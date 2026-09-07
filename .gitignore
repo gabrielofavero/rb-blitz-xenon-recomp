@@ -1,0 +1,33 @@
+# Local retail game dump. Never commit game binaries or content.
+/game/*
+!/game/README.md
+
+# Build products and CMake-local state.
+/out/
+/build/
+/cmake-build-*/
+/compile_commands.json
+/CMakeUserPresets.json
+
+# ReXGlue translation output is reproducible from the manifest and pinned SDK.
+# Keep only the small SDK integration file emitted by `rexglue init`.
+/generated/*
+!/generated/rexglue.cmake
+
+# Local diagnostics and captures.
+/logs/
+/captures/
+*.log
+*.dmp
+*.etl
+*.trace
+*.pix3
+
+# Local-only runtime configuration.
+/config/user.toml
+
+# Editor and platform state.
+/.vs/
+/.vscode/
+.DS_Store
+Thumbs.db

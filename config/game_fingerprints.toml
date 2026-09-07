@@ -1,0 +1,43 @@
+# Fingerprints for the supported, unmodified game dump.
+#
+# This file intentionally contains only identifiers, sizes, hashes, and XEX
+# metadata. It contains no game content and should be committed. These values
+# let tooling reject an unsupported revision before applying address-based
+# analysis hints or patches.
+
+schema_version = 1
+
+[game]
+name = "Rock Band Blitz"
+title_id = "5841122D"
+media_id = "78492654"
+region = "region-free"
+region_mask = "FFFFFFFF"
+xex_version = "0.0.0.2"
+xex_base_version = "0.0.0.2"
+arcade_project_version = "1.0.121.0"
+title_update_applied = false
+
+# Update assessment:
+# - the XEX module flags contain TITLE only (0x00000001), with no PATCH flag;
+# - version and base version are identical;
+# - the optional-header table has no DELTA_PATCH_DESCRIPTOR (0x000005FF).
+update_evidence = "Base title XEX; no title-update or delta-patch markers present"
+
+[[files]]
+role = "entrypoint"
+path = "default.xex"
+size = 9023488
+sha256 = "e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb"
+
+[[files]]
+role = "archive-header"
+path = "gen/main_xbox.hdr"
+size = 113528
+sha256 = "a12777e8df91215d53a8e3e917693df9e153381d695491786124b98c244756ed"
+
+[[files]]
+role = "archive-data"
+path = "gen/main_xbox_0.ark"
+size = 361769177
+sha256 = "eac4d2c2bb71d0142a9a604dfe4f3773d95d4512763009b3d748b002291bc620"
