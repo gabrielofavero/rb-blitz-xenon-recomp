@@ -127,7 +127,7 @@ Exit criterion: a fresh checkout can acquire the SDK deterministically, reject t
 
 ### Milestone 1 — Scaffold and generate
 
-- [ ] Build the pinned ReXGlue CLI and run `rexglue init` with project name `rb_blitz`, `game/default.xex`, and `game/` as the game root.
+- [x] Build the pinned ReXGlue CLI and run `rexglue init` with project name `rb_blitz`, `game/default.xex`, and `game/` as the game root.
 - [ ] Keep the generated CMake/ReXApp structure intact; only add the project source directories described above.
 - [ ] Point project presets at the pinned source SDK with `REXSDK_DIR` (or use an installed, exactly pinned package).
 - [ ] Run codegen once without `--force` and save the complete diagnostics.
