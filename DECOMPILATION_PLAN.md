@@ -120,7 +120,7 @@ The SDK is currently at `rexglue-sdk/`. Before scaffolding, either move/re-add i
 - [x] Pin ReXGlue v0.10.0 commit `c94f5eb...` as a submodule or document an equally reproducible SDK checkout.
 - [x] Record SHA-256 hashes and sizes for the expected XEX/HDR/ARK in a local, non-copyrighted fingerprint file. Decide whether hashes are safe and useful to commit.
 - [x] Record the title/media ID, executable version, region, and whether the dump includes an update.
-- [ ] Establish one baseline comparison run in current Xenia Canary and retain its config, log, and milestone observations locally.
+- [x] Establish one baseline comparison run in current Xenia Canary and retain its config, log, and milestone observations locally. The commit-safe findings are in [`docs/baselines/xenia-canary-80679bc.md`](docs/baselines/xenia-canary-80679bc.md).
 - [x] Generated-code policy: do not commit generated C++; reproduce it from the manifest and pinned SDK. Keep only `generated/rexglue.cmake`, which is required by the generated project scaffold.
 
 Exit criterion: a fresh checkout can acquire the SDK deterministically, reject the wrong game revision by fingerprint, and cannot accidentally commit retail content.
