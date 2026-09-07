@@ -9,7 +9,8 @@
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang",
-                "CMAKE_CXX_COMPILER": "clang++"
+                "CMAKE_CXX_COMPILER": "clang++",
+                "REXSDK_DIR": "${sourceDir}/rexglue-sdk"
             },
             "condition": {
                 "type": "equals",
@@ -24,7 +25,8 @@
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang-20",
-                "CMAKE_CXX_COMPILER": "clang++-20"
+                "CMAKE_CXX_COMPILER": "clang++-20",
+                "REXSDK_DIR": "${sourceDir}/rexglue-sdk"
             },
             "condition": {
                 "type": "equals",
@@ -40,7 +42,8 @@
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",
-                "CMAKE_OSX_ARCHITECTURES": "x86_64"
+                "CMAKE_OSX_ARCHITECTURES": "x86_64",
+                "REXSDK_DIR": "${sourceDir}/rexglue-sdk"
             },
             "condition": {
                 "type": "equals",

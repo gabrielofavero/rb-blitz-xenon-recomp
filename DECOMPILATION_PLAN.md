@@ -129,8 +129,8 @@ Exit criterion: a fresh checkout can acquire the SDK deterministically, reject t
 
 - [x] Build the pinned ReXGlue CLI and run `rexglue init` with project name `rb_blitz`, `game/default.xex`, and `game/` as the game root.
 - [ ] Keep the generated CMake/ReXApp structure intact; only add the project source directories described above.
-- [ ] Point project presets at the pinned source SDK with `REXSDK_DIR` (or use an installed, exactly pinned package).
-- [ ] Run codegen once without `--force` and save the complete diagnostics.
+- [x] Point project presets at the pinned source SDK with `REXSDK_DIR` (or use an installed, exactly pinned package).
+- [x] Run codegen once without `--force` and save the complete diagnostics.
 - [ ] Inventory sections, imports, discovered functions, unresolved direct/indirect targets, invalid instruction ranges, jump tables, and exception-handler patterns.
 - [ ] Confirm whether the title loads guest DLLs. Add only observed modules with the exact canonical guest paths expected by `XexLoadImage`.
 
