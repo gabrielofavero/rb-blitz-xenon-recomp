@@ -102,5 +102,14 @@ The title imports and calls `XexLoadImage` (`0x827F6C34`, called from
 `0x82728048`) and `XexUnloadImage` (`0x827F6C24`, from `0x82727F94`), so it
 *can* load additional modules at runtime. No additional `.xex`/`.dll` is present
 in `game/`, so the manifest carries only the `default.xex` entrypoint. Any
-runtime-loaded module must be observed during Milestone 2 guest boot before
+runtime-loaded module must be observed during Milestone 3 guest boot before
 adding `[[modules]]` entries.
+
+## Milestone 2 compile (2026-09-09)
+
+- Full build (`cmake --build out/build/win-amd64-debug`) compiles all 104
+  generated partitions and links `rb_blitz.exe` (Debug, ~77.9 MB).
+- One build-config fix required: the host target must receive the vendored
+  imgui include dir (`rexglue-sdk/thirdparty/imgui`) so `rex_app.cpp` can find
+  `<imgui.h>`. Applied in project `CMakeLists.txt`; see `docs/bringup-log.md`
+  B-004. Not a codegen/analysis fix — no change to `config/` or `generated/`.

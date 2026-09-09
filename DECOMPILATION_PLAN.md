@@ -142,16 +142,26 @@ Exit criterion: `rb_blitz_codegen` completes repeatably and a second unchanged r
 
 ### Milestone 2 — Close analysis and compile the translation
 
-- [ ] Resolve failures in small address-sorted batches.
-- [ ] Add verified function boundaries and discontinuous chunks to `functions.toml`.
-- [ ] Add manual switch tables only where automatic detection is demonstrably wrong.
-- [ ] Classify embedded data as data; do not invent fake functions just to silence validation.
-- [ ] Mark known indirect calls and exception handlers from disassembly evidence.
-- [ ] Map ReXCRT functions only after their addresses and ABI are confirmed. The heap group must be complete if enabled.
-- [ ] Enable generated exception handlers only if this binary requires them, then verify the Windows async-exception build flags stay consistent with generated PCH/source files.
-- [ ] Compile all generated translation units with line-table debug information and fix every compile/link error at its source configuration or supported hook boundary.
+- [x] Resolve failures in small address-sorted batches (the 3 tail-branch
+      thunks were resolved in Milestone 1 via `config/functions.toml`).
+- [x] Add verified function boundaries and discontinuous chunks to `functions.toml`.
+- [x] Add manual switch tables only where automatic detection is demonstrably wrong
+      (none needed — 132 tables auto-detected).
+- [x] Classify embedded data as data; do not invent fake functions just to silence
+      validation (0 data regions — nothing to classify).
+- [x] Mark known indirect calls and exception handlers from disassembly evidence
+      (none flagged by codegen).
+- [x] Map ReXCRT functions only after their addresses and ABI are confirmed.
+      The heap group must be complete if enabled (not enabled — not required).
+- [x] Enable generated exception handlers only if this binary requires them, then
+      verify the Windows async-exception build flags stay consistent with generated
+      PCH/source files (not required; `-fasync-exceptions` already carried).
+- [x] Compile all generated translation units with line-table debug information and
+      fix every compile/link error at its source configuration or supported hook
+      boundary (done; one build-config fix in project `CMakeLists.txt`, B-004).
 
-Exit criterion: the native executable links with no hand-edited generated files and no unexplained forced validation bypass.
+Exit criterion: the native executable links with no hand-edited generated files and
+no unexplained forced validation bypass. **Met** — `out/build/win-amd64-debug/rb_blitz.exe`.
 
 ### Milestone 3 — Reach guest entry and stable offline boot
 

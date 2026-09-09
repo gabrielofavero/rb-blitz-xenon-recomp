@@ -80,6 +80,27 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
 - Impact: rebuild-time only; no correctness impact. Revisit in Milestone 2 or
   report upstream against SDK `c94f5eb`.
 
+### B-004: host executable missing vendored `imgui.h` include path
+
+- Status: **resolved** (2026-09-09).
+- Symptom: compiling `rexglue-sdk/src/ui/rex_app.cpp` (pulled into the host
+  `rb_blitz` target by `rexglue_configure_target`) fails with
+  `fatal error: 'imgui.h' file not found` at
+  `rexglue-sdk/include/rex/ui/style.h:18`.
+- Root cause: `rexruntime` links `rexui` and `imgui` **PRIVATE**
+  (`src/kernel/CMakeLists.txt` line 69), so the vendored imgui include dir is
+  not propagated through `rex::runtime`. The generated `rexglue_setup_target`
+  macro only links `rex::runtime`, so the host target never sees `imgui.h`.
+- Fix (project-level): in `CMakeLists.txt`, add the imgui include dir to the
+  `rb_blitz` target only (headers, via `$<TARGET_PROPERTY:imgui,...>` with a
+  `REXSDK_DIR` fallback). imgui **objects** stay in `rexruntime.dll` where they
+  already live; linking `imgui::imgui` into the host would duplicate imgui
+  state and is deliberately avoided.
+- Regression check: full build compiles all 104 partition TUs and links
+  `rb_blitz.exe` (77.9 MB). Second build: exit 0.
+- Note: this is an SDK template defect (every recomp project hits it); report
+  upstream against `c94f5eb`.
+
 ## Toolchain notes (this machine)
 
 On default PATH (no dev shell needed); see repo memory `toolchain.md` for
@@ -91,7 +112,25 @@ exact paths:
 - NOTE: the Milestone 1 plan mentioned clang 22.1.8 / cmake 4.4.3 "not on
   PATH" — that is stale; the working toolchain is the one above.
 
-## Handoff to Milestone 2
+## Milestone 2 — Close analysis and compile
 
-See `prompts/02-close-analysis-compile.md` (entry state + knowledge folded in)
-and `docs/symbols.md` (full inventory).
+Status: complete (2026-09-09).
+
+- [x] Full `cmake --build out/build/win-amd64-debug` compiles all generated
+      TUs (104 `rb_blitz_recomp.*.cpp` partitions + init/register) and links
+      `rb_blitz.exe` (77.9 MB, Debug).
+- [x] One blocker fixed (B-004): host target lacked the vendored `imgui.h`
+      include path when compiling `rex_app.cpp`.
+- [x] Codegen during the build is output-stable:
+      `0 written, 0 unchanged, 0 deleted, 1 module(s) up to date`.
+- [x] No hand-edited generated files; no forced validation bypass. 0 analysis
+      errors; 132 auto-detected jump tables; 0 data regions; no SEH warnings.
+- [ ] Descriptive names for the three thunks (`sub_82354DC0`, `sub_82379D20`,
+      `sub_8243C688`) deferred to Milestone 3 runtime/disassembly evidence.
+
+## Handoff to Milestone 3
+
+See `prompts/03-guest-entry-boot.md` (entry state + knowledge folded in) and
+`docs/symbols.md` (full inventory). Build command:
+`cmake --build out/build/win-amd64-debug`; executable at
+`out/build/win-amd64-debug/rb_blitz.exe`.

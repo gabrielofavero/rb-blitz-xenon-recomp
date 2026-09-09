@@ -10,8 +10,20 @@ last_updated: 2026-09-09
 
 - Milestone 2 done: the native executable links and launches enough to begin
   executing guest code.
-- **Knowledge folded in:** *(edit as Milestone 2 finishes — expected blocking
-  kernel imports, EH/threading requirements, working build/run commands.)*
+- **Knowledge folded in (Milestone 2):**
+  - Build: `cmake --build out/build/win-amd64-debug` after
+    `cmake --preset win-amd64-debug`. Executable:
+    `out/build/win-amd64-debug/rb_blitz.exe` (Debug, ~77.9 MB).
+  - Imports: 262 function imports resolved (113 `xam.xex` + 162
+    `xboxkrnl.exe` − 13 patched variable imports), 0 unresolved. Full list in
+    `out/imports.txt`. `__C_specific_handler` is imported → SEH present, but
+    codegen reported no funclets and no manual EH hints were needed.
+  - EH flags: `-fasync-exceptions` (clang) is already carried by
+    `generated/rexglue.cmake`; keep it in sync when enabling EH.
+  - Threading: untested until first boot — watch for worker-thread/timer/shutdown
+    deadlocks (step 6).
+  - Build-config fix carried in project `CMakeLists.txt`: host target gets the
+    vendored imgui include dir (B-004). Do not hand-edit `generated/`.
 
 ## Reference points
 
