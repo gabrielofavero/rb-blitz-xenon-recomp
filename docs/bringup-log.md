@@ -5,19 +5,21 @@ captures are kept under `out/` (gitignored); commit-safe summaries live here.
 
 ## Milestone 1 — Scaffold and generate
 
-Status: in progress.
+Status: complete (2026-09-09).
 
 - [x] Built the pinned ReXGlue CLI (`rexglue-sdk/out/win-amd64/Release/rexglue.exe`,
       SDK commit `c94f5eb`).
 - [x] Ran `rexglue init`; manifest at `rb_blitz_manifest.toml`.
 - [x] Pointed project presets at the pinned source SDK via
-      `REXSDK_DIR = ${sourceDir}/rexglue-sdk` in `CMakePresets.json` (all base
-      presets). Verified: `cmake --preset win-amd64-debug` configures cleanly
-      (209.7s) and reports "Using ReXGlue SDK from source tree".
-- [x] Ran codegen once without `--force` and saved complete diagnostics to
-      `out/codegen-run-1.log`. Run summary below.
-- [ ] `rb_blitz_codegen` CMake target still fails to build on this machine
-      (see B-001).
+      `REXSDK_DIR = ${sourceDir}/rexglue-sdk` in `CMakePresets.json`.
+- [x] Added `-march=x86-64-v2` (`-v3` on mac) to the base presets — see B-002.
+- [x] `rb_blitz_codegen` target now builds and runs clean: 0 analysis errors,
+      215 files emitted into `generated/default`.
+- [x] Resolved the 3 unresolved tail branches via `config/functions.toml`
+      (see `docs/symbols.md`).
+- [x] Inventory written to `config/functions.toml` + `docs/symbols.md`.
+- [x] Guest DLL loading ruled out for now: `XexLoadImage` is imported/called
+      but no additional modules are present in `game/`.
 
 ### Codegen run 1 (2026-09-07)
 
@@ -27,55 +29,69 @@ Command: `rexglue.exe codegen rb_blitz_manifest.toml`
 - Guest: `default.xex`, Title ID `5841122D`, Media ID `78492654`,
   Version `0.0.0.2`, filetime 2012-06-19 16:38:01 UTC.
 - Phases completed: Register, Scan, Discover, GapFill, Merge, Validate.
-- Result: validation failed with **3 unresolved calls** (59.4s). No code emitted
-  into `generated/default`.
+- Result: validation failed with **3 unresolved calls** (59.4s). No code emitted.
 
-Initial Milestone 2 backlog (address-sorted):
+### Codegen run 2 (2026-09-09, after adding `config/functions.toml`)
 
-| Branch target | From call site | Instruction |
-| --- | --- | --- |
-| `0x82354DC0` | `0x8234017C` | `b 0x82354DC0` |
-| `0x82379D20` | `0x82364A10` | `b 0x82379D20` |
-| `0x8243C688` | `0x8242A8DC` | `b 0x8243C688` |
+Command: `rexglued.exe codegen rb_blitz_manifest.toml`
 
-All three are absolute `b` branches to targets outside any discovered function.
-They are the first entries for `config/functions.toml` / `config/analysis_hints.toml`
-once the target functions are identified from disassembly.
+- Result: **pass** (0 errors). 38,344 functions ready; 262 imports resolved,
+  31,076 PDATA functions, 132 jump tables, 0 data regions.
+- 215 files written to `generated/default` (104 `rb_blitz_recomp.*.cpp`
+  partitions + funcs headers, `codegen.partition.json`, `sources.cmake`,
+  init/register/pch).
+
+### Codegen run 3 (unchanged re-run)
+
+- Result: `Codegen summary: 0 written, 215 unchanged` — byte-identical output.
+- The analysis phase still re-runs instead of the intended `OutputStamp` skip;
+  see B-003.
 
 ## Blockers
 
 ### B-001: SDK submodule symlinks flattened on Windows, blocking `rb_blitz_codegen`
 
-- Status: investigating
-- Milestone/repro: Milestone 1; `cmake --build out/build/win-amd64-debug --target rb_blitz_codegen`
-- Game fingerprint: n/a (SDK build issue)
-- SDK commit: `c94f5eb`
-- Guest PC/function/thread: n/a
-- First bad event:
-  `clang` fails compiling `rexglue-sdk/thirdparty/libmspack/cabextract/mspack/lzxd.c`
-  with `error: expected identifier or '('`; the file is a 29-byte text file whose
-  content is `../../libmspack/mspack/lzxd.c` instead of a symlink.
-- Evidence: `git config core.symlinks` is `false`; symlink creation requires
-  Administrator privilege on this machine (`New-Item -ItemType SymbolicLink`
-  fails with "Administrator privilege required"). The same cabextract/mspack
-  directory contains ~15 flattened symlink stubs.
-- Reference behavior: on a symlink-capable checkout the stubs resolve to
-  `rexglue-sdk/thirdparty/libmspack/libmspack/mspack/*`, and the SDK build tree
-  already contains compiled `mspack` objects from a prior working checkout.
-- Fix layer and rationale: environment/SDK checkout, not game logic. Options:
-  1. enable Developer Mode or use an elevated shell, then
-     `git config core.symlinks true` and re-checkout the submodule files; or
-  2. use an installed SDK package instead of the source tree (requires
-     `cmake --install` and `find_package(rexglue 0.10.0 EXACT)`); or
-  3. patch `thirdparty/CMakeLists.txt` to reference
-     `libmspack/libmspack/mspack/lzxd.c` directly (upstream-worthy, avoids
-     the cabextract symlink indirection on Windows).
-- Workaround used for diagnostics: ran the prebuilt CLI directly.
-- Regression check: `cmake --build out/build/win-amd64-debug --target rb_blitz_codegen`
-  completes, then a second unchanged run is a no-op.
+- Status: **resolved** (2026-09-09).
+- Fix: repo-local `git config core.symlinks true`; the 15 `libmspack/cabextract`
+  stubs are now real symlinks (`lzxd.c` compiles). No SDK source patch needed.
+- Regression check: `rb_blitz_codegen` builds; mspack target compiles clean.
+
+### B-002: `rexcore/memory.cpp` SSSE3 intrinsic error (clang/MSVC)
+
+- Status: **resolved** (2026-09-09).
+- Symptom: `_mm_shuffle_epi8 requires target feature 'ssse3'` compiling
+  `rexglue-sdk/src/core/memory.cpp` under clang targeting `x86_64-pc-windows-msvc`.
+- Root cause: the SDK's own presets pass `-march=x86-64-v2`, but the project's
+  presets did not; `rexcore` (built via `add_subdirectory`) got no arch flag.
+- Fix (project-level): add `CMAKE_C_FLAGS`/`CMAKE_CXX_FLAGS = -march=x86-64-v2`
+  to `windows-base`/`linux-base` and `-march=x86-64-v3` to `mac-base` in
+  `CMakePresets.json`.
+
+### B-003: codegen `OutputStamp` skip does not trigger on re-run (perf)
+
+- Status: open (non-blocking).
+- Symptom: an unchanged second `rb_blitz_codegen` run re-runs the full analysis
+  (~390s Debug) instead of skipping via the `OutputStamp` fingerprint. Output is
+  still correct and byte-identical (`0 written, 215 unchanged`).
+- Evidence: input files (manifest, `config/functions.toml`, `default.xex`) are
+  byte-stable across runs, yet the stamp fingerprint changes each run — likely
+  the `hash_file` failure fallback (`<unreadable:size:mtime>`) or a Windows file
+  access quirk in `ComputeInputFingerprint` (`output_stamp.cpp`).
+- Impact: rebuild-time only; no correctness impact. Revisit in Milestone 2 or
+  report upstream against SDK `c94f5eb`.
 
 ## Toolchain notes (this machine)
 
-Not on default PATH; see repo memory `toolchain.md` for exact locations.
+On default PATH (no dev shell needed); see repo memory `toolchain.md` for
+exact paths:
 
-- clang/clang++ 22.1.8, cmake 4.4.3, ninja 1.13.2.
+- clang/clang++ 19.1.7 (`C:\Program Files\LLVM\bin`), cmake 4.4.0
+  (`C:\Program Files\CMake\bin`), ninja 1.13.2
+  (`C:\ProgramData\chocolatey\bin`).
+- NOTE: the Milestone 1 plan mentioned clang 22.1.8 / cmake 4.4.3 "not on
+  PATH" — that is stale; the working toolchain is the one above.
+
+## Handoff to Milestone 2
+
+See `prompts/02-close-analysis-compile.md` (entry state + knowledge folded in)
+and `docs/symbols.md` (full inventory).

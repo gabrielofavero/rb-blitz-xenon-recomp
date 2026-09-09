@@ -1,0 +1,30 @@
+# Forced function entry points.
+#
+# The discovery pass leaves three absolute tail-branch targets (unconditional
+# `b` to an address outside any discovered function) unresolved. Each target
+# is a real function entry that discovery never reached because nothing calls
+# it with a `bl`/`ba` that discovery follows.
+#
+# Entries here force codegen to register the address as a function entry point
+# (FunctionAuthority::CONFIG). No `size`/`end` is given on purpose: codegen
+# then discovers natural boundaries from the code region, matching the
+# behavior used for PDATA-discovered functions.
+#
+# Evidence (from codegen validation, run 1):
+#   b 0x82354DC0  from  0x8234017C
+#   b 0x82379D20  from  0x82364A10
+#   b 0x8243C688  from  0x8242A8DC
+#
+# Resolution (verified 2026-09-09, codegen trace):
+#   sub_82354DC0  (3 insns)  tail-calls sub_82354D00
+#   sub_82379D20  (1 insn)   tail-calls sub_82380088
+#   sub_8243C688  (10 insns) tail-calls sub_8243C458
+
+[functions."0x82354DC0"]
+# Tail-branch target from 0x8234017C; thunk -> sub_82354D00.
+
+[functions."0x82379D20"]
+# Tail-branch target from 0x82364A10; thunk -> sub_82380088.
+
+[functions."0x8243C688"]
+# Tail-branch target from 0x8242A8DC; thunk -> sub_8243C458.

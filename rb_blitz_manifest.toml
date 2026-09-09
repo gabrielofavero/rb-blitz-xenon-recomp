@@ -8,4 +8,4 @@ game_root = "game"
 [entrypoint]
 file_path = "game/default.xex"
 out_directory_path = "generated/default"
-includes = []
+includes = ["config/functions.toml"]

@@ -1,0 +1,63 @@
+# Milestone prompts
+
+This directory holds one **living agent prompt per milestone** in
+[`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md). Each file is a
+self-contained, actionable brief that an AI agent can execute against this
+repository. Run them in order, one at a time.
+
+## Why these exist
+
+The plan is the high-level map; these files are the **forward-looking,
+specific instructions** for the next chunk of work. They carry the current
+verified state, exact commands, and the exact acceptance criteria for each
+milestone — so each session starts from the best known information instead of
+re-deriving it.
+
+## How to run
+
+1. Pick the first file whose status is not `done`.
+2. Hand that file (plus this README) to the AI and say: *"Execute this
+   milestone prompt."*
+3. Work through it, following the bring-up loop at the bottom of each file.
+
+## The editing loop (the important part)
+
+Prompts get **more assertive** as we learn. After every session or every
+completed step, write the new knowledge back into three places:
+
+1. **`docs/bringup-log.md`** — the chronological record (what happened, in
+   order).
+2. **`docs/known-issues.md`** / **`docs/symbols.md`** — enduring facts that
+   outlive a single blocker.
+3. **These prompt files** — fold the knowledge into:
+   - the **"Entry state"** section of the prompt you just worked on, and
+   - the **"Knowledge folded in"** and **"Handoff to next milestone"**
+     sections of the *following* prompts.
+
+That third step is what makes the next prompt accurate: instead of guessing,
+the next agent starts knowing exactly what was discovered, what was tried, and
+what failed.
+
+### Rules
+
+- Never contradict `DECOMPILATION_PLAN.md`. If the plan and a prompt disagree,
+  the plan wins and the prompt must be corrected.
+- Keep every fact in a prompt verifiable: guest addresses, hashes, sizes,
+  file paths, and commands should be copy-pastable.
+- Prompts carry **specifics** (addresses, commands, current status); the plan
+  carries **intent and policy** (ownership boundaries, fix-order, "working"
+  definition).
+- Update the `last_updated` date and `status` in each file's header when you
+  edit it.
+
+## Status map
+
+| Milestone | File | Status |
+| --- | --- | --- |
+| 0 — Baseline safe & reproducible | `00-baseline-reproducible.md` | done |
+| 1 — Scaffold & generate | `01-scaffold-generate.md` | in-progress |
+| 2 — Close analysis & compile | `02-close-analysis-compile.md` | not-started |
+| 3 — Guest entry & offline boot | `03-guest-entry-boot.md` | not-started |
+| 4 — Menus, content, input, saves | `04-menus-content-input-saves.md` | not-started |
+| 5 — Complete one song | `05-complete-one-song.md` | not-started |
+| 6 — Reproducible release | `06-reproducible-release.md` | not-started |

@@ -114,6 +114,10 @@ The SDK is currently at `rexglue-sdk/`. Before scaffolding, either move/re-add i
 
 ## Work plan
 
+> Each milestone below has a matching living agent prompt in
+> [`prompts/`](prompts/README.md). Run them in order and edit the next prompts
+> as new knowledge lands (see the prompts README for the editing loop).
+
 ### Milestone 0 — Make the baseline safe and reproducible
 
 - [x] Add a root `.gitignore` for `game/`, `out/`, local logs/captures, user presets, and generated bulk output as decided below.
