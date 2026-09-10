@@ -134,3 +134,120 @@ See `prompts/03-guest-entry-boot.md` (entry state + knowledge folded in) and
 `docs/symbols.md` (full inventory). Build command:
 `cmake --build out/build/win-amd64-debug`; executable at
 `out/build/win-amd64-debug/rb_blitz.exe`.
+
+## Milestone 3 — Reach guest entry and stable offline boot
+
+Status: in progress (2026-09-09).
+
+### B-005: GPU emulation not loaded (gpu_plugin unset)
+
+- Status: **resolved** (2026-09-09).
+- Symptom: first launch reached guest boot but logged
+  `VdInitializeRingBuffer: no GPU emulation loaded (gpu_plugin not set)` and
+  stalled with only "Too few processor cores" warnings.
+- Root cause: the `gpu_plugin` cvar defaults to empty, and
+  `rexglue_setup_target(rb_blitz)` was called without `GPU_PLUGINS`, so the
+  `rexgpu-xenosd.dll` was never staged next to the executable.
+- Fix (project layer):
+  - `CMakeLists.txt`: `rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)`.
+  - `src/rb_blitz_app.h` `OnPreSetup`: set `config.gpu_plugin = "xenos"` when
+    empty (runtime/backend selection per plan).
+  - `OnConfigurePaths`: defensive separation of read-only `game_data_root`
+    from writable user/update/cache roots (all writable roots default outside
+    `game/`; anything pointing inside the game root is dropped).
+- Result: D3D12 (xenos) initializes against the GTX 970; guest boot proceeds
+  past graphics init.
+
+### B-006: unregistered functions reached via indirect call (bctr-terminated)
+
+- Status: **open** (iterating).
+- Symptom: at guest boot,
+  `[FATAL] Call to invalid or unregistered function at guest address 0xXXXXXXXX`.
+- Root cause (codegen `phase_gapfill.cpp`): `GapFill` splits uncovered code
+  regions only on `blr` and direct `b`-to-known-callable terminators. Functions
+  that end in `bctr` (indirect tail-call dispatcher) and that have no PDATA
+  entry and no static `bl` caller are never split out, so their entry is never
+  registered. They are real functions (verified by generated bodies, e.g.
+  `sub_8279A888` = `lwz r11,72(r3); addi r3,r11,64; …; mtctr r11; bctr`).
+- Fix (project layer, plan fix-order #1): register each entry in
+  `config/functions.toml` (`[functions."0x…"]`, no size → natural discovery),
+  one at a time as the runtime reveals them.
+- Registered so far (Milestone 3): `0x82789360`, `0x8278A708`, `0x8279A888`,
+  `0x82779A70`, `0x82783D18`.
+- This is a candidate upstream SDK fix (GapFill should split on `bctr` when the
+  following word is a known function entry); deferred per plan fix-order.
+
+### Tooling: Release codegen CLI
+
+- The Debug codegen CLI re-runs full analysis (~435 s) whenever
+  `config/functions.toml` changes. A Release codegen CLI was built from the
+  pinned SDK (same commit) at
+  `rexglue-sdk/out/win-amd64/Release/rexglue.exe` (~55 s per run).
+- Fast iteration loop:
+  1. `rexglue.exe codegen rb_blitz_manifest.toml` (Release, ~55 s);
+  2. touch `generated/default/*` so Ninja skips the Debug codegen step
+     (costs a full recompile of the 104 partitions in Debug, ~4 min), or
+     build the Release configuration instead (~55 s codegen + partial compile).
+- Project Release config: `cmake --preset win-amd64-release` →
+  `out/build/win-amd64-release` (full first build done; exe is 37 MB Release,
+  `rexruntime.dll` + `rexgpu-xenos.dll` staged next to it).
+
+### Where we stopped (resume here)
+
+Stopped 2026-09-09 for time. **State is mid-iteration, not clean:**
+
+- `config/functions.toml` already contains `[functions."0x82783D18"]` (the
+  5th Milestone-3 entry), but the last `cmake --build out/build/win-amd64-release`
+  was **cancelled**, so the generated code on disk does **not** yet include it.
+- Last confirmed runtime fact (Release exe with `0x82779A70` registered):
+  `[FATAL] Call to invalid or unregistered function at guest address 0x82783D18`
+  (thread t12912). Registering it is the next runtime-driven step.
+
+**Exact next commands (tomorrow):**
+
+```powershell
+# 1. Regenerate + rebuild Release (fast path)
+cmake --build out/build/win-amd64-release
+
+# 2. Run and read the newest FATAL
+Remove-Item out\build\win-amd64-release\logs\*.log
+Start-Process -FilePath .\out\build\win-amd64-release\rb_blitz.exe `
+  -ArgumentList "--game_data_root=$PWD\game" `
+  -WorkingDirectory "$PWD\out\build\win-amd64-release"
+Get-ChildItem out\build\win-amd64-release\logs\*.log |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+  ForEach-Object { Select-String -Path $_.FullName -Pattern "FATAL|unregistered" }
+
+# 3. Repeat: add [functions."0x…"] to config/functions.toml, rebuild, re-run.
+#    Kill the hung process each time:
+Stop-Process -Name rb_blitz -Force
+```
+
+**Remaining Milestone 3 work (not started):**
+
+- [ ] Step 3 in `prompts/03-guest-entry-boot.md`: finish registering
+      `bctr`-terminated indirect-call targets until guest boot stops faulting.
+- [ ] Step 4: make unavailable network services (`NetDll_*`, Xbox Live,
+      Rock Central) fail fast/faithfully enough for the offline path — observe
+      once boot proceeds past graphics/audio init.
+- [ ] Step 5: crash/hang diagnostics — the SDK `REX_FATAL` already logs the
+      last guest PC (`Call to invalid or unregistered function at guest address
+      0x…`); still to add: SDK version + game fingerprint + caller (LR) on fatal,
+      and a hang watchdog. (Note: `InvalidFunctionTrap` in
+      `rexglue-sdk/src/system/function_dispatcher.cpp` logs only
+      `ctx.last_indirect_target`; logging `ctx.lr` would reveal the caller and
+      the function-pointer table for batch fixing.)
+- [ ] Step 6: verify worker threads / timers / shutdown do not deadlock.
+- [ ] Step 2 (VFS): verify mounts + case/path normalization for every attempted
+      open. Partially observed already: `game:`/`d:` mount fine; the expected
+      `update:\gen\patch_xbox.hdr` open fails cleanly (`0xc000000f`) because
+      this base dump has no title update — consistent with the Xenia baseline.
+- [ ] Acceptance: 10 consecutive launches reach the title screen / offline
+      prompt and each closes cleanly.
+
+**Design decision to revisit (potential root-cause fix):** all `bctr`-missed
+functions could be eliminated at once by making codegen `GapFill`
+(`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`) also
+split on `bctr` when the next word is a known function entry. This is a
+generically-correct SDK fix but is fix-order #6 in the plan; the current path
+deliberately stays project-level (`config/functions.toml`).

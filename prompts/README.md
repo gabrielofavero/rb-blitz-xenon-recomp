@@ -57,7 +57,7 @@ what failed.
 | 0 — Baseline safe & reproducible | `00-baseline-reproducible.md` | done |
 | 1 — Scaffold & generate | `01-scaffold-generate.md` | in-progress |
 | 2 — Close analysis & compile | `02-close-analysis-compile.md` | done |
-| 3 — Guest entry & offline boot | `03-guest-entry-boot.md` | not-started |
+| 3 — Guest entry & offline boot | `03-guest-entry-boot.md` | in-progress |
 | 4 — Menus, content, input, saves | `04-menus-content-input-saves.md` | not-started |
 | 5 — Complete one song | `05-complete-one-song.md` | not-started |
 | 6 — Reproducible release | `06-reproducible-release.md` | not-started |

@@ -113,3 +113,27 @@ adding `[[modules]]` entries.
   imgui include dir (`rexglue-sdk/thirdparty/imgui`) so `rex_app.cpp` can find
   `<imgui.h>`. Applied in project `CMakeLists.txt`; see `docs/bringup-log.md`
   B-004. Not a codegen/analysis fix — no change to `config/` or `generated/`.
+
+## Milestone 3: indirect-call targets registered via `functions.toml`
+
+Guest boot reaches functions that codegen discovery missed. Each is a real
+function with **no PDATA entry and no static `bl` caller**, reached only through
+a function pointer; all end in `bctr` (indirect tail-call), which codegen
+`GapFill` does not split on. Registered one at a time from runtime evidence
+(`[FATAL] Call to invalid or unregistered function at guest address 0x…`):
+
+| Guest address | Evidence | Notes |
+| --- | --- | --- |
+| `0x82789360` | boot, thread t19844 | body: `lwz r8,184(r3); mr r9,r3; li r4,1; …` |
+| `0x8278A708` | boot, thread t18292 | after `0x82789360` registered |
+| `0x8279A888` | boot, thread t16280 | body ends `… mtctr r11; bctr` (dispatcher) |
+| `0x82779A70` | boot, thread t23656 | after `0x8279A888` registered |
+| `0x82783D18` | boot, thread t12912 (Release) | 5th; added, build pending |
+
+All entries use `[functions."0x…"]` with **no** `size`/`end` so codegen
+discovers the natural boundary from the code region.
+
+Candidate upstream fix (not applied; plan fix-order #6): `GapFill`
+(`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`)
+should also split on `bctr` when the following word is a known function entry.
+

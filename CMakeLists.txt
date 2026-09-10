@@ -35,4 +35,4 @@ else()
         "${REXSDK_DIR}/thirdparty/imgui")
 endif()
 
-rexglue_setup_target(rb_blitz)
+rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)

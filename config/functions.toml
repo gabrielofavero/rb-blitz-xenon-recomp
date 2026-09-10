@@ -28,3 +28,36 @@
 
 [functions."0x8243C688"]
 # Tail-branch target from 0x8242A8DC; thunk -> sub_8243C458.
+
+# --- Milestone 3: indirect-call targets missed by discovery (runtime evidence) ---
+
+[functions."0x82789360"]
+# Reached via an indirect call at guest boot (thread t19844); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x82789360"
+# Sits in the discovery gap between sub_82789310 (2-insn thunk -> sub_8279C730)
+# and sub_82789560, inside .text (0x82190000..0x827F6ED4), 16-byte aligned.
+# No size/end on purpose: let codegen discover the natural boundary.
+
+[functions."0x8278A708"]
+# Reached via an indirect call at guest boot (thread t18292); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x8278A708"
+# Next missed target after 0x82789360 was registered; same discovery-gap class.
+# No size/end on purpose: let codegen discover the natural boundary.
+
+[functions."0x8279A888"]
+# Reached via an indirect call at guest boot (thread t16280); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x8279A888"
+# Next missed target after 0x8278A708 was registered; same discovery-gap class.
+# No size/end on purpose: let codegen discover the natural boundary.
+
+[functions."0x82779A70"]
+# Reached via an indirect call at guest boot (thread t23656); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x82779A70"
+# Next missed target after 0x8279A888 was registered; same discovery-gap class.
+# No size/end on purpose: let codegen discover the natural boundary.
+
+[functions."0x82783D18"]
+# Reached via an indirect call at guest boot (thread t12912); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x82783D18"
+# Next missed target after 0x82779A70 was registered; same discovery-gap class.
+# No size/end on purpose: let codegen discover the natural boundary.
