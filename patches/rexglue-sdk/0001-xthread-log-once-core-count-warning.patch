@@ -1,0 +1,19 @@
+diff --git a/src/system/xthread.cpp b/src/system/xthread.cpp
+index 77bce256..018db91c 100644
+--- a/src/system/xthread.cpp
++++ b/src/system/xthread.cpp
+@@ -899,7 +899,13 @@ void XThread::SetActiveCpu(uint8_t cpu_index) {
+       thread_->set_affinity_mask(uint64_t(1) << cpu_index);
+     }
+   } else {
+-    REXSYS_WARN("Too few processor cores - scheduling will be wonky");
++    // Process-wide condition: reports the same fact on every thread's CPU
++    // assignment. Log once, not per call (this is called on every thread
++    // creation and CPU migration and otherwise floods the log).
++    static std::atomic<bool> few_cores_warned{false};
++    if (!few_cores_warned.exchange(true, std::memory_order_relaxed)) {
++      REXSYS_WARN("Too few processor cores - scheduling will be wonky");
++    }
+   }
+ }
+ 

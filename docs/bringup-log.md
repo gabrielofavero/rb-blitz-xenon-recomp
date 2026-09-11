@@ -137,7 +137,40 @@ See `prompts/03-guest-entry-boot.md` (entry state + knowledge folded in) and
 
 ## Milestone 3 — Reach guest entry and stable offline boot
 
-Status: in progress (2026-09-09).
+Status: **complete** (2026-09-10).
+
+### Result
+
+- The guest boots to the **title screen with "PRESS A TO START"** — this
+  **exceeds** the Xenia baseline (`docs/baselines/xenia-canary-80679bc.md`),
+  which only reached the looping animated logo.
+- Acceptance (`scripts/acceptance_launches.ps1`, Release build):
+  **10 / 10** consecutive launches stayed alive at the title screen with no
+  `[FATAL]`, and **10 / 10 closed cleanly** (graceful window close, no forced
+  kill). All ten screenshots visually confirmed the "PRESS A TO START" title
+  screen (`out/m3-acceptance/`, gitignored).
+- Log for a full boot-to-title + clean shutdown is now **~2 KB** (was ~580 KB
+  before B-007). Audio endpoint opens
+  (`audio endpoint '…': 6 ch, 48000 Hz`), D3D12 pipelines/shaders load, and
+  shutdown logs `Window closing, shutting down…` then
+  `Title terminated; hard-exiting process.`
+
+### B-007: core-count warning flooded the log (~580 KB / run)
+
+- Status: **resolved** (SDK, one-line fix).
+- Symptom: `XThread::SetActiveCpu` logged
+  `Too few processor cores - scheduling will be wonky` on **every** thread CPU
+  assignment (~11,000 lines, ~580 KB per boot), which made logs unreadable and
+  added heavy disk I/O during startup.
+- Root cause: a process-wide condition was re-logged per call
+  (`rexglue-sdk/src/system/xthread.cpp`).
+- Fix: log it once via a function-local `std::atomic<bool>` guard. Generically
+  correct (not title-specific) → candidate upstream contribution against
+  SDK `c94f5eb`. Kept as a repo patch so the submodule stays pinned at
+  `c94f5eb` (a local SDK commit would break fresh-checkout reproducibility):
+  `patches/rexglue-sdk/0001-xthread-log-once-core-count-warning.patch`
+  (apply/verify per `patches/README.md`).
+- Result: log drops to ~2 KB; the warning appears once.
 
 ### B-005: GPU emulation not loaded (gpu_plugin unset)
 
@@ -160,7 +193,7 @@ Status: in progress (2026-09-09).
 
 ### B-006: unregistered functions reached via indirect call (bctr-terminated)
 
-- Status: **open** (iterating).
+- Status: **resolved** (2026-09-10) — boot reaches the title screen.
 - Symptom: at guest boot,
   `[FATAL] Call to invalid or unregistered function at guest address 0xXXXXXXXX`.
 - Root cause (codegen `phase_gapfill.cpp`): `GapFill` splits uncovered code
@@ -170,12 +203,21 @@ Status: in progress (2026-09-09).
   registered. They are real functions (verified by generated bodies, e.g.
   `sub_8279A888` = `lwz r11,72(r3); addi r3,r11,64; …; mtctr r11; bctr`).
 - Fix (project layer, plan fix-order #1): register each entry in
-  `config/functions.toml` (`[functions."0x…"]`, no size → natural discovery),
-  one at a time as the runtime reveals them.
-- Registered so far (Milestone 3): `0x82789360`, `0x8278A708`, `0x8279A888`,
-  `0x82779A70`, `0x82783D18`.
-- This is a candidate upstream SDK fix (GapFill should split on `bctr` when the
-  following word is a known function entry); deferred per plan fix-order.
+  `config/functions.toml` (`[functions."0x…"]`, no size → natural discovery).
+- Registered: `0x82789360`, `0x8278A708`, `0x8279A888`, `0x82779A70`,
+  `0x82783D18`. Boot then completed with no further such faults.
+- This remains a candidate upstream SDK fix (GapFill should split on `bctr` when
+  the following word is a known function entry); deferred per plan fix-order.
+
+### Non-blocking stubs observed at boot (match the Xenia baseline)
+
+- `__imp__XamVoiceSetMicArrayIdleUsers` (×4), `__imp__XeKeysSetKey`,
+  `__imp__XeKeysAesCbc` — all log `STUB` and are **non-blocking**: the title
+  screen is reached regardless. Same three externs the Xenia baseline flagged.
+  Do not fake success (plan policy) unless a later milestone proves they gate
+  progress.
+- `update:\gen\patch_xbox.hdr` fails with `0xc000000f`: expected, this base dump
+  has no title update.
 
 ### Tooling: Release codegen CLI
 
@@ -192,9 +234,9 @@ Status: in progress (2026-09-09).
   `out/build/win-amd64-release` (full first build done; exe is 37 MB Release,
   `rexruntime.dll` + `rexgpu-xenos.dll` staged next to it).
 
-### Where we stopped (resume here)
+### Step-by-step status (Milestone 3)
 
-Stopped 2026-09-09 for time. **State is mid-iteration, not clean:**
+Superseded by the "Result" section above (kept for history).
 
 - `config/functions.toml` already contains `[functions."0x82783D18"]` (the
   5th Milestone-3 entry), but the last `cmake --build out/build/win-amd64-release`
@@ -223,27 +265,32 @@ Get-ChildItem out\build\win-amd64-release\logs\*.log |
 Stop-Process -Name rb_blitz -Force
 ```
 
-**Remaining Milestone 3 work (not started):**
+**Follow-ups (do not block Milestone 3 exit):**
 
-- [ ] Step 3 in `prompts/03-guest-entry-boot.md`: finish registering
-      `bctr`-terminated indirect-call targets until guest boot stops faulting.
-- [ ] Step 4: make unavailable network services (`NetDll_*`, Xbox Live,
-      Rock Central) fail fast/faithfully enough for the offline path — observe
-      once boot proceeds past graphics/audio init.
-- [ ] Step 5: crash/hang diagnostics — the SDK `REX_FATAL` already logs the
-      last guest PC (`Call to invalid or unregistered function at guest address
-      0x…`); still to add: SDK version + game fingerprint + caller (LR) on fatal,
-      and a hang watchdog. (Note: `InvalidFunctionTrap` in
-      `rexglue-sdk/src/system/function_dispatcher.cpp` logs only
+- [x] Step 3 — blocking faults resolved: five `bctr`-missed functions registered
+      (B-006); boot no longer faults.
+- [x] Step 4 — offline services: the offline path is reached with the three
+      key/voice externs left as honest `STUB`s (no faked success); nothing
+      network-related blocks boot.
+- [~] Step 5 — crash/hang diagnostics: `REX_FATAL` already reports the last
+      guest PC. Still to add: SDK version + game fingerprint + caller (LR) in
+      the log, and a hang watchdog. `InvalidFunctionTrap`
+      (`rexglue-sdk/src/system/function_dispatcher.cpp`) logs only
       `ctx.last_indirect_target`; logging `ctx.lr` would reveal the caller and
-      the function-pointer table for batch fixing.)
-- [ ] Step 6: verify worker threads / timers / shutdown do not deadlock.
-- [ ] Step 2 (VFS): verify mounts + case/path normalization for every attempted
-      open. Partially observed already: `game:`/`d:` mount fine; the expected
+      the function-pointer table (enables batch fixing).
+- [x] Step 6 — 10/10 launches closed cleanly; no thread/timer/shutdown deadlock.
+- [x] Step 2 (VFS) — `game:`/`d:` mount and title art loads; the expected
       `update:\gen\patch_xbox.hdr` open fails cleanly (`0xc000000f`) because
-      this base dump has no title update — consistent with the Xenia baseline.
-- [ ] Acceptance: 10 consecutive launches reach the title screen / offline
-      prompt and each closes cleanly.
+      this base dump has no title update.
+- [x] Acceptance — 10/10 reach the title screen and close cleanly.
+
+**Reproduce (Release, fast):**
+
+```powershell
+cmake --preset win-amd64-release          # once
+cmake --build out/build/win-amd64-release # regenerate + build
+.\scripts\acceptance_launches.ps1 -Runs 10 -BootWaitSec 26
+```
 
 **Design decision to revisit (potential root-cause fix):** all `bctr`-missed
 functions could be eliminated at once by making codegen `GapFill`

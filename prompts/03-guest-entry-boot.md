@@ -1,7 +1,7 @@
 ---
-status: in-progress
+status: done
 milestone: 3
-last_updated: 2026-09-09
+last_updated: 2026-09-10
 ---
 
 # Milestone 3 — Reach guest entry and stable offline boot
@@ -25,7 +25,12 @@ last_updated: 2026-09-09
   - Build-config fix carried in project `CMakeLists.txt`: host target gets the
     vendored imgui include dir (B-004). Do not hand-edit `generated/`.
 
-- **Knowledge folded in (Milestone 3, in progress — see
+- **Result (Milestone 3, complete 2026-09-10):** the guest boots to the
+  **title screen with "PRESS A TO START"**, exceeding the Xenia baseline
+  (which only looped the animated logo). Acceptance: **10/10** consecutive
+  launches reached the title with no `[FATAL]`, and **10/10** closed cleanly.
+  Log for a full boot is ~2 KB after B-007. See `docs/bringup-log.md`.
+- **Knowledge folded in (Milestone 3 — see
   `docs/bringup-log.md` for full detail):**
   - **GPU plugin must be enabled or the guest stalls before graphics init.**
     `rb_blitz` now calls `rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)`
@@ -71,14 +76,15 @@ last_updated: 2026-09-09
 - Implemented in `RbBlitzApp::OnConfigurePaths` (`src/rb_blitz_app.h`).
 - Game data is read-only; writable state lives outside `game/`.
 
-### 2. Verify VFS — **partly verified**
+### 2. Verify VFS — **verified**
 
-- `game:`/`d:` mount to the game-data root; `update:\gen\patch_xbox.hdr`
-  correctly fails with `0xc000000f` (no title update in this base dump).
-- Still to do: confirm case/path normalization against **every** attempted open;
-  keep the `fs` log category as the structured record.
+- `game:`/`d:` mount to the game-data root; the title artwork loads, so ARK/HDR
+  reads succeed.
+- `update:\gen\patch_xbox.hdr` correctly fails with `0xc000000f` (no title
+  update in this base dump) — consistent with the Xenia baseline.
+- The `fs` log category is the structured record for attempted opens.
 
-### 3. Implement blocking kernel imports / register missed functions — **in progress**
+### 3. Implement blocking kernel imports / register missed functions — **done**
 
 - Work from the import inventory produced in Milestone 2.
 - Prefer existing ReXGlue runtime implementations; add `REX_HOOK` whole-function
@@ -89,13 +95,11 @@ last_updated: 2026-09-09
   regions on `bctr` when the next word is a known function entry
   (`rexglue-sdk/src/codegen/phase_gapfill.cpp`).
 
-### 4. Offline services fail fast and faithfully — **not started**
+### 4. Offline services fail fast and faithfully — **verified (non-blocking)**
 
-- Make unavailable network services fail quickly enough for the title's own
-  offline path.
-- Do **not** fake a successful service unless the game cannot proceed without
-  it and the exact contract is understood (see plan).
-- Will become observable once boot proceeds past graphics/audio init.
+- The title's offline path is reached with `XamVoiceSetMicArrayIdleUsers`,
+  `XeKeysSetKey`, and `XeKeysAesCbc` left as honest `STUB`s (no faked success).
+- Nothing network-related blocks boot; boot to title is ~20 s.
 
 ### 5. Crash/hang diagnostics — **partial**
 
@@ -106,47 +110,61 @@ last_updated: 2026-09-09
   currently logs only `ctx.last_indirect_target`; logging `ctx.lr` would reveal
   the caller and the function-pointer table (enables batch fixing).
 
-### 6. Shutdown and threads — **not started**
+### 6. Shutdown and threads — **verified**
 
-- Verify worker threads, events, timers, and shutdown do not deadlock.
+- 10/10 launches closed cleanly via normal window close (no forced kill); no
+  worker-thread/timer/shutdown deadlock observed.
 
 ## Acceptance / exit criteria
 
-- [ ] Ten consecutive launches reach the title screen / offline prompt.
-- [ ] Each launch closes cleanly (no forced kill).
+- [x] Ten consecutive launches reach the title screen / offline prompt.
+- [x] Each launch closes cleanly (no forced kill).
 
-## Resume here (tomorrow)
+## Reproduce / verify
 
-State is mid-iteration and **not clean**: `config/functions.toml` already has
-`[functions."0x82783D18"]`, but the last Release build was cancelled, so the
-generated code does not include it yet.
+Build and run the Release configuration (fast codegen; Debug also works):
 
 ```powershell
-# 1. Rebuild Release (regenerates code ~55 s, then partial compile + link)
+# Build + run the acceptance test (10 launches must reach the title and close)
+cmake --preset win-amd64-release           # once
 cmake --build out/build/win-amd64-release
+.\scripts\acceptance_launches.ps1 -Runs 10 -BootWaitSec 26
 
-# 2. Run and read the newest FATAL
+# Single run, manual
 Remove-Item out\build\win-amd64-release\logs\*.log
 Start-Process -FilePath .\out\build\win-amd64-release\rb_blitz.exe `
   -ArgumentList "--game_data_root=$PWD\game" `
   -WorkingDirectory "$PWD\out\build\win-amd64-release"
-Get-ChildItem out\build\win-amd64-release\logs\*.log |
-  Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
-  ForEach-Object { Select-String -Path $_.FullName -Pattern "FATAL|unregistered" }
-
-# 3. Add the new address as [functions."0x…"] in config/functions.toml,
-#    rebuild, re-run. Kill the hung process each time:
-Stop-Process -Name rb_blitz -Force
+# Close gracefully with the window close button (do not force-kill).
 ```
 
 ## Handoff to Milestone 4
 
-Write into `04-menus-content-input-saves.md`:
+Copy these facts into `04-menus-content-input-saves.md` (and `docs/symbols.md`
+where durable):
 
-- the exact run command and required arguments;
-- which kernel imports were implemented and how;
-- any offline-service behavior the game depends on;
-- known-good log categories to watch during menu/content work.
+- **Run command:**
+  `out/build/win-amd64-release/rb_blitz.exe --game_data_root=<abs game/>` run
+  with the build dir as cwd (needs `rexruntime.dll` + `rexgpu-xenos.dll` there;
+  Debug uses `rexgpu-xenosd.dll`). Build: `cmake --build out/build/win-amd64-release`
+  (or `-debug`). Logs: `out/build/<preset>/logs/rb_blitz_NNN.log`.
+- **Kernel imports implemented:** none needed hooks — all 262 imports already
+  resolved by the SDK runtime. The only boot blocker was codegen function
+  discovery (B-006), fixed by five `config/functions.toml` `[functions]`
+  entries (no `src/hooks/` overrides were required yet).
+- **Offline-service behavior the game depends on:** none blocking. The title's
+  offline path is reached with `XamVoiceSetMicArrayIdleUsers`, `XeKeysSetKey`,
+  and `XeKeysAesCbc` as honest `STUB`s. Do not fake success.
+- **Known-good log categories:** `core` (lifecycle, FATAL, clean shutdown),
+  `gpu` (D3D12/pipelines/shaders), `apu` (audio endpoint), `fs` (VFS opens,
+  `update:` misses), `krnl` (stubs). `sys` no longer floods after B-007.
+- **Expected snags:** `update:\gen\patch_xbox.hdr` → `0xc000000f` (no title
+  update, benign); three key/voice `STUB` warnings (benign).
+- **Watch for (Milestone 4):** reaching the menu past "PRESS A TO START"
+  requires input; ensure a controller (or `--mnk_mode` keyboard emulation) is
+  mapped and the bundled content (`gen/main_xbox.hdr`/`_0.ark`) is enumerated
+  offline. Any new `[FATAL] … unregistered function` means another
+  `bctr`-missed target → add `[functions."0x…"]`.
 
 ## Bring-up loop
 

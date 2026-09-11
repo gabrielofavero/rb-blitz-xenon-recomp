@@ -1,0 +1,5 @@
+# Line-ending policy.
+#
+# Patch files are consumed by `git apply`, which is sensitive to CRLF: pin them
+# to LF so a fresh checkout on any host applies cleanly.
+*.patch text eol=lf

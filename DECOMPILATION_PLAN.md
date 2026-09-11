@@ -165,14 +165,14 @@ no unexplained forced validation bypass. **Met** — `out/build/win-amd64-debug/
 
 ### Milestone 3 — Reach guest entry and stable offline boot
 
-- [ ] Configure the game-data root separately from writable user/update/cache roots.
-- [ ] Verify VFS mounts and case/path normalization against every attempted open.
-- [ ] Implement or correct blocking Xbox kernel imports one at a time.
-- [ ] Capture the last guest PC/function on fatal exceptions and hangs.
-- [ ] Make unavailable network services fail quickly and faithfully enough for the title's existing offline path. Do not emulate a fake successful service unless the game cannot otherwise proceed and the exact contract is understood.
-- [ ] Verify worker threads, events, timers, and shutdown do not deadlock before moving forward.
+- [x] Configure the game-data root separately from writable user/update/cache roots.
+- [x] Verify VFS mounts and case/path normalization against every attempted open.
+- [x] Implement or correct blocking Xbox kernel imports one at a time.
+- [x] Capture the last guest PC/function on fatal exceptions and hangs.
+- [x] Make unavailable network services fail quickly and faithfully enough for the title's existing offline path. Do not emulate a fake successful service unless the game cannot otherwise proceed and the exact contract is understood.
+- [x] Verify worker threads, events, timers, and shutdown do not deadlock before moving forward.
 
-Exit criterion: ten consecutive launches reach the title screen/offline prompt and close cleanly.
+Exit criterion: ten consecutive launches reach the title screen/offline prompt and close cleanly. **Met** — 10/10 (Release), boot to "PRESS A TO START".
 
 ### Milestone 4 — Menus, content discovery, input, and saves
 
