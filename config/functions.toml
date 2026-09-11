@@ -61,3 +61,17 @@
 #   "[FATAL] Call to invalid or unregistered function at guest address 0x82783D18"
 # Next missed target after 0x82779A70 was registered; same discovery-gap class.
 # No size/end on purpose: let codegen discover the natural boundary.
+
+# --- Milestone 4: indirect-call target missed by discovery (runtime evidence) ---
+
+[functions."0x8278A6E0"]
+# Reached via an indirect call after "PRESS A TO START" (thread t21068, log
+# rb_blitz_001.log); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x8278A6E0"
+# 0x8278A6E0 is a HOLE in a dense run of 8-byte `addi r3,r3,-4; b <target>`
+# adjuster thunks (multiple-inheritance/interface thunks) that codegen already
+# registered at 0x8278A6D8 and 0x8278A6E8. Codegen emits those two neighbours as
+# exactly two instructions each, so the missing entry is a genuine function
+# boundary, not data. The register table (generated/default/rb_blitz_register.cpp)
+# has no 0x8278A6E0 entry, so the runtime trap fires on the first indirect call.
+# No size/end on purpose: let codegen discover the natural boundary.

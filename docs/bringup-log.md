@@ -298,3 +298,91 @@ functions could be eliminated at once by making codegen `GapFill`
 split on `bctr` when the next word is a known function entry. This is a
 generically-correct SDK fix but is fix-order #6 in the plan; the current path
 deliberately stays project-level (`config/functions.toml`).
+
+## Milestone 4 — Menus, content discovery, input, saves
+
+Status: **in progress** (2026-09-10). Steps 1–2 have first runtime evidence;
+steps 3–4 not started.
+
+### B-008: one more B-006-class missed function, reached by pressing A
+
+- Status: **resolved** (2026-09-10).
+- Symptom: pressing A at "PRESS A TO START" (driven with the keyboard) hit
+  `[FATAL] Call to invalid or unregistered function at guest address 0x8278A6E0`
+  (thread `t21068`). Milestone 3 only ever idled on the title, so this target
+  was never reached before.
+- Root cause: same discovery gap as B-006, but this entry is a **hole between
+  two already-registered functions**: codegen registered 8-byte
+  `addi r3,r3,-4; b <target>` adjuster thunks at `0x8278A6D8` and `0x8278A6E8`
+  and skipped `0x8278A6E0` in between. `generated/default/rb_blitz_register.cpp`
+  has no entry for it, so the first indirect call traps. The neighbours are
+  emitted as exactly two instructions each, which proves `0x8278A6E0` is a real
+  function boundary and not data.
+- Fix (project layer, plan fix-order #1): `[functions."0x8278A6E0"]` with no
+  size/end in `config/functions.toml`, so codegen discovers the natural
+  boundary.
+- Regression check: Release rebuild boots to the title and A no longer faults.
+- Consequence for later milestones: **any UI action can expose another
+  `bctr`-missed target**. Expect a new `[functions."0x…"]` entry each time a
+  previously-unreached path is taken.
+
+### Input: the MnK driver needs a genuine focus transition
+
+- Status: **working** (step 2 is verification, not bring-up).
+- Symptom: injected keystrokes were ignored until the window had seen a real
+  focus change; keys sent to a merely-foregrounded window never reached the
+  guest.
+- Fix: `scripts/drive_ui.ps1` gained a `refocus` action (minimize → restore →
+  `SetForegroundWindow`), and every `key:`/`hold:`/`text:` action re-asserts
+  foreground first. A failed focus is now a hard error instead of a silent
+  no-op (the earlier version dropped keys into the terminal without saying so).
+- Keybinds come from the SDK MnK controller emulation (`mnk_mode`):
+  `space`/`semicolon`→A, `backspace`→B, `l`→X, `p`→Y, `enter`→Start,
+  `z`/`tab`→Back, arrows (+Shift for D-pad), WASD/sticks.
+
+### Finding: A at the title attempts an online sign-in, not the offline start
+
+- Screenshot evidence: `out/drive-ui/m4-trace-dialog.png` shows
+  *"Cannot connect to Rock Central. To connect, sign in to an Xbox LIVE-enabled
+  profile, connect to Xbox LIVE, and return to the title screen."* with
+  `A SELECT / B BACK`.
+- **B (Back) dismisses the dialog** and returns to the title, so the title is
+  not wedged — but the offline entry point is somewhere else on this screen.
+- The guest image contains the string **"Proceed in Offline Mode?"** (found by
+  scanning the live process with `scripts/scan_process_strings.ps1`). Locating
+  its guest address tells us which branch reaches the menu without Xbox LIVE;
+  capturing that address is the next Milestone 4 step.
+
+### Finding: content enumeration is already running (step 1 evidence)
+
+- At the title the guest creates content enumerators:
+  `XamContentCreateEnumerator: added 2 items to enumerator` (the
+  `songcache:` / `globaloptions:` content devices) and
+  `XamContentAggregateCreateEnumerator: added 0 items` after
+  `game:\Content\0000000000000000` is not found.
+- Reading: bundled-content enumeration works through the SDK content path;
+  the aggregate (DLC) enumerator is legitimately empty for this dump. Step 1
+  still needs the menu reached *and* the bundled song list enumerated offline.
+- Log noise to watch: `XAudioSubmitRenderDriverFrame` logs one `[debug]` line
+  per submitted frame (audio is alive — see below), and the Debug log level
+  shows a startup burst of `GetProcAddressByOrdinal` lines.
+
+### Finding: audio is already submitting frames (Milestone 5 input)
+
+- At the title the log shows `XAudioRegisterRenderDriverClient` followed by
+  repeated `XAudioSubmitRenderDriverFrame: driver=41550000 samples=829D0D20`,
+  i.e. the guest's audio worker thread is running and handing frames to the
+  XAudio render driver. Whether those frames reach an audible endpoint is
+  Milestone 5 step 4 ("audio voices, sample formats, streaming, clocks") — not
+  a Milestone 4 criterion. Recorded here so M5 does not re-derive it.
+
+### New tooling (both untracked helpers, now committed)
+
+- `scripts/drive_ui.ps1` — action-grammar UI driver (`wait:`, `shot:`, `key:`,
+  `hold:`, `text:`, `refocus`) that focus-correctly injects keys and captures
+  window screenshots into `out/drive-ui/`.
+- `scripts/scan_process_strings.ps1` — searches the **live process** for a
+  string and reports the guest address, exploiting the fact that the arena is
+  mapped contiguously (guest `0x82000000` → process `0x0000000182000000`). The
+  XEX is encrypted/compressed on disk, so runtime scanning is the only way to
+  locate UI strings and then read the loading code in `generated/`.
