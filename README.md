@@ -19,9 +19,10 @@ decryption keys are never committed here. See
 
 ## Build and run
 
-[docs/build-and-run.md](docs/build-and-run.md) covers the prerequisite toolchain
-(LLVM, CMake, Ninja, Visual Studio Build Tools), configure/build via
-`CMakePresets.json`, the game-data path argument, and log capture.
+[docs/build-and-run.md](docs/build-and-run.md) covers the one-time SDK-tree
+preparation (§0), the prerequisite toolchain (LLVM, CMake, Ninja, Visual Studio
+Build Tools), configure/build via `CMakePresets.json`, the game-data path argument,
+and log capture.
 
 ## Where things are
 
@@ -35,6 +36,8 @@ decryption keys are never committed here. See
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [src/](src) | Host application and native overrides for guest functions. |
 | [config/](config) | Codegen inputs: confirmed function boundaries, names, fingerprints. |
+| [patches/](patches) | Local fixes to the pinned SDK, kept as patch files so the submodule stays pristine. |
+| [scripts/](scripts) | Configure/build/run helpers, plus the two SDK-tree repairs (§0 of the build guide). |
 
 ## License
 

@@ -55,6 +55,30 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
 - Fix: repo-local `git config core.symlinks true`; the 15 `libmspack/cabextract`
   stubs are now real symlinks (`lzxd.c` compiles). No SDK source patch needed.
 - Regression check: `rb_blitz_codegen` builds; mspack target compiles clean.
+- **Follow-up (2026-09-19) — the "now real symlinks" wording does not hold on this
+  checkout.** Observed state: zero reparse points anywhere under `rexglue-sdk/`;
+  all 16 tracked symlink entries (`thirdparty/libmspack/cabextract/mspack/*` × 15,
+  `thirdparty/o1heap/CLAUDE.md` × 1) are regular files whose content happens to
+  equal their link target. So `cabextract/mspack/lzxd.c` is the real 30,796-byte
+  source and the build is not currently broken — but Git reports each entry as a
+  type change (`120000` → `100644`), which is exactly the
+  ` M thirdparty/libmspack` / ` M thirdparty/o1heap` dirt visible in `git status`.
+  `core.symlinks=true` was set (by this entry) in the **root** repo only; the
+  submodule repos carry no local setting and inherit `false` from the system
+  gitconfig (`C:/Program Files/Git/etc/gitconfig`), so nothing re-creates links
+  inside them.
+- Re-promoting the submodules to `core.symlinks true` is **not** a fix here: the
+  machine cannot create symlinks (shell not elevated; `AllowDevelopmentWithoutDevLicense`
+  unset; `New-Item -ItemType SymbolicLink` and `cmd mklink` both fail), so Git's
+  `symlink()` fails with `unable to create symlink cabextract/mspack/lzxd.c:
+  Function not implemented`, the checkout exits 255, and the file is left
+  **missing** — worse than a flattened stub. Verified 2026-09-19 and reverted.
+- Standing fix: `scripts/repair_flat_symlinks.ps1` re-expands any flattened entry
+  from its link target (idempotent, SHA-256 check inside) and marks the 16 paths
+  `--skip-worktree` so the unrepresentable type change stops showing up as dirt.
+  Re-run after any clone, `submodule update`, or checkout that rewrites the SDK
+  tree. See [known-issues.md](./known-issues.md) and
+  [../patches/README.md](../patches/README.md).
 
 ### B-002: `rexcore/memory.cpp` SSSE3 intrinsic error (clang/MSVC)
 
@@ -484,3 +508,34 @@ steps 3–4 not started.
   mapped contiguously (guest `0x82000000` → process `0x0000000182000000`). The
   XEX is encrypted/compressed on disk, so runtime scanning is the only way to
   locate UI strings and then read the loading code in `generated/`.
+
+### SDK tree hygiene: durable patches and flattened-symlink repair (2026-09-19)
+
+`git status` showed four dirty entries inside the `rexglue-sdk` submodule. All
+four are now explained and either made durable or removed — none of them was a
+game-port code change:
+
+- `src/system/xthread.cpp` — **ours and intentional** (B-007). The one-line
+  log-once fix now lives in
+  `patches/rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` and is
+  re-applied after any checkout by `scripts/apply_sdk_patches.ps1`, so wiping or
+  re-cloning the SDK no longer loses it. While applied, the submodule reports
+  ` M src/system/xthread.cpp`: expected, not drift.
+- `thirdparty/libmspack` (15 paths) and `thirdparty/o1heap` (1 path) — flattened
+  tracked symlinks, not edits. Handled by
+  `scripts/repair_flat_symlinks.ps1`; see the B-001 follow-up for why
+  `core.symlinks true` cannot be used on this machine.
+- `thirdparty/fmt/support/.gradle/` — untracked Gradle caches (15 files, 79.2 KB)
+  from fmt's own tooling; deleted. `thirdparty/fmt` is clean again.
+
+Annotating `thirdparty/libmspack/cabextract/mspack/cabd.c` in an editor was
+harmless as well: the checked-in file is a symlink upstream, its expansion here is
+byte-identical to `libmspack/mspack/cabd.c`, and no edit was persisted.
+
+Newly documented alongside the scripts: [../patches/README.md](../patches/README.md)
+(patch set, script usage, the symlink quirk and its build impact) and §0 of
+[build-and-run.md](build-and-run.md) (the one-time preparation step). One
+environment note for future runs on this checkout: the PowerShell execution policy
+is `Restricted`, so scripts have to be launched as
+`powershell -NoProfile -ExecutionPolicy Bypass -File …`; the bare
+`.\scripts\….ps1` form used in earlier entries fails with `UnauthorizedAccess`.

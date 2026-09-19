@@ -80,6 +80,8 @@ Title-specific behavior belongs in this repository's project layer. Change the S
 │       ├── patches.h
 │       └── patches.cpp
 ├── metadata/                         # Redistributable project metadata only
+├── patches/                          # Local SDK fixes kept as patch files
+│   └── rexglue-sdk/                  #   applied by scripts/apply_sdk_patches.ps1
 ├── scripts/                          # Deterministic configure/build/run helpers
 ├── docs/
 │   ├── bringup-log.md                # Chronological milestone and blocker log
@@ -103,6 +105,8 @@ The SDK is currently at `rexglue-sdk/`. Before scaffolding, either move/re-add i
 - Use the manifest to map the entrypoint and any guest DLLs. Each binary gets its own output directory.
 - Use the manifest's `includes` support to split reverse-engineering knowledge by concern. The manifest remains a small index; address-heavy data lives in `config/`.
 - Pin the SDK commit. Upgrade it in isolated commits, regenerate everything, and rerun the milestone test matrix.
+- Keep local SDK fixes as patch files under `patches/rexglue-sdk/` and apply them with `scripts/apply_sdk_patches.ps1`; never commit inside the submodule, which would point the gitlink at a commit the upstream remote does not have. See [patches/README.md](patches/README.md).
+- Run `scripts/repair_flat_symlinks.ps1` on a fresh checkout: 16 tracked SDK symlinks cannot exist on Windows here, and one of them (`libmspack/cabextract/mspack/lzxd.c`) is compiled by the SDK.
 - Treat `generated/` as a build artifact even if it is temporarily committed to make early builds practical. No fixes may live only there.
 - Keep `src/main.cpp` trivial. Put path configuration in `OnConfigurePaths`, runtime/backend selection in `OnPreSetup`, loaded-image data patches in `OnPostLoadXexImage`, final guest patches in `OnPreLaunchModule`, and diagnostics/cleanup in the other `ReXApp` hooks.
 - Prefer fixes in this order:
@@ -111,7 +115,7 @@ The SDK is currently at `rexglue-sdk/`. Before scaffolding, either move/re-add i
   3. add a whole-function `REX_HOOK` override with the original guest address recorded;
   4. use a small named data/code patch;
   5. use a mid-ASM hook when an entire function cannot safely be replaced;
-  6. modify the SDK only for a reusable runtime defect.
+  6. modify the SDK only for a reusable runtime defect — and then record it as a patch file under `patches/`, not as an uncommitted submodule edit.
 - Every hook or patch must state the guest address, observed failure, intended behavior, evidence, and the milestone that requires it.
 - Do not use hooks to conceal unknown crashes. First capture the failing guest PC, call chain, registers, and relevant import/log messages.
 

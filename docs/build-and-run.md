@@ -7,8 +7,46 @@ Everything below is PowerShell, run from the repository root unless noted.
 
 > **Current state (as of B-009):** the fix is written and statically verified but
 > has never been compiled or run — no toolchain is installed on the development
-> machine and the checked-in build tree is stale. Start at §1, or jump to §2 if
-> the toolchain check in §1 already passes.
+> machine and the checked-in build tree is stale. Start at §0 (once per checkout),
+> then §1; jump to §2 if §0 is already done and the §1 toolchain check passes.
+
+## 0. Prepare the SDK submodule (once per checkout)
+
+The pinned SDK submodule needs two idempotent repairs before it can be built from.
+Run both after a fresh clone, a `git submodule update`, or any checkout that
+rewrites `rexglue-sdk/` — not on every build:
+
+```powershell
+# This machine's execution policy is Restricted, so -ExecutionPolicy Bypass is
+# required; a bare `.\scripts\...ps1` fails with UnauthorizedAccess.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair_flat_symlinks.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.ps1
+```
+
+1. **`repair_flat_symlinks.ps1`** expands the 16 SDK files that are symbolic links
+   upstream into regular files holding the target's content. Windows here cannot
+   create symlinks (not elevated, Developer Mode off) and the submodule repos
+   inherit `core.symlinks=false`, so a checkout leaves them as link-text stubs. This
+   is build-critical: the SDK compiles
+   `thirdparty/libmspack/cabextract/mspack/lzxd.c`, which becomes a 29-byte text
+   file (`lzxd.c` upstream is the real 30,796-byte source, under the same repo's
+   `libmspack/mspack/`). A healthy tree prints `content already correct : 16` and
+   `repaired from target    : 0`. The script then marks those 16 paths
+   `--skip-worktree`, because the residual difference (a file *type* change, not
+   content) cannot be resolved on this machine.
+   **Do not** try to fix this by setting `core.symlinks true` in the submodules:
+   checkout then fails with `unable to create symlink …: Function not implemented`
+   and deletes the file.
+2. **`apply_sdk_patches.ps1`** applies [patches/rexglue-sdk/](../patches/rexglue-sdk)
+   to the pinned checkout — currently the one-line change that stops the "Too few
+   processor cores" warning being logged on every thread CPU assignment. It prints
+   each patch as *already applied*, *applied now*, or *failed* (exit 1, with
+   guidance). `-Check` reports without writing.
+
+Afterwards the parent repo showing ` M rexglue-sdk` and the submodule showing
+` M src/system/xthread.cpp` is the expected, correct state — neither is drift to be
+cleaned. Full rationale and manual equivalents:
+[patches/README.md](../patches/README.md).
 
 ## 1. Toolchain prerequisites
 
