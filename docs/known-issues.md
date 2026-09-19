@@ -30,3 +30,10 @@ is removed from this file, not from the log.
 - Three key/voice `STUB` warnings at boot.
 - Online features (achievements, leaderboards, DLC enumeration) are offline-
   disabled by policy until the core loop works.
+- The project is **GPL-2.0-only**, deliberately not "or later": GPL-2.0 is what
+  keeps us compatible with the GPL-2.0 Rock Band 3 recompilation project we adapt
+  code from. Do not relicense, and do not add GPL-3.0-only or otherwise
+  incompatible third-party code ([README.md](../README.md)).
+- Borrowed code must carry provenance. Anything adapted from another project
+  keeps its original license, says so in a header comment, and gets a row in the
+  provenance table in [rb3-references.md](rb3-references.md) §9.

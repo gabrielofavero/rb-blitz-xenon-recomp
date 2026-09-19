@@ -6,7 +6,7 @@ Produce a reproducible native build of the Xbox 360 version of **Rock Band Blitz
 
 Correctness fixes, performance work, visual upgrades, broad DLC compatibility, restored online behavior, and quality-of-life features are later projects. During bring-up, make only the smallest change needed to pass the next milestone.
 
-This work assumes contributors use game files dumped from a copy they are authorized to use. Retail binaries, archives, music, keys, and other copyrighted game data must not be committed or redistributed.
+This work assumes contributors use game files dumped from a copy they are authorized to use. Retail binaries, archives, music, keys, and other copyrighted game data must not be committed or redistributed. The project's own source is licensed **GPL-2.0-only** (`LICENSE`), a choice made so that code can be adapted from the GPL-2.0 recompilation projects for the same engine; see `README.md` for what the license permits and what it does not.
 
 ## Current baseline
 
@@ -57,6 +57,7 @@ Title-specific behavior belongs in this repository's project layer. Change the S
 ├── CMakeLists.txt                    # Thin target definition from rexglue init
 ├── CMakePresets.json                 # Reproducible supported build presets
 ├── DECOMPILATION_PLAN.md
+├── LICENSE                           # Project license: GPL-2.0-only
 ├── README.md                         # Setup, legal input requirements, build/run
 ├── rb_blitz_manifest.toml            # Project, entrypoint, module/output mapping
 ├── config/
@@ -84,7 +85,7 @@ Title-specific behavior belongs in this repository's project layer. Change the S
 │   ├── bringup-log.md                # Chronological milestone and blocker log
 │   ├── build-and-run.md              # Rebuild / run / log-capture commands
 │   ├── known-issues.md
-│   ├── rb3-references.md               # What the RB3 projects solved on this engine
+│   ├── rb3-references.md             # What the RB3 projects solved on this engine
 │   ├── symbols.md                    # Important guest addresses and evidence
 │   └── test-matrix.md
 ├── generated/                        # RexGlue-owned output; do not hand-edit
@@ -300,3 +301,4 @@ Suggested blocker entry:
 - [Historical Xenia Rock Band Blitz compatibility report](https://github.com/xenia-project/game-compatibility/issues/1533)
 
 Because ReXGlue is pre-1.0 and the checked-out v0.10.0 source is newer than parts of its public wiki, the pinned local headers, templates, and CLI `--help` output are authoritative when documentation disagrees.
+

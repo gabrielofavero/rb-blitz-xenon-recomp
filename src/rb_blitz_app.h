@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Customize your app by overriding virtual hooks from rex::ReXApp.

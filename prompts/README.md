@@ -62,7 +62,8 @@ Rock Band Blitz shares its engine with Rock Band 3, so other projects have
 already walked a lot of this road:
 
 - `ihatecompvir/band3_recomp` — RB3 on the same ReXGlue SDK, with a mature hook
-  and patch set. **GPL-2.0: technique reference only, never copy its code.**
+  and patch set. **GPL-2.0, which is what we license under: its code may be
+  adapted, with attribution.**
 - `freeqaz/rb3-xenon` — RB3 for **Xbox 360** (same compiler, ABIs and kernel
   imports) and the RB3DX patch set that fixes real retail consoles.
 - `freeqaz/rb3` — RB3 for Wii: the engine source of truth, plus the audio

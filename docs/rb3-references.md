@@ -19,7 +19,7 @@ plan: nothing here changes our milestone order.
 
 | Project | What it is | License | How we use it |
 | --- | --- | --- | --- |
-| [`ihatecompvir/band3_recomp`](https://github.com/ihatecompvir/band3_recomp) | Rock Band 3 on the same ReXGlue SDK. A mature set of guest hooks and patches behind a symbol map. | **GPL-2.0** | Technique reference. Do **not** copy code (see §8). |
+| [`ihatecompvir/band3_recomp`](https://github.com/ihatecompvir/band3_recomp) | Rock Band 3 on the same ReXGlue SDK. A mature set of guest hooks and patches behind a symbol map. | **GPL-2.0** | Knowledge **and** a code source we may adapt, because we are GPL-2.0 too (see §9). |
 | [`freeqaz/rb3-xenon`](https://github.com/freeqaz/rb3-xenon) | Rock Band 3 for **Xbox 360** (MSVC X360, retail) decompilation. Engine from `dc3-decomp`, game code from the Wii decomp. Active 2026-09. | CC0-1.0 | Closest sibling: same compiler, same ABIs, same kernel imports. |
 | [`freeqaz/rb3`](https://github.com/freeqaz/rb3) | Rock Band 3 **Wii** decompilation with an LP64 native port, plus the audio/MOGG tooling and a verification methodology. | CC0-1.0 | Engine source of truth + verification method. |
 | [`freeqaz/milo-native-engine`](https://github.com/freeqaz/milo-native-engine) | The shared native (host) Milo engine extracted from that work. | CC0-1.0 | How they model a host engine layer at all. |
@@ -300,19 +300,45 @@ of width bug.
 | Symbol names | 37,851 anonymous functions (§2). | Name the proved ones. |
 | Hook hygiene | Our hooks have no "why is this disabled" record (§7.3). | Each hook file gets a header comment stating the faithful behaviour and the reason for deviating. |
 
-## 9. Do not copy
+## 9. Borrowing rules
 
-* `band3_recomp` is **GPL-2.0** and this project is unlicensed (there is no
-  `LICENSE` at the repo root). Copying its code would force a licence decision
-  nobody has made. Re-derive from Blitz's own addresses and behaviour, which is
-  what `src/hooks/crypto.cpp` already does.
-* Neither RB3 project's **addresses** apply to us. Same engine, different image,
-  different link order: every offset, field offset and function address in this
-  document is a *hint about structure*, never a constant to paste.
-* Do not vendor the clones, the game image, or the deobfuscated keyset into the
-  repo.
-* `RndMat__Load`'s field offsets (`+0x118`, `+0x99`) and the heap names in
-  `AddHeap` are the most likely things to be silently wrong if copied unverified.
+As of 2026-09-19 this project is **GPL-2.0-only** (`LICENSE` at the repo root,
+stated in the [README](../README.md)). That choice was made *because*
+`band3_recomp` is GPL-2.0: the two are compatible, so its code can be adapted
+directly instead of only re-derived. Every hook in §4 is now fair game to port,
+not just to mimic.
+
+* **Adapting band3 code is allowed** and is often the right move for the hooks in
+  §4 (`file.cpp`, `patches.cpp` are hand-transcribed and hard-won). Keep the file
+  under GPL-2.0, say so in a header comment, and add a row to the provenance
+  table below. Do not relicense the project to GPL-3.0 — it would cut off the
+  GPL-2.0 sources.
+* **Prefer knowledge where a clean-room implementation is cheaper** than an
+  adaptation: `math.cpp`'s native trig and the 24 KB `CamShot__Shake`
+  transcription are candidates for re-implementation from Blitz's own
+  disassembly.
+* **The `freeqaz` projects are CC0-1.0**, so nothing is owed for their code
+  either — but they are decompilations of copyrighted game code: port the
+  structure, never vendor the tree.
+* **Addresses still never transfer.** Same engine, different image, different
+  link order: every offset, field offset and function address in this document is
+  a *hint about structure*, never a constant to paste. Porting band3's `file.cpp`
+  verbatim would hook the wrong Blitz function.
+* **Field offsets are the risky part.** `RndMat__Load`'s `+0x118`/`+0x99` and
+  `AddHeap`'s heap names are the most likely things to be silently wrong if
+  copied unverified; confirm each against Blitz before trusting it.
+* **Do not vendor the clones, the game image, or the deobfuscated keyset** into
+  the repo. Reference clones live outside the tree, or as documented `git clone`
+  commands.
+
+### Provenance of adapted code
+
+Any file that adapts code from another project must be listed here with its
+origin. An empty table is the correct state until something is actually ported.
+
+| Our file | Adapted from | Their commit | Notes |
+| --- | --- | --- | --- |
+| *(none yet)* | | | |
 
 ## 10. Where this lands
 
@@ -323,3 +349,4 @@ of width bug.
 | §5–§6 (RB3DX cross-reference) | [prompts/04](../prompts/04-menus-content-input-saves.md) (groups 2–4), [05](../prompts/05-complete-one-song.md) (6–9) |
 | §7.1 (audio verification) | [prompts/05](../prompts/05-complete-one-song.md) |
 | §7.3, §8 (methodology, config gaps) | [prompts/06](../prompts/06-reproducible-release.md), [README](../prompts/README.md) |
+| §9 (borrowing rules) | [README](../README.md) (license), [prompts/06](../prompts/06-reproducible-release.md) (distribution hygiene) |

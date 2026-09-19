@@ -15,12 +15,15 @@ last_updated: 2026-09-19
 
 ## Reference leads (RB3 mining pass, 2026-09-19)
 
-- **Licensing is an open decision, not a detail.** This repository has **no
-  `LICENSE`** at its root, while `band3_recomp` is **GPL-2.0**: copying its code
-  would force a licence choice nobody has made. Everything borrowed from it must
-  stay *technique*, re-derived against Blitz's own addresses. The two `freeqaz`
-  projects are CC0-1.0 but are decompilations of copyrighted game code — treat
-  their code as reference, never vendor it.
+- **Licensing is settled: GPL-2.0-only.** `LICENSE` is at the repo root and the
+  [README](../README.md) states it. It was chosen to be compatible with
+  `band3_recomp`'s GPL-2.0, so its code may now be adapted rather than only
+  re-derived; the pinned SDK is BSD-3-Clause, which is compatible. Record every
+  adapted file in the provenance table at the end of
+  [`docs/rb3-references.md`](../docs/rb3-references.md) §9, and never relicense
+  to GPL-3.0 (it would cut off those sources). The two `freeqaz` projects are
+  CC0-1.0, but they are decompilations of copyrighted game code — port the
+  structure, never vendor the tree.
 - **Do not ship** the local reference clones, the retail image, extracted assets,
   or the deobfuscated AES keyset.
 - **Audit the hooks for "faithful behaviour switched off."** The RB3 native port's
@@ -59,6 +62,10 @@ last_updated: 2026-09-19
 
 - Ensure a distributable build contains no retail game data, proprietary
   database-derived symbols, credentials, or machine-specific paths.
+- Carry the notices a distributable build has to reproduce: the GPL-2.0 text for
+  this project, the BSD-3-Clause notice for the ReXGlue/Xenia SDK, and
+  attribution plus GPL-2.0 terms for anything adapted from `band3_recomp`
+  (listed in [`docs/rb3-references.md`](../docs/rb3-references.md) §9).
 
 ## Acceptance / exit criteria
 
