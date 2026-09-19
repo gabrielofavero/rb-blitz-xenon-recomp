@@ -1,7 +1,7 @@
 ---
 status: in-progress
 milestone: 4
-last_updated: 2026-09-10
+last_updated: 2026-09-19
 ---
 
 # Milestone 4 — Menus, content discovery, input, and saves
@@ -81,6 +81,54 @@ last_updated: 2026-09-10
   repeating `XAudioSubmitRenderDriverFrame`) — that is **Milestone 5** step 4
   material, not a Milestone 4 criterion.
 
+## Reference leads (RB3 mining pass, 2026-09-19)
+
+Full detail in [`docs/rb3-references.md`](../docs/rb3-references.md). Rock Band 3
+is the same engine, and two projects have already solved a lot of this:
+
+- **Any Blitz function is hookable today, with no symbol-map work.**
+  `generated/default/rb_blitz_pch.h` declares every function as a *weak* alias
+  (`Name`) over a *strong* original (`__imp__Name`), so
+  `REX_HOOK(sub_82438F40, Native)` + `__imp__sub_82438F40(ctx, base)` works for
+  any of the 38,344 functions. `band3_recomp`'s `__imp__NewFile`-style hooks are a
+  ReXGlue **0.8** artefact; we are on 0.10.
+- **`[[midasm_hook]]` is the right tool for forcing a branch or a return value**
+  (our 0.10 schema is richer than 0.8's) — no hand-transcribed function body
+  needed. Prime candidate: the **"Proceed in Offline Mode?"** branch (next steps
+  #1) and the debugger trap below. See `docs/rb3-references.md` §3.
+- **Give our proved functions real names.** Add `name =` to the
+  `[functions."0x…"]` entries in `config/functions.toml` (the eleven MOGG rows in
+  `docs/symbols.md` are the first batch). Readability only — not a prerequisite.
+- **Expect the debugger trap.** RB3 is patched for it twice over
+  (`band3_recomp/src/patches.cpp` `App__Run`, RB3DX group 2: `bl App::Run` →
+  `bcl RunWithoutDebugging` at `0x82272E90`). Find Blitz's equivalent rather than
+  waiting to trip it.
+- **Our manifest sets no `longjmp_address`/`setjmp_address`.** The 0.10 SDK
+  supports both at `[entrypoint]` level and `band3` sets them (`0x82BBB620` /
+  `0x82BBBA50`, RB3 addresses — do **not** copy). Find Blitz's; an unbridged
+  longjmp may already explain odd error-path deaths.
+- **`NewFile` + a host overlay is the clean way to shadow shipped data.** band3's
+  `NewFile` hook sanitises `..`, tries an `assets/<path>` fallback and sets
+  `ctx.r4.u64 = flags | 0x10000` to force host-file reads. Our asset root is
+  `game/`. Pair it with `StreamChecksum__ValidateChecksum` → `1` before editing
+  any shipping file, or validation rejects the edit.
+- **`OptionBool`/`OptionStr` inject host `argv` into guest DTA options.** That is
+  a deterministic alternative to `scripts/drive_ui.ps1`'s keystroke injection and
+  its required focus transition.
+- **Check the `update:` snag against `SetDiskError`.** RB3 no-ops
+  `PlatformMgr::SetDiskError` (band3 `patches.cpp`; RB3DX group 4, with 8 call
+  sites listed in `docs/rb3-references.md` §6) and RB3DX also rewrites the content
+  prefix `"UPDATE:"` → `"D:"` (group 8). Our `update:\gen\patch_xbox.hdr` miss may
+  be the same path.
+- **Two config placements to remember:** `d3d12_readback_resolve` is a **cvar**
+  in 0.10, so it belongs in the build-tree-local `rb_blitz.toml`
+  (`out/build/<preset>/rb_blitz.toml`) runtime profile, not the build manifest.
+  `band3` also has `longjmp_address`, above.
+- **Input war story from the RB3 native port:** a missing `button_meanings` block
+  in the shipped `config/joypad.dta` made **every menu key resolve to
+  `kAction_None`** — silent, total input failure. If our input layer looks dead
+  rather than wrong, suspect the DTA mapping, not the XInput path.
+
 ## Steps
 
 ### 1. Content access
@@ -123,6 +171,9 @@ last_updated: 2026-09-10
    expected offsets/sizes.
 3. Verify accept/back/pause/lane controls against `config/game_fingerprints.toml`
    hashes unchanged (step 2), then local persistence (step 3).
+
+Before writing any new hook, read **Reference leads** above: hooks, midasm hooks
+and the offline-mode candidates are already mapped there.
 
 ## Handoff to Milestone 5
 

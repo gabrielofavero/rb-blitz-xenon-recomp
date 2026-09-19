@@ -82,7 +82,9 @@ Title-specific behavior belongs in this repository's project layer. Change the S
 ├── scripts/                          # Deterministic configure/build/run helpers
 ├── docs/
 │   ├── bringup-log.md                # Chronological milestone and blocker log
+│   ├── build-and-run.md              # Rebuild / run / log-capture commands
 │   ├── known-issues.md
+│   ├── rb3-references.md               # What the RB3 projects solved on this engine
 │   ├── symbols.md                    # Important guest addresses and evidence
 │   └── test-matrix.md
 ├── generated/                        # RexGlue-owned output; do not hand-edit
@@ -219,6 +221,9 @@ For each blocker, use the same short loop:
 5. Apply the narrowest fix at the ownership boundary above.
 6. Re-run the current milestone test and all earlier smoke tests.
 7. Add the result to `docs/bringup-log.md`; promote enduring limitations to `docs/known-issues.md`.
+
+Commands for the rebuild → run → log-capture steps of this loop are in
+[`docs/build-and-run.md`](docs/build-and-run.md).
 
 Suggested blocker entry:
 

@@ -1,7 +1,7 @@
 ---
-status: complete
+status: done
 milestone: 1
-last_updated: 2026-09-09
+last_updated: 2026-09-19
 ---
 
 # Milestone 1 — Scaffold and generate

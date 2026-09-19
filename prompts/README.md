@@ -29,7 +29,11 @@ completed step, write the new knowledge back into three places:
    order).
 2. **`docs/known-issues.md`** / **`docs/symbols.md`** — enduring facts that
    outlive a single blocker.
-3. **These prompt files** — fold the knowledge into:
+3. **`docs/rb3-references.md`** — cross-project knowledge: what the Rock Band 3
+   recompilation and decompilations already solved on this engine, and which
+   technique transfers to us. Re-read it before starting anything that smells
+   like an *engine* problem rather than a Blitz-specific one.
+4. **These prompt files** — fold the knowledge into:
    - the **"Entry state"** section of the prompt you just worked on, and
    - the **"Knowledge folded in"** and **"Handoff to next milestone"**
      sections of the *following* prompts.
@@ -49,13 +53,32 @@ what failed.
   definition).
 - Update the `last_updated` date and `status` in each file's header when you
   edit it.
+- Prefer knowledge over code when borrowing from another project. Every
+  *address* in `docs/rb3-references.md` is RB3's, never ours.
+
+## Reference mining
+
+Rock Band Blitz shares its engine with Rock Band 3, so other projects have
+already walked a lot of this road:
+
+- `ihatecompvir/band3_recomp` — RB3 on the same ReXGlue SDK, with a mature hook
+  and patch set. **GPL-2.0: technique reference only, never copy its code.**
+- `freeqaz/rb3-xenon` — RB3 for **Xbox 360** (same compiler, ABIs and kernel
+  imports) and the RB3DX patch set that fixes real retail consoles.
+- `freeqaz/rb3` — RB3 for Wii: the engine source of truth, plus the audio
+  verification methodology.
+
+[`docs/rb3-references.md`](../docs/rb3-references.md) catalogues what is worth
+porting. It is a living document: when a lead there is proved or disproved
+against Blitz, record the outcome in `docs/bringup-log.md` and correct the
+document.
 
 ## Status map
 
 | Milestone | File | Status |
 | --- | --- | --- |
 | 0 — Baseline safe & reproducible | `00-baseline-reproducible.md` | done |
-| 1 — Scaffold & generate | `01-scaffold-generate.md` | in-progress |
+| 1 — Scaffold & generate | `01-scaffold-generate.md` | done |
 | 2 — Close analysis & compile | `02-close-analysis-compile.md` | done |
 | 3 — Guest entry & offline boot | `03-guest-entry-boot.md` | done |
 | 4 — Menus, content, input, saves | `04-menus-content-input-saves.md` | in-progress |

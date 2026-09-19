@@ -13,6 +13,7 @@ include(generated/rexglue.cmake)
 # Sources
 set(RBBLITZ_SOURCES
     src/main.cpp
+    src/hooks/crypto.cpp
 )
 
 if(WIN32)

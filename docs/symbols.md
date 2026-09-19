@@ -137,3 +137,36 @@ Candidate upstream fix (not applied; plan fix-order #6): `GapFill`
 (`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`)
 should also split on `bctr` when the following word is a known function entry.
 
+## Milestone 4: audio (MOGG) decryption path
+
+Music is encrypted and is decrypted with a key the kernel derives, not with a key
+embedded in the image. The path below was recovered from the recompiled image
+(`out/codegen-trace.log`, `generated/default/`), the run log, the shipping data and
+a match against the engine sources (`freeqaz/rb3`, `src/system/synth/`); the
+overrides live in `src/hooks/crypto.cpp` (see `docs/bringup-log.md` B-009).
+
+| Guest address | What it is |
+| --- | --- |
+| `0x827F6BA4` | import thunk → `__imp__XeKeysSetKey` (`xboxkrnl.exe`) |
+| `0x827F6BB4` | import thunk → `__imp__XeKeysAesCbc` |
+| `0x82727218` | guest `XeKeysSetKey` wrapper: rejects index ≥ 8 (`0x585`), null buffer (`0x57`), size ≠ 16 (`0x18`), then calls the import with `index + 0xE0` |
+| `0x827272B0` | guest `XeKeysAesCbc` wrapper: same `+0xE0` id bias, null feed, decrypt direction, forwards `r4..r6` |
+| `0x823DE070` | MOGG version → key index selector (`12/13→0`, `14→1`, `15→2`, `16→3`, else `0`) — `ByteGrinder::GetEncMethod` |
+| `0x823DE0C0` | `ByteGrinder::HvDecrypt(in, out, version)`: install the key for that version, then AES-128-ECB-decrypt the 16 bytes at `in` into `out` (the 16-byte stream mask) |
+| `0x82768C88` | `VorbisReader::CheckHmxHeader`: the MOGG header parser and the only caller of `0x823DE0C0`, once per music stream |
+| `0x82768AD0` | `VorbisReader::setupCypher(version)`: stream key = `GrindArray(keychain key) ^ mask`, then `ctr_start(nonce)` |
+| `0x8280C568` | 64-byte `.data` table of four **obscured** AES-128 keys, one per MOGG version |
+
+Because the guest id bias is `0xE0` and the wrapper accepts only `index < 8`, the
+kernel sees key ids `0xE0..0xE7` for the four table entries. `XeCryptAesKey` /
+`XeCryptAesCbc` (the real primitives the override forwards to) are exported by
+`rexruntime` from `rexglue-sdk/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp`; the
+`XeKeys*` layer itself is `REX_EXPORT_STUB` there, which is what made music
+silent.
+
+**Independent confirmation:** RB3DX — the patch set real players run on retail
+Rock Band 3 — fixes the same bug the same way (its patch group 1 swaps
+`XeKeysSetKey`/`XeKeysAesCbc` for `XeCryptAesKey`/`XeCryptAesCbc` and patches a
+64-byte key table at `0x82C76258`, byte-identical to Blitz's obscured table at
+`0x8280C568`). See [rb3-references.md](rb3-references.md) §5.
+

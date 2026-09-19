@@ -326,6 +326,104 @@ steps 3–4 not started.
   `bctr`-missed target**. Expect a new `[functions."0x…"]` entry each time a
   previously-unreached path is taken.
 
+### B-009: music never plays — `XeKeysSetKey`/`XeKeysAesCbc` were no-op stubs
+
+- Status: **fix in place, awaiting a run to confirm** (2026-09-10). Not yet
+  compiled: the development machine has no C++ toolchain installed and its
+  checked-in build tree is stale, so the rebuild in
+  [docs/build-and-run.md](build-and-run.md) has to happen first.
+- Symptom: sound effects are audible, music never is, and nothing in the log
+  looks like an error.
+- Root cause: the title stores its music encrypted and asks the kernel to
+  decrypt it. The guest wrappers at `0x82727218` (`XeKeysSetKey`) and
+  `0x827272B0` (`XeKeysAesCbc`) call the `xboxkrnl.exe` imports at `0x827F6BA4`
+  and `0x827F6BB4`, but the recompiled runtime ships both as `REX_EXPORT_STUB`
+  no-ops (`rexglue-sdk/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp:710,717`) while
+  the AES primitives underneath (`XeCryptAesKey`, `XeCryptAesCbc`) are real. The
+  log shows **exactly one pair** of stub hits, ~16 s into boot, and no crypto call
+  after it:
+
+  ```
+  [krnl] __imp__XeKeysSetKey STUB
+  [krnl] __imp__XeKeysAesCbc STUB
+  ```
+
+  That pair is the first MOGG stream being opened (the title music). The call site
+  is `0x82768C88`, which matches RB3's `VorbisReader::CheckHmxHeader` instruction
+  for instruction: the 60000-byte header buffer, the version window `0xC..0x10`, the
+  16-byte nonce, the two 64-bit magics, the 16-byte key block read twice, the
+  `mKeyIndex % 6 + 6` key index, and the call into `ByteGrinder::HvDecrypt`
+  (`0x823DE0C0`, called on `TheSynth->mGrinder` with the version as third argument).
+  `HvDecrypt` is an **AES-128-ECB decrypt of those 16 header bytes with the "green"
+  keyset entry for that MOGG version** — it produces `mKeyMask`, it does not decrypt
+  audio:
+
+  ```
+  XeKeysSetKey(0xE0, &table[GetEncMethod(version) * 16], 16);  // install key
+  XeKeysAesCbc(0xE0, in, 16, out, NULL, decrypt);              // ECB-decrypt in -> out
+  ```
+
+  `setupCypher` (`0x82768AD0`) then builds the stream key as
+  `GrindArray(keychain key, magicA, magicB) ^ mKeyMask` and starts AES-CTR with the
+  header nonce. With the stubs in place `mKeyMask` is noise, so the CTR key is
+  wrong, vorbis decodes garbage and the stream is dropped. Sound effects never touch
+  this path, which is why only music is silent. `game/gen/main_xbox_0.ark` (361 MB)
+  contains no plaintext `OggS`/`vorbis`/`MOGG`, confirming the audio is stored
+  encrypted.
+- Why the key cannot be read from the image: the guest hands `XeKeysSetKey` the
+  64-byte table at `0x8280C568` (`.data`, one key per version) and that table is
+  *obscured* key material. A retail console de-obfuscates it in hardware with the
+  per-console `KEY_OBFUSCATION_KEY`, which is not present in the image — the game
+  itself can never see the plaintext. The de-obfuscated material is platform key
+  material, not title data.
+- Fix (project layer, plan fix-order #1): `src/hooks/crypto.cpp` provides
+  definitions for `__imp__XeKeysSetKey` and `__imp__XeKeysAesCbc`. The generated
+  code declares both (`generated/default/rb_blitz_funcs.h:38310-38311`) but
+  defines neither, and `rb_blitz_recomp.33.cpp:32377` calls `__imp__XeKeysSetKey`
+  directly, so an executable-side definition satisfies the call site and both
+  registry entries; no `config/` or `generated/` change is involved.
+
+  - `XeKeysSetKey`: per-slot `XECRYPT_AES_STATE`s plus a host-side plaintext key
+    table. A call whose buffer points into `0x8280C568` installs the known
+    de-obfuscated key for that slot instead of the obscured bytes, then forwards
+    to the real `XeCryptAesKey`.
+  - `XeKeysAesCbc`: substitutes a zeroed 16-byte feed for the guest's null IV
+    (the runtime's CBC dereferences the feed and writes the chaining block back
+    into it), then forwards to the real `XeCryptAesCbc`.
+- Evidence that the replacement bytes are right:
+  - the 64 bytes at `0x8280C568` are **byte-identical** to the table retail Rock
+    Band 3 keeps at `0x82C76258` (`freeqaz/rb3-xenon`
+    `tools/oss-xbox-build/rb3dx_port_audit.json`, `.data` span `"clean"`), and the
+    RB3DX port rewrites exactly those bytes with the plaintext keyset this fix
+    installs (same audit, span `"rb3dx"`);
+  - those plaintext bytes are `gHvKeyGreen` in the engine sources (`freeqaz/rb3`,
+    `src/system/synth/ByteGrinder.cpp`) under the identical version→index mapping
+    (`GetEncMethod`), and they are the `NewKeyset` that `band3_recomp` installs for
+    the same key path (`src/Hooks/crypto.cpp`);
+  - the plaintext keyset does not occur anywhere in the Blitz image in any form or
+    permutation, while the 0x180-byte keychain blob at `0x82076598` is
+    byte-identical to the published RB3 one, so the obscured table is the only
+    piece missing;
+  - RB3DX ports exactly these two imports and no other crypto stub
+    (`PORT_XEKEYSSETKEY_STUB`, `PORT_XEKEYSAESCBC_STUB`), so three independent
+    ports end up installing the same key material.
+  Offline key scans of the ARK were inconclusive by construction (the archive
+  payload is compressed at rest), so the table identity above is the evidence.
+- Verification: the hook logs every key install plus the first 8 AES calls with the
+  ciphertext/plaintext of the block. Success = `guest XeKeys: key 0xE0 -> slot 0
+  (obscured table entry +0x…)` at boot (the offset is the MOGG version's entry:
+  `+0x0` for 12/13, `+0x10` for 14, `+0x20` for 15, `+0x30` for 16 — guest
+  `GetEncMethod` at `0x823DE070`), no `STUB` lines for either import, **music
+  audible**, and sound effects unaffected. Build, run, log-capture and
+  failure-signature detail: [docs/build-and-run.md](build-and-run.md). The hook
+  also logs a one-time
+  `guest XeKeys: decrypted a … container header` line if a whole `MOGG`/`OggS`
+  header ever travels through AES (a bonus, not expected: this call always carries
+  16 bytes).
+- Regression check: sound effects stay audible, `XeKeysSetKey`/`XeKeysAesCbc` no
+  longer log `STUB`, and boot gains at most the key schedule it was always supposed
+  to do.
+
 ### Input: the MnK driver needs a genuine focus transition
 
 - Status: **working** (step 2 is verification, not bring-up).

@@ -1,7 +1,7 @@
 ---
 status: not-started
 milestone: 6
-last_updated: 2026-09-09
+last_updated: 2026-09-19
 ---
 
 # Milestone 6 — Reproducible bring-up release
@@ -12,6 +12,24 @@ last_updated: 2026-09-09
   row.
 - **Knowledge folded in:** *(edit as Milestone 5 finishes — acceptance song,
   documented quirks, smoke-test route.)*
+
+## Reference leads (RB3 mining pass, 2026-09-19)
+
+- **Licensing is an open decision, not a detail.** This repository has **no
+  `LICENSE`** at its root, while `band3_recomp` is **GPL-2.0**: copying its code
+  would force a licence choice nobody has made. Everything borrowed from it must
+  stay *technique*, re-derived against Blitz's own addresses. The two `freeqaz`
+  projects are CC0-1.0 but are decompilations of copyrighted game code — treat
+  their code as reference, never vendor it.
+- **Do not ship** the local reference clones, the retail image, extracted assets,
+  or the deobfuscated AES keyset.
+- **Audit the hooks for "faithful behaviour switched off."** The RB3 native port's
+  audit (`docs/native/NATIVE_HACK_AUDIT_2026-06-08.md`) found that its dominant bug
+  class was ports silently disabling engine behaviour instead of implementing it —
+  every early-return hook needs a recorded reason. Useful alongside "Distribution
+  hygiene" below, and it is what "documented quirks" in the handoff must cover.
+- **Refresh and re-pin** [`docs/rb3-references.md`](../docs/rb3-references.md) at
+  release time; its §10 table says which sections belong to which prompt.
 
 ## Steps
 
