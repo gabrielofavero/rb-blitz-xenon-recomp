@@ -41,10 +41,44 @@ git -C rexglue-sdk apply --check         $p     # exit 0 => applies cleanly
 git -C rexglue-sdk apply                 $p     # apply it
 ```
 
-The patches are intentionally **not** applied automatically by the build. Apply
-them once after a fresh submodule checkout; `git status` in the parent then shows
-` M rexglue-sdk` and the submodule shows ` M src/system/xthread.cpp`. Both are
-expected while a patch is applied, and neither is drift to be "fixed".
+The patches are intentionally **not** applied automatically by the build: apply
+them once after a fresh submodule checkout.
+
+## Why the parent repository stays clean
+
+`.gitmodules` marks the submodule:
+
+```ini
+[submodule "rexglue-sdk"]
+	ignore = dirty
+```
+
+so an applied patch no longer shows up as a modified submodule forever. `git
+status`, `git diff` and `git status --porcelain=v2` (what editor SCM panels use)
+in the parent report nothing for the SDK, while the submodule itself still shows
+` M src/system/xthread.cpp`.
+
+`ignore = dirty` hides work-tree edits only. A **moved gitlink is still
+reported**: verified 2026-09-19 by pointing the index entry at a different
+commit, which produced `MM rexglue-sdk`. That is the case that matters — a pin
+bump must never be silent.
+
+Because the setting also hides *accidental* SDK edits, `apply_sdk_patches.ps1`
+audits the work tree on every run: each modified file must match a patch here
+(the `index` line is ignored, since its abbreviation length follows
+`core.abbrev`). Anything else is listed as `UNEXPECTED` and the script exits 1.
+
+```
+SDK work tree      : 1 patched, 0 UNEXPECTED, 0 untracked
+    patched    : src/system/xthread.cpp
+```
+
+Untracked files are listed for information only, not treated as drift. To bypass
+the setting and see the raw state:
+
+```powershell
+git -C rexglue-sdk status --porcelain
+```
 
 When a patch lands upstream, drop the file here and bump the submodule pin.
 
@@ -92,8 +126,10 @@ your edits in `git status`, and `-NoIndexMarks` if you do not want the index
 touched at all.
 
 After both scripts, `git -C rexglue-sdk status --porcelain` should show only
-` M src/system/xthread.cpp` (the patch) and the parent should show only
-` M rexglue-sdk`. Re-run them after `git submodule update`, a fresh clone, or any
-checkout that rewrites the SDK tree. Background:
+` M src/system/xthread.cpp` (the patch). The parent should be clean: `.gitmodules`
+sets `submodule.rexglue-sdk.ignore = dirty`, so the applied patch is no longer
+reported as a modified submodule, and `apply_sdk_patches.ps1` audits whatever that
+setting hides. Re-run the scripts after `git submodule update`, a fresh clone, or
+any checkout that rewrites the SDK tree. Background:
 [../docs/bringup-log.md](../docs/bringup-log.md) B-001 and
 [../docs/known-issues.md](../docs/known-issues.md).

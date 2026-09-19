@@ -41,12 +41,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.
    to the pinned checkout — currently the one-line change that stops the "Too few
    processor cores" warning being logged on every thread CPU assignment. It prints
    each patch as *already applied*, *applied now*, or *failed* (exit 1, with
-   guidance). `-Check` reports without writing.
+   guidance). `-Check` reports without writing. It also audits the SDK work tree:
+   any edit not covered by a patch is listed as `UNEXPECTED` and exits 1.
 
-Afterwards the parent repo showing ` M rexglue-sdk` and the submodule showing
-` M src/system/xthread.cpp` is the expected, correct state — neither is drift to be
-cleaned. Full rationale and manual equivalents:
-[patches/README.md](../patches/README.md).
+Afterwards the submodule showing ` M src/system/xthread.cpp` is the expected,
+correct state — it is the applied patch, not drift to be cleaned. The parent repo
+stays clean, because `.gitmodules` marks the submodule `ignore = dirty`; the audit
+above is what replaces the warning that setting suppresses. Full rationale and
+manual equivalents: [patches/README.md](../patches/README.md).
 
 ## 1. Toolchain prerequisites
 

@@ -539,3 +539,38 @@ environment note for future runs on this checkout: the PowerShell execution poli
 is `Restricted`, so scripts have to be launched as
 `powershell -NoProfile -ExecutionPolicy Bypass -File …`; the bare
 `.\scripts\….ps1` form used in earlier entries fails with `UnauthorizedAccess`.
+
+#### Clean parent status: `submodule.rexglue-sdk.ignore = dirty` (2026-09-19)
+
+The applied patch left the submodule permanently dirty, so the parent repository
+always showed ` M rexglue-sdk` — indistinguishable at a glance from real drift, and
+it was reported as an unexplained local change. `.gitmodules` now carries
+
+```ini
+[submodule "rexglue-sdk"]
+	ignore = dirty
+```
+
+which hides work-tree edits inside the submodule. Verified: `git status`,
+`git status --porcelain=v2` (what editor SCM panels consume), `git diff`,
+`git diff --cached`, `git ls-files -m` and a `status.submoduleSummary` run all
+report the parent as clean.
+
+What the setting must never hide is a moved pin, and it does not. Pointing the
+index entry at a different commit (`git update-index --cacheinfo 160000 <sha>
+rexglue-sdk`) still produced `MM rexglue-sdk`; the index was then restored to the
+recorded `c94f5eb…` and the tree re-verified clean.
+
+Because accidental work-tree edits inside the SDK are now invisible to the parent,
+`scripts/apply_sdk_patches.ps1` audits them on every run: a modified file counts as
+accounted for only if its diff matches a patch in the set (the `index` line is
+ignored, since its abbreviation length follows `core.abbrev`). Verified on this
+checkout:
+
+- hand edit appended to `src/system/xthread.cpp` →
+  `UNEXPECTED : src/system/xthread.cpp (differs from the patch set)`, exit 1;
+- blank line appended to the SDK's own `README.md` →
+  `UNEXPECTED : README.md (not touched by any patch)`, exit 1;
+- untracked `scratch_probe.txt` → listed for information only, exit 0;
+- `git -C rexglue-sdk checkout -- src/system/xthread.cpp` followed by a normal run
+  → `Applied now : 1`, back to exactly the patch (`+7 −1`), exit 0.

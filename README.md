@@ -36,7 +36,7 @@ and log capture.
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [src/](src) | Host application and native overrides for guest functions. |
 | [config/](config) | Codegen inputs: confirmed function boundaries, names, fingerprints. |
-| [patches/](patches) | Local fixes to the pinned SDK, kept as patch files so the submodule stays pristine. |
+| [patches/](patches) | Local fixes to the pinned SDK, kept as patch files so SDK fixes survive a re-checkout without committing inside the submodule. |
 | [scripts/](scripts) | Configure/build/run helpers, plus the two SDK-tree repairs (§0 of the build guide). |
 
 ## License
