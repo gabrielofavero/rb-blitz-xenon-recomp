@@ -15,6 +15,7 @@
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
+#include "fs/path_policy.h"
 #include "hooks/ultimate.h"
 #include "util/sha256.h"
 
@@ -42,19 +43,15 @@ class RbBlitzApp : public rex::ReXApp {
   //
   // game_data_root (read-only) comes from --game_data_root / the cvar and is
   // mounted read-only by the SDK (allow_game_relative_writes defaults off).
-  // Writable state (user/update/cache) must never live inside game_data_root.
+  // Writable state (user/update/cache) must never live inside game_data_root: a
+  // launcher that asks for that gets the platform user directory instead. Any
+  // other directory is honoured as given - see rb_blitz::fs::IsSameOrInside()
+  // for why the check is not a std::filesystem::relative() call.
   void OnConfigurePaths(rex::PathConfig& paths) override {
     auto redirect_if_inside_game_root = [&](std::filesystem::path& p) {
-      if (p.empty() || paths.game_data_root.empty()) return;
-      std::error_code ec;
-      auto gp = std::filesystem::weakly_canonical(
-          std::filesystem::absolute(paths.game_data_root, ec), ec);
-      auto pp = std::filesystem::weakly_canonical(
-          std::filesystem::absolute(p, ec), ec);
-      auto rel = std::filesystem::relative(pp, gp, ec);
-      bool inside = rel.empty() ||
-                    (!rel.is_absolute() && *rel.begin() != std::filesystem::path(".."));
-      if (inside) p.clear();
+      if (rb_blitz::fs::IsSameOrInside(p, paths.game_data_root)) {
+        p.clear();
+      }
     };
 
     redirect_if_inside_game_root(paths.user_data_root);

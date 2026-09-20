@@ -16,6 +16,7 @@ checkout.
 | --- | --- | --- |
 | `rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` | `XThread::SetActiveCpu` re-logged "Too few processor cores" on every thread CPU assignment (~11k lines, ~580 KB per boot). Log it once. | yes |
 | `rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch` | The SDK has no host format and no load shader for the 32-bit guest texture formats (`k_32`, `k_32_32`, `k_32_32_32_32`), which are 0.32 fixed point when `num_format = 0`; `CreateTexture` then returned `nullptr` and the SRV sampled (0,0,0,0), making every alpha-blended 3D element invisible (B-010 in [../docs/bringup-log.md](../docs/bringup-log.md)). Maps them to the float host formats with the existing word-mover load shaders, carries `num_format` in `TextureKey`, and converts the guest words to IEEE float bits on the CPU into an upload-pool staging buffer bound as the load shader's source. Integer (`num_format = 1`) textures still fail to create. | yes |
+| `rexglue-sdk/0003-trace-ntwritefile-and-scatter-reads.patch` | `NtWriteFile_entry` and `NtReadFileScatter_entry` in `src/kernel/xboxkrnl/xboxkrnl_io.cpp` called neither `REXKRNL_IMPORT_TRACE` nor `REXKRNL_IMPORT_RESULT`, unlike `NtReadFile_entry` — so `--log_level=trace` showed every guest read and **no** guest write, which reads as "the title never writes" when the truth is "writes are not logged". Adds both trace points to both entry points. The write trace is what makes the Milestone 4 persistence evidence (`[NtWriteFile] … len=0x400` while the title authors a fresh `globaloptions` payload) visible; the scatter trace is inert so far — no `NtReadFileScatter` call has been observed in any run. | yes |
 
 ## Apply / verify
 
@@ -57,11 +58,11 @@ them once after a fresh submodule checkout.
 so an applied patch no longer shows up as a modified submodule forever. `git
 status`, `git diff` and `git status --porcelain=v2` (what editor SCM panels use)
 in the parent report nothing for the SDK, while the submodule itself still shows
-` M` on the files the patch set touches (`src/system/xthread.cpp` for 0001, and
+` M` on the files the patch set touches (`src/system/xthread.cpp` for 0001;
 `include/rex/graphics/d3d12/shared_memory.h`,
 `include/rex/graphics/pipeline/texture/cache.h`,
 `src/graphics/d3d12/texture_cache.cpp`, `src/graphics/pipeline/texture/cache.cpp`
-for 0002).
+for 0002; `src/kernel/xboxkrnl/xboxkrnl_io.cpp` for 0003).
 
 `ignore = dirty` hides work-tree edits only. A **moved gitlink is still
 reported**: verified 2026-09-19 by pointing the index entry at a different
@@ -74,11 +75,12 @@ audits the work tree on every run: each modified file must match a patch here
 `core.abbrev`). Anything else is listed as `UNEXPECTED` and the script exits 1.
 
 ```
-SDK work tree      : 5 patched, 0 UNEXPECTED, 0 untracked
+SDK work tree      : 6 patched, 0 UNEXPECTED, 0 untracked
     patched    : include/rex/graphics/d3d12/shared_memory.h
     patched    : include/rex/graphics/pipeline/texture/cache.h
     patched    : src/graphics/d3d12/texture_cache.cpp
     patched    : src/graphics/pipeline/texture/cache.cpp
+    patched    : src/kernel/xboxkrnl/xboxkrnl_io.cpp
     patched    : src/system/xthread.cpp
 ```
 
@@ -135,7 +137,7 @@ your edits in `git status`, and `-NoIndexMarks` if you do not want the index
 touched at all.
 
 After both scripts, `git -C rexglue-sdk status --porcelain` should show only the
-files named in the patch set (the `0001`/`0002` rows above). The parent should be
+files named in the patch set (the `0001`/`0002`/`0003` rows above). The parent should be
 clean: `.gitmodules`
 sets `submodule.rexglue-sdk.ignore = dirty`, so the applied patch is no longer
 reported as a modified submodule, and `apply_sdk_patches.ps1` audits whatever that

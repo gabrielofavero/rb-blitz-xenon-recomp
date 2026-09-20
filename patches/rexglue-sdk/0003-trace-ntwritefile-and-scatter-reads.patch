@@ -1,0 +1,52 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io.cpp b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+index 3f1a852..32caeed 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_io.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+@@ -299,6 +299,14 @@ u32 NtReadFile_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_
+ u32 NtReadFileScatter_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_ptr,
+                             mapped_void apc_context, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block,
+                             mapped_u32 segment_array, u32 length, mapped_u64 byte_offset_ptr) {
++  REXKRNL_IMPORT_TRACE(
++      "NtReadFileScatter",
++      "handle={:#x} event={:#x} apc={:#x} apc_ctx={:#x} iosb={:#x} segments={:#x} len={:#x} "
++      "offset={}",
++      (uint32_t)file_handle, (uint32_t)event_handle, apc_routine_ptr.guest_address(),
++      apc_context.guest_address(), io_status_block.guest_address(), segment_array.guest_address(),
++      (uint32_t)length,
++      byte_offset_ptr ? (int64_t)static_cast<uint64_t>(*byte_offset_ptr) : -1);
+   X_STATUS result = X_STATUS_SUCCESS;
+ 
+   bool signal_event = false;
+@@ -376,12 +384,22 @@ u32 NtReadFileScatter_entry(u32 file_handle, u32 event_handle, mapped_void apc_r
+     ev->Set(0, false);
+   }
+ 
++  REXKRNL_IMPORT_RESULT("NtReadFileScatter", "{:#x} (iosb_status={:#x}, iosb_info={})", result,
++                        io_status_block ? (uint32_t)io_status_block->status : 0xDEAD,
++                        io_status_block ? (uint32_t)io_status_block->information : 0);
+   return result;
+ }
+ 
+ u32 NtWriteFile_entry(u32 file_handle, u32 event_handle, u32 apc_routine, mapped_void apc_context,
+                       ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block, mapped_void buffer,
+                       u32 buffer_length, mapped_u64 byte_offset_ptr) {
++  REXKRNL_IMPORT_TRACE(
++      "NtWriteFile",
++      "handle={:#x} event={:#x} apc={:#x} apc_ctx={:#x} iosb={:#x} buf={:#x} len={:#x} offset={}",
++      (uint32_t)file_handle, (uint32_t)event_handle, (uint32_t)apc_routine,
++      apc_context.guest_address(), io_status_block.guest_address(), buffer.guest_address(),
++      (uint32_t)buffer_length,
++      byte_offset_ptr ? (int64_t)static_cast<uint64_t>(*byte_offset_ptr) : -1);
+   X_STATUS result = X_STATUS_SUCCESS;
+ 
+   // Grab event to signal.
+@@ -450,6 +468,9 @@ u32 NtWriteFile_entry(u32 file_handle, u32 event_handle, u32 apc_routine, mapped
+     ev->Set(0, false);
+   }
+ 
++  REXKRNL_IMPORT_RESULT("NtWriteFile", "{:#x} (iosb_status={:#x}, iosb_info={})", result,
++                        io_status_block ? (uint32_t)io_status_block->status : 0xDEAD,
++                        io_status_block ? (uint32_t)io_status_block->information : 0);
+   return result;
+ }
+ 

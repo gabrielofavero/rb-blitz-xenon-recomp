@@ -170,7 +170,8 @@ function Reset-GameFocus {
 }
 
 foreach ($action in $Actions) {
-    $parts = $action.Split(":", 2)
+    # hold carries a third field (the seconds), so keep three parts.
+    $parts = $action.Split(":", 3)
     switch ($parts[0]) {
         "wait" {
             Start-Sleep -Seconds ([double]$parts[1])

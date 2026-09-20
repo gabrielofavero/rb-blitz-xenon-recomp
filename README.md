@@ -4,11 +4,15 @@ A reproducible native Windows build of the Xbox 360 version of **Rock Band Blitz
 (title ID `5841122D`), produced with [ReXGlue](rexglue-sdk) (pinned v0.10.0
 submodule) by statically recompiling the retail PowerPC code to host C++.
 
-Status: milestones 0–3 of [DECOMPILATION_PLAN.md](DECOMPILATION_PLAN.md) are done.
-Milestone 4 (menus, content, input, saves) works — the title takes its offline
-route, shows its menus and bundled song list, and writes its content into the
-writable root — with the ARK/HDR audit, pad-driven verification and save
-persistence still open, so the milestone is not closed. Milestone 5 (complete one
+Status: milestones 0–4 of [DECOMPILATION_PLAN.md](DECOMPILATION_PLAN.md) are done.
+Milestone 4 (menus, content, input, saves) closed on 2026-09-20 — the title takes
+its offline route, shows its menus and bundled song list, enumerates bundled
+content with no online dependency, and authors its content into the writable root;
+the ARK/HDR reads are audited (`scripts/audit_ark_reads.ps1`, 0 violations), pad
+input was verified by hand across navigation, accept/back, pause and the lane
+controls, and five scripted storage cases cover creation, restart and
+missing/corrupt data (`scripts/acceptance_persistence.ps1`). Milestone 5 (complete
+one
 song) is in progress: songs load, the note highway, gems, HUD and 3D background
 render and music plays, and its exit criterion is now recorded rather than
 observed — `scripts/acceptance_song.ps1` drives launch → a named song → results

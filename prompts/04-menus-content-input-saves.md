@@ -1,7 +1,7 @@
 ---
-status: in-progress
+status: done
 milestone: 4
-last_updated: 2026-09-19
+last_updated: 2026-09-20
 ---
 
 # Milestone 4 — Menus, content discovery, input, and saves
@@ -188,17 +188,24 @@ is the same engine, and two projects have already solved a lot of this:
   game-data root with correct offsets and sizes (fingerprints in
   `config/game_fingerprints.toml`).
 - Reach the main menu and enumerate bundled songs with **no online dependency**.
-- **State (2026-09-19):** menus and bundled-song enumeration work, and the
-  fingerprint check now exists at build time, at boot and as an audit tool; the
-  in-game offset/size audit is still to do.
+- **State (2026-09-20):** done. `scripts/audit_ark_reads.ps1` traces a driven run
+  (`--log_noisy=true --log_level=trace`), rebuilds the handle timeline from
+  `NtCreateFile`/`NtClose`, and checks every `NtReadFile` against the file it
+  resolves to. Song-play pass: 2420 reads, 2418 on the game-data root, 0
+  unattributed, 0 position-based, 0 violations; the same checker was verified to
+  fail (1865 violations, exit 1) against a deliberately absent game root.
 
 ### 2. Input
 
 - Map one standard XInput controller.
 - Verify navigation, accept/back, pause, and lane controls.
 - Keep keyboard fallback parity with the Xenia baseline (`keyboard_mode = 1`).
-- **State (2026-09-19):** first half done, second half open — every verified
-  navigation was keyboard-injected, and nothing has been checked on a pad.
+- **State (2026-09-20):** done by hand. With `XInput Controller #1`
+  (`0x0B05`/`0x1B4C`) connected, the author exercised menu navigation,
+  accept/back, pause, and the lane controls during a song; all four groups worked.
+  This stays a hand check — a headless acceptance run needs injected keys — so the
+  date and the device are the evidence. Keyboard fallback parity is unaffected
+  (`mnk_mode` still merges as before).
 
 ### 3. Local persistence
 
@@ -206,8 +213,12 @@ is the same engine, and two projects have already solved a lot of this:
   use.
 - Verify settings/save creation, restart persistence, and behavior with missing
   or corrupt writable data.
-- **State (2026-09-19):** partial — the SDK content path creates the files;
-  restart persistence and missing/corrupt writable data are untested.
+- **State (2026-09-20):** done. `scripts/acceptance_persistence.ps1` runs five
+  cases against an isolated `--user_data_root` (fresh, restart, missing,
+  corrupt-payload, corrupt-header), 5/5 passing; the writable-root overrides
+  themselves were silently ignored until that work exposed a
+  `std::filesystem::relative()` bug (fixed, with `tests/path_policy_tests.cpp`).
+  Detail and the results table: [docs/bringup-log.md](../docs/bringup-log.md).
 
 ### 4. Keep online features gracefully unavailable
 
@@ -224,36 +235,58 @@ is the same engine, and two projects have already solved a lot of this:
 
 ## Acceptance / exit criteria
 
-- [ ] Launch → navigate menus → see bundled content → select a song → return to
+- [x] Launch → navigate menus → see bundled content → select a song → return to
       menu, repeatedly, without a crash or online dependency.
-      **Partially met (2026-09-19):** the author did all of this while getting a
-      song to play (see Progress above), but not repeatably and not with the
-      return-to-menu leg on its own; this milestone should be exit-completed once
-      the offline route is scripted and a pad has been used for at least one pass.
+      **Met (2026-09-20).** The return-to-menu leg runs inside one process:
+      `scripts/acceptance_song.ps1 -Replay` plays a named song, reaches its results
+      screen, returns to the song list, and plays a second song, each transition
+      asserted on a screenshot plus the run's own log. The offline route itself is
+      recorded as a replayable action list in `scripts/drive_ui.ps1` (see the
+      2026-09-20 close-out below), and a pad pass covers navigation, accept/back,
+      pause and the lane controls by hand.
 
-## Next steps (pick up here)
+## Close-out (2026-09-20)
 
-1. **Record the offline route** — which key dismisses the sign-in and which key
-   picks "Proceed in Offline Mode?" — as a reusable action in `scripts/`, and write
-   the sequence into [docs/bringup-log.md](../docs/bringup-log.md). The guest-side
-   branch is still unidentified;
-   `scripts/scan_process_strings.ps1 -Pattern "Offline Mode"` plus a grep of
-   `generated/` is the lead.
-2. **Verify with a pad instead of injected keys** (step 2): navigation,
-   accept/back, pause, lane controls, and keyboard fallback parity on
-   `XInput Controller #1`.
-3. **The fingerprint file has consumers now; the offset audit is what is left.**
-   The decision recorded here is made and implemented (2026-09-19): the gate fails
-   closed before codegen, the boot logs both identity lines #10 asks for, and
-   `rb_blitz_fingerprint --all` checks the `.hdr`/`.ark` sizes and digests. What
-   no hashing can answer is the in-game offset audit for `main_xbox.hdr` /
-   `_0.ark` — that is the remaining part of this item.
-4. **Run the persistence cases deliberately** (step 3): launch twice and diff the
-   writable root; then run with the root absent and with a deliberately corrupted
-   `globaloptions`.
-5. **Then Milestone 5.** Its exit criterion (three clean full-song runs) also has
-   no driver, so write one script that does both: reach the offline menus, start a
-   song, capture the log, and shut down cleanly.
+What closed the milestone, and where each piece of evidence lives:
+
+- **ARK/HDR read audit** — `scripts/audit_ark_reads.ps1`; reports in
+  `out/m4-offsets/{boot,songplay}/read-audit.md`; negative self-test documented in
+  [docs/bringup-log.md](../docs/bringup-log.md).
+- **XInput** — hand pass over all four control groups on `XInput Controller #1`
+  (`0x0B05`/`0x1B4C`), dated and recorded in
+  [docs/bringup-log.md](../docs/bringup-log.md). Scripted routes remain
+  keyboard-injected on purpose.
+- **Deterministic storage** — fixed by title id `5841122D` / XUID
+  `0xB13EBABEBABEBABE`: `globaloptions` (1024 B), `songcache` (16 B), a 328-byte
+  header each, plus two shader-cache files; six files, 6288 bytes, identical
+  between runs.
+- **Persistence** — `scripts/acceptance_persistence.ps1`, 5/5 cases against an
+  isolated `--user_data_root` (`out/m4-persistence/summary.json`).
+- **Two project bugs and one SDK gap found on the way** — writable-root overrides
+  silently discarded (`src/fs/path_policy.h` + `tests/path_policy_tests.cpp`);
+  `drive_ui.ps1`'s `hold:<key>:<secs>` mis-split; and `NtWriteFile` had no trace
+  call at all, which `patches/rexglue-sdk/0003` fixes and without which the
+  persistence writes could not be attributed to the title.
+
+## Next steps (closed)
+
+All five items below are done; they are kept for the record, not as work.
+
+1. ~~Record the offline route.~~ Done and scripted: five `A` presses reach the song
+   row, four right-stick nudges move the selection to PLAY SONG, `A` confirms and
+   `Start` starts the song (`scripts/drive_ui.ps1`, used by
+   `scripts/acceptance_song.ps1`). The guest-side "Proceed in Offline Mode?"
+   branch was never needed — B dismisses the sign-in dialog and the offline entry
+   is on the title screen itself.
+2. ~~Verify with a pad instead of injected keys.~~ Done 2026-09-20, by hand; see
+   the close-out above.
+3. ~~The offset audit.~~ Done: `scripts/audit_ark_reads.ps1`, 0 violations, with a
+   negative self-test proving it can fail.
+4. ~~Run the persistence cases deliberately.~~ Done:
+   `scripts/acceptance_persistence.ps1`, five cases, 5/5 passing.
+5. ~~Then Milestone 5.~~ Done: `scripts/acceptance_song.ps1` is that driver, and
+   Milestone 5's exit criterion was met on 2026-09-20 (see
+   [`05-complete-one-song.md`](./05-complete-one-song.md)).
 
 Before writing any new hook, read **Reference leads** above: hooks, midasm hooks
 and the offline-mode candidates are already mapped there.
@@ -267,10 +300,12 @@ community's upgrade path — we only owe it continued working
 
 Folded into [`05-complete-one-song.md`](./05-complete-one-song.md) on 2026-09-19
 (content quirks, storage location, input mapping, the standing "audio frames are
-produced" fact). What is still owed to it:
+produced" fact). Both items it was still owed are now paid:
 
-- the **named** bundled song used for the full-playthrough test;
-- the recorded offline route, once captured (next step 1).
+- the **named** bundled song used for the full-playthrough test — `THESE DAYS`,
+  named on the results screenshot in `out/m5-acceptance/`;
+- the recorded offline route — scripted in `scripts/drive_ui.ps1` and driven by
+  `scripts/acceptance_song.ps1`.
 
 ## Bring-up loop
 

@@ -407,6 +407,25 @@ It clears `logs\` before each run and writes `out\m5-acceptance\runNN-*.png` (ev
 screen it asserted on as it went), a copy of each run's log, and `summary.json`; the
 exit code is non-zero unless every run passed the whole launch → results path.
 
+The Milestone 4 storage counterpart runs five cases against a *dedicated* writable
+root rather than the user's `Documents\rb_blitz`, and checks each run's own trace
+log as well as the files it leaves behind — creation, restart byte-identity, a
+missing root, a corrupt payload, a corrupt header:
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+.\scripts\acceptance_persistence.ps1                 # all five cases
+.\scripts\acceptance_persistence.ps1 -Only restart   # a single case
+```
+
+It needs the trace patch in [`patches/README.md`](../patches/README.md) (`0003`) to
+see the title's writes at all, writes `out\m4-persistence\<case>.log`,
+`-files.txt`, `-menu.png` and `summary.json`, and exits non-zero unless every case
+passes. `--user_data_root` and its `--cache_root`/`--update_data_root` siblings are
+what make that isolation safe to run on a machine with real saves; they are honoured
+as of 2026-09-20, before which they were silently discarded
+([docs/known-issues.md](known-issues.md)).
+
 ## 5. What a good run looks like (B-009, music)
 
 The hook logs only the first 8 AES calls, so a long run stays quiet. One combined

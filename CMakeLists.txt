@@ -142,6 +142,12 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_payload_overlay_tests PRIVATE src)
     add_test(NAME payload_overlay COMMAND rb_blitz_payload_overlay_tests)
 
+    add_executable(rb_blitz_path_policy_tests
+        tests/path_policy_tests.cpp
+    )
+    target_include_directories(rb_blitz_path_policy_tests PRIVATE src)
+    add_test(NAME path_policy COMMAND rb_blitz_path_policy_tests)
+
     add_executable(rb_blitz_fingerprint_tests
         tests/fingerprint_tests.cpp
         src/util/sha256.cpp

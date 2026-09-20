@@ -87,18 +87,20 @@ document.
 | 1 — Scaffold & generate | `01-scaffold-generate.md` | done |
 | 2 — Close analysis & compile | `02-close-analysis-compile.md` | done |
 | 3 — Guest entry & offline boot | `03-guest-entry-boot.md` | done |
-| 4 — Menus, content, input, saves | `04-menus-content-input-saves.md` | in-progress |
+| 4 — Menus, content, input, saves | `04-menus-content-input-saves.md` | done |
 | 5 — Complete one song | `05-complete-one-song.md` | in-progress |
 | 6 — Reproducible release | `06-reproducible-release.md` | not-started |
 
-The title is **playable and milestone 5's exit criterion is recorded**: as of
-2026-09-20 [scripts/acceptance_song.ps1](../scripts/acceptance_song.ps1) drives
+Milestones 0–4 are **done**. The title is **playable and milestone 5's exit
+criterion is recorded**: as of 2026-09-20
+[scripts/acceptance_song.ps1](../scripts/acceptance_song.ps1) drives
 launch → the named song "These Days" → results three times in a row from clean
-processes, keeping every screen and log it asserted on. Milestones 4 and 5 are
-still open for different reasons: M4 on its ARK/HDR audit, pad-driven verification
-and save persistence, M5 on measurement rather than function (Xenia draw
-comparison, audio voices/clocks/pause-resume, drift, frame pacing).
+processes, keeping every screen and log it asserted on. Milestone 4 closed the same
+day — its ARK/HDR read audit, pad-driven verification and save persistence all have
+evidence now — so milestone 5 is open on measurement rather than function (Xenia
+draw comparison, audio voices/clocks/pause-resume, drift, frame pacing).
 [docs/bringup-log.md](../docs/bringup-log.md) has the chronological detail
-("Milestone 4 close-out", "Milestone 5 — first songs played to the end", "Milestone
-5 acceptance: one named song, three clean-process runs") and
-[docs/known-issues.md](../docs/known-issues.md) has the enduring facts.
+("Milestone 4 close-out", "Milestone 4 close-out completed", "Milestone 5 — first
+songs played to the end", "Milestone 5 acceptance: one named song, three
+clean-process runs") and [docs/known-issues.md](../docs/known-issues.md) has the
+enduring facts.

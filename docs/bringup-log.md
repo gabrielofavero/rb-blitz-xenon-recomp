@@ -342,7 +342,9 @@ content into the writable root:
 | Online features gracefully unavailable | working — **final** for the vanilla route; see the 2026-09-19 decision at the end of this log |
 
 Resolved in this milestone: B-008 (pressing A), B-009 (music). Close-out detail,
-including what is still open and why, is in the entry at the end of this log.
+including what is still open and why, is in the entry at the end of this log. The
+three rows marked open above were closed on 2026-09-20 — see "Milestone 4 close-out
+completed (2026-09-20)".
 
 ### B-008: one more B-006-class missed function, reached by pressing A
 
@@ -683,9 +685,11 @@ What the title does now, from the surviving run log and the writable root:
 - **Input.** `XInput Controller #1` (VendorID `0x0B05`, ProductID `0x1B4C`) is
   enumerated, but every navigation verified so far was **keyboard-injected**
   through the SDK's MnK emulation and `scripts/drive_ui.ps1`. No pad-driven run
-  exists.
+  exists. (Closed 2026-09-20: a hand-run pad pass covers all four control groups —
+  see the close-out-completed section.)
 
-Still open for the milestone:
+Still open for the milestone (all four were closed on 2026-09-20 — see the
+close-out-completed section further down):
 
 | Item | Why it is open |
 | --- | --- |
@@ -701,6 +705,97 @@ run (the `added 2 items` above), and the shader cache
 timestamp of the last run (22:42:52), so the title writes it at exit and re-reads
 it next start. Settings-versus-save semantics, a corrupt writable root and a
 missing writable root are all untested.
+
+### Milestone 4 close-out completed (2026-09-20)
+
+All three rows still open above are closed, and the plan's exit criterion for the
+milestone is met. Evidence per item, with the command that reproduces it.
+
+**1. ARK/HDR offsets and sizes (runtime audit).** `scripts/audit_ark_reads.ps1`
+drives a run with `--log_noisy=true --log_level=trace`, rebuilds the guest's file
+handles from every `NtCreateFile`/`NtClose`, attributes each `NtReadFile` to its
+file through that timeline, and asserts that the read stayed inside the file and
+delivered `min(length, size - offset)` bytes:
+
+```
+reads=2420 (in-scope 2418, other-device 2) opens=11 failed-opens=0 unattributed=0 position-based=0 scatter=0 bytes=158347701 violations=0
+```
+
+The two out-of-scope reads are the content files (`globaloptions`, `songcache`) on
+their own devices: listed separately, and covered by the persistence tests below.
+In-scope traffic is `main_xbox.hdr` (1 read, 113 528 of 114 688 bytes requested),
+`main_xbox_0.ark` (2203 reads, 144 320 729 of 144 375 808 bytes requested, offsets
+0..361 758 720 of a 361 769 177-byte file), `patch_xbox.hdr` (1 read) and
+`patch_xbox_0.ark` (213 reads) — all served by `\Device\BlitzOverlay`, all
+65 536-byte blocks except the two headers. A boot-only run is the same picture with
+fewer reads (1863, of which 1650 on the main ARK). Reports:
+`out/m4-offsets/{boot,songplay}/read-audit.md`.
+
+The audit was then checked against a deliberately broken configuration, because a
+checker that always passes proves nothing: pointed at a non-existent game root
+(`-GameRoot game_absent`) it reports 1865 violations and exits 1.
+
+**2. XInput.** Hand-verified on 2026-09-20 instead of scripted: with
+`XInput Controller #1` (VendorID `0x0B05`, ProductID `0x1B4C`) connected, the
+author exercised all four control groups — menu navigation, accept/back, pause, and
+the lane controls during a song — and every one of them worked. The pad has been
+enumerated since Milestone 3; what this adds is that its state reaches the title as
+input. The scripted routes keep injecting keys through the SDK's MnK emulation
+because they have to be repeatable headlessly, so this item stays a hand check; it
+does not claim that every binding the retail game documents is mapped, only that
+pad input for all four groups is live.
+
+**3. Deterministic storage.** The layout is fixed by title id `5841122D`, content
+type `00000001` and XUID `0xB13EBABEBABEBABE` (hardcoded in the SDK's local user
+profile — the same value the Xenia baseline used), so the writable root is
+`…\B13EBABEBABEBABE\5841122D\00000001\{globaloptions,songcache}` (1024 and 16
+bytes), 328-byte aggregate headers under `…\Headers\00000001\`, and two shader
+cache files under `cache\shaders\shareable\`. Six files, 6288 bytes, byte-identical
+between runs. All of it is SDK content-path code, no project code — which is why
+this plan item needed proof rather than implementation.
+
+**4. Save creation, restart persistence, missing/corrupt data.**
+`scripts/acceptance_persistence.ps1` runs five cases, each a fresh process with an
+isolated `--user_data_root` under `out\m4-persistence\userdata`, and asserts on
+that run's own trace log plus the files it leaves behind. 5/5 pass
+(`out/m4-persistence/summary.json`):
+
+| Case | Setup | Result |
+| --- | --- | --- |
+| `fresh` | empty root | the title authors both files itself: `globaloptions` 1024/1024 bytes written over one open, `songcache` 16/16 over one open, 4 `NtWriteFile` calls; nothing is read back. Shader cache appears at shutdown. |
+| `restart` | the root `fresh` left behind | reads both files back byte-identical (`ContentSame=True`) and writes **nothing** |
+| `missing` | an existing root with the content files deleted | behaves like `fresh`: the defaults are re-authored |
+| `corrupt-payload` | `globaloptions` pre-filled with `0xAB` × 1024 | the title loads the garbage as-is — no fatal, no repair, no write |
+| `corrupt-header` | `globaloptions.header` pre-filled with `0xAB` × 328 | the title ignores the header and rewrites the 1024-byte default payload |
+
+Every case reaches the offline menus with no `[FATAL]`, leaves exactly the expected
+file set, and is confirmed to have used the isolated root (`User data:` in the log
+matches it).
+
+**Bugs and gaps found while closing this out.**
+
+- `--user_data_root`, `--cache_root` and `--update_data_root` — and their `REX_*`
+  variables — were silently ignored. `OnConfigurePaths` used
+  `std::filesystem::relative(path, game_root, ec)` and treated an *empty* result as
+  "inside the game root"; with LLVM/clang 23 + MSVC STL here, `relative()` returns
+  an empty path with `ec == 0` for any path that is not a descendant of the base,
+  so every override was discarded in favour of `%USERPROFILE%\Documents\rb_blitz`.
+  Fixed in `src/fs/path_policy.h` (`rb_blitz::fs::IsSameOrInside`), regression guard
+  `tests/path_policy_tests.cpp` (20 checks). Without the fix these five cases could
+  not have isolated themselves at all.
+- `drive_ui.ps1`'s `hold:<key>:<seconds>` action was broken (`Split(":", 2)` left
+  the seconds in the key name), so a held key never held.
+- The SDK had no `NtWriteFile` trace call, so "no writes in the log" was a tracing
+  gap rather than a fact about the title — and because `NtReadFile` *was* traced,
+  the asymmetry read like read-only behaviour. `patches/rexglue-sdk/0003` adds the
+  missing `REXKRNL_IMPORT_TRACE`/`RESULT` calls to `NtWriteFile_entry` and
+  `NtReadFileScatter_entry`; the `[NtWriteFile]` evidence above comes from it, and
+  it is what makes the `fresh`/`corrupt-header` writes attributable to the title
+  rather than to the host. The scatter half is inert here: `NtReadFileScatter`
+  appears in none of the audited logs (counted, not assumed).
+- The writable-root override fix has its own host test target now, so `ctest` runs
+  four suites (crypto keytable 88, payload overlay 83, path policy 20, fingerprint
+  331 = 522 checks) instead of two.
 
 ### B-009 follow-up: the key is selected by the buffer offset, not by the key id (2026-09-19)
 
@@ -941,6 +1036,9 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 issue is unaffected: milestone 4 and 5 still have no scripted run, because
 `scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
 results. The narrower wording is now in [known-issues.md](known-issues.md).
+(Correction, 2026-09-20: both have one now — `scripts/acceptance_song.ps1` drives
+menus → song → results and `scripts/acceptance_persistence.ps1` covers storage; the
+host suite is four targets rather than one.)
 
 ## The fingerprint file gains consumers: gate, boot line, header, tests (2026-09-19)
 
@@ -1032,6 +1130,8 @@ this: the two files are now proven to be the recorded revision, not proven to be
 read at the right offsets. `toolchain.md` (Milestone 6, step 4) is still missing
 too — the build works because the absolute compiler/cmake/ninja paths live in the
 build tree's `CMakeCache.txt` and nowhere else.
+(Closed 2026-09-20: the offset audit is `scripts/audit_ark_reads.ps1` — see the
+Milestone 4 close-out-completed section above.)
 
 ## B-012: Rock Band Blitz Ultimate install — a payload union device (2026-09-20)
 
@@ -1275,7 +1375,8 @@ close any of them:
 - **Audio quality is asserted only as "the song played for 315 s".** Voices,
   sample formats, clocks and pause/resume are untouched.
 - **The Xenia draw comparison is not attempted**, and the ARK/HDR offset audit
-  inherited from Milestone 4 is still open.
+  inherited from Milestone 4 is still open. (The audit part is closed as of
+  2026-09-20 — see the close-out-completed section; the Xenia comparison is not.)
 - The runs prove the *route* and the *absence of a fatal*; they are not a
   regression test for graphics or audio content.
 

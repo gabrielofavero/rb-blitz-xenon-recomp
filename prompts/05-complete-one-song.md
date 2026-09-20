@@ -8,10 +8,10 @@ last_updated: 2026-09-20
 
 ## Entry state
 
-- Milestone 4 is **working but not closed**: menus navigate, bundled content
-  enumerates, a song can be selected and played. Open there, and inherited here:
-  the ARK/HDR offset audit, pad-driven verification, and save restart /
-  corrupt-writable-data behaviour. Detail: "Milestone 4 close-out" in
+- Milestone 4 is **closed** (2026-09-20). What it used to leave open — the ARK/HDR
+  offset audit, pad-driven verification, and save restart / corrupt-writable-data
+  behaviour — all has evidence now; detail and the results tables are in the
+  "Milestone 4 close-out completed (2026-09-20)" section of
   [docs/bringup-log.md](../docs/bringup-log.md).
 - **Knowledge folded in (2026-09-19):**
   - **Already playable:** songs load, the highway/notes/HUD/3D background render,
