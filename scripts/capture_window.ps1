@@ -13,9 +13,17 @@ public class Win32 {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
+
+# Without this the window rect and the screen copy come back in DPI-virtualized
+# units (the game window is a real 1920x1080 surface, but a scaled desktop makes
+# it 1097x617), so UI text is captured too small to OCR. Must be set before the
+# window is measured; the process is per-invocation, so nothing else is affected.
+try { [Win32]::SetProcessDpiAwareness(2) | Out-Null } catch { [Win32]::SetProcessDPIAware() | Out-Null }
 
 $proc = Get-Process rb_blitz -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $proc) { Write-Error "rb_blitz not running"; exit 1 }
@@ -44,7 +52,8 @@ $bmp = New-Object System.Drawing.Bitmap $w, $ht
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
 $dir = Split-Path -Parent $OutFile
-if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-$bmp.Save((Resolve-Path -LiteralPath (Split-Path -Parent $OutFile) | ForEach-Object { $_ }).Path + "\" + (Split-Path -Leaf $OutFile), [System.Drawing.Imaging.ImageFormat]::Png)
+if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+$outPath = [System.IO.Path]::GetFullPath($OutFile)
+$bmp.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
-Write-Output "saved $OutFile ($w x $ht)"
+Write-Output "saved $outPath ($w x $ht)"

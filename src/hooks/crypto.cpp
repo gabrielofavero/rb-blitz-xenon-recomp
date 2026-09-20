@@ -14,7 +14,8 @@
 //   0x823DE0C0   ByteGrinder::HvDecrypt(in, out, version): installs the key for
 //                this version, then AES-128-ECB-decrypts the 16 bytes at `in` into
 //                `out`. It derives the 16-byte stream mask, it does not decrypt
-//                audio.
+//                audio. The install is `XeKeysSetKey(0, &table[GetEncMethod(version) * 16],
+//                16)`, i.e. a constant key id with the entry index in the pointer.
 //   0x82768C88   VorbisReader::CheckHmxHeader, the MOGG header parser and the only
 //                caller: reads version/nonce/magic/key index out of the HMX header
 //                and calls HvDecrypt once per music stream
@@ -39,7 +40,8 @@
 //   place the table bytes are never de-obfuscated and the derived mask is garbage.
 //   The de-obfuscated material is a platform constant rather than per-console data,
 //   so it is installed directly here: any XeKeysSetKey whose buffer points into
-//   0x8280C568 hands the AES engine the known plaintext key for that slot, and
+//   0x8280C568 hands the AES engine the known plaintext key for that table entry
+//   (the entry index is what selects the version's key), and
 //   AES-CBC is forwarded to the runtime's real XeCryptAesCbc, so
 //     XeKeysSetKey(0xE0, &table[index * 16], 16);
 //     XeKeysAesCbc(0xE0, in, 16, out, NULL, decrypt);
@@ -248,10 +250,19 @@ extern "C" REX_FUNC(__imp__XeKeysSetKey) {
   const uint32_t slot = KeySlotForId(key_id);
 
   if (IsKeysetTableAddress(key_buffer)) {
-    // The guest is installing an entry of its obscured table. The de-obfuscated
-    // key for that slot is already in our table, so there is nothing to copy.
-    REXLOG_INFO("guest XeKeys: key 0x{:X} -> slot {} (obscured table entry +0x{:X})", key_id,
-                slot, key_buffer - kKeysetTableAddress);
+    // The guest always installs into the same slot and carries the version's
+    // key in the buffer: ByteGrinder::HvDecrypt (0x823DE0C0) calls the wrapper
+    // with index 0 and the buffer `0x8280C568 + GetEncMethod(version) * 16`, so
+    // the key id is a constant 0xE0 and the entry offset is the only place the
+    // version survives. Real hardware de-obfuscates the buffer it is handed, so
+    // the key landing in the slot is the plaintext entry at that offset - not
+    // the one matching the key id.
+    const uint32_t table_offset = key_buffer - kKeysetTableAddress;
+    REXLOG_INFO(
+        "guest XeKeys: key 0x{:X} -> slot {} (obscured table entry +0x{:X} -> plaintext key {})",
+        key_id, slot, table_offset, table_offset / kKeySize);
+    std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize),
+                kDeobfuscatedKeyTable + table_offset, kKeySize);
   } else if (IsPlausibleGuestPointer(key_buffer)) {
     // A key installed straight from guest memory is used verbatim.
     REXLOG_INFO("guest XeKeys: key 0x{:X} -> slot {} from guest buffer 0x{:08X} (size {})", key_id,

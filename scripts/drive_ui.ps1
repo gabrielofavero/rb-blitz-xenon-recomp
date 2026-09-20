@@ -45,6 +45,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $capDir = Join-Path $root $OutDir
 New-Item -ItemType Directory -Force -Path $capDir | Out-Null
 
+# `powershell -File` hands the whole `-Actions a,b,c` list over as one
+# comma-joined string, so split it back into separate actions.
+if ($Actions.Count -eq 1 -and $Actions[0].Contains(",")) { $Actions = $Actions[0] -split "," }
+
 # MnK keybind names -> SendKeys tokens (see mnk_input_driver.cpp defaults:
 # A = Semicolon/Space, B = Quote/Backspace, X = L, Y = P, Start = X/Return,
 # Back = Z/Tab, D-pad = Shift+arrows, sticks = WASD / arrows).

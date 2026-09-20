@@ -75,3 +75,91 @@
 # boundary, not data. The register table (generated/default/rb_blitz_register.cpp)
 # has no 0x8278A6E0 entry, so the runtime trap fires on the first indirect call.
 # No size/end on purpose: let codegen discover the natural boundary.
+
+# --- Milestone 5: indirect-call target missed by discovery (runtime evidence) ---
+
+[functions."0x827EC038"]
+# Reached via an indirect call while the title-music MOGG stream is opened
+# (thread t23752, log rb_blitz_008.log); runtime FATAL:
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x827EC038"
+# This target only became reachable once the MOGG key path was fixed (see
+# src/hooks/crypto.cpp): before that the stream was rejected and the guest never
+# got as far as the sort that hands out this comparator.
+# Live guest bytes (read from the image at runtime, host 0x100000000 + VA):
+#   827EC034  4BFFFFEC   b   -> 0x827EC020   (tail of the previous function)
+#   827EC038  81630000   lwz r11,0(r3)
+#   827EC03C  81440000   lwz r10,0(r4)
+#   827EC040  816B0000   lwz r11,0(r11)
+#   827EC044  814A0000   lwz r10,0(r10)
+#   827EC048  7C6A5850   subf r3,r10,r11
+#   827EC04C  4E800020   blr
+#   827EC050  7D8802A6   mflr r12       (sub_827EC050, next discovered function)
+# so it is a genuine 24-byte leaf function (a dereference comparator whose
+# address is taken in data, hence never reached by bl/ba discovery), not data,
+# and it sits 0x18 bytes before the next registered entry.
+# No size/end on purpose: let codegen discover the natural boundary.
+
+# --- Milestone 5: adjuster-thunk tables missed by discovery (runtime evidence) ---
+#
+# Symptom: picking a song in the song list kills the process with
+#   "[FATAL] Call to invalid or unregistered function at guest address 0x82783CD8"
+# (logs/rb_blitz_018.log, thread t13624). 0x82783CD8 is an 8-byte adjuster thunk
+# (`addi r3,r3,-4 ; b 0x82783DF8`) inside the dense table 0x82783CC0..0x82783D17.
+# Codegen registered that table's first and third slots (0x82783CC0, 0x82783CE0)
+# as two-instruction functions but left the remaining slots uncovered, so every
+# hole in the table traps the first time a vtable/ILT slot is called.
+#
+# Instead of fixing one address per run, .text was read from the live process
+# (0x82190000..0x827F6ED4) and scanned for the same class of hole: an 8-byte
+# `addi r3,r3,imm ; b <registered function>` slot that is
+#   (a) absent from generated/default/rb_blitz_register.cpp,
+#   (b) preceded by a completed 8-byte thunk or a clean `blr`/padding boundary
+#       (so it cannot be the tail of a longer function), and
+#   (c) adjacent to a slot codegen *did* register as an 8-byte function.
+# 14 slots matched; all are registered below with their branch target.
+#
+# No size/end on purpose: let codegen discover the natural boundary.
+
+# Table 0x82783CC0..0x82783D17 (all `addi r3,r3,-4`); 0x82783CC0 and 0x82783CE0
+# were already registered, 0x82783D70 is the same class one slot later.
+[functions."0x82783CC8"]
+# addi r3,r3,-4 ; b 0x827892E8
+
+[functions."0x82783CD8"]
+# addi r3,r3,-4 ; b 0x82783DF8  <- the FATAL address from rb_blitz_018.log.
+
+[functions."0x82783CE8"]
+# addi r3,r3,-4 ; b 0x82783BF8
+
+[functions."0x82783D70"]
+# addi r3,r3,-4 ; b 0x82782C68
+
+[functions."0x82778960"]
+# addi r3,r3,-8 ; b 0x827764E8
+
+[functions."0x82789340"]
+# addi r3,r3,-4 ; b 0x827894B0
+
+[functions."0x82789350"]
+# addi r3,r3,-4 ; b 0x8278A6B0
+
+[functions."0x8278A6F0"]
+# addi r3,r3,-4 ; b 0x827892E0
+
+[functions."0x8279B4A8"]
+# addi r3,r3,-16 ; b 0x8279A650
+
+[functions."0x827AD510"]
+# addi r3,r3,-4 ; b 0x827AD498
+
+[functions."0x827ADA00"]
+# addi r3,r3,-4 ; b 0x827AD7B8
+
+[functions."0x827ADA08"]
+# addi r3,r3,-4 ; b 0x827AD898
+
+[functions."0x827AF2E0"]
+# addi r3,r3,-4 ; b 0x827AF1D8
+
+[functions."0x827AF300"]
+# addi r3,r3,-4 ; b 0x82371058
