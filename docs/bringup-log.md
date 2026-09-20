@@ -1064,7 +1064,7 @@ images decrypt to 10,747,904 bytes; the payload's is not even encrypted
 | --- | --- | --- | --- |
 | `0x8205DD74` | `"UPDATE:\0"` | `"D:\0…"` | the content-device prefix, 7 bytes |
 | `0x821D0A7C` (byte `0x821D0A7F`) | `01` (`li r3,1`) | `00` (`li r3,0`) | tail of `sub_821D0A18`: its 2-entry song blacklist table (`hierkommtalex`, `rockandrollstar`) can never match |
-| `0x8236C108` | `mflr r12` | `blr` | `sub_8236C108` returns immediately, `r3` intact |
+| `0x8236C108` | `mflr r12` | `blr` | `PlatformMgr::SetDiskError` (`sub_8236C108`) returns immediately, `r3` intact |
 
 **12 differing bytes in 3 runs, and that is the entire code delta** — everything
 else the mod ships is content in `patch_xbox_0.ark`. So compatibility is a bounded
@@ -1121,9 +1121,19 @@ they can be tested without booting anything:
 `Configure()` also recognises the merged shape: if `gen/patch_xbox.hdr` is already
 in the game root, the overlay is skipped and only the three edits are applied.
 
-**The state-update edit is the load-bearing one.** Routes were probed with the patch
-mask as the variable ("luma" is the mean luma of a 1280×720 capture: 1.7 MB / ~75 is
-a rendered frame, 7 KB / ~19 is black):
+**The third edit is `PlatformMgr::SetDiskError`, and it is the load-bearing one.**
+The function at `0x8236C108` latches its argument at `object+0x3C`, logs once behind a
+static bit at `0x8285489C`, notifies through a virtual slot and then never returns —
+`li r3,1; bl Sleep; b` in a loop — and every one of its seven references is a tail
+`b`, never a `bl`. The two callers that pass `r4 = 3` are the file-checksum validator,
+each having just printed `"No checksum found for file %s\n"` (`0x82107EA4`) or
+`"Checksum failure for file %s\n"` (`0x82107ECC`), so the error code is a checksum
+failure and the class is Blitz's `PlatformMgr::SetDiskError` — the same class RB3DX
+neuters at RB3's `0x82516320` with the identical `mflr r12` → `blr`. It also explains
+the mod's release note "Dirty disk error when loading custom songs removed (Xbox 360)",
+and why the edit cannot be dropped: a mod ark is not in the retail checksum database.
+Routes were probed with the patch mask as the variable ("luma" is the mean luma of a
+1280×720 capture: 1.7 MB / ~75 is a rendered frame, 7 KB / ~19 is black):
 
 | Route | Result |
 | --- | --- |
@@ -1131,15 +1141,15 @@ a rendered frame, 7 KB / ~19 is black):
 | payload pair copied into `game/gen/` (merged) | **pass** — `patches 0x7 (merged into the game root)`, no overlay line, 1694 KB / 75.0 |
 | `--ultimate_patches=5` (song blacklist off) | pass — 1694 KB / 75.1 |
 | `--ultimate_patches=6` (content device off) | boots (1725 KB / 74.3) but the payload is never opened: `update:\gen\patch_xbox.hdr -> 0xc000000f` |
-| `--ultimate_patches=3` (state update off) | **fail** — dirty-disc abort, 7 KB / 19.5 |
+| `--ultimate_patches=3` (disk error latch off) | **fail** — dirty-disc abort, 7 KB / 19.5 |
 | `--ultimate_patches=1` (content device only) | **fail** — same dirty-disc abort, 7 KB / 19.5 |
 | `--ultimate_mode=0`, payload on disk | vanilla — 1725 KB / 74.3 |
 | payload directory renamed away | vanilla — 1726 KB / 74.3 |
 
 Two readings worth keeping: content alone only makes the payload *reachable* — the
-mod's `blr` on `sub_8236C108` is what keeps the guest out of the disc-error state
-machine the payload's content drives — and the payload's content is live rather than
-inert, since the guest goes on to request `game:\ulti_settings.dta`,
+mod's `blr` on `PlatformMgr::SetDiskError` is what keeps the guest out of the
+disc-error state machine the payload's content drives — and the payload's content is
+live rather than inert, since the guest goes on to request `game:\ulti_settings.dta`,
 `game:\ulti_settings.ini` and `game:\scores`, all `0xc000000f`, all tolerated.
 Nothing in either decrypted image contains those names as plain bytes, so they come
 from the payload's script content.
@@ -1155,10 +1165,10 @@ ultimate: content device string at 0x8205DD74 patched: UPDATE: -> D:
 ultimate: overlay \Device\BlitzOverlay = …\game\ultimate + …\game - 4 payload-only record(s), 13 game-root-only, 0 payload copies preferred, 1 merged director(ies), 1 hidden
 ```
 
-**Still open.** The state-update edit's guest-side effect is established behaviourally
-only: no route has yet gone past the menu *with* an active payload to show an
-Ultimate-only feature working, and the blacklist edit is reproduced without a boot
-that loads one of the two songs it unblocks. The payload's `screenshots/` placeholder
+**Still open.** The payload boots to the menu, but no route has yet gone *past* it
+with an active payload to show an Ultimate-only feature working, and the blacklist
+edit is reproduced without a boot that loads one of the two songs it unblocks. The
+payload's `screenshots/` placeholder
 is now accounted for (the mod's `ulti_init.dta` offers its screenshot button only when
 that folder exists, which is what the zip's `_keepme` file creates), so only the empty
 `gen/` folder is still unexplained.

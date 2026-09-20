@@ -80,7 +80,7 @@ mapped at `0x82000000`):
 | --- | --- | --- | --- | --- |
 | `0x8205DD74` | `"UPDATE:\0"` | `"D:\0\0\0\0\0\0\0"` | The content-device string, the only `UPDATE:` in the image, feeding the retail format string `%s/gen/patch_%s` at `0x8205C827`. Points the guest's content lookups at `d:` instead of `update:`. | `1` (content device) |
 | `0x821D0A7C` (instruction; changed byte `0x821D0A7F`) | `li r3,1` (`01`) | `li r3,0` (`00`) | Tail of `sub_821D0A18`, the lookup that scans the 2-entry song-blacklist table at `0x82015FC8` (`hierkommtalex`/1005106, `rockandrollstar`/1005109). Patched, that table never matches — the mod's "Removed song blacklist (Rock 'n' Roll Star and Hier kommt Alex unblocked)". | `2` (song blacklist) |
-| `0x8236C108` | `mflr r12` (`7d8802a6`) | `blr` (`4e800020`) | Prologue of `sub_8236C108` (`object, state`): the whole function becomes a return with `r3` intact. | `4` (state update) |
+| `0x8236C108` | `mflr r12` (`7d8802a6`) | `blr` (`4e800020`) | Prologue of `sub_8236C108`, i.e. Blitz's `PlatformMgr::SetDiskError(err)` (see below): the whole function becomes a return with `r3` intact. | `4` (disk error latch) |
 
 **12 bytes in 3 runs, and that is the entire code delta.** Everything else the mod
 does is content in `patch_xbox_0.ark`. This is why compatibility is a small, bounded
@@ -106,6 +106,56 @@ is what the payload staged here (`game/ultimate/default.xex`, 9,023,488 B) hashe
   already handles. The exception is a release that ships a *different* `default.xex`:
   check its hash against `390e0ae0…` and re-derive the table above before trusting
   anything else in this file.
+
+### Edit 4 is Blitz's disk-error latch, and it is not optional
+
+`sub_8236C108` is `PlatformMgr::SetDiskError(err)`. Two call sites give it away
+(disassembled in the decrypted image, 2026-09-20):
+
+| Guest VA | Sequence |
+| --- | --- |
+| `0x827678CC` | prints `"No checksum found for file %s\n"` (`0x82107EA4`), then `li r4,3` → `b 0x8236C108` |
+| `0x82767968` | prints `"Checksum failure for file %s\n"` (`0x82107ECC`), then `li r4,3` → `b 0x8236C108` |
+
+so error code `3` is a checksum failure, and the caller is the file-checksum
+validator. The body says the same thing:
+
+```text
+0x8236C118  lwz   r11, 0x3c(r3)     ; mDiskError
+0x8236C120  cmpwi cr6, r11, 3
+0x8236C124  beq   cr6, 0x8236C1C4   ; already latched a checksum failure -> return
+0x8236C128  cmpw  cr6, r11, r4
+0x8236C12C  beq   cr6, 0x8236C1C4   ; already in this state -> return
+0x8236C130  stw   r4, 0x3c(r3)      ; mDiskError = err
+            ...                     ; log/notify once, guarded by the static bit at 0x8285489C
+0x8236C18C  bctrl                   ; notify through vtable slot +0x14
+0x8236C1B8  li    r3, 1
+0x8236C1BC  bl    0x82725470        ; sleep
+0x8236C1C0  b     0x8236C1B8        ; ...and never return
+```
+
+`this` is the singleton at `0x828548A0`; every call site passes it as `…, 0x48a0`
+off `0x82850000`, and the neighbouring function at `0x8236C1CC` clears bit 0 of the
+same guard word and returns — the latch/reset pair. Two more details fit: every
+reference to the function is a **tail** branch (`b`, seven sites), never a `bl`,
+which is what a function that cannot return looks like; and RB3 has the same class
+with the same shape, neutered by RB3DX at RB3's `0x82516320` with the identical
+`mflr r12` → `blr` trick (see [`rb3-references.md`](rb3-references.md) §6 group 4).
+
+**Why this matters for the install.** A mod-provided ark is not in the retail
+checksum database, so the validator reaches this path as soon as the payload is
+opened. Without the edit the failure is latched, the disc-error UI is raised and the
+thread spins in the sleep loop forever — that is the black screen in §7. Reproduce it
+with `--ultimate_patches=1`: the kernel log shows `XamShowDirtyDiscErrorUI called!
+user_index=0` 43 ms after `d:\gen\patch_xbox_0.ark` is opened, and nothing else
+afterwards. There is nothing to "fix" on our side; the mod's answer, and ours, is to
+neuter the handler.
+
+One limit on the evidence, so nobody over-reads it: the guest's own `printf` does not
+reach our host log, so the message text is not observable at runtime — the
+identification rests on the two call sites and the body above. Blitz also does not
+contain RB3's `"DISK ERROR"` log string, which is why the function cannot be found by
+string search in the first place.
 
 ## 4. Why the mod's `default.xex` is not the codegen input
 
@@ -182,7 +232,7 @@ ultimate: overlay \Device\BlitzOverlay = …\game\ultimate + …\game - 4 payloa
 | --- | --- | --- | --- |
 | Content device | `1` | `UPDATE:` → `D:` at `0x8205DD74`, so the guest looks for the payload's content pair in `d:\gen` rather than in a title-update device that this dump does not have. The lookup is the retail format string `%s/gen/patch_%s` (§2), so this one string edit re-points it; without it the payload is mounted but never opened. | Yes, for the payload to have any effect. |
 | Song blacklist | `2` | Forces `sub_821D0A18` to report "not in the table", unblocking the two blacklisted bonus tracks (the mod's "Removed song blacklist"). | No for boot, but it is a user-visible feature: leave it on. |
-| State update | `4` | Forces `sub_8236C108` to return immediately. | **Load-bearing**: with the payload present and this bit off, the guest calls `XamShowDirtyDiscErrorUI` and the screen stays black (§7). |
+| Disk error latch | `4` | Forces `sub_8236C108` — Blitz's `PlatformMgr::SetDiskError` — to return immediately. | **Load-bearing**: the payload's ark is not in the retail checksum database, so the validator calls `SetDiskError(3)`, which latches, raises the disc-error UI and never returns (see §3). With this bit off and the payload present, the guest calls `XamShowDirtyDiscErrorUI` and the screen stays black (§7). |
 
 The data patch refuses to touch `0x8205DD74` unless it still holds `"UPDATE:\0"`, so
 an already-patched image and any future layout are left alone. The slot lives in a
@@ -219,15 +269,18 @@ a black screen and ~75 with 1.7 MB is a rendered frame):
 | Payload directory renamed away, auto | `no payload at …\game\ultimate and no merged gen/patch_xbox.hdr, booting the retail game data` | 1726 KB, 74.3 | pass (vanilla) |
 | `--ultimate_patches=6` (content device off) | `update:\gen\patch_xbox.hdr -> 0xc000000f`; the payload is never opened | 1725 KB, 74.3 | boots, payload inert |
 | `--ultimate_patches=5` (song blacklist off) | overlay + content device patched | 1694 KB, 75.1 | pass |
-| `--ultimate_patches=3` (state update off) | `XamShowDirtyDiscErrorUI called! user_index=0` | 7 KB, 19.5 | **fail**, black screen |
+| `--ultimate_patches=3` (disk error latch off) | `XamShowDirtyDiscErrorUI called! user_index=0` 43 ms after `d:\gen\patch_xbox_0.ark` is opened, then nothing (§3) | 7 KB, 19.5 | **fail**, black screen |
 | `--ultimate_patches=1` (only the content device) | same dirty-disc abort | 7 KB, 19.5 | **fail**, black screen |
 | Pre-overlay attempt: payload aliased as `update:` | dirty-disc abort | 7 KB, 19.3 | rejected design (§5) |
 
 Two consequences worth keeping:
 
-- **The state-update edit is the one that matters.** Content alone is not enough:
-  the payload's content drives the guest into the disc-error state machine that
-  `sub_8236C108` guards, and the mod's `blr` patch is what keeps it out.
+- **The disk-error latch is the one that matters.** Content alone is not enough: the
+  payload's ark is not in the retail checksum database, so the validator calls
+  `PlatformMgr::SetDiskError(3)` (`sub_8236C108`), which latches the failure, raises
+  the disc-error UI and spins in its sleep loop forever — the black screen above.
+  The mod's `blr` patch is what keeps the guest out of that path (§3), which is why
+  `--ultimate_patches=1` and `=3` fail while `=5` and `=7` boot.
 - **The payload's content is live, not inert.** With the payload mounted, the guest
   opens the payload's pair and then asks for `game:\ulti_settings.dta` and
   `game:\ulti_settings.ini` (Ultimate's own settings files, which neither the retail

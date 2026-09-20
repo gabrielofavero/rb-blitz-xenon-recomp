@@ -160,7 +160,11 @@ is the same engine, and two projects have already solved a lot of this:
   sites listed in `docs/rb3-references.md` §6) and RB3DX also rewrites the content
   prefix `"UPDATE:"` → `"D:"` (group 8). **Confirmed against Blitz 2026-09-20:** the
   Ultimate mod makes exactly that `"UPDATE:"` → `"D:"` edit (B-012), which is why an
-  installed payload finds its `patch_xbox.*` pair where retail looks in vain.
+  installed payload finds its `patch_xbox.*` pair where retail looks in vain — and its
+  third edit neuters Blitz's own `PlatformMgr::SetDiskError` (`sub_8236C108`, the
+  checksum validator's `error = 3` path, which sleeps forever once it latches). Any
+  ark we add will hit that path, so the fix travels with the install rather than with
+  our hooks: `docs/ultimate-compat.md` §3.
 - **The Ultimate payload is what exercises the `update:` path.** Rock Band Blitz
   Ultimate is the Blitz sibling of the RB3DX patch set, and its Xbox 360 install rolls
   TU5 into the base installation — the payload's `gen\patch_xbox.hdr` and

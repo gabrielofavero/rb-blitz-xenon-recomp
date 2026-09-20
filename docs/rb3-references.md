@@ -163,7 +163,9 @@ candidates in our tree:
 * The **"Proceed in Offline Mode?"** branch (M4): once located, either force the
   branch or `return` a value, instead of reimplementing the caller.
 * `BandSongMgr::IsDemo`-style gates (M5, see §6).
-* The `SetDiskError` call sites (M4/M5, see §6).
+* The `SetDiskError` call sites (M4/M5, see §6) — although Blitz's handler turned
+  out to be a single function (`sub_8236C108`) that is cheaper to override than to
+  branch around; see `docs/ultimate-compat.md` §3.
 
 The one thing midasm hooks cannot do is carry host state across calls; anything
 stateful still wants `REX_HOOK`.
@@ -199,7 +201,7 @@ same problems.
 | `OptionBool` / `OptionStr` | Injects host `argv` into guest DTA options, tracking consumed args. | High value for us: `drive_ui.ps1` currently injects keystrokes against a real focus transition. DTA options may let us script the same states deterministically. |
 | `Rnd__PreInit` (`rnd_this + 0xf0` sync override) | Forces vertical sync behaviour. | Only if we need frame pacing. |
 | `StreamChecksum__ValidateChecksum` → `1` | Skips stream checksum validation. | **P1 for M5.** Any asset we decrypt, repack or edit will otherwise fail validation. |
-| `PlatformMgr__SetDiskError` → no-op | Suppresses the disk-error path. | RB3DX group 4; our `update:` reads already produce benign-looking failures. Check whether Blitz routes them here. |
+| `PlatformMgr__SetDiskError` → no-op | Suppresses the disk-error path (latch a code, log, notify, then never return — the caller sleeps). | RB3DX group 4. **Confirmed in Blitz 2026-09-20:** `PlatformMgr::SetDiskError` is `sub_8236C108`, called with `3` from the checksum validator at `0x827678D4` / `0x82767970` right after `"No checksum found for file %s\n"` / `"Checksum failure for file %s\n"`; Rock Band Blitz Ultimate ships the same `mflr r12` → `blr` edit, and without it any ark we add black-screens the boot (`docs/ultimate-compat.md` §3, `src/hooks/ultimate.cpp`). Blitz has no `"DISK ERROR"` string, so the function cannot be found by string search. |
 | `MetaMusic__{Load,Poll,Start,Loaded}` disable switch | A/B switch for the music system. | Useful for isolating audio bugs once B-009 is confirmed. |
 | `SongMgr__IsDemo` → `0` | Forces non-demo. | RB3DX group 6 disables the same check by branching. Demo logic hides content; check for a Blitz equivalent before M5 song enumeration. |
 | `MetaPerformer__SetVenue` | Forces a venue, optionally random. | Only if Blitz venues misbehave. |
@@ -238,7 +240,7 @@ against Blitz one by one (they are listed in §6 for the ones with Blitz leads).
 | --- | --- | --- | --- |
 | 2 | `0x82272E90`: `bl App::Run` → `bcl RunWithoutDebugging` | Yes — `patches.cpp` `App__Run` | Debugger trap; expect it. Find the branch in M4. |
 | 3 | Splash/ESRB skip: `0x82270F40` `beq`→`nop`, `0x82270F84` `bl`→`nop` | — | Cuts boot time and unblocks headless runs. Candidate for a midasm hook. |
-| 4 | `PlatformMgr::SetDiskError` neutered (`blr` at `0x82516320`), head reused for a `DataSet` type-guard trampoline; 8 call sites left unchanged (`0x8227153C`, `0x825338E0`, `0x82533AE4`, `0x82533B14`, `0x82533BE0`, `0x8253566C`, `0x82B8C730`, `0x82B8C7D8`) | Yes — `patches.cpp` `PlatformMgr__SetDiskError` | Check whether our `update:\gen\patch_xbox.hdr` failure routes here. |
+| 4 | `PlatformMgr::SetDiskError` neutered (`blr` at `0x82516320`), head reused for a `DataSet` type-guard trampoline; 8 call sites left unchanged (`0x8227153C`, `0x825338E0`, `0x82533AE4`, `0x82533B14`, `0x82533BE0`, `0x8253566C`, `0x82B8C730`, `0x82B8C7D8`) | Yes — `patches.cpp` `PlatformMgr__SetDiskError` | **Answered (2026-09-20):** Blitz's equivalent is `sub_8236C108`, patched the same way (`mflr r12` → `blr`) by the Ultimate mod; its checksum-validator callers pass `3`. Our payload boot reproduces the RB3 symptom exactly (`XamShowDirtyDiscErrorUI`, black screen) when that edit is disabled. |
 | 5 | `DataSet` type guard at `0x8275D6E0` | — | Only if we hit a DataSet type error. |
 | 6 | `0x82575F9C` `bne`→`nop` ⇒ `BandSongMgr::IsDemo` always false | Yes — `SongMgr__IsDemo` → 0 | M5: demo gates hide songs. |
 | 7 | `AddSongData`: `0x82579098` `bl` → `li r3,0` (special-song table disabled) | — | M5 song-list correctness. |

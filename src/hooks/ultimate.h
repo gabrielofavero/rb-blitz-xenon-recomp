@@ -30,9 +30,12 @@ enum Patch : uint32_t {
   // 0x821D0A7C (byte 0x821D0A7F): tail of sub_821D0A18, "li r3,1" -> "li r3,0", i.e.
   // the two entry song blacklist (name, id) table never matches.
   kPatchSongBlacklist = 1u << 1,
-  // 0x8236C108: prologue of sub_8236C108, "mflr r12" -> "blr", i.e. the object
-  // state update never runs.
-  kPatchUpdateState = 1u << 2,
+  // 0x8236C108: prologue of sub_8236C108, "mflr r12" -> "blr", i.e. Blitz's
+  // PlatformMgr::SetDiskError returns immediately instead of latching a disk error
+  // and spinning forever. The checksum validator calls it with 3 (failed checksum)
+  // for any ark that is not in the retail checksum database, which is exactly what
+  // the mod's payload is.
+  kPatchDiskError = 1u << 2,
   kPatchAll = (1u << 3) - 1,
 };
 

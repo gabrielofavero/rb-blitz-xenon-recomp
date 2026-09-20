@@ -18,11 +18,22 @@
 //                that result to skip per-entry work. The mod patches the function
 //                tail at 0x821D0A7C from "li r3,1; blr" to "li r3,0; blr", so the
 //                table never matches; reproduced by overriding the function (bit 1).
-//   0x8236C108   sub_8236C108(object, state): stores `state` at object+60 and
-//                dispatches unless the stored value already equals it or is 3. The
-//                mod patches the prologue at 0x8236C108 from "mflr r12" to "blr",
-//                i.e. the whole function becomes a return with r3 intact; reproduced
-//                by overriding the function (bit 2).
+//   0x8236C108   sub_8236C108(object, error): Blitz's PlatformMgr::SetDiskError. It
+//                latches `error` at object+60 (early-outs when the latch already holds
+//                the same value or 3), logs once behind a static bit at 0x8285489C,
+//                notifies through a virtual call, and then never returns - it spins in
+//                "li r3,1; bl Sleep; b" - so all seven references to it are tail
+//                branches, and the neighbouring 0x8236C1CC clears the same guard bit.
+//                The two callers that pass error=3 follow an immediate
+//                "No checksum found for file %s\n" (0x82107EA4) and
+//                "Checksum failure for file %s\n" (0x82107ECC), i.e. 3 is a failed
+//                checksum: a mod-provided ark is absent from the retail checksum
+//                database, so without this patch the validator latches the error,
+//                raises the disc-error UI and the thread sleeps forever. The mod
+//                patches the prologue at 0x8236C108 from "mflr r12" to "blr", i.e. the
+//                whole function becomes a return with r3 intact (RB3DX does the same
+//                to RB3's PlatformMgr::SetDiskError at 0x82516320); reproduced by
+//                overriding the function (bit 2).
 //
 // Installing the mod is dropping its folder next to the game's own data, which leaves
 // the payload's files and the game's files in two directories the game reads as one:
@@ -97,7 +108,7 @@ REXCVAR_DEFINE_STRING(ultimate_payload_root, "", "Compatibility",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_UINT32(ultimate_patches, kPatchAll, "Compatibility",
                       "Rock Band Blitz Ultimate default.xex edits to reapply: "
-                      "1=content device, 2=song blacklist, 4=state update")
+                      "1=content device, 2=song blacklist, 4=disk error latch")
     .range(0, kPatchAll)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -274,9 +285,11 @@ extern "C" REX_FUNC(sub_821D0A18) {
   __imp__sub_821D0A18(ctx, base);
 }
 
-// 0x8236C108: the object state update, forced to a return with r3 intact.
+// 0x8236C108 (PlatformMgr::SetDiskError): forced to a return with r3 intact, so a
+// payload ark that the retail checksum database does not know cannot latch a disk
+// error and black-screen the boot.
 extern "C" REX_FUNC(sub_8236C108) {
-  if (rb_blitz::ultimate::PatchEnabled(rb_blitz::ultimate::kPatchUpdateState)) {
+  if (rb_blitz::ultimate::PatchEnabled(rb_blitz::ultimate::kPatchDiskError)) {
     return;
   }
   __imp__sub_8236C108(ctx, base);
