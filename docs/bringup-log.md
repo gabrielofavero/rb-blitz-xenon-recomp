@@ -793,7 +793,7 @@ Still open, and none of it is tracked by a script:
 | Xenia draw comparison | not started |
 | Which input device the run used | keyboard injection, per the Milestone 4 close-out above |
 
-## Decision: online unblocking is not our job — Deluxe compatibility is (2026-09-19)
+## Decision: online unblocking is not our job — the Ultimate mod is (2026-09-19)
 
 The Milestone 4 close-out above calls online features "offline-disabled by policy
 until the core loop works", which reads as a promise to come back and unblock them.
@@ -804,33 +804,34 @@ We will not, and the docs now say so.
 findings above — so no part of the core loop needs a service restored; M4 closed
 its online step by refusing the Rock Central sign-in gracefully, not by bringing a
 service back. Online behaviour (sign-in, leaderboards, achievements, DLC
-enumeration) is meanwhile exactly what the community's **Rock Band Blitz Deluxe**
-mod (MiloHax, `solamint/rock-band-blitz-deluxe`) changes. Rebuilding a dead service
+enumeration) is meanwhile exactly what the community's **Rock Band Blitz Ultimate**
+mod (`ultimate-mods-rb/blitz-ultimate`) changes. Rebuilding a dead service
 would duplicate that work, badly.
 
-**What our obligation becomes: compatibility.** Deluxe installs by copying files
-over a vanilla copy — its own guide suggests renaming `default.xex` to
-`default_vanilla.xex` — so the supported shape is one executable and two
-`--game_data_root` variants:
+**What our obligation becomes: compatibility.** The payload installs by being
+dropped next to a vanilla install (the mod's own guide suggests renaming
+`default.xex` to `default_vanilla.xex` first), so the supported shape is one
+executable and two content variants:
 
 - vanilla retail dump → current behaviour, online stays unavailable (final).
-- Deluxe install → works as a game-data root of the same build, drag-and-drop,
-  vanilla untouched.
+- payload installed next to it → works on the same build, drag-and-drop, vanilla
+  untouched.
 
 The mod's `default.xex` is **not** swappable into our pipeline: the translation is
 generated from one specific retail image, and `config/functions.toml`,
-byte-guarded patches, import ordinals and jump tables are all addresses in it.
-Deluxe code deltas therefore have to be reproduced project-side, and only when a
-Deluxe-only feature actually needs them.
+byte-guarded patches, import ordinals and jump tables are all addresses in it. The
+mod's three code edits are reproduced project-side instead, and that whole job
+landed 2026-09-20 — **B-012** below.
 
 This is the same relationship the RB3 recomp has with RB3DX, which is why the
 patch-group catalogue in [`rb3-references.md`](rb3-references.md) §5–§6 is still
-the right thing to mine.
+the right thing to mine. (RB3DX is a Rock Band 3 project; it is not the mod this
+port supports.)
 
 **What changed in the docs.** New policy home
-[`deluxe-compat.md`](deluxe-compat.md) — decision table, install facts, why the
-executable is not swappable, hazards to expect on a first Deluxe-root run,
-acceptance criteria for "Deluxe works", refusal list. Propagated to
+[`ultimate-compat.md`](ultimate-compat.md) — decision table, payload facts, why the
+executable is not swappable, why the payload cannot be merged per file, the union
+rules, install/uninstall, hazards and the acceptance criteria. Propagated to
 [`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md) (goal, baseline, definition of
 "working", risks, deferred backlog), [`README.md`](../README.md),
 [`known-issues.md`](known-issues.md), [`build-and-run.md`](build-and-run.md),
@@ -842,12 +843,20 @@ acceptance criteria for "Deluxe works", refusal list. Propagated to
 
 - Milestone 4's "online features gracefully unavailable" step is final behaviour,
   not a stage; it is satisfied and closes here.
-- Milestone 6 inherits one new rule: never ship, mirror or vendor Deluxe files.
-- Deluxe compatibility is a post-bring-up backlog item with its own criteria; no
-  bring-up milestone depends on it.
-- The `update:\gen\patch_xbox.hdr` → `0xc000000f` snag may be exercised for real by
-  a Deluxe root, because the Deluxe Xbox 360 install rolls TU5 into the base
-  install instead of loading it as a title update.
+- Milestone 6 inherits one new rule: never ship, mirror or vendor Ultimate files.
+- Ultimate compatibility is a post-bring-up backlog item with its own criteria; no
+  bring-up milestone depends on it. The install route itself is delivered — B-012.
+- The `update:\gen\patch_xbox.hdr` → `0xc000000f` snag is exactly what an installed
+  payload exercises, because the mod's Xbox 360 install rolls TU5 into the base
+  install instead of loading it as a title update: B-012's content-device edit
+  (`UPDATE:` → `D:`) is what makes that lookup find the payload's pair.
+
+**Name correction (2026-09-20).** Both this heading and its body originally said
+"Rock Band Blitz Deluxe" and linked `solamint/rock-band-blitz-deluxe`. That was
+wrong on both counts: the Blitz mod is **Rock Band Blitz Ultimate**
+(`ultimate-mods-rb/blitz-ultimate`), while **Rock Band 3 Deluxe (RB3DX)** is a
+different project for a different game, mined here only for technique. Every
+document that repeated the old name has been corrected.
 
 ## First host unit tests: the B-009 key path (2026-09-19)
 
@@ -961,7 +970,7 @@ which is the size/digest half of the audit Milestone 4 was missing. The exit cod
 are a contract: 0 ok, 1 mismatch or unreadable, 2 usage or malformed fingerprint
 file — malformed input is not a way past the check.
 `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON` relaxes the mismatch to a warning, for a
-checkout whose `game/` is a Deluxe root.
+checkout whose `game/` is an Ultimate-installed root.
 
 **2. The compiled-in expectation.** The same binary's `--emit-header` writes
 `generated/fingerprint_expected.h` (not committed, like all generated output), and
@@ -1023,4 +1032,119 @@ this: the two files are now proven to be the recorded revision, not proven to be
 read at the right offsets. `toolchain.md` (Milestone 6, step 4) is still missing
 too — the build works because the absolute compiler/cmake/ninja paths live in the
 build tree's `CMakeCache.txt` and nowhere else.
+
+## B-012: Rock Band Blitz Ultimate install — a payload union device (2026-09-20)
+
+Closes the compatibility half of the decision above, on the corrected target: the
+community mod is **Rock Band Blitz Ultimate**
+(`ultimate-mods-rb/blitz-ultimate`), not "Rock Band Blitz Deluxe". The extracted
+payload was staged at `game/ultimate`; the requirement was that dropping it there
+*is* the install and deleting it again is the uninstall, with no recomp-specific
+second build and no pristine dump put at risk.
+
+- Status: **resolved** —
+  [`src/fs/payload_overlay.h`](../src/fs/payload_overlay.h),
+  [`src/fs/payload_overlay.cpp`](../src/fs/payload_overlay.cpp),
+  [`src/fs/overlay_merge.h`](../src/fs/overlay_merge.h),
+  [`src/hooks/ultimate.h`](../src/hooks/ultimate.h),
+  [`src/hooks/ultimate.cpp`](../src/hooks/ultimate.cpp), the
+  [`OnPostLoadXexImage`](../src/rb_blitz_app.h) call site,
+  [`tests/payload_overlay_tests.cpp`](../tests/payload_overlay_tests.cpp) and
+  [`scripts/decrypt_xex.py`](../scripts/decrypt_xex.py).
+- Policy, the full evidence tables, hazards and acceptance criteria:
+  [`ultimate-compat.md`](ultimate-compat.md).
+
+**The mod is 12 bytes.** `scripts/decrypt_xex.py` mirrors the SDK's
+`XexModule::ReadImage` (retail key, CBC IV = 0 chained across BASIC blocks), so
+`--diff` can compare the payload's executable with retail at guest addresses. Both
+images decrypt to 10,747,904 bytes; the payload's is not even encrypted
+(`encryption=0` vs retail's `1`):
+
+| Guest VA | Retail | Ultimate | What the edit is |
+| --- | --- | --- | --- |
+| `0x8205DD74` | `"UPDATE:\0"` | `"D:\0…"` | the content-device prefix, 7 bytes |
+| `0x821D0A7C` | `01` (`li r3,1`) | `00` (`li r3,0`) | tail of `sub_821D0A18`: its 2-entry name table can never match |
+| `0x8236C108` | `mflr r12` | `blr` | `sub_8236C108` returns immediately, `r3` intact |
+
+**12 differing bytes in 3 runs, and that is the entire code delta** — everything
+else the mod ships is content in `patch_xbox_0.ark`. So compatibility is a bounded
+job: reproduce three edits host-side and make the payload's files visible to the
+guest. The edits live in [`src/hooks/ultimate.cpp`](../src/hooks/ultimate.cpp) as
+one guarded data patch and two `REX_FUNC` overrides; the payload's own `default.xex`
+is never executed.
+
+**Why the payload cannot simply be the game root.** It carries the mod's
+`default.xex` (8,812 KB) and the title-update-shaped pair `gen/patch_xbox.hdr`
+(4,381 B) + `gen/patch_xbox_0.ark` (14,171,207 B). It does **not** carry the game's
+own data — `gen/main_xbox_0.ark` alone is 361 MB — so pointing `--game_data_root` at
+it loses the game. And the mod's own install shape (copy over a vanilla folder) is
+exactly what a pristine dump must not be asked to give up.
+
+**The first failure, and why "just alias the files" was impossible.** Mounting the
+payload as the `update:` device booted to a black screen ending in
+`XamShowDirtyDiscErrorUI called! user_index=0`. At trace level the guest really did
+find the payload — `[RtlInitAnsiString] str=update:\gen\patch_xbox.hdr`,
+`[NtCreateFile] path=update:\gen\patch_xbox.hdr access=0x80100080 …`, then the same
+for `patch_xbox_0.ark` — and aborted anyway, because the payload expects the *retail*
+`d:\gen` to still be underneath it. The obvious repair cannot work either:
+`VirtualFileSystem::OpenFile` resolves a file by resolving its **base path** first
+(`d:\gen` → an entry) and then calling `parent_entry->GetChild(file_name)`. No
+per-file alias, link or device is ever consulted for a single file, so the merged
+view has to exist at directory level.
+
+**The design.** A union device mounted between the guest and both directories, with
+`d:` and `game:` re-pointed at it, and the merge rules kept in an SDK-free header so
+they can be tested without booting anything:
+
+- payload records are read in place; the game root remains the only writable side,
+  so a payload-only file cannot be created or truncated, and a boot with no payload
+  mounted is byte-for-byte the old behaviour;
+- a file present in both resolves to the payload's copy (this payload has none);
+- the payload's `default.xex` is **hidden**, so a stale copy can never take over the
+  boot;
+- re-pointing is unregister-then-register, because `RegisterSymbolicLink()` uses
+  `insert` and never overwrites an existing `d:`/`game:`.
+
+`Configure()` also recognises the merged shape: if `gen/patch_xbox.hdr` is already
+in the game root, the overlay is skipped and only the three edits are applied.
+
+**The state-update edit is the load-bearing one.** Routes were probed with the patch
+mask as the variable ("luma" is the mean luma of a 1280×720 capture: 1.7 MB / ~75 is
+a rendered frame, 7 KB / ~19 is black):
+
+| Route | Result |
+| --- | --- |
+| payload present, default mask `0x7` | **pass** — overlay stats line, `d:\gen\patch_xbox.hdr` then `d:\gen\patch_xbox_0.ark`, no dirty disc, 1694 KB / 75.1 |
+| payload pair copied into `game/gen/` (merged) | **pass** — `patches 0x7 (merged into the game root)`, no overlay line, 1694 KB / 75.0 |
+| `--ultimate_patches=5` (reserved name off) | pass — 1694 KB / 75.1 |
+| `--ultimate_patches=6` (content device off) | boots (1725 KB / 74.3) but the payload is never opened: `update:\gen\patch_xbox.hdr -> 0xc000000f` |
+| `--ultimate_patches=3` (state update off) | **fail** — dirty-disc abort, 7 KB / 19.5 |
+| `--ultimate_patches=1` (content device only) | **fail** — same dirty-disc abort, 7 KB / 19.5 |
+| `--ultimate_mode=0`, payload on disk | vanilla — 1725 KB / 74.3 |
+| payload directory renamed away | vanilla — 1726 KB / 74.3 |
+
+Two readings worth keeping: content alone only makes the payload *reachable* — the
+mod's `blr` on `sub_8236C108` is what keeps the guest out of the disc-error state
+machine the payload's content drives — and the payload's content is live rather than
+inert, since the guest goes on to request `game:\ulti_settings.dta`,
+`game:\ulti_settings.ini` and `game:\scores`, all `0xc000000f`, all tolerated.
+Nothing in either decrypted image contains those names as plain bytes, so they come
+from the payload's script content.
+
+**Verified.** `ctest` is 3/3 in the configured tree, the new target being
+`payload_overlay` (83 checks, 15 cases, no SDK and no game image). Live, the
+`game data identity` line is unchanged on every route — an installed payload is a
+separate directory, not a modified root — and a payload boot logs:
+
+```text
+ultimate: payload …\game\ultimate, patches 0x7
+ultimate: content device string at 0x8205DD74 patched: UPDATE: -> D:
+ultimate: overlay \Device\BlitzOverlay = …\game\ultimate + …\game - 4 payload-only record(s), 13 game-root-only, 0 payload copies preferred, 1 merged director(ies), 1 hidden
+```
+
+**Still open.** The state-update edit's guest-side effect is established behaviourally
+only: no route has yet gone past the menu *with* an active payload to show an
+Ultimate-only feature working, and the reserved-name edit is reproduced without a
+user-visible artefact to point at. Whether the mod's two empty directories
+(`gen/`, `screenshots/`) matter is likewise unmeasured.
 

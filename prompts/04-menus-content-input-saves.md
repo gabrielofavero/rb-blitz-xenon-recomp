@@ -112,9 +112,10 @@ last_updated: 2026-09-19
 - **Step 4 (online unavailable): satisfied.** The Rock Central sign-in is refused
   and dismissible, the DLC aggregate enumerator returns 0 items, and no service is
   faked. This is also the **final** behaviour for the vanilla route — do not spend
-  Milestone 4 effort on unblocking online features. That work belongs to the Rock
-  Band Blitz Deluxe mod; our deliverable is that a Deluxe game-data root runs on
-  this same executable ([docs/deluxe-compat.md](../docs/deluxe-compat.md)).
+  Milestone 4 effort on unblocking online features. That work belongs to the
+  community's Rock Band Blitz Ultimate mod; our deliverable — that an installed
+  payload runs on this same executable — is implemented
+  ([docs/ultimate-compat.md](../docs/ultimate-compat.md)).
 - **B-010 is resolved and was never an M4 blocker:** 32-bit fixed-point textures
   are converted on the CPU (SDK patch 0002), which is what made the note highway
   and the 3D background appear. Two limits stand — see
@@ -157,13 +158,15 @@ is the same engine, and two projects have already solved a lot of this:
 - **Check the `update:` snag against `SetDiskError`.** RB3 no-ops
   `PlatformMgr::SetDiskError` (band3 `patches.cpp`; RB3DX group 4, with 8 call
   sites listed in `docs/rb3-references.md` §6) and RB3DX also rewrites the content
-  prefix `"UPDATE:"` → `"D:"` (group 8). Our `update:\gen\patch_xbox.hdr` miss may
-  be the same path.
-- **Our `update:` snag has a Deluxe angle.** Rock Band Blitz Deluxe is the Blitz
-  sibling of the RB3DX patch set, and its Xbox 360 install rolls TU5 into the base
-  installation — so a Deluxe game-data root may exercise exactly the `update:` path
-  we currently miss. It is also the mod's own reason that online unblocking is not
-  our job: [docs/deluxe-compat.md](../docs/deluxe-compat.md).
+  prefix `"UPDATE:"` → `"D:"` (group 8). **Confirmed against Blitz 2026-09-20:** the
+  Ultimate mod makes exactly that `"UPDATE:"` → `"D:"` edit (B-012), which is why an
+  installed payload finds its `patch_xbox.*` pair where retail looks in vain.
+- **The Ultimate payload is what exercises the `update:` path.** Rock Band Blitz
+  Ultimate is the Blitz sibling of the RB3DX patch set, and its Xbox 360 install rolls
+  TU5 into the base installation — the payload's `gen\patch_xbox.hdr` and
+  `patch_xbox_0.ark` *are* that title update. It is also the mod's own reason that
+  online unblocking is not our job:
+  [docs/ultimate-compat.md](../docs/ultimate-compat.md).
 - **Two config placements to remember:** `d3d12_readback_resolve` is a **cvar**
   in 0.10, so it belongs in the build-tree-local `rb_blitz.toml`
   (`out/build/<preset>/rb_blitz.toml`) runtime profile, not the build manifest.
@@ -208,11 +211,11 @@ is the same engine, and two projects have already solved a lot of this:
   gracefully unavailable unless they block the core loop.
 - **This is the final behaviour, not a stage.** The title ships an offline mode, so
   restoring or unblocking online services is permanently out of scope and belongs
-  to the community's Rock Band Blitz Deluxe mod. Our side of that bargain is
-  compatibility: an installed Deluxe copy must work as a `--game_data_root` of the
-  same executable, with vanilla unaffected and no recomp-specific build — policy,
-  hazards and acceptance criteria in
-  [docs/deluxe-compat.md](../docs/deluxe-compat.md).
+  to the community's Rock Band Blitz Ultimate mod. Our side of that bargain is
+  compatibility: an installed payload works with a vanilla `--game_data_root` on the
+  same executable, with vanilla unaffected and no recomp-specific build —
+  implementation, evidence and acceptance criteria in
+  [docs/ultimate-compat.md](../docs/ultimate-compat.md).
 - **State (2026-09-19):** done.
 
 ## Acceptance / exit criteria
@@ -252,9 +255,9 @@ Before writing any new hook, read **Reference leads** above: hooks, midasm hooks
 and the offline-mode candidates are already mapped there.
 
 Scope note: none of this is about restoring online services. The vanilla route
-stays offline permanently, and a Rock Band Blitz Deluxe game-data root is the
+stays offline permanently, and a Rock Band Blitz Ultimate payload is the
 community's upgrade path — we only owe it continued working
-([docs/deluxe-compat.md](../docs/deluxe-compat.md)).
+([docs/ultimate-compat.md](../docs/ultimate-compat.md)).
 
 ## Handoff to Milestone 5
 

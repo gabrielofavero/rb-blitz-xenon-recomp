@@ -31,17 +31,20 @@ is removed from this file, not from the log.
   instead of being sampled as if they were normalized data: a wrong texture is
   harder to notice than a missing one. B-010's conversion covers
   `num_format = 0` (fixed point) only.
-- `update:\gen\patch_xbox.hdr` → `0xc000000f`: no title update in this dump.
+- `update:\gen\patch_xbox.hdr` → `0xc000000f`: no title update in this dump, and
+  request that retail Blitz makes on every boot. (With an Ultimate payload
+  installed this request is re-pointed at the merged `d:` view; see
+  [ultimate-compat.md](ultimate-compat.md).)
 - Three key/voice `STUB` warnings at boot.
 - Online features (Rock Central sign-in, achievements, leaderboards, challenges,
   store/DLC enumeration) stay unavailable. This is **permanent, not a bring-up
   shortcut**: Blitz ships its own offline mode, so restoring online behaviour was
   never required for a playable port, and unblocking it is the community mod's job
-  rather than ours. Our obligation is the opposite direction — a Rock Band Blitz
-  Deluxe install must keep working by drag-and-drop. What that means, which hazards
-  a Deluxe game-data root brings (`update:`/TU5, overlay fingerprinting, replaced
-  UI data), and what we refuse to ship are in
-  [deluxe-compat.md](deluxe-compat.md).
+  rather than ours. Our obligation is the opposite direction — the community's
+  **Rock Band Blitz Ultimate** payload must keep working by drag-and-drop. What that
+  means, which hazards an Ultimate payload brings (`update:`/TU5, overlay
+  fingerprinting, replaced UI data), and what we refuse to ship are in
+  [ultimate-compat.md](ultimate-compat.md).
 - The project is **GPL-2.0-only**, deliberately not "or later": GPL-2.0 is what
   keeps us compatible with the GPL-2.0 Rock Band 3 recompilation project we adapt
   code from. Do not relicense, and do not add GPL-3.0-only or otherwise
@@ -50,9 +53,9 @@ is removed from this file, not from the log.
   keeps its original license, says so in a header comment, and gets a row in the
   provenance table in [rb3-references.md](rb3-references.md) §9.
 - The **build** refuses a `game/` that is not the fingerprinted dump, but a
-  **runtime** game-data root that differs is only logged, never fatal: a Rock Band
-  Blitz Deluxe install is a supported content variant chosen at launch
-  (`--game_data_root`), and refusing to start would turn compatibility into a bug
-  report. `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON` relaxes the build half for the
-  same case — [build-and-run.md](build-and-run.md) §3,
-  [deluxe-compat.md](deluxe-compat.md).
+  **runtime** game-data root that differs is only logged, never fatal: an Ultimate
+  payload is a supported content variant chosen at launch
+  (`--game_data_root`, `--ultimate_mode`), and refusing to start would turn
+  compatibility into a bug report. `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON` relaxes
+  the build half for the same case — [build-and-run.md](build-and-run.md) §3,
+  [ultimate-compat.md](ultimate-compat.md).

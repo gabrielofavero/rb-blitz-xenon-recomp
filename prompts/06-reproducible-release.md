@@ -51,9 +51,10 @@ last_updated: 2026-09-19
   release time; its §10 table says which sections belong to which prompt.
 - **Online unblocking is never a release requirement.** The title ships an offline
   mode, so this milestone does not restore or emulate any online service; the
-  community's Rock Band Blitz Deluxe mod owns that. What we owe is compatibility —
-  a Deluxe install used as the game-data root of the same executable — with its own
-  criteria in [`docs/deluxe-compat.md`](../docs/deluxe-compat.md). The one concrete
+  community's Rock Band Blitz Ultimate mod owns that. What we owe is compatibility —
+  an installed payload used alongside the game-data root of the same executable —
+  with its own
+  criteria in [`docs/ultimate-compat.md`](../docs/ultimate-compat.md). The one concrete
   release risk it creates here is distribution hygiene (below).
 
 ## Steps
@@ -75,9 +76,9 @@ last_updated: 2026-09-19
 - **State (2026-09-19): build-side implemented.** Codegen now fails closed on a
   wrong, missing or unreadable `game\default.xex` before any translation happens,
   and prints the digest it found next to the expected one. A *runtime*
-  `--game_data_root` mismatch still starts and only warns — deliberate, so a Deluxe
-  content root stays runnable — so what remains is judging whether the boot-time
-  warning is enough for a wrong-root launch.
+  `--game_data_root` mismatch still starts and only warns — deliberate, so an
+  Ultimate-installed root stays runnable — so what remains is judging whether the
+  boot-time warning is enough for a wrong-root launch.
 
 ### 4. Freeze and document
 
@@ -97,11 +98,11 @@ last_updated: 2026-09-19
   this project, the BSD-3-Clause notice for the ReXGlue/Xenia SDK, and
   attribution plus GPL-2.0 terms for anything adapted from `band3_recomp`
   (listed in [`docs/rb3-references.md`](../docs/rb3-references.md) §9).
-- Do not ship, mirror or vendor Rock Band Blitz Deluxe (its patched `default.xex`,
+- Do not ship, mirror or vendor Rock Band Blitz Ultimate (its patched `default.xex`,
   its `gen/` or `_ark/` data, or anything extracted from it), and do not bake its
-  files into a release "for convenience". A Deluxe install is user-supplied game
+  files into a release "for convenience". An Ultimate payload is user-supplied game
   data on the same footing as the retail dump
-  ([`docs/deluxe-compat.md`](../docs/deluxe-compat.md)).
+  ([`docs/ultimate-compat.md`](../docs/ultimate-compat.md)).
 
 ## Acceptance / exit criteria
 
@@ -114,9 +115,10 @@ last_updated: 2026-09-19
 
 Bring-up complete. Update `DECOMPILATION_PLAN.md` milestone checkboxes and
 `docs/bringup-log.md`; start the post-bring-up backlog from the plan's
-"Deferred" section — which now includes **Rock Band Blitz Deluxe compatibility**
-(drag-and-drop game-data variant, same executable) with its criteria in
-[`docs/deluxe-compat.md`](../docs/deluxe-compat.md).
+"Deferred" section — whose **Rock Band Blitz Ultimate compatibility** item (installed
+payload as a game-data variant, same executable) is already delivered (B-012), with
+its criteria in
+[`docs/ultimate-compat.md`](../docs/ultimate-compat.md).
 
 ## Bring-up loop
 

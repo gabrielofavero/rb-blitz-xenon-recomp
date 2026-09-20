@@ -23,7 +23,7 @@ plan: nothing here changes our milestone order.
 | [`freeqaz/rb3-xenon`](https://github.com/freeqaz/rb3-xenon) | Rock Band 3 for **Xbox 360** (MSVC X360, retail) decompilation. Engine from `dc3-decomp`, game code from the Wii decomp. Active 2026-09. | CC0-1.0 | Closest sibling: same compiler, same ABIs, same kernel imports. |
 | [`freeqaz/rb3`](https://github.com/freeqaz/rb3) | Rock Band 3 **Wii** decompilation with an LP64 native port, plus the audio/MOGG tooling and a verification methodology. | CC0-1.0 | Engine source of truth + verification method. |
 | [`freeqaz/milo-native-engine`](https://github.com/freeqaz/milo-native-engine) | The shared native (host) Milo engine extracted from that work. | CC0-1.0 | How they model a host engine layer at all. |
-| [`solamint/rock-band-blitz-deluxe`](https://github.com/solamint/rock-band-blitz-deluxe) | **Rock Band Blitz Deluxe** — the MiloHax QoL mod for *Blitz itself*, i.e. the Blitz-side counterpart of the RB3DX patch set in §5–§6. Not an RB3 project and not part of this survey; listed because it is where the work this repository deliberately does not do actually happens. | Repository root has no `LICENSE` file (checked 2026-09-19); it redistributes patched game files, so treat it as knowledge only — never a code source, never something to vendor. | Game-data compatibility target: [deluxe-compat.md](deluxe-compat.md). |
+| [`ultimate-mods-rb/blitz-ultimate`](https://github.com/ultimate-mods-rb/blitz-ultimate) | **Rock Band Blitz Ultimate** — the community QoL mod for *Blitz itself*, i.e. the Blitz-side counterpart of the RB3DX patch set in §5–§6. Not an RB3 project and not part of this survey; listed because it is where the work this repository deliberately does not do actually happens. | No `LICENSE` file at the repository root (checked 2026-09-20); it redistributes patched game files, so treat it as knowledge only — never a code source, never something to vendor. | Game-data compatibility target, implemented: [ultimate-compat.md](ultimate-compat.md). |
 
 Local clones used for this pass live outside the repo, in the session workspace
 (`files/band3_recomp`, `files/xenia`); they are **not** vendored here. To refresh:
@@ -38,12 +38,12 @@ git clone https://github.com/freeqaz/rb3
 files are written against **0.8 APIs**. We are on **0.10**; §1–§3 below note
 where that matters.
 
-The last row of that table is not an RB3 project. **Rock Band Blitz Deluxe** is
+The last row of that table is not an RB3 project. **Rock Band Blitz Ultimate** is
 the Blitz-side sibling of the RB3DX patch set catalogued in §5–§6, and it — not
 this repository — is where unblocked online behaviour and QoL changes live. We
-restore no online services; we aim to run a Deluxe install as a game-data variant
+restore no online services; we aim to run an Ultimate payload as a game-data variant
 of the same executable. Policy, hazards and acceptance criteria are in
-[deluxe-compat.md](deluxe-compat.md).
+[ultimate-compat.md](ultimate-compat.md).
 
 ## 1. How hooking actually works in ReXGlue 0.10 (read this first)
 
@@ -367,4 +367,4 @@ origin. An empty table is the correct state until something is actually ported.
 | §7.1 (audio verification) | [prompts/05](../prompts/05-complete-one-song.md) |
 | §7.3, §8 (methodology, config gaps) | [prompts/06](../prompts/06-reproducible-release.md), [README](../prompts/README.md) |
 | §9 (borrowing rules) | [README](../README.md) (license), [prompts/06](../prompts/06-reproducible-release.md) (distribution hygiene) |
-| §0 (Rock Band Blitz Deluxe row) | [deluxe-compat.md](deluxe-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 |
+| §0 (Rock Band Blitz Ultimate row) | [ultimate-compat.md](ultimate-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 (a different project from this one) |

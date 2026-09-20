@@ -7,7 +7,7 @@
 // Two callers, one parser (the build-time tool tools/fingerprint_check.cpp):
 //   * a fail-closed build gate on the codegen input, so a wrong revision stops
 //     the build instead of producing recompiled code for addresses that do not
-//     exist in the local dump (docs/deluxe-compat.md covers the opt-out for a
+//     exist in the local dump (docs/ultimate-compat.md covers the opt-out for a
 //     deliberately modified content root);
 //   * tools/fingerprint_check.cpp --emit-header, which turns the same parse into
 //     the expected values src/rb_blitz_app.h logs at boot.

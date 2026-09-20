@@ -21,6 +21,8 @@ include(generated/rexglue.cmake)
 set(RBBLITZ_SOURCES
     src/main.cpp
     src/hooks/crypto.cpp
+    src/hooks/ultimate.cpp
+    src/fs/payload_overlay.cpp
 )
 
 if(WIN32)
@@ -65,8 +67,8 @@ rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 # The gate checks the codegen input only; the 360 MB archive rows are audited on
 # demand with `rb_blitz_fingerprint --all` (docs/build-and-run.md).
 #
-# A deliberately modified content root (Rock Band Blitz Deluxe, see
-# docs/deluxe-compat.md) is a supported configuration, so it can be allowed:
+# A deliberately modified content root (Rock Band Blitz Ultimate, see
+# docs/ultimate-compat.md) is a supported configuration, so it can be allowed:
 # codegen still runs on whatever local default.xex is present, but the mismatch is
 # then reported instead of fatal.
 option(RBBLITZ_ALLOW_MODIFIED_GAME_DATA
@@ -133,6 +135,12 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_crypto_keytable_tests PRIVATE src)
     add_test(NAME crypto_keytable COMMAND rb_blitz_crypto_keytable_tests)
+
+    add_executable(rb_blitz_payload_overlay_tests
+        tests/payload_overlay_tests.cpp
+    )
+    target_include_directories(rb_blitz_payload_overlay_tests PRIVATE src)
+    add_test(NAME payload_overlay COMMAND rb_blitz_payload_overlay_tests)
 
     add_executable(rb_blitz_fingerprint_tests
         tests/fingerprint_tests.cpp

@@ -15,6 +15,7 @@
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
+#include "hooks/ultimate.h"
 #include "util/sha256.h"
 
 class RbBlitzApp : public rex::ReXApp {
@@ -69,16 +70,23 @@ class RbBlitzApp : public rex::ReXApp {
     }
   }
 
-  // Boot identity. Called once the XEX is loaded and the paths are final, which
-  // is the first point where game_data_root() is known and logging is up.
-  //
+  // Boot identity and mod compatibility. Called once the XEX is loaded and the
+  // paths are final, which is the first point where game_data_root() is known,
+  // logging is up and the guest has not started yet.
+  void OnPostLoadXexImage() override {
+    LogBootIdentity();
+    rb_blitz::ultimate::Configure(runtime(), game_data_root());
+  }
+
+ private:
   // The build gate in CMakeLists.txt has already refused to recompile against a
   // dump other than the one config/game_fingerprints.toml describes, but a
-  // launcher can still point a built binary at a different game/ tree - a Deluxe
-  // content root, for instance. Nothing here aborts: the point is that the log
-  // says which revision (if any) the running executable was actually booted
-  // against, so a bug report can be matched to it.
-  void OnPostLoadXexImage() override {
+  // launcher can still point a built binary at a different game/ tree - a
+  // tree with a Rock Band Blitz Ultimate payload merged into it, for instance.
+  // Nothing here aborts: the point is that the log says which revision (if any)
+  // the running executable was actually booted against, so a bug report can be
+  // matched to it.
+  void LogBootIdentity() {
     REXLOG_INFO("boot identity: {}", REXGLUE_BUILD_STAMP);
 
     const std::filesystem::path entrypoint =
@@ -103,7 +111,7 @@ class RbBlitzApp : public rex::ReXApp {
     REXLOG_WARN("game data identity: MODIFIED - {} is {} bytes, sha256 {}",
                 entrypoint.string(), size, digest);
     REXLOG_WARN("  expected: {} bytes, sha256 {} (config/game_fingerprints.toml, see"
-                " docs/deluxe-compat.md)",
+                " docs/ultimate-compat.md)",
                 rb_blitz::fingerprint::vanilla::kEntrypointSize,
                 rb_blitz::fingerprint::vanilla::kEntrypointSha256);
   }

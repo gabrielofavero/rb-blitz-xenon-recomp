@@ -36,8 +36,8 @@ constexpr const char* kDefaultProjectDir = RBBLITZ_PROJECT_DIR;
 constexpr const char* kDefaultProjectDir = ".";
 #endif
 
-// Where to look when the builder did not say. Kept in sync with the aliases in
-// docs/deluxe-compat.md.
+// Where to look when the builder did not say. Kept in sync with the defaults in
+// docs/build-and-run.md §3.
 constexpr const char* kFingerprintFile = "config/game_fingerprints.toml";
 constexpr const char* kGameRootDir = "game";
 
@@ -198,9 +198,9 @@ void PrintMismatchAdvice(const fs::path& game_root) {
             << "\" is not the revision config/game_fingerprints.toml describes.\n"
                "Recompiled addresses come from that revision, so building against another one\n"
                "produces code that does not match the dump.\n"
-               "  * A Rock Band Blitz Deluxe or otherwise modified content root is expected to\n"
+               "  * A Rock Band Blitz Ultimate or otherwise modified content root is expected to\n"
                "    differ. Codegen still has to run on the vanilla dump; see\n"
-               "    docs/deluxe-compat.md, and configure with -DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON\n"
+               "    docs/ultimate-compat.md, and configure with -DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON\n"
                "    to build anyway.\n"
                "  * Otherwise re-dump the game, or if you are deliberately moving to a new\n"
                "    revision, update config/game_fingerprints.toml (sha256sum or Get-FileHash)\n"

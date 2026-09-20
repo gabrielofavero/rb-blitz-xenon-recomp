@@ -259,9 +259,9 @@ Its other job is generating
 numbers that the runtime logs against (see §4). It is regenerated automatically
 whenever the `.toml` changes, and is not committed.
 
-A deliberately modified content root is a supported configuration — a Rock Band
-Blitz Deluxe install is the same files with `gen/` and the `.xex` replaced — so the
-gate can be relaxed for a checkout whose `game/` is one:
+A deliberately modified content root is a supported configuration — copying an
+Ultimate payload's `gen/` and `default.xex` over a dump produces one — so the gate
+can be relaxed for a checkout whose `game/` is one:
 
 ```powershell
 cmake --preset win-amd64-release -DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON
@@ -273,8 +273,8 @@ real-dump case from a failure to a skip). The option is **cached**: a later
 `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=OFF` rather than leaving a stale cache behind.
 Codegen still runs on whatever
 `default.xex` is present, so this is for the case where the *content root* is the
-mod's, never a claim that a Deluxe image compiles: see
-[deluxe-compat.md](deluxe-compat.md).
+mod's, never a claim that an Ultimate image compiles: see
+[ultimate-compat.md](ultimate-compat.md).
 
 `rb_blitz.exe` carries the Blitz icon. [rb_blitz.rc](../rb_blitz.rc) compiles
 [blitz.ico](../blitz.ico) into the executable, so the icon is a build input like
@@ -336,11 +336,16 @@ cd d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\build\win-amd64-release
 ```
 
 `--game_data_root` may point at either supported content variant — the retail dump,
-or a [Rock Band Blitz Deluxe](deluxe-compat.md) install, which is those same files
-copied over a vanilla game folder. Nothing else on the command line changes. The
+or a vanilla dump with a [Rock Band Blitz
+Ultimate](https://github.com/ultimate-mods-rb/blitz-ultimate) payload installed next
+to it. Nothing else on the command line has to change: the payload is detected and
+unioned over the game root at boot, and `--ultimate_mode` / `--ultimate_payload_root`
+/ `--ultimate_patches` exist only for probing. If the payload's files were instead
+copied *over* the game root, that merged layout is detected too. The
 **build** input does not get that choice: codegen and every byte-guarded patch are
 addressed against the vanilla `default.xex`, so keep it (the mod's own installer
-suggests renaming it to `default_vanilla.xex` before installing).
+suggests renaming it to `default_vanilla.xex` before installing) —
+[ultimate-compat.md](ultimate-compat.md).
 
 Every boot logs the identity of both halves, so a log states which binary ran
 against which image before any other evidence is read:
@@ -355,7 +360,7 @@ The first line is the SDK build stamp compiled into the binary, the second the
 — `game data identity: MODIFIED - … is N bytes, sha256 …` followed by an `expected:`
 line naming the values in
 [config/game_fingerprints.toml](../config/game_fingerprints.toml) — because pointing
-a built executable at a Deluxe content root is a supported run, not a build error.
+a built executable at an Ultimate content root is a supported run, not a build error.
 The fatal half of that check is the gate in §3, not the boot.
 
 Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:

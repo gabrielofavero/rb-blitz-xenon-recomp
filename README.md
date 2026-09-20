@@ -23,20 +23,22 @@ with a runtime path outside the source tree. Retail binaries, archives, music an
 decryption keys are never committed here. See
 [docs/build-and-run.md](docs/build-and-run.md).
 
-## Vanilla or Rock Band Blitz Deluxe
+## Vanilla or Rock Band Blitz Ultimate
 
 This port does **not** restore, emulate or route around online services — the
 retail title's own offline mode is the supported route, and the original services
 being gone changes nothing that a playable port needs. Unblocked behaviour and
 quality-of-life changes are the community's
-[Rock Band Blitz Deluxe](https://github.com/solamint/rock-band-blitz-deluxe) mod;
-our job is compatibility with it: a Deluxe install — files copied over a vanilla
-game folder — is meant to run on this same executable by drag-and-drop, with no
-separate build and with a vanilla dump unaffected.
+[Rock Band Blitz Ultimate](https://github.com/ultimate-mods-rb/blitz-ultimate) mod;
+our job is compatibility with it: an installed payload — the mod's files dropped next
+to a vanilla game folder — runs on this same executable by drag-and-drop, with no
+separate build and with a vanilla dump unaffected. Drop the payload in
+`<game root>/ultimate`, or delete it to go back to vanilla.
 
 The compilation input stays the **vanilla** `default.xex`, because every address in
-[config/](config) belongs to that image. Full policy, hazards and acceptance
-criteria: [docs/deluxe-compat.md](docs/deluxe-compat.md).
+[config/](config) belongs to that image; the mod's three edits are reproduced
+host-side instead. Full policy, evidence, hazards and acceptance criteria:
+[docs/ultimate-compat.md](docs/ultimate-compat.md).
 
 ## Build and run
 
@@ -53,7 +55,7 @@ and log capture.
 | [prompts/](prompts) | One living prompt per milestone; read [prompts/README.md](prompts/README.md) first. |
 | [docs/bringup-log.md](docs/bringup-log.md) | Chronological record of blockers and fixes. |
 | [docs/known-issues.md](docs/known-issues.md) | Enduring issues and accepted limitations. |
-| [docs/deluxe-compat.md](docs/deluxe-compat.md) | Vanilla vs Rock Band Blitz Deluxe: what we support, what we refuse to do, and what "Deluxe works" will mean. |
+| [docs/ultimate-compat.md](docs/ultimate-compat.md) | Vanilla vs Rock Band Blitz Ultimate: install, evidence, what we support, what we refuse to do. |
 | [docs/symbols.md](docs/symbols.md) | Image identity, guest addresses, and the evidence for them. |
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [src/](src) | Host application and native overrides for guest functions. |
