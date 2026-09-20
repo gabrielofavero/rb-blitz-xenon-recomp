@@ -89,7 +89,7 @@ camera told to be a different eye each time.
 | Render-target cache | `rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp` | EDRAM emulation and the `Path::kHostRenderTargets` / pixel-shader-interlock split. Doubling eye targets doubles work here, and this is where [B-010](known-issues.md)-class bugs live. |
 | Input | `rexglue-sdk/include/rex/input/` — `input_driver.h`, `sdl/`, `mnk/`, `state_merge.h` | An OpenXR driver slots in beside the existing drivers and merges into the same `X_INPUT_GAMEPAD`, with the existing neutral-device rules untouched. |
 | Platform layer | `rexglue-sdk/include/rex/platform.h` | `__ANDROID__` sets `REX_PLATFORM_ANDROID` + `REX_PLATFORM_LINUX` (36–37); Apple sets `REX_PLATFORM_MAC` (32), which an iOS port would need to subdivide. |
-| POSIX risk areas | `rexglue-sdk/src/core/fiber_posix.cpp`, `seh_posix.cpp`, `mapped_memory_posix.cpp`, `exception_handler_posix.cpp`; `rexglue-sdk/src/system/xmemory.cpp` | Fibers, SEH, and VA reservation. Android is much closer to these paths than Windows is, so V2 exercises them. |
+| POSIX risk areas | `rexglue-sdk/src/core/fiber_posix.cpp`, `seh_posix.cpp`, `mapped_memory_posix.cpp`, `exception_handler_posix.cpp`; `rexglue-sdk/src/system/xmemory.cpp` | Fibers, SEH, and VA reservation. Android is much closer to these paths than Windows is, so V2 exercises them (and §5.1 can exercise them earlier, on Linux). |
 | Texture formats | [patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch](../patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch) | D3D12-side only. The Vulkan host-format table lacks the same formats, so B-010 recurs on Vulkan until the equivalent lands — V1 owes it, and nothing Vulkan (Quest or iOS) is testable without it. |
 
 ## 5. Milestones
@@ -110,6 +110,52 @@ failure: it stops spending before the expensive steps.
 cheap. The eye count doubles draws *and* EDRAM resolves, and the resolve path is
 where this project's hardest graphics bugs have already been
 ([known-issues.md](known-issues.md)).
+
+### 5.1 What V0 also buys a non-VR host
+
+V0 is two things wearing one number. The **VR half** (constant logging, the
+camera-discovery heuristic, the cadence measurement) is worth nothing to a flat
+build with one camera and one eye. The **backend half** is platform-neutral, and
+on a non-Windows host it is the entire graphics stack rather than an optional
+extra, because the SDK chooses the backend by platform
+(`rexglue-sdk/CMakeLists.txt:37` **[tree]**): on Windows D3D12 defaults on and
+Vulkan off; everywhere else D3D12 is forced off and Vulkan on. The same file
+refuses to configure on anything but Windows, Linux and macOS.
+
+| V0 work | Helps Linux / macOS | Note |
+| --- | --- | --- |
+| Initialise the Vulkan submodules | yes | 6 of the 8 top-level uninitialised ones — `glslang`, `spirv-headers`, `spirv-tools`, `vulkan-headers`, `vulkan-loader`, `vulkan-memory-allocator` — are required by any Vulkan build |
+| `moltenvk` submodule | macOS only | unused on Windows and Linux |
+| Vulkan backend building and rendering | yes | the only backend off Windows |
+| B-010 fix in the Vulkan host-format table | yes | currently D3D12-side only |
+| Instance/device extension-list seam | yes | backend-level, host-agnostic |
+| Constant logging, camera heuristic, cadence | no | one camera, one eye |
+
+What V0 does **not** cover, and a Linux or macOS port would still owe, is the
+POSIX platform layer: `fiber_posix.cpp`, `seh_posix.cpp`,
+`mapped_memory_posix.cpp`, `exception_handler_posix.cpp`, `xmemory.cpp` and the
+rest of the `*_posix.cpp` set. V0 on Windows executes none of it.
+
+Three things are already portable here **[tree]**: [src/](../src) contains no
+Windows-specific call (`windows.h`, `_WIN32`, `__declspec` all absent); audio has
+only a `nop` and an SDL backend, so it is already WASAPI/CoreAudio/ALSA/AAudio;
+and the SDK carries `surface_win.cpp`, `surface_mac.cpp` and
+`surface_gnulinux.cpp` with presets already in place for Linux, macOS and ARM64.
+The toolchain is Clang-only on every host (`rexglue-sdk/CMakeLists.txt:83`
+rejects MSVC), and this Windows build already uses Clang and Ninja, so a port
+would use the same compiler frontend.
+
+The consequence for V0 itself: building the same backend once with the existing
+`linux-amd64-release` preset would exercise `fiber_posix.cpp`, `seh_posix.cpp`
+and `mapped_memory_posix.cpp` — the same three files V2 and V5 will hit — with no
+Android toolchain, no signing and no headset. That is the cheapest rehearsal
+available for the POSIX third of both ports. It is a partial proxy only:
+desktop GPUs have geometry shaders and fragment-shader interlock that Adreno and
+Apple GPUs do not, and Linux's `ucontext` is not deprecated the way iOS's is.
+
+None of this is a Linux or macOS commitment.
+[DECOMPILATION_PLAN.md](../DECOMPILATION_PLAN.md) still excludes those hosts; the
+paragraph above records what carries over, not work that is now planned.
 
 ## 6. Two risks that are not graphics
 
