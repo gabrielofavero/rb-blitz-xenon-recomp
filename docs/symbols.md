@@ -19,6 +19,11 @@ plaintext XEX2 header (`scripts/parse_xex2_header.py`). Codegen completed with
 | Header size | `0x3000` |
 | Encryption | normal (1), compression basic (1) |
 
+These are the numbers [config/game_fingerprints.toml](../config/game_fingerprints.toml)
+repeats as sizes and SHA-256 digests: the build checks the image against them
+before running codegen, and the boot logs the digest it actually got — see
+[build-and-run.md](build-and-run.md) §3–§4.
+
 ## Sections
 
 | Name | Guest range | Size | Executable |

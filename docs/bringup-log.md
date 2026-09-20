@@ -916,7 +916,8 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 
 - `1/1 Test #1: crypto_keytable ... Passed` in 0.07 s, and the same test source
   compiles clean standalone with `clang++ -std=c++23 -Wall -Wextra -Wpedantic`
-  (88 checks pass).
+  (88 checks pass). It was the only test target at the time; the section below adds
+  a second.
 - **The tests bite.** Reintroducing the B-009 bug in a scratch copy of the header
   (`PlaintextKeyAtOffset` returning entry 0, i.e. resolving by key id) turns 15
   checks red and exits 1, naming `tests/crypto_keytable_tests.cpp:162` for the
@@ -931,4 +932,95 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 issue is unaffected: milestone 4 and 5 still have no scripted run, because
 `scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
 results. The narrower wording is now in [known-issues.md](known-issues.md).
+
+## The fingerprint file gains consumers: gate, boot line, header, tests (2026-09-19)
+
+No new blocker. `config/game_fingerprints.toml` was the Milestone 0 artifact with
+nothing behind it: it recorded sizes and SHA-256 digests for `default.xex`,
+`gen/main_xbox.hdr` and `gen/main_xbox_0.ark`, no code read it, and no log line
+reported a fingerprint — so a wrong dump failed late as a content-open error well
+into boot, and definition-of-working #10 ("the SDK version, game fingerprint …")
+was half unmet. It now has four consumers, all built on one parsing/comparison unit
+instead of four ad-hoc readers.
+
+**The shared half.** [`src/util/sha256.{h,cpp}`](../src/util/sha256.h) is a
+project-owned FIPS 180-4 implementation — the host side had no digest at all, and
+taking a dependency for 90 lines is not a trade this project makes — streaming each
+file through a 1 MiB buffer so the 361 MB ark never lands in memory.
+[`src/util/game_fingerprint.{h,cpp}`](../src/util/game_fingerprint.h) parses the
+TOML subset the file actually uses (`schema_version`, `[game]`, repeated
+`[[files]]`, quoted strings, integers, booleans) and answers one question per role:
+*does this file have the recorded size and digest?* A malformed file is an error
+rather than an empty table, because refusing is the whole job.
+
+**1. The gate, before codegen.** `rb_blitz_fingerprint_gate` is a dependency of
+`rb_blitz_codegen`, so translation cannot start against an image whose digest
+differs from the file's. It checks the codegen input only — `default.xex`, 0.066 s —
+while `--all` additionally hashes the `.hdr` and the 361 MB `.ark` (2.15 s here),
+which is the size/digest half of the audit Milestone 4 was missing. The exit codes
+are a contract: 0 ok, 1 mismatch or unreadable, 2 usage or malformed fingerprint
+file — malformed input is not a way past the check.
+`-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON` relaxes the mismatch to a warning, for a
+checkout whose `game/` is a Deluxe root.
+
+**2. The compiled-in expectation.** The same binary's `--emit-header` writes
+`generated/fingerprint_expected.h` (not committed, like all generated output), and
+listing it in `target_sources` is what makes CMake regenerate it when the `.toml`
+changes. The runtime therefore compares against the numbers the gate already
+checked, without parsing TOML at boot.
+
+**3. The boot line.** [`src/rb_blitz_app.h`](../src/rb_blitz_app.h) overrides
+`OnPostLoadXexImage` — the first point where `game_data_root()` is final and logging
+is up — and logs both halves. Nothing there aborts, because pointing a built binary
+at a different root is a supported way to run.
+
+**4. The tests.** `tests/fingerprint_tests.cpp` covers the parser (six malformed
+inputs among them), the size/digest verdicts and the generated header text: 331
+checks in 9 cases. The single case that touches the real dump hashes
+`game\default.xex` only, and skips visibly when the dump is absent or the opt-out is
+set.
+
+**How it was verified.**
+
+```powershell
+cmake --build --preset win-amd64-release --target rb_blitz
+ctest --test-dir out\build\win-amd64-release --output-on-failure
+```
+
+- **The gate really runs before codegen.** Deleting
+  `generated\default\codegen.build.stamp` and rebuilding `rb_blitz_codegen` shows
+  the gate as the first ninja edge — printing
+  `ok entrypoint default.xex 9023488 bytes sha256 e2195d62…84bb` — and codegen only
+  after it, finishing normally and rewriting the stamp. A truncated copy of the real
+  `.xex` stops the build there with the digest it found next to the expected one,
+  and `--allow-mismatch` turns that same state into exit 0.
+- **The tool's contract holds.** Size mismatch, missing file, missing fingerprint
+  file and bad usage were each exercised; the exit codes were 1, 1, 1 and 2, as
+  documented.
+- **A real boot logs both lines** (25 s run, window closed cleanly, newest
+  `logs\rb_blitz_001.log`):
+
+  ```text
+  [info] [core] [t20932] boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260919_2358
+  [info] [core] [t20932] game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb)
+  ```
+
+- **One bug came out of the boot.** `REXGLUE_BUILD_STAMP` is declared in
+  `rex/version.h`, which the app header did not include, so the first link failed
+  with `use of undeclared identifier 'REXGLUE_BUILD_STAMP'`; adding the include
+  fixed it and nothing else about the build changed.
+- **`ctest` is green on both targets:** `1/2 crypto_keytable` 0.06 s, `2/2
+  fingerprint` 0.43 s, 419 checks.
+
+**Deliberately not demonstrated.** The runtime `MODIFIED` path has no live capture.
+Exercising it needs a genuinely different `default.xex`, and a modified copy does not
+load, so `OnPostLoadXexImage` never runs — the comparison logic is covered by the
+unit tests instead. The build-side half of the same check *is* demonstrated, and it
+is the half that fails closed.
+
+**Still open.** The ARK/HDR *offset* audit (Milestone 4) is untouched by any of
+this: the two files are now proven to be the recorded revision, not proven to be
+read at the right offsets. `toolchain.md` (Milestone 6, step 4) is still missing
+too — the build works because the absolute compiler/cmake/ninja paths live in the
+build tree's `CMakeCache.txt` and nowhere else.
 

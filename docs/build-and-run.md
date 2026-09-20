@@ -227,6 +227,62 @@ cmake --build --preset win-amd64-release -- -v                # show full comman
 Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`,
 `rexgpu-xenos.dll`.
 
+### The build gate: `game/` must be the fingerprinted dump
+
+Every build of `rb_blitz_codegen` — and therefore of `rb_blitz` — first runs
+`rb_blitz_fingerprint` against `game/default.xex`, and stops the build (exit 1)
+when it is not the dump
+[config/game_fingerprints.toml](../config/game_fingerprints.toml) describes:
+
+```text
+[0/4] Checking game data against config/game_fingerprints.toml
+Rock Band Blitz  title 5841122D  media 78492654  region-free  xex 0.0.0.2  (schema 1, game_fingerprints.toml)
+ok             entrypoint       default.xex                9023488 bytes  sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb
+```
+
+That is deliberate: every address in [config/](../config) belongs to one image, so a
+wrong `default.xex` has to fail here, with this message, instead of at runtime as
+`Call to invalid or unregistered function`. A mismatch prints the digest it found
+next to the one it expected, and the gate also fails if the fingerprint file itself
+cannot be read — malformed input is not a way past the check.
+
+The same binary is the audit tool. The gate checks the codegen input (`default.xex`)
+only, which costs ~0.07 s; `--all` additionally hashes `gen/main_xbox.hdr` and the
+361 MB `gen/main_xbox_0.ark` (~2 s):
+
+```powershell
+.\out\build\win-amd64-release\rb_blitz_fingerprint.exe --project-dir . --all
+```
+
+Its other job is generating
+[generated/fingerprint_expected.h](../generated), the compiled-in copy of the same
+numbers that the runtime logs against (see §4). It is regenerated automatically
+whenever the `.toml` changes, and is not committed.
+
+A deliberately modified content root is a supported configuration — a Rock Band
+Blitz Deluxe install is the same files with `gen/` and the `.xex` replaced — so the
+gate can be relaxed for a checkout whose `game/` is one:
+
+```powershell
+cmake --preset win-amd64-release -DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON
+```
+
+The mismatch is then reported but not fatal (it also switches the fingerprint test's
+real-dump case from a failure to a skip). The option is **cached**: a later
+`cmake --preset win-amd64-release` keeps the old value, so turn it back off with
+`-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=OFF` rather than leaving a stale cache behind.
+Codegen still runs on whatever
+`default.xex` is present, so this is for the case where the *content root* is the
+mod's, never a claim that a Deluxe image compiles: see
+[deluxe-compat.md](deluxe-compat.md).
+
+`rb_blitz.exe` carries the Blitz icon. [rb_blitz.rc](../rb_blitz.rc) compiles
+[blitz.ico](../blitz.ico) into the executable, so the icon is a build input like
+any other source: replacing the `.ico` and rebuilding is the whole edit, since
+nothing else references the file. One resource covers every surface, because SDL
+registers its window class with the first `RT_GROUP_ICON` in the executable —
+Explorer, title bar, taskbar and Alt-Tab all follow from it.
+
 ### Proving the new code actually linked
 
 Before spending a run on it, confirm the compiled-in diagnostic string is in the
@@ -242,17 +298,24 @@ The timestamp must be from this build, and the check must print `True`.
 
 ### Host unit tests (run these instead of booting, when they cover the change)
 
-The tests under [tests/](../tests) exercise pure host logic — currently the B-009
-MOGG key path, whose SDK-free half lives in
-[src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h) — so they need no
-game image, no runtime and no window, and finish in well under a second:
+The tests under [tests/](../tests) exercise pure host logic — the B-009 MOGG key
+path, whose SDK-free half lives in
+[src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h), and the fingerprint
+parsing/comparison in
+[src/util/game_fingerprint.h](../src/util/game_fingerprint.h) — so they need no
+game image, no runtime and no window, and finish in about half a second:
 
 ```powershell
-cmake --build --preset win-amd64-release --target rb_blitz_crypto_keytable_tests
+cmake --build --preset win-amd64-release `
+    --target rb_blitz_crypto_keytable_tests rb_blitz_fingerprint_tests
 ctest --test-dir out\build\win-amd64-release --output-on-failure
 ```
 
-Expected output is `1/1 Test #1: crypto_keytable ... Passed`. A failing check
+Expected output is `2/2` passing — `Test #1: crypto_keytable` and
+`Test #2: fingerprint`, 419 checks between them. Exactly one case needs the dump at
+all (`fingerprint_real_game_dump` hashes `game\default.xex`), and it prints
+`[ SKIP ]` instead of running when the dump is absent or, with
+`RBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, when it is not the supported revision. A failing check
 prints the case name, `file:line`, and for memory comparisons the first differing
 bytes, so a red test is self-explanatory. The harness is
 [tests/check.h](../tests/check.h) — deliberately dependency-free, because the
@@ -278,6 +341,22 @@ copied over a vanilla game folder. Nothing else on the command line changes. The
 **build** input does not get that choice: codegen and every byte-guarded patch are
 addressed against the vanilla `default.xex`, so keep it (the mod's own installer
 suggests renaming it to `default_vanilla.xex` before installing).
+
+Every boot logs the identity of both halves, so a log states which binary ran
+against which image before any other evidence is read:
+
+```text
+[info] [core] [t20932] boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260919_2358
+[info] [core] [t20932] game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62…84bb)
+```
+
+The first line is the SDK build stamp compiled into the binary, the second the
+`default.xex` it actually booted. A different `default.xex` **warns and continues**
+— `game data identity: MODIFIED - … is N bytes, sha256 …` followed by an `expected:`
+line naming the values in
+[config/game_fingerprints.toml](../config/game_fingerprints.toml) — because pointing
+a built executable at a Deluxe content root is a supported run, not a build error.
+The fatal half of that check is the gate in §3, not the boot.
 
 Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 

@@ -58,7 +58,8 @@ and log capture.
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [src/](src) | Host application and native overrides for guest functions. |
 | [tests/](tests) | Host unit tests (`ctest`); no SDK and no game image needed. |
-| [config/](config) | Codegen inputs: confirmed function boundaries, names, fingerprints. |
+| [config/](config) | Codegen inputs: confirmed function boundaries, names, and the fingerprint the build gate enforces. |
+| [tools/](tools) | Host-side build tools: `rb_blitz_fingerprint`, the game-data gate, audit and header generator. |
 | [patches/](patches) | Local fixes to the pinned SDK, kept as patch files so SDK fixes survive a re-checkout without committing inside the submodule. |
 | [scripts/](scripts) | Configure/build/run helpers, plus the two SDK-tree repairs (§0 of the build guide). |
 

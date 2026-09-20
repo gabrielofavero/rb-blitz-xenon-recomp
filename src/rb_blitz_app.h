@@ -5,8 +5,17 @@
 
 #pragma once
 
+#include <cstdint>
+#include <filesystem>
+#include <string>
+
 #include <rex/filesystem.h>
+#include <rex/logging/macros.h>
 #include <rex/rex_app.h>
+#include <rex/version.h>
+
+#include "generated/fingerprint_expected.h"
+#include "util/sha256.h"
 
 class RbBlitzApp : public rex::ReXApp {
  public:
@@ -58,5 +67,44 @@ class RbBlitzApp : public rex::ReXApp {
     if (paths.cache_root.empty()) {
       paths.cache_root = paths.user_data_root / "cache";
     }
+  }
+
+  // Boot identity. Called once the XEX is loaded and the paths are final, which
+  // is the first point where game_data_root() is known and logging is up.
+  //
+  // The build gate in CMakeLists.txt has already refused to recompile against a
+  // dump other than the one config/game_fingerprints.toml describes, but a
+  // launcher can still point a built binary at a different game/ tree - a Deluxe
+  // content root, for instance. Nothing here aborts: the point is that the log
+  // says which revision (if any) the running executable was actually booted
+  // against, so a bug report can be matched to it.
+  void OnPostLoadXexImage() override {
+    REXLOG_INFO("boot identity: {}", REXGLUE_BUILD_STAMP);
+
+    const std::filesystem::path entrypoint =
+        game_data_root() / rb_blitz::fingerprint::vanilla::kEntrypointPath;
+    std::error_code ec;
+    std::uint64_t size = 0;
+    const std::string digest = rb_blitz::util::HashFileHex(entrypoint, &size, ec);
+    if (digest.empty()) {
+      REXLOG_WARN("game data identity: cannot read {} ({})", entrypoint.string(),
+                  ec.message());
+      return;
+    }
+
+    if (size == rb_blitz::fingerprint::vanilla::kEntrypointSize &&
+        digest == rb_blitz::fingerprint::vanilla::kEntrypointSha256) {
+      REXLOG_INFO("game data identity: {} {} ({} bytes, sha256 {})",
+                  rb_blitz::fingerprint::vanilla::kGameName,
+                  rb_blitz::fingerprint::vanilla::kXexVersion, size, digest);
+      return;
+    }
+
+    REXLOG_WARN("game data identity: MODIFIED - {} is {} bytes, sha256 {}",
+                entrypoint.string(), size, digest);
+    REXLOG_WARN("  expected: {} bytes, sha256 {} (config/game_fingerprints.toml, see"
+                " docs/deluxe-compat.md)",
+                rb_blitz::fingerprint::vanilla::kEntrypointSize,
+                rb_blitz::fingerprint::vanilla::kEntrypointSha256);
   }
 };

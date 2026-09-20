@@ -15,9 +15,13 @@ last_updated: 2026-09-19
     the only existing script (`scripts/acceptance_launches.ps1`) stops at boot. The
     exit criterion below depends on that driver existing, and Milestone 5 needs the
     same one.
-  - **Log identity is not enforced.** `config/game_fingerprints.toml` exists but no
-    code reads it, and the log records neither a game-data fingerprint nor the SDK
-    version — both are required by definition-of-working #10.
+  - **Log identity is enforced (2026-09-19).** Both halves of
+    definition-of-working #10 are now automatic: every boot logs `boot identity:`
+    (the SDK build stamp) and `game data identity:` (the `default.xex` digest, or a
+    `MODIFIED` warning when it is not the supported revision), and the build
+    refuses to recompile against a dump other than the one
+    `config/game_fingerprints.toml` describes —
+    [docs/build-and-run.md](../docs/build-and-run.md) §3–§4.
   - **There is no `toolchain.md` repo memory.** The build works, but the absolute
     compiler/cmake/ninja paths live only in `out/build/<preset>/CMakeCache.txt`, and
     none of the three is on a plain shell's PATH; step 4 has to create that file.
@@ -68,9 +72,12 @@ last_updated: 2026-09-19
 
 - Test wrong/missing game data and confirm the error is actionable (fingerprint
   mismatch must fail closed, per `config/game_fingerprints.toml`).
-- **State (2026-09-19): not implemented.** A wrong or missing game-data root fails
-  late (content-open errors well into boot) rather than closed, because nothing
-  consumes the fingerprint file — see entry state.
+- **State (2026-09-19): build-side implemented.** Codegen now fails closed on a
+  wrong, missing or unreadable `game\default.xex` before any translation happens,
+  and prints the digest it found next to the expected one. A *runtime*
+  `--game_data_root` mismatch still starts and only warns — deliberate, so a Deluxe
+  content root stays runnable — so what remains is judging whether the boot-time
+  warning is enough for a wrong-root launch.
 
 ### 4. Freeze and document
 

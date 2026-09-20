@@ -95,10 +95,11 @@ last_updated: 2026-09-19
   it next session, because it is the first step of every later acceptance run.
 - **Step 1 (content): menus and bundled songs work; the offset audit does not
   exist.** `gen/main_xbox.hdr` / `gen/main_xbox_0.ark` are opened without complaint,
-  but nobody has compared offsets or sizes, and
-  `config/game_fingerprints.toml` is **read by nothing** — no code references it
-  and no log line reports a fingerprint — so a wrong dump still fails late and
-  confusingly.
+  but nobody has compared the *read* offsets. The fingerprints themselves are
+  enforced as of 2026-09-19: codegen is gated on `game\default.xex` matching
+  `config/game_fingerprints.toml`, every boot logs the image it got, and
+  `rb_blitz_fingerprint --all` audits the `.hdr`/`.ark` sizes and digests — see
+  [docs/build-and-run.md](../docs/build-and-run.md) §3–§4.
 - **Step 2 (input): pad enumerated, verification still keyboard-only.** The last
   session's log shows `SDL OnControllerDeviceAdded: "XInput Controller #1"`
   (VendorID `0x0B05`, ProductID `0x1B4C`); every navigation verified so far was
@@ -180,8 +181,9 @@ is the same engine, and two projects have already solved a lot of this:
   game-data root with correct offsets and sizes (fingerprints in
   `config/game_fingerprints.toml`).
 - Reach the main menu and enumerate bundled songs with **no online dependency**.
-- **State (2026-09-19):** menus and bundled-song enumeration work; the
-  offset/size audit and any fingerprint check are still to do.
+- **State (2026-09-19):** menus and bundled-song enumeration work, and the
+  fingerprint check now exists at build time, at boot and as an audit tool; the
+  in-game offset/size audit is still to do.
 
 ### 2. Input
 
@@ -233,10 +235,12 @@ is the same engine, and two projects have already solved a lot of this:
 2. **Verify with a pad instead of injected keys** (step 2): navigation,
    accept/back, pause, lane controls, and keyboard fallback parity on
    `XInput Controller #1`.
-3. **Decide what `config/game_fingerprints.toml` is for.** Either wire it into a
-   real check (definition-of-working #10 wants the SDK version *and* fingerprint in
-   the log) or delete it as dead config. Do the offset/size audit for
-   `main_xbox.hdr` / `_0.ark` at the same time.
+3. **The fingerprint file has consumers now; the offset audit is what is left.**
+   The decision recorded here is made and implemented (2026-09-19): the gate fails
+   closed before codegen, the boot logs both identity lines #10 asks for, and
+   `rb_blitz_fingerprint --all` checks the `.hdr`/`.ark` sizes and digests. What
+   no hashing can answer is the in-game offset audit for `main_xbox.hdr` /
+   `_0.ark` — that is the remaining part of this item.
 4. **Run the persistence cases deliberately** (step 3): launch twice and diff the
    writable root; then run with the root absent and with a deliberately corrupted
    `globaloptions`.

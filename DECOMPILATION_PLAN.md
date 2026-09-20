@@ -33,6 +33,8 @@ All of these must pass on a clean Windows AMD64 checkout:
 9. Required local settings/save data survive a restart.
 10. Failure produces a useful log containing the SDK version, game fingerprint, last guest PC/function, and missing import or assertion where applicable.
 
+The first two fields no longer depend on a failure (2026-09-19): every boot logs `boot identity:` with the SDK build stamp and `game data identity:` with the `default.xex` digest, or a `MODIFIED` warning naming the values in [config/game_fingerprints.toml](config/game_fingerprints.toml) — [docs/build-and-run.md](docs/build-and-run.md) §4. The remaining two are logged by the code paths that detect them, as before.
+
 This definition intentionally does not require online services, leaderboards, power-up service behavior, achievements, every song/DLC package, multiplayer, non-Windows hosts, perfect timing, or polished presentation.
 
 It also covers **only the vanilla content variant**. Running a Rock Band Blitz Deluxe install as the game-data root is a separate post-bring-up compatibility goal with its own acceptance criteria, not a condition of this release: [docs/deluxe-compat.md](docs/deluxe-compat.md).
@@ -133,12 +135,12 @@ The SDK is currently at `rexglue-sdk/`. Before scaffolding, either move/re-add i
 
 - [x] Add a root `.gitignore` for `game/`, `out/`, local logs/captures, user presets, and generated bulk output as decided below.
 - [x] Pin ReXGlue v0.10.0 commit `c94f5eb...` as a submodule or document an equally reproducible SDK checkout.
-- [x] Record SHA-256 hashes and sizes for the expected XEX/HDR/ARK in a local, non-copyrighted fingerprint file. Decide whether hashes are safe and useful to commit.
+- [x] Record SHA-256 hashes and sizes for the expected XEX/HDR/ARK in a local, non-copyrighted fingerprint file. Decide whether hashes are safe and useful to commit. (Committed as [`config/game_fingerprints.toml`](config/game_fingerprints.toml) and **enforced** since 2026-09-19: codegen refuses to run against a different `default.xex` unless the opt-out is set deliberately, and every boot logs which image it got.)
 - [x] Record the title/media ID, executable version, region, and whether the dump includes an update.
 - [x] Establish one baseline comparison run in current Xenia Canary and retain its config, log, and milestone observations locally. The commit-safe findings are in [`docs/baselines/xenia-canary-80679bc.md`](docs/baselines/xenia-canary-80679bc.md).
 - [x] Generated-code policy: do not commit generated C++; reproduce it from the manifest and pinned SDK. Keep only `generated/rexglue.cmake`, which is required by the generated project scaffold.
 
-Exit criterion: a fresh checkout can acquire the SDK deterministically, reject the wrong game revision by fingerprint, and cannot accidentally commit retail content.
+Exit criterion: a fresh checkout can acquire the SDK deterministically, reject the wrong game revision by fingerprint, and cannot accidentally commit retail content. **Fingerprint half met** (2026-09-19): the build itself refuses to generate code for an image other than the one the fingerprint file describes ([docs/build-and-run.md](docs/build-and-run.md) §3).
 
 ### Milestone 1 — Scaffold and generate
 
@@ -187,14 +189,14 @@ Exit criterion: ten consecutive launches reach the title screen/offline prompt a
 
 ### Milestone 4 — Menus, content discovery, input, and saves
 
-- [ ] Confirm the ARK/HDR files are read from the game-data root with correct offsets and sizes.
+- [ ] Confirm the ARK/HDR files are read from the game-data root with correct offsets and sizes. (The file-level half is done — `rb_blitz_fingerprint --all` checks the sizes and SHA-256 of `gen/main_xbox.hdr` and `gen/main_xbox_0.ark` against [config/game_fingerprints.toml](config/game_fingerprints.toml) — but the in-game *offset* audit is still open.)
 - [x] Reach the main menu and enumerate bundled songs without an online dependency. (Offline menus, song list and song selection are working as of 2026-09-19; the offset/size half of the item above is still unaudited.)
 - [ ] Map one standard XInput controller and verify navigation, accept/back, pause, and lane controls.
 - [ ] Provide a deterministic local profile/storage response sufficient for offline use.
 - [ ] Verify settings/save creation, restart persistence, and behavior with missing/corrupt writable data.
 - [x] Keep achievements, leaderboards, and downloadable-song enumeration disabled or gracefully unavailable unless they block the core loop. (The Rock Central sign-in attempt is refused and dismissible and the aggregate DLC enumerator returns 0 items, so the offline path is unaffected. This is the **final** behaviour for the vanilla route, not a bring-up shortcut — unblocking online features is not a milestone of ours; [docs/deluxe-compat.md](docs/deluxe-compat.md).)
 
-Exit criterion: the user can launch, navigate, see bundled content, select a song, and return to the menu repeatedly. **Partially met** (2026-09-19) — the offline path, bundled content and song selection work, but XInput lane/pause verification, storage restart persistence, and the ARK/HDR + fingerprint audit are still open.
+Exit criterion: the user can launch, navigate, see bundled content, select a song, and return to the menu repeatedly. **Partially met** (2026-09-19) — the offline path, bundled content and song selection work, but XInput lane/pause verification, storage restart persistence, and the ARK/HDR offset audit are still open (its size/digest half is now covered by the fingerprint audit).
 
 ### Milestone 5 — Complete one song
 
@@ -212,8 +214,8 @@ Exit criterion: one named bundled song passes the full launch-to-results path th
 
 - [ ] Add a one-command documented configure/build flow and a clear runtime data-path argument.
 - [ ] Run Debug and Release smoke tests on a clean checkout.
-- [ ] Test wrong/missing game data and confirm the error is actionable.
-- [ ] Freeze the minimal supported SDK/game fingerprints and compiler versions.
+- [ ] Test wrong/missing game data and confirm the error is actionable. (Build-side done 2026-09-19: the gate fails closed and prints the digest it found next to the one expected. The runtime half — a launcher pointing a built `rb_blitz.exe` at the wrong root — warns and continues by design.)
+- [ ] Freeze the minimal supported SDK/game fingerprints and compiler versions. (The game fingerprint is frozen in [config/game_fingerprints.toml](config/game_fingerprints.toml) and checked at build time; the SDK pin and compiler paths still need `toolchain.md`.)
 - [ ] Document remaining issues and explicitly move non-blockers to the post-bring-up backlog.
 - [ ] Ensure a distributable build contains no retail game data, symbols derived from proprietary databases, credentials, or machine-specific paths.
 
@@ -264,7 +266,7 @@ Suggested blocker entry:
 
 | Risk | Early check | Bring-up response |
 | --- | --- | --- |
-| Wrong or incomplete retail dump | Fingerprint and ARK/HDR read audit | Stop with a clear error |
+| Wrong or incomplete retail dump | Fingerprint gate before codegen; runtime identity line in the log; ARK/HDR read audit | Stop with a clear error — automatic since 2026-09-19 in the build (mismatch or unreadable fingerprint file fails codegen) and logged at boot |
 | Dead online-service dependency | Run offline baseline and log service calls | Preserve/force the legitimate offline failure path; never emulate a fake service — online behavior is the Deluxe mod's problem, not ours ([docs/deluxe-compat.md](docs/deluxe-compat.md)) |
 | Deluxe or title-update content in the data root | Run the vanilla smoke route against an installed Rock Band Blitz Deluxe root | Keep the vanilla `default.xex` as the codegen input, treat the overlay as data, and fix behaviour deltas in the project layer ([docs/deluxe-compat.md](docs/deluxe-compat.md)) |
 | Undiscovered PPC targets or EH funclets | Codegen validation plus crash-PC correlation | Layered function/analysis hints |
