@@ -1063,7 +1063,7 @@ images decrypt to 10,747,904 bytes; the payload's is not even encrypted
 | Guest VA | Retail | Ultimate | What the edit is |
 | --- | --- | --- | --- |
 | `0x8205DD74` | `"UPDATE:\0"` | `"D:\0…"` | the content-device prefix, 7 bytes |
-| `0x821D0A7C` | `01` (`li r3,1`) | `00` (`li r3,0`) | tail of `sub_821D0A18`: its 2-entry name table can never match |
+| `0x821D0A7C` (byte `0x821D0A7F`) | `01` (`li r3,1`) | `00` (`li r3,0`) | tail of `sub_821D0A18`: its 2-entry song blacklist table (`hierkommtalex`, `rockandrollstar`) can never match |
 | `0x8236C108` | `mflr r12` | `blr` | `sub_8236C108` returns immediately, `r3` intact |
 
 **12 differing bytes in 3 runs, and that is the entire code delta** — everything
@@ -1072,6 +1072,19 @@ job: reproduce three edits host-side and make the payload's files visible to the
 guest. The edits live in [`src/hooks/ultimate.cpp`](../src/hooks/ultimate.cpp) as
 one guarded data patch and two `REX_FUNC` overrides; the payload's own `default.xex`
 is never executed.
+
+**The executable is frozen, so that delta covers every release.** The mod's
+`default.xex` has exactly one commit in its repository (`66038c9f`, 2025-02-24) and is
+byte-identical in every release zip from 1.0 through 2.11, at sha256
+`390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c` — the same value as
+the payload staged here (`Get-FileHash game\ultimate\default.xex`). Everything the mod
+added after 1.0 (offline score saving, input viewer, cheats, custom gems, song search)
+is therefore ark/DTA content, which the overlay already carries; a release that ships a
+*different* `default.xex` is the one case that would invalidate this section, and its
+hash is the first thing to check. The release notes also name two of the three edits as
+features — "Removed song blacklist (Rock 'n' Roll Star and Hier kommt Alex unblocked)"
+and "Dirty disk error when loading custom songs removed (Xbox 360)" — which is what
+makes the blacklist byte a real feature rather than an unexplained diff.
 
 **Why the payload cannot simply be the game root.** It carries the mod's
 `default.xex` (8,812 KB) and the title-update-shaped pair `gen/patch_xbox.hdr`
@@ -1116,7 +1129,7 @@ a rendered frame, 7 KB / ~19 is black):
 | --- | --- |
 | payload present, default mask `0x7` | **pass** — overlay stats line, `d:\gen\patch_xbox.hdr` then `d:\gen\patch_xbox_0.ark`, no dirty disc, 1694 KB / 75.1 |
 | payload pair copied into `game/gen/` (merged) | **pass** — `patches 0x7 (merged into the game root)`, no overlay line, 1694 KB / 75.0 |
-| `--ultimate_patches=5` (reserved name off) | pass — 1694 KB / 75.1 |
+| `--ultimate_patches=5` (song blacklist off) | pass — 1694 KB / 75.1 |
 | `--ultimate_patches=6` (content device off) | boots (1725 KB / 74.3) but the payload is never opened: `update:\gen\patch_xbox.hdr -> 0xc000000f` |
 | `--ultimate_patches=3` (state update off) | **fail** — dirty-disc abort, 7 KB / 19.5 |
 | `--ultimate_patches=1` (content device only) | **fail** — same dirty-disc abort, 7 KB / 19.5 |
@@ -1144,7 +1157,9 @@ ultimate: overlay \Device\BlitzOverlay = …\game\ultimate + …\game - 4 payloa
 
 **Still open.** The state-update edit's guest-side effect is established behaviourally
 only: no route has yet gone past the menu *with* an active payload to show an
-Ultimate-only feature working, and the reserved-name edit is reproduced without a
-user-visible artefact to point at. Whether the mod's two empty directories
-(`gen/`, `screenshots/`) matter is likewise unmeasured.
+Ultimate-only feature working, and the blacklist edit is reproduced without a boot
+that loads one of the two songs it unblocks. The payload's `screenshots/` placeholder
+is now accounted for (the mod's `ulti_init.dta` offers its screenshot button only when
+that folder exists, which is what the zip's `_keepme` file creates), so only the empty
+`gen/` folder is still unexplained.
 

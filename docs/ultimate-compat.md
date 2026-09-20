@@ -49,10 +49,15 @@ for byte, when no payload is present.
   | `default.xex` | 8,812 KB | The mod's executable. **Not used by us**, see §4. |
   | `gen/patch_xbox.hdr` | 4,381 B | Title-update-shaped content header. |
   | `gen/patch_xbox_0.ark` | 14,171,207 B | The mod's content, in the same ark format as `main_xbox_0.ark`. |
-  | `screenshots/_keepme`, empty `gen/` | — | Directory placeholders. |
+  | `screenshots/_keepme` | 3 B (`zxc`) | A directory placeholder, but a load-bearing one: the mod's `ulti_init.dta` offers its endgame screenshot button only when a `screenshots/` folder exists, which is what this file is there to create. |
+  | `gen/` | — | Empty in the archive; the payload's content is the pair above. |
 
   `gen/patch_xbox.hdr` + `gen/patch_xbox_0.ark` are one unit: the game treats a
-  header without its `_0.ark` as a damaged disc.
+  header without its `_0.ark` as a damaged disc. The names are the game's own
+  convention, not the mod's: the decrypted retail image carries the format string
+  `%s/gen/patch_%s` (right after `gen/main_%s`, at `0x8205C827`) and `UPDATE:` as its
+  only device string (at `0x8205DD74`, the byte run edit `1` rewrites, §3). The mod
+  therefore rides a patch-content path that the retail game already has.
 - The mod also targets **PS3** (a `.pkg`). That flavour is not consumable here and is
   out of scope.
 
@@ -73,13 +78,34 @@ mapped at `0x82000000`):
 
 | Guest VA | Retail | Ultimate | What it is | Patch bit |
 | --- | --- | --- | --- | --- |
-| `0x8205DD74` | `"UPDATE:\0"` | `"D:\0\0\0\0\0\0\0"` | The content-device string. Points the guest's content lookups at `d:` instead of `update:`. | `1` (content device) |
-| `0x821D0A7C` | `li r3,1` (`01`) | `li r3,0` (`00`) | Tail of `sub_821D0A18`, the lookup that scans the 2-entry table at `0x82015FC8` (`hierkommtalex`/1005106, `rockandrollstar`/1005109). Patched, that table never matches. | `2` (reserved name) |
+| `0x8205DD74` | `"UPDATE:\0"` | `"D:\0\0\0\0\0\0\0"` | The content-device string, the only `UPDATE:` in the image, feeding the retail format string `%s/gen/patch_%s` at `0x8205C827`. Points the guest's content lookups at `d:` instead of `update:`. | `1` (content device) |
+| `0x821D0A7C` (instruction; changed byte `0x821D0A7F`) | `li r3,1` (`01`) | `li r3,0` (`00`) | Tail of `sub_821D0A18`, the lookup that scans the 2-entry song-blacklist table at `0x82015FC8` (`hierkommtalex`/1005106, `rockandrollstar`/1005109). Patched, that table never matches — the mod's "Removed song blacklist (Rock 'n' Roll Star and Hier kommt Alex unblocked)". | `2` (song blacklist) |
 | `0x8236C108` | `mflr r12` (`7d8802a6`) | `blr` (`4e800020`) | Prologue of `sub_8236C108` (`object, state`): the whole function becomes a return with `r3` intact. | `4` (state update) |
 
 **12 bytes in 3 runs, and that is the entire code delta.** Everything else the mod
 does is content in `patch_xbox_0.ark`. This is why compatibility is a small, bounded
 job rather than a port of a fork.
+
+### The executable is frozen, so this delta covers every release
+
+The mod's `default.xex` is a committed binary: one commit in its repository
+(`66038c9f`, 2025-02-24), no patch script, no offset table, no CI step that touches
+it. It is also **byte-identical in every release** — 1.0, 1.01, 2.0, 2.1 and 2.11 all
+ship sha256 `390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c`, which
+is what the payload staged here (`game/ultimate/default.xex`, 9,023,488 B) hashes to
+(checked 2026-09-20). Two things follow:
+
+- **Every feature added after 1.0 is content.** Offline score saving, the input
+  viewer, the cheats, custom gems and song search shipped in the ark/DTA, not in the
+  executable, so they reach the guest through the overlay without more code work
+  (§6). We know of exactly three xex-side behaviours — the three edits above — and
+  the mod's own release notes name two of them as features: "Removed song blacklist
+  (Rock 'n' Roll Star and Hier kommt Alex unblocked)" (edit `2`) and "Dirty disk error
+  when loading custom songs removed (Xbox 360)" (edit `4`).
+- **A new release is normally a content change only**, which is what the overlay
+  already handles. The exception is a release that ships a *different* `default.xex`:
+  check its hash against `390e0ae0…` and re-derive the table above before trusting
+  anything else in this file.
 
 ## 4. Why the mod's `default.xex` is not the codegen input
 
@@ -105,7 +131,8 @@ Two facts forced the design, both established by probing:
    creates `update:` when the dump actually has a title update; pointing `update:` at
    the payload made the guest open the payload's files and then call
    `XamShowDirtyDiscErrorUI` (black screen). That is what a copied-over install looks
-   like from the inside: the payload expects the *retail* `d:\gen` to still be there.
+   like from the inside: the payload expects the *retail* `d:\gen` to still be there,
+   which is why the mod re-points `%s/gen/patch_%s` at `d:` instead (§2, §3).
 2. **The virtual file system cannot merge per file.** `VirtualFileSystem::OpenFile`
    resolves a file by resolving its *directory* first (`d:\gen` → an entry) and then
    calling `parent_entry->GetChild("patch_xbox.hdr")`. So a symbolic link, device
@@ -153,8 +180,8 @@ ultimate: overlay \Device\BlitzOverlay = …\game\ultimate + …\game - 4 payloa
 
 | Bit | Value | What it does | Needed? |
 | --- | --- | --- | --- |
-| Content device | `1` | `UPDATE:` → `D:` at `0x8205DD74`, so the guest looks for the payload's content pair in `d:\gen` rather than in a title-update device that this dump does not have. Without it the payload is mounted but never opened. | Yes, for the payload to have any effect. |
-| Reserved name | `2` | Forces `sub_821D0A18` to report "not in the table". | No for boot; part of the mod's behaviour. |
+| Content device | `1` | `UPDATE:` → `D:` at `0x8205DD74`, so the guest looks for the payload's content pair in `d:\gen` rather than in a title-update device that this dump does not have. The lookup is the retail format string `%s/gen/patch_%s` (§2), so this one string edit re-points it; without it the payload is mounted but never opened. | Yes, for the payload to have any effect. |
+| Song blacklist | `2` | Forces `sub_821D0A18` to report "not in the table", unblocking the two blacklisted bonus tracks (the mod's "Removed song blacklist"). | No for boot, but it is a user-visible feature: leave it on. |
 | State update | `4` | Forces `sub_8236C108` to return immediately. | **Load-bearing**: with the payload present and this bit off, the guest calls `XamShowDirtyDiscErrorUI` and the screen stays black (§7). |
 
 The data patch refuses to touch `0x8205DD74` unless it still holds `"UPDATE:\0"`, so
@@ -191,7 +218,7 @@ a black screen and ~75 with 1.7 MB is a rendered frame):
 | `--ultimate_mode=0` with the payload on disk | `ultimate: off, booting the retail game data` | 1725 KB, 74.3 | pass (vanilla) |
 | Payload directory renamed away, auto | `no payload at …\game\ultimate and no merged gen/patch_xbox.hdr, booting the retail game data` | 1726 KB, 74.3 | pass (vanilla) |
 | `--ultimate_patches=6` (content device off) | `update:\gen\patch_xbox.hdr -> 0xc000000f`; the payload is never opened | 1725 KB, 74.3 | boots, payload inert |
-| `--ultimate_patches=5` (reserved name off) | overlay + content device patched | 1694 KB, 75.1 | pass |
+| `--ultimate_patches=5` (song blacklist off) | overlay + content device patched | 1694 KB, 75.1 | pass |
 | `--ultimate_patches=3` (state update off) | `XamShowDirtyDiscErrorUI called! user_index=0` | 7 KB, 19.5 | **fail**, black screen |
 | `--ultimate_patches=1` (only the content device) | same dirty-disc abort | 7 KB, 19.5 | **fail**, black screen |
 | Pre-overlay attempt: payload aliased as `update:` | dirty-disc abort | 7 KB, 19.3 | rejected design (§5) |
@@ -241,7 +268,7 @@ rb_blitz.exe --game_data_root=<game root>
 | Fingerprinting | The gate describes `default.xex` in the data root. Because an installed payload is a *separate directory*, the root's identity is unchanged (the "game data identity" line reports the same 9,023,488-byte / `e2195d62…` image on every route). Replacing the root's `default.xex` would change it: the build gate fails closed and can be relaxed with `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, while the boot-time check only warns. | [known-issues.md](known-issues.md), [build-and-run.md](build-and-run.md) §3 |
 | Menu/input data is replaced | The payload ships its own `_ark/ui/…` and `config` data; a missing or renamed DTA block can silently kill every menu binding. | [rb3-references.md](rb3-references.md) §7.2 |
 | Content-enumeration counts change | Our verified offline state (`XamContentCreateEnumerator: added 2 items`, aggregate enumerator `0 items`) is a **vanilla** baseline. | [bringup-log.md](bringup-log.md), [prompts/05](../prompts/05-complete-one-song.md) |
-| A payload release with a different shape | We reproduce 12 bytes of an image and union a directory. An extra ark, a real `update:` device or a second executable would make the payload unreachable again, and this file has to be revisited. | this file |
+| A payload release with a different shape | We reproduce 12 bytes of an image and union a directory. An extra ark, a real `update:` device or a second executable would make the payload unreachable again, and this file has to be revisited. The executable itself has been frozen since 1.0 (§3), so compare the release's `default.xex` hash against `390e0ae0…` first. | this file |
 | Mod churn | Its install instructions can change between releases; the only shape we promise is the one in §2. | this file |
 
 ## 10. Acceptance criteria for "Ultimate works"

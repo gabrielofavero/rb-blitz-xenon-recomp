@@ -97,7 +97,7 @@ REXCVAR_DEFINE_STRING(ultimate_payload_root, "", "Compatibility",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_UINT32(ultimate_patches, kPatchAll, "Compatibility",
                       "Rock Band Blitz Ultimate default.xex edits to reapply: "
-                      "1=content device, 2=reserved name, 4=state update")
+                      "1=content device, 2=song blacklist, 4=state update")
     .range(0, kPatchAll)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -267,7 +267,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 
 // 0x821D0A18: the (name, id) table lookup, forced to "not in the table".
 extern "C" REX_FUNC(sub_821D0A18) {
-  if (rb_blitz::ultimate::PatchEnabled(rb_blitz::ultimate::kPatchReservedName)) {
+  if (rb_blitz::ultimate::PatchEnabled(rb_blitz::ultimate::kPatchSongBlacklist)) {
     ctx.r3.u64 = 0;
     return;
   }

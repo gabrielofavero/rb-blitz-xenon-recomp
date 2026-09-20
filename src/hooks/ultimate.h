@@ -27,9 +27,9 @@ namespace rb_blitz::ultimate {
 enum Patch : uint32_t {
   // 0x8205DD74: the 8-byte content device string "UPDATE:\0" -> "D:\0...".
   kPatchContentDevice = 1u << 0,
-  // 0x821D0A7C: tail of sub_821D0A18, "li r3,1" -> "li r3,0", i.e. the two entry
-  // (name, id) table never matches.
-  kPatchReservedName = 1u << 1,
+  // 0x821D0A7C (byte 0x821D0A7F): tail of sub_821D0A18, "li r3,1" -> "li r3,0", i.e.
+  // the two entry song blacklist (name, id) table never matches.
+  kPatchSongBlacklist = 1u << 1,
   // 0x8236C108: prologue of sub_8236C108, "mflr r12" -> "blr", i.e. the object
   // state update never runs.
   kPatchUpdateState = 1u << 2,
