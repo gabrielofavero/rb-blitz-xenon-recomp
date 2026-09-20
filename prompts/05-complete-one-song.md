@@ -1,7 +1,7 @@
 ---
 status: in-progress
 milestone: 5
-last_updated: 2026-09-19
+last_updated: 2026-09-20
 ---
 
 # Milestone 5 — Complete one song
@@ -15,8 +15,10 @@ last_updated: 2026-09-19
   [docs/bringup-log.md](../docs/bringup-log.md).
 - **Knowledge folded in (2026-09-19):**
   - **Already playable:** songs load, the highway/notes/HUD/3D background render,
-    and the author has played full songs through 3–4 times. That is an
-    observation, not a recorded acceptance run, and nothing about it is scripted.
+    and the author has played full songs through 3–4 times. That was an
+    observation rather than a recorded acceptance run, and none of it was
+    scripted; both changed on 2026-09-20 — see "Acceptance / exit criteria"
+    below.
   - **Content quirks:** bundled content enumerates from the game-data root
     (`XamContentCreateEnumerator: added 2 items` — the `songcache:` /
     `globaloptions:` content devices); `game:\Content\0000000000000000` does not
@@ -32,8 +34,11 @@ last_updated: 2026-09-19
     injection (`scripts/drive_ui.ps1`): `space`/`semicolon`→A, `backspace`→B,
     `l`→X, `p`→Y, `enter`→Start, `z`/`tab`→Back, arrows (+Shift = D-pad),
     WASD = sticks. Pad lane controls are unverified.
-  - **The named song is not recorded.** Pick one and write it down before claiming
-    the exit criterion; B-011 was reached from the song list.
+  - **The named song is recorded (2026-09-20):** "These Days" (Foo Fighters), song
+    list row 3 of `Random Song` / `One Week` / `These Days` / `Death on Two Legs`.
+    The list cursor is moved by the **left stick** (`lstick_up` / `lstick_down`),
+    one row per press, clamped at both ends; the arrow keys are bound to the right
+    stick and do nothing here.
   - **The MOGG key entry is selected by buffer offset, not by key id.** If audio
     regresses for one stream but not another, read "B-009 follow-up" in
     [docs/bringup-log.md](../docs/bringup-log.md) first.
@@ -133,34 +138,43 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
 
 ### 4. Stability
 
-- **Status (2026-09-19): not tested.** Results, the return to song select and a
-  second play have not been exercised deliberately; frame pacing and input polling
-  are unmeasured. The only long-run evidence is one 25-minute session
-  (`out/build/win-amd64-release/logs/rb_blitz_001.log`) with 0 `[FATAL]`, 4 benign
-  `STUB` warnings and a clean `Title terminated; hard-exiting process.`
+- **Status (2026-09-20): the launch → results path is recorded and passing; the
+  measurements are not.** Three clean-process runs and one replay run are captured
+  in `out/m5-acceptance/`. Frame pacing and input polling are still unmeasured
+  (a vanilla log prints no fps or pacing line), results-to-song-select was only
+  observed under `-Replay`, and pause/resume is untouched.
 - Verify frame pacing and input polling are stable for a complete run.
 - Reach results, return to song select, and play again without leaked state or
-  a crash.
+  a crash. **Observed working** (2026-09-20, `-Replay`): the results screen returns
+  to the song list of the same process, the same row is reselected, and the second
+  song reaches its own results screen with no `[FATAL]` and no leaked state.
 
 ## Acceptance / exit criteria
 
-- [ ] One named bundled song passes the full launch → results path **three
-      times in a row** from a clean process. **Open, and nothing drives it yet:**
-      there is no script for this — the M3 analogue is
-      [scripts/acceptance_launches.ps1](../scripts/acceptance_launches.ps1), which
-      stops at boot — so the first job is to write one that launches, drives the
-      song and keeps the log per run.
+- [x] One named bundled song passes the full launch → results path **three
+      times in a row** from a clean process. **Met** (2026-09-20):
+      [scripts/acceptance_song.ps1](../scripts/acceptance_song.ps1) launches the
+      title, drives the offline route and asserts each transition on screenshots
+      plus the run's own log. Three consecutive runs passed — playback envelopes
+      315 / 317 / 317 s, a results screen naming `THESE DAYS`, no `[FATAL]`, a
+      clean window close (`out/m5-acceptance/summary.json`) — and `-Replay` played
+      the song a second time inside one process. Run it with
+      `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance_song.ps1`
+      (≈ 20 minutes for three runs).
 
 ## Handoff to Milestone 6
 
 Entry state of [`06-reproducible-release.md`](./06-reproducible-release.md) was
-seeded on 2026-09-19 with what M6 already inherits (unscripted acceptance, no
-fingerprint/log-identity enforcement, no `toolchain.md`). What is still owed once
-this milestone finishes:
+seeded on 2026-09-19 with what M6 already inherits (acceptance is scripted as of
+2026-09-20 for one song, but there is no fingerprint/log-identity enforcement and
+no `toolchain.md`). What is still owed once this milestone finishes:
 
-- the chosen song used for the acceptance test;
+- the chosen song used for the acceptance test: **"These Days" (song list row
+  3)**;
 - any known graphics/audio quirks that must be documented for the release;
-- the exact smoke-test route used.
+- the exact smoke-test route used: launch → A → A → A → main menu `PLAY` → A →
+  song list → left stick to row 3 → A → how-to-play card → A → gameplay →
+  results → `CONTINUE`.
 
 ## Bring-up loop
 

@@ -10,10 +10,13 @@ route, shows its menus and bundled song list, and writes its content into the
 writable root — with the ARK/HDR audit, pad-driven verification and save
 persistence still open, so the milestone is not closed. Milestone 5 (complete one
 song) is in progress: songs load, the note highway, gems, HUD and 3D background
-render and music plays, and full songs have been played through, but no
-repeatable acceptance run has been captured yet. Playable-state detail and the
-open items are in [docs/bringup-log.md](docs/bringup-log.md); standing limits are
-in [docs/known-issues.md](docs/known-issues.md).
+render and music plays, and its exit criterion is now recorded rather than
+observed — `scripts/acceptance_song.ps1` drives launch → a named song → results
+three times in a row from clean processes, and plays a second song in the same
+process with `-Replay`. What the milestone still owes is measurement, not function.
+Playable-state detail and the open items are in
+[docs/bringup-log.md](docs/bringup-log.md); standing limits are in
+[docs/known-issues.md](docs/known-issues.md).
 
 ## You supply the game data
 
@@ -64,6 +67,7 @@ and log capture.
 | [tools/](tools) | Host-side build tools: `rb_blitz_fingerprint`, the game-data gate, audit and header generator. |
 | [patches/](patches) | Local fixes to the pinned SDK, kept as patch files so SDK fixes survive a re-checkout without committing inside the submodule. |
 | [scripts/](scripts) | Configure/build/run helpers, plus the two SDK-tree repairs (§0 of the build guide). |
+| [installer/](installer) | Standalone Windows setup executable (Inno Setup + a native helper): the click-and-install path for a user who is not going to build anything. See [installer/README.md](installer/README.md). |
 
 ## License
 

@@ -206,9 +206,9 @@ Exit criterion: the user can launch, navigate, see bundled content, select a son
 - [ ] Verify audio voices, sample formats, streaming, clocks, and pause/resume.
 - [ ] Measure audio/gameplay drift across a full song; defer fine calibration unless drift makes play impossible.
 - [ ] Verify frame pacing and input polling are stable enough for a complete run.
-- [ ] Reach results, return to song select, and play again without leaked state or a crash.
+- [x] Reach results, return to song select, and play again without leaked state or a crash. (2026-09-20, `-Replay`: the results screen returns to the song list inside the same process, the same row is reselected, and the second song reaches its own results screen with no `[FATAL]` and a clean exit; `scripts/acceptance_song.ps1`.)
 
-Exit criterion: one named bundled song passes the full launch-to-results path three times in a row from a clean process. **Not yet recorded** (2026-09-19) — full songs have been played through several times by observation, but there is no captured, repeatable acceptance run; there is also no script for one yet.
+Exit criterion: one named bundled song passes the full launch-to-results path three times in a row from a clean process. **Met** (2026-09-20) — [`scripts/acceptance_song.ps1`](scripts/acceptance_song.ps1) drives the offline route in a fresh process per run and asserts each transition on a screenshot plus the run's own log; three consecutive runs passed (playback envelopes 315 / 317 / 317 s, a results screen naming `THESE DAYS`, no `[FATAL]`, clean window close, `out/m5-acceptance/summary.json`), and a `-Replay` run played the song twice inside one process. The bullets left open above are measurement work (Xenia draw comparison, audio voices/clocks/pause-resume, drift, frame pacing), not blockers for this criterion.
 
 ### Milestone 6 — Reproducible bring-up release
 

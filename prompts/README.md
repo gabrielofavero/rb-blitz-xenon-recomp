@@ -91,10 +91,14 @@ document.
 | 5 — Complete one song | `05-complete-one-song.md` | in-progress |
 | 6 — Reproducible release | `06-reproducible-release.md` | not-started |
 
-The title is **playable today** — menus, the bundled song list, graphics and
-audio all work and the author has played full songs through by hand — but none of
-it is scripted or repeatable yet. Milestones 4 and 5 are both open on the same
-gap: no recorded offline route and no acceptance driver.
+The title is **playable and milestone 5's exit criterion is recorded**: as of
+2026-09-20 [scripts/acceptance_song.ps1](../scripts/acceptance_song.ps1) drives
+launch → the named song "These Days" → results three times in a row from clean
+processes, keeping every screen and log it asserted on. Milestones 4 and 5 are
+still open for different reasons: M4 on its ARK/HDR audit, pad-driven verification
+and save persistence, M5 on measurement rather than function (Xenia draw
+comparison, audio voices/clocks/pause-resume, drift, frame pacing).
 [docs/bringup-log.md](../docs/bringup-log.md) has the chronological detail
-("Milestone 4 close-out", "Milestone 5 — first songs played to the end") and
+("Milestone 4 close-out", "Milestone 5 — first songs played to the end", "Milestone
+5 acceptance: one named song, three clean-process runs") and
 [docs/known-issues.md](../docs/known-issues.md) has the enduring facts.

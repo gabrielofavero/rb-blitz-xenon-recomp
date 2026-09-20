@@ -1173,3 +1173,109 @@ is now accounted for (the mod's `ulti_init.dta` offers its screenshot button onl
 that folder exists, which is what the zip's `_keepme` file creates), so only the empty
 `gen/` folder is still unexplained.
 
+## Milestone 5 acceptance: one named song, three clean-process runs (2026-09-20)
+
+Milestone 5's exit criterion — one named bundled song through the full
+launch-to-results path three times in a row from a clean process — is now a
+scripted, repeatable result rather than an observation.
+[`scripts/acceptance_song.ps1`](../scripts/acceptance_song.ps1) is the M3
+launch-driver's counterpart one screen further in: it starts the title itself,
+drives the offline route with injected keyboard input, and asserts every
+transition on evidence instead of on a fixed sleep.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance_song.ps1
+# -Runs 3 -Song 3 -SongName "THESE DAYS" -UltimateMode 0 [-Replay]
+# evidence lands in out/m5-acceptance/ (screenshots, per-run logs, summary.json)
+```
+
+### The route, and how each step is proved
+
+| Step | Assertion |
+| --- | --- |
+| title → sign-in refusal → offline notice → main menu | OCR of the navigator screenshot until `PLAY` appears |
+| song list | OCR until `YOUR SONGS`, then the footer info panel to confirm the cursor row |
+| row 3 = "These Days" | 6 × `lstick_up` then 2 × `lstick_down` (see below), then OCR of the footer |
+| how-to-play card → gameplay | OCR until the card's `PRESS (A) BEGIN`, then the log's playback markers |
+| song | a matched `XMPSetPlaybackController` pair at least 60 s long |
+| results | OCR of the results screen, which must name the song |
+| replay leg (`-Replay`) | back to `YOUR SONGS`, reselect, second matched pair, second results screen |
+| clean exit | no `[FATAL]` in the run's log, and a `Title terminated` close |
+
+Screenshots come from [`scripts/capture_window.ps1`](../scripts/capture_window.ps1)
+and text from [`scripts/ocr_image.ps1`](../scripts/ocr_image.ps1), the same
+primitives [`scripts/drive_ui.ps1`](../scripts/drive_ui.ps1) uses.
+
+### Result (2026-09-20)
+
+| Run | Playback envelope | Preview pair rejected | Results screen | `[FATAL]` | Exit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 12:44:58 → 12:50:13 (315 s) | 7 s | `THESE DAYS` + `BASE POINTS` / `BLITZ MODE` / `SOLO(S)` / `FINALE` / `CONTINUE` | none | clean |
+| 2 | 12:51:26 → 12:56:43 (317 s) | 5 s | `THESE DAYS` | none | clean |
+| 3 | 12:57:55 → 13:03:11 (317 s) | 6 s | `THESE DAYS` | none | clean |
+
+`launch-to-results: 3 / 3`, exit code 0, ~20 minutes wall clock, ~53 KB of log per
+run. A separate `-Runs 1 -Replay` run (`out/m5-acceptance-replay-validation/`)
+passed the launch-to-results leg in 319 s and then repeated the loop inside the
+same process, which is the "return to song select and play again" half of the
+milestone.
+
+### Four title behaviours the script had to learn
+
+These are the interesting findings, not the plumbing. Three of them are also
+documented where a reader would look for them
+([docs/build-and-run.md](build-and-run.md) §4,
+[docs/known-issues.md](known-issues.md)).
+
+1. **A background process cannot screenshot the game window reliably.** The first
+   version captured whatever happened to be foreground — a VS Code screenshot in
+   one case — and reported confident nonsense. `capture_window.ps1` now taps Alt
+   (nothing else reliably moves focus), then loops `BringWindowToTop` /
+   `SetForegroundWindow` until the window really is foreground, and *fails*
+   instead of capturing the wrong window. Verified with a deliberate focus steal.
+2. **The offline notice swallows the first A press.** On the results screen the
+   `UNABLE TO CONNECT TO ROCK CENTRAL` notice covers the button, so the replay
+   leg's first A goes to dismissing it. The script now presses A and rechecks for
+   `YOUR SONGS` (up to 4 presses) instead of pressing once and giving up.
+3. **The song list is driven by the left stick, not the arrows.** In
+   `mnk_input_driver.cpp` VK `0x26`/`0x28` are the *right* stick and `W`/`S` are
+   the left. `drive_ui.ps1`'s `dpad_up` / `dpad_down` are the arrow aliases, so
+   the first "selection" attempts were really selecting row 0 (`Random Song`) and
+   the song that played was luck. A live probe of the footer info panel settled
+   the model: one left-stick press moves exactly one row, clamps at both ends, does
+   not wrap, and a fresh boot starts on row 0. The script now does 6 × `lstick_up`
+   then `Index-1` × `lstick_down` and keeps a `…-list.png` shot as evidence.
+4. **The song-list previews reuse the song's playback markers.** Highlighting a
+   row (or scrolling past it) emits `XMPSetPlaybackController(00000000, 00000001)`
+   / `(…, 00000000)` through the *same* controller as the song itself, so a
+   `Wait-ForLog` that matched the next pair happily matched a 5–8 s preview: the
+   first scripted run "finished" in 9 s with a black results screenshot. The script
+   now collects every marker timestamp in order, pairs them **by index**, and
+   rejects pairs shorter than 60 s with a note. One replay-validation log shows the
+   shape clearly — pairs of 7 s, 319 s, 5 s, 7 s, unfinished — with the 4th and 5th
+   produced while navigating back for the replay.
+
+Two PowerShell 5.1 traps cost a cycle each and are worth remembering for the next
+script: **variable names are case-insensitive**, so a function-local `$song` that
+received `Wait-For-SongEnvelope`'s return value silently shadowed the caller's
+`-Song` parameter (the symptom was `Cannot convert the
+OrdereredDictionary … to Int32` in an unrelated-looking place); and **`.Count` on a
+single object is `$null`**, so a one-run pass counter read as "failed" unless the
+filter is wrapped in `@(…)`.
+
+### What this does not measure
+
+The milestone's remaining bullets are all measurement, and this run does not
+close any of them:
+
+- **Frame pacing is still unmeasured.** A vanilla log has no fps or pacing line —
+  the only figure available is the payload overlay's ("1694 KB / 75.1"), which
+  needs a payload boot, and `XAudioSubmitRenderDriverFrame` is logged in bursts
+  (~10 lines per run) rather than per frame.
+- **Audio quality is asserted only as "the song played for 315 s".** Voices,
+  sample formats, clocks and pause/resume are untouched.
+- **The Xenia draw comparison is not attempted**, and the ARK/HDR offset audit
+  inherited from Milestone 4 is still open.
+- The runs prove the *route* and the *absence of a fatal*; they are not a
+  regression test for graphics or audio content.
+

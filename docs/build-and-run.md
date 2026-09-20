@@ -381,6 +381,32 @@ It reports `alive` / `fatal` / `log KB` / `clean` per run and is the canonical
 Milestone 3 check. Related helpers: `scripts\capture_window.ps1 -OutFile <png>`
 and `scripts\drive_ui.ps1`.
 
+The Milestone 5 counterpart drives the whole offline route instead of stopping at
+the window: it presses title → sign-in → offline prompt → main menu → song list,
+selects the song by row with the *left* stick (arrow keys are the right stick in
+this title), waits for the song's own audio envelope
+(`XMPSetPlaybackController(0,1)` →
+`(0,0)`), and reads the results screen back as OCR text, passing a run only if that
+screen names the expected song. Vanilla content by default
+(`--ultimate_mode=0`), so an installed Ultimate payload cannot change the result:
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+.\scripts\acceptance_song.ps1 -Runs 3              # row 3 = "These Days"
+.\scripts\acceptance_song.ps1 -Runs 1 -Replay      # ... then play it again
+```
+
+Two behaviours the script has to work around, both found by making the run
+deterministic: the song list previews the rows the cursor moves over **through the
+same playback controller as the song**, so envelopes are matched in pairs and any
+pair shorter than 60 s is rejected as a preview; and the offline notice over the
+results screen swallows the first `A`, so returning to the list presses and
+re-checks instead of assuming one press is enough.
+
+It clears `logs\` before each run and writes `out\m5-acceptance\runNN-*.png` (every
+screen it asserted on as it went), a copy of each run's log, and `summary.json`; the
+exit code is non-zero unless every run passed the whole launch → results path.
+
 ## 5. What a good run looks like (B-009, music)
 
 The hook logs only the first 8 AES calls, so a long run stays quiet. One combined

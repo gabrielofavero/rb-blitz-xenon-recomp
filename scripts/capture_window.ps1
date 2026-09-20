@@ -12,9 +12,11 @@ public class Win32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
@@ -33,13 +35,22 @@ if ($h -eq [IntPtr]::Zero) { Write-Error "no main window"; exit 1 }
 
 [Win32]::ShowWindow($h, 9) | Out-Null      # SW_RESTORE
 # Bring the game window to the foreground and wait until it actually is.
+# Windows withholds the foreground from a background process, so tapping Alt
+# (which grants the caller the right to hand it out) is what makes this
+# converge when another window is in front - the same trick scripts/drive_ui.ps1
+# uses before sending keys. The copy below is a screen capture, so waiting on
+# the real foreground is not optional: capturing an occluding window would
+# silently save some other application's UI.
 $fg = $false
-for ($i = 0; $i -lt 20; $i++) {
+for ($i = 0; $i -lt 25; $i++) {
+    if ([Win32]::GetForegroundWindow() -eq $h) { $fg = $true; break }
+    [Win32]::keybd_event(0x12, 0x38, 0, [IntPtr]::Zero)   # Alt down
+    [Win32]::keybd_event(0x12, 0x38, 2, [IntPtr]::Zero)   # Alt up
+    [Win32]::BringWindowToTop($h) | Out-Null
     [Win32]::SetForegroundWindow($h) | Out-Null
     Start-Sleep -Milliseconds 150
-    if ([Win32]::GetForegroundWindow() -eq $h) { $fg = $true; break }
 }
-if (-not $fg) { Write-Warning "game window did not become foreground; capturing anyway" }
+if (-not $fg) { Write-Error "game window did not come to the foreground; refusing to save a capture of the wrong window"; exit 1 }
 Start-Sleep -Milliseconds 400
 
 $r = New-Object Win32+RECT
