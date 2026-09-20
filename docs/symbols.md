@@ -128,7 +128,7 @@ a function pointer; all end in `bctr` (indirect tail-call), which codegen
 | `0x8278A708` | boot, thread t18292 | after `0x82789360` registered |
 | `0x8279A888` | boot, thread t16280 | body ends `… mtctr r11; bctr` (dispatcher) |
 | `0x82779A70` | boot, thread t23656 | after `0x8279A888` registered |
-| `0x82783D18` | boot, thread t12912 (Release) | 5th; added, build pending |
+| `0x82783D18` | boot, thread t12912 (Release) | 5th; added and confirmed in the Release build |
 
 All entries use `[functions."0x…"]` with **no** `size`/`end` so codegen
 discovers the natural boundary from the code region.

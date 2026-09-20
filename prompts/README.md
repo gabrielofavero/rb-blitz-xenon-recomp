@@ -23,7 +23,7 @@ re-deriving it.
 ## The editing loop (the important part)
 
 Prompts get **more assertive** as we learn. After every session or every
-completed step, write the new knowledge back into three places:
+completed step, write the new knowledge back into four places:
 
 1. **`docs/bringup-log.md`** — the chronological record (what happened, in
    order).
@@ -83,5 +83,13 @@ document.
 | 2 — Close analysis & compile | `02-close-analysis-compile.md` | done |
 | 3 — Guest entry & offline boot | `03-guest-entry-boot.md` | done |
 | 4 — Menus, content, input, saves | `04-menus-content-input-saves.md` | in-progress |
-| 5 — Complete one song | `05-complete-one-song.md` | not-started |
+| 5 — Complete one song | `05-complete-one-song.md` | in-progress |
 | 6 — Reproducible release | `06-reproducible-release.md` | not-started |
+
+The title is **playable today** — menus, the bundled song list, graphics and
+audio all work and the author has played full songs through by hand — but none of
+it is scripted or repeatable yet. Milestones 4 and 5 are both open on the same
+gap: no recorded offline route and no acceptance driver.
+[docs/bringup-log.md](../docs/bringup-log.md) has the chronological detail
+("Milestone 4 close-out", "Milestone 5 — first songs played to the end") and
+[docs/known-issues.md](../docs/known-issues.md) has the enduring facts.

@@ -1,5 +1,5 @@
 ---
-status: not-started
+status: in-progress
 milestone: 5
 last_updated: 2026-09-19
 ---
@@ -8,10 +8,38 @@ last_updated: 2026-09-19
 
 ## Entry state
 
-- Milestone 4 done: menus navigate, bundled content enumerates, a song can be
-  selected, input works, saves persist.
-- **Knowledge folded in:** *(edit as Milestone 4 finishes — chosen song, input
-  mapping, storage format, content quirks.)*
+- Milestone 4 is **working but not closed**: menus navigate, bundled content
+  enumerates, a song can be selected and played. Open there, and inherited here:
+  the ARK/HDR offset audit, pad-driven verification, and save restart /
+  corrupt-writable-data behaviour. Detail: "Milestone 4 close-out" in
+  [docs/bringup-log.md](../docs/bringup-log.md).
+- **Knowledge folded in (2026-09-19):**
+  - **Already playable:** songs load, the highway/notes/HUD/3D background render,
+    and the author has played full songs through 3–4 times. That is an
+    observation, not a recorded acceptance run, and nothing about it is scripted.
+  - **Content quirks:** bundled content enumerates from the game-data root
+    (`XamContentCreateEnumerator: added 2 items` — the `songcache:` /
+    `globaloptions:` content devices); `game:\Content\0000000000000000` does not
+    exist, so the aggregate DLC enumerator returns 0 items (expected offline).
+  - **Storage:** the title writes into the writable root (here
+    `C:\Users\gabri\Documents\rb_blitz`):
+    `B13EBABEBABEBABE\5841122D\00000001\{globaloptions,songcache}` plus 328-byte
+    headers, and rewrites its shader cache
+    `cache\shaders\shareable\5841122D.rtv.d3d12.xpso` at process exit. All of it
+    is the SDK content path; no project code is involved.
+  - **Input mapping:** `XInput Controller #1` (VendorID `0x0B05`, ProductID
+    `0x1B4C`) is enumerated, but every verified run was driven by keyboard
+    injection (`scripts/drive_ui.ps1`): `space`/`semicolon`→A, `backspace`→B,
+    `l`→X, `p`→Y, `enter`→Start, `z`/`tab`→Back, arrows (+Shift = D-pad),
+    WASD = sticks. Pad lane controls are unverified.
+  - **The named song is not recorded.** Pick one and write it down before claiming
+    the exit criterion; B-011 was reached from the song list.
+  - **The MOGG key entry is selected by buffer offset, not by key id.** If audio
+    regresses for one stream but not another, read "B-009 follow-up" in
+    [docs/bringup-log.md](../docs/bringup-log.md) first.
+  - **Audio frames are produced from the title onward**
+    (`XAudioRegisterRenderDriverClient` + `XAudioSubmitRenderDriverFrame`), so M5
+    starts from "frames are produced" and only has to prove they are audible.
 
 ## Reference leads (RB3 mining pass, 2026-09-19)
 
@@ -62,6 +90,12 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
 ### 1. Song load
 
 - Get through song load without timeout, deadlock, or missing-file errors.
+- **Working (2026-09-19)** — but only after B-011: picking a song trapped on
+  `0x82783CD8` until 15 missed indirect-call targets were registered
+  (`0x827EC038` plus 14 adjuster-thunk holes). Registered targets and the pattern
+  scan that found them: [docs/bringup-log.md](../docs/bringup-log.md) B-011.
+  Expect one more of these for each newly reached gameplay path — the fault text
+  is `[FATAL] Call to invalid or unregistered function at guest address 0x…`.
 
 ### 2. Graphics
 
@@ -83,11 +117,22 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
 ### 3. Audio
 
 - Verify audio voices, sample formats, streaming, clocks, and pause/resume.
+- **Status (2026-09-19): audible, not measured.** Title music and in-song MOGG
+  streams decrypt (`guest XeKeys: key 0xE0 -> slot 0 (obscured table entry +0x30
+  -> plaintext key 3)`) and the surviving log contains one clean start/stop pair,
+  `XMPSetPlaybackController(0,1)` at 22:18:35 → `(0,0)` at 22:22:39. Voice counts,
+  sample formats, pause/resume and the `audio-verify` methodology above are all
+  still unchecked — "I heard it" is not yet evidence.
 - Measure audio/gameplay drift across a full song; defer fine calibration unless
   drift makes play impossible.
 
 ### 4. Stability
 
+- **Status (2026-09-19): not tested.** Results, the return to song select and a
+  second play have not been exercised deliberately; frame pacing and input polling
+  are unmeasured. The only long-run evidence is one 25-minute session
+  (`out/build/win-amd64-release/logs/rb_blitz_001.log`) with 0 `[FATAL]`, 4 benign
+  `STUB` warnings and a clean `Title terminated; hard-exiting process.`
 - Verify frame pacing and input polling are stable for a complete run.
 - Reach results, return to song select, and play again without leaked state or
   a crash.
@@ -95,11 +140,18 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
 ## Acceptance / exit criteria
 
 - [ ] One named bundled song passes the full launch → results path **three
-      times in a row** from a clean process.
+      times in a row** from a clean process. **Open, and nothing drives it yet:**
+      there is no script for this — the M3 analogue is
+      [scripts/acceptance_launches.ps1](../scripts/acceptance_launches.ps1), which
+      stops at boot — so the first job is to write one that launches, drives the
+      song and keeps the log per run.
 
 ## Handoff to Milestone 6
 
-Write into `06-reproducible-release.md`:
+Entry state of [`06-reproducible-release.md`](./06-reproducible-release.md) was
+seeded on 2026-09-19 with what M6 already inherits (unscripted acceptance, no
+fingerprint/log-identity enforcement, no `toolchain.md`). What is still owed once
+this milestone finishes:
 
 - the chosen song used for the acceptance test;
 - any known graphics/audio quirks that must be documented for the release;

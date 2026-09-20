@@ -10,8 +10,20 @@ last_updated: 2026-09-19
 
 - Milestone 5 done: one bundled song passes launch → results three times in a
   row.
-- **Knowledge folded in:** *(edit as Milestone 5 finishes — acceptance song,
-  documented quirks, smoke-test route.)*
+- **Knowledge folded in (2026-09-19, partial — Milestone 5 is still running):**
+  - **The acceptance test is not scripted.** Nothing reproducibly drives a song;
+    the only existing script (`scripts/acceptance_launches.ps1`) stops at boot. The
+    exit criterion below depends on that driver existing, and Milestone 5 needs the
+    same one.
+  - **Log identity is not enforced.** `config/game_fingerprints.toml` exists but no
+    code reads it, and the log records neither a game-data fingerprint nor the SDK
+    version — both are required by definition-of-working #10.
+  - **There is no `toolchain.md` repo memory.** The build works, but the absolute
+    compiler/cmake/ninja paths live only in `out/build/<preset>/CMakeCache.txt`, and
+    none of the three is on a plain shell's PATH; step 4 has to create that file.
+  - **Runtime data already lives outside the source tree** (`--game_data_root`, and
+    the writable root under the user's Documents), so step 1's data-path
+    requirement is mostly a documentation task.
 
 ## Reference leads (RB3 mining pass, 2026-09-19)
 
@@ -50,11 +62,17 @@ last_updated: 2026-09-19
 
 - Test wrong/missing game data and confirm the error is actionable (fingerprint
   mismatch must fail closed, per `config/game_fingerprints.toml`).
+- **State (2026-09-19): not implemented.** A wrong or missing game-data root fails
+  late (content-open errors well into boot) rather than closed, because nothing
+  consumes the fingerprint file — see entry state.
 
 ### 4. Freeze and document
 
 - Freeze minimal supported SDK/game fingerprints and compiler versions
   (toolchain paths in repo memory `toolchain.md`).
+- **State (2026-09-19): no home for the freeze yet** — `toolchain.md` does not
+  exist anywhere in the repo, though [`docs/bringup-log.md`](../docs/bringup-log.md)
+  currently records the three tool paths by hand.
 - Document remaining issues in `docs/known-issues.md`; move non-blockers to the
   post-bring-up backlog.
 

@@ -127,14 +127,17 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
 
 ## Toolchain notes (this machine)
 
-On default PATH (no dev shell needed); see repo memory `toolchain.md` for
-exact paths:
+Installed here, and recorded in the configured build tree's `CMakeCache.txt`:
 
 - clang/clang++ 19.1.7 (`C:\Program Files\LLVM\bin`), cmake 4.4.0
   (`C:\Program Files\CMake\bin`), ninja 1.13.2
-  (`C:\ProgramData\chocolatey\bin`).
+  (`C:\Users\gabri\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe`).
 - NOTE: the Milestone 1 plan mentioned clang 22.1.8 / cmake 4.4.3 "not on
   PATH" — that is stale; the working toolchain is the one above.
+- NOTE (2026-09-19): none of the three is on the `PATH` of a plain shell here,
+  so build commands have to run from a shell where they are (or with the absolute
+  paths above). `out/build/win-amd64-release` already has all three recorded, so
+  it needs no re-configure.
 
 ## Milestone 2 — Close analysis and compile
 
@@ -325,8 +328,21 @@ deliberately stays project-level (`config/functions.toml`).
 
 ## Milestone 4 — Menus, content discovery, input, saves
 
-Status: **in progress** (2026-09-10). Steps 1–2 have first runtime evidence;
-steps 3–4 not started.
+Status: **working, some items still open** (2026-09-19). The title reaches the
+offline route, shows its menus and bundled song list, starts a song and writes its
+content into the writable root:
+
+| Plan item | State (2026-09-19) |
+| --- | --- |
+| ARK/HDR offsets and sizes | never audited |
+| Offline menus and bundled song enumeration | working |
+| XInput navigation / accept / pause / lanes | pad enumerated; every run verified so far is keyboard-injected |
+| Deterministic local profile/storage | satisfied by the SDK content path, no project code |
+| Save creation, restart persistence, missing/corrupt data | content written; no deliberate restart or corrupt-data run |
+| Online features gracefully unavailable | working |
+
+Resolved in this milestone: B-008 (pressing A), B-009 (music). Close-out detail,
+including what is still open and why, is in the entry at the end of this log.
 
 ### B-008: one more B-006-class missed function, reached by pressing A
 
@@ -352,10 +368,13 @@ steps 3–4 not started.
 
 ### B-009: music never plays — `XeKeysSetKey`/`XeKeysAesCbc` were no-op stubs
 
-- Status: **fix in place, awaiting a run to confirm** (2026-09-10). Not yet
-  compiled: the development machine has no C++ toolchain installed and its
-  checked-in build tree is stale, so the rebuild in
-  [docs/build-and-run.md](build-and-run.md) has to happen first.
+- Status: **resolved and verified** (2026-09-19). The build confirmed the fix and
+  the log now shows the crypto pair being served by the hook instead of the
+  `STUB` warning; music plays, in menus and in song. One correction followed — see
+  "B-009 follow-up" at the end of this log. (The 2026-09-10 note that no C++
+  toolchain was installed and that the checked-in build tree was stale is
+  obsolete: the toolchain is installed and `out/build/win-amd64-release` is
+  configured for this working copy.)
 - Symptom: sound effects are audible, music never is, and nothing in the log
   looks like an error.
 - Root cause: the title stores its music encrypted and asks the kernel to
@@ -643,4 +662,134 @@ the staged copy must fit a single 2 MiB upload page (the largest conversion seen
 so far is 256 KB, so the headroom is 8×); integer `num_format = 1` textures
 remain unsupported; the CPU mirror can be stale for GPU-written data, for which
 `d3d12_readback_resolve = true` is the escape hatch.
+
+### Milestone 4 close-out (2026-09-19)
+
+What the title does now, from the surviving run log and the writable root:
+
+- **Offline route.** "A" at the title attempts a Rock Central sign-in; the dialog
+  is dismissible (B) and the title offers its offline path into the menus. No
+  service is faked — see "Accepted" in [known-issues.md](known-issues.md).
+- **Menus and content.** Main menu, song list and HUD render, and bundled songs are
+  enumerated from the game-data root with no online dependency:
+  `XamContentCreateEnumerator: added 2 items` (`songcache`, `globaloptions`) and
+  `XamContentAggregateCreateEnumerator: added 0 items` for
+  `game:\Content\0000000000000000` — no DLC in this dump, as expected.
+- **Storage.** The title creates and writes content into the writable root
+  (`C:\Users\gabri\Documents\rb_blitz` here):
+  `B13EBABEBABEBABE\5841122D\00000001\{globaloptions,songcache}` plus 328-byte
+  headers under `Headers\00000001\`. All of it is the SDK content path; no project
+  code is involved.
+- **Input.** `XInput Controller #1` (VendorID `0x0B05`, ProductID `0x1B4C`) is
+  enumerated, but every navigation verified so far was **keyboard-injected**
+  through the SDK's MnK emulation and `scripts/drive_ui.ps1`. No pad-driven run
+  exists.
+
+Still open for the milestone:
+
+| Item | Why it is open |
+| --- | --- |
+| ARK/HDR offsets and sizes | never audited — the title reads them without complaint, which is not the same as correct offsets |
+| XInput navigation / accept / pause / lanes | navigation is proven with a keyboard, not with a controller |
+| Deterministic local profile/storage | satisfied by the SDK content path; the plan's wording ("provide") implies project code that does not exist |
+| Save creation, restart persistence, corrupt/missing writable data | see the persistence note below |
+
+**Persistence so far.** No restart round-trip has been run deliberately, but two
+signals exist: content files written by the 17:16 run were discovered by the 22:17
+run (the `added 2 items` above), and the shader cache
+`cache\shaders\shareable\5841122D.rtv.d3d12.xpso` carries the *shutdown*
+timestamp of the last run (22:42:52), so the title writes it at exit and re-reads
+it next start. Settings-versus-save semantics, a corrupt writable root and a
+missing writable root are all untested.
+
+### B-009 follow-up: the key is selected by the buffer offset, not by the key id (2026-09-19)
+
+The first version of the hook keyed off the id passed to `XeKeysSetKey`, because
+the plaintext table is indexed by id. Real hardware does not work that way:
+
+- `ByteGrinder::HvDecrypt` (`0x823DE0C0`) installs with a **constant** key id
+  (`0xE0`) and carries the MOGG version in the **buffer offset**:
+  `&table[GetEncMethod(version) * 16]`. The entry that has to land in the slot is
+  the one selected by the *offset*, whatever the id says.
+- Installing nothing — or the id-matched entry — handed the AES engine the wrong
+  key material for every version except the one the slot happened to hold.
+
+Fix in `src/hooks/crypto.cpp`: copy the plaintext entry at
+`kDeobfuscatedKeyTable + table_offset` into the slot. The log line is now
+
+```
+guest XeKeys: key 0xE0 -> slot 0 (obscured table entry +0x30 -> plaintext key 3)
+```
+
+and both the title music and the in-song MOGG streams decrypt.
+
+### B-011: picking a song trapped — 14 adjuster-thunk holes and one data-taken address (2026-09-19)
+
+Reached across the Milestone 4/5 boundary: the first fault fires while the title
+music opens, the second when a song is picked.
+
+- Status: **resolved**, fix in `e799687`.
+- Symptom 1: `[FATAL] Call to invalid or unregistered function at guest address
+  0x827EC038` (thread `t23752`, `rb_blitz_008.log`), reached while the title-music
+  MOGG stream was opened — i.e. only once B-009's key path worked. `0x827EC038` is
+  a genuine 24-byte leaf function (`lwz r11,0(r3); lwz r10,0(r4); lwz r11,0(r11);
+  lwz r10,0(r10); subf r3,r10,r11; blr`) whose address is taken in data, so
+  `bl`/`ba` discovery never saw it.
+- Symptom 2: `[FATAL] … at guest address 0x82783CD8` (thread `t13624`,
+  `rb_blitz_018.log`), when a song is picked. `0x82783CD8` is an 8-byte adjuster
+  thunk (`addi r3,r3,-4 ; b 0x82783DF8`) inside the dense table
+  `0x82783CC0..0x82783D17`. Codegen registered that table's first and third slots
+  and left the rest uncovered, so every hole in the table traps the first time a
+  vtable/ILT slot is called.
+- Fix (`config/functions.toml`, 15 new entries, project layer):
+  - `0x827EC038` registered on its own;
+  - rather than chase one address per run, `.text` was read from the live process
+    (`0x82190000..0x827F6ED4`) and scanned for the whole class: an 8-byte
+    `addi r3,r3,imm ; b <registered function>` slot that is (a) absent from
+    `generated/default/rb_blitz_register.cpp`, (b) preceded by a completed 8-byte
+    thunk or a clean `blr`/padding boundary, so it cannot be the tail of a longer
+    function, and (c) adjacent to a slot codegen *did* register as 8-byte. 14
+    slots matched; each is registered with its branch target as evidence.
+- `config/functions.toml` now holds 24 forced entries: 3 tail-branch targets
+  (Milestone 2), 5 boot-time targets (Milestone 3), `0x8278A6E0` (Milestone 4),
+  and Milestone 5's `0x827EC038` plus 14 thunks. All are written with no
+  `size`/`end`, so codegen discovers natural boundaries.
+- Consequence: the class is bounded, not eliminated. Any newly reached UI or
+  gameplay path can still hit an unregistered hole; the only root-cause fix is the
+  codegen `GapFill` change that is plan fix-order #6 (split on `bctr`).
+
+## Milestone 5 — first songs played to the end (2026-09-19)
+
+Status: **in progress** — the first genuinely playable state. Almost none of the
+milestone's exit criterion is recorded yet.
+
+- Songs load and play to the end: the note highway, gems, HUD and 3D background
+  render, and the author observed full songs **3–4 times**. That is an
+  observation, not a captured acceptance run.
+- The surviving log `out/build/win-amd64-release/logs/rb_blitz_001.log` is a
+  25-minute session (22:17:19 → 22:42:52) with **0 `[FATAL]`**, 0
+  `Unsupported texture formats` lines, 4 benign `STUB` lines (all
+  `XamVoiceSetMicArrayIdleUsers`) and a clean
+  `Title terminated; hard-exiting process.` It also contains a complete
+  song-audio envelope: `XMPSetPlaybackController(0,1)` at 22:18:35 →
+  `XMPSetPlaybackController(0,0)` at 22:22:39, with the B-009 key install for that
+  stream at 22:18:28. So one music stream started and stopped cleanly over
+  ~4 minutes; the log alone cannot name the song or prove the results screen was
+  reached.
+- Log numbering restarts whenever the log directory is recreated (this one at
+  2026-09-19 17:05), so `rb_blitz_008.log` and `rb_blitz_018.log`, cited in B-011
+  above, are no longer on disk. Quote the decisive lines in the record rather than
+  citing a log by name.
+
+Still open, and none of it is tracked by a script:
+
+| Exit-criterion part | State |
+| --- | --- |
+| Three clean-process runs in a row | no script and no captured run; the M3 analogue is `scripts/acceptance_launches.ps1` |
+| A named song | never recorded |
+| Launch → results → song select → play again | untested; results and the return path have not been exercised deliberately |
+| Audio/gameplay drift across a full song | never measured |
+| Frame pacing and input polling stability | unmeasured |
+| Xenia draw comparison | not started |
+| Which input device the run used | keyboard injection, per the Milestone 4 close-out above |
 

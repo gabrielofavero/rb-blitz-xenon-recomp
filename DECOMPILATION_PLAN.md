@@ -139,11 +139,11 @@ Exit criterion: a fresh checkout can acquire the SDK deterministically, reject t
 ### Milestone 1 — Scaffold and generate
 
 - [x] Build the pinned ReXGlue CLI and run `rexglue init` with project name `rb_blitz`, `game/default.xex`, and `game/` as the game root.
-- [ ] Keep the generated CMake/ReXApp structure intact; only add the project source directories described above.
+- [x] Keep the generated CMake/ReXApp structure intact; only add the project source directories described above. (The ReXApp subclass is `src/rb_blitz_app.h`; every project source lives under `src/`.)
 - [x] Point project presets at the pinned source SDK with `REXSDK_DIR` (or use an installed, exactly pinned package).
 - [x] Run codegen once without `--force` and save the complete diagnostics.
-- [ ] Inventory sections, imports, discovered functions, unresolved direct/indirect targets, invalid instruction ranges, jump tables, and exception-handler patterns.
-- [ ] Confirm whether the title loads guest DLLs. Add only observed modules with the exact canonical guest paths expected by `XexLoadImage`.
+- [x] Inventory sections, imports, discovered functions, unresolved direct/indirect targets, invalid instruction ranges, jump tables, and exception-handler patterns. (Recorded in the three codegen runs in [docs/bringup-log.md](docs/bringup-log.md) and [docs/symbols.md](docs/symbols.md): 262 imports, 132 jump tables, 0 ambiguous data regions, 3 tail-branch targets.)
+- [x] Confirm whether the title loads guest DLLs. Add only observed modules with the exact canonical guest paths expected by `XexLoadImage`. (No guest DLLs: the manifest maps only `game/default.xex`, and a boot loads exactly one image.)
 
 Exit criterion: `rb_blitz_codegen` completes repeatably and a second unchanged run is a no-op through RexGlue's stamp/depfile mechanism.
 
@@ -184,25 +184,25 @@ Exit criterion: ten consecutive launches reach the title screen/offline prompt a
 ### Milestone 4 — Menus, content discovery, input, and saves
 
 - [ ] Confirm the ARK/HDR files are read from the game-data root with correct offsets and sizes.
-- [ ] Reach the main menu and enumerate bundled songs without an online dependency.
+- [x] Reach the main menu and enumerate bundled songs without an online dependency. (Offline menus, song list and song selection are working as of 2026-09-19; the offset/size half of the item above is still unaudited.)
 - [ ] Map one standard XInput controller and verify navigation, accept/back, pause, and lane controls.
 - [ ] Provide a deterministic local profile/storage response sufficient for offline use.
 - [ ] Verify settings/save creation, restart persistence, and behavior with missing/corrupt writable data.
-- [ ] Keep achievements, leaderboards, and downloadable-song enumeration disabled or gracefully unavailable unless they block the core loop.
+- [x] Keep achievements, leaderboards, and downloadable-song enumeration disabled or gracefully unavailable unless they block the core loop. (The Rock Central sign-in attempt is refused and dismissible and the aggregate DLC enumerator returns 0 items, so the offline path is unaffected.)
 
-Exit criterion: the user can launch, navigate, see bundled content, select a song, and return to the menu repeatedly.
+Exit criterion: the user can launch, navigate, see bundled content, select a song, and return to the menu repeatedly. **Partially met** (2026-09-19) — the offline path, bundled content and song selection work, but XInput lane/pause verification, storage restart persistence, and the ARK/HDR + fingerprint audit are still open.
 
 ### Milestone 5 — Complete one song
 
-- [ ] Get through song load without timeout, deadlock, or missing-file errors.
-- [ ] Verify the Xenos pipeline draws the highway, notes, HUD, and essential background objects.
+- [x] Get through song load without timeout, deadlock, or missing-file errors. (Only after the 15 additional guest addresses registered on 2026-09-19; song selection trapped before that.)
+- [x] Verify the Xenos pipeline draws the highway, notes, HUD, and essential background objects. (B-010 fixed the 32-bit fixed-point textures. Two format limits remain — see [docs/known-issues.md](docs/known-issues.md).)
 - [ ] Compare failing draws against a Xenia capture, especially resolve/readback and render-target transitions implicated by historical compatibility reports.
 - [ ] Verify audio voices, sample formats, streaming, clocks, and pause/resume.
 - [ ] Measure audio/gameplay drift across a full song; defer fine calibration unless drift makes play impossible.
 - [ ] Verify frame pacing and input polling are stable enough for a complete run.
 - [ ] Reach results, return to song select, and play again without leaked state or a crash.
 
-Exit criterion: one named bundled song passes the full launch-to-results path three times in a row from a clean process.
+Exit criterion: one named bundled song passes the full launch-to-results path three times in a row from a clean process. **Not yet recorded** (2026-09-19) — full songs have been played through several times by observation, but there is no captured, repeatable acceptance run; there is also no script for one yet.
 
 ### Milestone 6 — Reproducible bring-up release
 

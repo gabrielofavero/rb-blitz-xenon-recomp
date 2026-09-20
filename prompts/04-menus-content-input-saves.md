@@ -33,9 +33,12 @@ last_updated: 2026-09-19
     adjuster thunks) are missing from the register table, and each one shows up
     as a runtime `[FATAL] Call to invalid or unregistered function at guest
     address 0x…`. Fix = add `[functions."0x…"]` (no size) to
-    `config/functions.toml`, re-run codegen, rebuild, re-run. Registered so far:
-    `0x82789360`, `0x8278A708`, `0x8279A888`, `0x82779A70`, `0x82783D18`,
-    `0x8278A6E0`.
+    `config/functions.toml`, re-run codegen, rebuild, re-run. **24 addresses are
+    registered now:** 3 tail-branch targets, the 5 boot-time ones
+    (`0x82789360`, `0x8278A708`, `0x8279A888`, `0x82779A70`, `0x82783D18`),
+    `0x8278A6E0`, and the 2026-09-19 Milestone-5 batch (`0x827EC038` plus the 14
+    adjuster-thunk holes listed in [docs/bringup-log.md](../docs/bringup-log.md)
+    B-011).
   - **Fast iteration tooling:** the pinned Release codegen CLI
     (`rexglue-sdk/out/win-amd64/Release/rexglue.exe codegen
     rb_blitz_manifest.toml`, ~55 s) is much faster than the Debug CLI
@@ -43,7 +46,9 @@ last_updated: 2026-09-19
   - **Input is already live:** SDL reports
     `OnControllerDeviceAdded: "Xbox One Controller"` (VendorID 0x045E,
     ProductID 0x02FF) and the log's later timestamps show the title reacting to
-    button presses, so step 2 is verification, not bring-up.
+    button presses, so step 2 is verification, not bring-up. **Correction
+    (2026-09-19):** the pad present in the last session is a different one —
+    `"XInput Controller #1"`, VendorID `0x0B05`, ProductID `0x1B4C`.
 
 ## Progress (2026-09-10)
 
@@ -80,6 +85,36 @@ last_updated: 2026-09-19
 - **Audio is already submitting frames** (`XAudioRegisterRenderDriverClient` +
   repeating `XAudioSubmitRenderDriverFrame`) — that is **Milestone 5** step 4
   material, not a Milestone 4 criterion.
+
+## Progress (2026-09-19)
+
+- **The offline route is reachable.** B dismisses the "Cannot connect to Rock
+  Central" dialog and the title reaches its offline path; the author then navigated
+  the menus, saw the bundled song list and started a song (which needs the
+  Milestone 5 fixes as well). **The exact key sequence is not recorded** — capture
+  it next session, because it is the first step of every later acceptance run.
+- **Step 1 (content): menus and bundled songs work; the offset audit does not
+  exist.** `gen/main_xbox.hdr` / `gen/main_xbox_0.ark` are opened without complaint,
+  but nobody has compared offsets or sizes, and
+  `config/game_fingerprints.toml` is **read by nothing** — no code references it
+  and no log line reports a fingerprint — so a wrong dump still fails late and
+  confusingly.
+- **Step 2 (input): pad enumerated, verification still keyboard-only.** The last
+  session's log shows `SDL OnControllerDeviceAdded: "XInput Controller #1"`
+  (VendorID `0x0B05`, ProductID `0x1B4C`); every navigation verified so far was
+  keyboard-injected.
+- **Step 3 (persistence): partial.** The SDK content path writes everything (see
+  the close-out in [docs/bringup-log.md](../docs/bringup-log.md)). Weak cross-run
+  signals exist — content files written by one run were enumerated by the next, and
+  the shader cache is rewritten at process exit — but no deliberate restart,
+  missing-root or corrupt-root run has been done.
+- **Step 4 (online unavailable): satisfied.** The Rock Central sign-in is refused
+  and dismissible, the DLC aggregate enumerator returns 0 items, and no service is
+  faked.
+- **B-010 is resolved and was never an M4 blocker:** 32-bit fixed-point textures
+  are converted on the CPU (SDK patch 0002), which is what made the note highway
+  and the 3D background appear. Two limits stand — see
+  [docs/known-issues.md](../docs/known-issues.md).
 
 ## Reference leads (RB3 mining pass, 2026-09-19)
 
@@ -137,12 +172,16 @@ is the same engine, and two projects have already solved a lot of this:
   game-data root with correct offsets and sizes (fingerprints in
   `config/game_fingerprints.toml`).
 - Reach the main menu and enumerate bundled songs with **no online dependency**.
+- **State (2026-09-19):** menus and bundled-song enumeration work; the
+  offset/size audit and any fingerprint check are still to do.
 
 ### 2. Input
 
 - Map one standard XInput controller.
 - Verify navigation, accept/back, pause, and lane controls.
 - Keep keyboard fallback parity with the Xenia baseline (`keyboard_mode = 1`).
+- **State (2026-09-19):** first half done, second half open — every verified
+  navigation was keyboard-injected, and nothing has been checked on a pad.
 
 ### 3. Local persistence
 
@@ -150,42 +189,57 @@ is the same engine, and two projects have already solved a lot of this:
   use.
 - Verify settings/save creation, restart persistence, and behavior with missing
   or corrupt writable data.
+- **State (2026-09-19):** partial — the SDK content path creates the files;
+  restart persistence and missing/corrupt writable data are untested.
 
 ### 4. Keep online features gracefully unavailable
 
 - Achievements, leaderboards, and downloadable-song enumeration stay disabled or
   gracefully unavailable unless they block the core loop.
+- **State (2026-09-19):** done.
 
 ## Acceptance / exit criteria
 
 - [ ] Launch → navigate menus → see bundled content → select a song → return to
       menu, repeatedly, without a crash or online dependency.
+      **Partially met (2026-09-19):** the author did all of this while getting a
+      song to play (see Progress above), but not repeatably and not with the
+      return-to-menu leg on its own; this milestone should be exit-completed once
+      the offline route is scripted and a pad has been used for at least one pass.
 
 ## Next steps (pick up here)
 
-1. `scripts/scan_process_strings.ps1 -Pattern "Offline Mode"` on a live title,
-   then grep `generated/` for the address it reports to find the branch that
-   skips the Rock Central sign-in.
-2. Reach the main menu and enumerate the bundled song list with no online
-   dependency (step 1), confirming `gen/main_xbox.hdr` / `_0.ark` open with the
-   expected offsets/sizes.
-3. Verify accept/back/pause/lane controls against `config/game_fingerprints.toml`
-   hashes unchanged (step 2), then local persistence (step 3).
+1. **Record the offline route** — which key dismisses the sign-in and which key
+   picks "Proceed in Offline Mode?" — as a reusable action in `scripts/`, and write
+   the sequence into [docs/bringup-log.md](../docs/bringup-log.md). The guest-side
+   branch is still unidentified;
+   `scripts/scan_process_strings.ps1 -Pattern "Offline Mode"` plus a grep of
+   `generated/` is the lead.
+2. **Verify with a pad instead of injected keys** (step 2): navigation,
+   accept/back, pause, lane controls, and keyboard fallback parity on
+   `XInput Controller #1`.
+3. **Decide what `config/game_fingerprints.toml` is for.** Either wire it into a
+   real check (definition-of-working #10 wants the SDK version *and* fingerprint in
+   the log) or delete it as dead config. Do the offset/size audit for
+   `main_xbox.hdr` / `_0.ark` at the same time.
+4. **Run the persistence cases deliberately** (step 3): launch twice and diff the
+   writable root; then run with the root absent and with a deliberately corrupted
+   `globaloptions`.
+5. **Then Milestone 5.** Its exit criterion (three clean full-song runs) also has
+   no driver, so write one script that does both: reach the offline menus, start a
+   song, capture the log, and shut down cleanly.
 
 Before writing any new hook, read **Reference leads** above: hooks, midasm hooks
 and the offline-mode candidates are already mapped there.
 
 ## Handoff to Milestone 5
 
-Write into `05-complete-one-song.md`:
+Folded into [`05-complete-one-song.md`](./05-complete-one-song.md) on 2026-09-19
+(content quirks, storage location, input mapping, the standing "audio frames are
+produced" fact). What is still owed to it:
 
-- the named bundled song(s) available for the full-playthrough test;
-- input mapping details (which XInput controls map to which actions);
-- save/storage serialization format and where writable state lives;
-- any content-enumeration quirks that could affect song load;
-- the standing fact that audio submits frames from the title onward
-  (`XAudioRegisterRenderDriverClient` + `XAudioSubmitRenderDriverFrame`), so M5
-  starts from "frames are produced" and only has to prove they are audible.
+- the **named** bundled song used for the full-playthrough test;
+- the recorded offline route, once captured (next step 1).
 
 ## Bring-up loop
 
