@@ -1,0 +1,44 @@
+# Fingerprints for the Rock Band Blitz Ultimate payload this runtime supports.
+#
+# Same schema as ../../config/game_fingerprints.toml, and the same parser
+# (src/util/game_fingerprint.h), so there is one set of rules for "is this the
+# right data". Identifiers, sizes and hashes only - no mod content.
+#
+# These values are not a gate. Ultimate is a third-party fan mod and users may
+# legitimately supply another release or a rebuilt payload, so the installer
+# records what it finds, warns when it does not match, and installs anyway; the
+# thing that actually decides whether the overlay works is its shape
+# (ultimate/gen/patch_xbox.hdr + ultimate/gen/patch_xbox_0.ark), which is what
+# the runtime reads. See ../../docs/ultimate-compat.md.
+
+schema_version = 1
+
+[game]
+name = "Rock Band Blitz Ultimate"
+version = "2.11"
+console = "Xbox 360"
+source_repository = "https://github.com/ultimate-mods-rb/blitz-ultimate"
+
+# The two files the runtime opens. The entries are ordered the way the runtime
+# probes them.
+[[files]]
+role = "ultimate-archive-header"
+path = "gen/patch_xbox.hdr"
+size = 4381
+sha256 = "87b3042690cab7c76ab0538585d097dc0547d5a6dba6b3f85ed66f8f55d1b825"
+
+[[files]]
+role = "ultimate-archive-data"
+path = "gen/patch_xbox_0.ark"
+size = 14171207
+sha256 = "736f6f7ec916ed17306ee9a5bc6c01d0a5f261f9dbe5b18ea83282203fd74dd2"
+
+# Not installed: the mod's own default.xex, shipped inside the release archive.
+# Listed so a stray copy in a user-supplied folder is recognised and refused
+# instead of silently shadowing the entrypoint. The runtime applies the 12-byte
+# delta to the user's own default.xex (src/hooks/ultimate.cpp).
+[[files]]
+role = "ultimate-entrypoint-rejected"
+path = "default.xex"
+size = 9023488
+sha256 = "390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c"

@@ -1,0 +1,48 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "installer-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "installer-release",
+            "displayName": "Installer helper (Release, clang/LLVM from PATH)",
+            "inherits": "installer-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "installer-release-msvc",
+            "displayName": "Installer helper (Release, cl.exe from the VS environment)",
+            "inherits": "installer-base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        }
+    ],
+    "buildPresets": [
+        { "name": "installer-release", "configurePreset": "installer-release" },
+        { "name": "installer-release-msvc", "configurePreset": "installer-release-msvc" }
+    ],
+    "testPresets": [
+        {
+            "name": "installer-release",
+            "configurePreset": "installer-release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "installer-release-msvc",
+            "configurePreset": "installer-release-msvc",
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}

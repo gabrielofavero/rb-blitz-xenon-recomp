@@ -1,0 +1,64 @@
+# Release pins for the Rock Band Blitz installer.
+#
+# This file is the single source of truth for everything the installer needs to
+# know about the outside world. tools/embed_config.cpp compiles it (plus the two
+# fingerprint files) into generated/embedded_config.h for the native helper and
+# generated/pins.iss for the Inno Setup wizard, so the wizard and the helper can
+# never disagree about what they are installing.
+#
+# Keep this file content-free: identifiers, versions, URLs, sizes and hashes
+# only. See ../README.md and ../../prompts/06-reproducible-release.md for the
+# distribution rules the release has to satisfy.
+
+schema_version = 1
+
+[installer]
+name = "Rock Band Blitz (Xenon recomp)"
+short_name = "Rock Band Blitz"
+version = "1.0.0"
+publisher = "Rock Band Blitz Xenon Recomp"
+homepage_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp"
+support_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp/issues"
+# Folder offered under {localappdata}\Programs and appended to the install
+# directory the user picks.
+default_dir_name = "Rock Band Blitz"
+# Lowest Windows version the runtime needs: the recompiled binary and the
+# runtime DLLs are x86-64-v2, so nothing older than Windows 10 will do.
+min_windows_build = "10.0.17763"
+
+[payload]
+# The recompiled game the installer places. Either embedded in the setup
+# executable at build time (tools/make_payload.ps1 + build.ps1, the default) or
+# downloaded from `url` at install time; `build.ps1 -PayloadUrl/-PayloadSha256`
+# override the values below for a release without editing this file.
+#
+# Left empty in the repository: a pin that does not exist yet is worse than a
+# clear "no payload source configured" message. The release workflow (README.md,
+# section "Cutting a release") fills it in.
+version = ""
+url = ""
+sha256 = ""
+size = 0
+
+[ultimate]
+# Rock Band Blitz Ultimate, a fan mod maintained at the repository below. Its
+# files are downloaded on demand from the upstream release - never mirrored,
+# re-hosted or bundled - and only when the user asks for them.
+#
+# Schema-compatibility pin: the runtime in this repository looks for
+# ultimate/gen/patch_xbox.hdr and ultimate/gen/patch_xbox_0.ark under the game
+# data root (see ../../src/hooks/ultimate.cpp and ../../docs/ultimate-compat.md).
+# This is the release those two files are known to come from; the fingerprint
+# file next to this one records what they hash to.
+version = "2.11"
+url = "https://github.com/ultimate-mods-rb/blitz-ultimate/releases/download/2.11/Rock-Band-Blitz-Ultimate-2.11-Xbox.zip"
+sha256 = "6524a193de32de2961cd95329b65cdeda8dec9d813cbdf9bbd8dd3646ca8d5ff"
+size = 10366787
+repository_url = "https://github.com/ultimate-mods-rb/blitz-ultimate"
+release_url = "https://github.com/ultimate-mods-rb/blitz-ultimate/releases/tag/2.11"
+# Subtree of the release archive that belongs in <game root>\ultimate, and the
+# console the runtime emulates. The archive also carries a default.xex; it is
+# deliberately not installed, because the runtime reproduces that delta itself
+# from the user's own default.xex (docs/ultimate-compat.md).
+archive_prefix = "Xbox"
+destination_dir = "ultimate"
