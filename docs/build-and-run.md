@@ -250,6 +250,13 @@ cd d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\build\win-amd64-release
 .\rb_blitz.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game
 ```
 
+`--game_data_root` may point at either supported content variant — the retail dump,
+or a [Rock Band Blitz Deluxe](deluxe-compat.md) install, which is those same files
+copied over a vanilla game folder. Nothing else on the command line changes. The
+**build** input does not get that choice: codegen and every byte-guarded patch are
+addressed against the vanilla `default.xex`, so keep it (the mod's own installer
+suggests renaming it to `default_vanilla.xex` before installing).
+
 Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 
 ```powershell

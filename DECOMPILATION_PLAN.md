@@ -4,7 +4,7 @@
 
 Produce a reproducible native build of the Xbox 360 version of **Rock Band Blitz** with ReXGlue. The first release is a bring-up release: it should reliably launch, reach the offline song flow, and complete one bundled song with usable graphics, audio, controller input, and local persistence.
 
-Correctness fixes, performance work, visual upgrades, broad DLC compatibility, restored online behavior, and quality-of-life features are later projects. During bring-up, make only the smallest change needed to pass the next milestone.
+Correctness fixes, performance work, visual upgrades, broad DLC compatibility, and quality-of-life features are later projects. Restoring or unblocking online behavior is **not** one of them at all: the retail title ships an offline mode, so that work was never needed for a playable port, and it belongs to the community's Rock Band Blitz Deluxe mod rather than here. Our obligation on that front is compatibility — a Deluxe install dropped over a vanilla dump must run on the same executable ([docs/deluxe-compat.md](docs/deluxe-compat.md)). During bring-up, make only the smallest change needed to pass the next milestone.
 
 This work assumes contributors use game files dumped from a copy they are authorized to use. Retail binaries, archives, music, keys, and other copyrighted game data must not be committed or redistributed. The project's own source is licensed **GPL-2.0-only** (`LICENSE`), a choice made so that code can be adapted from the GPL-2.0 recompilation projects for the same engine; see `README.md` for what the license permits and what it does not.
 
@@ -16,7 +16,7 @@ This work assumes contributors use game files dumped from a copy they are author
 - Available SDK: ReXGlue v0.10.0, commit `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`.
 - No recompilation project, manifest, generated source, or known-good trace exists yet.
 - Historical Xenia testing reaches menus but reports missing gameplay track/background rendering. Treat graphics/readback behavior as a known investigation area, not as a conclusion about ReXGlue.
-- The original online services are gone. The bring-up target is deliberately offline and must not depend on Xbox Live or Rock Central.
+- The original online services are gone. The bring-up target is deliberately offline and must not depend on Xbox Live or Rock Central — permanently, not just during bring-up. The two content variants we support (a vanilla dump, and a Rock Band Blitz Deluxe install over one) and what compatibility with the latter means are defined in [docs/deluxe-compat.md](docs/deluxe-compat.md).
 
 ## Definition of “working” for the first release
 
@@ -34,6 +34,8 @@ All of these must pass on a clean Windows AMD64 checkout:
 10. Failure produces a useful log containing the SDK version, game fingerprint, last guest PC/function, and missing import or assertion where applicable.
 
 This definition intentionally does not require online services, leaderboards, power-up service behavior, achievements, every song/DLC package, multiplayer, non-Windows hosts, perfect timing, or polished presentation.
+
+It also covers **only the vanilla content variant**. Running a Rock Band Blitz Deluxe install as the game-data root is a separate post-bring-up compatibility goal with its own acceptance criteria, not a condition of this release: [docs/deluxe-compat.md](docs/deluxe-compat.md).
 
 ## Architecture
 
@@ -86,6 +88,7 @@ Title-specific behavior belongs in this repository's project layer. Change the S
 ├── docs/
 │   ├── bringup-log.md                # Chronological milestone and blocker log
 │   ├── build-and-run.md              # Rebuild / run / log-capture commands
+│   ├── deluxe-compat.md              # Vanilla vs Deluxe content-variant policy
 │   ├── known-issues.md
 │   ├── rb3-references.md             # What the RB3 projects solved on this engine
 │   ├── symbols.md                    # Important guest addresses and evidence
@@ -188,7 +191,7 @@ Exit criterion: ten consecutive launches reach the title screen/offline prompt a
 - [ ] Map one standard XInput controller and verify navigation, accept/back, pause, and lane controls.
 - [ ] Provide a deterministic local profile/storage response sufficient for offline use.
 - [ ] Verify settings/save creation, restart persistence, and behavior with missing/corrupt writable data.
-- [x] Keep achievements, leaderboards, and downloadable-song enumeration disabled or gracefully unavailable unless they block the core loop. (The Rock Central sign-in attempt is refused and dismissible and the aggregate DLC enumerator returns 0 items, so the offline path is unaffected.)
+- [x] Keep achievements, leaderboards, and downloadable-song enumeration disabled or gracefully unavailable unless they block the core loop. (The Rock Central sign-in attempt is refused and dismissible and the aggregate DLC enumerator returns 0 items, so the offline path is unaffected. This is the **final** behaviour for the vanilla route, not a bring-up shortcut — unblocking online features is not a milestone of ours; [docs/deluxe-compat.md](docs/deluxe-compat.md).)
 
 Exit criterion: the user can launch, navigate, see bundled content, select a song, and return to the menu repeatedly. **Partially met** (2026-09-19) — the offline path, bundled content and song selection work, but XInput lane/pause verification, storage restart persistence, and the ARK/HDR + fingerprint audit are still open.
 
@@ -261,7 +264,8 @@ Suggested blocker entry:
 | Risk | Early check | Bring-up response |
 | --- | --- | --- |
 | Wrong or incomplete retail dump | Fingerprint and ARK/HDR read audit | Stop with a clear error |
-| Dead online-service dependency | Run offline baseline and log service calls | Preserve/force the legitimate offline failure path |
+| Dead online-service dependency | Run offline baseline and log service calls | Preserve/force the legitimate offline failure path; never emulate a fake service — online behavior is the Deluxe mod's problem, not ours ([docs/deluxe-compat.md](docs/deluxe-compat.md)) |
+| Deluxe or title-update content in the data root | Run the vanilla smoke route against an installed Rock Band Blitz Deluxe root | Keep the vanilla `default.xex` as the codegen input, treat the overlay as data, and fix behaviour deltas in the project layer ([docs/deluxe-compat.md](docs/deluxe-compat.md)) |
 | Undiscovered PPC targets or EH funclets | Codegen validation plus crash-PC correlation | Layered function/analysis hints |
 | Missing kernel exports | Import inventory before first launch | Implement generic behavior in SDK or narrow project hook |
 | Gameplay graphics absent | Capture first song's draw/resolve sequence | Correct reusable Xenos behavior; avoid game-specific rendering hacks |
@@ -272,8 +276,9 @@ Suggested blocker entry:
 ## Deferred until after “working”
 
 - Pixel-perfect graphics, high-resolution/UI upgrades, unlocked frame rates, latency tuning, and performance optimization.
-- Restoring or replacing Rock Central, leaderboards, challenges, social features, or other online services.
+- Restoring, replacing or emulating Rock Central, leaderboards, challenges, social features, online multiplayer, or any other online service. Out of scope permanently: that work belongs to the Rock Band Blitz Deluxe mod and our only obligation is to stay compatible with it ([docs/deluxe-compat.md](docs/deluxe-compat.md)).
 - Reworking server-dependent progression, coins, power-ups, or achievements beyond what is necessary to play offline.
+- **Rock Band Blitz Deluxe compatibility** — a drag-and-drop Deluxe install used as the game-data root by the same executable, with the vanilla route unaffected. Acceptance criteria, hazards (TU5/`update:`, overlay fingerprinting, replaced UI data) and what we refuse to ship are in [docs/deluxe-compat.md](docs/deluxe-compat.md).
 - Exhaustive DLC/export/custom-song compatibility and content-management UI.
 - Multiple controller backends, keyboard bindings, handheld tuning, Linux/macOS/ARM support, packaging, installers, and auto-update.
 - Large source cleanup, symbol-name campaigns unrelated to blockers, broad native rewrites, and mod APIs.

@@ -34,8 +34,15 @@ is removed from this file, not from the log.
   `num_format = 0` (fixed point) only.
 - `update:\gen\patch_xbox.hdr` → `0xc000000f`: no title update in this dump.
 - Three key/voice `STUB` warnings at boot.
-- Online features (achievements, leaderboards, DLC enumeration) are offline-
-  disabled by policy until the core loop works.
+- Online features (Rock Central sign-in, achievements, leaderboards, challenges,
+  store/DLC enumeration) stay unavailable. This is **permanent, not a bring-up
+  shortcut**: Blitz ships its own offline mode, so restoring online behaviour was
+  never required for a playable port, and unblocking it is the community mod's job
+  rather than ours. Our obligation is the opposite direction — a Rock Band Blitz
+  Deluxe install must keep working by drag-and-drop. What that means, which hazards
+  a Deluxe game-data root brings (`update:`/TU5, overlay fingerprinting, replaced
+  UI data), and what we refuse to ship are in
+  [deluxe-compat.md](deluxe-compat.md).
 - The project is **GPL-2.0-only**, deliberately not "or later": GPL-2.0 is what
   keeps us compatible with the GPL-2.0 Rock Band 3 recompilation project we adapt
   code from. Do not relicense, and do not add GPL-3.0-only or otherwise

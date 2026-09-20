@@ -339,7 +339,7 @@ content into the writable root:
 | XInput navigation / accept / pause / lanes | pad enumerated; every run verified so far is keyboard-injected |
 | Deterministic local profile/storage | satisfied by the SDK content path, no project code |
 | Save creation, restart persistence, missing/corrupt data | content written; no deliberate restart or corrupt-data run |
-| Online features gracefully unavailable | working |
+| Online features gracefully unavailable | working — **final** for the vanilla route; see the 2026-09-19 decision at the end of this log |
 
 Resolved in this milestone: B-008 (pressing A), B-009 (music). Close-out detail,
 including what is still open and why, is in the entry at the end of this log.
@@ -792,4 +792,60 @@ Still open, and none of it is tracked by a script:
 | Frame pacing and input polling stability | unmeasured |
 | Xenia draw comparison | not started |
 | Which input device the run used | keyboard injection, per the Milestone 4 close-out above |
+
+## Decision: online unblocking is not our job — Deluxe compatibility is (2026-09-19)
+
+The Milestone 4 close-out above calls online features "offline-disabled by policy
+until the core loop works", which reads as a promise to come back and unblock them.
+We will not, and the docs now say so.
+
+**The reasoning.** The retail title already ships an offline path — the
+"Proceed in Offline Mode?" string is in the guest image, per the Milestone 4
+findings above — so no part of the core loop needs a service restored; M4 closed
+its online step by refusing the Rock Central sign-in gracefully, not by bringing a
+service back. Online behaviour (sign-in, leaderboards, achievements, DLC
+enumeration) is meanwhile exactly what the community's **Rock Band Blitz Deluxe**
+mod (MiloHax, `solamint/rock-band-blitz-deluxe`) changes. Rebuilding a dead service
+would duplicate that work, badly.
+
+**What our obligation becomes: compatibility.** Deluxe installs by copying files
+over a vanilla copy — its own guide suggests renaming `default.xex` to
+`default_vanilla.xex` — so the supported shape is one executable and two
+`--game_data_root` variants:
+
+- vanilla retail dump → current behaviour, online stays unavailable (final).
+- Deluxe install → works as a game-data root of the same build, drag-and-drop,
+  vanilla untouched.
+
+The mod's `default.xex` is **not** swappable into our pipeline: the translation is
+generated from one specific retail image, and `config/functions.toml`,
+byte-guarded patches, import ordinals and jump tables are all addresses in it.
+Deluxe code deltas therefore have to be reproduced project-side, and only when a
+Deluxe-only feature actually needs them.
+
+This is the same relationship the RB3 recomp has with RB3DX, which is why the
+patch-group catalogue in [`rb3-references.md`](rb3-references.md) §5–§6 is still
+the right thing to mine.
+
+**What changed in the docs.** New policy home
+[`deluxe-compat.md`](deluxe-compat.md) — decision table, install facts, why the
+executable is not swappable, hazards to expect on a first Deluxe-root run,
+acceptance criteria for "Deluxe works", refusal list. Propagated to
+[`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md) (goal, baseline, definition of
+"working", risks, deferred backlog), [`README.md`](../README.md),
+[`known-issues.md`](known-issues.md), [`build-and-run.md`](build-and-run.md),
+[`rb3-references.md`](rb3-references.md) §0 and §10, and prompts
+[`04`](../prompts/04-menus-content-input-saves.md),
+[`06`](../prompts/06-reproducible-release.md) and [`README`](../prompts/README.md).
+
+**Consequences recorded now, not later.**
+
+- Milestone 4's "online features gracefully unavailable" step is final behaviour,
+  not a stage; it is satisfied and closes here.
+- Milestone 6 inherits one new rule: never ship, mirror or vendor Deluxe files.
+- Deluxe compatibility is a post-bring-up backlog item with its own criteria; no
+  bring-up milestone depends on it.
+- The `update:\gen\patch_xbox.hdr` → `0xc000000f` snag may be exercised for real by
+  a Deluxe root, because the Deluxe Xbox 360 install rolls TU5 into the base
+  install instead of loading it as a title update.
 

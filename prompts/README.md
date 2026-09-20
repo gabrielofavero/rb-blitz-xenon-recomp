@@ -68,6 +68,11 @@ already walked a lot of this road:
   imports) and the RB3DX patch set that fixes real retail consoles.
 - `freeqaz/rb3` — RB3 for Wii: the engine source of truth, plus the audio
   verification methodology.
+- `solamint/rock-band-blitz-deluxe` — **Rock Band Blitz Deluxe**, the MiloHax QoL
+  mod for Blitz and the reason online unblocking is not our job: it is the Blitz
+  sibling of the RB3DX patch set, and our obligation is to run a Deluxe install by
+  drag-and-drop rather than to restore services
+  ([`docs/deluxe-compat.md`](../docs/deluxe-compat.md)).
 
 [`docs/rb3-references.md`](../docs/rb3-references.md) catalogues what is worth
 porting. It is a living document: when a lead there is proved or disproved
