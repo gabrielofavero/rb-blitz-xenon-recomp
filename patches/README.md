@@ -17,6 +17,7 @@ checkout.
 | `rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` | `XThread::SetActiveCpu` re-logged "Too few processor cores" on every thread CPU assignment (~11k lines, ~580 KB per boot). Log it once. | yes |
 | `rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch` | The SDK has no host format and no load shader for the 32-bit guest texture formats (`k_32`, `k_32_32`, `k_32_32_32_32`), which are 0.32 fixed point when `num_format = 0`; `CreateTexture` then returned `nullptr` and the SRV sampled (0,0,0,0), making every alpha-blended 3D element invisible (B-010 in [../docs/bringup-log.md](../docs/bringup-log.md)). Maps them to the float host formats with the existing word-mover load shaders, carries `num_format` in `TextureKey`, and converts the guest words to IEEE float bits on the CPU into an upload-pool staging buffer bound as the load shader's source. Integer (`num_format = 1`) textures still fail to create. | yes |
 | `rexglue-sdk/0003-trace-ntwritefile-and-scatter-reads.patch` | `NtWriteFile_entry` and `NtReadFileScatter_entry` in `src/kernel/xboxkrnl/xboxkrnl_io.cpp` called neither `REXKRNL_IMPORT_TRACE` nor `REXKRNL_IMPORT_RESULT`, unlike `NtReadFile_entry` — so `--log_level=trace` showed every guest read and **no** guest write, which reads as "the title never writes" when the truth is "writes are not logged". Adds both trace points to both entry points. The write trace is what makes the Milestone 4 persistence evidence (`[NtWriteFile] … len=0x400` while the title authors a fresh `globaloptions` payload) visible; the scatter trace is inert so far — no `NtReadFileScatter` call has been observed in any run. | yes |
+| `rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch` | Nothing in a vanilla log measures frame pacing or input polling: a run has no fps, frame-time or poll-rate line anywhere, and the only frame-ish number in it belongs to the payload overlay. Adds three `--log_level=trace` points — `[VdSwap]` in `VdSwap_entry` (`src/kernel/xboxkrnl/xboxkrnl_video.cpp`, every guest frame submitted, with the host-microsecond delta and the guest tick), `[XE_SWAP]` in `ExecutePacketType3_XE_SWAP` (`src/graphics/command_processor.cpp`, each frame that reached the host as a present) and `[XamInputGetState]` in `XamInputGetState_entry` (`src/kernel/xam/xam_input.cpp`, every guest poll of a pad, with the button word the guest was handed). They back the Milestone 5 frame-pacing and input-polling measurement in [../docs/bringup-log.md](../docs/bringup-log.md). | yes |
 
 ## Apply / verify
 
@@ -62,7 +63,9 @@ in the parent report nothing for the SDK, while the submodule itself still shows
 `include/rex/graphics/d3d12/shared_memory.h`,
 `include/rex/graphics/pipeline/texture/cache.h`,
 `src/graphics/d3d12/texture_cache.cpp`, `src/graphics/pipeline/texture/cache.cpp`
-for 0002; `src/kernel/xboxkrnl/xboxkrnl_io.cpp` for 0003).
+for 0002; `src/kernel/xboxkrnl/xboxkrnl_io.cpp` for 0003;
+`src/kernel/xboxkrnl/xboxkrnl_video.cpp`, `src/graphics/command_processor.cpp`
+and `src/kernel/xam/xam_input.cpp` for 0004).
 
 `ignore = dirty` hides work-tree edits only. A **moved gitlink is still
 reported**: verified 2026-09-19 by pointing the index entry at a different
@@ -137,7 +140,7 @@ your edits in `git status`, and `-NoIndexMarks` if you do not want the index
 touched at all.
 
 After both scripts, `git -C rexglue-sdk status --porcelain` should show only the
-files named in the patch set (the `0001`/`0002`/`0003` rows above). The parent should be
+files named in the patch set (the `0001`/`0002`/`0003`/`0004` rows above). The parent should be
 clean: `.gitmodules`
 sets `submodule.rexglue-sdk.ignore = dirty`, so the applied patch is no longer
 reported as a modified submodule, and `apply_sdk_patches.ps1` audits whatever that

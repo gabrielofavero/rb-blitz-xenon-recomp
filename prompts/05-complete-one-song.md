@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 milestone: 5
 last_updated: 2026-09-20
 ---
@@ -133,17 +133,35 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
   `XMPSetPlaybackController(0,1)` at 22:18:35 → `(0,0)` at 22:22:39. Voice counts,
   sample formats, pause/resume and the `audio-verify` methodology above are all
   still unchecked — "I heard it" is not yet evidence.
+- **Status (2026-09-20): closed as disposed, by ear and with a date.** The audio
+  items above and below are marked disposed in
+  [`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md) with the author's rationale:
+  full songs play with music, note and miss feedback all correct, and the residual
+  gameplay drift is what the title's own calibration screen exists to correct.
+  Voices, sample formats and pause/resume stay **unchecked on purpose** — nothing
+  in this section is measured, and nothing here claims to be.
 - Measure audio/gameplay drift across a full song; defer fine calibration unless
   drift makes play impossible.
 
 ### 4. Stability
 
-- **Status (2026-09-20): the launch → results path is recorded and passing; the
-  measurements are not.** Three clean-process runs and one replay run are captured
-  in `out/m5-acceptance/`. Frame pacing and input polling are still unmeasured
-  (a vanilla log prints no fps or pacing line), results-to-song-select was only
-  observed under `-Replay`, and pause/resume is untouched.
-- Verify frame pacing and input polling are stable for a complete run.
+- **Status (2026-09-20, closed): pacing and polling are measured, and they pass in
+  both vsync modes.** Three clean-process runs and one replay run are captured in
+  `out/m5-acceptance/`. [scripts/measure_pacing_input.ps1](../scripts/measure_pacing_input.ps1)
+  plays one named song in a fresh process and injects timed presses while SDK patch
+  0004 traces `VdSwap`, `XE_SWAP` and every `XamInputGetState`; then
+  [scripts/audit_pacing_input.ps1](../scripts/audit_pacing_input.ps1) reduces the
+  ~74 MB trace to a 17-check verdict, and its `-SelfTest` proves the checks fail a
+  synthesized broken run. vsync on: median present dt 16.72 ms (59.3 fps), p99
+  22.62 ms, 0.12% hitches, 402.1 polls/s, 6.89 ms p99 poll gap, every asserted press
+  seen within 47.0 ms. vsync off: 68.3 fps, median 14.34 ms, 16/16 of the checks
+  that mode shares. Results-to-song-select was only observed under `-Replay`, and
+  pause/resume is untouched and claimed nowhere.
+- Verify frame pacing and input polling are stable for a complete run. **Done**
+  (2026-09-20): both modes pass with zero missing or duplicate frame counters and
+  zero undelivered presses; the reports are `out/m5-pacing/vsync-{on,off}/pacing-input.{json,md}`
+  and the reading of them, including the limits, is "Milestone 5 close-out" in
+  [docs/bringup-log.md](../docs/bringup-log.md).
 - Reach results, return to song select, and play again without leaked state or
   a crash. **Observed working** (2026-09-20, `-Replay`): the results screen returns
   to the song list of the same process, the same row is reselected, and the second

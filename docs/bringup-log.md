@@ -1380,3 +1380,192 @@ close any of them:
 - The runs prove the *route* and the *absence of a fatal*; they are not a
   regression test for graphics or audio content.
 
+All four of those were dealt with later the same day — two measured, two disposed
+of on the author's judgement — in the close-out section below.
+
+## Milestone 5 close-out: frame pacing and input polling (2026-09-20)
+
+The acceptance runs above proved the *route* and proved nothing about *timing*.
+Four bullets were still open; two of them were real measurement work and are done
+and passing below, and two were disposed of rather than deferred, on the author's
+call and with a date, in
+[`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md).
+
+### Patch 0004: the traces that had to exist first
+
+There was nothing to measure. A vanilla log has **no** fps, frame-time or
+poll-rate line anywhere — the only frame-ish figure in a run is the payload
+overlay's textual `1694 KB / 75.1`, which needs a payload boot, and
+`XAudioSubmitRenderDriverFrame` appears in bursts of about ten lines per run
+instead of once per frame. So the measurement starts with patch 0004
+([`patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch`](../patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch),
+three files, +52/−1), gated by the same `--log_level=trace` switch as the other
+local traces:
+
+| Trace | Site | What it is |
+| --- | --- | --- |
+| `[VdSwap] n=… dt_us=… guest_tick=…` | `xboxkrnl_video.cpp` `VdSwap_entry` | the guest's own swap call — one frame **submitted** |
+| `[XE_SWAP] n=… dt_us=… guest_tick=…` | `command_processor.cpp` `ExecutePacketType3_XE_SWAP` | the packet that reaches the host as a present — one frame **presented** |
+| `[XamInputGetState] user=0 … buttons=… guest_tick=…` | `xam_input.cpp` `XamInputGetState_entry` | one guest poll of a pad, with the button word the guest was handed |
+
+Two counter series instead of one is deliberate: `VdSwap` is what the title
+*thinks* it did and `XE_SWAP` is what the host was *told*, so the pair catches a
+frame that was submitted and never presented.
+
+`guest_tick` is the guest's own monotonic counter, and deriving its frequency from
+the frame series rather than assuming 60 Hz is what lets the report cross-check a
+frame count against a song's length: **50.005 MHz** in the vsync-on run and
+50.003 MHz in the vsync-off run, measured, not assumed.
+
+### The harness
+
+[`scripts/measure_pacing_input.ps1`](../scripts/measure_pacing_input.ps1) reuses
+`acceptance_song.ps1`'s OCR-gated route to reach gameplay, then, while the song
+plays, injects pad-A presses at three hold lengths (8 / 30 / 90 ms) every 12 s and
+records the wall-clock instant of every key-down and key-up. Each press samples the
+foreground window **for the whole hold**, and repeats the press if the game window
+lost the foreground mid-hold (the reason is "the lost press" below). At the end it
+copies the run's whole rotated log set next to the injection record, so
+`out/m5-pacing/<tag>/` holds `run.json`, `injections.json` and ~74 MB of
+`logs/*.log` — the evidence, not a summary of it.
+
+[`scripts/audit_pacing_input.ps1`](../scripts/audit_pacing_input.ps1) reduces those
+logs to 17 named checks. `-SelfTest` synthesizes a healthy and a deliberately
+broken measurement and asserts that the verdicts differ, which is the check that
+the checks bite:
+
+| | Check | Threshold |
+| --- | --- | --- |
+| E1–E4 | log set present; a song envelope no preview closes; route completed; window length | ≥ 60 s of song, no `[FATAL]` |
+| F1–F2 | both frame traces present; counter continuity | no missing and no duplicate frame number |
+| F3 | presented frame cadence | median dt ≤ 20 ms |
+| F4 | presented frame tail | p99 dt ≤ 40 ms |
+| F5 | hitch budget (> 2.5 × median) | ≤ 1% of frames |
+| F6 | submit and present agree | frame-count delta ≤ 2, fps delta ≤ 2 |
+| F7 | vblank pacing (vsync on only) | median dt in [14, 20] ms |
+| I1 | successful poll rate for user 0 | ≥ 30/s |
+| I2 | worst poll gap | p99 ≤ 50 ms and max ≤ 250 ms |
+| I3 | every asserted press reached the guest | all presses ≥ 25 ms observed |
+| I4 | key-down to the first observing poll | ≤ 100 ms |
+| I5 | no stray buttons while probing | only the probe button is ever set |
+| I6 | probe coverage | ≥ 8 in-song presses |
+
+### Result: both modes pass
+
+| | vsync **on** | vsync **off** |
+| --- | --- | --- |
+| verdict | **PASS**, 17/17 | **PASS**, 16/16 (F7 does not apply) |
+| song window | 317.1 s | 316.0 s |
+| logs consumed | 15 files, 74.0 MB, 511 783 lines | 16 files, 75.8 MB, 532 270 lines |
+| `VdSwap` | 18 736 frames, 59.1 fps, median 16.76 ms | 21 579 frames, 68.3 fps, median 14.26 ms |
+| `XE_SWAP` | 18 735 frames, 59.3 fps, median 16.72 ms, p90 18.60, p99 22.62, max 263.6 ms | 21 579 frames, 68.3 fps, median 14.34 ms, p90 17.05, p99 21.46, max 245.8 ms |
+| hitches | 23 of 18 734 (0.12%) | 45 of 21 578 (0.21%) |
+| counter integrity | 0 missing, 0 duplicate, `dn=1` | 0 missing, 0 duplicate, `dn=0` |
+| poll rate (user 0) | 402.1/s (127 498 polls) | 397.4/s (125 578 polls) |
+| poll gap | median 4.10, p99 6.89, max 142.1 ms | median 4.11, p99 6.71, max 243.5 ms |
+| presses | 14 asserted, 0 missed, 0 discarded of 15 | 13 asserted, 0 missed, 0 discarded of 15 |
+| worst press latency | 47.0 ms | 50.0 ms |
+
+Both reports are `out/m5-pacing/vsync-{on,off}/pacing-input.{json,md}`, and both
+audits exit 0. The two runs are a single driver revision, so the numbers are
+comparable; the earlier pilot and preview runs that led here are superseded and
+deleted.
+
+### What the numbers say
+
+- **The guest is vblank-locked only when it is allowed to be.** With vsync on the
+  presented cadence is 16.72 ms median — 0.05 ms above a 16.67 ms vblank — and F7
+  confirms it. With vsync off the same route runs 68.3 fps (14.34 ms median). So
+  the title's frame loop is *not* internally capped at 60: it runs as fast as the
+  host will let it, which is worth knowing before anyone "fixes" the frame rate.
+- **The frame counters are sound.** `dn=1` and `dfps=0.21` with 18 736 submits
+  against 18 735 presents is one frame in flight at close, not a lost frame, and
+  there is no missing or duplicate counter in either series in either mode. That
+  matters because those counters are the measurement's own integrity check: a
+  dropped log line would have shown up as a gap.
+- **Pacing is stable at the 1% level and honest about its tail.** Hitches are
+  0.12% of frames with vsync on and 0.21% with vsync off; the p99 is 22.62 ms
+  against a 40 ms bound. The maximum is a different story and is reported, not
+  asserted — one 1174.9 ms `VdSwap` gap with vsync on and 263.6 ms in `XE_SWAP`,
+  254.3 / 245.8 ms with vsync off (see the limits below).
+- **Input is polled far more often than a human can press.** 402 polls/s is a
+  median gap of 4.10 ms, roughly four polls per presented frame, and the p99 of
+  6.89 ms means a press is visible to the guest within about one to two frames.
+  The worst realized latency is 47.0 ms (vsync on) and 50.0 ms (vsync off), both
+  measured key-down to the first poll that saw the button bit.
+- **The title polls pads other than the player's.** 191 247 polls in the vsync-on
+  run were for a user other than 0 — 1.5× the number of successful user-0 polls,
+  and none of them failed (the failed-fetch counter stayed at 0 in both runs).
+  So the title is enumerating more than one pad, not "asking whether a controller
+  exists" over and over.
+
+### The lost press
+
+The first attempt at the vsync-on run failed I3 — 14 presses asserted, 1 missed —
+and finding out why is the most useful thing this measurement produced. The miss
+was not a dropped input: `rexglue-sdk/src/input/mnk/mnk_input_driver.cpp` builds
+the pad state from the game window's own key events (`OnKeyDown` → `SetKeyState`,
+`OnKeyUp`) and **clears it on `OnLostFocus`** — it does not poll
+`GetAsyncKeyState`. A press therefore reaches the guest only if the window held the
+foreground while the `WM_KEYDOWN` arrived. The harness had sampled the foreground
+once, before the key-down, so a press stolen mid-hold looked like a lost input.
+
+Three changes followed, and the second and third are what make the numbers above
+mean anything:
+
+1. the driver samples the foreground across the whole hold, records how many
+   samples found the wrong window, and repeats an unclean press (up to 3 attempts);
+2. the analyzer counts such a press as **discarded** rather than failed, reports it
+   separately in `I3`, and shows a `delivered` column so a reader can tell the two
+   stories apart;
+3. the analyzer asserts only presses the driver realized at **≥ 25 ms**, and
+   reports shorter ones as characterization.
+
+Neither final run needed a retry: 15 of 15 presses were delivered cleanly in both
+modes, `0 discarded`. The failed run is preserved as the reason the checks exist,
+not as a result.
+
+### Honest limits of this measurement
+
+Four of them, and the first three are now a row in
+[docs/known-issues.md](known-issues.md):
+
+- **Every accepted run has one long stall** (~1174.9 ms `VdSwap` with vsync on,
+  ~254 ms with vsync off) that is reported but not asserted on. An earlier
+  vsync-off run of the same route, before the press-delivery change and no longer
+  on disk, reported 62.9 fps and a ~582 ms gap, so both the uncapped rate and the
+  length of the long tail vary with what else the machine is doing. These runs were
+  taken on an otherwise idle desktop; the 250 ms poll-gap bound in I2 is the one
+  the tail actually approaches.
+- **Injected keys depend on the foreground**, as above. The driver works around it
+  and the analyzer discounts it, but a measurement run has to be left alone.
+- **A press realized below 25 ms can fall between polls.** Of the three such
+  presses across the two runs, two were seen (12 and 14 ms) and one (14 ms) was
+  not. That is how a polled pad behaves rather than a defect — a human press is an
+  order of magnitude longer — but it is the reason the short bucket is
+  characterization and not an assertion.
+- **The harness cannot inject a hold of exactly 8 ms.** Requested buckets of
+  8 / 30 / 90 ms are realized as 14–154 ms (vsync on) and 12–96 ms (vsync off)
+  key-down to key-up: an injected key event costs ~3 ms on this machine, and short
+  targets are overshot while the game is running. The analyzer therefore asserts on
+  the realized key-down-to-key-up time, which is what the guest sees, and reports
+  the requested bucket only as provenance.
+
+### The two bullets that were disposed of instead
+
+Neither is a measurement, and neither is silent: both are marked disposed with the
+author's rationale in [`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md), which is
+also why `prompts/05-complete-one-song.md` is `status: done` with the audio section
+explicitly saying it is **unmeasured on purpose**:
+
+- **The Xenia draw comparison.** The Xenia build available here does not play
+  *Blitz* at all, so it cannot be a reference for draw behaviour; nothing a full
+  song needs fails to draw on the D3D12 backend. The two texture-format limits stay
+  recorded as B-010.
+- **The audio checklist and audio/gameplay drift.** Full songs play with music,
+  note and miss feedback all correct, and the residual drift is what the title's
+  own calibration screen exists to correct. Voices, sample formats, clocks and
+  pause/resume are therefore **not** covered by anything in this log, and are not
+  claimed to be; the key-selection rule underneath the music stays pinned by the
+  host tests of B-009.
+
