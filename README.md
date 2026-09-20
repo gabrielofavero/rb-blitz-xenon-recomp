@@ -61,6 +61,7 @@ and log capture.
 | [docs/ultimate-compat.md](docs/ultimate-compat.md) | Vanilla vs Rock Band Blitz Ultimate: install, evidence, what we support, what we refuse to do. |
 | [docs/symbols.md](docs/symbols.md) | Image identity, guest addresses, and the evidence for them. |
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
+| [docs/vr-port-plan.md](docs/vr-port-plan.md) | Scoping for a true-stereo Meta Quest build: mechanism, milestones, kill gates, distribution. |
 | [src/](src) | Host application and native overrides for guest functions. |
 | [tests/](tests) | Host unit tests (`ctest`); no SDK and no game image needed. |
 | [config/](config) | Codegen inputs: confirmed function boundaries, names, and the fingerprint the build gate enforces. |

@@ -284,6 +284,7 @@ Suggested blocker entry:
 - **Rock Band Blitz Ultimate compatibility** — a drag-and-drop payload dropped next to the game root and unioned over it by the same executable, with the vanilla route unaffected. The install route is delivered (2026-09-20, B-012); what remains is variant-specific behaviour polish beyond the acceptance criteria, hazards (TU5/`update:`, overlay fingerprinting, replaced UI data) and the refusal list in [docs/ultimate-compat.md](docs/ultimate-compat.md).
 - Exhaustive DLC/export/custom-song compatibility and content-management UI.
 - Multiple controller backends, keyboard bindings, handheld tuning, Linux/macOS/ARM support, packaging, installers, and auto-update.
+- **VR (Meta Quest) and iOS** — scoped, not planned: [docs/vr-port-plan.md](docs/vr-port-plan.md). Nothing there gates a milestone in this file.
 - Large source cleanup, symbol-name campaigns unrelated to blockers, broad native rewrites, and mod APIs.
 
 ## First execution sequence
