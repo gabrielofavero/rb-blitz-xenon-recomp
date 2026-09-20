@@ -574,3 +574,73 @@ checkout:
 - untracked `scratch_probe.txt` → listed for information only, exit 0;
 - `git -C rexglue-sdk checkout -- src/system/xthread.cpp` followed by a normal run
   → `Applied now : 1`, back to exactly the patch (`+7 −1`), exit 0.
+
+### B-010: 3D elements invisible — 32-bit fixed-point (`k_32_32_32_32`) textures had no host format (2026-09-19)
+
+**Symptom.** Menus, song list, HUD and audio were correct, but the note highway,
+the gems and the 3D background never appeared. The only GPU complaint was
+`Unsupported texture formats used in the frame: * k_32_32_32_32 resource`, which
+looked like a stray diagnostic rather than a cause, because the geometry across
+the frame was plainly being submitted.
+
+**Ruling out the earlier stages.** A temporary draw probe in
+`command_processor.cpp` reported, per frame, ~800 draws and ~1.1 M vertices with
+**zero** skip-path hits (`noVS`, `pitch0`, `noEffect`, `noHostVerts` all 0) and
+18,310 frames carrying the unsupported-format line. So the failure was downstream
+of draw submission, in sampling.
+
+**Root cause.** Decoding the fetch constants for those draws gives format 35
+(`k_32_32_32_32`), `1024×16`, linear, `k8in32`, `num_format = 0`. `num_format = 0`
+means the words are **0.32 unsigned fixed point**, not IEEE float. Neither the
+D3D12 nor the Vulkan host-format table in the pinned SDK defines the 32-bit
+formats (they are `DXGI_FORMAT_UNKNOWN`), and no load shader exists for them, so
+`CreateTexture` returned `nullptr`. The bound SRV therefore sampled
+`(0,0,0,0)`; the highway is alpha-blended, so fully transparent geometry =
+invisible geometry, while the draws still executed.
+
+Two experiments established causality and the data layout:
+
+- Remapping only these textures to a float host format made *broken, flickering*
+  3D appear — the format is causally involved in the missing 3D;
+- a live dump of the guest bytes (external `ReadProcessMemory` of the shared
+  memory mirror; `scripts/dump_guest_memory.ps1`) shows `0x80000000` and
+  `0xC0000000`, i.e. exactly `0.5` and `0.75` read as 0.32 unsigned. The data is
+  normalized fixed point, and reinterpreting those bits as float is precisely why
+  the first experiment flickered.
+
+The SDK's own header says the rest of it: integer DXGI formats cannot be used
+because they are not filterable, and a game using `num_format 1` for fixed-point
+data has to be handled by multiplying in the shader (`d3d12/texture_cache.h`).
+
+**Fix** — `patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch`:
+
+- `k_32`, `k_32_32`, `k_32_32_32_32` join `host_formats_` as
+  `R32_FLOAT`/`R32G32_FLOAT`/`R32G32B32A32_FLOAT`, reusing the existing
+  word-mover load shaders (`kLoadShaderIndex32bpb`/`64bpb`/`128bpb`), so no new
+  shader bytecode and no runtime shader compiler is needed.
+- `num_format` is carried in `TextureKey` (`include/rex/graphics/pipeline/texture/cache.h`)
+  and populated in `BindingInfoFromFetchConstant`.
+- The guest fixed-point words are converted to IEEE float bits **on the CPU**:
+  decode with `GpuSwap`, scale by `1/(2^32 − 1)` unsigned or `1/(2^31 − 1)` signed
+  (the same math as the vfetch translator, `dxbc_translator_fetch.cpp`), re-encode
+  with `GpuSwap` so the bytes keep guest order, and stage the result in a
+  `D3D12UploadBufferPool` buffer that is bound as the load shader's source
+  descriptor.
+- `IsSignedVersionSeparateForFormat` is forced true for these formats (the signed
+  and unsigned conversions produce different data in the same host format),
+  `IsScaledResolveSupportedForFormat` returns false for them (the scaled-resolve
+  path is not implemented), and `num_format = 1` (integer) still fails loudly
+  instead of being silently mis-sampled.
+
+**Verified.** With patch 0002 applied and the probes removed: 0
+`Unsupported texture formats` lines (was 18,310 frames), 0 staging allocation
+errors, and the conversion probe read back `0.5`/`0.75`/`0.496` from the staged
+words. The user then confirmed the note highway and 3D background render
+correctly.
+
+**Accepted limitations** (also recorded in [known-issues.md](known-issues.md)):
+the staged copy must fit a single 2 MiB upload page (the largest conversion seen
+so far is 256 KB, so the headroom is 8×); integer `num_format = 1` textures
+remain unsupported; the CPU mirror can be stale for GPU-written data, for which
+`d3d12_readback_resolve = true` is the escape hatch.
+

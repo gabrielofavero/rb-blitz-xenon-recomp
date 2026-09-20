@@ -67,6 +67,16 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
 
 - Verify the Xenos pipeline draws the note highway, notes, HUD, and essential
   background objects.
+- **Solved 2026-09-19 (B-010): the note highway and 3D background render.** They
+  were invisible because their textures use guest format 35 (`k_32_32_32_32`) with
+  `num_format = 0` — 0.32 fixed point, which has no samplable host format — so
+  `CreateTexture` returned `nullptr` and the alpha-blended geometry sampled
+  `(0,0,0,0)`. The SDK patch
+  [patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch](../patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch)
+  converts the words to floats on the CPU; see
+  [docs/bringup-log.md](../docs/bringup-log.md) B-010. Two limits remain: 32-bit
+  **integer** textures (`num_format = 1`) still fail to create, and one converted
+  texture must fit a single 2 MiB upload page.
 - Compare failing draws against a Xenia capture; prefer correcting reusable
   Xenos behavior over game-specific rendering hacks.
 

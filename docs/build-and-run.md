@@ -5,10 +5,11 @@ the log excerpt that blocker entries in [bringup-log.md](./bringup-log.md) need.
 
 Everything below is PowerShell, run from the repository root unless noted.
 
-> **Current state (as of B-009):** the fix is written and statically verified but
-> has never been compiled or run — no toolchain is installed on the development
-> machine and the checked-in build tree is stale. Start at §0 (once per checkout),
-> then §1; jump to §2 if §0 is already done and the §1 toolchain check passes.
+> **Current state (as of 2026-09-19):** the toolchain is installed on this machine
+> and the checkout has been rebuilt from source, so B-009's fix is no longer
+> "statically verified only" — it compiles, links, and a 40 s boot writes the §5
+> `guest XeKeys` lines. §0 and §2 are both already done; **§3 is the entry point**
+> for a normal source change, and §1 only needs revisiting on a fresh machine.
 
 ## 0. Prepare the SDK submodule (once per checkout)
 
@@ -38,26 +39,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.
    checkout then fails with `unable to create symlink …: Function not implemented`
    and deletes the file.
 2. **`apply_sdk_patches.ps1`** applies [patches/rexglue-sdk/](../patches/rexglue-sdk)
-   to the pinned checkout — currently the one-line change that stops the "Too few
-   processor cores" warning being logged on every thread CPU assignment. It prints
-   each patch as *already applied*, *applied now*, or *failed* (exit 1, with
-   guidance). `-Check` reports without writing. It also audits the SDK work tree:
-   any edit not covered by a patch is listed as `UNEXPECTED` and exits 1.
+   to the pinned checkout — currently the log-once fix for the "Too few processor
+   cores" warning, and the 32-bit fixed-point texture support that the note
+   highway needs ([bringup-log.md](bringup-log.md) B-010). It prints each patch as
+   *already applied*, *applied now*, or *failed* (exit 1, with guidance). `-Check`
+   reports without writing. It also audits the SDK work tree: any edit not covered
+   by a patch is listed as `UNEXPECTED` and exits 1.
 
-Afterwards the submodule showing ` M src/system/xthread.cpp` is the expected,
-correct state — it is the applied patch, not drift to be cleaned. The parent repo
-stays clean, because `.gitmodules` marks the submodule `ignore = dirty`; the audit
-above is what replaces the warning that setting suppresses. Full rationale and
-manual equivalents: [patches/README.md](../patches/README.md).
+Afterwards the submodule showing ` M` on the files the patch set names is the
+expected, correct state — they are the applied patches, not drift to be cleaned.
+The parent repo stays clean, because `.gitmodules` marks the submodule
+`ignore = dirty`; the audit above is what replaces the warning that setting
+suppresses. Full rationale and manual equivalents:
+[patches/README.md](../patches/README.md).
 
 ## 1. Toolchain prerequisites
 
-**Nothing in this section is installed on the machine this doc was written on** —
-no `C:\Program Files\LLVM`, no `C:\Program Files\CMake`, no
-`C:\ProgramData\chocolatey`, no `cl`, no `vswhere` (only `git`, `python` and
-`node` are on `PATH`). So on that machine the install below is the first step and
-has to happen before §2 or §3 can run. It is a one-time cost: once it is in, every
-later rebuild is the incremental path in §3.
+**This section is satisfied on the machine this doc was written on.** When the doc
+was first written none of it was installed — no `C:\Program Files\LLVM`, no
+`C:\Program Files\CMake`, no `C:\ProgramData\chocolatey`, no `cl`, no `vswhere`
+(only `git`, `python` and `node` were on `PATH`) — so the install below was the
+first step and had to happen before §2 or §3 could run. It is now in place (LLVM
+23.1.1, CMake 4.4.3, Ninja 1.13.2, VS 2022 Build Tools 17.14.41 with the Windows
+10.0.26100.0 SDK). The recipe is kept for a fresh machine; it is a one-time cost,
+and every later rebuild is the incremental path in §3.
 
 The build is a plain `Ninja` + `clang` build of the pinned SDK **from source**
 (`REXSDK_DIR` points at `rexglue-sdk/`, and `generated/rexglue.cmake` does an
@@ -88,7 +93,9 @@ clang++ -v -E -x c++ "$env:TEMP\probe.cpp" 2>&1 |
 
 All five tools must resolve, and the last command must list at least one MSVC
 include directory and one Windows Kits include directory. If it lists neither,
-clang is installed but the headers are not.
+clang is installed but the headers are not. An "ignoring nonexistent directory
+`...\MSVC\<ver>\atlmfc\include`" note in that output is normal — ATL/MFC is an
+optional VS component that this build does not use.
 
 ### Installing them
 
@@ -99,6 +106,14 @@ winget install --id LLVM.LLVM -e --accept-package-agreements --accept-source-agr
 winget install --id Kitware.CMake -e --accept-package-agreements --accept-source-agreements
 winget install --id Ninja-build.Ninja -e --accept-package-agreements --accept-source-agreements
 ```
+
+> **Trap met installing this here:** `LLVM.LLVM`'s MSI installs to
+> `C:\Program Files\LLVM`, but the silent install **does not add its `bin` to
+> `PATH`** — the §1 check above still reports `clang`, `clang++` and `lld-link` as
+> `MISSING` after a "Successfully installed". Append `C:\Program Files\LLVM\bin`
+> to the machine `PATH` by hand and open a new shell. `Kitware.CMake`'s MSI does
+> add itself, and `Ninja-build.Ninja` is a user-scope portable that adds its own
+> alias.
 
 The fourth one is the multi-GB part and needs an **elevated (Administrator)**
 shell:
@@ -145,6 +160,12 @@ mutually findable. If it instead reports a missing `libcmt.lib`, `ucrt.lib`,
 — that is the most common way this toolchain ends up broken.
 
 ## 2. The existing build tree is stale — regenerate it
+
+> **Already done on this machine (2026-09-19).** Both stale trees were wiped and
+> `out/build/win-amd64-release` has been regenerated from source, so the
+> `rb_blitz.exe` in it is current — do **not** re-run this section unless the
+> tree's own `CMakeCache.txt` again records a path other than the checkout below.
+> The check is `Select-String CMAKE_HOME_DIRECTORY out\build\win-amd64-release\CMakeCache.txt`.
 
 `out/build/win-amd64-release` was produced when this checkout lived at
 `D:\Gabriel\Documentos\Coding\decomps\360\rb-blitz-xenon-recomp` (that path is

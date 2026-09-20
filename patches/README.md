@@ -15,6 +15,7 @@ checkout.
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
 | `rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` | `XThread::SetActiveCpu` re-logged "Too few processor cores" on every thread CPU assignment (~11k lines, ~580 KB per boot). Log it once. | yes |
+| `rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch` | The SDK has no host format and no load shader for the 32-bit guest texture formats (`k_32`, `k_32_32`, `k_32_32_32_32`), which are 0.32 fixed point when `num_format = 0`; `CreateTexture` then returned `nullptr` and the SRV sampled (0,0,0,0), making every alpha-blended 3D element invisible (B-010 in [../docs/bringup-log.md](../docs/bringup-log.md)). Maps them to the float host formats with the existing word-mover load shaders, carries `num_format` in `TextureKey`, and converts the guest words to IEEE float bits on the CPU into an upload-pool staging buffer bound as the load shader's source. Integer (`num_format = 1`) textures still fail to create. | yes |
 
 ## Apply / verify
 
@@ -56,7 +57,11 @@ them once after a fresh submodule checkout.
 so an applied patch no longer shows up as a modified submodule forever. `git
 status`, `git diff` and `git status --porcelain=v2` (what editor SCM panels use)
 in the parent report nothing for the SDK, while the submodule itself still shows
-` M src/system/xthread.cpp`.
+` M` on the files the patch set touches (`src/system/xthread.cpp` for 0001, and
+`include/rex/graphics/d3d12/shared_memory.h`,
+`include/rex/graphics/pipeline/texture/cache.h`,
+`src/graphics/d3d12/texture_cache.cpp`, `src/graphics/pipeline/texture/cache.cpp`
+for 0002).
 
 `ignore = dirty` hides work-tree edits only. A **moved gitlink is still
 reported**: verified 2026-09-19 by pointing the index entry at a different
@@ -69,7 +74,11 @@ audits the work tree on every run: each modified file must match a patch here
 `core.abbrev`). Anything else is listed as `UNEXPECTED` and the script exits 1.
 
 ```
-SDK work tree      : 1 patched, 0 UNEXPECTED, 0 untracked
+SDK work tree      : 5 patched, 0 UNEXPECTED, 0 untracked
+    patched    : include/rex/graphics/d3d12/shared_memory.h
+    patched    : include/rex/graphics/pipeline/texture/cache.h
+    patched    : src/graphics/d3d12/texture_cache.cpp
+    patched    : src/graphics/pipeline/texture/cache.cpp
     patched    : src/system/xthread.cpp
 ```
 
@@ -125,8 +134,9 @@ dirt. Use `-ClearMarks` before editing libmspack sources by hand if you want to 
 your edits in `git status`, and `-NoIndexMarks` if you do not want the index
 touched at all.
 
-After both scripts, `git -C rexglue-sdk status --porcelain` should show only
-` M src/system/xthread.cpp` (the patch). The parent should be clean: `.gitmodules`
+After both scripts, `git -C rexglue-sdk status --porcelain` should show only the
+files named in the patch set (the `0001`/`0002` rows above). The parent should be
+clean: `.gitmodules`
 sets `submodule.rexglue-sdk.ignore = dirty`, so the applied patch is no longer
 reported as a modified submodule, and `apply_sdk_patches.ps1` audits whatever that
 setting hides. Re-run the scripts after `git submodule update`, a fresh clone, or

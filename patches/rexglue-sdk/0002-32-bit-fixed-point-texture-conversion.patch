@@ -1,0 +1,315 @@
+diff --git a/include/rex/graphics/d3d12/shared_memory.h b/include/rex/graphics/d3d12/shared_memory.h
+index 5100818..bed24e8 100644
+--- a/include/rex/graphics/d3d12/shared_memory.h
++++ b/include/rex/graphics/d3d12/shared_memory.h
+@@ -37,6 +37,12 @@ class D3D12SharedMemory : public SharedMemory {
+   ID3D12Resource* GetBuffer() const { return buffer_; }
+   D3D12_GPU_VIRTUAL_ADDRESS GetGPUAddress() const { return buffer_gpu_address_; }
+ 
++  // Host pointer to the CPU copy of the data at the guest physical address
++  // (the contents of the memory are big-endian).
++  uint8_t* TranslatePhysical(uint32_t guest_address) const {
++    return memory().TranslatePhysical(guest_address);
++  }
++
+   void CompletedSubmissionUpdated();
+   void BeginSubmission();
+ 
+diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
+index d26cd4f..86e3db5 100644
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -160,8 +160,12 @@ class TextureCache {
+ 
+     // Whether this texture is a resolution-scaled resolve target.
+     uint32_t scaled_resolve : 1;  // 97
++    // Whether the guest data is in a non-floating-point representation (such
++    // as fixed-point) that needs to be converted before loading to the host
++    // texture.
++    uint32_t num_format : 1;  // 98
+     // Least important in ==, so placed last.
+-    uint32_t is_valid : 1;  // 98
++    uint32_t is_valid : 1;  // 99
+ 
+     TextureKey() { MakeInvalid(); }
+     TextureKey(const TextureKey& key) { std::memcpy(this, &key, sizeof(*this)); }
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+index 2be0e8e..c66f5e9 100644
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -15,6 +15,7 @@
+ #include <cstddef>
+ #include <cstring>
+ #include <memory>
++#include <unordered_set>
+ #include <utility>
+ 
+ #include <rex/assert.h>
+@@ -80,6 +81,51 @@ namespace shaders {
+ #include "../shaders/bytecode/d3d12_5_1/texture_load_r5g6b5_b5g6r5_scaled_cs.h"
+ }  // namespace shaders
+ 
++namespace {
++
++// Whether the guest format stores 32-bit-per-component data that isn't
++// floating-point, which thus needs to be converted for a host texture (see the
++// k_32 comment in host_formats_).
++bool IsFixedPointConvertedFormat(xenos::TextureFormat format) {
++  return format == xenos::TextureFormat::k_32 || format == xenos::TextureFormat::k_32_32 ||
++         format == xenos::TextureFormat::k_32_32_32_32;
++}
++
++// Converts the 32-bit components of a big-endian guest texture region to the
++// floating-point values with the same meaning (used for the guest formats that
++// aren't floating-point, such as 0.32 fixed-point ones), using the same math as
++// the vertex fetch for such formats. The conversion is done in-place for each
++// component without any assumptions about the layout (tiling, mip packing and
++// so on), as it doesn't change it - so the load shaders can still be used to
++// load the converted data.
++void ConvertFixedPointGuestRange(const uint8_t* source, uint8_t* destination, uint32_t size_bytes,
++                                 xenos::Endian endianness, bool is_signed) {
++  std::memcpy(destination, source, size_bytes);
++  uint32_t component_count = size_bytes >> 2;
++  uint32_t* destination_components = reinterpret_cast<uint32_t*>(destination);
++  for (uint32_t i = 0; i < component_count; ++i) {
++    // Store the floating-point bits in the byte order of the guest data, since
++    // the load shaders apply the endianness conversion from the load constant
++    // to what they read.
++    uint32_t guest_value = xenos::GpuSwap(destination_components[i], endianness);
++    float converted_value;
++    if (is_signed) {
++      // Signed repeating fraction (the only mode supported for textures,
++      // kZeroClampMinusOne) - 1 / (2^31 - 1), with the most negative value
++      // rounded to -1 as float32, so no clamping is needed.
++      converted_value = float(int32_t(guest_value)) * (1.0f / 2147483647.0f);
++    } else {
++      // Unsigned repeating fraction - 1 / (2^32 - 1).
++      converted_value = float(guest_value) * (1.0f / 4294967295.0f);
++    }
++    uint32_t converted_value_bits;
++    std::memcpy(&converted_value_bits, &converted_value, sizeof(converted_value_bits));
++    destination_components[i] = xenos::GpuSwap(converted_value_bits, endianness);
++  }
++}
++
++}  // namespace
++
+ const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
+     // k_1_REVERSE
+     {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+@@ -232,17 +278,28 @@ const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
+      DXGI_FORMAT_R16G16B16A16_FLOAT, kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN,
+      kLoadShaderIndexUnknown, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
+     // k_32
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
++    // The non-floating-point 32-bit-per-component formats (0.32 fixed-point and
++    // so on) can't be represented by a samplable host texture format directly -
++    // there's no normalized 32-bit-per-component DXGI format, and integer
++    // formats can only be read with Load, not Sample - so the texture cache
++    // converts the components of the guest data to floating-point in a staging
++    // buffer (see ConvertFixedPointGuestRange), and, since the conversion
++    // doesn't change the layout, loads the host texture from it using the
++    // regular load shaders. The sign is applied to the data during the
++    // conversion, so the signed and the unsigned variants have different
++    // contents, even though the same host format is used for both (see
++    // IsSignedVersionSeparateForFormat).
++    {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
++     kLoadShaderIndex32bpb, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+      xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
+     // k_32_32
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+-     xenos::XE_GPU_TEXTURE_SWIZZLE_RGGG},
++    {DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32_FLOAT, kLoadShaderIndex64bpb,
++     DXGI_FORMAT_R32G32_FLOAT, kLoadShaderIndex64bpb, false, DXGI_FORMAT_UNKNOWN,
++     kLoadShaderIndexUnknown, xenos::XE_GPU_TEXTURE_SWIZZLE_RGGG},
+     // k_32_32_32_32
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+-     xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
++    {DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, kLoadShaderIndex128bpb,
++     DXGI_FORMAT_R32G32B32A32_FLOAT, kLoadShaderIndex128bpb, false, DXGI_FORMAT_UNKNOWN,
++     kLoadShaderIndexUnknown, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
+     // k_32_FLOAT
+     {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
+      kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+@@ -1460,12 +1517,25 @@ TextureCache::LoadShaderIndex D3D12TextureCache::GetLoadShaderIndex(TextureKey k
+ }
+ 
+ bool D3D12TextureCache::IsSignedVersionSeparateForFormat(TextureKey key) const {
++  // The sign of the non-floating-point 32-bit-per-component formats is applied
++  // to the guest data when it's converted to floating-point (see
++  // ConvertFixedPointGuestRange), so the signed and the unsigned versions have
++  // different contents even though the host format is the same for both.
++  if (IsFixedPointConvertedFormat(key.format) && key.num_format == 0) {
++    return true;
++  }
+   const HostFormat& host_format = host_formats_[uint32_t(key.format)];
+   return host_format.load_shader_signed != kLoadShaderIndexUnknown &&
+          host_format.load_shader_signed != host_format.load_shader;
+ }
+ 
+ bool D3D12TextureCache::IsScaledResolveSupportedForFormat(TextureKey key) const {
++  // Fixed-point textures are converted to floating-point on the CPU (see
++  // ConvertFixedPointGuestRange) when loaded from the guest memory, but the
++  // resolution-scaled loading from the resolves doesn't do that.
++  if (IsFixedPointConvertedFormat(key.format)) {
++    return false;
++  }
+   LoadShaderIndex load_shader = GetLoadShaderIndex(key);
+   return load_shader != kLoadShaderIndexUnknown && load_pipelines_scaled_[load_shader] != nullptr;
+ }
+@@ -1523,6 +1593,14 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(TextureK
+     unsupported_format_features_used_[uint32_t(key.format)] |= kUnsupportedResourceBit;
+     return nullptr;
+   }
++  if (IsFixedPointConvertedFormat(key.format) && key.num_format != 0) {
++    // The data isn't a fraction that the texture cache can convert to
++    // floating-point (the num_format bit indicates an integer, which would need
++    // multiplication by a scale in the shaders), and can't be used as a host
++    // texture directly (see the k_32 comment in host_formats_).
++    unsupported_format_features_used_[uint32_t(key.format)] |= kUnsupportedResourceBit;
++    return nullptr;
++  }
+   if (key.dimension == xenos::DataDimension::k3D) {
+     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+   } else {
+@@ -1695,6 +1773,63 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     return false;
+   }
+ 
++  // 32-bit-per-component guest formats that aren't floating-point (fixed-point
++  // ones, mostly) can't be converted by the hardware while sampling since no
++  // samplable host format with normalization and 32 bits per component exists
++  // (see the k_32 comment in host_formats_) - so, if the data is a repeating
++  // fraction (the num_format bit is 0, unlike an integer that would need a
++  // scale in the shaders), it's converted to floating-point in a staging
++  // buffer. As the conversion preserves the layout, the shared memory load
++  // constants can still be used for it, with the difference that the source of
++  // the load shaders is the staging buffer, and the guest offset is relative to
++  // the beginning of the guest data in that buffer rather than to the shared
++  // memory.
++  bool convert_fixed_point = !texture_resolution_scaled && texture_key.num_format == 0 &&
++                             IsFixedPointConvertedFormat(texture_key.format);
++  uint32_t fixed_point_staging_size = 0;
++  uint32_t fixed_point_mips_staging_offset = 0;
++  ID3D12Resource* fixed_point_staging_buffer = nullptr;
++  size_t fixed_point_staging_buffer_offset = 0;
++  if (convert_fixed_point) {
++    uint32_t guest_base_size = d3d12_texture.GetGuestBaseSize();
++    uint32_t guest_mips_size = d3d12_texture.GetGuestMipsSize();
++    fixed_point_mips_staging_offset =
++        uint32_t(rex::align(UINT64(guest_base_size), UINT64(256)));
++    fixed_point_staging_size = fixed_point_mips_staging_offset + guest_mips_size;
++    uint8_t* fixed_point_staging_mapping = nullptr;
++    if (fixed_point_staging_size <= ui::GraphicsUploadBufferPool::kDefaultPageSize) {
++      fixed_point_staging_mapping = command_processor_.GetConstantBufferPool().Request(
++          command_processor_.GetCurrentFrame(), fixed_point_staging_size, 256,
++          &fixed_point_staging_buffer, &fixed_point_staging_buffer_offset, nullptr);
++    }
++    if (fixed_point_staging_mapping == nullptr) {
++      REXGPU_ERROR(
++          "Failed to convert a guest texture ({}x{}x{}, {} levels, {}) with the fixed-point to "
++          "floating-point conversion because a staging buffer with {} bytes couldn't be allocated",
++          width, height, depth_or_array_size, texture_key.mip_max_level + 1,
++          guest_format_info->name, fixed_point_staging_size);
++      command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++      return false;
++    }
++    // The base and the mips are separate regions in the guest memory (and the
++    // layout of each of them, including tiling and packed mips, is preserved by
++    // the conversion), so only the beginnings of the regions that are being
++    // loaded need to be known.
++    D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(shared_memory());
++    bool is_signed = texture_key.signed_separate != 0;
++    if (level_first == 0) {
++      ConvertFixedPointGuestRange(
++          d3d12_shared_memory.TranslatePhysical(texture_key.base_page << 12),
++          fixed_point_staging_mapping, guest_base_size, texture_key.endianness, is_signed);
++    }
++    if (level_last != 0) {
++      ConvertFixedPointGuestRange(
++          d3d12_shared_memory.TranslatePhysical(texture_key.mip_page << 12),
++          fixed_point_staging_mapping + fixed_point_mips_staging_offset, guest_mips_size,
++          texture_key.endianness, is_signed);
++    }
++  }
++
+   // Begin loading.
+   // May use different buffers for scaled base and mips, and also addressability
+   // of more than 128 * 2^20 (2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP)
+@@ -1706,8 +1841,8 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     // Source - base and mips, one or both.
+     descriptor_count += (level_first == 0 && level_last != 0) ? 2 : 1;
+   } else {
+-    // Source - shared memory.
+-    if (!bindless_resources_used_) {
++    // Source - shared memory, or the fixed-point conversion staging buffer.
++    if (!bindless_resources_used_ || convert_fixed_point) {
+       ++descriptor_count;
+     }
+   }
+@@ -1733,17 +1868,30 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+   // depend on the buffer being current, so they will be set later - for mips,
+   // after loading the base is done).
+   if (!texture_resolution_scaled) {
+-    D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(shared_memory());
+-    d3d12_shared_memory.UseForReading();
+     ui::d3d12::util::DescriptorCpuGpuHandlePair descriptor_unscaled_source;
+-    if (bindless_resources_used_) {
+-      descriptor_unscaled_source = command_processor_.GetSharedMemoryUintPow2BindlessSRVHandlePair(
+-          load_shader_info.source_bpe_log2);
+-    } else {
++    if (convert_fixed_point) {
++      // The source is the staging buffer with the converted data, rather than
++      // the shared memory.
+       assert_true(descriptor_write_index < descriptor_count);
+       descriptor_unscaled_source = descriptors_allocated[descriptor_write_index++];
+-      d3d12_shared_memory.WriteUintPow2SRVDescriptor(descriptor_unscaled_source.first,
+-                                                     load_shader_info.source_bpe_log2);
++      ui::d3d12::util::CreateBufferTypedSRV(
++          device, descriptor_unscaled_source.first, fixed_point_staging_buffer,
++          ui::d3d12::util::GetUintPow2DXGIFormat(load_shader_info.source_bpe_log2),
++          uint32_t(fixed_point_staging_size) >> load_shader_info.source_bpe_log2,
++          uint32_t(fixed_point_staging_buffer_offset) >> load_shader_info.source_bpe_log2);
++    } else {
++      D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(shared_memory());
++      d3d12_shared_memory.UseForReading();
++      if (bindless_resources_used_) {
++        descriptor_unscaled_source =
++            command_processor_.GetSharedMemoryUintPow2BindlessSRVHandlePair(
++                load_shader_info.source_bpe_log2);
++      } else {
++        assert_true(descriptor_write_index < descriptor_count);
++        descriptor_unscaled_source = descriptors_allocated[descriptor_write_index++];
++        d3d12_shared_memory.WriteUintPow2SRVDescriptor(descriptor_unscaled_source.first,
++                                                       load_shader_info.source_bpe_log2);
++      }
+     }
+     command_list.D3DSetComputeRootDescriptorTable(1, descriptor_unscaled_source.second);
+   }
+@@ -1799,6 +1947,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+       // directly addresses as R32 on some hardware (above
+       // 2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP).
+       load_constants.guest_offset = 0;
++    } else if (convert_fixed_point) {
++      // The data was converted to a staging buffer that starts with the base
++      // (the guest addresses can't be used for it since it's not the shared
++      // memory).
++      load_constants.guest_offset = is_base ? 0 : fixed_point_mips_staging_offset;
+     } else {
+       load_constants.guest_offset = guest_address;
+     }
+diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
+index 76f5600..f16e03f 100644
+--- a/src/graphics/pipeline/texture/cache.cpp
++++ b/src/graphics/pipeline/texture/cache.cpp
+@@ -983,6 +983,7 @@ void TextureCache::BindingInfoFromFetchConstant(const xenos::xe_gpu_texture_fetc
+   key_out.packed_mips = fetch.packed_mips;
+   key_out.format = format;
+   key_out.endianness = fetch.endianness;
++  key_out.num_format = fetch.num_format;
+ 
+   key_out.is_valid = 1;
+ 
