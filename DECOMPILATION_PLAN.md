@@ -85,6 +85,7 @@ Title-specific behavior belongs in this repository's project layer. Change the S
 ├── patches/                          # Local SDK fixes kept as patch files
 │   └── rexglue-sdk/                  #   applied by scripts/apply_sdk_patches.ps1
 ├── scripts/                          # Deterministic configure/build/run helpers
+├── tests/                            # Host unit tests (ctest); no SDK, no game image
 ├── docs/
 │   ├── bringup-log.md                # Chronological milestone and blocker log
 │   ├── build-and-run.md              # Rebuild / run / log-capture commands
@@ -255,7 +256,7 @@ Suggested blocker entry:
 - Maintain milestone save points or deterministic local state where possible.
 - Use structured log categories and avoid permanent high-volume per-instruction logging.
 - Keep Debug assertions enabled during bring-up; use RelWithDebInfo for long gameplay runs.
-- Add small host-side tests for project-owned path conversion, patch preconditions, save serialization, and service-response parsing.
+- Add small host-side tests for project-owned path conversion, patch preconditions, save serialization, and service-response parsing. The first of these is in place (2026-09-19): `tests/` holds `crypto_keytable`, a dependency-free unit test for the B-009 key path, built and run by `ctest`. The rest are still open.
 - Guard every binary patch with an expected-byte/value check so a different game revision fails closed.
 - When comparing with Xenia or hardware, record exact versions and settings; screenshots alone are not sufficient evidence for timing or state bugs.
 

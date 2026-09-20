@@ -849,3 +849,86 @@ acceptance criteria for "Deluxe works", refusal list. Propagated to
   a Deluxe root, because the Deluxe Xbox 360 install rolls TU5 into the base
   install instead of loading it as a title update.
 
+## First host unit tests: the B-009 key path (2026-09-19)
+
+No new blocker. This is the first thing in the port that runs without booting, and
+it exists because three documents independently named it as the cheapest durable
+guarantee available: `known-issues.md` ("pure host code, starting with the B-009
+key-table deobfuscation, can be tested without booting the game"),
+`rb3-references.md` §7.3 ("our `src/hooks/crypto.cpp` deobfuscation is pure host
+code and could be unit-tested against the known plaintext keyset … do that when the
+toolchain lands"), and `prompts/05-complete-one-song.md` ("unit-test the
+deobfuscation before booting anything"). The toolchain has been here since
+Milestone 2, and the B-009 correction of this morning is exactly the kind of change
+that was only ever "verified once": its regression was a key *selection* rule that
+nothing replays.
+
+**The split.** The SDK-free half of the key path moved to a new header,
+[`src/hooks/crypto_keytable.h`](../src/hooks/crypto_keytable.h):
+`kKeysetTableAddress`/`kKeysetTableSize`/`kKeyIdBias`/`kKeySlots`/`kKeySize`,
+`kPlaintextKeyTable` (the 64 bytes that used to be `kDeobfuscatedKeyTable`), and
+three `constexpr` functions — `SelectKeySlot` (the 0xE0 bias, the `>= 8` clamp and a
+`clamped` flag instead of logging), `IsKeysetTableAddress` and
+`PlaintextKeyAtOffset`. Everything else stayed in
+[`src/hooks/crypto.cpp`](../src/hooks/crypto.cpp): the two import hooks, the guest
+buffers, the AES forwarding, the log lines. The file-local `KeySlotForId` is now a
+three-line wrapper that turns the `clamped` flag into the same once-per-process
+warning at the same two call sites, and the install `memcpy` reads through
+`PlaintextKeyAtOffset`, so behaviour is unchanged byte for byte — the same
+constants, the same permissive address test, the same warn text.
+
+**What the tests cover** (`tests/crypto_keytable_tests.cpp`, 88 checks, 9 cases):
+
+| Case | What it pins |
+| --- | --- |
+| biased ids `0xE0..0xE7` | the guest wrapper's bias maps to slots 0..7, unclamped |
+| bare ids `0..7` | the same slots, so the bias is not load-bearing |
+| ids with no slot (`8`, `0xE8`, `0x100`, `0xFFFF`, `0xFFFFFFFF`) | slot 0 **and** `clamped`, which is what drives the warning |
+| entry addresses `+0x00`, `+0x10`, `+0x20`, `+0x30` | every entry the guest computes is recognised |
+| `base-1`, `base-16`, `+0x40`, `+0x3F`, an unrelated guest buffer, 0 | nothing else is mistaken for a table entry |
+| lookup by offset | `PlaintextKeyAtOffset` indexes by buffer offset, not by key id |
+| table shape | four entries, pairwise distinct, none all-zero |
+| versions 12..16 + 11/17/0 | `GetEncMethod`'s version → entry mapping and its fallback, checked against the disassembly's numbers rather than the header's |
+| B-009 regression | for versions 14/15/16 the entry selected by the **buffer offset** differs from the entry a **key-id** lookup would pick — the exact mistake corrected this morning |
+
+Not covered, deliberately: the plaintext bytes are not cross-checked against a
+second copy. The only source for them is outside this repository, and
+`rb3-references.md` §9 says not to vendor the keyset, so duplicating 64 bytes into
+the test would create a second copy of external key material without adding
+evidence. The tests guard the *structure* the bug depended on (distinct entries,
+offset-driven selection) instead. The AES chain itself — forwarding to
+`XeCryptAesKey`/`XeCryptAesCbc`, the guest buffers, the fallback slot — is runtime
+behaviour and still needs a boot.
+
+**The harness is dependency-free.** The SDK vendors `catch2` as a submodule that is
+not initialised, and no test framework may be added to the build, so
+[`tests/check.h`](../tests/check.h) is ~100 lines of `CHECK_TRUE` / `CHECK_FALSE` /
+`CHECK_EQ` / `CHECK_MEM_EQ` over a check counter, printing the case name and
+`file:line` on failure and returning 1. `CMakeLists.txt` gained `include(CTest)`
+and one `add_executable` + `add_test` pair (`rb_blitz_crypto_keytable_tests`).
+
+**How it was verified, without a boot.**
+
+```powershell
+cmake --build --preset win-amd64-release --target rb_blitz_crypto_keytable_tests
+ctest --test-dir out\build\win-amd64-release --output-on-failure
+```
+
+- `1/1 Test #1: crypto_keytable ... Passed` in 0.07 s, and the same test source
+  compiles clean standalone with `clang++ -std=c++23 -Wall -Wextra -Wpedantic`
+  (88 checks pass).
+- **The tests bite.** Reintroducing the B-009 bug in a scratch copy of the header
+  (`PlaintextKeyAtOffset` returning entry 0, i.e. resolving by key id) turns 15
+  checks red and exits 1, naming `tests/crypto_keytable_tests.cpp:162` for the
+  regression case. A green run therefore means something.
+- **The refactor preserved the product.** After the split,
+  `cmake --build --preset win-amd64-release --target rb_blitz` recompiles only
+  `src/hooks/crypto.cpp`, relinks `rb_blitz.exe` and reports no new warnings, and
+  codegen reports `0 written, 0 unchanged, 0 deleted, 1 module(s) up to date` —
+  the guest side is untouched.
+
+**Still open.** This is one test target over one header. The acceptance half of the
+issue is unaffected: milestone 4 and 5 still have no scripted run, because
+`scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
+results. The narrower wording is now in [known-issues.md](known-issues.md).
+

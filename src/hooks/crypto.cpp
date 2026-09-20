@@ -57,9 +57,9 @@
 //   - The 64 bytes at 0x8280C568 are byte-identical to the table retail Rock
 //     Band 3 keeps at 0x82C76258 (freeqaz/rb3-xenon,
 //     tools/oss-xbox-build/rb3dx_port_audit.json, .data span "clean"), and the
-//     RB3DX port replaces exactly those bytes with the plaintext keyset below
-//     (same audit, span "rb3dx"). The obfuscation and its inverse are therefore
-//     title-independent.
+//     RB3DX port replaces exactly those bytes with the plaintext keyset in
+//     crypto_keytable.h (same audit, span "rb3dx"). The obfuscation and its
+//     inverse are therefore title-independent.
 //   - Those same 64 bytes are the engine constant gHvKeyGreen
 //     (freeqaz/rb3 src/system/synth/ByteGrinder.cpp) used with the identical
 //     version -> index mapping, and they are the NewKeyset that band3_recomp
@@ -84,6 +84,8 @@
 //
 // Milestone: 4 (see docs/bringup-log.md B-009).
 
+#include "crypto_keytable.h"
+
 #include <rex/hook.h>
 #include <rex/logging.h>
 #include <rex/system/kernel_state.h>
@@ -102,30 +104,25 @@ REX_EXTERN(__imp__XeCryptAesCbc);
 
 namespace {
 
-// Guest .data table holding the obscured key material.
-constexpr uint32_t kKeysetTableAddress = 0x8280C568;
-constexpr uint32_t kKeysetTableSize = 0x40;
-
-// The guest wrapper biases every key index by 0xE0 and rejects index >= 8.
-constexpr uint32_t kKeyIdBias = 0xE0;
-constexpr uint32_t kKeySlots = 8;
+// The key-table logic and the plaintext keyset live in crypto_keytable.h, which
+// has no SDK dependencies so the unit tests can reach them; the names are used
+// unqualified below.
+using rb_blitz::crypto::IsKeysetTableAddress;
+using rb_blitz::crypto::kKeySize;
+using rb_blitz::crypto::kKeySlots;
+using rb_blitz::crypto::kKeysetTableAddress;
+using rb_blitz::crypto::kKeysetTableSize;
+using rb_blitz::crypto::KeySlotSelection;
+using rb_blitz::crypto::kPlaintextKeyTable;
+using rb_blitz::crypto::PlaintextKeyAtOffset;
+using rb_blitz::crypto::SelectKeySlot;
 
 constexpr uint32_t kAesStateSize = 0x160;  // XECRYPT_AES_STATE
-constexpr uint32_t kKeySize = 0x10;        // AES-128
 constexpr uint32_t kFeedSize = 0x10;       // CBC chaining block
 
 // How many calls to dump in full. Music streams, so logging every call would
 // drown the log; the first few are enough to prove the path works.
 constexpr uint32_t kVerboseCalls = 8;
-
-// De-obfuscated key material: what XeKeysSetKey would install after the console
-// applied KEY_OBFUSCATION_KEY to the table above. Identical to the RB3 "green"
-// keyset / band3_recomp NewKeyset.
-constexpr uint8_t kDeobfuscatedKeyTable[kKeysetTableSize] = {
-    0x01, 0x22, 0x00, 0x38, 0xD2, 0x01, 0x78, 0x8B, 0xDD, 0xCD, 0xD0, 0xF0, 0xFE, 0x3E, 0x24, 0x7F,
-    0x51, 0x73, 0xAD, 0xE5, 0xB3, 0x99, 0xB8, 0x61, 0x58, 0x1A, 0xF9, 0xB8, 0x1E, 0xA7, 0xBE, 0xBF,
-    0xC6, 0x22, 0x94, 0x30, 0xD8, 0x3C, 0x84, 0x14, 0x08, 0x73, 0x7C, 0xF2, 0x23, 0xF6, 0xEB, 0x5A,
-    0x02, 0x1A, 0x83, 0xF3, 0x97, 0xE9, 0xD4, 0xB8, 0x06, 0x74, 0x14, 0x6B, 0x30, 0x4C, 0x00, 0x91};
 
 // Guest buffers, allocated on first use (heap is not up during static init).
 uint32_t g_aes_state = 0;  // kKeySlots * XECRYPT_AES_STATE
@@ -161,7 +158,7 @@ bool EnsureGuestBuffers(uint8_t* base) {
   g_feed = memory->SystemHeapAlloc(kFeedSize, 16);
 
   std::memset(GuestToHost(base, g_aes_state), 0, kKeySlots * kAesStateSize);
-  std::memcpy(GuestToHost(base, g_key_table), kDeobfuscatedKeyTable, kKeysetTableSize);
+  std::memcpy(GuestToHost(base, g_key_table), kPlaintextKeyTable, kKeysetTableSize);
   std::memset(GuestToHost(base, g_feed), 0, kFeedSize);
 
   REXLOG_INFO("guest XeKeys: aes states 0x{:08X}, key table 0x{:08X} ({} slots), feed 0x{:08X}",
@@ -169,24 +166,15 @@ bool EnsureGuestBuffers(uint8_t* base) {
   return true;
 }
 
+// The slot a key id names, plus a once-per-process warning when the id has no
+// slot of its own and slot 0 stands in for it.
 uint32_t KeySlotForId(uint32_t key_id) {
-  uint32_t slot = (key_id >= kKeyIdBias) ? (key_id - kKeyIdBias) : key_id;
-  if (slot >= kKeySlots) {
-    if (!g_warned_lookup) {
-      g_warned_lookup = true;
-      REXLOG_WARN("guest XeKeys: unexpected key id 0x{:X}, using slot 0", key_id);
-    }
-    slot = 0;
+  const KeySlotSelection selection = SelectKeySlot(key_id);
+  if (selection.clamped && !g_warned_lookup) {
+    g_warned_lookup = true;
+    REXLOG_WARN("guest XeKeys: unexpected key id 0x{:X}, using slot 0", key_id);
   }
-  return slot;
-}
-
-// True when the guest key buffer is one of the four obscured table entries.
-bool IsKeysetTableAddress(uint32_t guest_address) {
-  if (guest_address < kKeysetTableAddress) {
-    return false;
-  }
-  return (guest_address - kKeysetTableAddress) + kKeySize <= kKeysetTableSize;
+  return selection.slot;
 }
 
 bool IsPlausibleGuestPointer(uint32_t guest_address) {
@@ -262,7 +250,7 @@ extern "C" REX_FUNC(__imp__XeKeysSetKey) {
         "guest XeKeys: key 0x{:X} -> slot {} (obscured table entry +0x{:X} -> plaintext key {})",
         key_id, slot, table_offset, table_offset / kKeySize);
     std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize),
-                kDeobfuscatedKeyTable + table_offset, kKeySize);
+                PlaintextKeyAtOffset(table_offset), kKeySize);
   } else if (IsPlausibleGuestPointer(key_buffer)) {
     // A key installed straight from guest memory is used verbatim.
     REXLOG_INFO("guest XeKeys: key 0x{:X} -> slot {} from guest buffer 0x{:08X} (size {})", key_id,

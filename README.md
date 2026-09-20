@@ -57,6 +57,7 @@ and log capture.
 | [docs/symbols.md](docs/symbols.md) | Image identity, guest addresses, and the evidence for them. |
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [src/](src) | Host application and native overrides for guest functions. |
+| [tests/](tests) | Host unit tests (`ctest`); no SDK and no game image needed. |
 | [config/](config) | Codegen inputs: confirmed function boundaries, names, fingerprints. |
 | [patches/](patches) | Local fixes to the pinned SDK, kept as patch files so SDK fixes survive a re-checkout without committing inside the submodule. |
 | [scripts/](scripts) | Configure/build/run helpers, plus the two SDK-tree repairs (§0 of the build guide). |

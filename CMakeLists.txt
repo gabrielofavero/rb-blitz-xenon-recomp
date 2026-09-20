@@ -37,3 +37,16 @@ else()
 endif()
 
 rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
+
+# Host unit tests. Dependency-free (tests/check.h) because the SDK vendors catch2
+# as an uninitialised submodule, and SDK-free so they run without booting the game
+# - see docs/build-and-run.md. `cmake --build <build dir>; ctest` runs them.
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(rb_blitz_crypto_keytable_tests
+        tests/crypto_keytable_tests.cpp
+    )
+    target_include_directories(rb_blitz_crypto_keytable_tests PRIVATE src)
+    add_test(NAME crypto_keytable COMMAND rb_blitz_crypto_keytable_tests)
+endif()

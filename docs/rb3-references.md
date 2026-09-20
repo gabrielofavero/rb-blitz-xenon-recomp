@@ -293,6 +293,15 @@ with band3's `NewFile` hook (§4.1) to give us overlay-without-repacking.
   `src/hooks/crypto.cpp` deobfuscation is pure host code and could be unit-tested
   against the known plaintext keyset without ever booting the game. Do that when
   the toolchain lands; it is the cheapest durable guarantee we can buy.
+* **Done 2026-09-19.** The pure half of that path was split into
+  [`src/hooks/crypto_keytable.h`](../src/hooks/crypto_keytable.h) so it can be
+  reached without the SDK, and [`tests/crypto_keytable_tests.cpp`](../tests/crypto_keytable_tests.cpp)
+  (dependency-free harness in `tests/check.h`) now runs under `ctest` as
+  `crypto_keytable`. It covers the 0xE0 id bias, the slot clamp, the
+  `0x8280C568` table-address bounds, the version → entry mapping of
+  `0x823DE070`, and the B-009 regression itself: installing by key id would select
+  a different key than installing by buffer offset for MOGG versions 14–16. The
+  plaintext bytes are *not* duplicated into the test, per §9 below.
 
 Also filed as a warning: their `MILO_TRY`/`MILO_CATCH` broke on LP64 because
 `Debug::Fail` longjmps a `const char*` as an `int`, truncating the pointer. When

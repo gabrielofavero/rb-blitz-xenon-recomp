@@ -59,9 +59,14 @@ Detail in [`docs/rb3-references.md`](../docs/rb3-references.md).
   step 3 so the M5 acceptance test means something stronger than "I heard it".
 - **Unit-test the deobfuscation before booting anything.** The key-table
   deobfuscation in `src/hooks/crypto.cpp` is pure host code and can be checked
-  against the known plaintext keyset (recorded in `docs/symbols.md`) without
-  running the game. The RB3 port's audit names "verified once and forgotten" as
-  its worst failure mode — this is the cheapest durable guard we can buy.
+  against the known plaintext keyset without running the game. The RB3 port's
+  audit names "verified once and forgotten" as its worst failure mode — this is
+  the cheapest durable guard we can buy.
+  **Done 2026-09-19:** the pure half (id → slot, table-address bounds, version →
+  entry, plaintext lookup) now lives in `src/hooks/crypto_keytable.h` and is
+  covered by `tests/crypto_keytable_tests.cpp` under `ctest`; see "First host unit
+  tests" in `docs/bringup-log.md`. What is still untested is everything that needs
+  a run: the guest buffers, the AES forwarding, and whether music actually plays.
 - **Before repacking or editing any stream, hook
   `StreamChecksum__ValidateChecksum` → `1`** (band3 `patches.cpp`), or validation
   rejects the edit and we chase a phantom decode bug.

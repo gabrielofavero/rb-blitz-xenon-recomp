@@ -240,6 +240,28 @@ $exe = 'out\build\win-amd64-release\rb_blitz.exe'
 
 The timestamp must be from this build, and the check must print `True`.
 
+### Host unit tests (run these instead of booting, when they cover the change)
+
+The tests under [tests/](../tests) exercise pure host logic — currently the B-009
+MOGG key path, whose SDK-free half lives in
+[src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h) — so they need no
+game image, no runtime and no window, and finish in well under a second:
+
+```powershell
+cmake --build --preset win-amd64-release --target rb_blitz_crypto_keytable_tests
+ctest --test-dir out\build\win-amd64-release --output-on-failure
+```
+
+Expected output is `1/1 Test #1: crypto_keytable ... Passed`. A failing check
+prints the case name, `file:line`, and for memory comparisons the first differing
+bytes, so a red test is self-explanatory. The harness is
+[tests/check.h](../tests/check.h) — deliberately dependency-free, because the
+SDK's vendored `catch2` submodule is not initialised — so a new test file needs
+only an `add_executable` + `add_test` pair next to the existing one in
+`CMakeLists.txt`, plus `src` on its include path. Adding coverage here is the
+cheapest way to make a fix durable: `docs/rb3-references.md` §7.3 counts "zero
+automated tests" as the failure mode that let the RB3 port's fixes rot.
+
 ## 4. Run it
 
 Start it **from the build directory** — that is where the exe looks for

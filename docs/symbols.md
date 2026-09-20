@@ -143,7 +143,8 @@ Music is encrypted and is decrypted with a key the kernel derives, not with a ke
 embedded in the image. The path below was recovered from the recompiled image
 (`out/codegen-trace.log`, `generated/default/`), the run log, the shipping data and
 a match against the engine sources (`freeqaz/rb3`, `src/system/synth/`); the
-overrides live in `src/hooks/crypto.cpp` (see `docs/bringup-log.md` B-009).
+overrides live in `src/hooks/crypto.cpp` with the SDK-free half of the logic in
+`src/hooks/crypto_keytable.h` (see `docs/bringup-log.md` B-009).
 
 | Guest address | What it is |
 | --- | --- |
