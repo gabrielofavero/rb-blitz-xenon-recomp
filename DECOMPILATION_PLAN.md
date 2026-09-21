@@ -285,6 +285,8 @@ Suggested blocker entry:
 - Exhaustive DLC/export/custom-song compatibility and content-management UI.
 - Multiple controller backends, keyboard bindings, handheld tuning, Linux/macOS/ARM support, packaging, installers, and auto-update.
 - **VR (Meta Quest) and iOS** — scoped, not planned: [docs/vr-port-plan.md](docs/vr-port-plan.md). Nothing there gates a milestone in this file.
+- **In-game Audio/Video settings** — scoped, not planned: [docs/av-settings-plan.md](docs/av-settings-plan.md). Makes host settings (resolution, v-sync, volume, safe area) adjustable from inside the game's own Audio/Video screen instead of the F4 overlay or `rb_blitz.toml`. Nothing there gates a milestone in this file.
+- **Custom button mapping** — scoped, not planned: [docs/button-mapping-plan.md](docs/button-mapping-plan.md). Emulator-style per-action binding that captures a controller *or* keyboard press, layered above the guest's input boundary so the game's four controller presets keep working untouched. This is the "keyboard bindings" item above given a design; the rest of that bullet (controller backends, handheld tuning, packaging) stays deferred as written.
 - Large source cleanup, symbol-name campaigns unrelated to blockers, broad native rewrites, and mod APIs.
 
 ## First execution sequence

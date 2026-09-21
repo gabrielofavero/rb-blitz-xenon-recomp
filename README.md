@@ -66,6 +66,8 @@ and log capture.
 | [docs/symbols.md](docs/symbols.md) | Image identity, guest addresses, and the evidence for them. |
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [docs/vr-port-plan.md](docs/vr-port-plan.md) | Scoping for a true-stereo Meta Quest build: mechanism, milestones, kill gates, distribution. |
+| [docs/av-settings-plan.md](docs/av-settings-plan.md) | Scoping for exposing host settings (resolution, v-sync, volume, safe area) inside the game's own Audio/Video screen. |
+| [docs/button-mapping-plan.md](docs/button-mapping-plan.md) | Scoping for emulator-style custom button mapping: per-action binding that listens for a controller or keyboard press, layered so the game's four presets keep working untouched. |
 | [src/](src) | Host application and native overrides for guest functions. |
 | [tests/](tests) | Host unit tests (`ctest`); no SDK and no game image needed. |
 | [config/](config) | Codegen inputs: confirmed function boundaries, names, and the fingerprint the build gate enforces. |
