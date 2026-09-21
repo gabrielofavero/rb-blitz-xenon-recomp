@@ -15,7 +15,7 @@ schema_version = 1
 [installer]
 name = "Rock Band Blitz (Xenon recomp)"
 short_name = "Rock Band Blitz"
-version = "1.0.0"
+version = "0.1.0"
 publisher = "Rock Band Blitz Xenon Recomp"
 homepage_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp"
 support_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp/issues"

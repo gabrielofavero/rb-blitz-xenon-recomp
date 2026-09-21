@@ -79,7 +79,7 @@ Build and test the helper only; do not compile the setup executable.
 powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 
 .EXAMPLE
-powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1 -PayloadUrl https://example.invalid/rb_blitz-1.0.0.zip -PayloadSha256 0123abcd... -PayloadSize 52446752
+powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1 -PayloadUrl https://example.invalid/rb_blitz-0.1.0.zip -PayloadSha256 0123abcd... -PayloadSize 52446752
 #>
 [CmdletBinding()]
 param(

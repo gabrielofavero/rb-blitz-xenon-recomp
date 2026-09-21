@@ -252,7 +252,7 @@ Setup's own switches.
 Example — unattended install from a package, with the pinned mod, no dialog at all:
 
 ```bat
-RockBandBlitzSetup-1.0.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+RockBandBlitzSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
   /GAMEMETHOD=package /GAMEPACKAGE="D:\dd774f20c36263f22afd0a8b6fd742ac9e400b0a58" ^
   /ULTIMATESOURCE=pin

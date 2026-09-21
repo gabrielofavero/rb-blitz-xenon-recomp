@@ -74,7 +74,9 @@ inline constexpr std::string_view kUltimateRoles[] = {"ultimate-archive-header",
 inline constexpr std::string_view kOptionalGameFiles[] = {"ArcadeInfo.xml", "charnames.zbm",
                                                           "nxeart"};
 
-inline constexpr std::string_view kHelperVersion = "1.0.0";
+// The helper's own version, and the `--installer-version` fallback for runs
+// outside the wizard. Bumped with [installer] version in config/pins.toml.
+inline constexpr std::string_view kHelperVersion = "0.1.0";
 
 // Long steps write one integer percent per line, plus an optional label line, for
 // the wizard's progress page to poll. An empty `file` disables reporting.
