@@ -124,7 +124,8 @@ adding `[[modules]]` entries.
 Guest boot reaches functions that codegen discovery missed. Each is a real
 function with **no PDATA entry and no static `bl` caller**, reached only through
 a function pointer; all end in `bctr` (indirect tail-call), which codegen
-`GapFill` does not split on. Registered one at a time from runtime evidence
+`GapFill` did not split on — the discovery gap closed by patch 0005, see the end
+of this section. Registered one at a time from runtime evidence
 (`[FATAL] Call to invalid or unregistered function at guest address 0x…`):
 
 | Guest address | Evidence | Notes |
@@ -138,9 +139,21 @@ a function pointer; all end in `bctr` (indirect tail-call), which codegen
 All entries use `[functions."0x…"]` with **no** `size`/`end` so codegen
 discovers the natural boundary from the code region.
 
-Candidate upstream fix (not applied; plan fix-order #6): `GapFill`
-(`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`)
-should also split on `bctr` when the following word is a known function entry.
+The upstream fix is **applied** — patch
+[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch):
+`GapFill` (`rexglue-sdk/src/codegen/phase_gapfill.cpp`) now treats `bctr` as a
+terminator and re-splits a region it has already registered when a later pass
+reveals a boundary inside it (a withdraw/refine fixpoint, at most 8 passes).
+Measured with this list trimmed to the three oldest entries, codegen found 0 of
+the other 21 addresses before, 13 with the `bctr` terminator alone, and 20 with
+the fixpoint; the one it still cannot see is `0x827EC038`, whose address is only
+taken in data, so it stays a forced entry. With the full list the register table
+grew from 38,365 to 38,439 entries. `config/functions.toml` did not need to
+change for that: the entries above stay as the evidence trail (and as the
+fallback for the symbols no code region mentions, like `0x827EC038`), not
+because codegen still needs each one.
+Full detail and the two further defects the fix exposed are in
+[bringup-log.md](bringup-log.md) under "Codegen: the B-003/B-006 root causes".
 
 ## Milestone 4: audio (MOGG) decryption path
 

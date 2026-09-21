@@ -1,0 +1,355 @@
+diff --git a/include/rex/codegen/function_node.h b/include/rex/codegen/function_node.h
+index 569acf2..2f75ac1 100644
+--- a/include/rex/codegen/function_node.h
++++ b/include/rex/codegen/function_node.h
+@@ -165,6 +165,11 @@ class FunctionNode {
+   void addJumpTable(JumpTable jt);
+   void addUnresolvedJump(uint32_t site, uint32_t target, bool isCall, bool conditional);
+ 
++  /// Rewind every call/tail call edge targeting `target` back into an address-keyed unresolved
++  /// jump. Required before the target node is destroyed: CallTarget::ToFunction holds a raw
++  /// pointer, so a surviving edge would dangle.
++  size_t rewindEdgesTo(const FunctionNode* target, uint32_t targetBase);
++
+   // Resolution (reactive - called by graph on events)
+   bool tryResolveAgainst(FunctionNode* newFunction);
+   bool tryResolveAgainstImport(uint32_t importAddr, const std::string& importName);
+diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
+index fc918bb..b51e81a 100644
+--- a/src/codegen/function_graph.cpp
++++ b/src/codegen/function_graph.cpp
+@@ -203,6 +203,23 @@ void FunctionNode::removeUnresolvedJump(uint32_t site) {
+   unresolvedJumps_.erase(it, unresolvedJumps_.end());
+ }
+ 
++size_t FunctionNode::rewindEdgesTo(const FunctionNode* target, uint32_t targetBase) {
++  size_t rewound = 0;
++  const auto rewind = [&](std::vector<CallEdge>& edges, bool isCall) {
++    std::erase_if(edges, [&](const CallEdge& edge) {
++      if (edge.target.asFunction() != target) {
++        return false;
++      }
++      addUnresolvedJump(edge.site, targetBase, isCall, /*conditional=*/false);
++      ++rewound;
++      return true;
++    });
++  };
++  rewind(calls_, true);
++  rewind(tailCalls_, false);
++  return rewound;
++}
++
+ bool FunctionNode::tryResolveAgainst(FunctionNode* newFunction) {
+   if (isSealed())
+     return false;
+@@ -216,11 +233,14 @@ bool FunctionNode::tryResolveAgainst(FunctionNode* newFunction) {
+     if (it->target == newFunction->base()) {
+       // Target matches new function's entry point -> external call/tail call
+       REXCODEGEN_TRACE(
+-          "FunctionNode 0x{:08X}: resolved jump 0x{:08X} -> 0x{:08X} as external to {}", base_,
+-          it->site, it->target, newFunction->name());
++          "FunctionNode 0x{:08X}: resolved {} 0x{:08X} -> 0x{:08X} as external to {}", base_,
++          it->isCall ? "call" : "jump", it->site, it->target, newFunction->name());
+ 
+-      // Add as tail call (unconditional branch to another function)
+-      addTailCall(it->site, CallTarget::function(newFunction));
++      if (it->isCall) {
++        addCall(it->site, CallTarget::function(newFunction));
++      } else {
++        addTailCall(it->site, CallTarget::function(newFunction));
++      }
+ 
+       it = unresolvedJumps_.erase(it);
+       anyResolved = true;
+@@ -240,11 +260,14 @@ bool FunctionNode::tryResolveAgainstImport(uint32_t importAddr, const std::strin
+ 
+   for (auto it = unresolvedJumps_.begin(); it != unresolvedJumps_.end();) {
+     if (it->target == importAddr) {
+-      REXCODEGEN_TRACE("FunctionNode 0x{:08X}: resolved jump 0x{:08X} -> 0x{:08X} as import {}",
+-                       base_, it->site, it->target, importName);
++      REXCODEGEN_TRACE("FunctionNode 0x{:08X}: resolved {} 0x{:08X} -> 0x{:08X} as import {}",
++                       base_, it->isCall ? "call" : "jump", it->site, it->target, importName);
+ 
+-      // Add as tail call to import
+-      addTailCall(it->site, CallTarget::import(importAddr, importName));
++      if (it->isCall) {
++        addCall(it->site, CallTarget::import(importAddr, importName));
++      } else {
++        addTailCall(it->site, CallTarget::import(importAddr, importName));
++      }
+ 
+       it = unresolvedJumps_.erase(it);
+       anyResolved = true;
+@@ -800,6 +823,23 @@ bool FunctionGraph::removeFunction(uint32_t entryPoint) {
+     return false;
+   }
+   REXCODEGEN_TRACE("FunctionGraph: removing absorbed function 0x{:08X}", entryPoint);
++
++  FunctionNode* removed = it->second.get();
++
++  // Edges elsewhere in the graph may target the node we are destroying. Rewind them to
++  // address-keyed unresolved jumps first so the graph can re-resolve the site against whatever
++  // ends up owning that code, instead of dereferencing a freed node during emission.
++  size_t rewound = 0;
++  for (auto& [base, node] : functions_) {
++    if (node.get() != removed) {
++      rewound += node->rewindEdgesTo(removed, entryPoint);
++    }
++  }
++  if (rewound > 0) {
++    REXCODEGEN_TRACE("FunctionGraph: rewound {} edge(s) targeting removed 0x{:08X}", rewound,
++                     entryPoint);
++  }
++
+   functionsByBase_.erase(entryPoint);
+   functions_.erase(it);
+   functionHasXrefs_.erase(entryPoint);  // Clean up xref tracking
+diff --git a/src/codegen/manifest.cpp b/src/codegen/manifest.cpp
+index 4065fdb..c0378a0 100644
+--- a/src/codegen/manifest.cpp
++++ b/src/codegen/manifest.cpp
+@@ -222,6 +222,14 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
+     }
+   }
+ 
++  if (stamp_idx && lines[*stamp_idx] == stamp_line) {
++    // Already current. Rewriting it would only bump the mtime, and the manifest is
++    // a codegen input: every build rule depending on this module re-runs until the
++    // build stamp it produced is newer than its inputs again.
++    REXLOG_TRACE("Manifest sdk_version already {}, not rewriting", version);
++    return true;
++  }
++
+   if (stamp_idx) {
+     lines[*stamp_idx] = stamp_line;
+   } else if (project_header_idx) {
+diff --git a/src/codegen/output_stamp.cpp b/src/codegen/output_stamp.cpp
+index 77ee906..da6ed65 100644
+--- a/src/codegen/output_stamp.cpp
++++ b/src/codegen/output_stamp.cpp
+@@ -11,6 +11,7 @@
+ 
+ #include <rex/codegen/output_stamp.h>
+ 
++#include <algorithm>
+ #include <fstream>
+ 
+ #include <fmt/format.h>
+@@ -26,6 +27,30 @@ namespace rex::codegen {
+ /// Bump when the stamp layout changes.
+ constexpr int kStampVersion = 1;
+ 
++/// Bump when codegen can emit different output for the same inputs and sdkVersion -
++/// an analyser or gap-fill change, for example. Unlike kStampVersion this keeps the
++/// stamp format loadable; it only forces one regeneration of an existing tree.
++constexpr int kCodegenBehaviourVersion = 2;
++
++namespace {
++
++/// The same file reached through a different spelling - relative or absolute, '\'
++/// or '/', with or without '.' segments - must produce the same sort key, or the
++/// fingerprint depends on how the caller happened to spell the path.
++std::filesystem::path InputSortKey(const std::filesystem::path& path) {
++  std::error_code ec;
++  auto canonical = std::filesystem::weakly_canonical(path, ec);
++  if (!ec && !canonical.empty())
++    return canonical;
++  ec.clear();
++  auto absolute = std::filesystem::absolute(path, ec);
++  if (!ec && !absolute.empty())
++    return absolute;
++  return path.lexically_normal();
++}
++
++}  // namespace
++
+ std::optional<OutputStamp> OutputStamp::Load(const std::filesystem::path& path) {
+   std::ifstream in(path, std::ios::binary);
+   if (!in)
+@@ -71,6 +96,7 @@ std::string ComputeInputFingerprint(std::span<const std::filesystem::path> input
+   accumulator += "sdk=";
+   accumulator += sdkVersion;
+   accumulator += '\n';
++  accumulator += fmt::format("codegen={}\n", kCodegenBehaviourVersion);
+ 
+   for (const auto& flag : flagValues) {
+     accumulator += "flag=";
+@@ -78,7 +104,24 @@ std::string ComputeInputFingerprint(std::span<const std::filesystem::path> input
+     accumulator += '\n';
+   }
+ 
++  // Ordered and deduplicated here rather than by the caller: the fingerprint must
++  // not depend on the order or the spelling the inputs were collected in.
++  std::vector<std::pair<std::filesystem::path, std::filesystem::path>> ordered;
++  ordered.reserve(inputFiles.size());
+   for (const auto& path : inputFiles) {
++    ordered.emplace_back(InputSortKey(path), path);
++  }
++  std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
++    return lhs.first.generic_string() < rhs.first.generic_string();
++  });
++  ordered.erase(std::unique(ordered.begin(), ordered.end(),
++                            [](const auto& lhs, const auto& rhs) {
++                              return lhs.first.generic_string() == rhs.first.generic_string();
++                            }),
++                ordered.end());
++
++  for (const auto& entry : ordered) {
++    const std::filesystem::path& path = entry.second;
+     // Content, not mtime: survives a checkout, a copy, or a bare touch.
+     std::error_code ec;
+     std::string digest = "<missing>";
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+index f3da777..83c904b 100644
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -35,7 +35,8 @@ namespace {
+ // GapFill to register uncovered code regions
+ //=============================================================================
+ 
+-// Split a code region into function segments based on terminators (blr, tail calls).
++// Split a code region into function segments based on terminators (blr, bctr, tail
++// calls).
+ std::vector<CodeRegion> splitRegionOnTerminators(
+     const CodeRegion& region, const BinaryView& binary,
+     const std::unordered_set<uint32_t>& knownCallables) {
+@@ -56,6 +57,13 @@ std::vector<CodeRegion> splitRegionOnTerminators(
+     if (decoded.is_return()) {
+       shouldSplit = true;
+       reason = "blr";
++    } else if (decoded.is_indirect_branch() && !decoded.is_conditional()) {
++      // bctr: control leaves the function through CTR, so the next word is a new
++      // function's entry, not a continuation (bctrl is a call and is not covered
++      // here). Without this split that entry stays interior to this segment and is
++      // never registered, so an indirect call into it traps.
++      shouldSplit = true;
++      reason = "bctr";
+     } else if (decoded.opcode == Opcode::b && decoded.branch_target.has_value()) {
+       uint32_t target = decoded.branch_target.value();
+       // Don't split on tail recursion (branch to own segment start)
+@@ -126,50 +134,90 @@ void gapFillCodeRegions(CodegenContext& ctx) {
+   auto& binary = ctx.binary();
+   auto& scan = ctx.scan;
+ 
+-  // Build set of known callables for tail call detection
+-  std::unordered_set<uint32_t> knownCallables;
+-  for (const auto& [addr, node] : graph.functions()) {
+-    knownCallables.insert(addr);
+-  }
+-
+-  size_t gapsFound = 0;
+-  size_t segmentsCreated = 0;
+-
+-  for (const auto& region : scan.codeRegions) {
+-    // Split region on terminators (blr, tail calls), then check each segment
+-    auto segments = splitRegionOnTerminators(region, binary, knownCallables);
+-
+-    for (const auto& segment : segments) {
+-      // Skip if this segment's start is already a registered function entry
+-      if (graph.isEntryPoint(segment.start))
+-        continue;
++  // Splitting a region depends on which addresses are known callables, and
++  // registering a segment makes its start one - so a single pass can miss a segment
++  // whose start only became known later in the same pass. An 8-byte thunk slot that
++  // tail-calls a function registered moments earlier stays interior to its segment,
++  // is never registered, and an indirect call into it traps on an unknown address.
++  //
++  // Growing the callable set alone cannot fix that: once a coarse segment covering
++  // several thunk slots is registered, the finer boundaries a later pass uncovers
++  // inside it are rejected as interior to it. Each pass therefore withdraws the
++  // registrations of the previous one (only ever this phase's own GAP_FILL functions,
++  // so containment in a real function still protects against re-registering its
++  // interior), re-splits with the callables those registrations revealed, and
++  // registers the refined segmentation instead. That settles as soon as one pass
++  // reproduces the previous pass's segmentation.
++  constexpr size_t kMaxGapFillPasses = 8;
++  size_t passes = 0;
++  bool converged = false;
++  std::unordered_set<uint32_t> registeredStarts;
++
++  while (passes < kMaxGapFillPasses) {
++    ++passes;
++
++    // Withdraw the previous pass's segmentation. Those starts stay callable (below);
++    // only their extents are given back so finer ones can be cut out of them.
++    for (uint32_t start : registeredStarts) {
++      graph.removeFunction(start);
++    }
+ 
+-      // Skip if this segment's start is inside another function
+-      if (auto* containingFunc = graph.getFunctionContaining(segment.start)) {
+-        continue;
++    std::unordered_set<uint32_t> knownCallables;
++    for (const auto& [addr, node] : graph.functions()) {
++      knownCallables.insert(addr);
++    }
++    knownCallables.insert(registeredStarts.begin(), registeredStarts.end());
++
++    std::unordered_set<uint32_t> passStarts;
++    for (const auto& region : scan.codeRegions) {
++      // Split region on terminators (blr, bctr, tail calls), then check each segment
++      auto segments = splitRegionOnTerminators(region, binary, knownCallables);
++
++      for (const auto& segment : segments) {
++        // Skip if this segment's start is already a registered function entry
++        if (graph.isEntryPoint(segment.start))
++          continue;
++
++        // Skip if this segment's start is inside another function
++        if (auto* containingFunc = graph.getFunctionContaining(segment.start)) {
++          REXCODEGEN_TRACE("GapFill: 0x{:08X} is interior to sub_{:08X}, skipping",
++                           segment.start, containingFunc->base());
++          continue;
++        }
++
++        // Skip if this looks like exception handler data (handler ptr + rdata ptr)
++        if (looksLikeExceptionData(binary, graph, segment.start))
++          continue;
++
++        uint32_t segmentSize = segment.size();
++        graph.addFunction(segment.start, segmentSize, FunctionAuthority::GAP_FILL, false);
++        knownCallables.insert(segment.start);
++        passStarts.insert(segment.start);
++
++        REXCODEGEN_TRACE("GapFill: registered sub_{:08X} (0x{:08X}-0x{:08X}, {} bytes)",
++                         segment.start, segment.start, segment.end, segmentSize);
+       }
+-
+-      // Skip if this looks like exception handler data (handler ptr + rdata ptr)
+-      if (looksLikeExceptionData(binary, graph, segment.start))
+-        continue;
+-
+-      uint32_t segmentSize = segment.size();
+-      graph.addFunction(segment.start, segmentSize, FunctionAuthority::GAP_FILL, false);
+-
+-      REXCODEGEN_TRACE("GapFill: registered sub_{:08X} (0x{:08X}-0x{:08X}, {} bytes)",
+-                       segment.start, segment.start, segment.end, segmentSize);
+-      segmentsCreated++;
+     }
+ 
+-    gapsFound++;
++    if (passStarts == registeredStarts) {
++      converged = true;
++      break;
++    }
++    registeredStarts = std::move(passStarts);
+   }
+ 
+-  if (segmentsCreated > 0) {
+-    REXCODEGEN_TRACE("Analyze: registered {} gap functions from {} regions", segmentsCreated,
+-                     gapsFound);
++  if (!registeredStarts.empty()) {
++    REXCODEGEN_TRACE("Analyze: registered {} gap functions in {} pass(es)",
++                     registeredStarts.size(), passes);
+   } else {
+     REXCODEGEN_TRACE("Analyze: no uncovered regions found");
+   }
++  if (!converged) {
++    REXCODEGEN_WARN(
++        "Analyze: gap fill segmentation still changing after {} passes ({} functions); "
++        "some uncovered entries may be missing from the register table",
++        kMaxGapFillPasses, registeredStarts.size());
++  }
+ }
+ 
+ //=============================================================================

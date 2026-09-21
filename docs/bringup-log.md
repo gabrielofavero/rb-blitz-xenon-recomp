@@ -93,16 +93,29 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
 
 ### B-003: codegen `OutputStamp` skip does not trigger on re-run (perf)
 
-- Status: open (non-blocking).
+- Status: **resolved** (2026-09-20, patch 0005 — see "Codegen: the B-003/B-006
+  root causes" at the end of this log).
 - Symptom: an unchanged second `rb_blitz_codegen` run re-runs the full analysis
   (~390s Debug) instead of skipping via the `OutputStamp` fingerprint. Output is
   still correct and byte-identical (`0 written, 215 unchanged`).
 - Evidence: input files (manifest, `config/functions.toml`, `default.xex`) are
-  byte-stable across runs, yet the stamp fingerprint changes each run — likely
-  the `hash_file` failure fallback (`<unreadable:size:mtime>`) or a Windows file
-  access quirk in `ComputeInputFingerprint` (`output_stamp.cpp`).
-- Impact: rebuild-time only; no correctness impact. Revisit in Milestone 2 or
-  report upstream against SDK `c94f5eb`.
+  byte-stable across runs, yet the stamp fingerprint changes each run.
+- Root cause: **two independent defects, and the hypothesis in this entry was
+  wrong**. (a) `ManifestConfig::WriteSdkVersionStamp` (`src/codegen/manifest.cpp`)
+  rewrote `rb_blitz_manifest.toml` unconditionally *after* `RecompileProject` had
+  written the stamp; the manifest is itself a codegen input, so it was always the
+  newest file and the next run always had work to do (the tool's own skip then
+  hid it — the run was short but never zero, and `ninja` kept re-scheduling the
+  edge). (b) `ComputeInputFingerprint` (`src/codegen/output_stamp.cpp`) hashed the
+  input list in caller order and with the caller's spelling, so the same tree
+  fingerprinted differently depending on whether the manifest was named relative
+  or absolute. Neither is a `hash_file` fallback or a Windows access quirk.
+- Impact: rebuild-time only; no correctness impact. Fixed in patch 0005.
+  Measured after the fix: an unchanged run prints `0 written, 0 unchanged,
+  1 module(s) up to date` in 0.4 s (0.3 s with the manifest named absolutely),
+  against 160.4 s for a real Release regeneration, and `ninja` no longer
+  schedules the codegen edge at all (`ninja -d explain rb_blitz_codegen` explains
+  only the glob re-check and the fingerprint gate).
 
 ### B-004: host executable missing vendored `imgui.h` include path
 
@@ -233,8 +246,11 @@ Status: **complete** (2026-09-10).
   `config/functions.toml` (`[functions."0x…"]`, no size → natural discovery).
 - Registered: `0x82789360`, `0x8278A708`, `0x8279A888`, `0x82779A70`,
   `0x82783D18`. Boot then completed with no further such faults.
-- This remains a candidate upstream SDK fix (GapFill should split on `bctr` when
-  the following word is a known function entry); deferred per plan fix-order.
+- This stayed a candidate upstream SDK fix through Milestones 3–5; it was
+  applied on 2026-09-20 (patch 0005) along with the `bctr` terminator and the
+  withdraw/refine fixpoint that were missing beside it — see "Codegen: the
+  B-003/B-006 root causes" at the end of this log. The forced entries above stay
+  in `config/functions.toml` as evidence, not as the fix.
 
 ### Non-blocking stubs observed at boot (match the Xenia baseline)
 
@@ -319,12 +335,17 @@ cmake --build out/build/win-amd64-release # regenerate + build
 .\scripts\acceptance_launches.ps1 -Runs 10 -BootWaitSec 26
 ```
 
-**Design decision to revisit (potential root-cause fix):** all `bctr`-missed
-functions could be eliminated at once by making codegen `GapFill`
-(`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`) also
-split on `bctr` when the next word is a known function entry. This is a
-generically-correct SDK fix but is fix-order #6 in the plan; the current path
-deliberately stays project-level (`config/functions.toml`).
+**Design decision (taken 2026-09-20):** all `bctr`-missed functions are now
+eliminated at the root instead of one entry at a time, by making codegen `GapFill`
+(`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`) split on
+`bctr` and by re-splitting a region it has already registered once a later pass
+reveals a boundary inside it. Patch
+[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch)
+carries it; the measurement, the two further defects it exposed and what it does
+*not* cover are in "Codegen: the B-003/B-006 root causes" at the end of this log.
+The `config/functions.toml` entries stay as the evidence trail for the addresses
+that were found by hand, and as the only route for an address no code segment
+mentions (`0x827EC038`).
 
 ## Milestone 4 — Menus, content discovery, input, saves
 
@@ -850,8 +871,10 @@ music opens, the second when a song is picked.
   and Milestone 5's `0x827EC038` plus 14 thunks. All are written with no
   `size`/`end`, so codegen discovers natural boundaries.
 - Consequence: the class is bounded, not eliminated. Any newly reached UI or
-  gameplay path can still hit an unregistered hole; the only root-cause fix is the
-  codegen `GapFill` change that is plan fix-order #6 (split on `bctr`).
+  gameplay path can still hit an unregistered hole; the root-cause fix (the
+  codegen `GapFill` change that was plan fix-order #6) was applied on 2026-09-20
+  as patch 0005, which takes the 24 entries above from "the fix" to "the evidence
+  trail" — see "Codegen: the B-003/B-006 root causes" at the end of this log.
 
 ## Milestone 5 — first songs played to the end (2026-09-19)
 
@@ -1568,4 +1591,150 @@ explicitly saying it is **unmeasured on purpose**:
   pause/resume are therefore **not** covered by anything in this log, and are not
   claimed to be; the key-selection rule underneath the music stays pinned by the
   host tests of B-009.
+
+## Codegen: the B-003/B-006 root causes, fixed in the SDK (2026-09-20)
+
+Three defects in the pinned SDK's codegen, all of them standing since Milestone 3
+and all of them paid for on every rebuild or every newly reached UI path. They are
+captured by patch
+[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch),
+which touches `src/codegen/manifest.cpp`, `src/codegen/output_stamp.cpp`,
+`src/codegen/phase_gapfill.cpp`, `src/codegen/function_graph.cpp` and
+`include/rex/codegen/function_node.h`.
+
+Reasons for doing it now rather than in fix-order: (1) is pure rebuild cost, (2) is
+the difference between reaching a new path and trapping on it, and (3) is what
+made (2) unshippable — it turned a silent runtime hazard into six
+`undefined symbol` link errors.
+
+### (1) The skip that never skipped (B-003)
+
+`ManifestConfig::WriteSdkVersionStamp` rewrote `rb_blitz_manifest.toml`
+unconditionally *after* `RecompileProject` had written the stamp. The manifest is
+itself a codegen input, so it was the newest file on disk every time and the next
+run always had something to do; the tool's own `OutputStamp` skip then hid that,
+which is why the entry above could say "no output changed" while the phase timings
+showed a full analysis. The second half of the defect was in the fingerprint
+itself: `ComputeInputFingerprint` hashed the input list in caller order and with
+the caller's spelling, so the same tree fingerprinted differently depending on
+whether the manifest was named relatively or absolutely.
+
+Both are fixed in the patch, and the fix is verified end to end:
+
+```powershell
+# unchanged re-run of the tool (this used to be a 160 s Release / ~390 s Debug analysis)
+rexglue codegen rb_blitz_manifest.toml   # 0 written, 0 unchanged, 1 module(s) up to date
+                                         # 0.4 s; 0.3 s with an absolute manifest path
+ninja -d explain rb_blitz_codegen        # explains only the glob re-check and the
+                                         # fingerprint gate: the codegen edge is not
+                                         # scheduled at all any more
+Get-Item rb_blitz_manifest.toml          # mtime unchanged by the run
+```
+
+**One regeneration is forced on purpose.** The fingerprint gained a
+`codegen=<n>` line beside `sdk=` (`kCodegenBehaviourVersion`, now `2`), so every
+existing stamp mismatches exactly once after the patch is applied. A stale analysis
+that silently survives an analyser change is the failure this line exists to
+prevent; expect one full regeneration (~160 s Release) and nothing after it.
+
+### (2) Gap fill never revisited its own segmentation (B-006, B-011)
+
+Two independent holes in `phase_gapfill.cpp`:
+
+- `splitRegionOnTerminators` did not treat `bctr` as a terminator, so a slot that
+  is only reachable indirectly and ends in an indirect tail call was never split
+  out of the run it sat in. This is the mechanism behind every `[FATAL] Call to
+  invalid or unregistered function` recorded in this log.
+- `gapFillCodeRegions` built `knownCallables` once, before the region loop, and
+  then sealed a segmentation it could no longer reconsider — so a boundary that a
+  *later* segment exposed inside an *earlier*, coarser one (the B-008 case: an
+  adjuster-thunk hole between two slots codegen did register) stayed interior
+  forever, no matter how many entries were forced in `config/functions.toml`.
+
+Gap filling is now a withdraw/refine fixpoint: each pass hands back the previous
+pass's own `GAP_FILL` registrations (never a real function), re-splits against the
+callables they revealed, and stops when a pass reproduces the previous
+segmentation. The real project converges in **3 passes**; the loop is capped at 8
+and warns if it hits the cap.
+
+Measured by trimming `config/functions.toml` to its three oldest entries (the
+Milestone-2 tail branches) and asking whether codegen still finds the other 21
+addresses by itself:
+
+| Codegen | Registered functions | Of the 21 addresses that used to need a forced entry | Missing |
+| --- | --- | --- | --- |
+| pre-fix | 38,344 | 0 | all 21 |
+| `bctr` terminator only | 38,428 | 13 | 8 |
+| withdraw/refine fixpoint | 38,438 | 20 | `0x827EC038` |
+
+The one address left is the 24-byte leaf `0x827EC038` of B-011. Its address is
+taken in data only: no `bl`, no PDATA, no segment start mentions it, so nothing
+tells codegen a function begins there. It keeps its forced entry, and it is the
+only reason the list of 24 has to stay in the tree at all.
+
+With the real 24-entry list the register table grew from **38,365 to 38,439**
+entries: 75 new starts, one start removed. The removed one is the interesting
+half — `0x826D8638` was registered as an 8-byte function of its own, and is now
+the interior label of the 0x20-byte function at `0x826D8620` that contains it
+(`lwz r11,16(r3); lbz r11,1380(r11); cmplwi r11,0; beq 0x826d8638; lwz r3,4(r3);
+blr` / `lwz r3,8(r3); blr`). No reference to `0x826d8638` survives anywhere in
+`generated/` except the branch to `loc_826D8638` inside that function, which is
+what a mis-split function boundary is supposed to collapse into.
+
+### (3) The dangling call target the fix exposed (link-time)
+
+The first full build after (1) and (2) failed at the link step with six undefined
+symbols (`sub_824ED808`, `sub_824B51B8`, `sub_824B4F04`, `sub_821B6F68`,
+`sub_821B6FC0`, `sub_827905D8`) — names that appear in no register table and in no
+guest function. The cause was a **pre-existing use-after-free that the withdraw
+loop was the first code to trigger**:
+
+- `CallTarget::ToFunction` (`function_types.h`) holds a raw `FunctionNode*`, into
+  `FunctionGraph::functions_` (an `unordered_map<uint32_t, unique_ptr<FunctionNode>>`).
+- `FunctionGraph::removeFunction` erased the owning `unique_ptr` without touching
+  the edges that pointed at it. Withdrawing a gap-fill registration therefore left
+  every caller holding freed memory, and emission read `targetFn->name()` out of
+  it, printing a plausible-looking `sub_XXXXXXXX` that belonged to some other
+  function. Six such emissions are exactly six undefined symbols.
+
+The fix is small and structural: `FunctionGraph::removeFunction` now calls a new
+`FunctionNode::rewindEdgesTo` on every node and rewinds matching edges back into
+address-keyed unresolved jumps *before* erasing (164 rewinds in the real run).
+Those jumps are then re-resolved by the graph itself — to the function that ends up
+owning that address, to an internal label, or, if nothing ever claims it, to the
+`// FATAL: unresolved function 0x…` line that is checked into the generated source
+rather than into a freed string. This could not have shipped otherwise: it is
+reachable from any codegen change that withdraws a registration, which is exactly
+what (2) is.
+
+Two resolution helpers, `tryResolveAgainst` and `tryResolveAgainstImport`, were
+also promoting **every** re-resolved jump to a tail call and dropping the
+`isCall` flag, so a re-resolved `bl` site lost its call and became a return. They
+now honour the flag. Nothing else in the merge path changed.
+
+### Verification (all 2026-09-20)
+
+| Check | Result |
+| --- | --- |
+| SDK `rexglue` rebuild (release tree) | compiles and links; `function_graph.cpp` reports the same 5 warnings it reported at HEAD (`allRecompiled` at 487, unused parameters in `addCodeBuffer` at 696) — all outside every hunk |
+| Full regeneration, `--ignore-stamp` | 184 written, 31 unchanged; `registered 1672 gap functions in 3 pass(es)`; sealed 38,177/38,439 (unchanged from pre-fix); **0** `FATAL: unresolved function` emissions; all 24 forced addresses present |
+| The six undefined symbols | 0 references, 0 definitions — the thunks call their defined targets (`sub_821D52D8` → `sub_821D5060`, `sub_821D54C0` → `sub_82376F70`) |
+| `cmake --build out\build\win-amd64-release` | exit 0; links `rb_blitz.exe` (38,611,456 bytes) |
+| `ctest` (the 4 host test targets) | 4/4 passed in 0.49 s |
+| `scripts/apply_sdk_patches.ps1 -Check` | 14 patched, 0 UNEXPECTED, 0 untracked, exit 0 |
+
+### What this does not cover
+
+- **No boot was run for this change.** It is a codegen change: the evidence is the
+  regenerated table, the emitted bodies, the link, and the host tests. Whether the
+  75 newly compiled functions behave is scripted-acceptance territory, and the
+  acceptance run is the only thing that can say so, so it is left to the next
+  milestone's route rather than claimed here.
+- **`0x827EC038` still needs its config entry** (above), so a future address that
+  is referenced only from data still needs the manual route. The class is smaller,
+  not empty.
+- **The forced regeneration is once per project, not per machine**: a checkout that
+  applies the patch and then builds regenerates once and skips thereafter.
+- **`UnresolvedJump::conditional`** is still recorded and still never consumed by
+  the emitter; nothing here depends on it.
 
