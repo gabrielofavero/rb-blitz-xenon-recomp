@@ -9,9 +9,11 @@
 #include <filesystem>
 #include <string>
 
+#include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging/macros.h>
 #include <rex/rex_app.h>
+#include <rex/system/flags.h>
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
@@ -37,6 +39,7 @@ class RbBlitzApp : public rex::ReXApp {
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
+    ApplyContentLicense();
   }
 
   // Path policy. Called before logging is initialized, so keep this silent.
@@ -76,6 +79,35 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
  private:
+  // Content licence state, the emulated console's answer to "does this profile
+  // own this title?". XamContentGetLicenseMask hands the guest the
+  // `license_mask` kernel cvar verbatim, and this is the XBLA build of Rock Band
+  // Blitz: it asks for that mask early in boot and takes the trial path whenever
+  // the mask is zero, which is the mode that does not keep scores. ReXGlue
+  // defaults the mask to zero, i.e. "a
+  // console that owns no licence", and no rb_blitz.toml is shipped - by design,
+  // see installer/tools/make_payload.ps1 - so an installed build boots the full
+  // game as a trial. Playing the user's own dump is not that situation, and the
+  // reference baseline boots with a licence enabled
+  // (docs/baselines/xenia-canary-80679bc.md).
+  //
+  // Called after the config file, the REX_* environment and the command line
+  // have been applied, and only writes when none of them named a mask, so
+  // `license_mask = 0` in rb_blitz.toml or --license_mask=0 still selects the
+  // trial path - that is how a trial-only bug stays reproducible.
+  void ApplyContentLicense() {
+    if (rex::cvar::GetFlagSource("license_mask") != rex::cvar::Source::kDefault) {
+      REXLOG_INFO("content licence: license_mask = {} (configured)",
+                  rex::cvar::GetFlagByName("license_mask"));
+      return;
+    }
+
+    // The cvar's storage lives in rexruntime.dll, so the write goes through the
+    // declaration in <rex/system/flags.h> rather than the registry.
+    REXCVAR_SET(license_mask, 1);
+    REXLOG_INFO("content licence: license_mask = 1 (default; the title is treated as purchased)");
+  }
+
   // The build gate in CMakeLists.txt has already refused to recompile against a
   // dump other than the one config/game_fingerprints.toml describes, but a
   // launcher can still point a built binary at a different game/ tree - a
