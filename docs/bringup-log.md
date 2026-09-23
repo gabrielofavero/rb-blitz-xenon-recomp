@@ -1738,3 +1738,322 @@ now honour the flag. Nothing else in the merge path changed.
 - **`UnresolvedJump::conditional`** is still recorded and still never consumed by
   the emitter; nothing here depends on it.
 
+## Mouse navigation, and the pulse it turned out to need (2026-09-22)
+
+> *Partly superseded later the same day.* The pulse findings below still hold. The stepper it
+> describes — a pending pixel vector with caps that discarded travel — was replaced by the
+> increment model, and `mouse_ui_step_pixels` (a "feel constant") by `mouse_ui_row_fraction`,
+> measured against the guest's own rows: see "Mouse navigation, second pass" at the end of
+> this file.
+
+The window has always delivered mouse events — the SDK's `rex::ui::MouseEvent`
+carries buttons, motion and wheel, and its ImGui layer consumes them — but
+nothing turned them into pad input, because the only two drivers in
+`input_factory` hand the guest keys-as-a-pad or a real pad
+([button-mapping-plan.md](button-mapping-plan.md) §1.5). "The mouse should
+navigate the menus" is therefore a **third device**,
+[src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp), installed from
+`RbBlitzApp::OnPreSetup` ([src/rb_blitz_app.h](../src/rb_blitz_app.h:47)) — the
+last moment before the runtime builds the input system out of `input_factory`.
+
+### What it does
+
+| Input | Pad effect |
+| --- | --- |
+| Pointer travel | left stick: every `mouse_ui_step_pixels` (32) px of travel queues **one** discrete press; the dominant axis wins and the other contributes at most one step |
+| Wheel, one detent | one queued step, same direction convention (a detent up moves up a list) |
+| LMB | A, held exactly as long as the button is down |
+| RMB | B, likewise |
+
+The press magnitude is full deflection (∓32767), the same value the keyboard
+bindings use; the guest applies its own deadzone. Deliberately untouched: the
+right stick, the triggers, and `XInputGetKeystroke` (the guest's text entry), so
+the mouse is a *navigation* device and cannot produce text. Travel gathered while
+an ImGui overlay owns the pointer, or while the window is unfocused, is
+**dropped rather than replayed** — a drag under a dialog must not fire the moment
+the dialog closes. One cvar gates the whole thing, `mouse_ui_nav` (default
+`true`; `--no-mouse_ui_nav` on the command line), and the install is logged once
+per boot, which is the line to look for first:
+
+```text
+mouse_ui: the mouse navigates the menus (32 px per row, 40 ms per step, --no-mouse_ui_nav to disable)
+```
+
+### The two clocks, and the two bugs they caused
+
+The input-polling work above measured the rate the guest reads a pad at: ~400
+successful polls/s, median gap 4.1 ms (`I1`/`I2`). The menus, meanwhile, advance
+on the guest's **frame** clock. A driver that reasons in frames is therefore wrong
+by a factor of four, and the first implementation was wrong in both directions:
+
+- **Too short.** The stepper's press was a fixed **3 polls**. At the measured
+  ~2.2 ms interval that is **7 ms of deflection — less than one 16.7 ms guest
+  frame**, so a 128 px drag queued four steps that the menu saw as one. The
+  feature looked broken precisely when the user dragged, which is exactly how it
+  was reported.
+- **Too long.** Re-probing with an exaggerated 600 ms press (275 polls) produced
+  the opposite failure: **one** emitted press pair, 552 ms of `ly = -32767`, and
+  the panel moved **two** rows. Blitz's menus **auto-repeat** under a held stick,
+  so a long press is not the safe choice — it is a second bug, and the one that
+  says the answer is a *conversion*, not a bigger constant.
+
+So the pulse became time. `GetDeviceState` EWMA-tracks the interval between its
+own calls (`kPollIntervalSmoothing = 0.125`) and converts the two new cvars
+`mouse_ui_press_ms` / `mouse_ui_release_ms` (both 40, ranges 1–1000 and 0–1000)
+into poll counts via `UiNavStepper::SetPulsePolls`
+([src/input/ui_nav.h](../src/input/ui_nav.h)), which refuses a press shorter than
+one poll however fast the machine polls. The stepper itself stays SDK-free and is
+pinned by [tests/ui_nav_tests.cpp](../tests/ui_nav_tests.cpp) — 80 checks, the
+`ui_nav` `ctest` target, including the clamping and the `release = 0`
+back-to-back case.
+
+### Live verification: injected messages, OCR read-back
+
+The workstation could not be left unlocked for this session and `LockApp` owns the
+desktop, so a real cursor and `SetForegroundWindow` were both unavailable.
+Everything below comes from a temporary harness that `PostMessage`s mouse messages
+into the game window and reads the result back with
+`PrintWindow(PW_RENDERFULLCONTENT)` plus
+[scripts/ocr_image.ps1](../scripts/ocr_image.ps1). Two properties of the SDK
+window fell out of it that anyone repeating this needs:
+
+- **A posted `WM_MOUSEMOVE`'s coordinates are not the delta.** The window computes
+  `dx`/`dy` as *real client cursor* minus posted position, so an injected move is
+  only pure when the real cursor is known and held still (here `(984, 402)`), and
+  a posted event can carry a `dx`/`dy` the poster never asked for.
+- **Posted clicks carry no motion at all**, so a click-through route cannot leave
+  stray stick steps queued. Every route below therefore uses clicks to change
+  screen and only deliberate nudges to move inside one.
+- A per-poll log line is a **log flood**: the first debug build wrote one on
+  almost every poll (the computed pulse changes as the interval jitters), filled
+  the ~5 MiB log in about 40 s, and then the file silently stopped growing — which
+  reads exactly like a hang.
+
+The oracle is the song list, four rows deep — 1 Random Song, 2 One Week, 3 These
+Days, 4 Death on Two Legs — with a hard, non-wrapping clamp at each end, both
+ends confirmed by pushing past them:
+
+| Probe | Emitted | Panel result | Verdict |
+| --- | --- | --- | --- |
+| 5 × one +32 px nudge (1 step each) | 5 press/release pairs, 37–43 ms each | rows 2, 3, 4, then 4, 4 | one step per 32 px, and a nudge never overshoots |
+| one −64 px nudge (2 steps) from row 4 | 2 pairs, 39 and 38 ms | row 2 **exactly** | a burst is N steps, not "at least one" |
+| one −32 px from row 4, then again | 1 pair each | row 1, then row 1 | upward steps work, and the top clamp holds |
+| one +128 px nudge (4 steps) from row 1 | 4 pairs, 37–41 ms, 281 ms span | row 4 | the ±128 px pending-travel cap holds |
+| 2 × wheel detent | `wheel sx=0 sy=120` twice, one pair each | row 4 → row 2 | posted `WM_MOUSEWHEEL` reaches `OnMouseWheel`; one detent = one row |
+| LMB | `buttons=1000` held 164 ms | main menu → song list | LMB is A |
+| RMB | `buttons=2000` held 157 ms | song list → main menu | RMB is B |
+
+At the shipped defaults the driver's own cadence report reads
+`interval=2.25 ms pulse=18/18` — 40 ms of press is 18 polls — and the whole route
+ran at 40/40 with no doubled and no skipped row. The four `click:l`s that reach
+the song list are the same A presses the existing scripted routes inject as keys,
+which is the cross-check that a click is a real A and not a coincidence.
+
+**Auto-repeat, bounded: one extra row per ~275 ms of held deflection** (552 ms of
+deflection bought exactly 2 rows). The exact repeat delay was *not* measured — the
+bound is only "under 552 ms" — but the shipped 40 ms press is at most 1/7 of that
+bound, which is the margin that matters. A probe at 100–200 ms would pin the delay
+down and was not run.
+
+**The off switch, checked by booting with it.** `--no-mouse_ui_nav` still prints the
+install line (the installer runs either way) and produces no CLI error, and it takes the
+device away completely: with it, four injected clicks left the boot sitting on
+`PRESS A TO START`, where the same clicks walk the whole route when the cvar is unset.
+That is also the answer to "does something else already map LMB to A?" — nothing does;
+the button is this device's. `--mouse_ui_nav=false` was booted with too and behaves the
+same way (same four clicks, same static title), as the code predicts: cvars that register
+after `cvar::Init` are collected from the unrecognised-arguments stash, which accepts both
+`--name=value` and `--no-name`. `--no-mouse_ui_nav` is still the spelling the install line
+recommends.
+
+### What this does not cover
+
+- **No committed scripted route for the mouse.** The harness was a session
+  artifact and is gone, so mouse navigation sits in the same category as pad input
+  ([known-issues.md](known-issues.md)): verified, but re-verifiable only by
+  standing another injection harness back up. The recipe is the section above.
+- **The overlay and focus gates are reasoned, not exercised.** That travel is
+  dropped while an overlay owns the pointer, and that a held button is released on
+  focus loss, are code paths (`nav_.Reset()`), not driven experiments — no real
+  ImGui overlay was opened during the run.
+- **It is a menu device, not an analog one.** Travel quantized into 32 px steps
+  gives the menus a stick, not a mouse: a 200 px drag is six discrete steps with
+  nothing in between, so gameplay steering and lane control are out of scope and
+  the right stick stays the SDK's `mnk_mouse` business, untouched.
+- **The guest never sees a cursor.** "Hover" here means "the row highlight the pad
+  would move to", so pointer-over-element UI, per-pixel hit testing and any
+  3D pick-by-cursor behaviour do not exist and were not attempted.
+
+## Mouse navigation, second pass: the travel the clamps ate, and a click that waits (2026-09-22)
+
+The section above ends with "it is a menu device, not an analog one", and the first
+report from actually using it is about the half that sentence does not cover:
+
+> if my mouse is on an option, it should go there instantly. I'm finding results
+> inconsistent: sometimes there is offset, sometimes it doesn't work, because I think
+> it tries to navigate there instead of teleporting to the option.
+
+Two separate things are in that sentence, and both were real. The **offset** was two
+clamps in the stepper deleting travel, which in a relative model is exactly an offset;
+the **"doesn't work"** was those same clamps plus a button delivered while the walk it
+had asked for was still in flight. Neither is a setting, so both are code.
+
+### A pointer cannot teleport, and the arithmetic says why
+
+The request is the natural one — put the highlight on the row the cursor is over — and it
+is not available: the guest exposes no list model, no hit test and no way to read a frame
+back, and the runtime hands the host a composited image. Nothing observable says which
+row is highlighted, so the *offset* between the pointer and the selection is not merely
+unknown, it is untouchable: a bridge that can only add the pointer's own motion to it
+cannot change it, and pointing at the row that is already lit moves the selection by
+exactly as much as pointing anywhere else. Nor is there a name to go looking for: the
+generated guest symbol table ([generated/default/rb_blitz_funcs.h](../generated/default/rb_blitz_funcs.h))
+declares 38,439 functions and every one is an auto-generated `sub_XXXXXXXX` except the
+entry point `xstart` and the compiler's own `__savegprlr_*`-style register helpers, so no
+menu, list or selection function is identified by anything but its address. The only
+faithful quantity is **how far the pointer has moved**, so the ceiling on the feature is
+"the highlight follows the pointer's travel", not "the highlight is under the pointer".
+
+That ceiling is achievable exactly, and the demand it puts on the arithmetic is that
+**travel is never deleted**. A relative bridge that drops a pixel is a bridge that is
+offset by a pixel, permanently, with no way to notice — which is precisely the bug.
+
+### What the old model was doing with the travel
+
+The first implementation was a pending pixel vector (`pending_x_`/`pending_y_`) with two
+clamps around it:
+
+- `OnMotion` clamped each axis to `kMaxMotionSteps` (4) steps, i.e. ±128 px at the 32 px
+  step of the day. Anything past that was **discarded, not banked** — a 400 px fling
+  bought four rows and threw eleven away.
+- `TakeStep` took a step on the dominant axis and then clamped the *other* axis into
+  ±one step (`pending_x_ = std::clamp(pending_x_, -step, step)`). The secondary axis
+  could therefore never hold more than a single step of travel, and every step deleted
+  whatever was above it. A mostly-horizontal gesture on a vertical list — exactly what
+  aiming the mouse at the next row looks like — had its vertical component clipped away
+  again and again and could deliver one row, or none, for a gesture worth five.
+- Steps were also thresholded rather than rounded: 0.99 of a step did nothing, and the
+  0.01 was then lost to the next clamp.
+
+So the two symptoms are one mechanism seen from two directions: travel the pointer spent
+and the highlight never received. The old table above even records the behaviour as a
+feature ("the ±128 px pending-travel cap holds", "the dominant axis wins and the other
+contributes at most one step") — it is only when the thing is used by hand, aiming at a
+row, that "a cap that holds" turns out to mean "the selection is somewhere else now".
+
+### The replacement: residuals in rows
+
+`UiNavStepper` now keeps an **anchor** (the last position seen) and two per-axis
+**residuals**, and converts a move with
+
+```cpp
+const double rows = *residual + pixels / row_pixels_;
+long long whole = std::llround(rows);
+*residual = rows - static_cast<double>(whole);       // what the rounding left
+*queued  += static_cast<double>(whole);
+```
+
+which is the whole fix in five lines: **round** rather than threshold, and keep the
+fraction that was rounded away instead of clipping it. Properties that fall out of it,
+each of them one of the old bugs:
+
+- **Nothing is invented.** 0.4 of a row queues nothing; the highlight does not twitch.
+- **Nothing is lost.** The next 0.6 of a row completes the row, whenever it arrives.
+- **Neither axis is second class.** Residuals are per axis, so a diagonal drag delivers
+  both its components, one row at a time, instead of one axis paying for the other.
+- **The queue is in rows, not pixels** (`queued_x_`/`queued_y_`), which is why a press
+  costs one row however the pointer asked for it, and why the walk order can be
+  "the axis that is owed more rows first, ties to the vertical" — the axis menus are
+  lists of.
+- **The anchor is explicit.** `OnPointer(x, y)` moves it and queues the difference, so
+  the model needs a *position*, not a per-event delta; the first call after `Reset()` or
+  `ForgetPointer()` only sets the anchor, because where the pointer happens to be when
+  the driver starts looking says nothing about where the selection is.
+- **A gesture is still bounded, but bounded once**: ±24 rows per queueing call
+  (`kMaxQueuedRows`), with the residual dropped past the cap rather than banked, since
+  rows arriving after the hand has stopped are a selection running away from the user.
+
+`UiClickPulser` is the other half, and it is what the "it tries to navigate there
+instead of teleporting" complaint is really about. Travel is a **queue of presses that
+takes time to drain**, and the guest only moves its highlight when one of its own frames
+reads the stick, so a click reported when the button goes down activates whichever row
+the walk is passing through. The pulser therefore holds a click back until
+`UiNavStepper::HasPendingRows()` is false, and `OnMouseDown` calls `ForgetPointer()` so
+the trailing hardware move that follows a click cannot queue travel behind it. A click is
+now the last event of the gesture, not the middle of it.
+
+### The pitch, measured per screen
+
+The old `mouse_ui_step_pixels` was called a "feel constant" in the header, and that was
+the second wrong assumption: the pitch is a fact about the guest's layout, and it is not
+one fact. Measured on a 1360×768 client, by OCR of the highlight row's text box centroid
+in captures taken one row apart:
+
+| Screen | Selectable pitch | How it was measured |
+| --- | --- | --- |
+| Main menu | **27 px** | PLAY 529.5 → DOWNLOAD CONTENT 664.3 over 5 rows (6 rows before it scrolls) |
+| MOD SETTINGS | **40 px** | Gameplay 252.3, Visual 292.3, Other 332.5 |
+| Song list | **96 px** | visual rows 48 px, but every second one is an artist heading the selection skips: a band diff of two wheel captures shows the highlight bands 96 px apart |
+
+No single constant is one row on all three (27 px → 0.035 of the height, 40 → 0.052,
+96 → 0.125), which retires the idea that one exists. The cvar is a **fraction of the
+window height** rather than a pixel count — `mouse_ui_row_fraction`, 0.0417, i.e. 32 px
+at 768 — so the feel survives a resize, and the value left standing is the menu side of
+the measured range because the menus are the screens the pointer drives. The 96 px song
+list is what the wheel is for: `OnWheel` converts detents straight into rows with no
+pixel arithmetic at all, so one detent is one row on *every* screen by construction, and
+`--mouse_ui_row_fraction=0.125` makes the pointer exact there too.
+
+### What the live run showed
+
+Two temporary `REXLOG_INFO` probes (pointer motion, and every emitted pad-state change)
+went in for one session and came out again; the driver now logs only two lines per boot —
+the row it computed for the window, and the install line.
+
+- **Travel, exactly.** With the then-default 48 px row, a logged move of
+  `dx=-537 dy=132 row_px=48` (11.2 rows across, 2.75 down) produced 11 x presses and 2 y
+  presses as it drained, and the following `dy=54` added exactly one more y row: the press
+  count matched the travel rather than the event count. Horizontal presses are inert on the
+  main menu, so the highlight moved only for the y presses — which is the property the old
+  clamps broke.
+- **The click waits, and lands where the hand stopped.** `btn=0x1000` (A) appeared in the
+  log only *after* the whole queued walk had drained, and the press activated the row the
+  walk ended on — **DOWNLOAD CONTENT**, five rows down the main menu — rather than the row
+  the walk was passing over when the button went down. In that run A opened the Xbox LIVE
+  "you must be connected" dialog, and the dialog is the proof: the button reached the guest
+  with the selection already parked.
+- **The window has to be the *foreground* window.** A screen that appeared to ignore both
+  the mouse and the arrow keys was not broken: the runtime and the driver both gate on
+  real activation, and the window was not in front. `AppActivate(<pid>)` restored input
+  immediately (one injected `lstick_down` moved the highlight), and a *pseudo*-focus —
+  posting `WM_ACTIVATE`/`WM_SETFOCUS` — does not satisfy it, so steering silently dies
+  behind a dialog or another window and looks like a mouse fault. This is also true of the
+  keyboard driver (known-issues.md already records the same limitation for injected keys).
+- **The default moved from 48 px to 32 px.** With 0.0625 the menus ran 1.78 rows per row
+  on the main menu; 0.0417 gives 1.19 there and 0.80 on MOD SETTINGS, which is as close to
+  one number for three screens as the measured table allows. The press/release pulses are
+  **24/24 ms** (from 40/40): a press is a guest *frame* long at minimum and the menus
+  auto-repeat under a held stick at ~275 ms, so 24 ms keeps ~11× headroom while making a
+  long walk arrive visibly faster.
+
+The `ui_nav` unit target grew with the model (246 checks, `ctest`), and its pixel cases
+are now written as **ratios of `UiNavStepper::kDefaultRowPixels`** rather than literals —
+the first version of the suite hardcoded 20 px, which is under half a *48* px row and over
+half a *32* px one, so changing the default silently recalibrated four cases.
+
+### What the second pass does not cover
+
+- **No teleport, and none is planned.** Per-pixel hit testing needs a guest-side hook or a
+  frame readback; until one exists the pointer only ever adds travel, and the selection can
+  lag the pointer by whole rows after a gesture the cap truncated.
+- **HELP & OPTIONS was never measured**: the navigation attempt that was meant to measure
+  it landed on the leaderboard screen, and the pitch is assumed to be on the menu side of
+  the three that were.
+- **The overlay and focus gates are still reasoned, not exercised** — no live ImGui
+  overlay was driven in this pass either, and the pseudo-focus finding above is the one
+  focus fact that *was* established, by the probe failing and the real foreground
+  succeeding.
+- **No committed scripted route.** As above: the harness was a session artifact, so the
+  mouse is verified by hand and by the unit target, and re-verifying live means standing
+  the injection harness back up.
+

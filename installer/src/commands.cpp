@@ -789,6 +789,7 @@ int CommandFinalize(const std::vector<std::string>& args) {
   install.install_dir = PathFromUtf8(dest);
   install.game_dir = GameRoot(install.install_dir);
   install.installer_version = context.Get("installer-version", kHelperVersion);
+  install.payload_commit = pins.payload.commit;
 
   std::string error;
   if (!VerifyPayload(install.install_dir, pins, &install.payload, &error)) {
@@ -879,13 +880,17 @@ int CommandVersion(const std::vector<std::string>& args) {
   context.summary.Text("helper", kHelperVersion);
   context.summary.Text("installer", pins.installer.version);
   context.summary.Text("payload", pins.payload.version);
+  context.summary.Text("payload_commit", pins.payload.commit);
   context.summary.Flag("payload_download_pinned", pins.payload.HasDownload());
   context.summary.Text("ultimate", pins.ultimate.version);
   context.summary.Text("ultimate_url", pins.ultimate.url);
   context.summary.Text("game_fingerprints", "embedded");
-  return Succeed(&context, S("helper ", kHelperVersion, ", installer ", pins.installer.version,
-                             ", payload ", pins.payload.version, ", Ultimate ",
-                             pins.ultimate.version));
+  std::string line = S("helper ", kHelperVersion, ", installer ", pins.installer.version,
+                       ", payload ", pins.payload.version);
+  if (!pins.payload.commit.empty()) {
+    line += S(", commit ", pins.payload.commit.substr(0, 12));
+  }
+  return Succeed(&context, S(line, ", Ultimate ", pins.ultimate.version));
 }
 
 // --- dispatch -------------------------------------------------------------
@@ -929,8 +934,9 @@ constexpr CommandSpec kCommands[] = {
      "manifest report game_dir ultimate_installed"},
     {"uninstall-cleanup", CommandUninstallCleanup, "--dest <dir> [--keep-game-data]",
      "game_data_kept removed removed_items"},
-    {"version", CommandVersion, "", "helper installer payload payload_download_pinned ultimate "
-                                    "ultimate_url game_fingerprints"},
+    {"version", CommandVersion, "", "helper installer payload payload_commit "
+                                    "payload_download_pinned ultimate ultimate_url "
+                                    "game_fingerprints"},
 };
 
 }  // namespace

@@ -9,11 +9,15 @@
 /compile_commands.json
 /CMakeUserPresets.json
 
-# Installer: everything it generates (embedded config, wizard art, the payload
-# snapshot it ships, the helper build tree and the produced setup executable).
+# Installer: everything it generates (embedded config, the payload snapshot it
+# ships, the helper build tree and the produced setup executable).
 /installer/out/
 /installer/generated/
-/installer/assets/*.bmp
+
+# Side wizard image made by installer/tools/make_art.ps1. The artwork is not ours
+# to license, so only the repository's own assets/blitz.ico and assets/blitz.png
+# are committed.
+/assets/wizard-*.bmp
 
 # ReXGlue translation output is reproducible from the manifest and pinned SDK.
 # Keep only the small SDK integration file emitted by `rexglue init`.

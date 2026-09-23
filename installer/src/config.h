@@ -67,6 +67,9 @@ struct PinsPayload {
   std::string url;
   std::string sha256;  // empty means "no download pin configured yet"
   std::uint64_t size = 0;
+  // Commit of the recompiled build, resolved by installer/build.ps1 before the
+  // pins are compiled in; empty when the build did not record one.
+  std::string commit;
 
   bool HasDownload() const { return !url.empty(); }
 };

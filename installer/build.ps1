@@ -39,6 +39,14 @@ pre-check.
 Version string recorded in the install manifest for the recompiled build.
 Defaults to the [installer] version in config\pins.toml.
 
+.PARAMETER PayloadCommit
+Commit the recompiled build was built from, recorded in every install manifest
+and in the installation report. Defaults to the [payload] commit pin in
+config\pins.toml, which is resolved here: "latest" is the newest commit of the
+checkout being built, and any other value is a ref or an id that git resolves.
+Pass a 40-character commit id to build something other than the current commit,
+or set commit = "" in config\pins.toml to record nothing.
+
 .PARAMETER AllowUnverifiedPayload
 Permit -PayloadUrl without -PayloadSha256. Only for testing a build of your own;
 a published installer must name the hash of what it downloads.
@@ -69,8 +77,8 @@ or when the snapshot was made deliberately by tools\make_payload.ps1.
 Recreate the payload snapshot even if out\payload already has one.
 
 .PARAMETER SkipArt
-Do not refresh the wizard images (tools\make_art.ps1). The images are optional
-and are not committed, so a failed download is not a build failure.
+Do not refresh the side wizard image (tools\make_art.ps1). It is optional and is
+not committed, so a failed download is not a build failure.
 
 .PARAMETER SkipSetup
 Build and test the helper only; do not compile the setup executable.
@@ -87,6 +95,7 @@ param(
     [string] $PayloadSha256,
     [long]   $PayloadSize = 0,
     [string] $PayloadVersion,
+    [string] $PayloadCommit,
     [switch] $AllowUnverifiedPayload,
     [string] $PayloadDir,
     [string] $SourceDir,
@@ -110,7 +119,7 @@ if (-not $SourceDir) { $SourceDir = Join-Path $repoRoot 'out\build\win-amd64-rel
 
 $generatedDir = Join-Path $installerDir 'out\generated'
 $distDir = Join-Path $installerDir 'out\dist'
-$artDir = Join-Path $installerDir 'assets'
+$artDir = Join-Path $repoRoot 'assets'
 $buildDir = Join-Path $installerDir "out\build\$Preset"
 $payloadManifest = Join-Path $PayloadDir 'payload-manifest.toml'
 $makePayload = Join-Path $installerDir 'tools\make_payload.ps1'
@@ -193,6 +202,69 @@ function Get-SizeText {
     return ('{0:N0} bytes' -f $Bytes)
 }
 
+# The one pin this script has to read itself, because it decides what gets
+# compiled in. A missing or empty pin means "record nothing".
+function Read-PinnedCommit {
+    param([string] $PinsFile)
+
+    $table = ''
+    foreach ($line in Get-Content -LiteralPath $PinsFile) {
+        if ($line -match '^\s*\[(?<name>[^\]]+)\]') {
+            $table = $Matches['name'].Trim()
+            continue
+        }
+        if ($table -eq 'payload' -and $line -match '^\s*commit\s*=\s*"(?<value>[^"]*)"') {
+            return $Matches['value']
+        }
+    }
+    return ''
+}
+
+# "latest" is the newest commit of the checkout being built; any other value is a
+# ref or an id git has to resolve. Resolved here, before the pins are compiled
+# in, so that neither the helper nor the wizard ever sees a name it could only
+# look up at install time - on a machine that is not a git checkout.
+function Resolve-PayloadCommit {
+    param(
+        [string] $Spec,
+        [string] $RepoRoot
+    )
+
+    if ($Spec -match '^[0-9a-fA-F]{40}$') { return $Spec.ToLowerInvariant() }
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw ("the [payload] commit pin is '$Spec', which needs git to resolve, and git is not on " +
+               'PATH. Install git, pass -PayloadCommit <40 hex digits>, or set commit = "" in ' +
+               'config\pins.toml to record nothing.')
+    }
+
+    $revision = 'HEAD'
+    if ($Spec -ine 'latest') { $revision = $Spec }
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        # stderr is folded into the pipeline so git's own words can be reported
+        # below. It talks even when it succeeds - "warning: unable to find all
+        # commit-graph files" on this repository - so the commit is the line that
+        # is a commit, not the first line.
+        $output = @(& git -c safe.directory=* -C $RepoRoot rev-parse --verify --quiet "$revision^{commit}" 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+
+    foreach ($line in $output) {
+        if ("$line" -match '^([0-9a-fA-F]{40})$') { return $Matches[1].ToLowerInvariant() }
+    }
+
+    $message = ("the [payload] commit pin is '$Spec', and git could not resolve it to a commit " +
+                "in $RepoRoot (exit code $exitCode). Fix the pin in config\pins.toml, or pass " +
+                '-PayloadCommit <40 hex digits>.')
+    $detail = (@($output | ForEach-Object { "$_" }) -join ' | ').Trim()
+    if ($detail) { $message = $message + " git said: $detail" }
+    throw $message
+}
+
 # --------------------------------------------------------------------------
 # 1. the payload
 # --------------------------------------------------------------------------
@@ -200,6 +272,26 @@ Write-Step 'Payload'
 
 $embedPayload = -not $PayloadUrl
 $embedArgs = @()
+
+# Which commit this build says it is. The pin is deliberate - "latest" is the
+# newest commit of this checkout, any other name is whatever git resolves it to -
+# so it is resolved here rather than left to the compiled helper, which may run
+# on a machine with no git and no checkout.
+$pinsFile = Join-Path $installerDir 'config\pins.toml'
+if ($PSBoundParameters.ContainsKey('PayloadCommit')) {
+    if (-not $PayloadCommit) {
+        throw ('-PayloadCommit was given an empty value. Pass the commit this build is from, or ' +
+               'set commit = "" in config\pins.toml to record nothing.')
+    }
+    $commitSpec = $PayloadCommit
+} else {
+    $commitSpec = Read-PinnedCommit -PinsFile $pinsFile
+}
+$payloadCommit = ''
+if ($commitSpec) {
+    $payloadCommit = Resolve-PayloadCommit -Spec $commitSpec -RepoRoot $repoRoot
+    $embedArgs += @('--payload-commit', $payloadCommit)
+}
 
 if ($PayloadUrl) {
     if (-not $PayloadSha256) {
@@ -246,6 +338,8 @@ if ($PayloadUrl) {
     if ($PayloadVersion) { $embedArgs += @('--payload-version', $PayloadVersion) }
 }
 
+Write-Host "   commit  : $(if ($payloadCommit) { $payloadCommit } else { 'not recorded' })"
+
 # --------------------------------------------------------------------------
 # 2. the helper and its tests
 # --------------------------------------------------------------------------
@@ -272,6 +366,22 @@ if (-not $SkipTests) {
     Invoke-Native -Exe 'ctest' -Arguments $testArgs -What 'ctest --preset' -WorkingDirectory $installerDir
 }
 
+# Read back what was actually compiled in, not what this script resolved: the
+# override list is a cached CMake variable, so a stale one quietly ships a setup
+# executable that claims to be a different build.
+$appVersion = ''
+$generatedCommit = ''
+foreach ($line in Get-Content -LiteralPath (Join-Path $generatedDir 'pins.iss')) {
+    if ($line -match '^#define AppVersion "([^"]*)"') { $appVersion = $Matches[1] }
+    if ($line -match '^#define PayloadCommit "([^"]*)"') { $generatedCommit = $Matches[1] }
+}
+if (-not $appVersion) { throw 'could not read AppVersion from the generated pins.iss.' }
+if ($generatedCommit -ne $payloadCommit) {
+    throw ("the generated pins.iss says commit '$generatedCommit' but this build resolved " +
+           "'$payloadCommit'. -DRBBLITZ_EMBED_EXTRA_ARGS is cached in CMakeCache.txt, so delete " +
+           "$buildDir and build again.")
+}
+
 if ($SkipSetup) {
     Write-Host ''
     Write-Host 'Skipped the setup executable (-SkipSetup).' -ForegroundColor Yellow
@@ -279,17 +389,17 @@ if ($SkipSetup) {
 }
 
 # --------------------------------------------------------------------------
-# 3. the optional wizard images
+# 3. the optional side wizard image
 # --------------------------------------------------------------------------
 if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
-    Write-Step 'Wizard images (optional)'
+    Write-Step 'Wizard image (optional)'
     try {
         $artArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makeArt, '-OutDir', $artDir)
         Invoke-Native -Exe 'powershell.exe' -Arguments $artArgs -What 'make_art.ps1'
-        Write-Host "   images  : $artDir"
+        Write-Host "   image   : $artDir"
     } catch {
-        Write-Warning "wizard images were not refreshed: $($_.Exception.Message)"
-        Write-Warning 'the setup executable is built without them, which is a supported configuration.'
+        Write-Warning "the wizard image was not refreshed: $($_.Exception.Message)"
+        Write-Warning 'the setup executable is built without it, which is a supported configuration.'
     }
 }
 
@@ -308,12 +418,6 @@ $isccArgs = @('/Q',
               $setupScript)
 Invoke-Native -Exe $iscc -Arguments $isccArgs -What 'ISCC'
 
-$appVersion = ''
-foreach ($line in Get-Content -LiteralPath (Join-Path $generatedDir 'pins.iss')) {
-    if ($line -match '^#define AppVersion "([^"]*)"') { $appVersion = $Matches[1]; break }
-}
-if (-not $appVersion) { throw 'could not read AppVersion from the generated pins.iss.' }
-
 $setupExe = Join-Path $distDir "RockBandBlitzSetup-$appVersion.exe"
 if (-not (Test-Path -LiteralPath $setupExe)) { throw "ISCC reported success but $setupExe is missing." }
 
@@ -326,6 +430,7 @@ Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
 Write-Host ('   size    : {0}' -f (Get-SizeText $setupInfo.Length))
 Write-Host ('   sha256  : {0}' -f $setupHash)
 Write-Host ('   helper  : {0}' -f (Get-SizeText $helperSize))
+Write-Host ('   commit  : {0}' -f $(if ($generatedCommit) { $generatedCommit } else { 'not recorded' }))
 if ($embedPayload) {
     Write-Host ('   payload : embedded from {0}' -f $PayloadDir)
     Write-Host  '             the setup executable is not byte-reproducible across build machines (ISCC'

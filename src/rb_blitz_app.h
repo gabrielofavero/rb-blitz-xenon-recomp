@@ -19,6 +19,7 @@
 #include "generated/fingerprint_expected.h"
 #include "fs/path_policy.h"
 #include "hooks/ultimate.h"
+#include "input/mouse_ui.h"
 #include "util/sha256.h"
 
 class RbBlitzApp : public rex::ReXApp {
@@ -40,6 +41,10 @@ class RbBlitzApp : public rex::ReXApp {
       config.gpu_plugin = "xenos";
     }
     ApplyContentLicense();
+    // The runtime reads input_factory the moment this hook returns, and the
+    // input system is built from it, so this is the point where an extra input
+    // device can still be added. See src/input/mouse_ui.h.
+    rb_blitz::input::InstallMouseUiNavigation(config);
   }
 
   // Path policy. Called before logging is initialized, so keep this silent.

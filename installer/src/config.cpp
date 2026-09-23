@@ -111,8 +111,8 @@ bool ParseTableHeader(std::string_view header, std::string* name, bool* is_array
 
 constexpr std::string_view kHexDigits = "0123456789abcdef";
 
-bool IsSha256Hex(std::string_view text) {
-  if (text.size() != 64) {
+bool IsHex(std::string_view text, std::size_t digits) {
+  if (text.size() != digits) {
     return false;
   }
   for (const char c : text) {
@@ -123,6 +123,8 @@ bool IsSha256Hex(std::string_view text) {
   }
   return true;
 }
+
+bool IsSha256Hex(std::string_view text) { return IsHex(text, 64); }
 
 std::string ReadString(const TomlTable* table, std::string_view key) {
   if (table == nullptr) {
@@ -268,6 +270,10 @@ bool Pins::Validate(std::string* error) const {
   if (!payload.url.empty() && payload.size == 0) {
     return fail("[payload] a download url needs a size");
   }
+  if (!payload.commit.empty() && !IsHex(payload.commit, 40)) {
+    return fail("[payload] commit has to be a 40-character commit id, or empty: a ref or "
+                "\"latest\" is resolved by installer/build.ps1 before the pins are compiled in");
+  }
   if (ultimate.version.empty()) {
     return fail("[ultimate] version is required");
   }
@@ -317,6 +323,7 @@ bool ParsePins(std::string_view text, Pins* out, std::string* error) {
   pins.payload.url = ReadString(payload_table, "url");
   pins.payload.sha256 = Lower(ReadString(payload_table, "sha256"));
   pins.payload.size = payload_table->GetUnsigned("size", 0);
+  pins.payload.commit = Lower(ReadString(payload_table, "commit"));
 
   pins.ultimate.version = ReadString(ultimate_table, "version");
   pins.ultimate.url = ReadString(ultimate_table, "url");

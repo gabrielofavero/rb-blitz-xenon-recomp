@@ -15,7 +15,8 @@
 ;   /DGeneratedDir=<dir>  holds pins.iss and a copy of the helper
 ;   /DPayloadDir=<dir>    holds the recompiled build that gets embedded
 ;   /DDistDir=<dir>       receives the setup executable
-;   /DArtDir=<dir>        optional wizard images (see tools/make_art.ps1)
+;   /DArtDir=<dir>        optional side wizard image (default: the repository's
+;                         assets\ directory; see tools/make_art.ps1)
 ; ---------------------------------------------------------------------------
 
 #define InstallerDirPath AddBackslash(SourcePath)
@@ -31,7 +32,7 @@
   #define DistDir AddBackslash(SourcePath) + "out\dist"
 #endif
 #ifndef ArtDir
-  #define ArtDir AddBackslash(SourcePath) + "assets"
+  #define ArtDir ProjectDirPath + "assets"
 #endif
 
 #define GeneratedDirPath AddBackslash(GeneratedDir)
@@ -99,23 +100,25 @@ DisableWelcomePage=no
 ShowLanguageDialog=no
 SetupLogging=yes
 LicenseFile={#ProjectDirPath}LICENSE
-SetupIconFile={#ProjectDirPath}blitz.ico
+SetupIconFile={#ProjectDirPath}assets\blitz.ico
 UninstallDisplayIcon={app}\{#GameExeName}
 
 ; The side image is optional: it only appears when tools/make_art.ps1 produced it.
 ; The art is not committed (see .gitignore), and the licence of the artwork is
 ; not ours, so its absence is a supported configuration. The area the image has to
 ; fill grows with the user's DPI setting, so make_art.ps1 writes the whole ladder
-; of sizes Inno Setup documents; the wildcards below let Setup pick, on the
+; of sizes Inno Setup documents; the wildcard below lets Setup pick, on the
 ; machine it runs on, the file that best matches the area it has to fill.
 ; WizardImageStretch is deliberately left at its default (yes): on a DPI setting
 ; that is not one of the documented ones it fills the area instead of leaving bars.
 #if FileExists(ArtDirPath + "wizard-large-202x386.bmp")
 WizardImageFile={#ArtDirPath}wizard-large-*.bmp
 #endif
-#if FileExists(ArtDirPath + "wizard-small-58x58.bmp")
-WizardSmallImageFile={#ArtDirPath}wizard-small-*.bmp
-#endif
+
+; The corner badge is the app's own icon art, so unlike the side image it is
+; committed next to blitz.ico and needs no guard. It is stored at the largest size
+; the badge area reaches (159x159 at 250% scaling), so it is only ever shrunk.
+WizardSmallImageFile={#ProjectDirPath}assets\blitz.png
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -1371,9 +1374,13 @@ begin
     lines := lines + Space + 'Rock Band Blitz Ultimate: not installed' + NewLine;
 
   if gPayloadDownload then
-    lines := lines + Space + 'Recompiled build: downloaded from the pinned release' + NewLine
+    lines := lines + Space + 'Recompiled build: downloaded from the pinned release'
   else
-    lines := lines + Space + 'Recompiled build: included in this installer' + NewLine;
+    lines := lines + Space + 'Recompiled build: included in this installer';
+  // Recorded, not verified: the commit the recompiled build was built from.
+  if '{#PayloadCommit}' <> '' then
+    lines := lines + ' (commit ' + Copy('{#PayloadCommit}', 1, 12) + ')';
+  lines := lines + NewLine;
 
   Result := lines + MemoGroupInfo + MemoTasksInfo;
 end;

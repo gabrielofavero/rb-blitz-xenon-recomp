@@ -39,6 +39,15 @@ version = ""
 url = ""
 sha256 = ""
 size = 0
+# Commit of the recompiled build this setup ships, recorded in the install
+# manifest and in the installation report - recorded, never verified, the way
+# `version` above is. build.ps1 resolves it before the pins are compiled in:
+# "latest" is the newest commit of the checkout being built, and any other value
+# is a ref or a commit id git has to resolve to one, so neither half of the
+# installer ever sees a ref. A build that does not go through build.ps1 has
+# nothing to resolve it and refuses a pin that is not a 40-character commit id
+# (write one here, or pass -PayloadCommit <id>); empty means "record nothing".
+commit = "latest"
 
 [ultimate]
 # Rock Band Blitz Ultimate, a fan mod maintained at the repository below. Its

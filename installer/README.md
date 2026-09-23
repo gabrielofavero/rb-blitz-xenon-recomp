@@ -51,7 +51,7 @@ the byte count and whether the fingerprints matched) and `install-report.txt`
 | `config/pins.toml` | The only file that names the outside world: version, URLs, sizes, hashes. |
 | `config/ultimate_fingerprints.toml` | What the mod's files hash to, in the same schema as `../config/game_fingerprints.toml`. |
 | `tools/make_payload.ps1` | Snapshots a recompiled build into `out/payload` (and optionally `out/payload.zip`). |
-| `tools/make_art.ps1` | Downloads the optional wizard images into `assets/`. |
+| `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/`. |
 | `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`. |
 | `build.ps1` | The release entry point: payload, helper, tests, images, setup executable. |
 | `tests/installer_tests.cpp` | The helper's test suite (`ctest`), dependency-free and game-data-free. |
@@ -77,11 +77,12 @@ That one command:
 
 1. snapshots the recompiled build into `installer\out\payload` if the snapshot is
    missing (or rebuilds it with `-RefreshPayload`);
-2. generates the embedded config from `config\pins.toml`;
+2. generates the embedded config from `config\pins.toml`, resolving the
+   `[payload] commit` pin to a real commit on the way;
 3. builds the helper with the `installer-release` preset (clang++) and stages it
    next to `pins.iss` in `out\generated`;
 4. runs the helper's test suite;
-5. refreshes the optional wizard images;
+5. refreshes the optional side wizard image;
 6. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
 
 Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`. Use
@@ -96,7 +97,10 @@ ctest --preset installer-release --output-on-failure
 ```
 
 The presets are directory-scoped, so `cmake` and `ctest` must run with
-`installer\` as the working directory.
+`installer\` as the working directory. Configure through `build.ps1` at least
+once: `config\pins.toml` ships with a commit pin that only the script can resolve,
+so a bare `cmake --preset` fails with a message saying exactly that (see
+"Recording which build this is").
 
 ### Why the helper has a static CRT
 
@@ -146,6 +150,37 @@ Neither the payload zip nor the setup exe is byte-reproducible across machines
 payload directory ISCC happens to find), so publish the checksums `build.ps1`
 prints rather than a fixed one.
 
+### Recording which build this is
+
+The setup executable says which commit of this repository it was built from, so
+that a bug report can name a build rather than a version string: it shows on the
+wizard's "Ready to install" page next to the recompiled build, and lands in
+`install-manifest.toml` (`payload_commit`, always present) and in
+`install-report.txt` (`Commit`). What it records comes from the `[payload] commit`
+pin in `config/pins.toml`, resolved **once, at build time** — an installer that
+looked a ref up at install time would be asking a machine that has no checkout,
+and possibly no git:
+
+| The pin says | The build records |
+| --- | --- |
+| `latest` (the repository default) | The newest commit of the checkout being built, whatever `git rev-parse HEAD` answers at that moment. |
+| A commit id, or any other ref | That commit: `build.ps1` resolves it with git before the pins are compiled in. |
+| Empty | Nothing. The manifest carries `payload_commit = ""` and the report says `Commit     : unknown` — the honest answer for a build with no commit behind it, such as a tarball. |
+
+`-PayloadCommit <40 hex digits>` overrides the pin for one build, which is what
+you want when the installer is deliberately not being built from the commit it is
+going to claim (a release cut from a tag, or a rebuild of an earlier build). The
+value is never checked against anything at install time: it is a record, like the
+`[payload] version` string next to it, not a pin the helper enforces. The
+working tree is not consulted either — a build from a modified checkout still
+claims the last commit it has.
+
+Only `build.ps1` can turn a ref into a commit, so `tools/embed_config.cpp` refuses
+to compile a pin that is not a 40-character commit id — including a bare
+`cmake --preset installer-release` on a fresh clone, where the repository's
+`latest` has nothing to resolve it. Configure through the script, write a commit
+id in `pins.toml`, or pass `-PayloadCommit`.
+
 ## Configuration: `config/pins.toml`
 
 One file, parsed at build time, embedded into both halves:
@@ -153,7 +188,7 @@ One file, parsed at build time, embedded into both halves:
 | Section | Keys | Meaning |
 | --- | --- | --- |
 | `[installer]` | `name`, `version`, `publisher`, URLs, `default_dir_name`, `min_windows_build` | Everything the wizard's own resources need. `default_dir_name` is appended to the folder the user picks; `min_windows_build` is `10.0.17763` because the runtime and its DLLs are x86-64-v2. |
-| `[payload]` | `version`, `url`, `sha256`, `size` | Empty in the repository. A pin that does not exist yet fails with "no payload source configured" instead of downloading nothing; the release workflow fills it in (or overrides it with `-PayloadUrl`/`-PayloadSha256`/`-PayloadSize`). |
+| `[payload]` | `version`, `url`, `sha256`, `size`, `commit` | `version`, `url`, `sha256` and `size` are empty in the repository: a pin that does not exist yet fails with "no payload source configured" instead of downloading nothing, and the release workflow fills it in (or overrides it with `-PayloadUrl`/`-PayloadSha256`/`-PayloadSize`). `commit` is the exception — it ships as `latest`, which `build.ps1` resolves to the newest commit of the checkout before the pins are compiled in, so that every install can tell which build it is: see "Recording which build this is". |
 | `[ultimate]` | `version`, `url`, `sha256`, `size`, repository/release URLs, `archive_prefix`, `destination_dir` | The Ultimate release the wizard offers and the helper downloads. |
 
 `tools/embed_config.cpp` also compiles `config/ultimate_fingerprints.toml` and
@@ -223,11 +258,17 @@ that is what the runtime reads.
 
 ## Wizard images
 
-`assets/` holds the two images Inno Setup can show (the large one on the welcome
-and finish pages, the small one in the header). They are generated by
-`tools/make_art.ps1` and are **not** committed: the artwork is not ours to
-license. Their absence is a supported configuration — `setup.iss` only applies the
-`WizardImageFile`/`WizardSmallImageFile` directives when the files exist, and
+`assets/`, at the repository root, holds the images Inno Setup shows next to
+`blitz.ico`. That icon is the app's, compiled into `rb_blitz.exe` by `rb_blitz.rc`
+and used here as `SetupIconFile`; `blitz.png` is the app's own art too, committed
+and used unconditionally as `WizardSmallImageFile` for the badge in the top-right
+corner of the header. It is stored at 159x159, the largest the badge area reaches
+(at 250% scaling), so it is only ever shrunk.
+
+The large image on the left of the welcome and finish pages is the only optional
+one. It is generated by `tools/make_art.ps1` and is **not** committed: the artwork
+is not ours to license. Its absence is a supported configuration — `setup.iss`
+only applies the `WizardImageFile` directive when the files exist, and
 `build.ps1` treats a failed download as a warning, not a build failure. The script
 writes the whole ladder of sizes Inno Setup documents so the right one is picked
 on the machine the installer runs on, whatever its DPI setting.
@@ -312,4 +353,6 @@ mod's `ultimate\` folder lives inside the game data and follows it.
 | The test suite fails in a download-mode build with a mismatch between the pin and `pins.toml` | Expected: pass `-SkipTests` (see "Cutting a release"). |
 | `-PayloadUrl needs -PayloadSha256` | An installer that downloads its own build must name which build it is. `-AllowUnverifiedPayload` exists for local testing only. |
 | A rebuild ignores a pin you just removed | `-DRBBLITZ_EMBED_EXTRA_ARGS` is a *cached* CMake variable. `build.ps1` always passes it (possibly empty), so build through the script rather than a bare `cmake --preset`. |
+| `[payload] commit '<x>' is not a 40-character commit id` while configuring | The pin is a name — `latest` by default — and only `build.ps1` has git at the right moment to resolve it. Configure through the script, or write a commit id (or nothing) in `config\pins.toml`. |
+| `the generated pins.iss says commit '<a>' but this build resolved '<b>'` | A stale cached `-DRBBLITZ_EMBED_EXTRA_ARGS`, which would ship a setup executable claiming to be another build. Delete `installer\out\build` and build again. |
 | The wizard is up but nothing happens, then it fails after ten minutes | The helper died silently. Its own log is next to the install folder (`rbblitz-probe.log` in the temporary directory while the wizard is still open); `install-report.txt` in the finished install has the rest. |

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Windows resources. Keep "blitz.ico" resolvable relative to this file: the RC
-// compiler resolves the path against the directory holding this script.
+// Windows resources. Keep "assets\\blitz.ico" resolvable relative to this file:
+// the RC compiler resolves the path against the directory holding this script.
 //
 // The icon is the first RT_GROUP_ICON in the executable, which is what the
 // Explorer shows for rb_blitz.exe and what SDL_RegisterApp picks up as the
@@ -11,4 +11,4 @@
 
 #define IDI_RB_BLITZ 1
 
-IDI_RB_BLITZ ICON DISCARDABLE "blitz.ico"
+IDI_RB_BLITZ ICON DISCARDABLE "assets\\blitz.ico"

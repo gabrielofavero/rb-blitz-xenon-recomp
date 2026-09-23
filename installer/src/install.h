@@ -207,6 +207,9 @@ struct InstallSummary {
   bool ultimate_installed = false;
   ComponentResult ultimate;
   std::string installer_version;
+  // Commit of the recompiled build (the [payload] commit pin); empty when the
+  // build did not record one.
+  std::string payload_commit;
 };
 
 // Writes install-manifest.toml (machine-readable, for a future upgrade or

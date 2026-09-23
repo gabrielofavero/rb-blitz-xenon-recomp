@@ -199,8 +199,13 @@ opposite, passing hardware through untouched (`xinput_input_driver.cpp:219`). Th
 therefore has exactly one shape:
 
 ```
-any physical device ──► [ drivers: keyboard→pad, pad→pad ] ──► one X_INPUT_GAMEPAD ──► guest
+any physical device ──► [ drivers: keyboard→pad, pad→pad, mouse→pad ] ──► one X_INPUT_GAMEPAD ──► guest
 ```
+
+The third driver is the mouse menu-navigation device added 2026-09-22
+([src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp), [build-and-run.md](./build-and-run.md) §4):
+pointer travel into discrete left-stick presses, LMB/RMB into A/B. Same shape as the keyboard driver,
+so it changes nothing below — it is one more producer of pad fields, not a new kind of input.
 
 Three consequences decide this whole plan:
 
@@ -260,6 +265,12 @@ present:
 
 Two backends with two different capture shapes is a real cost, and it is why §4 prefers a layer that
 sits *after* both of them.
+
+One caveat for capture, from the mouse device added 2026-09-22: it watches the same window mouse
+events (`MouseUiInputDriver::OnMouseMove`/`OnMouseDown`) and turns them into pad fields, so a capture
+mode that reads **merged pad state** cannot tell the user's physical press from a step the mouse
+driver just queued. Capturing from the hardware event sources above avoids the ambiguity; a
+mouse-only remap profile and mouse menu navigation are otherwise independent features.
 
 ### 2.4 Physical pad buttons cannot be remapped today
 
@@ -645,7 +656,14 @@ deferred; H1 delivers the feature without it.
 - **Rebinding the host's own hotkeys** (F3/F4/F7/Backtick) — separate registry, deliberately
   reserved (§3.6).
 - **Mouse-look or mouse-as-stick rebinding.** `mnk_mouse`/`mnk_sensitivity` (`:27`, `:30`) stay as
-  they are; no axis tokens in v1 (§3.2).
+  they are; no axis tokens in v1 (§3.2). This is a statement about the **rebinding grammar** — an
+  analog mouse axis bound to a stick, with a sensitivity curve — not about the mouse reaching the
+  guest at all: since 2026-09-22 the mouse is already a third input device that quantizes pointer
+  travel into discrete left-stick *presses* for the menus (`mouse_ui_row_fraction`, 0.0417 = one row
+  per 32 px at 768, LMB = A, RMB = B;
+  [src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp), [build-and-run.md](./build-and-run.md) §4).
+  The two do not overlap and are not alternatives: the device never captures the cursor or produces a
+  continuous axis, and v1's grammar still has no token that could bind one.
 - **Fixing the `drive_ui.ps1` D-pad defect as a feature.** It is a one-line test-tooling correction
   named in IM0 because bindings are unverifiable without it — not part of the deliverable.
 - **Games' other input surfaces** — `XamInputGetKeystroke` (`xam_input.cpp:152`) is investigated in

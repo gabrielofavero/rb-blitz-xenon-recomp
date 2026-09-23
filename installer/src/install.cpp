@@ -1191,6 +1191,7 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
   manifest.push_back(S("installed_at = ", TomlString(stamp)));
   manifest.push_back(S("installer_version = ", TomlString(summary.installer_version)));
   manifest.push_back(S("helper_version = ", TomlString(kHelperVersion)));
+  manifest.push_back(S("payload_commit = ", TomlString(summary.payload_commit)));
   manifest.push_back(S("directory = ", TomlString(Display(summary.install_dir))));
   manifest.push_back(S("game_directory = ", TomlString(Display(game_dir))));
   manifest.push_back(S("windows_build = ", WindowsBuildNumber()));
@@ -1225,6 +1226,8 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
   report.push_back("----------------");
   report.push_back(S("Version    : ",
                      summary.payload.version.empty() ? "unknown" : summary.payload.version));
+  report.push_back(S("Commit     : ",
+                     summary.payload_commit.empty() ? "unknown" : summary.payload_commit));
   report.push_back(S("Source     : ", summary.payload.source));
   report.push_back(S("Files      : ", summary.payload.files, " (",
                      HumanBytes(summary.payload.bytes), ")"));

@@ -69,6 +69,7 @@ and log capture.
 | [docs/av-settings-plan.md](docs/av-settings-plan.md) | Scoping for exposing host settings (resolution, v-sync, volume, safe area) inside the game's own Audio/Video screen. |
 | [docs/button-mapping-plan.md](docs/button-mapping-plan.md) | Scoping for emulator-style custom button mapping: per-action binding that listens for a controller or keyboard press, layered so the game's four presets keep working untouched. |
 | [src/](src) | Host application and native overrides for guest functions. |
+| [assets/](assets) | Images and icons: `blitz.ico` is compiled into `rb_blitz.exe` and used by the installer, `blitz.png` is the installer's corner badge, the side wizard image is generated and not committed. |
 | [tests/](tests) | Host unit tests (`ctest`); no SDK and no game image needed. |
 | [config/](config) | Codegen inputs: confirmed function boundaries, names, and the fingerprint the build gate enforces. |
 | [tools/](tools) | Host-side build tools: `rb_blitz_fingerprint`, the game-data gate, audit and header generator. |

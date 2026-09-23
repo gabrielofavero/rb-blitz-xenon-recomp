@@ -678,6 +678,52 @@ static void TestStfs() {
   CHECK_FALSE(error.empty());
 }
 
+// --- the commit pin ---------------------------------------------------------
+
+// The repository pin is a name ("latest") or a ref, both of which only
+// installer\build.ps1 can turn into a commit, so a test that parses the file has
+// to put a valid id in its place.
+constexpr std::string_view kStandInCommit = "0000000000000000000000000000000000000000";
+static_assert(kStandInCommit.size() == 40, "the stand-in has to be a commit id");
+
+bool IsCommitId(std::string_view text) {
+  if (text.size() != 40) {
+    return false;
+  }
+  return std::all_of(text.begin(), text.end(), [](char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+  });
+}
+
+// The pin as the file writes it, read without validation: "latest" is expected.
+std::string ReadCommitPin(const std::string& pins_text) {
+  TomlDocument document;
+  if (!ParseTomlSubset(pins_text, &document, nullptr)) {
+    return "<unparsed>";
+  }
+  const TomlTable* payload = document.Find("payload");
+  return payload == nullptr ? "<missing>" : payload->GetString("commit", "<none>");
+}
+
+// A copy of the file with the [payload] commit pin replaced. Both searches
+// anchor on the start of a line so that a comment mentioning the key cannot be
+// mistaken for it.
+std::string WithCommitPin(const std::string& pins_text, std::string_view value) {
+  const std::size_t table = pins_text.find("\n[payload]");
+  const std::size_t key = pins_text.find("\ncommit = \"", table);
+  if (table == std::string::npos || key == std::string::npos) {
+    return pins_text;
+  }
+  const std::size_t value_at = key + std::strlen("\ncommit = \"");
+  const std::size_t value_end = pins_text.find('"', value_at);
+  if (value_end == std::string::npos) {
+    return pins_text;
+  }
+  std::string text = pins_text;
+  text.replace(value_at, value_end - value_at, std::string(value));
+  return text;
+}
+
 static void TestConfig() {
   BeginCase("toml subset parser");
 
@@ -719,7 +765,9 @@ static void TestConfig() {
 
   rb_blitz::installer::Pins pins;
   const fs::path pins_path = fs::path(RBBLITZ_INSTALLER_CONFIG_DIR) / "pins.toml";
-  CHECK_TRUE(rb_blitz::installer::ParsePins(ReadFileOrEmpty(pins_path), &pins, &error));
+  const std::string pins_text = ReadFileOrEmpty(pins_path);
+  const std::string pinned_commit = ReadCommitPin(pins_text);
+  CHECK_TRUE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, kStandInCommit), &pins, &error));
   CHECK_EQ(pins.schema_version, 1u);
   CHECK_STR_EQ(pins.installer.short_name, "Rock Band Blitz");
   CHECK_STR_EQ(pins.installer.default_dir_name, "Rock Band Blitz");
@@ -743,6 +791,28 @@ static void TestConfig() {
   CHECK_STR_EQ(embedded.ultimate.sha256, pins.ultimate.sha256);
   CHECK_EQ(embedded.ultimate.size, pins.ultimate.size);
   CHECK_STR_EQ(embedded.ultimate.release_url, pins.ultimate.release_url);
+
+  // The embedded copy is the one installer\build.ps1 made, so it holds the
+  // resolved commit whenever the repository pin is a name. A pin that is already
+  // a commit id has to match it; a name only has to have resolved to an id.
+  if (IsCommitId(pinned_commit)) {
+    CHECK_STR_EQ(embedded.payload.commit, Lower(pinned_commit));
+  } else {
+    CHECK_TRUE(embedded.payload.commit.empty() || IsCommitId(embedded.payload.commit));
+  }
+
+  BeginCase("a commit pin has to be a commit id");
+
+  rb_blitz::installer::Pins unresolved;
+  // The ref the pin usually carries, and a short id, are both refused: nothing
+  // but the build script can turn either into a commit, and a runtime that
+  // guessed would record a guess.
+  CHECK_FALSE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, "latest"), &unresolved, &error));
+  CHECK_CONTAINS(error, "[payload] commit");
+  CHECK_FALSE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, "2c4d2e2"), &unresolved, &error));
+  CHECK_CONTAINS(error, "[payload] commit");
+  CHECK_TRUE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, ""), &unresolved, &error));
+  CHECK_TRUE(unresolved.payload.commit.empty());
 
   BeginCase("a broken pin set is refused");
 
@@ -1073,6 +1143,7 @@ static void TestPayloadAndFinalize() {
   summary.game_evidence = "default.xex: ok\ngen/main_xbox.hdr: ok";
   summary.payload = payload;
   summary.installer_version = "1.0.0-test";
+  summary.payload_commit = std::string(kStandInCommit);
   CHECK_TRUE(FinalizeInstall(summary, &error));
 
   const std::string manifest_text = ReadFileOrEmpty(app / kInstallManifestName);
@@ -1081,12 +1152,27 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(manifest_text, "ultimate_installed = false");
   CHECK_CONTAINS(manifest_text, "[payload]");
   CHECK_CONTAINS(manifest_text, "1.0.0-test");
+  CHECK_CONTAINS(manifest_text, "payload_commit = \"" + std::string(kStandInCommit) + "\"");
 
   const std::string report_text = ReadFileOrEmpty(app / kInstallReportName);
   CHECK_CONTAINS(report_text, "Rock Band Blitz - install report");
   CHECK_CONTAINS(report_text, "Not installed.");
   CHECK_CONTAINS(report_text, "an extracted folder");
   CHECK_CONTAINS(report_text, "test entry");
+  CHECK_CONTAINS(report_text, "Commit     : " + std::string(kStandInCommit));
+
+  BeginCase("a build that did not record a commit says so");
+
+  // The escape hatch for a build from a tarball or a copy with no git: the
+  // manifest still carries the key, so a reader never has to guess whether the
+  // installer is old or the build simply did not know.
+  summary.payload_commit.clear();
+  CHECK_TRUE(FinalizeInstall(summary, &error));
+  CHECK_CONTAINS(ReadFileOrEmpty(app / kInstallManifestName), "payload_commit = \"\"");
+  CHECK_CONTAINS(ReadFileOrEmpty(app / kInstallReportName), "Commit     : unknown");
+
+  summary.payload_commit = std::string(kStandInCommit);
+  CHECK_TRUE(FinalizeInstall(summary, &error));
 
   BeginCase("uninstall cleanup removes the game data and the payload build");
 

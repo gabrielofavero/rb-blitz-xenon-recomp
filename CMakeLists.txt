@@ -9,8 +9,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(WIN32)
-    # rb_blitz.rc compiles blitz.ico into the executable. project() enables only
-    # CXX, so the resource compiler has to be turned on explicitly before the
+    # rb_blitz.rc compiles assets/blitz.ico into the executable. project() enables
+    # only CXX, so the resource compiler has to be turned on explicitly before the
     # .rc is handed to a target.
     enable_language(RC)
 endif()
@@ -23,17 +23,18 @@ set(RBBLITZ_SOURCES
     src/hooks/crypto.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
+    src/input/mouse_ui.cpp
 )
 
 if(WIN32)
-    # rb_blitz.rc carries the Windows resources (blitz.ico) and the WIN32
+    # rb_blitz.rc carries the Windows resources (assets/blitz.ico) and the WIN32
     # subsystem is already selected, so the icon applies to the GUI executable.
     #
     # The resource compiler does not report the files it inlines, so bind the
-    # icon to the resource object by hand: without this, swapping blitz.ico
+    # icon to the resource object by hand: without this, swapping the .ico
     # leaves the stale icon linked in until the .rc itself changes.
     set_source_files_properties(rb_blitz.rc PROPERTIES
-        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/blitz.ico")
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/blitz.ico")
     add_executable(rb_blitz WIN32 ${RBBLITZ_SOURCES} rb_blitz.rc)
 else()
     add_executable(rb_blitz ${RBBLITZ_SOURCES})
@@ -161,4 +162,10 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME fingerprint
              COMMAND rb_blitz_fingerprint_tests ${RBBLITZ_FINGERPRINT_TEST_ARGS})
+
+    add_executable(rb_blitz_ui_nav_tests
+        tests/ui_nav_tests.cpp
+    )
+    target_include_directories(rb_blitz_ui_nav_tests PRIVATE src)
+    add_test(NAME ui_nav COMMAND rb_blitz_ui_nav_tests)
 endif()

@@ -1,26 +1,27 @@
 <#
 .SYNOPSIS
-Builds the optional Inno Setup wizard images from the side artwork.
+Builds the optional Inno Setup side wizard image from the cover artwork.
 
 .DESCRIPTION
-The setup wizard can show a large image on the left of the welcome page and a
-small square badge in the top-right corner. Both are optional: setup.iss only
-uses them when they exist, and the artwork below is not ours, so the images are
-not committed to the repository (installer/assets/*.bmp is ignored). Running this
-script is therefore a deliberate, local act - and a failure here is not a build
-failure (build.ps1 continues with no images).
+The setup wizard can show a large image on the left of the welcome page. It is
+optional: setup.iss only uses it when it exists, and the artwork below is not
+ours, so it is not committed to the repository (assets/wizard-*.bmp is ignored).
+Running this script is therefore a deliberate, local act - and a failure here is
+not a build failure (build.ps1 continues with the setup executable, which simply
+has no side image).
 
 Inno picks, for each display scaling, the image that best matches the area it has
-to fill: the area is 202x386 logical units for the large image and 58x58 for the
-small one at 100%, and grows with the user's DPI setting. So instead of one image
-that has to be stretched on every machine, this script writes the whole ladder of
-documented sizes and lets Setup choose. That keeps the artwork at (very near)
-native resolution on a 100% display and avoids the blur of a 2.5x stretch on a
-250% one.
+to fill: the area is 202x386 logical units at 100% and grows with the user's DPI
+setting. So instead of one image that has to be stretched on every machine, this
+script writes the whole ladder of documented sizes and lets Setup choose. That
+keeps the artwork at (very near) native resolution on a 100% display and avoids
+the blur of a 2.5x stretch on a 250% one.
 
 The source is a 2:3 thumbnail; the wizard area is 164:314, which is taller and
-narrower. The image is therefore centre-cropped rather than distorted, and the
-square badge is a centre crop of that.
+narrower. The image is therefore centre-cropped rather than distorted.
+
+The square badge in the corner of the header is not made here: it is the app's own
+art, already committed as assets/blitz.png.
 
 .PARAMETER Url
 Artwork to download. Defaults to the SteamGridDB thumbnail the project uses. The
@@ -31,8 +32,8 @@ the installer - it is never redistributed.
 Use this image file instead of downloading. Accepts .jpg, .png and .bmp.
 
 .PARAMETER OutDir
-Where to write the bitmaps. Defaults to installer\assets, which is where
-setup.iss looks.
+Where to write the bitmaps. Defaults to the repository's assets directory, which
+is where setup.iss looks.
 
 .PARAMETER Force
 Overwrite the images even if they are newer than the source. By default an
@@ -56,13 +57,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$installerDir = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
-if (-not $OutDir) { $OutDir = Join-Path $installerDir 'assets' }
+if (-not $OutDir) { $OutDir = Join-Path $repoRoot 'assets' }
 
 # [Setup] WizardImageFile: the image area is 202x386 at 100% and grows with the
-# DPI setting; WizardSmallImageFile is the square in the corner, 58x58 at 100%.
-# Inno Setup 6.6 documentation, "WizardImageFile" and "WizardSmallImageFile".
+# DPI setting. Ladder from the Inno Setup "WizardImageFile" documentation; these
+# sizes are the 6.6+ ones (6.7 still documents them, 6.5 and earlier differ).
 $largeSizes = @(
     @{ Width = 202; Height = 386 },
     @{ Width = 269; Height = 515 },
@@ -72,16 +73,10 @@ $largeSizes = @(
     @{ Width = 498; Height = 953 },
     @{ Width = 534; Height = 1022 }
 )
-$smallSizes = @(58, 77, 97, 116, 124, 143, 159)
 
 function Get-LargeName {
     param([int] $Width, [int] $Height)
     return "wizard-large-${Width}x${Height}.bmp"
-}
-
-function Get-SmallName {
-    param([int] $Size)
-    return "wizard-small-${Size}x${Size}.bmp"
 }
 
 # The bitmaps are 24bpp on purpose: Inno Setup only applies alpha blending to the
@@ -120,7 +115,6 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 $expected = @()
 foreach ($size in $largeSizes) { $expected += (Join-Path $OutDir (Get-LargeName -Width $size.Width -Height $size.Height)) }
-foreach ($size in $smallSizes) { $expected += (Join-Path $OutDir (Get-SmallName -Size $size)) }
 
 $sourcePath = $SourceImage
 $downloaded = $false
@@ -162,24 +156,12 @@ try {
         [int][Math]::Floor(($bitmap.Height - $cropHeight) / 2),
         $cropWidth, $cropHeight)
 
-    $squareSide = [Math]::Min($largeCrop.Width, $largeCrop.Height)
-    $smallCrop = [System.Drawing.Rectangle]::new(
-        $largeCrop.X + [int][Math]::Floor(($largeCrop.Width - $squareSide) / 2),
-        $largeCrop.Y + [int][Math]::Floor(($largeCrop.Height - $squareSide) / 2),
-        $squareSide, $squareSide)
-
     Write-Host ("large crop  : {0}x{1} at {2},{3}" -f $largeCrop.Width, $largeCrop.Height, $largeCrop.X, $largeCrop.Y)
-    Write-Host ("small crop  : {0}x{1} at {2},{3}" -f $smallCrop.Width, $smallCrop.Height, $smallCrop.X, $smallCrop.Y)
 
     foreach ($size in $largeSizes) {
         $path = Join-Path $OutDir (Get-LargeName -Width $size.Width -Height $size.Height)
         Export-Bitmap -Source $bitmap -Crop $largeCrop -Width $size.Width -Height $size.Height -Path $path
         Write-Host ("   large    : {0}" -f (Split-Path -Leaf $path))
-    }
-    foreach ($size in $smallSizes) {
-        $path = Join-Path $OutDir (Get-SmallName -Size $size)
-        Export-Bitmap -Source $bitmap -Crop $smallCrop -Width $size -Height $size -Path $path
-        Write-Host ("   small    : {0}" -f (Split-Path -Leaf $path))
     }
 } finally {
     if ($bitmap) { $bitmap.Dispose() }
