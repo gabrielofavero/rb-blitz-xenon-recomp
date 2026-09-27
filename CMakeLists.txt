@@ -21,6 +21,7 @@ include(generated/rexglue.cmake)
 set(RBBLITZ_SOURCES
     src/main.cpp
     src/hooks/crypto.cpp
+    src/hooks/dlc.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
     src/input/mouse_ui.cpp
@@ -168,4 +169,10 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_ui_nav_tests PRIVATE src)
     add_test(NAME ui_nav COMMAND rb_blitz_ui_nav_tests)
+
+    add_executable(rb_blitz_dlc_layout_tests
+        tests/dlc_layout_tests.cpp
+    )
+    target_include_directories(rb_blitz_dlc_layout_tests PRIVATE src)
+    add_test(NAME dlc_layout COMMAND rb_blitz_dlc_layout_tests)
 endif()

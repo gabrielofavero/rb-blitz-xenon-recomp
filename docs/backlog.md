@@ -90,9 +90,11 @@ the release; each is picked up only if someone chooses to.
       each: can the guest consume input while a host dialog is open?
 
 Also deferred, with no design yet: pixel-perfect graphics and UI upgrades, unlocked
-frame rate, latency tuning, DLC/export/custom-song compatibility, other controller
+frame rate, latency tuning, custom-song/export compatibility, other controller
 backends, Linux/macOS/ARM hosts, packaging and auto-update, symbol-name campaigns,
-and mod APIs.
+and mod APIs. DLC packages do load ([dlc.md](dlc.md)) — what is still undefined is
+everything around them, from a store UI to custom-song content that no content API
+ever enumerated.
 
 Permanent non-goals: online services — Rock Central, leaderboards, achievements,
 challenges, multiplayer. Blitz ships its own offline mode, so restoring them was

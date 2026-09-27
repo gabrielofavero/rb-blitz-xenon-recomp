@@ -125,6 +125,7 @@ installer-release` from `installer\`.
 | [docs/history/bringup-log.md](docs/history/bringup-log.md) | Chronological record of blockers and fixes. |
 | [docs/known-issues.md](docs/known-issues.md) | Enduring issues and accepted limitations. |
 | [docs/ultimate-compat.md](docs/ultimate-compat.md) | Vanilla vs Rock Band Blitz Ultimate: install, evidence, what we support, what we refuse to do. |
+| [docs/dlc.md](docs/dlc.md) | Where DLC packages go (`<game_data_root>/dlc/<title_id>/<content_type>/<package>`), how the guest enumerates them, and the `--dlc_root` setting. |
 | [docs/symbols.md](docs/symbols.md) | Image identity, guest addresses, and the evidence for them. |
 | [docs/rb3-references.md](docs/rb3-references.md) | What the Rock Band 3 projects already solved on this engine. |
 | [docs/plans/](docs/plans) | Scoped designs with their own milestones and kill gates: [AV settings](docs/plans/av-settings-plan.md) (resolution, v-sync, volume, safe area inside the game's own Audio/Video screen), [button mapping](docs/plans/button-mapping-plan.md) (per-action binding layered above the guest input boundary), [VR port](docs/plans/vr-port-plan.md) (true-stereo Meta Quest, then iOS). |

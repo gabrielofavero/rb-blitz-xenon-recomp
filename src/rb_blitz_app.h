@@ -20,6 +20,7 @@
 
 #include "generated/fingerprint_expected.h"
 #include "fs/path_policy.h"
+#include "hooks/dlc.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "util/sha256.h"
@@ -92,6 +93,11 @@ class RbBlitzApp : public rex::ReXApp {
   void OnPostLoadXexImage() override {
     LogBootIdentity();
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
+    // After ultimate::Configure, which decides what the guest-visible game tree
+    // looks like: DLC is resolved by the SDK content manager from a host path, so
+    // the two do not interact, but the DLC log line reads better next to the boot
+    // identity and the payload line than before them.
+    rb_blitz::dlc::Configure(runtime(), game_data_root());
   }
 
  private:

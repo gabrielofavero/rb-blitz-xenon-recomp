@@ -347,6 +347,12 @@ addressed against the vanilla `default.xex`, so keep it (the mod's own installer
 suggests renaming it to `default_vanilla.xex` before installing) —
 [ultimate-compat.md](ultimate-compat.md).
 
+DLC needs no command-line change either: packages dropped in
+`<game_data_root>/dlc/<title_id>/<content_type>/<package>` are mounted in place and
+read-only at boot, and `--dlc_root` (or `dlc_root` in `rb_blitz.toml`) points
+somewhere else if they live elsewhere — [dlc.md](dlc.md), which also names the boot
+log line that says what was found.
+
 Every boot logs the identity of both halves, so a log states which binary ran
 against which image before any other evidence is read:
 
