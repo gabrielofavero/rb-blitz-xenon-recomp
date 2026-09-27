@@ -80,8 +80,8 @@ opaque binary: no printable strings, and none of the screen's own key names appe
 the container.
 
 Crucially, this behaviour is **already characterised, and there is already a working test harness
-for it**, because milestone 4 had to prove persistence ([bringup-log.md](./bringup-log.md) § Verification,
-[known-issues.md](./known-issues.md); reproduce with
+for it**, because milestone 4 had to prove persistence ([bringup-log.md](../history/bringup-log.md) § Verification,
+[known-issues.md](../known-issues.md); reproduce with
 `scripts/acceptance_persistence.ps1 -Only <case>` against an isolated `--user_data_root` **[tree]**):
 
 | Case | What the guest does |
@@ -108,8 +108,8 @@ payload installed adds a `MOD SETTINGS` entry to the main menu **[cited]** — t
 guest-side menu, whose three pages (`Gameplay Settings`, `Visual Settings`, `Other Settings`) are
 checkboxes and `Name: VALUE` cycling rows, with nested sub-pages (`HUD Settings`) and values such as
 `Camera Angle: DEFAULT` and `Game Speed: 100%`. It is backed by the payload's own live
-`game:\ulti_settings.dta` / `ulti_settings.ini` requests ([bringup-log.md](./bringup-log.md)), i.e. it
-is **content the payload ships**, not content we ship ([ultimate-compat.md](./ultimate-compat.md)).
+`game:\ulti_settings.dta` / `ulti_settings.ini` requests ([bringup-log.md](../history/bringup-log.md)), i.e. it
+is **content the payload ships**, not content we ship ([ultimate-compat.md](../ultimate-compat.md)).
 
 Two reasons it matters here. It is the closest existing precedent for what AV1 wants to draw — a real
 in-game settings list of toggles and cycling values, in the game's own visual language rather than an
@@ -205,12 +205,12 @@ feature is off, or be honest that they are restart-and-rebuild-level options.
 
 ### 2.6 Prior art this repo already catalogued
 
-[rb3-references.md](./rb3-references.md) records what the Rock Band 3 port solved on this engine
+[rb3-references.md](../rb3-references.md) records what the Rock Band 3 port solved on this engine
 **[tree]**. Three entries bear directly on this plan:
 
 | Technique | What it does | Why it matters here |
 | --- | --- | --- |
-| `OptionBool` / `OptionStr` | "Injects host `argv` into guest DTA options, tracking consumed args." | Direct prior art for host→guest settings injection — the same shape as §4's option C — and [prompts/04-menus-content-input-saves.md](../prompts/04-menus-content-input-saves.md) already flags it as a *deterministic alternative* to keystroke injection. |
+| `OptionBool` / `OptionStr` | "Injects host `argv` into guest DTA options, tracking consumed args." | Direct prior art for host→guest settings injection — the same shape as §4's option C — already flags it as a *deterministic alternative* to keystroke injection. |
 | `Rnd__PreInit` (`rnd_this + 0xf0` sync override) | "Forces vertical sync behaviour." | Confirms v-sync is guest-visible, not purely a host present-mode choice. |
 | `StreamChecksum__ValidateChecksum` → `1` | "Skips stream checksum validation." Flagged **P1**: "any asset we decrypt, repack or edit will otherwise fail validation." | **The gate on AV4.** Any shadowed `AV_Options*.flow` is subject to this — and the repo already knows the neighbouring lesson, that the mod's `blr` on `PlatformMgr::SetDiskError` is what keeps the guest out of the disc-error state machine that payload content drives. |
 
@@ -218,7 +218,7 @@ Two further assets already exist and should be reused rather than rebuilt:
 
 - **Payload DTA content is live, not inert.** The guest requests `game:\ulti_settings.dta` (and
   tolerates `ulti_settings.ini`, `game:\scores`) straight out of the payload directory
-  ([bringup-log.md](./bringup-log.md) **[cited]**), and those names exist nowhere in the base image as
+  ([bringup-log.md](../history/bringup-log.md) **[cited]**), and those names exist nowhere in the base image as
   plain bytes — they come from the payload's own script. So *guest script content layered in through
   the payload already reaches the running game*, which makes §4's option D less speculative than it
   first looks, and suggests a cheaper variant of C (§4, **C2**).
@@ -239,7 +239,7 @@ each. "Live?" is *today's* answer, not what AV2 could achieve.
 | Window size | `window_width`, `window_height` (0 = auto) | `rexglue-sdk/src/ui/window.cpp:24-45` | no — restart | Meaningless in exclusive fullscreen. |
 | Fullscreen | `fullscreen` (true) | same | **yes** | The one display flag with a change callback (`rex_app.cpp:353`). The template to copy for AV2. |
 | Monitor | `monitor` (0) | same | no — restart | |
-| V-Sync | `vsync` (true) | `rexglue-sdk/src/graphics/command_processor.cpp:38` | **effect verified, live apply unverified** | Declared with **no** lifecycle tag, so it *claims* `kHotReload`. Its effect is real and already measured: milestone 5 ran the same route with it on and off and the guest is vblank-locked only when allowed to be (68.3 fps / 14.34 ms median with it off) — [bringup-log.md](./bringup-log.md), `out/m5-pacing/vsync-{on,off}/`. Whether it applies *without a restart* is still an AV0 experiment. |
+| V-Sync | `vsync` (true) | `rexglue-sdk/src/graphics/command_processor.cpp:38` | **effect verified, live apply unverified** | Declared with **no** lifecycle tag, so it *claims* `kHotReload`. Its effect is real and already measured: milestone 5 ran the same route with it on and off and the guest is vblank-locked only when allowed to be (68.3 fps / 14.34 ms median with it off) — [bringup-log.md](../history/bringup-log.md), `out/m5-pacing/vsync-{on,off}/`. Whether it applies *without a restart* is still an AV0 experiment. |
 | Anti-aliasing | `native_2x_msaa` | `rexglue-sdk/src/graphics/flags.cpp:18` | no — restart | Affects pipeline creation. |
 | Anisotropic filtering | `anisotropic_override` (3) | `rexglue-sdk/src/graphics/cache.cpp:52` | no — restart | Sampler-state cache. |
 | Render scale | `draw_resolution_scale_x/y` (1) | `rexglue-sdk/src/graphics/cache.cpp:66,70` | no — restart | Does not resize the swap chain. |
@@ -255,8 +255,8 @@ each. "Live?" is *today's* answer, not what AV2 could achieve.
 
 **Deliberately excluded here:** mouse/keyboard and bind flags (an Input screen, not an AV screen),
 `ultimate_*` compatibility flags (diagnostics), and anything about log verbosity. Frame rate /
-unlocking is deferred by the project itself — see [DECOMPILATION_PLAN.md](../DECOMPILATION_PLAN.md)
-§ Deferred until after "working" — so a "frame rate cap" row should not be designed into AV1.
+unlocking is deferred by the project itself — see [backlog.md](../backlog.md)
+§ "Scoped, not planned" — so a "frame rate cap" row should not be designed into AV1.
 
 ---
 
@@ -271,8 +271,8 @@ recommendation at the end is a sequence, not a single pick.
 | **B** | Context-sensitive **host** dialog | Implement `OnCreateDialogs`, register a keybind, draw an ImGui table of §3. Optionally *auto-show* it when the guest AV screen is active, detected by sniffing VFS asset opens for `options_audio_video.ep` / `AV_Options*.flow` through the existing device layer (`src/fs/payload_overlay.h` **[tree]** sits in the same path). | Low–medium | Input arbitration (who owns the pad while the dialog is open?); detection false-positives. | **The realistic majority of the value.** "In-game" in the sense of *not leaving the game*, reachable and visible while the guest AV screen is on. No guest assets touched, no Reverse engineering of guest option storage required. |
 | **C** | Bridge the guest's **existing** rows | Find where the guest stores its `overscan` / `bass_boost` option values and make the Overscan row drive `present_safe_area_x/y` / `present_allow_overscan_cutoff`, and/or mirror host values back into the guest's storage. | Medium–high | The guest's storage location is **unknown** (§1.2); writing it while the guest is live could corrupt saves — though it is *not* integrity-checked, so corruption is silent rather than fatal. | Highest payoff per row (it is a *real* in-game setting), highest discovery risk. Justified **only** for the rows that already exist — see AV3's kill gate. |
 | **C2** | Inject the guest's **script** options (DTA) | Rather than touching the binary blob, determine whether the AV screen's options are fed from a `game:\*.dta` that the read-only payload overlay could shadow — the same mechanism that already delivers the mod's live `ulti_settings.dta` (§2.6). | Low–medium **if** the screen reads DTA at all | Depends entirely on an unverified premise; a shadowed DTA is subject to checksum validation. | **Test it in AV0 — it is cheap and it would make C almost free.** This is the exact shape of the RB3 port's `OptionBool`/`OptionStr` patch. |
-| **D** | Extend the guest's **own** UI | Author new rows in `AV_Options*.flow` + `.ep`/`.lst`/`.lbl`/`.sld`, and shadow the retail files through the existing read-only payload union device (`src/fs/payload_overlay.h`, `src/fs/overlay_merge.h`, tested by `tests/payload_overlay_tests.cpp` **[tree]**). | High | Requires external Milo/Flow tooling the project does not have; overriding shipped UI data is exactly the class of change [ultimate-compat.md](./ultimate-compat.md) is cautious about; asset redistribution rules apply. | **Optional, last, and only after the delivery pipeline is proven with a byte-identical shadow.** |
-| **E** | Hook guest option get/set functions | Hook the guest's option read/write entry points directly (no asset or memory editing). | Medium, but **blocked on addresses** | Needs guest function addresses for a subsystem we have not touched. | Blocked, not unplannable — and the unblocking workflow is routine in this repo. An unregistered guest address surfaces as `[FATAL] Call to invalid or unregistered function at guest address 0x…`; the fix is to add `[functions."0x…"]` to `config/functions.toml`, re-run codegen, rebuild (consumed via `rb_blitz_manifest.toml`'s `includes`). [prompts/04-menus-content-input-saves.md](../prompts/04-menus-content-input-saves.md) states the expectation: "one of these per newly-reached UI path". Record as a later refinement of C. |
+| **D** | Extend the guest's **own** UI | Author new rows in `AV_Options*.flow` + `.ep`/`.lst`/`.lbl`/`.sld`, and shadow the retail files through the existing read-only payload union device (`src/fs/payload_overlay.h`, `src/fs/overlay_merge.h`, tested by `tests/payload_overlay_tests.cpp` **[tree]**). | High | Requires external Milo/Flow tooling the project does not have; overriding shipped UI data is exactly the class of change [ultimate-compat.md](../ultimate-compat.md) is cautious about; asset redistribution rules apply. | **Optional, last, and only after the delivery pipeline is proven with a byte-identical shadow.** |
+| **E** | Hook guest option get/set functions | Hook the guest's option read/write entry points directly (no asset or memory editing). | Medium, but **blocked on addresses** | Needs guest function addresses for a subsystem we have not touched. | Blocked, not unplannable — and the unblocking workflow is routine in this repo. An unregistered guest address surfaces as `[FATAL] Call to invalid or unregistered function at guest address 0x…`; the fix is to add `[functions."0x…"]` to `config/functions.toml`, re-run codegen, rebuild (consumed via `rb_blitz_manifest.toml`'s `includes`). The expectation, recorded in [the bring-up log](../history/bringup-log.md), is "one of these per newly-reached UI path". Record as a later refinement of C. |
 | **F** | Extend the payload's **`MOD SETTINGS`** menu | Add AV rows to the Ultimate payload's own guest settings pages (§1.2). | Low **for payload users only** | The host menu is user-supplied content we do not distribute, so a vanilla install has no such entry; and anything we add there is redistributed content rather than our own. | **Not a delivery route — but it is the proof that the guest can render a settings list of toggles and cycling values**, which is what AV1 is trying to reproduce. Relevant as evidence, not as a plan. |
 
 ### 4.1 Recommendation
@@ -393,10 +393,10 @@ never be the reason game data ends up in the repository.
 ## 6. Non-goals
 
 - **No game data in this repository.** AV4 ships *patches the player applies to data they own*, never
-  the data. This follows [ultimate-compat.md](./ultimate-compat.md) and the repository's GPL-2.0-only
+  the data. This follows [ultimate-compat.md](../ultimate-compat.md) and the repository's GPL-2.0-only
   posture.
 - Not a content/DLC/entitlement UI, not a mod loader, not a general plugin API.
-- Not an unlocked frame rate (project-deferred; see [DECOMPILATION_PLAN.md](../DECOMPILATION_PLAN.md)).
+- Not an unlocked frame rate (project-deferred; see [backlog.md](../backlog.md)).
 - Not an Input or accessibility screen — that is its own plan:
   [button-mapping-plan.md](./button-mapping-plan.md). That plan also owns the input-arbitration question
   §4.2 raises here, since it depends on the answer more than this one does.
@@ -461,20 +461,20 @@ Question 6 is the cheapest possible answer and should be asked before AV1 is sch
   read-only payload union device (AV4's only delivery route).
 - `out/build/win-amd64-release/CMakeCache.txt` — `REXGLUE_ENABLE_FIDELITYFX=OFF`.
 - `out/build/win-amd64-release/rb_blitz.toml` — the effective host config.
-- `docs/vr-port-plan.md` — document structure and evidence convention.
-- `docs/ultimate-compat.md` — the project's posture on payloads and derived assets.
-- `DECOMPILATION_PLAN.md` — milestone framing and the deferred-items list.
-- `docs/bringup-log.md` — the persistence matrix, the milestone-5 vsync pacing runs, and the payload's
+- `vr-port-plan.md` — document structure and evidence convention.
+- `../ultimate-compat.md` — the project's posture on payloads and derived assets.
+- `../backlog.md` — milestone framing and the deferred-items list.
+- `../history/bringup-log.md` — the persistence matrix, the milestone-5 vsync pacing runs, and the payload's
   live DTA requests (`ulti_settings.dta`).
-- `docs/button-mapping-plan.md` — the sibling scoping plan that owns input arbitration and documents
+- `button-mapping-plan.md` — the sibling scoping plan that owns input arbitration and documents
   the guest's own `Controls` screen (§1.3) and the host's input surface (§2).
 - `docs/known-issues.md` — "a corrupt settings payload is loaded as-is", and the content-header case.
 - `docs/rb3-references.md` — borrowed-hook catalogue: `OptionBool`/`OptionStr`,
   `Rnd__PreInit` sync override, `StreamChecksum__ValidateChecksum`.
 - `docs/build-and-run.md` — the cvar TOML's location and its "the in-game settings overlay edits the
   same file" note.
-- `prompts/04-menus-content-input-saves.md` — the `functions.toml` address-registration workflow and
-  the `OptionBool`/`OptionStr` alternative to keystroke injection.
+- [history/bringup-log.md](../history/bringup-log.md) — the `functions.toml` address-registration workflow.
+- [rb3-references.md](../rb3-references.md) — the `OptionBool`/`OptionStr` alternative to keystroke injection.
 - `rb_blitz_manifest.toml` — `includes = ["config/functions.toml"]`, how guest addresses are fed to
   codegen.
 - `scripts/acceptance_persistence.ps1` — the existing five-case storage harness to extend.

@@ -24,7 +24,7 @@
     -NoIndexMarks to leave the index untouched, or -ClearMarks to undo the marks.
 
     Re-run after `git submodule update`, a fresh clone, or any checkout that
-    rewrites the SDK tree. Background: docs/bringup-log.md B-001,
+    rewrites the SDK tree. Background: docs/history/bringup-log.md B-001,
     docs/known-issues.md.
 
 .EXAMPLE

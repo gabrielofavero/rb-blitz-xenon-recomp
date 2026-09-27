@@ -4,8 +4,8 @@ Scoping for a **stereo, head-tracked** Meta Quest build of this title: what it
 takes, what it costs, and what has to be *proven* before each step is worth
 paying for.
 
-**Status: scoping only.** No VR code exists in this tree, nothing in
-[DECOMPILATION_PLAN.md](../DECOMPILATION_PLAN.md) changes, and this file does
+**Status: scoping only.** No VR code exists in this tree, nothing in the
+[backlog](../backlog.md) changes, and this file does
 not gate any Windows milestone. It exists because the question "is this viable"
 has a concrete answer now and the answer is worth not rediscovering later.
 
@@ -16,15 +16,13 @@ this plan, where the quote is recorded but the source has not been re-read here;
 **[assumed]** = engineering judgement with no source behind it.
 
 Precondition: milestone 4 closed and milestone 5 measured (see the status
-paragraph in [README.md](../README.md)). Every VR milestone needs the Windows
+paragraph in [README.md](../../README.md)). Every VR milestone needs the Windows
 build to be reproducible, so this work starts after that, not beside it.
 
-[DECOMPILATION_PLAN.md](../DECOMPILATION_PLAN.md) §"Deferred until after
-"working"" already excludes non-Windows hosts, and its packaging line covers
-installers, auto-update and ARM. VR is a further scope addition on top of that,
-which is why the milestones here are numbered `V0…V5` — they cannot be mistaken
-for Windows milestones 4 and 5, and the reference to that section now points
-here so the two documents stay in step.
+The [backlog](../backlog.md) already defers non-Windows hosts, packaging and
+auto-update, and ARM. VR is a further scope addition on top of that, which is why
+the milestones here are numbered `V0…V5` — they cannot be mistaken for Windows
+milestones 4 and 5.
 
 ## 1. Verdict
 
@@ -82,15 +80,15 @@ camera told to be a different eye each time.
 | --- | --- | --- |
 | Draw choke point | `rexglue-sdk/src/graphics/vulkan/command_processor.cpp` — `IssueDraw` (line 3590) | Every guest draw passes through here. The second eye is a second issue of the same draw with the other eye's constants bound. |
 | Constant tracking | same file — `WriteRegistersFromMem` (2163), `UpdateBindings` (6362; float-constant leg 6384+, upload from ~6421) | The SDK already tracks which float-constant registers each shader uses (`current_float_constant_map_vertex_`, `range_has_any_constant_usage` ≈2204). That is both the patch site and the raw material for camera discovery. |
-| Guest-code hooks | `rexglue-sdk/include/rex/hook.h` (`REX_HOOK`, `REX_HOOK_RAW`) | Hooking a recompiled guest function with raw guest register/memory access. This tree already patches guest bytes at absolute addresses ([src/hooks/ultimate.h](../src/hooks/ultimate.h), `OnPostLoadXexImage`), so intercepting the guest's camera update is an established technique here. |
-| Unnamed guest functions | [config/functions.toml](../config/functions.toml) | Nothing in the render or camera path is named yet (three forced entries, all elsewhere). If the camera has to be hooked rather than sniffed from constants, this file grows. |
+| Guest-code hooks | `rexglue-sdk/include/rex/hook.h` (`REX_HOOK`, `REX_HOOK_RAW`) | Hooking a recompiled guest function with raw guest register/memory access. This tree already patches guest bytes at absolute addresses ([src/hooks/ultimate.h](../../src/hooks/ultimate.h), `OnPostLoadXexImage`), so intercepting the guest's camera update is an established technique here. |
+| Unnamed guest functions | [config/functions.toml](../../config/functions.toml) | Nothing in the render or camera path is named yet (three forced entries, all elsewhere). If the camera has to be hooked rather than sniffed from constants, this file grows. |
 | Presenter | `rexglue-sdk/include/rex/ui/vulkan/presenter.h` — `class VulkanPresenter final : public Presenter` (61) | The `Presenter` base is the abstraction to implement; `final` plus a mandatory `VkSurfaceKHR`/`VkSwapchainKHR` means a **sibling** implementation. `GuestOutputImage` (153) is how guest output already reaches it. |
-| Instance / device creation | `rexglue-sdk/include/rex/ui/vulkan/instance.h` — `Create(bool with_surface, bool try_enable_validation)` (27); `device.h` — `CreateIfSupported(...)` (25) | Neither accepts an extension or feature list. OpenXR requires the runtime's extensions on both, so this is a small upstream-worthy change (see the patch policy in [patches/README.md](../patches/README.md)). |
-| Render-target cache | `rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp` | EDRAM emulation and the `Path::kHostRenderTargets` / pixel-shader-interlock split. Doubling eye targets doubles work here, and this is where [B-010](known-issues.md)-class bugs live. |
+| Instance / device creation | `rexglue-sdk/include/rex/ui/vulkan/instance.h` — `Create(bool with_surface, bool try_enable_validation)` (27); `device.h` — `CreateIfSupported(...)` (25) | Neither accepts an extension or feature list. OpenXR requires the runtime's extensions on both, so this is a small upstream-worthy change (see the patch policy in [patches/README.md](../../patches/README.md)). |
+| Render-target cache | `rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp` | EDRAM emulation and the `Path::kHostRenderTargets` / pixel-shader-interlock split. Doubling eye targets doubles work here, and this is where [B-010](../known-issues.md)-class bugs live. |
 | Input | `rexglue-sdk/include/rex/input/` — `input_driver.h`, `sdl/`, `mnk/`, `state_merge.h` | An OpenXR driver slots in beside the existing drivers and merges into the same `X_INPUT_GAMEPAD`, with the existing neutral-device rules untouched. |
 | Platform layer | `rexglue-sdk/include/rex/platform.h` | `__ANDROID__` sets `REX_PLATFORM_ANDROID` + `REX_PLATFORM_LINUX` (36–37); Apple sets `REX_PLATFORM_MAC` (32), which an iOS port would need to subdivide. |
 | POSIX risk areas | `rexglue-sdk/src/core/fiber_posix.cpp`, `seh_posix.cpp`, `mapped_memory_posix.cpp`, `exception_handler_posix.cpp`; `rexglue-sdk/src/system/xmemory.cpp` | Fibers, SEH, and VA reservation. Android is much closer to these paths than Windows is, so V2 exercises them (and §5.1 can exercise them earlier, on Linux). |
-| Texture formats | [patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch](../patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch) | D3D12-side only. The Vulkan host-format table lacks the same formats, so B-010 recurs on Vulkan until the equivalent lands — V1 owes it, and nothing Vulkan (Quest or iOS) is testable without it. |
+| Texture formats | [patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch](../../patches/rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch) | D3D12-side only. The Vulkan host-format table lacks the same formats, so B-010 recurs on Vulkan until the equivalent lands — V1 owes it, and nothing Vulkan (Quest or iOS) is testable without it. |
 
 ## 5. Milestones
 
@@ -99,7 +97,7 @@ failure: it stops spending before the expensive steps.
 
 | ID | Goal | Deliverable / exit criterion | Kill gate |
 | --- | --- | --- | --- |
-| **V0** | "Find the camera" — Windows, no headset | Initialise the 9 uninitialised SDK submodules and build the Vulkan backend (see [known-issues.md](known-issues.md)); port the 32-bit fixed-point conversion to the Vulkan host-format path; instrument `IssueDraw`/`UpdateBindings` to log the used vertex float-constant ranges and values per draw; implement a CitraVR-style scoring heuristic over those logs to nominate a view-projection range and a left/right eye indicator; measure guest tick cadence. | Written mapping from a live Blitz frame to a constant range that tracks the camera, plus a cadence number. If no range behaves like a view-projection matrix, per-eye injection becomes shader-translation work or depth reprojection: **stop and report before building V1.** |
+| **V0** | "Find the camera" — Windows, no headset | Initialise the 9 uninitialised SDK submodules and build the Vulkan backend (see [known-issues.md](../known-issues.md)); port the 32-bit fixed-point conversion to the Vulkan host-format path; instrument `IssueDraw`/`UpdateBindings` to log the used vertex float-constant ranges and values per draw; implement a CitraVR-style scoring heuristic over those logs to nominate a view-projection range and a left/right eye indicator; measure guest tick cadence. | Written mapping from a live Blitz frame to a constant range that tracks the camera, plus a cadence number. If no range behaves like a view-projection matrix, per-eye injection becomes shader-translation work or depth reprojection: **stop and report before building V1.** |
 | **V1** | Vulkan + stereo on the desktop | OpenXR session on Windows over Quest Link/SteamVR: `XR_KHR_vulkan_enable`, extension injection into instance/device creation, new presenter; two-pass per-eye stereo at `IssueDraw` with the V0 range patched; 3DOF tracking; HUD quad layer; OpenXR input driver. | Blitz playable in stereo with head tracking on desktop, with a measured per-eye and per-frame render cost. If per-eye cost cannot be brought near budget, decide between AppSW and a flat Quest build (itself a shippable deliverable) **before** funding Android bring-up. |
 | **V2** | Quest, **no stereo** | Android build of the SDK and app; manifest per §3 row 9 (VR intent category, `org.khronos.openxr.permission.OPENXR`, broker `<queries>`, `glEsVersion`, `android.hardware.vulkan.version`); sideload with `adb install`; guest rendered flat into the XR swapchain; audio through SDL → AAudio at a latency the title tolerates. | Sideloaded APK running the title on the headset with retrievable logs — the Android, presenter, lifecycle and audio work is proven separately from the stereo work. On-device `vkEnumerateDeviceExtensionProperties`/features dump taken here (interlock, multiview, transform feedback). |
 | **V3** | Quest stereo | Per-eye rendering on device (multiview if it pays for itself, two-pass otherwise); foveation; eye constants driven by the HMD pose; HUD quad layer; second-eye work skipped for draws that do not depend on the camera. | Sustained 72 Hz at the headset's per-eye resolution. |
@@ -109,7 +107,7 @@ failure: it stops spending before the expensive steps.
 **Not do-able in parallel with V0–V2:** any assumption that the second eye is
 cheap. The eye count doubles draws *and* EDRAM resolves, and the resolve path is
 where this project's hardest graphics bugs have already been
-([known-issues.md](known-issues.md)).
+([known-issues.md](../known-issues.md)).
 
 ### 5.1 What V0 also buys a non-VR host
 
@@ -136,7 +134,7 @@ POSIX platform layer: `fiber_posix.cpp`, `seh_posix.cpp`,
 `mapped_memory_posix.cpp`, `exception_handler_posix.cpp`, `xmemory.cpp` and the
 rest of the `*_posix.cpp` set. V0 on Windows executes none of it.
 
-Three things are already portable here **[tree]**: [src/](../src) contains no
+Three things are already portable here **[tree]**: [src/](../../src) contains no
 Windows-specific call (`windows.h`, `_WIN32`, `__declspec` all absent); audio has
 only a `nop` and an SDL backend, so it is already WASAPI/CoreAudio/ALSA/AAudio;
 and the SDK carries `surface_win.cpp`, `surface_mac.cpp` and
@@ -153,9 +151,9 @@ available for the POSIX third of both ports. It is a partial proxy only:
 desktop GPUs have geometry shaders and fragment-shader interlock that Adreno and
 Apple GPUs do not, and Linux's `ucontext` is not deprecated the way iOS's is.
 
-None of this is a Linux or macOS commitment.
-[DECOMPILATION_PLAN.md](../DECOMPILATION_PLAN.md) still excludes those hosts; the
-paragraph above records what carries over, not work that is now planned.
+None of this is a Linux or macOS commitment. The [backlog](../backlog.md) still
+defers those hosts; the paragraph above records what carries over, not work that is
+now planned.
 
 ## 6. Two risks that are not graphics
 
@@ -221,7 +219,7 @@ re-read the source documents before acting on any of it.
 | 3 | Audio latency / A/V sync in a rhythm game | V2 onward | Treat as a first-class workstream with its own acceptance test, not a bug to fix later. |
 | 4 | Camera motion comfort | V1 onward | Rotation-only tracking, comfort affordances, and a willingness to reframe the play space. |
 | 5 | GPU feature gaps (no fragment-shader interlock on Adreno, no geometry shaders under MoltenVK) | V2 | Both platforms land on the same fallback paths, so this is measured once. The V2 device dump is the datum. |
-| 6 | SDK changes needed are more than two patches (instance/device extensions, presenter) | V1 | Write them as upstream-worthy patches under the existing policy ([patches/README.md](../patches/README.md)) instead of accumulating an unmanaged local diff. |
+| 6 | SDK changes needed are more than two patches (instance/device extensions, presenter) | V1 | Write them as upstream-worthy patches under the existing policy ([patches/README.md](../../patches/README.md)) instead of accumulating an unmanaged local diff. |
 | 7 | Unverifiable policy surface (nothing documents "user-supplied game data" on Quest) | §7 | Sideload only. Do not make decisions that depend on store approval. |
 
 ## 9. Only the headset can answer these

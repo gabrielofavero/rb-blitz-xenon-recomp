@@ -1,45 +1,46 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Unit tests for the mouse -> left-stick translation in src/input/ui_nav.h, which
-// src/input/mouse_ui.cpp feeds from the window's mouse events. No SDK, no game
-// image, no boot: the question is pure arithmetic over pixel counters and poll
-// counts.
+// Unit tests for the mouse -> left-stick translation in src/input/ui_nav.h and the
+// guest-frame measurement it is aimed with in src/input/nav_detect.h, which
+// src/input/mouse_ui.cpp feeds from the window's mouse events and the guest's own
+// frames. No SDK, no game image, no boot: the question is pure arithmetic over
+// pixel counters, poll counts and frame differences.
 //
 // What is pinned here is the shape of what the guest receives, because the guest
 // is the thing that cannot be asked to be tolerant. Its menus move one row per
-// left-stick *press* and only on the edge, so the two ways this can go wrong are
-// both about edges: a deflection that is too short is a row that never moves, and
-// travel that keeps producing presses after the hand has stopped is a selection
-// that runs away from the user.
+// left-stick *press* and only on the edge, so the ways this can go wrong are all
+// about edges: a deflection that is too short is a row that never moves, a press
+// that outlives the frame that saw it is a row the guest reads twice, and travel
+// that keeps producing presses after the hand has stopped is a selection that runs
+// away from the user.
 //
-// A row of travel is a fact about the guest's layout, and the cases below hold the
-// translation to it: pointing at where a row's neighbour is has to move exactly
-// one row, a swing across several rows has to arrive as that many presses rather
-// than being cut short, sub-row motion has to be carried instead of thrown away
-// (and must not be invented either), and the caps that keep a flick or a wheel spin
-// from banking more rows than the guest can act on have to drop the excess rather
-// than save it up.
+// Two halves are held to that. The travel stepper is the fallback for when there
+// are no frames to measure - mouse look, no presenter, a window with no guest
+// output yet - and a row of travel is a fact about the guest's layout there, so a
+// swing across several rows has to arrive as that many presses rather than being
+// cut short, sub-row motion has to be carried instead of thrown away (and must not
+// be invented either), and the caps that keep a flick from banking more rows than
+// the guest can act on have to drop the excess rather than save it up.
 //
-// The pointer is placed absolutely in these cases, as the driver reports it, and
-// the first placement is deliberately a starting point only: the offset between
-// the pointer and the guest's highlight is not something the host can see, so a
-// position can only ever mean "the row I was at plus however far I moved".
+// The other half is the aligner, which is what makes the pointer's row the
+// selected row. Its inputs are a frame the guest drew and the pitch between two of
+// its rows, and both are invented here rather than measured: a synthetic frame with
+// a bar on it is stepped one pitch at a time, so what is being pinned is that the
+// detector reads the bar's old and new positions out of a difference, that the
+// aligner presses toward the row the pointer is on and stops when it is there, that
+// a press is exactly as long as the frame that saw it, and that a list which has
+// stopped moving is a burst that stops rather than one that keeps pressing.
 //
-// The pulse is counted in polls rather than in milliseconds here: turning the
-// cvars' milliseconds into those polls needs the guest's poll cadence, which only
-// src/input/mouse_ui.cpp can measure. What matters to the stepper is that it is
-// told how long a press must last and obeys it.
-//
-// The click side is pinned the same way, because it is the other half of the same
-// ordering problem: a click has to reach the guest after the rows the pointer
-// queued before it and not before, must survive being released while it waited,
-// and must still be a press the guest's frame can see rather than a flicker it
-// misses. What a click must never be is a press that never comes up, since that is
-// a menu item stuck down.
+// The pulse is counted in polls rather than in milliseconds for the stepper, and in
+// frames for the aligner: turning the cvars' milliseconds into those polls needs the
+// guest's poll cadence, and turning a press into frames needs the guest's frame
+// rate, neither of which a test can measure. What matters to both is that they are
+// told how long a press must last and that they obey it.
 
 #include "check.h"
 
+#include "input/nav_detect.h"
 #include "input/ui_nav.h"
 
 #include <cmath>
@@ -170,7 +171,149 @@ bool NoButtons(const std::vector<uint16_t>& polls) {
   return true;
 }
 
-// Polls a stepper until it owes the guest nothing, or until the limit is reached,
+// A guest that draws one bar on a plain background and moves it a row per press,
+// which is what the menus do: the bar is the highlight, its pitch is the row
+// spacing, and the frame it draws is what the detector has to read the move out of.
+// A real screen cannot be used here (the tests may not boot the game), so this is
+// the guest's whole behaviour reduced to what the aligner depends on.
+// The frame a fake screen draws is small enough for a test to build hundreds of
+// them, and still large enough to have the shape of one: the fractions the detector
+// works in are shares of the frame, and the bar below has to be inside them.
+class FakeScreen {
+ public:
+  static constexpr int kWidth = 640;
+  static constexpr int kHeight = 360;
+  static constexpr int kBarLeft = 200;
+  static constexpr int kBarWidth = 240;
+  // The background is a mid grey and the bar is brighter than it: the two have to
+  // differ by far more than the detector's threshold, and the background has to sit
+  // far enough from both ends of the range that a noise level added to it can never
+  // clamp, because a picture that clamps is a picture that stops changing.
+  static constexpr int kBackgroundLevel = 120;
+  static constexpr int kBarLevel = 200;
+
+  FakeScreen(int pitch, int bar_height, int first_centre, int last_centre, int centre)
+      : pitch_(pitch),
+        bar_height_(bar_height),
+        first_centre_(first_centre),
+        last_centre_(last_centre),
+        centre_(centre) {}
+
+  int pitch() const { return pitch_; }
+  int centre() const { return centre_; }
+  int presses_seen() const { return presses_; }
+  // The press with this number (the first is 1) moves two rows instead of one, which
+  // is what a guest does when it misses a press and the next one moves it twice.
+  void SetDoublePress(int index) { double_press_ = index; }
+
+  // What the guest's menu does with a stick: one row per press, on the edge, and
+  // nothing at all once the list has ended.
+  void Advance(int16_t stick_y) {
+    if (stick_y != 0 && last_stick_ == 0) {
+      ++presses_;
+      const int rows = double_press_ == presses_ ? 2 : 1;
+      const int moved = centre_ + (stick_y < 0 ? rows * pitch_ : -rows * pitch_);
+      centre_ = std::max(first_centre_, std::min(last_centre_, moved));
+    }
+    last_stick_ = stick_y;
+  }
+
+  // A frame with the bar where it is now. `noise_step` makes the whole picture a
+  // different brightness on every frame, which is what a transition - or a menu
+  // whose background is a video - looks like to a difference. The caller walks it in
+  // steps that are coprime with any short cycle, so that no two frames of one burst
+  // are ever the same picture by accident.
+  NavSampledFrame Frame(int noise_step = 0) const {
+    std::vector<uint8_t> pixels(static_cast<size_t>(kWidth) * kHeight * 4, 0);
+    for (int y = 0; y < kHeight; ++y) {
+      uint8_t* row = pixels.data() + static_cast<size_t>(y) * kWidth * 4;
+      const bool in_bar_row = y >= centre_ - bar_height_ / 2 && y <= centre_ + bar_height_ / 2;
+      for (int x = 0; x < kWidth; ++x) {
+        const bool in_bar = in_bar_row && x >= kBarLeft && x < kBarLeft + kBarWidth;
+        const int level = (in_bar ? kBarLevel : kBackgroundLevel) + noise_step;
+        uint8_t* pixel = row + static_cast<size_t>(x) * 4;
+        pixel[0] = static_cast<uint8_t>(std::clamp(level, 0, 255));
+        pixel[1] = static_cast<uint8_t>(std::clamp(level / 2, 0, 255));
+        pixel[2] = static_cast<uint8_t>(std::clamp(in_bar ? level / 4 : level, 0, 255));
+        pixel[3] = 255;
+      }
+    }
+    NavFrameView view;
+    view.pixels = pixels.data();
+    view.width = kWidth;
+    view.height = kHeight;
+    view.stride = static_cast<size_t>(kWidth) * 4;
+    NavSampledFrame frame;
+    SampleNavFrame(view, &frame);
+    return frame;
+  }
+
+ private:
+  int pitch_ = 56;
+  int bar_height_ = 40;
+  int first_centre_ = 0;
+  int last_centre_ = 0;
+  int centre_ = 0;
+  int16_t last_stick_ = 0;
+  int presses_ = 0;
+  int double_press_ = 0;
+};
+
+// What one frame of a driven aligner saw, so a case can talk about presses rather
+// than about frames.
+struct DrivenFrame {
+  int16_t stick = 0;
+  int centre = 0;
+};
+
+// Runs the aligner against the fake screen for as long as it wants frames, one guest
+// frame per action, and returns what each frame was drawn with. This is the loop the
+// driver runs: ask for the stick, the guest draws a frame with it, hand the frame
+// back.
+std::vector<DrivenFrame> DriveAlign(MenuHoverAligner* aligner, FakeScreen* screen, double frame_ms,
+                                    int limit = 120, int noise_per_frame = 0,
+                                    double start_ms = 20000.0) {
+  std::vector<DrivenFrame> frames;
+  double t = start_ms;
+  bool burst_seen = false;
+  for (int i = 0; i < limit; ++i) {
+    const int16_t stick = aligner->PollStick(t);
+    screen->Advance(stick);
+    t += frame_ms;
+    aligner->FeedFrame(screen->Frame(noise_per_frame != 0 ? ((i * 47) % 121) - 60 : 0), t);
+    if (aligner->Busy()) {
+      burst_seen = true;
+    }
+    frames.push_back(DrivenFrame{stick, screen->centre()});
+    if (burst_seen && !aligner->Busy()) {
+      break;
+    }
+  }
+  return frames;
+}
+
+int Presses(const std::vector<DrivenFrame>& frames) {
+  int presses = 0;
+  int16_t last = 0;
+  for (const DrivenFrame& frame : frames) {
+    if (frame.stick != 0 && last == 0) {
+      ++presses;
+    }
+    last = frame.stick;
+  }
+  return presses;
+}
+
+// A row pitch, a bar that fits inside one row, and the two ends of the list the
+// fake screen's rows are between: 27 px a row is what the main menu measured in a
+// 768-px-tall client, and 56 what the AV settings screen did
+// (docs/history/bringup-log.md), so both shapes are real.
+const int kPitch = 28;
+const int kBarHeight = 20;
+const int kListTop = 20;
+const int kListBottom = 330;
+
+// Poles the stepper until it owes the guest nothing, or until the limit is reached,
 // and returns how many polls that took.
 int Drain(UiNavStepper& nav, int limit) {
   int polls = 0;
@@ -357,62 +500,6 @@ int main() {
     CHECK_TRUE(AllCentred(Poll(nav, 50)));
   }
 
-  BeginCase("a wheel detent steps immediately, ahead of queued travel");
-  {
-    UiNavStepper nav;
-    nav.OnPointer(0.0, 0.0);
-    nav.OnWheel(0, UiNavStepper::kScrollUnitsPerDetent);
-    nav.OnPointer(0.0, 2.0 * kRow);
-    const std::vector<Run> runs = Runs(Poll(nav, 30));
-    // The detent is a deliberate gesture; the cursor motion queued behind it
-    // waits. Its press is a full one, not a shortened one that the release
-    // swallows.
-    CHECK_EQ(runs[0].y, UiNavStepper::kStepDeflection);
-    CHECK_EQ(runs[0].polls, kDefaultPressPolls);
-    CHECK_EQ(runs[1].polls, kDefaultReleasePolls);
-    // Then the two rows of motion, and a tail of silence: 6 runs is three presses
-    // and the gaps between them, with the last gap running to the end of the
-    // window.
-    CHECK_EQ(static_cast<int>(runs.size()), 6);
-    CHECK_EQ(runs[2].y, -UiNavStepper::kStepDeflection);
-    CHECK_TRUE(AllCentred(Poll(nav, 40)));
-  }
-
-  BeginCase("sub-detent wheel deltas accumulate instead of being dropped");
-  {
-    UiNavStepper nav;
-    nav.OnWheel(0, UiNavStepper::kScrollUnitsPerDetent / 2);
-    CHECK_TRUE(AllCentred(Poll(nav, 10)));
-    nav.OnWheel(0, UiNavStepper::kScrollUnitsPerDetent / 2);
-    CHECK_EQ(PressCount(Poll(nav, 10)), 1);
-    CHECK_TRUE(AllCentred(Poll(nav, 10)));
-  }
-
-  BeginCase("wheel direction and axis map to the stick");
-  {
-    UiNavStepper up;
-    up.OnWheel(0, 2 * UiNavStepper::kScrollUnitsPerDetent);
-    const std::vector<Run> up_runs = Runs(Poll(up, 10));
-    CHECK_EQ(up_runs[0].y, UiNavStepper::kStepDeflection);
-    CHECK_EQ(up_runs.size(), 4);
-
-    UiNavStepper down;
-    down.OnWheel(0, -2 * UiNavStepper::kScrollUnitsPerDetent);
-    CHECK_EQ(Runs(Poll(down, 1))[0].y, -UiNavStepper::kStepDeflection);
-
-    UiNavStepper across;
-    across.OnWheel(UiNavStepper::kScrollUnitsPerDetent, 0);
-    CHECK_EQ(Runs(Poll(across, 1))[0].x, UiNavStepper::kStepDeflection);
-  }
-
-  BeginCase("a wheel spin cannot queue more than kMaxWheelRows");
-  {
-    UiNavStepper nav;
-    nav.OnWheel(0, UiNavStepper::kScrollUnitsPerDetent * 50);
-    CHECK_EQ(PressCount(Poll(nav, 200)), UiNavStepper::kMaxWheelRows);
-    CHECK_TRUE(AllCentred(Poll(nav, 50)));
-  }
-
   BeginCase("Reset drops the pointer, queued rows and a press in flight");
   {
     UiNavStepper queued;
@@ -427,11 +514,6 @@ int main() {
     CHECK_EQ(PressCount(Poll(in_flight, 1)), 1);
     in_flight.Reset();
     CHECK_TRUE(AllCentred(Poll(in_flight, 10)));
-
-    UiNavStepper wheel;
-    wheel.OnWheel(0, UiNavStepper::kScrollUnitsPerDetent);
-    wheel.Reset();
-    CHECK_TRUE(AllCentred(Poll(wheel, 10)));
 
     // And the stepper still works afterwards.
     UiNavStepper reused;
@@ -583,13 +665,7 @@ int main() {
     CHECK_TRUE(Drain(nav, 100) < 100);
     CHECK_FALSE(nav.HasPendingRows());
 
-    // A wheel detent counts the same way, and so does an undelivered row from a
-    // longer walk.
-    nav.OnWheel(0, UiNavStepper::kScrollUnitsPerDetent);
-    CHECK_TRUE(nav.HasPendingRows());
-    CHECK_TRUE(Drain(nav, 100) < 100);
-    CHECK_FALSE(nav.HasPendingRows());
-
+    // And so does an undelivered row from a longer walk.
     nav.OnPointer(0.0, kRow * 5.0);
     CHECK_TRUE(nav.HasPendingRows());
     CHECK_TRUE(Drain(nav, 100) < 100);
@@ -778,6 +854,487 @@ int main() {
     const std::vector<uint16_t> polls = PollClicks(reused, kStepPolls + 2, false);
     CHECK_EQ(polls[0], UiClickPulser::MaskFor(kLeft));
     CHECK_EQ(PressRuns(polls), 1);
+  }
+
+  BeginCase("a difference of one press is the highlight twice, one pitch apart");
+  {
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    const NavSampledFrame before = screen.Frame();
+    screen.Advance(-MenuHoverAligner::kDeflection);
+    const NavSampledFrame after = screen.Frame();
+
+    NavDetectConfig config;
+    std::vector<NavRowDiff> rows;
+    CHECK_TRUE(DiffNavFrames(before, after, config, &rows));
+    CHECK_FALSE(LooksLikeScreenChange(after, rows, config));
+
+    NavBand bands[kMaxDetectBands];
+    const int count = FindChangedBands(after, rows, config, bands);
+    // Two rectangles, not one: where the bar was and where it went.
+    CHECK_EQ(count, 2);
+    for (int i = 0; i < count; ++i) {
+      CHECK_EQ(bands[i].Height(), kBarHeight + 1);
+      CHECK_EQ(bands[i].Width(), FakeScreen::kBarWidth);
+    }
+    CHECK_EQ(bands[1].top - bands[0].top, kPitch);
+
+    const NavStep step = FindNavStep(bands, count, config, 0, -1.0);
+    CHECK_TRUE(step.found);
+    CHECK_TRUE(step.separated);
+    CHECK_EQ(step.pitch, kPitch);
+    // Pressing down moves the selection down the screen, so the lower rectangle is
+    // where the highlight went - and only the caller's direction can say that.
+    CHECK_EQ(static_cast<int>(NewHighlightCentre(step, 1)), 120 + kPitch);
+    CHECK_EQ(static_cast<int>(NewHighlightCentre(step, -1)), 120);
+  }
+
+  BeginCase("a frame that has not changed is not a step");
+  {
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    const NavSampledFrame frame = screen.Frame();
+    NavDetectConfig config;
+    std::vector<NavRowDiff> rows;
+    CHECK_TRUE(DiffNavFrames(frame, frame, config, &rows));
+    CHECK_FALSE(LooksLikeScreenChange(frame, rows, config));
+    NavBand bands[kMaxDetectBands];
+    CHECK_EQ(FindChangedBands(frame, rows, config, bands), 0);
+    CHECK_FALSE(FindNavStep(bands, 0, config, 0, -1.0).found);
+  }
+
+  BeginCase("what a band is not");
+  {
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    const NavSampledFrame base = screen.Frame();
+    NavDetectConfig config;
+    std::vector<NavRowDiff> rows;
+    NavBand bands[kMaxDetectBands];
+
+    // A few samples changing in a row is under the share a row has to change by: a
+    // stray pixel, or animation that only touches part of a row, is not a marker.
+    NavSampledFrame speckle = base;
+    for (int y = 40; y < 80; ++y) {
+      for (int sx = 0; sx < 6; ++sx) {
+        speckle.rgb[(static_cast<size_t>(y) * speckle.sample_width + sx) * 3] = 255;
+      }
+    }
+    CHECK_TRUE(DiffNavFrames(base, speckle, config, &rows));
+    CHECK_EQ(FindChangedBands(speckle, rows, config, bands), 0);
+
+    // A whole row changing is too wide to be a selection marker, which is what keeps
+    // a scrolling list or a screen transition from being read as one.
+    NavSampledFrame wide = base;
+    for (int y = 40; y < 80; ++y) {
+      for (int sx = 0; sx < wide.sample_width; ++sx) {
+        wide.rgb[(static_cast<size_t>(y) * wide.sample_width + sx) * 3] = 255;
+      }
+    }
+    CHECK_TRUE(DiffNavFrames(base, wide, config, &rows));
+    CHECK_EQ(FindChangedBands(wide, rows, config, bands), 0);
+
+    // A single changed row is too thin to be one either.
+    NavSampledFrame line = base;
+    for (int sx = 40; sx < 120; ++sx) {
+      line.rgb[(static_cast<size_t>(40) * line.sample_width + sx) * 3] = 255;
+    }
+    CHECK_TRUE(DiffNavFrames(base, line, config, &rows));
+    CHECK_EQ(FindChangedBands(line, rows, config, bands), 0);
+
+    // And a screen that is replaced all over is reported as one.
+    NavSampledFrame replaced = base;
+    for (int y = 0; y < replaced.sample_height; ++y) {
+      for (int sx = 0; sx < replaced.sample_width; ++sx) {
+        replaced.rgb[(static_cast<size_t>(y) * replaced.sample_width + sx) * 3] = 255;
+      }
+    }
+    CHECK_TRUE(DiffNavFrames(base, replaced, config, &rows));
+    CHECK_TRUE(LooksLikeScreenChange(replaced, rows, config));
+  }
+
+  BeginCase("a bar as tall as its row is measured the same way");
+  {
+    // The bar and the pitch the same size: the difference sits between the two
+    // positions' own rows, so it still arrives as two rectangles a pitch apart -
+    // measured to the row boundary, which is one pixel more than the pitch.
+    FakeScreen screen(kPitch, kPitch, kListTop, kListBottom, 120);
+    const NavSampledFrame before = screen.Frame();
+    screen.Advance(-MenuHoverAligner::kDeflection);
+    const NavSampledFrame after = screen.Frame();
+
+    NavDetectConfig config;
+    std::vector<NavRowDiff> rows;
+    CHECK_TRUE(DiffNavFrames(before, after, config, &rows));
+    NavBand bands[kMaxDetectBands];
+    const int count = FindChangedBands(after, rows, config, bands);
+    CHECK_EQ(count, 2);
+    const NavStep step = FindNavStep(bands, count, config, 0, -1.0);
+    CHECK_TRUE(step.found);
+    CHECK_TRUE(step.separated);
+    CHECK_EQ(step.pitch, kPitch + 1);
+    CHECK_TRUE(std::fabs(NewHighlightCentre(step, 1) - (120 + kPitch)) < 1.5);
+    CHECK_TRUE(std::fabs(NewHighlightCentre(step, -1) - 120) < 1.5);
+  }
+
+  BeginCase("one rectangle spanning more than a pitch is placed by the pitch");
+  {
+    // A bar taller than its row is the shape where the two positions really do
+    // overlap: there is nothing in the difference to tell them apart, and the pitch
+    // already measured says where the centres are inside the one rectangle.
+    NavBand bands[1];
+    bands[0].top = 100;
+    bands[0].bottom = 179;
+    bands[0].left = 200;
+    bands[0].right = 439;
+    NavDetectConfig config;
+
+    // With no pitch measured, a tall rectangle is only a tall rectangle: guessing
+    // where the selection is inside it would be guessing where it is at all.
+    CHECK_FALSE(FindNavStep(bands, 1, config, 0, -1.0).found);
+
+    const NavStep step = FindNavStep(bands, 1, config, 40, 120.0);
+    CHECK_TRUE(step.found);
+    CHECK_TRUE(step.merged);
+    CHECK_EQ(step.pitch, 40);
+    CHECK_TRUE(std::fabs(NewHighlightCentre(step, 1) - 159.5) < 1e-9);
+    CHECK_TRUE(std::fabs(NewHighlightCentre(step, -1) - 119.5) < 1e-9);
+
+    // And a rectangle that does not contain the highlight that was last seen is not
+    // this step, however tall it is.
+    CHECK_FALSE(FindNavStep(bands, 1, config, 40, 260.0).found);
+  }
+
+  BeginCase("two pairs are told apart by the pitch that is known");
+  {
+    NavBand bands[3];
+    bands[0].top = 100;
+    bands[0].bottom = 139;
+    bands[1].top = 128;
+    bands[1].bottom = 167;
+    bands[2].top = 200;
+    bands[2].bottom = 239;
+    for (NavBand& band : bands) {
+      band.left = 400;
+      band.right = 879;
+    }
+    // The third band is the same height as the other two but slightly narrower: it
+    // has to be distinguishable, since a pair that fits as tidily as another would
+    // win only by being found first.
+    bands[2].right = 859;
+    NavDetectConfig config;
+
+    // Without a pitch, the pair that is the same bar in two places - identical in
+    // height and edges - is the one believed.
+    const NavStep unknown = FindNavStep(bands, 3, config, 0, -1.0);
+    CHECK_TRUE(unknown.found);
+    CHECK_EQ(unknown.pitch, 28);
+    CHECK_TRUE(std::fabs(unknown.lower_centre - 147.5) < 1e-9);
+
+    // With one, the pair that matches it wins even though it fits less tidily.
+    const NavStep known = FindNavStep(bands, 3, config, 100, -1.0);
+    CHECK_TRUE(known.found);
+    CHECK_EQ(known.pitch, 100);
+    CHECK_TRUE(std::fabs(known.lower_centre - 219.5) < 1e-9);
+  }
+
+  BeginCase("the pointer's pixels are the guest's pixels");
+  {
+    // A 1360x768 window with a 1280x720 guest: the presenter fits by width, centres
+    // the shortfall vertically, and the mapping has to say the same thing.
+    const GuestImageMapping window = ComputeGuestImageMapping(1360, 768, 1280, 720, true);
+    CHECK_TRUE(window.valid);
+    CHECK_TRUE(std::fabs(window.scale - 1.0625) < 1e-9);
+    CHECK_TRUE(std::fabs(window.offset_x) < 1e-9);
+    CHECK_TRUE(std::fabs(window.offset_y - 1.0) < 1e-9);
+    CHECK_TRUE(std::fabs(window.ClientToGuestY(1.0)) < 1e-9);
+    CHECK_TRUE(std::fabs(window.GuestToClientY(720.0) - 766.0) < 1e-9);
+
+    // A window of exactly the guest's size needs no mapping at all.
+    const GuestImageMapping same = ComputeGuestImageMapping(1280, 720, 1280, 720, true);
+    CHECK_TRUE(std::fabs(same.scale - 1.0) < 1e-9);
+    CHECK_TRUE(std::fabs(same.offset_y) < 1e-9);
+
+    // A window taller than the guest's aspect ratio letterboxes top and bottom.
+    const GuestImageMapping tall = ComputeGuestImageMapping(1280, 1000, 1280, 720, true);
+    CHECK_TRUE(std::fabs(tall.scale - 1.0) < 1e-9);
+    CHECK_TRUE(std::fabs(tall.offset_y - 140.0) < 1e-9);
+
+    // With letterboxing switched off the image fills the window instead, which is a
+    // different map, and a pointer mapped through the wrong one is an offset.
+    const GuestImageMapping stretched = ComputeGuestImageMapping(1360, 768, 1280, 720, false);
+    CHECK_TRUE(std::fabs(stretched.scale - 768.0 / 720.0) < 1e-9);
+    CHECK_TRUE(std::fabs(stretched.offset_y) < 1e-9);
+
+    // Nothing to map with is not a mapping.
+    CHECK_FALSE(ComputeGuestImageMapping(0, 768, 1280, 720, true).valid);
+    CHECK_FALSE(ComputeGuestImageMapping(1360, 768, 0, 0, true).valid);
+  }
+
+  BeginCase("a hover one row down is one press, and lands on the row");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    // The pointer is put on the row below the one that is selected - the row under
+    // the bar's lower edge, which is inside the next row and not this one.
+    aligner.SetTargetY(120 + 0.7 * kPitch, 1000.0);
+
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_EQ(Presses(frames), 1);
+    CHECK_EQ(screen.centre(), 120 + kPitch);
+    // The press is held for a couple of the guest's frames - long enough that no
+    // frame can miss it - and the guest moves one row from it rather than one row per
+    // deflected frame, which is what the edge-triggered guest below models and what
+    // the real menus do.
+    int deflected = 0;
+    for (const DrivenFrame& frame : frames) {
+      if (frame.stick != 0) {
+        ++deflected;
+        CHECK_EQ(frame.stick, -MenuHoverAligner::kDeflection);
+      }
+    }
+    CHECK_TRUE(deflected >= 2);
+    CHECK_TRUE(deflected <= 5);
+    CHECK_TRUE(aligner.HaveGeometry());
+    CHECK_EQ(aligner.pitch(), kPitch);
+    CHECK_FALSE(aligner.Busy());
+
+    // And a pointer moved within the same row is the same hover: no more presses.
+    aligner.SetTargetY(120 + kPitch + 0.1 * kPitch, 9000.0);
+    CHECK_EQ(Presses(DriveAlign(&aligner, &screen, 16.7, 40)), 0);
+    CHECK_EQ(screen.centre(), 120 + kPitch);
+  }
+
+  BeginCase("a hover six rows down arrives as six presses, in order");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 60);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(60 + 6.0 * kPitch, 1000.0);
+
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    // The aligner has to measure the screen on the way in, and what it measures is
+    // the row it just crossed - so the presses are the rows between, the first one
+    // gives the pitch, and the pointer's row is where it stops.
+    CHECK_EQ(Presses(frames), 6);
+    CHECK_EQ(screen.centre(), 60 + 6 * kPitch);
+    CHECK_EQ(screen.presses_seen(), 6);
+    // Every press is the same direction, because the pointer never moved.
+    for (const DrivenFrame& frame : frames) {
+      CHECK_TRUE(frame.stick == 0 || frame.stick == -MenuHoverAligner::kDeflection);
+    }
+  }
+
+  BeginCase("a hover that has to go up presses up");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 60 + 4 * kPitch);
+    // Two presses' worth of measurement first: on an untouched screen the first
+    // press is a guess, so the case gives the aligner a screen it has already
+    // measured by hovering the row below.
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(60 + 5.0 * kPitch, 1000.0);
+    DriveAlign(&aligner, &screen, 16.7);
+    CHECK_TRUE(aligner.HaveGeometry());
+
+    // Now the pointer goes up, and the presses have to follow it.
+    aligner.SetTargetY(60 + 1.0 * kPitch, 9000.0);
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_EQ(screen.centre(), 60 + 1 * kPitch);
+    CHECK_TRUE(Presses(frames) >= 3);
+    for (const DrivenFrame& frame : frames) {
+      CHECK_TRUE(frame.stick == 0 || frame.stick == MenuHoverAligner::kDeflection);
+    }
+  }
+
+  BeginCase("the first hover on a screen measures it, and the next one costs nothing");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    // Nothing has been measured yet, so the only way to find the highlight is to
+    // press, and the pointer happens to be on the row that is already selected: down
+    // once to find the pitch, then back up once the measurement says so.
+    aligner.SetTargetY(120.0, 1000.0);
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_EQ(Presses(frames), 2);
+    CHECK_EQ(screen.centre(), 120);
+    CHECK_TRUE(aligner.HaveGeometry());
+  }
+
+  BeginCase("the hover waits for the pointer to rest");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(120 + 3.0 * kPitch, 1000.0);
+    // Sweeping across a list must not press once per row crossed: nothing happens
+    // until the pointer has been still for longer than a sweep's own gaps.
+    for (double t = 1000.0; t < 1000.0 + aligner.hover_delay_ms(); t += 5.0) {
+      CHECK_EQ(aligner.PollStick(t), 0);
+    }
+    CHECK_FALSE(aligner.Busy());
+    // The frame a press is measured against has to be one read while the pointer was
+    // resting, and the one this screen was last read at is a second old: the aligner
+    // asks for a frame instead of pressing, and the driver's frame thread is what
+    // answers that.
+    const double rest_ms = 1000.0 + aligner.hover_delay_ms();
+    CHECK_TRUE(aligner.WantsFrames(rest_ms));
+    CHECK_EQ(aligner.PollStick(rest_ms), 0);
+    CHECK_FALSE(aligner.Busy());
+    // Given one, it presses on the next poll.
+    aligner.FeedFrame(screen.Frame(), rest_ms + 10.0);
+    CHECK_TRUE(aligner.PollStick(rest_ms + 20.0) != 0);
+    CHECK_TRUE(aligner.Busy());
+  }
+
+  BeginCase("a list that has ended stops the burst instead of pressing into it");
+  {
+    MenuHoverAligner aligner;
+    // Two rows, and the pointer well below the last of them.
+    FakeScreen screen(kPitch, kBarHeight, 60, 60 + kPitch, 60);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(60 + 6.0 * kPitch, 1000.0);
+
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_EQ(screen.centre(), 60 + kPitch);
+    // A press that moves nothing is retried with a longer gap, and then given up on
+    // rather than kept up: this is a list at its end, not a pulse that was too
+    // short, and the guest must not be held down in the hope that it changes.
+    CHECK_TRUE(Presses(frames) >= 2);
+    CHECK_TRUE(Presses(frames) <= 6);
+    CHECK_FALSE(aligner.Busy());
+    // And the same hover does not press again: only a new pointer position is a new
+    // question.
+    CHECK_EQ(Presses(DriveAlign(&aligner, &screen, 16.7, 60)), 0);
+    CHECK_EQ(screen.presses_seen(), Presses(frames));
+  }
+
+  BeginCase("a press that crossed two rows does not become the pitch");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 60);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    // The guest's second press moves it two rows - what a guest does when the press
+    // before it landed while it was not looking - so that step arrives as a pair two
+    // rows apart. Read as the pitch, that would double the tolerance the pointer's
+    // row is judged by, and the hover would stop a row short of the pointer with the
+    // log insisting it had arrived.
+    screen.SetDoublePress(2);
+    aligner.SetTargetY(60 + 4.0 * kPitch, 1000.0);
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_EQ(screen.centre(), 60 + 4 * kPitch);
+    CHECK_EQ(aligner.pitch(), kPitch);
+    CHECK_TRUE(aligner.HaveGeometry());
+    CHECK_FALSE(aligner.Busy());
+    // Three presses rather than four, because the guest's second one crossed two rows.
+    CHECK_EQ(Presses(frames), 3);
+  }
+
+  BeginCase("losing the focus does not lose the row the highlight is on");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(120 + 2.0 * kPitch, 1000.0);
+    DriveAlign(&aligner, &screen, 16.7);
+    CHECK_TRUE(aligner.HaveGeometry());
+
+    // The window loses the focus: the gesture is over, the screen is not.
+    aligner.ForgetBurst();
+    CHECK_TRUE(aligner.HaveGeometry());
+    CHECK_FALSE(aligner.Busy());
+    // And the pointer's row is still the selected row, so nothing has to move - a
+    // press to prove it would be a flick of the selection for nothing.
+    aligner.SetTargetY(120 + 2.0 * kPitch, 30000.0);
+    CHECK_EQ(Presses(DriveAlign(&aligner, &screen, 16.7, 60)), 0);
+
+    // Another window or another screen is another matter: nothing measured in the
+    // old one's pixels means anything.
+    aligner.Forget();
+    CHECK_FALSE(aligner.HaveGeometry());
+  }
+
+  BeginCase("a screen that changes under a still pointer is not stepped through");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen menu(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    aligner.FeedFrame(menu.Frame(), 0.0);
+    aligner.SetTargetY(120 + 2.0 * kPitch, 1000.0);
+    DriveAlign(&aligner, &menu, 16.7);
+    CHECK_TRUE(aligner.HaveGeometry());
+
+    // A click opens another menu, and the pointer is still where it was: the row it is
+    // over is a row of the screen that has gone, and the selection of the new one is
+    // not the pointer's to move until the pointer does.
+    FakeScreen other(kPitch, kBarHeight, 60, 60 + 8 * kPitch, 60);
+    aligner.FeedFrame(menu.Frame(), 40000.0);
+    aligner.FeedFrame(other.Frame(50), 40016.0);
+    CHECK_FALSE(aligner.HaveGeometry());
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &other, 16.7, 60, 0, 40032.0);
+    CHECK_EQ(Presses(frames), 0);
+    CHECK_EQ(other.presses_seen(), 0);
+
+    // And the pointer moving again is the next hover, on the new screen.
+    aligner.SetTargetY(60 + 2.0 * kPitch, 41000.0);
+    const std::vector<DrivenFrame> again = DriveAlign(&aligner, &other, 16.7, 60, 0, 41000.0);
+    CHECK_EQ(other.centre(), 60 + 2 * kPitch);
+    CHECK_TRUE(Presses(again) >= 1);
+  }
+
+  BeginCase("a screen that keeps changing ends the burst");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 120);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(120 + 4.0 * kPitch, 1000.0);
+    // Every frame is a different picture, as a transition or a menu background that
+    // is a video would be: nothing about the highlight can be read, so the burst
+    // ends rather than pressing into a moving screen. The noise cycles rather than
+    // rising for ever, since a level that saturates is a picture that stops changing.
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7, 200, 1);
+    CHECK_TRUE(Presses(frames) <= MenuHoverAligner::kMaxScreenChanges + 1);
+    CHECK_FALSE(aligner.Busy());
+    CHECK_FALSE(aligner.HaveGeometry());
+  }
+
+  BeginCase("a pointer that moves again mid-burst re-aims it");
+  {
+    MenuHoverAligner aligner;
+    FakeScreen screen(kPitch, kBarHeight, kListTop, kListBottom, 60);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(60 + 8.0 * kPitch, 1000.0);
+    double t = 20000.0;
+    for (int i = 0; i < 60; ++i) {
+      const int16_t stick = aligner.PollStick(t);
+      screen.Advance(stick);
+      t += 16.7;
+      aligner.FeedFrame(screen.Frame(), t);
+      if (i == 10) {
+        // The hand keeps moving while the selection is still travelling.
+        aligner.SetTargetY(60 + 2.0 * kPitch, t);
+      }
+      if (i > 12 && !aligner.Busy()) {
+        break;
+      }
+    }
+    // It follows the pointer rather than finishing the journey it started: the row
+    // the pointer ended on is the row that is selected.
+    CHECK_EQ(screen.centre(), 60 + 2 * kPitch);
+    CHECK_FALSE(aligner.Busy());
+  }
+
+  BeginCase("no frames is no hover, and no hover is no press");
+  {
+    MenuHoverAligner aligner;
+    aligner.SetTargetY(400.0, 1000.0);
+    // Without a frame there is nothing to aim at, so the driver leaves the selection
+    // to the travel fallback and the aligner stays silent.
+    for (double t = 1000.0; t < 2000.0; t += 5.0) {
+      CHECK_EQ(aligner.PollStick(t), 0);
+    }
+    CHECK_FALSE(aligner.Busy());
+    // It is asking for frames rather than for nothing: without one there is nothing to
+    // press from, and reading one is what the driver's frame thread does for it.
+    CHECK_TRUE(aligner.WantsFrames(2000.0));
   }
 
   return Finish();

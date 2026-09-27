@@ -45,7 +45,7 @@ inline bool SamePathElement(const std::filesystem::path& lhs,
 // the LLVM-clang-on-Windows build of it used here returns an *empty* path with no
 // error set, so a caller reasoning "no leading .. segment, therefore inside" answers
 // yes for every directory outside the game root, and silently discards the override
-// it was asked to check (docs/bringup-log.md, 2026-09-21). Walking the elements has
+// it was asked to check (docs/history/bringup-log.md, 2026-09-21). Walking the elements has
 // no such case.
 //
 // An empty candidate or root, or a path that cannot be made absolute, answers false:

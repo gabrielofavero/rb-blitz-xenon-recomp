@@ -21,7 +21,7 @@ The game data is always the user's own: an Xbox 360 package or a game folder the
 already extracted. The Rock Band Blitz Ultimate mod is a third-party fan project,
 so it is downloaded from its own GitHub release while the installer runs, or
 supplied by the user — never mirrored, re-hosted or bundled. The distribution
-rules are in [`../prompts/06-reproducible-release.md`](../prompts/06-reproducible-release.md)
+rules are in [`../docs/backlog.md`](../docs/backlog.md) (the distributable audit)
 and [`../docs/ultimate-compat.md`](../docs/ultimate-compat.md).
 
 ## What the user walks through

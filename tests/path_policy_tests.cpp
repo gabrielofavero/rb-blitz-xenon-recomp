@@ -11,7 +11,7 @@
 // directory that is not a descendant of the game root - a sibling of it, another
 // drive - and every writable root named that way (--user_data_root, --cache_root,
 // REX_USER_DATA_ROOT) was then discarded and replaced by the default under
-// Documents (docs/bringup-log.md, 2026-09-21).
+// Documents (docs/history/bringup-log.md, 2026-09-21).
 
 #include "check.h"
 

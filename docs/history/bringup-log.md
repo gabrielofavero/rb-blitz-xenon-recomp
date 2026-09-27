@@ -77,8 +77,8 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
   from its link target (idempotent, SHA-256 check inside) and marks the 16 paths
   `--skip-worktree` so the unrepresentable type change stops showing up as dirt.
   Re-run after any clone, `submodule update`, or checkout that rewrites the SDK
-  tree. See [known-issues.md](./known-issues.md) and
-  [../patches/README.md](../patches/README.md).
+  tree. See [known-issues.md](../known-issues.md) and
+  [../patches/README.md](../../patches/README.md).
 
 ### B-002: `rexcore/memory.cpp` SSSE3 intrinsic error (clang/MSVC)
 
@@ -170,8 +170,8 @@ Status: complete (2026-09-09).
 
 ## Handoff to Milestone 3
 
-See `prompts/03-guest-entry-boot.md` (entry state + knowledge folded in) and
-`docs/symbols.md` (full inventory). Build command:
+See the Milestone 3 section below (entry state and knowledge folded in) and
+`../symbols.md` (full inventory). Build command:
 `cmake --build out/build/win-amd64-debug`; executable at
 `out/build/win-amd64-debug/rb_blitz.exe`.
 
@@ -182,7 +182,8 @@ Status: **complete** (2026-09-10).
 ### Result
 
 - The guest boots to the **title screen with "PRESS A TO START"** — this
-  **exceeds** the Xenia baseline (`docs/baselines/xenia-canary-80679bc.md`),
+  **exceeds** the Xenia baseline (canary `80679bc`, whose own notes were
+  superseded and removed with the baseline document),
   which only reached the looping animated logo.
 - Acceptance (`scripts/acceptance_launches.ps1`, Release build):
   **10 / 10** consecutive launches stayed alive at the title screen with no
@@ -340,7 +341,7 @@ eliminated at the root instead of one entry at a time, by making codegen `GapFil
 (`rexglue-sdk/src/codegen/phase_gapfill.cpp`, `splitRegionOnTerminators`) split on
 `bctr` and by re-splitting a region it has already registered once a later pass
 reveals a boundary inside it. Patch
-[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch)
+[0005](../../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch)
 carries it; the measurement, the two further defects it exposed and what it does
 *not* cover are in "Codegen: the B-003/B-006 root causes" at the end of this log.
 The `config/functions.toml` entries stay as the evidence trail for the addresses
@@ -481,7 +482,7 @@ completed (2026-09-20)".
   `+0x0` for 12/13, `+0x10` for 14, `+0x20` for 15, `+0x30` for 16 — guest
   `GetEncMethod` at `0x823DE070`), no `STUB` lines for either import, **music
   audible**, and sound effects unaffected. Build, run, log-capture and
-  failure-signature detail: [docs/build-and-run.md](build-and-run.md). The hook
+  failure-signature detail: [docs/build-and-run.md](../build-and-run.md). The hook
   also logs a one-time
   `guest XeKeys: decrypted a … container header` line if a whole `MOGG`/`OggS`
   header ever travels through AES (a bonus, not expected: this call always carries
@@ -574,9 +575,9 @@ Annotating `thirdparty/libmspack/cabextract/mspack/cabd.c` in an editor was
 harmless as well: the checked-in file is a symlink upstream, its expansion here is
 byte-identical to `libmspack/mspack/cabd.c`, and no edit was persisted.
 
-Newly documented alongside the scripts: [../patches/README.md](../patches/README.md)
+Newly documented alongside the scripts: [../patches/README.md](../../patches/README.md)
 (patch set, script usage, the symlink quirk and its build impact) and §0 of
-[build-and-run.md](build-and-run.md) (the one-time preparation step). One
+[build-and-run.md](../build-and-run.md) (the one-time preparation step). One
 environment note for future runs on this checkout: the PowerShell execution policy
 is `Restricted`, so scripts have to be launched as
 `powershell -NoProfile -ExecutionPolicy Bypass -File …`; the bare
@@ -680,7 +681,7 @@ errors, and the conversion probe read back `0.5`/`0.75`/`0.496` from the staged
 words. The user then confirmed the note highway and 3D background render
 correctly.
 
-**Accepted limitations** (also recorded in [known-issues.md](known-issues.md)):
+**Accepted limitations** (also recorded in [known-issues.md](../known-issues.md)):
 the staged copy must fit a single 2 MiB upload page (the largest conversion seen
 so far is 256 KB, so the headroom is 8×); integer `num_format = 1` textures
 remain unsupported; the CPU mirror can be stale for GPU-written data, for which
@@ -692,7 +693,7 @@ What the title does now, from the surviving run log and the writable root:
 
 - **Offline route.** "A" at the title attempts a Rock Central sign-in; the dialog
   is dismissible (B) and the title offers its offline path into the menus. No
-  service is faked — see "Accepted" in [known-issues.md](known-issues.md).
+  service is faked — see "Accepted" in [known-issues.md](../known-issues.md).
 - **Menus and content.** Main menu, song list and HUD render, and bundled songs are
   enumerated from the game-data root with no online dependency:
   `XamContentCreateEnumerator: added 2 items` (`songcache`, `globaloptions`) and
@@ -942,20 +943,18 @@ mod's three code edits are reproduced project-side instead, and that whole job
 landed 2026-09-20 — **B-012** below.
 
 This is the same relationship the RB3 recomp has with RB3DX, which is why the
-patch-group catalogue in [`rb3-references.md`](rb3-references.md) §5–§6 is still
+patch-group catalogue in [`rb3-references.md`](../rb3-references.md) §5–§6 is still
 the right thing to mine. (RB3DX is a Rock Band 3 project; it is not the mod this
 port supports.)
 
 **What changed in the docs.** New policy home
-[`ultimate-compat.md`](ultimate-compat.md) — decision table, payload facts, why the
+[`ultimate-compat.md`](../ultimate-compat.md) — decision table, payload facts, why the
 executable is not swappable, why the payload cannot be merged per file, the union
 rules, install/uninstall, hazards and the acceptance criteria. Propagated to
-[`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md) (goal, baseline, definition of
-"working", risks, deferred backlog), [`README.md`](../README.md),
-[`known-issues.md`](known-issues.md), [`build-and-run.md`](build-and-run.md),
-[`rb3-references.md`](rb3-references.md) §0 and §10, and prompts
-[`04`](../prompts/04-menus-content-input-saves.md),
-[`06`](../prompts/06-reproducible-release.md) and [`README`](../prompts/README.md).
+[`README.md`](../../README.md) (goal, baseline, and what "working" means),
+[`backlog.md`](../backlog.md) (the deferred backlog), [`known-issues.md`](../known-issues.md),
+[`build-and-run.md`](../build-and-run.md), and [`rb3-references.md`](../rb3-references.md)
+§0 and §10.
 
 **Consequences recorded now, not later.**
 
@@ -991,13 +990,13 @@ that was only ever "verified once": its regression was a key *selection* rule th
 nothing replays.
 
 **The split.** The SDK-free half of the key path moved to a new header,
-[`src/hooks/crypto_keytable.h`](../src/hooks/crypto_keytable.h):
+[`src/hooks/crypto_keytable.h`](../../src/hooks/crypto_keytable.h):
 `kKeysetTableAddress`/`kKeysetTableSize`/`kKeyIdBias`/`kKeySlots`/`kKeySize`,
 `kPlaintextKeyTable` (the 64 bytes that used to be `kDeobfuscatedKeyTable`), and
 three `constexpr` functions — `SelectKeySlot` (the 0xE0 bias, the `>= 8` clamp and a
 `clamped` flag instead of logging), `IsKeysetTableAddress` and
 `PlaintextKeyAtOffset`. Everything else stayed in
-[`src/hooks/crypto.cpp`](../src/hooks/crypto.cpp): the two import hooks, the guest
+[`src/hooks/crypto.cpp`](../../src/hooks/crypto.cpp): the two import hooks, the guest
 buffers, the AES forwarding, the log lines. The file-local `KeySlotForId` is now a
 three-line wrapper that turns the `clamped` flag into the same once-per-process
 warning at the same two call sites, and the install `memcpy` reads through
@@ -1029,7 +1028,7 @@ behaviour and still needs a boot.
 
 **The harness is dependency-free.** The SDK vendors `catch2` as a submodule that is
 not initialised, and no test framework may be added to the build, so
-[`tests/check.h`](../tests/check.h) is ~100 lines of `CHECK_TRUE` / `CHECK_FALSE` /
+[`tests/check.h`](../../tests/check.h) is ~100 lines of `CHECK_TRUE` / `CHECK_FALSE` /
 `CHECK_EQ` / `CHECK_MEM_EQ` over a check counter, printing the case name and
 `file:line` on failure and returning 1. `CMakeLists.txt` gained `include(CTest)`
 and one `add_executable` + `add_test` pair (`rb_blitz_crypto_keytable_tests`).
@@ -1058,7 +1057,7 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 **Still open.** This is one test target over one header. The acceptance half of the
 issue is unaffected: milestone 4 and 5 still have no scripted run, because
 `scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
-results. The narrower wording is now in [known-issues.md](known-issues.md).
+results. The narrower wording is now in [known-issues.md](../known-issues.md).
 (Correction, 2026-09-20: both have one now — `scripts/acceptance_song.ps1` drives
 menus → song → results and `scripts/acceptance_persistence.ps1` covers storage; the
 host suite is four targets rather than one.)
@@ -1073,11 +1072,11 @@ into boot, and definition-of-working #10 ("the SDK version, game fingerprint …
 was half unmet. It now has four consumers, all built on one parsing/comparison unit
 instead of four ad-hoc readers.
 
-**The shared half.** [`src/util/sha256.{h,cpp}`](../src/util/sha256.h) is a
+**The shared half.** [`src/util/sha256.{h,cpp}`](../../src/util/sha256.h) is a
 project-owned FIPS 180-4 implementation — the host side had no digest at all, and
 taking a dependency for 90 lines is not a trade this project makes — streaming each
 file through a 1 MiB buffer so the 361 MB ark never lands in memory.
-[`src/util/game_fingerprint.{h,cpp}`](../src/util/game_fingerprint.h) parses the
+[`src/util/game_fingerprint.{h,cpp}`](../../src/util/game_fingerprint.h) parses the
 TOML subset the file actually uses (`schema_version`, `[game]`, repeated
 `[[files]]`, quoted strings, integers, booleans) and answers one question per role:
 *does this file have the recorded size and digest?* A malformed file is an error
@@ -1099,7 +1098,7 @@ listing it in `target_sources` is what makes CMake regenerate it when the `.toml
 changes. The runtime therefore compares against the numbers the gate already
 checked, without parsing TOML at boot.
 
-**3. The boot line.** [`src/rb_blitz_app.h`](../src/rb_blitz_app.h) overrides
+**3. The boot line.** [`src/rb_blitz_app.h`](../../src/rb_blitz_app.h) overrides
 `OnPostLoadXexImage` — the first point where `game_data_root()` is final and logging
 is up — and logs both halves. Nothing there aborts, because pointing a built binary
 at a different root is a supported way to run.
@@ -1166,16 +1165,16 @@ payload was staged at `game/ultimate`; the requirement was that dropping it ther
 second build and no pristine dump put at risk.
 
 - Status: **resolved** —
-  [`src/fs/payload_overlay.h`](../src/fs/payload_overlay.h),
-  [`src/fs/payload_overlay.cpp`](../src/fs/payload_overlay.cpp),
-  [`src/fs/overlay_merge.h`](../src/fs/overlay_merge.h),
-  [`src/hooks/ultimate.h`](../src/hooks/ultimate.h),
-  [`src/hooks/ultimate.cpp`](../src/hooks/ultimate.cpp), the
-  [`OnPostLoadXexImage`](../src/rb_blitz_app.h) call site,
-  [`tests/payload_overlay_tests.cpp`](../tests/payload_overlay_tests.cpp) and
-  [`scripts/decrypt_xex.py`](../scripts/decrypt_xex.py).
+  [`src/fs/payload_overlay.h`](../../src/fs/payload_overlay.h),
+  [`src/fs/payload_overlay.cpp`](../../src/fs/payload_overlay.cpp),
+  [`src/fs/overlay_merge.h`](../../src/fs/overlay_merge.h),
+  [`src/hooks/ultimate.h`](../../src/hooks/ultimate.h),
+  [`src/hooks/ultimate.cpp`](../../src/hooks/ultimate.cpp), the
+  [`OnPostLoadXexImage`](../../src/rb_blitz_app.h) call site,
+  [`tests/payload_overlay_tests.cpp`](../../tests/payload_overlay_tests.cpp) and
+  [`scripts/decrypt_xex.py`](../../scripts/decrypt_xex.py).
 - Policy, the full evidence tables, hazards and acceptance criteria:
-  [`ultimate-compat.md`](ultimate-compat.md).
+  [`ultimate-compat.md`](../ultimate-compat.md).
 
 **The mod is 12 bytes.** `scripts/decrypt_xex.py` mirrors the SDK's
 `XexModule::ReadImage` (retail key, CBC IV = 0 chained across BASIC blocks), so
@@ -1192,7 +1191,7 @@ images decrypt to 10,747,904 bytes; the payload's is not even encrypted
 **12 differing bytes in 3 runs, and that is the entire code delta** — everything
 else the mod ships is content in `patch_xbox_0.ark`. So compatibility is a bounded
 job: reproduce three edits host-side and make the payload's files visible to the
-guest. The edits live in [`src/hooks/ultimate.cpp`](../src/hooks/ultimate.cpp) as
+guest. The edits live in [`src/hooks/ultimate.cpp`](../../src/hooks/ultimate.cpp) as
 one guarded data patch and two `REX_FUNC` overrides; the payload's own `default.xex`
 is never executed.
 
@@ -1301,7 +1300,7 @@ that folder exists, which is what the zip's `_keepme` file creates), so only the
 Milestone 5's exit criterion — one named bundled song through the full
 launch-to-results path three times in a row from a clean process — is now a
 scripted, repeatable result rather than an observation.
-[`scripts/acceptance_song.ps1`](../scripts/acceptance_song.ps1) is the M3
+[`scripts/acceptance_song.ps1`](../../scripts/acceptance_song.ps1) is the M3
 launch-driver's counterpart one screen further in: it starts the title itself,
 drives the offline route with injected keyboard input, and asserts every
 transition on evidence instead of on a fixed sleep.
@@ -1325,9 +1324,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance_song.ps1
 | replay leg (`-Replay`) | back to `YOUR SONGS`, reselect, second matched pair, second results screen |
 | clean exit | no `[FATAL]` in the run's log, and a `Title terminated` close |
 
-Screenshots come from [`scripts/capture_window.ps1`](../scripts/capture_window.ps1)
-and text from [`scripts/ocr_image.ps1`](../scripts/ocr_image.ps1), the same
-primitives [`scripts/drive_ui.ps1`](../scripts/drive_ui.ps1) uses.
+Screenshots come from [`scripts/capture_window.ps1`](../../scripts/capture_window.ps1)
+and text from [`scripts/ocr_image.ps1`](../../scripts/ocr_image.ps1), the same
+primitives [`scripts/drive_ui.ps1`](../../scripts/drive_ui.ps1) uses.
 
 ### Result (2026-09-20)
 
@@ -1347,8 +1346,8 @@ milestone.
 
 These are the interesting findings, not the plumbing. Three of them are also
 documented where a reader would look for them
-([docs/build-and-run.md](build-and-run.md) §4,
-[docs/known-issues.md](known-issues.md)).
+([docs/build-and-run.md](../build-and-run.md) §4,
+[docs/known-issues.md](../known-issues.md)).
 
 1. **A background process cannot screenshot the game window reliably.** The first
    version captured whatever happened to be foreground — a VS Code screenshot in
@@ -1411,8 +1410,8 @@ of on the author's judgement — in the close-out section below.
 The acceptance runs above proved the *route* and proved nothing about *timing*.
 Four bullets were still open; two of them were real measurement work and are done
 and passing below, and two were disposed of rather than deferred, on the author's
-call and with a date, in
-[`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md).
+call and with a date, as recorded under "The two bullets that were disposed of
+instead" below.
 
 ### Patch 0004: the traces that had to exist first
 
@@ -1421,7 +1420,7 @@ poll-rate line anywhere — the only frame-ish figure in a run is the payload
 overlay's textual `1694 KB / 75.1`, which needs a payload boot, and
 `XAudioSubmitRenderDriverFrame` appears in bursts of about ten lines per run
 instead of once per frame. So the measurement starts with patch 0004
-([`patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch`](../patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch),
+([`patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch`](../../patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch),
 three files, +52/−1), gated by the same `--log_level=trace` switch as the other
 local traces:
 
@@ -1442,7 +1441,7 @@ frame count against a song's length: **50.005 MHz** in the vsync-on run and
 
 ### The harness
 
-[`scripts/measure_pacing_input.ps1`](../scripts/measure_pacing_input.ps1) reuses
+[`scripts/measure_pacing_input.ps1`](../../scripts/measure_pacing_input.ps1) reuses
 `acceptance_song.ps1`'s OCR-gated route to reach gameplay, then, while the song
 plays, injects pad-A presses at three hold lengths (8 / 30 / 90 ms) every 12 s and
 records the wall-clock instant of every key-down and key-up. Each press samples the
@@ -1452,7 +1451,7 @@ copies the run's whole rotated log set next to the injection record, so
 `out/m5-pacing/<tag>/` holds `run.json`, `injections.json` and ~74 MB of
 `logs/*.log` — the evidence, not a summary of it.
 
-[`scripts/audit_pacing_input.ps1`](../scripts/audit_pacing_input.ps1) reduces those
+[`scripts/audit_pacing_input.ps1`](../../scripts/audit_pacing_input.ps1) reduces those
 logs to 17 named checks. `-SelfTest` synthesizes a healthy and a deliberately
 broken measurement and asserts that the verdicts differ, which is the check that
 the checks bite:
@@ -1551,7 +1550,7 @@ not as a result.
 ### Honest limits of this measurement
 
 Four of them, and the first three are now a row in
-[docs/known-issues.md](known-issues.md):
+[docs/known-issues.md](../known-issues.md):
 
 - **Every accepted run has one long stall** (~1174.9 ms `VdSwap` with vsync on,
   ~254 ms with vsync off) that is reported but not asserted on. An earlier
@@ -1577,8 +1576,8 @@ Four of them, and the first three are now a row in
 ### The two bullets that were disposed of instead
 
 Neither is a measurement, and neither is silent: both are marked disposed with the
-author's rationale in [`DECOMPILATION_PLAN.md`](../DECOMPILATION_PLAN.md), which is
-also why `prompts/05-complete-one-song.md` is `status: done` with the audio section
+author's rationale, which is also why `prompts/05-complete-one-song.md` was
+`status: done` with the audio section
 explicitly saying it is **unmeasured on purpose**:
 
 - **The Xenia draw comparison.** The Xenia build available here does not play
@@ -1597,7 +1596,7 @@ explicitly saying it is **unmeasured on purpose**:
 Three defects in the pinned SDK's codegen, all of them standing since Milestone 3
 and all of them paid for on every rebuild or every newly reached UI path. They are
 captured by patch
-[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch),
+[0005](../../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch),
 which touches `src/codegen/manifest.cpp`, `src/codegen/output_stamp.cpp`,
 `src/codegen/phase_gapfill.cpp`, `src/codegen/function_graph.cpp` and
 `include/rex/codegen/function_node.h`.
@@ -1750,10 +1749,10 @@ The window has always delivered mouse events — the SDK's `rex::ui::MouseEvent`
 carries buttons, motion and wheel, and its ImGui layer consumes them — but
 nothing turned them into pad input, because the only two drivers in
 `input_factory` hand the guest keys-as-a-pad or a real pad
-([button-mapping-plan.md](button-mapping-plan.md) §1.5). "The mouse should
+([button-mapping-plan.md](../plans/button-mapping-plan.md) §1.5). "The mouse should
 navigate the menus" is therefore a **third device**,
-[src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp), installed from
-`RbBlitzApp::OnPreSetup` ([src/rb_blitz_app.h](../src/rb_blitz_app.h:47)) — the
+[src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp), installed from
+`RbBlitzApp::OnPreSetup` ([src/rb_blitz_app.h](../../src/rb_blitz_app.h:47)) — the
 last moment before the runtime builds the input system out of `input_factory`.
 
 ### What it does
@@ -1801,9 +1800,9 @@ So the pulse became time. `GetDeviceState` EWMA-tracks the interval between its
 own calls (`kPollIntervalSmoothing = 0.125`) and converts the two new cvars
 `mouse_ui_press_ms` / `mouse_ui_release_ms` (both 40, ranges 1–1000 and 0–1000)
 into poll counts via `UiNavStepper::SetPulsePolls`
-([src/input/ui_nav.h](../src/input/ui_nav.h)), which refuses a press shorter than
+([src/input/ui_nav.h](../../src/input/ui_nav.h)), which refuses a press shorter than
 one poll however fast the machine polls. The stepper itself stays SDK-free and is
-pinned by [tests/ui_nav_tests.cpp](../tests/ui_nav_tests.cpp) — 80 checks, the
+pinned by [tests/ui_nav_tests.cpp](../../tests/ui_nav_tests.cpp) — 80 checks, the
 `ui_nav` `ctest` target, including the clamping and the `release = 0`
 back-to-back case.
 
@@ -1814,7 +1813,7 @@ desktop, so a real cursor and `SetForegroundWindow` were both unavailable.
 Everything below comes from a temporary harness that `PostMessage`s mouse messages
 into the game window and reads the result back with
 `PrintWindow(PW_RENDERFULLCONTENT)` plus
-[scripts/ocr_image.ps1](../scripts/ocr_image.ps1). Two properties of the SDK
+[scripts/ocr_image.ps1](../../scripts/ocr_image.ps1). Two properties of the SDK
 window fell out of it that anyone repeating this needs:
 
 - **A posted `WM_MOUSEMOVE`'s coordinates are not the delta.** The window computes
@@ -1870,7 +1869,7 @@ recommends.
 
 - **No committed scripted route for the mouse.** The harness was a session
   artifact and is gone, so mouse navigation sits in the same category as pad input
-  ([known-issues.md](known-issues.md)): verified, but re-verifiable only by
+  ([known-issues.md](../known-issues.md)): verified, but re-verifiable only by
   standing another injection harness back up. The recipe is the section above.
 - **The overlay and focus gates are reasoned, not exercised.** That travel is
   dropped while an overlay owns the pointer, and that a held button is released on
@@ -1907,7 +1906,7 @@ row is highlighted, so the *offset* between the pointer and the selection is not
 unknown, it is untouchable: a bridge that can only add the pointer's own motion to it
 cannot change it, and pointing at the row that is already lit moves the selection by
 exactly as much as pointing anywhere else. Nor is there a name to go looking for: the
-generated guest symbol table ([generated/default/rb_blitz_funcs.h](../generated/default/rb_blitz_funcs.h))
+generated guest symbol table ([generated/default/rb_blitz_funcs.h](../../generated/default/rb_blitz_funcs.h))
 declares 38,439 functions and every one is an auto-generated `sub_XXXXXXXX` except the
 entry point `xstart` and the compiler's own `__savegprlr_*`-style register helpers, so no
 menu, list or selection function is identified by anything but its address. The only
@@ -2057,3 +2056,90 @@ half a *32* px one, so changing the default silently recalibrated four cases.
   mouse is verified by hand and by the unit target, and re-verifying live means standing
   the injection harness back up.
 
+
+## Mouse navigation, third pass: the highlight is measured onto the pointer (2026-09-22)
+
+The first two passes left the mouse as *relative travel*: the driver counted the pointer's
+movement and turned the rows it added up to into left-stick presses. It was reported as
+"still way off and hacky" in three ways that are all the same complaint - the selection did
+not sit under the cursor, the rows it was away by grew with distance (the pitch is `mouse_ui_row_fraction`
+or it is nothing), and holding the pointer over an element made the selection *walk* to it,
+which is what a controller does and not what a mouse does.
+
+**The claim the first passes rested on was wrong.** "There is no frame readback" was
+recorded as a fact, and `rex::ui::Presenter::CaptureGuestOutput(RawImage&)` is exactly
+that: the last frame the guest handed to the presenter, as R8 G8 B8 X8, readable from the
+driver. It is what `mouse_ui_probe` was already using to write thumbnails. A guest's menus
+expose no list model and no hit test, but they do move their highlight, and that is enough:
+**the difference between the frame before a press and the frame after it holds the
+highlight twice**, once where it was and once where it went. Two rectangles, their centres
+and the pitch between them - which is the row the highlight is on, in the guest's own
+pixels, with no constant to be wrong.
+
+That is the whole design, and every part of it was measured against the running game
+rather than assumed:
+
+| Question | Answer, as measured |
+| --- | --- |
+| Where is the highlight? | The two bands of the difference between the frame before a press and the frame after it, paired by height, columns and the row grid ([src/input/nav_detect.h](../../src/input/nav_detect.h)) |
+| What is a row, in guest pixels? | Main menu **25.4** (27 client), HELP & OPTIONS **53**, AUDIO/VIDEO screens **56**, from the distance between the two band centres. Band *centres*, not tops: two labels of different heights put the tops half a height-difference apart, which is what read as 25 where 27 was expected |
+| How does a client pixel become a guest pixel? | The presenter's own letterbox: `scale = min(cw/1280, ch/720)`, centred, `offset = floor((client - content) / 2)`; 1360x768 gives scale 1.0625 and offset 1, and client 637 maps to guest 598 (`ComputeGuestImageMapping`) |
+| How long is a press? | A couple of the guest's frames, with 15 ms of slack - ~50 ms - timed from the rate the guest asks for the pad state at, floored at 60 Hz. The menus auto-repeat under a held stick (~one row per 275 ms, measured by holding the keyboard's left stick for 300 ms and watching exactly one row go by), so 50 ms carries about five times the headroom |
+| How long is the gap after it? | A couple more, ~50 ms: long enough that the guest's own frames read the stick as returned, short enough that a five-row hover costs half a second |
+| How does it know the pitch is a pitch? | A pair twice as far apart as the pitch already measured is two steps read as one, not a new pitch: taking it would double the tolerance the pointer's row is judged by, and the hover would stop a row short while the log said it had arrived. Measured live: one hover did exactly that, 26 px short, before the rule existed |
+
+**What the first live run got wrong, and what each fault was.**
+
+- **A settle phase that could not settle.** Waiting for a frame to be *drawn* before the
+  first press deadlocks on a menu that is not animating; a press can be measured against any
+  frame that was drawn before it, so there is nothing to wait for. Removed.
+- **A phase ended by the picture changing read an older press's change as its own.** On a
+  static menu, only the press's own move changes anything - but the frame that carries it
+  is read back a capture later, so the *next* press's phase ended on the *previous* move and
+  measured it a second time: a step measured twice followed by a press that measured
+  nothing, alternating. Both phases are now a fixed number of the guest's frames, which
+  cannot be confused about which press a change belongs to.
+- **A frame from before the last move.** After a refocus - the window minimized and
+  restored, which is what the live harness does and what a user alt-tabbing away and back
+  does - the newest frame the aligner held could be from before the previous hover's move,
+  and the first press's difference then spanned two moves. The pitch came out doubled and
+  the hover walked four rows into the end of a list that had not asked for it. The frame
+  thread now hands frames over while a hover is being decided whether or not they changed,
+  and a press is only made against a frame read within the last few of the guest's frames.
+- **A screen that changed under a still pointer was walked through.** Clicking a row opens
+  the next menu; the pointer is still over the row it clicked, which is not a row of the new
+  screen. The aligner kept its target, measured the new screen's rows, and stepped four rows
+  down a menu nobody had asked about. A detected screen change now blocks the aligner until
+  the pointer moves - which is also what a mouse does: the pointer asked for nothing new.
+
+**Verified live, per row, against the picture rather than the log.** The main menu's
+selection marker is its label turning blue on a yellow panel, so the row it is on can be
+read out of a screenshot independently of anything the driver says: for six hovers
+(PLAY, LEADERBOARDS, ACHIEVEMENTS, HELP & OPTIONS, MOD SETTINGS, EXIT GAME, approached from
+different rows and in both directions) the blue-label row was the pointer's row every time,
+with one press per row crossed, and `H outcome=aligned ... highlight=624 target=624` agreeing
+in the log. A click on HELP & OPTIONS opened that screen, and the new screen's selection
+stayed where it was until the pointer moved. A second hover 3 px from the first, inside the
+same row, pressed nothing at all.
+
+The unit target grew to **621 checks** ([tests/ui_nav_tests.cpp](../../tests/ui_nav_tests.cpp)):
+the detector against synthetic bands, the letterbox mapping against the presenter's own
+numbers, and the aligner driven with a fake screen that moves one row per press *edge* -
+which is what the guest does, and what a 300 ms hold moving exactly one row confirmed. The
+fake screen doubles a press on request, which is the case that pins the doubled-pitch rule.
+
+### What the third pass does not cover
+
+- **Only the main menu and HELP & OPTIONS were measured live.** Their pitches are 25.4 and
+  53 guest pixels; the AUDIO/VIDEO screens' 56 comes from the corpus frame pair, not from a
+  live hover, and the song list - the screen the wheel existed for - was never hovered. The
+  wheel is gone with this pass: the selection follows the pointer's position now, so a wheel
+  has nothing to add that being over a row does not say better, and scrolling lists would
+  want a different answer (a pointer held at an edge, not a wheel).
+- **A screen whose rows a difference cannot read is given up on.** If a menu's highlight
+  does not move when the stick does - a screen that clamps, or one whose marker is a
+  full-screen animated thing - the aligner presses once per attempt, finds nothing, and stops
+  until the pointer moves somewhere else. That is the correct failure, but it is a failure.
+- **The overlay and focus gates are still reasoned, not exercised**, as in the passes before
+  this one; the live harness refocuses the window before every hover because a background
+  window is ignored by the guest, which is what the earlier pass already recorded.

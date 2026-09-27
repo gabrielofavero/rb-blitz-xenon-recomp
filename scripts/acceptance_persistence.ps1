@@ -5,7 +5,7 @@
 # title against a *fresh* --user_data_root under out/, so what is checked is our
 # storage layer and not whatever the machine's Documents\rb_blitz happens to
 # hold. That isolation only works because the launcher's data-root overrides are
-# honoured now (they used to be discarded silently - see docs/bringup-log.md,
+# honoured now (they used to be discarded silently - see docs/history/bringup-log.md,
 # 2026-09-20, and the regression test tests/path_policy_tests.cpp).
 #
 # Cases, in order, sharing one writable root:

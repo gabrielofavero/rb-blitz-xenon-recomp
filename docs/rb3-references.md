@@ -7,10 +7,8 @@ ReXGlue SDK v0.10.0.2-dev).*
 Rock Band Blitz and Rock Band 3 are the same engine. That means a lot of the
 work already done for RB3 transfers to us **as knowledge**, even though the
 addresses never do. This document is the durable output of a survey of the two
-external projects, and the source for the "Reference leads" sections added to
-[prompts/04](../prompts/04-menus-content-input-saves.md),
-[prompts/05](../prompts/05-complete-one-song.md) and
-[prompts/06](../prompts/06-reproducible-release.md).
+external projects; the leads that name an action are tracked in
+[backlog.md](backlog.md).
 
 It is deliberately a catalogue of *techniques and known-answer checks*, not a
 plan: nothing here changes our milestone order.
@@ -363,10 +361,10 @@ origin. An empty table is the correct state until something is actually ported.
 
 | Section | Goes to |
 | --- | --- |
-| §1–§3 (hook mechanism, names, midasm) | [prompts/04](../prompts/04-menus-content-input-saves.md) |
-| §4 (port catalogue) | [prompts/04](../prompts/04-menus-content-input-saves.md), [05](../prompts/05-complete-one-song.md) |
-| §5–§6 (RB3DX cross-reference) | [prompts/04](../prompts/04-menus-content-input-saves.md) (groups 2–4), [05](../prompts/05-complete-one-song.md) (6–9) |
-| §7.1 (audio verification) | [prompts/05](../prompts/05-complete-one-song.md) |
-| §7.3, §8 (methodology, config gaps) | [prompts/06](../prompts/06-reproducible-release.md), [README](../prompts/README.md) |
-| §9 (borrowing rules) | [README](../README.md) (license), [prompts/06](../prompts/06-reproducible-release.md) (distribution hygiene) |
+| §1–§3 (hook mechanism, names, midasm) | [backlog.md](backlog.md) — "Engine knowledge still to port" |
+| §4 (port catalogue) | [backlog.md](backlog.md) |
+| §5–§6 (RB3DX cross-reference) | [backlog.md](backlog.md) (groups 2–4 and 6–9) |
+| §7.1 (audio verification) | [backlog.md](backlog.md) — audio-verify methodology |
+| §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) |
+| §9 (borrowing rules) | [README](../README.md) (license), [backlog.md](backlog.md) (distribution hygiene) |
 | §0 (Rock Band Blitz Ultimate row) | [ultimate-compat.md](ultimate-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 (a different project from this one) |

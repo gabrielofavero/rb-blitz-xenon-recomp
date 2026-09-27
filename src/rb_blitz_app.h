@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 
 #include <rex/cvar.h>
@@ -14,6 +15,7 @@
 #include <rex/logging/macros.h>
 #include <rex/rex_app.h>
 #include <rex/system/flags.h>
+#include <rex/system/interfaces/graphics.h>
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
@@ -44,7 +46,16 @@ class RbBlitzApp : public rex::ReXApp {
     // The runtime reads input_factory the moment this hook returns, and the
     // input system is built from it, so this is the point where an extra input
     // device can still be added. See src/input/mouse_ui.h.
-    rb_blitz::input::InstallMouseUiNavigation(config);
+    //
+    // The presenter is the only handle on the guest's own frames, and it does
+    // not exist yet here, so it is handed over as a lazy lookup instead of a
+    // pointer. Runtime::graphics_system() is the public route to it;
+    // Window::presenter() is protected.
+    rb_blitz::input::InstallMouseUiNavigation(config, [this] {
+      rex::Runtime* runtime = this->runtime();
+      rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
+      return graphics ? graphics->presenter() : nullptr;
+    });
   }
 
   // Path policy. Called before logging is initialized, so keep this silent.
@@ -93,8 +104,7 @@ class RbBlitzApp : public rex::ReXApp {
   // console that owns no licence", and no rb_blitz.toml is shipped - by design,
   // see installer/tools/make_payload.ps1 - so an installed build boots the full
   // game as a trial. Playing the user's own dump is not that situation, and the
-  // reference baseline boots with a licence enabled
-  // (docs/baselines/xenia-canary-80679bc.md).
+  // reference baseline boots with a licence enabled.
   //
   // Called after the config file, the REX_* environment and the command line
   // have been applied, and only writes when none of them named a mask, so

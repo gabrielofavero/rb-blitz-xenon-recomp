@@ -178,7 +178,7 @@ Two things fall out of that naming, and both are load-bearing for this plan:
    measured. An index that carries *both* families (index 2 does) is anomalous, so the
    index ↔ displayed-name mapping is **not yet established** and is a task for IM0.
 
-Finally, the sibling fact from [rb3-references.md](./rb3-references.md): the Rock Band 3 ports
+Finally, the sibling fact from [rb3-references.md](../rb3-references.md): the Rock Band 3 ports
 remapped controls by editing a data file, `config/joypad.dta`, whose `button_meanings` block maps
 actions to buttons (`:274-276` **[tree]**), and a missing block there caused a silent total input
 failure. **Blitz has no such file.** There is no `joypad` entry and no `.dta` mapping table anywhere
@@ -203,7 +203,7 @@ any physical device ──► [ drivers: keyboard→pad, pad→pad, mouse→pad 
 ```
 
 The third driver is the mouse menu-navigation device added 2026-09-22
-([src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp), [build-and-run.md](./build-and-run.md) §4):
+([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp), [build-and-run.md](../build-and-run.md) §4):
 pointer travel into discrete left-stick presses, LMB/RMB into A/B. Same shape as the keyboard driver,
 so it changes nothing below — it is one more producer of pad fields, not a new kind of input.
 
@@ -305,7 +305,7 @@ Better still, **this repository already patches exactly this function.** Patch
 handed** (`:123-129` in the patched file) **[tree]**. That means the remap layer's verification
 method already exists: exercise an input, read the logged button word, assert the bit. No
 screenshots, no OCR — the same style of log-derived verdict the project already uses for pacing
-([known-issues.md](./known-issues.md) `:17`).
+([known-issues.md](../known-issues.md) `:17`).
 
 Also present in the same file: `XamInputGetKeystroke_entry` (`:152`). If any guest text-entry or
 menu path reads keystrokes rather than pad state, a state-only remap has a hole there — an IM0 task,
@@ -348,12 +348,12 @@ Reused wholesale from [av-settings-plan.md](./av-settings-plan.md) §2.3 **[tree
 
 | Technique | Source | Why it matters here |
 | --- | --- | --- |
-| `ControllerHook` at `0x825320B4` | [rb3-references.md](./rb3-references.md) `:155` — a midafter-instruction hook on `r11`, catalogued but **not implemented** | the one existing candidate for observing guest controller code; relevant to H5 (reading `last_map`), not needed for H1 |
+| `ControllerHook` at `0x825320B4` | [rb3-references.md](../rb3-references.md) `:155` — a midafter-instruction hook on `r11`, catalogued but **not implemented** | the one existing candidate for observing guest controller code; relevant to H5 (reading `last_map`), not needed for H1 |
 | `button_meanings` / `config/joypad.dta` | `:274-276` | the RB3 approach, **absent from Blitz** (§1.4) — recorded so the plan does not try to borrow it |
 | A git-tracked DTA overlay shadowing extracted assets on read | `:274` | a general "override shipped data" mechanism; would apply to H4, and is subject to checksum validation |
-| `mnk_mode` in the build-tree-local profile | `:318`, plus [build-and-run.md](./build-and-run.md) `:182-183`, `:199` | the precedent for *where* this feature's configuration lives: `out/build/<preset>/rb_blitz.toml`, gitignored |
-| Arrow keys are the right stick in this title | [build-and-run.md](./build-and-run.md) `:386` | matches §1.3's observation that menus use the left stick, and constrains which sources are worth binding |
-| Pad input is the one hand-verified item | [known-issues.md](./known-issues.md) `:18` | every scripted route injects **keys**; a custom pad mapping has no scripted coverage today |
+| `mnk_mode` in the build-tree-local profile | `:318`, plus [build-and-run.md](../build-and-run.md) `:182-183`, `:199` | the precedent for *where* this feature's configuration lives: `out/build/<preset>/rb_blitz.toml`, gitignored |
+| Arrow keys are the right stick in this title | [build-and-run.md](../build-and-run.md) `:386` | matches §1.3's observation that menus use the left stick, and constrains which sources are worth binding |
+| Pad input is the one hand-verified item | [known-issues.md](../known-issues.md) `:18` | every scripted route injects **keys**; a custom pad mapping has no scripted coverage today |
 
 ---
 
@@ -533,7 +533,7 @@ Five families. H1 is where the value is; the rest are alternatives or later refi
 | **H2** | Extend `keybind_*` only | Add a capture UI that writes the existing 25 cvars, and add pad tokens to the same grammar. | **Low** | **Necessary, not sufficient.** Keyboard rebinding becomes real almost immediately, but pad buttons stay hard-coded (§2.4), so "either controller or keyboard" fails for controllers. Fold into H1 as its keyboard half. |
 | **H3** | SDL-level remap | Use `hid_mappings_file` / a GameControllerDB to reassign hardware names. | Low | **Does not solve it.** It renames raw hardware into SDL's model; the guest still receives the fixed Xbox layout, and it is SDL-only. Useful only for exotic pads that are mis-detected today. |
 | **H4** | New **guest-side preset** | Author `controller_preset_4`, `set_4.grp`, `smash_*_4.lbl`, a locale token, a glyph atlas, and edit `UpdateControllerLayout*.flow` inside the shipped archive. | **High** | The only route to a truly *guest-visible* custom preset. Needs archive editing, the checksum story from §2.8, and tooling this project does not have — and it would still leave capture to us. Gate on IM0; expect to defer. |
-| **H5** | Read/write the guest's `last_map` | Hook or patch the guest so the resident preset index can be read (and possibly set), making the host panel preset-aware. | **Medium, blocked on addresses** | A refinement, not a foundation. The unblocking workflow is routine here: an unregistered address surfaces as `[FATAL] Call to invalid or unregistered function at guest address 0x…`, fixed by adding `[functions."0x…"]` to [config/functions.toml](../config/functions.toml) and re-running codegen (consumed via `rb_blitz_manifest.toml`'s `includes`). `ControllerHook 0x825320B4` ([rb3-references.md](./rb3-references.md) `:155`) is a catalogued starting point. |
+| **H5** | Read/write the guest's `last_map` | Hook or patch the guest so the resident preset index can be read (and possibly set), making the host panel preset-aware. | **Medium, blocked on addresses** | A refinement, not a foundation. The unblocking workflow is routine here: an unregistered address surfaces as `[FATAL] Call to invalid or unregistered function at guest address 0x…`, fixed by adding `[functions."0x…"]` to [config/functions.toml](../../config/functions.toml) and re-running codegen (consumed via `rb_blitz_manifest.toml`'s `includes`). `ControllerHook 0x825320B4` ([rb3-references.md](../rb3-references.md) `:155`) is a catalogued starting point. |
 
 ### 4.1 Recommendation
 
@@ -590,7 +590,7 @@ Each milestone has a kill gate. A failed gate means **stop and report**, not "pu
    (`controller_preset_0..3`, `smash_*_0..3`, no index 4) and by the period-4 cycle.
 7. **Tooling prerequisite: fix `drive_ui.ps1`'s D-pad defect.** Its `Send-Key` uses only the
    virtual-key map, so `dpad_up/down/left/right` are sent **without Shift** — bit-identical to the
-   bare arrows, which are the *right stick* in this title ([build-and-run.md](./build-and-run.md)
+   bare arrows, which are the *right stick* in this title ([build-and-run.md](../build-and-run.md)
    `:386`). Until that is fixed (or a new action is added), no scripted test can exercise a D-pad
    binding, so every D-pad row would be untestable by construction. Note also that `-Actions` takes
    **one comma-joined string**, not an array.
@@ -598,8 +598,8 @@ Each milestone has a kill gate. A failed gate means **stop and report**, not "pu
 ### IM1 — The remap core, headless
 
 Deliverable: a repo-owned module (e.g. `src/input/remap.{h,cpp}`) plus a `remap_*` cvar family, wired
-in at the choke point, with unit tests in [tests/](../tests) alongside the four existing host-side
-targets ([known-issues.md](./known-issues.md) `:18`).
+in at the choke point, with unit tests in [tests/](../../tests) alongside the four existing host-side
+targets ([known-issues.md](../known-issues.md) `:18`).
 
 Acceptance, in the project's own idiom — both from the log, not from screenshots:
 
@@ -624,7 +624,7 @@ conflict detection (§3.3) and the `Save to config` path (§3.5).
 
 Verify with `scripts/drive_ui.ps1` for keyboard bindings and with the hand-pad procedure for pad
 bindings — noting that pad input is currently the one hand-verified item in this project
-([known-issues.md](./known-issues.md) `:18`), which IM1's log assertion is intended to change.
+([known-issues.md](../known-issues.md) `:18`), which IM1's log assertion is intended to change.
 
 ### IM3 — The panel
 
@@ -658,10 +658,11 @@ deferred; H1 delivers the feature without it.
 - **Mouse-look or mouse-as-stick rebinding.** `mnk_mouse`/`mnk_sensitivity` (`:27`, `:30`) stay as
   they are; no axis tokens in v1 (§3.2). This is a statement about the **rebinding grammar** — an
   analog mouse axis bound to a stick, with a sensitivity curve — not about the mouse reaching the
-  guest at all: since 2026-09-22 the mouse is already a third input device that quantizes pointer
-  travel into discrete left-stick *presses* for the menus (`mouse_ui_row_fraction`, 0.0417 = one row
-  per 32 px at 768, LMB = A, RMB = B;
-  [src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp), [build-and-run.md](./build-and-run.md) §4).
+  guest at all: since 2026-09-22 the mouse is already a third input device that puts the menus'
+  highlight on the row the pointer is over by measuring the guest's own frames, with the older
+  relative model (`mouse_ui_row_fraction`, 0.0417 = one row per 32 px at 768) as the fallback when
+  frames cannot be read; LMB = A, RMB = B
+  ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp), [build-and-run.md](../build-and-run.md) §4).
   The two do not overlap and are not alternatives: the device never captures the cursor or produces a
   continuous axis, and v1's grammar still has no token that could bind one.
 - **Fixing the `drive_ui.ps1` D-pad defect as a feature.** It is a one-line test-tooling correction
@@ -669,7 +670,7 @@ deferred; H1 delivers the feature without it.
 - **Games' other input surfaces** — `XamInputGetKeystroke` (`xam_input.cpp:152`) is investigated in
   IM0 and only extended if a real path needs it.
 - **Multiple controller backends, Linux/macOS/ARM**, per the project's existing deferral
-  (`DECOMPILATION_PLAN.md`) — this plan assumes the two backends that exist (`input_backend`,
+  (`../backlog.md`) — this plan assumes the two backends that exist (`input_backend`,
   `input_system.cpp:27`).
 
 ---
@@ -679,7 +680,7 @@ deferred; H1 delivers the feature without it.
 | # | Risk | Impact | Mitigation |
 | --- | --- | --- | --- |
 | R1 | The guest may consume the event we just captured | capture feels broken; a press does two things | IM0 task 2; explicit suppression window inside IM1 if needed (§4.2) |
-| R2 | Keyboard input needs a genuine focus transition, and the driver clears state on focus loss | bindings appear dead after alt-tabbing | already documented as a standing limit ([known-issues.md](./known-issues.md) `:17`, [bringup-log.md](./bringup-log.md) `:472`, `:1508-1509`); restate it in the feature's documentation rather than fighting it |
+| R2 | Keyboard input needs a genuine focus transition, and the driver clears state on focus loss | bindings appear dead after alt-tabbing | already documented as a standing limit ([known-issues.md](../known-issues.md) `:17`, [bringup-log.md](../history/bringup-log.md) `:472`, `:1508-1509`); restate it in the feature's documentation rather than fighting it |
 | R3 | The guest's active preset is invisible to us | panel could mislead about which action set is in force | show the *modelled-on* set only; add the guest's value only if IM0 task 3 succeeds (§3.7) |
 | R4 | Two devices, `SlotAssignment`, and a synthetic keyboard pad all feeding users | a second player's profile could alter user 0's input | profiles keyed per device (§3.4); verify routing per `input_system.cpp:36`'s synthetic-device note |
 | R5 | Analog sources as buttons can stick or chatter | continuous unintended input | threshold **plus** hysteresis, and never bind a resting axis (§3.3) |
@@ -696,7 +697,7 @@ deferred; H1 delivers the feature without it.
 1. Does mutating the pad state after `is->GetState(...)` actually change guest behaviour? (§5 IM0.1 —
    the plan's load-bearing assumption.)
 2. Does the guest keep polling and consuming input while a host dialog is open? (§4.2, shared with
-   the AV plan.) At ~402 polls/s and a 4.10 ms median poll gap ([bringup-log.md](./bringup-log.md)),
+   the AV plan.) At ~402 polls/s and a 4.10 ms median poll gap ([bringup-log.md](../history/bringup-log.md)),
    there is no quiet window to hide in.
 3. Can `last_map` be read — and is it an index 0–3? Which index is `Default`?
 4. Is the guest's preset persisted across a relaunch, and if so, where? The in-session round trip is
@@ -707,7 +708,7 @@ deferred; H1 delivers the feature without it.
 6. Do the four presets map one-to-one onto `controller_preset_0..3` in display order, and why does
    index 2 carry both split and unified track-switch labels? (§1.4)
 7. Which guest user does a second pad feed under `SlotAssignment`, and does the guest read users
-   above 0 at all? ([bringup-log.md](./bringup-log.md) records 191 247 non-user-0 polls in one run.)
+   above 0 at all? ([bringup-log.md](../history/bringup-log.md) records 191 247 non-user-0 polls in one run.)
 8. Is the D-pad a *distinct* logical control in this title, or unused? Menus use the left stick and
    the right stick is inert in them; the D-pad's role is untested **because the test script cannot
    currently press it distinctly** (R7).
@@ -750,7 +751,7 @@ deferred; H1 delivers the feature without it.
   (`OnCreateDialogs` `:108`).
 - `patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch` — the `XamInputGetState`
   button-word trace that IM1's acceptance rests on; `patches/README.md` and
-  [patches/](../patches) for the 0001–0005 delivery convention, applied by
+  [patches/](../../patches) for the 0001–0005 delivery convention, applied by
   `scripts/apply_sdk_patches.ps1`.
 - `src/rb_blitz_app.h` (`:36`, `:50`, `:73` — `OnCreateDialogs` not yet overridden),
   `src/hooks/ultimate.cpp:100-109` (this repo's own cvar definitions — the pattern to copy).
@@ -763,13 +764,13 @@ deferred; H1 delivers the feature without it.
   `:199`), "arrow keys are the right stick" (`:386`).
 - `docs/known-issues.md` — the four standing frame-pacing/input limits incl. the focus dependency
   (`:17`), pad input as the one hand-verified item and the test/acceptance inventory (`:18`).
-- `docs/bringup-log.md` — "the MnK driver needs a genuine focus transition" (`:472`), the
+- `../history/bringup-log.md` — "the MnK driver needs a genuine focus transition" (`:472`), the
   `OnLostFocus`/`GetAsyncKeyState` root cause (`:1508-1509`), poll rate and latency figures.
-- `docs/av-settings-plan.md` — shared settings/host surface, §2.3 (overlay, dialogs), §4.2 (input
+- `av-settings-plan.md` — shared settings/host surface, §2.3 (overlay, dialogs), §4.2 (input
   arbitration), §1.2 and §2.6 (the guest container and DTA prior art).
 - `docs/ultimate-compat.md` — the project's posture on payloads and derived content (relevant only to
   H4).
-- `DECOMPILATION_PLAN.md` — milestone framing, the deferred-items list, and the existing
+- `../backlog.md` — milestone framing, the deferred-items list, and the existing
   "multiple controller backends and keyboard bindings" deferral.
 
 **Observed from the running build [cited]**

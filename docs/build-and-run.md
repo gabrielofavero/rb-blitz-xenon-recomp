@@ -1,7 +1,7 @@
 # Build, run, and capture a log
 
 How to turn a source change into a running `rb_blitz.exe`, and how to hand back
-the log excerpt that blocker entries in [bringup-log.md](./bringup-log.md) need.
+the log excerpt that blocker entries in [bringup-log.md](history/bringup-log.md) need.
 
 Everything below is PowerShell, run from the repository root unless noted.
 
@@ -41,7 +41,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.
 2. **`apply_sdk_patches.ps1`** applies [patches/rexglue-sdk/](../patches/rexglue-sdk)
    to the pinned checkout — currently the log-once fix for the "Too few processor
    cores" warning, and the 32-bit fixed-point texture support that the note
-   highway needs ([bringup-log.md](bringup-log.md) B-010). It prints each patch as
+   highway needs ([bringup-log.md](history/bringup-log.md) B-010). It prints each patch as
    *already applied*, *applied now*, or *failed* (exit 1, with guidance). `-Check`
    reports without writing. It also audits the SDK work tree: any edit not covered
    by a patch is listed as `UNEXPECTED` and exits 1.
@@ -426,71 +426,84 @@ what make that isolation safe to run on a machine with real saves; they are hono
 as of 2026-09-20, before which they were silently discarded
 ([docs/known-issues.md](known-issues.md)).
 
-### Mouse navigation (menus only), and its four cvars
+### Mouse navigation (menus only), and its cvars
 
-The mouse is a **third input device**, not a pointer: moving it moves the same row
-highlight a pad moves, and the buttons *are* A and B. It is on by default, needs no
-setup, and announces itself once per boot, twice — once when the window appears, with
-the row it computed for that size, and once when the driver is installed:
+The mouse is a **third input device**, not a pointer: the row the pointer rests on is
+the row the highlight is put on, and the buttons *are* A and B. It is on by default,
+needs no setup, and announces itself once per boot, twice — once when the window
+appears, with the row it computed for that size, and once when the driver is installed:
 
 ```text
-[info] [core] [t14740] mouse_ui: a menu row is 32 px at 1360x768
-[info] [core] [t14740] mouse_ui: the mouse navigates the menus (a row of travel per 0.0417 of the window's height, 24 + 24 ms per step, --no-mouse_ui_nav to disable)
+[info] [core] [t14740] mouse_ui: a menu row is 32 px on a 1360x768 window (fallback pitch), hover alignment true, guest frames at 5 Hz
+[info] [core] [t14740] mouse_ui: the mouse navigates the menus (hover alignment true, a row of travel per 0.0417 of the window's height as a fallback, --no-mouse_ui_nav to disable)
 ```
 
 | Cvar | Default | Range | Meaning |
 | --- | --- | --- | --- |
 | `mouse_ui_nav` | `true` | flag | the whole device; `--no-mouse_ui_nav` (or `--mouse_ui_nav=false`) makes the driver enumerate no device at all |
-| `mouse_ui_row_fraction` | 0.0417 | 0.01–0.25 | pointer travel that moves the selection by one row, as a fraction of the window's height — 32 px at 768 |
-| `mouse_ui_press_ms` | 24 | 1–1000 | how long one step holds the stick |
-| `mouse_ui_release_ms` | 24 | 0–1000 | the gap between two steps |
+| `mouse_ui_hover` | `true` | flag | hover alignment: the highlight follows the row the pointer is over, by measuring the guest's own frames |
+| `mouse_ui_hover_delay_ms` | 80 | 0–2000 | how long the pointer rests before the selection follows it; shorter than a deliberate hover, longer than the gaps inside one movement |
+| `mouse_ui_idle_hz` | 5 | 0.1–60 | how often the guest's frame is read while nothing is being aligned, for spotting a screen change and for the fallback pitch |
+| `mouse_ui_row_fraction` | 0.0417 | 0.01–0.25 | pointer travel that moves the selection by one row in the fallback path, as a fraction of the window's height — 32 px at 768 |
+| `mouse_ui_press_ms` | 24 | 1–1000 | how long one step of the fallback path holds the stick |
+| `mouse_ui_release_ms` | 24 | 0–1000 | the gap between two steps of the fallback path |
+| `mouse_ui_hover_log` | `false` | flag | write `out/mouse-probe/guestframes.log`: one line per press and one per hover, for measuring a screen |
+| `mouse_ui_probe` | `false` | flag | the same file, with one line and an ASCII thumbnail per *changed* frame |
+| `mouse_ui_probe_path` | `out/mouse-probe/guestframes.log` | path | where both of the above write |
+| `mouse_ui_probe_thumb_every` | 10 | 0–1000 | thumbnail every Nth frame in the probe log; 0 is none |
 
 Like every other cvar they come from the command line or `rb_blitz.toml` (§2), and
 there is no runtime console, so changing one means a relaunch:
 
 ```powershell
-.\rb_blitz.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game --mouse_ui_row_fraction=0.125
+.\rb_blitz.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game --mouse_ui_hover_log=true
 ```
 
-The row is a fraction rather than a pixel count because the guest's rows are a
-fraction of its own screen, so the same value keeps the same feel at any window size.
-**It is a compromise no single number can settle**, because each screen spaces its rows
-differently — measured on a 1360×768 window: the main menu 27 px, MOD SETTINGS 40 px,
-and the song list 96 px per *selectable* row (48 px visually, with every second row an
-artist heading the selection skips over), with the AUDIO/VIDEO screen's ~56 px coming
-from the [AV bring-up](av-settings-plan.md)'s frame diffs. 0.0417 (32 px) is the menu
-side of that range, since the menus are the screens driven by the pointer; the 96 px song
-list is the case for the wheel instead, which is one detent per row on *every* screen with
-no arithmetic to be wrong (`--mouse_ui_row_fraction=0.125` makes the pointer exact there
-too).
+**Hover alignment is measured, not guessed.** The guest exposes no list model and no hit
+test, but the presenter can hand the guest's own last frame back
+(`rex::ui::Presenter::CaptureGuestOutput`), and that frame is enough: a menu step *moves*
+the highlight, so the difference between the frame before the press and the frame after it
+holds the highlight twice — where it was and where it went. From that pair
+([src/input/nav_detect.h](../src/input/nav_detect.h)) come the row pitch and the row the
+highlight is on, both in guest pixels; the pointer is mapped into the same pixels through
+the presenter's own letterbox geometry ([src/input/ui_nav.h](../src/input/ui_nav.h),
+`ComputeGuestImageMapping`), and the left stick is then deflected one row at a time until
+the measured row is the pointer's row. So the highlight lands **on** the row under the
+pointer rather than a fixed distance from wherever it started, and screens whose rows are
+spaced differently need no per-screen constant: the main menu's 26-27 px and the
+HELP & OPTIONS screen's 53 px were both measured and both landed exactly.
 
-Turning it off is all-or-nothing, and the install line above is *not* a sign it is on:
-the installer logs either way, and the cvar decides whether the driver offers a device.
-With `--no-mouse_ui_nav` (or `--mouse_ui_nav=false`) a boot ignores clicks completely —
-the title sits on "PRESS A TO START" however many times it is clicked — because LMB = A is
-this device's own binding, not something the keyboard emulation supplies.
+Three properties of that loop are what make it behave like a native menu rather than a
+controller:
 
-**The pointer adds travel; it never jumps.** The guest exposes no list model and no way
-to read a frame back, so "put the highlight on the row under the cursor" cannot be
-implemented host-side. What the driver does instead is turn the *cumulative* distance the
-pointer has moved into `round(distance / row)` presses and keep the fraction of a row it
-rounded away as a running remainder, so no travel is invented (a 0.4-row move moves
-nothing) and none is lost (the next 0.6 of a row completes it). Two consequences follow
-directly from that, and both were the first bug reports:
+- **A press lasts a couple of the guest's own frames** (measured from how often the guest
+  asks for the pad state, floored at 60 Hz) and the gap after it lasts a couple more, so a
+  press is always seen and never held long enough to auto-repeat. The menus were measured
+  to be free of repeats up to a third of a second, so 50 ms carries about six times the
+  headroom.
+- **A press is measured against a frame read while the pointer was resting**, never against
+  one from before the last move the guest made — otherwise one press's difference holds two
+  moves, the pitch comes out doubled, and the hover stops a row short of the pointer while
+  the log insists it arrived.
+- **A screen that changes under a still pointer is left alone.** A click that opens a menu
+  leaves the pointer over a row of a screen that is gone; the new screen's selection is not
+  the pointer's to move until the pointer moves.
 
-- **Clicks wait for the walk.** A click on a row the pointer reached by moving would
-  otherwise fire A *before* the queued presses had drained, activating the row the
-  highlight was on when the button went down. `UiClickPulser` holds the button until the
-  queue is empty, which is why A lands where the hand stopped.
-- **Error is relative, not absolute.** Precision is exact on a screen whose pitch matches
-  the cvar and drifts with distance on one that does not (the 96 px song list), because
-  every press is a fixed fraction of a row rather than a distance to a target.
+The pointer falling back to travel: with `--no-mouse_ui_hover`, or on a guest whose frames
+cannot be read back (no presenter, or a resized window with no guest size yet), the driver
+is the older relative model — cumulative pointer travel turned into
+`round(distance / row)` presses, with the fraction of a row carried forward. It is exact on
+a screen whose pitch matches the cvar and drifts with distance on one that does not (the
+song list's selectable rows are 96 px apart), which is what the measured path exists to
+avoid. The 24 ms default is not arbitrary: the guest's menus **auto-repeat** under a held
+stick (one extra row per ~275 ms), so a long press overshoots, while a press shorter than
+the guest's own frame (~17 ms) is never seen.
 
-The 24 ms default is not arbitrary and should not be raised casually: the guest's
-menus **auto-repeat** under a held stick (one extra row per ~275 ms), so a long press
-overshoots, while a press shorter than the guest's own frame (~17 ms) is never seen —
-and the driver converts the milliseconds into polls at the interval it measures from
-its own call site, so neither mistake is machine-specific.
+**Clicks wait for the alignment.** A click on a row the pointer has just moved to must not
+fire A before the highlight has arrived, or it activates the row the selection was on when
+the button went down. `UiClickPulser` holds the button until nothing is in flight, which is
+why A lands where the hand is — and why clicking a row the pointer was already resting on
+is instant.
 
 **The game window has to be the foreground window** for any of this to work — and for the
 keyboard driver too, which is easy to confuse with "the mouse is broken". Both the runtime
@@ -498,10 +511,11 @@ and this driver gate on real activation, so while the window is unfocused every 
 dropped and a menu that ignores both the mouse *and* the arrow keys is telling you the
 window is not really in front, not that navigation is off. Clicking the window is the fix.
 
-The standing limits of the device (menus only, travel rather than a teleport, no visible
-cursor, travel dropped while an overlay owns the pointer, and the foreground requirement
-above) are in [known-issues.md](known-issues.md); the measurements behind the defaults are
-in [bringup-log.md](bringup-log.md), in the two "Mouse navigation" sections.
+The standing limits of the device (menus only, no visible cursor, travel dropped while an
+overlay owns the pointer, and the foreground requirement above) are in
+[known-issues.md](known-issues.md); the measurements behind the defaults — the per-screen
+pitches, the pulse widths, the letterbox mapping — are in
+[bringup-log.md](history/bringup-log.md), in the "Mouse navigation" sections.
 
 ## 5. What a good run looks like (B-009, music)
 
@@ -531,7 +545,7 @@ guest XeKeys:   out <32 hex chars> |<ascii>|
   obscured table entry was installed (`+0x…` is the entry offset, so `+0x0` for a
   MOGG version of 12/13, `+0x10` for 14, `+0x20` for 15, `+0x30` for 16 — the
   version→index mapping is in
-  [bringup-log.md](./bringup-log.md#b-009-music-never-plays--xekeyssetkeyxekeysaescbc-were-no-op-stubs));
+  [bringup-log.md](history/bringup-log.md#b-009-music-never-plays--xekeyssetkeyxekeysaescbc-were-no-op-stubs));
 - the `in` block echoes those same obscured table bytes (the dump is
   `min(inp_size, 32)` bytes, so 16 here), making it a second, independent
   confirmation that the right entry and slot are in play;

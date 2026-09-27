@@ -7,7 +7,7 @@
 # never disagree about what they are installing.
 #
 # Keep this file content-free: identifiers, versions, URLs, sizes and hashes
-# only. See ../README.md and ../../prompts/06-reproducible-release.md for the
+# only. See ../README.md and ../../docs/backlog.md for the
 # distribution rules the release has to satisfy.
 
 schema_version = 1

@@ -1,7 +1,7 @@
 # Vanilla vs Rock Band Blitz Ultimate — content-variant policy and install
 
 Policy decided 2026-09-19, **implemented and verified 2026-09-20**
-([bringup-log.md](bringup-log.md) B-012). The drag-and-drop install works: the
+([bringup-log.md](history/bringup-log.md) B-012). The drag-and-drop install works: the
 payload folder is dropped next to the retail game data and the same
 `rb_blitz.exe` boots either variant.
 
@@ -320,7 +320,7 @@ rb_blitz.exe --game_data_root=<game root>
 | The mod's own settings files are absent | `game:\ulti_settings.dta`, `game:\ulti_settings.ini` and `game:\scores` are requested and missing (`0xc000000f`); the guest tolerates all three. If a future release needs them, they are user-supplied content, not something we ship. | §7 |
 | Fingerprinting | The gate describes `default.xex` in the data root. Because an installed payload is a *separate directory*, the root's identity is unchanged (the "game data identity" line reports the same 9,023,488-byte / `e2195d62…` image on every route). Replacing the root's `default.xex` would change it: the build gate fails closed and can be relaxed with `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, while the boot-time check only warns. | [known-issues.md](known-issues.md), [build-and-run.md](build-and-run.md) §3 |
 | Menu/input data is replaced | The payload ships its own `_ark/ui/…` and `config` data; a missing or renamed DTA block can silently kill every menu binding. | [rb3-references.md](rb3-references.md) §7.2 |
-| Content-enumeration counts change | Our verified offline state (`XamContentCreateEnumerator: added 2 items`, aggregate enumerator `0 items`) is a **vanilla** baseline. | [bringup-log.md](bringup-log.md), [prompts/05](../prompts/05-complete-one-song.md) |
+| Content-enumeration counts change | Our verified offline state (`XamContentCreateEnumerator: added 2 items`, aggregate enumerator `0 items`) is a **vanilla** baseline. | [bringup-log.md](history/bringup-log.md), [backlog.md](backlog.md) |
 | A payload release with a different shape | We reproduce 12 bytes of an image and union a directory. An extra ark, a real `update:` device or a second executable would make the payload unreachable again, and this file has to be revisited. The executable itself has been frozen since 1.0 (§3), so compare the release's `default.xex` hash against `390e0ae0…` first. | this file |
 | Mod churn | Its install instructions can change between releases; the only shape we promise is the one in §2. | this file |
 
@@ -338,7 +338,7 @@ rb_blitz.exe --game_data_root=<game root>
 
 Points 2, 3 and 4 hold as of 2026-09-20. The "plays a song" half of point 1 rests on
 the Milestone 5 observation rather than a scripted run, exactly like the vanilla
-route ([bringup-log.md](bringup-log.md)).
+route ([bringup-log.md](history/bringup-log.md)).
 
 ## 11. What we never do
 
@@ -348,7 +348,7 @@ route ([bringup-log.md](bringup-log.md)).
 - Ship, mirror or vendor Rock Band Blitz Ultimate, its patched `.xex`, its `gen/` or
   `_ark/` data, or anything extracted from it. A payload is user-supplied game data,
   on the same footing as the retail dump
-  ([prompts/06](../prompts/06-reproducible-release.md) §5).
+  ([backlog.md](backlog.md) — the distributable audit in milestone 6).
 - Commit decryption keys: `scripts/decrypt_xex.py` reads the retail key out of the
   pinned SDK source instead of carrying a copy.
 - Support the PS3 `.pkg` flavour.

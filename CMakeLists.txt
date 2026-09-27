@@ -45,7 +45,7 @@ endif()
 # <imgui.h>, but rexruntime links imgui PRIVATE, so the vendored imgui include
 # directory is not propagated through rex::runtime. Expose it to the host
 # target only (headers), keeping imgui objects in rexruntime.dll where they
-# already live. See docs/bringup-log.md B-004.
+# already live. See docs/history/bringup-log.md B-004.
 if(TARGET imgui)
     target_include_directories(rb_blitz PRIVATE
         $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>)

@@ -116,7 +116,7 @@ adding `[[modules]]` entries.
   generated partitions and links `rb_blitz.exe` (Debug, ~77.9 MB).
 - One build-config fix required: the host target must receive the vendored
   imgui include dir (`rexglue-sdk/thirdparty/imgui`) so `rex_app.cpp` can find
-  `<imgui.h>`. Applied in project `CMakeLists.txt`; see `docs/bringup-log.md`
+  `<imgui.h>`. Applied in project `CMakeLists.txt`; see `docs/history/bringup-log.md`
   B-004. Not a codegen/analysis fix — no change to `config/` or `generated/`.
 
 ## Milestone 3: indirect-call targets registered via `functions.toml`
@@ -153,7 +153,7 @@ change for that: the entries above stay as the evidence trail (and as the
 fallback for the symbols no code region mentions, like `0x827EC038`), not
 because codegen still needs each one.
 Full detail and the two further defects the fix exposed are in
-[bringup-log.md](bringup-log.md) under "Codegen: the B-003/B-006 root causes".
+[bringup-log.md](history/bringup-log.md) under "Codegen: the B-003/B-006 root causes".
 
 ## Milestone 4: audio (MOGG) decryption path
 
@@ -162,7 +162,7 @@ embedded in the image. The path below was recovered from the recompiled image
 (`out/codegen-trace.log`, `generated/default/`), the run log, the shipping data and
 a match against the engine sources (`freeqaz/rb3`, `src/system/synth/`); the
 overrides live in `src/hooks/crypto.cpp` with the SDK-free half of the logic in
-`src/hooks/crypto_keytable.h` (see `docs/bringup-log.md` B-009).
+`src/hooks/crypto_keytable.h` (see `docs/history/bringup-log.md` B-009).
 
 | Guest address | What it is |
 | --- | --- |

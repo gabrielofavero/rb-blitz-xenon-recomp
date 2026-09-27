@@ -8,7 +8,7 @@
 // (tests/crypto_keytable_tests.cpp); src/hooks/crypto.cpp is the only production
 // consumer and holds the evidence, the guest addresses and the two hooks.
 //
-// See docs/bringup-log.md B-009 and docs/rb3-references.md §5.
+// See docs/history/bringup-log.md B-009 and docs/rb3-references.md §5.
 
 #pragma once
 

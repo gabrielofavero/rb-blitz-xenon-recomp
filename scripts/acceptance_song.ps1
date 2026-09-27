@@ -285,7 +285,7 @@ function Invoke-Run([int]$Run) {
 
         # 2. "Cannot connect to Rock Central" -> "Proceed in Offline Mode?" ->
         #    main menu. A is SELECT on both dialogs; the second one is the
-        #    documented offline route (docs/bringup-log.md, Milestone 4).
+        #    documented offline route (docs/history/bringup-log.md, Milestone 4).
         Invoke-Actions @("key:a")
         $signin = Wait-ForScreen (Shot "$tag-signin.png") "ROCK CENTRAL" $ScreenTimeoutSec "${tag}: sign-in dialog"
         if (-not $signin.Contains("ROCK CENTRAL")) { $notes.Add("sign-in dialog not recognised") | Out-Null }
