@@ -2244,9 +2244,15 @@ The three Release runs are the shape the 2026-09-20 runs had: envelopes
 as the song list rather than the song, no `[FATAL]`, a clean window close and the
 title's own `Title terminated` marker. Run logs are ~13.5 MB each, one file per run.
 
+Two more runs of it: once against `3809171` (the commit that records this pass) after
+re-resetting the same clone - `launch-to-results 1 / 1`, envelope
+`18:10:46 -> 18:16:01`, again 315 s - and once against the long-lived tree, which the
+changes here do not disturb: configure and build clean, `ctest` 6/6, and no
+codegen-check step at all, because that tree has the generated sources already.
+
 **Both presets in one tree do not collide.** The SDK writes both configurations into
 `rexglue-sdk/out/win-amd64`, which looked like a hazard for the item's "one clean tree";
-it is not, because Debug artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglue d.exe`).
+it is not, because Debug artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglued.exe`).
 Checked by hashing the Release `rb_blitz.exe` and its two DLL copies before the Debug
 build and after it: unchanged.
 
