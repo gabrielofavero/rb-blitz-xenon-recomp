@@ -478,6 +478,11 @@ Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 Name,Length,LastWriteTime
 ```
 
+A source path that shows up in a log is relative to the checkout
+(`./src/hooks/dlc.cpp`), not absolute: the build maps its own two trees with
+`-ffile-prefix-map`, which is the same thing that keeps the path of the machine
+that built a payload out of a shipped binary ([distributable.md](distributable.md)).
+
 For a repeatable run, the acceptance harness clears `logs\` and drives the window
 itself (`-BootWaitSec` is how long it waits before closing):
 

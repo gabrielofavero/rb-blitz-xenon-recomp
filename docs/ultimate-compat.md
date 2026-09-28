@@ -338,7 +338,7 @@ rb_blitz.exe --game_data_root=<game root>
 
 Points 2, 3 and 4 hold as of 2026-09-20. The "plays a song" half of point 1 rests on
 the 2026-09-20 hand observation rather than a scripted run, exactly like the vanilla
-route ([bringup-log.md](history/bringup-log.md)); [backlog.md](backlog.md) §4 carries
+route ([bringup-log.md](history/bringup-log.md)); [backlog.md](backlog.md) §3 carries
 the scripted run as a task.
 
 ## 11. What we never do
@@ -349,7 +349,7 @@ the scripted run as a task.
 - Ship, mirror or vendor Rock Band Blitz Ultimate, its patched `.xex`, its `gen/` or
   `_ark/` data, or anything extracted from it. A payload is user-supplied game data,
   on the same footing as the retail dump
-  ([backlog.md](backlog.md) §1 — the distributable audit).
+  ([distributable.md](distributable.md) — what ships, and the audit that checks it).
 - Commit decryption keys: `scripts/decrypt_xex.py` reads the retail key out of the
   pinned SDK source instead of carrying a copy.
 - Support the PS3 `.pkg` flavour.

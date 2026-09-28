@@ -6,51 +6,7 @@ input, persistence, songs, Ultimate, DLC — is closed; its chronology is in
 [history/bringup-log.md](history/bringup-log.md) and the limits it left standing are
 in [known-issues.md](known-issues.md).
 
-## 1. Release readiness
-
-The one goal that is not a feature: another authorized developer follows
-[README.md](../README.md) from a clean checkout and reproduces the acceptance run.
-
-- [x] **Debug and Release smoke tests on a clean checkout** — both presets, one clean
-      tree, the documented route from `scripts/acceptance_song.ps1`. Done 2026-09-28 on a
-      fresh clone in a scratch directory: Release `launch-to-results 3 / 3` (three 315 s
-      envelopes, no `[FATAL]`, clean closes), Debug and Release both configure, build and
-      pass `ctest` 6/6 in one tree without clobbering each other, and the route is
-      scriptable with no local `rb_blitz.toml`. Four blockers found and fixed along the
-      way — the symlink repair exiting 1, a first build that linked no recompiled code, a
-      harness with no input path, and a song envelope read from a log level the clone did
-      not have ([history/bringup-log.md](history/bringup-log.md), "Clean-checkout smoke
-      test"). The Debug route itself aborts on an SDK assert; that is B-013, below.
-- [x] **Freeze the supported toolchain** — SDK pin, compiler paths and versions — in
-      a `toolchain.md`. Done 2026-09-28: [toolchain.md](toolchain.md) is the prose,
-      [config/toolchain.toml](../config/toolchain.toml) is the record (SDK commit, clang,
-      CMake, Ninja, MSVC toolset, Windows SDK — versions *and* the paths they were
-      measured at), [tools/toolchain_check.cpp](../tools/toolchain_check.cpp) is the
-      check, and it runs as a build gate before codegen the way the game fingerprint
-      does. A binary built on a machine that is not the frozen set says so in its boot
-      log, which is where that fact used to be missing entirely. The game fingerprint is
-      frozen and enforced the same way
-      ([config/game_fingerprints.toml](../config/game_fingerprints.toml)).
-- [x] **Record the runtime half of the wrong-data check.** The build half fails closed.
-      Captured 2026-09-28 with `scripts/acceptance_wrong_data.ps1`: three boots (the
-      recorded image, the Ultimate payload's own image — a valid XEX with a different
-      digest — and a truncated copy), 3/3 in the repository tree and in a clean clone, each
-      with the build gate's verdict on the same file as the contrast. The
-      warn-and-continue is real and the boot is not harmed by it: `game data identity:
-      MODIFIED - …` plus the `expected:` line, then the title screen, then a clean close.
-      The third case is the boundary rather than a fourth behaviour — the check runs after
-      `OnPostLoadXexImage`, so an image the XEX loader cannot read never reaches it, which
-      is B-014 below. Log and details:
-      [history/bringup-log.md](history/bringup-log.md) "The runtime half of the wrong-data
-      check".
-- [ ] **Audit the distributable** — confirm no retail data, symbols derived from
-      proprietary databases, credentials or machine-specific paths reach the
-      installer payload or a packaged build ([installer/](../installer)).
-
-The one-command configure/build flow, the runtime data-path argument and the log
-locations are already documented in [README.md](../README.md); nothing is owed there.
-
-## 2. Fixes implied by open known-issues
+## 1. Fixes implied by open known-issues
 
 - [ ] **Decide the Debug preset's assert policy.** The Debug preset builds, links and
       passes its host tests, but the guest flow stops on an SDK assert —
@@ -92,7 +48,7 @@ locations are already documented in [README.md](../README.md); nothing is owed t
       onto the pointer's row. What is left is the relative *fallback*, used only when
       frames cannot be read.
 
-## 3. Engine knowledge still to port
+## 2. Engine knowledge still to port
 
 [rb3-references.md](rb3-references.md) is the catalogue; these are the items in it
 that name an action.
@@ -107,7 +63,7 @@ that name an action.
       regression check (§7.1).
 - [ ] Add a provenance-table row for anything adapted from another project (§9).
 
-## 4. Ultimate compatibility
+## 3. Ultimate compatibility
 
 - [ ] **Script an Ultimate run** — boot → menu → a song against an installed payload.
       The install itself landed and was verified by hand on 2026-09-20
@@ -117,7 +73,7 @@ that name an action.
 - [ ] Re-derive the 12-byte patch table if a payload release ships a different
       `default.xex` (compare its hash against `390e0ae0…` first).
 
-## 5. The launcher — the one active design
+## 4. The launcher — the one active design
 
 - [ ] [plans/launcher-plan.md](plans/launcher-plan.md) — a launcher that owns the
       installed game's settings (General/Graphics/Controller/Experimental), ships in the
@@ -127,7 +83,7 @@ that name an action.
       builds the remap core and the launcher's Controller → Manual page is its panel.
       Nothing in it gates release readiness.
 
-## 6. Deferred, with no design yet
+## 5. Deferred, with no design yet
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
@@ -139,14 +95,14 @@ Dropped for now, their documents deleted with them: in-game host Audio/Video set
 the per-device button-mapping layer (its remap half lives on in the launcher plan), and
 the VR port. Anything needed from them has to be re-derived.
 
-## 7. Permanent non-goals
+## 6. Permanent non-goals
 
 Online services — Rock Central, leaderboards, achievements, challenges, multiplayer.
 Blitz ships its own offline mode, so restoring them was never required, and unblocking
 them is the community mod's job. Our obligation runs the other way: staying compatible
 with the **Rock Band Blitz Ultimate** payload ([ultimate-compat.md](ultimate-compat.md)).
 
-## 8. Ground rules
+## 7. Ground rules
 
 Keep four layers separate: **game input** (locally dumped content — read-only,
 untracked, fingerprinted), the **pinned SDK** (no title-specific edits), **generated

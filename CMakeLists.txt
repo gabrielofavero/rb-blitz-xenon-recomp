@@ -15,6 +15,24 @@ if(WIN32)
     enable_language(RC)
 endif()
 
+# The path of the machine that built a payload must not travel inside it. Every
+# REXLOG_*/REX_ASSERT macro expands to a __FILE__ literal, so without the mapping
+# below the checkout path is embedded in all three payload binaries - measured
+# before adding it: 8 hits in rb_blitz.exe, 122 in rexruntime.dll and 18 in
+# rexgpu-xenos.dll, every one of them this repository's own absolute path
+# (docs/distributable.md). Mapping the source and build trees to relative names
+# keeps the file name useful in a log and drops the developer's disk out of it.
+#
+# It has to be set before generated/rexglue.cmake, which add_subdirectory()s the
+# SDK: a directory property is inherited by subdirectories added after it, so the
+# SDK's own libraries get the mapping too. MSVC is not covered (it needs /pathmap
+# and /d1trimfile, and nothing builds the game with it here);
+# scripts/audit_distributable.ps1 is what refuses a payload that leaks anyway.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
+    add_compile_options("-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
+endif()
+
 include(generated/rexglue.cmake)
 
 # A clean checkout has no generated/default/sources.cmake yet, because codegen is

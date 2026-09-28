@@ -2324,7 +2324,7 @@ and on its first day that statement is backed by a run that already exists.
 - [tools/toolchain_check.cpp](../../tools/toolchain_check.cpp) - the probe and the
   report, built as `rb_blitz_toolchain`; `--check` is the build gate, `--emit-header`
   writes the stamp a binary logs at boot.
-- [docs/toolchain.md](../../toolchain.md) - the prose half: what is frozen, why each
+- [docs/toolchain.md](../toolchain.md) - the prose half: what is frozen, why each
   component is in the set, what each verdict does to a build, what is deliberately not
   covered, and how to change the record.
 
@@ -2517,3 +2517,125 @@ should be.
 - **Anything past the title screen.** The payload-image boot was stopped at the title screen
   and closed. Whether the guest would go on into a song against that root is a different
   experiment, and the script asserts only what it observed.
+
+## Auditing the distributable (2026-09-28)
+
+The last release-readiness item, and the first one whose subject is not the game but the
+thing that leaves this machine. The claim to establish is a negative: no retail data, no
+symbol taken from a proprietary database, no credential and no machine-specific path
+reaches the installer payload or a packaged build. A negative claim is only worth the check
+behind it, so the deliverable is a check that can fail -
+[scripts/audit_distributable.ps1](../../scripts/audit_distributable.ps1) - and it did fail,
+on the third of those four questions.
+
+Status: complete. Seven checks, 7/7 pass on the payload this tree builds, exit 0, with the
+finding below fixed rather than argued away.
+
+What the installer places is a short list and the audit reads it from the packer rather than
+restating it: [`installer/tools/make_payload.ps1`](../../installer/tools/make_payload.ps1)
+copies `rb_blitz.exe`, the two SDK DLLs it loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and
+the four Visual C++ runtime DLLs the three import, plus `payload-manifest.toml` with their
+sizes and digests. 7 files, 50.2 MiB. Nothing else is quoted from the build tree, the game
+data is always the user's own, and the Ultimate mod is downloaded from its own release.
+
+### The finding: the build machine's path was in the payload
+
+Every `REXLOG_*` and `REX_ASSERT` macro expands to a `__FILE__` literal, and the compiler was
+invoked with absolute paths, so each file that logs anything wrote its own path into the
+binary's string table:
+
+```text
+rb_blitz.exe      8 hits    .../rb-blitz-xenon-recomp/src/hooks/dlc.cpp, .../src/rb_blitz_app.h,
+                            .../generated/default/rb_blitz_pch.h
+rexruntime.dll    122 hits  the same checkout prefix, in the SDK's own strings
+rexgpu-xenos.dll  18 hits   ditto
+```
+
+`D:/Coding/decomps/360/rb-blitz-xenon-recomp/...` is not a credential and not game data, but
+it is exactly what the item asks about, and it was in the product. The fix is the compiler's
+own mapping, and where it sits is the whole point of it:
+
+```cmake
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
+    add_compile_options("-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
+endif()
+```
+
+It is *before* `include(generated/rexglue.cmake)`, which `add_subdirectory()`s the SDK: a
+directory property is inherited by subdirectories added after it, so the SDK's libraries get
+the mapping too. A fix that only covered `src/` would have left 140 of the 148 hits. After a
+full rebuild the same scan reports 0, 0 and 0, and a log line that used to name a disk now
+says `./src/hooks/dlc.cpp`. MSVC is not covered by the flag (`/pathmap` covers debug info,
+`/d1trimfile` the literal, and nothing here builds the game with it) - which is why the audit,
+not the flag, is the guarantee.
+
+### The check, and proof that it can fail
+
+Seven checks, each with a file of evidence in `out/distributable-audit/`: the payload
+allow-list and its manifest, the game fingerprints (`config/game_fingerprints.toml`, by size
+and digest, by extension, by container magic, and by whether the recorded dump's own first or
+last 4 KiB appear in a binary), the mod fingerprints, credentials, symbol tables, machine
+paths, and `git ls-files`. The verdict of the run this entry records:
+
+```text
+inventory    PASS   8 files, allow-list exactly, manifest agrees
+retail-data  PASS   no game data in the payload (3 fingerprints, extension and magic checked)
+mod-data     PASS   no Rock Band Blitz Ultimate content in the payload (3 fingerprints, extension and magic checked)
+credentials  PASS   no secret-shaped string in 15 scanned files; 3 word-level note(s)
+symbols      PASS   no symbol table and no .debug section in the payload binaries
+machine-paths PASS   no build-machine path in 15 shipped files; 15 note(s)
+tracked-tree PASS   113 tracked files, none of them game data or a binary
+```
+
+A check that has never gone red is a hope, so the two failures that matter were reproduced
+against a copy of the payload: a checkout path appended to `rexgpu-xenos.dll` and the
+recorded dump's first 4 KiB appended to `rexruntime.dll`, with the manifest's size and digest
+corrected for both so the inventory check still passes. `retail-data` and `machine-paths` both
+fail, the other five pass, exit 1.
+
+### What is not a finding
+
+Fifteen paths stay in the payload and are reported as notes rather than failures, none of them
+this machine's: `D:\a\_work\1\s\binaries\…` in the four Microsoft CRT DLLs (Microsoft's own
+CI path), `C:\Windows\Fonts\msgothic.ttc` and `C:/Windows/USB_Vibration` in `rexruntime.dll`
+(the font and XInput device paths the SDK looks for), and
+`C:\Coding\Is\issrc-build\Components\ChaCha20.pas` in each setup executable (Inno Setup's own
+path, inside ISCC's compiled script). The first version of the generic sweep also flagged
+`https://` inside URLs and guest device paths like `e:\default.xex`; tightening it to
+two-segment, character-classed paths took the note count from 88 to 15 and left the signal
+visible.
+
+Two more things are recorded as deliberate, not defects: the build stamp's timestamp
+(`…@20260928_1827`, which is what a bug report needs) and the console's own XEX key inside
+`rexruntime.dll` - the emulated console has to read the user's dump, the constant is public in
+every Xenia-derived runtime, and the project keeps exactly one copy: `scripts/decrypt_xex.py`
+reads it out of the SDK source rather than carrying a second one. All seven payload PEs
+report `PointerToSymbolTable: 0x0` and no `.debug` section, so no name travels as a symbol at
+all.
+
+### Verification (all 2026-09-28)
+
+- A full Release rebuild after the flag (904 steps) and a refreshed distributable:
+  `installer\out\dist\RockBandBlitzSetup-0.1.0.exe`, 15,181,458 bytes, sha256
+  `248e28cf…c735`, recording commit `0324493`. The installer's own suite passes, and the helper
+  and `pins.iss` were scanned too: no machine path in either.
+- `ctest` 7/7 in the rebuilt tree, and one launch acceptance run
+  (`acceptance_launches.ps1 -Runs 1 -BootWaitSec 40`): alive at the end, no `[FATAL]`, clean
+  close. The flag changes strings, and this is what says it changed nothing else.
+- The audit report itself is the evidence for the seven checks; the negative control above is
+  the evidence that it is a check.
+
+### What this does not cover
+
+- **The setup executable's interior.** Inno Setup compresses what it embeds, so the exe is
+  scanned as a file. The payload inside it is the one the audit read - the setup exe is a
+  function of that directory - and neither the zip nor the exe is byte-reproducible across
+  machines, so a release publishes the checksum its own build printed.
+- **The install-time download.** The pinned Ultimate URL and its SHA-256 are in
+  `config/pins.toml`; the upstream artefact is not ours to vouch for.
+- **Any toolchain other than clang.** `-ffile-prefix-map` is clang's and GCC's; an MSVC build
+  is audited, not fixed.
+- **Legal questions.** Redistribution is decided by the borrowing rules in
+  [rb3-references.md](../rb3-references.md) §9 and its provenance table, not by a string scan.
+  The audit's claim is narrower: nothing *unintended* is in the payload.
