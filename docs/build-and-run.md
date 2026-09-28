@@ -24,17 +24,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair_flat_symlin
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.ps1
 ```
 
-1. **`repair_flat_symlinks.ps1`** expands the 16 SDK files that are symbolic links
+1. **`repair_flat_symlinks.ps1`** expands the SDK files that are symbolic links
    upstream into regular files holding the target's content. Windows here cannot
    create symlinks (not elevated, Developer Mode off) and the submodule repos
    inherit `core.symlinks=false`, so a checkout leaves them as link-text stubs. This
    is build-critical: the SDK compiles
    `thirdparty/libmspack/cabextract/mspack/lzxd.c`, which becomes a 29-byte text
    file (`lzxd.c` upstream is the real 30,796-byte source, under the same repo's
-   `libmspack/mspack/`). A healthy tree prints `content already correct : 16` and
-   `repaired from target    : 0`. The script then marks those 16 paths
-   `--skip-worktree`, because the residual difference (a file *type* change, not
-   content) cannot be resolved on this machine.
+   `libmspack/mspack/`).
+   How many entries the scan meets depends on which submodules are initialised, which
+   is why the number in this paragraph moved when the smoke test of 2026-09-28 cloned
+   with `--recurse-submodules`: **16** in this machine's long-lived tree, which has
+   MoltenVK unchecked, and **18** in a full clone (those 16 — 15
+   `libmspack/cabextract/mspack` files and o1heap's `CLAUDE.md` — plus two MoltenVK
+   headers that link to a sibling file). Either way a healthy tree prints
+   `repaired from target    : 0`, `not repairable          : 0` and exit 0, and marks
+   what it repaired `--skip-worktree`, because the residual difference (a file *type*
+   change, not content) cannot be resolved on this machine.
+   A full clone also brings eight links with **no file to copy**, which are reported
+   rather than repaired: one points at a *directory* (MoltenVK's
+   `MoltenVK/include/MoltenVK` → `../MoltenVK/API`) and seven point into MoltenVK's
+   `External/` and `Package/` trees, which that submodule's own scripts fetch and which
+   no target on this host compiles. They print as `directory links (skip) : 1` and
+   `external targets (skip) : 7`; only a target the submodule *does* track and that is
+   nevertheless absent is `not repairable` and exits 1, because that one means the
+   checkout itself is incomplete. (Before 2026-09-28 all eight were fatal, so the script
+   exited 1 on every fresh clone: [bringup-log.md](history/bringup-log.md),
+   "Clean-checkout smoke test".)
    **Do not** try to fix this by setting `core.symlinks true` in the submodules:
    checkout then fails with `unable to create symlink …: Function not implemented`
    and deletes the file.
@@ -257,6 +273,15 @@ cmake --build --preset win-amd64-release -- -v                # show full comman
 
 Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`,
 `rexgpu-xenos.dll`.
+
+`win-amd64-debug` and `win-amd64-relwithdebinfo` build into their own trees in the same
+checkout, and neither preset disturbs the other: the SDK's staging directory
+(`rexglue-sdk/out/win-amd64`) holds both configurations side by side because Debug
+artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglued.exe`). The Debug preset builds
+and its host tests pass, but the *guest* flow stops on an SDK assert —
+`XamAlloc_entry`'s `assert_true(unk == 0)`, at the first A on the title screen — so
+acceptance runs use Release; the whole of it is
+[known-issues.md](known-issues.md) B-013.
 
 ### The build gate: `game/` must be the fingerprinted dump
 

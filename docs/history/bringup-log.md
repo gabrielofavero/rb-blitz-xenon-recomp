@@ -2142,3 +2142,141 @@ fake screen doubles a press on request, which is the case that pins the doubled-
 - **The overlay and focus gates are still reasoned, not exercised**, as in the passes before
   this one; the live harness refocuses the window before every hover because a background
   window is ignored by the guest, which is what the earlier pass already recorded.
+
+
+## Clean-checkout smoke test (2026-09-27 to 2026-09-28)
+
+The release-readiness goal is another authorized developer following
+[README.md](../../README.md) from a *clean checkout* to the acceptance run. Every run
+in this log until now used this machine's long-lived tree - which carries a populated
+`generated/`, a working `CMakeCache.txt`, and the local `rb_blitz.toml` - so the goal
+had never actually been exercised. This pass did it: `git clone --recurse-submodules`
+of `main` at `576b493` into `D:\Coding\decomps\360\_smoke\rb-blitz-clean`, 24
+submodules initialised, the dump copied to `<clone>/game` (1.1 GB, 31 files, so the
+fingerprint gate passes), and the documented route run from there.
+
+Status: complete. The four blockers below are fixed in `b75fa73`; the Debug-only abort
+is recorded as B-013 and left open.
+
+### What a fresh checkout could not do
+
+Each of these was invisible in the existing tree, and each stopped the documented
+route (or made it misreport) on a cloned one.
+
+- **`repair_flat_symlinks.ps1` exited 1 on the first run.** It works the 26 mode-120000
+  entries a *fully initialised* `--recurse-submodules` clone has (this machine's
+  long-lived tree has 16, because it has MoltenVK unchecked - which is why
+  [build-and-run.md](../build-and-run.md) §0 quoted 16, and why that number moved with
+  this pass); 18 of them are the libmspack/o1heap links the build needs and are repaired
+  by copying the link target's content over the stub. The other eight are not build
+  inputs: one links to a *directory* (MoltenVK's `MoltenVK/include/MoltenVK` ->
+  `../MoltenVK/API`) and seven link into MoltenVK's `External/` and `Package/` trees,
+  which that submodule's own scripts fetch and which no target on this host compiles. The
+  script treated all eight as "link target missing" and exited 1, which is a hard stop for
+  a reader following README. It now separates the three cases - repaired file, directory
+  link, target the submodule does not track - and only a target the submodule *does* track
+  and that is absent still fails, because that one really does mean an incomplete
+  checkout. A healthy full clone prints `content already correct : 18`,
+  `directory links (skip) : 1`, `external targets (skip) : 7`,
+  `not repairable          : 0`, exit 0; the long-lived tree prints `16 / 0 / 0 / 0`
+  and exit 0, unchanged.
+
+- **The first build linked `rb_blitz.exe` with no recompiled code in it.** The build
+  stopped at the link with `lld-link: error: undefined symbol: _sub_821D0A18`,
+  `_sub_8236C108` and `PPCImageConfig`; the log of that build contains **zero**
+  occurrences of `rb_blitz_recomp`, and that is the whole story. `generated/default/sources.cmake`
+  is what names the 104 partitions to CMake, and codegen writes it *during* the build,
+  so a configure that ran before codegen (i.e. every clean checkout) creates no recomp
+  object library at all and `rexglue_setup_target()` includes no generated sources.
+  `CMAKE_CONFIGURE_DEPENDS` on the generated file does not rescue this: the property is
+  accepted and has no effect for a file a custom command produces - measured, the next
+  build did not re-run CMake (`Re-running CMake`: 0) and failed identically. The
+  configure has to run again, and `CMakeLists.txt` now says exactly that, from a check
+  that runs right after codegen and only in a configuration that predates the generated
+  sources (that build stops at `[10/14]`, before compiling anything, with the two
+  commands to run). README and [build-and-run.md](../build-and-run.md) �2a document the
+  second pass. The second configure+build is incremental and produced a working
+  executable; the other preset needs no second pass, because codegen has run by then.
+
+- **The harnesses had no input path.** `acceptance_song.ps1` injects every key through
+  the MnK controller emulation, which is off unless `mnk_mode` is set - and the only
+  place it was set is the gitignored `out/build/<preset>/rb_blitz.toml`. On the clone,
+  A at the title screen did nothing: the OCR after the press read `BLITZ PRESS A TO
+  START` unchanged, while the same build with `--mnk_mode=1` on the command line opened
+  the "Cannot connect to Rock Central" dialog. `acceptance_song.ps1`,
+  `acceptance_persistence.ps1`, `measure_pacing_input.ps1` and `audit_ark_reads.ps1 -Actions`
+  now pass the flag themselves.
+
+- **The song envelope was read from a log level the clone did not have.** With input
+  fixed, the first clean-checkout run reported `Playing: false` for a song that had
+  played: the results screen named THESE DAYS and `Boot`, `SongList`, `Results`,
+  `SongSeen`, `Clean` were all true, but the run waited 600 s for a playback envelope
+  that was never in the log (6 KB, zero `XMPSetPlaybackController` lines). The marker is
+  a `REXKRNL_DEBUG` line - `[debug] [krnl]` - and per-category levels exist only in the
+  toml (`ParseCategoryLevelsFromConfig` reads `[log.levels]` from `<exe>.toml`), so a
+  command line can only raise the *global* level. Measured on a probe: with
+  `--log_level=debug` the marker appears, and the run's log grows at ~40 KB/s, of which
+  the marker's own category contributes 30 lines against 31,937 `apu` debug lines - the
+  chatter the local profile switches off with `apu = "off"`, which is the same class of
+  hidden dependency. `acceptance_song.ps1` now passes `--log_level=debug`,
+  `--log_flush_interval=1` (so the file trails the guest by a second rather than by the
+  whole run) and `--log_max_file_size_mb=100` (the 5 MB default rotates twice inside one
+  song, and the harness's pair bookkeeping reads one file).
+
+### The smoke test itself
+
+| Step | Result |
+| --- | --- |
+| Clean clone, 24 submodules, dump in place | ok, `git status` empty |
+| `repair_flat_symlinks.ps1` | exit 0 after the fix; 18 already correct, 1 directory link, 7 external, 0 unrepairable |
+| `apply_sdk_patches.ps1` | 6 patches, 16 files patched, 0 UNEXPECTED, 0 untracked |
+| Release configure | 210.2 s (SDK from source); codegen `215 written` in 152.5 s |
+| Release build | stops once at the codegen check by design; the second pass links `rb_blitz.exe` |
+| Release `ctest` | 6/6, 1.47 s |
+| Debug configure + build | 899 steps, exit 0, no second pass needed |
+| Debug `ctest` | 6/6, 12.19 s |
+| `acceptance_song.ps1 -Runs 3` (Release) | **launch-to-results 3 / 3** |
+| Debug route | aborts at the SDK assert B-013, after the title screen |
+
+The three Release runs are the shape the 2026-09-20 runs had: envelopes
+`17:40:30 -> 17:45:45`, `17:46:54 -> 17:52:09` and `17:53:18 -> 17:58:33`, each
+**315 s** (the earlier runs measured 315/317/317 s), each rejecting a 5 s preview pair
+as the song list rather than the song, no `[FATAL]`, a clean window close and the
+title's own `Title terminated` marker. Run logs are ~13.5 MB each, one file per run.
+
+**Both presets in one tree do not collide.** The SDK writes both configurations into
+`rexglue-sdk/out/win-amd64`, which looked like a hazard for the item's "one clean tree";
+it is not, because Debug artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglue d.exe`).
+Checked by hashing the Release `rb_blitz.exe` and its two DLL copies before the Debug
+build and after it: unchanged.
+
+### B-013: the Debug preset aborts the guest flow on an SDK assert
+
+- Status: **open**. Symptom: on the first A at the title screen, while the guest is
+  enumerating content (`XamContentAggregateCreateEnumerator` is the last line the log
+  reaches), a Debug runtime dialog appears -
+  `MICROSOFT VISUAL C++ RUNTIME LIBRARY ASSERTION FAILED! ... REXRUNTIMED.DLL ... File:
+  .../xam_info.cpp Line: 297 Expression: unk == 0` - and the route cannot continue.
+- Where: `XamAlloc_entry`'s `assert_true(unk == 0)`. The parameter is unused by the
+  implementation (`SystemHeapAlloc(size)` is all that happens), so in Release - where
+  the assert is compiled out - the same route completes; the assert is Debug-only
+  strictness, not a behavioural difference the title depends on.
+- Not fixed here, deliberately: the fix is a policy choice (relax guest-parameter
+  asserts in Debug, or declare Debug a build/test-only preset and keep acceptance on
+  Release), and there is no evidence yet that this is the only one. Release runs the
+  route with every assert compiled out, so a Debug run stops at the *first* assert it
+  meets instead of showing there are no others.
+
+### What this pass does not cover
+
+- **The Debug preset has not been shown to complete the route** - it aborts at B-013,
+  which is why the acceptance evidence above is Release.
+- **RelWithDebInfo was not built.** The item names Debug and Release.
+- **Ultimate is untouched** - it needs an installed payload
+  ([ultimate-compat.md](../ultimate-compat.md) �7, �10).
+- **The clone's game data is a copy of this machine's dump**, not a second dump, and
+  `--game_data_root` was the copy throughout.
+- **Machine-local step that the clone needed:** this scratch volume is exFAT and records
+  no ownership, so `git` refuses the tree ("dubious ownership") until `safe.directory`
+  covers it. That is why the four blockers above were never seen before - every earlier
+  run inherited this machine's own settings.

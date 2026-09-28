@@ -11,8 +11,16 @@ in [known-issues.md](known-issues.md).
 The one goal that is not a feature: another authorized developer follows
 [README.md](../README.md) from a clean checkout and reproduces the acceptance run.
 
-- [ ] **Debug and Release smoke tests on a clean checkout** — both presets, one clean
-      tree, the documented route from `scripts/acceptance_song.ps1`.
+- [x] **Debug and Release smoke tests on a clean checkout** — both presets, one clean
+      tree, the documented route from `scripts/acceptance_song.ps1`. Done 2026-09-28 on a
+      fresh clone in a scratch directory: Release `launch-to-results 3 / 3` (three 315 s
+      envelopes, no `[FATAL]`, clean closes), Debug and Release both configure, build and
+      pass `ctest` 6/6 in one tree without clobbering each other, and the route is
+      scriptable with no local `rb_blitz.toml`. Four blockers found and fixed along the
+      way — the symlink repair exiting 1, a first build that linked no recompiled code, a
+      harness with no input path, and a song envelope read from a log level the clone did
+      not have ([history/bringup-log.md](history/bringup-log.md), "Clean-checkout smoke
+      test"). The Debug route itself aborts on an SDK assert; that is B-013, below.
 - [ ] **Freeze the supported toolchain** — SDK pin, compiler paths and versions — in
       a `toolchain.md`. Today the build works only because the absolute
       compiler/cmake/ninja paths sit in the build tree's `CMakeCache.txt`. The game
@@ -31,6 +39,14 @@ locations are already documented in [README.md](../README.md); nothing is owed t
 
 ## 2. Fixes implied by open known-issues
 
+- [ ] **Decide the Debug preset's assert policy.** The Debug preset builds, links and
+      passes its host tests, but the guest flow stops on an SDK assert —
+      `XamAlloc_entry`'s `assert_true(unk == 0)`, the first A at the title screen — while
+      Release completes the same route with every assert compiled out. Relax the
+      guest-parameter asserts in Debug (an SDK patch, the way the diagnostics patches
+      already do), or declare Debug build/test-only and keep acceptance on Release.
+      Evidence and the reasoning for leaving it open: [known-issues.md](known-issues.md)
+      B-013, [history/bringup-log.md](history/bringup-log.md) "Clean-checkout smoke test".
 - [ ] `0x827EC038` — the last forced `functions.toml` entry of the indirect-call
       class: a 24-byte leaf whose address is only taken in data, so no segment
       mentions it (B-006).
