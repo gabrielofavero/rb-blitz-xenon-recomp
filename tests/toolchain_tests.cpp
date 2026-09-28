@@ -430,6 +430,17 @@ void TestFormatting() {
   checks = rb_blitz::toolchain::ComparePin(pin, FrozenMachine(), CheckOptions{});
   const std::string clang_line = rb_blitz::toolchain::FormatCheckLine(*FindCheck(checks, "clang"));
   CHECK_CONTAINS(clang_line, "C:\\Program Files\\LLVM\\bin\\clang++.exe");
+
+  // A component that could not be measured is *not* the frozen set: the stamp used to
+  // skip it and then call the remainder frozen, which is how a build with an
+  // unreadable compiler reported itself as the frozen toolchain.
+  auto unanswered = FrozenMachine();
+  unanswered["clang"] = {"", "no clang version in what clang++ printed"};
+  checks = rb_blitz::toolchain::ComparePin(pin, unanswered, CheckOptions{});
+  stamp = rb_blitz::toolchain::FormatStamp(checks);
+  CHECK_CONTAINS(stamp, "clang unknown");
+  CHECK_CONTAINS(stamp, "off the frozen set: clang unknown");
+  CHECK_TRUE(stamp.find("(frozen set)") == std::string::npos);
 }
 
 void TestEmitBuildHeader() {
