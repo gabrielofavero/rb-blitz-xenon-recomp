@@ -2194,7 +2194,7 @@ route (or made it misreport) on a cloned one.
   configure has to run again, and `CMakeLists.txt` now says exactly that, from a check
   that runs right after codegen and only in a configuration that predates the generated
   sources (that build stops at `[10/14]`, before compiling anything, with the two
-  commands to run). README and [build-and-run.md](../build-and-run.md) �2a document the
+  commands to run). README and [build-and-run.md](../build-and-run.md) §2, under "The first build on a tree that has never run codegen", document the
   second pass. The second configure+build is incremental and produced a working
   executable; the other preset needs no second pass, because codegen has run by then.
 
@@ -2279,7 +2279,7 @@ build and after it: unchanged.
   which is why the acceptance evidence above is Release.
 - **RelWithDebInfo was not built.** The item names Debug and Release.
 - **Ultimate is untouched** - it needs an installed payload
-  ([ultimate-compat.md](../ultimate-compat.md) �7, �10).
+  ([ultimate-compat.md](../ultimate-compat.md) §7, §10).
 - **The clone's game data is a copy of this machine's dump**, not a second dump, and
   `--game_data_root` was the copy throughout.
 - **Machine-local step that the clone needed:** this scratch volume is exFAT and records
@@ -2333,7 +2333,7 @@ toolchain  rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC to
 ok        rexglue-sdk     c94f5eb           nightly-20260826-f5337cdc-2-gc94f5eb
 ok        clang           23.1.1            C:\Program Files\LLVM\bin\clang++.exe
 ok        CMake           4.4.3             C:\Program Files\CMake\bin\cmake.exe
-ok        Ninja           1.13.2            �\WinGet\Packages\Ninja-build.Ninja_�\ninja.exe
+ok        Ninja           1.13.2            …\WinGet\Packages\Ninja-build.Ninja_…\ninja.exe
 ok        MSVC toolset    14.44.35207       from the compiler's include roots
 ok        Windows SDK     10.0.26100.0      from the compiler's include roots
 ok         the frozen toolchain
@@ -2345,7 +2345,7 @@ and the game data identity:
 ```text
 boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260928_1827
 toolchain: rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0 (frozen set)
-game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62�84bb)
+game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62…84bb)
 ```
 
 The measured behaviour of the switch, with a pin file changed under it rather than the
@@ -2370,7 +2370,7 @@ so a build that refuses or accepts is not a mystery.
 One bug worth recording, because it is the kind that hides: the first version of the
 probe ran the compiler through `popen`, which hands the command to `cmd /c`, and cmd
 strips the first and last quote of a command line that begins with one - so
-`"C:\Program Files\LLVM\bin\clang++.exe" -v � 2>&1` reached cmd as an unquoted path and
+`"C:\Program Files\LLVM\bin\clang++.exe" -v … 2>&1` reached cmd as an unquoted path and
 the probe silently returned the *preprocessed source* instead of the banner. The
 compiler then reported `unknown` with a plausible-looking path next to it, and the stamp
 said `(frozen set)` for a set it had not measured. Both are fixed - the command is
