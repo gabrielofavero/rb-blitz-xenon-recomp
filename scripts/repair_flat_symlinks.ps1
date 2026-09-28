@@ -19,6 +19,14 @@
     rather than the link text. It is idempotent: entries that already match their
     target are reported and left alone.
 
+    Two kinds of entry are skipped rather than repaired, because there is no file
+    to copy and neither one is a build input on this host: a link to a
+    *directory*, and a link whose target the submodule does not track at all -
+    MoltenVK's links into its `External/` and `Package/` trees, which MoltenVK's
+    own scripts fetch and which only macOS builds. Only a target the submodule
+    *does* track and that is nevertheless absent is a failure, because that means
+    the checkout is incomplete.
+
     By default it also marks exactly those paths `--skip-worktree`, so `git
     status` stays quiet about the unavoidable, harmless content difference. Use
     -NoIndexMarks to leave the index untouched, or -ClearMarks to undo the marks.
@@ -70,6 +78,21 @@ function Get-FileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
+# Is this link target something the submodule's own checkout should have
+# produced? True only for a path the repository tracks; an untracked one is
+# external content that some script of the submodule's own fetches later.
+function Test-TrackedTarget {
+    param([string]$RepoDir, [string]$TargetAbs)
+    $prefix = $RepoDir.TrimEnd('\', '/') + '\'
+    if (-not $TargetAbs.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        # Outside the repository, so no checkout could have tracked it.
+        return $false
+    }
+    $relativeTarget = $TargetAbs.Substring($prefix.Length) -replace '\\', '/'
+    $probe = Invoke-Git @('-c', 'safe.directory=*', '-C', $RepoDir, 'ls-files', '--', $relativeTarget)
+    return ($probe.ExitCode -eq 0 -and $probe.Output.Count -gt 0)
+}
+
 if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
     Write-Error "Repository root not found: $RepoRoot"
     exit 1
@@ -94,6 +117,8 @@ $checked = 0
 $alreadyOk = @()
 $repaired = @()
 $realLinks = @()
+$directoryLinks = @()
+$externalTargets = @()
 $unrepairable = @()
 $markTargets = @{}
 
@@ -130,7 +155,20 @@ foreach ($relative in $submodulePaths) {
         $targetAbs = [System.IO.Path]::GetFullPath((Join-Path $entryDir $linkText))
 
         if (-not (Test-Path -LiteralPath $targetAbs -PathType Leaf)) {
-            $unrepairable += "$relative/$entryPath (link target missing: $linkText)"
+            # Nothing to copy. This script materialises *files*, so a link to a
+            # directory (MoltenVK's include trees) is reported and skipped. A
+            # missing target stays fatal only when the submodule tracks it,
+            # because then the checkout itself is incomplete; a target the
+            # submodule does not track is content its own scripts fetch later
+            # (MoltenVK's External/ and Package/ trees, which no host but macOS
+            # builds), so leaving that stub alone is not a build problem.
+            if (Test-Path -LiteralPath $targetAbs) {
+                $directoryLinks += "$relative/$entryPath (directory link: $linkText)"
+            } elseif (Test-TrackedTarget -RepoDir $repoDir -TargetAbs $targetAbs) {
+                $unrepairable += "$relative/$entryPath (link target missing: $linkText)"
+            } else {
+                $externalTargets += "$relative/$entryPath (link target not in the checkout: $linkText)"
+            }
             continue
         }
 
@@ -177,8 +215,12 @@ Write-Host "Flattened-symlink entries found: $checked"
 Write-Host "  content already correct : $($alreadyOk.Count)"
 Write-Host "  repaired from target    : $($repaired.Count)"
 Write-Host "  genuine symlinks (skip) : $($realLinks.Count)"
+Write-Host "  directory links (skip)  : $($directoryLinks.Count)"
+Write-Host "  external targets (skip) : $($externalTargets.Count)"
 Write-Host "  not repairable          : $($unrepairable.Count)"
 foreach ($item in $repaired) { Write-Host "    repaired: $item" }
+foreach ($item in $directoryLinks) { Write-Host "    directory link: $item" }
+foreach ($item in $externalTargets) { Write-Host "    external target: $item" }
 foreach ($item in $unrepairable) { Write-Host "    UNREPAIRABLE: $item" }
 
 if ($NoIndexMarks) {

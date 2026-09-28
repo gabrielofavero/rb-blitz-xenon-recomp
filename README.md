@@ -38,7 +38,7 @@ cmake --preset win-amd64-release
 cmake --build --preset win-amd64-release
 ```
 
-The first configure+build compiles the SDK (SDL3, fmt, spdlog, mspack, the rexglue runtime) from source and takes tens of minutes. After that it is incremental and routinely under a minute: `cmake --build --preset win-amd64-release` after a source change, `--target rb_blitz` to skip unrelated targets, and `win-amd64-debug` / `win-amd64-relwithdebinfo` for the other configurations. Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`, `rexgpu-xenos.dll`.
+The first configure+build compiles the SDK (SDL3, fmt, spdlog, mspack, the rexglue runtime) from source and takes tens of minutes. The very first build of a tree that has never run codegen stops once, right after generating the recompiled code, and says so: a build system cannot learn about sources that appear in the middle of it, so run the same two commands again and the second build links the executable. The other preset does not need that second pass — codegen has run by then. After that it is incremental and routinely under a minute: `cmake --build --preset win-amd64-release` after a source change, `--target rb_blitz` to skip unrelated targets, and `win-amd64-debug` / `win-amd64-relwithdebinfo` for the other configurations. Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`, `rexgpu-xenos.dll`.
 
 **Run** it from the build directory (that is where the exe finds its DLLs, its `.toml` and `logs\`), with the game data path on the command line, since it can live anywhere outside the source tree:
 

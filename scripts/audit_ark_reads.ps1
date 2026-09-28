@@ -82,8 +82,12 @@ if ($Launch) {
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     Write-Host "launching $exe (trace logging, ${RunSec}s)"
+    # mnk_mode is always passed, not only when -Actions is used: keys come from the
+    # local gitignored out/build/<preset>/rb_blitz.toml otherwise, so on a fresh
+    # checkout a run that is meant to be driven would silently ignore the actions.
     $proc = Start-Process -FilePath $exe `
-        -ArgumentList "--game_data_root=$gameRootAbs", "--log_noisy=true", "--log_level=trace" `
+        -ArgumentList "--game_data_root=$gameRootAbs", "--log_noisy=true", "--log_level=trace", `
+                      "--mnk_mode=1" `
         -WorkingDirectory $work -PassThru
     Start-Sleep -Seconds $BootWaitSec
 

@@ -17,6 +17,46 @@ endif()
 
 include(generated/rexglue.cmake)
 
+# A clean checkout has no generated/default/sources.cmake yet, because codegen is
+# a build step, and the file above includes it only when it is already there. The
+# build system of that first build therefore knows nothing about the recompiled
+# code: rb_blitz.exe is linked from the hand-written sources alone and fails with
+# a wall of undefined symbols (`_sub_...`, `PPCImageConfig`), which says nothing
+# about the actual cause.
+#
+# Codegen output cannot be picked up inside the same build - Ninja only reloads
+# the build system between invocations, and naming the generated file as a
+# CMAKE_CONFIGURE_DEPENDS dependency does not change that (measured: the property
+# is accepted and ignored for a file a custom command produces). So the configure
+# has to run again, and the only thing worth engineering here is that the person
+# meets that requirement instead of the linker error. The check below is added
+# only to a configuration that predates the generated sources, and it runs right
+# after codegen has produced them.
+if(NOT REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
+    set(RBBLITZ_CODEGEN_CHECK "${CMAKE_CURRENT_BINARY_DIR}/rb_blitz_codegen_check.cmake")
+    file(WRITE "${RBBLITZ_CODEGEN_CHECK}" [=[
+if(EXISTS "${RBBLITZ_SOURCES_FILE}")
+    message(FATAL_ERROR
+        "Recompiled code has just been generated, but this build system was "
+        "configured before it existed, so rb_blitz.exe cannot be linked in this "
+        "build.\n"
+        "Re-run the configure step, then build again. The second build is "
+        "incremental and produces the executable:\n"
+        "  cmake --preset ${RBBLITZ_PRESET}\n"
+        "  cmake --build --preset ${RBBLITZ_PRESET}\n")
+endif()
+]=])
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" rbblitz_build_type)
+    add_custom_command(TARGET rb_blitz_codegen POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+                "-DRBBLITZ_SOURCES_FILE=${CMAKE_CURRENT_SOURCE_DIR}/generated/default/sources.cmake"
+                "-DRBBLITZ_PRESET=win-amd64-${rbblitz_build_type}"
+                -P "${RBBLITZ_CODEGEN_CHECK}"
+        COMMENT "Checking that this build system knows about the generated code"
+        VERBATIM
+    )
+endif()
+
 # Sources
 set(RBBLITZ_SOURCES
     src/main.cpp

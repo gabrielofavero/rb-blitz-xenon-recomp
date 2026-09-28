@@ -334,13 +334,17 @@ function Wait-ForSongPlayback([int]$StableSec, [int]$TimeoutSec, [string]$Label)
 Get-LogFiles | Remove-Item -Force
 # `vsync` is a bool cvar, and the traces are noisy-gated (`log_noisy`), so both
 # have to be set on the command line rather than left to the local toml.
+# `mnk_mode` is the same argument again: the harness drives the menus with
+# injected keys, and the local toml that turns controller emulation on is
+# gitignored, so a fresh checkout has no input path without it.
 $vsyncValue = if ($Vsync -eq "on") { "true" } else { "false" }
 $exeArgs = @(
     "--game_data_root=$GameRoot",
     "--ultimate_mode=0",
     "--vsync=$vsyncValue",
     "--log_level=$LogLevel",
-    "--log_noisy=true"
+    "--log_noisy=true",
+    "--mnk_mode=1"
 )
 
 $notes = New-Object System.Collections.ArrayList

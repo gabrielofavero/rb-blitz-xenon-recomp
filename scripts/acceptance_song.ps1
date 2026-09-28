@@ -272,8 +272,26 @@ function Invoke-Run([int]$Run) {
     }
 
     Get-ChildItem (Join-Path $logs "*.log") -ErrorAction SilentlyContinue | Remove-Item -Force
+    # Everything this run needs from the runtime is named here rather than
+    # inherited from the local out/build/<preset>/rb_blitz.toml. That profile is
+    # gitignored and machine-specific, so on a fresh checkout every one of these
+    # would be missing and the run would misreport rather than fail: no
+    # mnk_mode, so every injected key is dropped; no debug level, so the
+    # XMPSetPlaybackController pair this script reads the song from is never
+    # written; a 5 MB log cap, which the debug chatter below fills twice inside
+    # one four-minute song, costing the harness the pair across a rotation.
+    #
+    # The level has to be the global one: per-category levels exist only in the
+    # toml ([log.levels]), and the marker is a `[debug] [krnl]` line. The author's
+    # own profile pairs `log_level = "debug"` with `apu = "off"` - the APU debug
+    # chatter is ~40 KB/s, exactly what buries the marker - and there is no
+    # command-line equivalent, so the cap below is what keeps a run's log in one
+    # file instead. `log_flush_interval` is what makes the file readable while the
+    # guest is still running; with the default (0) it is flushed at shutdown.
     $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru `
-        -ArgumentList "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode"
+        -ArgumentList "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
+                      "--mnk_mode=1", "--log_level=debug", "--log_flush_interval=1", `
+                      "--log_max_file_size_mb=100"
 
     try {
         # 1. Title screen. Boot is 25-40s; the OCR wait is what makes a slow boot

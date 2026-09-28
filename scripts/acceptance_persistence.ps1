@@ -188,9 +188,14 @@ function Wait-ForWindow($Proc, [int]$TimeoutSec) {
 
 function Start-RbBlitz {
     Get-ChildItem (Join-Path $logs "*.log") -ErrorAction SilentlyContinue | Remove-Item -Force
+    # mnk_mode is named here rather than inherited from the local
+    # out/build/<preset>/rb_blitz.toml: that profile is gitignored and
+    # machine-specific, and the route is injected keystrokes, so a fresh checkout
+    # has no input path until the flag is given.
     return Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList `
         "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
-        "--user_data_root=$UserDataRoot", "--log_noisy=true", "--log_level=trace"
+        "--user_data_root=$UserDataRoot", "--log_noisy=true", "--log_level=trace", `
+        "--mnk_mode=1"
 }
 
 function Stop-RbBlitz($Proc, [int]$TimeoutSec) {
