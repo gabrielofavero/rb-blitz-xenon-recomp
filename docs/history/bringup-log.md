@@ -1145,6 +1145,11 @@ Exercising it needs a genuinely different `default.xex`, and a modified copy doe
 load, so `OnPostLoadXexImage` never runs — the comparison logic is covered by the
 unit tests instead. The build-side half of the same check *is* demonstrated, and it
 is the half that fails closed.
+(Corrected 2026-09-28: only a *corrupt* copy fails to load. A valid image with a
+different digest — the Ultimate payload's own `default.xex` is one — boots, logs the
+mismatch and carries on to the title screen, and the runtime half is captured in
+"The runtime half of the wrong-data check" below. B-014 is the crash the wrong half
+of the assumption was hiding.)
 
 **Still open.** The ARK/HDR *offset* audit is untouched by any of
 this: the two files are now proven to be the recorded revision, not proven to be
@@ -2388,3 +2393,127 @@ the stamp as well as the report - and the test suite pins the second one.
 - **A machine that cannot probe.** An `unknown` component is reported, not fatal, so a
   box with no clang on `PATH` gets its failure from the build itself - and the record
   says what was expected.
+
+## The runtime half of the wrong-data check (2026-09-28)
+
+The release-readiness item beside the toolchain one, and the last piece of the game-data
+fingerprint feature that was argued rather than measured. The check has two halves and
+they are meant to disagree:
+
+- the **build** half fails closed: [tools/fingerprint_check.cpp](../../tools/fingerprint_check.cpp)
+  runs as a gate before codegen and refuses to recompile against a dump other than the one
+  [config/game_fingerprints.toml](../../config/game_fingerprints.toml) records (exit 1;
+  `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON` relaxes it to a warning).
+- the **runtime** half warns and continues: `RbBlitzApp::LogBootIdentity()` logs which
+  revision the running executable was actually booted against and returns, because
+  pointing a built binary at another `game/` tree is a supported way to run.
+
+Status: complete — [scripts/acceptance_wrong_data.ps1](../../scripts/acceptance_wrong_data.ps1),
+three cases, **3/3** in this repository's tree and in the clean clone, exit 0 both times.
+
+The bring-up entry for the fingerprints ended with "**Deliberately not demonstrated**", on
+the reasoning that exercising the runtime path "needs a genuinely different `default.xex`,
+and a modified copy does not load, so `OnPostLoadXexImage` never runs". That is true of one
+kind of modified copy and false of the kind that matters: a *truncated* image is one the
+loader cannot get through, while a valid image whose content differs loads exactly like the
+recorded one. The payload's own `default.xex` — the same 9,023,488 bytes, sha256
+`390e0ae0…`, 12 bytes of code different ([ultimate-compat.md](../ultimate-compat.md) §3) —
+is the realistic instance of the second kind, and it is what a root holds when the mod's
+files were copied *over* the dump rather than staged at `game/ultimate`, a layout the same
+doc names as supported. So the MODIFIED path does have a live capture, and this is it.
+
+### The three outcomes, captured
+
+Each case swaps `game\default.xex` for one image, boots the built binary with
+`--game_data_root` on that root — vanilla, `--ultimate_mode=0`, so the identity line is the
+only variable — waits for the title screen, closes the window and reads the run's log. The
+build gate's verdict on the same file is taken first, which is the contrast the table is
+about:
+
+| Case | Image | Build half (gate) | Runtime half (boot) |
+| --- | --- | --- | --- |
+| `retail` | the recorded image, sha256 `e2195d62…` | `ok  entrypoint  default.xex  9023488 bytes  sha256 e2195d62…` — exit 0 | `game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62…)`, title screen, clean close |
+| `payload` | the payload's image, same size, sha256 `390e0ae0…` | `HASH MISMATCH  entrypoint  default.xex  9023488 bytes  sha256 390e0ae0… (expected e2195d62…)` — exit 1 | `MODIFIED` + `expected:`, **then the title screen and a clean close** |
+| `truncated` | the first 1 MiB of the recorded image, sha256 `dbebf8bc…` | `SIZE MISMATCH  entrypoint  default.xex  size 1048576 (expected 9023488)` — exit 1 | no `game data identity` line at all; the process ends with `-1073741819` |
+
+The whole of the warn-and-continue, verbatim (18:54:25.969–26.066; the `ultimate: off` line
+between the two is the vanilla switch doing its job):
+
+```text
+[info] [core] [t20316] boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260928_1827
+[info] [core] [t20316] toolchain: rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0 (frozen set)
+[warning] [core] [t20316] game data identity: MODIFIED - D:\Coding\decomps\360\rb-blitz-xenon-recomp\game\default.xex is 9023488 bytes, sha256 390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c
+[warning] [core] [t20316]   expected: 9023488 bytes, sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb (config/game_fingerprints.toml, see docs/ultimate-compat.md)
+[info] [core] [t20316] ultimate: off, booting the retail game data
+```
+
+and the same two lines in their recorded form (18:54:09.039, the `retail` case):
+
+```text
+[info] [core] [t21596] game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb)
+```
+
+The warning is not a decision, and the payload case is where that is visible: nothing else
+about the run changed. It reached `PRESS … TO START` (Windows OCR read `TO START` off the
+captured frame), closed on `CloseMainWindow()` with exit 0, wrote
+`Title terminated; hard-exiting process.` as its last line, and logged no `[FATAL]` in
+583 KB of debug log. The recorded case is the same 585 KB and the same clean close.
+
+### The boundary: where the check cannot look
+
+The truncation is the interesting case, not a third behaviour. `LogBootIdentity()` is called
+from `OnPostLoadXexImage()`, so by the time the check runs the image has already been loaded
+and the check can only ever see a file the loader accepted. The truncated boot proves it
+from the other side — the last line it writes is the loader's own, with nothing after it:
+
+```text
+[debug] [sys] [t13452] Loading XEX image: game:\default.xex
+```
+
+then exit `-1073741819` (`0xC0000005`, an access violation inside the SDK's XEX load path)
+with no `[FATAL]`, no dialog, and no identity line. Two consequences worth keeping:
+
+- the check's `cannot read` branch (warn, then return) is unreachable in a real boot: an
+  image the process cannot read never gets as far as the check. It stays covered by
+  `tests/fingerprint_tests.cpp`, and the acceptance script asserts the branch never fires.
+- a corrupt dump is diagnosed by the build gate or not at all. That is **B-014** in
+  [known-issues.md](../known-issues.md), left open with its two options — pre-validate the
+  XEX header in the `patches/rexglue-sdk/` lane so the failure is a sentence, or accept that
+  this is the loader's failure — rather than fixed inside a capture task.
+
+### How it is captured
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+.\scripts\acceptance_wrong_data.ps1
+```
+
+The script edits `<GameRoot>\default.xex` in place — that is the mechanism, since the check
+reacts to the image the root actually holds — and puts it back from
+`out/m5-wrong-data/default.xex.retail` in a `finally`, verifying the digest afterwards. A run
+that dies hard enough to skip the restore leaves a root whose image no longer matches the
+record, so the next run refuses to start and names the command (`-Restore`) that puts it
+back. Per case it writes `<case>.log`, `<case>.png`, `<case>-gate.txt` and a row in
+`summary.json`, prints the verdict table above, and exits non-zero unless every executed case
+behaved as recorded; the `payload` case is reported as skipped where no payload is staged.
+
+Three things the first version of the script got wrong, kept here because they are the kind
+that hide: PowerShell 5.1 turns a *failing* native command's stderr into an error record,
+which `$ErrorActionPreference = "Stop"` raises as a terminating error, so the gate is invoked
+with the expectation relaxed; `Get-Content` returns strings wearing the provider's note
+properties (`PSPath`, `ReadCount`), which is all a JSON dump of the verdict line turns into;
+and the identity line's regex has to allow the recorded form's parentheses as well as the
+`MODIFIED` form's "is N bytes", or the recorded case "passes" with `-` where its digest
+should be.
+
+### What this does not cover
+
+- **Other revisions.** One different image is captured. Another dump, or a re-dump, takes the
+  same branch with different numbers; nothing here claims a guest behaviour difference, only
+  that the boot continues.
+- **The other two roles.** `--all` (the `.hdr` and the 361 MB `.ark`) is out of scope: the
+  entrypoint is what codegen and every address-based patch are guarded against.
+- **A fix for the corrupt-image crash.** B-014, deliberately.
+- **Anything past the title screen.** The payload-image boot was stopped at the title screen
+  and closed. Whether the guest would go on into a song against that root is a different
+  experiment, and the script asserts only what it observed.

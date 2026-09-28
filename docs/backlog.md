@@ -31,10 +31,18 @@ The one goal that is not a feature: another authorized developer follows
       log, which is where that fact used to be missing entirely. The game fingerprint is
       frozen and enforced the same way
       ([config/game_fingerprints.toml](../config/game_fingerprints.toml)).
-- [ ] **Record the runtime half of the wrong-data check.** The build half fails closed.
-      The runtime half is a deliberate warn-and-continue (a mismatched
-      `--game_data_root` may be an Ultimate payload) and has no capture yet — the
-      comparison logic is covered by `tests/fingerprint_tests.cpp` instead.
+- [x] **Record the runtime half of the wrong-data check.** The build half fails closed.
+      Captured 2026-09-28 with `scripts/acceptance_wrong_data.ps1`: three boots (the
+      recorded image, the Ultimate payload's own image — a valid XEX with a different
+      digest — and a truncated copy), 3/3 in the repository tree and in a clean clone, each
+      with the build gate's verdict on the same file as the contrast. The
+      warn-and-continue is real and the boot is not harmed by it: `game data identity:
+      MODIFIED - …` plus the `expected:` line, then the title screen, then a clean close.
+      The third case is the boundary rather than a fourth behaviour — the check runs after
+      `OnPostLoadXexImage`, so an image the XEX loader cannot read never reaches it, which
+      is B-014 below. Log and details:
+      [history/bringup-log.md](history/bringup-log.md) "The runtime half of the wrong-data
+      check".
 - [ ] **Audit the distributable** — confirm no retail data, symbols derived from
       proprietary databases, credentials or machine-specific paths reach the
       installer payload or a packaged build ([installer/](../installer)).
@@ -52,6 +60,14 @@ locations are already documented in [README.md](../README.md); nothing is owed t
       already do), or declare Debug build/test-only and keep acceptance on Release.
       Evidence and the reasoning for leaving it open: [known-issues.md](known-issues.md)
       B-013, [history/bringup-log.md](history/bringup-log.md) "Clean-checkout smoke test".
+- [ ] **Decide how a corrupt `default.xex` fails.** Truncating the recorded image to 1 MiB
+      ends the boot with `0xC0000005` and no diagnostic: the runtime fingerprint check runs
+      after the XEX load, so a file the loader cannot read is one it never sees, and only
+      the build gate reports it (`SIZE MISMATCH`, exit 1) — B-014. Either pre-validate the
+      XEX header in the `patches/rexglue-sdk/` lane so the failure is a sentence, or record
+      that a corrupt image is the loader's business and the gate is the half that covers
+      it. Evidence: [history/bringup-log.md](history/bringup-log.md) "The runtime half of
+      the wrong-data check", [known-issues.md](known-issues.md) B-014.
 - [ ] `0x827EC038` — the last forced `functions.toml` entry of the indirect-call
       class: a 24-byte leaf whose address is only taken in data, so no segment
       mentions it (B-006).

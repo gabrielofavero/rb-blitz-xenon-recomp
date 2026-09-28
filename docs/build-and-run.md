@@ -456,6 +456,22 @@ line naming the values in
 a built executable at an Ultimate content root is a supported run, not a build error.
 The fatal half of that check is the gate in §3, not the boot.
 
+What that warning can and cannot see is measured by
+`scripts\acceptance_wrong_data.ps1`, which boots the recorded image, the Ultimate
+payload's own image (a valid XEX with a different digest) and a truncated copy, and
+reports the §3 gate's verdict on the same file as the contrast:
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+.\scripts\acceptance_wrong_data.ps1
+```
+
+Two things it pins down. A valid image with a different digest boots on to the title
+screen rather than being rejected — the warning is the whole response. And an image
+the XEX loader cannot load never reaches the check at all: it runs after
+`OnPostLoadXexImage`, so the last line such a run writes is the loader's own
+`Loading XEX image: game:\default.xex` (B-014 in [known-issues.md](known-issues.md)).
+
 Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 
 ```powershell
