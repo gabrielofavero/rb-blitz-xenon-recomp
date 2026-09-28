@@ -19,6 +19,7 @@
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
+#include "generated/toolchain_build.h"
 #include "fs/path_policy.h"
 #include "hooks/dlc.h"
 #include "hooks/ultimate.h"
@@ -138,6 +139,13 @@ class RbBlitzApp : public rex::ReXApp {
   // matched to it.
   void LogBootIdentity() {
     REXLOG_INFO("boot identity: {}", REXGLUE_BUILD_STAMP);
+
+    // Which compiler, CMake, Ninja, MSVC toolset, Windows SDK and SDK commit built
+    // this binary, with the frozen set named in the same line when it is one. It is
+    // the build's half of what the game data identity below is the runtime's half
+    // of: a log states the provenance of both sides before any other evidence in it
+    // is read (docs/toolchain.md).
+    REXLOG_INFO("toolchain: {}", RBBLITZ_TOOLCHAIN_STAMP);
 
     const std::filesystem::path entrypoint =
         game_data_root() / rb_blitz::fingerprint::vanilla::kEntrypointPath;

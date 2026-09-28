@@ -166,6 +166,73 @@ add_custom_target(rb_blitz_fingerprint_gate
 )
 add_dependencies(rb_blitz_codegen rb_blitz_fingerprint_gate)
 
+# Frozen toolchain
+#
+# config/toolchain.toml records the compiler, CMake, Ninja, MSVC toolset, Windows
+# SDK and SDK pin this project is built with, and this gate compares the machine
+# against it before codegen - the same shape as the game-data gate above, and for
+# the same reason: the knowledge of "what works here" used to live in this build
+# tree's CMakeCache.txt, which no other machine has. docs/toolchain.md is the prose
+# half; src/util/toolchain_pin.h is the parser and the comparison, covered by
+# tests/toolchain_tests.cpp.
+#
+# A component below its recorded minimum, or the SDK off its pinned commit, stops
+# the build; anything else is reported and builds, because the frozen set is what
+# the last acceptance run was measured with rather than a wall in front of the next
+# developer. The two switches exist for the releases-and-contributors split:
+# -DRBBLITZ_STRICT_TOOLCHAIN=ON refuses every deviation (a release build that wants
+# the frozen set or nothing) and -DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON accepts every
+# one (report and build).
+option(RBBLITZ_STRICT_TOOLCHAIN
+    "Refuse to build unless the toolchain matches config/toolchain.toml exactly" OFF)
+option(RBBLITZ_ALLOW_OTHER_TOOLCHAIN
+    "Report a toolchain that is not the frozen one, but never fail the build" OFF)
+
+set(RBBLITZ_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/toolchain.toml")
+set(RBBLITZ_TOOLCHAIN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/generated/toolchain_build.h")
+
+add_executable(rb_blitz_toolchain
+    tools/toolchain_check.cpp
+    src/util/toolchain_pin.cpp
+)
+target_include_directories(rb_blitz_toolchain PRIVATE src)
+
+set(RBBLITZ_TOOLCHAIN_PROBE_ARGS
+    --project-dir "${CMAKE_CURRENT_SOURCE_DIR}"
+    --cxx "${CMAKE_CXX_COMPILER}"
+    --cmake "${CMAKE_COMMAND}"
+    --ninja "${CMAKE_MAKE_PROGRAM}"
+)
+set(RBBLITZ_TOOLCHAIN_GATE_ARGS ${RBBLITZ_TOOLCHAIN_PROBE_ARGS})
+if(RBBLITZ_STRICT_TOOLCHAIN)
+    list(APPEND RBBLITZ_TOOLCHAIN_GATE_ARGS --strict)
+endif()
+if(RBBLITZ_ALLOW_OTHER_TOOLCHAIN)
+    list(APPEND RBBLITZ_TOOLCHAIN_GATE_ARGS --allow-other-toolchain)
+endif()
+
+# The stamp the binary reports at boot. Generated rather than configured, because
+# what it records is what the probes above found on this machine, not the record in
+# the .toml - a binary built off the frozen set says so in its own log.
+add_custom_command(
+    OUTPUT "${RBBLITZ_TOOLCHAIN_HEADER}"
+    COMMAND $<TARGET_FILE:rb_blitz_toolchain> --emit-header "${RBBLITZ_TOOLCHAIN_HEADER}"
+            ${RBBLITZ_TOOLCHAIN_PROBE_ARGS}
+    DEPENDS rb_blitz_toolchain "${RBBLITZ_TOOLCHAIN_FILE}"
+    COMMENT "Emitting the toolchain boot stamp"
+    VERBATIM
+)
+target_sources(rb_blitz PRIVATE "${RBBLITZ_TOOLCHAIN_HEADER}")
+
+add_custom_target(rb_blitz_toolchain_gate
+    COMMAND $<TARGET_FILE:rb_blitz_toolchain> --check ${RBBLITZ_TOOLCHAIN_GATE_ARGS}
+    DEPENDS rb_blitz_toolchain
+    COMMENT "Checking the toolchain against config/toolchain.toml"
+    USES_TERMINAL
+    VERBATIM
+)
+add_dependencies(rb_blitz_codegen rb_blitz_toolchain_gate)
+
 # Host unit tests. Dependency-free (tests/check.h) because the SDK vendors catch2
 # as an uninitialised submodule, and SDK-free so they run without booting the game
 # - see docs/build-and-run.md. `cmake --build <build dir>; ctest` runs them.
@@ -215,4 +282,12 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_dlc_layout_tests PRIVATE src)
     add_test(NAME dlc_layout COMMAND rb_blitz_dlc_layout_tests)
+
+    add_executable(rb_blitz_toolchain_tests
+        tests/toolchain_tests.cpp
+        src/util/toolchain_pin.cpp
+    )
+    target_include_directories(rb_blitz_toolchain_tests PRIVATE src)
+    add_test(NAME toolchain
+             COMMAND rb_blitz_toolchain_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

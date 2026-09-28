@@ -2286,3 +2286,100 @@ build and after it: unchanged.
   no ownership, so `git` refuses the tree ("dubious ownership") until `safe.directory`
   covers it. That is why the four blockers above were never seen before - every earlier
   run inherited this machine's own settings.
+
+## Freezing the toolchain (2026-09-28)
+
+The last entry's opposite number: the game dump has been recorded and enforced since
+bring-up, while "which compiler does this build work with" lived in exactly one file -
+`out\build\win-amd64-release\CMakeCache.txt`, whose `CMAKE_CXX_COMPILER`,
+`CMAKE_MAKE_PROGRAM` and `CMAKE_COMMAND` are absolute paths on this machine and are
+re-created, differently, by every clone. The machine that follows README has none of
+that knowledge, which is the same shape of problem B-001/B-010 had and the same answer:
+put the record in the repository and check it.
+
+Status: complete.
+
+### What the record is
+
+- [config/toolchain.toml](../../config/toolchain.toml) - the frozen set, with the SDK
+  commit, clang, CMake, Ninja, the MSVC toolset and the Windows SDK. Every component
+  carries the version *and* the path it was measured at, because the paths are what
+  `CMakeCache.txt` used to be the only record of; the check compares versions and only
+  reports paths, since the same version lives somewhere else on the next machine.
+- [src/util/toolchain_pin.h](../../src/util/toolchain_pin.h) /
+  [.cpp](../../src/util/toolchain_pin.cpp) - the parser and the comparison, SDK-free, so
+  [tests/toolchain_tests.cpp](../../tests/toolchain_tests.cpp) covers it without a
+  build: **133 checks** over the parse, the version ordering, the verdicts and the
+  fatal policy.
+- [tools/toolchain_check.cpp](../../tools/toolchain_check.cpp) - the probe and the
+  report, built as `rb_blitz_toolchain`; `--check` is the build gate, `--emit-header`
+  writes the stamp a binary logs at boot.
+- [docs/toolchain.md](../../toolchain.md) - the prose half: what is frozen, why each
+  component is in the set, what each verdict does to a build, what is deliberately not
+  covered, and how to change the record.
+
+### What it does to a build
+
+The gate runs before codegen, next to the game-data gate, on every build:
+
+```text
+[0/3] Checking the toolchain against config/toolchain.toml
+toolchain  rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0  (config/toolchain.toml)
+ok        rexglue-sdk     c94f5eb           nightly-20260826-f5337cdc-2-gc94f5eb
+ok        clang           23.1.1            C:\Program Files\LLVM\bin\clang++.exe
+ok        CMake           4.4.3             C:\Program Files\CMake\bin\cmake.exe
+ok        Ninja           1.13.2            …\WinGet\Packages\Ninja-build.Ninja_…\ninja.exe
+ok        MSVC toolset    14.44.35207       from the compiler's include roots
+ok        Windows SDK     10.0.26100.0      from the compiler's include roots
+ok         the frozen toolchain
+```
+
+and the machine's own toolchain is in the log of every run, between the build identity
+and the game data identity:
+
+```text
+boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260928_1827
+toolchain: rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0 (frozen set)
+game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62…84bb)
+```
+
+The measured behaviour of the switch, with a pin file changed under it rather than the
+machine (the tool takes `--pin`, so the policies are testable without touching a real
+one):
+
+| Change | Report | Exit |
+| --- | --- | --- |
+| Ninja `1.13.2` -> `1.14.0`, no minimum recorded | `different  Ninja  1.13.2  frozen 1.14.0` | 0, builds |
+| CMake minimum raised above the machine's `4.4.3` | `too old  CMake  4.4.3  needs 5.0 or newer` | 1, stops |
+| the same, with `--allow-other-toolchain` | the same line | 0 |
+| the Ninja difference, with `--strict` | the same line | 1 |
+| SDK `commit` -> another revision | `different  rexglue-sdk  c94f5eb  frozen f5337cd` | 1, stops |
+| no `schema_version` in the record | `no schema_version at the top of the file` | 2 |
+
+The SDK commit and a below-minimum version are fatal by construction; everything else is
+reported and builds, because the frozen set is what the last acceptance run was measured
+with, not a wall in front of the next developer. `-DRBBLITZ_STRICT_TOOLCHAIN=ON` and
+`-DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON` are the two directions of that, named in the report
+so a build that refuses or accepts is not a mystery.
+
+One bug worth recording, because it is the kind that hides: the first version of the
+probe ran the compiler through `popen`, which hands the command to `cmd /c`, and cmd
+strips the first and last quote of a command line that begins with one - so
+`"C:\Program Files\LLVM\bin\clang++.exe" -v … 2>&1` reached cmd as an unquoted path and
+the probe silently returned the *preprocessed source* instead of the banner. The
+compiler then reported `unknown` with a plausible-looking path next to it, and the stamp
+said `(frozen set)` for a set it had not measured. Both are fixed - the command is
+wrapped in a second pair of quotes, an unmeasured component is now marked `unknown` in
+the stamp as well as the report - and the test suite pins the second one.
+
+### What this does not cover
+
+- **The installer's toolchain.** Inno Setup 6 and PowerShell 5.1 are not in the record.
+  The item's scope is the build that produces the payload, not the packaging step.
+- **Platforms other than `win-amd64`.** The linux and mac presets exist; the record is
+  one platform's, and on another host the check can only report, not judge.
+- **Reproducibility in the byte-for-byte sense.** The stamp names the toolchain; nothing
+  pins build ids or timestamps.
+- **A machine that cannot probe.** An `unknown` component is reported, not fatal, so a
+  box with no clang on `PATH` gets its failure from the build itself - and the record
+  says what was expected.

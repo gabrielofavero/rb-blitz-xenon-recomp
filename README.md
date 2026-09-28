@@ -22,7 +22,7 @@ You will need to provide the 360 package to install. It can be either packed or 
 
 Everything below assumes Windows and runs in PowerShell, from the repo root.
 
-**Prerequisites:** LLVM/Clang, CMake 3.25+, Ninja and the Visual Studio Build Tools *with* the Windows SDK, all of them resolvable from `PATH`. Clang alone is not enough, since without the MSVC/UCRT headers the build fails on `<windows.h>`, not on a missing compiler. [docs/build-and-run.md](docs/build-and-run.md) §1 has the `winget` commands and the two traps worth knowing about.
+**Prerequisites:** LLVM/Clang, CMake 3.25+, Ninja and the Visual Studio Build Tools *with* the Windows SDK, all of them resolvable from `PATH`. Clang alone is not enough, since without the MSVC/UCRT headers the build fails on `<windows.h>`, not on a missing compiler. [docs/build-and-run.md](docs/build-and-run.md) §1 has the `winget` commands and the two traps worth knowing about. The versions this project is built and accepted with are frozen in [config/toolchain.toml](config/toolchain.toml) and explained in [docs/toolchain.md](docs/toolchain.md); every build checks the machine against that record before it compiles anything.
 
 **Once per checkout**, the pinned rexglue submodule needs two idempotent repairs: upstream's symlinked files cannot be created on a stock Windows checkout, and the patch set carries the fixes the note highway needs.
 
@@ -63,7 +63,7 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1
 
 Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, which embeds the payload and therefore installs with no network access. It needs [Inno Setup 6](https://jrsoftware.org/isdl.php) (ISCC); `-RefreshPayload`, `-SkipTests`, `-SkipArt` and `-SkipSetup` control the individual stages, and [installer/README.md](installer/README.md) covers the releases side of it.
 
-Everything I've worked out about the game lives in `docs\`: [known-issues.md](docs/known-issues.md) for the standing limits, [backlog.md](docs/backlog.md) for what's next, [dlc.md](docs/dlc.md) for where DLC packages go, [ultimate-compat.md](docs/ultimate-compat.md) for the Ultimate install, [rb3-references.md](docs/rb3-references.md) for the Rock Band 3 knowledge I borrow, [symbols.md](docs/symbols.md) for the guest addresses, and [history/bringup-log.md](docs/history/bringup-log.md) for the whole chronological record.
+Everything I've worked out about the game lives in `docs\`: [known-issues.md](docs/known-issues.md) for the standing limits, [backlog.md](docs/backlog.md) for what's next, [toolchain.md](docs/toolchain.md) for the frozen build toolchain, [dlc.md](docs/dlc.md) for where DLC packages go, [ultimate-compat.md](docs/ultimate-compat.md) for the Ultimate install, [rb3-references.md](docs/rb3-references.md) for the Rock Band 3 knowledge I borrow, [symbols.md](docs/symbols.md) for the guest addresses, and [history/bringup-log.md](docs/history/bringup-log.md) for the whole chronological record.
 
 ## How about AI usage?! I WON'T play this if it is one of those AI trash ports!! 😡😡
 

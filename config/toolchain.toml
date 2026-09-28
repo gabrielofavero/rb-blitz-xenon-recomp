@@ -1,0 +1,59 @@
+# The supported build toolchain, frozen the way the supported game dump is
+# (config/game_fingerprints.toml): the record lives in the repository instead of
+# in one machine's build tree, and something checks it. That something is
+# tools/toolchain_check.cpp, built as rb_blitz_toolchain and run by the build
+# before codegen, so a build states the toolchain it is about to use instead of
+# leaving it in the build tree's CMakeCache.txt. docs/toolchain.md is the prose
+# half of this file.
+#
+# What is compared:
+#   * `commit` - an exact revision (the ReXGlue SDK pin). A difference is fatal.
+#   * `version` - dotted numbers. `minimum` is the oldest still accepted and
+#     failing it is fatal; any other difference is reported and, unless the build
+#     asked for a strict toolchain, still builds.
+#   * `path` - recorded for the reader: the absolutely-resolved location this set
+#     was measured at. Reported, never required, because the same version lives
+#     elsewhere on another machine.
+# Unknown sections and keys are ignored, so this file can grow ahead of the tool.
+#
+# Values are double-quoted with C escapes or single-quoted literals; paths use the
+# single-quoted form so a backslash stays a backslash.
+
+schema_version = 1
+
+[sdk]
+# The pinned ReXGlue SDK submodule. The gitlink in the parent commit already
+# refuses a different commit at clone time; this copy is what puts the pin in the
+# same report as the compiler and the rest. `version` is what the SDK reports for
+# itself and depends on whether its tags were fetched, so it is informational.
+version = "0.10.0.0-dev.unknown"
+commit = "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518"
+
+[clang]
+# The linux presets name clang-20, so 20 is the oldest this project already
+# assumes; win-amd64 was measured and torn down with 23.
+version = "23.1.1"
+minimum = "20"
+path = 'C:\Program Files\LLVM\bin\clang++.exe'
+
+[cmake]
+version = "4.4.3"
+minimum = "3.25"
+path = 'C:\Program Files\CMake\bin\cmake.exe'
+
+[ninja]
+version = "1.13.2"
+path = 'C:\Users\gabri\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe'
+
+[msvc]
+# The MSVC toolchain clang takes its headers and libraries from. `version` here is
+# the toolset directory under VC\Tools\MSVC (not the Visual Studio product
+# version, which docs/toolchain.md records separately). This is not cosmetic -
+# without those headers the build fails on <windows.h> rather than on anything the
+# presets name.
+version = "14.44.35207"
+path = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207'
+
+[windows_sdk]
+version = "10.0.26100.0"
+path = 'C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0'

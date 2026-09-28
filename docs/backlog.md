@@ -21,10 +21,15 @@ The one goal that is not a feature: another authorized developer follows
       harness with no input path, and a song envelope read from a log level the clone did
       not have ([history/bringup-log.md](history/bringup-log.md), "Clean-checkout smoke
       test"). The Debug route itself aborts on an SDK assert; that is B-013, below.
-- [ ] **Freeze the supported toolchain** — SDK pin, compiler paths and versions — in
-      a `toolchain.md`. Today the build works only because the absolute
-      compiler/cmake/ninja paths sit in the build tree's `CMakeCache.txt`. The game
-      fingerprint is already frozen and enforced
+- [x] **Freeze the supported toolchain** — SDK pin, compiler paths and versions — in
+      a `toolchain.md`. Done 2026-09-28: [toolchain.md](toolchain.md) is the prose,
+      [config/toolchain.toml](../config/toolchain.toml) is the record (SDK commit, clang,
+      CMake, Ninja, MSVC toolset, Windows SDK — versions *and* the paths they were
+      measured at), [tools/toolchain_check.cpp](../tools/toolchain_check.cpp) is the
+      check, and it runs as a build gate before codegen the way the game fingerprint
+      does. A binary built on a machine that is not the frozen set says so in its boot
+      log, which is where that fact used to be missing entirely. The game fingerprint is
+      frozen and enforced the same way
       ([config/game_fingerprints.toml](../config/game_fingerprints.toml)).
 - [ ] **Record the runtime half of the wrong-data check.** The build half fails closed.
       The runtime half is a deliberate warn-and-continue (a mismatched
@@ -58,8 +63,9 @@ locations are already documented in [README.md](../README.md); nothing is owed t
       ([rb3-references.md](rb3-references.md) §8).
 - [ ] **Hook hygiene**: every hook file states the faithful behaviour and the reason
       for deviating, including each early return.
-- [ ] **Host test coverage beyond the six existing targets** — `crypto_keytable`,
-      `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav` and `dlc_layout`.
+- [ ] **Host test coverage beyond the seven existing targets** — `crypto_keytable`,
+      `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`, `dlc_layout` and
+      `toolchain`.
       Everything that needs a boot is still verified by hand: the SDK-touching hooks,
       pause/resume, and the UI paths outside the offline song loop.
 - [ ] **Mouse navigation limits** are accepted, not fixed — a screen whose rows a

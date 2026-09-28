@@ -80,6 +80,12 @@ first step and had to happen before §2 or §3 could run. It is now in place (LL
 10.0.26100.0 SDK). The recipe is kept for a fresh machine; it is a one-time cost,
 and every later rebuild is the incremental path in §3.
 
+Those exact versions are the **frozen set**
+([config/toolchain.toml](../config/toolchain.toml), [toolchain.md](toolchain.md)),
+and installing them is what §3's toolchain gate checks for. A newer version is
+reported rather than refused, so the install below can legitimately be a little
+ahead of the record.
+
 The build is a plain `Ninja` + `clang` build of the pinned SDK **from source**
 (`REXSDK_DIR` points at `rexglue-sdk/`, and `generated/rexglue.cmake` does an
 `add_subdirectory`), so the first build compiles SDL3, fmt, spdlog,
@@ -332,6 +338,29 @@ Codegen still runs on whatever
 mod's, never a claim that an Ultimate image compiles: see
 [ultimate-compat.md](ultimate-compat.md).
 
+### The other gate: the frozen toolchain
+
+Every build of `rb_blitz_codegen` also runs `rb_blitz_toolchain` against
+[config/toolchain.toml](../config/toolchain.toml), right after the game-data gate,
+and prints the same two-line report either way:
+
+```text
+[0/3] Checking the toolchain against config/toolchain.toml
+toolchain  rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0  (config/toolchain.toml)
+ok        rexglue-sdk     c94f5eb           nightly-20260826-f5337cdc-2-gc94f5eb
+ok        clang           23.1.1            C:\Program Files\LLVM\bin\clang++.exe
+...
+ok         the frozen toolchain
+```
+
+This is what replaced "the absolute compiler paths in this build tree's
+`CMakeCache.txt`" as the record of a working toolchain: the same knowledge, in the
+repository, checked on every machine. Only a version below the recorded `minimum` and an
+SDK checkout off its pinned commit stop a build; anything else is reported and builds.
+Both behaviours have a switch — `-DRBBLITZ_STRICT_TOOLCHAIN=ON` refuses every
+deviation, `-DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON` accepts every one — and the whole
+subject is [toolchain.md](toolchain.md).
+
 `rb_blitz.exe` carries the Blitz icon. [rb_blitz.rc](../rb_blitz.rc) compiles
 [assets/blitz.ico](../assets/blitz.ico) into the executable, so the icon is a
 build input like any other source: replacing the `.ico` and rebuilding is the
@@ -356,19 +385,21 @@ The timestamp must be from this build, and the check must print `True`.
 
 The tests under [tests/](../tests) exercise pure host logic — the B-009 MOGG key
 path, whose SDK-free half lives in
-[src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h), and the fingerprint
+[src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h), the fingerprint
 parsing/comparison in
-[src/util/game_fingerprint.h](../src/util/game_fingerprint.h) — so they need no
-game image, no runtime and no window, and finish in about half a second:
+[src/util/game_fingerprint.h](../src/util/game_fingerprint.h), and with them the DLC
+layout, the payload overlay, the path policy, the mouse-navigation stepper and the
+frozen-toolchain record in
+[src/util/toolchain_pin.h](../src/util/toolchain_pin.h) — so they need no game
+image, no runtime and no window, and finish in a couple of seconds:
 
 ```powershell
-cmake --build --preset win-amd64-release `
-    --target rb_blitz_crypto_keytable_tests rb_blitz_fingerprint_tests
+cmake --build --preset win-amd64-release
 ctest --test-dir out\build\win-amd64-release --output-on-failure
 ```
 
-Expected output is `2/2` passing — `Test #1: crypto_keytable` and
-`Test #2: fingerprint`, 419 checks between them. Exactly one case needs the dump at
+Expected output is `7/7` passing (`crypto_keytable`, `payload_overlay`, `path_policy`,
+`fingerprint`, `ui_nav`, `dlc_layout`, `toolchain`). Exactly one case needs the dump at
 all (`fingerprint_real_game_dump` hashes `game\default.xex`), and it prints
 `[ SKIP ]` instead of running when the dump is absent or, with
 `RBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, when it is not the supported revision. A failing check
