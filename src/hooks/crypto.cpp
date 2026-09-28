@@ -82,7 +82,7 @@
 //     around at 0x82076598 is byte-identical to the published RB3 one, so only
 //     the obscured table needs substituting.
 //
-// Milestone: 4 (see docs/history/bringup-log.md B-009).
+// The B-009 fix; see docs/history/bringup-log.md.
 
 #include "crypto_keytable.h"
 

@@ -1,6 +1,6 @@
-# Milestone 5: measure frame pacing and input polling on a real song.
+# Measure frame pacing and input polling on a real song.
 #
-# The milestone's remaining stability question is not answerable from a vanilla
+# The remaining stability question is not answerable from a vanilla
 # log: nothing in it prints a frame time or a poll rate. This driver produces the
 # evidence instead of an opinion:
 #

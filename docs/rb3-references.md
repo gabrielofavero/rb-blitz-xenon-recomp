@@ -11,7 +11,7 @@ external projects; the leads that name an action are tracked in
 [backlog.md](backlog.md).
 
 It is deliberately a catalogue of *techniques and known-answer checks*, not a
-plan: nothing here changes our milestone order.
+plan: nothing here is a commitment.
 
 ## 0. Sources
 
@@ -158,10 +158,10 @@ This is the right tool for the places where we only need to **force a branch or 
 return value** — cheaper and far less brittle than a hand-transcribed body. Live
 candidates in our tree:
 
-* The **"Proceed in Offline Mode?"** branch (M4): once located, either force the
+* The **"Proceed in Offline Mode?"** branch: once located, either force the
   branch or `return` a value, instead of reimplementing the caller.
-* `BandSongMgr::IsDemo`-style gates (M5, see §6).
-* The `SetDiskError` call sites (M4/M5, see §6) — although Blitz's handler turned
+* `BandSongMgr::IsDemo`-style gates (see §6).
+* The `SetDiskError` call sites (see §6) — although Blitz's handler turned
   out to be a single function (`sub_8236C108`) that is cheaper to override than to
   branch around; see `docs/ultimate-compat.md` §3.
 
@@ -177,15 +177,15 @@ lists the Blitz evidence we would need before writing code.
 
 | band3 hook (RB3 addr) | What it does | Why we want it | Blitz evidence needed | Priority |
 | --- | --- | --- | --- | --- |
-| `NewFile` `0x825173E0` (`.cpp`) | Sanitises `..` → `(..)`, tries an `assets/<path>` fallback, and if the host file exists sets `ctx.r4.u64 = flags \| 0x10000` to **force the host-file read path**. | The mechanism for the asset-overlay idea in §7.2: let us shadow or fix shipping data without touching `game/`. | Blitz `NewFile` (import thunk to `__imp__NewFile`), the flags word layout, and our asset root (`game/`, not `assets/`). | P1 for M4 |
+| `NewFile` `0x825173E0` (`.cpp`) | Sanitises `..` → `(..)`, tries an `assets/<path>` fallback, and if the host file exists sets `ctx.r4.u64 = flags \| 0x10000` to **force the host-file read path**. | The mechanism for the asset-overlay idea in §7.2: let us shadow or fix shipping data without touching `game/`. | Blitz `NewFile` (import thunk to `__imp__NewFile`), the flags word layout, and our asset root (`game/`, not `assets/`). | P1 |
 | `AddHeap` `0x827BC2D0` (`.cpp`) | Reads the DTA `DataArray` in `r5`, `strcmp(name, "main"/"char")` and overrides `ctx.r4.u32` (heap size) from config. | Gives us a heap dial when we hit `out of memory` at boot or mid-song. | Blitz's `AddHeap` and its DTA heap names. Note the RB3 hook **cannot** change `mem.dta` pools, so a `big_hunk`-style pool stays fixed. | P2 |
-| `PlatformMgr__GetName` `0x8251CA58` (`.cpp`) | Calls the original, then copies a configured user name (≤32 chars) into the guest buffer at `ctx.r3`. | Canned profile data for UI automation; removes a manual step from the M4 smoke test. | Blitz's equivalent getter; where the name is consumed. | P3 |
+| `PlatformMgr__GetName` `0x8251CA58` (`.cpp`) | Calls the original, then copies a configured user name (≤32 chars) into the guest buffer at `ctx.r3`. | Canned profile data for UI automation; removes a manual step from the acceptance run. | Blitz's equivalent getter; where the name is consumed. | P3 |
 | `BoxMapLighting__ApplyQueuedLights` (`.cpp) | Early-return: skip the approximate box-map lights. | Visual A/B only. | — | P3 |
-| `RndMat__Load` `0x82438F40` (`.cpp`) | Reads `REX_LOAD_U32(this+0x118)`; the hair shader id `2` is zeroed. Also `REX_STORE_U8(this+0x99, 0)` to force `useEnviron` (fullbright). | Workaround for wrong shading; useful if M6 screenshots come out unlit. | Blitz `RndMat::Load` and the same field offsets. **Offsets are not portable — verify before trusting.** | P3 |
+| `RndMat__Load` `0x82438F40` (`.cpp`) | Reads `REX_LOAD_U32(this+0x118)`; the hair shader id `2` is zeroed. Also `REX_STORE_U8(this+0x99, 0)` to force `useEnviron` (fullbright). | Workaround for wrong shading; useful if release screenshots come out unlit. | Blitz `RndMat::Load` and the same field offsets. **Offsets are not portable — verify before trusting.** | P3 |
 | `ProcCounter__ProcCommands` `0x8242FA80` (`.cpp`) | `ctx.r3.u64 = 7`, then early-return: disables even/odd rendering. | Debug aid for double-draw artefacts. | — | P3 |
 | `OutfitConfig__CompressTextures` (`.cpp) | Skips texture compression when disabled. | Not relevant to Blitz (no outfits we need). | — | — |
 | `CamShot__Shake` `0x824BDB80` (`.cpp`, 24 KB) | **Whole-function reimplementation** of the camera shake: a hand-transcribed copy of the generated PPC body with a host `steady_clock`-derived `GetRealFpsScale()` (clamped to 0.1 s, `× 60.0f`) replacing the guest frame-count delta, so shake is frame-rate independent. | Only if we ever uncap the frame rate. | — | P3 |
-| `_Normalize_Vector3` / `_Matrix3` / `_Multiply_Matrix3`, `_Interp_Vector3`, `_acos/_asin/_atan/_atan2/_cos/_floor/_fmod/_pow/_sin/_tan` (`.cpp) | Native replacements for scalar math and trig. | **Perf**, and it sidesteps guest-FPU precision drift. Worth measuring once we run a frame-rate-sensitive scene. | Which of these Blitz actually has and whether they are hot. | P2 for M5 |
+| `_Normalize_Vector3` / `_Matrix3` / `_Multiply_Matrix3`, `_Interp_Vector3`, `_acos/_asin/_atan/_atan2/_cos/_floor/_fmod/_pow/_sin/_tan` (`.cpp) | Native replacements for scalar math and trig. | **Perf**, and it sidesteps guest-FPU precision drift. Worth measuring once we run a frame-rate-sensitive scene. | Which of these Blitz actually has and whether they are hot. | P2 |
 | `patches.cpp` | See §4.2. | | | |
 
 ### 4.2 `patches.cpp` — the patch catalogue
@@ -195,13 +195,13 @@ same problems.
 
 | Patch | Effect | Blitz relevance |
 | --- | --- | --- |
-| `App__Run` → `RunFunc_AppRunWithoutDebugging` | "Patching debugger trap". | RB3DX does the **identical** patch (§6, group 2). Expect Blitz to have it; the M4 bring-up will hit it. |
+| `App__Run` → `RunFunc_AppRunWithoutDebugging` | "Patching debugger trap". | RB3DX does the **identical** patch (§6, group 2). Expect Blitz to have it. |
 | `OptionBool` / `OptionStr` | Injects host `argv` into guest DTA options, tracking consumed args. | High value for us: `drive_ui.ps1` currently injects keystrokes against a real focus transition. DTA options may let us script the same states deterministically. |
 | `Rnd__PreInit` (`rnd_this + 0xf0` sync override) | Forces vertical sync behaviour. | Only if we need frame pacing. |
-| `StreamChecksum__ValidateChecksum` → `1` | Skips stream checksum validation. | **P1 for M5.** Any asset we decrypt, repack or edit will otherwise fail validation. |
+| `StreamChecksum__ValidateChecksum` → `1` | Skips stream checksum validation. | **P1.** Any asset we decrypt, repack or edit will otherwise fail validation. |
 | `PlatformMgr__SetDiskError` → no-op | Suppresses the disk-error path (latch a code, log, notify, then never return — the caller sleeps). | RB3DX group 4. **Confirmed in Blitz 2026-09-20:** `PlatformMgr::SetDiskError` is `sub_8236C108`, called with `3` from the checksum validator at `0x827678D4` / `0x82767970` right after `"No checksum found for file %s\n"` / `"Checksum failure for file %s\n"`; Rock Band Blitz Ultimate ships the same `mflr r12` → `blr` edit, and without it any ark we add black-screens the boot (`docs/ultimate-compat.md` §3, `src/hooks/ultimate.cpp`). Blitz has no `"DISK ERROR"` string, so the function cannot be found by string search. |
 | `MetaMusic__{Load,Poll,Start,Loaded}` disable switch | A/B switch for the music system. | Useful for isolating audio bugs once B-009 is confirmed. |
-| `SongMgr__IsDemo` → `0` | Forces non-demo. | RB3DX group 6 disables the same check by branching. Demo logic hides content; check for a Blitz equivalent before M5 song enumeration. |
+| `SongMgr__IsDemo` → `0` | Forces non-demo. | RB3DX group 6 disables the same check by branching. Demo logic hides content; check for a Blitz equivalent before relying on song enumeration. |
 | `MetaPerformer__SetVenue` | Forces a venue, optionally random. | Only if Blitz venues misbehave. |
 | Forced import of `__imp__XamContentAggregateCreateEnumerator` (`[[gnu::used]] static volatile auto`) | Keeps the DLC enumerator linked so content enumerates. | Relevant if Blitz mounts content; check whether our link already keeps it. |
 
@@ -236,12 +236,12 @@ against Blitz one by one (they are listed in §6 for the ones with Blitz leads).
 
 | # | Patch | Same thing in band3_recomp? | Blitz lead |
 | --- | --- | --- | --- |
-| 2 | `0x82272E90`: `bl App::Run` → `bcl RunWithoutDebugging` | Yes — `patches.cpp` `App__Run` | Debugger trap; expect it. Find the branch in M4. |
+| 2 | `0x82272E90`: `bl App::Run` → `bcl RunWithoutDebugging` | Yes — `patches.cpp` `App__Run` | Debugger trap; expect it. Find the branch. |
 | 3 | Splash/ESRB skip: `0x82270F40` `beq`→`nop`, `0x82270F84` `bl`→`nop` | — | Cuts boot time and unblocks headless runs. Candidate for a midasm hook. |
 | 4 | `PlatformMgr::SetDiskError` neutered (`blr` at `0x82516320`), head reused for a `DataSet` type-guard trampoline; 8 call sites left unchanged (`0x8227153C`, `0x825338E0`, `0x82533AE4`, `0x82533B14`, `0x82533BE0`, `0x8253566C`, `0x82B8C730`, `0x82B8C7D8`) | Yes — `patches.cpp` `PlatformMgr__SetDiskError` | **Answered (2026-09-20):** Blitz's equivalent is `sub_8236C108`, patched the same way (`mflr r12` → `blr`) by the Ultimate mod; its checksum-validator callers pass `3`. Our payload boot reproduces the RB3 symptom exactly (`XamShowDirtyDiscErrorUI`, black screen) when that edit is disabled. |
 | 5 | `DataSet` type guard at `0x8275D6E0` | — | Only if we hit a DataSet type error. |
-| 6 | `0x82575F9C` `bne`→`nop` ⇒ `BandSongMgr::IsDemo` always false | Yes — `SongMgr__IsDemo` → 0 | M5: demo gates hide songs. |
-| 7 | `AddSongData`: `0x82579098` `bl` → `li r3,0` (special-song table disabled) | — | M5 song-list correctness. |
+| 6 | `0x82575F9C` `bne`→`nop` ⇒ `BandSongMgr::IsDemo` always false | Yes — `SongMgr__IsDemo` → 0 | Demo gates hide songs. |
+| 7 | `AddSongData`: `0x82579098` `bl` → `li r3,0` (special-song table disabled) | — | Song-list correctness. |
 | 8 | Content prefix `0x82089B40/44`: `"UPDATE:"` → `"D:"` (mount content from `D:`) | — | **Directly relevant**: our `update:` reads are a known snag. |
 | 9 | `0x82089518`: `"songcache"` → `"rbdxcache"` | — | Lineage fingerprint only; tells us the string is a real cache name. |
 | 10 | `0x82AE6880`: `strcpy` → `strncpy` | — | Crash hardening; adopt only if we hit it. |
@@ -256,8 +256,8 @@ from the recompiled image — `src/system/synth/` is where `VorbisReader`,
 independent implementation of the same deobfuscation, useful as a cross-check of
 `kDeobfuscatedKeyTable` in `src/hooks/crypto.cpp`.
 
-`.claude/skills/audio-verify/SKILL.md` is the thing we should adopt wholesale for
-M5, because "music plays" is otherwise a vibes-based test. Their method:
+`.claude/skills/audio-verify/SKILL.md` is the thing we should adopt wholesale as
+a regression check, because "music plays" is otherwise a vibes-based test. Their method:
 
 * **identity** — chroma cross-correlation against a reference rendering;
 * **speed** — resample-search to detect pitch/tempo drift;
@@ -273,7 +273,7 @@ plausible fix and a proved one.
 extracted assets **on read**, rejecting `..`. Their war story is instructive: a
 `button_meanings` block missing from the shipped Xbox-flavoured `config/joypad.dta`
 made every menu key resolve to `kAction_None`, so **all input silently did
-nothing** — which is precisely the class of bug our M4 input work will hit.
+nothing** — which is precisely the class of bug our input layer is exposed to.
 
 The Xbox-specific finding does not transfer; the *technique* does, and it pairs
 with band3's `NewFile` hook (§4.1) to give us overlay-without-repacking.
@@ -361,10 +361,10 @@ origin. An empty table is the correct state until something is actually ported.
 
 | Section | Goes to |
 | --- | --- |
-| §1–§3 (hook mechanism, names, midasm) | [backlog.md](backlog.md) — "Engine knowledge still to port" |
-| §4 (port catalogue) | [backlog.md](backlog.md) |
-| §5–§6 (RB3DX cross-reference) | [backlog.md](backlog.md) (groups 2–4 and 6–9) |
-| §7.1 (audio verification) | [backlog.md](backlog.md) — audio-verify methodology |
-| §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) |
-| §9 (borrowing rules) | [README](../README.md) (license), [backlog.md](backlog.md) (distribution hygiene) |
+| §1–§3 (hook mechanism, names, midasm) | [backlog.md](backlog.md) §3, "Engine knowledge still to port" |
+| §4 (port catalogue) | [backlog.md](backlog.md) §3 |
+| §5–§6 (RB3DX cross-reference) | [backlog.md](backlog.md) §3 (groups 2–4 and 6–9) |
+| §7.1 (audio verification) | [backlog.md](backlog.md) §3 — the audio-verify regression check |
+| §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) §2 — hook hygiene and the config gaps |
+| §9 (borrowing rules) | [README](../README.md) (license), [backlog.md](backlog.md) §1 (distribution hygiene) |
 | §0 (Rock Band Blitz Ultimate row) | [ultimate-compat.md](ultimate-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 (a different project from this one) |

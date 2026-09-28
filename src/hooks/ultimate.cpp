@@ -47,7 +47,7 @@
 // image and reproduces the mod's three edits in it, and the overlay hides that file so
 // that a stale payload copy cannot take over the boot.
 //
-// Milestone: 5 (see docs/history/bringup-log.md).
+// The Ultimate install; see docs/history/bringup-log.md B-012.
 
 #include "hooks/ultimate.h"
 

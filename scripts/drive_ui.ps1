@@ -1,5 +1,5 @@
 # Drive the rb_blitz window with keystrokes and capture screenshots, for
-# milestone bring-up verification (input mapping, menu navigation).
+# bring-up verification (input mapping, menu navigation).
 #
 # The game window must be foreground before a key is sent, so every "key:"
 # action re-asserts the foreground window first. Keys are sent through the

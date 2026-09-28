@@ -1,9 +1,9 @@
 # Rock Band Blitz bring-up log
 
-Chronological record of milestone progress and blockers. Full diagnostic
+Chronological record of the bring-up work and its blockers. Full diagnostic
 captures are kept under `out/` (gitignored); commit-safe summaries live here.
 
-## Milestone 1 — Scaffold and generate
+## Scaffold and generate (2026-09-07 to 2026-09-09)
 
 Status: complete (2026-09-09).
 
@@ -145,14 +145,14 @@ Installed here, and recorded in the configured build tree's `CMakeCache.txt`:
 - clang/clang++ 19.1.7 (`C:\Program Files\LLVM\bin`), cmake 4.4.0
   (`C:\Program Files\CMake\bin`), ninja 1.13.2
   (`C:\Users\gabri\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe`).
-- NOTE: the Milestone 1 plan mentioned clang 22.1.8 / cmake 4.4.3 "not on
+- NOTE: the original scaffold plan mentioned clang 22.1.8 / cmake 4.4.3 "not on
   PATH" — that is stale; the working toolchain is the one above.
 - NOTE (2026-09-19): none of the three is on the `PATH` of a plain shell here,
   so build commands have to run from a shell where they are (or with the absolute
   paths above). `out/build/win-amd64-release` already has all three recorded, so
   it needs no re-configure.
 
-## Milestone 2 — Close analysis and compile
+## Close analysis and compile (2026-09-09)
 
 Status: complete (2026-09-09).
 
@@ -166,16 +166,16 @@ Status: complete (2026-09-09).
 - [x] No hand-edited generated files; no forced validation bypass. 0 analysis
       errors; 132 auto-detected jump tables; 0 data regions; no SEH warnings.
 - [ ] Descriptive names for the three thunks (`sub_82354DC0`, `sub_82379D20`,
-      `sub_8243C688`) deferred to Milestone 3 runtime/disassembly evidence.
+      `sub_8243C688`) deferred to boot-phase runtime/disassembly evidence.
 
-## Handoff to Milestone 3
+## Handoff to the boot phase
 
-See the Milestone 3 section below (entry state and knowledge folded in) and
+See the boot phase section below (entry state and knowledge folded in) and
 `../symbols.md` (full inventory). Build command:
 `cmake --build out/build/win-amd64-debug`; executable at
 `out/build/win-amd64-debug/rb_blitz.exe`.
 
-## Milestone 3 — Reach guest entry and stable offline boot
+## Guest entry and stable offline boot (2026-09-09 to 2026-09-10)
 
 Status: **complete** (2026-09-10).
 
@@ -247,7 +247,7 @@ Status: **complete** (2026-09-10).
   `config/functions.toml` (`[functions."0x…"]`, no size → natural discovery).
 - Registered: `0x82789360`, `0x8278A708`, `0x8279A888`, `0x82779A70`,
   `0x82783D18`. Boot then completed with no further such faults.
-- This stayed a candidate upstream SDK fix through Milestones 3–5; it was
+- This stayed a candidate upstream SDK fix through the boot, menus and songs phases; it was
   applied on 2026-09-20 (patch 0005) along with the `bctr` terminator and the
   withdraw/refine fixpoint that were missing beside it — see "Codegen: the
   B-003/B-006 root causes" at the end of this log. The forced entries above stay
@@ -258,7 +258,7 @@ Status: **complete** (2026-09-10).
 - `__imp__XamVoiceSetMicArrayIdleUsers` (×4), `__imp__XeKeysSetKey`,
   `__imp__XeKeysAesCbc` — all log `STUB` and are **non-blocking**: the title
   screen is reached regardless. Same three externs the Xenia baseline flagged.
-  Do not fake success (plan policy) unless a later milestone proves they gate
+  Do not fake success (plan policy) unless later work proves they gate
   progress.
 - `update:\gen\patch_xbox.hdr` fails with `0xc000000f`: expected, this base dump
   has no title update.
@@ -278,12 +278,12 @@ Status: **complete** (2026-09-10).
   `out/build/win-amd64-release` (full first build done; exe is 37 MB Release,
   `rexruntime.dll` + `rexgpu-xenos.dll` staged next to it).
 
-### Step-by-step status (Milestone 3)
+### Step-by-step status (boot phase)
 
 Superseded by the "Result" section above (kept for history).
 
 - `config/functions.toml` already contains `[functions."0x82783D18"]` (the
-  5th Milestone-3 entry), but the last `cmake --build out/build/win-amd64-release`
+  5th boot-phase entry), but the last `cmake --build out/build/win-amd64-release`
   was **cancelled**, so the generated code on disk does **not** yet include it.
 - Last confirmed runtime fact (Release exe with `0x82779A70` registered):
   `[FATAL] Call to invalid or unregistered function at guest address 0x82783D18`
@@ -309,7 +309,7 @@ Get-ChildItem out\build\win-amd64-release\logs\*.log |
 Stop-Process -Name rb_blitz -Force
 ```
 
-**Follow-ups (do not block Milestone 3 exit):**
+**Follow-ups (do not block the boot phase):**
 
 - [x] Step 3 — blocking faults resolved: five `bctr`-missed functions registered
       (B-006); boot no longer faults.
@@ -348,7 +348,7 @@ The `config/functions.toml` entries stay as the evidence trail for the addresses
 that were found by hand, and as the only route for an address no code segment
 mentions (`0x827EC038`).
 
-## Milestone 4 — Menus, content discovery, input, saves
+## Menus, content discovery, input, saves (2026-09-19 to 2026-09-20)
 
 Status: **working, some items still open** (2026-09-19). The title reaches the
 offline route, shows its menus and bundled song list, starts a song and writes its
@@ -363,17 +363,16 @@ content into the writable root:
 | Save creation, restart persistence, missing/corrupt data | content written; no deliberate restart or corrupt-data run |
 | Online features gracefully unavailable | working — **final** for the vanilla route; see the 2026-09-19 decision at the end of this log |
 
-Resolved in this milestone: B-008 (pressing A), B-009 (music). Close-out detail,
+Resolved here: B-008 (pressing A), B-009 (music). Close-out detail,
 including what is still open and why, is in the entry at the end of this log. The
-three rows marked open above were closed on 2026-09-20 — see "Milestone 4 close-out
-completed (2026-09-20)".
+three rows marked open above were closed on 2026-09-20 — see "Close-out: menus, content discovery, input, saves — completed (2026-09-20)".
 
 ### B-008: one more B-006-class missed function, reached by pressing A
 
 - Status: **resolved** (2026-09-10).
 - Symptom: pressing A at "PRESS A TO START" (driven with the keyboard) hit
   `[FATAL] Call to invalid or unregistered function at guest address 0x8278A6E0`
-  (thread `t21068`). Milestone 3 only ever idled on the title, so this target
+  (thread `t21068`). The boot phase only ever idled on the title, so this target
   was never reached before.
 - Root cause: same discovery gap as B-006, but this entry is a **hole between
   two already-registered functions**: codegen registered 8-byte
@@ -386,7 +385,7 @@ completed (2026-09-20)".
   size/end in `config/functions.toml`, so codegen discovers the natural
   boundary.
 - Regression check: Release rebuild boots to the title and A no longer faults.
-- Consequence for later milestones: **any UI action can expose another
+- Consequence for later work: **any UI action can expose another
   `bctr`-missed target**. Expect a new `[functions."0x…"]` entry each time a
   previously-unreached path is taken.
 
@@ -516,7 +515,7 @@ completed (2026-09-20)".
 - The guest image contains the string **"Proceed in Offline Mode?"** (found by
   scanning the live process with `scripts/scan_process_strings.ps1`). Locating
   its guest address tells us which branch reaches the menu without Xbox LIVE;
-  capturing that address is the next Milestone 4 step.
+  capturing that address is the next step.
 
 ### Finding: content enumeration is already running (step 1 evidence)
 
@@ -532,14 +531,14 @@ completed (2026-09-20)".
   per submitted frame (audio is alive — see below), and the Debug log level
   shows a startup burst of `GetProcAddressByOrdinal` lines.
 
-### Finding: audio is already submitting frames (Milestone 5 input)
+### Finding: audio is already submitting frames (input to the songs phase)
 
 - At the title the log shows `XAudioRegisterRenderDriverClient` followed by
   repeated `XAudioSubmitRenderDriverFrame: driver=41550000 samples=829D0D20`,
   i.e. the guest's audio worker thread is running and handing frames to the
   XAudio render driver. Whether those frames reach an audible endpoint is
-  Milestone 5 step 4 ("audio voices, sample formats, streaming, clocks") — not
-  a Milestone 4 criterion. Recorded here so M5 does not re-derive it.
+  the songs phase's step 4 ("audio voices, sample formats, streaming, clocks") — not
+  a criterion of this phase. Recorded here so the songs phase does not re-derive it.
 
 ### New tooling (both untracked helpers, now committed)
 
@@ -687,7 +686,7 @@ so far is 256 KB, so the headroom is 8×); integer `num_format = 1` textures
 remain unsupported; the CPU mirror can be stale for GPU-written data, for which
 `d3d12_readback_resolve = true` is the escape hatch.
 
-### Milestone 4 close-out (2026-09-19)
+### Close-out: menus, content discovery, input, saves (2026-09-19)
 
 What the title does now, from the surviving run log and the writable root:
 
@@ -710,7 +709,7 @@ What the title does now, from the surviving run log and the writable root:
   exists. (Closed 2026-09-20: a hand-run pad pass covers all four control groups —
   see the close-out-completed section.)
 
-Still open for the milestone (all four were closed on 2026-09-20 — see the
+Still open for the phase (all four were closed on 2026-09-20 — see the
 close-out-completed section further down):
 
 | Item | Why it is open |
@@ -728,10 +727,10 @@ timestamp of the last run (22:42:52), so the title writes it at exit and re-read
 it next start. Settings-versus-save semantics, a corrupt writable root and a
 missing writable root are all untested.
 
-### Milestone 4 close-out completed (2026-09-20)
+### Close-out: menus, content discovery, input, saves — completed (2026-09-20)
 
 All three rows still open above are closed, and the plan's exit criterion for the
-milestone is met. Evidence per item, with the command that reproduces it.
+phase is met. Evidence per item, with the command that reproduces it.
 
 **1. ARK/HDR offsets and sizes (runtime audit).** `scripts/audit_ark_reads.ps1`
 drives a run with `--log_noisy=true --log_level=trace`, rebuilds the guest's file
@@ -761,7 +760,7 @@ checker that always passes proves nothing: pointed at a non-existent game root
 `XInput Controller #1` (VendorID `0x0B05`, ProductID `0x1B4C`) connected, the
 author exercised all four control groups — menu navigation, accept/back, pause, and
 the lane controls during a song — and every one of them worked. The pad has been
-enumerated since Milestone 3; what this adds is that its state reaches the title as
+enumerated since the boot phase; what this adds is that its state reaches the title as
 input. The scripted routes keep injecting keys through the SDK's MnK emulation
 because they have to be repeatable headlessly, so this item stays a hand check; it
 does not claim that every binding the retail game documents is mapped, only that
@@ -842,7 +841,7 @@ and both the title music and the in-song MOGG streams decrypt.
 
 ### B-011: picking a song trapped — 14 adjuster-thunk holes and one data-taken address (2026-09-19)
 
-Reached across the Milestone 4/5 boundary: the first fault fires while the title
+Reached across the menus/songs boundary: the first fault fires while the title
 music opens, the second when a song is picked.
 
 - Status: **resolved**, fix in `e799687`.
@@ -868,8 +867,8 @@ music opens, the second when a song is picked.
     function, and (c) adjacent to a slot codegen *did* register as 8-byte. 14
     slots matched; each is registered with its branch target as evidence.
 - `config/functions.toml` now holds 24 forced entries: 3 tail-branch targets
-  (Milestone 2), 5 boot-time targets (Milestone 3), `0x8278A6E0` (Milestone 4),
-  and Milestone 5's `0x827EC038` plus 14 thunks. All are written with no
+  (the analysis and compile phase), 5 boot-time targets (the boot phase), `0x8278A6E0` (the menus phase),
+  and the songs phase's `0x827EC038` plus 14 thunks. All are written with no
   `size`/`end`, so codegen discovers natural boundaries.
 - Consequence: the class is bounded, not eliminated. Any newly reached UI or
   gameplay path can still hit an unregistered hole; the root-cause fix (the
@@ -877,10 +876,10 @@ music opens, the second when a song is picked.
   as patch 0005, which takes the 24 entries above from "the fix" to "the evidence
   trail" — see "Codegen: the B-003/B-006 root causes" at the end of this log.
 
-## Milestone 5 — first songs played to the end (2026-09-19)
+## First songs played to the end (2026-09-19 to 2026-09-20)
 
 Status: **in progress** — the first genuinely playable state. Almost none of the
-milestone's exit criterion is recorded yet.
+phase's exit criterion is recorded yet.
 
 - Songs load and play to the end: the note highway, gems, HUD and 3D background
   render, and the author observed full songs **3–4 times**. That is an
@@ -904,23 +903,23 @@ Still open, and none of it is tracked by a script:
 
 | Exit-criterion part | State |
 | --- | --- |
-| Three clean-process runs in a row | no script and no captured run; the M3 analogue is `scripts/acceptance_launches.ps1` |
+| Three clean-process runs in a row | no script and no captured run; the boot-phase analogue is `scripts/acceptance_launches.ps1` |
 | A named song | never recorded |
 | Launch → results → song select → play again | untested; results and the return path have not been exercised deliberately |
 | Audio/gameplay drift across a full song | never measured |
 | Frame pacing and input polling stability | unmeasured |
 | Xenia draw comparison | not started |
-| Which input device the run used | keyboard injection, per the Milestone 4 close-out above |
+| Which input device the run used | keyboard injection, per the close-out above |
 
 ## Decision: online unblocking is not our job — the Ultimate mod is (2026-09-19)
 
-The Milestone 4 close-out above calls online features "offline-disabled by policy
+The close-out above calls online features "offline-disabled by policy
 until the core loop works", which reads as a promise to come back and unblock them.
 We will not, and the docs now say so.
 
 **The reasoning.** The retail title already ships an offline path — the
-"Proceed in Offline Mode?" string is in the guest image, per the Milestone 4
-findings above — so no part of the core loop needs a service restored; M4 closed
+"Proceed in Offline Mode?" string is in the guest image, per the
+menus-phase findings above — so no part of the core loop needs a service restored; the menus phase closed
 its online step by refusing the Rock Central sign-in gracefully, not by bringing a
 service back. Online behaviour (sign-in, leaderboards, achievements, DLC
 enumeration) is meanwhile exactly what the community's **Rock Band Blitz Ultimate**
@@ -958,11 +957,11 @@ rules, install/uninstall, hazards and the acceptance criteria. Propagated to
 
 **Consequences recorded now, not later.**
 
-- Milestone 4's "online features gracefully unavailable" step is final behaviour,
+- The menus phase's "online features gracefully unavailable" step is final behaviour,
   not a stage; it is satisfied and closes here.
-- Milestone 6 inherits one new rule: never ship, mirror or vendor Ultimate files.
+- Release readiness inherits one new rule: never ship, mirror or vendor Ultimate files.
 - Ultimate compatibility is a post-bring-up backlog item with its own criteria; no
-  bring-up milestone depends on it. The install route itself is delivered — B-012.
+  bring-up task depends on it. The install route itself is delivered — B-012.
 - The `update:\gen\patch_xbox.hdr` → `0xc000000f` snag is exactly what an installed
   payload exercises, because the mod's Xbox 360 install rolls TU5 into the base
   install instead of loading it as a title update: B-012's content-device edit
@@ -985,7 +984,7 @@ key-table deobfuscation, can be tested without booting the game"),
 code and could be unit-tested against the known plaintext keyset … do that when the
 toolchain lands"), and `prompts/05-complete-one-song.md` ("unit-test the
 deobfuscation before booting anything"). The toolchain has been here since
-Milestone 2, and the B-009 correction of this morning is exactly the kind of change
+the analysis and compile phase, and the B-009 correction of this morning is exactly the kind of change
 that was only ever "verified once": its regression was a key *selection* rule that
 nothing replays.
 
@@ -1055,7 +1054,7 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
   the guest side is untouched.
 
 **Still open.** This is one test target over one header. The acceptance half of the
-issue is unaffected: milestone 4 and 5 still have no scripted run, because
+issue is unaffected: the menus and songs phases still have no scripted run, because
 `scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
 results. The narrower wording is now in [known-issues.md](../known-issues.md).
 (Correction, 2026-09-20: both have one now — `scripts/acceptance_song.ps1` drives
@@ -1064,7 +1063,7 @@ host suite is four targets rather than one.)
 
 ## The fingerprint file gains consumers: gate, boot line, header, tests (2026-09-19)
 
-No new blocker. `config/game_fingerprints.toml` was the Milestone 0 artifact with
+No new blocker. `config/game_fingerprints.toml` was the scaffold artifact with
 nothing behind it: it recorded sizes and SHA-256 digests for `default.xex`,
 `gen/main_xbox.hdr` and `gen/main_xbox_0.ark`, no code read it, and no log line
 reported a fingerprint — so a wrong dump failed late as a content-open error well
@@ -1086,7 +1085,7 @@ rather than an empty table, because refusing is the whole job.
 `rb_blitz_codegen`, so translation cannot start against an image whose digest
 differs from the file's. It checks the codegen input only — `default.xex`, 0.066 s —
 while `--all` additionally hashes the `.hdr` and the 361 MB `.ark` (2.15 s here),
-which is the size/digest half of the audit Milestone 4 was missing. The exit codes
+which is the size/digest half of the audit the menus phase was missing. The exit codes
 are a contract: 0 ok, 1 mismatch or unreadable, 2 usage or malformed fingerprint
 file — malformed input is not a way past the check.
 `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON` relaxes the mismatch to a warning, for a
@@ -1147,13 +1146,13 @@ load, so `OnPostLoadXexImage` never runs — the comparison logic is covered by 
 unit tests instead. The build-side half of the same check *is* demonstrated, and it
 is the half that fails closed.
 
-**Still open.** The ARK/HDR *offset* audit (Milestone 4) is untouched by any of
+**Still open.** The ARK/HDR *offset* audit is untouched by any of
 this: the two files are now proven to be the recorded revision, not proven to be
-read at the right offsets. `toolchain.md` (Milestone 6, step 4) is still missing
+read at the right offsets. `toolchain.md` (a release-readiness task) is still missing
 too — the build works because the absolute compiler/cmake/ninja paths live in the
 build tree's `CMakeCache.txt` and nowhere else.
 (Closed 2026-09-20: the offset audit is `scripts/audit_ark_reads.ps1` — see the
-Milestone 4 close-out-completed section above.)
+close-out-completed section above.)
 
 ## B-012: Rock Band Blitz Ultimate install — a payload union device (2026-09-20)
 
@@ -1295,12 +1294,12 @@ is now accounted for (the mod's `ulti_init.dta` offers its screenshot button onl
 that folder exists, which is what the zip's `_keepme` file creates), so only the empty
 `gen/` folder is still unexplained.
 
-## Milestone 5 acceptance: one named song, three clean-process runs (2026-09-20)
+## Acceptance: one named song, three clean-process runs (2026-09-20)
 
-Milestone 5's exit criterion — one named bundled song through the full
+The songs phase's exit criterion — one named bundled song through the full
 launch-to-results path three times in a row from a clean process — is now a
 scripted, repeatable result rather than an observation.
-[`scripts/acceptance_song.ps1`](../../scripts/acceptance_song.ps1) is the M3
+[`scripts/acceptance_song.ps1`](../../scripts/acceptance_song.ps1) is the boot-phase
 launch-driver's counterpart one screen further in: it starts the title itself,
 drives the offline route with injected keyboard input, and asserts every
 transition on evidence instead of on a fixed sleep.
@@ -1340,7 +1339,7 @@ primitives [`scripts/drive_ui.ps1`](../../scripts/drive_ui.ps1) uses.
 run. A separate `-Runs 1 -Replay` run (`out/m5-acceptance-replay-validation/`)
 passed the launch-to-results leg in 319 s and then repeated the loop inside the
 same process, which is the "return to song select and play again" half of the
-milestone.
+phase.
 
 ### Four title behaviours the script had to learn
 
@@ -1387,7 +1386,7 @@ filter is wrapped in `@(…)`.
 
 ### What this does not measure
 
-The milestone's remaining bullets are all measurement, and this run does not
+This phase's remaining bullets are all measurement, and this run does not
 close any of them:
 
 - **Frame pacing is still unmeasured.** A vanilla log has no fps or pacing line —
@@ -1397,7 +1396,7 @@ close any of them:
 - **Audio quality is asserted only as "the song played for 315 s".** Voices,
   sample formats, clocks and pause/resume are untouched.
 - **The Xenia draw comparison is not attempted**, and the ARK/HDR offset audit
-  inherited from Milestone 4 is still open. (The audit part is closed as of
+  inherited from the menus phase is still open. (The audit part is closed as of
   2026-09-20 — see the close-out-completed section; the Xenia comparison is not.)
 - The runs prove the *route* and the *absence of a fatal*; they are not a
   regression test for graphics or audio content.
@@ -1405,7 +1404,7 @@ close any of them:
 All four of those were dealt with later the same day — two measured, two disposed
 of on the author's judgement — in the close-out section below.
 
-## Milestone 5 close-out: frame pacing and input polling (2026-09-20)
+## Close-out: frame pacing and input polling (2026-09-20)
 
 The acceptance runs above proved the *route* and proved nothing about *timing*.
 Four bullets were still open; two of them were real measurement work and are done
@@ -1593,7 +1592,7 @@ explicitly saying it is **unmeasured on purpose**:
 
 ## Codegen: the B-003/B-006 root causes, fixed in the SDK (2026-09-20)
 
-Three defects in the pinned SDK's codegen, all of them standing since Milestone 3
+Three defects in the pinned SDK's codegen, all of them standing since the boot phase
 and all of them paid for on every rebuild or every newly reached UI path. They are
 captured by patch
 [0005](../../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch),
@@ -1657,7 +1656,7 @@ segmentation. The real project converges in **3 passes**; the loop is capped at 
 and warns if it hits the cap.
 
 Measured by trimming `config/functions.toml` to its three oldest entries (the
-Milestone-2 tail branches) and asking whether codegen still finds the other 21
+analysis-phase tail branches) and asking whether codegen still finds the other 21
 addresses by itself:
 
 | Codegen | Registered functions | Of the 21 addresses that used to need a forced entry | Missing |
@@ -1727,8 +1726,8 @@ now honour the flag. Nothing else in the merge path changed.
 - **No boot was run for this change.** It is a codegen change: the evidence is the
   regenerated table, the emitted bodies, the link, and the host tests. Whether the
   75 newly compiled functions behave is scripted-acceptance territory, and the
-  acceptance run is the only thing that can say so, so it is left to the next
-  milestone's route rather than claimed here.
+  acceptance run is the only thing that can say so, so it is left to a scripted
+  acceptance run rather than claimed here.
 - **`0x827EC038` still needs its config entry** (above), so a future address that
   is referenced only from data still needs the manual route. The class is smaller,
   not empty.
@@ -1749,7 +1748,7 @@ The window has always delivered mouse events — the SDK's `rex::ui::MouseEvent`
 carries buttons, motion and wheel, and its ImGui layer consumes them — but
 nothing turned them into pad input, because the only two drivers in
 `input_factory` hand the guest keys-as-a-pad or a real pad
-([button-mapping-plan.md](../plans/button-mapping-plan.md) §1.5). "The mouse should
+(`CreateDefaultInputSystem`, [rexglue-sdk/src/input/input_system.cpp](../../rexglue-sdk/src/input/input_system.cpp)). "The mouse should
 navigate the menus" is therefore a **third device**,
 [src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp), installed from
 `RbBlitzApp::OnPreSetup` ([src/rb_blitz_app.h](../../src/rb_blitz_app.h:47)) — the

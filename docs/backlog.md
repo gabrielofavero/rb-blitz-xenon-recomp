@@ -1,23 +1,27 @@
 # Backlog
 
-What is still pending. The bring-up milestones 0–5 are closed: the chronology is in
-[history/bringup-log.md](history/bringup-log.md), the standing limits in
-[known-issues.md](known-issues.md). Everything below is open work, roughly in the
-order it should be picked up.
+What is still pending, most important first. Every entry is a task, and the order is
+the order to pick them up in. The bring-up work — scaffold, codegen, boot, menus,
+input, persistence, songs, Ultimate, DLC — is closed; its chronology is in
+[history/bringup-log.md](history/bringup-log.md) and the limits it left standing are
+in [known-issues.md](known-issues.md).
 
-## Milestone 6 — reproducible bring-up release
+## 1. Release readiness
 
-Exit criterion: another authorized developer follows [README.md](../README.md) from a
-clean checkout and reproduces the acceptance run.
+The one goal that is not a feature: another authorized developer follows
+[README.md](../README.md) from a clean checkout and reproduces the acceptance run.
 
 - [ ] **Debug and Release smoke tests on a clean checkout** — both presets, one clean
       tree, the documented route from `scripts/acceptance_song.ps1`.
 - [ ] **Freeze the supported toolchain** — SDK pin, compiler paths and versions — in
-      a `toolchain.md`. The game fingerprint is already frozen and enforced
+      a `toolchain.md`. Today the build works only because the absolute
+      compiler/cmake/ninja paths sit in the build tree's `CMakeCache.txt`. The game
+      fingerprint is already frozen and enforced
       ([config/game_fingerprints.toml](../config/game_fingerprints.toml)).
-- [ ] **Close the wrong-data test.** The build half fails closed; record the runtime
-      half deliberately (a mismatched `--game_data_root` warns and continues, because
-      an Ultimate payload is a supported content variant).
+- [ ] **Record the runtime half of the wrong-data check.** The build half fails closed.
+      The runtime half is a deliberate warn-and-continue (a mismatched
+      `--game_data_root` may be an Ultimate payload) and has no capture yet — the
+      comparison logic is covered by `tests/fingerprint_tests.cpp` instead.
 - [ ] **Audit the distributable** — confirm no retail data, symbols derived from
       proprietary databases, credentials or machine-specific paths reach the
       installer payload or a packaged build ([installer/](../installer)).
@@ -25,7 +29,7 @@ clean checkout and reproduces the acceptance run.
 The one-command configure/build flow, the runtime data-path argument and the log
 locations are already documented in [README.md](../README.md); nothing is owed there.
 
-## Fixes implied by open known-issues
+## 2. Fixes implied by open known-issues
 
 - [ ] `0x827EC038` — the last forced `functions.toml` entry of the indirect-call
       class: a 24-byte leaf whose address is only taken in data, so no segment
@@ -38,9 +42,10 @@ locations are already documented in [README.md](../README.md); nothing is owed t
       ([rb3-references.md](rb3-references.md) §8).
 - [ ] **Hook hygiene**: every hook file states the faithful behaviour and the reason
       for deviating, including each early return.
-- [ ] **Host test coverage beyond the five existing targets.** Everything that needs
-      a boot is still verified by hand: the SDK-touching hooks, pause/resume, and the
-      UI paths outside the offline song loop.
+- [ ] **Host test coverage beyond the six existing targets** — `crypto_keytable`,
+      `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav` and `dlc_layout`.
+      Everything that needs a boot is still verified by hand: the SDK-touching hooks,
+      pause/resume, and the UI paths outside the offline song loop.
 - [ ] **Mouse navigation limits** are accepted, not fixed — a screen whose rows a
       frame difference cannot read is given up on rather than measured, there is no
       guest cursor, and the overlay/foreground gates are reasoned rather than
@@ -49,7 +54,7 @@ locations are already documented in [README.md](../README.md); nothing is owed t
       onto the pointer's row. What is left is the relative *fallback*, used only when
       frames cannot be read.
 
-## Engine knowledge still to port
+## 3. Engine knowledge still to port
 
 [rb3-references.md](rb3-references.md) is the catalogue; these are the items in it
 that name an action.
@@ -64,45 +69,46 @@ that name an action.
       regression check (§7.1).
 - [ ] Add a provenance-table row for anything adapted from another project (§9).
 
-## Ultimate compatibility
+## 4. Ultimate compatibility
 
 - [ ] **Script an Ultimate run** — boot → menu → a song against an installed payload.
-      Acceptance criterion 1 currently rests on the Milestone 5 hand observation
-      ([ultimate-compat.md](ultimate-compat.md) §7).
+      The install itself landed and was verified by hand on 2026-09-20
+      ([ultimate-compat.md](ultimate-compat.md) §7); what is missing is the scripted
+      run that closes acceptance criterion 1 with evidence instead of an observation
+      ([ultimate-compat.md](ultimate-compat.md) §10).
 - [ ] Re-derive the 12-byte patch table if a payload release ships a different
       `default.xex` (compare its hash against `390e0ae0…` first).
 
-## Scoped, not planned
+## 5. The launcher — the one active design
 
-Designs with their own milestones and kill gates. None of them gates milestone 6 or
-the release; each is picked up only if someone chooses to.
+- [ ] [plans/launcher-plan.md](plans/launcher-plan.md) — a launcher that owns the
+      installed game's settings (General/Graphics/Controller/Experimental), ships in the
+      installer payload beside `rb_blitz.exe` and launches it. It is written
+      prompt-by-prompt with waves, a dependency graph and an open-questions list that has
+      to be answered before wave 0. It absorbed the per-device remap design: lane C
+      builds the remap core and the launcher's Controller → Manual page is its panel.
+      Nothing in it gates release readiness.
 
-- [ ] [plans/av-settings-plan.md](plans/av-settings-plan.md) — host settings
-      (resolution, v-sync, volume, safe area) adjustable from inside the game's own
-      Audio/Video screen. AV0's five investigations come before any product code, and
-      AV0's kill gate may collapse the whole framing.
-- [ ] [plans/button-mapping-plan.md](plans/button-mapping-plan.md) — per-action
-      control binding layered above the guest input boundary. IM0 task 7, the
-      `drive_ui.ps1` D-pad defect, is a tooling prerequisite for its own acceptance.
-- [ ] [plans/vr-port-plan.md](plans/vr-port-plan.md) — Meta Quest, then iOS. Its
-      precondition is the reproducible Windows build milestone 6 owes.
-- [ ] Answer the **input arbitration** question once for both plans and record it in
-      each: can the guest consume input while a host dialog is open?
+## 6. Deferred, with no design yet
 
-Also deferred, with no design yet: pixel-perfect graphics and UI upgrades, unlocked
-frame rate, latency tuning, custom-song/export compatibility, other controller
-backends, Linux/macOS/ARM hosts, packaging and auto-update, symbol-name campaigns,
-and mod APIs. DLC packages do load ([dlc.md](dlc.md)) — what is still undefined is
-everything around them, from a store UI to custom-song content that no content API
-ever enumerated.
+Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
+custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
+packaging and auto-update, symbol-name campaigns, and mod APIs. DLC packages do load
+([dlc.md](dlc.md)) — what is still undefined is everything around them, from a store UI
+to custom-song content that no content API ever enumerated.
 
-Permanent non-goals: online services — Rock Central, leaderboards, achievements,
-challenges, multiplayer. Blitz ships its own offline mode, so restoring them was
-never required, and unblocking them is the community mod's job. Our obligation runs
-the other way: staying compatible with the **Rock Band Blitz Ultimate** payload
-([ultimate-compat.md](ultimate-compat.md)).
+Dropped for now, their documents deleted with them: in-game host Audio/Video settings,
+the per-device button-mapping layer (its remap half lives on in the launcher plan), and
+the VR port. Anything needed from them has to be re-derived.
 
-## Ground rules
+## 7. Permanent non-goals
+
+Online services — Rock Central, leaderboards, achievements, challenges, multiplayer.
+Blitz ships its own offline mode, so restoring them was never required, and unblocking
+them is the community mod's job. Our obligation runs the other way: staying compatible
+with the **Rock Band Blitz Ultimate** payload ([ultimate-compat.md](ultimate-compat.md)).
+
+## 8. Ground rules
 
 Keep four layers separate: **game input** (locally dumped content — read-only,
 untracked, fingerprinted), the **pinned SDK** (no title-specific edits), **generated
@@ -114,8 +120,7 @@ upstream, and then as a patch file ([patches/README.md](../patches/README.md)).
 Fix order: correct boundaries or hints → an existing SDK implementation →
 a whole-function hook with the guest address recorded → a named data/code patch →
 a mid-ASM hook → an SDK patch file. Every hook or patch states its guest address,
-the observed failure, the intended behaviour, the evidence, and the milestone that
-required it.
+the observed failure, the intended behaviour, and the evidence.
 
 Record as you go: chronology in [history/bringup-log.md](history/bringup-log.md),
 enduring facts in [known-issues.md](known-issues.md) and [symbols.md](symbols.md),

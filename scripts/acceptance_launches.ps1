@@ -1,4 +1,4 @@
-# Milestone 3 acceptance: 10 consecutive launches must reach the title screen /
+# Launch acceptance: 10 consecutive launches must reach the title screen /
 # offline prompt and each must close cleanly (no forced kill).
 #
 # Usage:  .\scripts\acceptance_launches.ps1 [-Runs 10] [-BootWaitSec 28]

@@ -1,7 +1,7 @@
-# Milestone 5 acceptance: one named bundled song, launch -> results, three
+# Song acceptance: one named bundled song, launch -> results, three
 # consecutive clean-process runs.
 #
-# The Milestone 3 analogue (acceptance_launches.ps1) stops at boot. This one
+# The launch check (acceptance_launches.ps1) stops at boot. This one
 # drives the whole offline route with scripts/drive_ui.ps1 and decides each
 # transition from evidence, not from a fixed sleep:
 #
@@ -16,7 +16,7 @@
 #   * the run fails if the log contains a [FATAL], if the window dies early, or
 #     if the log never prints the title's own "Title terminated" marker.
 #
-# Vanilla by default: the milestone's exit criterion covers the vanilla content
+# Vanilla by default: the acceptance criterion covers the vanilla content
 # variant, so --ultimate_mode=0 is passed even when a Rock Band Blitz Ultimate
 # payload is installed next to the game root (docs/ultimate-compat.md).
 #
@@ -285,7 +285,7 @@ function Invoke-Run([int]$Run) {
 
         # 2. "Cannot connect to Rock Central" -> "Proceed in Offline Mode?" ->
         #    main menu. A is SELECT on both dialogs; the second one is the
-        #    documented offline route (docs/history/bringup-log.md, Milestone 4).
+        #    documented offline route (docs/history/bringup-log.md, the menus work).
         Invoke-Actions @("key:a")
         $signin = Wait-ForScreen (Shot "$tag-signin.png") "ROCK CENTRAL" $ScreenTimeoutSec "${tag}: sign-in dialog"
         if (-not $signin.Contains("ROCK CENTRAL")) { $notes.Add("sign-in dialog not recognised") | Out-Null }
@@ -437,7 +437,7 @@ $rows | Format-Table Run, Boot, SongList, Playing, Results, SongSeen, Replayed, 
 $rows | ForEach-Object { if ($_.Envelope) { Write-Host ("run {0}: playback {1} ({2}s) [{3}]" -f $_.Run, $_.Envelope, $_.SongSec, $SongName) } }
 $rows | ForEach-Object { if ($_.Notes) { Write-Host ("run {0}: {1}" -f $_.Run, $_.Notes) } }
 
-# A pass is the milestone 5 exit criterion: a clean process reaches the title,
+# A pass is the acceptance criterion: a clean process reaches the title,
 # picks the named song from the list, plays it to the end and reaches a results
 # screen that names it, with no fatal, and closes through its own window. With
 # -Replay the second song has to reach its results screen as well.

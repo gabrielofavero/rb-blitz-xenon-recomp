@@ -1,4 +1,4 @@
-# Milestone 5: verdict on frame pacing and input polling from a measurement run.
+# Verdict on frame pacing and input polling from a measurement run.
 #
 # Consumes the directory scripts/measure_pacing_input.ps1 produced
 # (<dir>\run.json, <dir>\injections.json, <dir>\logs\logNN-*.log) and turns the

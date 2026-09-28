@@ -1,6 +1,6 @@
 # Rock Band Blitz — Symbol & Analysis Inventory
 
-Generated from the Milestone 1 codegen trace (`out/codegen-trace.log`) and the
+Generated from the first codegen trace (`out/codegen-trace.log`) and the
 plaintext XEX2 header (`scripts/parse_xex2_header.py`). Codegen completed with
 **0 analysis errors** on 2026-09-09.
 
@@ -74,7 +74,7 @@ variable imports** to fixed addresses (e.g. `XboxHardwareInfo`,
 | Code regions | 12,670 |
 | Data regions | 0 |
 
-## Unresolved-call resolution (Milestone 1 → 2 handoff)
+## Unresolved-call resolution (before the first compile)
 
 The three absolute tail branches flagged by the first validation run were
 resolved by adding `[functions]` entries (no explicit size → natural
@@ -87,8 +87,8 @@ discovery) in `config/functions.toml`:
 | `0x8243C688` | `0x8242A8DC` | `sub_8243C688` (10 insns) | tail-calls `sub_8243C458` |
 
 Each target is a small thunk/stub ending in a tail branch; the real bodies are
-the named `sub_*` targets above. Milestone 2 should assign descriptive names to
-these and their targets from runtime/disassembly evidence.
+the named `sub_*` targets above. They still need descriptive names, assigned from
+runtime/disassembly evidence.
 
 ## Jump tables
 
@@ -107,10 +107,10 @@ The title imports and calls `XexLoadImage` (`0x827F6C34`, called from
 `0x82728048`) and `XexUnloadImage` (`0x827F6C24`, from `0x82727F94`), so it
 *can* load additional modules at runtime. No additional `.xex`/`.dll` is present
 in `game/`, so the manifest carries only the `default.xex` entrypoint. Any
-runtime-loaded module must be observed during Milestone 3 guest boot before
+runtime-loaded module must be observed during a guest boot before
 adding `[[modules]]` entries.
 
-## Milestone 2 compile (2026-09-09)
+## First compile (2026-09-09)
 
 - Full build (`cmake --build out/build/win-amd64-debug`) compiles all 104
   generated partitions and links `rb_blitz.exe` (Debug, ~77.9 MB).
@@ -119,7 +119,7 @@ adding `[[modules]]` entries.
   `<imgui.h>`. Applied in project `CMakeLists.txt`; see `docs/history/bringup-log.md`
   B-004. Not a codegen/analysis fix — no change to `config/` or `generated/`.
 
-## Milestone 3: indirect-call targets registered via `functions.toml`
+## Indirect-call targets registered via `functions.toml`
 
 Guest boot reaches functions that codegen discovery missed. Each is a real
 function with **no PDATA entry and no static `bl` caller**, reached only through
@@ -155,7 +155,7 @@ because codegen still needs each one.
 Full detail and the two further defects the fix exposed are in
 [bringup-log.md](history/bringup-log.md) under "Codegen: the B-003/B-006 root causes".
 
-## Milestone 4: audio (MOGG) decryption path
+## Audio (MOGG) decryption path
 
 Music is encrypted and is decrypted with a key the kernel derives, not with a key
 embedded in the image. The path below was recovered from the recompiled image

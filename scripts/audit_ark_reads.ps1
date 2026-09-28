@@ -1,6 +1,6 @@
-# Milestone 4: in-game archive (ARK/HDR) read audit.
+# In-game archive (ARK/HDR) read audit.
 #
-# The milestone asks for proof that the title reads its archive header and data
+# This audit provides proof that the title reads its archive header and data
 # files out of the game-data root at correct offsets and sizes. File identity is
 # already covered offline by the fingerprint audit (tools/fingerprint_check
 # --all); this script covers the runtime half: every guest read is recovered from

@@ -1,6 +1,6 @@
-# Milestone 4 acceptance: local settings/save persistence.
+# Storage acceptance: local settings/save persistence.
 #
-# The milestone asks for a deterministic local profile/storage response and for
+# The check asks for a deterministic local profile/storage response and for
 # defined behaviour when that storage is missing or corrupt. Every case runs the
 # title against a *fresh* --user_data_root under out/, so what is checked is our
 # storage layer and not whatever the machine's Documents\rb_blitz happens to

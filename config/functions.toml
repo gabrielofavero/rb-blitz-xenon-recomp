@@ -29,7 +29,7 @@
 [functions."0x8243C688"]
 # Tail-branch target from 0x8242A8DC; thunk -> sub_8243C458.
 
-# --- Milestone 3: indirect-call targets missed by discovery (runtime evidence) ---
+# --- Indirect-call targets missed by discovery (runtime evidence) ---
 
 [functions."0x82789360"]
 # Reached via an indirect call at guest boot (thread t19844); runtime FATAL:
@@ -62,7 +62,7 @@
 # Next missed target after 0x82779A70 was registered; same discovery-gap class.
 # No size/end on purpose: let codegen discover the natural boundary.
 
-# --- Milestone 4: indirect-call target missed by discovery (runtime evidence) ---
+# --- Indirect-call target 0x8278A6E0 missed by discovery (runtime evidence) ---
 
 [functions."0x8278A6E0"]
 # Reached via an indirect call after "PRESS A TO START" (thread t21068, log
@@ -76,7 +76,7 @@
 # has no 0x8278A6E0 entry, so the runtime trap fires on the first indirect call.
 # No size/end on purpose: let codegen discover the natural boundary.
 
-# --- Milestone 5: indirect-call target missed by discovery (runtime evidence) ---
+# --- Indirect-call target 0x827EC038 missed by discovery (runtime evidence) ---
 
 [functions."0x827EC038"]
 # Reached via an indirect call while the title-music MOGG stream is opened
@@ -99,7 +99,7 @@
 # and it sits 0x18 bytes before the next registered entry.
 # No size/end on purpose: let codegen discover the natural boundary.
 
-# --- Milestone 5: adjuster-thunk tables missed by discovery (runtime evidence) ---
+# --- Adjuster-thunk tables missed by discovery (runtime evidence) ---
 #
 # Symptom: picking a song in the song list kills the process with
 #   "[FATAL] Call to invalid or unregistered function at guest address 0x82783CD8"

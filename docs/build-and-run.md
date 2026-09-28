@@ -375,7 +375,7 @@ Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 Name,Length,LastWriteTime
 ```
 
-For a repeatable run, the milestone harness clears `logs\` and drives the window
+For a repeatable run, the acceptance harness clears `logs\` and drives the window
 itself (`-BootWaitSec` is how long it waits before closing):
 
 ```powershell
@@ -384,10 +384,10 @@ cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 ```
 
 It reports `alive` / `fatal` / `log KB` / `clean` per run and is the canonical
-Milestone 3 check. Related helpers: `scripts\capture_window.ps1 -OutFile <png>`
+launch check. Related helpers: `scripts\capture_window.ps1 -OutFile <png>`
 and `scripts\drive_ui.ps1`.
 
-The Milestone 5 counterpart drives the whole offline route instead of stopping at
+The song-route counterpart drives the whole offline route instead of stopping at
 the window: it presses title → sign-in → offline prompt → main menu → song list,
 selects the song by row with the *left* stick (arrow keys are the right stick in
 this title), waits for the song's own audio envelope
@@ -413,7 +413,7 @@ It clears `logs\` before each run and writes `out\m5-acceptance\runNN-*.png` (ev
 screen it asserted on as it went), a copy of each run's log, and `summary.json`; the
 exit code is non-zero unless every run passed the whole launch → results path.
 
-The Milestone 4 storage counterpart runs five cases against a *dedicated* writable
+The storage counterpart runs five cases against a *dedicated* writable
 root rather than the user's `Documents\rb_blitz`, and checks each run's own trace
 log as well as the files it leaves behind — creation, restart byte-identity, a
 missing root, a corrupt payload, a corrupt header:
@@ -578,7 +578,7 @@ If the hook lines appear, the keys are right, and music is *still* silent, the
 next suspect is the guest side that consumes the revealed mask:
 `setupCypher` at `0x82768AD0` (`gKey = GrindArray(keychain key) ^ mKeyMask`,
 then AES-CTR with the header nonce). See
-[symbols.md](./symbols.md#milestone-4-audio-mogg-decryption-path).
+[symbols.md](./symbols.md#audio-mogg-decryption-path).
 
 ## 6. Optional A/B: prove the fix is what changed it
 
