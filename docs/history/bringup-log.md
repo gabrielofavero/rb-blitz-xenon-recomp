@@ -2314,7 +2314,7 @@ and on its first day that statement is backed by a run that already exists.
 - [src/util/toolchain_pin.h](../../src/util/toolchain_pin.h) /
   [.cpp](../../src/util/toolchain_pin.cpp) - the parser and the comparison, SDK-free, so
   [tests/toolchain_tests.cpp](../../tests/toolchain_tests.cpp) covers it without a
-  build: **133 checks** over the parse, the version ordering, the verdicts and the
+  build: **136 checks** over the parse, the version ordering, the verdicts and the
   fatal policy.
 - [tools/toolchain_check.cpp](../../tools/toolchain_check.cpp) - the probe and the
   report, built as `rb_blitz_toolchain`; `--check` is the build gate, `--emit-header`
