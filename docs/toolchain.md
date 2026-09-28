@@ -26,7 +26,10 @@ Two things follow from it being recorded rather than assumed:
 ## The set
 
 Measured on the machine the acceptance runs are made on, Windows x86-64
-(`win-amd64-release` / `win-amd64-debug`).
+(`win-amd64-release` / `win-amd64-debug`). It is what the clean-checkout acceptance run
+of 2026-09-28 was made with — three runs, `launch-to-results 3 / 3`, each a 315 s
+envelope — so the record starts out justified by evidence rather than aspirational
+([history/bringup-log.md](history/bringup-log.md), "Clean-checkout smoke test").
 
 | Component | Version | Measured at | Why it is in the set |
 | --- | --- | --- | --- |

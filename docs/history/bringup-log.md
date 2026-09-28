@@ -2299,6 +2299,11 @@ put the record in the repository and check it.
 
 Status: complete.
 
+The values recorded are the ones the clean-checkout acceptance run of the previous entry
+was made with (three runs, `launch-to-results 3 / 3`, a 315 s envelope each) rather than a
+new claim, which is deliberate: `config/toolchain.toml` says "this is what was accepted",
+and on its first day that statement is backed by a run that already exists.
+
 ### What the record is
 
 - [config/toolchain.toml](../../config/toolchain.toml) - the frozen set, with the SDK
@@ -2328,7 +2333,7 @@ toolchain  rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC to
 ok        rexglue-sdk     c94f5eb           nightly-20260826-f5337cdc-2-gc94f5eb
 ok        clang           23.1.1            C:\Program Files\LLVM\bin\clang++.exe
 ok        CMake           4.4.3             C:\Program Files\CMake\bin\cmake.exe
-ok        Ninja           1.13.2            …\WinGet\Packages\Ninja-build.Ninja_…\ninja.exe
+ok        Ninja           1.13.2            ï¿½\WinGet\Packages\Ninja-build.Ninja_ï¿½\ninja.exe
 ok        MSVC toolset    14.44.35207       from the compiler's include roots
 ok        Windows SDK     10.0.26100.0      from the compiler's include roots
 ok         the frozen toolchain
@@ -2340,7 +2345,7 @@ and the game data identity:
 ```text
 boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260928_1827
 toolchain: rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0 (frozen set)
-game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62…84bb)
+game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62ï¿½84bb)
 ```
 
 The measured behaviour of the switch, with a pin file changed under it rather than the
@@ -2365,7 +2370,7 @@ so a build that refuses or accepts is not a mystery.
 One bug worth recording, because it is the kind that hides: the first version of the
 probe ran the compiler through `popen`, which hands the command to `cmd /c`, and cmd
 strips the first and last quote of a command line that begins with one - so
-`"C:\Program Files\LLVM\bin\clang++.exe" -v … 2>&1` reached cmd as an unquoted path and
+`"C:\Program Files\LLVM\bin\clang++.exe" -v ï¿½ 2>&1` reached cmd as an unquoted path and
 the probe silently returned the *preprocessed source* instead of the banner. The
 compiler then reported `unknown` with a plausible-looking path next to it, and the stamp
 said `(frozen set)` for a set it had not measured. Both are fixed - the command is
