@@ -2263,7 +2263,9 @@ build and after it: unchanged.
 
 ### B-013: the Debug preset aborts the guest flow on an SDK assert
 
-- Status: **open**. Symptom: on the first A at the title screen, while the guest is
+- Status: **resolved** (2026-09-29, patch 0007 - see "The Debug preset's assert policy"
+  below); open when this pass recorded it. Symptom: on the first A at the title screen,
+  while the guest is
   enumerating content (`XamContentAggregateCreateEnumerator` is the last line the log
   reaches), a Debug runtime dialog appears -
   `MICROSOFT VISUAL C++ RUNTIME LIBRARY ASSERTION FAILED! ... REXRUNTIMED.DLL ... File:
@@ -2281,7 +2283,8 @@ build and after it: unchanged.
 ### What this pass does not cover
 
 - **The Debug preset has not been shown to complete the route** - it aborts at B-013,
-  which is why the acceptance evidence above is Release.
+  which is why the acceptance evidence above is Release. (With patch 0007 it does; the
+  entry at the end of this log is the run.)
 - **RelWithDebInfo was not built.** The item names Debug and Release.
 - **Ultimate is untouched** - it needs an installed payload
   ([ultimate-compat.md](../ultimate-compat.md) §7, §10).
@@ -2639,3 +2642,90 @@ all.
 - **Legal questions.** Redistribution is decided by the borrowing rules in
   [rb3-references.md](../rb3-references.md) §9 and its provenance table, not by a string scan.
   The audit's claim is narrower: nothing *unintended* is in the payload.
+
+## The Debug preset's assert policy (2026-09-29)
+
+The clean-checkout smoke test left one item open deliberately: the Debug preset builds, links
+and passes its host tests, but its guest flow stops on an SDK assert at the first A on the title
+screen, so every acceptance run was a Release run. It was recorded as a policy choice rather
+than a bug - relax the guest-parameter asserts in Debug, or declare Debug a build/test-only
+preset - and the choice was missing the one thing it needed: what the guest actually passes
+there.
+
+Status: complete. Decided for **relaxing the over-strict assert**, as
+[patches/rexglue-sdk/0007](../../patches/rexglue-sdk/0007-xamalloc-heap-flag-word.patch). The
+Debug preset now walks the same offline route Release does.
+
+### What the assert was actually rejecting
+
+`XamAlloc_entry` asserts that its first parameter is zero and then never reads it -
+`SystemHeapAlloc(size)` is the whole implementation - and the name it had (`unk`) is what made
+that look defensible. It is not an unknown parameter; it is XAM's **heap-flag word**, and
+upstream Xenia Canary has since implemented it: `XamAllocImpl(uint32_t flags, uint32_t size, …)`
+names bit `0x00100000` ("HEAP_ZERO_memory used unless this flag"), reports the top four bits as
+a heap selector, and then allocates from the system heap without acting on any of it. A
+temporary probe in the same function - one `REXKRNL_INFO` line, removed again before the run
+below - recorded the call the assert used to abort:
+
+```text
+[info] [krnl] [t26980] XamAlloc probe: flags=0x10000000 size=48 out=0x7018f240
+```
+
+three times in a row, on the content enumeration that follows the first A at the title screen
+(`XamContentAggregateCreateEnumerator` is the last line the aborted log reached). The value is
+the heap-selector nibble, not the zeroing bit. So the assert was refusing the title's ordinary
+call, and it could only refuse it where asserts are compiled in: a Release build has never
+executed that comparison, which is why the route completes there, and why nothing in the game
+depends on the flag word being honoured.
+
+### The decision
+
+Relax, not "Debug is build/test-only". The deciding argument is the one the ground rules ask
+for - the change is generically right rather than title-specific. A parameter the implementation
+never reads is not something a Debug build can validate: the assert cannot catch a wrong call,
+only make the caller's flags stricter than the implementation is, and Canary's `flags` spelling
+is the upstream statement that this parameter is a flag word. The alternative would have left
+the Debug preset unable to run the game, which is the one thing a recomp port wants Debug for.
+The cost is one SDK file, in the lane the diagnostics patches already use.
+
+### Verification (all 2026-09-29)
+
+- **Debug builds and its tests pass.** `cmake --preset win-amd64-debug` and
+  `cmake --build --preset win-amd64-debug`: 907 steps, exit 0, 18:46:16 -> 18:55:24 (the first
+  Debug configure of *this* tree - the smoke test's Debug build was the clone's). `ctest` in
+  `out/build/win-amd64-debug`: 7/7, 12.14 s.
+- **Debug walks the route.** `acceptance_song.ps1 -Runs 1 -BuildDir out/build/win-amd64-debug
+  -OutDir out/m5-acceptance-debug`: **launch-to-results 1 / 1**, playback envelope
+  18:57:16 -> 19:02:46 (**330 s**), the results screen names THESE DAYS, no `[FATAL]`, clean
+  window close, one 14 MB log. The run raised the budgets (`-BootTimeoutSec 300
+  -SongTimeoutSec 1800`) as a precaution against Debug being slow; measured, 330 s would have
+  fitted the default 600 s.
+- **Release is unchanged.** Incremental rebuild after the patch (10 steps), `ctest` 7/7
+  (1.87 s), and `acceptance_song.ps1 -Runs 1` on the Release tree: launch-to-results 1 / 1,
+  envelope 19:09:08 -> 19:14:23, **315 s** - the exact shape the recorded runs have
+  (315/317/317 s).
+- **The probe is not in the patch.** It was removed and the tree rebuilt; the rebuilt Debug
+  binary runs past `XamContentAggregateCreateEnumerator` - the enumerator's line is 12,909 of
+  that log's 18,597 lines, where the aborted run's log *ended* on it.
+- **Patch mechanics.** `git apply --check --cached` applies the patch to the pinned checkout
+  (exit 0), `--reverse --check` matches this work tree (exit 0), and
+  `apply_sdk_patches.ps1 -Check` reports `7 patches ... 17 patched, 0 UNEXPECTED, 0 untracked`,
+  exit 0.
+
+One reading that looks like a difference and is not: the Debug run's results screen OCR reads
+`THESE DAYS 400 … Base Points O Blitz Mode O Finale 400`, where the Release run of the same hour
+read `7,932 … 5,182 … 1,250 … 1,500`. Two of the three 2026-09-20 Release runs read the *same*
+`400` / `Base Points O` text on that screen, so it is what the OCR makes of that screen rather
+than a Debug difference.
+
+### What this does not cover
+
+- **Only the offline route has been walked in Debug.** The SDK's remaining asserts are
+  untouched, and a guest path no script visits can still stop a Debug run the way this one did.
+  Release stays the acceptance configuration - it is the configuration that ships, and every
+  assert is compiled out there.
+- **The flag word's semantics are still unimplemented**, here and upstream: no separate XAM
+  heaps and no zeroing promise. Release has ignored both since bring-up and this title does not
+  notice; a title that allocates from a named heap *and* depends on the contents being zeroed
+  would want Canary's treatment, not this one.
+- **RelWithDebInfo was still not built.** The smoke test's note stands.

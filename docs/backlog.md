@@ -8,14 +8,6 @@ in [known-issues.md](known-issues.md).
 
 ## 1. Fixes implied by open known-issues
 
-- [ ] **Decide the Debug preset's assert policy.** The Debug preset builds, links and
-      passes its host tests, but the guest flow stops on an SDK assert —
-      `XamAlloc_entry`'s `assert_true(unk == 0)`, the first A at the title screen — while
-      Release completes the same route with every assert compiled out. Relax the
-      guest-parameter asserts in Debug (an SDK patch, the way the diagnostics patches
-      already do), or declare Debug build/test-only and keep acceptance on Release.
-      Evidence and the reasoning for leaving it open: [known-issues.md](known-issues.md)
-      B-013, [history/bringup-log.md](history/bringup-log.md) "Clean-checkout smoke test".
 - [ ] **Decide how a corrupt `default.xex` fails.** Truncating the recorded image to 1 MiB
       ends the boot with `0xC0000005` and no diagnostic: the runtime fingerprint check runs
       after the XEX load, so a file the loader cannot read is one it never sees, and only

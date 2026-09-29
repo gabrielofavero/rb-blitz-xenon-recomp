@@ -283,11 +283,14 @@ Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`
 `win-amd64-debug` and `win-amd64-relwithdebinfo` build into their own trees in the same
 checkout, and neither preset disturbs the other: the SDK's staging directory
 (`rexglue-sdk/out/win-amd64`) holds both configurations side by side because Debug
-artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglued.exe`). The Debug preset builds
-and its host tests pass, but the *guest* flow stops on an SDK assert —
-`XamAlloc_entry`'s `assert_true(unk == 0)`, at the first A on the title screen — so
-acceptance runs use Release; the whole of it is
-[known-issues.md](known-issues.md) B-013.
+artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglued.exe`). The Debug preset is a full
+preset, not a build/test-only one: it builds, its host tests pass, and it walks the whole
+offline route (`acceptance_song.ps1 -BuildDir out/build/win-amd64-debug`). It could not
+until patch 0007 dropped the SDK's over-strict `XamAlloc_entry` assert — the flag-word
+parameter the implementation ignores — which stopped it at the first A on the title screen
+([known-issues.md](known-issues.md) "Accepted", [bringup-log.md](history/bringup-log.md)
+B-013). Acceptance runs are still Release runs, because Release is the configuration that
+ships.
 
 ### The build gate: `game/` must be the fingerprinted dump
 

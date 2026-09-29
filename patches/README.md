@@ -20,6 +20,7 @@ checkout.
 | `rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch` | Nothing in a vanilla log measures frame pacing or input polling: a run has no fps, frame-time or poll-rate line anywhere, and the only frame-ish number in it belongs to the payload overlay. Adds three `--log_level=trace` points — `[VdSwap]` in `VdSwap_entry` (`src/kernel/xboxkrnl/xboxkrnl_video.cpp`, every guest frame submitted, with the host-microsecond delta and the guest tick), `[XE_SWAP]` in `ExecutePacketType3_XE_SWAP` (`src/graphics/command_processor.cpp`, each frame that reached the host as a present) and `[XamInputGetState]` in `XamInputGetState_entry` (`src/kernel/xam/xam_input.cpp`, every guest poll of a pad, with the button word the guest was handed). They back the frame-pacing and input-polling measurement in [../docs/history/bringup-log.md](../docs/history/bringup-log.md). | yes |
 | `rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch` | Three codegen defects behind B-003/B-006 in [../docs/known-issues.md](../docs/known-issues.md). **(1) Skipped builds.** `ManifestConfig::WriteSdkVersionStamp` (`src/codegen/manifest.cpp`) rewrote the manifest unconditionally after `RecompileProject` had already written `codegen.build.stamp`, so the manifest — a codegen input — was newest again on the next `ninja`, and the codegen edge re-ran with nothing changed (the Debug tree's stamped re-run cost ~390 s; a real Release regeneration measures 160.4 s here); it now returns early when the `sdk_version` line already matches, leaving the manifest mtime alone. `ComputeInputFingerprint` (`src/codegen/output_stamp.cpp`) also hashed the input list in caller order and with the caller's spelling, so the same tree fingerprinted differently depending on whether the manifest was named relative or absolute; inputs are now sorted and deduped by canonical key, and a `codegen=<n>` behaviour version (`kCodegenBehaviourVersion`) joins the `sdk=` line so a future analyser change can force exactly one regeneration. **(2) Missing gap-fill entries.** `splitRegionOnTerminators` (`src/codegen/phase_gapfill.cpp`) did not treat `bctr` as a terminator, and `gapFillCodeRegions` built its callable set once before the region loop and never revisited a segmentation it had already registered — a thunk slot that is only reachable indirectly and ends in `bctr`, or a boundary a later segment exposed inside an earlier coarse one, stayed interior to that segment and was never registered, so calling it trapped with `[FATAL] Call to invalid or unregistered function`. Gap filling is now a withdraw/refine fixpoint: each pass gives back the previous pass's own `GAP_FILL` registrations (never a real function), re-splits against the callables they revealed, and stops when a pass reproduces the previous segmentation (≤ 8 passes, then a warning). **(3) Dangling call targets.** Withdrawing a registration exposed a pre-existing use-after-free: `CallTarget::ToFunction` (`include/rex/codegen/function_types.h`) holds a raw `FunctionNode*`, and `FunctionGraph::removeFunction` erased the owning `unique_ptr` without touching the edges that pointed at it, so emission read `targetFn->name()` from freed memory and printed a symbol that belonged to an unrelated function, which is what the link's `undefined symbol` errors named. `removeFunction` now rewinds every affected edge back into an address-keyed unresolved jump (`FunctionNode::rewindEdgesTo`), which the graph re-resolves to whatever ends up owning that address — the re-registered function, an internal label, or an explicit `FATAL` line instead of freed memory. `tryResolveAgainst` / `tryResolveAgainstImport` also stopped promoting every re-resolved jump to a tail call, so a `bl` site no longer loses its call. **(4) Measured.** Applying the patch forces exactly one regeneration per project — the `codegen=` behaviour version in the fingerprint goes from absent to 2, so every existing stamp mismatches once, by design; after that an unchanged tree is a 0.4 s skip instead of a 160 s Release analysis (measured on this project: `0 written, 0 unchanged, 1 module(s) up to date`), and `ninja` no longer schedules the codegen edge at all because the manifest mtime is left alone. With `config/functions.toml` trimmed to its three oldest entries it also took codegen's own gap-fill discovery from 0 of the other 21 addresses to 20. | yes |
 | `rexglue-sdk/0006-content-container-packages-and-extra-content-root.patch` | The content manager handled one form of content item: a directory. That is what this runtime installs (`InstallContent()` extracts a package, `CreateContent()` makes one), but not what a console — or a dumped DLC folder — stores, which is the STFS container itself; a package file was therefore skipped at enumeration and, if the guest opened one by name, mounted as a directory that is not one. Upstream Xenia picks a container-backed package for a file (`ContentPackageContainer`) and a directory-backed one otherwise (`ContentPackageDirectory`), and this restores that, including reading the license bits from the container when there is no `.header` file beside it. It also adds a second, read-only content root laid out as `<root>/<title_id>/<content_type>/<name>` (no xuid level), which enumeration and opening fall back to while create/thumbnail/install/delete resolve against the writable root alone, so a bundle directory next to the game data can be served without being writable. This is what lets `game/dlc/…` deliver Rock Band 3's DLC to Blitz — [../docs/dlc.md](../docs/dlc.md). | yes |
+| `rexglue-sdk/0007-xamalloc-heap-flag-word.patch` | `XamAlloc_entry` (`src/kernel/xam/xam_info.cpp`) asserted that its first parameter is zero — `assert_true(unk == 0)` — while the implementation ignores it entirely (`SystemHeapAlloc(size)` is all that happens). The parameter is not an unknown: Xenia Canary spells it `flags` in its `XamAllocImpl`, identifies bit `0x00100000` ("HEAP_ZERO_memory used unless this flag") as the only bit it knows about, reports the top four bits as selecting one of several heaps, and allocates from the system heap without acting on them either. The assert therefore only rejected **in Debug** a call a Release build completes unchecked: with the assert compiled out, this title finishes its content enumeration and the whole offline route. The patch names the parameter `flags`, drops the assert, and leaves the allocation untouched (B-013 in [../docs/history/bringup-log.md](../docs/history/bringup-log.md)). | yes |
 
 ## Apply / verify
 
@@ -70,7 +71,9 @@ for 0002; `src/kernel/xboxkrnl/xboxkrnl_io.cpp` for 0003;
 and `src/kernel/xam/xam_input.cpp` for 0004; `src/codegen/manifest.cpp`,
 `src/codegen/output_stamp.cpp`, `src/codegen/phase_gapfill.cpp`,
 `src/codegen/function_graph.cpp` and `include/rex/codegen/function_node.h` for
-0005).
+0005; `include/rex/system/xam/content_manager.h` and
+`src/system/xam/content_manager.cpp` for 0006; `src/kernel/xam/xam_info.cpp` for
+0007).
 
 `ignore = dirty` hides work-tree edits only. A **moved gitlink is still
 reported**: verified 2026-09-19 by pointing the index entry at a different
@@ -83,10 +86,11 @@ audits the work tree on every run: each modified file must match a patch here
 `core.abbrev`). Anything else is listed as `UNEXPECTED` and the script exits 1.
 
 ```
-SDK work tree      : 14 patched, 0 UNEXPECTED, 0 untracked
+SDK work tree      : 17 patched, 0 UNEXPECTED, 0 untracked
     patched    : include/rex/codegen/function_node.h
     patched    : include/rex/graphics/d3d12/shared_memory.h
     patched    : include/rex/graphics/pipeline/texture/cache.h
+    patched    : include/rex/system/xam/content_manager.h
     patched    : src/codegen/function_graph.cpp
     patched    : src/codegen/manifest.cpp
     patched    : src/codegen/output_stamp.cpp
@@ -94,9 +98,11 @@ SDK work tree      : 14 patched, 0 UNEXPECTED, 0 untracked
     patched    : src/graphics/command_processor.cpp
     patched    : src/graphics/d3d12/texture_cache.cpp
     patched    : src/graphics/pipeline/texture/cache.cpp
+    patched    : src/kernel/xam/xam_info.cpp
     patched    : src/kernel/xam/xam_input.cpp
     patched    : src/kernel/xboxkrnl/xboxkrnl_io.cpp
     patched    : src/kernel/xboxkrnl/xboxkrnl_video.cpp
+    patched    : src/system/xam/content_manager.cpp
     patched    : src/system/xthread.cpp
 ```
 
@@ -153,7 +159,7 @@ your edits in `git status`, and `-NoIndexMarks` if you do not want the index
 touched at all.
 
 After both scripts, `git -C rexglue-sdk status --porcelain` should show only the
-files named in the patch set (the files the six rows above name). The parent should be
+files named in the patch set (the files the seven rows above name). The parent should be
 clean: `.gitmodules`
 sets `submodule.rexglue-sdk.ignore = dirty`, so the applied patches are no longer
 reported as a modified submodule, and `apply_sdk_patches.ps1` audits whatever that
