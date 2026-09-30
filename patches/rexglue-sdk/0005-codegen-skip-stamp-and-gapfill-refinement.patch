@@ -124,7 +124,7 @@ index 4065fdb..c0378a0 100644
      lines[*stamp_idx] = stamp_line;
    } else if (project_header_idx) {
 diff --git a/src/codegen/output_stamp.cpp b/src/codegen/output_stamp.cpp
-index 77ee906..da6ed65 100644
+index 77ee906..19fdf2c 100644
 --- a/src/codegen/output_stamp.cpp
 +++ b/src/codegen/output_stamp.cpp
 @@ -11,6 +11,7 @@
@@ -142,7 +142,7 @@ index 77ee906..da6ed65 100644
 +/// Bump when codegen can emit different output for the same inputs and sdkVersion -
 +/// an analyser or gap-fill change, for example. Unlike kStampVersion this keeps the
 +/// stamp format loadable; it only forces one regeneration of an existing tree.
-+constexpr int kCodegenBehaviourVersion = 2;
++constexpr int kCodegenBehaviourVersion = 3;
 +
 +namespace {
 +
@@ -200,10 +200,18 @@ index 77ee906..da6ed65 100644
      std::error_code ec;
      std::string digest = "<missing>";
 diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
-index f3da777..83c904b 100644
+index f3da777..f861430 100644
 --- a/src/codegen/phase_gapfill.cpp
 +++ b/src/codegen/phase_gapfill.cpp
-@@ -35,7 +35,8 @@ namespace {
+@@ -11,6 +11,7 @@
+ 
+ #include "ppc/instruction.h"
+ 
++#include <algorithm>
+ #include <unordered_set>
+ 
+ #include <rex/codegen/phases.h>
+@@ -35,7 +36,8 @@ namespace {
  // GapFill to register uncovered code regions
  //=============================================================================
  
@@ -213,7 +221,7 @@ index f3da777..83c904b 100644
  std::vector<CodeRegion> splitRegionOnTerminators(
      const CodeRegion& region, const BinaryView& binary,
      const std::unordered_set<uint32_t>& knownCallables) {
-@@ -56,6 +57,13 @@ std::vector<CodeRegion> splitRegionOnTerminators(
+@@ -56,6 +58,13 @@ std::vector<CodeRegion> splitRegionOnTerminators(
      if (decoded.is_return()) {
        shouldSplit = true;
        reason = "blr";
@@ -227,7 +235,77 @@ index f3da777..83c904b 100644
      } else if (decoded.opcode == Opcode::b && decoded.branch_target.has_value()) {
        uint32_t target = decoded.branch_target.value();
        // Don't split on tail recursion (branch to own segment start)
-@@ -126,50 +134,90 @@ void gapFillCodeRegions(CodegenContext& ctx) {
+@@ -119,6 +128,69 @@ bool looksLikeExceptionData(const BinaryView& binary, const FunctionGraph& graph
+   return false;
+ }
+ 
++// True when the instruction before `addr` never falls through - a return, an
++// indirect branch, or an unconditional branch - so `addr` cannot be the continuation
++// of the block in front of it and is a real entry, not the middle of one.
++bool followsTerminator(const BinaryView& binary, uint32_t addr) {
++  if (addr < 4)
++    return false;
++
++  const uint8_t* data = binary.translate(addr - 4);
++  if (!data)
++    return false;
++
++  uint32_t raw = load_and_swap<uint32_t>(data);
++  auto decoded = decode_instruction(addr - 4, raw);
++
++  if (decoded.is_return() || (decoded.is_indirect_branch() && !decoded.is_conditional()))
++    return true;
++
++  // An unconditional branch: opcode 18 without the link bit. `bl` sets LR and falls
++  // through, so a call in front of `addr` is not what makes it an entry.
++  return decoded.opcode == Opcode::b && (raw & 1) == 0;
++}
++
++// A merged view of the address ranges the graph already claims - one span per function,
++// over its extent - used to find the words inside a code region that belong to no
++// function at all.
++class CoveredSpans {
++ public:
++  void add(uint32_t start, uint32_t end) {
++    if (end > start)
++      spans_.emplace_back(start, end);
++  }
++
++  void seal() {
++    std::sort(spans_.begin(), spans_.end());
++    size_t kept = 0;
++    for (const auto& span : spans_) {
++      if (kept > 0 && span.first <= spans_[kept - 1].second) {
++        spans_[kept - 1].second = std::max(spans_[kept - 1].second, span.second);
++      } else {
++        spans_[kept++] = span;
++      }
++    }
++    spans_.resize(kept);
++  }
++
++  // A walk may revisit an address (an overlap between a segment and a block it
++  // contains), so the lookup is a plain binary search rather than a moving cursor.
++  bool contains(uint32_t addr) const {
++    auto it =
++        std::upper_bound(spans_.begin(), spans_.end(), addr,
++                         [](uint32_t value, const std::pair<uint32_t, uint32_t>& span) {
++                           return value < span.first;
++                         });
++    if (it == spans_.begin())
++      return false;
++    --it;
++    return addr < it->second;
++  }
++
++ private:
++  std::vector<std::pair<uint32_t, uint32_t>> spans_;
++};
++
+ void gapFillCodeRegions(CodegenContext& ctx) {
+   REXCODEGEN_TRACE("Analyze: checking for uncovered code regions...");
+ 
+@@ -126,50 +198,158 @@ void gapFillCodeRegions(CodegenContext& ctx) {
    auto& binary = ctx.binary();
    auto& scan = ctx.scan;
  
@@ -239,15 +317,6 @@ index f3da777..83c904b 100644
 -
 -  size_t gapsFound = 0;
 -  size_t segmentsCreated = 0;
--
--  for (const auto& region : scan.codeRegions) {
--    // Split region on terminators (blr, tail calls), then check each segment
--    auto segments = splitRegionOnTerminators(region, binary, knownCallables);
--
--    for (const auto& segment : segments) {
--      // Skip if this segment's start is already a registered function entry
--      if (graph.isEntryPoint(segment.start))
--        continue;
 +  // Splitting a region depends on which addresses are known callables, and
 +  // registering a segment makes its start one - so a single pass can miss a segment
 +  // whose start only became known later in the same pass. An 8-byte thunk slot that
@@ -262,6 +331,16 @@ index f3da777..83c904b 100644
 +  // interior), re-splits with the callables those registrations revealed, and
 +  // registers the refined segmentation instead. That settles as soon as one pass
 +  // reproduces the previous pass's segmentation.
++  //
++  // A segment start is still only a guess about where a function might begin, and the
++  // one address the splitter cannot propose at all is the one no branch in the image
++  // mentions: the 24-byte comparator 0x827EC038 follows the tail branch that ends
++  // sub_827EBE08, whose address is taken by nothing - the guest builds it in a register
++  // at run time - so the branch's target is not a callable, the segment that contains
++  // it starts at an already registered entry (sub_827EBE08's own extent ends right
++  // there), and the segment is skipped as one. Nothing in the graph claims its bytes -
++  // they lie past the extent of every function - and that is a fact rather than a guess,
++  // so each pass also registers the runs of words inside a region that no function claims.
 +  constexpr size_t kMaxGapFillPasses = 8;
 +  size_t passes = 0;
 +  bool converged = false;
@@ -276,20 +355,61 @@ index f3da777..83c904b 100644
 +      graph.removeFunction(start);
 +    }
  
--      // Skip if this segment's start is inside another function
--      if (auto* containingFunc = graph.getFunctionContaining(segment.start)) {
--        continue;
+-  for (const auto& region : scan.codeRegions) {
+-    // Split region on terminators (blr, tail calls), then check each segment
+-    auto segments = splitRegionOnTerminators(region, binary, knownCallables);
 +    std::unordered_set<uint32_t> knownCallables;
 +    for (const auto& [addr, node] : graph.functions()) {
 +      knownCallables.insert(addr);
 +    }
 +    knownCallables.insert(registeredStarts.begin(), registeredStarts.end());
-+
+ 
+-    for (const auto& segment : segments) {
+-      // Skip if this segment's start is already a registered function entry
+-      if (graph.isEntryPoint(segment.start))
+-        continue;
 +    std::unordered_set<uint32_t> passStarts;
+ 
+-      // Skip if this segment's start is inside another function
+-      if (auto* containingFunc = graph.getFunctionContaining(segment.start)) {
+-        continue;
++    // What the graph claims before this pass registers anything: every function's
++    // extent. Its blocks would be too fine a test - the words between the blocks of a
++    // function whose extent spans them belong to it even though nothing emits them -
++    // and the extent is what every other check in this phase reads.
++    CoveredSpans claimedByExtents;
++    for (const auto& [addr, node] : graph.functions()) {
++      claimedByExtents.add(addr, addr + node->size());
++    }
++    claimedByExtents.seal();
++
++    // Register the words of this region that nothing claims. `registeredHere` holds the
++    // segments below, because their blocks - and so their coverage - do not exist until
++    // discoverPendingFunctions() runs after this loop; their declared extent is what
++    // they claim in the meantime.
++    auto registerUncoveredRun = [&](uint32_t start, uint32_t end) {
++      if (!followsTerminator(binary, start)) {
++        REXCODEGEN_TRACE(
++            "GapFill: 0x{:08X}-0x{:08X} is claimed by no function but is not an entry, skipping",
++            start, end);
++        return;
++      }
++      if (graph.isEntryPoint(start) || looksLikeExceptionData(binary, graph, start))
++        return;
++
++      graph.addFunction(start, end - start, FunctionAuthority::GAP_FILL, false);
++      knownCallables.insert(start);
++      passStarts.insert(start);
++
++      REXCODEGEN_TRACE("GapFill: registered uncovered sub_{:08X} (0x{:08X}-0x{:08X}, {} bytes)",
++                       start, start, end, end - start);
++    };
++
 +    for (const auto& region : scan.codeRegions) {
 +      // Split region on terminators (blr, bctr, tail calls), then check each segment
 +      auto segments = splitRegionOnTerminators(region, binary, knownCallables);
 +
++      std::vector<CodeRegion> registeredHere;
 +      for (const auto& segment : segments) {
 +        // Skip if this segment's start is already a registered function entry
 +        if (graph.isEntryPoint(segment.start))
@@ -310,11 +430,12 @@ index f3da777..83c904b 100644
 +        graph.addFunction(segment.start, segmentSize, FunctionAuthority::GAP_FILL, false);
 +        knownCallables.insert(segment.start);
 +        passStarts.insert(segment.start);
++        registeredHere.push_back(segment);
 +
 +        REXCODEGEN_TRACE("GapFill: registered sub_{:08X} (0x{:08X}-0x{:08X}, {} bytes)",
 +                         segment.start, segment.start, segment.end, segmentSize);
        }
--
+ 
 -      // Skip if this looks like exception handler data (handler ptr + rdata ptr)
 -      if (looksLikeExceptionData(binary, graph, segment.start))
 -        continue;
@@ -325,6 +446,28 @@ index f3da777..83c904b 100644
 -      REXCODEGEN_TRACE("GapFill: registered sub_{:08X} (0x{:08X}-0x{:08X}, {} bytes)",
 -                       segment.start, segment.start, segment.end, segmentSize);
 -      segmentsCreated++;
++      // Walk the region for words no function claims. A segment that was skipped above
++      // can leave a run behind: its start belongs to a function whose extent stops
++      // inside the segment, and the words past that extent are claimed by nobody.
++      uint32_t runStart = 0;
++      bool inRun = false;
++      for (uint32_t addr = region.start; addr < region.end; addr += 4) {
++        bool claimed = claimedByExtents.contains(addr);
++        for (size_t i = 0; !claimed && i < registeredHere.size(); ++i) {
++          claimed = registeredHere[i].contains(addr);
++        }
++
++        if (!claimed && !inRun) {
++          runStart = addr;
++          inRun = true;
++        } else if (claimed && inRun) {
++          inRun = false;
++          registerUncoveredRun(runStart, addr);
++        }
++      }
++      if (inRun) {
++        registerUncoveredRun(runStart, region.end);
++      }
      }
  
 -    gapsFound++;

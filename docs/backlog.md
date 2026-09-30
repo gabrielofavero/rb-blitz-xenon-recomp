@@ -8,9 +8,6 @@ in [known-issues.md](known-issues.md).
 
 ## 1. Fixes implied by open known-issues
 
-- [ ] `0x827EC038` — the last forced `functions.toml` entry of the indirect-call
-      class: a 24-byte leaf whose address is only taken in data, so no segment
-      mentions it (B-006).
 - [ ] 32-bit integer textures (`num_format = 1`) still fail to create, and one
       converted texture plus its mips must fit a single 2 MiB upload page (B-010).
 - [ ] `longjmp_address` / `setjmp_address` are unset, so guest `longjmp`/`setjmp` has

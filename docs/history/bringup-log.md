@@ -347,6 +347,11 @@ carries it; the measurement, the two further defects it exposed and what it does
 The `config/functions.toml` entries stay as the evidence trail for the addresses
 that were found by hand, and as the only route for an address no code segment
 mentions (`0x827EC038`).
+> *Superseded 2026-09-29, in part.* The extended patch 0005 found the entries this
+> paragraph is about - `0x827EC038` included, and the "taken in data" reading above is wrong: the
+> address appears nowhere in the image - so the 21 indirect-call entries are gone
+> from `config/functions.toml`. The three tail-branch entries stay. See "B-006: the
+> last forced entry goes away" at the end of this log.
 
 ## Menus, content discovery, input, saves (2026-09-19 to 2026-09-20)
 
@@ -1603,7 +1608,9 @@ captured by patch
 [0005](../../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch),
 which touches `src/codegen/manifest.cpp`, `src/codegen/output_stamp.cpp`,
 `src/codegen/phase_gapfill.cpp`, `src/codegen/function_graph.cpp` and
-`include/rex/codegen/function_node.h`.
+`include/rex/codegen/function_node.h`. The same patch was extended on 2026-09-29 with the
+unclaimed-run rule - no new file - which is the last of the class; see "B-006: the last
+forced entry goes away" at the end of this log.
 
 Reasons for doing it now rather than in fix-order: (1) is pure rebuild cost, (2) is
 the difference between reaching a new path and trapping on it, and (3) is what
@@ -1635,8 +1642,9 @@ Get-Item rb_blitz_manifest.toml          # mtime unchanged by the run
 ```
 
 **One regeneration is forced on purpose.** The fingerprint gained a
-`codegen=<n>` line beside `sdk=` (`kCodegenBehaviourVersion`, now `2`), so every
-existing stamp mismatches exactly once after the patch is applied. A stale analysis
+`codegen=<n>` line beside `sdk=` (`kCodegenBehaviourVersion`, `2` here and `3` since
+the 2026-09-29 extension), so every existing stamp mismatches exactly once after the
+patch is applied. A stale analysis
 that silently survives an analyser change is the failure this line exists to
 prevent; expect one full regeneration (~160 s Release) and nothing after it.
 
@@ -1674,6 +1682,11 @@ The one address left is the 24-byte leaf `0x827EC038` of B-011. Its address is
 taken in data only: no `bl`, no PDATA, no segment start mentions it, so nothing
 tells codegen a function begins there. It keeps its forced entry, and it is the
 only reason the list of 24 has to stay in the tree at all.
+> *Superseded 2026-09-29.* The extended patch 0005 registers the 24 bytes from the
+> unclaimed run they are, so this address needs no entry and the "taken in data" reason is
+> disproved (nothing in the image mentions it). With the list trimmed to the three
+> tail branches the table is 38,457 entries and all 21 addresses are registered; see
+> "B-006: the last forced entry goes away" at the end of this log.
 
 With the real 24-entry list the register table grew from **38,365 to 38,439**
 entries: 75 new starts, one start removed. The removed one is the interesting
@@ -1736,6 +1749,9 @@ now honour the flag. Nothing else in the merge path changed.
 - **`0x827EC038` still needs its config entry** (above), so a future address that
   is referenced only from data still needs the manual route. The class is smaller,
   not empty.
+  > *Superseded 2026-09-29.* It does not need an entry any more - the extended patch
+  > 0005 registers the unclaimed run it sits in - and no data references it either; see
+  > "B-006: the last forced entry goes away" at the end of this log.
 - **The forced regeneration is once per project, not per machine**: a checkout that
   applies the patch and then builds regenerates once and skips thereafter.
 - **`UnresolvedJump::conditional`** is still recorded and still never consumed by
@@ -2871,3 +2887,91 @@ cases: 5 executed, 5 passed, 0 failed, 0 skipped - evidence in out/m5-wrong-data
   lengths, one shape each. An image edited by hand with plausible lengths - a header that is
   wrong but self-consistent - is exactly the case this check does not claim: the identity
   warning is what reports it.
+
+## B-006: the last forced entry goes away (2026-09-29)
+
+Status: **resolved** - the 21 indirect-call entries are out of
+[config/functions.toml](../../config/functions.toml), which now holds the three
+tail-branch entries and nothing else.
+
+### What the last address was, and what the record got wrong
+
+B-011 recorded `0x827EC038` as a leaf "whose address is taken in data". It is taken
+by nothing. Measured against the decrypted image (`scripts/decrypt_xex.py`, byte for
+byte what the runtime maps, checked against the live bytes B-011 quoted): no 32-bit
+word anywhere in the file equals `0x827EC038` in either byte order, at any offset -
+a whole-image search is **0 hits** - and a linear decode of `.text` finds no direct
+branch to it either. The guest builds the address in a register (or reads it out of
+a structure nothing in the image attributes to code), so no scan of the image can
+mention it, and "taken in data" was a plausible reading rather than a measurement.
+
+That is enough to explain the trap, and the gap-fill trace shows the mechanism.
+`sub_827EBE08` has PDATA size 560, so its extent ends exactly at `0x827EC038`; the
+region `[0x827EBE08, 0x827EC254]` splits into `[0x827EBE08, 0x827EC028)` and
+`[0x827EC028, 0x827EC050)`, and the second is skipped because its start is interior
+to `sub_827EBE08` - the `b 0x827EC020` at `0x827EC034` is not a "tail call" the
+splitter recognises, because `0x827EC020` is an epilogue block of the same function
+rather than a callable. The 24 bytes from `0x827EC038` to the next entry are claimed
+by nothing, and the first indirect call into them traps.
+
+### The first cut was wrong, and the measurement said so
+
+The obvious rule - split a region at *every* unconditional `b` whose fall-through
+word is inside no function's blocks, not only at tail calls to callables - registered
+`0x827EC038` on the first try (38,450 entries, the address present), and it also
+produced two `[error] Unresolved conditional branch to 0x823DD73C from 0x823DD70C`
+emissions the pre-fix run does not have. The cause: it registered `0x823DD6FC` and
+`0x823DD738` too - dead `b` words *inside* `sub_823DD6C0`, between blocks that one
+extent owns - and a registered 4-byte function with a lower base shadows the real
+owner in `FunctionGraph::getFunctionContaining`'s nearest-base lookup, so branch
+sites above it classified against nothing and the two conditional branches to
+`0x823DD73C` (an internal label of `sub_823DD6C0`) lost their target. The table grew
+and the emitted code degraded at the same time; that is the difference between "an
+address is registered" and "the graph still knows who owns an address".
+
+### The rule that shipped (patch 0005, extended)
+
+Each pass now keeps a merged index of what the graph claims - one span per function,
+over its **extent**, because the words between a function's blocks still belong to it
+- and registers the runs of words inside a code region that no span covers, when the
+word in front of the run leaves control: a return, an indirect branch, or an
+unconditional branch without the link bit (a `bl` falls through, so the word after a
+call is not an entry on account of the call). A run whose first word is not an entry
+is logged and skipped, which is what keeps the rule out of a function's
+continuation. The segmentation itself is untouched, so the new rule cannot change a
+boundary the splitter already found.
+
+### Verification (all 2026-09-29, Release `out/build/win-amd64-release`)
+
+| Check | Result |
+| --- | --- |
+| codegen, pre-fix tool, `config/functions.toml` trimmed to its 3 tail-branch entries | **38,438** entries, and `0x827EC038` is the only one of the 21 addresses missing - the B-011 measurement, reproduced |
+| codegen, extended patch 0005, same trimmed list | **38,457** entries, all 21 registered, `registered 1722 gap functions in 3 pass(es)` (1,699 before), **0** errors, **0** warnings |
+| the delta | 22 new, 4 absorbed: `0x82344F4C`, `0x82357EEC`, `0x8264C304`, `0x8277C3EC`, each a mis-split `li r3,imm; blr` epilogue fragment that is now the interior label of the function owning it, and none of the four is stored as a dword anywhere in the image, so nothing could have called it through a pointer |
+| the new entries that matter | 3 of the 22 *are* stored as dwords (`0x82343A80` x8, `0x827149B8` x13, `0x8277C3C0` x1): function pointers discovery had never registered, now resolvable |
+| `cmake --build --preset win-amd64-release` | exit 0, the regenerated files compiled and linked into `rb_blitz.exe` (38,842,368 bytes) |
+| `ctest` (7 host targets) | 7/7 passed (1.7 s) |
+| `acceptance_launches.ps1 -Runs 2 -BootWaitSec 40` | **2 / 2** reached-title-and-closed-clean, no `[FATAL]` |
+| the call that used to trap | a temporary `REXLOG_INFO` in the generated body of `sub_827EC038` logged **206 calls** in one 40 s boot (thread t27832), 0 `[FATAL]`; the probe was then removed and the tree rebuilt (the regenerated output was byte-identical - `0 written, 215 unchanged`) |
+| `config/functions.toml` emptied to a comment | codegen registers 23 of the historical 24 addresses by itself; the Validate phase reports `UnresolvedCall (1): 0x8243C688 from 0x8242A8DC: b 0x8243C688 from 0x8242A8DC - target not in any function`, which is why that entry stays |
+| `scripts/apply_sdk_patches.ps1 -Check` | 9 patches, all applied; 21 patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
+| codegen after the change | `Codegen summary: 0 written, 0 unchanged, 0 deleted, 1 module(s) up to date` in 0.1 s - patch 0005 now bumps `kCodegenBehaviourVersion` 2 -> 3, so every existing tree regenerates exactly once, by design |
+
+### What this does not cover
+
+- **A branch to an address in no function is still a build failure.** `0x8243C688`
+  is registered because it is forced. Validate's `UnresolvedCall` is deliberately
+  loud, and turning it into "register the target and carry on" would silently
+  recompile data misread as instructions. That decision is not taken here.
+- **The three tail-branch entries stay.** Two of them are found by the new rule
+  today; one is not, and an entry costs nothing while it protects the address from a
+  future regression in the rule.
+- **No new UI or gameplay path was exercised.** The evidence is the boot to the title
+  screen - the path B-011 trapped on - plus the comparator's own call count. A hole
+  that only a later path reaches is still possible, and the manual fix for it is
+  unchanged.
+- **The rule registers dead code, not only functions.** A `blr` slab after a tail
+  branch with nothing around it becomes a 4-byte function (several of the 22 are
+  exactly that). It is harmless - such an address resolves to a body that returns -
+  but it is not a function, and the entry count is now a little further from the
+  count of functions.

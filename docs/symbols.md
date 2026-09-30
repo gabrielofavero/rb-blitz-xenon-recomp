@@ -119,14 +119,13 @@ adding `[[modules]]` entries.
   `<imgui.h>`. Applied in project `CMakeLists.txt`; see `docs/history/bringup-log.md`
   B-004. Not a codegen/analysis fix — no change to `config/` or `generated/`.
 
-## Indirect-call targets registered via `functions.toml`
+## Indirect-call targets codegen had to be taught about
 
-Guest boot reaches functions that codegen discovery missed. Each is a real
-function with **no PDATA entry and no static `bl` caller**, reached only through
-a function pointer; all end in `bctr` (indirect tail-call), which codegen
-`GapFill` did not split on — the discovery gap closed by patch 0005, see the end
-of this section. Registered one at a time from runtime evidence
-(`[FATAL] Call to invalid or unregistered function at guest address 0x…`):
+Guest boot reached functions that codegen discovery missed: real functions with
+**no PDATA entry and no static `bl` caller**, reached only through a function
+pointer. Each surfaced at runtime as
+`[FATAL] Call to invalid or unregistered function at guest address 0x…` and was
+forced into `config/functions.toml` one address at a time from that evidence:
 
 | Guest address | Evidence | Notes |
 | --- | --- | --- |
@@ -135,25 +134,38 @@ of this section. Registered one at a time from runtime evidence
 | `0x8279A888` | boot, thread t16280 | body ends `… mtctr r11; bctr` (dispatcher) |
 | `0x82779A70` | boot, thread t23656 | after `0x8279A888` registered |
 | `0x82783D18` | boot, thread t12912 (Release) | 5th; added and confirmed in the Release build |
+| `0x8278A6E0` | "PRESS A TO START", thread t21068 | a hole between the 8-byte adjuster thunks at `0x8278A6D8` and `0x8278A6E8` |
+| `0x827EC038` | title-music MOGG open, thread t23752 | the 24-byte comparator; see the note below |
+| 14 thunk slots | song pick, thread t13624 | `0x82783CC0..0x82783D17` plus `0x82783D70`, 8-byte `addi r3,r3,imm; b <target>` veneers |
 
-All entries use `[functions."0x…"]` with **no** `size`/`end` so codegen
-discovers the natural boundary from the code region.
+**None of these is forced any more**, and the three tail-branch targets that are
+still forced are a different class: nothing reaches them through a pointer. Patch
+[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch)
+taught `GapFill` (`rexglue-sdk/src/codegen/phase_gapfill.cpp`) to treat `bctr` as a
+terminator and to re-split a segmentation a later pass refines (a withdraw/refine
+fixpoint, at most 8 passes), and its gap fill was extended on 2026-09-29 to register
+the runs of words inside a code region that no function's **extent** claims, when the
+word in front of the run leaves control.
+Measured with this list trimmed to the three tail-branch entries, codegen found 0 of
+the other 21 addresses before, 13 with the `bctr` terminator alone, 20 with the
+fixpoint, and **21 with the unclaimed-run rule**; the register table grew 38,365
+→ 38,439 → 38,457 (patch 0005, before and after its extension). Nothing in the table above needs
+its `[functions."0x…"]` entry: `config/functions.toml` keeps the three tail-branch
+entries and nothing else, and one of those is still load-bearing
+(`0x8243C688`, in front of which sits a `bl`, so the word after it is not an entry).
 
-The upstream fix is **applied** — patch
-[0005](../patches/rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch):
-`GapFill` (`rexglue-sdk/src/codegen/phase_gapfill.cpp`) now treats `bctr` as a
-terminator and re-splits a region it has already registered when a later pass
-reveals a boundary inside it (a withdraw/refine fixpoint, at most 8 passes).
-Measured with this list trimmed to the three oldest entries, codegen found 0 of
-the other 21 addresses before, 13 with the `bctr` terminator alone, and 20 with
-the fixpoint; the one it still cannot see is `0x827EC038`, whose address is only
-taken in data, so it stays a forced entry. With the full list the register table
-grew from 38,365 to 38,439 entries. `config/functions.toml` did not need to
-change for that: the entries above stay as the evidence trail (and as the
-fallback for the symbols no code region mentions, like `0x827EC038`), not
-because codegen still needs each one.
-Full detail and the two further defects the fix exposed are in
-[bringup-log.md](history/bringup-log.md) under "Codegen: the B-003/B-006 root causes".
+`0x827EC038` is the one whose recorded reason was wrong. B-011 called its address
+"taken in data"; it is taken by nothing - no dword in the decrypted image equals it
+in either byte order, aligned or not, and no direct branch reaches it. It follows the
+tail branch that ends `sub_827EBE08` (PDATA size 560, so that function's own extent
+stops exactly at `0x827EC038`), and the guest builds the address in a register at run
+time, so no segment ever started there and the first indirect call into it trapped.
+With the extended patch 0005 it is registered from the unclaimed bytes, and the call that used to
+trap now resolves: a 40 s boot reached the title screen with no `[FATAL]` and
+`sub_827EC038` ran 206 times (measured with a temporary probe in its generated body).
+Full detail, including the two defects patch 0005 exposed and the two the first cut of
+the unclaimed-run rule exposed, is in [bringup-log.md](history/bringup-log.md) under "Codegen: the
+B-003/B-006 root causes" and "B-006: the last forced entry goes away".
 
 ## Audio (MOGG) decryption path
 
