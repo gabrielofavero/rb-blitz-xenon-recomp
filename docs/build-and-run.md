@@ -280,6 +280,17 @@ cmake --build --preset win-amd64-release -- -v                # show full comman
 Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`,
 `rexgpu-xenos.dll`.
 
+The two DLLs are **copies**: the SDK builds them into its own staging directory
+(`rexglue-sdk/out/win-amd64\`) and `rexglue_setup_target` refreshes the ones beside
+the executable in a `POST_BUILD` step of the `rb_blitz.exe` **link** — so a change
+that only reaches `rexgpu-xenos.dll` (any edit under
+`rexglue-sdk/src/graphics/`, including patch 0002's texture cache) relinks the
+plugin and leaves the copy beside the executable stale until something relinks the
+executable (measured 2026-09-30: a plugin-only build left a 2,852,352-byte
+`rexgpu-xenos.dll` in `rexglue-sdk/out/win-amd64` and a 2,850,304-byte one in
+`out\build\win-amd64-release`). Touch a project source and rebuild, or copy the
+DLL by hand, before a run that has to see a plugin-only change.
+
 `win-amd64-debug` and `win-amd64-relwithdebinfo` build into their own trees in the same
 checkout, and neither preset disturbs the other: the SDK's staging directory
 (`rexglue-sdk/out/win-amd64`) holds both configurations side by side because Debug

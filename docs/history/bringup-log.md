@@ -2975,3 +2975,123 @@ boundary the splitter already found.
   exactly that). It is harmless - such an address resolves to a body that returns -
   but it is not a function, and the entry count is now a little further from the
   count of functions.
+
+## B-010's two standing limits (2026-09-30)
+
+Status: **both closed** - patch 0002 converts the `num_format = 1` (integer) number
+format as well as the fraction, and the staging copy no longer has to fit one 2 MiB
+upload page.
+
+The 2026-09-19 fix (B-010, above) converted the guest's 32-bit non-floating-point
+textures to IEEE float on the CPU and left two limits in
+[known-issues.md](../known-issues.md): an integer texture failed to create, and the
+converted texture plus its mips had to fit a single
+`GraphicsUploadBufferPool::kDefaultPageSize` page (2 MiB; the largest conversion was
+256 KB). This section closes both and says what is still assumed rather than measured.
+
+### What the integer number format means, and where that was established
+
+No run of this title has ever sampled an integer texture, so the rule could not be
+observed - it had to be derived, and the only authority available is the SDK's own
+handling of the same bit in its other number-format consumers:
+
+- **The vertex fetch**: `src/graphics/pipeline/shader/dxbc_translator_fetch.cpp` applies
+  the fraction scaling under `if (!instr.attributes.is_integer)`. In the `is_integer`
+  mode a component reaches the shader as `UToF`/`IToF` of the raw word, unscaled.
+  `include/rex/graphics/format/ucode.h` names the bit the same way:
+  `bool is_normalized() const { return data_.num_format_all == 0; }`.
+- **The memory export**: `src/graphics/pipeline/shader/dxbc_translator_memexport.cpp`
+  handles `kUnsignedInteger`/`kSignedInteger` by clamping to the integer range, while
+  the fraction formats multiply by `2^n - 1` - the same asymmetry.
+- **The enum the export modes come from**: `xenos::SurfaceNumberFormat` in
+  `include/rex/graphics/xenos.h`, a development of AMD's `a2xx_sq_surfaceformat`
+  number-format field, whose non-normalized variant is the raw integer.
+- **The SDK's own comment in the host-format table** (the warning against integer DXGI
+  formats) already stated what the sampled value is: for `num_format = 1` "add a
+  constant buffer containing multipliers for the textures and multiplication to the
+  tfetch implementation" - the shader is handed the integer, and scaling it belongs to
+  the game, not to the fetch unit.
+
+The texture fetch constant's bit is that same bit, so the conversion writes
+`float(int32_t(word))` for a signed integer and `float(word)` for an unsigned one, and
+the fraction rules are untouched. The sign still comes from the fetch constant's
+swizzled signs (`signed_separate`), so all four combinations are covered, and
+`IsSignedVersionSeparateForFormat` now returns true for both number formats rather than
+for the fraction alone (the signed and the unsigned conversion of the same words are
+different contents in the same host format). Because this rule is reasoned rather than
+observed, the first use of each integer format is reported once per process, at
+`REXGPU_WARN`: `Sampling guest texture format <name> as <signed|unsigned> integer data
+(num_format 1) - the components are given to the shaders without normalization`. A
+title that depends on the rule is one a run can be pointed at.
+
+### Removing the 2 MiB ceiling
+
+The converted data has to be contiguous - the load shaders read one typed-buffer SRV
+with a byte offset into it - so the request cannot be split across pages, and until now
+anything larger than a page was refused with an error and no texture. That is honest,
+but it is a ceiling no guest format has: a 2048x2048 `k_32_32_32_32` texture is 16 MiB
+by itself.
+
+A larger constant would have moved the ceiling rather than removed it, so the pool
+learned to serve the request:
+
+- `GraphicsUploadBufferPool::Page` records the size its buffer was actually allocated
+  with (`Page::size_`), and the fit checks in `Request` and `RequestPartial` compare
+  against the page's own size rather than against `page_size_`. That is what makes an
+  increase of `page_size_` safe while pages of the old size are still in flight or have
+  been recycled into the writable list. For a pool that never grows, `size_` and
+  `page_size_` are equal, so nothing else changes.
+- `D3D12UploadBufferPool::Request` increases `page_size_` (aligned to
+  `D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT`) for a request that does not fit a page.
+  The base class header has always said an implementation may increase the page size;
+  this is that, in the one implementation this runtime uses.
+- The texture cache owns its own pool for the conversion staging
+  (`D3D12TextureCache::conversion_staging_pool_`, reclaimed on
+  `CompletedSubmissionUpdated` and cleared with `ClearCache`) instead of borrowing the
+  constant buffer pool, so a 16 MiB conversion cannot make every later constant buffer
+  page a 16 MiB allocation. The old `<= kDefaultPageSize` pre-check is gone.
+
+### Verification (all 2026-09-30, Release `out/build/win-amd64-release`)
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset win-amd64-release` | exit 0; the SDK tree relinks `rexruntime.dll` and `rexgpu-xenos.dll`, then `rb_blitz.exe` |
+| `ctest` (7 host targets) | **7/7** passed (1.9 s) |
+| `scripts/acceptance_song.ps1 -Runs 1` (final binaries, log 13,748 KB) | pass - boot -> song list -> **315 s** of playback (19:09:49 -> 19:15:04) -> results naming `THESE DAYS`, 0 `[FATAL]` |
+| the B-010 symptom | **0** `Unsupported texture formats used in the frame` lines (18,310 frames carried them before the 2026-09-19 fix) and **0** `Failed to convert a guest texture` lines |
+| the new integer path not taken | **0** `Sampling guest texture format` lines: every fetch constant this title samples is a fraction (`num_format = 0`, as B-010's decoded one was), so the derived rule is not exercised by any run here |
+| the staging path, measured with a temporary probe (removed afterwards, tree rebuilt) | **8** requests of **524,288** bytes, packed four to a 2 MiB page - offsets 0 / 524,288 / 1,048,576 / 1,572,864 within each of the two page buffers the run used - and the pool's own allocation logged as `2097152` bytes |
+| the staged data, same probe | **8** conversions of **131,072** components each; read back through the destination mapping, every component is inside the range its number format allows - min `0.10800648` / max `0.75000000` for one texture and min `0.47703350` / max `0.80284172` for the other, **0 NaN, 0 out of range** |
+| the growth path, measured with a forced configuration (the staging pool constructed with a 64 KiB page and primed with a 4,096-byte request; both removed afterwards, tree rebuilt) | `upload page allocating: 65536 bytes` for the priming page, then `upload page size grown to 524288 bytes for a 524288 byte request` + `upload page allocating: 524288 bytes`; all 8 conversion requests landed at **offset 0 of a fresh buffer**, not at the priming page's offset 4,096 - which is where a fit check against the grown `page_size_` instead of the page's own size would have put a 524,288-byte write inside a 65,536-byte buffer |
+| the growth run's data and route | the same read-back values line for line, and the same pass (315 s, `THESE DAYS`) |
+| `scripts/apply_sdk_patches.ps1 -Check` | 8 patches, all applied; **24** patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
+| the plugin-only build | measured: a build that only recompiles `rexgpu-xenos.dll` leaves the copy beside `rb_blitz.exe` stale, because that copy is a `POST_BUILD` of the executable's link - recorded in [build-and-run.md](../build-and-run.md) §3, and the forced-growth run copied the DLL by hand |
+
+Two conditions of these measurements. The machine was **not idle**: another session on
+this host launches the game for its own checks, and its 22-second boots landed inside
+the acceptance run's song (its logs share the run's `logs\` directory) - the run still
+delivered its keys, played the full 315 s envelope and reached the results screen. And
+the probe and forced-growth configurations were **temporary edits**, reverted with the
+two files restored byte for byte (`Get-FileHash` compared against copies taken before
+the first probe) and the tree rebuilt, so the acceptance run above and the patch
+regenerated below are of the same source; the probe lines were confirmed absent from
+that log (`[probe]`: 0).
+
+### What this does not cover
+
+- **The integer rule is derived, not observed.** No run here has taken the
+  `num_format = 1` path (the warning never fired), so the rule rests on the SDK's own
+  consumers of the same bit, listed above, rather than on a title using it. The
+  `REXGPU_WARN` line is the instrument that would identify such a title.
+- **No texture larger than a page was measured.** The largest conversion in this
+  title's content is 512 KB, and the growth was measured by forcing a 64 KiB page
+  rather than by feeding the pool a >2 MiB texture. What was in question was the
+  arithmetic of growing the page and of skipping one that is smaller; the request size
+  is a number in that arithmetic, not a separate path.
+- **Vulkan still has the old table.** `include/rex/graphics/vulkan/texture_cache.h`
+  leaves the 32-bit guest formats unknown with the original comment; this runtime runs
+  D3D12 (and the Vulkan texture cache would need its own staging design, since
+  `VkBuffer`/`VkImageView` binding differs).
+- **The CPU mirror can still be stale for GPU-written data**, which is the limit
+  [known-issues.md](../known-issues.md) keeps for B-010; `d3d12_readback_resolve` is
+  still the escape hatch, and this work does not change what the mirror holds.

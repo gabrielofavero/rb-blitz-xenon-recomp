@@ -15,6 +15,43 @@ index 5100818..bed24e8 100644
    void CompletedSubmissionUpdated();
    void BeginSubmission();
  
+diff --git a/include/rex/graphics/d3d12/texture_cache.h b/include/rex/graphics/d3d12/texture_cache.h
+index 4d845c7..c5d9d0b 100644
+--- a/include/rex/graphics/d3d12/texture_cache.h
++++ b/include/rex/graphics/d3d12/texture_cache.h
+@@ -27,6 +27,7 @@
+ #include <rex/graphics/xenos.h>
+ #include <rex/ui/d3d12/d3d12_api.h>
+ #include <rex/ui/d3d12/d3d12_provider.h>
++#include <rex/ui/d3d12/d3d12_upload_buffer_pool.h>
+ 
+ namespace rex::graphics::d3d12 {
+ 
+@@ -86,6 +87,8 @@ class D3D12TextureCache final : public TextureCache {
+ 
+   void ClearCache() override;
+ 
++  void CompletedSubmissionUpdated(uint64_t completed_submission_index) override;
++
+   void BeginSubmission(uint64_t new_submission_index) override;
+   void BeginFrame() override;
+   void EndFrame();
+@@ -457,6 +460,15 @@ class D3D12TextureCache final : public TextureCache {
+   D3D12CommandProcessor& command_processor_;
+   bool bindless_resources_used_;
+ 
++  // Upload pool for the staging buffers containing guest texture data converted
++  // to floating-point (see ConvertNonFloatGuestRange) - a texture and its mips
++  // have to be contiguous for the load shaders, so the pool may allocate pages
++  // larger than its default page size for them.
++  std::unique_ptr<ui::d3d12::D3D12UploadBufferPool> conversion_staging_pool_;
++  // Texture formats for which the integer num_format has been reported (see the
++  // REXGPU_WARN in LoadTextureDataFromResidentMemoryImpl).
++  uint32_t integer_conversion_reported_ = 0;
++
+   Microsoft::WRL::ComPtr<ID3D12RootSignature> load_root_signature_;
+   std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, kLoadShaderCount> load_pipelines_;
+   // Load pipelines for resolution-scaled resolve targets.
 diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
 index d26cd4f..86e3db5 100644
 --- a/include/rex/graphics/pipeline/texture/cache.h
@@ -33,8 +70,61 @@ index d26cd4f..86e3db5 100644
  
      TextureKey() { MakeInvalid(); }
      TextureKey(const TextureKey& key) { std::memcpy(this, &key, sizeof(*this)); }
+diff --git a/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h b/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
+index 0e33a65..3e13012 100644
+--- a/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
++++ b/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
+@@ -20,6 +20,10 @@ class D3D12UploadBufferPool : public GraphicsUploadBufferPool {
+  public:
+   D3D12UploadBufferPool(const D3D12Provider& provider, size_t page_size = kDefaultPageSize);
+ 
++  // Request to write data in a single piece, creating a new page if the current
++  // one doesn't have enough free space - and a larger one if the request doesn't
++  // fit a page of the current size, since the whole request is placed in a
++  // single page (the callers need their data to be contiguous).
+   uint8_t* Request(uint64_t submission_index, size_t size, size_t alignment,
+                    ID3D12Resource** buffer_out, size_t* offset_out,
+                    D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out);
+diff --git a/include/rex/ui/graphics_upload_buffer_pool.h b/include/rex/ui/graphics_upload_buffer_pool.h
+index 517513c..fa8d250 100644
+--- a/include/rex/ui/graphics_upload_buffer_pool.h
++++ b/include/rex/ui/graphics_upload_buffer_pool.h
+@@ -45,12 +45,19 @@ class GraphicsUploadBufferPool {
+     virtual ~Page();
+     uint64_t last_submission_index_;
+     Page* next_;
++    // The size of the buffer the implementation allocated for this page. The
++    // page size may be increased after the page was created (see Request), and
++    // the pages that already exist keep the size they were allocated with, so
++    // this may be smaller than page_size_ - but never larger.
++    size_t size_;
+   };
+ 
+   GraphicsUploadBufferPool(size_t page_size) : page_size_(page_size) {}
+ 
+   // Request to write data in a single piece, creating a new page if the current
+-  // one doesn't have enough free space.
++  // one doesn't have enough free space. The whole request is placed in a single
++  // page, so it must fit page_size_ - an implementation that needs to serve
++  // requests larger than the page size has to increase page_size_ first.
+   Page* Request(uint64_t submission_index, size_t size, size_t alignment, size_t& offset_out);
+   // Request to write data in multiple parts, filling the buffer entirely.
+   Page* RequestPartial(uint64_t submission_index, size_t size, size_t alignment, size_t& offset_out,
+@@ -62,7 +69,11 @@ class GraphicsUploadBufferPool {
+ 
+   // May be increased by the implementation on creation or on first allocation
+   // to avoid wasting space if the real allocation turns out to be bigger than
+-  // the specified page size.
++  // the specified page size, and by an implementation of Request that can serve
++  // a request larger than a page by allocating a larger page for it (a single
++  // request is always placed in a single page). Only the pages created after
++  // the increase have the new size - the existing ones keep the size recorded
++  // in Page::size_.
+   size_t page_size_;
+ 
+   // A list of buffers with free space, with the first buffer being the one
 diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
-index 2be0e8e..c66f5e9 100644
+index 2be0e8e..f7d0fd8 100644
 --- a/src/graphics/d3d12/texture_cache.cpp
 +++ b/src/graphics/d3d12/texture_cache.cpp
 @@ -15,6 +15,7 @@
@@ -45,29 +135,31 @@ index 2be0e8e..c66f5e9 100644
  #include <utility>
  
  #include <rex/assert.h>
-@@ -80,6 +81,51 @@ namespace shaders {
+@@ -80,6 +81,59 @@ namespace shaders {
  #include "../shaders/bytecode/d3d12_5_1/texture_load_r5g6b5_b5g6r5_scaled_cs.h"
  }  // namespace shaders
  
 +namespace {
 +
 +// Whether the guest format stores 32-bit-per-component data that isn't
-+// floating-point, which thus needs to be converted for a host texture (see the
-+// k_32 comment in host_formats_).
-+bool IsFixedPointConvertedFormat(xenos::TextureFormat format) {
++// floating-point, so it needs to be converted for a host texture (see the k_32
++// comment in host_formats_). The num_format bit of the fetch constant tells
++// whether such data is a fraction or an integer.
++bool IsNonFloat32bpcFormat(xenos::TextureFormat format) {
 +  return format == xenos::TextureFormat::k_32 || format == xenos::TextureFormat::k_32_32 ||
 +         format == xenos::TextureFormat::k_32_32_32_32;
 +}
 +
 +// Converts the 32-bit components of a big-endian guest texture region to the
-+// floating-point values with the same meaning (used for the guest formats that
-+// aren't floating-point, such as 0.32 fixed-point ones), using the same math as
-+// the vertex fetch for such formats. The conversion is done in-place for each
-+// component without any assumptions about the layout (tiling, mip packing and
-+// so on), as it doesn't change it - so the load shaders can still be used to
-+// load the converted data.
-+void ConvertFixedPointGuestRange(const uint8_t* source, uint8_t* destination, uint32_t size_bytes,
-+                                 xenos::Endian endianness, bool is_signed) {
++// floating-point values a shader sampling it on the console would receive (used
++// for the guest formats that aren't floating-point, such as 0.32 fixed-point and
++// 32-bit integer ones), using the same math as the vertex fetch and the memory
++// export for such formats. The conversion is done in-place for each component
++// without any assumptions about the layout (tiling, mip packing and so on), as it
++// doesn't change it - so the load shaders can still be used to load the converted
++// data.
++void ConvertNonFloatGuestRange(const uint8_t* source, uint8_t* destination, uint32_t size_bytes,
++                               xenos::Endian endianness, bool is_signed, bool is_integer) {
 +  std::memcpy(destination, source, size_bytes);
 +  uint32_t component_count = size_bytes >> 2;
 +  uint32_t* destination_components = reinterpret_cast<uint32_t*>(destination);
@@ -77,7 +169,13 @@ index 2be0e8e..c66f5e9 100644
 +    // to what they read.
 +    uint32_t guest_value = xenos::GpuSwap(destination_components[i], endianness);
 +    float converted_value;
-+    if (is_signed) {
++    if (is_integer) {
++      // Integer - the value reaches the shaders as it is, not scaled to the
++      // normalized range, just like in the is_integer mode of the vertex fetch
++      // and the unsigned integer and the signed integer surface number formats
++      // of the memory export, so the game applies any scaling it needs itself.
++      converted_value = is_signed ? float(int32_t(guest_value)) : float(guest_value);
++    } else if (is_signed) {
 +      // Signed repeating fraction (the only mode supported for textures,
 +      // kZeroClampMinusOne) - 1 / (2^31 - 1), with the most negative value
 +      // rounded to -1 as float32, so no clamping is needed.
@@ -97,23 +195,23 @@ index 2be0e8e..c66f5e9 100644
  const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
      // k_1_REVERSE
      {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
-@@ -232,17 +278,28 @@ const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
+@@ -232,17 +286,28 @@ const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
       DXGI_FORMAT_R16G16B16A16_FLOAT, kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN,
       kLoadShaderIndexUnknown, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
      // k_32
 -    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
 -     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
-+    // The non-floating-point 32-bit-per-component formats (0.32 fixed-point and
-+    // so on) can't be represented by a samplable host texture format directly -
-+    // there's no normalized 32-bit-per-component DXGI format, and integer
-+    // formats can only be read with Load, not Sample - so the texture cache
-+    // converts the components of the guest data to floating-point in a staging
-+    // buffer (see ConvertFixedPointGuestRange), and, since the conversion
++    // The non-floating-point 32-bit-per-component formats (0.32 fixed-point
++    // and so on) can't be represented by a samplable host texture format
++    // directly - there's no normalized 32-bit-per-component DXGI format, and
++    // integer formats can only be read with Load, not Sample - so the texture
++    // cache converts the components of the guest data to floating-point in a
++    // staging buffer (see ConvertNonFloatGuestRange), and, since the conversion
 +    // doesn't change the layout, loads the host texture from it using the
-+    // regular load shaders. The sign is applied to the data during the
-+    // conversion, so the signed and the unsigned variants have different
-+    // contents, even though the same host format is used for both (see
-+    // IsSignedVersionSeparateForFormat).
++    // regular load shaders. The sign and the num_format bits are applied to the
++    // data during the conversion, so the signed and the unsigned variants have
++    // different contents, even though the same host format is used for both
++    // (see IsSignedVersionSeparateForFormat).
 +    {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
 +     kLoadShaderIndex32bpb, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
       xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
@@ -134,15 +232,48 @@ index 2be0e8e..c66f5e9 100644
      // k_32_FLOAT
      {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
       kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
-@@ -1460,12 +1517,25 @@ TextureCache::LoadShaderIndex D3D12TextureCache::GetLoadShaderIndex(TextureKey k
+@@ -391,6 +456,11 @@ bool D3D12TextureCache::Initialize() {
+   const ui::d3d12::D3D12Provider& provider = command_processor_.GetD3D12Provider();
+   ID3D12Device* device = provider.GetDevice();
+ 
++  // Pool for the staging buffers with the guest data converted to
++  // floating-point (the pages of which grow for a request that doesn't fit
++  // one - see the k_32 comment in host_formats_).
++  conversion_staging_pool_ = std::make_unique<ui::d3d12::D3D12UploadBufferPool>(provider);
++
+   if (IsDrawResolutionScaled()) {
+     // Buffers not used yet - no need aliasing barriers to change ownership of
+     // gigabytes between even and odd buffers.
+@@ -648,12 +718,20 @@ bool D3D12TextureCache::Initialize() {
+ void D3D12TextureCache::ClearCache() {
+   TextureCache::ClearCache();
+ 
++  conversion_staging_pool_->ClearCache();
++
+   // Clear texture descriptor cache.
+   srv_descriptor_cache_free_.clear();
+   srv_descriptor_cache_allocated_ = 0;
+   srv_descriptor_cache_.clear();
+ }
+ 
++void D3D12TextureCache::CompletedSubmissionUpdated(uint64_t completed_submission_index) {
++  TextureCache::CompletedSubmissionUpdated(completed_submission_index);
++
++  conversion_staging_pool_->Reclaim(completed_submission_index);
++}
++
+ void D3D12TextureCache::BeginSubmission(uint64_t new_submission_index) {
+   TextureCache::BeginSubmission(new_submission_index);
+ 
+@@ -1460,12 +1538,26 @@ TextureCache::LoadShaderIndex D3D12TextureCache::GetLoadShaderIndex(TextureKey k
  }
  
  bool D3D12TextureCache::IsSignedVersionSeparateForFormat(TextureKey key) const {
-+  // The sign of the non-floating-point 32-bit-per-component formats is applied
-+  // to the guest data when it's converted to floating-point (see
-+  // ConvertFixedPointGuestRange), so the signed and the unsigned versions have
++  // For the non-floating-point 32-bit-per-component formats, the sign of the
++  // guest data is applied during the conversion to floating-point (see
++  // ConvertNonFloatGuestRange), so the signed and the unsigned versions have
 +  // different contents even though the host format is the same for both.
-+  if (IsFixedPointConvertedFormat(key.format) && key.num_format == 0) {
++  if (IsNonFloat32bpcFormat(key.format)) {
 +    return true;
 +  }
    const HostFormat& host_format = host_formats_[uint32_t(key.format)];
@@ -151,69 +282,54 @@ index 2be0e8e..c66f5e9 100644
  }
  
  bool D3D12TextureCache::IsScaledResolveSupportedForFormat(TextureKey key) const {
-+  // Fixed-point textures are converted to floating-point on the CPU (see
-+  // ConvertFixedPointGuestRange) when loaded from the guest memory, but the
-+  // resolution-scaled loading from the resolves doesn't do that.
-+  if (IsFixedPointConvertedFormat(key.format)) {
++  // Non-floating-point 32-bit-per-component textures are converted to
++  // floating-point on the CPU (see ConvertNonFloatGuestRange) when loaded from
++  // the guest memory, but the resolution-scaled loading from the resolves
++  // doesn't do that.
++  if (IsNonFloat32bpcFormat(key.format)) {
 +    return false;
 +  }
    LoadShaderIndex load_shader = GetLoadShaderIndex(key);
    return load_shader != kLoadShaderIndexUnknown && load_pipelines_scaled_[load_shader] != nullptr;
  }
-@@ -1523,6 +1593,14 @@ std::unique_ptr<TextureCache::Texture> D3D12TextureCache::CreateTexture(TextureK
-     unsupported_format_features_used_[uint32_t(key.format)] |= kUnsupportedResourceBit;
-     return nullptr;
-   }
-+  if (IsFixedPointConvertedFormat(key.format) && key.num_format != 0) {
-+    // The data isn't a fraction that the texture cache can convert to
-+    // floating-point (the num_format bit indicates an integer, which would need
-+    // multiplication by a scale in the shaders), and can't be used as a host
-+    // texture directly (see the k_32 comment in host_formats_).
-+    unsupported_format_features_used_[uint32_t(key.format)] |= kUnsupportedResourceBit;
-+    return nullptr;
-+  }
-   if (key.dimension == xenos::DataDimension::k3D) {
-     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
-   } else {
-@@ -1695,6 +1773,63 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1695,6 +1787,74 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      return false;
    }
  
 +  // 32-bit-per-component guest formats that aren't floating-point (fixed-point
-+  // ones, mostly) can't be converted by the hardware while sampling since no
-+  // samplable host format with normalization and 32 bits per component exists
-+  // (see the k_32 comment in host_formats_) - so, if the data is a repeating
-+  // fraction (the num_format bit is 0, unlike an integer that would need a
-+  // scale in the shaders), it's converted to floating-point in a staging
-+  // buffer. As the conversion preserves the layout, the shared memory load
++  // ones and integers) can't be converted by the hardware while sampling since
++  // no samplable host format with normalization and 32 bits per component
++  // exists (see the k_32 comment in host_formats_) - so the data is converted
++  // to floating-point in a staging buffer, according to the num_format bit of
++  // the fetch constant (which tells whether the components are fractions or
++  // integers). As the conversion preserves the layout, the shared memory load
 +  // constants can still be used for it, with the difference that the source of
 +  // the load shaders is the staging buffer, and the guest offset is relative to
 +  // the beginning of the guest data in that buffer rather than to the shared
 +  // memory.
-+  bool convert_fixed_point = !texture_resolution_scaled && texture_key.num_format == 0 &&
-+                             IsFixedPointConvertedFormat(texture_key.format);
-+  uint32_t fixed_point_staging_size = 0;
-+  uint32_t fixed_point_mips_staging_offset = 0;
-+  ID3D12Resource* fixed_point_staging_buffer = nullptr;
-+  size_t fixed_point_staging_buffer_offset = 0;
-+  if (convert_fixed_point) {
++  bool convert_non_float = !texture_resolution_scaled && IsNonFloat32bpcFormat(texture_key.format);
++  uint32_t staging_size = 0;
++  uint32_t mips_staging_offset = 0;
++  ID3D12Resource* staging_buffer = nullptr;
++  size_t staging_buffer_offset = 0;
++  if (convert_non_float) {
 +    uint32_t guest_base_size = d3d12_texture.GetGuestBaseSize();
 +    uint32_t guest_mips_size = d3d12_texture.GetGuestMipsSize();
-+    fixed_point_mips_staging_offset =
-+        uint32_t(rex::align(UINT64(guest_base_size), UINT64(256)));
-+    fixed_point_staging_size = fixed_point_mips_staging_offset + guest_mips_size;
-+    uint8_t* fixed_point_staging_mapping = nullptr;
-+    if (fixed_point_staging_size <= ui::GraphicsUploadBufferPool::kDefaultPageSize) {
-+      fixed_point_staging_mapping = command_processor_.GetConstantBufferPool().Request(
-+          command_processor_.GetCurrentFrame(), fixed_point_staging_size, 256,
-+          &fixed_point_staging_buffer, &fixed_point_staging_buffer_offset, nullptr);
-+    }
-+    if (fixed_point_staging_mapping == nullptr) {
++    mips_staging_offset = uint32_t(rex::align(UINT64(guest_base_size), UINT64(256)));
++    staging_size = mips_staging_offset + guest_mips_size;
++    // The pool increases the size of its pages for a request that doesn't fit
++    // one, since the base and the mips have to be contiguous for the load
++    // shaders.
++    uint8_t* staging_mapping =
++        conversion_staging_pool_->Request(command_processor_.GetCurrentSubmission(), staging_size,
++                                          256, &staging_buffer, &staging_buffer_offset, nullptr);
++    if (staging_mapping == nullptr) {
 +      REXGPU_ERROR(
-+          "Failed to convert a guest texture ({}x{}x{}, {} levels, {}) with the fixed-point to "
-+          "floating-point conversion because a staging buffer with {} bytes couldn't be allocated",
++          "Failed to convert a guest texture ({}x{}x{}, {} levels, {}) with the non-floating-point "
++          "to floating-point conversion because a staging buffer with {} bytes couldn't be "
++          "allocated",
 +          width, height, depth_or_array_size, texture_key.mip_max_level + 1,
-+          guest_format_info->name, fixed_point_staging_size);
++          guest_format_info->name, staging_size);
 +      command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
 +      return false;
 +    }
@@ -223,34 +339,46 @@ index 2be0e8e..c66f5e9 100644
 +    // loaded need to be known.
 +    D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(shared_memory());
 +    bool is_signed = texture_key.signed_separate != 0;
++    bool is_integer = texture_key.num_format != 0;
++    if (is_integer &&
++        !(integer_conversion_reported_ & (UINT32_C(1) << uint32_t(texture_key.format)))) {
++      // The integer number format is converted according to the rules of the
++      // other number-format consumers of this data on the console rather than
++      // according to an observation of a title using it, so report it once per
++      // format to make a run that depends on it identifiable.
++      integer_conversion_reported_ |= UINT32_C(1) << uint32_t(texture_key.format);
++      REXGPU_WARN(
++          "Sampling guest texture format {} as {} integer data (num_format 1) - the components "
++          "are given to the shaders without normalization",
++          guest_format_info->name, is_signed ? "signed" : "unsigned");
++    }
 +    if (level_first == 0) {
-+      ConvertFixedPointGuestRange(
-+          d3d12_shared_memory.TranslatePhysical(texture_key.base_page << 12),
-+          fixed_point_staging_mapping, guest_base_size, texture_key.endianness, is_signed);
++      ConvertNonFloatGuestRange(d3d12_shared_memory.TranslatePhysical(texture_key.base_page << 12),
++                                staging_mapping, guest_base_size, texture_key.endianness, is_signed,
++                                is_integer);
 +    }
 +    if (level_last != 0) {
-+      ConvertFixedPointGuestRange(
-+          d3d12_shared_memory.TranslatePhysical(texture_key.mip_page << 12),
-+          fixed_point_staging_mapping + fixed_point_mips_staging_offset, guest_mips_size,
-+          texture_key.endianness, is_signed);
++      ConvertNonFloatGuestRange(d3d12_shared_memory.TranslatePhysical(texture_key.mip_page << 12),
++                                staging_mapping + mips_staging_offset, guest_mips_size,
++                                texture_key.endianness, is_signed, is_integer);
 +    }
 +  }
 +
    // Begin loading.
    // May use different buffers for scaled base and mips, and also addressability
    // of more than 128 * 2^20 (2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP)
-@@ -1706,8 +1841,8 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1706,8 +1866,8 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      // Source - base and mips, one or both.
      descriptor_count += (level_first == 0 && level_last != 0) ? 2 : 1;
    } else {
 -    // Source - shared memory.
 -    if (!bindless_resources_used_) {
-+    // Source - shared memory, or the fixed-point conversion staging buffer.
-+    if (!bindless_resources_used_ || convert_fixed_point) {
++    // Source - shared memory, or the conversion staging buffer.
++    if (!bindless_resources_used_ || convert_non_float) {
        ++descriptor_count;
      }
    }
-@@ -1733,17 +1868,30 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1733,17 +1893,30 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
    // depend on the buffer being current, so they will be set later - for mips,
    // after loading the base is done).
    if (!texture_resolution_scaled) {
@@ -261,7 +389,7 @@ index 2be0e8e..c66f5e9 100644
 -      descriptor_unscaled_source = command_processor_.GetSharedMemoryUintPow2BindlessSRVHandlePair(
 -          load_shader_info.source_bpe_log2);
 -    } else {
-+    if (convert_fixed_point) {
++    if (convert_non_float) {
 +      // The source is the staging buffer with the converted data, rather than
 +      // the shared memory.
        assert_true(descriptor_write_index < descriptor_count);
@@ -269,10 +397,10 @@ index 2be0e8e..c66f5e9 100644
 -      d3d12_shared_memory.WriteUintPow2SRVDescriptor(descriptor_unscaled_source.first,
 -                                                     load_shader_info.source_bpe_log2);
 +      ui::d3d12::util::CreateBufferTypedSRV(
-+          device, descriptor_unscaled_source.first, fixed_point_staging_buffer,
++          device, descriptor_unscaled_source.first, staging_buffer,
 +          ui::d3d12::util::GetUintPow2DXGIFormat(load_shader_info.source_bpe_log2),
-+          uint32_t(fixed_point_staging_size) >> load_shader_info.source_bpe_log2,
-+          uint32_t(fixed_point_staging_buffer_offset) >> load_shader_info.source_bpe_log2);
++          uint32_t(staging_size) >> load_shader_info.source_bpe_log2,
++          uint32_t(staging_buffer_offset) >> load_shader_info.source_bpe_log2);
 +    } else {
 +      D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(shared_memory());
 +      d3d12_shared_memory.UseForReading();
@@ -289,15 +417,15 @@ index 2be0e8e..c66f5e9 100644
      }
      command_list.D3DSetComputeRootDescriptorTable(1, descriptor_unscaled_source.second);
    }
-@@ -1799,6 +1947,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1799,6 +1972,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
        // directly addresses as R32 on some hardware (above
        // 2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP).
        load_constants.guest_offset = 0;
-+    } else if (convert_fixed_point) {
++    } else if (convert_non_float) {
 +      // The data was converted to a staging buffer that starts with the base
 +      // (the guest addresses can't be used for it since it's not the shared
 +      // memory).
-+      load_constants.guest_offset = is_base ? 0 : fixed_point_mips_staging_offset;
++      load_constants.guest_offset = is_base ? 0 : mips_staging_offset;
      } else {
        load_constants.guest_offset = guest_address;
      }
@@ -313,3 +441,72 @@ index 76f5600..f16e03f 100644
  
    key_out.is_valid = 1;
  
+diff --git a/src/ui/d3d12/d3d12_upload_buffer_pool.cpp b/src/ui/d3d12/d3d12_upload_buffer_pool.cpp
+index ade5dd2..a768989 100644
+--- a/src/ui/d3d12/d3d12_upload_buffer_pool.cpp
++++ b/src/ui/d3d12/d3d12_upload_buffer_pool.cpp
+@@ -27,6 +27,15 @@ D3D12UploadBufferPool::D3D12UploadBufferPool(const D3D12Provider& provider, size
+ uint8_t* D3D12UploadBufferPool::Request(uint64_t submission_index, size_t size, size_t alignment,
+                                         ID3D12Resource** buffer_out, size_t* offset_out,
+                                         D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out) {
++  if (size > page_size_) {
++    // The callers of Request need their data to be contiguous, so make the
++    // request fit a single page by increasing the page size, as the pages that
++    // have already been allocated keep the size they were created with (so this
++    // doesn't affect the ones that may still be in use). For example, the
++    // texture cache stages converted guest texture data, the size of which
++    // depends on the size of the texture.
++    page_size_ = rex::align(size, size_t(D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT));
++  }
+   size_t offset;
+   const D3D12Page* page = static_cast<const D3D12Page*>(
+       GraphicsUploadBufferPool::Request(submission_index, size, alignment, offset));
+diff --git a/src/ui/graphics_upload_buffer_pool.cpp b/src/ui/graphics_upload_buffer_pool.cpp
+index 407498e..d42a4c0 100644
+--- a/src/ui/graphics_upload_buffer_pool.cpp
++++ b/src/ui/graphics_upload_buffer_pool.cpp
+@@ -103,8 +103,10 @@ GraphicsUploadBufferPool::Page* GraphicsUploadBufferPool::Request(uint64_t submi
+   assert_true(!current_page_used_ || submission_index >= writable_first_->last_submission_index_);
+   assert_true(!submitted_last_ || submission_index >= submitted_last_->last_submission_index_);
+   size_t current_page_used_aligned = rex::align(current_page_used_, alignment);
+-  if (current_page_used_aligned + size > page_size_ || !writable_first_) {
+-    // Start a new page if can't fit all the bytes or don't have an open page.
++  if (!writable_first_ || current_page_used_aligned + size > writable_first_->size_) {
++    // Start a new page if can't fit all the bytes in the current page (which may
++    // be smaller than the current page size if it was created before the page
++    // size was increased) or don't have an open page.
+     if (writable_first_) {
+       // Close the page that was current.
+       FlushWrites();
+@@ -129,9 +131,11 @@ GraphicsUploadBufferPool::Page* GraphicsUploadBufferPool::Request(uint64_t submi
+       }
+       writable_first_->last_submission_index_ = submission_index;
+       writable_first_->next_ = nullptr;
+-      writable_last_ = writable_first_;
+       // After CreatePageImplementation (more specifically, the first successful
+-      // call), page_size_ may grow - but this doesn't matter here.
++      // call), page_size_ may grow - but the newly created page is the one
++      // having the new size.
++      writable_first_->size_ = page_size_;
++      writable_last_ = writable_first_;
+     }
+     current_page_used_ = 0;
+     current_page_used_aligned = 0;
+@@ -151,10 +155,14 @@ GraphicsUploadBufferPool::Page* GraphicsUploadBufferPool::RequestPartial(uint64_
+   alignment = std::max(alignment, size_t(1));
+   assert_true(rex::is_pow2(alignment));
+   size = rex::align(size, alignment);
+-  size = std::min(size, page_size_);
++  // The pages keep the size they were allocated with, so use the size of the
++  // page the request will be placed in - the current one, or a new one of the
++  // current page size.
++  size_t target_page_size = writable_first_ ? writable_first_->size_ : page_size_;
++  size = std::min(size, target_page_size);
+   size_t current_page_used_aligned = rex::align(current_page_used_, alignment);
+-  if (current_page_used_aligned + alignment <= page_size_) {
+-    size = std::min(size, (page_size_ - current_page_used_aligned) & ~(alignment - 1));
++  if (current_page_used_aligned + alignment <= target_page_size) {
++    size = std::min(size, (target_page_size - current_page_used_aligned) & ~(alignment - 1));
+   }
+   Page* page = Request(submission_index, size, alignment, offset_out);
+   if (!page) {

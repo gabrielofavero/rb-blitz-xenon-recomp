@@ -8,8 +8,6 @@ in [known-issues.md](known-issues.md).
 
 ## 1. Fixes implied by open known-issues
 
-- [ ] 32-bit integer textures (`num_format = 1`) still fail to create, and one
-      converted texture plus its mips must fit a single 2 MiB upload page (B-010).
 - [ ] `longjmp_address` / `setjmp_address` are unset, so guest `longjmp`/`setjmp` has
       no host bridge. Find Blitz's equivalents — `band3_recomp` sets
       `0x82BBB620` / `0x82BBBA50` — or record why they are not needed
