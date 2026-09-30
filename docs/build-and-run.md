@@ -461,19 +461,27 @@ The fatal half of that check is the gate in §3, not the boot.
 
 What that warning can and cannot see is measured by
 `scripts\acceptance_wrong_data.ps1`, which boots the recorded image, the Ultimate
-payload's own image (a valid XEX with a different digest) and a truncated copy, and
-reports the §3 gate's verdict on the same file as the contrast:
+payload's own image (a valid XEX with a different digest) and three corrupt copies,
+and reports the §3 gate's verdict on the same file as the contrast:
 
 ```powershell
 cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\acceptance_wrong_data.ps1
 ```
 
-Two things it pins down. A valid image with a different digest boots on to the title
-screen rather than being rejected — the warning is the whole response. And an image
-the XEX loader cannot load never reaches the check at all: it runs after
-`OnPostLoadXexImage`, so the last line such a run writes is the loader's own
-`Loading XEX image: game:\default.xex` (B-014 in [known-issues.md](known-issues.md)).
+Three things it pins down. A valid image with a different digest boots on to the title
+screen rather than being rejected — the warning is the whole response. A corrupt copy
+never reaches the identity check at all, because that runs after `OnPostLoadXexImage`
+and the loader has already refused the file — with a sentence, one per shape, since
+[patches/rexglue-sdk/0008](../patches/rexglue-sdk/0008-xex-image-bounds-checks.patch):
+1 MiB of the recorded image (`truncated`) is `its block table describes 9011200 bytes
+of image data, the image holds 1036288 after its 12288-byte header`, its first 2 KiB
+(`short`) is `its header claims 12288 bytes, the image holds 2048`, and a zero-length
+file (`empty`) is `Failed to map … (0 bytes) for module game:\default.xex`. Before
+patch 0008 the first of those ended the process with `0xC0000005` and the loader's own
+`Loading XEX image: game:\default.xex` as the last line written (B-014 in
+[known-issues.md](known-issues.md)). And the gate refuses all three on the same file
+(`SIZE MISMATCH`), which is the half that covers the build.
 
 Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 

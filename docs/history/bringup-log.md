@@ -2482,7 +2482,9 @@ with no `[FATAL]`, no dialog, and no identity line. Two consequences worth keepi
 - a corrupt dump is diagnosed by the build gate or not at all. That is **B-014** in
   [known-issues.md](../known-issues.md), left open with its two options — pre-validate the
   XEX header in the `patches/rexglue-sdk/` lane so the failure is a sentence, or accept that
-  this is the loader's failure — rather than fixed inside a capture task.
+  this is the loader's failure — rather than fixed inside a capture task. *(Both options were
+  weighed on 2026-09-29 and the first was taken: patch 0008, "How a corrupt `default.xex`
+  fails" below, which is where the truncated case's outcome changed.)*
 
 ### How it is captured
 
@@ -2516,7 +2518,10 @@ should be.
   that the boot continues.
 - **The other two roles.** `--all` (the `.hdr` and the 361 MB `.ark`) is out of scope: the
   entrypoint is what codegen and every address-based patch are guarded against.
-- **A fix for the corrupt-image crash.** B-014, deliberately.
+- **A fix for the corrupt-image crash.** B-014, deliberately — taken the next day as
+  [patch 0008](../../patches/rexglue-sdk/0008-xex-image-bounds-checks.patch) ("How a corrupt
+  `default.xex` fails" below), which is what added the `truncated`, `short` and `empty` cases
+  to this script.
 - **Anything past the title screen.** The payload-image boot was stopped at the title screen
   and closed. Whether the guest would go on into a song against that root is a different
   experiment, and the script asserts only what it observed.
@@ -2729,3 +2734,140 @@ than a Debug difference.
   notice; a title that allocates from a named heap *and* depends on the contents being zeroed
   would want Canary's treatment, not this one.
 - **RelWithDebInfo was still not built.** The smoke test's note stands.
+
+## How a corrupt `default.xex` fails (2026-09-29)
+
+The wrong-data capture of 2026-09-28 left one item open deliberately (B-014): the runtime
+identity check runs in `OnPostLoadXexImage`, so it only ever sees an image the XEX loader
+accepted, and a truncated copy - the first 1 MiB of the recorded image - ended the process with
+`0xC0000005` inside the load path, the loader's own `Loading XEX image: game:\default.xex` as
+the last line written. The build gate saw it (`SIZE MISMATCH`, exit 1); the boot said nothing.
+The item was recorded as a choice: pre-validate the XEX header in the `patches/rexglue-sdk/`
+lane so the failure is a sentence, or record that a corrupt image is the loader's business and
+the gate is the half that covers it.
+
+Status: complete. Decided for **the loader's half**, as
+[patches/rexglue-sdk/0008](../../patches/rexglue-sdk/0008-xex-image-bounds-checks.patch). A
+corrupt image is now one line and a non-zero exit, at a different check per shape.
+
+### Why the loader had to be the half
+
+A header-only check cannot see the captured failure: the truncated image's *header* is intact -
+all 12,288 bytes of it are inside the 1 MiB - and what is short is the image data behind it,
+whose length is not in the header at all. The block table is what says how long that data is,
+and only the loader parses it. So the choice was never "SDK lane or project lane": to catch
+this failure the reader that owns the block table has to be the one that checks it, and a
+project-side probe would have had to walk the XEX container itself - loader knowledge, not
+Blitz knowledge.
+
+Where it died, read out of the image rather than guessed (a throwaway parse of the header, no
+build involved):
+
+```text
+header_size    : 0x3000    security_off : 0xA8    header_count : 18
+file_format    : info_size=48 encryption=1 compression=1
+  block[0] data=0x188000 (1605632) zero=0x8000 (32768)   data range 0x3000-0x18B000
+  block[1] data=0x668000 (6717440) zero=0x8000 (32768)   data range 0x18B000-0x7F3000
+  block[2] data=0x50000  (327680)  zero=0x190000         data range 0x7F3000-0x843000
+  block[3] data=0x8000   (32768)   zero=0x8000           data range 0x843000-0x84B000
+  block[4] data=0x50000  (327680)  zero=0                    data range 0x84B000-0x89B000
+  data end 0x89B000 == the file's size;  sum(data+zero) = 0xA40000 == security_info.image_size
+```
+
+`compression_type = 1` is **basic**: five blocks whose `data_size`s tile the file from
+`header_size` (0x3000) to its end (0x89B000). `ReadImageBasicCompressed` walks each block for
+its `data_size` bytes with no bound but its own loop, so with only 1 MiB of the file present,
+block 0's 1,605,632 bytes run 0x8B000 bytes past the end of the mapping, and the first AES
+block read past it is the access violation. The same class of unbounded read sits behind the
+header size, the optional-header table, the security info's page descriptors and the file
+format info, each a number the file itself supplies.
+
+### The decision
+
+The loader's half, as patch 0008. `CheckXexImage()` runs in `XexModule::Load` before the header
+is even copied, and checks every offset and length the header supplies against the image's own
+length - the header size, the optional-header table, the security info and its page
+descriptors, the file format info, and for a basic-compressed image the block table summed
+against the data region - while `UserModule::LoadFromMemory` refuses a file too short to hold a
+signature and `LoadFromFile` names one it cannot map. It is a check on the container's
+arithmetic, not a signature check on the image: an image whose bytes are wrong while its
+lengths add up still only warns and boots, which is the `payload` case this script has always
+captured.
+
+Rejected: recording the crash as the loader's business. The gate does cover the build, but the
+runtime root is the one a launcher can point anywhere (`--game_data_root`), and "the process
+dies silently" is not a diagnosis - it is the shape of report this project keeps turning into a
+sentence. The cost is one patch, in the lane the other seven already use.
+
+### Verification (all 2026-09-29, Release `out/build/win-amd64-release`)
+
+- **The captured failure is now a sentence.** `acceptance_wrong_data.ps1`: 5 executed, **5
+  passed, 0 failed**, every refusal asserted with the numbers this script reads out of the
+  image it built (the header size comes from the file, not a constant):
+
+```text
+retail   : gate 0  identity recorded    boot title   exit 0  -> pass
+            gate: ok entrypoint default.xex 9023488 bytes sha256 e2195d62…84bb
+payload  : gate 1  identity MODIFIED    boot title   exit 0  -> pass
+            gate: HASH MISMATCH entrypoint default.xex 9023488 bytes sha256 390e0ae0…928c (expected e2195d62…84bb)
+truncated: gate 1  identity none        boot refused exit -1073740940  -> pass
+            gate: SIZE MISMATCH entrypoint default.xex size 1048576 (expected 9023488)
+            refusal: Refusing damaged XEX image \Device\Harddisk0\Partition1\default.xex: its block table describes 9011200 bytes of image data, the image holds 1036288 after its 12288-byte header
+short    : gate 1  identity none        boot refused exit -1073740940  -> pass
+            gate: SIZE MISMATCH entrypoint default.xex size 2048 (expected 9023488)
+            refusal: Refusing damaged XEX image \Device\Harddisk0\Partition1\default.xex: its header claims 12288 bytes, the image holds 2048
+empty    : gate 1  identity none        boot refused exit -1073740940  -> pass
+            gate: SIZE MISMATCH entrypoint default.xex size 0 (expected 9023488)
+            refusal: Failed to map \Device\Harddisk0\Partition1\default.xex (0 bytes) for module game:\default.xex
+
+cases: 5 executed, 5 passed, 0 failed, 0 skipped - evidence in out/m5-wrong-data
+```
+
+  The script was extended for this: the corrupt cases wait on the refusal in the log rather
+  than on a title screen they can never reach, and each one's refusal is matched against its
+  own shape with the numbers checked against the image (`truncated`: the table's total exceeds
+  what the file holds after its header; `short`: the header's claim exceeds the file;
+  `empty`: the map failure). Two more shapes were probed by hand and are *not* cases: 3 bytes
+  reads `Refusing to load \Device\…\default.xex: the image is 3 bytes, too short to hold a
+  module signature` (status `C000000D`), which is the same patch's other half - the module
+  loader's length guard.
+
+- **The regression half did not move.** In the same table, `retail` reached the title screen
+  with the recorded identity line and closed clean (exit 0), and `payload` - the Ultimate
+  payload's own image, a valid XEX with a different digest - warned `MODIFIED`, named the
+  digest it found *and* the expected one, reached the title screen and closed clean. Beyond the
+  script: `acceptance_launches.ps1 -Runs 2 -BootWaitSec 40` **2 / 2**
+  reached-title-and-closed-clean with no `[FATAL]`; `ctest` in the Release tree **7/7** (2.05 s);
+  and `acceptance_song.ps1 -Runs 1` **launch-to-results 1 / 1**, playback envelope
+  20:01:44 -> 20:06:59 (**315 s** - the shape the recorded runs have, 315/317/317 s), the
+  results screen naming THESE DAYS, no `[FATAL]`, clean window close. The whole offline route
+  therefore still runs on an image the new checks passed.
+- **The build gate is unchanged.** All three corrupt images exit the gate 1 with
+  `SIZE MISMATCH`, and the recorded image exits 0 - the half that was already doing its job.
+- **Patch mechanics.** `git apply --check --cached` applies 0008 to the pinned checkout
+  (exit 0), `--reverse --check` matches this work tree (exit 0), and
+  `apply_sdk_patches.ps1 -Check` reports `8 patches ... 19 patched, 0 UNEXPECTED,
+  0 untracked`, exit 0.
+
+### What this does not cover
+
+- **Normal-compressed images.** The check that catches the captured failure works on a
+  *basic*-compressed image because its block table can be summed before it is read. A
+  **normal**-compressed image (`compression_type = 2`) describes its data as a chain in which
+  each block names the length of the next, so there is nothing to sum up front; a truncated
+  one still walks the SDK's original de-block loop and could still read past the end. Neither
+  this title nor the Ultimate payload's image is that layout, and changing a loop whose
+  invariants are only reachable from another title's XEX was not part of this decision.
+- **The exit is still not clean.** A refused boot ends with `0xC0000374` (heap corruption)
+  rather than 1, because the only code path that runs the SDK's post-`Setup` teardown is the
+  failure path - a normal exit hard-exits on purpose ("Title terminated; hard-exiting
+  process") - and that teardown corrupts the heap. It is not this patch: the same exit comes
+  from failures patch 0008 never touches, an empty game root (`Entrypoint XEX not found`,
+  documented SDK behaviour) and a file whose first four bytes are not a module magic (which
+  the pristine SDK already refused with `Unknown module magic: 41414141`), both reproduced on
+  2026-09-29 in this same tree. The sentence is in the log before it, which is what this item
+  was about; a clean exit code would be a separate item about the teardown.
+- **A download that failed part-way is the only corruption shape here.** Truncation at three
+  lengths, one shape each. An image edited by hand with plausible lengths - a header that is
+  wrong but self-consistent - is exactly the case this check does not claim: the identity
+  warning is what reports it.

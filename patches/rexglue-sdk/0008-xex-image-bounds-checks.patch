@@ -1,0 +1,165 @@
+diff --git a/src/system/user_module.cpp b/src/system/user_module.cpp
+index 171546f..3096e4f 100644
+--- a/src/system/user_module.cpp
++++ b/src/system/user_module.cpp
+@@ -67,6 +67,9 @@ X_STATUS UserModule::LoadFromFile(const std::string_view path) {
+     // Map.
+     auto mmap = fs_entry->OpenMapped(memory::MappedMemory::Mode::kRead);
+     if (!mmap) {
++      // An empty file is the shape this meets: there is nothing to map, and
++      // without a word here the load would be reported only as a failing status.
++      REXSYS_ERROR("Failed to map {} ({} bytes) for module {}", path_, fs_entry->size(), path);
+       return result;
+     }
+ 
+@@ -131,7 +134,15 @@ X_STATUS UserModule::LoadFromFile(const std::string_view path) {
+ X_STATUS UserModule::LoadFromMemory(const void* addr, const size_t length) {
+   auto* dispatcher = kernel_state_->function_dispatcher();
+ 
+-  // Detect format by magic bytes
++  // Detect format by magic bytes. A file shorter than the signature it is
++  // supposed to start with has none to read, so it is rejected rather than
++  // read off the end of its own buffer.
++  if (length < sizeof(memory::fourcc_t)) {
++    REXSYS_ERROR("Refusing to load {}: the image is {} bytes, too short to hold a module signature",
++                 path_, length);
++    return X_STATUS_INVALID_PARAMETER;
++  }
++
+   be<memory::fourcc_t> magic;
+   magic.value = memory::load<memory::fourcc_t>(addr);
+ 
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+index 0726516..e3c8f76 100644
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -863,6 +863,112 @@ void XexModule::ReadSecurityInfo() {
+   }
+ }
+ 
++namespace {
++
++// Byte offsets inside a XEX header, derived from the structures rather than
++// spelled as numbers, and pinned so that a change to one of them fails here
++// instead of quietly moving a check off the thing it is checking.
++constexpr size_t kXexHeaderFieldsSize = sizeof(xex2_header) - sizeof(xex2_opt_header);
++constexpr size_t kXex2SecuritySize = sizeof(xex2_security_info) - sizeof(xex2_page_descriptor);
++constexpr size_t kXex1SecuritySize = sizeof(xex1_security_info) - sizeof(xex2_page_descriptor);
++static_assert(kXexHeaderFieldsSize == 0x18, "the optional-header table follows header_count");
++static_assert(kXex2SecuritySize == 0x184, "the XEX2 page descriptors follow the security info");
++static_assert(kXex1SecuritySize == 0x168, "the XEX1 page descriptors follow the security info");
++
++// Returns an empty string when every offset and length a XEX header supplies
++// lies inside the image that header came from, or a sentence naming the first
++// one that does not.
++//
++// The loader trusts all of them - the header size, the optional-header table,
++// the security info, the file format info and, for a compressed image, the
++// block table behind it - and reads through each with nothing but the image's
++// own length to stop it. A truncated copy (or an edited one) therefore ran off
++// the end of the mapping inside the XEX load path, which is an access violation
++// with nothing logged before it. This is a check on the container's own
++// arithmetic, not on the image's contents: bytes that are wrong while the
++// lengths add up pass here, and are reported by whoever knows what the bytes
++// should have been.
++std::string CheckXexImage(const xex2_header* header, size_t xex_length, bool is_xex1,
++                          bool is_patch) {
++  if (xex_length < kXexHeaderFieldsSize) {
++    return fmt::format("{} bytes, too short to hold a XEX header", xex_length);
++  }
++
++  const size_t header_size = header->header_size;
++  if (header_size < kXexHeaderFieldsSize || header_size > xex_length) {
++    return fmt::format("its header claims {} bytes, the image holds {}", header_size, xex_length);
++  }
++
++  const size_t table_size =
++      static_cast<size_t>(static_cast<uint32_t>(header->header_count)) * sizeof(xex2_opt_header);
++  if (table_size > header_size - kXexHeaderFieldsSize) {
++    return fmt::format("its {} optional headers do not fit in a {}-byte header",
++                       static_cast<uint32_t>(header->header_count), header_size);
++  }
++
++  // The security info is a fixed structure at security_offset, followed by
++  // page_descriptor_count page descriptors; both are read out of the header.
++  const size_t security_offset = header->security_offset;
++  const size_t security_size = is_xex1 ? kXex1SecuritySize : kXex2SecuritySize;
++  if (security_offset > header_size || security_size > header_size - security_offset) {
++    return fmt::format("its security info at offset {} does not fit in a {}-byte header",
++                       security_offset, header_size);
++  }
++  const auto* security = reinterpret_cast<const uint8_t*>(header) + security_offset;
++  const uint32_t descriptor_count =
++      *reinterpret_cast<const be<uint32_t>*>(security + security_size - sizeof(uint32_t));
++  const size_t descriptors_size =
++      static_cast<size_t>(descriptor_count) * sizeof(xex2_page_descriptor);
++  if (descriptors_size > header_size - security_offset - security_size) {
++    return fmt::format("its {} page descriptors do not fit in a {}-byte header", descriptor_count,
++                       header_size);
++  }
++
++  xex2_opt_file_format_info* file_format = nullptr;
++  if (!XexModule::GetOptHeader(header, XEX_HEADER_FILE_FORMAT_INFO, &file_format)) {
++    return {};
++  }
++
++  const auto* info = reinterpret_cast<const uint8_t*>(file_format);
++  const size_t info_offset = static_cast<size_t>(info - reinterpret_cast<const uint8_t*>(header));
++  if (info_offset > header_size || sizeof(uint32_t) > header_size - info_offset) {
++    return fmt::format("its file format info at offset {} lies outside a {}-byte header",
++                       info_offset, header_size);
++  }
++  const size_t info_size = file_format->info_size;
++  if (info_size < 8 || info_size > header_size - info_offset) {
++    return fmt::format("its file format info claims {} bytes, {} fit in the header", info_size,
++                       header_size - info_offset);
++  }
++
++  // A basic-compressed image is a table of block lengths followed by exactly as
++  // much image data as they add up to, which is what this title - and the
++  // Ultimate payload's own image - is. So the table can be checked against the
++  // image before a byte of it is read, which is the half that turns a
++  // truncated image into a sentence. (A normal-compressed image instead
++  // describes its data as a chain of blocks, each naming the length of the
++  // next, which cannot be added up here; that layout keeps the loader's
++  // existing behaviour. A patch file is copied verbatim rather than
++  // decompressed, so its table is not read either.)
++  if (!is_patch && file_format->compression_type == XEX_COMPRESSION_BASIC) {
++    const uint32_t block_count = static_cast<uint32_t>((info_size - 8) / 8);
++    uint64_t data_size = 0;
++    for (uint32_t n = 0; n < block_count; n++) {
++      data_size += static_cast<uint32_t>(file_format->compression_info.basic.blocks[n].data_size);
++    }
++    if (data_size > xex_length - header_size) {
++      return fmt::format(
++          "its block table describes {} bytes of image data, the image holds {} after its "
++          "{}-byte header",
++          data_size, xex_length - header_size, header_size);
++    }
++  }
++
++  return {};
++}
++
++}  // namespace
++
+ bool XexModule::Load(const std::string_view name, const std::string_view path, const void* xex_addr,
+                      size_t xex_length) {
+   auto src_header = reinterpret_cast<const xex2_header*>(xex_addr);
+@@ -875,6 +981,16 @@ bool XexModule::Load(const std::string_view name, const std::string_view path, c
+     return false;
+   }
+ 
++  const bool image_is_patch = (src_header->module_flags &
++                               (XEX_MODULE_MODULE_PATCH | XEX_MODULE_PATCH_DELTA |
++                                XEX_MODULE_PATCH_FULL)) != 0;
++  std::string rejected =
++      CheckXexImage(src_header, xex_length, xex_format_ == kFormatXex1, image_is_patch);
++  if (!rejected.empty()) {
++    REXLOG_ERROR("Refusing damaged XEX image {}: {}", std::string(path), rejected);
++    return false;
++  }
++
+   assert_false(loaded_);
+   loaded_ = true;
+ 

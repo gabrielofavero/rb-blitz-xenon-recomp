@@ -8,14 +8,6 @@ in [known-issues.md](known-issues.md).
 
 ## 1. Fixes implied by open known-issues
 
-- [ ] **Decide how a corrupt `default.xex` fails.** Truncating the recorded image to 1 MiB
-      ends the boot with `0xC0000005` and no diagnostic: the runtime fingerprint check runs
-      after the XEX load, so a file the loader cannot read is one it never sees, and only
-      the build gate reports it (`SIZE MISMATCH`, exit 1) — B-014. Either pre-validate the
-      XEX header in the `patches/rexglue-sdk/` lane so the failure is a sentence, or record
-      that a corrupt image is the loader's business and the gate is the half that covers
-      it. Evidence: [history/bringup-log.md](history/bringup-log.md) "The runtime half of
-      the wrong-data check", [known-issues.md](known-issues.md) B-014.
 - [ ] `0x827EC038` — the last forced `functions.toml` entry of the indirect-call
       class: a 24-byte leaf whose address is only taken in data, so no segment
       mentions it (B-006).

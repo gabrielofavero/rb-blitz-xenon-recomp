@@ -12,23 +12,37 @@
 #     game/ tree is a supported way to run: an Ultimate payload staged at
 #     game/ultimate is one (docs/ultimate-compat.md), a second dump is another.
 #
-# This script captures that second half from the real boot, for the three
-# outcomes it has, and takes the build half's verdict on the same file as the
-# contrast that makes the design visible:
+# This script captures that second half from the real boot, for the outcomes it
+# has, and takes the build half's verdict on the same file as the contrast that
+# makes the design visible:
 #
 #   retail     the recorded image        gate 0 -> "game data identity: Rock Band
 #                                                  Blitz 0.0.0.2 (...)"
 #   payload    a valid, different image  gate 1 -> "MODIFIED" + "expected:", and
 #                                                  the boot still reaches the title
-#   truncated  an unloadable image       gate 1 -> no identity line at all
+#   truncated  the image data cut off    gate 1 -> the loader refuses it and says
+#                                                  which claim does not fit
+#   short      the header itself cut off gate 1 -> the loader refuses it too
+#   empty      a zero-length file        gate 1 -> the loader cannot map it
 #
-# The third case is the boundary. The check lives in OnPostLoadXexImage, so it
-# only ever sees an image the XEX loader has already accepted: a corrupt copy is
-# the loader's failure and this check has nothing to say about it. That is also
-# why the MODIFIED path was once believed to have no live capture at all - a
-# truncated copy does not load, and a valid image with a different digest was
-# assumed to behave the same way. It does not: the boot reports the mismatch and
-# continues to the title screen (docs/history/bringup-log.md).
+# The corrupt cases are the boundary. The identity check lives in
+# OnPostLoadXexImage, so it only ever sees an image the XEX loader has already
+# accepted: a corrupt copy never reaches it, and no identity line is written for
+# one. That is also why the MODIFIED path was once believed to have no live
+# capture at all - a truncated copy does not load, and a valid image with a
+# different digest was assumed to behave the same way. It does not: the boot
+# reports the mismatch and continues to the title screen
+# (docs/history/bringup-log.md).
+#
+# What a corrupt copy does instead is the loader's half (patches/rexglue-sdk/
+# 0008-xex-image-bounds-checks.patch): it is refused, and the log says which of
+# the header's own claims runs past the end of the file. This script asserts that
+# sentence, with the numbers checked against the image it built, for the three
+# shapes that reach a different check each: the block table past the end of the
+# data (truncated), the header size past the end of the file (short), and a file
+# too small to map (empty). A refused image ends with the pre-existing
+# 0xC0000374 in the SDK's post-Setup teardown - see docs/known-issues.md - so the
+# exit code is recorded, not asserted beyond being non-zero.
 #
 # The payload image defaults to <GameRoot>\ultimate\default.xex, so that case runs
 # only where the community mod is staged and is reported as skipped elsewhere.
@@ -47,10 +61,11 @@
 # skip the restore, the next run refuses to start and says so; -Restore then puts
 # the image back and exits.
 #
-# Per case it writes out/m5-wrong-data/<case>.png (the screen it asserted on),
-# <case>.log (a copy of the run's log) and <case>-gate.txt (what the build gate
-# said about the same file), plus summary.json, then prints a verdict table. Exit
-# code 0 means every executed case behaved as recorded.
+# Per case it writes out/m5-wrong-data/<case>.png (the screen it asserted on, for
+# the cases that reach one - a refused image never does), <case>.log (a copy of the
+# run's log) and <case>-gate.txt (what the build gate said about the same file),
+# plus summary.json, then prints a verdict table. Exit code 0 means every executed
+# case behaved as recorded.
 param(
     [string]$GameRoot,
     [string]$BuildDir = "out/build/win-amd64-release",
@@ -79,6 +94,8 @@ if (-not $PayloadImage) { $PayloadImage = Join-Path $GameRoot "ultimate/default.
 $imagePath = Join-Path $GameRoot "default.xex"
 $retailCopy = Join-Path $capDir "default.xex.retail"
 $truncatedImage = Join-Path $capDir "truncated-default.xex"
+$shortImage = Join-Path $capDir "short-default.xex"
+$emptyImage = Join-Path $capDir "empty-default.xex"
 New-Item -ItemType Directory -Force -Path $capDir | Out-Null
 
 if (-not (Test-Path $exe)) { throw "not found: $exe (build $BuildDir first)" }
@@ -127,13 +144,23 @@ if ($imageSize -eq $expectedSize -and $imageDigest -eq $expectedSha) {
     throw "$imagePath is $imageSize bytes, sha256 $imageDigest - that is not the recorded image, so a previous run did not restore it. $advice"
 }
 
-# A fixed truncation, not a random cut: the loader must accept a real XEX header
-# and fail on the image behind it. Measured: 1 MiB in, the last line the run
-# writes is the loader's own "Loading XEX image: game:\default.xex".
+# Three fixed corruptions, not random cuts, one per check the loader makes on a
+# file it cannot trust. Measured before the loader checked any of them: 1 MiB in,
+# the last line the run wrote was the loader's own "Loading XEX image:
+# game:\default.xex", and the process died there with 0xC0000005.
 $retailBytes = [IO.File]::ReadAllBytes($retailCopy)
 [IO.File]::WriteAllBytes($truncatedImage, $retailBytes[0..1048575])
-Write-Host ("retail image: {0} bytes, sha256 {1}" -f $expectedSize, $expectedSha)
-Write-Host ("truncated image: {0} bytes, sha256 {1}" -f (Get-Item $truncatedImage).Length, (Get-Digest $truncatedImage))
+# The XEX header size, read out of the image (big-endian at offset 8) because the
+# refusal lines quote it: a hardcoded copy would drift from the dump.
+$xexHeaderSize = ($retailBytes[8] * 16777216) + ($retailBytes[9] * 65536) +
+                ($retailBytes[10] * 256) + $retailBytes[11]
+[IO.File]::WriteAllBytes($shortImage, $retailBytes[0..2047])
+[IO.File]::WriteAllBytes($emptyImage, (New-Object byte[] 0))
+Write-Host ("retail image: {0} bytes, sha256 {1}, {2}-byte header" -f $expectedSize, $expectedSha, $xexHeaderSize)
+foreach ($image in @($truncatedImage, $shortImage, $emptyImage)) {
+    Write-Host ("corrupt image: {0} -> {1} bytes, sha256 {2}" -f `
+        (Split-Path -Leaf $image), (Get-Item $image).Length, (Get-Digest $image))
+}
 Write-Host ""
 
 # ---------------------------------------------------------------- helpers ---
@@ -208,6 +235,31 @@ function Get-NewestLog {
     return $f.FullName
 }
 
+# The refusal is written to the log just before the loader's modal dialog goes up,
+# and a refused image never gets a title screen, so this is what the corrupt cases
+# wait on - a window and a title would only be waited for in vain.
+function Wait-ForRefusal($Proc, [int]$TimeoutSec) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        foreach ($f in (Get-ChildItem (Join-Path $logs "*.log") -ErrorAction SilentlyContinue)) {
+            if ((Get-LogText $f.FullName) -match 'Refusing|Failed to map') { return $true }
+        }
+        try { $Proc.Refresh(); if ($Proc.HasExited) { return $true } } catch { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+
+# The refusal line's match, or $null when the line does not have the shape the
+# case expects. [regex] rather than -match: -match sets $Matches as a side effect,
+# which a chain of elseif tests would quietly overwrite.
+function Get-RefusalMatch([string]$Line, [string]$Pattern) {
+    if (-not $Line) { return $null }
+    $m = [regex]::Match($Line, $Pattern)
+    if ($m.Success) { return $m }
+    return $null
+}
+
 function Get-LogText([string]$Path) {
     if (-not $Path -or -not (Test-Path $Path)) { return "" }
     # The log may still be flushing as the process dies; a sharing violation here
@@ -221,9 +273,11 @@ function Get-LogText([string]$Path) {
 # ------------------------------------------------------------------ cases ---
 
 $cases = @(
-    [pscustomobject]@{ Name = "retail"; Image = $retailCopy; Note = "the recorded retail image" }
-    [pscustomobject]@{ Name = "payload"; Image = $PayloadImage; Note = "a valid image with a different digest (the Ultimate payload)" }
-    [pscustomobject]@{ Name = "truncated"; Image = $truncatedImage; Note = "the first 1 MiB of the retail image" }
+    [pscustomobject]@{ Name = "retail"; Image = $retailCopy; Note = "the recorded retail image"; Refusal = "" }
+    [pscustomobject]@{ Name = "payload"; Image = $PayloadImage; Note = "a valid image with a different digest (the Ultimate payload)"; Refusal = "" }
+    [pscustomobject]@{ Name = "truncated"; Image = $truncatedImage; Note = "the first 1 MiB of the retail image: the data behind the header is cut off"; Refusal = 'its block table describes (\d+) bytes of image data, the image holds (\d+) after its (\d+)-byte header' }
+    [pscustomobject]@{ Name = "short"; Image = $shortImage; Note = "the first 2 KiB of the retail image: the header itself is cut off"; Refusal = 'its header claims (\d+) bytes, the image holds (\d+)' }
+    [pscustomobject]@{ Name = "empty"; Image = $emptyImage; Note = "a zero-length file"; Refusal = 'Failed to map .+ \(0 bytes\) for module' }
 )
 
 $rows = @()
@@ -235,7 +289,7 @@ try {
             Write-Host ("{0,-9}: skipped - no image at {1}" -f $case.Name, $case.Image)
             $rows += [pscustomobject]@{
                 Case = $case.Name; Note = $case.Note; Image = "-"; GateExit = "-"
-                Identity = "-"; Boot = "-"; Verdict = "skip"; Failures = @()
+                Identity = "-"; Boot = "-"; Refusal = ""; Verdict = "skip"; Failures = @()
             }
             continue
         }
@@ -243,7 +297,7 @@ try {
         Copy-Item -LiteralPath $case.Image -Destination $imagePath -Force
         $size = (Get-Item -LiteralPath $imagePath).Length
         $digest = Get-Digest $imagePath
-        $short = $digest.Substring(0, 12)
+        $digestHead = $digest.Substring(0, 12)
         $gateLog = Join-Path $capDir ($case.Name + "-gate.txt")
 
         # The build half's verdict on the very same file. A failing gate writes
@@ -274,10 +328,18 @@ try {
         $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru `
             -ArgumentList "--game_data_root=$GameRoot", "--ultimate_mode=0", `
                 "--log_level=debug", "--log_flush_interval=1", "--log_max_file_size_mb=100"
-        if (-not (Wait-ForWindow $p $TitleTimeoutSec)) {
-            Write-Host ("  ({0}: no window within {1}s)" -f $case.Name, $TitleTimeoutSec)
+        if ($case.Refusal) {
+            # Nothing to see: the loader refused the image before any guest ran.
+            $title = [pscustomobject]@{ Text = ""; Seen = $false }
+            if (-not (Wait-ForRefusal $p $TitleTimeoutSec)) {
+                Write-Host ("  ({0}: no refusal line within {1}s)" -f $case.Name, $TitleTimeoutSec)
+            }
+        } else {
+            if (-not (Wait-ForWindow $p $TitleTimeoutSec)) {
+                Write-Host ("  ({0}: no window within {1}s)" -f $case.Name, $TitleTimeoutSec)
+            }
+            $title = Wait-ForTitle $p $shot $TitleTimeoutSec
         }
-        $title = Wait-ForTitle $p $shot $TitleTimeoutSec
 
         $exitedOnItsOwn = $p.HasExited
         $exitCode = "-"
@@ -312,6 +374,12 @@ try {
 
         $lines = @($text -split "`r?`n" | Where-Object { $_.Trim() -ne "" })
         $lastLine = if ($lines.Count -gt 0) { $lines[-1].Trim() } else { "" }
+        # The line that says why a corrupt image was refused. Two shapes: the XEX
+        # loader's own ("Refusing damaged XEX image <path>: <claim>") and the module
+        # loader's ("Refusing to load <path>: ..." / "Failed to map ...").
+        $refusalLine = ((@($lines | Where-Object { $_ -match '\[error\].*(Refusing|Failed to map )' })[0]) -join '').Trim()
+        # ... and the same line without its [time] [level] [category] [thread] prefix.
+        $refusalText = ($refusalLine -replace '^\[[^\]]*\] \[[^\]]*\] \[[^\]]*\] \[[^\]]*\] ', '').Trim()
 
         $fail = New-Object System.Collections.ArrayList
         switch ($case.Name) {
@@ -345,6 +413,35 @@ try {
                 if ($title.Seen) { [void]$fail.Add("the title screen was reached with an image that does not load") }
                 if ($gateExit -eq 0) { [void]$fail.Add("the build gate accepted a truncated image") }
                 if ($exitCode -eq 0) { [void]$fail.Add("the run exited 0 after failing to load the image") }
+                $m = Get-RefusalMatch $refusalLine $case.Refusal
+                if (-not $m) {
+                    [void]$fail.Add("the refusal does not name the block table running past the image (got: '$refusalText')")
+                } elseif ([int]$m.Groups[1].Value -le [int]$m.Groups[2].Value -or
+                          [int]$m.Groups[2].Value -ne ($size - $xexHeaderSize) -or
+                          [int]$m.Groups[3].Value -ne $xexHeaderSize) {
+                    [void]$fail.Add("the refusal's numbers do not describe this image (got '$refusalText'; $size bytes and a $xexHeaderSize-byte header)")
+                }
+            }
+            "short" {
+                if ($identitySeen) { [void]$fail.Add("an identity line was written for an image whose header is cut off") }
+                if ($title.Seen) { [void]$fail.Add("the title screen was reached with an image whose header is cut off") }
+                if ($gateExit -eq 0) { [void]$fail.Add("the build gate accepted a truncated header") }
+                if ($exitCode -eq 0) { [void]$fail.Add("the run exited 0 after failing to load the image") }
+                $m = Get-RefusalMatch $refusalLine $case.Refusal
+                if (-not $m) {
+                    [void]$fail.Add("the refusal does not name the header running past the image (got: '$refusalText')")
+                } elseif ([int]$m.Groups[1].Value -ne $xexHeaderSize -or [int]$m.Groups[2].Value -ne $size) {
+                    [void]$fail.Add("the refusal's numbers do not describe this image (got '$refusalText'; $size bytes and a $xexHeaderSize-byte header)")
+                }
+            }
+            "empty" {
+                if ($identitySeen) { [void]$fail.Add("an identity line was written for a zero-length image") }
+                if ($title.Seen) { [void]$fail.Add("the title screen was reached from a zero-length image") }
+                if ($gateExit -eq 0) { [void]$fail.Add("the build gate accepted a zero-length image") }
+                if ($exitCode -eq 0) { [void]$fail.Add("the run exited 0 after failing to read the image") }
+                if (-not (Get-RefusalMatch $refusalLine $case.Refusal)) {
+                    [void]$fail.Add("the run does not say the empty file could not be mapped (got: '$refusalText')")
+                }
             }
         }
         if ($fatal) { [void]$fail.Add("the log contains a [FATAL]") }
@@ -357,24 +454,26 @@ try {
         elseif ($modified) { $identity = "MODIFIED" }
         elseif ($cannotRead) { $identity = "cannot read" }
         else { $identity = "none" }
-        $boot = if ($title.Seen) { "title" } elseif ($exitedOnItsOwn) { "exited" } elseif ($cleanClose) { "closed" } else { "killed" }
+        $boot = if ($title.Seen) { "title" } elseif ($case.Refusal) { "refused" } elseif ($exitedOnItsOwn) { "exited" } elseif ($cleanClose) { "closed" } else { "killed" }
         $verdict = if ($fail.Count -eq 0) { "pass" } else { "FAIL" }
 
-        Write-Host ("{0,-9}: gate {1}  identity {2,-11} boot {3,-6} exit {4}  -> {5}" -f `
+        Write-Host ("{0,-9}: gate {1}  identity {2,-11} boot {3,-7} exit {4}  -> {5}" -f `
             $case.Name, $gateExit, $identity, $boot, $exitCode, $verdict)
         Write-Host ("            gate: {0}" -f ($gateLine -replace " +", " "))
+        if ($refusalText) { Write-Host ("            refusal: {0}" -f $refusalText) }
         foreach ($f in $fail) { Write-Host ("  !! {0}" -f $f) }
 
         $rows += [pscustomobject]@{
             Case          = $case.Name
             Note          = $case.Note
-            Image         = "$size bytes, sha256 $short..."
+            Image         = "$size bytes, sha256 $digestHead..."
             GateExit      = $gateExit
             GateVerdict   = $gateLine
             Identity      = $identity
             IdentityLine  = if ($identitySeen) { (@($lines | Where-Object { $_ -match 'game data identity:' })[0]).Trim() } else { "" }
             ExpectedLine  = $expectedLine
             Reported      = "$reportedSize bytes, sha256 $reportedDigest"
+            Refusal       = $refusalText
             Boot          = $boot
             LastLine      = $lastLine
             ExitCode      = $exitCode
