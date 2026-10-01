@@ -415,6 +415,60 @@ copies, or use the 70%-identical majority to separate "this is the image" from "
 re-encode". That belongs with the rest of the open problem in
 [backlog.md](backlog.md).
 
+## The texture record, pinned
+
+The layout below is read off MiloLib (`MiloLib/Assets/Rnd/RndBitmap.cs` and `RndTex.cs`)
+and then **confirmed against this title's bytes** rather than assumed. It is the answer to
+"where does the pixel buffer start", which earlier revisions of this document called the
+one open question.
+
+```
+RndTex:    combinedRevision(u32) [Object fields if revision > 8]
+           width(u32) height(u32) bpp(u32) sourcePath(Symbol)
+           mipMapK(f32) type(u32) optimizeForPS3(bool) useExternalPath(bool)
+RndBitmap: revision(u8) bpp(u8) encoding(u32) mipMaps(u8)
+           width(u16) height(u16) bpl(u16) wiiAlphaNum(u16)
+           + 13 bytes (revision 2) or 17 bytes, then one block per mip level
+level size = (w >> m or 1) * (h >> m or 1) * bpp / 8
+```
+
+`encoding` is 8 for DXT1/BC1, 24 for **DXT5/BC3**, 32 for ATI2/BC5, and it agrees with the
+separate `bpp` field (dxt5 stores as bpp 8, i.e. 8 bits per pixel of block-compressed data).
+The decompressed scene stream is **big-endian**; the values are read as such.
+
+Two independent confirmations on `ui/resource/fonts/gen/buttons.milo_xbox`:
+
+| | |
+| --- | --- |
+| Fields | revision 193, bpp 8, **encoding 24 (DXT5)**, mipMaps 0, **512 ? 512**, bpl 512 ? every field consistent with the others (`bpl == bpp * width / 8`) |
+| Size | pixel data at stream `0x5EC`, 262,144 bytes = 512 ? 512 ? 8 / 8, and it ends at `0x405EC` ? **exactly the end of chunk 0**, which is the stored chunk. The sheet fills its chunk to the byte. |
+
+So the older "file bytes `0xDFC`?`0x40DFC`" note was right about the *location* (`0xDFC` is
+stream `0x5EC` plus the 0x810 file header) and wrong about nothing except that it was
+arrived at by inference. It was never the format that was missing.
+
+That same inference error is worth naming: **file offsets and stream offsets differ by the
+0x810 file header**, and a chunk's stream offset is the sum of the *decompressed* sizes of
+the chunks before it, not their stored sizes. Mixing the two silently shifts an edit.
+
+### Which art can be edited in place, and which cannot
+
+A scene's first chunk is stored decompressed and holds the object graph; in several UI
+scenes it also holds the sheet. Everything after it is usually compressed:
+
+| Scene | Chunks | Stored | Compressed | Decompressed | Stored |
+| --- | --- | --- | --- | --- | --- |
+| `buttons.milo_xbox` | 2 | 1 | 1 | 267,147 | 264,426 |
+| `blitz_icons.milo_xbox` | 2 | 1 | 1 | 530,914 | 526,447 |
+| `header.milo_xbox` | 11 | 1 | 10 | 3,881,542 | 804,073 |
+| `background_night.milo_xbox` | 12 | 1 | 11 | 9,398,913 | 2,627,227 |
+
+An edit that lands in a stored chunk can be written in place, because the archive index
+records a fixed entry size. An edit that lands in a compressed chunk cannot be padded back
+(see the chunk-stream note), so it has to be delivered as a whole replacement scene - which
+the archive format allows, since a payload ark carries per-entry sizes and Rock Band Blitz
+Ultimate ships scenes whose sizes differ from the originals by megabytes.
+
 ## Use the community toolchain, not a hand-rolled parser
 
 The archive and chunk layers here agree with the community's understanding, but the
