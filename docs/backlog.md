@@ -60,24 +60,23 @@ that name an action.
 
 ## 5. Deferred, with no design yet
 
-- [ ] **Texture swapping for the in-game UI** — the menus, buttons and layout art are not
-      standalone textures: they belong to `ui/**/*.milo_xbox` scenes. Two thirds of that
-      are done. The standalone `*.png_xbox` / `*.bmp_xbox` entries round-trip through
-      [scripts/hmx_tex.py](../scripts/hmx_tex.py) (decode, export, re-import, swap; DDS
-      bit-exact) and a trace of title screen → main menu → song list shows which of them
-      the title reads at all. [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads a
-      scene's chunk stream (0x810-byte table of raw-deflate chunks) and lists the `.tex`
-      assets it owns, which is the map of what a reskin has to touch. What is missing is
-      where those pixels are. Ruled out against real scenes:
-      the RB3 inline `RndBitmap` shape, a power-of-two descriptor shape, **linear** DXT
-      data (both statements checked by the endpoint signature of a DXT block, and by
-      adjacent-pixel smoothness), and uncompressed image data. The scenes do carry, per
-      texture, a big-endian record with width/height/bpp and a length-prefixed
-      builder-side source path (`img/list_panel.png`), and no such archive entry exists.
-      Next candidates to test: a **tiled (swizzled) 360 pixel layout** - which is exactly
-      what every linear-block test above would miss - or a runtime cache the engine writes
-      somewhere. `hmx_milo.py dump` is the corpus tool for that hunt. Evidence:
-      [assets.md](assets.md), "Texture swapping".
+- [ ] **Texture swapping for the in-game UI** — the mechanism works and the first target is
+      located; what is left is one mapping. Verified: editing a *scene* inside the archive
+      changes what the game draws (zeroing a 262,144-byte region of
+      `ui/resource/fonts/gen/buttons.milo_xbox` removes the main menu's A/B button
+      prompts; filling it makes them opaque). That region is the font's **512×512,
+      row-bytes-512, single-level 8-bit** glyph sheet, sitting in chunk 0 — which every
+      scene keeps *stored*, so a patch never needs recompression. The byte is ink
+      coverage, `0x00` transparent and `0xFF` opaque, with the material supplying the
+      colour. Open: the sample-to-screen mapping (a spatially varying pattern comes back
+      as a one-pixel seam, which points at the font's per-character `Glyph` rectangles —
+      `x`, `y`, `width`, `height` — rather than a row-major sheet). Read those glyph
+      records next; the evidence, offsets and the four experiments are in
+      [assets.md](assets.md), "Where the art actually lives". The standalone
+      `*.png_xbox` / `*.bmp_xbox` path is already done
+      ([scripts/hmx_tex.py](../scripts/hmx_tex.py), DDS round trip bit-exact) and
+      [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads any scene's chunk stream and
+      lists the `.tex` assets a screen owns.
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,

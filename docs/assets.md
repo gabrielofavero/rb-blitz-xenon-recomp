@@ -124,9 +124,13 @@ entry is copied untouched.
 
 Both routes reach the title: replacing `gen\main_xbox_0.ark` in the dump, or dropping the
 same file into a payload directory the overlay merges (its boot line then reports
-`1 payload copies preferred`, and a trace shows the title reading the merged path). What
-was *not* observed is a swapped texture on screen — because, as the next section shows,
-nothing the reachable screens draw comes from these entries.
+`1 payload copies preferred`, and a trace shows the title reading the merged path).
+
+What these entries buy you is narrower than it looks. Replacing all 241 of them with
+solid magenta leaves the title screen, the main menu and the song list **pixel-identical**,
+because the screens you can reach draw almost none of them — the menu, button and layout
+art belongs to `ui/**/*.milo_xbox` scenes instead, and the next two sections are about
+those.
 
 ### Which textures the title actually draws
 
@@ -160,37 +164,81 @@ python scripts\hmx_milo.py list extracted\ui\splash\gen\splash.milo_xbox --textu
 python scripts\hmx_milo.py dump extracted\ui\splash\gen\splash.milo_xbox --chunk 3 --out chunk3.bin
 ```
 
-Where the *pixels* of those `.tex` assets are is still open, but the search has narrowed.
-What the scenes were checked against, all on real scenes:
+### Where the art actually lives, and what an edit does
+
+The important result: **editing a scene inside the archive changes what the game draws.**
+Verified on the button prompts, by four experiments against the same screen:
+
+| What was written | What the main menu showed |
+| --- | --- |
+| nothing (retail) | the round **A** glyph and the **B** glyph (`A SELECT` / `B BACK`) |
+| the region zeroed | the glyphs gone — OCR of the same screen loses `A SELECT` and `B BACK` |
+| the region filled with `0xFF` | fully opaque (invisible on the white menu) — the glyphs are still drawn |
+| a solid-colour DXT encode | a 4-pixel dither — the bytes are *not* DXT |
+
+So the chain ark → scene → screen works for edited content, and the region involved is
+exactly located:
+
+| | |
+| --- | --- |
+| Entry | `ui/resource/fonts/gen/buttons.milo_xbox` (266,490 B, ark offset 325,896,454) |
+| Region | file bytes `0xDFC`…`0x40DFC`, **262,144 bytes** — the whole tail of chunk 0 |
+| Chunk 0 | 263,660 bytes and **stored decompressed** (bit 24 set), so a patch needs no recompression |
+| Record just before it | a length-prefixed source path `../image/icons_buttons_xbox_nomip.bmp` and the fields 512 / 512 / 512, i.e. **512×512, row bytes 512, one level** — matching the `nomip` in that name, at 8 bits per pixel |
+| Meaning | the font's glyph sheet: the scene's own `buttons.tex` and `buttons.font`, whose character set is the Xbox pad (` ABXYgclLrRSsD12345wdxa[]6789^&*(`) |
+
+The byte value behaves as **ink coverage**, not colour: `0x00` is transparent and `0xFF`
+is fully opaque, with the material supplying the colour (a `UIColor` set — `normal`,
+`focused`, `disabled`, `selected` — is in the same scene). That is also why the sheet
+decodes as neither DXT1 nor DXT5 (both produce a dither when written back) and why no
+256-entry palette exists anywhere in the scene: the bytes are the ink samples themselves.
+
+What is still open is the *sample-to-screen mapping*. Every probe that wrote a spatially
+varying pattern came back as a single one-pixel seam rather than a scaled image, which
+points at a cell grid (the font's `Glyph` rectangles — `x`, `y`, `width`, `height` per
+character) rather than a plain row-major sheet; the glyph records themselves are the next
+thing to read. Two of the four experiments above also show the trap: a change can be
+*invisible* (opaque white on a white menu) while still being applied, so a swap has to be
+checked by a pixel diff, not by eye.
+
+### The rest of the scene corpus
+
+`ui/**/*.milo_xbox` scenes own the visible art — `ui/background/gen/background_night.milo_xbox`
+holds the splash art (`night_gradient.tex`, `northern_lights.tex`, `rays.tex`, … plus
+`img/star.png`), `splash.milo_xbox` holds `list_panel.tex` and `splash_logo.tex`, and
+`splash_logo_element.milo_xbox` holds `splash_elements.tex`. Their pixel data follows the
+same rule: look for a stored chunk and a 512-multiple region, not for a DXT signature —
+the DXT and image-smoothness scans listed below were all red herrings for this title.
+
+Ruled out on the scenes, so a later attempt does not repeat them:
 
 - The RB3 inline bitmap shape (`RndBitmap::LoadHeader`: revision byte, bits per pixel,
   byte order, mip count, dimensions, row bytes, reserved bytes, mip chain) matches
-  nothing — nor does any descriptor that merely puts a power-of-two width and height
-  next to matching row bytes.
-- No region of the stream decodes as a **linear** DXT texture (checked by the endpoint
-  signature of a DXT block: in real art the two 16-bit colour endpoints of every 8-byte
-  block are close; the best window in 10.4 MB scores 4,500 where art scores hundreds),
-  in either byte order.
-- No region looks like an uncompressed image either (adjacent-pixel and row-to-row
-  differences stay in the tens of a byte value everywhere, where real art is in the
-  low single digits).
+  nothing, nor does any descriptor that merely puts a power-of-two width and height next
+  to matching row bytes.
+- No region decodes as a **linear** DXT texture; the endpoint signature of a DXT block
+  (in real art the two 16-bit colour endpoints of every 8-byte block are close) scores
+  4,500 at best in 10.4 MB of `splash.milo_xbox`, where real art scores in the hundreds.
+  Byte order does not change that.
 
-What the scenes *do* carry, read straight off the bytes: each texture is a record with
-big-endian fields, `width`, `height`, `bpp` and a length-prefixed builder-side source
-path — `splash.milo_xbox` names `img/list_neon_outer.png`, `img/list_panel.png`,
-`img/start_inner_neon.png` (512×512 and 512×128 at bpp 8), and no such entry exists in
-either archive. `ui/background/gen/background_night.milo_xbox` owns the visible splash
-art (`night_gradient.tex`, `northern_lights.tex`, `rays.tex`, … plus `img/star.png`).
+Read straight off the bytes, each texture is a record with `width`, `height`, `bpp` and a
+length-prefixed builder-side source path — `splash.milo_xbox` names
+`img/list_neon_outer.png`, `img/list_panel.png`, `img/start_inner_neon.png` (512×512 and
+512×128 at bpp 8), and no such entry exists in either archive.
 
-So the remaining candidates are a **tiled (swizzled) 360 layout** for the pixel data —
-which would defeat every linear-block test above — or a cached copy written somewhere
-by the engine at runtime. The next attempt should start there, and the corpus is
-already in place: `hmx_milo.py dump` writes any chunk out, so a tiled layout can be
-hunted offline against a texture whose appearance is known.
+So today: **standalone textures can be swapped** (`hmx_tex.py`, byte-verified offline,
+DDS round trip bit-exact), a **scene's own bitmap can be edited and the game will use it**
+(the four experiments above — the delivery chain is proven), the scenes that own the
+menu, button and layout art can be read and enumerated (`hmx_milo.py`), and what is left
+is the sample-to-screen mapping inside a scene's bitmap, which the font's glyph records
+should settle.
 
-So today: **standalone textures can be swapped** (`hmx_tex.py`, byte-verified
-offline), the scenes that own the menu, button and layout art can be read and
-enumerated (`hmx_milo.py`), and the pixels inside them are the remaining unknown.
+Two practical notes for the next attempt. A scene patch never needs to recompress: on the
+five scenes checked (`buttons`, `splash`, `background_night`, `content_refresh`,
+`player_state_sounds`) the first chunk is always stored decompressed, and the bitmaps sit
+in it. And a swap must be judged by a pixel diff: writing opaque white over a white menu
+is applied but looks like nothing happened, which is exactly the trap this section walked
+into twice.
 
 ## Where the format knowledge comes from
 
