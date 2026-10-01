@@ -385,10 +385,10 @@ origin. An empty table is the correct state until something is actually ported.
 
 | Section | Goes to |
 | --- | --- |
-| §1–§3 (hook mechanism, names, midasm) | [backlog.md](backlog.md) §2, "Engine knowledge still to port" |
-| §4 (port catalogue) | [backlog.md](backlog.md) §2 |
-| §5–§6 (RB3DX cross-reference) | [backlog.md](backlog.md) §2 (groups 2–4 and 6–9) |
-| §7.1 (audio verification) | [backlog.md](backlog.md) §2 — the audio-verify regression check |
-| §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) §1 — hook hygiene and the config gaps |
+| §1–§3 (hook mechanism, names, midasm) | [backlog.md](backlog.md) §1, "Engine knowledge still to port" |
+| §4 (port catalogue) | [backlog.md](backlog.md) §1 |
+| §5–§6 (RB3DX cross-reference) | [backlog.md](backlog.md) §1 (groups 2–4 and 6–9) |
+| §7.1 (audio verification) | [backlog.md](backlog.md) §1 — the audio-verify regression check |
+| §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) §1 — the config gaps (hook hygiene closed 2026-10-01 and removed with its section) |
 | §9 (borrowing rules) | [README](../README.md) (license), [distributable.md](distributable.md) — what ships and the audit that refuses the rest |
 | §0 (Rock Band Blitz Ultimate row) | [ultimate-compat.md](ultimate-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 (a different project from this one) |

@@ -3,7 +3,7 @@
 //
 // Customize your app by overriding virtual hooks from rex::ReXApp.
 //
-// Hook hygiene (docs/backlog.md §1): this is the one file whose hooks are
+// Hook hygiene (docs/rb3-references.md §8): this is the one file whose hooks are
 // rex::ReXApp's, so each override below states what the SDK does by itself and why
 // this app differs. In short:
 //   * OnPreSetup - the SDK runs its configured backends and input devices; here the

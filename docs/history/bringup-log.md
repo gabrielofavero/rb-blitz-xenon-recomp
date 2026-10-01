@@ -3097,11 +3097,11 @@ that log (`[probe]`: 0).
   still the escape hatch, and this work does not change what the mirror holds.
 ## The guest's longjmp/setjmp, and the bridge they now have (2026-09-30)
 
-The first item of [backlog.md](../backlog.md) §1 and the one open row of
-[rb3-references.md](../rb3-references.md) §8: `longjmp_address`/`setjmp_address`
-were unset, so the guest's own `longjmp`/`setjmp` had no host bridge. band3's
-numbers (`0x82BBB620` / `0x82BBBA50`) are another image's and do not transfer, so
-the pair had to be found in Blitz's.
+The first item of the backlog's known-issues section, since closed and removed, and the
+one open row of [rb3-references.md](../rb3-references.md) §8:
+`longjmp_address`/`setjmp_address` were unset, so the guest's own `longjmp`/`setjmp` had
+no host bridge. band3's numbers (`0x82BBB620` / `0x82BBBA50`) are another image's and do
+not transfer, so the pair had to be found in Blitz's.
 
 ### How the pair was found
 
@@ -3201,7 +3201,8 @@ observed run has entered one.
 
 ## Hook hygiene: the faithful behaviour of every hook (2026-10-01)
 
-The first item of [backlog.md](../backlog.md) section 1. Its known-issues entry said
+The first item of the backlog's known-issues section, since closed and removed. Its
+known-issues entry said
 *"Hooks carry no 'why is this disabled' record - a hook that early-returns is a bug unless
 it is documented as a deliberate deviation"*, and it came from
 [rb3-references.md](../rb3-references.md) §7.3, where the RB3 port's dominant bug class was
@@ -3522,7 +3523,8 @@ one band:
 
 ## Close-out: the fixes implied by the open known-issues (2026-10-01)
 
-Backlog section 1 is closed here; its four items are done and their chronology is above and
+The backlog's known-issues section — removed from [backlog.md](../backlog.md) when it
+completed — is closed here; its four items are done and their chronology is above and
 below in this file.
 
 - **Hook hygiene** — every hook file states the faithful behaviour and the reason for

@@ -345,7 +345,7 @@ rb_blitz.exe --game_data_root=<game root>
 
 Points 2, 3 and 4 hold as of 2026-09-20. The "plays a song" half of point 1 rests on
 the 2026-09-20 hand observation rather than a scripted run, exactly like the vanilla
-route ([bringup-log.md](history/bringup-log.md)); [backlog.md](backlog.md) §3 carries
+route ([bringup-log.md](history/bringup-log.md)); [backlog.md](backlog.md) §2 carries
 the scripted run as a task.
 
 ## 11. What we never do

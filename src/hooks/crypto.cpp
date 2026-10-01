@@ -84,7 +84,7 @@
 //
 // The B-009 fix; see docs/history/bringup-log.md.
 //
-// Hook hygiene (docs/backlog.md §1): the faithful behaviour, and every deviation
+// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and every deviation
 // from it including each early return.
 //
 // Faithful behaviour. On hardware, XeKeysSetKey applies KEY_OBFUSCATION_KEY - a

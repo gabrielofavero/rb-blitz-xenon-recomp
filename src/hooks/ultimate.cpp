@@ -49,7 +49,7 @@
 //
 // The Ultimate install; see docs/history/bringup-log.md B-012.
 //
-// Hook hygiene (docs/backlog.md §1): the faithful behaviour, and every deviation
+// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and every deviation
 // from it including each early return.
 //
 // Faithful behaviour. Vanilla Blitz is the default and is untouched: with no

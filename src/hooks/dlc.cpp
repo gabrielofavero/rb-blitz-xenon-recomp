@@ -16,7 +16,7 @@
 // title id (XEX optional header 0x000407FF: 45410829, 45410869, 45410914) so RB3 DLC
 // enumerates for Blitz; 5841122D is Blitz itself. See docs/dlc.md.
 //
-// Hook hygiene (docs/backlog.md §1): the faithful behaviour, and the reason for the
+// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and the reason for the
 // deviation.
 //
 // Faithful behaviour: the guest enumerates downloadable content through the emulated
