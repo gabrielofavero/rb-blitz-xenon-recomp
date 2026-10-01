@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "jB2dOQPBzHo=",
+  "success": true,
+  "projectFilePath": "D:\\Coding\\decomps\\360\\rb-blitz-xenon-recomp\\tools\\milotex\\MiloTex.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\gabri\\.nuget\\packages\\sharpziplib\\1.4.2\\sharpziplib.1.4.2.nupkg.sha512"
+  ],
+  "logs": []
+}
