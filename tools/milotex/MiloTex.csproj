@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Small CLI over MiloLib (https://github.com/ihatecompvir/MiloEditor) for pulling a
+       texture out of a .milo_xbox scene and putting one back. MiloLib does the asset
+       parsing; this only adds the two verbs its GUI offers but a script cannot drive.
+
+       MiloEditor is not vendored here - clone it and point MiloLibProject at its
+       MiloLib.csproj, or leave the default (out/_tools/MiloEditor, which is gitignored):
+         msbuild /p:MiloLibProject=C:\path\to\MiloEditor\MiloLib\MiloLib.csproj -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>milotex</AssemblyName>
+    <RootNamespace>MiloTex</RootNamespace>
+    <MiloLibProject Condition="'$(MiloLibProject)' == ''">$(MSBuildThisFileDirectory)..\..\out\_tools\MiloEditor\MiloLib\MiloLib.csproj</MiloLibProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MiloLibProject)" />
+  </ItemGroup>
+
+</Project>

@@ -415,6 +415,32 @@ copies, or use the 70%-identical majority to separate "this is the image" from "
 re-encode". That belongs with the rest of the open problem in
 [backlog.md](backlog.md).
 
+## Use the community toolchain, not a hand-rolled parser
+
+The archive and chunk layers here agree with the community's understanding, but the
+**asset** layer is solved already and hand-rolling it was a mistake worth recording:
+
+| Tool | What it provides |
+| --- | --- |
+| [MiloEditor / MiloLib / MiloUtil](https://github.com/ihatecompvir/MiloEditor) | Parses Milo scenes across games. `RndTex` carries an `RndBitmap` with `width`, `height`, `bpp`, `encoding`, `mipMaps` and the per-level pixel bytes, and `RndBitmap.ConvertToImage()` renders any of them to a DDS. Its GUI has a texture viewer/exporter/importer; `MiloUtil` is a CLI (`info`, `extract`, `uncompress`). |
+| [Mackiloha / ArkHelper](https://github.com/PikminGuts92/Mackiloha) | Reads and writes the ARK v6 archives ? the same format as `hmx_ark.py`, but complete. |
+| [re-notes](https://github.com/PikminGuts92/re-notes) | `swap_rb_art_bytes.py`, the Xbox?PS3 texture conversion. |
+| [Rock Band Blitz Deluxe](https://github.com/solamint/rock-band-blitz-deluxe) (MiloHax) | A shipped **Rock Band Blitz** mod whose optional upgrades include **Custom Textures**, built with ArkHelper. Custom art in this game is a solved workflow. |
+| [rb3 decomp](https://github.com/DarkRTA/rb3) | The source MiloLib credits; where the asset format is actually documented. |
+
+Two facts read straight out of MiloLib that this document spent a long time guessing at:
+
+- `RndBitmap` is the texture asset ? the width/height/bpp/encoding the record declares map
+  onto it directly, so there is no offset to find: parse the object graph, do not scan for a
+  record.
+- The Xbox 360 **storage scramble** is `[i+1][i][i+3][i+2]` over 4-byte groups
+  (`RndBitmap.ConvertToImage`). That is exactly the "16-bit word swap" measured here between
+  the platforms, and it is why the same art is byte-different on 360 and PS3.
+
+`tools/milotex` is a small CLI over MiloLib (`list`, `export`, `import`) because MiloLib's
+GUI cannot be driven from a script and MiloUtil's `extract` only dumps raw asset bytes. It
+builds against a MiloEditor clone; see the project file for the path.
+
 ## Where the format knowledge comes from
 
 The archive layout and the header cipher are public community knowledge, not something
