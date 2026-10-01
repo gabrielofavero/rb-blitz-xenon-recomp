@@ -657,10 +657,11 @@ the presenter's own letterbox geometry ([src/input/ui_nav.h](../src/input/ui_nav
 `ComputeGuestImageMapping`), and the left stick is then deflected one row at a time until
 the measured row is the pointer's row. So the highlight lands **on** the row under the
 pointer rather than a fixed distance from wherever it started, and screens whose rows are
-spaced differently need no per-screen constant: the main menu's 26-27 px and the
-HELP & OPTIONS screen's 53 px were both measured and both landed exactly.
+spaced differently need no per-screen constant: the main menu's 26-27 px, the
+HELP & OPTIONS screen's 53 px, MOD SETTINGS' 40 px and the in-song pause menu's 37-38 px
+were all measured, and the ones hovered landed exactly.
 
-Three properties of that loop are what make it behave like a native menu rather than a
+Four properties of that loop are what make it behave like a native menu rather than a
 controller:
 
 - **A press lasts a couple of the guest's own frames** (measured from how often the guest
@@ -675,6 +676,14 @@ controller:
 - **A screen that changes under a still pointer is left alone.** A click that opens a menu
   leaves the pointer over a row of a screen that is gone; the new screen's selection is not
   the pointer's to move until the pointer moves.
+- **A marker at least as tall as its row is measured across two presses.** Its old and new
+  positions overlap in the frame as well as in space, so one difference holds a single band
+  with nothing in it to separate the two positions. The next press, in the same direction,
+  moves that band by exactly one row — the band is rigid — and that shift is the pitch,
+  with the marker being what is left of the band once a row is taken out of it. The turn of
+  the stick that follows a press which measured nothing is therefore deferred to the third
+  press, so the two presses a tall marker needs can go the same way. This is the shape the
+  settings, pause and Ultimate-style lists with a wide selection bar present.
 
 The pointer falling back to travel: with `--no-mouse_ui_hover`, or on a guest whose frames
 cannot be read back (no presenter, or a resized window with no guest size yet), the driver

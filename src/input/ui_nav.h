@@ -303,6 +303,15 @@ class MenuHoverAligner {
   // list being stepped through any more.
   static constexpr int kMaxScreenChanges = 2;
 
+  // When there is no measurement yet, the first presses all go the same way and the
+  // turn only comes on this attempt. A marker at least as tall as its row arrives as
+  // a single band whose *movement* between two presses is the pitch, and a band only
+  // moves between two presses that go the same way - turning the stick round sends
+  // the marker back where it was and the band with it, which measures nothing. The
+  // flip is only ever a guess about which way the list runs, so deferring it costs
+  // at most one press into an end that is already there.
+  static constexpr int kFlipOnAttempt = 2;
+
   // The stick's waveform per attempt at one step, in the guest's frames: a press
   // long enough for any guest to see it twice over, then a gap long enough that the
   // next press is a new press rather than the same hold. The later attempts lengthen
@@ -550,6 +559,17 @@ class MenuHoverAligner {
   Report report_;
   bool report_ready_ = false;
   int bands_this_step_ = 0;
+
+  // A difference that is a single band too tall to be one marker - the marker's old
+  // and new positions overlapping in *appearance* as well as in space, which a bar
+  // brighter at its top is enough to do - seen while no pitch is known. The next
+  // press in the same direction moves that band by exactly one row, and that shift
+  // is what makes the screen measurable at all. Kept between the two presses and
+  // dropped with the burst.
+  bool have_merged_probe_ = false;
+  int merged_probe_top_ = 0;
+  int merged_probe_height_ = 0;
+  int merged_probe_direction_ = 0;
 };
 
 // The other half of the bridge: turning mouse clicks into the short A and B
@@ -1042,6 +1062,7 @@ inline void MenuHoverAligner::BeginBurst(double now_ms) {
   budget_ = kMaxSteps;
   screen_changes_ = 0;
   flipped_ = false;
+  have_merged_probe_ = false;
   report_ready_ = false;
   // Straight to the press. Waiting for the guest to draw a frame first would wait
   // for ever on a screen that is not moving, and the frame the press is measured
@@ -1076,6 +1097,7 @@ inline void MenuHoverAligner::AdvancePhase(double now_ms) {
 inline void MenuHoverAligner::EndBurst(const char* outcome) {
   phase_ = Phase::kIdle;
   have_base_ = false;
+  have_merged_probe_ = false;
   report_.outcome = outcome;
   report_.steps = steps_;
   report_.presses = presses_;
@@ -1125,6 +1147,54 @@ inline void MenuHoverAligner::Evaluate(double now_ms) {
       bands_this_step_ = FindChangedBands(current_, rows_, detect_, bands_.data());
       step = FindNavStep(bands_.data(), bands_this_step_, detect_, pitch_,
                          have_highlight_ ? highlight_centre_ : -1.0);
+
+      // A difference that is a single band too tall to be one marker is a marker
+      // whose two positions overlap in appearance as well as in space - a bar that
+      // is brighter at its top is enough - and it is the one shape the separated
+      // path cannot split and the merged path cannot place without a pitch. Two
+      // presses in the same direction can place it: the band is rigid, so it has
+      // moved by exactly one row, and that shift is the pitch; what is left of the
+      // band once one row is taken out of it is the marker. This is the only way a
+      // screen whose marker is at least as tall as its row is measured at all, and
+      // without it the first hover there is a burst that gives up.
+      if (!step.found && bands_this_step_ == 1) {
+        const NavBand& band = bands_[0];
+        if (have_merged_probe_ && merged_probe_direction_ == press_direction &&
+            std::abs(band.Height() - merged_probe_height_) <= detect_.max_height_difference) {
+          const int shift = band.top - merged_probe_top_;
+          const int pitch = std::abs(shift);
+          const int marker_height = band.Height() - pitch;
+          const bool moved_with_the_press =
+              (press_direction == kStickDown && shift > 0) ||
+              (press_direction == kStickUp && shift < 0);
+          if (moved_with_the_press && pitch >= detect_.min_step_pixels &&
+              pitch <= detect_.max_step_pixels && marker_height >= detect_.min_band_height &&
+              marker_height <= detect_.max_band_height) {
+            // The marker is at the end of the band the press moved it to; the other
+            // position is one row back along the direction pressed.
+            const double marker_centre =
+                press_direction == kStickDown
+                    ? static_cast<double>(band.bottom) - 0.5 * (marker_height - 1)
+                    : static_cast<double>(band.top) + 0.5 * (marker_height - 1);
+            const double other_centre =
+                marker_centre + static_cast<double>(press_direction) * pitch;
+            step.found = true;
+            step.merged = true;
+            step.pitch = pitch;
+            step.upper_centre = std::min(marker_centre, other_centre);
+            step.lower_centre = std::max(marker_centre, other_centre);
+            step.left = band.left;
+            step.right = band.right;
+            step.score = 0;
+          }
+        }
+        if (!step.found) {
+          have_merged_probe_ = true;
+          merged_probe_top_ = band.top;
+          merged_probe_height_ = band.Height();
+          merged_probe_direction_ = press_direction;
+        }
+      }
     }
   }
 
@@ -1161,6 +1231,7 @@ inline void MenuHoverAligner::Evaluate(double now_ms) {
     have_highlight_ = false;
     highlight_centre_ = 0.0;
     pitch_ = 0;
+    have_merged_probe_ = false;
     attempt_ = 0;
     budget_ = kMaxSteps;
     if (screen_changes_ > kMaxScreenChanges) {
@@ -1176,6 +1247,9 @@ inline void MenuHoverAligner::Evaluate(double now_ms) {
 
   if (step.found) {
     highlight_centre_ = NewHighlightCentre(step, screen_direction);
+    // Whatever the last band was, this press moved the selection, so it is not a
+    // second position of that band to learn a pitch from.
+    have_merged_probe_ = false;
     if (AcceptsPitch(step.pitch)) {
       // A measurement of the pitch rather than of two steps at once, so the pitch is
       // what the rest of the burst aims by: half of it, not half of two rows, is what
@@ -1208,7 +1282,7 @@ inline void MenuHoverAligner::Evaluate(double now_ms) {
   ++attempt_;
   if (attempt_ < kAttempts) {
     int direction = direction_;
-    const bool flip = !have_highlight_ && !flipped_;
+    const bool flip = !have_highlight_ && !flipped_ && attempt_ >= kFlipOnAttempt;
     if (flip) {
       direction = -direction;
       flipped_ = true;

@@ -45,6 +45,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -192,12 +193,20 @@ class FakeScreen {
   static constexpr int kBackgroundLevel = 120;
   static constexpr int kBarLevel = 200;
 
-  FakeScreen(int pitch, int bar_height, int first_centre, int last_centre, int centre)
+  // `ramp` makes the bar brighter at its top than at its bottom, which is what most
+  // beveled selection markers look like and the only way a marker at least as tall as
+  // its row shows up as one band: a marker that is the same colour everywhere leaves
+  // the part the two positions share unchanged, and the difference splits into the
+  // two slivers either side of it. A marker whose colour changes with position
+  // changes in the shared part too, and the difference is one band.
+  FakeScreen(int pitch, int bar_height, int first_centre, int last_centre, int centre,
+             bool ramp = false)
       : pitch_(pitch),
         bar_height_(bar_height),
         first_centre_(first_centre),
         last_centre_(last_centre),
-        centre_(centre) {}
+        centre_(centre),
+        ramp_(ramp) {}
 
   int pitch() const { return pitch_; }
   int centre() const { return centre_; }
@@ -225,12 +234,14 @@ class FakeScreen {
   // are ever the same picture by accident.
   NavSampledFrame Frame(int noise_step = 0) const {
     std::vector<uint8_t> pixels(static_cast<size_t>(kWidth) * kHeight * 4, 0);
+    const int bar_top = centre_ - bar_height_ / 2;
     for (int y = 0; y < kHeight; ++y) {
       uint8_t* row = pixels.data() + static_cast<size_t>(y) * kWidth * 4;
       const bool in_bar_row = y >= centre_ - bar_height_ / 2 && y <= centre_ + bar_height_ / 2;
+      const int bar_level = ramp_ ? kBarLevel - (y - bar_top) : kBarLevel;
       for (int x = 0; x < kWidth; ++x) {
         const bool in_bar = in_bar_row && x >= kBarLeft && x < kBarLeft + kBarWidth;
-        const int level = (in_bar ? kBarLevel : kBackgroundLevel) + noise_step;
+        const int level = (in_bar ? bar_level : kBackgroundLevel) + noise_step;
         uint8_t* pixel = row + static_cast<size_t>(x) * 4;
         pixel[0] = static_cast<uint8_t>(std::clamp(level, 0, 255));
         pixel[1] = static_cast<uint8_t>(std::clamp(level / 2, 0, 255));
@@ -254,6 +265,7 @@ class FakeScreen {
   int first_centre_ = 0;
   int last_centre_ = 0;
   int centre_ = 0;
+  bool ramp_ = false;
   int16_t last_stick_ = 0;
   int presses_ = 0;
   int double_press_ = 0;
@@ -974,6 +986,31 @@ int main() {
     CHECK_TRUE(std::fabs(NewHighlightCentre(step, -1) - 120) < 1.5);
   }
 
+  BeginCase("a beveled marker taller than its row is one band, and one band is not a step");
+  {
+    // A marker brighter at its top: the part the old and the new positions share
+    // changes as well, so the difference cannot separate them and arrives as a single
+    // band. That is the shape a menu with a big beveled bar - the settings and
+    // Ultimate-style lists the mouse has to drive - puts in the difference, and a
+    // single band is not a step until something says how tall one row is.
+    FakeScreen screen(kPitch, kPitch + 16, kListTop, kListBottom, 120, /*ramp=*/true);
+    const NavSampledFrame before = screen.Frame();
+    screen.Advance(-MenuHoverAligner::kDeflection);
+    const NavSampledFrame after = screen.Frame();
+
+    NavDetectConfig config;
+    std::vector<NavRowDiff> rows;
+    CHECK_TRUE(DiffNavFrames(before, after, config, &rows));
+    CHECK_FALSE(LooksLikeScreenChange(after, rows, config));
+    NavBand bands[kMaxDetectBands];
+    const int count = FindChangedBands(after, rows, config, bands);
+    CHECK_EQ(count, 1);
+    // With no pitch there is nothing to split the band with, so the separated path
+    // cannot pair it and the merged path cannot place it. The aligner is what has to
+    // get the pitch, from a second press rather than from this one.
+    CHECK_FALSE(FindNavStep(bands, count, config, 0, -1.0).found);
+  }
+
   BeginCase("one rectangle spanning more than a pitch is placed by the pitch");
   {
     // A bar taller than its row is the shape where the two positions really do
@@ -1227,6 +1264,54 @@ int main() {
     CHECK_FALSE(aligner.Busy());
     // Three presses rather than four, because the guest's second one crossed two rows.
     CHECK_EQ(Presses(frames), 3);
+  }
+
+  BeginCase("a marker at least as tall as its row is measured across two presses");
+  {
+    // The bar overlaps its own next position and the ramp makes the overlap change,
+    // so every press arrives as one band and the pitch cannot be read from any single
+    // difference. Two presses give it: the band is rigid, so it has moved by exactly
+    // one row. Before this the burst ran out of presses and gave up on the screen.
+    const int tall_pitch = 40;
+    const int tall_bar = 46;
+    MenuHoverAligner aligner;
+    FakeScreen screen(tall_pitch, tall_bar, kListTop, kListBottom, 120, /*ramp=*/true);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(120 + 3.0 * tall_pitch, 1000.0);
+
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_TRUE(aligner.HaveGeometry());
+    CHECK_EQ(aligner.pitch(), tall_pitch);
+    CHECK_EQ(screen.centre(), 120 + 3 * tall_pitch);
+    // One press to move the band, one to learn the pitch from how far it moved, and
+    // then the presses the distance actually needs.
+    CHECK_EQ(Presses(frames), 3);
+    CHECK_FALSE(aligner.Busy());
+
+    MenuHoverAligner::Report report;
+    CHECK_TRUE(aligner.TakeReport(&report));
+    CHECK_TRUE(std::string(report.outcome) == "aligned");
+    CHECK_TRUE(report.have_highlight);
+    CHECK_EQ(report.pitch, tall_pitch);
+  }
+
+  BeginCase("a tall marker that cannot move does not invent a pitch");
+  {
+    // A list of one row: the press is clamped away, the picture does not change, and
+    // there is no band - let alone two of them to learn a pitch from. Two presses
+    // that look like one is not enough to measure anything, so the burst still ends
+    // by giving up rather than by pressing on.
+    const int tall_pitch = 40;
+    MenuHoverAligner aligner;
+    FakeScreen screen(tall_pitch, 46, 120, 120, 120, /*ramp=*/true);
+    aligner.FeedFrame(screen.Frame(), 0.0);
+    aligner.SetTargetY(120 + 4.0 * tall_pitch, 1000.0);
+
+    const std::vector<DrivenFrame> frames = DriveAlign(&aligner, &screen, 16.7);
+    CHECK_FALSE(aligner.HaveGeometry());
+    CHECK_FALSE(aligner.Busy());
+    CHECK_TRUE(Presses(frames) >= 2);
+    CHECK_TRUE(Presses(frames) <= MenuHoverAligner::kAttempts + 1);
   }
 
   BeginCase("losing the focus does not lose the row the highlight is on");

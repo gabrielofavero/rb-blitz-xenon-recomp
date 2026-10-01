@@ -3433,3 +3433,120 @@ checks; injected keys also need the game window to hold the foreground, which is
 "machine left alone" caveat on
 [scripts/measure_pacing_input.ps1](../../scripts/measure_pacing_input.ps1) is about.
 
+## Mouse navigation, fourth pass: a marker at least as tall as its row (2026-10-01)
+
+The third pass's last limit was "**a screen whose rows a difference cannot read is given up
+on**", and the screens the mouse still had to drive — the settings list, the in-song pause
+menu and whatever the Ultimate payload puts in front of them — were exactly the ones nobody
+had pointed at. This pass closes the part of that limit that is a *shape*, and leaves the
+part that is physics where it was.
+
+### The shapes the screens actually use, measured from captures already on disk
+
+No boot was needed and none was run: the m6 screens acceptance walk
+([scripts/acceptance_screens.ps1](../../scripts/acceptance_screens.ps1)) keeps a
+`-clamped` (first row) and a `-row` (one tap down) shot of every screen it asserts, and the
+song acceptance keeps `run01-paused.png`. Differencing those pairs — through the presenter's
+own letterbox, so the numbers are guest pixels — gives the marker's shape directly:
+
+| Screen | Marker | Row pitch |
+| --- | --- | --- |
+| HELP & OPTIONS pages (Controls, Calibration, Audio/Video, Credits) | one solid **455x46** bar at x=413 | **53.6** (Controls, one press) |
+| Main menu, LEADERBOARDS, ACHIEVEMENTS, HELP list, DOWNLOAD CONTENT, EXIT GAME | the label recoloured, **~18 px** tall, 60-265 px wide | **25-27** (leaderboards) |
+| In-song pause menu ([out/m5-acceptance/run01-paused.png](../../out/m5-acceptance/run01-paused.png)) | the seven option rows, read from the ink profile | **37-38** |
+| MOD SETTINGS | not captured by either walk | **40** (OCR centroid, second pass) |
+
+Two facts fall out of that. The marker is sometimes a bar and sometimes a recoloured label,
+and both already read; and neither walk ever reached MOD SETTINGS or an Ultimate menu, so
+what those screens *draw* is not measured — only their pitches are.
+
+### The shape that could not be read
+
+A marker **at least as tall as its row** is the one shape the detector could not place. Its
+old and new positions overlap in the frame, and if its appearance changes with position —
+which any bevel, ramp or gradient does — the overlapping part changes too. So the
+difference is a single band, not two: the separated path has no pair to take a pitch from,
+and the merged path needs a pitch already measured to split the band, which on the first
+hover there is not. Four presses that read nothing, and the burst gave up on the screen.
+
+The measurements above make that concrete rather than hypothetical: the pause menu's rows
+are ~38 px apart and the HELP pages' bar is 46 px tall, so a bar of that class on a screen
+with a ~40 px pitch overlaps its own next position by construction — the shape is the normal
+case for a screen whose selection bar spans most of a row, which is what a settings or
+Ultimate list looks like.
+
+### The fix: the band moves, so two presses place it
+
+The band is rigid. Press once and it is one band at the old and new positions merged; press
+again, the same way, and it has moved by exactly one row. That shift is the pitch, and the
+marker is what is left of the band once one row is taken out of it: the aligner records the
+band when a press measures nothing, and on the next press in the same direction
+([src/input/ui_nav.h](../../src/input/ui_nav.h)) it builds the step from the shift, places
+the marker at the end of the band the press moved it to, and carries on measuring the screen
+as any other.
+
+The turn of the stick that used to follow the first failed press had to move for that to be
+possible: a flipped press sends the marker back where it was and the band with it, so the
+pair would have measured nothing. The flip is now deferred to the third attempt
+(`kFlipOnAttempt`), which costs at most one press into an end of the list that is already
+there. The detector itself was not loosened — the same band, width and screen-change filters
+still decide what a marker is — so nothing that read as a step before reads differently now.
+
+### Verification, by host test rather than by boot
+
+The `ui_nav` target ([tests/ui_nav_tests.cpp](../../tests/ui_nav_tests.cpp)) grew **638
+checks** and two cases that pin the new behaviour against a fake screen whose marker is
+ramped (brighter at its top) and **16 px taller than its row**, so the difference really is
+one band:
+
+- the detector case shows the single band and that `FindNavStep` cannot place it without a
+  pitch — the gap being closed;
+- the aligner case drives that screen and asserts the burst *measures* the pitch (40), lands
+  on the pointer's row, and does it in **three presses** (one to move the band, one to learn
+  the pitch, one to arrive) instead of giving up;
+- a negative control drives a one-row list of the same marker and asserts the burst still
+  ends without geometry, so two presses that look like one cannot invent a pitch.
+
+`ctest` is green on all eight targets. `rb_blitz` rebuilds with the header.
+
+### What this does not cover
+
+- **No live run.** The marker shapes above are read from captured frames, not from a boot
+  with the mouse in hand, and MOD SETTINGS and the Ultimate menus were never captured at
+  all. Their pitches are known; their markers are still inferred.
+- **A marker whose move is under the detector's colour threshold** (24 levels) is still
+  invisible, and a screen with no moving marker at all still gives up — that is the
+  remaining half of the third pass's limit.
+- **The overlay and focus gates are still reasoned rather than exercised**, as in every pass
+  before this one.
+
+## Close-out: the fixes implied by the open known-issues (2026-10-01)
+
+Backlog section 1 is closed here; its four items are done and their chronology is above and
+below in this file.
+
+- **Hook hygiene** — every hook file states the faithful behaviour and the reason for
+  deviating, including each early return. Done 2026-10-01; the per-file table is in "Hook
+  hygiene: the faithful behaviour of every hook". The surfaces that already carried the
+  record were left alone: the synthetic-pad input device
+  ([src/input/mouse_ui.h](../../src/input/mouse_ui.h)), the VFS overlay device
+  ([src/fs/payload_overlay.h](../../src/fs/payload_overlay.h)) and the SDK patches
+  ([patches/README.md](../../patches/README.md), one row per patch).
+- **Host test coverage: the decidable half of every hook** — the eight targets
+  `crypto_keytable`, `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`,
+  `dlc_layout`, `ultimate_plan` and `toolchain`, the last decisions inside SDK-touching
+  hook bodies having moved into the SDK-free headers those targets reach. Done 2026-10-01;
+  chronology in "An eighth host test target" and "The last three host-decidable hook
+  decisions". What is left inside a hook is the SDK call itself, and one stateful
+  path/click-wait switch in [src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp).
+- **Scripted coverage for the routes only a boot reaches** — done 2026-10-01, and now the
+  source of the captures the fourth mouse pass measured. Chronology in "Scripted coverage
+  for the routes only a boot reached".
+- **Mouse navigation limits** — closed 2026-10-01 as far as code can close it: the absolute
+  mapping exists (`CaptureGuestOutput` and the measured highlight), and the one shape a
+  single difference could not read, a marker at least as tall as its row, is now measured
+  across two presses ("Mouse navigation, fourth pass", above). The limits that remain are
+  recorded in [known-issues.md](../known-issues.md): a screen with no moving marker at all,
+  a move under the detector's colour threshold, no guest cursor, and the overlay/foreground
+  gates that are reasoned rather than exercised.
+
