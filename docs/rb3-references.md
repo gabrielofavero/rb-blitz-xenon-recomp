@@ -304,6 +304,15 @@ with band3's `NewFile` hook (§4.1) to give us overlay-without-repacking.
   `0x823DE070`, and the B-009 regression itself: installing by key id would select
   a different key than installing by buffer offset for MOGG versions 14–16. The
   plaintext bytes are *not* duplicated into the test, per §9 below.
+* **Done 2026-10-01, and the shape to repeat per hook.** The Ultimate compatibility
+  layer gave up the same half: its mode/payload truth table, patch-mask clamp,
+  payload-root arithmetic and content-device slot classification moved into
+  [`src/hooks/ultimate_plan.h`](../src/hooks/ultimate_plan.h), and
+  [`tests/ultimate_plan_tests.cpp`](../tests/ultimate_plan_tests.cpp) runs them under
+  `ctest` as `ultimate_plan`. What stays behind - protecting a page, registering a
+  device, forwarding to the kernel - is the part that genuinely needs a boot.
+  Chronology: [history/bringup-log.md](history/bringup-log.md), "An eighth host test
+  target".
 
 Also filed as a warning: their `MILO_TRY`/`MILO_CATCH` broke on LP64 because
 `Debug::Fail` longjmps a `const char*` as an `int`, truncating the pointer. When

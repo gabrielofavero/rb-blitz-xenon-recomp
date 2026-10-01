@@ -258,6 +258,13 @@ Host tests, no boot needed: `ctest` in the configured build tree runs three targ
 union, backing and hide rules of
 [overlay_merge.h](../src/fs/overlay_merge.h)) — 3/3 pass.
 
+The decisions *this* layer makes have host tests of their own as of 2026-10-01: `ctest`
+runs `ultimate_plan` over [src/hooks/ultimate_plan.h](../src/hooks/ultimate_plan.h) — the
+mode × payload-on-disk truth table of the cvars above, the patch-mask clamp, the
+payload-root arithmetic, the payload's own spelling and the content-device slot
+classification — so §3's slot guard and §6's cvar table are pinned without a boot. The
+counts above are the 2026-09-20 snapshot and are left as they were found.
+
 Boot probes ("luma" is the mean luma of a 1280×720 window capture, so ~19 with 7 KB is
 a black screen and ~75 with 1.7 MB is a rendered frame):
 

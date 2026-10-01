@@ -301,6 +301,12 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_dlc_layout_tests PRIVATE src)
     add_test(NAME dlc_layout COMMAND rb_blitz_dlc_layout_tests)
 
+    add_executable(rb_blitz_ultimate_plan_tests
+        tests/ultimate_plan_tests.cpp
+    )
+    target_include_directories(rb_blitz_ultimate_plan_tests PRIVATE src)
+    add_test(NAME ultimate_plan COMMAND rb_blitz_ultimate_plan_tests)
+
     add_executable(rb_blitz_toolchain_tests
         tests/toolchain_tests.cpp
         src/util/toolchain_pin.cpp

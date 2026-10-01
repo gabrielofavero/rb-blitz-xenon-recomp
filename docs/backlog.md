@@ -23,11 +23,16 @@ in [known-issues.md](known-issues.md).
       ([patches/README.md](../patches/README.md), one row per patch). Chronology and the
       per-file table: [history/bringup-log.md](history/bringup-log.md), "Hook hygiene:
       the faithful behaviour of every hook".
-- [ ] **Host test coverage beyond the seven existing targets** — `crypto_keytable`,
-      `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`, `dlc_layout` and
-      `toolchain`.
-      Everything that needs a boot is still verified by hand: the SDK-touching hooks,
-      pause/resume, and the UI paths outside the offline song loop.
+- [ ] **Host test coverage beyond the eight existing targets** — `crypto_keytable`,
+      `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`, `dlc_layout`,
+      `ultimate_plan` and `toolchain`.
+      Everything that needs a boot is still verified by hand: the SDK half of the hooks
+      that touch it, pause/resume, and the UI paths outside the offline song loop. The
+      Ultimate layer's decidable half joined `ctest` on 2026-10-01
+      ([src/hooks/ultimate_plan.h](../src/hooks/ultimate_plan.h), "An eighth host test
+      target: the Ultimate layer's decidable half"); the half of that layer which
+      touches the SDK — protecting a page, registering the overlay device — still needs
+      a boot.
 - [ ] **Mouse navigation limits** are accepted, not fixed — a screen whose rows a
       frame difference cannot read is given up on rather than measured, there is no
       guest cursor, and the overlay/foreground gates are reasoned rather than

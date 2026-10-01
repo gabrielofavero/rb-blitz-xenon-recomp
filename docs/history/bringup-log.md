@@ -3249,3 +3249,58 @@ The entry also closes the known-issues row and the [rb3-references.md](../rb3-re
   (1.97 s). Documentation-only, so this is a regression check on the tree, not on the
   comments.
 
+## An eighth host test target: the Ultimate layer's decidable half (2026-10-01)
+
+The [known-issues row](../known-issues.md) on host coverage names the same gap from both
+sides: [tests/](../tests) covers the pure host code, and every hook that touches the SDK
+is still verified by hand. The Ultimate layer is the first of those to give up half its
+body to a test. Its cvars and its guest addresses stay where they were, but what they
+*decide* now lives in [src/hooks/ultimate_plan.h](../../src/hooks/ultimate_plan.h), free of
+SDK headers and of runtime state: whether the layer touches the guest at all, where the
+payload is looked for, which patch bits exist, and whether the content-device slot still
+holds the retail spelling.
+
+### What moved, and what stayed
+
+Moved into the header: the `Patch` bits and their clamp, `ModeFromValue` and
+`DecideOutcome` (the off/auto/force × payload-present × merged truth table),
+`ShouldMountOverlay`, `ResolvePayloadRoot`, the payload's own spelling
+(`gen/patch_xbox.hdr`, `gen/patch_xbox_0.ark`, `default.xex`), `HasPayload` /
+`HasPayloadArchive`, and `ClassifyContentDeviceSlot` with both 8-byte spellings of the
+`0x8205DD74` slot. `ultimate.h` includes the plan header, so the bits keep one definition.
+
+Stayed in [src/hooks/ultimate.cpp](../../src/hooks/ultimate.cpp): the cvars, the guest
+addresses and the evidence in the file header, `ApplyContentDevicePatch`'s page protection
+and store, `MountOverlay`'s device registration and the two function overrides.
+
+### Behaviour is unchanged
+
+The decision functions are the arithmetic and the comparisons that were already there,
+moved; the loop over `{"d:", "game:"}` and the whole-slot `memcmp` guard are the same
+operations. The one shape that changed is internal: `ApplyContentDevicePatch`'s two
+comparisons became a `switch` over `ClassifyContentDeviceSlot`, whose cases return in the
+same order and log the same lines. "Mode off" and "auto with nothing on disk" are still two
+branches with their own messages.
+
+### Verification (2026-10-01, Release `out/build/win-amd64-release`)
+
+- `ninja CMakeFiles/rb_blitz.dir/src/hooks/ultimate.cpp.obj` and the same for `main.cpp`,
+  then the full `rb_blitz` target: both objects recompiled and `rb_blitz.exe` linked,
+  exit 0. An extraction is only as good as the compile that proves the call sites still
+  agree, so the production target - not just the test target - was built and linked.
+- `ctest --test-dir out\build\win-amd64-release --output-on-failure`: **8/8** passed
+  (1.43 s), the new `ultimate_plan` being 72 checks over nine cases. The seven older
+  targets were not touched and still pass.
+- Negative control, so the green above means something: with
+  `ClassifyContentDeviceSlot` forced to return `kRetail` for every input, the test
+  reports **4 of 72 checks failed** and exits 1, naming
+  `tests/ultimate_plan_tests.cpp:151,154,157,162`. The header was reverted and the
+  binary rebuilt before the 8/8 run above.
+
+### What this does not cover
+
+The hook bodies themselves. Protecting a read-only page, registering the overlay device
+and forwarding to `__imp__XeKeys*` / `__imp__sub_*` still need a boot; so do every other
+hook in [src/hooks/](../../src/hooks), pause/resume, and the UI paths outside the offline
+song loop. The known-issues row and the backlog entry now say exactly that.
+

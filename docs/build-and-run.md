@@ -402,8 +402,10 @@ path, whose SDK-free half lives in
 [src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h), the fingerprint
 parsing/comparison in
 [src/util/game_fingerprint.h](../src/util/game_fingerprint.h), and with them the DLC
-layout, the payload overlay, the path policy, the mouse-navigation stepper and the
-frozen-toolchain record in
+layout, the payload overlay, the path policy, the mouse-navigation stepper, the
+Ultimate compatibility layer's decidable half in
+[src/hooks/ultimate_plan.h](../src/hooks/ultimate_plan.h) and the frozen-toolchain
+record in
 [src/util/toolchain_pin.h](../src/util/toolchain_pin.h) — so they need no game
 image, no runtime and no window, and finish in a couple of seconds:
 
@@ -412,8 +414,8 @@ cmake --build --preset win-amd64-release
 ctest --test-dir out\build\win-amd64-release --output-on-failure
 ```
 
-Expected output is `7/7` passing (`crypto_keytable`, `payload_overlay`, `path_policy`,
-`fingerprint`, `ui_nav`, `dlc_layout`, `toolchain`). Exactly one case needs the dump at
+Expected output is `8/8` passing (`crypto_keytable`, `payload_overlay`, `path_policy`,
+`fingerprint`, `ui_nav`, `dlc_layout`, `ultimate_plan`, `toolchain`). Exactly one case needs the dump at
 all (`fingerprint_real_game_dump` hashes `game\default.xex`), and it prints
 `[ SKIP ]` instead of running when the dump is absent or, with
 `RBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, when it is not the supported revision. A failing check

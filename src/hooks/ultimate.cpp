@@ -81,6 +81,10 @@
 // further, not a disable: a slot that does not hold the retail string, a missing
 // heap, VFS or directory, or a device that will not register all leave the guest's
 // behaviour as it was, and each says why in the log.
+//
+// The decidable half of all that - the mode and payload truth table, the patch mask,
+// the payload's spelling and the content-device slot classification - lives in
+// src/hooks/ultimate_plan.h, which tests/ultimate_plan_tests.cpp covers without a boot.
 
 #include "hooks/ultimate.h"
 
@@ -119,16 +123,6 @@ uint32_t g_patches = 0;
 // registers to union the payload with the game root (src/fs/payload_overlay.h).
 constexpr std::string_view kGameMount = "\\Device\\Harddisk0\\Partition1";
 constexpr std::string_view kOverlayMount = "\\Device\\BlitzOverlay";
-
-// The content device string slot and both spellings of its 8 bytes.
-constexpr uint32_t kContentDeviceSlot = 0x8205DD74;
-constexpr char kContentDeviceRetail[8] = {'U', 'P', 'D', 'A', 'T', 'E', ':', '\0'};
-constexpr char kContentDevicePayload[8] = {'D', ':', '\0', '\0', '\0', '\0', '\0', '\0'};
-
-// A payload is present when the game can find a patch header for it.
-constexpr std::string_view kPayloadHeader = "gen/patch_xbox.hdr";
-constexpr std::string_view kPayloadArchive = "gen/patch_xbox_0.ark";
-constexpr std::string_view kEntrypoint = "default.xex";
 
 REXCVAR_DEFINE_INT32(ultimate_mode, 1, "Compatibility",
                      "Rock Band Blitz Ultimate: 0=off, 1=auto, 2=force")
@@ -172,16 +166,18 @@ void ApplyContentDevicePatch(rex::Runtime* runtime) {
     return;
   }
   auto* slot = memory->TranslateVirtual<uint8_t*>(kContentDeviceSlot);
-  if (std::memcmp(slot, kContentDevicePayload, sizeof(kContentDevicePayload)) == 0) {
-    REXLOG_INFO("ultimate: 0x{:08X} already redirects the content device, nothing to do",
-                kContentDeviceSlot);
-    return;
-  }
-  if (std::memcmp(slot, kContentDeviceRetail, sizeof(kContentDeviceRetail)) != 0) {
-    REXLOG_WARN("ultimate: 0x{:08X} holds [{}] instead of the retail content device string,"
-                " leaving it alone",
-                kContentDeviceSlot, HexBytes(slot, sizeof(kContentDeviceRetail)));
-    return;
+  switch (ClassifyContentDeviceSlot(slot)) {
+    case ContentDeviceState::kAlreadyRedirected:
+      REXLOG_INFO("ultimate: 0x{:08X} already redirects the content device, nothing to do",
+                  kContentDeviceSlot);
+      return;
+    case ContentDeviceState::kUnrecognized:
+      REXLOG_WARN("ultimate: 0x{:08X} holds [{}] instead of the retail content device string,"
+                  " leaving it alone",
+                  kContentDeviceSlot, HexBytes(slot, sizeof(kContentDeviceRetail)));
+      return;
+    case ContentDeviceState::kRetail:
+      break;
   }
   uint32_t old_protect = 0;
   if (!heap->Protect(kContentDeviceSlot, sizeof(kContentDevicePayload),
@@ -256,53 +252,47 @@ void MountOverlay(rex::Runtime* runtime, const std::filesystem::path& payload_ro
 
 }  // namespace
 
-bool PatchEnabled(uint32_t bit) { return (g_patches & bit) != 0; }
+bool PatchEnabled(uint32_t bit) { return HasPatch(g_patches, bit); }
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   if (runtime == nullptr) return;
 
-  if (REXCVAR_GET(ultimate_mode) <= 0) {
-    REXLOG_INFO("ultimate: off, booting the retail game data");
-    return;
-  }
+  const Mode mode = ModeFromValue(REXCVAR_GET(ultimate_mode));
+  const std::filesystem::path payload_root =
+      ResolvePayloadRoot(REXCVAR_GET(ultimate_payload_root), game_data_root);
+  const bool has_payload = HasPayload(payload_root);
+  const bool merged = HasPayload(game_data_root);
 
-  std::filesystem::path payload_root = REXCVAR_GET(ultimate_payload_root);
-  if (payload_root.empty()) {
-    payload_root = game_data_root / "ultimate";
-  } else if (payload_root.is_relative()) {
-    payload_root = (game_data_root / payload_root).lexically_normal();
-  }
-
-  std::error_code ec;
-  const bool has_payload =
-      std::filesystem::is_regular_file(payload_root / kPayloadHeader, ec);
-  const bool merged =
-      std::filesystem::is_regular_file(game_data_root / kPayloadHeader, ec);
-  if (!has_payload && !merged) {
-    if (REXCVAR_GET(ultimate_mode) == 1) {
+  switch (DecideOutcome(mode, has_payload, merged)) {
+    case Outcome::kOff:
+      REXLOG_INFO("ultimate: off, booting the retail game data");
+      return;
+    case Outcome::kRetailNoPayload:
       REXLOG_INFO("ultimate: no payload at {} and no merged {}, booting the retail game data",
                   payload_root.string(), std::string(kPayloadHeader));
       return;
-    }
-    REXLOG_WARN("ultimate: forced on but neither {} nor {} exists, the payload's content will"
-                " not be readable",
-                payload_root.string(), std::string(kPayloadHeader));
+    case Outcome::kForcedWithoutPayload:
+      REXLOG_WARN("ultimate: forced on but neither {} nor {} exists, the payload's content will"
+                  " not be readable",
+                  payload_root.string(), std::string(kPayloadHeader));
+      break;
+    case Outcome::kPayload:
+      break;
   }
 
-  if (has_payload &&
-      !std::filesystem::is_regular_file(payload_root / kPayloadArchive, ec)) {
+  if (has_payload && !HasPayloadArchive(payload_root)) {
     REXLOG_WARN("ultimate: {} without {}, the game treats that pair as a damaged disc",
                 std::string(kPayloadHeader), std::string(kPayloadArchive));
   }
 
-  g_patches = REXCVAR_GET(ultimate_patches) & kPatchAll;
+  g_patches = ClampPatchMask(REXCVAR_GET(ultimate_patches));
   REXLOG_INFO("ultimate: payload {}, patches 0x{:X}{}", payload_root.string(), g_patches,
               merged ? " (merged into the game root)" : "");
 
   if (PatchEnabled(kPatchContentDevice)) {
     ApplyContentDevicePatch(runtime);
   }
-  if (has_payload && !merged) {
+  if (ShouldMountOverlay(has_payload, merged)) {
     MountOverlay(runtime, payload_root, game_data_root);
   }
 }
