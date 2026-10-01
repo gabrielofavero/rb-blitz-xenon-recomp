@@ -48,51 +48,31 @@ that name an action.
 
 ## 4. Deferred, with no design yet
 
-- [ ] **Scene texture extract/import: pin the buffer offset, then a scene reskin is a
-      two-command job.** Everything else is in place and verified. The map exists
-      ([scripts/hmx_milo.py](../scripts/hmx_milo.py) `records`: **706 texture records in
-      151 scenes**, with each texture's builder source path and dimensions — the button
-      prompts are `buttons.milo_xbox`'s `../image/icons_buttons_xbox_nomip.bmp` at 512×512,
-      the controller diagrams are `controller_config.milo_xbox`'s `img/xbox_0..3.png` and
-      `img/ps_0..3.png` at 1024×1024, the lane icons are `track_shared_textures`), the
-      delivery works (editing a scene inside the archive changes what the game draws,
-      proven on the A/B prompts), and a texture is 8-bit with `0x00` transparent and
-      `0xFF` opaque. What is missing is the one thing an extractor needs: **where the
-      pixel buffer starts**. The dimensions follow from the record and so the buffer size
-      follows from them (`buttons.tex`: 512 × 512 × 1 = 262,144 bytes, exactly the region
-      whose edit changed the screen), but the writer interleaves other objects —
-      materials, and for a font its `Glyph` table — into the same section, so the offset
-      has to be derived per texture rather than assumed. Read the object records between
-      a texture and the next one (the `Glyph` rectangles are the natural first target,
-      since they also give the sample-to-screen mapping the last experiments could not
-      pin down), then add `extract`/`import` to `hmx_milo.py`. Evidence and the rejected
-      hypotheses — not a mip chain, not DXT — are in
-      [assets.md](assets.md) "Where the art actually lives".
-- [ ] **A writer that can change an entry's length.** The one hard block found so far, and
-      it is what stops a reskin of anything whose pixels sit in a compressed chunk. A chunk
-      that has to be recompressed but comes out larger cannot be padded back to its stored
-      size: `XMemDecompress` is handed the whole chunk, and trailing bytes after a complete
-      deflate stream make it fail — it crashes the game rather than erroring
-      ([assets.md](assets.md) "Editing a scene with PS3 data"). Rebalancing the chunk table
-      between chunks does not help, because the padded chunk is still padded. Either a
-      reskin of those textures keeps its deflate output inside the original budget, or the
-      ark's entry sizes become mutable — which is the real fix, since the chunk table
-      already tolerates any sizes as long as the entry totals match.
-- [ ] **Use the PS3 build as the decoder oracle.** The PS3 dump is the same game in the same
-      container — `.\scripts\extract_assets.ps1 -Platform ps3 -GameRoot <USRDIR>` writes
-      `extracted-ps3\`, and every tool in `scripts\` reads it unchanged ([assets.md](assets.md#ps3))
-      — which gives the open texture problem something last round did not have: the same asset
-      from an independent build, at the same offset. `buttons.milo_ps3` is the same size as its
-      360 twin, its object records are **99.5% identical**, its texture record is the same, and
-      only the pixel region differs — as a **16-bit word swap**, 70% matching after swapping byte
-      pairs against 20% left alone, collapsing to 5% at a wrong offset, so the structure is real
-      and the format is **16-bit elements**. The region is raw (no zlib/raw-deflate/gzip/lzma
-      framing; it deflates to 20%) and shows no glyph-grid periodicity. A correct decoding has to
-      read *both* copies, and the 70% they share is what separates "this is the image" from "this
-      is a per-platform re-encode" — that is the test to build the next attempt around.
-      Two results already banked: `blitz_icons` matches **99.5%** after the swap and the four
-      controller diagrams match **100%** — the pad art is the same picture on both platforms, and
-      `buttons.milo_*` is the genuinely platform-different sheet.
+- [ ] **Pin the sheet format and offset, then a reskin is a two-command job.** The claim
+      that this already worked is withdrawn ? the pixel diffs it rested on were the animated
+      backgrounds, not the art ([assets.md](assets.md) "Where the art would have to live,
+      and a retraction"). What is solid: the payload route delivers a whole replacement
+      scene (`gen/main_xbox_0.ark` in a payload directory is the copy the game uses, run-log
+      confirmed; a payload with only `patch_xbox.*` mounts but prefers no copies); the
+      archive index carries per-entry sizes, so a replacement scene can be any size; the
+      360 and PS3 `buttons.milo_xbox` differ across one span, **stream `0x5C9`?`0x405DF`,
+      262,167 bytes = a 512?512 sheet plus 23**, which is where a reskin has to aim; and the
+      span has **16-byte elements** (pitch-16 neighbour difference is 26 where every other
+      pitch sits at 55+) with a working **mip chain** on `controller_config`'s pad texture
+      (DXT5 1024?1024, level 1 correlates 0.86 with the half-scaled level 0, alternating
+      cleanly on a 16-byte period). DXT5 is the leading hypothesis; it is not confirmed.
+      The next run should write one flat DXT5 colour over the span and check the prompt band
+      with OCR plus a settled-frame A/B, which answers format and location at once.
+- [ ] **Measure the noise floor before believing any screenshot diff.** Two runs of the
+      same build differ by **3.5?5.9%** of the frame just after a screen is entered and
+      ~0.14% once it has settled, and the prompt band sits on top of the animated aurora ?
+      which is exactly how a whole round of "proven" swaps turned out to be nothing. Put a
+      same-build baseline in the loop, prefer OCR of static text as the control, and treat a
+      pixel diff as corroboration.
+- [ ] **The controller page's pad art is byte-identical across platforms.** 1,398,101 bytes
+      of `controller_config` match between builds after a 16-bit swap, so there is nothing to
+      gain by sourcing that art from the PS3 dump ? the button sheet is the only
+      platform-different art found so far.
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,

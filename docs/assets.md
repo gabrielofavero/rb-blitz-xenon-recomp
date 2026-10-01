@@ -189,54 +189,71 @@ diagrams from **`controller_config.milo_xbox`**, and the in-game lane icons from
 **`track_shared_textures.milo_xbox`** — each an 8-bit (one byte per pixel) image, and
 each reachable by editing its scene inside the archive.
 
-### Where the art actually lives, and what an edit does
+### Where the art would have to live, and a retraction
 
-The important result: **editing a scene inside the archive changes what the game draws.**
-Verified on the button prompts, by four experiments against the same screen:
+**Earlier revisions of this document claimed a working reskin here. That claim is
+withdrawn.** The section below records what was actually measured, what was wrong with
+the measurement, and what is left standing.
 
-| What was written | What the main menu showed |
-| --- | --- |
-| nothing (retail) | the round **A** glyph and the **B** glyph (`A SELECT` / `B BACK`) |
-| the region zeroed | the glyphs gone — OCR of the same screen loses `A SELECT` and `B BACK` |
-| the region filled with `0xFF` | fully opaque (invisible on the white menu) — the glyphs are still drawn |
-| a solid-colour DXT encode | a 4-pixel dither — the bytes are *not* DXT |
+The withdrawn claim was that zeroing the region below removed the button prompts, and
+that writing the PS3 build's sheet over it changed the A glyph. Both were pixel-diff
+comparisons between two runs, and both were false positives: **the title's backgrounds
+are animated**, so two runs of the *same* build differ by 3.5?5.9% of the frame, and the
+prompt band they were reading is the noisiest part of it. Re-run properly ? a same-session
+baseline, the region zeroed, and OCR of the prompt band as the control ? the prompts are
+unchanged (`SELECT BACK` reads the same in both runs). The apparent glyph change was the
+aurora behind it drifting.
 
-So the chain ark → scene → screen works for edited content, and the region involved is
-exactly located:
+Two lessons worth keeping, because they cost a whole round:
+
+- A run-to-run pixel diff is only evidence if the noise floor is known. Measure it by
+  running the *same* build twice; on these screens it is 3.5?5.9% of the frame for a
+  capture taken just after a screen is entered, and ~0.14% for one taken after the screen
+  has settled for a few seconds.
+- The prompt band is the worst possible place to compare, because the animated background
+  runs through it. OCR of the static text is immune to that and should be the control
+  (`scripts/ocr_image.ps1`), with the pixel diff as corroboration rather than proof.
+
+What *is* established, by the run logs rather than by screenshots:
 
 | | |
 | --- | --- |
-| Entry | `ui/resource/fonts/gen/buttons.milo_xbox` (266,490 B, ark offset 325,896,454) |
-| Region | file bytes `0xDFC`…`0x40DFC`, **262,144 bytes** — the whole tail of chunk 0 |
-| Chunk 0 | 263,660 bytes and **stored decompressed** (bit 24 set), so a patch needs no recompression |
-| Record just before it | a length-prefixed source path `../image/icons_buttons_xbox_nomip.bmp` and the fields 512 / 512 / 512, i.e. **512×512, row bytes 512, one level** — matching the `nomip` in that name, at 8 bits per pixel |
-| Meaning | the font's glyph sheet: the scene's own `buttons.tex` and `buttons.font`, whose character set is the Xbox pad (` ABXYgclLrRSsD12345wdxa[]6789^&*(`) |
+| Delivery route | A payload directory with `gen/main_xbox_0.ark` **is** preferred over the game's ? `ultimate: overlay ? 1 payload copies preferred`. This is the route a reskin must use. |
+| Not the patch ark | A payload carrying only `gen/patch_xbox.hdr` + `gen/patch_xbox_0.ark` mounts but logs **0 payload copies preferred**; on its own it does not override the scene. Rock Band Blitz Ultimate ships both, so the full-ark copy is what does the work. |
+| The region is not the prompts | Zeroing `buttons.milo_xbox` bytes `0xDFC`?`0x40DFC` changes nothing on screen (same-session A/B, OCR identical, ~the 0.14% noise floor in the band). Whatever that region is, it is not what draws the footer prompts. |
+| The two builds differ here | Comparing the 360 and PS3 scenes byte for byte, the 360 `buttons.milo_xbox` and its PS3 twin differ across **stream bytes `0x5C9`?`0x405DF` ? 262,167 bytes, which is a 512?512 sheet plus 23**. That span is the only large platform-varying region in the scene, and it is where a reskin has to aim. |
 
-The byte value behaves as **ink coverage**, not colour: `0x00` is transparent and `0xFF`
-is fully opaque, with the material supplying the colour (a `UIColor` set — `normal`,
-`focused`, `disabled`, `selected` — is in the same scene). That is also why the sheet
-decodes as neither DXT1 nor DXT5 (both produce a dither when written back) and why no
-256-entry palette exists anywhere in the scene: the bytes are the ink samples themselves.
+Note the units: that span is in *stream* coordinates (the concatenation of the scene's
+decompressed chunks). Chunk 0 is stored and begins at file offset `0x810`, so the span is
+file `0xDD9`?`0x40DEF`. Earlier revisions compared a file offset against a stream offset
+here, which is part of how the wrong region was chosen.
 
-The region's size agrees with the record: the record declares 512 × 512 at 8 bits per
-pixel, and 512 × 512 × 1 = 262,144 bytes, exactly the region that was edited. The two
-are also in the same scene section — the record sits ~2 KB before it, with the scene's
-other objects (`Mat`, the `Font` and its `Glyph` table) in between.
+What the bytes in that span *are* is still open, and the honest state is that the pixel
+region has to be pinned by a method that does not rely on a screenshot diff:
 
-Two hypotheses about the data layout were tested and **rejected**, so a later attempt
-need not repeat them: the section is *not* a stored mip chain (a chain of 1024 down to 8
-is 1,398,080 bytes, which happens to match the gap between two consecutive records in
-`controller_config`, but the level-2 block at `base + 1024²` does not resemble the
-downsampled base at any offset), and it is not DXT (writing a solid DXT encode back
-produced a dither rather than a solid colour).
+- The span is a 512?512 sheet by size (262,144 bytes), reached from the record whose
+  builder source path is `../image/icons_buttons_xbox_nomip.bmp`, declared 512 ? 512.
+- It is **not** a linear 8-bit image: a byte-stride probe across it finds no row pitch
+  (mean |b[i] ? b[i+pitch]| sits at 55?60 for every pitch from 1 to 512, where a real row
+  stride drops well below), and its ink profile is flat where a glyph atlas would clump.
+- The strongest structural hint is that the pitch-**16** neighbour difference is the lowest
+  of any pitch tested (26 against 60 at pitch 1 and 84 at pitch 8), i.e. the data has
+  16-byte elements ? which is what a DXT5/BC3 block is, and matches the platform
+  relationship: for the pad art in `controller_config`, `swap16(360 stream)` equals the PS3
+  stream **byte for byte over 1,398,101 bytes**, which is what two builds storing the same
+  16-bit endpoint values in opposite endianness look like.
+- On `controller_config`'s pad texture a mip-chain test agrees: decoding level 0 as DXT5 at
+  1024?1024 and comparing it with the half-scaled decode of level 1 gives a correlation of
+  **0.85?0.87**, and the value alternates cleanly with a 16-byte period (0.22 at a 4-byte
+  shift, 0.85 at 12, 0.22 at 20, 0.86 at 28) ? 16-byte blocks with a real mip relationship
+  across a 1,048,576-byte level.
 
-What is still open is the *sample-to-screen mapping*. Every probe that wrote a spatially
-varying pattern came back as a single one-pixel seam rather than a scaled image, which
-points at a cell grid (the font's `Glyph` rectangles — `x`, `y`, `width`, `height` per
-character) rather than a plain row-major sheet; the glyph records themselves are the next
-thing to read. Two of the four experiments above also show the trap: a change can be
-*invisible* (opaque white on a white menu) while still being applied, so a swap has to be
-checked by a pixel diff, not by eye.
+So DXT5 is the leading hypothesis, not a confirmed format: it is consistent with the block
+size, the endianness relationship and the mip chain, but the earlier rejection of "DXT"
+rested on a write-back that is now itself in question, and nothing yet decodes the sheet
+into recognisable glyphs. The next attempt should confirm it the way this round should
+have: write a DXT5 encode of a flat colour into the span and check with a settled-frame
+A/B and OCR, not with a whole-frame diff.
 
 ### The rest of the scene corpus
 
@@ -265,33 +282,39 @@ length-prefixed builder-side source path — `splash.milo_xbox` names
 
 ### Can a UI texture be swapped today?
 
-Partly — the halves are uneven.
+**No ? and the previous revision of this section said yes.** What that claim rested on is
+withdrawn above; what is left is a much smaller, but solid, set of pieces.
 
-**Ready.** Finding the art (the `records` map above: which scene, which source path,
-what dimensions). Reading and writing the archive, including a small overlay copy. Proven
-delivery: an edit inside a scene reaches the screen. A known-good worked example: the
-glyph sheet in `buttons.milo_xbox`, whose 262,144-byte region is located, size-checked
-against its record, and demonstrated to change the A/B prompts.
+**Ready.** Reading the archive and writing a whole replacement entry to it, delivered
+through a payload directory (the run log confirms the payload's `main_xbox_0.ark` is the
+copy the game uses). Finding candidate art: the `records` map above gives which scene, which
+builder-side source path and what dimensions. Reading a scene's chunk stream and rebuilding
+one whose chunks are compressed.
 
-**Not ready.** Turning a texture record into a *pixel buffer* you can save and load. The
-record gives the dimensions and the size follows from them, but nothing yet says where
-that buffer begins relative to the record — the writer interleaves other objects
-(materials, `Font` and its `Glyph` table) into the same section — so the offset has to be
-found per texture, and there is no tool that does it. Until there is, "replace the
-controller image" is a research task: read the glyph/object records around the texture to
-find the buffer boundary with certainty, then a `records`-driven extract/import pair is a
-small addition.
+**Not ready.** Everything between "this scene, this record" and "these bytes are that
+texture". There is no tool that turns a record into a pixel buffer or back, because the
+buffer's format and offset inside the scene are not pinned. That is the blocker, and it is
+the only one: delivery, sizing and archive surgery are all solved.
 
-So: recognise *what* to edit in one command, edit *it* still by hand. The honest summary
-is that this is one tool away — a scene-texture extractor/import that pins the buffer
-offset — and the remaining unknown is a parsing detail, not a format mystery.
+The way through it is a measurement that the animated backgrounds cannot fake, and the two
+that qualify are:
 
-Two practical notes for the next attempt. A scene patch never needs to recompress: on the
-five scenes checked (`buttons`, `splash`, `background_night`, `content_refresh`,
-`player_state_sounds`) the first chunk is always stored decompressed, and the textures sit
-in it. And a swap must be judged by a pixel diff: writing opaque white over a white menu
-is applied but looks like nothing happened, which is exactly the trap this section walked
-into twice.
+- **A control whose signal is text.** `scripts/ocr_image.ps1` reads the prompt band and is
+  unaffected by the background. It is what showed the old claim was wrong.
+- **A settled-frame A/B with a known noise floor.** Capture the screen, wait several
+  seconds, capture again, and use the second pair ? the background drifts most just after a
+  screen is entered. The floor still has to be measured against a same-build baseline first.
+
+With those in hand, the experiment to run next is small: write one flat DXT5 colour over the
+262,167-byte span the two builds differ in, and see whether the prompt band changes at all.
+That answers "is this span the shown texture" and "is the format DXT5" in a single run,
+which is one run more than the withdrawn claim ever justified.
+
+A practical note that survives: on the five scenes checked (`buttons`, `splash`,
+`background_night`, `content_refresh`, `player_state_sounds`) the first chunk is stored
+decompressed, so a patch to the start of a scene needs no recompression ? but a scene whose
+edit does not fit is better delivered as a whole replacement entry, which the archive format
+and the payload route both allow.
 
 ## PS3
 
@@ -337,53 +360,36 @@ texture; the 241 standalone `*_ps3` entries are the same set the 360 has), and t
 texture layout is the same unsolved detail on both — see "Can a UI texture be swapped
 today?" above.
 
-### Editing a scene with PS3 data — what works, and what the engine refuses
+### Editing a scene with PS3 data
 
-Tested end to end, not reasoned: a PS3-sourced swap was built, booted, and compared against
-a baseline run of the same build with the same flags (the overlay on, pointing at a pristine
-copy of the same archive, so the only difference between the two legs is the ark's content).
+The PS3 build is worth keeping for the platform relationship alone ? it is the same game in
+the same container, so the two builds are a controlled comparison of exactly the bytes a
+reskin has to change.
 
-**Works: the glyph sheet.** `buttons.milo_xbox`'s 262,144-byte sheet is stored uncompressed
-in chunk 0, the PS3 copy is the same size, and writing `swap16(ps3 sheet)` over it changes
-what the game draws — measured on the running build:
+Measured on `controller_config`, whose pad art is the same picture on both platforms:
 
-| Screen | Pixels changed | Where |
-| --- | --- | --- |
-| Main menu footer | 0.163% | x 554–798, y 694–729 |
-| Options footer | 0.110% | x 539–765, y 676–705 |
-| Controls (CONTROLLER) footer | 0.110% | x 539–765, y 676–705 |
+- `swap16(360 stream)` equals the PS3 stream **byte for byte across 1,398,101 bytes** at the
+  pad record. Both builds store the same values with the 16-bit words in opposite order,
+  which is what an endianness difference in 16-bit texture elements looks like.
+- On `buttons`, whose art genuinely differs, the same swap reaches **63%** agreement against
+  23% left alone. The gap is the size of the difference a platform-specific sheet carries:
+  the two sheets are laid out the same but not drawn the same.
+- The 360 and PS3 `buttons.milo_xbox` files are the same size (266,490 B), their object
+  records are 99.5% identical, and the only large platform-varying span is the 262,167-byte
+  sheet region described above.
 
-The A button is the visible difference: retail draws a thin outline with a small letterform,
-the PS3 sheet draws a filled form of the same letter. That the sheet *is* the platform-specific
-asset is confirmed numerically — 70% of the region matches the PS3 copy after the swap, where
-the generic icon sheet matches 99.5% and every pad diagram matches 100%.
+**What a swap still needs, and what the engine refuses.** Writing a scene of a different
+size is not the obstacle it looked like: the payload ark route replaces whole entries and
+the archive index carries per-entry offsets and sizes, so a rebuilt scene can be any size.
+The obstacle is the texture: until the sheet's layout inside that 262,167-byte span is
+pinned by a measurement that survives the animated background, a replacement cannot be
+authored. That is the whole of the remaining problem, and it is a parsing problem, not a
+delivery one.
 
-**Refused: a recompressed chunk.** `controller_config`'s pixels live in deflate chunks, so
-editing them means recompressing. Its chunks are the same size as the archive entry's budget
-to within a few KB, and one edited chunk came out ~1 KB over, so the chunk was recompressed
-and padded back to its original stored size with trailing zeros — which is what a chunk
-stream would normally tolerate, since `ChunkStream` cannot be seeked and never reads past the
-end of a stream. **The engine does not accept it**: both the full build and a single-variant
-build crashed on the Controls page with an unhandled guest access violation. The likely
-reason is that `XMemDecompress` is handed the whole padded chunk as input and reports a
-failure when the deflate stream does not consume all of it. So a compressed chunk can only be
-edited if the replacement deflate stream fills its slot exactly — which needs either an
-identical compression ratio or a writer that can change an entry's length in the archive
-index, not a padded stream.
-
-**And nothing to gain there anyway:** the four pad diagrams are byte-identical between the
-two builds (100% after the swap), so the PS3 pad art is the same picture — the only
-platform-different art in this area is the button sheet.
-
-Two more facts worth keeping, both measured:
-
-- The record layout is `[u8 length][source path][26 bytes of fields][pixel data]`. The 26-byte
-  field block is the only part that does not match after the 16-bit swap (20 of its 26 bytes
-  differ between builds); everything from byte 26 on matches exactly, which is how the offset
-  is known rather than guessed.
-- A texture's pixels can **straddle a chunk boundary** — `img/xbox_2.png`'s record ends inside
-  chunk 6 and its data continues into chunk 7 — so an edit has to be applied to the reassembled
-  stream and split back, not written into one chunk.
+Recorded so it is not tried again: a deflate chunk that is recompressed but overruns its
+stored size cannot be padded back ? see the chunk-stream note in "The rest of the scene
+corpus" ? so an edit that sits in a compressed chunk has to fit or the entry has to be
+replaced wholesale, which the payload route makes possible.
 
 ### PS3 as a decoder oracle
 
