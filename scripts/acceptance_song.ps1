@@ -13,6 +13,13 @@
 #     song list previews the rows it scrolls past through that same controller;
 #   * the results screen has to name the expected song, so a pass really is
 #     evidence that *that* song was played and not an arbitrary row;
+#   * with -Pause the pause is decided from the screen too, because the log
+#     prints nothing for one: the title's XMPSetPlaybackController markers
+#     bracket the song's stream and a pause leaves them alone, so the pause menu
+#     (Windows OCR reads "GAME PAUSED") has to appear mid-song and leave the
+#     screen again on the same key, and the song still has to reach its own stop
+#     marker and its results screen afterwards — a run that only dismissed the
+#     menu would never get there;
 #   * the run fails if the log contains a [FATAL], if the window dies early, or
 #     if the log never prints the title's own "Title terminated" marker.
 #
@@ -24,6 +31,7 @@
 #   .\scripts\acceptance_song.ps1                       # 3 runs, "These Days"
 #   .\scripts\acceptance_song.ps1 -Runs 1 -Song 2 -SongName "ONE WEEK"
 #   .\scripts\acceptance_song.ps1 -Replay               # ... and play it again
+#   .\scripts\acceptance_song.ps1 -Runs 1 -Pause        # pause mid-song, resume
 #
 # Per run it writes out/m5-acceptance/runNN-*.png (the screens it asserted on)
 # and a copy of the run's log, then prints a pass/fail table. Exit code 0 means
@@ -43,6 +51,11 @@ param(
     [string]$UltimateMode = "0",
     # Play the song a second time from the results screen, in the same process.
     [switch]$Replay,
+    # Take a pause during the song and release it, asserting both from the
+    # screen (see the route notes at the top); a run does not pass without it.
+    [switch]$Pause,
+    # Seconds into the song at which the pause is taken.
+    [int]$PauseAfterSec = 45,
     [int]$BootTimeoutSec = 180,
     [int]$ScreenTimeoutSec = 90,
     [int]$SongTimeoutSec = 600,
@@ -116,6 +129,47 @@ function Get-LogMarkerTimes([string]$Text, [string]$Pattern) {
     return $times.ToArray()
 }
 
+# Take a pause during the song and release it, deciding both from the screen.
+#
+# The log cannot answer this one: a pause does not touch the playback
+# controller the song's envelope is read from (measured: the only
+# XMPSetPlaybackController lines in a paused run are the pair that brackets the
+# whole song), so the pause menu is the evidence there is. Start opens it and
+# Start releases it — the menu opens on "Resume Game" — and the release is the
+# text leaving the screen again, which gameplay (unreadable by OCR) satisfies
+# and a still-open menu does not. Taking the pause mid-song and releasing it
+# before the song's own stop marker is what makes it a pause *during* the song;
+# the caller checks that ordering against the envelope it was waiting for.
+function Invoke-PauseRoute([string]$Tag, [System.Collections.ArrayList]$Notes) {
+    $result = [ordered]@{ Paused = $false; Resumed = $false; PauseSec = 0; Taken = $null; Released = $null }
+    Invoke-Actions @("key:start")
+    $result.Taken = Get-Date
+    $text = Wait-ForScreen (Shot "$Tag-paused.png") "GAME PAUSED" 20 "${Tag}: pause menu"
+    if (-not $text.Contains("GAME PAUSED")) {
+        $Notes.Add("a Start during the song did not open the pause menu (screen text: $text)") | Out-Null
+        return [pscustomobject]$result
+    }
+    $result.Paused = $true
+
+    # The menu can swallow a press the way the offline notice over the results
+    # screen swallows an A, so press the key and re-check rather than assume one
+    # press is enough.
+    for ($i = 1; $i -le 3; $i++) {
+        Invoke-Actions @("key:start")
+        $deadline = (Get-Date).AddSeconds(15)
+        $left = $false
+        while ((Get-Date) -lt $deadline) {
+            if (-not (Get-ScreenText (Save-Shot "$Tag-resumed.png")).Contains("GAME PAUSED")) { $left = $true; break }
+            Start-Sleep -Seconds 2
+        }
+        if ($left) { $result.Resumed = $true; break }
+        $Notes.Add("the pause menu was still up after resume press $i") | Out-Null
+    }
+    $result.Released = Get-Date
+    $result.PauseSec = [int]($result.Released - $result.Taken).TotalSeconds
+    return [pscustomobject]$result
+}
+
 # Waits for the pair of playback markers that brackets a song.
 #
 # The song list previews the highlighted row through the very same controller, so
@@ -130,11 +184,17 @@ function Wait-For-SongEnvelope {
         [int]$TimeoutSec,
         [string]$Label,
         [System.Collections.ArrayList]$Notes,
-        [string]$ShotAtStart = ""
+        [string]$ShotAtStart = "",
+        # Seconds after the pair's own start marker at which a pause is taken,
+        # and the prefix its screens are written under. 0 leaves the wait alone.
+        [int]$PauseAfterSec = 0,
+        [string]$PauseTag = ""
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $k = $Base + 1
     $shotFor = 0
+    $pauseAt = 0
+    $pause = $null
     while ((Get-Date) -lt $deadline) {
         $text = Get-LogText $Path
         $starts = @(Get-LogMarkerTimes $text $startMarker)
@@ -145,10 +205,18 @@ function Wait-For-SongEnvelope {
             $shotFor = $k
             Save-Shot $ShotAtStart | Out-Null
         }
+        # The pause goes in only while pair $k is still open and has lasted
+        # $PauseAfterSec: a preview is rejected by the length test and $k moves
+        # on long before then, so a pause can never land on one.
+        if ($PauseAfterSec -gt 0 -and $pauseAt -ne $k -and $starts.Count -ge $k -and $stops.Count -lt $k -and
+            (Get-Date) -gt $starts[$k - 1].AddSeconds($PauseAfterSec)) {
+            $pauseAt = $k
+            $pause = Invoke-PauseRoute $PauseTag $Notes
+        }
         if ($starts.Count -ge $k -and $stops.Count -ge $k) {
             $sec = [int]($stops[$k - 1] - $starts[$k - 1]).TotalSeconds
             if ($sec -ge $MinSec) {
-                return [ordered]@{ Index = $k; Sec = $sec; Start = $starts[$k - 1]; Stop = $stops[$k - 1] }
+                return [ordered]@{ Index = $k; Sec = $sec; Start = $starts[$k - 1]; Stop = $stops[$k - 1]; Pause = $pause }
             }
             $Notes.Add("playback pair $k lasts ${sec}s, which is the list preview rather than the song") | Out-Null
             $k++
@@ -268,6 +336,7 @@ function Invoke-Run([int]$Run) {
         Run = $Run; Boot = $false; SongList = $false; Playing = $false
         Results = $false; SongSeen = $false; Replayed = $false; Fatal = $false
         Clean = $false; SongSec = 0; Envelope = ""; LogKB = 0
+        Paused = $null; Resumed = $null; PauseSec = $null
         ResultsText = ""; Notes = ""
     }
 
@@ -334,11 +403,27 @@ function Invoke-Run([int]$Run) {
         # Not named $song: PowerShell variable names are case-insensitive, so that
         # would shadow the -Song parameter this run is selecting.
         $playback = Wait-For-SongEnvelope -Path $log -Base 0 -MinSec 60 -TimeoutSec $SongTimeoutSec `
-            -Label "${tag}: song playback" -Notes $notes -ShotAtStart "$tag-playing.png"
+            -Label "${tag}: song playback" -Notes $notes -ShotAtStart "$tag-playing.png" `
+            -PauseAfterSec $(if ($Pause) { $PauseAfterSec } else { 0 }) -PauseTag $tag
         if ($playback) {
             $r.Playing = $true
         } else {
             $notes.Add("no song-length playback envelope appeared") | Out-Null
+        }
+        # The pause has to sit inside the song, not replace it: the envelope's
+        # own stop marker must come after the resume, and the song's length
+        # reported below then includes the paused span (the guest's clock is
+        # stopped by a pause, the wall clock is not).
+        if ($playback -and $playback.Pause) {
+            $r.Paused = $playback.Pause.Paused
+            $r.Resumed = $playback.Pause.Resumed
+            $r.PauseSec = $playback.Pause.PauseSec
+            if (-not ($r.Paused -and $r.Resumed)) {
+                $notes.Add("the pause was not both taken and released (see the pause notes above)") | Out-Null
+            } elseif (-not ($playback.Stop -gt $playback.Pause.Released)) {
+                $r.Resumed = $false
+                $notes.Add("the song's stop marker is not after the resume") | Out-Null
+            }
         }
 
         # 6. Results screen. It names the song, which is what makes a pass
@@ -451,19 +536,20 @@ for ($i = 1; $i -le $Runs; $i++) {
 }
 
 Write-Host "`n=== summary ==="
-$rows | Format-Table Run, Boot, SongList, Playing, Results, SongSeen, Replayed, SongSec, Fatal, Clean -AutoSize | Out-String | Write-Host
+$rows | Format-Table Run, Boot, SongList, Playing, Paused, Resumed, PauseSec, Results, SongSeen, Replayed, SongSec, Fatal, Clean -AutoSize | Out-String | Write-Host
 $rows | ForEach-Object { if ($_.Envelope) { Write-Host ("run {0}: playback {1} ({2}s) [{3}]" -f $_.Run, $_.Envelope, $_.SongSec, $SongName) } }
 $rows | ForEach-Object { if ($_.Notes) { Write-Host ("run {0}: {1}" -f $_.Run, $_.Notes) } }
 
 # A pass is the acceptance criterion: a clean process reaches the title,
 # picks the named song from the list, plays it to the end and reaches a results
 # screen that names it, with no fatal, and closes through its own window. With
-# -Replay the second song has to reach its results screen as well.
+# -Replay the second song has to reach its results screen as well, and with
+# -Pause the song itself has to be paused and released on the way.
 # @(...) because .Count on a single object is $null in PowerShell 5.1, which
 # would report "0 / 1" for a passing one-run validation.
 $pass = @($rows | Where-Object {
     $_.Boot -and $_.SongList -and $_.Playing -and $_.Results -and $_.Clean -and -not $_.Fatal -and
-    ((-not $Replay) -or $_.Replayed)
+    ((-not $Replay) -or $_.Replayed) -and ((-not $Pause) -or ($_.Paused -and $_.Resumed))
 }).Count
 Write-Host "launch-to-results: $pass / $Runs"
 $rows | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $capDir "summary.json")

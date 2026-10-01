@@ -3367,3 +3367,69 @@ song loop** stay boot-only; they are guest behaviour, not host logic, so no extr
 could reach them, and the backlog now carries them as their own entry rather than as a tail
 on this one.
 
+## Scripted coverage for the routes only a boot reached (2026-10-01)
+
+That backlog entry is closed with routes rather than with a test target, and no project
+source changed: one switch on the song route, one new script.
+
+### The pause is a screen, because the log has nothing to say
+
+`scripts/acceptance_song.ps1 -Pause` takes a pause 45 s into the song and releases it, Start
+both ways (the pause menu opens on Resume Game). The log was measured before the run was
+written: with `--log_noisy=true --log_level=trace` on, a paused run's log carries exactly
+the `XMPSetPlaybackController` pair that brackets the whole song — `(0,1)` at the start,
+`(0,0)` at the end, nothing at the pause — so a pause does not touch the controller the
+song's envelope is read from, and the screen is the only evidence there is. What the run
+requires is therefore: `GAME PAUSED` on the screen after the first Start, that text gone
+after the second, and the song's own stop marker *after* the release, which is what makes
+it a pause during the song rather than one that ended it. The paused span stays inside the
+reported envelope, because the guest's clock stops and the wall clock does not.
+
+### The menu tree, walked and verified
+
+`scripts/acceptance_screens.ps1` boots once and takes every screen the song route never
+reaches, one row at a time, with the screen each row produced read back as the assertion:
+the career leaderboard (which names Rock Central as the reason it is empty), the
+achievements row — **inert offline**: A on it leaves the menu up, and that is the
+assertion, a row that is present and does nothing — the HELP & OPTIONS submenu and its four
+pages (Controls, Calibration, Audio/Video, Credits; "How to Play" is the submenu's title,
+not a row), the eStore notice (left with A, which is what it asks for; B does nothing), and
+the EXIT GAME dialog, cancelled with B and then asked for again and confirmed, so the
+**guest** ends its own process.
+
+### Two guest behaviours the walk had to learn, both measured
+
+- **A list resets its selection whenever it is entered.** After B from the leaderboard
+  screen, an accept with *no stick input at all* opens the song list — the highlight was
+  back on PLAY. A walk that carries on from wherever the screen before left the highlight
+  therefore   reads a row nobody chose: the first version counted its down-taps across screens, so its
+  first row pressed none and opened the song list, three attempts running. Every row is now
+  clamped to the first row of its list and counted down from there.
+- **The guest's own exit is a different shutdown from a closed window.** The confirmed
+  EXIT GAME logs `KernelState::TerminateTitle` and then `Execution complete`; closing the
+  window from outside — the path `acceptance_launches.ps1` and `acceptance_song.ps1` use —
+  logs `Title terminated; hard-exiting process.` The first passing walk failed on exactly
+  that difference, and the script now requires the guest's own pair.
+
+### Verification (2026-10-01, Release `out/build/win-amd64-release`)
+
+- `.\scripts\acceptance_screens.ps1`: **PASS** — all 16 checks true on one boot, 8.1 MB log,
+  no `[FATAL]`, exit 0. Evidence in `out/m6-screens/`: 45 files, the screen it asserted for
+  every row plus the clamped/row/back shots around each one, `run.log` and `summary.json`.
+- `.\scripts\acceptance_song.ps1 -Runs 1 -Pause`: **PASS**, `1 / 1` — *These Days*, envelope
+  09:17:38 → 09:22:57 (319 s of wall clock, 7 s of it paused), results screen naming
+  "THESE DAYS", clean window close, no `[FATAL]`. It also shows the preview filter earning
+  its keep: pair 1 lasted 5 s and was rejected as the list's preview before the song's pair
+  was measured.
+- Negative control, so the green means something: run before the walk was fixed, the same
+  script failed three times and exited 1, naming the screen it actually got — `route:
+  leaderboards did not show what it should (screen: YOUR SONGS …)`.
+  The check is not vacuous.
+
+### What this does not cover
+
+The input layer itself. The routes inject keys, so a real pad and the mouse stay hand
+checks; injected keys also need the game window to hold the foreground, which is what the
+"machine left alone" caveat on
+[scripts/measure_pacing_input.ps1](../../scripts/measure_pacing_input.ps1) is about.
+

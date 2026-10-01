@@ -41,13 +41,24 @@ in [known-issues.md](known-issues.md).
       a function of host data alone. Chronology:
       [history/bringup-log.md](history/bringup-log.md), "An eighth host test target" and
       "The last three host-decidable hook decisions".
-- [ ] **Scripted coverage for the routes only a boot reaches** — pause/resume and the
-      UI paths outside the offline song loop are still verified by hand, and no host test
-      can reach them: they are guest behaviour, not host logic. The acceptance runs
-      already inject keys and read the screen back, so what is missing is routes, not
-      machinery — a pause taken and released during a song, and the screens no scripted
-      route visits. The standing limitation is recorded in
-      [known-issues.md](known-issues.md); this entry is what would retire it.
+- [x] **Scripted coverage for the routes only a boot reaches** — done 2026-10-01. A pause
+      taken and released during a song is a switch on the song route
+      (`scripts/acceptance_song.ps1 -Pause`): `GAME PAUSED` has to appear on the screen,
+      leave it again on the same key, and the song still has to reach its own stop marker
+      and name itself on the results screen afterwards. The log has nothing to say about
+      a pause — it does not touch the playback controller the song's envelope is read
+      from — so the screen is the evidence. The screens no scripted route visited are
+      their own run, [scripts/acceptance_screens.ps1](../scripts/acceptance_screens.ps1):
+      the career leaderboard, the inert achievements row, the four HELP & OPTIONS pages,
+      the eStore notice, and the EXIT GAME dialog, cancelled with B and then confirmed so
+      the guest ends its own process. Every row of that walk is clamped to the first row
+      of its list and checked against the screen it produced, because a list resets its
+      selection whenever it is entered (measured) and an injected tap is not evidence by
+      itself. What is left of the limitation is the input layer a script cannot be — a
+      real pad and the mouse — and it is recorded in
+      [known-issues.md](known-issues.md). Chronology:
+      [history/bringup-log.md](history/bringup-log.md), "Scripted coverage for the routes
+      only a boot reached".
 - [ ] **Mouse navigation limits** are accepted, not fixed — a screen whose rows a
       frame difference cannot read is given up on rather than measured, there is no
       guest cursor, and the overlay/foreground gates are reasoned rather than

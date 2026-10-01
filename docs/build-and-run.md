@@ -519,11 +519,14 @@ It reports `alive` / `fatal` / `log KB` / `clean` per run and is the canonical
 launch check. Related helpers: `scripts\capture_window.ps1 -OutFile <png>`
 and `scripts\drive_ui.ps1`.
 
-The harnesses that press keys (`acceptance_song.ps1`, `acceptance_persistence.ps1`,
-`measure_pacing_input.ps1`, `audit_ark_reads.ps1 -Actions`) pass `--mnk_mode=1` on
-the command line instead of relying on the local profile above: that profile is
-gitignored and machine-specific, so on a fresh checkout controller emulation is off
-and every injected key would be dropped in silence.
+The harnesses that press keys (`acceptance_song.ps1`, `acceptance_screens.ps1`,
+`acceptance_persistence.ps1`, `measure_pacing_input.ps1`, `audit_ark_reads.ps1
+-Actions`) pass `--mnk_mode=1` on the command line instead of relying on the local
+profile above: that profile is gitignored and machine-specific, so on a fresh
+checkout controller emulation is off and every injected key would be dropped in
+silence. The screens run also passes `--no-mouse_ui_nav`: the mouse is a second
+synthetic pad on the same guest slot, and a keyboard-driven walk should not depend
+on where the mouse pointer happens to be resting.
 
 The song-route counterpart drives the whole offline route instead of stopping at
 the window: it presses title → sign-in → offline prompt → main menu → song list,
@@ -550,6 +553,46 @@ re-checks instead of assuming one press is enough.
 It clears `logs\` before each run and writes `out\m5-acceptance\runNN-*.png` (every
 screen it asserted on as it went), a copy of each run's log, and `summary.json`; the
 exit code is non-zero unless every run passed the whole launch → results path.
+
+`-Pause` adds the one route inside the song that the log cannot show: a pause
+taken and released with Start. The title prints nothing when it pauses — a pause
+does not touch the playback controller the song's envelope is read from, so a
+paused run's log carries nothing but the pair that brackets the whole song — so
+the pause menu is the evidence: `GAME PAUSED` has to be on the screen, and off it
+again on the second Start, and the song still has to reach its own stop marker and
+name itself on the results screen afterwards. The paused span stays inside the
+reported envelope (the guest's clock stops, the wall clock does not):
+
+```powershell
+.\scripts\acceptance_song.ps1 -Runs 1 -Pause      # pause 45 s in, then resume
+```
+
+The menu routes the song never takes have their own run. `acceptance_screens.ps1`
+boots once and walks the main menu and the HELP & OPTIONS submenu from the top,
+taking every screen the offline song route does not reach: the career leaderboard
+(which names Rock Central as the reason it is empty), the achievements row
+(inert without a signed-in profile, so the menu still being up is what is
+asserted), the four HELP & OPTIONS pages, the eStore notice (left with `A`, which
+is what it asks for, and not with `B`) and the EXIT GAME dialog — cancelled with
+`B` and then asked for a second time and confirmed, so the **guest** ends its own
+process. That is a different shutdown from the window close the launch check
+uses: the guest's own exit prints `KernelState::TerminateTitle` and `Execution
+complete`, where closing the window prints `Title terminated; hard-exiting
+process.`
+
+```powershell
+.\scripts\acceptance_screens.ps1
+```
+
+Every row of that walk is clamped up to the first row of its list and counted
+down from there, then checked against the screen it produced, because the guest
+resets a list's selection whenever the list is entered — leaving the leaderboard
+screen and accepting with no tap at all opens the song list — so carrying on from
+wherever the last screen left the highlight reads a row nobody chose. A step that
+lands somewhere else walks the route again from the first row rather than
+pressing on into an unknown one. `-Pause` and this run write their screens to
+`out\m5-acceptance\<run>-paused|resumed.png` and `out\m6-screens\` respectively,
+with a copy of each run's log and a `summary.json` beside them.
 
 The storage counterpart runs five cases against a *dedicated* writable
 root rather than the user's `Documents\rb_blitz`, and checks each run's own trace
