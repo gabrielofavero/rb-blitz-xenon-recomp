@@ -9,3 +9,10 @@ game_root = "game"
 file_path = "game/default.xex"
 out_directory_path = "generated/default"
 includes = ["config/functions.toml"]
+# The guest CRT's context save/restore pair, so codegen bridges them to the
+# host's setjmp/longjmp instead of recompiling the raw VMX128 save (see
+# docs/symbols.md "Setjmp / longjmp").  Both sit inside the image: 0x82772510
+# is a PDATA entry point, 0x82772940 is inside the entry that starts at
+# 0x82772828 and is reached by bl from four sites.
+longjmp_address = 0x82772510
+setjmp_address = 0x82772940

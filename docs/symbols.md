@@ -167,6 +167,68 @@ Full detail, including the two defects patch 0005 exposed and the two the first 
 the unclaimed-run rule exposed, is in [bringup-log.md](history/bringup-log.md) under "Codegen: the
 B-003/B-006 root causes" and "B-006: the last forced entry goes away".
 
+## Setjmp / longjmp
+
+The guest's `setjmp`/`longjmp` are the CRT's own context save and restore, written
+for the Xenon ABI — where f14–f31, r13–r31, CR, LR and v64–v127 live across a call —
+into a 1,344-byte (`0x540`) buffer. Codegen bridges the pair to the host's
+`setjmp`/`longjmp` instead of recompiling the save
+(`longjmp_address`/`setjmp_address`, `[entrypoint]` of
+[rb_blitz_manifest.toml](../rb_blitz_manifest.toml)).
+
+| Guest address | What it is | Evidence |
+| --- | --- | --- |
+| `0x82772940` | `setjmp(_JUMP_BUFFER*)`, returns 0 | `mflr r0; mfcr r4`, then `stfd f14..f31` at 0–143, `std r1` (SP) at 144, `std r13..r31` at 152–303, `stw r4` (CR) at 304, `stw r0` (LR) at 308, a word it zeroes at 312, `stvlx128` for v64–v127 at 320–1343, ending `li r3,0; blr` at `0x82772C08`. Four `bl` sites: `0x82600060`, `0x826001E0`, `0x826D98D4`, `0x826D9E9C` |
+| `0x82772510` | `longjmp(_JUMP_BUFFER*, int)` | restores that layout offset for offset (`lfd` 0–136, `lwz` 144 = SP, `ld` 152–296, `lwz` 304 = CR, `lwz` 308 = LR, `lvx128` v64–v127 from 320), forces a zero value to 1 (`cmpwi r4,0` … `li r6,1`), takes the SEH path at `0x827727FC` (`bl __imp__RtlUnwind`, thunk `0x827F6164`) when the word setjmp left at `buf+312` is non-zero, and returns through `mtlr r5; ld r1,144(r7); mtcr r4; mr r3,r6; blr` at `0x827727F8`. 17 call sites: 15 `bl` (`0x825FF290`, `0x826D8924`, `0x826D9E30`, `0x82702A8C`, …) and 2 `b` (`0x825FF030`, `0x82702F0C`) |
+
+Why these two and not a lookalike:
+
+- The listings are each other's inverse, offset for offset — a layout nothing else
+  in the image writes. `0x82772510` is also a PDATA entry point (`0x82772510` …
+  `0x82772828`), which is what the size above is read from.
+- One guest function calls **both**, on the same buffer: `0x826D9868` (PDATA size
+  1488) does `addi r3,r31,16; bl 0x82772940`, keeps the result and branches on it
+  (`cmpwi r3,0; bne 0x826D9AB4` at `0x826D98F0`), and longjmps `r31+16` with value 1
+  at `0x826D9E30`.
+- Neither address is taken in data, and neither is built in a register: the only
+  dword in the decrypted image equal to `0x82772510` is its own PDATA entry
+  (`0x82183018`), `0x82772940` appears nowhere at all in either byte order, and no
+  `lis`/`addi`/`ori` pair constructs either one. Every call into the pair is one of
+  the 21 direct branches in the table.
+
+Two properties of the pair the recompiler has to live with:
+
+- **`setjmp` has no PDATA entry of its own.** The entry at `0x82772828` (unwind word
+  `0x40004506`, whose low byte encodes a six-instruction prologue) belongs to the
+  libm function in front of it, so by the table's own begin-to-next-begin arithmetic
+  `0x82772940`…`0x82772C08` sits inside *that* function's extent. Codegen still
+  registers it — the `bl` targets re-split the extent, the mechanism
+  [bringup-log.md](history/bringup-log.md) B-006 ended up relying on — and
+  `generated/default/codegen.partition.json` gives it an index of its own.
+- **The first five instructions are a call through a function pointer in `.data`**
+  (`lis r4,0x829E; lwz r0,0x67CC(r4); cmpwi r0,0; mtctr r0; bnectr` before anything
+  is saved): a hook `setjmp` runs first. The slot is zero in the image, so a plain
+  dump never calls it, and nothing in this port has to know what it would do.
+
+One reading caution for the next session: the VMX128 stores at 320–1343 are the one
+place the bundled `powerpc-none-elf-objdump` disagrees with the recompiler. It prints
+them as `psq_stx`/`psq_stux f0..f31` (a same-encoding ambiguity); the SDK's own
+decoder reads `stvlx128` in `setjmp` and `lvx128` in `longjmp`, one per register,
+v64–v127 — which is the reading the table above uses, and the one the generated
+bodies (`generated/default/rb_blitz_recomp.78.cpp` for `0x82772940`,
+`…recomp.40.cpp` for `0x82772510`) show.
+
+Measured on 2026-09-30, with a `REXLOG_INFO` in front of each of the 21 bridge sites
+(temporary, removed and the tree re-generated afterwards, and with a control probe in
+`sub_82768C88`, the MOGG header parser, to prove the channel logs: it fired 2,164
+times in a 40 s boot): **no run reaches either bridge.** A 40 s boot to the title
+screen and the whole offline route — boot → menu → song list → a 315 s song → the
+results screen (`scripts/acceptance_song.ps1 -Runs 1`, pass) — execute 0 of the 21
+sites; the same route on the clean tree passes as well. So
+the engine's `setjmp`/`longjmp` are error-path only: the bridge is correct by
+construction, and it is not what a happy-path crash would be, which disposes of the
+"it may already explain odd error-path deaths" hypothesis.
+
 ## Audio (MOGG) decryption path
 
 Music is encrypted and is decrypted with a key the kernel derives, not with a key

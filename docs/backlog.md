@@ -8,10 +8,6 @@ in [known-issues.md](known-issues.md).
 
 ## 1. Fixes implied by open known-issues
 
-- [ ] `longjmp_address` / `setjmp_address` are unset, so guest `longjmp`/`setjmp` has
-      no host bridge. Find Blitz's equivalents — `band3_recomp` sets
-      `0x82BBB620` / `0x82BBBA50` — or record why they are not needed
-      ([rb3-references.md](rb3-references.md) §8).
 - [ ] **Hook hygiene**: every hook file states the faithful behaviour and the reason
       for deviating, including each early return.
 - [ ] **Host test coverage beyond the seven existing targets** — `crypto_keytable`,

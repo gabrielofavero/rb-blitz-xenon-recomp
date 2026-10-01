@@ -3095,3 +3095,106 @@ that log (`[probe]`: 0).
 - **The CPU mirror can still be stale for GPU-written data**, which is the limit
   [known-issues.md](../known-issues.md) keeps for B-010; `d3d12_readback_resolve` is
   still the escape hatch, and this work does not change what the mirror holds.
+## The guest's longjmp/setjmp, and the bridge they now have (2026-09-30)
+
+The first item of [backlog.md](../backlog.md) §1 and the one open row of
+[rb3-references.md](../rb3-references.md) §8: `longjmp_address`/`setjmp_address`
+were unset, so the guest's own `longjmp`/`setjmp` had no host bridge. band3's
+numbers (`0x82BBB620` / `0x82BBBA50`) are another image's and do not transfer, so
+the pair had to be found in Blitz's.
+
+### How the pair was found
+
+Cheap in hindsight, and it is one instruction that makes it cheap: **`mfcr`.** A
+`setjmp` on this ABI has to save the condition register, and nothing else compiled
+into this image does: the whole `.text` (0x82190000-0x827F6ED4, decrypted with
+`scripts/decrypt_xex.py` and disassembled with the SDK's bundled
+`rexglue-sdk/tools/binutils/powerpc-none-elf-objdump`, which reads a `-b binary`
+input as little-endian, so the image was word-swapped first — scratch, not kept)
+holds exactly one `mfcr`, at `0x82772958` — and it sits in a function that saves
+f14-f31, r13-r31, SP, CR, LR and v64-v127 (1,344 bytes) into `r3`. `longjmp` is the
+twin in front of it: the CR restore `mtcrf` (printed `mtcr` by that objdump) occurs
+twice in the image, once in the SEH context restore at `0x824FFF24` and once in the
+function that restores exactly those offsets and returns the saved LR, at
+`0x827727F0`.
+
+The identification does not rest on that pattern alone. The two listings are each
+other's inverse offset for offset; one guest function (`0x826D9868`) calls both on
+the same buffer, `&r31+16`, and branches on `setjmp`'s result; neither address is
+taken in data or built in a register, so all 21 calls are the direct branches in
+[symbols.md](../symbols.md) "Setjmp / longjmp"; and `0x82772510` is a PDATA entry
+point, which is where its size comes from.
+
+One side finding belongs to B-006's class: **`setjmp` has no PDATA entry of its
+own.** The entry that covers its bytes begins at `0x82772828` and its unwind word
+(`0x40004506`, low byte = a six-instruction prologue) describes the libm function
+that ends at `0x82772938`, so by the table's own arithmetic the whole `setjmp`
+sits inside that function's extent. Codegen still registers `0x82772940` with an
+index of its own — a pass re-splits a segmentation a `bl` targets — so nothing had
+to be added to `config/functions.toml` for it.
+
+### The change
+
+Two keys in `[entrypoint]` of [rb_blitz_manifest.toml](../../rb_blitz_manifest.toml);
+nothing else. Codegen's `emit_function_call` has handled both since 0.10
+(`rexglue-sdk/src/codegen/builders/context.cpp` 175-193): a call to the setjmp
+address becomes `env = ctx; temp.s64 = ppc_setjmp(ctx.r3.u32); if (temp.s64 != 0)
+ctx = env; ctx.r3 = temp;`, and a call to the longjmp address becomes
+`ppc_longjmp(ctx.r3.u32, ctx.r4.s32)` (`[[noreturn]]`, aborting if the guest buffer
+address was never registered), instead of recompiling the 1,344-byte save. Both
+`bl` and the two tail `b` sites go through that path.
+
+### Does anything actually longjmp?
+
+No measured route does. All 21 bridge sites were instrumented with a `REXLOG_INFO`
+for one build — and, to prove the channel logs at all, `sub_82768C88` (the MOGG
+header parser, which runs whenever a music stream opens) got a control probe that
+fired **2,164** times in a 40 s boot. With the channel proved:
+
+- a 40 s boot to the title screen: **0** of 21 sites;
+- the full offline route (boot -> menu -> song list -> a 315 s song -> the results
+  screen, `scripts/acceptance_song.ps1 -Runs 1`): **0** of 21 sites.
+
+So the engine's `setjmp`/`longjmp` are error-path only on the routes this project
+can drive, and the backlog's "it may already explain odd error-path deaths" is
+answered in the negative: the missing bridge was not hiding a happy-path crash.
+The bridge still matters where an error path does run — it is what makes those
+paths correct rather than re-entering the guest save as ordinary code — but no
+observed run has entered one.
+
+### Verification (all 2026-09-30, Release `out/build/win-amd64-release`)
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset win-amd64-release --target rb_blitz_codegen` | exit 0, **0** analysis errors; the write pass reports 26 written / 189 unchanged |
+| the generated code | **21** bridge sites emitted: 4 `temp.s64 = ppc_setjmp(ctx.r3.u32)` and 17 `ppc_longjmp(ctx.r3.u32, ctx.r4.s32)`, matching the 4 `bl` and 17 `bl`/`b` call sites the disassembly has |
+| `cmake --build --preset win-amd64-release` | exit 0; 12 generated partitions recompiled, `rb_blitz.exe` linked |
+| `ctest` (7 host targets) | **7/7** passed (1.9 s) |
+| a 40 s boot of the instrumented build | title screen reached, `game data identity` clean, 0 `[FATAL]`, window closed cleanly ("Title terminated"); control probe 2,164 hits, the 21 bridge probes 0 |
+| `scripts/acceptance_song.ps1 -Runs 1` on the instrumented build (log 13,520 KB) | pass - boot -> song list -> **315 s** of playback (22:09:16 -> 22:14:31) -> results naming `THESE DAYS`, 0 `[FATAL]`, clean exit |
+| `scripts/acceptance_song.ps1 -Runs 1` on the final binaries (log 13,638 KB) | pass - the same route, 315 s of playback (22:21:25 -> 22:26:40), 0 `[FATAL]`, clean exit |
+| the two probes (removed afterwards) | control 2,164 hits; 0 setjmp and 0 longjmp across both routes above |
+| the tree after removal | `generated/default/codegen.build.stamp` and the SDK's input stamp deleted, codegen re-run: **14 written, 201 unchanged** (the 13 probed partitions + the control one), 0 probe lines left, 21 bridge sites intact - the emitted tree is codegen's own output again, not a hand-reverted copy |
+
+### What this does not cover
+
+- **No error path was driven.** Every measurement says the bridge is never
+  reached on the routes this project can script; it says nothing about whether the
+  bridge behaves correctly once one is. Driving one would need a title state this
+  harness cannot produce (the retry path inside `0x826D9868`, or whatever sets the
+  `setjmp` hook word at `0x829E67CC`, which is zero in the image and never set by
+  any run here).
+- **The host `setjmp`/`longjmp` pair is per-thread** (`get_jmp_buf_map()` is
+  `thread_local`), where the guest's buffer is just memory. A guest that set a
+  buffer on one thread and longjmped on another would now abort instead of
+  restoring; nothing observed does that, and 0 of 21 sites running means there is
+  no evidence either way.
+- **`ppc_longjmp` aborts when the buffer is unknown**, which is a behaviour change
+  for a guest that longjmps a buffer it never set through the bridge (the
+  recompiled save would have read whatever was there). That is the SDK's design,
+  not this project's, and it is the reason the two addresses had to be exact.
+- The disassembly this rests on was scratch and is not kept (deleted after the tree
+  was re-generated; `out/setjmp/` now holds only the two acceptance runs' screens
+  and logs); how to rebuild it is two lines up, and the addresses and the reading
+  are in [symbols.md](../symbols.md), which is what a future session should work
+  from.
