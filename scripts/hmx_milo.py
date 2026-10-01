@@ -150,6 +150,63 @@ class Milo:
         """The scene's texture assets, which is what a swap has to aim at."""
         return [name for name in self.assets() if name.endswith(".tex")]
 
+    def texture_records(self):
+        """Every texture's record: its builder-side source path and its dimensions.
+
+        A texture asset is serialised as a length-prefixed source path followed by
+        the fields the engine loads it with - the interesting ones being three
+        big-endian 16-bit values, width, height and row bytes, so the bits per
+        pixel follows from ``row_bytes * 8 / width``. The path is what tells a
+        reskin which file it is replacing (`img/xbox_0.png`,
+        `../image/icons_buttons_xbox_nomip.bmp`), and the dimensions are what the
+        pixel data has to match. Where that data sits is still open - see
+        docs/assets.md, "Where the art actually lives".
+        """
+        stream = self.stream()
+        records = []
+        for match in re.finditer(rb"\.(?:bmp|BMP|png|PNG)\b", stream):
+            end = match.end()
+            path = None
+            for back in range(1, 64):
+                if stream[end - back] != back - 1:
+                    continue
+                start = end - back + 1
+                if all(32 <= byte < 127 for byte in stream[start:end]):
+                    path = stream[start:end].decode("latin-1")
+                break
+            if path is None:
+                continue
+            dims = self._dimensions_after(stream, end)
+            if dims is None:
+                continue
+            width, height, row_bytes = dims
+            records.append({
+                "path": path,
+                "width": width,
+                "height": height,
+                "row_bytes": row_bytes,
+                "bpp": row_bytes * 8 // width,
+                "at": end,
+            })
+        return records
+
+    @staticmethod
+    def _dimensions_after(stream, at):
+        """The width/height/row-bytes triple that follows a source path, if any."""
+        window = stream[at:at + 48]
+        for offset in range(0, len(window) - 6):
+            width, height, row_bytes = struct.unpack_from(">HHH", window, offset)
+            if width < 8 or width > 4096 or height < 8 or height > 4096:
+                continue
+            if width & (width - 1) or height & (height - 1):
+                continue
+            if row_bytes != width * 8 // 8:  # every texture in these scenes is 8bpp
+                continue
+            if row_bytes > 4096:
+                continue
+            return width, height, row_bytes
+        return None
+
     def describe(self):
         lines = [
             f"{self.path}: {len(self.data)} bytes, {self.codec} chunk stream, "
@@ -206,6 +263,34 @@ def cmd_dump(args):
     return 0
 
 
+def cmd_records(args):
+    """List the texture records of one or more scenes (or every scene under a root)."""
+    paths = []
+    for target in args.path:
+        if os.path.isdir(target):
+            for root, dirs, files in os.walk(target):
+                paths += [os.path.join(root, f) for f in files if f.endswith(".milo_xbox")]
+        else:
+            paths.append(target)
+    total = 0
+    for path in sorted(paths):
+        try:
+            records = load(path).texture_records()
+        except (OSError, MiloError) as exc:
+            if args.verbose:
+                print(f"{path}: {exc}")
+            continue
+        if not records:
+            continue
+        total += len(records)
+        print(f"\n{os.path.relpath(path, args.root) if args.root else path}")
+        for record in records:
+            print(f"  {record['width']:>5}x{record['height']:<5} {record['bpp']:>3}bpp  "
+                  f"{record['path']}")
+    print(f"\n{total} texture record(s) in {len(paths)} scene(s)")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="hmx_milo.py",
@@ -228,6 +313,13 @@ def main(argv=None):
     p.add_argument("--chunk", type=int, default=0)
     p.add_argument("--out")
     p.set_defaults(func=cmd_dump)
+
+    p = sub.add_parser("records", help="list every texture's source path and dimensions")
+    p.add_argument("path", nargs="+", help="a scene, or a directory to walk")
+    p.add_argument("--root", help="strip this prefix from the printed paths")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="also report files that are not chunk streams")
+    p.set_defaults(func=cmd_records)
 
     args = parser.parse_args(argv)
     try:

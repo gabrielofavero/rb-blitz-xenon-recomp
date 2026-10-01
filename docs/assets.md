@@ -162,7 +162,32 @@ owns which texture. [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads all of t
 python scripts\hmx_milo.py info extracted\ui\splash\gen\splash.milo_xbox --out-dir out\milo
 python scripts\hmx_milo.py list extracted\ui\splash\gen\splash.milo_xbox --textures
 python scripts\hmx_milo.py dump extracted\ui\splash\gen\splash.milo_xbox --chunk 3 --out chunk3.bin
+python scripts\hmx_milo.py records extracted\ui --root extracted   # the map below
 ```
+
+### The map: which scene owns which UI art
+
+Every texture in a scene is serialised as a length-prefixed **builder-side source
+path** followed by its dimensions — three big-endian 16-bit values, width, height and
+row bytes, with the bits per pixel following from `row_bytes * 8 / width`. `records`
+walks any scene (or a whole tree) and prints them, which answers the one question a
+reskin starts with: *which file is this screen's art?* Across the dump it finds
+**706 texture records in 151 scenes**; the ones the UI work cares about:
+
+| Scene | Texture | Size |
+| --- | --- | --- |
+| `ui/controller_config/gen/controller_config` | `img/xbox_0.png` … `xbox_3.png` | 1024×1024, 8bpp |
+| `ui/controller_config/gen/controller_config` | `img/ps_0.png` … `ps_3.png` | 1024×1024, 8bpp |
+| `ui/resource/fonts/gen/buttons` | `../image/icons_buttons_xbox_nomip.bmp` | 512×512, 8bpp |
+| `ui/resource/fonts/gen/blitz_icons` | `../image/blitz_icons_xbox_nomip.bmp` | 1024×512, 8bpp |
+| `ui/calibration/gen/cal_auto` | `../image/button_a_calibrate_icon0001/2.bmp`, `button_press_ps30001/2.bmp` | 256×256, 8bpp |
+| `ui/store/gen/store` | `img/ps_1080.bmp` | 512×128, 8bpp |
+| `track/cached_subdirs/gen/track_shared_textures` | `icon_*` / `*_chevron` / `*_watermark` (guitar, drums, bass, keys, mic), `help_arrow`, `multiplier_arrow` | 128², 128×256, 256×64, 64×64 |
+
+So the A/B prompts on every menu come from **`buttons.milo_xbox`**, the controller
+diagrams from **`controller_config.milo_xbox`**, and the in-game lane icons from
+**`track_shared_textures.milo_xbox`** — each an 8-bit (one byte per pixel) image, and
+each reachable by editing its scene inside the archive.
 
 ### Where the art actually lives, and what an edit does
 
@@ -192,6 +217,18 @@ is fully opaque, with the material supplying the colour (a `UIColor` set — `no
 `focused`, `disabled`, `selected` — is in the same scene). That is also why the sheet
 decodes as neither DXT1 nor DXT5 (both produce a dither when written back) and why no
 256-entry palette exists anywhere in the scene: the bytes are the ink samples themselves.
+
+The region's size agrees with the record: the record declares 512 × 512 at 8 bits per
+pixel, and 512 × 512 × 1 = 262,144 bytes, exactly the region that was edited. The two
+are also in the same scene section — the record sits ~2 KB before it, with the scene's
+other objects (`Mat`, the `Font` and its `Glyph` table) in between.
+
+Two hypotheses about the data layout were tested and **rejected**, so a later attempt
+need not repeat them: the section is *not* a stored mip chain (a chain of 1024 down to 8
+is 1,398,080 bytes, which happens to match the gap between two consecutive records in
+`controller_config`, but the level-2 block at `base + 1024²` does not resemble the
+downsampled base at any offset), and it is not DXT (writing a solid DXT encode back
+produced a dither rather than a solid colour).
 
 What is still open is the *sample-to-screen mapping*. Every probe that wrote a spatially
 varying pattern came back as a single one-pixel seam rather than a scaled image, which
@@ -226,16 +263,32 @@ length-prefixed builder-side source path — `splash.milo_xbox` names
 `img/list_neon_outer.png`, `img/list_panel.png`, `img/start_inner_neon.png` (512×512 and
 512×128 at bpp 8), and no such entry exists in either archive.
 
-So today: **standalone textures can be swapped** (`hmx_tex.py`, byte-verified offline,
-DDS round trip bit-exact), a **scene's own bitmap can be edited and the game will use it**
-(the four experiments above — the delivery chain is proven), the scenes that own the
-menu, button and layout art can be read and enumerated (`hmx_milo.py`), and what is left
-is the sample-to-screen mapping inside a scene's bitmap, which the font's glyph records
-should settle.
+### Can a UI texture be swapped today?
+
+Partly — the halves are uneven.
+
+**Ready.** Finding the art (the `records` map above: which scene, which source path,
+what dimensions). Reading and writing the archive, including a small overlay copy. Proven
+delivery: an edit inside a scene reaches the screen. A known-good worked example: the
+glyph sheet in `buttons.milo_xbox`, whose 262,144-byte region is located, size-checked
+against its record, and demonstrated to change the A/B prompts.
+
+**Not ready.** Turning a texture record into a *pixel buffer* you can save and load. The
+record gives the dimensions and the size follows from them, but nothing yet says where
+that buffer begins relative to the record — the writer interleaves other objects
+(materials, `Font` and its `Glyph` table) into the same section — so the offset has to be
+found per texture, and there is no tool that does it. Until there is, "replace the
+controller image" is a research task: read the glyph/object records around the texture to
+find the buffer boundary with certainty, then a `records`-driven extract/import pair is a
+small addition.
+
+So: recognise *what* to edit in one command, edit *it* still by hand. The honest summary
+is that this is one tool away — a scene-texture extractor/import that pins the buffer
+offset — and the remaining unknown is a parsing detail, not a format mystery.
 
 Two practical notes for the next attempt. A scene patch never needs to recompress: on the
 five scenes checked (`buttons`, `splash`, `background_night`, `content_refresh`,
-`player_state_sounds`) the first chunk is always stored decompressed, and the bitmaps sit
+`player_state_sounds`) the first chunk is always stored decompressed, and the textures sit
 in it. And a swap must be judged by a pixel diff: writing opaque white over a white menu
 is applied but looks like nothing happened, which is exactly the trap this section walked
 into twice.

@@ -43,23 +43,26 @@ that name an action.
 
 ## 4. Deferred, with no design yet
 
-- [ ] **Texture swapping for the in-game UI** — the mechanism works and the first target is
-      located; what is left is one mapping. Verified: editing a *scene* inside the archive
-      changes what the game draws (zeroing a 262,144-byte region of
-      `ui/resource/fonts/gen/buttons.milo_xbox` removes the main menu's A/B button
-      prompts; filling it makes them opaque). That region is the font's **512×512,
-      row-bytes-512, single-level 8-bit** glyph sheet, sitting in chunk 0 — which every
-      scene keeps *stored*, so a patch never needs recompression. The byte is ink
-      coverage, `0x00` transparent and `0xFF` opaque, with the material supplying the
-      colour. Open: the sample-to-screen mapping (a spatially varying pattern comes back
-      as a one-pixel seam, which points at the font's per-character `Glyph` rectangles —
-      `x`, `y`, `width`, `height` — rather than a row-major sheet). Read those glyph
-      records next; the evidence, offsets and the four experiments are in
-      [assets.md](assets.md), "Where the art actually lives". The standalone
-      `*.png_xbox` / `*.bmp_xbox` path is already done
-      ([scripts/hmx_tex.py](../scripts/hmx_tex.py), DDS round trip bit-exact) and
-      [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads any scene's chunk stream and
-      lists the `.tex` assets a screen owns.
+- [ ] **Scene texture extract/import: pin the buffer offset, then a scene reskin is a
+      two-command job.** Everything else is in place and verified. The map exists
+      ([scripts/hmx_milo.py](../scripts/hmx_milo.py) `records`: **706 texture records in
+      151 scenes**, with each texture's builder source path and dimensions — the button
+      prompts are `buttons.milo_xbox`'s `../image/icons_buttons_xbox_nomip.bmp` at 512×512,
+      the controller diagrams are `controller_config.milo_xbox`'s `img/xbox_0..3.png` and
+      `img/ps_0..3.png` at 1024×1024, the lane icons are `track_shared_textures`), the
+      delivery works (editing a scene inside the archive changes what the game draws,
+      proven on the A/B prompts), and a texture is 8-bit with `0x00` transparent and
+      `0xFF` opaque. What is missing is the one thing an extractor needs: **where the
+      pixel buffer starts**. The dimensions follow from the record and so the buffer size
+      follows from them (`buttons.tex`: 512 × 512 × 1 = 262,144 bytes, exactly the region
+      whose edit changed the screen), but the writer interleaves other objects —
+      materials, and for a font its `Glyph` table — into the same section, so the offset
+      has to be derived per texture rather than assumed. Read the object records between
+      a texture and the next one (the `Glyph` rectangles are the natural first target,
+      since they also give the sample-to-screen mapping the last experiments could not
+      pin down), then add `extract`/`import` to `hmx_milo.py`. Evidence and the rejected
+      hypotheses — not a mip chain, not DXT — are in
+      [assets.md](assets.md) "Where the art actually lives".
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
