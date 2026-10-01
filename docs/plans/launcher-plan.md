@@ -348,6 +348,34 @@ where that honesty is most needed.
 
 ---
 
+### D15 — Reusing the game's own UI art
+
+**Recommendation:** reuse it, but only ever **derived from the user's own game data, on their
+machine — never committed and never shipped.** The project already draws this line for the
+wizard: [installer/tools/make_art.ps1](../../installer/tools/make_art.ps1) renders from a source
+image that is not ours into `assets/wizard-*.bmp`, which `.gitignore` excludes, and absence is a
+supported configuration (D11, Contract 5). Every game-derived image the launcher ever shows —
+background, logo, button prompts, controller diagrams — inherits exactly that rule. Reusing the
+game's art is a *look*, not a payload.
+
+Three routes, in the order they should be attempted. None is a new subsystem:
+
+1. **Read the art out of `game/` at runtime.** The launcher already knows the game root; nothing
+   is generated, nothing is redistributed, and the art tracks the installed game. Blocked on one
+   parsing detail — see §10.4 — so this is the goal, not the start.
+2. **Generate it locally on the user's machine** at first run, into the launcher's own data
+   directory: same posture as `make_art.ps1`, same "not ours, gitignored, absence supported"
+   comment. Available today with a *capture* source (§10.3).
+3. **Draw the fallback.** Flat panel, the committed `assets/blitz.png` badge, the title text.
+   Already Contract 5's rule for the cover; §10.2 extends it to every slot.
+
+So the deliverable that is unblocked now is not an extractor: it is the **slot list** — what
+images the launcher wants, at what sizes, each with its fallback — because that is what makes a
+later extractor a drop-in instead of a redesign. §10 is that list, the research behind it, and the
+phases.
+
+---
+
 ## 4. Contracts that must exist before parallel work
 
 These are Wave 0. Everything else can be built against them by someone who has read only this section.
@@ -1108,7 +1136,128 @@ Anything not in this table is not verified, and should be said out loud rather t
 
 ---
 
-## 10. Open questions
+## 10. Reusing the game's own UI art — inventory, routes, blocker
+
+The research behind D15. Everything here was read off the dump, not guessed; the tooling it names
+is [scripts/hmx_milo.py](../../scripts/hmx_milo.py) and the measurements are in
+[assets.md](../assets.md).
+
+### 10.1 What is reusable, and where it lives
+
+Every texture in a scene carries a record naming the **builder-side source path** and the
+dimensions, which is enough to say which screen owns which art. Across the dump: **706 texture
+records in 151 scenes.** The ones a launcher would want:
+
+| Slot | Scene | Source-path record | Size |
+| --- | --- | --- | --- |
+| Background | `ui/background/gen/background_night.milo_xbox` | `img/night_gradient.bmp`, `img/northern_lights.bmp`, `rays.tex`, `img/star.png` | 1024² and up, 8-bit |
+| Logo | `ui/splash/gen/splash_logo_element.milo_xbox`, `ui/splash/gen/splash.milo_xbox` | `splash_elements.tex`, `splash_logo.tex` | — |
+| Button prompts (A/B/X/Y, LB/RB) | `ui/resource/fonts/gen/buttons.milo_xbox` | `../image/icons_buttons_xbox_nomip.bmp` | 512×512, 8-bit |
+| Extra button icons | `ui/resource/fonts/gen/blitz_icons.milo_xbox` | `../image/blitz_icons_xbox_nomip.bmp` | 1024×512, 8-bit |
+| Controller diagrams | `ui/controller_config/gen/controller_config.milo_xbox` | `img/xbox_0..3.png`, `img/ps_0..3.png` | 1024×1024, 8-bit |
+| Calibration prompts | `ui/calibration/gen/cal_auto.milo_xbox` | `button_a_calibrate_icon0001/2.bmp`, `button_press_ps30001/2.bmp` | 256×256 |
+| Lane / power-up icons | `track/cached_subdirs/gen/track_shared_textures.milo_xbox` | `icon_guitar/drums/bass/keys/mic*`, `help_arrow`, `multiplier_arrow` | 64²–128×256 |
+
+Two facts matter for the launcher. The prompts are **font glyphs**, not standalone images: the A/B
+prompts on every screen come from the one 512×512 sheet in `buttons.milo_xbox`, drawn through a
+`Glyph` table — which is why they never appear as separate ark entries. And the controller
+diagrams are four 1024² images per pad family in one scene, so "Controller → Manual" can show the
+real pad without drawing anything.
+
+### 10.2 The slots, and a fallback for each
+
+Contract 5's rule ("absence is a supported configuration") applied to every slot, not just the
+cover. This table *is* the deliverable that is unblocked today: with it, a later extractor is a
+drop-in, and an empty launcher is still a working one.
+
+| Slot | Wanted | Absent → |
+| --- | --- | --- |
+| Window background | one 1920×1080 image, darkened | flat panel, `assets/blitz.png` badge, title text |
+| App badge / logo | the Blitz wordmark, transparent | `assets/blitz.png` (committed) |
+| Tab icon strip (General/Graphics/Controller/Experimental) | 4 small icons | text labels only |
+| Prompt icons (A, B, X, Y, LB, RB, D-pad, Start, Back) | 9 transparent sprites at 32–64 px | drawn shapes: a filled circle with the letter, a rounded rect for the shoulders |
+| Controller diagram | one image per pad family | the drawn shapes above, or nothing (the binding list already names the buttons) |
+| Cursor / focus ring | 1 accent sprite | a 1 px outline |
+
+Every row must be reachable *both* filled and unfilled in a debug build (a `--no-art` switch), for
+the same reason D6 has `--no-gamepad`: the fallback is the recovery path, not dead code.
+
+### 10.3 Route 2 in practice — capture, which works today
+
+The game's own screens are already scriptable from this repository:
+[scripts/drive_ui.ps1](../../scripts/drive_ui.ps1) sends keys,
+[scripts/capture_window.ps1](../../scripts/capture_window.ps1) shoots the window. Measured on a real
+run: the splash, title, main-menu and options screens capture cleanly at 1360×768, and the footer
+prompt glyphs are ≈40 px — usable for a prompt icon, marginal as an upscaled background. This route
+needs no new file-format work at all: it is `make_art.ps1`'s posture with a `-SourceImage` that
+happens to be a capture. It is also the fastest way to answer "does the look carry over", which is
+worth knowing before investing in the extractor.
+
+Caveats, measured: a capture includes whatever is composited on top (a desktop notification landed
+in one of mine), the title screen is animated so a still is a choice, and the window size is the
+game's, not the launcher's.
+
+### 10.4 Route 1's blocker — the one open detail
+
+Reading the art out of `game/` needs the scene's pixel buffer, and its offset is the only thing not
+yet pinned. State of the research, so a next attempt starts where this one stopped:
+
+- **Proven.** The container (0x810-byte chunk table, deflate chunks), the record (source path plus
+  width/height/row bytes), the pixel format (8-bit, one byte per pixel), the meaning of the byte
+  (`0x00` transparent, `0xFF` opaque, the material tints it — not DXT, not palettised), and
+  delivery: editing a scene inside the archive demonstrably changes what the game draws.
+- **Proven for one texture.** In `buttons.milo_xbox` the glyph sheet is the last 262,144 bytes of
+  chunk 0 — exactly `512 × 512 × 1`, matching its record — and zeroing it removes the A/B prompts
+  from the menu, while filling it with `0xFF` makes them opaque.
+- **The blocker.** The rule "the buffer is the last `w × h × bpp` bytes of the chunk" does *not*
+  generalise: chunks hold several textures, and the writer interleaves other objects (materials,
+  and for a font its `Glyph` table) into the same section, so nothing yet says where a given buffer
+  starts.
+- **Rejected, do not retry.** An RB3-shaped inline `RndBitmap` header (no match anywhere); a
+  power-of-two descriptor shape beyond the one already used; a **stored mip chain** (the byte counts
+  line up — a 1024² chain without its base level is 349,525 and the gaps between consecutive records
+  are exactly that plus the record — but the level-2 block does not correlate with the
+  box-downsampled base at *any* offset, and scores worse than a control block, so the match is a
+  coincidence); DXT in either byte order (a solid DXT encode comes back as a dither); and a
+  256-entry palette (none exists in the scene).
+
+**Next step, and the reason it is small:** read the *object records* that sit between one texture
+and the next. The `Glyph` table is the natural first target — it is a list of `x, y, width, height`
+rectangles that must fit inside the 512×512 sheet, so its values both locate the sheet and supply
+the sample-to-screen mapping that the last round of experiments could not pin down. Once one scene's
+buffer offset is derived from its own records rather than assumed, the same derivation applies to
+every other scene, and `hmx_milo.py extract` / `import` is a small addition on top of tooling that
+already exists.
+
+### 10.5 Phases
+
+| Phase | Work | Blocked on |
+| --- | --- | --- |
+| **P0** | The slot list (§10.2) in the launcher's own build, `--no-art`, and the flat-panel and drawn-shape fallbacks — every slot rendered filled and unfilled. | nothing |
+| **P0** | A capture script in `make_art.ps1`'s posture (`launcher/tools/`), producing the background, the badge and the prompt crops into a gitignored directory at build or first run. | nothing (capture already works) |
+| **P1** | Derive the scene buffer offset from the object records (§10.4), then read background, logo and prompts straight out of `game/` at runtime — route 1, with no generated files at all. | P0's loader |
+| **P2** | The pad-family diagrams on Controller → Manual, and the game's own fonts if the launcher ever wants them. | P1 |
+
+P0 is worth doing first regardless of P1: it is the difference between a launcher that can *use* art
+and one that needs it.
+
+### 10.6 Risks
+
+- **Licensing is the whole reason for the rule, not a formality.** Shipping the installer or the
+  launcher with retail art inside it would be redistributing the game's assets.
+  Derived-on-the-user's-machine (routes 1 and 2) is the only acceptable form, and the `.gitignore`
+  rule that covers `assets/wizard-*.bmp` has to cover whatever the launcher's build writes too.
+- **A capture is not the game's art file.** It carries the HUD, the prompts, and whichever animation
+  frame it was taken on; it is a fallback source, not a substrate for recolouring. Anything that has
+  to *change* an asset — a theme, a colourway — needs route 1.
+- **Fallbacks are load-bearing.** Every art slot has to look intentional when empty, or an absent
+  game dump becomes a broken-looking launcher.
+- **The launcher is not the game's UI.** §9 keeps it out of the guest's screens; reusing art must not
+  drift into re-implementing them.
+
+---
+
+## 11. Open questions
 
 **Settled 2026-09-27:** D13's fork — this plan owns the per-device remap work, and the launcher's
 Controller → Manual page is its panel. Consequences are already folded into R13, §2.2, D13, the
@@ -1132,7 +1281,17 @@ For the running artifacts (answer with a boot, not an opinion):
 
 ---
 
-## 11. Sources
+### 11.1 Also open, for the art (D15, §10)
+
+6. **Is a capture good enough to ship as the look**, or does the launcher wait for route 1 (runtime
+   read)? Answer by building P0's slot list and looking at a filled launcher next to a filled game.
+   The capture route is unblocked today, so this is a cheap answer.
+7. **Does the launcher need the game's fonts?** The prompts are glyphs from `buttons.tex`; the rest
+   of the launcher's text is ImGui's. Reusing the game's font means carrying the `Glyph` table too
+   (§10.4's next step), which is only worth it if the answer to 6 is "the look matters a lot".
+
+---
+## 12. Sources
 
 - [installer/README.md](../../installer/README.md) — what the installer contains, the helper contract,
   the payload allow-list, silent parameters, uninstall.
@@ -1149,3 +1308,7 @@ For the running artifacts (answer with a boot, not an opinion):
 - [docs/dlc.md](../dlc.md) — DLC layout and the save containers under `Documents\rb_blitz`.
 - [docs/known-issues.md](../known-issues.md), [docs/backlog.md](../backlog.md) — the standing limits and
   the deferred features this plan must not quietly un-defer.
+- **The art research (§10):** [scripts/hmx_milo.py](../../scripts/hmx_milo.py) — the scene reader whose
+  `records` command produces the texture inventory; [docs/assets.md](../assets.md) — the container and
+  texture formats, the delivery experiments and the rejected hypotheses; [scripts/drive_ui.ps1](../../scripts/drive_ui.ps1)
+  and `scripts/capture_window.ps1` — the capture route the acceptance scripts already use.

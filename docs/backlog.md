@@ -39,6 +39,11 @@ that name an action.
       prompt-by-prompt with waves, a dependency graph and an open-questions list that has
       to be answered before wave 0. It absorbed the per-device remap design: lane C
       builds the remap core and the launcher's Controller → Manual page is its panel.
+      It also reuses the game's own UI art where it can (D15, [§10](plans/launcher-plan.md)):
+      background, logo, button prompts and the controller diagrams, all derived from the
+      user's own game data on their machine and never shipped. §10 has the inventory of
+      what is reusable and where it lives, the capture route that works today, and the one
+      parsing detail that still blocks reading the art straight out of `game/`.
       Nothing in it gates release readiness.
 
 ## 4. Deferred, with no design yet
