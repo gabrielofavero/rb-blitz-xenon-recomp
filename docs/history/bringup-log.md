@@ -3300,7 +3300,70 @@ branches with their own messages.
 ### What this does not cover
 
 The hook bodies themselves. Protecting a read-only page, registering the overlay device
-and forwarding to `__imp__XeKeys*` / `__imp__sub_*` still need a boot; so do every other
-hook in [src/hooks/](../../src/hooks), pause/resume, and the UI paths outside the offline
-song loop. The known-issues row and the backlog entry now say exactly that.
+and forwarding to `__imp__XeKeys*` / `__imp__sub_*` still need a boot, as do pause/resume
+and the UI paths outside the offline song loop. The section below takes the same
+extraction as far as it goes in the rest of [src/hooks/](../../src/hooks).
+
+## The last three host-decidable hook decisions (2026-10-01)
+
+The Ultimate layer's plan header did this for one hook; this pass did it for the rest.
+Every decision that was still written inside a hook body that touches the SDK moved into
+the SDK-free header its test target already reaches, which leaves those hook bodies with
+the SDK call and nothing else to decide.
+
+### What moved, and where it is pinned
+
+- `src/hooks/crypto.cpp`, `XeKeysSetKey`: which of three shapes a key buffer is - an entry
+  of the obscured table, a plausible guest pointer, or neither - is now
+  `crypto::SelectKeySource` in [src/hooks/crypto_keytable.h](../../src/hooks/crypto_keytable.h),
+  and `IsPlausibleGuestPointer` moved there with it. Both ends of the address window are
+  pinned as inclusive. The **arm order** is pinned too, and it matters: the table sits
+  high in the guest address space, so its own entries are also plausible pointers, and
+  swapping the two arms fails the test (see the control below).
+- `src/hooks/crypto.cpp`, `XeKeysAesCbc`: which key the call runs under - the slot the key
+  id names, the most recently keyed slot, or no key at all - is now `crypto::SelectCbcKey`,
+  the same three outcomes the two `if`s produced. The one-shot `g_warned_*` logging is
+  unchanged.
+- `src/hooks/dlc.cpp`, `Configure`: the four refusals - no directory, no package, no
+  content manager, or register - are now `fs::DecideDlcRegistration` in
+  [src/fs/dlc_layout.h](../../src/fs/dlc_layout.h), a precondition chain written in the
+  hook's own order: a directory that is not there is not scanned, and a scan that found
+  nothing is not reported as unregisterable.
+
+### Behaviour is unchanged
+
+Each function is the branch structure that was already there, moved: the same
+comparisons, the same order, the same log lines. One internal ordering changed in
+`dlc.cpp` - the content-manager lookup happens before the switch rather than after the
+empty-scan check - and it changes nothing observable: the lookup has no side effects, and
+the decision still answers "no packages" first. The scan still runs only when the
+directory exists, so an absent `dlc/` folder stays as silent as it was.
+
+### Verification (2026-10-01, Release `out/build/win-amd64-release`)
+
+- `cmake --build --target rb_blitz`: `crypto.cpp` and `dlc.cpp` recompiled and
+  `rb_blitz.exe` linked, exit 0 - the extraction is only as good as the compile that
+  proves the call sites still agree.
+- `ctest --output-on-failure`: **8/8** passed (1.37 s). The two extended targets grew
+  without a new target being added: `crypto_keytable` 88 checks / 9 cases → **116 / 13**,
+  and `dlc_layout` → **59 checks / 8 cases** (two new cases, one of them built on a real
+  scratch tree so the decision is asked with a scan's own result).
+- Negative control: with the two arms of `SelectKeySource` swapped, `crypto_keytable`
+  reports **4 of 116 checks failed** and exits 1. It was reverted and the binary rebuilt
+  before the 8/8 run above.
+- Debug, as a second compiler configuration over the same headers: the two targets build
+  and pass in `out/build/win-amd64-debug` unmodified - 116 and 59 checks, exit 0.
+
+### What this does not cover
+
+The SDK calls these decisions feed: the heap allocation and `XeCryptAesKey` install behind
+the key path, the page protection behind the Ultimate data patch, the device registration
+behind the overlay, and `set_extra_content_root` here. Also not covered, and said rather
+than implied: the mouse driver's path/click-wait switch in
+[src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp) is stateful - it mixes the covered
+steppers with live frame, focus and timing state - so it was left where it is instead of
+being forced into a pure function. **pause/resume** and **the UI paths outside the offline
+song loop** stay boot-only; they are guest behaviour, not host logic, so no extraction
+could reach them, and the backlog now carries them as their own entry rather than as a tail
+on this one.
 

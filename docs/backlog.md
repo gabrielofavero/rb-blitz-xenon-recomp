@@ -23,16 +23,31 @@ in [known-issues.md](known-issues.md).
       ([patches/README.md](../patches/README.md), one row per patch). Chronology and the
       per-file table: [history/bringup-log.md](history/bringup-log.md), "Hook hygiene:
       the faithful behaviour of every hook".
-- [ ] **Host test coverage beyond the eight existing targets** — `crypto_keytable`,
-      `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`, `dlc_layout`,
-      `ultimate_plan` and `toolchain`.
-      Everything that needs a boot is still verified by hand: the SDK half of the hooks
-      that touch it, pause/resume, and the UI paths outside the offline song loop. The
-      Ultimate layer's decidable half joined `ctest` on 2026-10-01
-      ([src/hooks/ultimate_plan.h](../src/hooks/ultimate_plan.h), "An eighth host test
-      target: the Ultimate layer's decidable half"); the half of that layer which
-      touches the SDK — protecting a page, registering the overlay device — still needs
-      a boot.
+- [x] **Host test coverage: the decidable half of every hook** — the eight targets
+      `crypto_keytable`, `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`,
+      `dlc_layout`, `ultimate_plan` and `toolchain`. Done 2026-10-01. The last decisions
+      that still lived inside an SDK-touching hook body moved into the SDK-free headers
+      those targets already reach: the Ultimate layer's mode, payload and patch
+      decisions ([src/hooks/ultimate_plan.h](../src/hooks/ultimate_plan.h), the new
+      `ultimate_plan` target), the key source and the CBC key of the two `XeKeys` hooks
+      ([src/hooks/crypto_keytable.h](../src/hooks/crypto_keytable.h), `crypto_keytable`)
+      and the content-root registration decision of
+      [src/hooks/dlc.cpp](../src/hooks/dlc.cpp) ([src/fs/dlc_layout.h](../src/fs/dlc_layout.h),
+      `dlc_layout`). What is left inside a hook is the SDK call itself — protecting a
+      page, registering a device, forwarding to the kernel — and one stateful
+      path/click-wait switch in [src/input/mouse_ui.cpp](../src/input/mouse_ui.cpp),
+      whose pure halves ([src/input/ui_nav.h](../src/input/ui_nav.h),
+      [src/input/nav_detect.h](../src/input/nav_detect.h)) are covered but which is not
+      a function of host data alone. Chronology:
+      [history/bringup-log.md](history/bringup-log.md), "An eighth host test target" and
+      "The last three host-decidable hook decisions".
+- [ ] **Scripted coverage for the routes only a boot reaches** — pause/resume and the
+      UI paths outside the offline song loop are still verified by hand, and no host test
+      can reach them: they are guest behaviour, not host logic. The acceptance runs
+      already inject keys and read the screen back, so what is missing is routes, not
+      machinery — a pause taken and released during a song, and the screens no scripted
+      route visits. The standing limitation is recorded in
+      [known-issues.md](known-issues.md); this entry is what would retire it.
 - [ ] **Mouse navigation limits** are accepted, not fixed — a screen whose rows a
       frame difference cannot read is given up on rather than measured, there is no
       guest cursor, and the overlay/foreground gates are reasoned rather than

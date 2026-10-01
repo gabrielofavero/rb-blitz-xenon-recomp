@@ -115,6 +115,12 @@
 //     buffer, because the runtime's CBC dereferences feed and writes the last
 //     ciphertext block back into it. A null feed and a zeroed one are the same IV,
 //     so no guest-visible byte changes.
+//
+// What the two hooks decide - where a key comes from (an entry of the obscured table,
+// a guest buffer, or neither) and which key an AES-CBC call runs under (the named
+// slot, the most recently keyed one, or none) - is pure and lives in
+// src/hooks/crypto_keytable.h, covered by tests/crypto_keytable_tests.cpp. Only the
+// kernel calls themselves need a boot.
 
 #include "crypto_keytable.h"
 
@@ -139,7 +145,10 @@ namespace {
 // The key-table logic and the plaintext keyset live in crypto_keytable.h, which
 // has no SDK dependencies so the unit tests can reach them; the names are used
 // unqualified below.
+using rb_blitz::crypto::CbcKeySelection;
 using rb_blitz::crypto::IsKeysetTableAddress;
+using rb_blitz::crypto::IsPlausibleGuestPointer;
+using rb_blitz::crypto::KeySource;
 using rb_blitz::crypto::kKeySize;
 using rb_blitz::crypto::kKeySlots;
 using rb_blitz::crypto::kKeysetTableAddress;
@@ -147,7 +156,9 @@ using rb_blitz::crypto::kKeysetTableSize;
 using rb_blitz::crypto::KeySlotSelection;
 using rb_blitz::crypto::kPlaintextKeyTable;
 using rb_blitz::crypto::PlaintextKeyAtOffset;
+using rb_blitz::crypto::SelectCbcKey;
 using rb_blitz::crypto::SelectKeySlot;
+using rb_blitz::crypto::SelectKeySource;
 
 constexpr uint32_t kAesStateSize = 0x160;  // XECRYPT_AES_STATE
 constexpr uint32_t kFeedSize = 0x10;       // CBC chaining block
@@ -209,10 +220,6 @@ uint32_t KeySlotForId(uint32_t key_id) {
   return selection.slot;
 }
 
-bool IsPlausibleGuestPointer(uint32_t guest_address) {
-  return guest_address >= 0x10000 && guest_address <= 0xFFFF0000 - kKeySize;
-}
-
 std::string HexDump(const uint8_t* data, uint32_t size) {
   static const char kHex[] = "0123456789ABCDEF";
   std::string out;
@@ -269,31 +276,36 @@ extern "C" REX_FUNC(__imp__XeKeysSetKey) {
   const uint32_t key_size = static_cast<uint32_t>(ctx.r5.u64);
   const uint32_t slot = KeySlotForId(key_id);
 
-  if (IsKeysetTableAddress(key_buffer)) {
-    // The guest always installs into the same slot and carries the version's
-    // key in the buffer: ByteGrinder::HvDecrypt (0x823DE0C0) calls the wrapper
-    // with index 0 and the buffer `0x8280C568 + GetEncMethod(version) * 16`, so
-    // the key id is a constant 0xE0 and the entry offset is the only place the
-    // version survives. Real hardware de-obfuscates the buffer it is handed, so
-    // the key landing in the slot is the plaintext entry at that offset - not
-    // the one matching the key id.
-    const uint32_t table_offset = key_buffer - kKeysetTableAddress;
-    REXLOG_INFO(
-        "guest XeKeys: key 0x{:X} -> slot {} (obscured table entry +0x{:X} -> plaintext key {})",
-        key_id, slot, table_offset, table_offset / kKeySize);
-    std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize),
-                PlaintextKeyAtOffset(table_offset), kKeySize);
-  } else if (IsPlausibleGuestPointer(key_buffer)) {
-    // A key installed straight from guest memory is used verbatim.
-    REXLOG_INFO("guest XeKeys: key 0x{:X} -> slot {} from guest buffer 0x{:08X} (size {})", key_id,
-                slot, key_buffer, key_size);
-    std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize), GuestToHost(base, key_buffer),
-                kKeySize);
-  } else {
-    REXLOG_WARN(
-        "guest XeKeys: key 0x{:X} -> slot {} has unusable buffer 0x{:08X} (size {}), keeping the "
-        "known key",
-        key_id, slot, key_buffer, key_size);
+  switch (SelectKeySource(key_buffer)) {
+    case KeySource::kKeysetTable: {
+      // The guest always installs into the same slot and carries the version's
+      // key in the buffer: ByteGrinder::HvDecrypt (0x823DE0C0) calls the wrapper
+      // with index 0 and the buffer `0x8280C568 + GetEncMethod(version) * 16`, so
+      // the key id is a constant 0xE0 and the entry offset is the only place the
+      // version survives. Real hardware de-obfuscates the buffer it is handed, so
+      // the key landing in the slot is the plaintext entry at that offset - not
+      // the one matching the key id.
+      const uint32_t table_offset = key_buffer - kKeysetTableAddress;
+      REXLOG_INFO(
+          "guest XeKeys: key 0x{:X} -> slot {} (obscured table entry +0x{:X} -> plaintext key {})",
+          key_id, slot, table_offset, table_offset / kKeySize);
+      std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize),
+                  PlaintextKeyAtOffset(table_offset), kKeySize);
+      break;
+    }
+    case KeySource::kGuestBuffer:
+      // A key installed straight from guest memory is used verbatim.
+      REXLOG_INFO("guest XeKeys: key 0x{:X} -> slot {} from guest buffer 0x{:08X} (size {})",
+                  key_id, slot, key_buffer, key_size);
+      std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize), GuestToHost(base, key_buffer),
+                  kKeySize);
+      break;
+    case KeySource::kUnusable:
+      REXLOG_WARN(
+          "guest XeKeys: key 0x{:X} -> slot {} has unusable buffer 0x{:08X} (size {}), keeping the "
+          "known key",
+          key_id, slot, key_buffer, key_size);
+      break;
   }
 
   InstallKey(ctx, base, slot);
@@ -321,24 +333,30 @@ extern "C" REX_FUNC(__imp__XeKeysAesCbc) {
   const uint32_t encrypt = static_cast<uint32_t>(ctx.r8.u64);
   const uint32_t slot = KeySlotForId(key_id);
 
-  if (!g_slot_keyed[slot] && g_has_keyed_slot) {
-    // The guest asked for a slot it never installed a key into; reuse the most
-    // recent one instead of running AES with an empty schedule.
-    if (!g_warned_fallback) {
-      g_warned_fallback = true;
-      REXLOG_WARN(
-          "guest XeKeys: AES-CBC on key 0x{:X} (slot {}) before XeKeysSetKey, reusing slot {}",
-          key_id, slot, g_last_keyed_slot);
-    }
-    std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize),
-                GuestToHost(base, g_key_table + g_last_keyed_slot * kKeySize), kKeySize);
-    InstallKey(ctx, base, slot);
-    g_slot_keyed[slot] = true;
-  }
-  if (!g_slot_keyed[slot] && !g_warned_unkeyed[slot]) {
-    g_warned_unkeyed[slot] = true;
-    REXLOG_WARN("guest XeKeys: AES-CBC on key 0x{:X} (slot {}) before any key was installed",
-                key_id, slot);
+  switch (SelectCbcKey(g_slot_keyed[slot], g_has_keyed_slot)) {
+    case CbcKeySelection::kSlotKeyed:
+      break;
+    case CbcKeySelection::kReuseLast:
+      // The guest asked for a slot it never installed a key into; reuse the most
+      // recent one instead of running AES with an empty schedule.
+      if (!g_warned_fallback) {
+        g_warned_fallback = true;
+        REXLOG_WARN(
+            "guest XeKeys: AES-CBC on key 0x{:X} (slot {}) before XeKeysSetKey, reusing slot {}",
+            key_id, slot, g_last_keyed_slot);
+      }
+      std::memcpy(GuestToHost(base, g_key_table + slot * kKeySize),
+                  GuestToHost(base, g_key_table + g_last_keyed_slot * kKeySize), kKeySize);
+      InstallKey(ctx, base, slot);
+      g_slot_keyed[slot] = true;
+      break;
+    case CbcKeySelection::kUnkeyed:
+      if (!g_warned_unkeyed[slot]) {
+        g_warned_unkeyed[slot] = true;
+        REXLOG_WARN("guest XeKeys: AES-CBC on key 0x{:X} (slot {}) before any key was installed",
+                    key_id, slot);
+      }
+      break;
   }
 
   // The guest always passes a null feed (IV = 0), but the runtime's CBC

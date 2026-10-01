@@ -2,11 +2,13 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Pure host logic of the MOGG key path (B-009): which slot a guest key id names,
-// which guest buffers are entries of the obscured .data key table, and what
-// those entries de-obfuscate to. Deliberately free of SDK headers and of runtime
-// state so it can be unit-tested without booting the game
-// (tests/crypto_keytable_tests.cpp); src/hooks/crypto.cpp is the only production
-// consumer and holds the evidence, the guest addresses and the two hooks.
+// which guest buffers are entries of the obscured .data key table, what those
+// entries de-obfuscate to, and - for the two import hooks as a whole - where a
+// XeKeysSetKey call's key material comes from and which key a XeKeysAesCbc call
+// runs under. Deliberately free of SDK headers and of runtime state so it can be
+// unit-tested without booting the game (tests/crypto_keytable_tests.cpp);
+// src/hooks/crypto.cpp is the only production consumer and holds the evidence,
+// the guest addresses and the two hooks.
 //
 // See docs/history/bringup-log.md B-009 and docs/rb3-references.md §5.
 
@@ -65,6 +67,48 @@ constexpr bool IsKeysetTableAddress(uint32_t guest_address) {
     return false;
   }
   return (guest_address - kKeysetTableAddress) + kKeySize <= kKeysetTableSize;
+}
+
+// Where a XeKeysSetKey call's key material comes from. The first is the only
+// shape the guest produces (see above); the other two are handled rather than
+// trusted, and each is a refusal to read a guest buffer the hook cannot vouch for.
+enum class KeySource {
+  kKeysetTable,  // an entry of the obscured table: install that entry's plaintext key
+  kGuestBuffer,  // a plausible guest pointer: install the 16 bytes it names
+  kUnusable,     // neither: keep whatever key the slot already holds
+};
+
+// True when a guest address is one the runtime can translate a whole key at: not
+// in the null page, and low enough that 16 bytes fit below the top of the address
+// space. It is a refusal to read an address, not a judgement about the key.
+constexpr bool IsPlausibleGuestPointer(uint32_t guest_address) {
+  return guest_address >= 0x10000 && guest_address <= 0xFFFF0000u - kKeySize;
+}
+
+constexpr KeySource SelectKeySource(uint32_t key_buffer) {
+  if (IsKeysetTableAddress(key_buffer)) {
+    return KeySource::kKeysetTable;
+  }
+  if (IsPlausibleGuestPointer(key_buffer)) {
+    return KeySource::kGuestBuffer;
+  }
+  return KeySource::kUnusable;
+}
+
+// Which key a XeKeysAesCbc call runs under. The guest always installs a key for
+// the slot it is about to use, so the other two are shapes it has not produced.
+enum class CbcKeySelection {
+  kSlotKeyed,  // the named slot holds a key: use it
+  kReuseLast,  // it does not, but a key was installed somewhere: copy that one in
+  kUnkeyed,    // no key was ever installed: report it and run the call anyway
+};
+
+// `any_key_installed` is the hook's "a key landed in some slot at least once".
+constexpr CbcKeySelection SelectCbcKey(bool slot_keyed, bool any_key_installed) {
+  if (slot_keyed) {
+    return CbcKeySelection::kSlotKeyed;
+  }
+  return any_key_installed ? CbcKeySelection::kReuseLast : CbcKeySelection::kUnkeyed;
 }
 
 // The plaintext key the obscured entry at `table_offset` de-obfuscates to. The

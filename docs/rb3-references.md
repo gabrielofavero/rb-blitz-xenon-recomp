@@ -313,6 +313,19 @@ with band3's `NewFile` hook (§4.1) to give us overlay-without-repacking.
   device, forwarding to the kernel - is the part that genuinely needs a boot.
   Chronology: [history/bringup-log.md](history/bringup-log.md), "An eighth host test
   target".
+* **Done 2026-10-01, and the point at which the extraction runs out.** The same pass
+  finished the remaining hooks: `crypto_keytable` now covers the two `XeKeys` hooks'
+  own decisions (where a key comes from, and which key an AES-CBC call runs under) and
+  `dlc_layout` covers the content-root registration decision, so **every decision
+  inside a hook that is a function of host data is host-tested**. What is left in a
+  hook is the SDK call itself, plus one stateful path/click-wait switch in the mouse
+  driver whose pure halves were already covered. The lesson worth keeping: the
+  extractable part is always the *decision*, and it is worth naming in the header why
+  the two arms are ordered the way they are - in the `XeKeys` case the obscured table
+  lives high in the address space, so its entries are also plausible guest pointers,
+  and getting the order wrong installs the table as if it were a key.
+  Chronology: [history/bringup-log.md](history/bringup-log.md), "The last three
+  host-decidable hook decisions".
 
 Also filed as a warning: their `MILO_TRY`/`MILO_CATCH` broke on LP64 because
 `Debug::Fail` longjmps a `const char*` as an `int`, truncating the pointer. When

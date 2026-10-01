@@ -30,6 +30,10 @@
 // missing directory, no usable package, no kernel state or no content manager leaves
 // the SDK's own root as the only source, which is the faithful behaviour, and each is
 // logged.
+//
+// Which refusal a directory and its scan amount to is pure - fs::DecideDlcRegistration
+// in src/fs/dlc_layout.h, covered by tests/dlc_layout_tests.cpp - so only handing the
+// root to the content manager needs a runtime.
 
 #include "hooks/dlc.h"
 
@@ -84,30 +88,40 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   std::error_code ec;
   const std::filesystem::path root =
       std::filesystem::absolute(fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
+  const bool is_directory = std::filesystem::is_directory(root, ec) && !ec;
 
-  if (!std::filesystem::is_directory(root, ec) || ec) {
-    REXLOG_INFO("dlc: no content directory at {}, DLC is served from the content root alone",
-                root.string());
-    return;
-  }
-
-  const fs::DlcScanResult scan = fs::ScanDlcRoot(root);
-  for (const auto& rejected : scan.rejected) {
-    REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
-  }
-
-  if (scan.packages.empty()) {
-    REXLOG_WARN("dlc: {} holds no <title_id>/<content_type>/<package> entry, nothing to mount",
-                root.string());
-    return;
+  // Scanned only when the directory is there: an absent DLC folder is the normal
+  // case and must not produce a scan's worth of noise.
+  fs::DlcScanResult scan;
+  if (is_directory) {
+    scan = fs::ScanDlcRoot(root);
+    for (const auto& rejected : scan.rejected) {
+      REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
+    }
   }
 
   rex::system::KernelState* kernel_state = runtime->kernel_state();
   rex::system::xam::ContentManager* content_manager =
       kernel_state != nullptr ? kernel_state->content_manager() : nullptr;
-  if (content_manager == nullptr) {
-    REXLOG_WARN("dlc: no content manager to register {} with, nothing to mount", root.string());
-    return;
+
+  // Which refusal, if any, the directory and the scan amount to. The decision itself
+  // is host logic and is pinned by tests/dlc_layout_tests.cpp; only the effects below
+  // need a runtime.
+  switch (fs::DecideDlcRegistration(is_directory, scan.packages.size(),
+                                    content_manager != nullptr)) {
+    case fs::DlcRegistration::kNoDirectory:
+      REXLOG_INFO("dlc: no content directory at {}, DLC is served from the content root alone",
+                  root.string());
+      return;
+    case fs::DlcRegistration::kNoPackages:
+      REXLOG_WARN("dlc: {} holds no <title_id>/<content_type>/<package> entry, nothing to mount",
+                  root.string());
+      return;
+    case fs::DlcRegistration::kNoContentManager:
+      REXLOG_WARN("dlc: no content manager to register {} with, nothing to mount", root.string());
+      return;
+    case fs::DlcRegistration::kRegister:
+      break;
   }
 
   // Registering is all that is needed: enumeration and opening both resolve against

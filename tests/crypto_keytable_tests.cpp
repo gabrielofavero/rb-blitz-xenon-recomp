@@ -3,7 +3,10 @@
 //
 // Unit tests for the B-009 MOGG key path (src/hooks/crypto_keytable.h). No SDK,
 // no game image, no boot: the logic under test is pure host code, so this runs in
-// milliseconds and is the only automated check this project has.
+// milliseconds. It is the oldest of the project's host test targets (docs/backlog.md
+// §1); what the two import hooks decide - where a key comes from, and which key an
+// AES-CBC call runs under - is covered here too, so only the kernel calls themselves
+// still need a boot.
 //
 // The plaintext keyset itself is intentionally not copied here - it would be a
 // second vendored copy of external key material (docs/rb3-references.md §9), and
@@ -148,6 +151,58 @@ void TestVersionChoosesTableEntry() {
   CHECK_EQ(EncMethodForVersion(17), 0);
 }
 
+void TestKeySourceIsDecidedInOrder() {
+  BeginCase("the obscured table wins over the general guest-pointer arm");
+  // The table lives high in the guest address space, so it is also a plausible
+  // pointer. The hook's first arm has to win or HvDecrypt's own call would be
+  // treated as "install these bytes verbatim" and the table would install itself.
+  for (uint32_t entry = 0; entry < kKeysetEntryCount; ++entry) {
+    const uint32_t buffer = kKeysetTableAddress + entry * kKeySize;
+    CHECK_TRUE(IsPlausibleGuestPointer(buffer));
+    CHECK_TRUE(SelectKeySource(buffer) == KeySource::kKeysetTable);
+  }
+  // One byte either side of the table is not an entry, so it falls through to the
+  // pointer arm rather than being read as a key.
+  CHECK_TRUE(SelectKeySource(kKeysetTableAddress - 1) == KeySource::kGuestBuffer);
+  CHECK_TRUE(SelectKeySource(kKeysetTableAddress + kKeysetTableSize) == KeySource::kGuestBuffer);
+}
+
+void TestKeySourceForPlainGuestBuffers() {
+  BeginCase("a guest buffer that is not the table is used verbatim");
+  const uint32_t buffers[] = {0x10000, 0x82076598, 0xFFFEFFF0};
+  for (uint32_t buffer : buffers) {
+    CHECK_TRUE(IsPlausibleGuestPointer(buffer));
+    CHECK_TRUE(SelectKeySource(buffer) == KeySource::kGuestBuffer);
+  }
+}
+
+void TestKeySourceRefusesAddressesItCannotRead() {
+  BeginCase("the null page and the top of the address space are not read");
+  // The bounds are inclusive on both ends: an address is usable when a whole key
+  // fits above it. The guest has never produced either shape - the wrapper rejects
+  // a NULL buffer itself - so this is a refusal, not a path the title takes.
+  CHECK_FALSE(IsPlausibleGuestPointer(0));
+  CHECK_FALSE(IsPlausibleGuestPointer(0xFFFF));
+  CHECK_FALSE(IsPlausibleGuestPointer(0xFFFEFFF1));
+  CHECK_FALSE(IsPlausibleGuestPointer(0xFFFFFFFF));
+
+  const uint32_t unusable[] = {0, 0xFFFF, 0xFFFEFFF1, 0xFFFFFFFF};
+  for (uint32_t buffer : unusable) {
+    CHECK_TRUE(SelectKeySource(buffer) == KeySource::kUnusable);
+  }
+}
+
+void TestCbcKeySelection() {
+  BeginCase("AES-CBC runs under the named slot, the last key, or nothing");
+  // The guest's own order: install, then encrypt. A keyed slot is used as it is.
+  CHECK_TRUE(SelectCbcKey(true, true) == CbcKeySelection::kSlotKeyed);
+  CHECK_TRUE(SelectCbcKey(true, false) == CbcKeySelection::kSlotKeyed);
+  // A slot that was never keyed borrows the most recent key...
+  CHECK_TRUE(SelectCbcKey(false, true) == CbcKeySelection::kReuseLast);
+  // ...and with no key installed anywhere the call is reported and still run.
+  CHECK_TRUE(SelectCbcKey(false, false) == CbcKeySelection::kUnkeyed);
+}
+
 void TestBugWouldInstallDifferentKey() {
   BeginCase("B-009 regression: installing by key id would select a different key");
   // Before the fix the host resolved the key from the key id, which is a constant
@@ -175,6 +230,10 @@ int main() {
   TestPlaintextLookupIndexesByEntryOffset();
   TestTableHoldsFourDistinctKeys();
   TestVersionChoosesTableEntry();
+  TestKeySourceIsDecidedInOrder();
+  TestKeySourceForPlainGuestBuffers();
+  TestKeySourceRefusesAddressesItCannotRead();
+  TestCbcKeySelection();
   TestBugWouldInstallDifferentKey();
   return rb_blitz::test::Finish();
 }

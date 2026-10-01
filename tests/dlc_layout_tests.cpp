@@ -4,7 +4,8 @@
 // Unit tests for the DLC directory layout in src/fs/dlc_layout.h, which
 // src/hooks/dlc.cpp registers with the SDK as an extra read-only content root. No
 // SDK, no game image, no boot: the questions are which directory names the SDK will
-// look up, which entries are packages, and what a misplaced file reports.
+// look up, which entries are packages, what a misplaced file reports, and which of
+// those answers leaves the hook with nothing to register.
 //
 // What is pinned here is the layout the guest's own enumeration depends on: the SDK
 // formats the search path with fmt("{:08X}") and looks up the *exact* directory name,
@@ -220,6 +221,46 @@ int main() {
     const DlcScanResult empty = ScanDlcRoot(s.root);
     CHECK_EQ(empty.packages.size(), 0);
     CHECK_EQ(empty.rejected.size(), 0);
+  }
+
+  BeginCase("the registration decision is a precondition chain, in the hook's order");
+  {
+    // src/hooks/dlc.cpp asks this and does nothing else with the answer, so the
+    // four outcomes and their order are the whole of what it decides. Each step is
+    // a precondition of the next: the counts below are deliberately contradictory
+    // (a missing directory that "found" packages) to pin that the earlier question
+    // wins.
+    CHECK_TRUE(DecideDlcRegistration(false, 0, false) == DlcRegistration::kNoDirectory);
+    CHECK_TRUE(DecideDlcRegistration(false, 3, true) == DlcRegistration::kNoDirectory);
+
+    CHECK_TRUE(DecideDlcRegistration(true, 0, false) == DlcRegistration::kNoPackages);
+    CHECK_TRUE(DecideDlcRegistration(true, 0, true) == DlcRegistration::kNoPackages);
+
+    CHECK_TRUE(DecideDlcRegistration(true, 1, false) == DlcRegistration::kNoContentManager);
+    CHECK_TRUE(DecideDlcRegistration(true, 7, false) == DlcRegistration::kNoContentManager);
+
+    CHECK_TRUE(DecideDlcRegistration(true, 1, true) == DlcRegistration::kRegister);
+    CHECK_TRUE(DecideDlcRegistration(true, 7, true) == DlcRegistration::kRegister);
+  }
+
+  BeginCase("what was scanned is what the decision is made from");
+  {
+    Scratch s;
+    // A real tree: the directory exists, no package is in it yet, and the SDK can
+    // take a root - so the only thing standing between the hook and registering is
+    // the scan. This is the case that used to be "nothing to mount".
+    const DlcScanResult empty = ScanDlcRoot(s.root);
+    CHECK_TRUE(DecideDlcRegistration(true, empty.packages.size(), true) ==
+               DlcRegistration::kNoPackages);
+
+    WriteFile(s.root / "45410914" / "00000002" / kRb3Package, "LIVE a container");
+    const DlcScanResult one = ScanDlcRoot(s.root);
+    CHECK_EQ(one.packages.size(), 1);
+    CHECK_TRUE(DecideDlcRegistration(true, one.packages.size(), true) == DlcRegistration::kRegister);
+    // A scan that found a package but no manager still refuses, and the package is
+    // not lost - the caller has it, it just has nowhere to hand it.
+    CHECK_TRUE(DecideDlcRegistration(true, one.packages.size(), false) ==
+               DlcRegistration::kNoContentManager);
   }
 
   return Finish();

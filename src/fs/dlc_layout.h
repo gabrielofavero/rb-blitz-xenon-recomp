@@ -11,13 +11,16 @@
 //   <dlc_root>/<title_id>/<content_type>/<package>
 //
 // with the names spelled the way the SDK spells them when it builds the search path
-// (docs/dlc.md). Kept free of any SDK dependency for the same reason
-// src/fs/path_policy.h is - it is host path arithmetic and directory reading, and
-// tests/dlc_layout_tests.cpp has to cover it without booting the game
-// (docs/rb3-references.md §7.3).
+// (docs/dlc.md). It also holds the decision src/hooks/dlc.cpp makes about that root -
+// register it, or leave the SDK's own content root as the only source - because that
+// decision is a function of the directory and the scan, not of the runtime. Kept free
+// of any SDK dependency for the same reason src/fs/path_policy.h is - it is host path
+// arithmetic and directory reading, and tests/dlc_layout_tests.cpp has to cover it
+// without booting the game (docs/rb3-references.md §7.3).
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -100,6 +103,35 @@ inline std::filesystem::path ResolveDlcRoot(const std::string_view configured,
     root = game_data_root / root;
   }
   return root.lexically_normal();
+}
+
+// What src/hooks/dlc.cpp does with the configured root. Every value but kRegister
+// is a refusal to add the root, which leaves the SDK's own content root as the only
+// source - the faithful behaviour - and the hook says why in the log.
+enum class DlcRegistration {
+  kNoDirectory,       // nothing at the configured path
+  kNoPackages,        // the directory is there but holds no <title_id>/<content_type>/<package>
+  kNoContentManager,  // no content manager to register the root with
+  kRegister,          // packages were found and there is a manager to hand them to
+};
+
+// The order is the hook's and each step is a precondition of the next: a directory
+// that is not there is not scanned, a scan that found nothing is not reported as
+// unregisterable, and the root is only offered to a manager that exists.
+// `package_count` is what ScanDlcRoot() accepted.
+constexpr DlcRegistration DecideDlcRegistration(bool root_is_directory,
+                                                std::size_t package_count,
+                                                bool has_content_manager) {
+  if (!root_is_directory) {
+    return DlcRegistration::kNoDirectory;
+  }
+  if (package_count == 0) {
+    return DlcRegistration::kNoPackages;
+  }
+  if (!has_content_manager) {
+    return DlcRegistration::kNoContentManager;
+  }
+  return DlcRegistration::kRegister;
 }
 
 namespace detail {
