@@ -49,6 +49,14 @@ cd out\build\win-amd64-release
 
 Each launch writes a new `logs\rb_blitz_NNN.log`. Pointing `--game_data_root` at an Ultimate payload root is supported and only warns; pointing it at the wrong dump behaves the same way, so check the `game data identity:` line at the top of the log instead of assuming a clean boot means the right game.
 
+**Extract the assets.** The title's content is one ARK archive pair under `game\gen\`, plus the Ultimate payload's overlay pair. One command unpacks both into a gitignored `extracted\` — byte-exact, with a JSON index per archive:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\extract_assets.ps1
+```
+
+[assets.md](docs/assets.md) has the resulting layout, the archive format and what is still obfuscated.
+
 **Tests** are SDK-free and game-data-free, about half a second:
 
 ```powershell
@@ -63,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1
 
 Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, which embeds the payload and therefore installs with no network access. It needs [Inno Setup 6](https://jrsoftware.org/isdl.php) (ISCC); `-RefreshPayload`, `-SkipTests`, `-SkipArt` and `-SkipSetup` control the individual stages, and [installer/README.md](installer/README.md) covers the releases side of it.
 
-Everything I've worked out about the game lives in `docs\`: [known-issues.md](docs/known-issues.md) for the standing limits, [backlog.md](docs/backlog.md) for what's next, [toolchain.md](docs/toolchain.md) for the frozen build toolchain, [distributable.md](docs/distributable.md) for what the installer ships and the audit that refuses the rest, [dlc.md](docs/dlc.md) for where DLC packages go, [ultimate-compat.md](docs/ultimate-compat.md) for the Ultimate install, [rb3-references.md](docs/rb3-references.md) for the Rock Band 3 knowledge I borrow, [symbols.md](docs/symbols.md) for the guest addresses, and [history/bringup-log.md](docs/history/bringup-log.md) for the whole chronological record.
+Everything I've worked out about the game lives in `docs\`: [known-issues.md](docs/known-issues.md) for the standing limits, [backlog.md](docs/backlog.md) for what's next, [toolchain.md](docs/toolchain.md) for the frozen build toolchain, [distributable.md](docs/distributable.md) for what the installer ships and the audit that refuses the rest, [dlc.md](docs/dlc.md) for where DLC packages go, [ultimate-compat.md](docs/ultimate-compat.md) for the Ultimate install, [rb3-references.md](docs/rb3-references.md) for the Rock Band 3 knowledge I borrow, [symbols.md](docs/symbols.md) for the guest addresses, [assets.md](docs/assets.md) for unpacking the title's archives, and [history/bringup-log.md](docs/history/bringup-log.md) for the whole chronological record.
 
 ## How about AI usage?! I WON'T play this if it is one of those AI trash ports!! 😡😡
 

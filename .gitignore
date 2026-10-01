@@ -2,6 +2,9 @@
 /game/*
 !/game/README.md
 
+# Extracted game assets (scripts/extract_assets.ps1). Retail content: never commit.
+/extracted/
+
 # Build products and CMake-local state.
 /out/
 /build/
@@ -35,6 +38,9 @@
 
 # Local-only runtime configuration.
 /config/user.toml
+
+# Python bytecode from the asset tooling (scripts/hmx_*.py).
+__pycache__/
 
 # Editor and platform state.
 /.vs/

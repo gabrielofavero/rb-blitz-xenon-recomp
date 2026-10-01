@@ -64,6 +64,19 @@ that name an action.
 
 ## 5. Deferred, with no design yet
 
+- [ ] **Texture swapping for the in-game UI** — the menus, buttons and layout art are not
+      standalone textures: they live inside `ui/**/*.milo_xbox` scenes, whose pixel data
+      is stored in the engine's ChunkStream chunks (LZX, or flagged decompressed with bit
+      24 of the chunk-size word). The standalone `*.png_xbox` / `*.bmp_xbox` entries in
+      the archive already round-trip through [scripts/hmx_tex.py](../scripts/hmx_tex.py)
+      (decode, export, re-import, swap; byte-verified offline), and a trace of the title
+      screen → main menu → song list shows which of them the title actually reads
+      ([assets.md](assets.md) "Texture swapping"). What is missing is the `.milo_xbox`
+      half: a reader that walks the chunk stream and decompresses its LZX chunks
+      (`rexglue-sdk\thirdparty\libmspack` already builds `lzxd`), then re-emits the chunk
+      uncompressed so no LZX compressor is needed to write it back. `freeqaz/rb3-xenon`
+      is the reference for the object layout (`RndBitmap::LoadHeader`, `RndTex::Load`).
+
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
 packaging and auto-update, symbol-name campaigns, and mod APIs. DLC packages do load
