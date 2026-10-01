@@ -65,17 +65,23 @@ that name an action.
 ## 5. Deferred, with no design yet
 
 - [ ] **Texture swapping for the in-game UI** — the menus, buttons and layout art are not
-      standalone textures: they live inside `ui/**/*.milo_xbox` scenes, whose pixel data
-      is stored in the engine's ChunkStream chunks (LZX, or flagged decompressed with bit
-      24 of the chunk-size word). The standalone `*.png_xbox` / `*.bmp_xbox` entries in
-      the archive already round-trip through [scripts/hmx_tex.py](../scripts/hmx_tex.py)
-      (decode, export, re-import, swap; byte-verified offline), and a trace of the title
-      screen → main menu → song list shows which of them the title actually reads
-      ([assets.md](assets.md) "Texture swapping"). What is missing is the `.milo_xbox`
-      half: a reader that walks the chunk stream and decompresses its LZX chunks
-      (`rexglue-sdk\thirdparty\libmspack` already builds `lzxd`), then re-emits the chunk
-      uncompressed so no LZX compressor is needed to write it back. `freeqaz/rb3-xenon`
-      is the reference for the object layout (`RndBitmap::LoadHeader`, `RndTex::Load`).
+      standalone textures: they belong to `ui/**/*.milo_xbox` scenes. Two thirds of that
+      are done. The standalone `*.png_xbox` / `*.bmp_xbox` entries round-trip through
+      [scripts/hmx_tex.py](../scripts/hmx_tex.py) (decode, export, re-import, swap; DDS
+      bit-exact) and a trace of title screen → main menu → song list shows which of them
+      the title reads at all. [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads a
+      scene's chunk stream (0x810-byte table of raw-deflate chunks) and lists the `.tex`
+      assets it owns, which is the map of what a reskin has to touch. What is missing is
+      where those pixels are. Ruled out against real scenes:
+      the RB3 inline `RndBitmap` shape, a power-of-two descriptor shape, **linear** DXT
+      data (both statements checked by the endpoint signature of a DXT block, and by
+      adjacent-pixel smoothness), and uncompressed image data. The scenes do carry, per
+      texture, a big-endian record with width/height/bpp and a length-prefixed
+      builder-side source path (`img/list_panel.png`), and no such archive entry exists.
+      Next candidates to test: a **tiled (swizzled) 360 pixel layout** - which is exactly
+      what every linear-block test above would miss - or a runtime cache the engine writes
+      somewhere. `hmx_milo.py dump` is the corpus tool for that hunt. Evidence:
+      [assets.md](assets.md), "Texture swapping".
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,

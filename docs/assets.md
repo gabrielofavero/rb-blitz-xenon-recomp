@@ -144,22 +144,53 @@ the title reads, only four are standalone textures:
 | `ui/powerup_select/img/gen/synchrony_keep.png_xbox` | 256×256 DXT5, power-up icon |
 | `ui/recommendations/img/gen/icon_more_stars_keep.png_xbox` | 512×512 DXT1, panel icon |
 
-The rest of what is on screen comes out of `ui/**/*.milo_xbox` scenes — and a `.milo_xbox`
-*is* a `ChunkStream`: magic `0xCDBEDEAF`, then chunks that are either LZX (XMemCompress)
-or marked "already stored decompressed" with bit 24 of the chunk-size word (the RB3
-decompilation at [freeqaz/rb3-xenon](https://github.com/freeqaz/rb3-xenon) is the
-reference for that and for the inline `RndBitmap` layout, `ChunkStream::DecompressChunk`
-and `RndBitmap::LoadHeader`; nothing here is guessed). The splash screen's art is a good
-example: `splash.milo_xbox` is 2.3 MB, its string table is plaintext (`splash_city.tex`,
-`splash_logo.tex`, `list_panel.tex`, … 13 textures and their materials), and the pixels
-behind those names are inside compressed chunks.
+The rest of what is on screen comes out of `ui/**/*.milo_xbox` scenes. A scene is a
+`ChunkStream`: a 0x810-byte little-endian `ChunkInfo` block (stream id, chunk count,
+largest decompressed chunk, one word per chunk) followed by the chunk payloads, where
+bit 24 of a chunk word means "stored decompressed" and everything else decodes as
+**raw deflate with its size in front**. `splash.milo_xbox` is 2.3 MB on disk and
+10.4 MB decompressed; its first chunk is stored plaintext and holds the scene's object
+directory — `Tex` and its 13 `.tex` assets (`splash_logo.tex`, `list_panel.tex`, …),
+`Mat` and the materials, `Group` and the groups — which is what tells you which screen
+owns which texture. [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads all of that:
 
-So today: **standalone textures can be swapped** (`hmx_tex.py`, byte-verified offline),
-and the on-screen menus, buttons and layout art need one more tool — a `.milo_xbox`
-reader that decompresses its ChunkStream. Its two halves both exist in this repository
-already: `rexglue-sdk\thirdparty\libmspack` decodes the LZX chunks, and the chunk stream
-can be re-emitted uncompressed (bit 24) so no LZX *compressor* is needed to write one
-back. That is backlogged rather than half-built; see [backlog.md](backlog.md).
+```powershell
+python scripts\hmx_milo.py info extracted\ui\splash\gen\splash.milo_xbox --out-dir out\milo
+python scripts\hmx_milo.py list extracted\ui\splash\gen\splash.milo_xbox --textures
+python scripts\hmx_milo.py dump extracted\ui\splash\gen\splash.milo_xbox --chunk 3 --out chunk3.bin
+```
+
+Where the *pixels* of those `.tex` assets are is still open, but the search has narrowed.
+What the scenes were checked against, all on real scenes:
+
+- The RB3 inline bitmap shape (`RndBitmap::LoadHeader`: revision byte, bits per pixel,
+  byte order, mip count, dimensions, row bytes, reserved bytes, mip chain) matches
+  nothing — nor does any descriptor that merely puts a power-of-two width and height
+  next to matching row bytes.
+- No region of the stream decodes as a **linear** DXT texture (checked by the endpoint
+  signature of a DXT block: in real art the two 16-bit colour endpoints of every 8-byte
+  block are close; the best window in 10.4 MB scores 4,500 where art scores hundreds),
+  in either byte order.
+- No region looks like an uncompressed image either (adjacent-pixel and row-to-row
+  differences stay in the tens of a byte value everywhere, where real art is in the
+  low single digits).
+
+What the scenes *do* carry, read straight off the bytes: each texture is a record with
+big-endian fields, `width`, `height`, `bpp` and a length-prefixed builder-side source
+path — `splash.milo_xbox` names `img/list_neon_outer.png`, `img/list_panel.png`,
+`img/start_inner_neon.png` (512×512 and 512×128 at bpp 8), and no such entry exists in
+either archive. `ui/background/gen/background_night.milo_xbox` owns the visible splash
+art (`night_gradient.tex`, `northern_lights.tex`, `rays.tex`, … plus `img/star.png`).
+
+So the remaining candidates are a **tiled (swizzled) 360 layout** for the pixel data —
+which would defeat every linear-block test above — or a cached copy written somewhere
+by the engine at runtime. The next attempt should start there, and the corpus is
+already in place: `hmx_milo.py dump` writes any chunk out, so a tiled layout can be
+hunted offline against a texture whose appearance is known.
+
+So today: **standalone textures can be swapped** (`hmx_tex.py`, byte-verified
+offline), the scenes that own the menu, button and layout art can be read and
+enumerated (`hmx_milo.py`), and the pixels inside them are the remaining unknown.
 
 ## Where the format knowledge comes from
 

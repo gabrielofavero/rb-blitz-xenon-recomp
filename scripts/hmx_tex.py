@@ -43,10 +43,9 @@ PNG conversion needs Pillow (``pip install pillow``). The DDS path needs nothing
 and is byte-exact: export a DDS, edit it in a DXT-aware editor, import it back.
 
 This covers the archive's own texture entries. It does *not* reach the art of the
-menus, buttons and layout screens - that lives inside ``ui/**/*.milo_xbox`` scenes,
-whose pixel data sits in the engine's ChunkStream chunks (LZX-compressed). See
-``docs/assets.md``, "Texture swapping", for which entries the title actually reads
-and what the ``.milo_xbox`` half of the job needs.
+menus, buttons and layout screens - that belongs to `ui/**/*.milo_xbox` scenes,
+which scripts/hmx_milo.py reads (their pixels are still unlocated; see
+``docs/assets.md``, "Texture swapping").
 """
 import argparse
 import os
