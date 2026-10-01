@@ -68,6 +68,16 @@ that name an action.
       pin down), then add `extract`/`import` to `hmx_milo.py`. Evidence and the rejected
       hypotheses — not a mip chain, not DXT — are in
       [assets.md](assets.md) "Where the art actually lives".
+- [ ] **A writer that can change an entry's length.** The one hard block found so far, and
+      it is what stops a reskin of anything whose pixels sit in a compressed chunk. A chunk
+      that has to be recompressed but comes out larger cannot be padded back to its stored
+      size: `XMemDecompress` is handed the whole chunk, and trailing bytes after a complete
+      deflate stream make it fail — it crashes the game rather than erroring
+      ([assets.md](assets.md) "Editing a scene with PS3 data"). Rebalancing the chunk table
+      between chunks does not help, because the padded chunk is still padded. Either a
+      reskin of those textures keeps its deflate output inside the original budget, or the
+      ark's entry sizes become mutable — which is the real fix, since the chunk table
+      already tolerates any sizes as long as the entry totals match.
 - [ ] **Use the PS3 build as the decoder oracle.** The PS3 dump is the same game in the same
       container — `.\scripts\extract_assets.ps1 -Platform ps3 -GameRoot <USRDIR>` writes
       `extracted-ps3\`, and every tool in `scripts\` reads it unchanged ([assets.md](assets.md#ps3))
@@ -80,6 +90,9 @@ that name an action.
       framing; it deflates to 20%) and shows no glyph-grid periodicity. A correct decoding has to
       read *both* copies, and the 70% they share is what separates "this is the image" from "this
       is a per-platform re-encode" — that is the test to build the next attempt around.
+      Two results already banked: `blitz_icons` matches **99.5%** after the swap and the four
+      controller diagrams match **100%** — the pad art is the same picture on both platforms, and
+      `buttons.milo_*` is the genuinely platform-different sheet.
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,

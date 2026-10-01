@@ -337,6 +337,54 @@ texture; the 241 standalone `*_ps3` entries are the same set the 360 has), and t
 texture layout is the same unsolved detail on both — see "Can a UI texture be swapped
 today?" above.
 
+### Editing a scene with PS3 data — what works, and what the engine refuses
+
+Tested end to end, not reasoned: a PS3-sourced swap was built, booted, and compared against
+a baseline run of the same build with the same flags (the overlay on, pointing at a pristine
+copy of the same archive, so the only difference between the two legs is the ark's content).
+
+**Works: the glyph sheet.** `buttons.milo_xbox`'s 262,144-byte sheet is stored uncompressed
+in chunk 0, the PS3 copy is the same size, and writing `swap16(ps3 sheet)` over it changes
+what the game draws — measured on the running build:
+
+| Screen | Pixels changed | Where |
+| --- | --- | --- |
+| Main menu footer | 0.163% | x 554–798, y 694–729 |
+| Options footer | 0.110% | x 539–765, y 676–705 |
+| Controls (CONTROLLER) footer | 0.110% | x 539–765, y 676–705 |
+
+The A button is the visible difference: retail draws a thin outline with a small letterform,
+the PS3 sheet draws a filled form of the same letter. That the sheet *is* the platform-specific
+asset is confirmed numerically — 70% of the region matches the PS3 copy after the swap, where
+the generic icon sheet matches 99.5% and every pad diagram matches 100%.
+
+**Refused: a recompressed chunk.** `controller_config`'s pixels live in deflate chunks, so
+editing them means recompressing. Its chunks are the same size as the archive entry's budget
+to within a few KB, and one edited chunk came out ~1 KB over, so the chunk was recompressed
+and padded back to its original stored size with trailing zeros — which is what a chunk
+stream would normally tolerate, since `ChunkStream` cannot be seeked and never reads past the
+end of a stream. **The engine does not accept it**: both the full build and a single-variant
+build crashed on the Controls page with an unhandled guest access violation. The likely
+reason is that `XMemDecompress` is handed the whole padded chunk as input and reports a
+failure when the deflate stream does not consume all of it. So a compressed chunk can only be
+edited if the replacement deflate stream fills its slot exactly — which needs either an
+identical compression ratio or a writer that can change an entry's length in the archive
+index, not a padded stream.
+
+**And nothing to gain there anyway:** the four pad diagrams are byte-identical between the
+two builds (100% after the swap), so the PS3 pad art is the same picture — the only
+platform-different art in this area is the button sheet.
+
+Two more facts worth keeping, both measured:
+
+- The record layout is `[u8 length][source path][26 bytes of fields][pixel data]`. The 26-byte
+  field block is the only part that does not match after the 16-bit swap (20 of its 26 bytes
+  differ between builds); everything from byte 26 on matches exactly, which is how the offset
+  is known rather than guessed.
+- A texture's pixels can **straddle a chunk boundary** — `img/xbox_2.png`'s record ends inside
+  chunk 6 and its data continues into chunk 7 — so an edit has to be applied to the reassembled
+  stream and split back, not written into one chunk.
+
 ### PS3 as a decoder oracle
 
 The PS3 build is worth keeping for one more reason: it is a **second sample of the same
