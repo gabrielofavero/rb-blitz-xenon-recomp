@@ -1161,8 +1161,10 @@ records in 151 scenes.** The ones a launcher would want:
 Two facts matter for the launcher. The prompts are **font glyphs**, not standalone images: the A/B
 prompts on every screen come from the one 512×512 sheet in `buttons.milo_xbox`, drawn through a
 `Glyph` table — which is why they never appear as separate ark entries. And the controller
-diagrams are four 1024² images per pad family in one scene, so "Controller → Manual" can show the
-real pad without drawing anything.
+diagrams are four 1024² images **per pad family** — `xbox_0..3` and `ps_0..3` — so "Controller →
+Manual" can show the real pad without drawing anything. Both families ship in **both** builds (the
+PS3 dump carries `img/xbox_0..3.png` as well, and the 360 one carries `img/ps_0..3.png`), so either
+dump is a source for either diagram.
 
 ### 10.2 The slots, and a fallback for each
 
@@ -1237,6 +1239,7 @@ already exists.
 | **P0** | A capture script in `make_art.ps1`'s posture (`launcher/tools/`), producing the background, the badge and the prompt crops into a gitignored directory at build or first run. | nothing (capture already works) |
 | **P1** | Derive the scene buffer offset from the object records (§10.4), then read background, logo and prompts straight out of `game/` at runtime — route 1, with no generated files at all. | P0's loader |
 | **P2** | The pad-family diagrams on Controller → Manual, and the game's own fonts if the launcher ever wants them. | P1 |
+| **P2** | Read the PS3 dump as a second art source where it is easier (its standalone textures decode with the same codec; [assets.md](../assets.md#ps3) has the comparison). | nothing |
 
 P0 is worth doing first regardless of P1: it is the difference between a launcher that can *use* art
 and one that needs it.

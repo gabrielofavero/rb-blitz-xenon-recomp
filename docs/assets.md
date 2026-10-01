@@ -293,6 +293,74 @@ in it. And a swap must be judged by a pixel diff: writing opaque white over a wh
 is applied but looks like nothing happened, which is exactly the trap this section walked
 into twice.
 
+## PS3
+
+The PlayStation 3 build is the same game with the same content pipeline, which makes it
+both useful and, for the parts that already work, free:
+
+```powershell
+.\scripts\extract_assets.ps1 -Platform ps3 `
+    -GameRoot "C:\Games\Emulators\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"
+```
+
+| | 360 | PS3 |
+| --- | --- | --- |
+| Base archive | `gen\main_xbox.hdr` + `_0.ark`, 361,769,177 B | `gen\main_ps3.hdr` + `_0.ark`, 353,726,603 B |
+| Overlay | `ultimate\gen\patch_xbox.hdr` (62 entries) | `gen\patch_ps3.hdr` (62 entries, 33 added / 29 replaced) |
+| Entries | 1,613 | 1,616 |
+| Extracted | 1,648 files, 353.8 MiB | 1,651 files, 346.4 MiB |
+| Archive format | ARK v6 | **ARK v6** — same reader |
+| Texture envelope | 32-byte v2, DXT1/DXT5 | **identical** — same reader |
+
+Every tool in this repository reads the PS3 dump **unchanged**: `hmx_ark.py` lists and
+extracts `main_ps3.hdr` as-is, `hmx_tex.py` decodes `esrb_keep.bmp_ps3` / `upsell_04_keep.bmp_ps3`
+to the same formats, sizes and mip counts as their 360 twins, and `hmx_milo.py` reads the
+PS3 scenes' chunk streams and texture records. The only platform-specific entries are the
+shader blobs (`ps3_shaders` / `ps3_preinit_shaders` vs `xbox_shaders` /
+`xbox_preinit_shaders`), two `dorkage.fpo` / `.vpo` shaders, and `mc/gamedata/icon0.png`.
+
+The two builds also ship **the same art**: `esrb_keep` is 84.7% byte-identical between
+platforms and decodes to the same image (mean channel difference 13/255, i.e. a per-platform
+DXT re-encode of one source bitmap). So a PS3 texture is a good reference for what a 360 one
+is supposed to look like, and vice versa.
+
+### What this does and does not buy the launcher
+
+Both builds ship **both pad families**: `controller_config` carries `img/xbox_0..3.png` and
+`img/ps_0..3.png` (1024×1024 each) on 360 *and* on PS3, so the launcher's Controller page can
+show the real pad whichever the player has, out of either dump. The button prompts are the
+same story — one 512×512 sheet in `buttons` on both.
+
+What PS3 does **not** do is make the button and controller art any easier to read. Those are
+scene-embedded on both platforms (neither dump has a standalone `buttons`/`controller`
+texture; the 241 standalone `*_ps3` entries are the same set the 360 has), and the scene
+texture layout is the same unsolved detail on both — see "Can a UI texture be swapped
+today?" above.
+
+### PS3 as a decoder oracle
+
+The PS3 build is worth keeping for one more reason: it is a **second sample of the same
+asset**, from an independent build, at the same offset. Measured on `buttons`:
+
+- The scene files are structural twins: byte-identical sizes (266,490 B), the object records
+  are **99.5% identical**, the chunk table is identical, and the texture record carries the
+  same source path (`../image/icons_buttons_xbox_nomip.bmp`) and the same 512×512 at 8 bpp.
+- Only the pixel region differs — and it differs as a **16-bit word swap**: 70% of it matches
+  the other build after swapping byte pairs, against 20% left alone. The match is
+  alignment-sensitive (it collapses to 5% at the wrong offset), so it is real structure, not
+  a coincidence of low-entropy bytes. That constrains the format to **16-bit elements**, which
+  is the most useful thing known about it.
+- The region is **raw, not compressed**: no zlib / raw-deflate / gzip / lzma framing applies,
+  and it is highly compressible (deflate gets it to 20% of its size).
+- No glyph-grid periodicity shows up at cell-sized lags (the only autocorrelation peaks are at
+  the smallest lags, which just means neighbouring samples are similar), and the region
+  decodes as neither DXT1 nor DXT5 in either byte order — on both platforms.
+
+So the next attempt has an oracle the last one did not: find a decoding that reads *both*
+copies, or use the 70%-identical majority to separate "this is the image" from "this is a
+re-encode". That belongs with the rest of the open problem in
+[backlog.md](backlog.md).
+
 ## Where the format knowledge comes from
 
 The archive layout and the header cipher are public community knowledge, not something
@@ -309,4 +377,5 @@ The extraction is byte-exact: every entry in both archives has been compared aga
 ark slice it claims, and the only differences in the tree are the 29 files the Ultimate
 patch is meant to replace (33 of its 62 entries are new). Reading is the only thing this
 tool does to the dump — the game folder is opened read-only, and nothing written here is
-committed.
+committed. The PS3 tree is extracted by the same code path against `main_ps3.hdr` and its
+`gen\patch_ps3.hdr` overlay, with the same 29-replaced / 33-added split.

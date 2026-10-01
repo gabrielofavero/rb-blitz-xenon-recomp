@@ -3,7 +3,9 @@
 !/game/README.md
 
 # Extracted game assets (scripts/extract_assets.ps1). Retail content: never commit.
+# -ps3 is the PlayStation 3 dump's tree, extracted by the same script.
 /extracted/
+/extracted-ps3/
 
 # Build products and CMake-local state.
 /out/

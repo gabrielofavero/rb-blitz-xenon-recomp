@@ -68,6 +68,18 @@ that name an action.
       pin down), then add `extract`/`import` to `hmx_milo.py`. Evidence and the rejected
       hypotheses — not a mip chain, not DXT — are in
       [assets.md](assets.md) "Where the art actually lives".
+- [ ] **Use the PS3 build as the decoder oracle.** The PS3 dump is the same game in the same
+      container — `.\scripts\extract_assets.ps1 -Platform ps3 -GameRoot <USRDIR>` writes
+      `extracted-ps3\`, and every tool in `scripts\` reads it unchanged ([assets.md](assets.md#ps3))
+      — which gives the open texture problem something last round did not have: the same asset
+      from an independent build, at the same offset. `buttons.milo_ps3` is the same size as its
+      360 twin, its object records are **99.5% identical**, its texture record is the same, and
+      only the pixel region differs — as a **16-bit word swap**, 70% matching after swapping byte
+      pairs against 20% left alone, collapsing to 5% at a wrong offset, so the structure is real
+      and the format is **16-bit elements**. The region is raw (no zlib/raw-deflate/gzip/lzma
+      framing; it deflates to 20%) and shows no glyph-grid periodicity. A correct decoding has to
+      read *both* copies, and the 70% they share is what separates "this is the image" from "this
+      is a per-platform re-encode" — that is the test to build the next attempt around.
 
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,

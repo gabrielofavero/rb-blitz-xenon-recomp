@@ -55,7 +55,7 @@ Each launch writes a new `logs\rb_blitz_NNN.log`. Pointing `--game_data_root` at
 powershell -ExecutionPolicy Bypass -File .\scripts\extract_assets.ps1
 ```
 
-[assets.md](docs/assets.md) has the resulting layout, the archive format and what is still obfuscated.
+The PlayStation 3 build is the same game in the same container, so the same script unpacks it too — `-Platform ps3 -GameRoot <the dump's USRDIR>` writes `extracted-ps3\`, and every tool in `scripts\` reads that dump unchanged. [assets.md](docs/assets.md) has the resulting layout, the archive format, the two-platform comparison, and what is still obfuscated.
 
 **Tests** are SDK-free and game-data-free, about half a second:
 
