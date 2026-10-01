@@ -48,6 +48,39 @@
 // that a stale payload copy cannot take over the boot.
 //
 // The Ultimate install; see docs/history/bringup-log.md B-012.
+//
+// Hook hygiene (docs/backlog.md §1): the faithful behaviour, and every deviation
+// from it including each early return.
+//
+// Faithful behaviour. Vanilla Blitz is the default and is untouched: with no
+// payload Configure() returns before patching anything, and every edit is behind a
+// bit of `--ultimate_patches` - with the mask at 0 the two overrides call their
+// originals and the content device slot keeps its retail bytes. Each override's
+// early return when its bit is clear is therefore the faithful path, not a disable.
+//
+// Deviations (each reproduces one edit the mod makes to its own default.xex, so
+// that a payload dropped beside the retail data behaves as if that image had been
+// patched; the payload's own default.xex stays hidden so it cannot take over):
+//   * 0x8205DD74, data patch: the content device string "UPDATE:\0" -> "D:\0...",
+//     so content is read from the game directory. Applied only while the slot still
+//     holds the retail bytes, which keeps an image with the edit already baked in
+//     safe.
+//   * 0x821D0A18, function override: the (name, id) table lookup always answers
+//     "not in the table" (r3 = 0) - the mod's `li r3,1` -> `li r3,0` at 0x821D0A7C.
+//     With the bit clear it calls __imp__sub_821D0A18, i.e. faithfully.
+//   * 0x8236C108, function override: PlatformMgr::SetDiskError returns with r3
+//     intact instead of latching a disk error, notifying and spinning forever - the
+//     mod's `mflr r12` -> `blr`. Without it an ark the retail checksum database does
+//     not know black-screens the boot. With the bit clear it calls
+//     __imp__sub_8236C108, i.e. faithfully.
+//   * The overlay device and the d:/game: aliases: the one deviation with no byte in
+//     the mod's image, because the mod expects its files to be copied over the
+//     game's. It is skipped when the payload is already merged into the game root.
+//
+// Every other early return on the patch/overlay path is a refusal to deviate
+// further, not a disable: a slot that does not hold the retail string, a missing
+// heap, VFS or directory, or a device that will not register all leave the guest's
+// behaviour as it was, and each says why in the log.
 
 #include "hooks/ultimate.h"
 

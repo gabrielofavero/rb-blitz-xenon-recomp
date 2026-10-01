@@ -288,6 +288,8 @@ with band3's `NewFile` hook (§4.1) to give us overlay-without-repacking.
   places where a port silently disables engine behaviour instead of implementing
   it. **We should audit our own hooks for that** — a hook that early-returns is a
   bug unless documented as such.
+  **Done 2026-10-01.** Every hook file now carries that record; §8 below names the
+  files and [history/bringup-log.md](history/bringup-log.md) holds the chronology.
 * The port had **zero automated tests**, so every fix was "verified once and
   forgotten" until a gtest harness existed. We are in the same position: our
   `src/hooks/crypto.cpp` deobfuscation is pure host code and could be unit-tested
@@ -315,7 +317,7 @@ of width bug.
 | ~~`longjmp_address` / `setjmp_address`~~ — **closed 2026-09-30** | Our 0.10 SDK supports both at `[entrypoint]` level (`config.cpp` 124–131). band3 sets `longjmp_address = 0x82BBB620`, `setjmp_address = 0x82BBBA50`. Blitz's pair is `longjmp = 0x82772510`, `setjmp = 0x82772940`, and [rb_blitz_manifest.toml](../rb_blitz_manifest.toml) sets both; the disassembly reading and the evidence for each address are in [symbols.md](symbols.md) "Setjmp / longjmp". | Done — found, not re-derived from band3's numbers: the pair is identified by the save/restore layout symmetry and by one guest function that calls both on the same buffer. Nothing observed longjmps yet (see that section for what a run measures). |
 | `d3d12_readback_resolve` | band3 has it in its **manifest**. In 0.10 it is a **cvar** (`graphics/d3d12/command_processor.cpp`), and the runtime profile is a flat recursive cvar table (`src/core/cvar.cpp` `ApplyTomlTable` joins nested tables with `_`). | Put it in the build-tree-local `rb_blitz.toml` (`out/build/<preset>/rb_blitz.toml`, alongside `mnk_mode`, `log_level`, `[log.levels]`), **not** the manifest. |
 | Symbol names | 37,851 anonymous functions (§2). | Name the proved ones. |
-| Hook hygiene | Our hooks have no "why is this disabled" record (§7.3). | Each hook file gets a header comment stating the faithful behaviour and the reason for deviating. |
+| ~~Hook hygiene~~ — **closed 2026-10-01** | Our hooks had no "why is this disabled" record (§7.3). | Done — every hook file carries a header comment stating the faithful behaviour and the reason for deviating, including each early return: [src/hooks/crypto.cpp](../src/hooks/crypto.cpp), [src/hooks/ultimate.cpp](../src/hooks/ultimate.cpp), [src/hooks/dlc.cpp](../src/hooks/dlc.cpp) and the `rex::ReXApp` overrides in [src/rb_blitz_app.h](../src/rb_blitz_app.h). The input device ([src/input/mouse_ui.h](../src/input/mouse_ui.h)), the VFS overlay ([src/fs/payload_overlay.h](../src/fs/payload_overlay.h)) and the SDK patches ([patches/README.md](../patches/README.md), one row per patch) already carried it. Chronology: [history/bringup-log.md](history/bringup-log.md). |
 
 ## 9. Borrowing rules
 

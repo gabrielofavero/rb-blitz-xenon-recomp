@@ -83,6 +83,38 @@
 //     the obscured table needs substituting.
 //
 // The B-009 fix; see docs/history/bringup-log.md.
+//
+// Hook hygiene (docs/backlog.md §1): the faithful behaviour, and every deviation
+// from it including each early return.
+//
+// Faithful behaviour. On hardware, XeKeysSetKey applies KEY_OBFUSCATION_KEY - a
+// per-console value held in a hardware seal - to the buffer it is handed and
+// installs the result under the requested key id; XeKeysAesCbc then runs the block
+// cipher with that key. The guest uses the pair as one operation (see above), and
+// neither hook changes guest control flow or the guest's view of the call: both
+// report success, which is what the wrappers expect.
+//
+// Deviations, all inside the two hooks:
+//   * The seal does not exist here, so the de-obfuscated material is installed
+//     directly from kPlaintextKeyTable. The obscure-on-hardware step is
+//     substituted, not skipped - the bytes a console would have put in the slot are
+//     the bytes that go in. Installing the obscured bytes through the stub pair is
+//     what left music silent (B-009).
+//   * Early return when EnsureGuestBuffers() cannot allocate the guest buffers: the
+//     kernel heap is not up, so the call becomes a successful no-op instead of a
+//     crash. No observed path reaches this (the first call is ~16 s into boot), and
+//     it is logged.
+//   * Early return when the key buffer is neither an entry of the obscured table
+//     nor a plausible guest pointer: the key already in the slot is kept rather than
+//     reading whatever the address names. This guards a shape the guest has never
+//     produced; it is logged on every such call.
+//   * Early return when AES-CBC names a slot no key was ever installed into: the
+//     most recently keyed slot is reused instead of running AES with an empty
+//     schedule, and the event is logged once. Real hardware would fail the call.
+//   * A null CBC feed - the guest always passes IV = 0 - is given a zeroed guest
+//     buffer, because the runtime's CBC dereferences feed and writes the last
+//     ciphertext block back into it. A null feed and a zeroed one are the same IV,
+//     so no guest-visible byte changes.
 
 #include "crypto_keytable.h"
 

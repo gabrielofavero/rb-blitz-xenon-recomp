@@ -8,8 +8,21 @@ in [known-issues.md](known-issues.md).
 
 ## 1. Fixes implied by open known-issues
 
-- [ ] **Hook hygiene**: every hook file states the faithful behaviour and the reason
-      for deviating, including each early return.
+- [x] **Hook hygiene**: every hook file states the faithful behaviour and the reason
+      for deviating, including each early return. Done 2026-10-01. A record was added to
+      each file that replaces or extends emulated behaviour — the two import hooks in
+      [src/hooks/crypto.cpp](../src/hooks/crypto.cpp), the two function overrides, the
+      content-device data patch and the overlay in
+      [src/hooks/ultimate.cpp](../src/hooks/ultimate.cpp), the content root in
+      [src/hooks/dlc.cpp](../src/hooks/dlc.cpp), and the `rex::ReXApp` overrides in
+      [src/rb_blitz_app.h](../src/rb_blitz_app.h) — naming what the console or SDK does
+      by itself and every early return that changes it. The other hook surfaces already
+      carried the record and were left alone: the synthetic-pad input device
+      ([src/input/mouse_ui.h](../src/input/mouse_ui.h)), the VFS overlay device
+      ([src/fs/payload_overlay.h](../src/fs/payload_overlay.h)) and the SDK patches
+      ([patches/README.md](../patches/README.md), one row per patch). Chronology and the
+      per-file table: [history/bringup-log.md](history/bringup-log.md), "Hook hygiene:
+      the faithful behaviour of every hook".
 - [ ] **Host test coverage beyond the seven existing targets** — `crypto_keytable`,
       `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`, `dlc_layout` and
       `toolchain`.

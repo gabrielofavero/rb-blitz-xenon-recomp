@@ -3198,3 +3198,54 @@ observed run has entered one.
   and logs); how to rebuild it is two lines up, and the addresses and the reading
   are in [symbols.md](../symbols.md), which is what a future session should work
   from.
+
+## Hook hygiene: the faithful behaviour of every hook (2026-10-01)
+
+The first item of [backlog.md](../backlog.md) section 1. Its known-issues entry said
+*"Hooks carry no 'why is this disabled' record - a hook that early-returns is a bug unless
+it is documented as a deliberate deviation"*, and it came from
+[rb3-references.md](../rb3-references.md) §7.3, where the RB3 port's dominant bug class was
+"faithful behaviour switched off" (`gDeforms = 0`). §8 had the scope in its own words:
+*"each hook file gets a header comment stating the faithful behaviour and the reason for
+deviating"*. Status: complete.
+
+### The inventory
+
+Every place this project replaces or extends emulated behaviour, and where its record now
+lives. "Faithful" is what the console, the kernel import or the SDK does without us.
+
+| File | Hook | Faithful behaviour | Deviation | Early returns |
+| --- | --- | --- | --- | --- |
+| [src/hooks/crypto.cpp](../../src/hooks/crypto.cpp) | `__imp__XeKeysSetKey`, `__imp__XeKeysAesCbc` | `XeKeysSetKey` de-obfuscates with `KEY_OBFUSCATION_KEY` and installs the result; `XeKeysAesCbc` runs the block cipher under that key | The hardware seal does not exist, so the known plaintext material is installed directly - the obscure-on-hardware step is substituted, not skipped | **added**: no kernel heap (successful no-op), a buffer that is neither the table nor a plausible pointer (keep the slot), a slot never keyed (reuse the last), a null CBC feed (zeroed buffer) |
+| [src/hooks/ultimate.cpp](../../src/hooks/ultimate.cpp) | `sub_821D0A18`, `sub_8236C108`, the `0x8205DD74` data patch, the `d:`/`game:` overlay | Vanilla Blitz. With `--ultimate_patches=0` both overrides call their originals and the content device slot keeps its retail bytes | Reproduces the mod's three `default.xex` edits and unions the payload with the game root so the payload sits beside the retail data | **added**: patch bit clear (the faithful path), a slot that does not hold the retail string, a missing heap/VFS/directory, a device that will not register - each leaves the guest's behaviour alone and logs why |
+| [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) | the extra read-only content root | The guest enumerates DLC through the emulated content APIs and the SDK serves it from the writable content root under `Documents\rb_blitz` | A second, read-only root at `<game_data_root>/dlc` is registered | **added**: missing directory, no usable package, no kernel state, no content manager - the SDK's own root stays the only source |
+| [src/rb_blitz_app.h](../../src/rb_blitz_app.h) | `OnPreSetup`, `OnConfigurePaths`, `OnPostLoadXexImage`, `ApplyContentLicense`, `LogBootIdentity` | The SDK runs its configured backends and input devices, honours every path as given, starts the guest unchanged, and defaults `license_mask` to 0 (trial) | `xenos` default, the mouse device appended, writable roots kept out of the read-only game tree, `license_mask = 1`, the Ultimate + DLC layers run first | **added**: a configured plugin/factory/path/mask is honoured; without a payload or a directory the layers are no-ops |
+| [src/input/mouse_ui.h](../../src/input/mouse_ui.h) + `mouse_ui.cpp` | a third input device (synthetic left stick) | The guest has no cursor; the menus are read straight off the pad | The mouse is translated into discrete left-stick presses, timed by the guest's own frames | already carried: no frames to read (travel fallback), missing window geometry, unfocused or overlay-owned pointer (dropped), a click that outwaits alignment |
+| [src/fs/payload_overlay.h](../../src/fs/payload_overlay.h) + `payload_overlay.cpp` | the union device behind `d:`/`game:` | The SDK VFS resolves a file's directory first and cannot merge two directories | A read-only union device, the payload copy preferred and writes kept on the game root | already carried: a payload or base device that will not mount (init fails), a write of a merged record (base backing), hidden payload records |
+| [patches/rexglue-sdk](../../patches/rexglue-sdk) | eight SDK patches | The pinned SDK's behaviour | Every patch's fix, each with its evidence | already carried: [patches/README.md](../../patches/README.md) has one row per patch |
+
+Not a hook, and deliberately left alone: `config/functions.toml`'s three forced entries are
+codegen discovery (a function that no `bl` reaches), not a behaviour change, and the file
+already states why each stays and why the class collapsed from 24 to 3.
+
+### What changed
+
+Four files gained a "Hook hygiene" header block: `src/hooks/crypto.cpp` (the two import
+hooks and each early return), `src/hooks/ultimate.cpp` (the three edits, the overlay, and
+the distinction between a patch bit that is clear - the faithful path - and an early return
+that refuses to deviate further), `src/hooks/dlc.cpp` (the faithful content root and the
+added one) and `src/rb_blitz_app.h` (the `rex::ReXApp` hooks). The input device, the VFS
+overlay and the SDK patches already stated the same thing and were not touched.
+
+The entry also closes the known-issues row and the [rb3-references.md](../rb3-references.md)
+§8 gap. A disproof would edit this section.
+
+### Verification (2026-10-01, Release `out/build/win-amd64-release`)
+
+- `cmake --build --preset win-amd64-release --target rb_blitz`: `crypto.cpp`,
+  `ultimate.cpp`, `dlc.cpp` and `main.cpp` recompiled, `rb_blitz.exe` linked, exit 0. The
+  four edits are comments; the compile is the proof that they landed in the right files.
+- `ctest --test-dir out\build\win-amd64-release --output-on-failure`: **7/7** passed
+  (1.97 s). Documentation-only, so this is a regression check on the tree, not on the
+  comments.
+

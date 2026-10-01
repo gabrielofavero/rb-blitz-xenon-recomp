@@ -2,6 +2,30 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Customize your app by overriding virtual hooks from rex::ReXApp.
+//
+// Hook hygiene (docs/backlog.md §1): this is the one file whose hooks are
+// rex::ReXApp's, so each override below states what the SDK does by itself and why
+// this app differs. In short:
+//   * OnPreSetup - the SDK runs its configured backends and input devices; here the
+//     GPU plugin defaults to xenos when none is named (the only one staged), and the
+//     mouse driver is appended to whatever input factory is configured. Both are
+//     additive; a configured plugin and a configured factory are honoured.
+//   * OnConfigurePaths - faithfully, every path is honoured as given; here a writable
+//     root that resolves inside the read-only game tree is dropped in favour of the
+//     platform user directory, so a launcher cannot make the game write into its own
+//     data. Any other directory is honoured as given.
+//   * ApplyContentLicense - the emulated console owns no licence, which sends the
+//     title down the trial path; here license_mask defaults to 1 (treated as
+//     purchased), and only when nothing else - config file, REX_* environment or
+//     command line - named a mask, so `license_mask = 0` restores the faithful path.
+//   * OnPostLoadXexImage - the SDK starts the guest unchanged; here the Ultimate and
+//     DLC layers run first, and each is a no-op without its payload/directory.
+//   * LogBootIdentity - diagnostics only; it changes no guest behaviour.
+//
+//   Every early return above is either the faithful path or a refusal to deviate
+//   further: a configured plugin, factory, path or mask leaves the SDK's own
+//   behaviour alone, and a missing payload or directory makes the added layers
+//   no-ops.
 
 #pragma once
 

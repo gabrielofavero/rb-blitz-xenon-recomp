@@ -15,6 +15,21 @@
 // directory. 45410914 is Rock Band 3's title id, which Blitz lists as an alternate
 // title id (XEX optional header 0x000407FF: 45410829, 45410869, 45410914) so RB3 DLC
 // enumerates for Blitz; 5841122D is Blitz itself. See docs/dlc.md.
+//
+// Hook hygiene (docs/backlog.md §1): the faithful behaviour, and the reason for the
+// deviation.
+//
+// Faithful behaviour: the guest enumerates downloadable content through the emulated
+// Xbox content APIs and the SDK serves them from the writable content root under
+// Documents\rb_blitz. The title has no notion of a DLC directory of its own, and
+// nothing here disables that root - it keeps working exactly as it did.
+//
+// Deviation: a second, read-only content root is registered so packages under
+// <game_data_root>/dlc enumerate and open like installed content. Every early return
+// below is a refusal to add that root, not a change to the guest's existing view: a
+// missing directory, no usable package, no kernel state or no content manager leaves
+// the SDK's own root as the only source, which is the faithful behaviour, and each is
+// logged.
 
 #include "hooks/dlc.h"
 
