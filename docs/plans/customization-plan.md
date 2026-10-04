@@ -73,6 +73,7 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
 | A mouse-driven menu layer | `src/input/mouse_ui.{h,cpp}`, `src/input/ui_nav.h`, `src/input/nav_detect.h`, `tests/ui_nav_tests.cpp` **[tree]** | R6 starts from a measured, working synthetic pad, plus the aligner that already measures row pitch per screen |
 | Host-side DLC layout work | `src/fs/dlc_layout.h`, `tests/dlc_layout_tests.cpp`, the enumeration facts in [dlc.md](../dlc.md) §1–§2 | R7's cache wraps a path that is already understood and tested |
 | A settings surface to hang toggles on | [launcher-plan.md](launcher-plan.md) D2/D12, `rb_blitz.toml` and the flat cvar table | this plan only has to define the guest-side toggle names |
+| An enhancement toggle contract (landed 2026-10-04, P1) | `[enhancements]` in `<exe name>.toml`, [src/enhancements.cpp](../../src/enhancements.cpp), [docs/engine/toggles.md](../engine/toggles.md) | every feature below already has its off-by-default switch and a boot line that reports value and source, so a feature commit only has to read it |
 
 ### 2.2 Does not exist — this is the gap this plan closes
 
@@ -88,8 +89,10 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
   build differ by **3.5–5.9 %** of the frame just after a screen is entered and ~0.14 % once settled
   **[tree]** [backlog.md](../backlog.md) §4. Any pixel-diff-based verification is meaningless until a
   same-build baseline is in the loop.
-- **No toggle contract.** The README promises "enhancements will be toggleable"
-  **[tree]** [README.md](../../README.md), and nothing defines how.
+- ~~**No toggle contract**~~ — **landed 2026-10-04 (P1).** Every enhancement is one
+  `[enhancements]` key in `<exe name>.toml`, default off, logged with its value and source at every
+  boot: [docs/engine/toggles.md](../engine/toggles.md), [src/enhancements.cpp](../../src/enhancements.cpp)
+  and D7 below.
 - **No host-side DLC cache.** The guest scans; the cache is the guest's `songcache:`, whose format
   is unknown host-side.
 - **No native mouse.** The engine's own pointer path is unproven; the current device synthesizes pad
@@ -190,10 +193,21 @@ which is P1 there and is *not* on this plan's critical path.
 
 ### D7 — The toggle contract
 
-**Proposal:** every enhancement is one `rb_blitz.toml` key under `[enhancements]` plus one flat cvar
-(`enh_<feature>`), default **off**, with the boot log printing each toggle's effective value. The
-launcher plan's Graphics tab is where they surface later (D12 there); this plan does not build that
-UI.
+**Landed 2026-10-04 (P1).** The implementation is [src/enhancements.cpp](../../src/enhancements.cpp)
+and [src/enhancements.h](../../src/enhancements.h); the table is
+[docs/engine/toggles.md](../engine/toggles.md).
+
+**As built:** every enhancement is one `rb_blitz.toml` key under `[enhancements]`, default **off**,
+and the runtime's own nesting rule makes the cvar name the table path joined with `_`
+(`ApplyTomlTable`, `rexglue-sdk/src/core/cvar.cpp`): `[enhancements] skip_offline_dialog = true`
+sets `enhancements_skip_offline_dialog`. **The `enh_<feature>` spelling first proposed here was
+wrong** — the flat-cvar namespace of this runtime is the table path, so a name that is not the path
+would be unreachable from the TOML table it is documented under. Every toggle carries
+`kRequiresRestart` (what they gate is decided at load) and logs `on`/`off` with the source that set
+it, so "the toggle did nothing" and "the toggle was never on" cannot be confused.
+
+The launcher plan's Graphics tab is where they surface later (D12 there); this plan does not build
+that UI.
 
 ### D8 — The DLC cache is host-side; the guest's cache is untouched
 
@@ -209,9 +223,10 @@ any fingerprint change, or the refresh action.
 
 ### D9 — A forced controller scheme is opt-in and backed up
 
-**Proposal:** apply the forced scheme **only** when `enh_force_controller_scheme` (or the
-launcher's row) names one; back up the file being modified; never silently overwrite a user's saved
-layout; log the before/after. Where the scheme actually lives is D3's research question, not assumed.
+**Proposal:** apply the forced scheme **only** when `enhancements_force_controller_scheme` (or the
+launcher's row) names a scheme in `enhancements_controller_scheme`; back up the file being modified;
+never silently overwrite a user's saved layout; log the before/after. Where the scheme actually
+lives is D3's research question, not assumed.
 
 ### D10 — Offline skip forces the branch, it does not skip the mode
 
@@ -263,9 +278,9 @@ or [history/bringup-log.md](../history/bringup-log.md) in the same commit.
 
 ## 5. Contracts
 
-Contract 1 — **the probe/toggle surface** (P1): the `[enhancements]` table, the `enh_*` cvar
-namespace, the boot line that prints them, and the rule that a probe is a cvar not a compile define,
-so acceptance runs the release build.
+Contract 1 — **the probe/toggle surface** (P1, landed 2026-10-04): the `[enhancements]` table, the
+`enhancements_*` cvar namespace (the table path, per D7), the boot line that prints them, and the
+rule that a probe is a cvar not a compile define, so acceptance runs the release build.
 
 Contract 2 — **the research artifact** (P4): the `docs/engine/<area>.md` shape — a header stating the
 question, a table of addresses with evidence tags, the flow, and an "open" section. Every flow-map
@@ -349,13 +364,13 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 
 > **Goal.** Define how an enhancement is turned on and off. Add an `[enhancements]` table to the
 > build-tree-local `rb_blitz.toml` (and document the user-facing `rb_blitz.toml` copy), one flat
-> `enh_*` cvar per feature, all defaulting to **off**, and a boot log line that prints each toggle
+> `enhancements_*` cvar per feature, all defaulting to **off**, and a boot log line that prints each toggle
 > with its effective value and its source. Cover R1–R9 by name even though none exists yet, so the
 > names are argued before the code is. State for each toggle what the faithful (off) behaviour is.
 > **Deliverable.** The cvar registrations (a single `src/enhancements.cpp`/`.h` pair is enough), the
 > `rb_blitz.toml` documented table, and a `docs/engine/toggles.md` listing every toggle, its default,
 > its faithful behaviour and the feature it will gate.
-> **Verify.** Boot the release build with no config: the log lists nine `enh_*` toggles as off; boot
+> **Verify.** Boot the release build with no config: the log lists nine toggles as off; boot
 > with one on: only that one reads on, and its cvar shows in `--help`/the cvar dump.
 > **Don't.** Do not implement a feature; do not build launcher UI (that is
 > [launcher-plan.md](launcher-plan.md) B2); do not default anything on.
@@ -678,7 +693,8 @@ table, which `[functions]` cannot name.
 
 > **Goal.** The first feature-shaped prompt, deliberately the cheapest: locate the
 > **"Proceed in Offline Mode?"** decision (D10) with the S2 map and `scan_process_strings.ps1` if
-> needed, then force the offline outcome with a `[[midasm_hook]]`, behind `enh_skip_offline_dialog`.
+> needed, then force the offline outcome with a `[[midasm_hook]]`, behind
+> `enhancements_skip_offline_dialog`.
 > Record the address, the observed behaviour with the toggle off, and the intended behaviour (D10).
 > **Deliverable.** The hook config, the toggle, the map row in `docs/engine/main-menu-flow.md`, and a
 > log line naming the decision made.
@@ -792,7 +808,7 @@ it is cheaper to learn that now than after R1's and R4's asset work.
 
 | Requirement | How it is proven | Where |
 | --- | --- | --- |
-| Every enhancement is toggleable and off by default | boot log lists nine `enh_*` as off; each acceptance run with all off passes | P1, E2 |
+| Every enhancement is toggleable and off by default | boot log lists nine `enhancements_*` as off; each acceptance run with all off passes | P1, E2 |
 | R1 non-16:9 behaviour is known, per screen | classification table with captures + OCR at 2560×1080 and 1080×1920 | R1 |
 | R1 3D and background are expanded, not host-stretched | before/after captures at the guest mode + the logged sizing/projection values | R2, R3 |
 | R2 text/logo accessibility is reachable | one scaled screen captured; text boxes change by the scale; no overlap at 125 % | U2 |

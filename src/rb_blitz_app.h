@@ -44,6 +44,7 @@
 
 #include "generated/fingerprint_expected.h"
 #include "generated/toolchain_build.h"
+#include "enhancements.h"
 #include "fs/path_policy.h"
 #include "hooks/dlc.h"
 #include "hooks/ultimate.h"
@@ -117,6 +118,7 @@ class RbBlitzApp : public rex::ReXApp {
   // logging is up and the guest has not started yet.
   void OnPostLoadXexImage() override {
     LogBootIdentity();
+    rb_blitz::enhancements::LogToggles();
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
     // After ultimate::Configure, which decides what the guest-visible game tree
     // looks like: DLC is resolved by the SDK content manager from a host path, so

@@ -78,6 +78,7 @@ endif()
 # Sources
 set(RBBLITZ_SOURCES
     src/main.cpp
+    src/enhancements.cpp
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
     src/hooks/ultimate.cpp
