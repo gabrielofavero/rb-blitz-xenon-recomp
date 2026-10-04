@@ -326,6 +326,17 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_toolchain_tests PRIVATE src)
     add_test(NAME toolchain
              COMMAND rb_blitz_toolchain_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # The launcher profile: path resolution and the reader/writer (P0.3). SDK-free, so it
+    # runs without booting anything, and compiled from src/ because the game executable
+    # reads the same file (D1).
+    add_executable(rb_blitz_launcher_profile_tests
+        tests/launcher_profile_tests.cpp
+        src/launcher/profile.cpp
+        src/launcher/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_launcher_profile_tests PRIVATE src)
+    add_test(NAME launcher_profile COMMAND rb_blitz_launcher_profile_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,
