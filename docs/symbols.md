@@ -289,7 +289,7 @@ overrides live in `src/hooks/crypto.cpp` with the SDK-free half of the logic in
 | `0x827272B0` | guest `XeKeysAesCbc` wrapper: same `+0xE0` id bias, null feed, decrypt direction, forwards `r4..r6` |
 | `0x823DE070` | MOGG version → key index selector (`12/13→0`, `14→1`, `15→2`, `16→3`, else `0`) — `ByteGrinder::GetEncMethod` |
 | `0x823DE0C0` | `ByteGrinder::HvDecrypt(in, out, version)`: install the key for that version, then AES-128-ECB-decrypt the 16 bytes at `in` into `out` (the 16-byte stream mask) |
-| `0x82768C88` | `VorbisReader::CheckHmxHeader`: the MOGG header parser and the only caller of `0x823DE0C0`, once per music stream |
+| `0x82768C88` | `VorbisReader::CheckHmxHeader`: the MOGG header parser and the only caller of `0x823DE0C0`. Entered **once per stream by `0x823DE0C0`/`0x82768AD0`, but repeatedly by the caller above it** — measured 2026-10-04 with the probe ([engine/probe.md](engine/probe.md)), 1,806 entries over 28 s of title music against **1** `HvDecrypt` and **1** `setupCypher` in the same window. The earlier "once per music stream" described the two callees, not this function |
 | `0x82768AD0` | `VorbisReader::setupCypher(version)`: stream key = `GrindArray(keychain key) ^ mask`, then `ctr_start(nonce)` |
 | `0x8280C568` | 64-byte `.data` table of four **obscured** AES-128 keys, one per MOGG version |
 

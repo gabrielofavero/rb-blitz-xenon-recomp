@@ -23,6 +23,10 @@
 //   * OnPreLaunchModule - the SDK never finalizes the cvar registry, so a key in
 //     rb_blitz.toml that matches no cvar stays silent; here the registry is finalized
 //     last, which reports such a key and locks the kInitOnly flags.
+//   * OnCreateDialogs - the SDK adds its own overlays (F3 debug, console, settings);
+//     here the probe overlay joins them, so there is still one ImGui context and one
+//     renderer. It draws only while probe_overlay is on; with the cvar off it changes
+//     nothing (diagnostics, see src/diag/probe.h).
 //   * LogBootIdentity - diagnostics only; it changes no guest behaviour.
 //
 //   Every early return above is either the faithful path or a refusal to deviate
@@ -35,6 +39,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 
 #include <rex/cvar.h>
@@ -43,10 +48,12 @@
 #include <rex/rex_app.h>
 #include <rex/system/flags.h>
 #include <rex/system/interfaces/graphics.h>
+#include <rex/ui/window.h>
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
 #include "generated/toolchain_build.h"
+#include "diag/probe.h"
 #include "enhancements.h"
 #include "fs/path_policy.h"
 #include "hooks/dlc.h"
@@ -141,6 +148,37 @@ class RbBlitzApp : public rex::ReXApp {
   // selections that the config, environment and command line have already fixed.
   void OnPreLaunchModule() override { rex::cvar::FinalizeInit(); }
 
+  // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor
+  // registers it with the drawer and its destructor unregisters it, so this only
+  // has to own it for as long as the app lives. Whether it draws is the
+  // `probe_overlay` cvar's decision, re-read every frame, which is what makes the
+  // toggle live; the cvar off draws nothing at all.
+  //
+  // The one thing the dialog cannot reach is the window (it lives here), so it is
+  // handed over as a callback rather than a pointer - the same lazily-called shape
+  // as the mouse driver's presenter lookup in OnPreSetup.
+  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+    probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
+      rb_blitz::diag::WindowState state;
+      const rex::ui::Window* w = window();
+      if (w == nullptr) {
+        return state;
+      }
+      state.physical_width = w->GetActualPhysicalWidth();
+      state.physical_height = w->GetActualPhysicalHeight();
+      state.logical_width = w->GetActualLogicalWidth();
+      state.logical_height = w->GetActualLogicalHeight();
+      state.fullscreen = w->IsFullscreen();
+      // The window reports both sizes; the ratio is the only reason to want a
+      // scale, and a logical size of zero (window not yet realised) means one.
+      if (state.logical_width != 0) {
+        state.dpi_scale = static_cast<float>(state.physical_width) /
+                          static_cast<float>(state.logical_width);
+      }
+      return state;
+    });
+  }
+
  private:
   // Content licence state, the emulated console's answer to "does this profile
   // own this title?". XamContentGetLicenseMask hands the guest the
@@ -177,8 +215,7 @@ class RbBlitzApp : public rex::ReXApp {
   // Nothing here aborts: the point is that the log says which revision (if any)
   // the running executable was actually booted against, so a bug report can be
   // matched to it.
-  void LogBootIdentity() {
-    REXLOG_INFO("boot identity: {}", REXGLUE_BUILD_STAMP);
+  void LogBootIdentity() {    REXLOG_INFO("boot identity: {}", REXGLUE_BUILD_STAMP);
 
     // Which compiler, CMake, Ninja, MSVC toolset, Windows SDK and SDK commit built
     // this binary, with the frozen set named in the same line when it is one. It is
@@ -213,4 +250,8 @@ class RbBlitzApp : public rex::ReXApp {
                 rb_blitz::fingerprint::vanilla::kEntrypointSize,
                 rb_blitz::fingerprint::vanilla::kEntrypointSha256);
   }
+
+  // Owned for the app's lifetime; it unregisters itself from the drawer when this
+  // is destroyed, which happens before ~ReXApp() tears the drawer down.
+  std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
 };

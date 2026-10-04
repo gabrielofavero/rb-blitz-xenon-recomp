@@ -78,6 +78,10 @@ endif()
 # Sources
 set(RBBLITZ_SOURCES
     src/main.cpp
+    src/diag/probe.cpp
+    src/diag/probe_overlay.cpp
+    src/diag/probe_points.cpp
+    src/diag/probe_trace.cpp
     src/enhancements.cpp
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
@@ -295,6 +299,13 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_ui_nav_tests PRIVATE src)
     add_test(NAME ui_nav COMMAND rb_blitz_ui_nav_tests)
+
+    add_executable(rb_blitz_probe_trace_tests
+        tests/probe_trace_tests.cpp
+        src/diag/probe_trace.cpp
+    )
+    target_include_directories(rb_blitz_probe_trace_tests PRIVATE src)
+    add_test(NAME probe_trace COMMAND rb_blitz_probe_trace_tests)
 
     add_executable(rb_blitz_dlc_layout_tests
         tests/dlc_layout_tests.cpp

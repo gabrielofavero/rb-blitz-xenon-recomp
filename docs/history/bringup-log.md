@@ -3695,3 +3695,54 @@ dropped in silence, so a profile edit could not be verified by looking for a war
   `log_levels_gpu`, and nothing for any other key in the profile. The typo is the control
   that proves finalization ran in that same process; without it the `[log.levels]` silence
   would prove nothing.
+
+
+## Enhancement toggles, so a planned feature cannot look like a working one (2026-10-04)
+
+[plans/customization-plan.md](../plans/customization-plan.md) is a prompt plan for nine UI /
+resolution / save / DLC features, and every one of them starts off by default - so the first thing it
+needs is a way to say "this toggle exists and is off", because "the toggle did nothing" and "the
+toggle was never on" are otherwise the same log line.
+
+- **The contract.** `src/enhancements.{h,cpp}` register nine cvars, and `LogToggles()` prints each
+  one's value and the source that set it (`default` / `config` / `environment` / `command line` /
+  `runtime`) from `OnPostLoadXexImage`. All nine default off and each description names the faithful
+  (off) behaviour; [engine/toggles.md](../engine/toggles.md) is the table, with the prompt that will
+  implement each one.
+- **A name that had to change.** The plan proposed `enh_<feature>`. The runtime builds a cvar name by
+  joining a nested TOML table's path with `_` (`ApplyTomlTable` in `rexglue-sdk/src/core/cvar.cpp`),
+  so `[enhancements] dlc_cache = true` is `enhancements_dlc_cache`; an `enh_*` name would have been
+  unreachable from the table it was documented under. The plan's D7 records the correction.
+- **Measured.** No config: all nine read `off (default)`. `--enhancements_skip_offline_dialog=1`:
+  that one `on (command line)`, the other eight unchanged. `[enhancements] dlc_cache = true` in the
+  gitignored profile: `enhancements_dlc_cache = on (config)`. Release build clean, ctest 8/8.
+
+## The probe: the guest's own trace, and what it immediately corrected (2026-10-04)
+
+The customization plan's flow maps need to watch the guest run, and the only view until now was a
+screenshot. [src/diag/probe.h](../../src/diag/probe.h) adds a bounded ring of trace events fed by
+points placed inside hooks (`RBBLITZ_PROBE(address, tag)` records the address, tag, thread, guest
+return address and `r3..r10`), an ImGui overlay showing the guest's requested video mode, window and
+present path, and a trace file rewritten twice a second for scripted runs.
+[engine/probe.md](../engine/probe.md) is the operator's view.
+
+- **One ImGui context, deliberately.** The overlay is an SDK `ImGuiDialog` added through
+  `ReXApp::OnCreateDialogs` - the same mechanism as the SDK's own F3 debug overlay, console and
+  settings dialogs - not a second renderer, which is what the plan's P2 forbade.
+- **The pure half is host-tested.** The ring (`src/diag/probe_trace.h`, no SDK dependency) is covered
+  by `tests/probe_trace_tests.cpp` under `ctest` as `probe_trace`: wrap-around, drop counting,
+  snapshot order, capacity clamp and resize, tag truncation, and the one-line format.
+- **First real trace, and it corrected a claim.** With the four named MOGG functions instrumented, a
+  vanilla run (`--ultimate_mode=0`) records `header -> hv_decrypt -> enc_method -> setup_cypher` in
+  order, with `hv_decrypt`'s `lr=0x82768E08` inside `CheckHmxHeader` and `enc_method`'s
+  `lr=0x823DE0E4` inside `HvDecrypt`. The census is the finding: **1,806 `CheckHmxHeader` entries
+  against 1 `HvDecrypt` and 1 `setupCypher` in the same window**, so symbols.md's "once per music
+  stream" described the two callees, not the parser. An Ultimate run (patches `0x7`) gives the same
+  order and census, so this is not a payload artefact; symbols.md's MOGG row carries the correction.
+- **What is not wired, and why.** The menu path: a point can only be placed on a function that is
+  already identified, and no menu function has a name yet - that is S2's work, and S2 depends on this
+  instrument. The plan's P2 verification, which asked for a title -> main menu trace it could not
+  have, was corrected rather than left standing.
+- **A cosmetic bug the trace found in itself.** The first event was dated `-0.000s`, because the
+  clock was read before the origin static was created; the fix reads the origin first, and a re-run
+  dates it `+0.000s`.

@@ -74,6 +74,7 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
 | Host-side DLC layout work | `src/fs/dlc_layout.h`, `tests/dlc_layout_tests.cpp`, the enumeration facts in [dlc.md](../dlc.md) §1–§2 | R7's cache wraps a path that is already understood and tested |
 | A settings surface to hang toggles on | [launcher-plan.md](launcher-plan.md) D2/D12, `rb_blitz.toml` and the flat cvar table | this plan only has to define the guest-side toggle names |
 | An enhancement toggle contract (landed 2026-10-04, P1) | `[enhancements]` in `<exe name>.toml`, [src/enhancements.cpp](../../src/enhancements.cpp), [docs/engine/toggles.md](../engine/toggles.md) | every feature below already has its off-by-default switch and a boot line that reports value and source, so a feature commit only has to read it |
+| A runtime probe (landed 2026-10-04, P2) | [src/diag/probe.h](../../src/diag/probe.h), [docs/engine/probe.md](../engine/probe.md) | S2–S7 measure with it: an ordered trace of guest points plus an overlay of the guest's requested video mode, window and present path |
 
 ### 2.2 Does not exist — this is the gap this plan closes
 
@@ -83,8 +84,10 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
 - **No flow maps.** There is no document saying which function decides the main menu's option list,
   which one sizes the background, which one builds the song list, or which one reads the controller
   layout. The bring-up log holds chronology, not structure.
-- **No guest-state visibility.** Nothing reports the guest's current video mode, current scene, or
-  scene/state name while the game runs; the only view is a screenshot.
+- ~~**No guest-state visibility.**~~ — **landed 2026-10-04 (P2).** The probe records an ordered trace
+  of points placed in hooks and draws an ImGui overlay with the guest's requested video mode, the
+  window and the present path: [docs/engine/probe.md](../engine/probe.md). The one gap it states
+  rather than hides is the presenter's paint rect, which no public SDK accessor exposes.
 - **No baseline set, and a measured noise floor bigger than most effects.** Two runs of the same
   build differ by **3.5–5.9 %** of the frame just after a screen is entered and ~0.14 % once settled
   **[tree]** [backlog.md](../backlog.md) §4. Any pixel-diff-based verification is meaningless until a
@@ -377,16 +380,34 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 
 #### P2 — Guest probe overlay and flow log
 
+> **Landed 2026-10-04.** [src/diag/probe.{h,cpp}](../../src/diag/probe.h),
+> [probe_overlay.{h,cpp}](../../src/diag/probe_overlay.h),
+> [probe_trace.{h,cpp}](../../src/diag/probe_trace.h) (SDK-free, unit-tested by
+> [tests/probe_trace_tests.cpp](../../tests/probe_trace_tests.cpp), run as `ctest -R probe_trace`),
+> [probe_points.cpp](../../src/diag/probe_points.cpp) and
+> [docs/engine/probe.md](../../docs/engine/probe.md). Four cvars (`probe_trace`,
+> `probe_trace_capacity`, `probe_trace_path`, `probe_overlay`); the overlay is an SDK `ImGuiDialog`
+> added through `ReXApp::OnCreateDialogs` — the SDK's own extension point, so there is still one
+> ImGui context and one renderer; the MOGG path is the first wired trace.
+>
+> **The verify below was wrong, and is corrected here.** "Paste the trace for one transition
+> (title → main menu)" cannot be P2's own acceptance: a probe point can only be placed on a function
+> that is already identified, and no menu function has a name yet — finding them is S2's output, and
+> S2 depends on P2. P2 therefore verifies on the one guest path that *is* proved (the MOGG path S1
+> named), and the title → main menu trace becomes **S2's** acceptance. The prompt text below is kept
+> as written so the correction is legible; probe.md records the measured trace.
+>
 > **Goal.** Make the guest's own state visible at runtime. Add a probe facility (cvar-gated, not a
 > compile define) that can (a) log an ordered trace of guest addresses visited on a named path, with
-> the register/branch values that chose each edge, and (b) draw a small ImGui overlay showing the
-> guest's current video mode, the presenter's paint rect, the current scene name if one can be read,
-> and the last N probe events. This is the instrument S2–S7 measure with.
+> the register values passed at each point, and (b) draw a small ImGui overlay showing the guest's
+> current video mode, the present-path settings, the window, and the last N probe events. This is the
+> instrument S2–S7 measure with.
 > **Deliverable.** `src/diag/probe.{h,cpp}` plus the overlay wiring in `RbBlitzApp` (the app already
 > owns the ImGui host through the SDK's overlay — check `rex_app.h` before adding a second renderer),
 > and a `docs/engine/probe.md` describing each probe area and its log format.
-> **Verify.** Boot, toggle the probe on, and paste the trace for one transition (title → main menu):
-> addresses in order, with the value that decided each branch. The overlay is visible in a capture.
+> **Verify.** Boot with `--probe_trace=1 --probe_trace_path=<file>`, and paste the trace for one real
+> path — the points that exist, in order, with their `lr` and arguments. The overlay is visible in a
+> capture and readable by OCR. A named *menu* path is S2's, not this prompt's.
 > **Don't.** Do not add a second ImGui context or a second overlay renderer; do not log every
 > function (a full trace is unusable) — the prompt is *named* paths with a bounded ring buffer.
 
