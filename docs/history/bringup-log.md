@@ -3610,3 +3610,54 @@ runtime profile the app reads, `out/build/<preset>/rb_blitz.toml`.
   calls**. A misspelled key is therefore dropped silently, so a boot log line is not a
   usable control; that limit is recorded in [known-issues.md](../known-issues.md).
 
+
+## DLC reaches the guest, and the alpha save/DLC acceptance (2026-10-03)
+
+### The bug: the container probe tested the directory
+
+The DLC root was registered (`dlc: 21 package(s) for title(s) 45410914, 5841122D ... mounted
+in place`) yet the guest's own song list carried no DLC song, and a boot showed the
+enumerator coming back empty:
+
+```text
+XamContentAggregateCreateEnumerator: added 0 items to enumerator   (three times)
+```
+
+Temporary logging in `ContentManager::AppendContentFromDirectory` named the cause: the extra
+root resolved and listed, but the one entry was rejected as "not a content package".
+
+```text
+content: extra root candidate '...\game\dlc\45410914\00000002' exists=true
+content: scan '...\game\dlc\45410914\00000002' -> 1 entry(ies)
+content: entry '...\game\dlc\45410914\00000002' type=0 pkg=0
+```
+
+`rex::filesystem::ListFiles` puts the entry's **parent** in `FileInfo::path` and the entry
+name in `FileInfo::name` (`filesystem_win.cpp`; `GetInfo` sets them the same way), but patch
+0006's new probe asked `IsContentPackageFile(file_info.path)` - the directory - so every
+STFS container failed `StfsContainerDevice::ReadPackageHeader` and was skipped. The check is
+now `file_info.path / file_info.name`, carried in patch 0006
+([patches/README.md](../../patches/README.md)).
+
+- **Measured with the fix.** The aggregate enumerator reports `added 1 items`, and the song
+  list carries the package's songs; the first artist-sorted row is All-American Rejects'
+  "Kids in the Street". The `5841122D/00009000` packages are avatar items ("Rock Band Blitz
+  Logo Tee", "Guitar Track Jumpsuit", "Rock Band Blitz Rocket", ...), not songs, and the
+  guest never asks for that content type - correctly so.
+- **Why the host tests could not catch it.** `tests/dlc_layout_tests.cpp` pins the decision
+  in `src/fs/dlc_layout.h` and the layout scanner; the defect was in the SDK's `ListFiles`
+  contract, which no host test target reaches. The in-game acceptance is the regression
+  test.
+
+### The alpha acceptance
+
+`scripts/acceptance_dlc.ps1` (a package-carrying song must be on the song list, with a
+no-DLC control leg where it must be absent) and `scripts/acceptance_save.ps1` (change the
+manual-calibration offset, quit, restart, require it read back, then revert) now drive both
+features, and `scripts/acceptance_alpha.ps1` runs both against the dev tree and the installer
+payload. Save/load: A on the calibration page's CONTINUE rewrites `globaloptions` (hash
+changes; `[NtCreateFile] disp=0x5` + a 1024-byte `[NtWriteFile]`), the value reads back after
+a restart with the file byte-identical, and the revert reads back 0. The Audio/Video toggles
+and the controller scheme change on screen but never write the file - measured across left
+stick, D-pad, A, START, B, X, Y, a 30 s wait and a main-menu round trip - which is recorded
+in [known-issues.md](../known-issues.md).

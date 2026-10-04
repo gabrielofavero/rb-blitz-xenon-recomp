@@ -620,6 +620,41 @@ what make that isolation safe to run on a machine with real saves; they are hono
 as of 2026-09-20, before which they were silently discarded
 ([docs/known-issues.md](known-issues.md)).
 
+### Saving and DLC under the alpha (`acceptance_save.ps1`, `acceptance_dlc.ps1`)
+
+The two features the alpha is judged on have their own runs, and
+`acceptance_alpha.ps1` drives both against the dev tree *and* against the payload the
+installer ships (snapshotted by `installer/tools/make_payload.ps1`, run from a bare
+install folder with no `rb_blitz.toml`):
+
+```powershell
+.\scripts\acceptance_alpha.ps1                 # both suites, both build kinds
+.\scripts\acceptance_alpha.ps1 -SkipInstalled  # the dev tree only
+.\scripts\acceptance_save.ps1                  # save/load round trip on its own
+.\scripts\acceptance_save.ps1 -Steps 3         # -15 ms instead of -10 ms
+.\scripts\acceptance_dlc.ps1                   # DLC visibility on its own
+```
+
+* `acceptance_save.ps1` changes the **manual calibration** offset through the guest's
+  own menus (HELP & OPTIONS → Calibration → Calibrate Manually), quits, restarts and
+  requires the value to read back, then reverts it and checks the revert too. The
+  three legs share one isolated `--user_data_root`. Manual calibration is the setting
+  it uses because it is the one that commits: A on the page's CONTINUE rewrites
+  `globaloptions` (a `[NtCreateFile] disp=0x5` plus a 1024-byte `[NtWriteFile]`, and
+  the file's hash changes), where the Audio/Video toggles and the controller scheme
+  change on screen but do not write the file ([docs/known-issues.md](known-issues.md)).
+  The value comes from OCR, so digits the OCR engine reads as letters ("0" → "O",
+  "-10" → "-IO") are normalised before they are parsed.
+* `acceptance_dlc.ps1` requires the DLC root's packages to be enumerated by the guest
+  (`XamContentAggregateCreateEnumerator: added N items`, N > 0) and a song only the
+  DLC package carries to be on the song-selection screen, read with Windows OCR. Its
+  control leg points `--dlc_root` at a path that does not exist and requires the same
+  song to be *absent*, so a pass cannot come from the bundled game data. Each leg
+  uses a fresh writable root, because the guest caches its song list into `songcache`.
+
+Evidence lands in `out\m7-dev\`, `out\m7-installed\` and, per standalone run,
+`out\m7-save\` / `out\m7-dlc\`; `out\alpha-acceptance.json` is the combined verdict.
+
 ### Mouse navigation (menus only), and its cvars
 
 The mouse is a **third input device**, not a pointer: the row the pointer rests on is

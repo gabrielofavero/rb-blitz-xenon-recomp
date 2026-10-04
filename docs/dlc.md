@@ -92,15 +92,28 @@ that directory nor its write access.
 
 ## 5. Limits
 
-- **Not verified in game.** What is proven host-side: the layout
+- **Verified in game (2026-10-03).** What is proven host-side: the layout
   ([tests/dlc_layout_tests.cpp](../tests/dlc_layout_tests.cpp), and the real `game/dlc`
   tree reports 21 packages and 0 rejected entries) and the patch set
   ([patches/rexglue-sdk/0006-content-container-packages-and-extra-content-root.patch](../patches/rexglue-sdk/0006-content-container-packages-and-extra-content-root.patch),
   which applies to the pinned checkout). The guest's own song list is the only thing
-  that proves the enumeration and the mount. What to look for:
-  `XamContentAggregateCreateEnumerator: added N items` in the log, where the vanilla
-  baseline was 0 with no DLC present ([history/bringup-log.md](history/bringup-log.md)),
-  and then a `--log_level=trace` read of a file inside one of the packages.
+  that proves the enumeration and the mount, and
+  [scripts/acceptance_dlc.ps1](../scripts/acceptance_dlc.ps1) now drives it:
+  `XamContentAggregateCreateEnumerator: added N items` must be non-zero and a song
+  only the DLC package carries must be on the song list, read with Windows OCR,
+  with a control leg at a `--dlc_root` that does not exist where the song must be
+  absent. On this dump the positive leg reports `dlc: 21 package(s)` and `added 1
+  items`, and the list carries All-American Rejects' "Kids in the Street"; the
+  control leg reports no packages and 0 items, and the list is the three bundled
+  songs alone. Evidence: `out/m7-dlc/`.
+- **The container probe needs the entry's full path (fixed 2026-10-03).** The first
+  cut asked `IsContentPackageFile(file_info.path)`, but
+  `rex::filesystem::ListFiles` reports the entry's **parent** in `FileInfo::path`
+  and the entry name in `FileInfo::name` (`GetInfo` does the same), so the check
+  tested the directory and rejected every STFS package. The hook found the packages
+  (21 in this dump) and mounted the root, yet the guest's aggregate enumerator added
+  0 items and no song list carried DLC. `file_info.path / file_info.name` is the fix,
+  carried in patch 0006 ([patches/README.md](../patches/README.md)).
 - **Only the content API route.** The SDK scans `game:\Content\0000000000000000\…` for
   the enumerator, but opening those items resolves through the content manager's roots
   and not against the game tree, so that directory is not a DLC source. It was not one
