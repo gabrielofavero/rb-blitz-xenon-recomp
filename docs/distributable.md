@@ -27,9 +27,10 @@ failed, 2 the audit could not measure what it needs (a missing `llvm-readobj`, o
 
 ## What the payload is
 
-The installer places a recompiled build and nothing else: `rb_blitz.exe`, the two SDK DLLs
-it loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the
-three import, plus `payload-manifest.toml`, which records their sizes and digests so the
+The installer places a recompiled build and nothing else: `rb_blitz.exe` and the launcher
+that owns its settings, `rb_blitz_launcher.exe`, the two SDK DLLs the game loads
+(`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the executables
+import, plus `payload-manifest.toml`, which records their sizes and digests so the
 helper can hash what it placed before it reports success. The list lives in one place,
 `$wanted` in [`installer/tools/make_payload.ps1`](../installer/tools/make_payload.ps1),
 and the script re-derives the DLL imports from the binaries it copies, so a build that

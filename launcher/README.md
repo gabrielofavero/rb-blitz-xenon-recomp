@@ -46,8 +46,11 @@ import-derived DLL check (P0.5) is what keeps that honest.
 
 ```
 cmake --build out/build/<preset> --target rb_blitz_launcher
-out\build\<preset>\launcher\rb_blitz_launcher.exe
+out\build\<preset>\rb_blitz_launcher.exe
 ```
+
+It is written to the build root, next to `rb_blitz.exe` (D1): one directory holds what
+a payload snapshot copies (P0.5), and one place is what a user is told to run from.
 
 The window is a placeholder by design: it names the backend and the three ways out, and
 nothing else. It is a WIN32-subsystem executable, so a bring-up failure reports itself in

@@ -295,7 +295,9 @@ cmake --build --preset win-amd64-release -- -v                # show full comman
 ```
 
 Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`,
-`rexgpu-xenos.dll`.
+`rexgpu-xenos.dll`, and the launcher, `rb_blitz_launcher.exe`, beside them (D1 of
+[plans/launcher-plan.md](plans/launcher-plan.md), which is what the installer's
+payload snapshot reads).
 
 The two DLLs are **copies**: the SDK builds them into its own staging directory
 (`rexglue-sdk/out/win-amd64\`) and `rexglue_setup_target` refreshes the ones beside

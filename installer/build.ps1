@@ -69,6 +69,17 @@ installer-release-msvc uses cl.exe from a Visual Studio developer prompt.
 .PARAMETER SkipTests
 Do not run the installer helper's test suite.
 
+.PARAMETER SkipLauncher
+Do not build rb_blitz_launcher.exe before the payload step. Use when it has
+already been built, or when the payload is downloaded at install time - which
+skips the step on its own.
+
+.PARAMETER LauncherTarget
+The rb_blitz_launcher.exe to package, when it is not where the game's build tree
+puts it (<SourceDir>\rb_blitz_launcher.exe, D1). Passing it means the launcher is
+already built: the build step is skipped and the directory holding it is what the
+payload snapshot reads.
+
 .PARAMETER SkipPayload
 Do not create the payload snapshot, even if it is missing. Use with -PayloadUrl,
 or when the snapshot was made deliberately by tools\make_payload.ps1.
@@ -102,6 +113,8 @@ param(
     [string] $IsccPath,
     [string] $Preset = 'installer-release',
     [switch] $SkipTests,
+    [switch] $SkipLauncher,
+    [string] $LauncherTarget,
     [switch] $SkipPayload,
     [switch] $RefreshPayload,
     [switch] $SkipArt,
@@ -266,7 +279,42 @@ function Resolve-PayloadCommit {
 }
 
 # --------------------------------------------------------------------------
-# 1. the payload
+# 1. the launcher
+# --------------------------------------------------------------------------
+# The launcher is the second executable of the recompiled build (docs/plans/
+# launcher-plan.md D1) and the payload carries it (P0.5), so it has to exist
+# before the snapshot is taken. A tree that was never built with the launcher in
+# it fails here or, if this step is skipped, at make_payload.ps1 - which names the
+# missing input instead of quietly shipping a payload without the launcher.
+Write-Step 'Launcher'
+
+if (-not $LauncherTarget) { $LauncherTarget = Join-Path $SourceDir 'rb_blitz_launcher.exe' }
+
+if ($SkipLauncher) {
+    Write-Host '   skipped : -SkipLauncher'
+} elseif ($PayloadUrl) {
+    Write-Host '   skipped : the payload is downloaded at install time (-PayloadUrl)'
+} elseif ($PSBoundParameters.ContainsKey('LauncherTarget')) {
+    if (-not (Test-Path -LiteralPath $LauncherTarget)) {
+        throw "-LauncherTarget was given but $LauncherTarget does not exist."
+    }
+    Write-Host "   used    : $LauncherTarget (not rebuilt)"
+} else {
+    if (-not (Test-Path -LiteralPath $SourceDir)) {
+        throw ("no recompiled build tree to build the launcher in: $SourceDir does not exist. Build " +
+               'the emulator first (see docs/build-and-run.md), pass -LauncherTarget for a launcher ' +
+               'built elsewhere, or pass -PayloadUrl to download the build at install time instead.')
+    }
+    $launcherArgs = @('--build', $SourceDir, '--target', 'rb_blitz_launcher')
+    Invoke-Native -Exe 'cmake' -Arguments $launcherArgs -What 'cmake --build --target rb_blitz_launcher'
+    if (-not (Test-Path -LiteralPath $LauncherTarget)) {
+        throw "the launcher build reported success but $LauncherTarget is missing."
+    }
+    Write-Host "   built   : $LauncherTarget"
+}
+
+# --------------------------------------------------------------------------
+# 2. the payload
 # --------------------------------------------------------------------------
 Write-Step 'Payload'
 
@@ -331,7 +379,8 @@ if ($PayloadUrl) {
         Write-Host "   mode    : embedded in the setup executable"
         Write-Host "   snapshot: rebuilding from $SourceDir"
         $nativeArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makePayload,
-                        '-SourceDir', $SourceDir, '-PayloadDir', $PayloadDir, '-Clean')
+                        '-SourceDir', $SourceDir, '-LauncherDir', (Split-Path -Parent $LauncherTarget),
+                        '-PayloadDir', $PayloadDir, '-Clean')
         Invoke-Native -Exe 'powershell.exe' -Arguments $nativeArgs -What 'make_payload.ps1'
     }
 
@@ -341,7 +390,7 @@ if ($PayloadUrl) {
 Write-Host "   commit  : $(if ($payloadCommit) { $payloadCommit } else { 'not recorded' })"
 
 # --------------------------------------------------------------------------
-# 2. the helper and its tests
+# 3. the helper and its tests
 # --------------------------------------------------------------------------
 Write-Step 'Configuring and building the helper'
 
@@ -389,7 +438,7 @@ if ($SkipSetup) {
 }
 
 # --------------------------------------------------------------------------
-# 3. the optional side wizard image
+# 4. the optional side wizard image
 # --------------------------------------------------------------------------
 if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
     Write-Step 'Wizard image (optional)'
@@ -404,7 +453,7 @@ if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
 }
 
 # --------------------------------------------------------------------------
-# 4. the setup executable
+# 5. the setup executable
 # --------------------------------------------------------------------------
 Write-Step 'Compiling the setup executable'
 

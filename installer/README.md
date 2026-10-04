@@ -13,7 +13,7 @@ run the game, and none of it is compiled into `rb_blitz.exe`.
 
 | It contains | It never contains |
 | --- | --- |
-| The recompiled build (`rb_blitz.exe`) and the runtime DLLs it loads | Any game code, archive, music or key |
+| The recompiled build (`rb_blitz.exe` and its launcher) and the runtime DLLs the game loads | Any game code, archive, music or key |
 | The wizard, its images and the helper that does the file work | Rock Band Blitz Ultimate, in any form |
 | — | Anything read from the machine it is built on |
 
@@ -51,10 +51,10 @@ the byte count and whether the fingerprints matched) and `install-report.txt`
 | `src/commands.cpp` | The helper's command line: one command per stage, `--summary` / `--log` / `--progress` for each. |
 | `config/pins.toml` | The only file that names the outside world: version, URLs, sizes, hashes. |
 | `config/ultimate_fingerprints.toml` | What the mod's files hash to, in the same schema as `../config/game_fingerprints.toml`. |
-| `tools/make_payload.ps1` | Snapshots a recompiled build into `out/payload` (and optionally `out/payload.zip`). |
+| `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its launcher and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`). |
 | `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/`. |
 | `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`. |
-| `build.ps1` | The release entry point: payload, helper, tests, images, setup executable. |
+| `build.ps1` | The release entry point: the launcher, the payload, the helper, the tests, the images, the setup executable. |
 | `tests/installer_tests.cpp` | The helper's test suite (`ctest`), dependency-free and game-data-free. |
 | `out/` | Build output. Nothing in it is committed. |
 
@@ -76,20 +76,24 @@ powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 
 That one command:
 
-1. snapshots the recompiled build into `installer\out\payload` if the snapshot is
-   missing (or rebuilds it with `-RefreshPayload`);
-2. generates the embedded config from `config\pins.toml`, resolving the
+1. builds `rb_blitz_launcher.exe` in the game's build tree (skip it with
+   `-SkipLauncher`, or point at one built elsewhere with `-LauncherTarget`);
+2. snapshots the recompiled build — the game, its launcher and the DLLs they
+   need — into `installer\out\payload` if the snapshot is missing (or rebuilds it
+   with `-RefreshPayload`);
+3. generates the embedded config from `config\pins.toml`, resolving the
    `[payload] commit` pin to a real commit on the way;
-3. builds the helper with the `installer-release` preset (clang++) and stages it
+4. builds the helper with the `installer-release` preset (clang++) and stages it
    next to `pins.iss` in `out\generated`;
-4. runs the helper's test suite;
-5. refreshes the optional side wizard image;
-6. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
+5. runs the helper's test suite;
+6. refreshes the optional side wizard image;
+7. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
 
 Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`. Use
 `-Preset installer-release-msvc` from a Visual Studio developer prompt, and
-`-SkipArt`, `-SkipTests`, `-SkipPayload`, `-SkipSetup`, `-IsccPath` as needed —
-`Get-Help .\build.ps1 -Full` documents all of them.
+`-SkipArt`, `-SkipTests`, `-SkipLauncher`, `-LauncherTarget`, `-SkipPayload`,
+`-SkipSetup`, `-IsccPath` as needed — `Get-Help .\build.ps1 -Full` documents all
+of them.
 
 Tests alone, from this directory:
 
@@ -236,8 +240,9 @@ offers the user-supplied zip and folder.
 | File | Why |
 | --- | --- |
 | `rb_blitz.exe` | The game. |
+| `rb_blitz_launcher.exe` | The launcher (D1), built beside the game in the same build tree. |
 | `rexruntime.dll`, `rexgpu-xenos.dll` | Runtime DLLs the executable loads. |
-| `msvcp140.dll`, `msvcp140_atomic_wait.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | The Visual C++ runtime the three binaries import. |
+| `msvcp140.dll`, `msvcp140_atomic_wait.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | The Visual C++ runtime the binaries import. |
 
 Nothing else is quoted from the build tree — in particular `rb_blitz.toml` is a
 developer profile rather than a shipped file, and the `*d.dll` / `*.pdb` files

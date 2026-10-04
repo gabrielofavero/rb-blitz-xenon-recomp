@@ -64,6 +64,13 @@ endif()
 
 target_compile_features(rb_blitz_launcher PRIVATE cxx_std_20)
 
+# D1 puts the launcher next to rb_blitz.exe in the build root rather than beside this
+# file, because that is the directory the payload snapshot reads (P0.5) and the one a
+# user is told to run the game from. Asking for rb_blitz's own output directory keeps
+# the two together under any generator or CMAKE_RUNTIME_OUTPUT_DIRECTORY.
+set_target_properties(rb_blitz_launcher PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:rb_blitz>")
+
 if(MSVC)
     target_compile_options(rb_blitz_launcher PRIVATE /W4 /utf-8 /EHsc)
 else()
