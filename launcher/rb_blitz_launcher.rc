@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// rb_blitz launcher - Windows resources.
+//
+// Same mechanism as the game's rb_blitz.rc: the icon is the executable's first
+// RT_GROUP_ICON, which is what Explorer shows for rb_blitz_launcher.exe and what SDL
+// registers as the window class icon. The path is resolved against the directory
+// holding this file, so one copy of the art serves both executables.
+
+#define IDI_RB_BLITZ_LAUNCHER 1
+
+IDI_RB_BLITZ_LAUNCHER ICON DISCARDABLE "..\\assets\\blitz.ico"
