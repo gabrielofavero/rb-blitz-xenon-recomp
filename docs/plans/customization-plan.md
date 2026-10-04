@@ -393,6 +393,14 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 
 #### S1 — Symbol naming registry + first tranche
 
+**Status: done 2026-10-03.** Nine names landed — the three tail-branch thunks and the six
+proved MOGG functions; the rule and the table are in
+[symbols.md](../symbols.md) "Named symbols", chronology in
+[history/bringup-log.md](../history/bringup-log.md), and the remaining anonymous set stays open
+in [backlog.md](../backlog.md) §1. The tranche is nine names, not "the eleven MOGG rows": the
+MOGG table's other two rows are import thunks codegen already names, and one is a `.data`
+table, which `[functions]` cannot name.
+
 > **Goal.** Open the naming campaign this whole scope depends on. Extend
 > [symbols.md](../symbols.md) with a symbol table (`address`, `name`, `subsystem`, `evidence`,
 > `confidence`), define the naming rule (evidence required, `Subsystem_Method` shape), and name the

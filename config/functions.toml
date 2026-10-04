@@ -1,4 +1,18 @@
-# Forced function entry points - three left, all absolute tail-branch targets.
+# Manual codegen overrides. Two groups:
+#
+#  1. Forced entry points - addresses discovery cannot reach through a
+#     `bl`/`ba`, so codegen has to be told they are function entries.
+#  2. Names for functions already proved by hand - a readability lever only.
+#     The name must resolve to the same body; no `size`/`end` is given, so
+#     codegen redisovers the natural boundary exactly as it does for a PDATA
+#     entry, and the generated body is unchanged.
+#
+# The naming rule, the evidence and the confidence for every name below are in
+# docs/symbols.md "Named symbols".
+
+# ---------------------------------------------------------------------------
+# Forced entry points - three left, all absolute tail-branch targets.
+# ---------------------------------------------------------------------------
 #
 # The discovery pass leaves three absolute tail-branch targets (unconditional
 # `b` to an address outside any discovered function) unresolved. Each target
@@ -40,11 +54,51 @@
 # the other two could be dropped today; they stay because an entry costs nothing and this
 # class is one decision rather than two.
 
+# All three are pure tail thunks: their whole body is argument setup plus one
+# unconditional branch, so they are named `Thunk_<target>` - see the naming rule.
+
 [functions."0x82354DC0"]
+name = "Thunk_82354D00"
 # Tail-branch target from 0x8234017C; thunk -> sub_82354D00.
 
 [functions."0x82379D20"]
+name = "Thunk_82380088"
 # Tail-branch target from 0x82364A10; thunk -> sub_82380088.
 
 [functions."0x8243C688"]
+name = "Thunk_8243C458"
 # Tail-branch target from 0x8242A8DC; thunk -> sub_8243C458.
+
+# ---------------------------------------------------------------------------
+# Named functions - the MOGG (music) decryption path, all PDATA entry points.
+# ---------------------------------------------------------------------------
+#
+# Proved by hand from the recompiled image, the run log and the engine sources
+# (docs/symbols.md "Audio (MOGG) decryption path",
+# docs/history/bringup-log.md B-009 and its follow-up). Every address below is
+# already a function; the entry exists only to attach the name, so the body is
+# the one codegen already generated.
+
+[functions."0x823DE070"]
+name = "ByteGrinder_GetEncMethod"
+# MOGG version -> key-table index selector.
+
+[functions."0x823DE0C0"]
+name = "ByteGrinder_HvDecrypt"
+# Installs the version's key, then AES-128-ECB-decrypts the 16-byte header mask.
+
+[functions."0x82768AD0"]
+name = "VorbisReader_SetupCypher"
+# Stream key = GrindArray(keychain) ^ mKeyMask, then CTR start.
+
+[functions."0x82768C88"]
+name = "VorbisReader_CheckHmxHeader"
+# MOGG header parser; the only caller of ByteGrinder_HvDecrypt.
+
+[functions."0x82727218"]
+name = "XeKeys_SetKey"
+# Guest wrapper over the __imp__XeKeysSetKey import (+0xE0 id bias).
+
+[functions."0x827272B0"]
+name = "XeKeys_AesCbc"
+# Guest wrapper over the __imp__XeKeysAesCbc import (+0xE0 id bias).

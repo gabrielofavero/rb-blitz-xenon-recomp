@@ -3552,3 +3552,61 @@ below in this file.
   a move under the detector's colour threshold, no guest cursor, and the overlay/foreground
   gates that are reasoned rather than exercised.
 
+## The naming campaign opens: nine symbols (2026-10-03)
+
+S1 of [customization-plan.md](../plans/customization-plan.md) and backlog §1's first item.
+Before this, `config/functions.toml` forced three entry points and named none, so the
+generated tree was 37,851 anonymous `sub_XXXXXXXX` symbols.
+
+- **The rule.** A name states the subsystem and the method, `Subsystem_Method`, backed by
+  recorded evidence and a confidence. A function whose whole body is argument setup plus one
+  unconditional branch is a tail thunk and is named `Thunk_<target>`, its target's behaviour
+  being the evidence. A name is a readability lever only: it changes no boundary and no
+  behaviour.
+- **The nine.** The three forced tail-branch thunks (`Thunk_82354D00`, `Thunk_82380088`,
+  `Thunk_8243C458`) and the six proved functions of the MOGG decryption path
+  (`ByteGrinder_GetEncMethod`, `ByteGrinder_HvDecrypt`, `VorbisReader_SetupCypher`,
+  `VorbisReader_CheckHmxHeader`, `XeKeys_SetKey`, `XeKeys_AesCbc`).
+- **Evidence.** The MOGG names are the ones already recorded in [symbols.md](../symbols.md)
+  "Audio (MOGG) decryption path" and above under B-009. The thunks were classified from
+  their generated bodies: a 4-byte growable-array reserve (`sub_82354D00`), an input/pad
+  setter gated on `XamInputGetCapabilities` (`sub_82380088` → `sub_827266F0`), and a
+  12-byte-element container insert with an assertion string at `0x82085618`
+  (`sub_8243C458`). The per-address rule, evidence and confidence are the "Named symbols"
+  table in [symbols.md](../symbols.md).
+- **Verification.** The six name-only entries carry no `size`/`end`, so codegen redisovers
+  the natural boundary exactly as for a PDATA entry; every named body in `generated/default/`
+  was diffed before and after and is byte-identical apart from the symbol and the renamed
+  call targets inside it (`HvDecrypt` and `CheckHmxHeader` call the renamed `GetEncMethod`,
+  `XeKeys_*` and `SetupCypher`). `cmake --build --preset win-amd64-release` clean (codegen
+  `Validate` clean, 23 files rewritten), `ctest` 8/8.
+- **What is left.** The wider anonymous set; `config/functions.toml` and
+  [symbols.md](../symbols.md) grow together, one proved batch at a time.
+
+## `d3d12_readback_resolve` moves to the runtime profile (2026-10-03)
+
+Backlog §1's second item and [rb3-references.md](../rb3-references.md) §8. In this 0.10 SDK
+`d3d12_readback_resolve` is a **cvar**, not a project-manifest key:
+`REXCVAR_DEFINE_BOOL(d3d12_readback_resolve, false, "GPU/D3D12", …)` in
+`rexglue-sdk/src/graphics/d3d12/command_processor.cpp`, and `true` selects the
+readback-resolve path in `GetReadbackResolveMode` — the B-010 escape hatch for a stale CPU
+mirror. band3 keeps the equivalent setting in its manifest; the correct home here is the
+runtime profile the app reads, `out/build/<preset>/rb_blitz.toml`.
+
+- **The manifest does not carry it** ([rb_blitz_manifest.toml](../rb_blitz_manifest.toml)) and
+  never did, so there was nothing to remove; the build-tree-local profile now sets
+  `d3d12_readback_resolve = true` beside `mnk_mode`.
+- **Why the local file, and how a fresh checkout gets it.** The runtime reads
+  `<exe name>.toml` from its own directory, and `rb_blitz.toml` is gitignored
+  ([build-and-run.md](../build-and-run.md) §2). The recreate block there now carries the key,
+  so the decision survives a wiped `out\`; [rb3-references.md](../rb3-references.md) §8 is
+  closed.
+- **Verified by source, not by a boot — and the reason matters.** A boot with the key present
+  is clean (no `[FATAL]`, the crypto path runs, 21 DLC packages mount), but it cannot *prove*
+  the key applies. A key is applied only after its cvar registers — `cvar::LoadConfig` defers
+  it and `RegisterFlag` replays it on registration, which is how `d3d12_readback_resolve`
+  (registered by the D3D12 backend, after the profile is read) still takes effect — and a key
+  that matches nothing is reported only by `cvar::FinalizeInit()`, which **nothing in the app
+  calls**. A misspelled key is therefore dropped silently, so a boot log line is not a
+  usable control; that limit is recorded in [known-issues.md](../known-issues.md).
+

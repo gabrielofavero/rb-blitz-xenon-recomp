@@ -11,11 +11,11 @@ in [known-issues.md](known-issues.md).
 [rb3-references.md](rb3-references.md) is the catalogue; these are the items in it
 that name an action.
 
-- [ ] **Name functions**: the three tail-branch thunks, then the MOGG rows, then the
-      wider anonymous set ([symbols.md](symbols.md)). Names go in
+- [ ] **Name functions**: the first batch landed 2026-10-03 — the three tail-branch
+      thunks and the six MOGG functions, named in `config/functions.toml` with the
+      rule, evidence and confidence in [symbols.md](symbols.md) "Named symbols".
+      What remains is the wider anonymous set; names keep going in
       `config/functions.toml` in the same commit as the doc update.
-- [ ] Move `d3d12_readback_resolve` out of the manifest into the build-tree-local
-      `rb_blitz.toml`.
 - [ ] Check the RB3DX groups 2–10 against Blitz one by one; the `NewFile` hook is P1.
 - [ ] Adopt the audio-verify methodology (chroma correlation, speed, distortion) as a
       regression check (§7.1).

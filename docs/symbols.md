@@ -74,21 +74,64 @@ variable imports** to fixed addresses (e.g. `XboxHardwareInfo`,
 | Code regions | 12,670 |
 | Data regions | 0 |
 
+## Named symbols
+
+`config/functions.toml` names the functions this project has proved by hand;
+everything else is still the codegen's `sub_XXXXXXXX`. A name is a **readability
+lever only** — it must resolve to the same body — so it is added in the same
+commit as this table. As of 2026-10-03 the file carries nine entries: the three
+forced entries below and six name-only entries for functions that already
+existed, so nothing is added to or removed from discovery.
+
+**The naming rule.**
+
+- A name states the **subsystem and the method** it belongs to,
+  `Subsystem_Method` (e.g. `VorbisReader_CheckHmxHeader`). The subsystem comes
+  from the engine class or module the evidence names, never from a guess.
+- **Nothing is named without evidence**, and the evidence plus a confidence
+  (1–10) is recorded in the table. A name is only added once that evidence
+  exists.
+- A function whose whole body is argument setup plus one unconditional branch is
+  a **tail thunk** and has no method of its own; it is named `Thunk_<target>`
+  after the function it forwards to, and the target's behaviour is the evidence.
+- A rename never changes boundaries or behaviour. The entry carries no
+  `size`/`end`, so codegen redisovers the natural boundary exactly as it does for
+  a PDATA entry; the generated body is byte-identical apart from the symbol and
+  the renamed call targets inside it. Verified 2026-10-03 by diffing every named
+  body in `generated/default/` before and after (`Validate` clean, 8/8 `ctest`).
+
+| Guest address | Name | Subsystem | Evidence | Confidence |
+| --- | --- | --- | --- | --- |
+| `0x82354DC0` | `Thunk_82354D00` | thunk | 3 instructions, `mr r5,r4; lwz r4,4(r3); b 0x82354D00`. The target is a growable-array reserve: it doubles the capacity at `this+8` and reallocates `this+0` at 4 bytes per element. | 9 |
+| `0x82379D20` | `Thunk_82380088` | thunk | 1 instruction, `b 0x82380088`. The target packs a `(u16, u16)` pair and calls `sub_827266F0`, which gates on `XamInputGetCapabilities` before it writes — an input/pad setter. | 8 |
+| `0x8243C688` | `Thunk_8243C458` | thunk | 10 instructions ending `b 0x8243C458`, with `r3 = this + 12*index` and `r7 = &0x82085618` (an assertion string). The target computes `(end-begin)/12 <= index` then inserts — a 12-byte-element container insert. | 9 |
+| `0x823DE070` | `ByteGrinder_GetEncMethod` | ByteGrinder | MOGG version → key-table index (`12/13→0`, `14→1`, `15→2`, `16→3`, else `0`); matches `ByteGrinder::GetEncMethod` in `freeqaz/rb3` `src/system/synth/ByteGrinder.cpp`. | 10 |
+| `0x823DE0C0` | `ByteGrinder_HvDecrypt` | ByteGrinder | Installs the version's key and AES-128-ECB-decrypts the 16-byte header block; produces `mKeyMask`. [bringup-log.md](history/bringup-log.md) B-009 and its follow-up. | 10 |
+| `0x82768AD0` | `VorbisReader_SetupCypher` | VorbisReader | Builds the stream key as `GrindArray(keychain key, magicA, magicB) ^ mKeyMask` and starts AES-CTR with the header nonce; matches `setupCypher` in the engine sources. B-009. | 9 |
+| `0x82768C88` | `VorbisReader_CheckHmxHeader` | VorbisReader | MOGG header parser; matches RB3's `VorbisReader::CheckHmxHeader` instruction for instruction and is the only caller of `ByteGrinder_HvDecrypt`. B-009. | 10 |
+| `0x82727218` | `XeKeys_SetKey` | XeKeys | Guest wrapper over the `__imp__XeKeysSetKey` import: rejects index ≥ 8, a null buffer and a size ≠ 16, then calls the import with `index + 0xE0`. B-009. | 10 |
+| `0x827272B0` | `XeKeys_AesCbc` | XeKeys | Guest wrapper over the `__imp__XeKeysAesCbc` import, same `+0xE0` id bias, decrypt direction. B-009. | 10 |
+
+The two other rows of the MOGG table below are not `[functions]` entries:
+`0x827F6BA4` and `0x827F6BB4` are import thunks and already carry codegen's
+`__imp__XeKeysSetKey` / `__imp__XeKeysAesCbc` from import resolution, and
+`0x8280C568` is a `.data` table, which `[functions]` cannot name.
+
 ## Unresolved-call resolution (before the first compile)
 
 The three absolute tail branches flagged by the first validation run were
 resolved by adding `[functions]` entries (no explicit size → natural
 discovery) in `config/functions.toml`:
 
-| Branch target | From call site | Discovered as | Resolution |
+| Branch target | From call site | Thunk | Resolution |
 | --- | --- | --- | --- |
-| `0x82354DC0` | `0x8234017C` | `sub_82354DC0` (3 insns) | tail-calls `sub_82354D00` |
-| `0x82379D20` | `0x82364A10` | `sub_82379D20` (1 insn) | tail-calls `sub_82380088` |
-| `0x8243C688` | `0x8242A8DC` | `sub_8243C688` (10 insns) | tail-calls `sub_8243C458` |
+| `0x82354DC0` | `0x8234017C` | `Thunk_82354D00` (3 insns) | tail-calls `sub_82354D00` |
+| `0x82379D20` | `0x82364A10` | `Thunk_82380088` (1 insn) | tail-calls `sub_82380088` |
+| `0x8243C688` | `0x8242A8DC` | `Thunk_8243C458` (10 insns) | tail-calls `sub_8243C458` |
 
 Each target is a small thunk/stub ending in a tail branch; the real bodies are
-the named `sub_*` targets above. They still need descriptive names, assigned from
-runtime/disassembly evidence.
+the `sub_*` targets above. All three are named now — see "Named symbols" for the
+rule and the evidence.
 
 ## Jump tables
 

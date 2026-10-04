@@ -105,8 +105,9 @@ guest code.
 
 ## 2. Symbol names — a readability lever we are not using
 
-Our `config/functions.toml` forces nine entry points and names **none** of them,
-so the generated tree is 37,851 anonymous `sub_XXXXXXXX` symbols. Adding
+`config/functions.toml` names the functions this project has proved by hand;
+before the campaign opened it forced nine entry points and named **none** of them,
+leaving the generated tree 37,851 anonymous `sub_XXXXXXXX` symbols. Adding
 `name =` costs nothing at build time and buys real code:
 
 ```toml
@@ -123,9 +124,12 @@ Our 0.10 schema (`rexglue-sdk/src/codegen/config.cpp`):
 | `parent` | Attach under a parent symbol. |
 | `share_registers` | Opt out of per-function register save/restore. |
 
-Recommendation: name the functions we have *proved* by hand (the eleven MOGG rows
-in [symbols.md](symbols.md) are the obvious first batch). Do it in the same commit
-as a doc update so the symbol map and [symbols.md](symbols.md) stay in step.
+Recommendation: name the functions we have *proved* by hand, in the same commit
+as a doc update so the symbol map and [symbols.md](symbols.md) stay in step. The
+campaign opened 2026-10-03 with the three tail-branch thunks and the six MOGG
+functions of the decryption path — nine names, the rule and the evidence in
+[symbols.md](symbols.md) "Named symbols". The wider anonymous set is the next
+batch.
 
 ## 3. `[[midasm_hook]]` — surgical patching without a hook function
 
@@ -337,8 +341,8 @@ of width bug.
 | Gap | Detail | Action |
 | --- | --- | --- |
 | ~~`longjmp_address` / `setjmp_address`~~ — **closed 2026-09-30** | Our 0.10 SDK supports both at `[entrypoint]` level (`config.cpp` 124–131). band3 sets `longjmp_address = 0x82BBB620`, `setjmp_address = 0x82BBBA50`. Blitz's pair is `longjmp = 0x82772510`, `setjmp = 0x82772940`, and [rb_blitz_manifest.toml](../rb_blitz_manifest.toml) sets both; the disassembly reading and the evidence for each address are in [symbols.md](symbols.md) "Setjmp / longjmp". | Done — found, not re-derived from band3's numbers: the pair is identified by the save/restore layout symmetry and by one guest function that calls both on the same buffer. Nothing observed longjmps yet (see that section for what a run measures). |
-| `d3d12_readback_resolve` | band3 has it in its **manifest**. In 0.10 it is a **cvar** (`graphics/d3d12/command_processor.cpp`), and the runtime profile is a flat recursive cvar table (`src/core/cvar.cpp` `ApplyTomlTable` joins nested tables with `_`). | Put it in the build-tree-local `rb_blitz.toml` (`out/build/<preset>/rb_blitz.toml`, alongside `mnk_mode`, `log_level`, `[log.levels]`), **not** the manifest. |
-| Symbol names | 37,851 anonymous functions (§2). | Name the proved ones. |
+| ~~`d3d12_readback_resolve`~~ — **closed 2026-10-03** | band3 keeps it in its **manifest**, but in 0.10 it is a **cvar** (`graphics/d3d12/command_processor.cpp`), and the runtime profile is a flat recursive cvar table (`src/core/cvar.cpp` `ApplyTomlTable` joins nested tables with `_`; a value whose cvar registers later is replayed on registration). | Done: it is **not** in [rb_blitz_manifest.toml](../rb_blitz_manifest.toml); the build-tree-local `rb_blitz.toml` (`out/build/<preset>/rb_blitz.toml`) sets `d3d12_readback_resolve = true` alongside `mnk_mode`. That profile is gitignored, so a fresh checkout recreates it from [build-and-run.md](build-and-run.md) §2. A key that matches no cvar is dropped silently - see [known-issues.md](known-issues.md). |
+| Symbol names | 37,851 anonymous functions (§2). | Started 2026-10-03: nine named (the three tail-branch thunks and the six MOGG functions); the wider anonymous set is still to name. |
 | ~~Hook hygiene~~ — **closed 2026-10-01** | Our hooks had no "why is this disabled" record (§7.3). | Done — every hook file carries a header comment stating the faithful behaviour and the reason for deviating, including each early return: [src/hooks/crypto.cpp](../src/hooks/crypto.cpp), [src/hooks/ultimate.cpp](../src/hooks/ultimate.cpp), [src/hooks/dlc.cpp](../src/hooks/dlc.cpp) and the `rex::ReXApp` overrides in [src/rb_blitz_app.h](../src/rb_blitz_app.h). The input device ([src/input/mouse_ui.h](../src/input/mouse_ui.h)), the VFS overlay ([src/fs/payload_overlay.h](../src/fs/payload_overlay.h)) and the SDK patches ([patches/README.md](../patches/README.md), one row per patch) already carried it. Chronology: [history/bringup-log.md](history/bringup-log.md). |
 
 ## 9. Borrowing rules
