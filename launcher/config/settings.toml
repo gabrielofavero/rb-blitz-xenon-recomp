@@ -1,0 +1,480 @@
+# The launcher's settings schema - Contract 1 of docs/plans/launcher-plan.md (§4.1).
+#
+# One [[setting]] per row the launcher shows, and one [[group]] per category. The
+# build compiles this file into out/generated/settings_table.h (tools/embed_settings.cpp),
+# and it refuses a table that breaks a rule below, so a row cannot appear in the UI
+# without a tooltip, without a destination, or with an unearned "live" claim.
+#
+# Fields
+#   key       the cvar name; also the profile key, and - when argv = "flag" - the
+#             --flag the launcher passes to the game
+#   tab       general | graphics | controller. There is no `experimental` (D14).
+#   group     must match a [[group]] with the same tab
+#   label     the row's text in the tab
+#   kind      bool | int | float | enum | string | path_dir | path_file
+#   default   the compiled default as written; the launcher compares the profile
+#             against it to decide what to pass on the command line
+#   applies   restart | live. `live` requires an evidence comment (see below).
+#   tooltip   the user-facing sentence shown in the bottom bar. Never empty.
+#   argv      flag | none. `flag` emits `--<key>=<value>`; `none` is a launcher-level
+#             row the launcher translates itself (launch.target, D4)
+#   choices   enum only: the allowed values, e.g. ["sdl", "xinput"]
+#   validate  path_dir / path_file only: `exists`, `dlc_layout` or
+#             `inside_game_root:forbid`, separated by `|`
+#
+# `applies = "live"` claims that the running game re-reads the value, so the row must
+# carry a comment naming the mechanism that does it, on the same line as `applies` or on
+# a comment-only line directly above it:
+#
+#     applies = "live"   # live: <where the change lands>
+#
+# Everything else is `restart` - including rows the runtime could re-read but that
+# nothing has cited yet, because a lifecycle tag is not a promise that a value applies
+# live (D12). A row that the runtime only consumes while starting up is `restart` even
+# though its cvar is registered hot-reloadable (input_backend is the example).
+#
+# Rows compiled out in this build (present_effect and the CAS/FSR parameters behind
+# REXGLUE_ENABLE_FIDELITYFX=OFF) are absent rather than greyed: the build flag is not
+# something a user can act on from the launcher (D12). Master volume is absent because
+# the SDK has no audio_volume cvar yet (D14). Per-button remapping is absent because it
+# is planned work, not a setting (D13).
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Groups
+#
+# A group with no rows yet is declared `status = "unavailable"` together with the one
+# line the tab shows for it, so an unbuilt category is named instead of being drawn as a
+# disabled widget that looks like a setting (D14).
+# ---------------------------------------------------------------------------
+
+[[group]]
+name = "Launch target"
+tab  = "general"
+
+[[group]]
+name = "Paths"
+tab  = "general"
+
+# M1's "named but empty" General group (§1.1): the ultimate_patches bits (content
+# device / song blacklist / disk-error latch) stay out until B8.
+[[group]]
+name   = "Ultimate (advanced)"
+tab    = "general"
+status = "unavailable"
+note   = "The Ultimate content-device, song-blacklist and disk-error edits are not editable in this build."
+
+[[group]]
+name = "Display"
+tab  = "graphics"
+
+[[group]]
+name = "Window"
+tab  = "graphics"
+
+[[group]]
+name = "Rendering"
+tab  = "graphics"
+
+[[group]]
+name = "Presentation"
+tab  = "graphics"
+
+[[group]]
+name = "Audio"
+tab  = "graphics"
+
+# Developer rows (d3d12_readback_resolve, log_level) are out of M1 and disclosed only
+# with --show-dev-settings (D14), so M1 declares the group without a row.
+[[group]]
+name   = "Developer"
+tab    = "graphics"
+status = "unavailable"
+note   = "Developer rows are hidden unless the launcher is started with --show-dev-settings."
+
+[[group]]
+name = "Input"
+tab  = "controller"
+
+# The Controller tab's unbuilt groups: device list + deadzone (C1), keyboard mapping
+# (C2), per-button remap (C3-C6). Their rows arrive with those prompts (§1.1, D13).
+[[group]]
+name   = "Devices"
+tab    = "controller"
+status = "unavailable"
+note   = "The connected-controls list and per-device deadzone are not in this build yet."
+
+[[group]]
+name   = "Keyboard"
+tab    = "controller"
+status = "unavailable"
+note   = "Keyboard mapping is not editable in this build."
+
+[[group]]
+name   = "Manual"
+tab    = "controller"
+status = "unavailable"
+note   = "Per-button remapping is not available in this build."
+
+# ---------------------------------------------------------------------------
+# General
+# ---------------------------------------------------------------------------
+
+# The one row whose key is not a cvar: the launcher turns it into --ultimate_mode /
+# --license_mask itself (D4, §4.3), which is why it is argv = "none".
+[[setting]]
+key     = "launch.target"
+tab     = "general"
+group   = "Launch target"
+label   = "Launch target"
+kind    = "enum"
+choices = ["common", "demo", "ultimate"]
+default = "ultimate"
+applies = "restart"
+argv    = "none"
+tooltip = """
+What the launcher starts: Common is the retail game, Demo is its XBLA trial, and
+Ultimate mounts the Ultimate payload. Ultimate is the default only while its files are
+present - the launcher checks them and says so when they are not.
+"""
+
+[[setting]]
+key     = "user_data_root"
+tab     = "general"
+group   = "Paths"
+label   = "Save game location"
+kind    = "path_dir"
+default = ""
+applies = "restart"
+argv    = "flag"
+validate = "inside_game_root:forbid"
+tooltip = """
+Where the title's saves and globaloptions live. Empty uses Documents\\rb_blitz. A folder
+inside the game data folder is refused, because the runtime would redirect it to the
+platform user folder and the setting would silently do something else.
+"""
+
+[[setting]]
+key     = "dlc_root"
+tab     = "general"
+group   = "Paths"
+label   = "DLC location"
+kind    = "path_dir"
+default = ""
+applies = "restart"
+argv    = "flag"
+validate = "dlc_layout|inside_game_root:forbid"
+tooltip = """
+DLC directory, laid out as <title_id>/<content_type>/<package>. Empty uses the game
+folder's dlc directory. Packages are mounted read-only where they lie, and a folder
+inside the game data folder is refused for the same reason as the save location.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Display
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "resolution"
+tab     = "graphics"
+group   = "Display"
+label   = "Resolution preset"
+kind    = "string"
+default = ""
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Common width x height for the guest video mode and the startup window: 720p, 1080p,
+1440p, 4k, or an explicit size such as 1280x720. Empty leaves both to the two rows
+below.
+"""
+
+[[setting]]
+key     = "video_mode_width"
+tab     = "graphics"
+group   = "Display"
+label   = "Guest video mode width"
+kind    = "int"
+default = 1280
+applies = "restart"
+argv    = "flag"
+tooltip = "Width the title renders at, in pixels (640 to 4095)."
+
+[[setting]]
+key     = "video_mode_height"
+tab     = "graphics"
+group   = "Display"
+label   = "Guest video mode height"
+kind    = "int"
+default = 720
+applies = "restart"
+argv    = "flag"
+tooltip = "Height the title renders at, in pixels (480 to 4095)."
+
+[[setting]]
+key     = "video_mode_refresh_rate"
+tab     = "graphics"
+group   = "Display"
+label   = "Guest refresh rate"
+kind    = "float"
+default = 60.0
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Guest video mode refresh rate in Hz (24 to 240). The title's own frame pacing follows
+it, so a wrong value changes how the game runs, not just how it looks.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Window
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "window_width"
+tab     = "graphics"
+group   = "Window"
+label   = "Window width"
+kind    = "int"
+default = 0
+applies = "restart"
+argv    = "flag"
+tooltip = "Startup window width in logical pixels (0 to 8192). 0 uses the app default."
+
+[[setting]]
+key     = "window_height"
+tab     = "graphics"
+group   = "Window"
+label   = "Window height"
+kind    = "int"
+default = 0
+applies = "restart"
+argv    = "flag"
+tooltip = "Startup window height in logical pixels (0 to 8192). 0 uses the app default."
+
+[[setting]]
+key     = "fullscreen"
+tab     = "graphics"
+group   = "Window"
+label   = "Fullscreen"
+kind    = "bool"
+default = true
+applies = "live"   # live: RegisterChangeCallback("fullscreen", ...) in rex_app.cpp:353 calls Window::SetFullscreen
+argv    = "flag"
+tooltip = "Start the window in fullscreen mode. Applies immediately."
+
+[[setting]]
+key     = "monitor"
+tab     = "graphics"
+group   = "Window"
+label   = "Monitor"
+kind    = "int"
+default = 0
+applies = "restart"
+argv    = "flag"
+tooltip = "Monitor to display on: 0 is the default, 1 the primary, 2 the second, and so on (0 to 16)."
+
+[[setting]]
+key     = "vsync"
+tab     = "graphics"
+group   = "Window"
+label   = "V-Sync"
+kind    = "bool"
+default = true
+applies = "live"   # live: the GPU vsync worker re-reads it every iteration (graphics_system.cpp:164)
+argv    = "flag"
+tooltip = """
+Pace presentation to the display's refresh instead of running free. Off removes the
+guest vblank interval, which changes how the title's own timing behaves.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Rendering
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "native_2x_msaa"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Anti-aliasing (native 2x MSAA)"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Resolve the title's 2x MSAA render targets natively on the host. Off leaves that
+resolve to the guest's own path.
+"""
+
+[[setting]]
+key     = "anisotropic_override"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Anisotropic filtering"
+kind    = "enum"
+choices = ["-1", "0", "1", "2", "3", "4", "5"]
+default = "3"
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Force anisotropic filtering for eligible textures: -1 keeps the guest's own value, 0
+disables it, and 1 to 5 force 1x, 2x, 4x, 8x or 16x. Higher values stay sharper at
+oblique angles and cost more sampling.
+"""
+
+[[setting]]
+key     = "resolution_scale"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Render scale"
+kind    = "int"
+default = 1
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Integer scale for both draw axes (1 to 8): 1 leaves the title's resolution alone, and
+higher values render at that multiple. Costs fill rate quickly.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Presentation
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "present_letterbox"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Letterbox"
+kind    = "bool"
+default = true
+applies = "live"   # live: re-read on every paint (presenter.cpp:925 and :960)
+argv    = "flag"
+tooltip = "Keep the title's aspect ratio with black bars instead of stretching the frame to the window."
+
+[[setting]]
+key     = "present_safe_area_x"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Safe area (horizontal)"
+kind    = "int"
+default = 90
+applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:944)
+argv    = "flag"
+tooltip = """
+Horizontal safe area as a percentage (0 to 100), used when overscan cutoff is on: 100
+keeps the full width, lower values crop more.
+"""
+
+[[setting]]
+key     = "present_safe_area_y"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Safe area (vertical)"
+kind    = "int"
+default = 90
+applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:908)
+argv    = "flag"
+tooltip = """
+Vertical safe area as a percentage (0 to 100), used when overscan cutoff is on: 100
+keeps the full height, lower values crop more.
+"""
+
+[[setting]]
+key     = "present_allow_overscan_cutoff"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Overscan cutoff"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = "Crop the presented frame to the safe area above instead of showing the whole guest frame."
+
+[[setting]]
+key     = "present_dither"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Dithering"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = "Enable output dithering in the final present pass."
+
+# ---------------------------------------------------------------------------
+# Graphics - Audio
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "audio_mute"
+tab     = "graphics"
+group   = "Audio"
+label   = "Mute audio"
+kind    = "bool"
+default = false
+applies = "live"   # live: re-read for every buffer the SDL audio callback fills (sdl_audio_driver.cpp:198)
+argv    = "flag"
+tooltip = "Mute the game's audio output on the host."
+
+[[setting]]
+key     = "audio_maxqframes"
+tab     = "graphics"
+group   = "Audio"
+label   = "Audio buffer (frames)"
+kind    = "int"
+default = 8
+applies = "restart"
+argv    = "flag"
+tooltip = "Maximum buffered audio frames (4 to 64). Lower values reduce latency and can stutter."
+
+# ---------------------------------------------------------------------------
+# Controller - Input
+#
+# The rest of the Controller tab (devices, keyboard mapping, per-pad remap) is declared
+# as unavailable groups above; keyboard support is always on and is not a setting (R13).
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "input_backend"
+tab     = "controller"
+group   = "Input"
+label   = "Input form"
+kind    = "enum"
+choices = ["sdl", "xinput"]
+default = "sdl"
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Which host backend reads pads: sdl (SDL3, with the game controller database) or xinput.
+The input system is built once when the game starts, so this needs a restart.
+"""
+
+[[setting]]
+key     = "mouse_ui_nav"
+tab     = "controller"
+group   = "Input"
+label   = "Mouse support"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Drive the title's own menus with the mouse: moving the pointer moves the selection, and
+the left and right buttons press A and B. The navigation is installed when the game
+starts, so this needs a restart.
+"""
+
+[[setting]]
+key     = "guide_button"
+tab     = "controller"
+group   = "Input"
+label   = "Guide button pass-through"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Pass the guide button through to the guest instead of leaving it to the host. The
+XInput backend picks its guide-capable entry point while starting, so this needs a
+restart.
+"""

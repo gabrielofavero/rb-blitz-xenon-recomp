@@ -3603,12 +3603,14 @@ runtime profile the app reads, `out/build/<preset>/rb_blitz.toml`.
   closed.
 - **Verified by source, not by a boot — and the reason matters.** A boot with the key present
   is clean (no `[FATAL]`, the crypto path runs, 21 DLC packages mount), but it cannot *prove*
-  the key applies. A key is applied only after its cvar registers — `cvar::LoadConfig` defers
-  it and `RegisterFlag` replays it on registration, which is how `d3d12_readback_resolve`
-  (registered by the D3D12 backend, after the profile is read) still takes effect — and a key
-  that matches nothing is reported only by `cvar::FinalizeInit()`, which **nothing in the app
-  calls**. A misspelled key is therefore dropped silently, so a boot log line is not a
-  usable control; that limit is recorded in [known-issues.md](../known-issues.md).
+  the key applies. `cvar::LoadConfig` defers a key whose cvar is not registered yet and
+  `RegisterFlag` replays it when it registers, so whether this key was applied at load time
+  or replayed later is not visible in a log — `ApplyTomlTable`'s own `Config: …` lines are
+  emitted before `InitLogging` and are lost, and the boot does not say which it was. What
+  made the edit unverifiable was the other half: a key that never matches is reported only by
+  `cvar::FinalizeInit()`, and **nothing in the app called it**, so a misspelled key was
+  dropped silently. That was fixed the next day — see
+  "A config key that matches no cvar is reported" below.
 
 
 ## DLC reaches the guest, and the alpha save/DLC acceptance (2026-10-03)
@@ -3661,3 +3663,35 @@ a restart with the file byte-identical, and the revert reads back 0. The Audio/V
 and the controller scheme change on screen but never write the file - measured across left
 stick, D-pad, A, START, B, X, Y, a 30 s wait and a main-menu round trip - which is recorded
 in [known-issues.md](../known-issues.md).
+
+## A config key that matches no cvar is reported (2026-10-04)
+
+The limit [known-issues.md](../known-issues.md) recorded the day before, when
+`d3d12_readback_resolve` moved into the gitignored profile: a key that matched no cvar was
+dropped in silence, so a profile edit could not be verified by looking for a warning.
+
+- **Why it was silent.** `cvar::LoadConfig` puts a key with no registered cvar into the
+  pending-value store, and `RegisterFlag` replays it if the cvar registers later — both
+  deliberate — but nothing ever reported the entries still sitting there at the end.
+  `cvar::FinalizeInit()` is the SDK's report for exactly that (`Config: unknown cvar '…'`)
+  and nothing in the app called it.
+- **Why calling it was not enough on its own.** `ApplyTomlTable` walks every table, so the
+  SDK's own `[log.levels]` convention — which `ParseCategoryLevelsFromConfig` reads straight
+  out of the file — produced a pending `log_levels_<category>` for each entry. Finalizing
+  would have named those alongside real typos, which is the one thing that report must not
+  do. Patch 0009 leaves `[log.levels]` to the logging subsystem.
+- **The change.** `rexglue-sdk/0009-log-levels-table-not-cvars.patch`
+  ([patches/README.md](../../patches/README.md)) stops `ApplyTomlTable` descending into
+  `log.levels`; `RbBlitzApp::OnPreLaunchModule` calls `rex::cvar::FinalizeInit()`. That is the
+  last hook before the guest thread is created, so every cvar this build has is registered by
+  then — including the GPU plugin's, which register when the plugin loads. It also locks the
+  `kInitOnly` flags at the end of initialization, which is what that lifecycle means. The
+  patch audit reports the work tree fully explained: 9 patches, 25 patched files, 0
+  UNEXPECTED.
+- **Verified with a deliberate positive control.** One release-build run whose profile
+  carried **both** a misspelled key (`d3d12_readback_resolv`) and a `[log.levels]` table
+  logged exactly one report, `Config: unknown cvar 'd3d12_readback_resolv'`, immediately
+  followed by `cvar: initialization finalized` — and nothing for `log_levels_apu` /
+  `log_levels_gpu`, and nothing for any other key in the profile. The typo is the control
+  that proves finalization ran in that same process; without it the `[log.levels]` silence
+  would prove nothing.

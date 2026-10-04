@@ -316,3 +316,8 @@ if(BUILD_TESTING)
     add_test(NAME toolchain
              COMMAND rb_blitz_toolchain_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
+
+# The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,
+# next to rb_blitz.exe, so a release always ships both. It carries its own settings
+# schema, which is compiled and validated at build time.
+add_subdirectory(launcher)

@@ -1,0 +1,18 @@
+diff --git a/src/core/cvar.cpp b/src/core/cvar.cpp
+index 228728d..dd3262e 100644
+--- a/src/core/cvar.cpp
++++ b/src/core/cvar.cpp
+@@ -96,6 +96,13 @@ bool ApplyFromSource(FlagEntry& entry, std::string_view value, Source source) {
+ // Recursively apply TOML values
+ void ApplyTomlTable(const toml::table& table, const std::string& prefix) {
+   for (const auto& [key, value] : table) {
++    // `[log.levels]` belongs to the logging subsystem, which reads it straight out of the
++    // file (ParseCategoryLevelsFromConfig); its keys are per-category log levels, not cvars.
++    // Walking into it would defer every one of them as a pending value, and the final
++    // "unknown cvar" report would name them alongside real typos.
++    if (value.is_table() && prefix == "log" && key.str() == "levels") {
++      continue;
++    }
+     std::string full_key = prefix.empty() ? std::string(key) : prefix + "_" + std::string(key);
+ 
+     if (value.is_table()) {

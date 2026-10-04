@@ -19,6 +19,9 @@
 /installer/out/
 /installer/generated/
 
+# Launcher: the settings schema compiled from launcher/config/settings.toml.
+/launcher/out/
+
 # Side wizard image made by installer/tools/make_art.ps1. The artwork is not ours
 # to license, so only the repository's own assets/blitz.ico and assets/blitz.png
 # are committed.

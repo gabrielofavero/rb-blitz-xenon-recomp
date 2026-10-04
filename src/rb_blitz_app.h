@@ -20,6 +20,9 @@
 //     command line - named a mask, so `license_mask = 0` restores the faithful path.
 //   * OnPostLoadXexImage - the SDK starts the guest unchanged; here the Ultimate and
 //     DLC layers run first, and each is a no-op without its payload/directory.
+//   * OnPreLaunchModule - the SDK never finalizes the cvar registry, so a key in
+//     rb_blitz.toml that matches no cvar stays silent; here the registry is finalized
+//     last, which reports such a key and locks the kInitOnly flags.
 //   * LogBootIdentity - diagnostics only; it changes no guest behaviour.
 //
 //   Every early return above is either the faithful path or a refusal to deviate
@@ -126,6 +129,17 @@ class RbBlitzApp : public rex::ReXApp {
     // identity and the payload line than before them.
     rb_blitz::dlc::Configure(runtime(), game_data_root());
   }
+
+  // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no
+  // cvar is deferred at load time, because the cvar may register later - the GPU plugin's
+  // do - and is only reported if something finalizes the registry. This is the last hook
+  // before the guest thread is created and every cvar this build has is registered by now,
+  // so finalizing here turns a misspelled key from a silent no-op into a log warning.
+  //
+  // FinalizeInit is the SDK's own end-of-initialization point: it also stops any further
+  // change to kInitOnly flags, which is correct here - those are device and logging
+  // selections that the config, environment and command line have already fixed.
+  void OnPreLaunchModule() override { rex::cvar::FinalizeInit(); }
 
  private:
   // Content licence state, the emulated console's answer to "does this profile
