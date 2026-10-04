@@ -90,8 +90,10 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
   rather than hides is the presenter's paint rect, which no public SDK accessor exposes.
 - **No baseline set, and a measured noise floor bigger than most effects.** Two runs of the same
   build differ by **3.5–5.9 %** of the frame just after a screen is entered and ~0.14 % once settled
-  **[tree]** [backlog.md](../backlog.md) §4. Any pixel-diff-based verification is meaningless until a
-  same-build baseline is in the loop.
+  **[tree]** [backlog.md](../backlog.md) §4, so any pixel-diff-based verification is meaningless until a
+  same-build baseline is in the loop. **The harness landed (P3, 2026-10-04)** and measures the floor
+  per state — it already found that the animated title background has no settled frame at all (two
+  same-build pairs: 0.046 % and 1.978 %). What E1 still owes is the baseline *set*.
 - ~~**No toggle contract**~~ — **landed 2026-10-04 (P1).** Every enhancement is one
   `[enhancements]` key in `<exe name>.toml`, default off, logged with its value and source at every
   boot: [docs/engine/toggles.md](../engine/toggles.md), [src/enhancements.cpp](../../src/enhancements.cpp)
@@ -413,6 +415,21 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 
 #### P3 — Scripted observation harness
 
+> **Landed 2026-10-04.** [scripts/observe_ui.ps1](../../scripts/observe_ui.ps1) (the harness),
+> [scripts/ui_states.ps1](../../scripts/ui_states.ps1) (the one state table: route, needle, settle,
+> per-state `MaxDiff` and optional `Crop`) and [docs/engine/observing.md](../../docs/engine/observing.md).
+> It joins `drive_ui.ps1`, `capture_window.ps1`, `ocr_image.ps1` and `frame_diff.ps1` as child scripts
+> rather than re-implementing any of them, reports one JSON object, and exits non-zero when the state
+> was not reached or its expectation did not hold.
+>
+> **The verify below is only half achievable, and the harness says why.** "`-Compare` … a diff below
+> the settled noise floor" assumes the state *has* a settled frame. Measured on the first real pair:
+> two same-build runs of the title screen differ by **0.046 %** in one pair and **1.978 %** in another,
+> because the aurora behind it animates and what varies is the distance between the two runs' phases.
+> So the ceiling is per state (2.5 % on the two screens with that background), and **OCR is the
+> control while the diff is corroboration**. `-Compare` with no baseline reports `no-baseline` and does
+> not fail the run; `capture_size` is in the report because a capture at one size cannot be diffed
+> against another.
 > **Goal.** Join the existing scripts into one harness: `scripts/observe_ui.ps1 -State <name>
 > [-Compare <baseline>] [-Ocr]`, driving `drive_ui.ps1` to a named state, capturing with
 > `capture_window.ps1`, reading static text with `ocr_image.ps1`, diffing with `frame_diff.ps1`, and
@@ -422,8 +439,7 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 > **Deliverable.** The harness, the state table, a `--list-states` mode, and `docs/engine/observing.md`
 > (how to add a state, what the JSON means).
 > **Verify.** `observe_ui.ps1 -State "main menu" -Ocr` returns a capture path and OCR text containing
-> a known menu label; `-Compare` against the same run's baseline reports a diff below the settled
-> noise floor.
+> a known menu label; `-Compare` reads a diff only against a same-build baseline and the state's own ceiling.
 > **Don't.** Do not assert on a diff without a baseline; do not add game-data dependencies to `ctest`
 > (this harness is PowerShell, outside the test suite).
 

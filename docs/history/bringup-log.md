@@ -3746,3 +3746,38 @@ present path, and a trace file rewritten twice a second for scripted runs.
 - **A cosmetic bug the trace found in itself.** The first event was dated `-0.000s`, because the
   clock was read before the origin static was created; the fix reads the origin first, and a re-run
   dates it `+0.000s`.
+
+## The observation harness, and the noise floor it walked into (2026-10-04)
+
+`scripts/observe_ui.ps1` drives the game to a named screen, captures it, reads it and says what
+changed - the instrument the customization plan's S2-S7 and E1 measure with. `scripts/ui_states.ps1`
+is the one table of state names, routes and needles; `docs/engine/observing.md` is the operator's
+view.
+
+- **It joins, it does not re-implement.** `drive_ui.ps1` sends the keys, `capture_window.ps1` refuses
+  to save the wrong window, `ocr_image.ps1` reads the text, `frame_diff.ps1` measures the difference,
+  and the state table is transcribed from the routes `scripts/acceptance_screens.ps1` already walks -
+  a list clamps at both ends and resets to its first row on entry, both measured, which is what makes
+  "clamp, tap down N, accept" a safe route.
+- **A diff is only read against a same-build baseline, and never without one.** `-Compare` with no
+  baseline reports `no-baseline` and does not fail the run: there is nothing to measure against, and
+  saying so is the point (docs/backlog.md, "Measure the noise floor").
+- **The first real pair corrected the plan's own verification.** The plan asked for a diff "below the
+  settled noise floor". Two same-build runs of the title screen differ by **0.046 %** in one pair and
+  **1.978 %** in another: the aurora behind the title animates, so what varies is the distance between
+  the two runs' phases, and no settle time removes it. The ceiling is therefore **per state** (2.5 %
+  for the two screens with that background) and **OCR is the control while the diff is
+  corroboration**. The plan's P3 verify was corrected rather than left standing.
+- **A capture is 3840x2160**, the guest's 1280x720 upscaled to a 300 % desktop, which is already past
+  the size Windows OCR will upscale: `-GrayscaleScale 3` is refused outright, and scale 2 reads the
+  How to Play screen's rows but not its stylised heading. The harness therefore gives a state an
+  optional OCR `Crop` - help-options uses one for its title - and reports both `capture_size` and
+  `ocr.crop`, because a capture at one size cannot be diffed against another and a crop follows the
+  capture size.
+- **Measured cost.** A capture run 46 s; a compare run 154 s, most of it `frame_diff`'s per-pixel
+  PowerShell loop over the frame. That is why the harness is a research tool and not a `ctest` target.
+- **What it saw that nobody had written down.** Entering HELP & OPTIONS and accepting nothing captures
+  a screen titled "How to PLAY" whose visible rows read BASIC TUTORIAL and ADVANCED TUTORIAL, while
+  one row down from there is CONTROLLER. So that screen's row 0 is a tutorial entry, and
+  acceptance_screens.ps1's "a submenu titled How to Play over four pages" describes rows 1-4 without
+  accounting for row 0. Left for S2's flow map - the harness reports what it saw and no more.
