@@ -205,7 +205,7 @@ index bd6c797..5e6914c 100644
 +  auto file_infos = rex::filesystem::ListFiles(package_root);
 +  for (const auto& file_info : file_infos) {
 +    if (file_info.type != rex::filesystem::FileInfo::Type::kDirectory &&
-+        !IsContentPackageFile(file_info.path)) {
++        !IsContentPackageFile(file_info.path / file_info.name)) {
 +      // Directories only, plus the STFS containers a dumped content directory
 +      // holds. Anything else (a readme, a stray save) is not content.
 +      continue;

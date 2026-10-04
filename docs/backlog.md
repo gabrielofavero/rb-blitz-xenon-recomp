@@ -21,6 +21,11 @@ that name an action.
       regression check (§7.1).
 - [ ] Add a provenance-table row for anything adapted from another project (§9).
 
+> **The customization scope's research plan:** [plans/customization-plan.md](plans/customization-plan.md)
+> plans the function-naming, flow-mapping, probe and harness work that the nine UI / resolution /
+> save / DLC enhancements need. Its S1 *is* the naming campaign above, and its flow maps are what make
+> the remaining "Engine knowledge still to port" items cheap. No feature code lives there.
+
 ## 2. Ultimate compatibility
 
 - [ ] **Script an Ultimate run** — boot → menu → a song against an installed payload.
@@ -34,8 +39,11 @@ that name an action.
 ## 3. The launcher — the one active design
 
 - [ ] [plans/launcher-plan.md](plans/launcher-plan.md) — a launcher that owns the
-      installed game's settings (General/Graphics/Controller/Experimental), ships in the
-      installer payload beside `rb_blitz.exe` and launches it. It is written
+      installed game's settings (General/Graphics/Controller; the Experimental tab is
+      withdrawn, D14), ships in the installer payload beside `rb_blitz.exe` and launches
+      it. The current milestone is M1, "the launcher with the graphical settings"
+      (§1.1): three tabs, Graphics whole, General limited to the launch target plus the
+      save and DLC locations, and the launcher fully controller-navigable. It is written
       prompt-by-prompt with waves, a dependency graph and an open-questions list that has
       to be answered before wave 0. It absorbed the per-device remap design: lane C
       builds the remap core and the launcher's Controller → Manual page is its panel.

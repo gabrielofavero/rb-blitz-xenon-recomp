@@ -3,6 +3,12 @@
 **Status: scoping/planning.** No code in this document. Nothing here is a commitment, and nothing here
 gates the release-readiness tasks in [backlog.md](../backlog.md).
 
+> **Current milestone: M1 — "the launcher with the graphical settings" (§1.1), decided 2026-10-03.**
+> The plan below still describes the whole launcher. M1 is the cut that is in scope *right now*:
+> three tabs (General, Graphics, Controller), with the Graphics tab whole, the General tab limited to
+> the launch target plus the save and DLC locations, and the Controller tab's unbuilt parts named but
+> empty. Everything outside M1 is planned, not dropped.
+
 This document is written as a **prompt plan**: every unit of work is a self-contained prompt you can
 hand to a fresh agent session, plus the order it must run in and what can run beside what (§6).
 
@@ -32,14 +38,39 @@ hand to a fresh agent session, plus the order it must run in and what can run be
 | R6 | at the end, ask: open game / open launcher / do nothing | a custom finish page replacing the single `[Run]` checkbox (D8) |
 | R7 | mouse **and** controller control | ImGui navigation driven by one input-agnostic focus model, fed by mouse and SDL3 gamepad (D6) |
 | R8 | hover/focus shows a tooltip in a bar before the confirm button, RPCS3-style | a bottom bar that always names the hovered/focused row's tooltip and the current control hints (D7) |
-| R9 | four tabs: General, Graphics, Controller, Experimental | the tab list is data, not code (§4.1) |
-| R10 | General: launch target (Ultimate / Blitz / Demo), DLC dir, save dir | mapped onto `ultimate_mode`, `dlc_root`, `user_data_root` (D4) |
+| R9 | tabs: General, Graphics, Controller | three tabs, and the tab list is data, not code (§4.1). The Experimental tab is **withdrawn**; its rows are re-homed by D14 |
+| R10 | General: launch target (Common / Demo / Ultimate), save dir, DLC dir | mapped onto `ultimate_mode`, `user_data_root`, `dlc_root` (D4). **This is the General tab's whole M1 scope** (§1.1) |
 | R11 | "if Ultimate is installed, the Ultimate option is disabled with a tooltip to reinstall — or something friendlier" | **friendlier: never hard-disable.** Detect the payload, and when it is missing or damaged offer an inline *Install Ultimate…* that drives the already-installed `rb_blitz_setup_helper.exe` (D5) |
-| R12 | Graphics: everything we can configure — API, resolution, etc. | the candidate rows §2.1 lists, each row labelled with whether it is live or needs a restart; FSR/sharpening stay hidden in this build (D12) |
-| R13 | Controller: pick the input form; list user controllers; per-button mapping; per-controller profiles never overwritten; keyboard always enabled | **two phases.** Phase C-A: device select + keyboard mapping + deadzone (everything that exists today). Phase C-B: per-pad remap, which does not exist yet — it is **planned work here, in this plan's lane C** (C3—C6, D13) |
-| R14 | Experimental: Mouse Support toggle, plus suggestions | mouse support becomes a real gate on the existing mouse-nav install; suggested extra toggles with their evidence status are in D14 |
+| R12 | Graphics: everything we can configure — API, resolution, etc. | the candidate rows §2.1 lists, each row labelled with whether it is live or needs a restart; FSR/sharpening stay hidden in this build (D12). **This tab is M1's point** (§1.1) |
+| R13 | Controller: pick the input form; mouse support; list user controllers; per-button mapping; per-controller profiles never overwritten; keyboard always enabled | **two phases.** Phase C-A: input form + **mouse support** + device select + keyboard mapping + deadzone (everything that exists today). Phase C-B: per-pad remap, which does not exist yet — it is **planned work here, in this plan's lane C** (C3—C6, D13) |
+| R14 | Experimental: Mouse Support toggle, plus suggestions | **withdrawn (2026-10-03).** There is no Experimental tab (D14). Mouse support becomes a real gate on the existing mouse-nav install and lives on the Controller tab (B3/B6); the suggested extra toggles are re-homed by D14 or dropped |
 | R15 | all of it saved to an ini/other format, install folder or better | one TOML profile in the user's own app-data folder, with a portable override (D2) |
 | R16 | (implied) nothing new is redistributed | the mod is never bundled — the launcher reuses the installer's helper and the same pin (D5) |
+
+### 1.1 The current milestone — M1, "the launcher with the graphical settings"
+
+Decided 2026-10-03. M1 is deliberately small: a launcher the installer ships, that is fully operable
+with a controller, with **three tabs** (General, Graphics, Controller) — two of them real, the third
+real only in part.
+
+| Tab | In M1 | Named but empty / later |
+| --- | --- | --- |
+| **General** | launch target (**Common** / **Demo** / **Ultimate**) with filesystem availability detection (D5), save location, DLC location (D4) | game-directory override, *Verify installation*, *Install Ultimate…* (B8), first-run prefill from the manifest (D4) |
+| **Graphics** | the graphical settings (D12): resolution, window size, fullscreen, monitor, V-Sync, MSAA, anisotropic, render scale, letterbox, safe area/overscan, dithering | *Audio* beyond mute/buffer (no `audio_volume` cvar yet), *Developer* group (`d3d12_readback_resolve`, `log_level`), FSR/sharpening (compiled out) |
+| **Controller** | the *Input* group: input form (sdl/xinput), mouse support (B3/B6), guide button — and **full controller navigation of the launcher itself** (D6, A3) | device list + deadzone (C1), keyboard mappings (C2), per-button pad remapping (C3–C6) |
+
+Two rules keep the "leave it blank" instruction honest:
+
+- **A group with no rows renders as its name plus one line, or is hidden — never as a disabled widget
+  that looks like a setting** (D14).
+- No row is added to fill a category. If a feature does not exist (master volume) or is compiled out
+  (FSR/sharpening), there is no row (P0.2, D12).
+
+M1 keeps R7/R8 as hard requirements: the launcher is navigable end to end with a pad, mouse and
+keyboard, with the bottom bar naming the focused row's tooltip and the current control hints (A2, A3).
+
+The prompts M1 needs are the S1+S2 cut in §6.3, with **B3**/**B6** building the Controller tab's input
+group instead of the withdrawn Experimental tab.
 
 ---
 
@@ -53,10 +84,10 @@ hand to a fresh agent session, plus the order it must run in and what can run be
 | The mod's installer, reusable from the launcher | `install-ultimate --dest <game root> (--from-pinned\|--from-zip\|--from-dir\|--from-url)` ([installer/src/commands.cpp:924-927](../../installer/src/commands.cpp)), pinned URL+hash embedded at build time | D5's "Install Ultimate…" is a `CreateProcess` of a binary the installer already put in `{app}` |
 | The install's own record | `install-manifest.toml`: `[install] directory`, `game_directory`, `payload_commit`; `[game_data] source`, `directory`, `ultimate_installed` ([installer/src/install.cpp:1187-1208](../../installer/src/install.cpp)) | first-run prefill for the General tab (D4) |
 | A flat cvar registry with a command line, a config file and source priorities | `--name=value` at startup, `rb_blitz.toml` next to the exe, `Source{kDefault,kConfig,kEnvironment,kCommandLine,kRuntime}` ([rexglue-sdk/src/core/cvar.cpp:83](../../rexglue-sdk/src/core/cvar.cpp), `:97`, `:538`, `:639`) | the launcher's settings *are* cvars; no new settings plane is needed |
-| The launcher-relevant cvars | `game_data_root`/`user_data_root`/`update_data_root`/`cache_root` ([rexglue-sdk/include/rex/runtime.h:38-41](../../rexglue-sdk/include/rex/runtime.h)), `dlc_root` ([src/hooks/dlc.cpp:33](../../src/hooks/dlc.cpp)), `ultimate_mode`/`ultimate_payload_root`/`ultimate_patches` ([src/hooks/ultimate.cpp:100-113](../../src/hooks/ultimate.cpp)), `input_backend`/`guide_button` ([rexglue-sdk/src/input/input_system.cpp:27-30](../../rexglue-sdk/src/input/input_system.cpp)), `mnk_mode`/`mnk_mouse`/`mnk_sensitivity` and 25 `keybind_*` ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:26-59](../../rexglue-sdk/src/input/mnk/mnk_input_driver.cpp)), display/graphics/audio rows in the SDK's own cvar registry | the four tabs are a *projection* of the registry, not a new subsystem |
+| The launcher-relevant cvars | `game_data_root`/`user_data_root`/`update_data_root`/`cache_root` ([rexglue-sdk/include/rex/runtime.h:38-41](../../rexglue-sdk/include/rex/runtime.h)), `dlc_root` ([src/hooks/dlc.cpp:33](../../src/hooks/dlc.cpp)), `ultimate_mode`/`ultimate_payload_root`/`ultimate_patches` ([src/hooks/ultimate.cpp:100-113](../../src/hooks/ultimate.cpp)), `input_backend`/`guide_button` ([rexglue-sdk/src/input/input_system.cpp:27-30](../../rexglue-sdk/src/input/input_system.cpp)), `mnk_mode`/`mnk_mouse`/`mnk_sensitivity` and 25 `keybind_*` ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:26-59](../../rexglue-sdk/src/input/mnk/mnk_input_driver.cpp)), display/graphics/audio rows in the SDK's own cvar registry | the three tabs are a *projection* of the registry, not a new subsystem |
 | A boot-time hook where paths can still be corrected | `OnConfigurePaths` ([rexglue-sdk/include/rex/rex_app.h:113-115](../../rexglue-sdk/include/rex/rex_app.h)), overridden at [src/rb_blitz_app.h:50](../../src/rb_blitz_app.h) | the exact insertion point for "standalone uses the launcher's profile" (D3) |
 | A precedent for "apply only where nothing else did" | `ApplyContentLicense()` reads `GetFlagSource("license_mask")` and writes only when it is `kDefault` ([src/rb_blitz_app.h](../../src/rb_blitz_app.h)) | same shape as the profile merge |
-| The mouse-navigation feature, currently unconditional | `InstallMouseUiNavigation` in `OnPreSetup` ([src/rb_blitz_app.h:36](../../src/rb_blitz_app.h)), device in [src/input/mouse_ui.h](../../src/input/mouse_ui.h), arithmetic in [src/input/ui_nav.h](../../src/input/ui_nav.h) | the Experimental tab's first toggle is a *gate*, not a new feature |
+| The mouse-navigation feature, currently unconditional | `InstallMouseUiNavigation` in `OnPreSetup` ([src/rb_blitz_app.h:36](../../src/rb_blitz_app.h)), device in [src/input/mouse_ui.h](../../src/input/mouse_ui.h), arithmetic in [src/input/ui_nav.h](../../src/input/ui_nav.h) | the Controller tab's mouse-support toggle is a *gate*, not a new feature |
 | A vendored UI stack already configured for this build | `imgui` OBJECT target ([rexglue-sdk/thirdparty/CMakeLists.txt:231-242](../../rexglue-sdk/thirdparty/CMakeLists.txt)), SDL3 static with `SDL_SHARED=OFF`/`SDL_STATIC=ON` (`:247-250`), PNG decode via stb_image ([rexglue-sdk/src/ui/image_decode.cpp:17](../../rexglue-sdk/src/ui/image_decode.cpp)) | the launcher needs no new third-party dependency (D1, D6) |
 | An art pipeline with a stated licensing posture | [installer/tools/make_art.ps1](../../installer/tools/make_art.ps1) (DPI ladder, centre-crop, "not ours, not committed"), `.gitignore` `/assets/wizard-*.bmp`, committed `assets/blitz.png` + `assets/blitz.ico` | R2's cover is generated, not committed (D11) |
 | A capture/verify toolkit | `scripts/capture_window.ps1`, `scripts/frame_diff.ps1`, `scripts/drive_ui.ps1`, `scripts/acceptance_*.ps1` | E2/E3 verify the launcher the same way the game is verified |
@@ -167,13 +198,16 @@ in-game — that is precedence #3 winning, working as designed; B4 surfaces it a
 
 ### D4 — General tab: what the three launch targets actually are
 
+M1 shows exactly these five rows and nothing else; the game-directory override, *Verify installation*
+and *Install Ultimate…* are later (§1.1, B8).
+
 | Row | cvars | Grounded meaning |
 | --- | --- | --- |
-| Rock Band Blitz Ultimate | `--ultimate_mode=1` (auto) | payload at `<game root>\ultimate\gen\patch_xbox.hdr` is mounted and the mod's 12-byte edits are re-applied host-side ([src/hooks/ultimate.cpp:231-260](../../src/hooks/ultimate.cpp)) |
-| Rock Band Blitz | `--ultimate_mode=0` | "ultimate: off, booting the retail game data" |
-| Rock Band Blitz Demo | `--license_mask=0` | the XBLA trial path; the project's own note is that a licence-less boot takes the trial mode that does not keep scores ([src/rb_blitz_app.h](../../src/rb_blitz_app.h), `ApplyContentLicense`) |
-| DLC location | `dlc_root` | `<title_id>/<content_type>/<package>`, mounted in place read-only ([docs/dlc.md](../dlc.md)) |
+| Rock Band Blitz (**Common**) | `--ultimate_mode=0` | "ultimate: off, booting the retail game data" |
+| Rock Band Blitz **Demo** | `--license_mask=0` | the XBLA trial path; the project's own note is that a licence-less boot takes the trial mode that does not keep scores ([src/rb_blitz_app.h](../../src/rb_blitz_app.h), `ApplyContentLicense`) |
+| Rock Band Blitz **Ultimate** | `--ultimate_mode=1` (auto) | payload at `<game root>\ultimate\gen\patch_xbox.hdr` is mounted and the mod's 12-byte edits are re-applied host-side ([src/hooks/ultimate.cpp:231-260](../../src/hooks/ultimate.cpp)) |
 | Save game location | `user_data_root` | default `Documents\rb_blitz`; the title's own saves and `globaloptions` live there |
+| DLC location | `dlc_root` | `<title_id>/<content_type>/<package>`, mounted in place read-only ([docs/dlc.md](../dlc.md)) |
 
 The launcher must refuse a save/DLC directory **inside** the game root, and say why: the runtime
 already redirects those to the platform user directory ([src/fs/path_policy.h](../../src/fs/path_policy.h),
@@ -297,13 +331,18 @@ filtering, render scale, letterbox, safe area/overscan, overscan cutoff, ditheri
 - Frame-rate unlocking is a project non-goal (the Deferred section of [docs/backlog.md](../backlog.md)).
   Do not put a frame-rate row in.
 
+M1 ships this tab in full (§1.1); a row for a feature that does not exist yet (master volume) stays out
+of the table until it does (P0.2's rule).
+
 ### D13 — Controller tab, honestly split in two
 
-**Phase C-A — everything that exists today.** Input form (`input_backend`: sdl/xinput), the list of
-connected controls (SDL3 enumeration + the keyboard as its own row), deadzone, `mnk_mode` (keyboard
-drives the synthetic pad), `mnk_mouse` + sensitivity, and editing the 25 `keybind_*` strings with real
-capture. Per-device profiles are stored per device from day one, keyed by SDL GUID (falling back to
-ordinal), so nothing is overwritten when a second pad appears.
+**Phase C-A — everything that exists today.** Input form (`input_backend`: sdl/xinput), the **mouse
+support toggle** (B3/B6's `mouse_ui_nav`, default on — the gate on the guest's mouse navigation, moved
+here when the Experimental tab was scrapped, D14), `guide_button` pass-through, the list of connected
+controls (SDL3 enumeration + the keyboard as its own row), deadzone, `mnk_mode` (keyboard drives the
+synthetic pad), `mnk_mouse` + sensitivity, and editing the 25 `keybind_*` strings with real capture.
+Per-device profiles are stored per device from day one, keyed by SDL GUID (falling back to ordinal), so
+nothing is overwritten when a second pad appears.
 
 **Keyboard is always enabled** (R13): the pad merge in the SDK ORs devices, so the launcher never turns
 `mnk_mode` off when a pad is selected — it keeps a pad *and* the keyboard mapped, and the Controller tab
@@ -323,28 +362,34 @@ all three:
 - The shared contract must be a **file**, not a cvar family: cvars are registered at compile time, so a
   dynamically named `remap_<device>_a` cannot exist. The profile file (D2) is the contract; the game
   reads it where it reads the rest of the profile (D3).
-- Until C5 lands, the Controller tab shows the pad rows read-only with one honest line: "Per-button
-  remapping is not available in this build" — never an empty table.
+- Until C5 lands, the Controller tab shows the remap group as its name plus one honest line:
+  "Per-button remapping is not available in this build" — never an empty or disabled table (D14).
 
-### D14 — Experimental tab
+### D14 — The tabs: General, Graphics, Controller. Experimental is withdrawn (2026-10-03)
 
-| Toggle | cvar | Status today |
-| --- | --- | --- |
-| **Mouse support** (guest menus by mouse) | new, e.g. `experimental_mouse_nav`, gating `InstallMouseUiNavigation` ([src/rb_blitz_app.h:36](../../src/rb_blitz_app.h)) | exists unconditionally; the prompt is a gate + default-on + a log line |
-| Mouse look / sensitivity | `mnk_mouse`, `mnk_sensitivity` | exists (may live in Controller instead) |
-| Ultimate content device edit | `ultimate_patches` bit 1 | exists |
-| Ultimate song blacklist edit | bit 2 | exists |
-| Ultimate disk-error latch edit | bit 4 | exists |
-| Guide button pass-through | `guide_button` | exists |
-| Frame readback for hover alignment | `d3d12_readback_resolve` (backlog: move it out of the manifest into `rb_blitz.toml`) | exists, developer-only |
-| Developer overlays (F3 / console / log level) | `bind_debug`, `log_level` | exists; belongs behind a "developer" disclosure, if shown at all |
-| Master volume | `audio_volume` | **does not exist** in the SDK yet |
-| Skip stream checksum validation | — | **not offerable**: it is a guest patch, flagged P1 in [docs/rb3-references.md](../rb3-references.md) §2.6; offer it only after that patch exists |
-| Shader cache / readback resolver | `d3d12_readback_resolve` | dev-only, hide by default |
+The launcher has **three** tabs. The planned Experimental tab (R14) is scrapped: a tab that exists
+because "we were not sure where this belongs" is where settings go to be forgotten, and every row it
+held has an obvious home.
 
-Every row states whether it is a real runtime behaviour or a build-time fact, in the repo's hook-hygiene
-spirit ("every hook states the faithful behaviour and the reason for deviating") — an Experimental tab is
-where that honesty is most needed.
+| Row | cvar | New home | Status today |
+| --- | --- | --- | --- |
+| **Mouse support** (guest menus by mouse) | new, e.g. `mouse_ui_nav`, gating `InstallMouseUiNavigation` ([src/rb_blitz_app.h:36](../../src/rb_blitz_app.h)) | **Controller → Input** | exists unconditionally; B6 turns it into a gate, default-on, with a log line (B3 renders it) |
+| Mouse look / sensitivity | `mnk_mouse`, `mnk_sensitivity` | **Controller → Mouse** | exists |
+| Guide button pass-through | `guide_button` | **Controller → Input** | exists |
+| Input form | `input_backend` | **Controller → Input** | exists; changing it needs a restart |
+| Ultimate content device / song blacklist / disk-error latch edits | `ultimate_patches` bits 1/2/4 | **General → Ultimate (advanced)** | exists; M1 leaves the group **named but empty** |
+| Frame readback for hover alignment | `d3d12_readback_resolve` | **Graphics → Developer**, hidden unless `--show-dev-settings` | exists, developer-only; out of M1 |
+| Developer overlays (F3 / console / log level) | `bind_debug`, `log_level` | **Graphics → Developer** (same disclosure) | exists; out of M1 |
+| Master volume | `audio_volume` | **Graphics → Audio** | **does not exist** in the SDK yet |
+| Skip stream checksum validation | — | **not offerable**: it is a guest patch, flagged P1 in [docs/rb3-references.md](../rb3-references.md) §2.6; offer it only after that patch exists | — |
+| Shader cache / readback resolver | `d3d12_readback_resolve` | **Graphics → Developer** (same row as above, not a second one) | dev-only, hide by default |
+
+Two rules keep "leave the unimplemented categories blank" honest:
+
+- **A group with no rows renders as its name plus one line, or is hidden — never as a disabled widget
+  that looks like a setting.** D12's rule for compiled-out rows applies to unbuilt ones too.
+- Every row that *is* shown states whether it is a real runtime behaviour or a build-time fact, in the
+  repo's hook-hygiene spirit ("every hook states the faithful behaviour and the reason for deviating").
 
 ---
 
@@ -404,6 +449,12 @@ tooltip  = "Width of the guest's video mode. Restart required."
 Rules: `enum` entries carry `choices`; `path_dir` entries carry `validate` (`exists|dlc_layout|inside_game_root:forbid`);
 `applies = "live"` is only allowed with an evidence comment naming the change callback.
 
+**Tabs and groups.** `tab` is one of `general | graphics | controller` — there is no `experimental`
+(D14). M1's row set (§1.1) is every `general` row (`launch.target`, `user_data_root`, `dlc_root`), every
+`graphics` row (D12), and the `controller` rows in the *Input* group (B3); the rest of Controller arrives
+with C1/C2/C5. A group with no rows yet is declared with `status = "unavailable"` and a one-line
+`tooltip`, so a tab can name the category without inventing a widget (D14's empty-group rule).
+
 ### 4.2 `launcher.toml` — the profile (Contract 2)
 
 ```toml
@@ -418,7 +469,7 @@ width  = 1100
 height = 720
 
 [launch]
-target       = "ultimate"        # ultimate | vanilla | demo
+target       = "ultimate"        # common | demo | ultimate
 game_dir     = "C:\\Games\\Rock Band Blitz\\game"
 user_data_dir = ""               # empty = game default
 dlc_dir      = ""
@@ -508,7 +559,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 | A1 | Tab shell + focus model | A | P0.4 | S1 |
 | A4 | Cover art pipeline | A | P0.4 | S3 |
 | B2 | Graphics tab | B | A1, P0.2 | S2 |
-| B3 | Experimental tab | B | A1, P0.2, B6 | S2 |
+| B3 | Controller tab: input group + empty-group rule | B | A1, P0.2, B6 | S2 |
 | B5 | Game-side profile loading | B | P0.3 | S2 |
 | E1 | Launcher unit tests in CTest | E | P0.2, P0.3 | S1 |
 | D1 | Launcher in the payload | D | P0.5 | S1 |
@@ -535,7 +586,8 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 Stages: **S1** walking skeleton (a launcher that launches the game, and an installer that ships it),
 **S2** settings surface, **S3** input + art, **S4** installer polish + verification, **S5** the absorbed
-remap work (C3–C6) and release-quality evidence.
+remap work (C3–C6) and release-quality evidence. **M1 (§1.1) is the S1+S2 cut**, minus the pieces it
+defers — §6.3 names them.
 
 ### 5.3 The prompts
 
@@ -543,12 +595,15 @@ remap work (C3–C6) and release-quality evidence.
 
 > **Goal.** Create `launcher/config/settings.toml` (Contract 1 in
 > `docs/plans/launcher-plan.md` §4.1) and `launcher/tools/embed_settings.cpp`, which compiles it into
-> `launcher/out/generated/settings_table.h`. Cover **every row of all four tabs** with `key`, `tab`,
-> `group`, `label`, `kind`, `default`, `applies` and a real `tooltip` — no placeholders. Source the rows
+> `launcher/out/generated/settings_table.h`. Cover the **M1 row set (§1.1)** — every row of the General
+> and Graphics tabs, plus the Controller tab's *Input* group — with `key`, `tab`, `group`, `label`,
+> `kind`, `default`, `applies` and a real `tooltip`; no placeholders, and no row for a feature that does
+> not exist (D14). Declare groups that have no rows yet with `status = "unavailable"` so the tab can
+> name them. Source the rows
 > from: `rexglue-sdk/src/ui/window.cpp`, `graphics/flags.cpp`, `graphics/cache.cpp`, `ui/presenter.cpp`
 > (display/graphics), `src/audio/*` and `sdl_audio_driver.cpp` (audio), `src/input/input_system.cpp`,
 > `mnk/mnk_input_driver.cpp` (input), `src/hooks/ultimate.cpp`, `src/hooks/dlc.cpp`,
-> `rexglue-sdk/include/rex/runtime.h` and `rex_app.h:98-115` (paths/experimental). Cross-check the
+> `rexglue-sdk/include/rex/runtime.h` and `rex_app.h:98-115` (paths/input). Cross-check the
 > "live vs restart" column against each setting's own change callback and keep its honesty; hide
 > the `present_*` rows that `REXGLUE_ENABLE_FIDELITYFX=OFF` compiles out.
 > **Deliverable.** The toml, the tool, the generated header, a CMake target for the generator (build
@@ -608,30 +663,33 @@ remap work (C3–C6) and release-quality evidence.
 
 #### B6 — Game-side mouse-support toggle
 
-> **Goal.** Turn the unconditional mouse navigation into a flag. Add a cvar (category
-> `Experimental`, default **on** so today's behaviour is unchanged when the file says nothing) and gate
-> the `InstallMouseUiNavigation(...)` call in `RbBlitzApp::OnPreSetup` (`src/rb_blitz_app.h:36`) on it.
+> **Goal.** Turn the unconditional mouse navigation into a flag. Add a cvar named `mouse_ui_nav`
+> (category `Input` — the Experimental tab no longer exists, D14), default **on** so today's behaviour
+> is unchanged when the file says nothing, and gate the `InstallMouseUiNavigation(...)` call in
+> `RbBlitzApp::OnPreSetup` (`src/rb_blitz_app.h:36`) on it.
 > Log one line either way, in the style of the existing `content licence:` / `dlc:` lines, so a capture
 > proves which mode booted. Register it with `.lifecycle(kRequiresRestart)` unless you can show it
 > installs and uninstalls cleanly at runtime — say which and why in a comment.
 > **Deliverable.** The cvar, the gate, the log line, a row in `launcher/config/settings.toml`'s
-> Experimental group (coordinate with P0.2; if that file does not exist yet, leave a TODO naming it),
-> and a `docs/known-issues.md` line only if a limit exists.
+> Controller → Input group (coordinate with P0.2; if that file does not exist yet, leave a TODO naming
+> it), and a `docs/known-issues.md` line only if a limit exists.
 > **Verify.** Two runs of the existing acceptance route (`scripts/acceptance_launches.ps1`) or a short
-> `scripts/drive_ui.ps1` run with `--experimental_mouse_nav=0` and with `1`: the boot log must show the
+> `scripts/drive_ui.ps1` run with `--mouse_ui_nav=0` and with `1`: the boot log must show the
 > line and the mouse must be inert in the off case, with the pad still working.
 > **Don't.** Do not touch `src/input/ui_nav.h` arithmetic or its tests; this is a gate, not a rewrite.
 
 #### A1 — Tab shell and focus model
 
-> **Goal.** Build the launcher's shell in `launcher/`: four tabs from the schema table's `tab` values,
+> **Goal.** Build the launcher's shell in `launcher/`: three tabs from the schema table's `tab` values
+> (General, Graphics, Controller — there is no Experimental, D14),
 > groups per `group`, and one widget per `kind` (`bool`, `int`, `float`, `enum`, `string`, `path_dir`,
 > `path_file`). Implement a single input-agnostic focus model — a flat, ordered list of rows per tab
 > with a focused index — with `Tab`/`Shift+Tab`, arrows, `Home`/`End`, `Enter`/`Space`, and the
 > controller path stubbed behind one interface so A3 can fill it in without touching widget code.
 > Persist and restore window geometry through `src/launcher/profile.{h,cpp}` (P0.3). DPI-aware layout:
 > the UI must be legible at 100% and 200%; use ImGui's font scaling rather than fixed pixel maths.
-> **Deliverable.** Working shell with all four tabs rendering the schema rows read-only, plus
+> **Deliverable.** Working shell with all three tabs rendering the schema rows read-only, a group with
+> no rows rendered as its name plus one line (never a dead widget, D14), plus
 > `launcher/README.md` notes on adding a row.
 > **Verify.** Run it; tab through every row of every tab; screenshot at 100% and 200% DPI
 > (`scripts/capture_window.ps1`).
@@ -672,21 +730,24 @@ remap work (C3–C6) and release-quality evidence.
 > **Don't.** Do not add rows for compiled-out features; do not claim a setting is live without a
 > change-callback citation.
 
-#### B3 — Experimental tab
+#### B3 — Controller tab: the input group, and the empty-group rule
 
-> **Goal.** Implement the Experimental tab from D14: the mouse-support toggle (B6's cvar), the three
-> `ultimate_patches` bits as individually labelled toggles, `guide_button`, mouse-look sensitivity, and
-> a collapsed "developer" group (`d3d12_readback_resolve`, `log_level`, overlay hotkeys) that is
-> hidden unless `--show-dev-settings` or a profile flag is set. Each row states, in its tooltip, what
-> it changes and what it costs; each patch bit names the guest address it edits
-> (`src/hooks/ultimate.cpp` Patch enum, `docs/ultimate-compat.md`).
-> **Deliverable.** The tab plus a short table in `launcher/README.md` (or in this plan's D14) that
-> records, per toggle: cvar, default, live-or-restart, evidence.
-> **Verify.** Toggle each on/off, launch, and capture the game's log line that names the effective
-> state (`ultimate:`/`dlc:`-style); for the patch bits, `--ultimate_patches=1` must boot and log
-> `patches 0x1`.
-> **Don't.** Do not expose anything the project deliberately deferred (frame-rate unlock), and do not
-> invent a guest patch (stream checksum) that does not exist.
+> **Goal.** Build the Controller tab's *Input* group — the part of the tab that exists today and is in
+> M1 (§1.1): the `input_backend` selector (sdl/xinput) with its "needs restart" badge, the
+> **mouse-support toggle** (B6's `mouse_ui_nav`, default on, tooltip explaining that it drives the
+> guest's menus by mouse), and `guide_button` pass-through. Render the groups M1 does not build (device
+> list/deadzone → C1, keyboard mappings → C2, per-pad remap → C3–C6) as their **name plus one honest
+> line** — "Per-button remapping is not available in this build" — never as a disabled control or an
+> empty table (D14).
+> **Deliverable.** The tab's Input group, its rows in `launcher/config/settings.toml`, and a
+> `launcher/README.md` note recording, per toggle: cvar, default, live-or-restart, evidence.
+> **Verify.** Toggle mouse support off and on: two runs of the existing acceptance route
+> (`scripts/acceptance_launches.ps1`) or a short `scripts/drive_ui.ps1` run with `--mouse_ui_nav=0` and
+> `1` — the boot log must show the line, and the mouse must be inert in the off case with the pad still
+> working. Confirm the unbuilt groups render as text, not widgets, in both DPI steps.
+> **Don't.** Do not implement per-button remapping here (C3–C6); do not expose anything the project
+> deliberately deferred (frame-rate unlock); do not invent a guest patch (stream checksum) that does not
+> exist.
 
 #### B5 — Game-side profile loading
 
@@ -763,7 +824,8 @@ remap work (C3–C6) and release-quality evidence.
 
 #### B1 — General tab
 
-> **Goal.** Implement D4/D5: the launch-target radio (Ultimate / Vanilla / Demo) with availability
+> **Goal.** Implement D4/D5 for M1's five General rows (§1.1): the launch-target radio (Common / Demo /
+> Ultimate) with availability
 > detection from the filesystem, the tooltips from D5, the DLC directory picker (validating
 > `<title_id>/<content_type>/<package>` with the same rules `src/fs/dlc_layout.h` encodes), the save
 > directory picker (validating against `src/fs/path_policy.h`: never inside the game root — and say so
@@ -1024,7 +1086,7 @@ graph LR
   P04[P0.4 target spike] --> A1
   P03[P0.3 profile module] --> B5[B5 game reads profile]
   P02 --> B2[B2 graphics]
-  P02 --> B3[B3 experimental]
+  P02 --> B3[B3 controller input]
   B6[B6 mouse toggle] --> B3
   A1 --> A2[A2 bottom bar]
   A1 --> A3[A3 pad nav]
@@ -1081,10 +1143,15 @@ If you only have one session at a time, run: P0.4 → P0.5 → D1 → P0.2 → P
 → D3 → E3 → E4, and fold B6, A2, A3, B2, B3, C1, C2, B8, D4, D5, E1, E2, C3–C6 in afterwards in any
 order that respects §6.1.
 
-**Minimum useful launcher (the S1+S2 cut):** P0.4, P0.5, D1, P0.2, P0.3, A1, A2, B1, B2, B3, B4, B5, B6,
-B7, D2, D3, E1, E3 — a launcher the installer ships, that launches the game with the user's settings,
-mouse-controllable, with tooltips. Controller navigation (A3) and remapping (C) are the next chunk;
-they change no interfaces built by the cut.
+**M1 — "the launcher with the graphical settings" (§1.1).** Prompts: P0.4, P0.2, P0.3, A1, A2, A3, B2,
+B3, B6, B1, B4, B5, B7, E1 — a launcher that opens on three tabs, is fully navigable with a controller,
+mouse and keyboard, shows the Graphics settings (all of D12) and the General launch target + save/DLC
+rows, writes them to the profile, and launches the game with them. Packaging it so the installer ships
+it (P0.5, D1, and the wizard work in D2/D3) is unchanged work and is what turns "runs" into "ships".
+
+Deferred past M1, and none of them changes an interface M1 builds: A4 (art), B8 (*Install Ultimate…*),
+C1/C2 (device list, keyboard mapping — the Controller tab's remaining groups), C3–C6 (per-pad remap),
+D4 (first-run prefill), D5, E2, E3, E4.
 
 ---
 
@@ -1102,7 +1169,8 @@ they change no interfaces built by the cut.
 | R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8 |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 |
 | R13 per-device profiles survive | two devices → two files; plugin order changed → same files | C1 |
-| R14 mouse toggle | two boots with the flag off/on, log + behaviour | B6 |
+| R9/R10/R12 three tabs, M1 rows live | launcher shows General/Graphics/Controller; Graphics rows editable; General shows target + save + DLC | A1, B2, B3, B1 |
+| R14 no Experimental tab; mouse toggle on Controller | tab list has no Experimental; two boots with `mouse_ui_nav` off/on, log + behaviour | B3, B6, D14 |
 | R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4, E3 |
 
 Anything not in this table is not verified, and should be said out loud rather than implied.
@@ -1132,6 +1200,8 @@ Anything not in this table is not verified, and should be said out loud rather t
 - Unlocking frame rate, or exposing compiled-out graphics features.
 - A guest-visible settings screen: the launcher only projects cvars, it does not own the game's own UI.
 - Editing the guest's own Controls presets.
+- An Experimental (or "Miscellaneous") tab: a setting with no honest category is left out or re-homed,
+  never parked (D14).
 - Linux/macOS launchers.
 
 ---
@@ -1176,7 +1246,7 @@ drop-in, and an empty launcher is still a working one.
 | --- | --- | --- |
 | Window background | one 1920×1080 image, darkened | flat panel, `assets/blitz.png` badge, title text |
 | App badge / logo | the Blitz wordmark, transparent | `assets/blitz.png` (committed) |
-| Tab icon strip (General/Graphics/Controller/Experimental) | 4 small icons | text labels only |
+| Tab icon strip (General/Graphics/Controller) | 3 small icons | text labels only |
 | Prompt icons (A, B, X, Y, LB, RB, D-pad, Start, Back) | 9 transparent sprites at 32–64 px | drawn shapes: a filled circle with the letter, a rounded rect for the shoulders |
 | Controller diagram | one image per pad family | the drawn shapes above, or nothing (the binding list already names the buttons) |
 | Cursor / focus ring | 1 accent sprite | a 1 px outline |
@@ -1265,6 +1335,10 @@ and one that needs it.
 **Settled 2026-09-27:** D13's fork — this plan owns the per-device remap work, and the launcher's
 Controller → Manual page is its panel. Consequences are already folded into R13, §2.2, D13, the
 C-lane prompts, the DAG and the waves.
+
+**Settled 2026-10-03:** the tab set is General, Graphics, Controller — the Experimental tab is
+withdrawn and its rows re-homed (D14) — and the current deliverable is **M1** (§1.1), the launcher
+with the graphical settings; everything else is planned, not dropped.
 
 Still open, for you before or during Wave 0:
 
