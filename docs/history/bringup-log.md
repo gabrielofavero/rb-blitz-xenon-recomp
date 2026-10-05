@@ -3781,3 +3781,48 @@ view.
   one row down from there is CONTROLLER. So that screen's row 0 is a tutorial entry, and
   acceptance_screens.ps1's "a submenu titled How to Play over four pages" describes rows 1-4 without
   accounting for row 0. Left for S2's flow map - the harness reports what it saw and no more.
+
+## The observation baseline, and the floor it does not have (2026-10-04)
+
+E1 of the customization plan is the reference set the later visual work is measured against, and
+`scripts/observe_baseline.ps1` is the driver that produces it: two passes per state (capture, then
+compare), the second pass's `diff.percent` **being** that state's same-build floor. It writes
+`out/observations/baseline/<build>/` (`<build>` = the executable's SHA-256, first 12 digits) with one
+PNG + JSON per state and a `summary.json`. `-Resume` reuses a capture instead of booting again,
+because a run is fourteen boots and does get interrupted. `observe_ui.ps1` gained `-CompareScale N`
+(both frames are downscaled before `frame_diff.ps1`'s per-pixel PowerShell loop sees them), and the
+baseline metadata now records the scale, the capture size and the OCR verdict.
+
+- **The baseline's own floors falsified the numbers P3 had recorded.** The harness's first two
+  same-build pairs of the title screen differed by 0.046 % and 1.978 %, and a 2.5 % ceiling was taken
+  from them. E1's run measured the same state twice more: **18.28 %** then **10.74 %**, and a third
+  time at **1.894 %** - all three captures OCR'd as `TO START`, so all three are the same screen. What
+  moves is the aurora behind the title: an animation whose phase two runs need not share, and no
+  settle time removes a phase difference. A ceiling taken from one pair is not a floor; the 2.5 %
+  values are withdrawn.
+- **Only three of fourteen states came back under the 1 % default.** `help-options` and `exit-confirm`
+  at 0 % and `song-list` at 0.473 %; the rest are 5-85 %, each for a different reason: an animated
+  background (title, main-menu 17.71 %, download 14.62 %, leaderboards 10.535 %, controls and
+  calibration 5 %), a live scene behind a menu (pause, 56.031 %), a random song (in-song, 72.777 %),
+  a race with the splash (boot, 84.972 % - one capture was black, mean luminance 4.4 against 75.2),
+  and three routes that captured a different screen than the state's name (main-menu the "Proceed in
+  Offline Mode?" dialog, audio-video the help index, credits the Audio/Video page).
+- **That last group is the finding that changed the harness.** A same-build `percent` cannot tell a
+  change of screen from a change of pixels, so a run that gates on it reports a route miss as a visual
+  regression and a visual regression as a route miss. `observe_ui.ps1` now gates on the diff only where
+  it can be believed - a state with a settled frame (`Settled` in `ui_states.ps1`, default true)
+  compared against a baseline measured at the same scale - and reports `diff.settled` and
+  `diff.gates_pass`, so a reader can see which rule ran. Every state whose measured pair exceeded the
+  default carries `Settled = $false`: its diff is corroboration and its OCR needle is the control.
+  Verified end to end: a same-build title run at its ceiling's own scale now exits 0 with
+  `percent=1.894`, `settled=false`, `gates_pass=false`, `ocr.matched=true`.
+- **`-Resume` is not a same-session guarantee.** The run that produced these numbers reused a capture
+  taken 11 h earlier and compared it against a fresh one. The build matched, so it is a legitimate
+  same-build pair; nothing else was checked, and the cross-scale warning the driver now prints
+  (`baseline captured at scale 1, compared at 4`) is the only other thing it can notice.
+- **Not fixed, and left visible.** The route language has no "wait for this text" step, so a dialog
+  slower than its `wait:N` leaves the next tap on the dialog; `song-list` is the case where that is
+  invisible, because both of its readings were the one-time entry tutorial the save decides, so its
+  needle never read and it agreed with itself about the wrong screen. `in-song` accepts *Random Song*
+  and writes the save, so the next run starts from a different machine. Both are in observing.md's
+  open list; naming the tutorial's owner is S2's.

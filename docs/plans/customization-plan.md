@@ -426,10 +426,12 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 > the settled noise floor" assumes the state *has* a settled frame. Measured on the first real pair:
 > two same-build runs of the title screen differ by **0.046 %** in one pair and **1.978 %** in another,
 > because the aurora behind it animates and what varies is the distance between the two runs' phases.
-> So the ceiling is per state (2.5 % on the two screens with that background), and **OCR is the
-> control while the diff is corroboration**. `-Compare` with no baseline reports `no-baseline` and does
-> not fail the run; `capture_size` is in the report because a capture at one size cannot be diffed
-> against another.
+> So the ceiling is per state, and **OCR is the control while the diff is corroboration**.
+> `-Compare` with no baseline reports `no-baseline` and does not fail the run; `capture_size` is in the
+> report because a capture at one size cannot be diffed against another. **E1 (below) then measured
+> the spread the 2.5 % ceilings were drawn from and withdrew them**: the same state came back at
+> 18.28 %, 10.74 % and 1.894 %, so both aurora screens carry `Settled = $false` and no run gates on
+> their diff.
 > **Goal.** Join the existing scripts into one harness: `scripts/observe_ui.ps1 -State <name>
 > [-Compare <baseline>] [-Ocr]`, driving `drive_ui.ps1` to a named state, capturing with
 > `capture_window.ps1`, reading static text with `ocr_image.ps1`, diffing with `frame_diff.ps1`, and
@@ -468,6 +470,24 @@ table, which `[functions]` cannot name.
 
 #### E1 — Baseline capture set and noise floor
 
+> **Landed 2026-10-04, with the noise floor as the correction.** [scripts/observe_baseline.ps1](../../scripts/observe_baseline.ps1)
+> produced the set — `out/observations/baseline/caa1e18c3c6c/` (`<build>` = the executable's SHA-256,
+> first 12 digits), one PNG + JSON per state plus a `summary.json`, with `-Resume` so an interrupted
+> fourteen-boot run does not start over — and the floors are recorded in
+> [observing.md](../../docs/engine/observing.md) and [known-issues.md](../../docs/known-issues.md)
+> B-015. `observe_ui.ps1` gained `-CompareScale`, and the baseline's metadata now carries the scale,
+> the capture size and the OCR verdict.
+>
+> **The verify is the part that did not hold, and it is the useful part.** Only three of fourteen
+> states came back under the 1 % default — `help-options` and `exit-confirm` at 0 %, `song-list` at
+> 0.473 % — and the other eleven differ by 5–85 %, four of them because the route captured a screen
+> other than the one the state names. A same-build `percent` cannot tell a change of screen from a
+> change of pixels, so the harness now gates on the diff only for a state with a settled frame
+> compared at the baseline's own scale (`Settled = $false` on every state whose measured pair exceeded
+> the default) and otherwise reports it as corroboration with the OCR needle as the control. The
+> prompt's own "say which states settle" is therefore answered with a table, and the routes' lack of a
+> wait-for-a-screen step is the finding S2 inherits.
+>
 > **Goal.** Produce the reference set every later visual claim is measured against, on the release
 > build, at the **native 1280×720 guest mode**, plus the measured noise floor per state.
 > **Deliverable.** `out/observations/baseline/<build-id>/` with one capture and one OCR text per

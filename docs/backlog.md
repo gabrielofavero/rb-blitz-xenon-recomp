@@ -71,12 +71,16 @@ that name an action.
       cleanly on a 16-byte period). DXT5 is the leading hypothesis; it is not confirmed.
       The next run should write one flat DXT5 colour over the span and check the prompt band
       with OCR plus a settled-frame A/B, which answers format and location at once.
-- [ ] **Measure the noise floor before believing any screenshot diff.** Two runs of the
-      same build differ by **3.5?5.9%** of the frame just after a screen is entered and
-      ~0.14% once it has settled, and the prompt band sits on top of the animated aurora ?
-      which is exactly how a whole round of "proven" swaps turned out to be nothing. Put a
-      same-build baseline in the loop, prefer OCR of static text as the control, and treat a
-      pixel diff as corroboration.
+- [x] **Measured 2026-10-04 - the noise floor is not one number.** [observing.md](engine/observing.md)
+      carries the per-state table and [known-issues.md](known-issues.md) B-015 the reason for it: at
+      `-CompareScale 4` only `help-options` and `exit-confirm` reproduced at 0 %, with `song-list` at
+      0.473 %, while the title screen alone measured 0.046 %, 1.978 %, 18.28 %, 10.74 % and 1.894 %
+      across five same-build pairs (three of them OCR-identical as `TO START`). The rule stands and is
+      now enforced rather than advised: put a same-build baseline in the loop, prefer OCR of static
+      text as the control, treat a pixel diff as corroboration, and do not gate a run on a diff for a
+      screen that has no settled frame (`Settled = $false`) or against a baseline taken at another
+      scale. The old 3.5-5.9 % / ~0.14 % pair was measured on ~1 Mpx captures and does not transfer to
+      the 8.3 Mpx ones here.
 - [ ] **The controller page's pad art is byte-identical across platforms.** 1,398,101 bytes
       of `controller_config` match between builds after a 16-bit swap, so there is nothing to
       gain by sourcing that art from the PS3 dump ? the button sheet is the only
