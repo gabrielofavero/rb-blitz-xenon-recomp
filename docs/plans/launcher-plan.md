@@ -100,7 +100,7 @@ group instead of the withdrawn Experimental tab — and all of them are built, *
 | The mouse-navigation feature, currently unconditional | `InstallMouseUiNavigation` in `OnPreSetup` ([src/rb_blitz_app.h:36](../../src/rb_blitz_app.h)), device in [src/input/mouse_ui.h](../../src/input/mouse_ui.h), arithmetic in [src/input/ui_nav.h](../../src/input/ui_nav.h) | the Controller tab's mouse-support toggle is a *gate*, not a new feature |
 | A vendored UI stack already configured for this build | `imgui` OBJECT target ([rexglue-sdk/thirdparty/CMakeLists.txt:231-242](../../rexglue-sdk/thirdparty/CMakeLists.txt)), SDL3 static with `SDL_SHARED=OFF`/`SDL_STATIC=ON` (`:247-250`), PNG decode via stb_image ([rexglue-sdk/src/ui/image_decode.cpp:17](../../rexglue-sdk/src/ui/image_decode.cpp)) | the launcher needs no new third-party dependency (D1, D6) |
 | An art pipeline with a stated licensing posture | [installer/tools/make_art.ps1](../../installer/tools/make_art.ps1) (DPI ladder, centre-crop, "not ours, not committed"), `.gitignore` `/assets/wizard-*.bmp`, committed `assets/blitz.png` + `assets/blitz.ico` | R2's cover is generated, not committed (D11) |
-| A capture/verify toolkit | `scripts/capture_window.ps1`, `scripts/frame_diff.ps1`, `scripts/drive_ui.ps1`, `scripts/acceptance_*.ps1` | E2/E3 verify the launcher the same way the game is verified |
+| A capture/verify toolkit | `scripts/capture_window.ps1`, `scripts/frame_diff.ps1`, `scripts/drive_ui.ps1`, `scripts/acceptance_*.ps1`, and the launcher's own `scripts/capture_launcher.ps1` / `scripts/acceptance_launcher.ps1` | the launcher is verified the same way the game is (E2/E3, now built) |
 | A dependency-free test harness | `tests/check.h`, targets in [CMakeLists.txt:128-172](../../CMakeLists.txt) | launcher/profile/settings tests look exactly like the existing six |
 
 ### 2.2 Does not exist
@@ -112,7 +112,7 @@ group instead of the withdrawn Experimental tab — and all of them are built, *
 | Per-pad-button remapping | R13 Phase C-B is this plan's lane C (C3–C6, D13) — planned work here, not an outside dependency. **Built 2026-10-05** (D17): the SDK needs one seam it did not have (`InputSystem::SetStateFilter`), which is patch 0010 |
 | A master volume cvar | `audio_volume` does not exist in the SDK; the audio row of the Graphics tab is "mute only" until it does |
 | The installer's knowledge of a launcher | D1–D5 |
-| Any launcher test, capture script or acceptance run | E1–E3 |
+| Any launcher test, capture script or acceptance run | **Built 2026-10-05** (E1–E3): six CTest targets, `scripts/capture_launcher.ps1` and `scripts/acceptance_launcher.ps1` |
 
 ---
 
@@ -842,7 +842,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Twenty-five prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty-six prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -874,10 +874,11 @@ session should read as instructions, and every deviation it would have described
 | E1 | the six launcher test targets named in `docs/build-and-run.md`'s new launcher section, with what each covers and the tree that has `BUILD_TESTING` on | — |
 | E2 | `scripts/capture_launcher.ps1` (the headless reports, the keyboard leg and the pad leg), `capture_window.ps1 -ClientArea`, the README's "How it is checked" section and the same `build-and-run.md` section | A2/D7: the bar's help is the *row's*, so the harness asserts on the presses that cross a row and reports the ones inside a row's choices |
 | E3 | `scripts/acceptance_launcher.ps1`: the silent install, the four legs (retail, ultimate, demo, save), the argv contract, the boot-log assertions, its exit codes and `summary.json`, plus the `build-and-run.md` section and the README's "How it is checked" entry | §11's two findings: the profile is not loaded as a config file, and the General tab's path rows and the launch command use different stores. R4's row in §7 changed state because of the first |
+| E4 | the root README's launcher section, `known-issues.md`'s new entries (art licensing, version skew, renderer machine-dependence, and what E3 measured), and `distributable.md`'s packaging rows | — (E3's two findings are what the new entries write up, and two of them correct claims the plan and `known-issues.md` were carrying about how settings travel) |
 
-**Open.** Seven prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
-column means the prompt beside it names a finished prompt rather than an open one — B1 is
-its own dependency because only half of it went out; §5.3 says which half.
+**Open.** Six prompts: A4, A5, B1, C1, C2 and C6 — the art, the recovery half, and the Controller
+tab's remaining lanes. None is gated by anything, each is one step from the documentation that owns
+its evidence, and §5.3 is the only place they are described.
 
 | ID | Prompt | Lane | Depends on | Unblocks |
 | --- | --- | --- | --- | --- |
@@ -887,17 +888,18 @@ its own dependency because only half of it went out; §5.3 says which half.
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
-| E4 | Docs, backlog, standing limits | E | all of the above | — |
 
-The four groups those fall into, which is what §6 schedules:
+The three groups those fall into, which is what §6 schedules:
 
 - **The Controller tab's remaining lanes** — C1, C2, C6.
-- **Art and evidence** — A4 and E4, and A5's recovery half.
-- **Finish M1** — done, and now completely: A3 and A2 are built, E1's test names, E2's
-  capture harness and E3's installed run are in `docs/build-and-run.md`, and the launcher
-  they describe is the one §7's rows were measured on. M1 was defined (§1.1) as "navigable
-  end to end with a pad, mouse and keyboard, with the bottom bar naming the focused row's
-  tooltip and the current control hints", and that is what the launcher does now.
+- **Art and recovery** — A4 and A5.
+- **Finish M1** — done, and completely: A3 and A2 are built, E1's test names, E2's capture
+  harness and E3's installed run are in `docs/build-and-run.md`, and the launcher they describe is
+  the one §7's rows were measured on. M1 was defined (§1.1) as "navigable end to end with a pad,
+  mouse and keyboard, with the bottom bar naming the focused row's tooltip and the current control
+  hints", and that is what the launcher does now.
+- **The evidence lane** — done: E1, E2, E3 and E4 are built, and E4's write-up is where E3's two
+  measurements live (§11.6, §11.7).
 
 ### 5.3 The prompts that are left
 
@@ -1004,20 +1006,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > path to a deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
 
-#### E4 — Docs, backlog, standing limits, audit
-
-> **Goal.** Finish the paper trail. Already done: `launcher/README.md` is the living description, the
-> two-settings-files precedence limit is in `docs/known-issues.md`, and §3 of `docs/backlog.md`
-> carries this plan. Still owed: a launcher section in the root `README.md` (what it is, where the
-> settings live, how to launch the game without it); `known-issues.md` entries for the limits this work
-> created and has not yet recorded (art licensing, launcher/game version skew, and the renderer's
-> machine-dependence); and a distributable-audit row for the packaging decisions (embedded cover art,
-> helper reuse).
-> **Deliverable.** Documentation only, in the repo's voice: state the behaviour and why, and name the
-> evidence.
-> **Verify.** Every link resolves; `git status` shows no art, no game files, no binaries.
-> **Don't.** Do not add a new markdown file where an existing one is the right home.
-
 ---
 
 ## 6. Order and parallelization
@@ -1032,31 +1020,27 @@ graph LR
   C1[C1 devices]
   C2[C2 keyboard panel]
   C6[C6 safety rails]
-  A4 --> E4[E4 docs/audit]
-  A5 --> E4
-  B1 --> E4
-  C1 --> E4
-  C2 --> E4
-  C6 --> E4
 ```
+
+Six prompts, and none of them depends on another: the evidence lane that used to sit under all of
+them (E1-E4) is built, and what each of these still owes is its own evidence, in its own file.
 
 ### 6.2 Waves
 
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
 | **1** | A5, B1, C1, C2, C6 | five independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
-| **2** | A4 | A4 needs only the built P0.4. E2 ran here and is built. |
-| **3** | E4, one manual pass | E4 is last by definition; it also writes up what E3 measured and could not fix. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
+| **2** | A4 | A4 needs only the built P0.4. |
+| **3** | one manual pass | The only work left that cannot be done at a keyboard, and the only part of §6 the evidence lane could not script: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, and one real Ultimate install driven through the wizard. E2's pad leg and E3's helper leg cover the scripted halves of the last two. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path over what is left: **A4 → E4** — two steps. Everything else is one step, and E3
-walked its own two (E3 → E4) already.
-
-If you only have one session at a time, run: **E4**, folding C1, C2, C6, A4, A5 and B1 in before
-it in any order that respects §6.1. E2 and E3 left their harnesses behind:
-`scripts/capture_launcher.ps1` re-measures the ring, the bar and a tab's body, and
-`scripts/acceptance_launcher.ps1` re-installs and re-boots the four legs.
+Nothing is on a critical path any more: A4, A5, B1, C1, C2 and C6 are independent, one step each, and
+the evidence lane's own two-step chains (E2 → E4, E3 → E4) are finished. If you only have one session
+at a time, take them in any order that respects §6.1; the harnesses they will be re-measured with are
+already in the tree — `scripts/capture_launcher.ps1` for the ring, the bar and a tab's body,
+`scripts/acceptance_launcher.ps1` for the installed launcher and the four boots it enables, and
+`ctest -R launcher` for the six host targets.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
 naming the focused row's tooltip and the current control hints" is what the launcher does: A3's pad
@@ -1066,18 +1050,18 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 "Controller tab input group" listed `input_backend`, which D17 removed: that is a shortening of M1,
 not a gap in it.
 
-**Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
-Controller tab's remaining lanes (C1, C2, C6), and the evidence lane, which is finished —
-E2's harness and E3's installed run are built, and E4 writes up what E3 measured.
-Packaging (D3–D5) and first-run prefill (D4) are built.
+**Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), and the
+Controller tab's remaining lanes (C1, C2, C6). Packaging (D3–D5), first-run prefill (D4) and the whole
+evidence lane (E1–E4) are built, and §11 carries the two decisions E3's evidence left open.
 
 ---
 
 ## 7. Verification matrix
 
 State as of 2026-10-05. A row whose `Where` names only built prompts is already proven — the evidence
-is the test or the headless report named beside it, and `docs/build-and-run.md` is where the commands
-live. The rows that still name an open prompt are the ones §6 schedules.
+is the test, the headless report or the harness named beside it, and `docs/build-and-run.md` is where
+the commands live. A row still marked **open** is one nothing has measured yet, and its note says
+what is missing.
 
 | Requirement | How it is proven | Where | State |
 | --- | --- | --- | --- |
@@ -1113,8 +1097,8 @@ Anything not in this table is not verified, and should be said out loud rather t
 | Machine-wide installs | `{app}` may be read-only; the launcher's own log and the game's `rb_blitz.toml` writes fail there | the profile never lives in `{app}`; the launcher degrades to a warning |
 | Controller-only users | a bad mapping can make the game unreachable | C6's panic path, A5's recovery switches, "never persist a half-armed capture" |
 | Remap scope creep | lane C was a whole project folded into this one (D13) | **spent**: C3/C4/C5 shipped inside the plan, and D17 narrowed them (one table, no per-device keying). What is left is C6, whose rails are what keep a bad mapping recoverable |
-| Art licensing | the cover is not ours | identical posture to the installer; build-time fetch, gitignored, absence supported, recorded in the audit |
-| Version skew | launcher and game can be different builds | the launch contract passes the profile path and the launcher prints `--version`; E3 asserts both |
+| Art licensing | the cover is not ours | identical posture to the installer: the image is fetched at build time, gitignored, and absence is supported. The launcher has no cover at all until A4; both halves are recorded in `docs/known-issues.md`, and `docs/distributable.md` gains the packaging rows that say what covers them |
+| Version skew | launcher and game can be different builds | the shared seam is versioned where it can be (`[remap]` rows kept verbatim, the profile's `schema_version` refused rather than reinterpreted) and an unknown `--flag` is logged; E3 asserts the shared half end to end, and the rest is a standing limit in `docs/known-issues.md` |
 | Silent-install surprises | new tasks/params can change unattended behaviour | new parameter defaults are documented and tested (D5, built) |
 
 ---

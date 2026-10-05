@@ -18,6 +18,16 @@ Download the installer from the releases section. It's very early into the devel
 
 You will need to provide the 360 package to install. It can be either packed or already extracted. Nothing from the game ships in this repo. Use a copy you are authorized to have.
 
+## The launcher
+
+The installer also puts a settings launcher next to the game — `rb_blitz_launcher.exe`, in the install folder, with its own Start-menu shortcut (and a desktop one if you asked for it). It's a normal desktop window with three tabs, General, Audio / Video and Controller; you can drive it with the mouse, the keyboard or a controller, and the bottom bar names whatever row is focused and which buttons do what. *Launch Game* saves anything unsaved first and then starts the game with what you chose; *Copy command line* on the same bar gives you the exact command it would run.
+
+Your settings live in one file, `%APPDATA%\rb_blitz\launcher.toml` — unless you used *Change settings location* on the General tab, in which case it's wherever you pointed that. Nothing has to be configured for the game to run: a first boot with no profile just uses the compiled defaults, and the launcher's own first run fills the General tab in from the installer's `install-manifest.toml`, so the game folder is already right. The uninstaller leaves that file alone.
+
+**You don't have to use the launcher.** The game's Start-menu entry is `rb_blitz.exe` with `--game_data_root`, and the exe runs on its own — double-click it and it boots with the `rb_blitz.toml` next to it (the file the in-game overlay's *Save to config* writes) and the compiled defaults. What that route does *not* get is the launcher's own settings: those reach the game as command-line flags, so only a launch through the launcher passes them. If you want them without the window, take the command line from *Copy command line* and run that — it's the same bytes the button runs. The measurement behind that, and the decision it leaves open, are in [docs/plans/launcher-plan.md](docs/plans/launcher-plan.md) §11.
+
+Building it, testing it and re-measuring the whole thing (install, four boots, the logs) is in [docs/build-and-run.md](docs/build-and-run.md) §4 and [launcher/README.md](launcher/README.md).
+
 ## How to Build (dev)
 
 Everything below assumes Windows and runs in PowerShell, from the repo root.

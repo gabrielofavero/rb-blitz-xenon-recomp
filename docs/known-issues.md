@@ -26,18 +26,69 @@ is removed from this file, not from the log.
 ## Accepted (by design, not bugs)
 
 - **Two settings files, and the game's own wins at equal rank** (launcher D3). The launcher
-  keeps `launcher.toml` where D2 puts it, and the game loads it as a config file at the top of
-  `OnConfigurePaths`; the game's own `rb_blitz.toml`, next to its executable, is loaded after it
-  at the same rank, so for any row the launcher does not pass on the command line the game's file
-  is what the game will really use. That is deliberate: an in-game change made through the F4
-  overlay's *Save to config* must not be silently undone by the launcher. It is a *limit*
-  because it means the launcher's value can be right and still not be the one in effect — and
-  a user who changes a display setting in-game and then sees the launcher's own value is not
+  keeps `launcher.toml` where D2 puts it, and what it manages reaches the game as command-line
+  flags — every row the profile moved off its compiled default is passed as `--<key>=<value>`, and
+  `[remap]` is read out of the file by the game itself. The game's own `rb_blitz.toml`, next to its
+  executable, is loaded after the command line at config rank, so for any row the launcher does not
+  pass the game's file is what the game will really use. That is deliberate: an in-game change made
+  through the F4 overlay's *Save to config* must not be silently undone by the launcher. It is a
+  *limit* because it means the launcher's value can be right and still not be the one in effect —
+  and a user who changes a display setting in-game and then sees the launcher's own value is not
   looking at a bug. The launcher's answer is to say so (B4's badge, on every tab, with the value
   the game will use and a *Copy the effective value* action that writes the launcher's file and
   never the game's). Ordering, once, for the record: argv → `RBBLITZ_*` → `rb_blitz.toml` →
-  `launcher.toml` → compiled defaults. (`--dump-profile` prints every badged row, which is the
+  compiled defaults. (`--dump-profile` prints every badged row, which is the
   audit for this rule without a screenshot.)
+  **Measured 2026-10-05 (E3): the profile is *not* applied as a config file**, so there is no
+  `launcher.toml` step between the game's file and the defaults — a top-level `license_mask = 0` in
+  a profile handed to `--launcher_profile` still boots as `license_mask = 1 (default; …)`. What
+  follows is that a game started **without** the launcher (its own shortcut, or a double-click)
+  never sees the launcher's rows at all: it gets `rb_blitz.toml` and the compiled defaults. D3's
+  table describes the missing step and
+  [launcher-plan.md](plans/launcher-plan.md) §11.6 carries the measurement and the decision that
+  step needs; until it is made, treat "a double-click uses the launcher's settings" as false and
+  `rb_blitz_launcher.exe --print-command` as the way to see exactly what a launch does pass.
+- **The launcher ships no cover art, and the installer's cover image is not committed** (launcher
+  D11/D15). Both are the same fact: the artwork is not ours to license, so nothing is redistributed
+  with either binary. The installer's large wizard image is *generated* on the build machine by
+  `installer/tools/make_art.ps1` and is never committed — the script's rule, and `build.ps1` treats a
+  failed download as a warning rather than a build failure, so absence is the ordinary case. The
+  launcher has no cover at all yet: the General tab is a flat panel with the badge and the title, and
+  drawing a ladder beside the tabs is A4, which owes the same absence-is-supported rule for its own
+  art. Two images *are* committed and embedded — `assets/blitz.ico` (compiled into both exes by their
+  `.rc` files) and `assets/blitz.png` (the wizard badge) — and they are the app's own, which is what
+  keeps `tracked-tree`'s "no binary artefact" claim true; see
+  [distributable.md](distributable.md) for the packaging rows that cover the rest.
+- **The launcher and the game can be different builds, and only some of the seam is versioned**
+  (launcher D2/C3, R-skew). Installed together they always match; the skew matters when one of the
+  two files is replaced by hand, or a payload is dropped over an older install. What is *safe* is
+  the part that was built for it: `[remap]` rows a build does not understand are kept verbatim and
+  left alone rather than half-applied (`src/launcher/remap.cpp`), a profile whose `schema_version`
+  is newer is refused with a reason instead of reinterpreted (`src/launcher/profile.cpp`, and the
+  launcher then refuses to save over the file), and an `--flag` neither build knows is *logged* as an
+  unclaimed cvar — the cvar registry is finalized last so that report is trustworthy
+  (`patches/rexglue-sdk/0009-log-levels-table-not-cvars.patch`). What is *not* covered: a cvar that a
+  newer build renamed simply stops being passed, and the log's only trace of it is that unclaimed-key
+  line; and the command line is strings on both sides, so no version handshake exists beyond the
+  profile's own. Evidence: `scripts/acceptance_launcher.ps1`'s legs prove the shared half end to end
+  (a `[remap]` row written by the launcher is the game's `remap: 1 pad control(s) rebound by the
+  launcher profile` line), and `--print-command` is the launcher's half of the contract.
+- **The General tab's two path rows are stored twice, and only one of the two stores is passed on**
+  (launcher B1/B4/B7; measured 2026-10-05, E3). `Save game location` and `DLC location` are written
+  by the panel into `[launch] user_data_dir` / `dlc_dir`, which is also what `--dump-general`
+  reports; the launch command builds `--user_data_root` / `--dlc_root` from `[settings]
+  user_data_root` / `dlc_root` (`launcher/src/game_launch.cpp`, `RowValue`). A profile whose two
+  halves were made to disagree printed `row dlc_root = (empty)` from the panel while the command line
+  carried `--dlc_root="D:\…\game\dlc"`, so a folder picked in the panel is shown by the panel and
+  never reaches the game. [launcher-plan.md](plans/launcher-plan.md) §11.7 has the reproduction and
+  the (small) fix, which belongs with the row's storage rather than with the acceptance run that
+  found it. Editing `[settings]` by hand is the current way to make the DLC or save folder travel.
+- **The `mouse_ui: the mouse navigates the menus` boot line is not evidence of the row's value**
+  (measured 2026-10-05, E3). The driver is installed unconditionally and reads `mouse_ui_nav` per
+  event (`MouseUiInputDriver::IsEnabled`), so `--no-mouse_ui_nav`, `--mouse_ui_nav=false` and no flag
+  at all all print it. The evidence for the mode is the flag on the command line
+  (`rb_blitz_launcher.exe --print-command`), not that line; if the log should carry the mode, the
+  line has to carry the value. [launcher-plan.md](plans/launcher-plan.md) §11.8.
 - **The launcher's declared limits, as of A1/B1/B4/A3/A2.** (1) The badge's *Copy the effective value*
   button is reachable by mouse only: a second focusable target per row is a change to the focus
   model, and a pad binding for it belongs with A5; the row can be set to the same value by hand
@@ -74,6 +125,18 @@ is removed from this file, not from the log.
   `rb_blitz_embed_settings.exe --settings launcher/config/settings.toml --header launcher/out/generated/settings_table.h --backends=d3d12,vulkan`
   — and check with `--dump-layout`, which prints each enum row's choices. Making the header
   per-build-directory is a change to P0.2's contract, not a bug fix.
+
+- **The Renderer row is the build's; what actually renders is the machine's** (launcher D18, B2/B3).
+  The row's choices come from CMake (`choices_from = "gpu_backends"`), so the launcher can only offer
+  what the binary beside it was compiled with — this Release tree offers D3D12 and Vulkan, a
+  D3D12-only build offers one — and choosing one is a request the *driver* answers: the game's own
+  log is where the answer appears (`DXGI adapter: AMD Radeon(TM) Graphics (vendor 0x1002, device
+  0x163F)`, the D3D12 feature table, the shader and pipeline counts), not the row. So a machine whose
+  driver rejects a backend fails at boot with the game's own message rather than at the row, and the
+  two build trees sharing one generated settings header (the bullet above) can leave the row offering
+  a backend the binary in front of you was not built with. Not a bug — enumerating a driver's
+  capabilities means doing the GPU work the game does — but it is why a support report needs the
+  game's log and `--dump-display` rather than a screenshot of the row.
 
 - **The Debug preset runs the guest route, and Release is still the configuration acceptance
   runs on.** Until 2026-09-29 the Debug preset stopped at the first A on the title screen, on

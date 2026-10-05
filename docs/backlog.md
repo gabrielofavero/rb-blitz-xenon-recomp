@@ -54,6 +54,31 @@ that name an action.
       parsing detail that still blocks reading the art straight out of `game/`.
       Nothing in it gates release readiness.
 
+      **Status, 2026-10-05.** M1 ("the launcher with the graphical settings") is finished, and so are
+      packaging (D3–D5), first-run prefill (D4) and the whole evidence lane — E1's test names, E2's
+      capture harness, E3's installed end-to-end run and E4's write-up are all in the tree. Six prompts
+      are left: A4 (cover art), A5 (accessibility and recovery), and C1, C2, C6 (the Controller tab's
+      remaining lanes), none of them gated by anything. Re-measuring any of it is scripted rather than
+      manual now: `ctest -R launcher`, `scripts/capture_launcher.ps1` (the ring, the bar, a tab's body)
+      and `scripts/acceptance_launcher.ps1` (install the built setup, boot four legs, read the game's
+      own log).
+
+- [ ] **Make the launcher's settings reach a game the launcher did not start** — D3's rank 4, "the
+      profile applied as a config file at the top of `OnConfigurePaths`", is not in the tree: measured
+      2026-10-05, a top-level key in a profile handed to `--launcher_profile` does not reach a cvar, and
+      the launcher's rows arrive only as `--<key>=<value>` flags (`plans/launcher-plan.md` §11.6). So
+      *Launch Game* is covered and a double-click, or the game's own Start-menu shortcut, is not: it
+      boots with `rb_blitz.toml` and the compiled defaults. Either apply `[settings]` at config rank
+      before the game's own file — which is what D3 describes, and what R4's standalone half needs —
+      or drop rank 4 and document that the launcher is the entry point. One decision, then a small hook
+      or a documentation change.
+
+- [ ] **One store for the General tab's two path rows** — the panel writes `[launch] user_data_dir` /
+      `dlc_dir` and `launch/src/game_launch.cpp` reads `[settings] user_data_root` / `dlc_root`, so a
+      folder picked in the panel is shown by the panel and never passed to the game (measured
+      2026-10-05, `plans/launcher-plan.md` §11.7, `known-issues.md`). Pick one store, bridge or migrate
+      the other, and pin it with a test that the panel's own value is what `--print-command` carries.
+
 ## 4. Deferred, with no design yet
 
 - [ ] **Pin the sheet format and offset, then a reskin is a two-command job.** The claim
