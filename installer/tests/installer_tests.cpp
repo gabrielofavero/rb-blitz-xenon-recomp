@@ -1039,6 +1039,7 @@ static void TestPayloadAndFinalize() {
     std::string_view text;
   };
   const Entry entries[] = {{kRuntimeExeName, "not really the runtime"},
+                           {kLauncherExeName, "not really the launcher"},
                            {"rb_blitz.toml", "[backend]\n"},
                            {"rexruntime.dll", "not really a dll"}};
 
@@ -1076,12 +1077,17 @@ static void TestPayloadAndFinalize() {
   const fs::path progress_file = g_root / "install/progress.txt";
   ComponentResult payload;
   CHECK_TRUE(InstallPayload(source, app, embedded, ProgressSink{progress_file}, &payload, &error));
-  CHECK_EQ(payload.files, 3u);
+  CHECK_EQ(payload.files, 4u);
   CHECK_EQ(payload.bytes, total);
   CHECK_TRUE(payload.fingerprints_matched);
   CHECK_FALSE(payload.version.empty());
   CHECK_CONTAINS(payload.source, "folder");
+  // The payload carries both executables (R3): the game and its launcher.
+  CHECK_EQ(payload.executables.size(), 2u);
+  CHECK_STR_EQ(payload.executables[0], kRuntimeExeName);
+  CHECK_STR_EQ(payload.executables[1], kLauncherExeName);
   CHECK_TRUE(FileExists(app / kRuntimeExeName));
+  CHECK_TRUE(FileExists(app / kLauncherExeName));
   CHECK_TRUE(FileExists(app / "rexruntime.dll"));
   CHECK_TRUE(FileExists(app / kPayloadManifestName));
   CHECK_TRUE(FileExists(app / "rb_blitz.toml"));
@@ -1092,13 +1098,25 @@ static void TestPayloadAndFinalize() {
 
   ComponentResult verify;
   CHECK_TRUE(VerifyPayload(app, embedded, &verify, &error));
-  CHECK_EQ(verify.files, 3u);
+  CHECK_EQ(verify.files, 4u);
   CHECK_TRUE(verify.fingerprints_matched);
 
   WriteText(app / kRuntimeExeName, "tampered");
   CHECK_FALSE(VerifyPayload(app, embedded, &verify, &error));
   CHECK_CONTAINS(error, "does not match");
   WriteText(app / kRuntimeExeName, entries[0].text);
+
+  BeginCase("an install whose manifest lists a missing launcher fails loudly");
+
+  // The launcher travels in the payload (P0.5/D1). A folder that still has the
+  // game but lost rb_blitz_launcher.exe must fail verification and name the file
+  // rather than install "successfully" into a launcher-less state.
+  fs::remove(app / kLauncherExeName);
+  CHECK_FALSE(VerifyPayload(app, embedded, &verify, &error));
+  CHECK_CONTAINS(error, "does not match");
+  CHECK_CONTAINS(error, kLauncherExeName);
+  WriteText(app / kLauncherExeName, entries[1].text);
+  CHECK_TRUE(VerifyPayload(app, embedded, &verify, &error));
 
   BeginCase("a payload zip installs the same way a folder does");
 
@@ -1120,10 +1138,11 @@ static void TestPayloadAndFinalize() {
   zip_source.path = payload_zip;
   ComponentResult from_zip;
   CHECK_TRUE(InstallPayload(zip_source, zip_app, embedded, ProgressSink{}, &from_zip, &error));
-  CHECK_EQ(from_zip.files, 3u);
+  CHECK_EQ(from_zip.files, 4u);
   CHECK_EQ(from_zip.bytes, total);
   CHECK_CONTAINS(from_zip.source, "archive");
   CHECK_TRUE(FileExists(zip_app / kRuntimeExeName));
+  CHECK_TRUE(FileExists(zip_app / kLauncherExeName));
   CHECK_TRUE(FileExists(zip_app / "rexruntime.dll"));
   CHECK_TRUE(FileExists(zip_app / kPayloadManifestName));
   CHECK_FALSE(DirectoryExists(StagingRoot(zip_app)));
@@ -1153,6 +1172,9 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(manifest_text, "[payload]");
   CHECK_CONTAINS(manifest_text, "1.0.0-test");
   CHECK_CONTAINS(manifest_text, "payload_commit = \"" + std::string(kStandInCommit) + "\"");
+  // The manifest names the executables the payload laid down, so a support reader
+  // can see the launcher was installed (R3/D1).
+  CHECK_CONTAINS(manifest_text, "executables = [\"rb_blitz.exe\", \"rb_blitz_launcher.exe\"]");
 
   const std::string report_text = ReadFileOrEmpty(app / kInstallReportName);
   CHECK_CONTAINS(report_text, "Rock Band Blitz - install report");
@@ -1160,6 +1182,7 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(report_text, "an extracted folder");
   CHECK_CONTAINS(report_text, "test entry");
   CHECK_CONTAINS(report_text, "Commit     : " + std::string(kStandInCommit));
+  CHECK_CONTAINS(report_text, "Executables: rb_blitz.exe, rb_blitz_launcher.exe");
 
   BeginCase("a build that did not record a commit says so");
 
@@ -1186,6 +1209,7 @@ static void TestPayloadAndFinalize() {
   // The manifest is the only record of a downloaded payload, so the payload
   // files go too and are not left behind for the uninstaller to find.
   CHECK_FALSE(FileExists(app / kRuntimeExeName));
+  CHECK_FALSE(FileExists(app / kLauncherExeName));
   CHECK_FALSE(FileExists(app / "rexruntime.dll"));
   CHECK_FALSE(removed.empty());
 

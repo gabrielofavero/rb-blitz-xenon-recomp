@@ -39,8 +39,9 @@ build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultima
 
 A copy of everything the helper did is left next to the game as
 `install-manifest.toml` (machine-readable, includes the source, the file count,
-the byte count and whether the fingerprints matched) and `install-report.txt`
-(the same, for a human, with the helper's log appended).
+the byte count, whether the fingerprints matched, and which executables the
+payload laid down) and `install-report.txt` (the same, for a human, with the
+helper's log appended).
 
 ## Layout
 
@@ -362,7 +363,10 @@ The uninstaller runs the helper once (`uninstall-cleanup`) and then removes the
 install folder. The imported game data — several hundred megabytes the user may
 well want to keep, for example to reinstall later without the disc or the package
 again — is only deleted if the user answers yes; a silent uninstall keeps it. The
-mod's `ultimate\` folder lives inside the game data and follows it.
+mod's `ultimate\` folder lives inside the game data and follows it. The launcher
+(`rb_blitz_launcher.exe`) travels in the payload and is removed with it;
+`launcher.toml`, the user's own settings, is deliberately left behind — like the
+game data, it is not the installer's to delete.
 
 ## Troubleshooting
 

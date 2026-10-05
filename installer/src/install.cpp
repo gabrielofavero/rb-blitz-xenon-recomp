@@ -657,6 +657,18 @@ bool VerifyPayloadTree(const fs::path& root, const Pins& pins, std::string_view 
   for (const FileCheck& check : checks) {
     result.bytes += check.actual_size;
   }
+  // The payload's entry points, as the manifest names them, so the install
+  // manifest and the report can say which programs were laid down (R3). A
+  // manifest that does not carry the launcher is recorded as such rather than
+  // failing here: verification is what the manifest says it is.
+  for (const std::string_view exe : kPayloadExecutables) {
+    const bool named = std::any_of(
+        print.files.begin(), print.files.end(),
+        [exe](const fingerprint::FileFingerprint& file) { return file.path == exe; });
+    if (named) {
+      result.executables.emplace_back(exe);
+    }
+  }
   LogChecks(checks);
   if (!fingerprint::AllMatched(checks)) {
     result.fingerprints_matched = false;
@@ -1155,6 +1167,16 @@ void AddManifestComponent(std::vector<std::string>* lines, std::string_view sect
   lines->push_back(S("files = ", component.files));
   lines->push_back(S("bytes = ", component.bytes));
   lines->push_back(S("fingerprints_matched = ", component.fingerprints_matched ? "true" : "false"));
+  if (!component.executables.empty()) {
+    std::string list;
+    for (const std::string& exe : component.executables) {
+      if (!list.empty()) {
+        list += ", ";
+      }
+      list += TomlString(exe);
+    }
+    lines->push_back(S("executables = [", list, "]"));
+  }
   lines->push_back(S("warnings = ", component.notes.size()));
   for (std::size_t index = 0; index < component.notes.size(); ++index) {
     lines->push_back(S("warning_", index + 1, " = ", TomlString(component.notes[index])));
@@ -1232,6 +1254,9 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
   report.push_back(S("Files      : ", summary.payload.files, " (",
                      HumanBytes(summary.payload.bytes), ")"));
   report.push_back(S("Verified   : ", summary.payload.fingerprints_matched ? "yes" : "no"));
+  if (!summary.payload.executables.empty()) {
+    report.push_back(S("Executables: ", Join(summary.payload.executables, ", ")));
+  }
   report.push_back(std::string{});
   report.push_back("Game data");
   report.push_back("---------");

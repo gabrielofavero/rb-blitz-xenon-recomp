@@ -45,6 +45,7 @@
 ; payload manifest, which the helper reads back at the end of the install.
 #define HelperExeName "rb_blitz_setup_helper.exe"
 #define GameExeName "rb_blitz.exe"
+#define LauncherExeName "rb_blitz_launcher.exe"
 #define GameDirName "game"
 
 #if !FileExists(GeneratedDirPath + "pins.iss")
@@ -156,6 +157,10 @@ Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDi
 ; by the uninstaller, so these entries only cost a failed delete.
 Type: files; Name: "{app}\{#HelperExeName}"
 Type: files; Name: "{app}\{#GameExeName}"
+; The launcher travels in the payload (see tools/make_payload.ps1) and is deleted
+; with the rest of it. launcher.toml is deliberately not listed: it is the user's
+; own settings and survives an uninstall, like the game data (Contract 4).
+Type: files; Name: "{app}\{#LauncherExeName}"
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\payload-manifest.toml"
 Type: files; Name: "{app}\install-manifest.toml"

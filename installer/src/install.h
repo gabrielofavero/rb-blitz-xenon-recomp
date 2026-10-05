@@ -22,6 +22,7 @@
 // Layout of an installed {app} directory:
 //
 //   {app}/rb_blitz.exe                 payload, copied by Inno Setup [Files]
+//   {app}/rb_blitz_launcher.exe        payload, the settings launcher (D1)
 //   {app}/payload-manifest.toml        payload, hashes of the files above
 //   {app}/game/default.xex             imported dump
 //   {app}/game/gen/main_xbox*.ark
@@ -53,7 +54,15 @@ inline constexpr std::string_view kInstallManifestName = "install-manifest.toml"
 inline constexpr std::string_view kInstallReportName = "install-report.txt";
 inline constexpr std::string_view kInstallLogName = "install.log";
 inline constexpr std::string_view kRuntimeExeName = "rb_blitz.exe";
+inline constexpr std::string_view kLauncherExeName = "rb_blitz_launcher.exe";
 inline constexpr std::string_view kHelperExeName = "rb_blitz_setup_helper.exe";
+
+// The programs the recompiled payload is expected to carry: the game and its
+// launcher (docs/plans/launcher-plan.md R3, Contract 4). Verification itself
+// stays manifest-driven - the launcher hashes like every other [[files]] entry -
+// but recording the names here lets the install manifest and the report say
+// which executables the folder received.
+inline constexpr std::string_view kPayloadExecutables[] = {kRuntimeExeName, kLauncherExeName};
 
 // The roles in config/game_fingerprints.toml that identify a Rock Band Blitz
 // dump. All three are mandatory: the archive trio is what proves the user has
@@ -170,6 +179,7 @@ struct ComponentResult {
   std::uint64_t bytes = 0;
   std::string source;               // DescribeSource()
   bool fingerprints_matched = true;
+  std::vector<std::string> executables;  // payload only: names the manifest carries
   std::vector<std::string> notes;   // warnings worth keeping in the report
 };
 
