@@ -37,6 +37,24 @@ build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultima
 | Progress | One bar, four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
 | Finish | "Launch Rock Band Blitz" (unticked in silent installs). |
 
+### Shortcuts
+
+The installer writes two Start-menu shortcuts and offers two desktop ones. The
+game's shortcut keeps its `--game_data_root="{app}\game"` argument, so the game
+still launches standalone; the launcher's takes no arguments and finds the game
+beside itself.
+
+| Where | Shortcut | Default |
+| --- | --- | --- |
+| Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | always |
+| Start menu | **Rock Band Blitz Launcher** — the settings launcher | always |
+| Desktop | **Rock Band Blitz Launcher** — the `launchericon` task | checked in the wizard; in a silent install only with `/LAUNCHERICON=1` |
+| Desktop | **Rock Band Blitz** — the `desktopicon` task | unchecked, as before |
+
+The names are deliberately different so a list can tell them apart, and the
+game's shortcut is never repointed at the launcher: the game has to stay runnable
+on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
+
 A copy of everything the helper did is left next to the game as
 `install-manifest.toml` (machine-readable, includes the source, the file count,
 the byte count, whether the fingerprints matched, and which executables the
@@ -307,6 +325,7 @@ Setup's own switches.
 | `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder` | Whether and how to install the mod. |
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
+| `/LAUNCHERICON` | `1` | Silent installs only: also create the launcher's desktop shortcut. Omitted, nothing is added to the desktop. |
 | `/DIR` | folder | Install folder (Inno Setup). |
 | `/ALLUSERS`, `/CURRENTUSER` | — | Machine-wide instead of the default per-user install (Inno Setup). |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | — | Usual unattended switches (Inno Setup). |

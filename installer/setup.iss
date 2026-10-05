@@ -67,6 +67,11 @@
 ; Setup's version resource needs four components; the app version has three.
 #define SetupVersionQuad AppVersion + ".0"
 
+; D9 names the two Start-menu shortcuts so a list can tell them apart: the game
+; keeps AppShortName, the launcher appends " Launcher" (pins.iss defines
+; AppShortName, so this has to come after the include above).
+#define LauncherShortcutName AppShortName + " Launcher"
+
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
 AppName={#AppName}
@@ -129,6 +134,10 @@ WelcomeLabel1=Welcome to the {#AppName} setup
 WelcomeLabel2=This wizard puts a ready-to-play build of Rock Band Blitz on your PC, without compiling anything.%n%nIt needs the game data taken from an Xbox 360 copy that you own - either a game folder you have already extracted or the package you downloaded. No game files are included or downloaded by this installer, and it is not affiliated with or endorsed by the game's publisher.%n%nContinue when the folder or the package is at hand.
 
 [Tasks]
+; D9: the launcher's desktop shortcut is offered checked; the game's stays
+; unchecked, as it always has been. A silent install is conservative - it only
+; creates the launcher one when /LAUNCHERICON=1 asks (see README.md).
+Name: "launchericon"; Description: "Create a &desktop shortcut for the launcher"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Files]
@@ -145,8 +154,13 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 #endif
 
 [Icons]
+; Two shortcuts, with names a Start-menu list can tell apart. The game's keeps
+; its --game_data_root argument: it must stay runnable without the launcher
+; (Contract 4). The launcher's takes none; it finds the game beside itself.
 Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"
+Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: launchericon
 
 [Run]
 Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#AppShortName}}"; Flags: postinstall nowait skipifsilent; Check: InstallSucceeded
@@ -220,6 +234,11 @@ const
   UltimateSourceParam = 'ULTIMATESOURCE';
   UltimateZipParam = 'ULTIMATEZIP';
   UltimateFolderParam = 'ULTIMATEFOLDER';
+  LauncherIconParam = 'LAUNCHERICON';
+
+  { The launcher's desktop icon: the [Tasks] name, shared by the [Icons] entry
+    and the code that applies D9's default and the silent switch above. }
+  LauncherIconTask = 'launchericon';
 
   { Page indexes. }
   MethodPackage = 0;
@@ -329,6 +348,11 @@ end;
 function ParamUltimateFolder: String;
 begin
   Result := RemoveQuotes(Trim(ExpandConstant('{param:ULTIMATEFOLDER|}')));
+end;
+
+function ParamLauncherIcon: String;
+begin
+  Result := Trim(ExpandConstant('{param:LAUNCHERICON|}'));
 end;
 
 function ReadAllText(const path: String): String;
@@ -900,6 +924,8 @@ begin
 end;
 
 procedure InitializeWizard;
+var
+  index: Integer;
 begin
   gTempDir := ExpandConstant('{tmp}');
   gAppDir := '';
@@ -962,6 +988,16 @@ begin
     'The installer is building your game folder. This takes a few minutes for the game data.');
 
   RefreshMethodPage;
+
+  // The wizard offers the launcher's desktop shortcut checked (D9), which is the
+  // default the task was declared with. A silent install is conservative: it
+  // creates no desktop shortcut unless /LAUNCHERICON=1 asks (README.md).
+  if WizardSilent and (ParamLauncherIcon <> '1') then
+  begin
+    index := WizardForm.TasksList.Items.IndexOf(LauncherIconTask);
+    if index >= 0 then
+      WizardForm.TasksList.Checked[index] := False;
+  end;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

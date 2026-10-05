@@ -835,7 +835,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Seventeen prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Eighteen prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -859,8 +859,9 @@ session should read as instructions, and every deviation it would have described
 | C5 | `launcher/src/controller_tab.{h,cpp}`: one row per control, a three-second capture, per-control and global resets | D17: capture adds rather than resolving conflicts; no per-device enable/disable. A3: the pads it reads are the launcher's open ones, because SDL reads a pad only through a handle somebody opened |
 | A3 | `launcher/src/{pad_nav,pad_source,virtual_pad,focus_log}.{h,cpp}`, the real `GamepadNavSource`, `NavAction::kLaunch`, `--focus-log`, `--no-gamepad`, `--test-pad`, the README's pad table | D6: `Back`'s menu is not built (the cancel half is), and the bar's glyphs come from the pad that was last used rather than from "the" pad |
 | A2 | `Shell::DrawBottomBar`'s help region, `schema_view`'s `SettingForEntry`/`RowActionVerb`/`FlattenHelpText`, `ProfilePanel::HelpText`, `ControllerTab::HelpText`, hover-adopts-the-ring on both blocks | D7: the hints follow the last device used, and the tooltip is re-wrapped to the bar's width rather than drawn as the file wrapped it |
+| D2 | the `launchericon` task, the two launcher `[Icons]` rows (Start menu always, desktop by task) and `/LAUNCHERICON` in `installer/setup.iss` + `installer/README.md` | D9 (the task defaults and the silent switch) |
 
-**Open.** Fifteen prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+**Open.** Fourteen prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
 column means the prompt beside it names a finished prompt rather than an open one — B1, B7 and E1 are
 each their own dependency because only half of each went out; §5.3 says which half.
 
@@ -873,10 +874,9 @@ each their own dependency because only half of each went out; §5.3 says which h
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
-| D2 | Shortcuts and tasks | D | D1 *(built)* | D5 |
 | D3 | Finish-page three-way choice | D | D1 *(built)* | D5 |
 | D4 | First-run prefill from the manifest | D | D1, B4 *(built)* | D5 |
-| D5 | Installer tests and README tables | D | D2, D3, D4 | — |
+| D5 | Installer tests and README tables | D | D3, D4 | — |
 | E1 | The launcher test names in `build-and-run.md` | E | E1 *(built)* | — |
 | E2 | Launcher capture harness | E | A2 *(built)* | E4 |
 | E3 | End-to-end acceptance | E | B7, D1 *(built)*, D3 | E4 |
@@ -884,7 +884,7 @@ each their own dependency because only half of each went out; §5.3 says which h
 
 The four groups those fall into, which is what §6 schedules:
 
-- **Make it ship** — D2, D3, D4, D5, and B7's remainder.
+- **Make it ship** — D3, D4, D5, and B7's remainder.
 - **The Controller tab's remaining lanes** — C1, C2, C6.
 - **Art and evidence** — A4, E2, E3, E4, and A5's recovery half.
 - **Finish M1** — done: A3 and A2 are built, and E1's one-line note with them. M1 was defined (§1.1)
@@ -1018,19 +1018,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > path to a deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
 
-#### D2 — Shortcuts and tasks
-
-> **Goal.** Implement D9: a `launchericon` `[Tasks]` entry (checked by default) and `[Icons]` entries
-> for the launcher in the program group and on the desktop, keeping the game's own entries and their
-> `--game_data_root="{app}\game"` argument so the game stays runnable standalone. Name the two
-> shortcuts so they are distinguishable in a list. Add the new task's silent-install parameter to the
-> table in `installer/README.md`.
-> **Deliverable.** `installer/setup.iss` changes plus README rows.
-> **Verify.** Interactive install on a scratch folder: both shortcuts appear with the right targets;
-> `/VERYSILENT` with and without `/LAUNCHERICON=1`; the game shortcut still launches the game directly
-> with data.
-> **Don't.** Do not repoint the game's shortcut at the launcher; do not remove `AllowNoIcons`.
-
 #### D3 — Finish-page three-way choice
 
 > **Goal.** Implement D8. Remove the `[Run]` entries and put the three-way radio on the finish page:
@@ -1143,7 +1130,7 @@ graph LR
   C1[C1 devices]
   C2[C2 keyboard panel]
   C6[C6 safety rails]
-  D2[D2 shortcuts] --> D5[D5 installer docs]
+  D5[D5 installer docs]
   D3[D3 finish page] --> D5
   D4[D4 first run] --> D5
   D3 --> E3
@@ -1162,17 +1149,17 @@ graph LR
 
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
-| **1** | A5, B1, B7, C1, C2, C6, D2, D3 | eight independent sessions, none of them gated by anything open. C2 and C6 need nothing open, and the three installer prompts touch only `installer/`. |
+| **1** | A5, B1, B7, C1, C2, C6, D3 | seven independent sessions, none of them gated by anything open. C2 and C6 need nothing open, and the two installer prompts touch only `installer/`. |
 | **2** | A4, D4, E2 | A4 needs only the built P0.4, D4 only the built D1/B4, and E2 only the bar A2 built. |
-| **3** | D5 | needs D2/D3/D4. |
+| **3** | D5 | needs D3/D4. |
 | **4** | E3, E4, one manual pass | E3 needs B7/D3; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
 Critical path over what is left: **D3 → E3 → E4** — three steps, with the packaging lane
-(D2/D4 → D5 → E4) the same length beside it. Everything else is two steps or one.
+(D3/D4 → D5 → E4) the same length beside it. Everything else is two steps or one.
 
-If you only have one session at a time, run: **D2 → D3 → D4 → B7 → D5 → E2 → E3 → E4**, folding C1,
+If you only have one session at a time, run: **D3 → D4 → B7 → D5 → E2 → E3 → E4**, folding C1,
 C2, C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
@@ -1184,7 +1171,7 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 not a gap in it.
 
 **Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
-Controller tab's remaining lanes (C1, C2, C6), packaging (D2–D5), first-run prefill (D4), and the
+Controller tab's remaining lanes (C1, C2, C6), packaging (D3–D5), first-run prefill (D4), and the
 evidence lane (E2, E3, E4).
 
 ---
@@ -1229,7 +1216,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 | Remap scope creep | lane C was a whole project folded into this one (D13) | **spent**: C3/C4/C5 shipped inside the plan, and D17 narrowed them (one table, no per-device keying). What is left is C6, whose rails are what keep a bad mapping recoverable |
 | Art licensing | the cover is not ours | identical posture to the installer; build-time fetch, gitignored, absence supported, recorded in the audit |
 | Version skew | launcher and game can be different builds | the launch contract passes the profile path and the launcher prints `--version`; E3 asserts both |
-| Silent-install surprises | new tasks/params can change unattended behaviour | new parameter defaults are documented and tested (D2, D3, D5) |
+| Silent-install surprises | new tasks/params can change unattended behaviour | new parameter defaults are documented and tested (D3, D5) |
 
 ---
 
@@ -1391,8 +1378,10 @@ own outside a listen.
 
 Still open, for you before or during Wave 1:
 
-1. **Should the launcher be the primary entry point** (Start menu and desktop), with the game's own
-   shortcut as the standalone option? D9 recommends yes, and D2 is the prompt that acts on it.
+1. ~~**Should the launcher be the primary entry point** (Start menu and desktop), with the game's own
+   shortcut as the standalone option?~~ **Answered 2026-10-05 (D2):** yes, as D9 recommended — the
+   launcher is in the Start menu and on the desktop (checked), and the game keeps its own shortcut,
+   still pointed at the game so it runs standalone.
 2. ~~**Portable mode**: worth it, or is `%APPDATA%` always right?~~ **Answered 2026-10-05 (D17):**
    `%APPDATA%` is the default and a *Change settings location* button moves it; the marker file still
    resolves, so no install is broken by the change.
