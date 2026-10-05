@@ -61,13 +61,17 @@ struct Profile {
   // The launcher window's own geometry, in logical points - the same unit SDL reports a
   // window in once the display's content scale is divided out. main() multiplies it by that
   // scale to size the window, so the number means the same thing on a 100% and a 300% display.
-  int window_width = 1100;
-  int window_height = 640;
+  int window_width = 1280;
+  int window_height = 840;
   LaunchTarget target = LaunchTarget::kUltimate;
   std::string game_dir;
   std::string user_data_dir;  // empty = the game's own default
   std::string dlc_dir;        // empty = the game's own default
   std::vector<ProfileSetting> settings;  // file order
+  // The `[remap]` table, one row per pad control the user rebound and nothing for the ones they
+  // did not. The game reads it to rewrite the pad state the guest asks for (src/launcher/remap.h):
+  // a table is not a scalar, so it is not one of the `[settings]` keys.
+  std::vector<ProfileSetting> remap;  // file order
 
   // The document as read, so a save can patch it. Empty when there was no file, in which
   // case a save renders a fresh one. Treat as read-only.

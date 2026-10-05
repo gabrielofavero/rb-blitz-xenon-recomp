@@ -40,19 +40,39 @@ struct LayoutGroup {
 struct TabLayout {
   settings::Tab tab = settings::Tab::kGeneral;
   std::vector<LayoutGroup> groups;
-  std::size_t row_count = 0;   // focusable settings across every group
-  std::size_t note_count = 0;  // groups rendered as a name and one line
+  std::size_t row_count = 0;    // focusable settings across every group
+  std::size_t note_count = 0;   // groups rendered as a name and one line
+  std::size_t hidden_count = 0; // rows the environment kept out of this tab
 };
 
 // Every tab, in the table's own order, because the tab list is data (R9): adding a Tab to
 // the schema is what adds a tab to the launcher.
 std::vector<settings::Tab> TabOrder();
 
-// The tab's groups and rows. A group marked unavailable, and a group with no rows at all,
-// both become one note row carrying the group's own text.
-TabLayout BuildTabLayout(settings::Tab tab);
+// The tab's name as a person reads it - "General", not the lowercase key the schema spells.
+// The strip, the headings and the window title all use this.
+std::string DisplayTabName(settings::Tab tab);
 
-std::vector<TabLayout> BuildLayout();
+// What a row's `visible` rule is decided from. Passed in rather than looked up, so this module
+// stays dependency-free and a headless dump can describe another machine's answer.
+struct RowEnvironment {
+  // False only when the machine is known to have one display: the rule a Monitor row needs,
+  // because there is nothing to choose between. A caller that has not looked - --dump-layout, a
+  // test - leaves this true, so no rule hides a row by accident.
+  bool multiple_monitors = true;
+};
+
+// False when a row declares a `visible` rule this environment does not satisfy. A row with no
+// rule is always visible.
+bool SettingVisible(const settings::Setting& setting, const RowEnvironment& environment);
+
+// The tab's groups and rows, with the rows the environment hides already left out - so a
+// caller that draws this layout cannot draw, or focus, a row that is not there. A group marked
+// unavailable, and a group with no rows at all, both become one note row carrying the group's
+// own text.
+TabLayout BuildTabLayout(settings::Tab tab, const RowEnvironment& environment = {});
+
+std::vector<TabLayout> BuildLayout(const RowEnvironment& environment = {});
 
 // The one row with this key, or nullptr. The General tab (B1) uses it to find the row a
 // picked path belongs to, and B7 will use it to turn a profile into the game's argv.

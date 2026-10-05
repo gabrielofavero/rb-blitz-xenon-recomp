@@ -47,9 +47,13 @@ constexpr const char* kWindowTitle = "Rock Band Blitz Launcher";
 // display's content scale, so a 300% display opens a window three times as large in pixels
 // rather than one a third the size. The size is chosen so every tab's content - the General
 // tab's settings-file block included - fits without scrolling at 100%.
-constexpr int kDefaultWidth = 1100;
-constexpr int kDefaultHeight = 640;
-constexpr int kMinWindowSize = 400;
+constexpr int kDefaultWidth = 1280;
+constexpr int kDefaultHeight = 840;
+// The range a stored size is clamped to, in points. The floor is where the layout stops being
+// readable rather than what the launcher prefers, and it is also the window's own minimum size,
+// so the frame's maximize box never offers less than the content can use.
+constexpr int kMinWindowWidth = 720;
+constexpr int kMinWindowHeight = 520;
 constexpr int kMaxWindowSize = 8192;
 
 // The point size of the UI face before DPI scaling. ImGui's built-in face is a 13px pixel
@@ -61,7 +65,7 @@ namespace fs = std::filesystem;
 // Defined with the rest of the path helpers below; the dump modes need it before the loop.
 fs::path ExecutableDir();
 // Defined with the window helpers below; --dump-display reports what they decide.
-int WindowDimension(int value, int fallback);
+int WindowDimension(int value, int fallback, int minimum);
 void FitToDisplay(int* width, int* height);
 std::string LoadUiFont();
 
@@ -231,8 +235,10 @@ int DumpDisplay(const std::string& path) {
   const auto to_units = [scale](int points) {
     return static_cast<int>(std::lround(points * scale));
   };
-  int want_width = WindowDimension(to_units(kDefaultWidth), to_units(kDefaultWidth));
-  int want_height = WindowDimension(to_units(kDefaultHeight), to_units(kDefaultHeight));
+  int want_width = WindowDimension(to_units(kDefaultWidth), to_units(kDefaultWidth),
+                                   to_units(kMinWindowWidth));
+  int want_height = WindowDimension(to_units(kDefaultHeight), to_units(kDefaultHeight),
+                                    to_units(kMinWindowHeight));
   FitToDisplay(&want_width, &want_height);
 
   IMGUI_CHECKVERSION();
@@ -263,13 +269,13 @@ fs::path ExecutableDir() {
   return base == nullptr ? fs::path{} : fs::path(base);
 }
 
-int WindowDimension(int value, int fallback) {
-  return value > 0 ? std::clamp(value, kMinWindowSize, kMaxWindowSize) : fallback;
+int WindowDimension(int value, int fallback, int minimum) {
+  return value > 0 ? std::clamp(value, minimum, kMaxWindowSize) : fallback;
 }
 
 // Keeps the wanted size on screen. The launcher is resizable and its tabs scroll, so this is
 // not a layout constraint - it only stops the first frame from opening larger than the display
-// work area (a 900pt default on a 720p-ish laptop panel, for instance).
+// work area (a large default on a small panel, for instance).
 void FitToDisplay(int* width, int* height) {
   SDL_Rect bounds{};
   if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds)) {
@@ -281,6 +287,67 @@ void FitToDisplay(int* width, int* height) {
   if (bounds.h > 0) {
     *height = std::min(*height, static_cast<int>(bounds.h));
   }
+}
+
+// A window sized to the whole work area is a title bar taller than the screen once its frame is
+// added, and Windows then withholds the maximize box. Measuring the frame after creation and
+// shrinking to fit is what keeps the window maximizable, and keeps its bottom on screen.
+//
+// The window's minimum size is set in the same place and for the same reason: it is a size the
+// frame will refuse to go below, so it has to be a size that fits on this display. A machine
+// smaller than the layout's own floor gets the floor it can actually hold.
+void FitWindowToWorkArea(SDL_Window* window, int min_width, int min_height) {
+  SDL_Rect bounds{};
+  if (!SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(window), &bounds)) {
+    return;
+  }
+  int top = 0;
+  int left = 0;
+  int bottom = 0;
+  int right = 0;
+  if (!SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right)) {
+    return;
+  }
+  const int max_width = bounds.w - (left + right);
+  const int max_height = bounds.h - (top + bottom);
+  SDL_SetWindowMinimumSize(window, max_width > 0 ? std::min(min_width, max_width) : min_width,
+                           max_height > 0 ? std::min(min_height, max_height) : min_height);
+  int width = 0;
+  int height = 0;
+  SDL_GetWindowSize(window, &width, &height);
+  const int fitted_width = max_width > 0 ? std::min(width, max_width) : width;
+  const int fitted_height = max_height > 0 ? std::min(height, max_height) : height;
+  if (fitted_width != width || fitted_height != height) {
+    SDL_SetWindowSize(window, fitted_width, fitted_height);
+  }
+}
+
+// Puts the window's whole frame - title bar, borders and all - in the middle of the work area.
+//
+// SDL positions a window by its *client* area, not by its frame, so centring the client leaves
+// the title bar hanging off the top of the screen exactly when the window is as tall as the work
+// area, which is the size the fit above just produced. The maximize box lives in that title bar,
+// so this is not cosmetic: measuring the frame and placing it is what keeps the window usable.
+void CenterWindowFrame(SDL_Window* window) {
+  SDL_Rect bounds{};
+  if (!SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(window), &bounds)) {
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    return;
+  }
+  int top = 0;
+  int left = 0;
+  int bottom = 0;
+  int right = 0;
+  if (!SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right)) {
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    return;
+  }
+  int width = 0;
+  int height = 0;
+  SDL_GetWindowSize(window, &width, &height);
+  const int frame_x = bounds.x + std::max(0, (bounds.w - (width + left + right)) / 2);
+  const int frame_y = bounds.y + std::max(0, (bounds.h - (height + top + bottom)) / 2);
+  SDL_SetWindowPosition(window, frame_x + left, frame_y + top);
 }
 
 // Loads a neutral UI face from the operating system. Nothing is redistributed with the
@@ -368,8 +435,13 @@ int main(int argc, char** argv) {
   const auto to_units = [ui_scale](int points) {
     return static_cast<int>(std::lround(points * ui_scale));
   };
-  int want_width = WindowDimension(to_units(stored_width), to_units(kDefaultWidth));
-  int want_height = WindowDimension(to_units(stored_height), to_units(kDefaultHeight));
+  // A stored size wins, so the size the user dragged the window to is the size it opens at. The
+  // clamp is only the range the layout is usable in: the profile's own defaults are what a
+  // launcher with no stored size opens at, and the work area has the last word on both.
+  int want_width = WindowDimension(to_units(stored_width), to_units(kDefaultWidth),
+                                   to_units(kMinWindowWidth));
+  int want_height = WindowDimension(to_units(stored_height), to_units(kDefaultHeight),
+                                    to_units(kMinWindowHeight));
   FitToDisplay(&want_width, &want_height);
   SDL_Window* window =
       SDL_CreateWindow(kWindowTitle, want_width, want_height,
@@ -379,7 +451,11 @@ int main(int argc, char** argv) {
     SDL_Quit();
     return 1;
   }
-  SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+  // The floor the frame's own resize handling enforces, so the window cannot be dragged smaller
+  // than the layout can be read at. It is a minimum size and not a fixed one: maximizing and
+  // dragging both still work, which is the point.
+  FitWindowToWorkArea(window, to_units(kMinWindowWidth), to_units(kMinWindowHeight));
+  CenterWindowFrame(window);
 
   SDL_GPUDevice* gpu_device =
       SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
@@ -413,6 +489,16 @@ int main(int argc, char** argv) {
   LoadUiFont();
   ImGui::StyleColorsDark();
   ImGuiStyle& style = ImGui::GetStyle();
+  // Roomier than ImGui's defaults. This is a settings dialog read at a glance, not a dense tool
+  // window, so rows, buttons and the strip get air between them. Set before ScaleAllSizes so the
+  // display's content scale multiplies these values too.
+  style.WindowPadding = ImVec2(18.0f, 16.0f);
+  style.FramePadding = ImVec2(12.0f, 7.0f);
+  style.ItemSpacing = ImVec2(12.0f, 12.0f);
+  style.ItemInnerSpacing = ImVec2(10.0f, 8.0f);
+  style.IndentSpacing = 24.0f;
+  style.ScrollbarSize = 18.0f;
+  style.GrabMinSize = 14.0f;
   style.ScaleAllSizes(ui_scale);
   style.FontScaleDpi = ui_scale;
 
@@ -427,8 +513,16 @@ int main(int argc, char** argv) {
 
   SDL_ShowWindow(window);
 
+  // The facts a row's `visible` rule is decided from, read once: a machine with one display has
+  // no monitor to choose between, so the Monitor row is not shown at all.
+  int display_count = 0;
+  SDL_DisplayID* displays = SDL_GetDisplays(&display_count);
+  rb_blitz::launcher::RowEnvironment environment;
+  environment.multiple_monitors = displays != nullptr && display_count > 1;
+  SDL_free(displays);
+
   std::unique_ptr<rb_blitz::launcher::Shell> shell =
-      std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots);
+      std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots, environment);
 
   // The title names the current tab. It is the only piece of the launcher's state a script
   // can read back (MainWindowTitle), which is what makes A1's "tab through every tab"
@@ -437,7 +531,7 @@ int main(int argc, char** argv) {
   const auto sync_title = [&]() {
     const std::string wanted =
         std::string(kWindowTitle) + " - " +
-        std::string(rb_blitz::launcher::settings::TabName(shell->CurrentTab()));
+        rb_blitz::launcher::DisplayTabName(shell->CurrentTab());
     if (wanted != window_title) {
       window_title = wanted;
       SDL_SetWindowTitle(window, window_title.c_str());

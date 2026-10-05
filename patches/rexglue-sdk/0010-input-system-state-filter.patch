@@ -1,0 +1,56 @@
+diff --git a/include/rex/input/input_system.h b/include/rex/input/input_system.h
+index 1cb3faa..abde2fc 100644
+--- a/include/rex/input/input_system.h
++++ b/include/rex/input/input_system.h
+@@ -39,6 +39,16 @@ class InputSystem : public system::IInputSystem {
+   void AttachWindow(rex::ui::Window* window);
+   void SetActiveCallback(std::function<bool()> callback);
+ 
++  /// Installs a filter over what the guest sees. It runs after every assigned
++  /// device's state has been merged and before the state is handed back, so a
++  /// title can rewrite the pad - which a driver cannot do, because drivers are
++  /// merged together and merging only ever adds input.
++  ///
++  /// The filter sees the merged state by reference, with the user index it is
++  /// for. Local patch: patches/rexglue-sdk/0010-input-system-state-filter.patch.
++  using StateFilter = std::function<void(uint32_t user_index, X_INPUT_STATE& state)>;
++  void SetStateFilter(StateFilter filter);
++
+   /// Replaces any previous assignment. Call before the guest starts polling.
+   void SetDeviceAssignment(std::unique_ptr<DeviceAssignment> assignment);
+ 
+@@ -60,6 +70,7 @@ class InputSystem : public system::IInputSystem {
+ 
+   std::unique_ptr<DeviceAssignment> assignment_;
+   ActiveDeviceTracker active_devices_;
++  StateFilter state_filter_;
+ 
+   // Ordered by ordinal. Ordinals are never recycled, so unplugging pad one
+   // does not renumber pad two.
+diff --git a/src/input/input_system.cpp b/src/input/input_system.cpp
+index 813bb1c..193c1fa 100644
+--- a/src/input/input_system.cpp
++++ b/src/input/input_system.cpp
+@@ -78,6 +78,12 @@ void InputSystem::SetDeviceAssignment(std::unique_ptr<DeviceAssignment> assignme
+   }
+ }
+ 
++// Local patch (patches/rexglue-sdk/0010-input-system-state-filter.patch): the seam the
++// remap of the guest's pad lives behind.
++void InputSystem::SetStateFilter(StateFilter filter) {
++  state_filter_ = std::move(filter);
++}
++
+ void InputSystem::RefreshDevices() {
+   std::vector<DeviceInfo> seen;
+   std::vector<InputDriver*> owners;
+@@ -246,6 +252,9 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
+   if (out_state) {
++    if (state_filter_) {
++      state_filter_(user_index, merged);
++    }
+     *out_state = merged;
+   }
+   return X_ERROR_SUCCESS;

@@ -99,7 +99,7 @@ group instead of the withdrawn Experimental tab.
 | --- | --- |
 | Any launcher: no folder, no target, no UI | the launcher is greenfield |
 | Any settings file the **game** reads other than its own `rb_blitz.toml` | D3 has to be decided and built (small, one hook) |
-| Per-pad-button remapping | R13 Phase C-B is this plan's lane C (C3–C6, D13) — planned work here, not an outside dependency |
+| Per-pad-button remapping | R13 Phase C-B is this plan's lane C (C3–C6, D13) — planned work here, not an outside dependency. **Built 2026-10-05** (D17): the SDK needs one seam it did not have (`InputSystem::SetStateFilter`), which is patch 0010 |
 | A master volume cvar | `audio_volume` does not exist in the SDK; the audio row of the Graphics tab is "mute only" until it does |
 | The installer's knowledge of a launcher | D1–D5 |
 | Any launcher test, capture script or acceptance run | E1–E3 |
@@ -161,6 +161,12 @@ shipped alone). Not in scope now.
   [installer/src/config.cpp](../../installer/src/config.cpp) is P0.4's call.
 - **Never lose a hand-edited file:** parse failure keeps the file, shows the reason, and refuses to
   save until the user resolves it (B4).
+
+> **Amended 2026-10-05 (built).** The file can be moved to a folder the user chooses, recorded in
+> `%APPDATA%\rb_blitz\settings_dir.txt`; that pointer is step 3 of the order, above the portable marker
+> and below an explicit override, and choosing a folder removes the marker so one question has one
+> answer. D17 has the rules; `src/launcher/profile_path.{h,cpp}` is the whole of it. The
+> `controllers\<device-key>.toml` files are still unbuilt for the reason D17 gives.
 
 ### D3 — How the game gets the launcher's settings (standalone included)
 
@@ -382,6 +388,13 @@ all three:
 - Until C5 lands, the Controller tab shows the remap group as its name plus one honest line:
   "Per-button remapping is not available in this build" — never an empty or disabled table (D14).
 
+> **Amended 2026-10-05 (built).** The Controller tab's phase C-A is where it was left: `input_backend`
+> is **withdrawn** as a row (D17 — with the remap listening to every device, the backend is not a
+> user-facing choice), *Mouse support* and *Guide button pass-through* are the two rows the tab has, and
+> the rest of C-A (the device list, deadzone, `mnk_mode`, the `keybind_*` editor) is unbuilt. Phase C-B
+> is **built**, with the scope D17 settles: one `[remap]` table keyed by control, no per-device storage,
+> and the panel in `launcher/src/controller_tab.{h,cpp}`.
+
 ### D14 — The tabs: General, Graphics, Controller. Experimental is withdrawn (2026-10-03)
 
 The launcher has **three** tabs. The planned Experimental tab (R14) is scrapped: a tab that exists
@@ -448,14 +461,26 @@ phases.
 
 ### D16 — The window: its name, its size, its face
 
-Decided 2026-10-05, from reading the first running build.
+Decided 2026-10-05, from reading the first running build. Amended the same day after the second
+round of feedback (below).
 
 - **The name is "Rock Band Blitz Launcher".** The window title, the in-window heading and the ImGui
   window id all use it; the title keeps the ` — <tab>` suffix, which is the one piece of launcher state
   a script can read back (`MainWindowTitle`), and it is what makes "tab through every tab" checkable.
-- **The window opens at 1100×640 in logical points**, sized so every tab's content fits without
-  scrolling, and it is clamped to the display's work area. A size the profile already holds is used as
-  it is, so a user's own resize is respected.
+  Tab names are capitalized where a person reads them (`General`, not the schema's `general` key).
+- **The window opens at 1280×840 in logical points**, clamped to the display's work area less its own
+  frame, and its **minimum size is 720×520 points** — a minimum, not a fixed size, so the window is
+  draggable, maximizable from the frame's own maximize box, and restorable. A size the profile already
+  holds is used as it is, so a user's own resize is respected.
+- **A tab taller than the window scrolls, under a fixed strip.** The strip and the unsaved-changes
+  marker stay put and the rows live in a scrolling child, so the wheel and the ring's
+  `SetScrollHereY` both move the rows and never the strip. The Graphics and Controller tabs are both
+  taller than a small window, which is what this is for.
+- **Spacing is set once, in the style**, before `ScaleAllSizes` multiplies it by the display's scale:
+  a settings dialog read at a glance gets air between rows and buttons rather than ImGui's dense
+  defaults.
+- **No label carries an ellipsis.** A button says what it does and stops; `…` on a button that opens a
+  dialog rather than continuing a sentence is a habit, not information.
 - **The geometry is stored in points, not pixels, and multiplied by the display's content scale when
   the window is created.** SDL sizes a window in the same units ImGui measures the UI in, so without
   that multiplication a 300% display would get a window a third the size with physically tiny text —
@@ -465,6 +490,57 @@ Decided 2026-10-05, from reading the first running build.
   `arial.ttf`, from `%SystemRoot%\Fonts`), with ImGui's built-in face as the fallback. Nothing is
   redistributed and no font file is added to the repository — the same posture as the cover art (D11),
   and for the same reason.
+
+### D17 — Quiet text, one way to move the settings, and a real remap
+
+Decided 2026-10-05, from the third round of feedback, and it settles the parts of C3–C6 that the
+feedback changed. Where a prompt below still describes something else, this is the newer instruction.
+
+- **A panel that is fine says nothing.** The profile block prints no file path and no "Saved": it
+  prints the two things worth printing, a file it could not read and changes that are not written yet
+  (in warning colour). A category with nothing in it is hidden (D14 already allowed that), a row whose
+  rule the machine does not satisfy is not in the layout at all, and a rule repeated seventeen times is
+  one sentence and a `?` instead of seventeen lines.
+- **Portable mode is replaced by *Change settings location*.** Where the settings live is a folder the
+  user picks, recorded in `%APPDATA%\rb_blitz\settings_dir.txt` — a pointer file in the default folder,
+  because that is the one location that is always there. Choosing a folder carries the settings over,
+  keeps the file it came from, and rolls the pointer back if the new folder cannot be written; choosing
+  the default removes the pointer. The older `rb_blitz_launcher.portable` marker still resolves, and a
+  chosen folder supersedes it, because two answers to one question is one too many.
+- **A path row shows the path the game will use.** An empty profile value means the game's own default,
+  and a blank field would hide where the saves are about to go; the defaults are the game's own
+  arithmetic, repeated rather than reinvented. Only an actual edit writes an explicit value.
+- **The remap is a `[remap]` table in the profile, keyed by pad *control*, not by device.**
+  - *One table, not one per device.* C4 asked for per-device profiles keyed by SDL GUID with an "any
+    pad" fallback. This game is single-player, the feedback asked for every device to be accepted
+    without an input-source choice, and nothing in the guest distinguishes two pads — so a second axis
+    of state would be a setting whose other values do nothing. If a user genuinely runs two pads with
+    different layouts, that is when the GUID key comes back.
+  - *Sources are `pad:`, `key:` and `mouse:`.* The pad half reuses the control vocabulary as both
+    target and source (the SDK's mapping is one physical control per bit, and the pad's buttons are
+    labelled that way anyway), so there is one set of names to learn. The keyboard half is not the
+    game's own `keybind_*` cvars (C4's constraint): the SDK's SDL driver maps no keys to pad buttons at
+    all, so a `key:` source is what makes a keyboard press a pad button, and it is read beside the pad
+    rather than out of the game's own configuration.
+  - *Assign adds; Reset removes.* C5 asked for a conflict Replace/Swap/Cancel flow. "Several inputs,
+    one button" is the feedback's own requirement, and adding is what expresses it: press Assign, press
+    the input; press Assign again for another. A control with no row is the pad's own, so there is no
+    conflict to resolve — the row says exactly what the control answers to.
+  - *No hysteresis.* Hysteresis is for a layer that reports edges; this one rewrites a state the guest
+    polls, so a trigger source uses the same threshold the SDK uses for its own digital view of it.
+  - *An empty row is expressible and not offered.* `left_trigger = ""` means nothing presses it; the
+    grammar accepts it, the panel shows it in warning colour, and the game honours it — but the panel
+    does not offer it, because "wait three seconds" is not a thing a user should have to discover.
+  - *Byte-identical pass-through, as C3 requires.* With no `[remap]` rows the filter is not installed
+    at all, and with a row for a control the pad does not report, `Apply` copies the state before it
+    rewrites it. `tests/launcher_remap_tests.cpp` pins both.
+- **The seam is the SDK's, and it is one patch.** A driver cannot subtract — `InputSystem::GetState`
+  merges every assigned device, and merging only ever adds — so the remap needs a hook over the merged
+  state. `patches/rexglue-sdk/0010-input-system-state-filter.patch` adds
+  `InputSystem::SetStateFilter`, ten lines, and everything above it is this project's. C3's "the choke
+  point §2.5 identifies" is this one.
+- **`input_backend` is not a row.** With the audible outcome "every device is accepted", selecting a
+  backend is not a user-facing choice (D13's Controller tab keeps its two real settings).
 
 ---
 
@@ -495,7 +571,10 @@ tooltip  = "Width of the guest's video mode. Restart required."
 
 Rules: `enum` entries carry `choices`; a numeric entry may carry `min`/`max` (both or neither, the
 default inside); `path_dir` entries carry `validate` (`exists|dlc_layout|inside_game_root:forbid`);
-`applies = "live"` is only allowed with an evidence comment naming the change callback.
+`applies = "live"` is only allowed with an evidence comment naming the change callback; and an entry may
+carry `visible` — a rule the *machine* has to satisfy for the row to exist at all (`multi_monitor` is
+the only one), applied when the layout is built so the ring and the drawing cannot disagree about it
+(D17).
 
 > **Amended 2026-10-05 (built).** The example above (`video_mode_width`, `Resolution width`) is the row
 > this build withdrew: resolution is one `enum` over the runtime's preset list, and a numeric row that
@@ -517,8 +596,8 @@ version      = 1
 portable     = false
 
 [window]
-width  = 1100
-height = 720
+width  = 1280
+height = 840
 
 [launch]
 target       = "ultimate"        # common | demo | ultimate
@@ -528,7 +607,9 @@ dlc_dir      = ""
 
 [settings]
 ultimate_mode  = 1               # only values that differ from the schema default are written
-video_mode_width = 1600
+
+[remap]                          # one row per pad control the user rebound; nothing for the rest
+y = "pad:x, key:Space"           # sources are `pad:`, `key:` and `mouse:` (D17)
 
 [devices."030000005e0400008e02000000007801"]
 name    = "Xbox Wireless Controller"
@@ -542,6 +623,11 @@ to   = "PadA"
 
 Resolution order for the file's own path is in D2. Unknown keys survive a save (round-trip), so a newer
 launcher's file is not destroyed by an older one.
+
+> **Amended 2026-10-05 (built).** `[window]` holds 1280×840, `[remap]` is real and is one table keyed by
+> control rather than the per-device `[devices."<GUID>"]` blocks sketched below, and where the file lives
+> can be moved by the pointer file D2 describes. D17 has the reasoning; the `[devices]` shape waits for
+> the case that needs it.
 
 ### 4.3 The launch contract (Contract 3)
 
@@ -904,6 +990,11 @@ defers — §6.3 names them.
 > with the install folder read-only.
 > **Don't.** Do not write `rb_blitz.toml`; do not delete a file you failed to parse.
 
+> **Superseded in part, 2026-10-05.** Built, with the portable switch replaced by *Change settings
+> location* — a folder the user picks, recorded in a pointer file (D17, D2's amendment). The panel also
+> stopped saying the settings file's path out loud: it prints the two things worth printing (a file it
+> could not read, and changes not yet written) and nothing else.
+
 #### B7 — Launch the game
 
 > **Goal.** Implement §4.3: build the argv from the schema (paths always; other flags only where they
@@ -1051,6 +1142,11 @@ defers — §6.3 names them.
 > **Don't.** Do not put remap data in `remap_*` cvars if per-device names are needed — cvars are
 > registered at compile time, so the file is the contract (D13). Do not build the panel yet (C5).
 
+> **Superseded in part, 2026-10-05.** Built, but narrowed by D17: one `[remap]` table keyed by pad
+> control rather than per device, sources `pad:`/`key:`/`mouse:`, thresholds without hysteresis, and the
+> seam is the SDK's `InputSystem::SetStateFilter` (patch 0010) rather than a state machine inside the
+> project. Read D17 first; the rest of this prompt is what is still open.
+
 #### C4 — Remap grammar and persistence
 
 > **Goal.** The second parser for the `Pad*` source class and its grammar, the serialiser, per-device
@@ -1065,6 +1161,12 @@ defers — §6.3 names them.
 > **Don't.** Do not extend the SDK's own `keybind_*` cvars with `Pad*` tokens; do not key profiles by
 > device ordinal.
 
+> **Superseded in part, 2026-10-05.** The parser, the serialiser, the round trip, unknown-token
+> tolerance and the `,`-alternatives are built (`src/launcher/remap.{h,cpp}`,
+> `tests/launcher_remap_tests.cpp`); the per-device storage, the hysteresis and the reading of the
+> game's `keybind_*` cvars are not, and D17 says why. `pad:` sources are read beside the pad rather than
+> out of the game's own configuration, because the SDK's SDL driver maps no keys to pad buttons at all.
+
 #### C5 — Pad remap panel
 
 > **Goal.** The remap panel, host-side in the launcher: one row per action
@@ -1075,6 +1177,12 @@ defers — §6.3 names them.
 > **Verify.** Capture a full layout for a real pad, launch, and show the mapping taking effect in the
 > guest's menu navigation; then disable the device and show byte-identical pass-through again.
 > **Don't.** Do not present this as configuring the game's presets; do not persist a half-armed capture.
+
+> **Superseded in part, 2026-10-05.** The panel is built (`launcher/src/controller_tab.{h,cpp}`): one row
+> per control, a three-second capture that listens to every device, and per-control and global resets.
+> Capture *adds* rather than resolving conflicts, and there is no per-device enable/disable — D17 has the
+> reasoning. What it says about honesty stands: the panel is not the guest's Controls screen and does
+> not claim to be.
 
 #### C6 — Remap safety rails
 
@@ -1087,6 +1195,12 @@ defers — §6.3 names them.
 > **Verify.** Attempt to save a broken layout (refused, with the reason); apply the panic path from a
 > deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
+
+> **Still open, 2026-10-05.** Only two of these are in place, and they are the two that came for free:
+> a listen that captures nothing changes nothing, so a capture is never half-written; and the panic path
+> is the launcher's own *Reset all bindings* plus deleting `[remap]` by hand, since a profile with no
+> rows installs no filter at all. The unbound-Start/Back validator, the "not offerable" reserved keys,
+> and the test screen are not built.
 
 #### D5 — Installer tests and README tables
 

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "general_tab.h"
+#include "controller_tab.h"
 #include "launcher/profile.h"
 #include "nav.h"
 #include "profile_session.h"
@@ -28,8 +29,9 @@ namespace rb_blitz::launcher {
 class Shell {
  public:
   // `session` is the profile and its file: B1 and B4 edit it, and B4's block is what writes it.
-  // `roots` is where the game's data was found.
-  Shell(ProfileSession session, GameRoots roots);
+  // `roots` is where the game's data was found. `environment` is what a row's `visible` rule is
+  // decided from (a single-display machine has no Monitor row).
+  Shell(ProfileSession session, GameRoots roots, RowEnvironment environment);
 
   // Draws one frame. Returns false when the user asked to leave (Esc or B).
   bool Frame();
@@ -51,6 +53,7 @@ class Shell {
   GameRoots roots_;
   ProfileSession session_;
   GeneralTab general_;
+  ControllerTab controller_;
   std::vector<TabLayout> layout_;
   std::vector<FocusModel> rings_;
   std::size_t tab_ = 0;

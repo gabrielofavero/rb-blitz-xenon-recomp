@@ -24,6 +24,10 @@
 #   min/max   int / float only, optional: the range the row's widget is bounded to, so
 #             the slider carries the cvar's real limits. Both or neither, and the
 #             default must sit inside it.
+#   visible   optional: a precondition the machine has to satisfy for the row to be shown
+#             at all. `multi_monitor` is the only rule today (a machine with one display
+#             has no monitor to choose between); the tab hides the row and the focus ring
+#             skips it, so a hidden row is never a focus trap.
 #
 # `applies = "live"` claims that the running game re-reads the value, so the row must
 # carry a comment naming the mechanism that does it, on the same line as `applies` or on
@@ -234,6 +238,7 @@ kind    = "int"
 default = 0
 min     = 0
 max     = 16
+visible = "multi_monitor"
 applies = "restart"
 argv    = "flag"
 tooltip = "Monitor to display on: 0 is the default, 1 the primary, 2 the second, and so on (0 to 16)."
@@ -402,24 +407,17 @@ tooltip = "Maximum buffered audio frames (4 to 64). Lower values reduce latency 
 # ---------------------------------------------------------------------------
 # Controller - Input
 #
-# The rest of the Controller tab (devices, keyboard mapping, per-pad remap) is declared
-# as unavailable groups above; keyboard support is always on and is not a setting (R13).
+# The rest of the Controller tab (device list, keyboard mapping, per-button remap) is the
+# remap lane, and the panel for it is drawn by the tab itself rather than by schema rows.
+# Keyboard support is always on and is not a setting (R13).
+#
+# There is deliberately no input-form row. `input_backend` (sdl/xinput) is a real cvar, but
+# SDL3's driver already opens every pad the machine has - XInput, DirectInput, WGI - through
+# SDL's controller database, so "accept all controllers" is what the default already does and
+# a selector would only offer a way to make a single-player game accept less. The cvar is
+# still there for a hand-edited `rb_blitz.toml` or `--input_backend=xinput` when a pad needs
+# the XInput path; it just is not a row (D13, amended).
 # ---------------------------------------------------------------------------
-
-[[setting]]
-key     = "input_backend"
-tab     = "controller"
-group   = "Input"
-label   = "Input form"
-kind    = "enum"
-choices = ["sdl", "xinput"]
-default = "sdl"
-applies = "restart"
-argv    = "flag"
-tooltip = """
-Which host backend reads pads: sdl (SDL3, with the game controller database) or xinput.
-The input system is built once when the game starts, so this needs a restart.
-"""
 
 [[setting]]
 key     = "mouse_ui_nav"

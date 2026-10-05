@@ -5,12 +5,16 @@
 //
 // It is the visible half of the write path: whether what is on screen is saved, a *Save* that
 // only writes what changed, a *Reset to defaults* that names exactly what it will remove before
-// it removes it, *Import…*/*Export…*, and the portable switch with the one line that says where
-// settings then live.
+// it removes it, *Import*/*Export*, and *Change settings location*, which moves the folder the
+// profile lives in.
 //
-// It owns the modal and the two file dialogs, so the tab above it only has to give it a ring
-// index and a `NavAction`. Everything it *decides* lives in profile_session.h; this file is
+// It owns the modal and the three folder/file dialogs, so the tab above it only has to give it a
+// ring index and a `NavAction`. Everything it *decides* lives in profile_session.h; this file is
 // buttons and wording.
+//
+// The wording is deliberately quiet: a block that is fine says nothing at all. Every line it
+// does print is either an action's outcome or something the user has to act on, because a
+// status area that always says "Saved" is a line the eye learns to skip.
 
 #pragma once
 
@@ -24,9 +28,9 @@ namespace rb_blitz::launcher {
 
 class ProfilePanel {
  public:
-  // Focusable items, so the caller can size the tab's ring: Save, Reset, Import, Export and the
-  // portable switch. A5's "complete every tab with the keyboard only" is why they are in the
-  // ring at all rather than being mouse-only buttons.
+  // Focusable items, so the caller can size the tab's ring: Save, Reset to defaults, Import,
+  // Export and Change settings location. A5's "complete every tab with the keyboard only" is
+  // why they are in the ring at all rather than being mouse-only buttons.
   static constexpr std::size_t kRowCount = 5;
 
   // Draws the block. `first_row` is the ring index of the first item. `action` is this frame's
@@ -41,8 +45,11 @@ class ProfilePanel {
   // callbacks need them; nothing else calls them.
   void OnImportChosen(const char* const* filelist);
   void OnExportChosen(const char* const* filelist);
+  void OnSettingsDirChosen(const char* const* filelist);
 
  private:
+  // One line: whatever the last action did, or the one thing that is wrong. Empty when there is
+  // nothing to say, which is the ordinary case.
   void DrawStatus(const ProfileSession& session);
   // `was_open` is the previous frame's ModalOpen(): true when the confirmation was already up,
   // which is what decides whether this frame's Enter or Escape belongs to it.
@@ -55,6 +62,9 @@ class ProfilePanel {
   // The dialogs answer asynchronously, so the choice is recorded and applied by the next Draw.
   bool import_chosen_ = false;
   std::string chosen_path_;
+  // The folder the settings-location dialog was answered with, kept apart from the import and
+  // export choice because it means something different: a directory, not a profile to copy.
+  std::string chosen_settings_dir_;
   // The last action's outcome, and the last failure. The failure wins if both are set.
   std::string status_;
   std::string status_error_;

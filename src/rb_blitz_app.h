@@ -59,6 +59,7 @@
 #include "hooks/dlc.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
+#include "input/remap.h"
 #include "util/sha256.h"
 
 class RbBlitzApp : public rex::ReXApp {
@@ -93,6 +94,10 @@ class RbBlitzApp : public rex::ReXApp {
       rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
       return graphics ? graphics->presenter() : nullptr;
     });
+    // The launcher's `[remap]` table, applied to the pad state the guest asks for. Its own
+    // wrapper of input_factory, so both it and the mouse compose with whichever backend was
+    // selected. See src/input/remap.h.
+    rb_blitz::input::InstallPadRemap(config);
   }
 
   // Path policy. Called before logging is initialized, so keep this silent.

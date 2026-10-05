@@ -21,6 +21,26 @@ namespace {
 // for it, so the name is only an identity.
 constexpr const char* kWindowId = "Rock Band Blitz Launcher";
 
+// The scrolling region under the tab strip, so a tab taller than the window scrolls its rows
+// while the strip and the unsaved-changes marker stay put.
+constexpr const char* kBodyId = "##body";
+
+// How many ring entries a tab's schema rows take. A tab's own block of rows starts after them
+// (GeneralTab::kExtraRows, ControllerTab::kRowCount), so the loop that sizes the ring and the
+// loop that draws it have to agree on this number - which is why both ask here rather than each
+// doing its own arithmetic.
+std::size_t SchemaFocusEntries(const TabLayout& tab) {
+  std::size_t entries = 0;
+  for (const LayoutGroup& group : tab.groups) {
+    for (const LayoutRow& row : group.rows) {
+      if (row.setting != nullptr) {
+        entries += FocusEntriesFor(*row.setting);
+      }
+    }
+  }
+  return entries;
+}
+
 // The keyboard's mapping (A1). ImGui's own navigation is deliberately off, so every key the
 // launcher binds is translated here and nowhere else.
 class KeyboardNavSource : public NavSource {
@@ -78,11 +98,11 @@ class GamepadNavSource : public NavSource {
 
 }  // namespace
 
-Shell::Shell(ProfileSession session, GameRoots roots)
+Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment)
     : roots_(std::move(roots)),
       session_(std::move(session)),
       general_(roots_),
-      layout_(BuildLayout()),
+      layout_(BuildLayout(environment)),
       keyboard_(std::make_unique<KeyboardNavSource>()),
       gamepad_(std::make_unique<GamepadNavSource>()) {
   // D5's target fallback lives in the General tab, which applies it to what it shows rather than
@@ -92,18 +112,15 @@ Shell::Shell(ProfileSession session, GameRoots roots)
   for (std::size_t index = 0; index < layout_.size(); ++index) {
     // A row takes one ring entry, except an enum, which takes one per choice because each
     // choice is drawn as its own radio (schema_view's FocusEntriesFor). B4's profile block is
-    // focusable too and lives at the end of the General tab, so that tab adds its rows.
-    std::size_t entries = 0;
-    for (const LayoutGroup& group : layout_[index].groups) {
-      for (const LayoutRow& row : group.rows) {
-        if (row.setting != nullptr) {
-          entries += FocusEntriesFor(*row.setting);
-        }
-      }
-    }
-    const std::size_t extra =
-        layout_[index].tab == settings::Tab::kGeneral ? GeneralTab::kExtraRows : 0;
-    rings_[index].Reset(entries + extra);
+    // focusable too and lives at the end of the General tab, and D16's mapping block at the end
+    // of the Controller tab, so those tabs add their rows. A row the environment hides is not
+    // in the layout at all, so the ring cannot land on one.
+    const std::size_t extra = layout_[index].tab == settings::Tab::kGeneral
+                                  ? GeneralTab::kExtraRows
+                                  : (layout_[index].tab == settings::Tab::kController
+                                         ? ControllerTab::kRowCount
+                                         : 0);
+    rings_[index].Reset(SchemaFocusEntries(layout_[index]) + extra);
   }
 }
 
@@ -170,16 +187,27 @@ bool Shell::Frame() {
   }
   if (action == NavAction::kCancel) {
     // Escape belongs to the modal that is up - B4's reset confirmation, or B8's install
-    // progress - and only means "leave the launcher" when nothing modal is on screen (A1).
-    if (!general_.ModalOpen()) {
+    // progress - and only means "leave the launcher" when nothing modal is on screen (A1). A
+    // listen that is running owns Escape too: cancelling it is what a user pressing Escape
+    // while counting down means, and quitting the launcher instead would be a trap.
+    if (!general_.ModalOpen() && !controller_.Listening()) {
       return false;
     }
   }
   // A modal owns the launcher while it is up, so the tab cannot be changed behind it: its own
   // tab has to keep being drawn for its state machine to keep running, and walking away from it
-  // would leave the helper installing with nothing watching.
-  if (general_.ModalOpen() &&
+  // would leave the helper installing with nothing watching. A listen needs the same handling
+  // for the same reason - its countdown only advances while its tab is on screen.
+  const bool owns_keyboard = general_.ModalOpen() || controller_.Listening();
+  if (owns_keyboard &&
       (action == NavAction::kNextTab || action == NavAction::kPreviousTab)) {
+    action = NavAction::kNone;
+  }
+  if (controller_.Listening() && !general_.ModalOpen() &&
+      action == NavAction::kActivate) {
+    // While a listen is running the key being pressed is the *input being captured*, not a
+    // command: Space has to assign Space rather than press whatever the ring happens to be on.
+    // Escape still cancels the listen, and clicking is what the ring's own button is for.
     action = NavAction::kNone;
   }
   ApplyAction(action);
@@ -208,7 +236,7 @@ bool Shell::Frame() {
     if (selected) {
       ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     }
-    const std::string name(settings::TabName(layout_[index].tab));
+    const std::string name = DisplayTabName(layout_[index].tab);
     if (ImGui::Button(name.c_str())) {
       tab_ = index;
     }
@@ -227,13 +255,27 @@ bool Shell::Frame() {
   }
   ImGui::Separator();
 
-  if (tab_ < layout_.size()) {
-    if (layout_[tab_].tab == settings::Tab::kGeneral) {
-      general_.Draw(layout_[tab_], rings_[tab_], session_, action_);
-    } else {
-      DrawTab(layout_[tab_], rings_[tab_]);
+  // The tab body is its own scrolling region under a fixed header, so a tab taller than the
+  // window scrolls its rows while the strip stays where the user can reach it. The popups the
+  // tabs open are keyed off this same id stack, which is why they are drawn from here too.
+  if (ImGui::BeginChild(kBodyId, ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
+                        ImGuiWindowFlags_None)) {
+    if (tab_ < layout_.size()) {
+      // The two tabs with a block of their own after the schema's rows draw it here, once the
+      // generic renderer has taken its share of the ring - which is why the count of rows a tab
+      // draws and the count its ring was sized for are the same arithmetic in one place
+      // (SchemaFocusEntries) rather than two.
+      if (layout_[tab_].tab == settings::Tab::kGeneral) {
+        general_.Draw(layout_[tab_], rings_[tab_], session_, action_);
+      } else if (layout_[tab_].tab == settings::Tab::kController) {
+        DrawTab(layout_[tab_], rings_[tab_]);
+        controller_.Draw(SchemaFocusEntries(layout_[tab_]), rings_[tab_], session_, action_);
+      } else {
+        DrawTab(layout_[tab_], rings_[tab_]);
+      }
     }
   }
+  ImGui::EndChild();
 
   ImGui::End();
   action_ = NavAction::kNone;

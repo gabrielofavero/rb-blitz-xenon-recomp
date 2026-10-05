@@ -7,8 +7,8 @@
 //   1. a profile with unknown keys and comments round-trips
 //   2. a save with nothing to change does not touch the file (its mtime included)
 //   3. a file that cannot be written is reported, not crashed into
-//   4. portable mode whose destination cannot be written is reported, and the marker is put
-//      back where it was
+//   4. a settings folder that cannot be written is reported, and the location stays where it
+//      was
 //
 // No ImGui, no SDL, no game data, no boot: the panel is the only part of B4 that needs a
 // window, and everything it decides is here.
@@ -293,7 +293,7 @@ void TestWindowGeometry(Scratch& scratch) {
   ProfileSession session = MakeSession(install, app_data);
 
   // A launcher nobody resized does not create the profile at all (A1's rule, kept).
-  const SaveOutcome unchanged = session.SaveWindowGeometry(1100, 640);
+  const SaveOutcome unchanged = session.SaveWindowGeometry(1280, 840);
   CHECK_TRUE(unchanged.ok);
   CHECK_FALSE(unchanged.wrote);
   CHECK_FALSE(fs::exists(profile_path));
@@ -383,7 +383,7 @@ void TestFreshProfile(Scratch& scratch) {
   reverted.profile().target = LaunchTarget::kUltimate;
   CHECK_FALSE(reverted.Dirty());
   // So a save here would not create a file either (the same rule the geometry write follows).
-  CHECK_FALSE(reverted.SaveWindowGeometry(1100, 640).wrote);
+  CHECK_FALSE(reverted.SaveWindowGeometry(1280, 840).wrote);
   CHECK_FALSE(fs::exists(other_app_data / "rb_blitz" / "launcher.toml"));
 }
 
@@ -478,89 +478,116 @@ void TestImportExport(Scratch& scratch) {
   CHECK_STR_EQ(ReadText(broken), "schema_version = \"one\"\n");
 }
 
-void TestPortableMode(Scratch& scratch) {
-  BeginCase("D2: portable mode is the marker, and it moves where the settings live");
+void TestSettingsLocation(Scratch& scratch) {
+  BeginCase("D2: the settings folder is a choice, and moving it carries the settings over");
 
-  const fs::path install = scratch.Make("portable-install");
-  const fs::path app_data = scratch.Make("portable-appdata");
+  const fs::path install = scratch.Make("location-install");
+  const fs::path app_data = scratch.Make("location-appdata");
+  const fs::path other = scratch.Make("location-other");
   const fs::path roaming = app_data / "rb_blitz" / "launcher.toml";
   WriteText(roaming, kHandEdited);
 
   ProfileSession session = MakeSession(install, app_data, LoadProfile(roaming));
   CHECK_FALSE(session.portable());
   CHECK_FALSE(session.path_from_override());
+  CHECK_FALSE(session.settings_dir_chosen());
   CHECK_STR_EQ(session.path().string(), roaming.string());
 
-  const ProfileSession::PortableOutcome on = session.SetPortable(true);
-  CHECK_TRUE(on.ok);
-  CHECK_TRUE(on.changed);
-  CHECK_TRUE(session.portable());
-  CHECK_TRUE(fs::exists(install / kPortableMarkerName));
-  CHECK_STR_EQ(session.path().string(), (install / kProfileFileName).string());
-  // The settings followed the switch rather than being discarded by it: the new file is the
-  // document that was in the old one, with the profile's own record of portable mode updated.
-  const std::string carried = ReadText(install / kProfileFileName);
+  const ProfileSession::LocationOutcome moved = session.SetSettingsDir(other);
+  CHECK_TRUE(moved.ok);
+  CHECK_TRUE(moved.changed);
+  CHECK_TRUE(session.settings_dir_chosen());
+  CHECK_STR_EQ(session.path().string(), (other / kProfileFileName).string());
+  // The settings followed the choice rather than being discarded by it: the new file is the
+  // document that was in the old one.
+  const std::string carried = ReadText(other / kProfileFileName);
   CHECK_CONTAINS(carried, "# my notes, which must survive");
   CHECK_CONTAINS(carried, "future_key = \"a newer launcher wrote this\"");
   CHECK_CONTAINS(carried, "fullscreen = false");
-  CHECK_CONTAINS(carried, "portable = true");
   // And the file they came from is still there: switching location is not deleting.
   CHECK_STR_EQ(ReadText(roaming), kHandEdited);
 
-  BeginCase("D2: the profile's own record of portable mode matches the marker");
+  BeginCase("D2: the location survives a re-resolve, which is what the next run does");
 
-  CHECK_TRUE(session.profile().portable);
+  ProfilePathInputs inputs;
+  inputs.executable_dir = install;
+  inputs.app_data_dir = app_data;
+  CHECK_STR_EQ(ResolveProfilePath(inputs).string(), (other / kProfileFileName).string());
 
-  BeginCase("B4: turning it off puts the settings back, marker and all");
+  BeginCase("B4: the launcher's own folder is a location like any other, and is portable");
 
-  const ProfileSession::PortableOutcome off = session.SetPortable(false);
-  CHECK_TRUE(off.ok);
-  CHECK_TRUE(off.changed);
+  const ProfileSession::LocationOutcome beside = session.SetSettingsDir(install);
+  CHECK_TRUE(beside.ok);
+  CHECK_TRUE(beside.changed);
+  CHECK_TRUE(session.portable());
+  CHECK_STR_EQ(session.path().string(), (install / kProfileFileName).string());
+
+  BeginCase("B4: choosing the default folder removes the pointer instead of recording it");
+
+  const ProfileSession::LocationOutcome back = session.SetSettingsDir(app_data / "rb_blitz");
+  CHECK_TRUE(back.ok);
+  CHECK_TRUE(back.changed);
+  CHECK_FALSE(session.settings_dir_chosen());
   CHECK_FALSE(session.portable());
-  CHECK_FALSE(fs::exists(install / kPortableMarkerName));
   CHECK_STR_EQ(session.path().string(), roaming.string());
+  CHECK_FALSE(fs::exists(app_data / "rb_blitz" / kSettingsDirFileName));
 
-  BeginCase("B4: asking for the state it is already in changes nothing");
+  BeginCase("B4: asking for the folder it is already in changes nothing");
 
-  const ProfileSession::PortableOutcome again = session.SetPortable(false);
+  const ProfileSession::LocationOutcome again = session.SetSettingsDir(app_data / "rb_blitz");
   CHECK_TRUE(again.ok);
   CHECK_FALSE(again.changed);
 
-  BeginCase("B4: a read-only install folder is reported, and the switch stays where it was");
+  BeginCase("B4: a location that cannot be written is reported, and nothing moves");
 
-  // The marker cannot be created because its parent is a regular file - the same failure a
-  // read-only install folder produces, without needing ACLs.
-  const fs::path blocker = scratch.base / "portable-blocked";
-  WriteText(blocker / "install", "not a folder");
-  const fs::path blocked_install = blocker / "install" / "nested";
-  ProfileSession blocked = MakeSession(blocked_install, app_data, LoadProfile(roaming));
+  const fs::path blocker = scratch.base / "location-blocked";
+  WriteText(blocker / "settings", "not a folder");
+  const fs::path blocked_dir = blocker / "settings" / "nested";
+  ProfileSession blocked = MakeSession(install, app_data, LoadProfile(roaming));
 
-  const ProfileSession::PortableOutcome blocked_on = blocked.SetPortable(true);
-  CHECK_FALSE(blocked_on.ok);
-  CHECK_FALSE(blocked_on.changed);
-  CHECK_CONTAINS(blocked_on.error, "cannot create");
-  CHECK_FALSE(blocked.portable());
-  CHECK_FALSE(blocked.path_from_override());
+  const ProfileSession::LocationOutcome blocked_move = blocked.SetSettingsDir(blocked_dir);
+  CHECK_FALSE(blocked_move.ok);
+  CHECK_FALSE(blocked_move.changed);
+  CHECK_CONTAINS(blocked_move.error, "cannot write");
+  CHECK_FALSE(blocked.settings_dir_chosen());
   CHECK_STR_EQ(blocked.path().string(), roaming.string());
 
-  BeginCase("B4: a destination that cannot be written rolls the marker back");
+  BeginCase("B4: an override names the file, so the location cannot move out from under it");
 
-  const fs::path full_install = scratch.Make("portable-destination");
-  // The file portable mode would write to is read-only, so carrying the settings over fails
-  // after the marker has been created.
-  WriteText(full_install / kProfileFileName, "schema_version = 1\n");
-  MakeReadOnly(full_install / kProfileFileName, true);
-  ProfileSession moved = MakeSession(full_install, app_data, LoadProfile(roaming));
+  const fs::path named = scratch.base / "named.toml";
+  WriteText(named, kHandEdited);
+  ProfilePathInputs override_inputs;
+  override_inputs.command_line_value = named.string();
+  override_inputs.executable_dir = install;
+  override_inputs.app_data_dir = app_data;
+  ProfileSession pinned(std::move(override_inputs), LoadProfile(named));
+  CHECK_TRUE(pinned.path_from_override());
 
-  const ProfileSession::PortableOutcome failed = moved.SetPortable(true);
-  CHECK_FALSE(failed.ok);
-  CHECK_FALSE(failed.changed);
-  CHECK_CONTAINS(failed.error, "cannot write");
-  // Pointing "portable" at a file that cannot be written is not an improvement.
-  CHECK_FALSE(moved.portable());
-  CHECK_FALSE(fs::exists(full_install / kPortableMarkerName));
-  CHECK_STR_EQ(moved.path().string(), roaming.string());
-  MakeReadOnly(full_install / kProfileFileName, false);
+  const ProfileSession::LocationOutcome refused = pinned.SetSettingsDir(other);
+  CHECK_FALSE(refused.ok);
+  CHECK_FALSE(refused.changed);
+  CHECK_CONTAINS(refused.error, "launcher_profile");
+  CHECK_FALSE(pinned.settings_dir_chosen());
+  CHECK_STR_EQ(pinned.path().string(), named.string());
+
+  BeginCase("D2: the older marker beside the launcher still moves the settings, and a chosen "
+            "folder supersedes it");
+
+  WriteText(install / kPortableMarkerName, "");
+  // A fresh session: the path is resolved when the session is made, so the marker is what
+  // makes it the launcher-folder file - the same thing a user who copies the marker in sees
+  // on the next run.
+  ProfileSession marked = MakeSession(install, app_data, LoadProfile(roaming));
+  CHECK_FALSE(marked.settings_dir_chosen());
+  CHECK_STR_EQ(marked.path().string(), (install / kProfileFileName).string());
+
+  const ProfileSession::LocationOutcome chosen = marked.SetSettingsDir(other);
+  CHECK_TRUE(chosen.ok);
+  CHECK_TRUE(chosen.changed);
+  // One answer, not two: the marker is gone and the pointer is what says where the settings are.
+  CHECK_FALSE(fs::exists(install / kPortableMarkerName));
+  CHECK_STR_EQ(marked.path().string(), (other / kProfileFileName).string());
+  CHECK_STR_EQ(ResolveProfilePath(inputs).string(), (other / kProfileFileName).string());
 }
 
 void TestGameConfigReader(Scratch& scratch) {
@@ -672,7 +699,7 @@ int main() {
   TestFreshProfile(scratch);
   TestReset(scratch);
   TestImportExport(scratch);
-  TestPortableMode(scratch);
+  TestSettingsLocation(scratch);
   TestGameConfigReader(scratch);
   TestPrecedence(scratch);
   return Finish();

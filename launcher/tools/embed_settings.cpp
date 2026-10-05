@@ -426,6 +426,9 @@ struct SettingRow {
   std::string choices;   // comma-separated, empty unless kEnum
   std::string validate;  // pipe-separated rules, empty unless a path kind
   std::string evidence;  // the `live:` comment's tail, empty unless kLive
+  // Optional preconditions the runtime environment has to satisfy for the row to be shown at
+  // all, e.g. "multi_monitor". Empty means the row is always shown.
+  std::string visible;
   // Optional bounds for an int/float row, so the widget's slider carries the row's real
   // limits instead of the launcher inventing one.
   bool has_range = false;
@@ -794,6 +797,21 @@ std::unique_ptr<Schema> Build(const Document& document) {
       row.max_text = max_value->text;
     }
 
+    // Optional visibility rule: a row that only makes sense in some environments says so, and a
+    // rule this build does not know is refused rather than silently ignored.
+    if (const Value* visible = entry.Find("visible"); visible != nullptr) {
+      if (visible->is_array || visible->text.empty()) {
+        Fail(Location(line) + "row `" + row.key + "` has an empty `visible` rule");
+        continue;
+      }
+      if (visible->text != "multi_monitor") {
+        Fail(Location(visible->line) + "row `" + row.key + "` has unknown visible rule `" +
+             visible->text + "`; expected multi_monitor");
+        continue;
+      }
+      row.visible = visible->text;
+    }
+
     schema->settings.push_back(std::move(row));
   }
 
@@ -937,6 +955,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "  bool has_range;\n"
       << "  std::string_view min_text;\n"
       << "  std::string_view max_text;\n"
+      << "  std::string_view visible;\n"
       << "  bool argv_flag;\n"
       << "};\n"
       << "\n"
@@ -979,6 +998,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
         << ", .has_range = " << (row.has_range ? "true" : "false")
         << ", .min_text = " << CppLiteral(row.min_text)
         << ", .max_text = " << CppLiteral(row.max_text)
+        << ", .visible = " << CppLiteral(row.visible)
         << ", .argv_flag = " << (row.argv_flag ? "true" : "false") << "},\n";
   }
   out << "}};\n"

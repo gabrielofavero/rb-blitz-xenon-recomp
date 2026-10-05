@@ -6,8 +6,8 @@
 // P0.3's profile module is the format: it patches the keys it owns into the document it was
 // given and leaves everything else byte for byte as it was. This is the session on top of it -
 // the file's path, what a save would change, whether saving is allowed at all, and the two
-// decisions B4 adds on top of "write the model": a reset that can name what it removes, and
-// portable mode, whose switch is a marker file rather than a setting inside the profile.
+// decisions B4 adds on top of "write the model": a reset that can name what it removes, and the
+// settings folder, which moves by a pointer file rather than by a setting inside the profile.
 //
 // The file is the authority for "did anything change": `Dirty` and `Save` make the same byte
 // comparison, so a profile that was edited and edited back is not reported as unsaved, and a
@@ -59,20 +59,22 @@ std::string OverrideNoteText(std::string_view launcher_value, std::string_view g
 
 class ProfileSession {
  public:
-  // `inputs` is D2's resolution order, kept whole: the portable switch re-resolves with it, so
-  // an override that named the file still names it afterwards. `load` is what was read, kept
-  // whole because a file that did not parse must not be written over (D2).
+  // `inputs` is D2's resolution order, kept whole: changing the settings folder re-resolves
+  // with it, so an override that named the file still names it afterwards. `load` is what was
+  // read, kept whole because a file that did not parse must not be written over (D2).
   ProfileSession(ProfilePathInputs inputs, ProfileLoadResult load);
 
   Profile& profile() { return load_.profile; }
   const Profile& profile() const { return load_.profile; }
 
-  // The file this session writes. It moves when the portable switch does.
+  // The file this session writes. It moves when the settings folder changes.
   const std::filesystem::path& path() const { return path_; }
 
+  // True when the profile is the one beside the launcher: either the older marker asked for it
+  // or the user chose that folder. The profile's own `portable` field is written to agree.
   bool portable() const { return portable_; }
-  // True when argv or the environment named the file, so the portable switch cannot move it -
-  // D2's order puts an explicit choice above the marker, and the UI says so.
+  // True when argv or the environment named the file, so the settings folder cannot move it -
+  // D2's order puts an explicit choice above the pointer, and the UI says so.
   bool path_from_override() const { return path_from_override_; }
   // The directory the portable marker lives in: the launcher's own, which is where the game's
   // executable and its `rb_blitz.toml` are too (D1: both ship in the payload).
@@ -130,21 +132,27 @@ class ProfileSession {
   // resize itself out from under the user.
   void ResetToDefaults();
 
-  struct PortableOutcome {
+  struct LocationOutcome {
     bool ok = true;
-    bool changed = false;  // false when it was already in the state that was asked for
+    bool changed = false;  // false when the settings were already in the folder asked for
     std::string error;
   };
 
-  // D2's portable mode. The marker beside the executable is the whole switch; the profile's own
-  // `portable` field is written to agree with it but never decides anything.
+  // D2's settings location, chosen rather than toggled: `dir` is the folder that should hold
+  // `launcher.toml`, recorded in a pointer file in the default folder and re-resolved so an
+  // override that named the file still wins.
   //
-  // Turning it on carries the current settings to the new location rather than starting from
-  // the defaults, and the file it leaves behind is kept: switching where settings live is not
-  // the place to delete a settings file. If the new location cannot be written the marker is
-  // put back the way it was and the failure is reported - "portable" pointing at a read-only
-  // install folder is exactly the case B4 has to survive.
-  PortableOutcome SetPortable(bool on);
+  // The settings are carried to the new folder instead of being left behind - a location the
+  // user chose and then found empty would be a reset, not a move - and the file in the old one
+  // is kept: switching where settings live is not the place to delete a settings file. If the
+  // new folder cannot be written the pointer is put back exactly as it was and the failure is
+  // reported, because "settings in a folder that cannot be written" is worse than "settings
+  // where they were".
+  LocationOutcome SetSettingsDir(const std::filesystem::path& dir);
+
+  // The folder the profile is in, and whether that is one the user chose.
+  std::filesystem::path settings_dir() const { return path_.parent_path(); }
+  bool settings_dir_chosen() const { return !ReadSettingsDirPointer(inputs_.app_data_dir).empty(); }
 
   // The game's own file, re-read when it changes on disk. Badge input only: the launcher never
   // writes it (D2).

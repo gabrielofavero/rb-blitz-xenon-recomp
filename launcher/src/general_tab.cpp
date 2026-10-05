@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -42,6 +43,31 @@ void SetProfilePath(Profile* profile, std::string_view key, const std::string& v
 
 void SDLCALL FolderChosen(void* userdata, const char* const* filelist, int /*filter*/) {
   static_cast<GeneralTab*>(userdata)->OnFolderChosen(filelist);
+}
+
+// The folder the game will actually use for a row whose profile value is empty. The defaults
+// belong to the game (src/rb_blitz_app.h for the save folder, src/fs/dlc_layout.h for DLC), so
+// they are repeated as arithmetic here rather than left as a blank field - a blank field reads
+// as "nowhere", and this is the one place a user can see where their saves are about to go.
+std::string EffectivePath(const settings::Setting& setting, const Profile& profile,
+                         const GameRoots& roots) {
+  if (const std::string& configured = ProfilePathValue(profile, setting.key);
+      !configured.empty()) {
+    return configured;
+  }
+  // The same known folder rex::filesystem::GetUserFolder() returns, through SDL rather than the
+  // SDK: the launcher does not link the runtime.
+  if (setting.key == "user_data_root") {
+    const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    if (documents == nullptr) {
+      return {};
+    }
+    return (std::filesystem::path(documents) / "rb_blitz").string();
+  }
+  if (setting.key == "dlc_root" && !roots.game_root.empty()) {
+    return (roots.game_root / "dlc").string();
+  }
+  return {};
 }
 
 }  // namespace
@@ -131,11 +157,15 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
     }
 
     const std::size_t index = first_row + 2;
+    // The gap is the point: the two radios above choose the game, and this is the thing to do
+    // about it, so it must not read as a third choice in the same list.
+    ImGui::Spacing();
+    ImGui::Spacing();
     const bool focused = !ring.Empty() && ring.Index() == index;
     if (focused) {
       ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     }
-    const bool clicked = ImGui::Button("Install Ultimate...");
+    const bool clicked = ImGui::Button("Install Ultimate");
     if (focused) {
       ImGui::PopStyleColor();
     }
@@ -180,7 +210,7 @@ void GeneralTab::DrawInstallModal(NavAction action) {
   }
   if (ImGui::BeginPopupModal(kInstallPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     if (install_.Busy()) {
-      ImGui::TextUnformatted("Downloading and installing the Ultimate mod...");
+      ImGui::TextUnformatted("Downloading and installing the Ultimate mod");
       if (install_.progress_percent() >= 0) {
         ImGui::ProgressBar(install_.progress_percent() / 100.0f, ImVec2(360.0f, 0.0f));
       } else {
@@ -240,17 +270,21 @@ void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_wid
                                ProfileSession& session, std::size_t index, FocusModel& ring,
                                NavAction action) {
   PathRowState& state = RowStateFor(setting.key);
-  const std::string& current = ProfilePathValue(session.profile(), setting.key);
-  if (state.source != current) {
-    state.source = current;
-    const std::size_t count = std::min(current.size(), sizeof(state.buffer) - 1);
-    std::memcpy(state.buffer, current.data(), count);
+  // The field shows the path that will be used, not the one that was typed: an empty profile
+  // value means the game's own default, and showing nothing there would hide where the saves
+  // are about to go. Editing the field is still the way to override it.
+  const std::string shown = EffectivePath(setting, session.profile(), roots_);
+  if (state.source != shown) {
+    state.source = shown;
+    const std::size_t count = std::min(shown.size(), sizeof(state.buffer) - 1);
+    std::memcpy(state.buffer, shown.data(), count);
     state.buffer[count] = '\0';
   }
+  const std::string& current = ProfilePathValue(session.profile(), setting.key);
 
   const float spacing = ImGui::GetStyle().ItemSpacing.x;
   const float browse_width =
-      ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+      ImGui::CalcTextSize("Browse").x + ImGui::GetStyle().FramePadding.x * 2.0f;
   const float input_width = std::max(80.0f, value_width - browse_width - spacing);
 
   ImGui::SetNextItemWidth(input_width);
@@ -258,7 +292,7 @@ void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_wid
                                         ImGuiInputTextFlags_EnterReturnsTrue);
   const bool committed = entered || ImGui::IsItemDeactivatedAfterEdit();
   ImGui::SameLine();
-  const bool browsed = ImGui::Button("Browse...", ImVec2(browse_width, 0.0f));
+  const bool browsed = ImGui::Button("Browse", ImVec2(browse_width, 0.0f));
 
   // Enter and Space on the focused row open the picker, the same as the button. That is the
   // controller-friendly half of R7 - a pad cannot type a path - and the typed field beside it
@@ -267,11 +301,14 @@ void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_wid
       action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
   if (browsed || activated) {
     chosen_key_ = std::string(setting.key);
+    const std::string start = current.empty() ? shown : current;
     SDL_ShowOpenFolderDialog(&FolderChosen, this, nullptr,
-                             current.empty() ? nullptr : current.c_str(), false);
+                             start.empty() ? nullptr : start.c_str(), false);
   }
   if (committed) {
-    // Typing is a pick too, so it is validated the same way.
+    // Typing is a pick too, so it is validated the same way. Enter on a field nobody touched
+    // describes the same value it already showed, and the profile takes it as an explicit
+    // choice rather than as the default - which is what the field said all along.
     chosen_key_ = std::string(setting.key);
     chosen_path_ = state.buffer;
   }
@@ -332,20 +369,19 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
       // own heading, and it occupies kTargetRows ring rows.
       if (setting.key == "launch.target") {
         DrawTargetRows(session, row_index, ring, rows_action);
-        if (!roots_.game_root_found) {
-          ImGui::TextDisabled(
-              "No game folder was found next to the launcher, so nothing here has been "
-              "checked against an install.");
-        }
         row_index += kTargetRows;
         continue;
       }
 
-      const RowColumns columns = RowColumnWidths();
+      // A path is the widest thing on the tab and the one value a user reads character by
+      // character, so it takes most of the row; every other kind is a single small widget
+      // beside a full-width label.
+      const bool is_path =
+          setting.kind == settings::Kind::kPathDir || setting.kind == settings::Kind::kPathFile;
+      const RowColumns columns = RowColumnWidths(is_path ? 0.62f : 0.35f);
       DrawRowLabel(setting, row_index, ring, columns.label_width);
       ImGui::SameLine();
-      if (setting.kind == settings::Kind::kPathDir ||
-          setting.kind == settings::Kind::kPathFile) {
+      if (is_path) {
         DrawPathValue(setting, columns.value_width, session, row_index, ring, rows_action);
       } else {
         ImGui::BeginDisabled();

@@ -480,7 +480,6 @@ std::string Apply(const Layout& layout, const Pending& pending) {
 
     std::size_t offset = text.size();
     bool starts_a_table = false;
-    std::string block;
     const auto last = layout.section_last_line.find(section);
     if (last != layout.section_last_line.end()) {
       // After the section's last line, which keeps any trailing comments with it.
@@ -489,11 +488,20 @@ std::string Apply(const Layout& layout, const Pending& pending) {
       // Top level: before the first table, after the last top-level key, or at the end.
       offset = layout.has_header ? layout.line_begin[layout.first_header_line] : text.size();
     } else {
-      block += "[" + section + "]" + layout.newline;
+      // A table this document does not have goes at the end of it.
       starts_a_table = true;
     }
+
+    std::string block;
+    // A block of lines has to begin at the start of a line. The insertion point is not always
+    // one: a document whose last line has no trailing newline ends in the middle of a line, so
+    // the separator belongs before the block - and an unseparated `[remap]` would land on the
+    // end of `fullscreen = false` and turn both into one broken line.
     if (offset > 0 && text[offset - 1] != '\n') {
       block += layout.newline;
+    }
+    if (starts_a_table) {
+      block += "[" + section + "]" + layout.newline;
     }
     for (const std::string& line : lines) {
       block += line + layout.newline;
@@ -773,6 +781,8 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
   for (const KeyRef& ref : layout.keys) {
     if (ref.section == "settings") {
       profile.settings.push_back(ProfileSetting{ref.key, ref.value, ref.style});
+    } else if (ref.section == "remap") {
+      profile.remap.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     }
   }
 
@@ -814,10 +824,23 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
   for (const ProfileSetting& setting : profile.settings) {
     Schedule(layout, &pending, "settings", setting.key, setting.value, setting.style);
   }
-  // `[settings]` is modelled as a whole, so a key the model no longer has is dropped.
-  // Everything outside it is untouched, which is what protects a newer launcher's keys.
+  for (const ProfileSetting& binding : profile.remap) {
+    Schedule(layout, &pending, "remap", binding.key, binding.value, binding.style);
+  }
+  // `[settings]` and `[remap]` are modelled as a whole, so a key the model no longer has is
+  // dropped. Everything outside them is untouched, which is what protects a newer launcher's
+  // keys.
   for (const KeyRef& ref : layout.keys) {
-    if (ref.section == "settings" && profile.FindSetting(ref.key) == nullptr) {
+    const bool modelled = ref.section == "settings" || ref.section == "remap";
+    if (!modelled) {
+      continue;
+    }
+    const std::vector<ProfileSetting>& rows =
+        ref.section == "settings" ? profile.settings : profile.remap;
+    const bool kept = std::any_of(rows.begin(), rows.end(), [&](const ProfileSetting& row) {
+      return row.key == ref.key;
+    });
+    if (!kept) {
       pending.edits.push_back(Edit{ref.line_begin, ref.line_end, ""});
     }
   }
@@ -886,6 +909,13 @@ std::string RenderProfile(const Profile& profile) {
     text += "[settings]" + newline;
     for (const ProfileSetting& setting : profile.settings) {
       text += setting.key + " = " + RenderValue(setting.value, setting.style) + newline;
+    }
+  }
+  if (!profile.remap.empty()) {
+    text += newline;
+    text += "[remap]" + newline;
+    for (const ProfileSetting& binding : profile.remap) {
+      text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
     }
   }
   return text;

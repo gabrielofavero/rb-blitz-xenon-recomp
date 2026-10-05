@@ -7,7 +7,7 @@
 // files say, and the save and DLC locations - and edits them in the session's profile, which
 // B4's block at the end of the tab is what writes to disk. The launch target is drawn as one
 // stacked entry per choice, and when the payload is not there the Ultimate entry is replaced by
-// the *Install Ultimate...* action (D5's "never hard-disable", B8), which drives the installer's
+// the *Install Ultimate* action (D5's "never hard-disable", B8), which drives the installer's
 // own helper. The game-directory override and *Verify installation* are D4's later rows, not
 // M1's.
 //

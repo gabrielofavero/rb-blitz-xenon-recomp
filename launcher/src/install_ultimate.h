@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The General tab's *Install Ultimate...* action (docs/plans/launcher-plan.md D5, B8).
+// The General tab's *Install Ultimate* action (docs/plans/launcher-plan.md D5, B8).
 //
 // The launcher never bundles the mod and never downloads it itself: it drives the same
 // helper the installer put in the install folder (`rb_blitz_setup_helper.exe`) with

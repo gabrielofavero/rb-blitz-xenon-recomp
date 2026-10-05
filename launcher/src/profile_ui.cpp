@@ -34,6 +34,10 @@ void SDLCALL ExportChosen(void* userdata, const char* const* filelist, int /*fil
   static_cast<ProfilePanel*>(userdata)->OnExportChosen(filelist);
 }
 
+void SDLCALL SettingsDirChosen(void* userdata, const char* const* filelist, int /*filter*/) {
+  static_cast<ProfilePanel*>(userdata)->OnSettingsDirChosen(filelist);
+}
+
 // The label a settings key is shown under, when the schema has one. A key no longer in the
 // schema - a newer launcher's, or a typo in a hand-edited file - is named by its key, because
 // that is exactly and only what a reset would remove.
@@ -63,7 +67,28 @@ void ProfilePanel::OnExportChosen(const char* const* filelist) {
   chosen_path_ = filelist[0];
 }
 
+void ProfilePanel::OnSettingsDirChosen(const char* const* filelist) {
+  if (filelist == nullptr || filelist[0] == nullptr) {
+    return;  // cancelled, or the dialog failed
+  }
+  chosen_settings_dir_ = filelist[0];
+}
+
 void ProfilePanel::ApplyPendingDialogs(ProfileSession& session) {
+  if (!chosen_settings_dir_.empty()) {
+    const std::string dir = std::exchange(chosen_settings_dir_, std::string{});
+    const ProfileSession::LocationOutcome outcome = session.SetSettingsDir(dir);
+    if (!outcome.ok) {
+      status_.clear();
+      status_error_ = "Cannot move the settings: " + outcome.error;
+    } else if (!outcome.changed) {
+      status_error_.clear();
+      status_ = "The settings are already in " + dir;
+    } else {
+      status_error_.clear();
+      status_ = "Settings moved to " + session.path().string();
+    }
+  }
   if (chosen_path_.empty()) {
     return;
   }
@@ -122,30 +147,20 @@ bool ProfilePanel::Item(std::size_t index, const FocusModel& ring, NavAction act
 }
 
 void ProfilePanel::DrawStatus(const ProfileSession& session) {
-  const std::string& path = session.path().string();
-  if (path.empty()) {
-    ImGui::TextWrapped("No settings file: this process has nowhere to keep one. Settings on "
-                       "this screen will not be saved.");
-  } else if (session.portable()) {
-    ImGui::TextWrapped("Settings file: %s  (portable)", path.c_str());
-  } else {
-    ImGui::TextWrapped("Settings file: %s", path.c_str());
-  }
-
+  // A block that is fine says nothing: no file path, no "Saved". The path is already the value
+  // the *Change settings location* button sits next to, and the two things worth printing are
+  // the ones that need the user to do something - a file that could not be read, and changes
+  // that are not written yet.
   if (!session.CanSave()) {
     ImGui::PushStyleColor(ImGuiCol_Text, kError);
-    ImGui::TextWrapped("This file was not understood, so nothing will be written over it. Fix "
-                       "it by hand, or import a profile you trust. %s",
+    ImGui::TextWrapped("This settings file was not understood, so nothing will be written over "
+                       "it. Fix it by hand, or import a profile you trust. %s",
                        session.Refusal().c_str());
     ImGui::PopStyleColor();
   } else if (session.Dirty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
     ImGui::TextUnformatted("Unsaved changes");
     ImGui::PopStyleColor();
-  } else if (!session.has_file()) {
-    ImGui::TextDisabled("No settings file yet, and nothing has been changed");
-  } else {
-    ImGui::TextDisabled("Saved");
   }
 
   if (!status_error_.empty()) {
@@ -208,6 +223,8 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   ImGui::SeparatorText("Settings file");
   DrawStatus(session);
 
+  // One row of buttons with air between them, in the order they are meant to be read: write what
+  // is on screen, then the two ways a profile moves between machines, then where it lives.
   const bool usable = session.CanSave();
   if (!usable) {
     ImGui::BeginDisabled();
@@ -223,7 +240,7 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
     }
   }
   ImGui::SameLine();
-  if (Item(first_row + 1, ring, live, "Reset to defaults...")) {
+  if (Item(first_row + 1, ring, live, "Reset to defaults")) {
     ImGui::OpenPopup(kResetPopup);
   }
   if (!usable) {
@@ -232,7 +249,7 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   // Import stays live even when the file on disk did not parse: reading a profile the user
   // trusts is the way out of a damaged one.
   ImGui::SameLine();
-  if (Item(first_row + 2, ring, live, "Import...")) {
+  if (Item(first_row + 2, ring, live, "Import")) {
     const SDL_DialogFileFilter filters[] = {{kFileFilterName, "toml"}, {"All files", "*"}};
     const std::string start = session.path().parent_path().string();
     SDL_ShowOpenFileDialog(&ImportChosen, this, nullptr, filters, SDL_arraysize(filters),
@@ -242,52 +259,22 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   if (!usable) {
     ImGui::BeginDisabled();
   }
-  if (Item(first_row + 3, ring, live, "Export...")) {
+  if (Item(first_row + 3, ring, live, "Export")) {
     const SDL_DialogFileFilter filters[] = {{kFileFilterName, "toml"}, {"All files", "*"}};
     const std::string start = session.path().parent_path().string();
     SDL_ShowSaveFileDialog(&ExportChosen, this, nullptr, filters, SDL_arraysize(filters),
                            start.empty() ? nullptr : start.c_str());
   }
-
-  bool portable = session.portable();
-  const bool in_ring = !ring.Empty() && ring.Index() == first_row + 4;
-  const bool activated = live == NavAction::kActivate && in_ring;
-  if (activated) {
-    portable = !portable;
-  }
-  const bool toggled = ImGui::Checkbox("Portable: keep the settings next to the launcher",
-                                       &portable);
-  if (in_ring && !ImGui::IsItemVisible()) {
-    ImGui::SetScrollHereY(0.5f);
-  }
-  if (activated || toggled) {
-    const ProfileSession::PortableOutcome outcome = session.SetPortable(portable);
-    if (!outcome.ok) {
-      status_.clear();
-      status_error_ = "Cannot change portable mode: " + outcome.error;
-    } else {
-      status_error_.clear();
-      status_ = portable ? "Settings now live in " + session.path().string()
-                         : "Settings live in " + session.path().string() + " again";
-    }
+  ImGui::SameLine();
+  // The folder picker opens at the folder the settings are in, so choosing a location starts
+  // from the answer to "where are they now?" rather than from nowhere.
+  if (Item(first_row + 4, ring, live, "Change settings location")) {
+    const std::string start = session.settings_dir().string();
+    SDL_ShowOpenFolderDialog(&SettingsDirChosen, this, nullptr,
+                             start.empty() ? nullptr : start.c_str(), false);
   }
   if (!usable) {
     ImGui::EndDisabled();
-  }
-  // B4's one line: where they live now, and what that means for an install folder that is
-  // replaced on update.
-  if (session.portable()) {
-    ImGui::TextDisabled(
-        "Portable mode: settings live next to the launcher, in the file above, instead of in "
-        "the app data folder.");
-  } else if (!session.path().empty()) {
-    ImGui::TextDisabled(
-        "Settings live in the app data folder, so they survive moving or updating the install.");
-  }
-  if (session.path_from_override()) {
-    ImGui::TextDisabled(
-        "An override named the settings file, so portable mode does not change which file is "
-        "used.");
   }
 
   DrawResetModal(session, modal_was_open, action);

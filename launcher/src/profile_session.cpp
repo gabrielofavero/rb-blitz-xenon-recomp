@@ -57,14 +57,24 @@ bool RemoveMarker(const fs::path& marker, std::string* error) {
   return true;  // it was not there, which is the state that was asked for
 }
 
+// The profile is "portable" when the file is the one beside the launcher - whether the older
+// marker put it there or the user chose that folder. It is a fact about the path, not a flag,
+// so there is only ever one of it.
+bool IsPortablePath(const fs::path& path, const fs::path& executable_dir) {
+  if (path.empty() || executable_dir.empty()) {
+    return false;
+  }
+  return path == executable_dir / kProfileFileName;
+}
+
 }  // namespace
 
 ProfileSession::ProfileSession(ProfilePathInputs inputs, ProfileLoadResult load)
     : inputs_(std::move(inputs)), load_(std::move(load)) {
   path_from_override_ =
       !inputs_.command_line_value.empty() || !inputs_.environment_value.empty();
-  portable_ = IsPortable(inputs_.executable_dir);
   path_ = ResolveProfilePath(inputs_);
+  portable_ = IsPortablePath(path_, inputs_.executable_dir);
   saved_ = load_.profile;
 }
 
@@ -252,6 +262,11 @@ ResetPlan ProfileSession::WhatResetWouldRemove() const {
   if (profile.dlc_dir != defaults.dlc_dir) {
     plan.launch.push_back("the DLC location");
   }
+  // A remap is a change the user made, so a reset that left it behind would be a reset that
+  // did not reset the pad.
+  if (!profile.remap.empty()) {
+    plan.launch.push_back("every button binding, back to the pad as it came");
+  }
   return plan;
 }
 
@@ -266,62 +281,87 @@ void ProfileSession::ResetToDefaults() {
   profile.dlc_dir = defaults.dlc_dir;
   // Every recorded setting goes, which is what makes the next save drop every `[settings]` key.
   profile.settings.clear();
+  profile.remap.clear();
 }
 
-ProfileSession::PortableOutcome ProfileSession::SetPortable(bool on) {
-  PortableOutcome outcome;
-  if (portable_ == on) {
+ProfileSession::LocationOutcome ProfileSession::SetSettingsDir(const fs::path& dir) {
+  LocationOutcome outcome;
+  if (dir.empty()) {
+    outcome.ok = false;
+    outcome.error = "no folder was chosen";
     return outcome;
   }
+
+  // The pointer is what moves the path; the marker beside the executable is the older answer
+  // to the same question. Leaving both behind would leave two answers, so a location the user
+  // chose supersedes the marker - the folder named here is the folder, marker or not.
+  const fs::path marker = inputs_.executable_dir / kPortableMarkerName;
+
+  const fs::path wanted = dir / kProfileFileName;
+  if (wanted == path_) {
+    // Already there. The marker still goes, so an explicit choice of the folder the marker
+    // asked for leaves one answer behind instead of two.
+    if (!IsPortable(inputs_.executable_dir)) {
+      return outcome;
+    }
+  }
   if (!CanSave()) {
-    // The settings cannot be carried to the new location, so moving them there would only
-    // point the launcher at a file it refuses to write.
+    // The settings cannot be carried to the new folder, so moving them there would only point
+    // the launcher at a file it refuses to write.
     outcome.ok = false;
     outcome.error = Refusal();
     return outcome;
   }
+  if (path_from_override_) {
+    // Writing the pointer would record a choice that has no effect, and the next run would
+    // disagree with this one. Saying so is the honest answer instead.
+    outcome.ok = false;
+    outcome.error =
+        "This process was told which settings file to use, by --launcher_profile or "
+        "RBBLITZ_LAUNCHER_PROFILE, so where the settings live cannot be changed here.";
+    return outcome;
+  }
 
-  const fs::path marker = inputs_.executable_dir / kPortableMarkerName;
+  const fs::path previous_pointer = ReadSettingsDirPointer(inputs_.app_data_dir);
+  const fs::path previous_path = path_;
+  const bool previous_portable = portable_;
+  const bool previous_field = load_.profile.portable;
+
   std::string error;
-  if (on) {
-    if (!WriteMarker(marker, &error)) {
-      outcome.ok = false;
-      outcome.error = error;
-      return outcome;
-    }
-  } else if (!RemoveMarker(marker, &error)) {
+  if (!WriteSettingsDirPointer(inputs_.app_data_dir, dir, &error)) {
     outcome.ok = false;
     outcome.error = error;
     return outcome;
   }
+  RemoveMarker(marker, &error);
 
   // D2's order is re-resolved rather than assumed: an override that named the file goes on
-  // naming it, and then the answer is that the marker did not move anything.
-  const fs::path previous = path_;
+  // naming it, and then the answer is that the pointer did not move anything.
   path_ = ResolveProfilePath(inputs_);
-  portable_ = on;
-  load_.profile.portable = on;  // the file's own record, which decides nothing (D2)
+  portable_ = IsPortablePath(path_, inputs_.executable_dir);
+  load_.profile.portable = portable_;  // the file's own record, which decides nothing (D2)
 
-  // The settings follow the switch instead of the switch looking like it discarded them. The
+  // The settings follow the choice instead of the choice looking like it discarded them. The
   // file left behind is not deleted: nothing here removes a settings file.
   if (!path_.empty() && !SaveProfile(path_, load_.profile, &error)) {
-    // Pointing "portable" at a file that cannot be written is not an improvement, so the
-    // marker is put back exactly as it was and the failure is reported (B4's read-only folder).
-    path_ = previous;
-    portable_ = !on;
-    load_.profile.portable = !on;
+    // A folder that cannot be written is not an improvement over the one that worked, so the
+    // pointer and the marker are put back exactly as they were and the failure is reported.
     std::string rollback_error;
-    if (on) {
-      RemoveMarker(marker, &rollback_error);
-    } else {
+    WriteSettingsDirPointer(inputs_.app_data_dir, previous_pointer, &rollback_error);
+    if (previous_portable && !IsPortable(inputs_.executable_dir)) {
       WriteMarker(marker, &rollback_error);
     }
+    path_ = previous_path;
+    portable_ = previous_portable;
+    load_.profile.portable = previous_field;
     outcome.ok = false;
     outcome.error = error;
     return outcome;
   }
 
-  outcome.changed = true;
+  // A move that ended up at the same file - because the override decided it, say - is not a
+  // change, and the status line should not claim one.
+  outcome.changed = path_ != previous_path || previous_portable != portable_;
   return outcome;
 }
 

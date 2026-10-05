@@ -5,7 +5,9 @@
 
 #include "schema_view.h"
 
+#include <cctype>
 #include <iterator>
+#include <string>
 #include <utility>
 
 namespace rb_blitz::launcher {
@@ -26,11 +28,26 @@ std::vector<settings::Tab> TabOrder() {
   return tabs;
 }
 
+std::string DisplayTabName(settings::Tab tab) {
+  std::string name(settings::TabName(tab));
+  if (!name.empty()) {
+    name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
+  }
+  return name;
+}
+
+bool SettingVisible(const settings::Setting& setting, const RowEnvironment& environment) {
+  if (setting.visible == "multi_monitor") {
+    return environment.multiple_monitors;
+  }
+  return true;
+}
+
 std::string_view GroupNoteText(const settings::Group& group) {
   return OrPlaceholder(group.note, "Nothing in this group is available in this build yet.");
 }
 
-TabLayout BuildTabLayout(settings::Tab tab) {
+TabLayout BuildTabLayout(settings::Tab tab, const RowEnvironment& environment) {
   TabLayout layout;
   layout.tab = tab;
   // kGroups' order is the display order within a tab, and kSettings' order is the order
@@ -42,9 +59,18 @@ TabLayout BuildTabLayout(settings::Tab tab) {
     LayoutGroup entry;
     entry.group = &group;
     for (const settings::Setting& setting : settings::kSettings) {
-      if (setting.tab == tab && setting.group == group.name) {
-        entry.rows.push_back(LayoutRow{&setting, nullptr});
+      if (setting.tab != tab || setting.group != group.name) {
+        continue;
       }
+      // A row the environment hides is not part of the layout at all. It is filtered here
+      // rather than skipped by each caller, because the ring that decides what is focusable
+      // and the loop that draws are two different pieces of code: the only way they cannot
+      // disagree is for the row to be gone before either of them sees it.
+      if (!SettingVisible(setting, environment)) {
+        ++layout.hidden_count;
+        continue;
+      }
+      entry.rows.push_back(LayoutRow{&setting, nullptr});
     }
     // An unavailable group's rows are deliberately not drawn, and a group with no rows is
     // the same thing: a category with nothing in it is not a setting (D14).
@@ -61,10 +87,10 @@ TabLayout BuildTabLayout(settings::Tab tab) {
   return layout;
 }
 
-std::vector<TabLayout> BuildLayout() {
+std::vector<TabLayout> BuildLayout(const RowEnvironment& environment) {
   std::vector<TabLayout> layout;
   for (const settings::Tab tab : TabOrder()) {
-    layout.push_back(BuildTabLayout(tab));
+    layout.push_back(BuildTabLayout(tab, environment));
   }
   return layout;
 }
@@ -113,7 +139,9 @@ std::string DescribeLayout(const std::vector<TabLayout>& layout) {
     out += std::to_string(tab.groups.size());
     out += " groups, ";
     out += std::to_string(tab.note_count);
-    out += " unavailable\n";
+    out += " unavailable, ";
+    out += std::to_string(tab.hidden_count);
+    out += " hidden by rule\n";
     for (const LayoutGroup& group : tab.groups) {
       out += "  group ";
       out += group.group->name;

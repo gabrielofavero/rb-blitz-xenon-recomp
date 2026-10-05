@@ -24,6 +24,9 @@ inline const char* g_case = "<none>";
 inline void BeginCase(const char* name) {
   g_case = name;
   std::printf("[ RUN  ] %s\n", name);
+  // Flushed at once: a case that crashes takes the C runtime's buffer with it, and the whole
+  // point of naming the case is to know which one that was.
+  std::fflush(stdout);
 }
 
 inline void Fail(const char* file, int line, const std::string& message) {

@@ -87,7 +87,11 @@ set(RBBLITZ_SOURCES
     src/hooks/dlc.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
+    src/input/remap.cpp
     src/input/mouse_ui.cpp
+    src/launcher/profile.cpp
+    src/launcher/profile_path.cpp
+    src/launcher/remap.cpp
 )
 
 if(WIN32)
@@ -361,6 +365,17 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_launcher_session_tests PRIVATE src launcher/src)
     add_test(NAME launcher_session COMMAND rb_blitz_launcher_session_tests)
+
+    # D16's vocabulary: the `[remap]` grammar, what the profile round-trips, and the rewrite
+    # itself. Dependency-free like the profile tests - no pad, no window, no SDL - because the
+    # device side is only the callback the game hands the rewrite (src/input/remap.cpp).
+    add_executable(rb_blitz_launcher_remap_tests
+        tests/launcher_remap_tests.cpp
+        src/launcher/profile.cpp
+        src/launcher/remap.cpp
+    )
+    target_include_directories(rb_blitz_launcher_remap_tests PRIVATE src)
+    add_test(NAME launcher_remap COMMAND rb_blitz_launcher_remap_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,

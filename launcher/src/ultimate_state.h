@@ -50,7 +50,7 @@ bool UltimateAvailable(UltimateState state);
 
 // D5: never hard-disable. Kept as the single flag the decision says to flip if that ever
 // changes, and pinned by the tests. The General tab no longer needs it, though: when the
-// payload is not there the Ultimate entry is replaced by *Install Ultimate...* rather than
+// payload is not there the Ultimate entry is replaced by *Install Ultimate* rather than
 // being drawn greyed out, so there is nothing left to disable.
 bool UltimateSelectable(UltimateState state);
 

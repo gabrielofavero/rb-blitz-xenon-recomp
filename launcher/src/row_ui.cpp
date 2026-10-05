@@ -151,12 +151,12 @@ void DrawReadOnlyValue(const settings::Setting& setting, float value_width,
       char text[kTextBufferSize] = {};
       CopyToBuffer(value_text.empty() ? std::string_view("(game default)") : value_text, text);
       const float browse_width =
-          ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+          ImGui::CalcTextSize("Browse").x + ImGui::GetStyle().FramePadding.x * 2.0f;
       ImGui::SetNextItemWidth(std::max(kMinValueWidth * 0.5f,
                                        value_width - browse_width - ImGui::GetStyle().ItemSpacing.x));
       ImGui::InputText("##value", text, sizeof(text), ImGuiInputTextFlags_ReadOnly);
       ImGui::SameLine();
-      ImGui::Button("Browse...", ImVec2(browse_width, 0.0f));
+      ImGui::Button("Browse", ImVec2(browse_width, 0.0f));
       return;
     }
   }

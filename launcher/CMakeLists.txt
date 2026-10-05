@@ -50,6 +50,7 @@ set_source_files_properties(${RBBLITZ_IMGUI_BACKENDS} PROPERTIES
 
 set(RBBLITZ_LAUNCHER_SOURCES
     main.cpp
+    src/controller_tab.cpp
     src/game_config.cpp
     src/general_report.cpp
     src/general_tab.cpp
@@ -63,10 +64,13 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/settings_edit.cpp
     src/shell.cpp
     src/ultimate_state.cpp
-    # The profile module is shared with the game and SDK-free on purpose (P0.3), which is
-    # what lets the launcher compile it too: it is how A1 remembers the window geometry.
+    # The profile and remap modules are shared with the game and dependency-free on purpose
+    # (P0.3, D16), which is what lets the launcher compile them too: the profile module is how
+    # A1 remembers the window geometry, and the remap module is the vocabulary the Controller
+    # tab writes and the game reads back.
     "${CMAKE_SOURCE_DIR}/src/launcher/profile.cpp"
     "${CMAKE_SOURCE_DIR}/src/launcher/profile_path.cpp"
+    "${CMAKE_SOURCE_DIR}/src/launcher/remap.cpp"
     ${RBBLITZ_IMGUI_BACKENDS})
 
 if(WIN32)
