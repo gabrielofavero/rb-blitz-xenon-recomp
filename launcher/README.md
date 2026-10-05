@@ -247,7 +247,8 @@ only way to ask a payload "does this build offer Vulkan?" without a screen.
 `--dump-general` prints what the General tab would
 decide for a given game root and profile, `--dump-profile` prints B4's write path and the
 **precedence audit** — one line per row the game's own `rb_blitz.toml` decides, in the words
-the badge uses — `--dump-display` prints what the launcher made of the display, which is
+the badge uses — `--dump-prefill` prints D4's first-run decision (the manifest it read and what
+it would seed), `--dump-display` prints what the launcher made of the display, which is
 the only way to check the DPI story without a screenshot, and `--print-command` prints the
 exact command line *Launch Game* would run (B1/B4/B2/B7's verification):
 
@@ -255,6 +256,7 @@ exact command line *Launch Game* would run (B1/B4/B2/B7's verification):
 rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
 rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\Games\rb_blitz" --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-profile=out\profile.txt --launcher_profile=out\p.toml
+rb_blitz_launcher.exe --dump-prefill=out\prefill.txt --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-display
 rb_blitz_launcher.exe --print-command --launcher_profile=out\p.toml
 ```
@@ -465,6 +467,39 @@ and `swap_post_effect` (`none` / `fxaa` / `fxaa_extreme`) runs a post-process pa
 finished frame. Merging them into one "quality" row would have made one setting quietly change
 two mechanisms.
 
+
+## The first run (D4)
+
+A launcher that has just been installed has no profile. Rather than asking the user to type a
+path the installer already wrote down, the first run reads `install-manifest.toml` beside the
+launcher (`[install] game_directory`, `[game_data] ultimate_installed`) and **seeds** the
+General tab from it: the game folder, and the launch target that the install's Ultimate state
+implies (Ultimate when the mod was installed, the retail game otherwise). It also records the
+`payload_commit` for a bug report.
+
+Nothing is written by the prefill. The profile is left **dirty**, so the panel shows *Unsaved
+changes* and the user's **Save** is the confirmation that creates the first file — the same rule
+the window geometry follows on the way out, which writes the profile as the file last had it and
+therefore cannot persist an unsaved prefill by the back door.
+
+The cases the launcher handles rather than pretending they do not exist
+(`launcher/src/prefill.{h,cpp}`, unit-tested over fixture manifests in
+`tests/launcher_profile_session_tests.cpp`):
+
+| The folder holds | What happens |
+| --- | --- |
+| a manifest whose paths exist | the manifest's game folder and Ultimate state seed the profile |
+| no manifest (a hand install, or an installer older than the manifest) | the file system, exactly as B1 already detects the game root |
+| a manifest whose paths are gone | the missing folders are named and the file system is re-scanned; what is named is what the report (`--dump-prefill`) shows |
+| a profile that already exists | nothing: a second launcher install shares the one per-user file, and overwriting it would be a reset the user did not ask for |
+
+`--dump-prefill` prints this decision without opening a window — the manifest it read, whether
+the prefill applies, and the game folder and target it would seed — which is how an install the
+launcher has never seen is checked on a build machine:
+
+```
+rb_blitz_launcher.exe --dump-prefill=out\prefill.txt --launcher_profile=out\p.toml
+```
 
 ## The profile — `launcher.toml`
 

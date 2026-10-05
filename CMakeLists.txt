@@ -359,6 +359,7 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_launcher_session_tests
         tests/launcher_profile_session_tests.cpp
         launcher/src/game_config.cpp
+        launcher/src/prefill.cpp
         launcher/src/profile_session.cpp
         src/launcher/profile.cpp
         src/launcher/profile_path.cpp

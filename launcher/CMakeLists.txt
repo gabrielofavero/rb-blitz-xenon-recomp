@@ -80,6 +80,7 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/pad_nav.cpp
     src/pad_source.cpp
     src/path_validate.cpp
+    src/prefill.cpp
     src/profile_session.cpp
     src/profile_ui.cpp
     src/row_ui.cpp

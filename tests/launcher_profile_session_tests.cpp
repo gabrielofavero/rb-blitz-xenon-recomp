@@ -24,6 +24,7 @@
 #include "game_config.h"
 #include "launcher/profile.h"
 #include "launcher/profile_path.h"
+#include "prefill.h"
 #include "profile_session.h"
 
 #include <chrono>
@@ -688,6 +689,213 @@ void TestPrecedence(Scratch& scratch) {
   CHECK_FALSE(unreadable.overridden);
 }
 
+// A TOML basic string, escaped the way the installer's writer escapes one, so the fixture
+// exercises the reader's unescape rather than passing through forward slashes.
+std::string Quoted(std::string_view text) {
+  std::string out = "\"";
+  for (const char c : text) {
+    if (c == '\\' || c == '"') {
+      out += '\\';
+    }
+    out.push_back(c);
+  }
+  out += '"';
+  return out;
+}
+
+// install-manifest.toml as installer/src/install.cpp writes it: the tables the launcher reads,
+// plus the `[payload]` component and its `executables` array, which it must tolerate.
+void WriteManifest(const fs::path& install_dir, const fs::path& game_dir, bool ultimate) {
+  std::ostringstream manifest;
+  manifest << "schema_version = 1\n\n[install]\n";
+  manifest << "installed_at = \"2026-10-05T12:00:00Z\"\n";
+  manifest << "installer_version = \"0.1.0\"\n";
+  manifest << "helper_version = \"0.1.0\"\n";
+  manifest << "payload_commit = \"0123456789abcdef0123456789abcdef01234567\"\n";
+  manifest << "directory = " << Quoted(install_dir.string()) << "\n";
+  manifest << "game_directory = " << Quoted(game_dir.string()) << "\n";
+  manifest << "\n[payload]\nversion = \"0.1.0\"\nsource = \"embedded in this installer\"\n";
+  manifest << "files = 7\nbytes = 1234\nfingerprints_matched = true\n";
+  manifest << "executables = [\"rb_blitz.exe\", \"rb_blitz_launcher.exe\"]\nwarnings = 0\n";
+  manifest << "\n[game_data]\nsource = \"the user's package\"\n";
+  manifest << "directory = " << Quoted(game_dir.string()) << "\n";
+  manifest << "ultimate_installed = " << (ultimate ? "true" : "false") << "\n";
+  WriteText(install_dir / kInstallManifestFileName, manifest.str());
+}
+
+void TestPrefill(Scratch& scratch) {
+  BeginCase("D4: a manifest whose paths exist seeds the game folder and the Ultimate target");
+
+  {
+    const fs::path install = scratch.Make("prefill-install");
+    const fs::path game = install / "game";
+    fs::create_directories(game);
+    WriteManifest(install, game, /*ultimate=*/true);
+
+    PrefillInputs inputs;
+    inputs.game_root_found = true;
+    inputs.detected_game_dir = game.string();
+    inputs.ultimate_available = true;
+    const PrefillPlan plan = PlanPrefill(install, inputs);
+    CHECK_TRUE(plan.applies);
+    CHECK_TRUE(plan.source == PrefillSource::kManifest);
+    CHECK_STR_EQ(plan.game_dir, game.string());
+    CHECK_TRUE(plan.target == LaunchTarget::kUltimate);
+    CHECK_TRUE(plan.missing.empty());
+    CHECK_FALSE(plan.rescanned);
+    CHECK_TRUE(plan.manifest.parsed);
+    CHECK_STR_EQ(plan.manifest.payload_commit, "0123456789abcdef0123456789abcdef01234567");
+
+    Profile profile;
+    CHECK_TRUE(ApplyPrefill(profile, plan));
+    CHECK_STR_EQ(profile.game_dir, game.string());
+    CHECK_TRUE(profile.target == LaunchTarget::kUltimate);
+
+    // The prefill is not a write: the session stays fileless and dirty, and the panel's Save is
+    // the confirmation that creates the first profile (D4's "only when the user confirms").
+    ProfileSession session = MakeSession(install, scratch.Make("prefill-appdata"));
+    CHECK_FALSE(session.has_file());
+    CHECK_TRUE(ApplyPrefill(session.profile(), plan));
+    CHECK_TRUE(session.Dirty());
+    CHECK_FALSE(session.has_file());
+    const SaveOutcome saved = session.Save();
+    CHECK_TRUE(saved.ok);
+    CHECK_TRUE(saved.wrote);
+    CHECK_TRUE(session.has_file());
+    const std::string text = ReadText(session.path());
+    CHECK_CONTAINS(text, "game_dir = ");
+    CHECK_CONTAINS(text, "target = \"ultimate\"");
+  }
+
+  BeginCase("D4: a manifest without Ultimate asks for the retail target");
+
+  {
+    const fs::path install = scratch.Make("prefill-common");
+    const fs::path game = install / "game";
+    fs::create_directories(game);
+    WriteManifest(install, game, /*ultimate=*/false);
+
+    const PrefillPlan plan = PlanPrefill(install, PrefillInputs{});
+    CHECK_TRUE(plan.applies);
+    CHECK_TRUE(plan.source == PrefillSource::kManifest);
+    CHECK_TRUE(plan.target == LaunchTarget::kCommon);
+  }
+
+  BeginCase("D4: no manifest falls back to the file system, exactly as B1 detects it");
+
+  {
+    const fs::path install = scratch.Make("prefill-no-manifest");
+    const fs::path game = install / "game";
+    fs::create_directories(game);
+
+    PrefillInputs inputs;
+    inputs.game_root_found = true;
+    inputs.detected_game_dir = game.string();
+    inputs.ultimate_available = false;
+    const PrefillPlan plan = PlanPrefill(install, inputs);
+    CHECK_FALSE(plan.manifest.present);
+    CHECK_TRUE(plan.applies);
+    CHECK_TRUE(plan.source == PrefillSource::kFileSystem);
+    CHECK_STR_EQ(plan.game_dir, game.string());
+    CHECK_TRUE(plan.target == LaunchTarget::kCommon);
+
+    PrefillInputs nothing;
+    nothing.game_root_found = false;
+    nothing.detected_game_dir = (install / "game").string();
+    const PrefillPlan bare = PlanPrefill(install, nothing);
+    CHECK_FALSE(bare.applies);
+  }
+
+  BeginCase("D4: a manifest whose paths are gone names them and re-scans the file system");
+
+  {
+    const fs::path install = scratch.Make("prefill-stale");
+    const fs::path gone = scratch.base / "prefill-stale-gone";
+    WriteManifest(install, gone / "game", /*ultimate=*/true);
+
+    const fs::path detected = install / "game";
+    fs::create_directories(detected);
+    PrefillInputs inputs;
+    inputs.game_root_found = true;
+    inputs.detected_game_dir = detected.string();
+    inputs.ultimate_available = true;
+    const PrefillPlan plan = PlanPrefill(install, inputs);
+    CHECK_TRUE(plan.applies);
+    CHECK_TRUE(plan.rescanned);
+    CHECK_TRUE(plan.source == PrefillSource::kFileSystem);
+    CHECK_STR_EQ(plan.game_dir, detected.string());
+    CHECK_FALSE(plan.missing.empty());
+
+    const std::string report = DescribePrefill(plan);
+    CHECK_CONTAINS(report, "re-scanned");
+    CHECK_CONTAINS(report, (gone / "game").string());
+  }
+
+  BeginCase("D4: a second install shares one profile, so it is never overwritten");
+
+  {
+    const fs::path install = scratch.Make("prefill-second");
+    const fs::path game = install / "game";
+    fs::create_directories(game);
+    WriteManifest(install, game, /*ultimate=*/true);
+
+    PrefillInputs inputs;
+    inputs.has_profile = true;
+    inputs.game_root_found = true;
+    inputs.detected_game_dir = game.string();
+    inputs.ultimate_available = true;
+    const PrefillPlan plan = PlanPrefill(install, inputs);
+    CHECK_FALSE(plan.applies);
+    CHECK_TRUE(plan.source == PrefillSource::kNone);
+    CHECK_CONTAINS(plan.note, "already exists");
+
+    Profile profile;
+    CHECK_FALSE(ApplyPrefill(profile, plan));
+    CHECK_STR_EQ(profile.game_dir, "");
+  }
+
+  BeginCase("D4: a file that is not this manifest is named, not guessed at");
+
+  {
+    const fs::path install = scratch.Make("prefill-foreign");
+    WriteText(install / kInstallManifestFileName, "this is not toml\n");
+    const fs::path game = install / "game";
+    fs::create_directories(game);
+
+    PrefillInputs inputs;
+    inputs.game_root_found = true;
+    inputs.detected_game_dir = game.string();
+    inputs.ultimate_available = true;
+    const PrefillPlan plan = PlanPrefill(install, inputs);
+    CHECK_TRUE(plan.manifest.present);
+    CHECK_FALSE(plan.manifest.parsed);
+    CHECK_TRUE(plan.applies);
+    CHECK_TRUE(plan.source == PrefillSource::kFileSystem);
+    CHECK_CONTAINS(plan.note, "could not be read");
+  }
+
+  BeginCase("D4: a manifest an editor re-saved with a BOM still reads");
+
+  {
+    const fs::path install = scratch.Make("prefill-bom");
+    const fs::path game = install / "game";
+    fs::create_directories(game);
+    WriteManifest(install, game, /*ultimate=*/true);
+
+    const std::string with_bom = "\xEF\xBB\xBF" + ReadText(install / kInstallManifestFileName);
+    WriteText(install / kInstallManifestFileName, with_bom);
+
+    PrefillInputs inputs;
+    inputs.game_root_found = true;
+    inputs.detected_game_dir = game.string();
+    inputs.ultimate_available = true;
+    const PrefillPlan plan = PlanPrefill(install, inputs);
+    CHECK_TRUE(plan.manifest.parsed);
+    CHECK_TRUE(plan.source == PrefillSource::kManifest);
+    CHECK_STR_EQ(plan.game_dir, game.string());
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -702,5 +910,6 @@ int main() {
   TestSettingsLocation(scratch);
   TestGameConfigReader(scratch);
   TestPrecedence(scratch);
+  TestPrefill(scratch);
   return Finish();
 }

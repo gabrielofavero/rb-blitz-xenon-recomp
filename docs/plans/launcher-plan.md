@@ -835,7 +835,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Nineteen prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -861,8 +861,9 @@ session should read as instructions, and every deviation it would have described
 | A2 | `Shell::DrawBottomBar`'s help region, `schema_view`'s `SettingForEntry`/`RowActionVerb`/`FlattenHelpText`, `ProfilePanel::HelpText`, `ControllerTab::HelpText`, hover-adopts-the-ring on both blocks | D7: the hints follow the last device used, and the tooltip is re-wrapped to the bar's width rather than drawn as the file wrapped it |
 | D2 | the `launchericon` task, the two launcher `[Icons]` rows (Start menu always, desktop by task) and `/LAUNCHERICON` in `installer/setup.iss` + `installer/README.md` | D9 (the task defaults and the silent switch) |
 | D3 | the three-way finish page in `installer/setup.iss` (the `[Run]` entry removed, three radios, `/RUNATEND`) and `installer/README.md`'s finish-page section and manual checklist | D8 (the page and its three choices) |
+| D4 | `launcher/src/prefill.{h,cpp}`, the first-run application in `main.cpp`, `--dump-prefill`, the fixture-manifest cases in `tests/launcher_profile_session_tests.cpp`, the README's first-run section (the run on a real install is the §6 wave-4 manual pass's) | D4 (the General tab's rows; the prefill seeds the fields behind them) |
 
-**Open.** Thirteen prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+**Open.** Twelve prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
 column means the prompt beside it names a finished prompt rather than an open one — B1, B7 and E1 are
 each their own dependency because only half of each went out; §5.3 says which half.
 
@@ -875,8 +876,7 @@ each their own dependency because only half of each went out; §5.3 says which h
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
-| D4 | First-run prefill from the manifest | D | D1, B4 *(built)* | D5 |
-| D5 | Installer tests and README tables | D | D3 *(built)*, D4 | — |
+| D5 | Installer tests and README tables | D | D3 *(built)*, D4 *(built)* | — |
 | E1 | The launcher test names in `build-and-run.md` | E | E1 *(built)* | — |
 | E2 | Launcher capture harness | E | A2 *(built)* | E4 |
 | E3 | End-to-end acceptance | E | B7, D1 *(built)*, D3 *(built)* | E4 |
@@ -884,7 +884,7 @@ each their own dependency because only half of each went out; §5.3 says which h
 
 The four groups those fall into, which is what §6 schedules:
 
-- **Make it ship** — D4, D5, and B7's remainder.
+- **Make it ship** — D5, and B7's remainder.
 - **The Controller tab's remaining lanes** — C1, C2, C6.
 - **Art and evidence** — A4, E2, E3, E4, and A5's recovery half.
 - **Finish M1** — done: A3 and A2 are built, and E1's one-line note with them. M1 was defined (§1.1)
@@ -1018,20 +1018,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > path to a deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
 
-#### D4 — First-run prefill from `install-manifest.toml`
-
-> **Goal.** On first run (no profile), derive defaults from the machine's install instead of asking:
-> find `rb_blitz.exe` next to the launcher, read `install-manifest.toml` (`[install]
-> directory`/`game_directory`/`payload_commit`, `[game_data] source`/`directory`/`ultimate_installed`),
-> prefill the General tab from it, and write the first profile only when the user confirms. Handle: no
-> manifest (installed by hand or by an older installer) → detect from the filesystem as B1 now does; a
-> manifest whose paths no longer exist → say which and offer to re-scan; a second launcher install
-> elsewhere.
-> **Deliverable.** The prefill module with unit tests over fixture manifests, plus README text.
-> **Verify.** Unit tests for the three cases; a manual run on an install produced by D1/D3.
-> **Don't.** Do not write a profile without the user's confirmation; do not fail to start when the
-> manifest is missing.
-
 #### D5 — Installer tests and README tables
 
 > **Goal.** Close the loop on the installer: extend `installer/tests/installer_tests.cpp` for the new
@@ -1118,7 +1104,6 @@ graph LR
   C2[C2 keyboard panel]
   C6[C6 safety rails]
   D5[D5 installer docs]
-  D4[D4 first run] --> D5
   A4 --> E4[E4 docs/audit]
   A5 --> E4
   B1 --> E4
@@ -1135,16 +1120,15 @@ graph LR
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
 | **1** | A5, B1, B7, C1, C2, C6 | six independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
-| **2** | A4, D4, E2 | A4 needs only the built P0.4, D4 only the built D1/B4, and E2 only the bar A2 built. |
-| **3** | D5 | needs D4. |
+| **2** | A4, E2 | A4 needs only the built P0.4 and E2 only the bar A2 built. |
+| **3** | D5 | needs D3/D4, both built; it is the installer's own tables and tests. |
 | **4** | E3, E4, one manual pass | E3 needs B7; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path over what is left: **B7 → E3 → E4** and the packaging lane **D4 → D5 → E4** — three
-steps each. Everything else is two steps or one.
+Critical path over what is left: **B7 → E3 → E4** — three steps. Everything else is two steps or one.
 
-If you only have one session at a time, run: **D4 → B7 → D5 → E2 → E3 → E4**, folding C1,
+If you only have one session at a time, run: **B7 → D5 → E2 → E3 → E4**, folding C1,
 C2, C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
@@ -1156,8 +1140,8 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 not a gap in it.
 
 **Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
-Controller tab's remaining lanes (C1, C2, C6), packaging (D4–D5), first-run prefill (D4), and the
-evidence lane (E2, E3, E4).
+Controller tab's remaining lanes (C1, C2, C6), packaging (D3–D5, all but D5 built), first-run
+prefill (D4, built), and the evidence lane (E2, E3, E4).
 
 ---
 
@@ -1183,7 +1167,7 @@ live. The rows that still name an open prompt are the ones §6 schedules.
 | ~~R13 per-device profiles survive~~ | **withdrawn with D17**: there are no per-device files to survive — one `[remap]` table keyed by control | — | removed |
 | R9/R10/R12 three tabs, M1 rows live | launcher shows General/Audio / Video/Controller; the tab's rows editable; General shows target + save + DLC | A1, B2, B3, B1 | built (built rows unchanged by D18 except the additions it lists) |
 | R14 no Experimental tab; mouse toggle on Controller | tab list has no Experimental; two boots with `mouse_ui_nav` off/on, log + behaviour | B3, B6, D14 | built |
-| R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4, E3 | **open** |
+| R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4 *(built)*, E3 | **open** (E3's run; the first-run prefill's "never overwrite an existing profile" is proven) |
 
 Anything not in this table is not verified, and should be said out loud rather than implied.
 

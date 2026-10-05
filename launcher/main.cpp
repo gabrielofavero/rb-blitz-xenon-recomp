@@ -25,6 +25,7 @@
 #include "general_report.h"
 #include "launcher/profile.h"
 #include "launcher/profile_path.h"
+#include "prefill.h"
 #include "schema_view.h"
 #include "shell.h"
 #include "ultimate_state.h"
@@ -103,6 +104,11 @@ struct Options {
   // B4 that otherwise only exists on screen.
   bool dump_profile = false;
   std::string dump_profile_path;
+  // --dump-prefill[=<path>] prints D4's first-run prefill - what install-manifest.toml says,
+  // whether it applies, and what it would seed - and leaves. It is how "an install the launcher
+  // has never seen" is checked on a build machine instead of by reading a folder by eye.
+  bool dump_prefill = false;
+  std::string dump_prefill_path;
   // --dump-display[=<path>] prints what the launcher made of the display - the usable bounds,
   // the content scale, the window size it would open at, and the face it loaded - and leaves.
   // A1's "legible at 100% and 200%" is otherwise only checkable from a screenshot.
@@ -134,6 +140,7 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kDumpPrefix = "--dump-layout=";
   constexpr std::string_view kDumpGeneralPrefix = "--dump-general=";
   constexpr std::string_view kDumpProfilePrefix = "--dump-profile=";
+  constexpr std::string_view kDumpPrefillPrefix = "--dump-prefill=";
   constexpr std::string_view kDumpDisplayPrefix = "--dump-display=";
   constexpr std::string_view kPrintCommandPrefix = "--print-command=";
   constexpr std::string_view kFocusLogPrefix = "--focus-log=";
@@ -146,6 +153,8 @@ Options ParseOptions(int argc, char** argv) {
       options.dump_general = true;
     } else if (argument == "--dump-profile") {
       options.dump_profile = true;
+    } else if (argument == "--dump-prefill") {
+      options.dump_prefill = true;
     } else if (argument == "--dump-display") {
       options.dump_display = true;
     } else if (argument == "--print-command") {
@@ -170,6 +179,10 @@ Options ParseOptions(int argc, char** argv) {
                argument.substr(0, kDumpProfilePrefix.size()) == kDumpProfilePrefix) {
       options.dump_profile = true;
       options.dump_profile_path = std::string(argument.substr(kDumpProfilePrefix.size()));
+    } else if (argument.size() > kDumpPrefillPrefix.size() &&
+               argument.substr(0, kDumpPrefillPrefix.size()) == kDumpPrefillPrefix) {
+      options.dump_prefill = true;
+      options.dump_prefill_path = std::string(argument.substr(kDumpPrefillPrefix.size()));
     } else if (argument.size() > kDumpGeneralPrefix.size() &&
                argument.substr(0, kDumpGeneralPrefix.size()) == kDumpGeneralPrefix) {
       options.dump_general = true;
@@ -275,6 +288,31 @@ int DumpProfile(const Options& options) {
   text += session.Dirty() ? "yes, a save would write\n" : "no, a save would not touch the file\n";
   text += rb_blitz::launcher::DescribePrecedence(session);
   return Emit(text, options.dump_profile_path, 0);
+}
+
+// The three facts the prefill needs, from the same detection the General tab uses.
+rb_blitz::launcher::PrefillInputs FirstRunInputs(const rb_blitz::launcher::GameRoots& roots,
+                                                 const rb_blitz::launcher::ProfileSession& session) {
+  rb_blitz::launcher::PrefillInputs inputs;
+  inputs.has_profile = session.has_file();
+  inputs.game_root_found = roots.game_root_found;
+  inputs.detected_game_dir = roots.game_root.string();
+  inputs.ultimate_available = rb_blitz::launcher::UltimateAvailable(
+      rb_blitz::launcher::DetectUltimateState(roots.game_root));
+  return inputs;
+}
+
+// D4's first run, decided without a window: what the install manifest says, whether it is
+// usable, and what it would seed. This is the evidence an install the launcher has never seen
+// is prefilled, without reading a settings folder by eye.
+int DumpPrefill(const Options& options) {
+  const fs::path launcher_dir = ExecutableDir();
+  const rb_blitz::launcher::GameRoots roots =
+      rb_blitz::launcher::DetectGameRoots(launcher_dir, options.game_data_root);
+  const rb_blitz::launcher::ProfileSession session = MakeDumpSession(options);
+  const rb_blitz::launcher::PrefillPlan plan =
+      rb_blitz::launcher::PlanPrefill(launcher_dir, FirstRunInputs(roots, session));
+  return Emit(rb_blitz::launcher::DescribePrefill(plan), options.dump_prefill_path, 0);
 }
 
 // What the launcher made of the display: the work area it clamps to, the content scale it
@@ -448,6 +486,9 @@ int main(int argc, char** argv) {
   if (options.dump_profile) {
     return DumpProfile(options);
   }
+  if (options.dump_prefill) {
+    return DumpPrefill(options);
+  }
   if (options.dump_display) {
     return DumpDisplay(options.dump_display_path);
   }
@@ -501,6 +542,18 @@ int main(int argc, char** argv) {
   // next to the launcher (B1). The General tab reads the Ultimate state from it.
   const rb_blitz::launcher::GameRoots roots =
       rb_blitz::launcher::DetectGameRoots(launcher_dir, options.game_data_root);
+
+  // D4: a first run seeds the General tab from the install manifest instead of making the user
+  // retype what the installer wrote down. Nothing is saved here - the profile is left dirty so
+  // the user's Save is what creates the file - and a profile that already exists is never
+  // touched (a second install shares one per-user file).
+  {
+    const rb_blitz::launcher::PrefillPlan prefill =
+        rb_blitz::launcher::PlanPrefill(launcher_dir, FirstRunInputs(roots, session));
+    if (rb_blitz::launcher::ApplyPrefill(session.profile(), prefill)) {
+      std::fprintf(stderr, "first run: %s\n", prefill.note.c_str());
+    }
+  }
 
   const float display_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   const float ui_scale = display_scale > 0.0f ? display_scale : 1.0f;
