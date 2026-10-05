@@ -842,7 +842,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Twenty-one prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty-two prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -868,10 +868,11 @@ session should read as instructions, and every deviation it would have described
 | A2 | `Shell::DrawBottomBar`'s help region, `schema_view`'s `SettingForEntry`/`RowActionVerb`/`FlattenHelpText`, `ProfilePanel::HelpText`, `ControllerTab::HelpText`, hover-adopts-the-ring on both blocks | D7: the hints follow the last device used, and the tooltip is re-wrapped to the bar's width rather than drawn as the file wrapped it |
 | D2 | the `launchericon` task, the two launcher `[Icons]` rows (Start menu always, desktop by task) and `/LAUNCHERICON` in `installer/setup.iss` + `installer/README.md` | D9 (the task defaults and the silent switch) |
 | D3 | the three-way finish page in `installer/setup.iss` (the `[Run]` entry removed, three radios, `/RUNATEND`) and `installer/README.md`'s finish-page section and manual checklist | D8 (the page and its three choices) |
-| D4 | `launcher/src/prefill.{h,cpp}`, the first-run application in `main.cpp`, `--dump-prefill`, the fixture-manifest cases in `tests/launcher_profile_session_tests.cpp`, the README's first-run section (the run on a real install is the §6 wave-4 manual pass's) | D4 (the General tab's rows; the prefill seeds the fields behind them) |
+| D4 | `launcher/src/prefill.{h,cpp}`, the first-run application in `main.cpp`, `--dump-prefill`, the fixture-manifest cases in `tests/launcher_profile_session_tests.cpp`, the README's first-run section (the run on a real install is the §6 wave-3 manual pass's) | D4 (the General tab's rows; the prefill seeds the fields behind them) |
 | B7 | the *Copy command line* bar button and failed-start modal, `LaunchFailureMessage`/`GameLogDirectory`/`LaunchReadiness` in `game_launch.{h,cpp}`, and the failing-start and readiness cases in `tests/launcher_launch_tests.cpp` | D18 (the launch contract §4.3 completes) |
+| D5 | the manifest/report field assertions in `installer/tests/installer_tests.cpp` and `installer/README.md`'s manifest-field list and "the helper has two callers" note | — |
 
-**Open.** Eleven prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+**Open.** Ten prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
 column means the prompt beside it names a finished prompt rather than an open one — B1 and E1 are
 each their own dependency because only half of each went out; §5.3 says which half.
 
@@ -883,7 +884,6 @@ each their own dependency because only half of each went out; §5.3 says which h
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
-| D5 | Installer tests and README tables | D | D3 *(built)*, D4 *(built)* | — |
 | E1 | The launcher test names in `build-and-run.md` | E | E1 *(built)* | — |
 | E2 | Launcher capture harness | E | A2 *(built)* | E4 |
 | E3 | End-to-end acceptance | E | B7 *(built)*, D1 *(built)*, D3 *(built)* | E4 |
@@ -891,7 +891,6 @@ each their own dependency because only half of each went out; §5.3 says which h
 
 The four groups those fall into, which is what §6 schedules:
 
-- **Make it ship** — D5.
 - **The Controller tab's remaining lanes** — C1, C2, C6.
 - **Art and evidence** — A4, E2, E3, E4, and A5's recovery half.
 - **Finish M1** — done: A3 and A2 are built, and E1's one-line note with them. M1 was defined (§1.1)
@@ -1003,25 +1002,15 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > path to a deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
 
-#### D5 — Installer tests and README tables
-
-> **Goal.** Close the loop on the installer: extend `installer/tests/installer_tests.cpp` for the new
-> payload entry (D1, already covered) and for the new manifest/report fields; update
-> `installer/README.md`'s tables (payload allow-list, layout, silent parameters, the finish-page
-> checklist D3 adds); and state that the helper is now also invoked by the launcher (B8) and which
-> three commands are allowed (§4.6).
-> **Deliverable.** Tests plus documentation, no behaviour change.
-> **Verify.** `ctest --preset installer-release` green; `installer\build.ps1` end to end.
-> **Don't.** Do not add a test that needs the network or a game dump.
-
 #### E1 — The launcher test names in `build-and-run.md`
 
-> **Goal.** One line of documentation. E1's substance is done — five launcher targets are wired into
+> **Goal.** One line of documentation. E1's substance is done — six launcher targets are wired into
 > CTest and green: `launcher_profile`, `launcher_general`, `launcher_session`, `launcher_remap`,
-> `launcher_launch`. The "the tests actually run" evidence exists for the newest of them (a wrong
-> expectation in `launcher_launch_tests.cpp` printed `[ FAIL ] … 1 of 30 checks failed` before it was
-> corrected); `docs/build-and-run.md`'s test section names the game's targets and not the launcher's.
-> **Deliverable.** The `build-and-run.md` line (or table row), naming the five and what each covers.
+> `launcher_launch`, `launcher_nav`. The "the tests actually run" evidence exists for the newest of
+> them (a wrong expectation in `launcher_launch_tests.cpp` printed `[ FAIL ] … 1 of 30 checks failed`
+> before it was corrected); `docs/build-and-run.md`'s test section names the game's targets and not
+> the launcher's.
+> **Deliverable.** The `build-and-run.md` line (or table row), naming the six and what each covers.
 > **Verify.** `ctest --test-dir out/build/win-amd64-release -N` lists exactly those names.
 > **Don't.** Do not re-document the harness; `tests/check.h` and the convention are already described.
 
@@ -1087,14 +1076,12 @@ graph LR
   C1[C1 devices]
   C2[C2 keyboard panel]
   C6[C6 safety rails]
-  D5[D5 installer docs]
   A4 --> E4[E4 docs/audit]
   A5 --> E4
   B1 --> E4
   C1 --> E4
   C2 --> E4
   C6 --> E4
-  D5 --> E4
   E2[E2 capture harness] --> E4
   E3[E3 e2e acceptance] --> E4
 ```
@@ -1105,15 +1092,14 @@ graph LR
 | --- | --- | --- |
 | **1** | A5, B1, C1, C2, C6 | five independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
 | **2** | A4, E2 | A4 needs only the built P0.4 and E2 only the bar A2 built. |
-| **3** | D5 | needs D3/D4, both built; it is the installer's own tables and tests. |
-| **4** | E3, E4, one manual pass | neither needs anything open; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
+| **3** | E3, E4, one manual pass | neither needs anything open; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path over what is left: **E3 → E4** — two steps, and D5 → E4, E2 → E4 and A4 → E4 are
-the same length. Everything else is one step.
+Critical path over what is left: **E3 → E4**, **E2 → E4** and **A4 → E4** — two steps each, so any
+of them can go first. Everything else is one step.
 
-If you only have one session at a time, run: **D5 → E2 → E3 → E4**, folding C1, C2,
+If you only have one session at a time, run: **E2 → E3 → E4**, folding C1, C2,
 C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
@@ -1125,8 +1111,8 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 not a gap in it.
 
 **Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
-Controller tab's remaining lanes (C1, C2, C6), packaging (D3–D5, all but D5 built), first-run
-prefill (D4, built), and the evidence lane (E2, E3, E4).
+Controller tab's remaining lanes (C1, C2, C6), and the evidence lane (E2, E3, E4). Packaging
+(D3–D5) and first-run prefill (D4) are built.
 
 ---
 
@@ -1138,11 +1124,11 @@ live. The rows that still name an open prompt are the ones §6 schedules.
 
 | Requirement | How it is proven | Where | State |
 | --- | --- | --- | --- |
-| R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests | D1, D5 | built (D5's tables still owed) |
+| R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests | D1, D5 | built |
 | R4 standalone uses launcher settings | four-boot precedence test (none / profile only / profile+`rb_blitz.toml` / profile+argv) | B5 | built; `--dump-profile` prints the precedence audit |
 | R4 defaults when never configured | boot with no profile: log shows compiled defaults | B5 | built |
-| R6 finish-page choice | three interactive installs + one silent | D3 | built — `ISCC` compiles it; the three installs and the silent one are the manual pass's (§6 wave 4), and `installer/README.md` carries the checklist |
-| R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 4). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
+| R6 finish-page choice | three interactive installs + one silent | D3 | built — `ISCC` compiles it; the three installs and the silent one are the manual pass's (§6 wave 3), and `installer/README.md` carries the checklist |
+| R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 3). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
 | R7 the bar follows the device | `device gamepad name="Virtual Pad" confirm=Cross cancel=Circle shoulders=L1/R1 start=Options` in the trace, and the capture reading `Cross Choose  Circle Quit  L1/R1 Switch tab  Options Launch`; the same bar before the pad moved read `Enter Choose  Esc Quit  Tab Switch tab`; a keyboard-only session (three Down, End, Home, Tab and Right, all in the trace) never left the key names | A3, A2 | built |
 | R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
 | R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2 | built — `scripts/frame_diff.ps1` was not needed: the tooltip text in the capture is the stronger evidence |
@@ -1170,7 +1156,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 | Remap scope creep | lane C was a whole project folded into this one (D13) | **spent**: C3/C4/C5 shipped inside the plan, and D17 narrowed them (one table, no per-device keying). What is left is C6, whose rails are what keep a bad mapping recoverable |
 | Art licensing | the cover is not ours | identical posture to the installer; build-time fetch, gitignored, absence supported, recorded in the audit |
 | Version skew | launcher and game can be different builds | the launch contract passes the profile path and the launcher prints `--version`; E3 asserts both |
-| Silent-install surprises | new tasks/params can change unattended behaviour | new parameter defaults are documented and tested (D5) |
+| Silent-install surprises | new tasks/params can change unattended behaviour | new parameter defaults are documented and tested (D5, built) |
 
 ---
 

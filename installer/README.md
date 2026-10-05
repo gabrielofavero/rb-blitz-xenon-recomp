@@ -78,11 +78,18 @@ implied to be covered:
 
 A failed install never starts anything.
 
-A copy of everything the helper did is left next to the game as
-`install-manifest.toml` (machine-readable, includes the source, the file count,
-the byte count, whether the fingerprints matched, and which executables the
-payload laid down) and `install-report.txt` (the same, for a human, with the
-helper's log appended).
+A copy of everything the helper did is left next to the game:
+
+* `install-manifest.toml` — machine-readable, and the record the launcher reads. It
+  carries `schema_version`, an `[install]` table (`installed_at`, `installer_version`,
+  `helper_version`, `payload_commit`, `directory`, `game_directory`, `windows_build`,
+  `architecture`), a `[payload]` component table (version, source, file and byte counts,
+  whether the fingerprints matched, the executables it laid down), a `[game_data]`
+  table (`source`, `directory`, `ultimate_installed`) and, when the mod was installed,
+  an `[ultimate]` table. The launcher's first-run prefill reads
+  `[install] game_directory` and `[game_data] ultimate_installed` from it, and
+  `payload_commit` is the build a bug report names (`launcher-plan` D4).
+* `install-report.txt` — the same, for a human, with the helper's log appended.
 
 ## Layout
 
@@ -387,6 +394,14 @@ commands are:
 | `finalize` | Write `install-manifest.toml` and `install-report.txt`. |
 | `uninstall-cleanup` | Remove what the helper wrote, `--keep-game-data` to keep the import. |
 | `version` | Print the versions it was built with. |
+
+**The helper has two callers.** The wizard uses every command above. The **launcher**
+also invokes it, but with exactly three commands (`launcher-plan` §4.6, B8):
+`install-ultimate` (its *Install Ultimate* action), and `verify-payload` /
+`verify-game` (its *Verify installation* action). All three are read-only checks
+apart from the mod install, which never takes administrator rights and never
+bundles the mod; importing game data or re-placing the payload stays the
+wizard's job, and the launcher points at the installer for those.
 
 Two properties matter for reliability:
 

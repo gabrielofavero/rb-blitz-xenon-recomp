@@ -74,6 +74,21 @@ std::string ReadFileOrEmpty(const fs::path& path) {
   return text;
 }
 
+// The manifest's own string writer escapes backslashes and quotes (install.cpp's TomlString), so
+// a Windows path appears doubled there. This is the same transform, used to build the expected
+// line rather than to guess at the escaping.
+std::string EscapedTomlString(std::string_view text) {
+  std::string out = "\"";
+  for (const char c : text) {
+    if (c == '\\' || c == '"') {
+      out.push_back('\\');
+    }
+    out.push_back(c);
+  }
+  out.push_back('"');
+  return out;
+}
+
 std::vector<std::uint8_t> PayloadBytes() {
   static const std::string body = "Rock Band Blitz: inflate round trip. 0123456789\n";
   std::string text;
@@ -1175,6 +1190,18 @@ static void TestPayloadAndFinalize() {
   // The manifest names the executables the payload laid down, so a support reader
   // can see the launcher was installed (R3/D1).
   CHECK_CONTAINS(manifest_text, "executables = [\"rb_blitz.exe\", \"rb_blitz_launcher.exe\"]");
+  // The fields the launcher's first-run prefill reads (launcher/src/prefill.cpp): the game
+  // folder the manifest records, and the game-data section it can fall back to. A support report
+  // also needs the install folder and the versions.
+  CHECK_CONTAINS(manifest_text, "installer_version = \"1.0.0-test\"");
+  CHECK_CONTAINS(manifest_text, "directory = " + EscapedTomlString(app.string()));
+  CHECK_CONTAINS(manifest_text, "game_directory = " + EscapedTomlString(game_root.string()));
+  CHECK_CONTAINS(manifest_text, "installed_at = \"");
+  CHECK_CONTAINS(manifest_text, "windows_build = ");
+  CHECK_CONTAINS(manifest_text, "architecture = \"");
+  CHECK_CONTAINS(manifest_text, "[game_data]");
+  CHECK_CONTAINS(manifest_text, "source = \"an extracted folder\"");
+  CHECK_CONTAINS(manifest_text, "directory = " + EscapedTomlString(game_root.string()));
 
   const std::string report_text = ReadFileOrEmpty(app / kInstallReportName);
   CHECK_CONTAINS(report_text, "Rock Band Blitz - install report");
@@ -1183,6 +1210,14 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(report_text, "test entry");
   CHECK_CONTAINS(report_text, "Commit     : " + std::string(kStandInCommit));
   CHECK_CONTAINS(report_text, "Executables: rb_blitz.exe, rb_blitz_launcher.exe");
+  // The report's header and its game-data section, which is what a person reads instead of the
+  // manifest's tables.
+  CHECK_CONTAINS(report_text, "Folder     : " + app.string());
+  CHECK_CONTAINS(report_text, "Game data  : " + game_root.string());
+  CHECK_CONTAINS(report_text, "Installer  : version 1.0.0-test (helper ");
+  CHECK_CONTAINS(report_text, "Source     : an extracted folder");
+  CHECK_CONTAINS(report_text, "Checks     :");
+  CHECK_CONTAINS(report_text, "  default.xex: ok");
 
   BeginCase("a build that did not record a commit says so");
 
