@@ -2,6 +2,13 @@
 # presenting new content and how much of the screen moves. Used during menu
 # bring-up where the interesting question is "did that input do anything?".
 #
+# Every pixel is walked in PowerShell, so the cost of a comparison is the frame's
+# area: a 3840x2160 pair takes minutes.
+#
+# What this script reads is what the file says, so the percentages it prints are
+# only meaningful when both files hold the same pixels - see the resolution trap
+# in Get-Pixels.
+#
 # Usage: .\scripts\frame_diff.ps1 -Files out\drive-ui\a.png,out\drive-ui\b.png
 param(
     [Parameter(Mandatory = $true)][string[]]$Files,
@@ -18,6 +25,14 @@ function Get-Pixels([string]$path) {
     $full = (Resolve-Path -LiteralPath $path).Path
     $src = [System.Drawing.Bitmap]::FromFile($full)
     $bmp = New-Object System.Drawing.Bitmap $src.Width, $src.Height, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    # The scratch bitmap is 96 dpi and a capture need not be - the 3840x2160 game
+    # window is recorded at 288, the desktop's scale - and DrawImageUnscaled draws
+    # at the image's *physical* size. Without this it draws a third-scale copy into
+    # the top-left corner and leaves the rest of the frame transparent, which
+    # compares a 3840x2160 pair as 1280x720 and reports a 17.768 % difference as
+    # 1.894 % with a bbox of 0,0 - 1279,718. Matching the source's resolution makes
+    # "unscaled" mean one pixel to one pixel.
+    $bmp.SetResolution($src.HorizontalResolution, $src.VerticalResolution)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.DrawImageUnscaled($src, 0, 0)
     $g.Dispose()

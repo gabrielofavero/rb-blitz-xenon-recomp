@@ -112,6 +112,17 @@ Two reasons, both practical:
   comparison is the frame's area: at `-CompareScale 4` a compare takes tens of seconds instead of
   minutes.
 
+**A capture is 288 dpi, and `frame_diff.ps1` used to ignore that.** The game window's PNG records the
+desktop's scale — 3840×2160 at 288 dpi — and the script copied each frame with `DrawImageUnscaled`
+into a 96-dpi scratch bitmap. That method draws at the image's *physical* size, so a third-scale copy
+landed in the top-left corner and the rest of the frame compared as empty: a 3840×2160 pair was
+compared as 1280×720 and a **17.768 %** difference was reported as **1.894 %**, with a bbox that
+stopped at `0,0 - 1279,718` — which is what gave it away. Fixed 2026-10-04 by matching the scratch
+bitmap's resolution to the source, so `-CompareScale 1` now diffs the frames as captured. **The floor
+table above is not affected**: it was measured at `-CompareScale 4`, where both frames are redrawn at
+an explicit pixel size into 96-dpi copies, and a re-run of that path reproduces it. Any *earlier*
+percentage `frame_diff.ps1` printed for a game capture was under-reported the same way.
+
 [observe_baseline.ps1](../../scripts/observe_baseline.ps1) is the driver that produces a whole
 baseline set with one scale: two passes per state (capture, then compare), the second pass's
 `percent` **being** that state's same-build floor. It writes `out/observations/baseline/<build>/`

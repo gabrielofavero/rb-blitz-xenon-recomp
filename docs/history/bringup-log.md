@@ -3814,8 +3814,22 @@ baseline metadata now records the scale, the capture size and the OCR verdict.
   compared against a baseline measured at the same scale - and reports `diff.settled` and
   `diff.gates_pass`, so a reader can see which rule ran. Every state whose measured pair exceeded the
   default carries `Settled = $false`: its diff is corroboration and its OCR needle is the control.
-  Verified end to end: a same-build title run at its ceiling's own scale now exits 0 with
-  `percent=1.894`, `settled=false`, `gates_pass=false`, `ocr.matched=true`.
+  Verified end to end: a same-build title run now exits 0 with `settled=false`, `gates_pass=false` and
+  `ocr.matched=true` where the old ceiling had failed it - and that run's `percent` is where the
+  `frame_diff` bug below was found.
+- **The verification found a bug in `frame_diff` itself.** The end-to-end check printed
+  `percent=1.894` for a pair that genuinely differed by **17.768 %**. `frame_diff.ps1` copies each
+  frame with `DrawImageUnscaled` into a 96 dpi scratch bitmap, and that method draws at the image's
+  *physical* size, so a capture recorded at 288 dpi - the 3840x2160 window at the desktop's 300 %
+  scale - became a third-scale copy in the top-left corner with the rest of the frame transparent.
+  The give-away was the bbox: `0,0 - 1279,718` on two 3840x2160 images. Fixed by matching the scratch
+  bitmap's resolution to the source, after which a direct re-run reported 17.768 %, maxDelta=255,
+  meanDelta=3.7665, bbox 0,0 - 3839,2157 - digit for digit what an independent counter returned - and
+  the regression checks hold (a file against itself is still 0 % / no change, and the scale-4 path
+  still reproduces ~18 %). The floors above are unaffected: they were measured at `-CompareScale 4`,
+  where both frames are redrawn at an explicit pixel size into 96 dpi copies. The default path was the
+  one that was wrong, so any earlier `frame_diff` percentage taken from a game capture was
+  under-reported by roughly the ninth the empty frame implies.
 - **`-Resume` is not a same-session guarantee.** The run that produced these numbers reused a capture
   taken 11 h earlier and compared it against a fresh one. The build matched, so it is a legitimate
   same-build pair; nothing else was checked, and the cross-scale warning the driver now prints
