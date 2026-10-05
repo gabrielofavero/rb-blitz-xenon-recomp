@@ -842,7 +842,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Twenty-two prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty-four prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -871,10 +871,12 @@ session should read as instructions, and every deviation it would have described
 | D4 | `launcher/src/prefill.{h,cpp}`, the first-run application in `main.cpp`, `--dump-prefill`, the fixture-manifest cases in `tests/launcher_profile_session_tests.cpp`, the README's first-run section (the run on a real install is the §6 wave-3 manual pass's) | D4 (the General tab's rows; the prefill seeds the fields behind them) |
 | B7 | the *Copy command line* bar button and failed-start modal, `LaunchFailureMessage`/`GameLogDirectory`/`LaunchReadiness` in `game_launch.{h,cpp}`, and the failing-start and readiness cases in `tests/launcher_launch_tests.cpp` | D18 (the launch contract §4.3 completes) |
 | D5 | the manifest/report field assertions in `installer/tests/installer_tests.cpp` and `installer/README.md`'s manifest-field list and "the helper has two callers" note | — |
+| E1 | the six launcher test targets named in `docs/build-and-run.md`'s new launcher section, with what each covers and the tree that has `BUILD_TESTING` on | — |
+| E2 | `scripts/capture_launcher.ps1` (the headless reports, the keyboard leg and the pad leg), `capture_window.ps1 -ClientArea`, the README's "How it is checked" section and the same `build-and-run.md` section | A2/D7: the bar's help is the *row's*, so the harness asserts on the presses that cross a row and reports the ones inside a row's choices |
 
-**Open.** Ten prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
-column means the prompt beside it names a finished prompt rather than an open one — B1 and E1 are
-each their own dependency because only half of each went out; §5.3 says which half.
+**Open.** Eight prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+column means the prompt beside it names a finished prompt rather than an open one — B1 is
+its own dependency because only half of it went out; §5.3 says which half.
 
 | ID | Prompt | Lane | Depends on | Unblocks |
 | --- | --- | --- | --- | --- |
@@ -884,18 +886,18 @@ each their own dependency because only half of each went out; §5.3 says which h
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
-| E1 | The launcher test names in `build-and-run.md` | E | E1 *(built)* | — |
-| E2 | Launcher capture harness | E | A2 *(built)* | E4 |
 | E3 | End-to-end acceptance | E | B7 *(built)*, D1 *(built)*, D3 *(built)* | E4 |
 | E4 | Docs, backlog, standing limits | E | all of the above | — |
 
 The four groups those fall into, which is what §6 schedules:
 
 - **The Controller tab's remaining lanes** — C1, C2, C6.
-- **Art and evidence** — A4, E2, E3, E4, and A5's recovery half.
-- **Finish M1** — done: A3 and A2 are built, and E1's one-line note with them. M1 was defined (§1.1)
-  as "navigable end to end with a pad, mouse and keyboard, with the bottom bar naming the focused
-  row's tooltip and the current control hints", and that is what the launcher does now (§7's rows).
+- **Art and evidence** — A4, E3, E4, and A5's recovery half.
+- **Finish M1** — done, and now completely: A3 and A2 are built, E1's test names and E2's
+  capture harness are in `docs/build-and-run.md`, and the launcher they describe is the one
+  §7's rows were measured on. M1 was defined (§1.1) as "navigable end to end with a pad,
+  mouse and keyboard, with the bottom bar naming the focused row's tooltip and the current
+  control hints", and that is what the launcher does now.
 
 ### 5.3 The prompts that are left
 
@@ -1002,37 +1004,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > path to a deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
 
-#### E1 — The launcher test names in `build-and-run.md`
-
-> **Goal.** One line of documentation. E1's substance is done — six launcher targets are wired into
-> CTest and green: `launcher_profile`, `launcher_general`, `launcher_session`, `launcher_remap`,
-> `launcher_launch`, `launcher_nav`. The "the tests actually run" evidence exists for the newest of
-> them (a wrong expectation in `launcher_launch_tests.cpp` printed `[ FAIL ] … 1 of 30 checks failed`
-> before it was corrected); `docs/build-and-run.md`'s test section names the game's targets and not
-> the launcher's.
-> **Deliverable.** The `build-and-run.md` line (or table row), naming the six and what each covers.
-> **Verify.** `ctest --test-dir out/build/win-amd64-release -N` lists exactly those names.
-> **Don't.** Do not re-document the harness; `tests/check.h` and the convention are already described.
-
-#### E2 — Launcher capture harness
-
-> **Goal.** A repeatable way to prove the launcher's UI, in the spirit of the existing capture
-> scripts: `scripts/capture_launcher.ps1` (start the launcher on a fixed profile and a fixed window
-> size, drive it with synthetic input — keyboard first, gamepad via SDL's virtual joystick if
-> available — and capture with `scripts/capture_window.ps1`) and assertions with
-> `scripts/frame_diff.ps1`: switching tabs changes the content region, focusing a row changes the
-> bottom bar's help region, focus moves one row per press. Exit non-zero on a failed assertion, like
-> `acceptance_song.ps1` does.
-> **Depends on A2** for the help region to assert on; the tab and focus assertions can be written
-> first.
-> **Deliverable.** The script, a paragraph in `launcher/README.md`, and a row in
-> `docs/build-and-run.md`'s verification list.
-> **Verify.** Run it twice and show both passing; deliberately break a tooltip and show it failing.
-> **Don't.** Do not assert on pixel-exact screenshots (fonts and DPI differ). Prefer the launcher's
-> own headless output where a text assertion is possible — `--dump-layout` (rows and now enum
-> choices), `--dump-general`, `--dump-profile`, `--dump-display`, `--print-command` all exist and need
-> no window.
-
 #### E3 — End-to-end acceptance
 
 > **Goal.** `scripts/acceptance_launcher.ps1`: from a built installer, install silently into a scratch
@@ -1082,7 +1053,6 @@ graph LR
   C1 --> E4
   C2 --> E4
   C6 --> E4
-  E2[E2 capture harness] --> E4
   E3[E3 e2e acceptance] --> E4
 ```
 
@@ -1091,16 +1061,18 @@ graph LR
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
 | **1** | A5, B1, C1, C2, C6 | five independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
-| **2** | A4, E2 | A4 needs only the built P0.4 and E2 only the bar A2 built. |
+| **2** | A4 | A4 needs only the built P0.4. E2 ran here and is built. |
 | **3** | E3, E4, one manual pass | neither needs anything open; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path over what is left: **E3 → E4**, **E2 → E4** and **A4 → E4** — two steps each, so any
-of them can go first. Everything else is one step.
+Critical path over what is left: **E3 → E4** and **A4 → E4** — two steps each, so either can go
+first. Everything else is one step.
 
-If you only have one session at a time, run: **E2 → E3 → E4**, folding C1, C2,
-C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
+If you only have one session at a time, run: **E3 → E4**, folding C1, C2,
+C6, A4, A5 and B1 in afterwards in any order that respects §6.1. E2 walked this road one step
+earlier and left the harness behind: `scripts/capture_launcher.ps1` is how a change to the ring,
+the bar or a tab's body is re-measured.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
 naming the focused row's tooltip and the current control hints" is what the launcher does: A3's pad
@@ -1111,7 +1083,8 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 not a gap in it.
 
 **Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
-Controller tab's remaining lanes (C1, C2, C6), and the evidence lane (E2, E3, E4). Packaging
+Controller tab's remaining lanes (C1, C2, C6), and the evidence lane's end-to-end half (E3, E4).
+E2's harness is built. Packaging
 (D3–D5) and first-run prefill (D4) are built.
 
 ---
@@ -1131,7 +1104,8 @@ live. The rows that still name an open prompt are the ones §6 schedules.
 | R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 3). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
 | R7 the bar follows the device | `device gamepad name="Virtual Pad" confirm=Cross cancel=Circle shoulders=L1/R1 start=Options` in the trace, and the capture reading `Cross Choose  Circle Quit  L1/R1 Switch tab  Options Launch`; the same bar before the pad moved read `Enter Choose  Esc Quit  Tab Switch tab`; a keyboard-only session (three Down, End, Home, Tab and Right, all in the trace) never left the key names | A3, A2 | built |
 | R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
-| R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2 | built — `scripts/frame_diff.ps1` was not needed: the tooltip text in the capture is the stronger evidence |
+| R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2, E2 | built — and now measured rather than read: `scripts/capture_launcher.ps1` diffs the bar's help strip, where a press that leaves a row moves 6.7-10.4% of it and the three choices of the launch target move 0% by design (the sentence is the row's) |
+| R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring one `--focus-log` entry, every press moves the body crop (0.19-4.28%), `Right` changes the title to *Audio / Video* and moves 16.0-18.1% of the body, `Left` returns to a 0% body, and a session that pressed nothing moves 0% of both crops | E2 | built |
 | R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist; E3 **open** |
 | R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8 | built; `tests/launcher_ultimate_state_tests.cpp` |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |

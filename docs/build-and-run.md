@@ -767,6 +767,76 @@ overlay owns the pointer, and the foreground requirement above) are in
 pitches, the pulse widths, the letterbox mapping — are in
 [bringup-log.md](history/bringup-log.md), in the "Mouse navigation" sections.
 
+### The launcher — `rb_blitz_launcher.exe`
+
+The launcher is the second executable this tree builds: the settings window that appears
+before the game and the shortcut the installer's finish page points at
+([launcher/README.md](../launcher/README.md) is its description; the plan is
+[plans/launcher-plan.md](plans/launcher-plan.md)). It sits beside `rb_blitz.exe` in the
+build directory and needs the same `.toml` and DLLs, so start it the same way — from the
+build directory, pointing at the game root and at a profile of your own:
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\build\win-amd64-release
+.\rb_blitz_launcher.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game `
+    --launcher_profile=d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\my-launcher.toml
+```
+
+`--launcher_profile` is step 1 of the order the launcher and the game share, so naming one
+keeps a run away from `%APPDATA%\rb_blitz\launcher.toml` — which is what the harnesses
+below do. What the launcher decided is also readable without a window: `--dump-layout`,
+`--dump-display`, `--dump-profile`, `--dump-general`, `--dump-prefill` and
+`--print-command` each write their report to a file and exit, so the launcher's own
+output is the first thing to reach for on a build machine that has no display to look at.
+
+**Its unit tests** are the same kind of host test as the game's — dependency-free, no
+window, no game image, a couple of seconds — and CTest names them after the module they
+cover:
+
+| CTest name | Target | What it covers |
+| --- | --- | --- |
+| `launcher_profile` | `rb_blitz_launcher_profile_tests` | D2's profile format: the parse, the patch-in-place writer, what a save preserves, and the path resolution order |
+| `launcher_general` | `rb_blitz_launcher_general_tests` | the General tab's decidable half: D5's four Ultimate states, and the path rules a row validates against |
+| `launcher_session` | `rb_blitz_launcher_session_tests` | B4's write path — save, dirty, reset, import/export, moving the settings folder — and D4's first-run prefill |
+| `launcher_remap` | `rb_blitz_launcher_remap_tests` | the `[remap]` vocabulary: the grammar, the serialiser, the round trip |
+| `launcher_launch` | `rb_blitz_launcher_launch_tests` | Contract 3: the argv the game is started with, the pre-spawn readiness check, and B7's failure sentence |
+| `launcher_nav` | `rb_blitz_launcher_nav_tests` | A3's pad rules (deadzone, repeat, binding table) and A2's walk from a ring entry to the row the bar names |
+
+```powershell
+cmake --build --preset win-amd64-debug
+ctest --test-dir out\build\win-amd64-debug -R launcher --output-on-failure
+```
+
+`win-amd64-debug` is the preset whose tree is configured with tests here
+(`out\build\win-amd64-release` was configured with `BUILD_TESTING=OFF`, which is why its
+CTest list is a leftover); the same run carries the game's own tests, so
+`ctest --test-dir out\build\win-amd64-debug -N` lists the six below beside them.
+
+**The captures** are [scripts/capture_launcher.ps1](../scripts/capture_launcher.ps1): it
+writes a fixture profile, runs the headless reports above, then starts the launcher on
+that profile and drives it with synthetic keys, capturing the client area
+(`capture_window.ps1 -ClientArea`) and measuring crops against each other with
+`frame_diff.ps1`. What it asserts is what text cannot: one press moves the ring one focus
+entry, a press that leaves a row rewrites the bar's help line, a tab switch changes the
+body and coming back returns to it, and a session with no input at all changes nothing.
+The launcher's ring has one entry per *choice* as well as per row, so a few presses
+inside the launch target's three choices are a 0% help diff by design — those numbers are
+in the summary rather than asserted on.
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+.\scripts\capture_launcher.ps1                 # headless + keyboard + pad legs
+.\scripts\capture_launcher.ps1 -SkipWindow     # the headless assertions alone
+```
+
+Frames, crops, both `--focus-log` traces and `summary.json` land in
+`out\launcher-capture\`; the run prints one line per check and exits non-zero if any
+failed. It needs an interactive desktop (the window is captured from the screen, and the
+launcher's window has to own the foreground before a key is sent), while `-SkipWindow`
+does not. The pad leg uses A3's virtual pad, so a controller is not required — and
+`--no-gamepad` is what keeps one that happens to be plugged in out of the keyboard leg's
+counts.
+
 ## 5. What a good run looks like (B-009, music)
 
 The hook logs only the first 8 AES calls, so a long run stays quiet. One combined

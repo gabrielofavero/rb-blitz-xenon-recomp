@@ -860,6 +860,35 @@ said so. It is gone now for a different reason — with the remap in place the l
 every device at once (D16), so "which backend" is not a user-facing choice any more, and the
 `input_backend` cvar keeps its own default.
 
+## How it is checked
+
+Three ways, in the order of what they cost:
+
+- **The unit tests**, named after the module they cover — `ctest -R launcher`. The six
+  targets, what each one pins and where the host harness lives are in
+  [build-and-run.md §3](../docs/build-and-run.md); the pattern is the same as the game's:
+  no window, no SDL, no game image.
+- **The headless reports.** `--dump-layout`, `--dump-display`, `--dump-profile`,
+  `--dump-general`, `--dump-prefill` and `--print-command` each write what the launcher
+  decided to a file and exit, before any window is created. They are the reason a claim
+  about a row, a path, a target or a command line is asserted on *text* on a build machine
+  instead of read out of a screenshot by eye.
+- **The captures.** [scripts/capture_launcher.ps1](../scripts/capture_launcher.ps1) starts
+  the launcher on a fixture profile, drives it with synthetic keys, captures the client
+  area and measures crops of it against each other with `frame_diff.ps1`. Its claims are
+  the three the text cannot carry: one press moves the ring one focus entry, a press that
+  leaves a row rewrites the bar's help line, and a tab switch changes the body — with a
+  session that pressed nothing as the control, so "everything is different" cannot pass as
+  "that action worked".
+
+The capture harness is also where the ring's shape is visible: a row that offers a choice
+counts as one focus entry *per choice* (the launch target's common/demo/ultimate are
+entries 0, 1 and 2 of the General tab), so a few presses inside it move the highlight and
+leave the bar's help saying the same sentence — the sentence belongs to the row. The
+harness reports those presses rather than asserting on them, and asserts on the ones that
+crossed a row boundary. `-SkipWindow` runs the two text layers alone, which needs no
+desktop.
+
 ## How to add a row
 
 1. Check the setting really exists — a cvar in the SDK or in `src/`. A row for a feature
