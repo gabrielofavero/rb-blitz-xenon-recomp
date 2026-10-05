@@ -3,10 +3,10 @@
 //
 // The profile block on the General tab (docs/plans/launcher-plan.md D2, prompt B4).
 //
-// It is the visible half of the write path: whether what is on screen is saved, a *Save* that
-// only writes what changed, a *Reset to defaults* that names exactly what it will remove before
-// it removes it, *Import*/*Export*, and *Change settings location*, which moves the folder the
-// profile lives in.
+// It is the visible half of the write path: a *Reset to defaults* that names exactly what it will
+// remove before it removes it, *Import*/*Export*, and *Change settings location*, which moves the
+// folder the profile lives in. *Save* is not here: it belongs to the bottom bar, next to Close
+// and Launch Game, because that is where a user looks for "did that stick?".
 //
 // It owns the modal and the three folder/file dialogs, so the tab above it only has to give it a
 // ring index and a `NavAction`. Everything it *decides* lives in profile_session.h; this file is
@@ -14,7 +14,9 @@
 //
 // The wording is deliberately quiet: a block that is fine says nothing at all. Every line it
 // does print is either an action's outcome or something the user has to act on, because a
-// status area that always says "Saved" is a line the eye learns to skip.
+// status area that always says "Saved" is a line the eye learns to skip. What it prints goes
+// through the caller - the bottom bar owns the line - so the two accessors below are how the
+// shell reads it.
 
 #pragma once
 
@@ -28,10 +30,10 @@ namespace rb_blitz::launcher {
 
 class ProfilePanel {
  public:
-  // Focusable items, so the caller can size the tab's ring: Save, Reset to defaults, Import,
-  // Export and Change settings location. A5's "complete every tab with the keyboard only" is
-  // why they are in the ring at all rather than being mouse-only buttons.
-  static constexpr std::size_t kRowCount = 5;
+  // Focusable items, so the caller can size the tab's ring: Reset to defaults, Import, Export
+  // and Change settings location. A5's "complete every tab with the keyboard only" is why they
+  // are in the ring at all rather than being mouse-only buttons.
+  static constexpr std::size_t kRowCount = 4;
 
   // Draws the block. `first_row` is the ring index of the first item. `action` is this frame's
   // NavAction, so Enter/Space on a focused item does what clicking it does.
@@ -41,6 +43,11 @@ class ProfilePanel {
   // instead of treating it as "quit" (A1 reads Escape as cancel).
   bool ModalOpen() const { return modal_open_; }
 
+  // The last action's outcome, and the last failure. The failure wins if both are set. Empty
+  // when there is nothing worth saying, which is the ordinary case.
+  const std::string& status_message() const { return status_; }
+  const std::string& status_error() const { return status_error_; }
+
   // SDL's dialog callbacks, which fire during the event pump. Public only because the C
   // callbacks need them; nothing else calls them.
   void OnImportChosen(const char* const* filelist);
@@ -48,9 +55,6 @@ class ProfilePanel {
   void OnSettingsDirChosen(const char* const* filelist);
 
  private:
-  // One line: whatever the last action did, or the one thing that is wrong. Empty when there is
-  // nothing to say, which is the ordinary case.
-  void DrawStatus(const ProfileSession& session);
   // `was_open` is the previous frame's ModalOpen(): true when the confirmation was already up,
   // which is what decides whether this frame's Enter or Escape belongs to it.
   void DrawResetModal(ProfileSession& session, bool was_open, NavAction action);

@@ -21,11 +21,30 @@ endif()
 set(RBBLITZ_SETTINGS_TOML "${CMAKE_CURRENT_SOURCE_DIR}/config/settings.toml")
 set(RBBLITZ_SETTINGS_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/out/generated/settings_table.h")
 
+# Which graphics backends the payload was built with decides which renderer the launcher may
+# offer: the GPU plugin cannot run a backend it was not compiled with, so the schema's
+# `choices_from = "gpu_backends"` row gets exactly this list - not a list written by hand that
+# could drift from the build. A payload with one backend therefore offers one renderer.
+set(RBBLITZ_BACKENDS "")
+if(REXGLUE_USE_D3D12)
+    list(APPEND RBBLITZ_BACKENDS d3d12)
+endif()
+if(REXGLUE_USE_VULKAN)
+    list(APPEND RBBLITZ_BACKENDS vulkan)
+endif()
+string(REPLACE ";" "," RBBLITZ_BACKENDS_ARG "${RBBLITZ_BACKENDS}")
+
+set(RBBLITZ_SETTINGS_ARGS)
+if(RBBLITZ_BACKENDS)
+    list(APPEND RBBLITZ_SETTINGS_ARGS "--backends=${RBBLITZ_BACKENDS_ARG}")
+endif()
+
 add_custom_command(
     OUTPUT "${RBBLITZ_SETTINGS_HEADER}"
     COMMAND $<TARGET_FILE:rb_blitz_embed_settings>
             --settings "${RBBLITZ_SETTINGS_TOML}"
             --header "${RBBLITZ_SETTINGS_HEADER}"
+            ${RBBLITZ_SETTINGS_ARGS}
     DEPENDS rb_blitz_embed_settings "${RBBLITZ_SETTINGS_TOML}"
     COMMENT "Embedding the launcher settings schema"
     VERBATIM)
@@ -52,6 +71,7 @@ set(RBBLITZ_LAUNCHER_SOURCES
     main.cpp
     src/controller_tab.cpp
     src/game_config.cpp
+    src/game_launch.cpp
     src/general_report.cpp
     src/general_tab.cpp
     src/install_ultimate.cpp
@@ -117,4 +137,33 @@ if(WIN32)
     # B8 opens the OS shell (the default browser for the pinned release URL, Explorer for the
     # folder a manual install goes into) through ShellExecuteW.
     target_link_libraries(rb_blitz_launcher PRIVATE shell32)
+endif()
+
+# B7's launch contract, as a test: the argv the launcher hands the game is built from the
+# schema, so this target needs the generated table - which is why it lives here rather than
+# beside the other launcher tests in the root CMakeLists.txt. No ImGui, no SDL, no process:
+# BuildLaunchCommand is pure string work.
+if(BUILD_TESTING)
+    add_executable(rb_blitz_launcher_launch_tests
+        "${CMAKE_SOURCE_DIR}/tests/launcher_launch_tests.cpp"
+        src/game_launch.cpp
+        src/game_config.cpp
+        src/profile_session.cpp
+        "${CMAKE_SOURCE_DIR}/src/launcher/profile.cpp"
+        "${CMAKE_SOURCE_DIR}/src/launcher/profile_path.cpp"
+    )
+    target_include_directories(rb_blitz_launcher_launch_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/out/generated")
+    add_dependencies(rb_blitz_launcher_launch_tests rb_blitz_launcher_settings)
+    # Next to the launcher and the game, like every other test executable this tree builds.
+    set_target_properties(rb_blitz_launcher_launch_tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:rb_blitz>")
+    if(MSVC)
+        target_compile_options(rb_blitz_launcher_launch_tests PRIVATE /W4 /utf-8 /EHsc)
+    else()
+        target_compile_options(rb_blitz_launcher_launch_tests PRIVATE -Wall -Wextra)
+    endif()
+    add_test(NAME launcher_launch COMMAND rb_blitz_launcher_launch_tests)
 endif()

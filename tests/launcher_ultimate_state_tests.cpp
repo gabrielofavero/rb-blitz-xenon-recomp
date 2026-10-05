@@ -189,6 +189,30 @@ void TestGameRootDetection(Scratch& scratch) {
   CHECK_TRUE(here.game_root_found);
   CHECK_STR_EQ(here.game_root.string(), dump.string());
 
+  BeginCase("a build tree is found by walking up from the launcher");
+
+  // `out\build\<preset>` is three levels below the checkout, which is where the `game` folder
+  // really is during development: this is the case the launcher was reporting as "install
+  // Ultimate" before the search went up the tree.
+  const fs::path checkout = scratch.Make("checkout");
+  WriteText(checkout / "game" / "default.xex", "the user's own executable");
+  const fs::path preset = checkout / "out" / "build" / "win-amd64-release";
+  std::error_code made;
+  fs::create_directories(preset, made);
+  const GameRoots above = DetectGameRoots(preset, {});
+  CHECK_TRUE(above.game_root_found);
+  CHECK_STR_EQ(above.game_root.string(), (checkout / "game").string());
+
+  BeginCase("the nearest game wins: beside the launcher, then up the tree");
+
+  const fs::path root = scratch.Make("nearest");
+  WriteText(root / "game" / "default.xex", "further up");
+  const fs::path nested = root / "deeper" / "here";
+  WriteText(nested / "game" / "default.xex", "beside the launcher");
+  const GameRoots nearest = DetectGameRoots(nested, {});
+  CHECK_TRUE(nearest.game_root_found);
+  CHECK_STR_EQ(nearest.game_root.string(), (nested / "game").string());
+
   BeginCase("nothing to find is reported, not guessed at");
 
   const fs::path bare = scratch.Make("bare");

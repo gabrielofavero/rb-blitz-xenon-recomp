@@ -5,11 +5,11 @@
 //
 // It draws the three rows §1.1 gives M1 - the launch target with the payload availability the
 // files say, and the save and DLC locations - and edits them in the session's profile, which
-// B4's block at the end of the tab is what writes to disk. The launch target is drawn as one
-// stacked entry per choice, and when the payload is not there the Ultimate entry is replaced by
-// the *Install Ultimate* action (D5's "never hard-disable", B8), which drives the installer's
-// own helper. The game-directory override and *Verify installation* are D4's later rows, not
-// M1's.
+// the settings-file block at the end of the tab is what writes to disk. The launch target is
+// drawn as one stacked entry per choice, and when the payload is not there the Ultimate entry
+// is replaced by the *Install Ultimate* action (D5's "never hard-disable", B8), which drives the
+// installer's own helper. The game-directory override and *Verify installation* are D4's later
+// rows, not M1's.
 //
 // The rules are not re-implemented here: the payload state comes from ultimate_state.h, the
 // value rules from path_validate.h (which is src/fs/dlc_layout.h and src/fs/path_policy.h),
@@ -61,6 +61,11 @@ class GeneralTab {
   // progress and its result. The shell leaves Escape to it instead of reading it as "leave the
   // launcher" (A1).
   bool ModalOpen() const { return panel_.ModalOpen() || install_modal_open_; }
+
+  // What the profile panel's last action did, and its last failure. The bottom bar draws them
+  // (A2 owns the bar), so they are read rather than printed here.
+  const std::string& status_message() const;
+  const std::string& status_error() const;
 
   // SDL's dialog callback target. Public only because the C callback needs it; nothing else
   // in the launcher calls it.

@@ -408,11 +408,11 @@ held has an obvious home.
 | Guide button pass-through | `guide_button` | **Controller → Input** | exists |
 | Input form | `input_backend` | **Controller → Input** | exists; changing it needs a restart |
 | Ultimate content device / song blacklist / disk-error latch edits | `ultimate_patches` bits 1/2/4 | **General → Ultimate (advanced)** | exists; M1 leaves the group **named but empty** |
-| Frame readback for hover alignment | `d3d12_readback_resolve` | **Graphics → Developer**, hidden unless `--show-dev-settings` | exists, developer-only; out of M1 |
-| Developer overlays (F3 / console / log level) | `bind_debug`, `log_level` | **Graphics → Developer** (same disclosure) | exists; out of M1 |
-| Master volume | `audio_volume` | **Graphics → Audio** | **does not exist** in the SDK yet |
+| Frame readback for hover alignment | `d3d12_readback_resolve` | **Audio / Video → Developer**, hidden unless `--show-dev-settings` | exists, developer-only; out of M1 |
+| Developer overlays (F3 / console / log level) | `bind_debug`, `log_level` | **Audio / Video → Developer** (same disclosure) | exists; out of M1 |
+| Master volume | `audio_volume` | **Audio / Video → Audio** | **does not exist** in the SDK yet |
 | Skip stream checksum validation | — | **not offerable**: it is a guest patch, flagged P1 in [docs/rb3-references.md](../rb3-references.md) §2.6; offer it only after that patch exists | — |
-| Shader cache / readback resolver | `d3d12_readback_resolve` | **Graphics → Developer** (same row as above, not a second one) | dev-only, hide by default |
+| Shader cache / readback resolver | `d3d12_readback_resolve` | **Audio / Video → Developer** (same row as above, not a second one) | dev-only, hide by default |
 
 Two rules keep "leave the unimplemented categories blank" honest:
 
@@ -464,18 +464,22 @@ phases.
 Decided 2026-10-05, from reading the first running build. Amended the same day after the second
 round of feedback (below).
 
-- **The name is "Rock Band Blitz Launcher".** The window title, the in-window heading and the ImGui
-  window id all use it; the title keeps the ` — <tab>` suffix, which is the one piece of launcher state
-  a script can read back (`MainWindowTitle`), and it is what makes "tab through every tab" checkable.
-  Tab names are capitalized where a person reads them (`General`, not the schema's `general` key).
+- **The name is "Rock Band Blitz Launcher".** The window title and the ImGui window id all use it; the
+  title keeps the ` — <tab>` suffix, which is the one piece of launcher state a script can read back
+  (`MainWindowTitle`), and it is what makes "tab through every tab" checkable. Tab names are
+  capitalized where a person reads them (`General`, not the schema's `general` key).
+  > **Amended 2026-10-05 (D18).** There is no in-window heading any more: the frame's own title bar
+  > carries the name, and the legend that used to sit beside it is gone with it.
 - **The window opens at 1280×840 in logical points**, clamped to the display's work area less its own
   frame, and its **minimum size is 720×520 points** — a minimum, not a fixed size, so the window is
   draggable, maximizable from the frame's own maximize box, and restorable. A size the profile already
   holds is used as it is, so a user's own resize is respected.
-- **A tab taller than the window scrolls, under a fixed strip.** The strip and the unsaved-changes
-  marker stay put and the rows live in a scrolling child, so the wheel and the ring's
-  `SetScrollHereY` both move the rows and never the strip. The Graphics and Controller tabs are both
-  taller than a small window, which is what this is for.
+- **A tab taller than the window scrolls, under a fixed strip.** The strip and the bottom bar stay put
+  and the rows live in a scrolling child, so the wheel and the ring's `SetScrollHereY` both move the
+  rows and never the chrome. The Audio / Video and Controller tabs are both taller than a small window,
+  which is what this is for.
+  > **Amended 2026-10-05 (D18).** The unsaved-changes marker is not in the strip any more: it is the
+  > left half of the bottom bar, beside Save, and the window opens maximized.
 - **Spacing is set once, in the style**, before `ScaleAllSizes` multiplies it by the display's scale:
   a settings dialog read at a glance gets air between rows and buttons rather than ImGui's dense
   defaults.
@@ -541,6 +545,69 @@ feedback changed. Where a prompt below still describes something else, this is t
   point §2.5 identifies" is this one.
 - **`input_backend` is not a row.** With the audible outcome "every device is accepted", selecting a
   backend is not a user-facing choice (D13's Controller tab keeps its two real settings).
+
+### D18 — The window's own chrome, a Renderer row, and launching the game
+
+Decided 2026-10-05, from the fourth round of feedback. Amends D16 (the window), D4/D5 (the General
+tab), D14 (empty groups), D12 (the Graphics rows) and §4.3 (which B7 now implements), and supersedes
+their older wording where they disagree.
+
+- **The window is the launcher's chrome, and nothing else is.** The in-window heading and the key
+  legend are gone: the frame's own title bar says "Rock Band Blitz Launcher — <tab>", which is where a
+  user looks for a window's name, and the bottom bar's controls say what they do. A strip of
+  instructions above the content is text a user reads once and scrolls past for the rest of the
+  launcher's life; the keyboard table stays in `launcher/README.md`, where it is looked up on purpose.
+- **It opens expanded.** `SDL_MaximizeWindow` runs after `SDL_ShowWindow` — maximizing a *hidden*
+  window is a request Windows answers when the window appears, and it did not, leaving the window
+  merely clamped to the work area with the maximize box already spent. Because a maximized window
+  reports the work area rather than the size the user chose, the exit-time geometry write is skipped
+  while it is: what the profile remembers is what to restore to, not "as big as this display".
+- **The bottom bar is the session's, and it is the only place a session ends.** *Close* (leave), *Save*
+  (write the profile), *Launch Game* (B7). The state of the settings file is on its left: "Unsaved
+  changes" in warning colour, a file that could not be parsed in error colour, the last action's
+  outcome otherwise, and nothing at all when there is nothing to say. **Save moves out of the
+  settings-file block** and onto the bar — it is not a property of one tab's rows, and a Save button
+  at the end of a list is both easy to miss and easy to mistake for "save this tab". The block keeps
+  *Reset to defaults*, *Import*, *Export* and *Change settings location*. A2's other half, the focused
+  row's tooltip, is still owed.
+- **The Graphics tab is renamed Audio / Video.** Its schema key stays `graphics` — the `.toml`'s
+  business, not the user's — and `DisplayTabName` is the one place that turns a tab key into a label.
+  "Audio / Video" is also what the tab actually is: it has held the audio rows since B2.
+- **A category with nothing to show is hidden outright, name and note included.** D14 allowed either;
+  this settles it. The General tab's *Ultimate (advanced)*, the Graphics tab's *Developer* and the
+  Controller tab's *Devices*/*Keyboard*/*Manual* are declared in the schema, counted and named by
+  `--dump-layout`, and drawn nowhere. The one "this is missing" message that earns its space is the
+  Ultimate *install* action, which is a button rather than a sentence.
+- **The game is looked for up the tree.** The installer's layout is `<launcher>\game`; a development
+  tree puts the same folder at the checkout root, three levels above `out\build\<preset>`. Before the
+  search walked up, a launcher run from the build folder reported "Ultimate is not installed" however
+  complete the payload was — the bug this decision was written from. Six levels, nearest match wins,
+  an explicit `--game_data_root` still overrides everything.
+- **The renderer is a row, and its choices come from the build.** `gpu_backend` is this project's cvar
+  (`src/main.cpp`), acted on by `RbBlitzApp::SelectGpuBackend`, which loads the GPU plugin with the
+  named backend and gets out of the way for the empty/"any" value the SDK itself uses. The Renderer
+  row takes its `choices` from **what CMake compiled in** (`choices_from = "gpu_backends"`, fed by
+  `--backends=`), because offering a backend the plugin does not have would be offering a renderer that
+  cannot run. This replaces D12's "there is no row for it: a setting nobody can act on would be a lie" —
+  with the cvar, the app-side load and the build-fed choices, somebody can act on it.
+  > **Amended 2026-10-05 (Vulkan enabled).** The five submodules the Windows Vulkan path needs were
+  > initialised and the tree is configured with `REXGLUE_USE_D3D12=ON` **and** `REXGLUE_USE_VULKAN=ON`,
+  > so the row really offers both — verified by booting the game on each backend and by a capture of the
+  > Vulkan-rendered title screen. That made a second failure mode reachable, so `SelectGpuBackend` now
+  > also probes the Vulkan *loader* before committing: the SDK loads `vulkan-1.dll` at run time, so on a
+  > machine with no Vulkan driver the plugin loads fine and only fails inside presentation setup, where
+  > there is nothing left to fall back to. With the probe the promise above holds for both cases — the
+  > payload not having the backend, and the machine not being able to run it — and both are logged.
+  > `--dump-layout` now prints every enum's `choices`, so "does this payload offer Vulkan?" is
+  > answerable headlessly.
+- **Anti-aliasing is two rows, not one.** `native_2x_msaa` (resolve the title's own MSAA natively) and
+  `swap_post_effect` (`none`/`fxaa`/`fxaa_extreme`, a post-process pass) are independent mechanisms;
+  one "quality" enum that quietly set both would misdescribe what it does.
+- **B7 is implemented**: `BuildLaunchCommand` (pure, contract 3), `GameProcess`
+  (`CreateProcessW`, the install folder as the working directory, the handle kept so a second launch is
+  refused while the game runs), `--print-command` as the dry run, and the launcher saving first when
+  something is unsaved. What B7 still owes: the "Copy command line" affordance, the game's log path in
+  a failure message, and E3's end-to-end assertion against a real boot.
 
 ---
 
@@ -627,7 +694,8 @@ launcher's file is not destroyed by an older one.
 > **Amended 2026-10-05 (built).** `[window]` holds 1280×840, `[remap]` is real and is one table keyed by
 > control rather than the per-device `[devices."<GUID>"]` blocks sketched below, and where the file lives
 > can be moved by the pointer file D2 describes. D17 has the reasoning; the `[devices]` shape waits for
-> the case that needs it.
+> the case that needs it. D18 adds `[settings] gpu_backend` and `[settings] swap_post_effect`, the two
+> rows the fourth round of feedback asked for.
 
 ### 4.3 The launch contract (Contract 3)
 
@@ -644,6 +712,14 @@ rb_blitz.exe
 
 Rules: quote every path; never pass an empty flag; log the exact argv in the launcher's own log and in a
 "Copy command line" affordance, because that is the first thing a bug report needs.
+
+> **Implemented 2026-10-05 (B7, D18).** `BuildLaunchCommand` (`launcher/src/game_launch.cpp`) builds
+> exactly this and `--print-command` prints it, so the contract is a unit test
+> (`tests/launcher_launch_tests.cpp`) as well as a launch. Two additions the launcher makes: the
+> executable is the command line's first token as well as `CreateProcessW`'s `lpApplicationName`
+> (the C runtime reads `argv` from the one string), and *Launch Game* saves first when something is
+> unsaved. The "Copy command line" affordance and the game's log path in a failure message are still
+> owed.
 
 ### 4.4 The packaging contract (Contract 4)
 

@@ -19,10 +19,6 @@
 namespace rb_blitz::launcher {
 namespace {
 
-// Not constexpr: ImVec4 has no constexpr constructor.
-const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
-const ImVec4 kError{0.95f, 0.42f, 0.38f, 1.0f};
-
 constexpr const char* kResetPopup = "Reset to defaults?";
 constexpr const char* kFileFilterName = "Launcher profile";
 
@@ -146,32 +142,6 @@ bool ProfilePanel::Item(std::size_t index, const FocusModel& ring, NavAction act
   return clicked || focused;
 }
 
-void ProfilePanel::DrawStatus(const ProfileSession& session) {
-  // A block that is fine says nothing: no file path, no "Saved". The path is already the value
-  // the *Change settings location* button sits next to, and the two things worth printing are
-  // the ones that need the user to do something - a file that could not be read, and changes
-  // that are not written yet.
-  if (!session.CanSave()) {
-    ImGui::PushStyleColor(ImGuiCol_Text, kError);
-    ImGui::TextWrapped("This settings file was not understood, so nothing will be written over "
-                       "it. Fix it by hand, or import a profile you trust. %s",
-                       session.Refusal().c_str());
-    ImGui::PopStyleColor();
-  } else if (session.Dirty()) {
-    ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-    ImGui::TextUnformatted("Unsaved changes");
-    ImGui::PopStyleColor();
-  }
-
-  if (!status_error_.empty()) {
-    ImGui::PushStyleColor(ImGuiCol_Text, kError);
-    ImGui::TextWrapped("%s", status_error_.c_str());
-    ImGui::PopStyleColor();
-  } else if (!status_.empty()) {
-    ImGui::TextDisabled("%s", status_.c_str());
-  }
-}
-
 void ProfilePanel::DrawResetModal(ProfileSession& session, bool was_open, NavAction action) {
   if (ImGui::BeginPopupModal(kResetPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     const ResetPlan plan = session.WhatResetWouldRemove();
@@ -221,26 +191,16 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   ApplyPendingDialogs(session);
 
   ImGui::SeparatorText("Settings file");
-  DrawStatus(session);
 
-  // One row of buttons with air between them, in the order they are meant to be read: write what
-  // is on screen, then the two ways a profile moves between machines, then where it lives.
+  // One row of buttons with air between them, in the order they are meant to be read: what a
+  // reset would remove, the two ways a profile moves between machines, then where it lives.
+  // *Save* is the bottom bar's (it is not a property of this block), which is why the ring
+  // here starts at Reset.
   const bool usable = session.CanSave();
   if (!usable) {
     ImGui::BeginDisabled();
   }
-  if (Item(first_row, ring, live, "Save")) {
-    const SaveOutcome outcome = session.Save();
-    if (!outcome.ok) {
-      status_.clear();
-      status_error_ = "Cannot save: " + outcome.error;
-    } else {
-      status_error_.clear();
-      status_ = outcome.wrote ? "Saved" : "Nothing to save: the file already matches";
-    }
-  }
-  ImGui::SameLine();
-  if (Item(first_row + 1, ring, live, "Reset to defaults")) {
+  if (Item(first_row, ring, live, "Reset to defaults")) {
     ImGui::OpenPopup(kResetPopup);
   }
   if (!usable) {
@@ -249,7 +209,7 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   // Import stays live even when the file on disk did not parse: reading a profile the user
   // trusts is the way out of a damaged one.
   ImGui::SameLine();
-  if (Item(first_row + 2, ring, live, "Import")) {
+  if (Item(first_row + 1, ring, live, "Import")) {
     const SDL_DialogFileFilter filters[] = {{kFileFilterName, "toml"}, {"All files", "*"}};
     const std::string start = session.path().parent_path().string();
     SDL_ShowOpenFileDialog(&ImportChosen, this, nullptr, filters, SDL_arraysize(filters),
@@ -259,7 +219,7 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   if (!usable) {
     ImGui::BeginDisabled();
   }
-  if (Item(first_row + 3, ring, live, "Export")) {
+  if (Item(first_row + 2, ring, live, "Export")) {
     const SDL_DialogFileFilter filters[] = {{kFileFilterName, "toml"}, {"All files", "*"}};
     const std::string start = session.path().parent_path().string();
     SDL_ShowSaveFileDialog(&ExportChosen, this, nullptr, filters, SDL_arraysize(filters),
@@ -268,7 +228,7 @@ void ProfilePanel::Draw(std::size_t first_row, ProfileSession& session, FocusMod
   ImGui::SameLine();
   // The folder picker opens at the folder the settings are in, so choosing a location starts
   // from the answer to "where are they now?" rather than from nowhere.
-  if (Item(first_row + 4, ring, live, "Change settings location")) {
+  if (Item(first_row + 3, ring, live, "Change settings location")) {
     const std::string start = session.settings_dir().string();
     SDL_ShowOpenFolderDialog(&SettingsDirChosen, this, nullptr,
                              start.empty() ? nullptr : start.c_str(), false);

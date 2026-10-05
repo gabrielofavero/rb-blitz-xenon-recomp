@@ -15,6 +15,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// How far up the tree a `<dir>\game` is looked for after the launcher's own folder. One level
+// covers the installer's layout, and three cover a build tree (`out\build\<preset>`); the rest
+// is slack for a deeper output directory. The limit is what keeps this from becoming a search
+// of the whole drive.
+constexpr int kGameSearchDepth = 6;
+
 // A directory that holds the game: the entry point, or the archive folder the entry point
 // needs. Both spellings the tree uses are accepted because the installer's layout is the
 // first and a hand-made dump the second.
@@ -47,17 +53,40 @@ GameRoots DetectGameRoots(const fs::path& launcher_dir, std::string_view overrid
     return roots;
   }
 
-  const fs::path beside_game = launcher_dir / "game";
-  if (LooksLikeGameRoot(beside_game)) {
-    roots.game_root = beside_game;
+  // The installer's layout: `<launcher dir>\game`. A development build tree is the same layout
+  // seen from further down - `out\build\<preset>` has the checkout's own `game` three levels
+  // above it - so the search continues up the tree, which is what makes the launcher say
+  // "Ultimate is ready" when it is run from the build folder instead of an install.
+  const auto find_beside = [](const fs::path& base) {
+    const fs::path candidate = base / "game";
+    return LooksLikeGameRoot(candidate) ? candidate : fs::path{};
+  };
+
+  if (fs::path found = find_beside(launcher_dir); !found.empty()) {
+    roots.game_root = std::move(found);
     roots.game_root_found = true;
   } else if (LooksLikeGameRoot(launcher_dir)) {
     roots.game_root = launcher_dir;
     roots.game_root_found = true;
   } else {
-    // The installer's layout, so the tab still has somewhere concrete to look and to offer
-    // as a default, with game_root_found saying it was not actually there.
-    roots.game_root = beside_game;
+    fs::path ancestor = launcher_dir;
+    for (int level = 0; level < kGameSearchDepth; ++level) {
+      const fs::path parent = ancestor.parent_path();
+      if (parent.empty() || parent == ancestor) {
+        break;  // the filesystem root
+      }
+      ancestor = parent;
+      if (fs::path found = find_beside(ancestor); !found.empty()) {
+        roots.game_root = std::move(found);
+        roots.game_root_found = true;
+        break;
+      }
+    }
+  }
+  if (!roots.game_root_found) {
+    // The installer's layout, so the tab still has somewhere concrete to look and to offer as a
+    // default, with game_root_found saying it was not actually there.
+    roots.game_root = launcher_dir / "game";
   }
   roots.ultimate_root = rb_blitz::ultimate::ResolvePayloadRoot("", roots.game_root);
   return roots;

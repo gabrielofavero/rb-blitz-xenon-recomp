@@ -117,8 +117,11 @@ Both are cached like any CMake option, so turn them back off by naming them
   can only report that, not judge it.
 - **Python.** The diagnostics under `scripts/*.py` and the installer helper use it;
   the build does not.
-- **The graphics driver and the machine itself.** Frame pacing and the D3D12 path are
-  properties of the host too ([known-issues.md](known-issues.md)).
+- **The graphics driver and the machine itself.** Frame pacing, and whether a graphics
+  backend can run at all, are properties of the host too ([known-issues.md](known-issues.md)):
+  this tree compiles both D3D12 and Vulkan, and the launcher's *Renderer* row picks between
+  them, with the Vulkan loader probed at boot so a machine without a Vulkan driver falls back
+  to D3D12 instead of failing.
 - **Byte-for-byte reproducibility.** The check says which toolchain built a binary, not
   that two machines produce identical bytes; the build stamp carries a timestamp, and no
   build-id or timestamp pinning is attempted.

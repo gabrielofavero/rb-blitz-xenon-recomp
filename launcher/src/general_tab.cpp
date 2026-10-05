@@ -74,6 +74,10 @@ std::string EffectivePath(const settings::Setting& setting, const Profile& profi
 
 GeneralTab::GeneralTab(GameRoots roots) : roots_(std::move(roots)) {}
 
+const std::string& GeneralTab::status_message() const { return panel_.status_message(); }
+
+const std::string& GeneralTab::status_error() const { return panel_.status_error(); }
+
 GeneralTab::PathRowState& GeneralTab::RowStateFor(std::string_view key) {
   for (PathRowState& state : path_rows_) {
     if (state.key == key) {
@@ -157,9 +161,9 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
     }
 
     const std::size_t index = first_row + 2;
-    // The gap is the point: the two radios above choose the game, and this is the thing to do
-    // about it, so it must not read as a third choice in the same list.
-    ImGui::Spacing();
+    // A gap, but a small one: the two radios above choose the game and this is the thing to do
+    // about it, so it must not read as a third choice in the same list - while still reading as
+    // part of the same row rather than as a separate block.
     ImGui::Spacing();
     const bool focused = !ring.Empty() && ring.Index() == index;
     if (focused) {
@@ -353,17 +357,9 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
 
   std::size_t row_index = 0;
   for (const LayoutGroup& group : tab.groups) {
-    // A category this build has nothing for is hidden outright rather than naming itself.
-    if (group.unavailable) {
-      continue;
-    }
     ImGui::SeparatorText(group.group->name.data());
-    for (const LayoutRow& row : group.rows) {
-      if (row.setting == nullptr) {
-        continue;
-      }
-
-      const settings::Setting& setting = *row.setting;
+    for (const settings::Setting* row : group.rows) {
+      const settings::Setting& setting = *row;
       RowScope scope(setting.key);
       // The launch target is not a labelled row: it is a stack of choices under the group's
       // own heading, and it occupies kTargetRows ring rows.

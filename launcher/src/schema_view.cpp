@@ -29,6 +29,10 @@ std::vector<settings::Tab> TabOrder() {
 }
 
 std::string DisplayTabName(settings::Tab tab) {
+  // The graphics tab is the audio tab too, and "Graphics" would hide half of what is on it.
+  if (tab == settings::Tab::kGraphics) {
+    return "Audio / Video";
+  }
   std::string name(settings::TabName(tab));
   if (!name.empty()) {
     name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
@@ -56,6 +60,14 @@ TabLayout BuildTabLayout(settings::Tab tab, const RowEnvironment& environment) {
     if (group.tab != tab) {
       continue;
     }
+    // A category this build has nothing for is not drawn at all: not a disabled widget, and
+    // not a heading with a line of apology under it either - the newer instruction is to
+    // reduce the useless text, and a name for something the user cannot act on is exactly
+    // that. It is still named in the dump below, so the list of what is owed survives.
+    if (group.unavailable) {
+      layout.unbuilt.push_back(&group);
+      continue;
+    }
     LayoutGroup entry;
     entry.group = &group;
     for (const settings::Setting& setting : settings::kSettings) {
@@ -70,18 +82,15 @@ TabLayout BuildTabLayout(settings::Tab tab, const RowEnvironment& environment) {
         ++layout.hidden_count;
         continue;
       }
-      entry.rows.push_back(LayoutRow{&setting, nullptr});
+      entry.rows.push_back(&setting);
     }
-    // An unavailable group's rows are deliberately not drawn, and a group with no rows is
-    // the same thing: a category with nothing in it is not a setting (D14).
-    if (group.unavailable || entry.rows.empty()) {
-      entry.rows.clear();
-      entry.rows.push_back(LayoutRow{nullptr, &group});
-      entry.unavailable = true;
-      ++layout.note_count;
-    } else {
-      layout.row_count += entry.rows.size();
+    // A group that declared no rows at all is the same thing as one declared unavailable, and
+    // the same as one whose only rows were hidden: there is nothing to show.
+    if (entry.rows.empty()) {
+      layout.unbuilt.push_back(&group);
+      continue;
     }
+    layout.row_count += entry.rows.size();
     layout.groups.push_back(std::move(entry));
   }
   return layout;
@@ -138,22 +147,16 @@ std::string DescribeLayout(const std::vector<TabLayout>& layout) {
     out += " rows, ";
     out += std::to_string(tab.groups.size());
     out += " groups, ";
-    out += std::to_string(tab.note_count);
-    out += " unavailable, ";
+    out += std::to_string(tab.unbuilt.size());
+    out += " not in this build, ";
     out += std::to_string(tab.hidden_count);
     out += " hidden by rule\n";
     for (const LayoutGroup& group : tab.groups) {
       out += "  group ";
       out += group.group->name;
-      out += group.unavailable ? " (unavailable)\n" : "\n";
-      for (const LayoutRow& row : group.rows) {
-        if (row.setting == nullptr) {
-          out += "    note   ";
-          out += GroupNoteText(*row.note_group);
-          out += "\n";
-          continue;
-        }
-        const settings::Setting& setting = *row.setting;
+      out += "\n";
+      for (const settings::Setting* row : group.rows) {
+        const settings::Setting& setting = *row;
         out += "    row    ";
         out += setting.key;
         out += " [";
@@ -164,11 +167,33 @@ std::string DescribeLayout(const std::vector<TabLayout>& layout) {
         out += setting.label;
         out += " = ";
         out += OrPlaceholder(setting.default_text, "(empty)");
+        // An enum's choices, because they are part of what the row can do and one row's are
+        // decided by the build rather than by the schema (`choices_from`). Without this the
+        // dump cannot answer "is Vulkan offered?" except by opening the window.
+        if (setting.kind == settings::Kind::kEnum) {
+          out += "  choices: ";
+          const std::vector<std::string_view> choices = SettingChoices(setting);
+          for (std::size_t index = 0; index < choices.size(); ++index) {
+            if (index != 0) {
+              out += ", ";
+            }
+            out += choices[index];
+          }
+        }
         if (setting.tooltip.empty()) {
           out += "  MISSING-TOOLTIP";
         }
         out += "\n";
       }
+    }
+    // The categories this build does not fill: named here so the dump still says what is
+    // owed, even though the tab itself shows nothing for them.
+    for (const settings::Group* group : tab.unbuilt) {
+      out += "  unbuilt ";
+      out += group->name;
+      out += ": ";
+      out += GroupNoteText(*group);
+      out += "\n";
     }
   }
   return out;

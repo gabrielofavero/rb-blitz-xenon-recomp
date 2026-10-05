@@ -21,6 +21,7 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 
+#include "game_launch.h"
 #include "general_report.h"
 #include "launcher/profile.h"
 #include "launcher/profile_path.h"
@@ -106,6 +107,11 @@ struct Options {
   // A1's "legible at 100% and 200%" is otherwise only checkable from a screenshot.
   bool dump_display = false;
   std::string dump_display_path;
+  // --print-command[=<path>] prints the exact command line B7 would start the game with
+  // (Contract 3) and leaves. It is the same builder a real launch uses, so the contract is
+  // assertable without booting anything - and it is the first thing a bug report wants.
+  bool print_command = false;
+  std::string print_command_path;
 };
 
 Options ParseOptions(int argc, char** argv) {
@@ -116,6 +122,7 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kDumpGeneralPrefix = "--dump-general=";
   constexpr std::string_view kDumpProfilePrefix = "--dump-profile=";
   constexpr std::string_view kDumpDisplayPrefix = "--dump-display=";
+  constexpr std::string_view kPrintCommandPrefix = "--print-command=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--dump-layout") {
@@ -126,6 +133,12 @@ Options ParseOptions(int argc, char** argv) {
       options.dump_profile = true;
     } else if (argument == "--dump-display") {
       options.dump_display = true;
+    } else if (argument == "--print-command") {
+      options.print_command = true;
+    } else if (argument.size() > kPrintCommandPrefix.size() &&
+               argument.substr(0, kPrintCommandPrefix.size()) == kPrintCommandPrefix) {
+      options.print_command = true;
+      options.print_command_path = std::string(argument.substr(kPrintCommandPrefix.size()));
     } else if (argument.size() > kDumpDisplayPrefix.size() &&
                argument.substr(0, kDumpDisplayPrefix.size()) == kDumpDisplayPrefix) {
       options.dump_display = true;
@@ -199,6 +212,29 @@ int DumpGeneral(const Options& options) {
       rb_blitz::launcher::DetectGameRoots(ExecutableDir(), options.game_data_root);
   const rb_blitz::launcher::ProfileSession session = MakeDumpSession(options);
   return Emit(rb_blitz::launcher::DescribeGeneral(session, roots), options.dump_general_path, 0);
+}
+
+// B7's dry run: the exact command line a Launch Game would start, from the same builder, so the
+// launch contract is assertable on a build machine (`--print-command` in launcher/README.md).
+int PrintCommand(const Options& options) {
+  const rb_blitz::launcher::GameRoots roots =
+      rb_blitz::launcher::DetectGameRoots(ExecutableDir(), options.game_data_root);
+  const rb_blitz::launcher::ProfileSession session = MakeDumpSession(options);
+  const rb_blitz::launcher::LaunchTarget target = rb_blitz::launcher::FallbackTarget(
+      session.profile().target, rb_blitz::launcher::DetectUltimateState(roots.game_root));
+
+  const rb_blitz::launcher::LaunchCommand command =
+      rb_blitz::launcher::BuildLaunchCommand(session, roots, target);
+
+  std::string text;
+  text += "working dir : " + command.working_directory.string() + "\n";
+  text += "game exe    : ";
+  text += command.ok ? "found\n" : "MISSING\n";
+  text += "command     : " + rb_blitz::launcher::FormatLaunchCommand(command) + "\n";
+  if (!command.ok) {
+    text += "cannot start: " + command.error + "\n";
+  }
+  return Emit(text, options.print_command_path, command.ok ? 0 : 1);
 }
 
 int DumpProfile(const Options& options) {
@@ -392,6 +428,9 @@ int main(int argc, char** argv) {
   if (options.dump_display) {
     return DumpDisplay(options.dump_display_path);
   }
+  if (options.print_command) {
+    return PrintCommand(options);
+  }
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -512,6 +551,14 @@ int main(int argc, char** argv) {
   ImGui_ImplSDLGPU3_Init(&init_info);
 
   SDL_ShowWindow(window);
+  // The launcher opens expanded, which is the size its content wants: every tab fits without
+  // scrolling at 100%, and a maximized window is what a user who opens it on a small panel would
+  // drag it to anyway. It is maximized *after* the window is shown, because maximizing a hidden
+  // window is a request Windows answers when the window appears - which it did not do here, and
+  // the window ended up merely clamped to the work area with the maximize box already used.
+  // Un-maximizing still lands on the stored size below, so what the profile remembers is the
+  // restored geometry and never the work area.
+  SDL_MaximizeWindow(window);
 
   // The facts a row's `visible` rule is decided from, read once: a machine with one display has
   // no monitor to choose between, so the Monitor row is not shown at all.
@@ -615,11 +662,17 @@ int main(int argc, char** argv) {
     int width = 0;
     int height = 0;
     SDL_GetWindowSize(window, &width, &height);
+    // A maximized window reports the work area, not the size the user chose: writing that back
+    // would replace the remembered geometry with "as big as this display", so the restored size
+    // would be lost. The launcher opens expanded every time anyway, so there is nothing to
+    // record while it is.
+    const bool maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
     // Back to the points the profile keeps, so the number survives a different-DPI monitor.
     const int point_width = static_cast<int>(std::lround(width / ui_scale));
     const int point_height = static_cast<int>(std::lround(height / ui_scale));
     const rb_blitz::launcher::SaveOutcome outcome =
-        shell->session().SaveWindowGeometry(point_width, point_height);
+        maximized ? rb_blitz::launcher::SaveOutcome{}
+                  : shell->session().SaveWindowGeometry(point_width, point_height);
     if (!outcome.ok) {
       std::fprintf(stderr, "could not save the window size to %s: %s\n",
                    shell->session().path().string().c_str(), outcome.error.c_str());

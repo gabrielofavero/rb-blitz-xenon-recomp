@@ -7,9 +7,11 @@
 // rex::ReXApp's, so each override below states what the SDK does by itself and why
 // this app differs. In short:
 //   * OnPreSetup - the SDK runs its configured backends and input devices; here the
-//     GPU plugin defaults to xenos when none is named (the only one staged), and the
-//     mouse driver is appended to whatever input factory is configured. Both are
-//     additive; a configured plugin and a configured factory are honoured.
+//     GPU plugin defaults to xenos when none is named (the only one staged), the
+//     graphics backend named by `gpu_backend` is loaded first (refusing an empty or
+//     "any" value, so the SDK's own load is untouched), and the mouse driver is
+//     appended to whatever input factory is configured. Both are additive; a configured
+//     plugin and a configured factory are honoured.
 //   * OnConfigurePaths - faithfully, every path is honoured as given; here a writable
 //     root that resolves inside the read-only game tree is dropped in favour of the
 //     platform user directory, so a launcher cannot make the game write into its own
@@ -45,8 +47,10 @@
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging/macros.h>
+#include <rex/platform/dynlib.h>
 #include <rex/rex_app.h>
 #include <rex/system/flags.h>
+#include <rex/system/gpu_plugin.h>
 #include <rex/system/interfaces/graphics.h>
 #include <rex/ui/window.h>
 #include <rex/version.h>
@@ -61,6 +65,12 @@
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "util/sha256.h"
+
+// The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
+// to. It is this project's cvar rather than the SDK's because choosing a backend is the *app's*
+// decision: the GPU plugin can only run the backends it was compiled with, so the load below is
+// where the choice can be honoured or refused.
+REXCVAR_DECLARE(std::string, gpu_backend);
 
 class RbBlitzApp : public rex::ReXApp {
  public:
@@ -80,6 +90,7 @@ class RbBlitzApp : public rex::ReXApp {
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
+    SelectGpuBackend(config);
     ApplyContentLicense();
     // The runtime reads input_factory the moment this hook returns, and the
     // input system is built from it, so this is the point where an extra input
@@ -98,6 +109,52 @@ class RbBlitzApp : public rex::ReXApp {
     // wrapper of input_factory, so both it and the mouse compose with whichever backend was
     // selected. See src/input/remap.h.
     rb_blitz::input::InstallPadRemap(config);
+  }
+
+  // The graphics backend, from `gpu_backend` (launcher/config/settings.toml's Renderer row).
+  //
+  // The SDK loads the GPU plugin itself, with its own default backend - "any", whichever
+  // backend the plugin was compiled with. All this does is name one instead, and only when
+  // something did: "any" and an empty value both return without touching `config`, so the
+  // SDK's own load runs exactly as it always did and the faithful behaviour is unchanged.
+  //
+  // A named backend the payload does not have fails to load, is logged with the backend's
+  // name by the plugin, and leaves `config.graphics` empty - so the SDK's own load runs anyway
+  // and picks the backend the build does have. A wrong choice therefore degrades to the working
+  // renderer instead of refusing to boot, and never silently: the log names what could not be
+  // provided and what was used instead.
+  static void SelectGpuBackend(rex::RuntimeConfig& config) {
+    if (config.graphics || config.gpu_plugin.empty()) {
+      return;
+    }
+    const std::string backend = REXCVAR_GET(gpu_backend);
+    if (backend.empty() || backend == "any") {
+      return;
+    }
+    // A backend this *payload* has but this *machine* cannot run: the SDK loads the Vulkan
+    // loader at run time rather than linking it, so the plugin is happy to build a Vulkan
+    // graphics system on a box with no Vulkan driver, and the failure only lands later, inside
+    // presentation setup - where the backend is already committed and there is nothing left to
+    // fall back to. Checking the loader first is what keeps "a wrong choice degrades to the
+    // renderer that works" true for the case that actually happens.
+    if (backend == "vulkan" && !VulkanLoaderIsUsable()) {
+      REXLOG_WARN("graphics backend 'vulkan' was asked for, but {} is not usable here; "
+                  "falling back to the backend this build would have picked by itself",
+                  rex::platform::lib_names::kVulkanLoader);
+      return;
+    }
+    config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin, backend);
+  }
+
+  // True when the Vulkan loader is present and looks like a loader. Whether it has a usable
+  // *device* is deliberately left to the provider: enumerating physical devices here would mean
+  // a second Vulkan initialization in the same process, and the provider has to do it anyway.
+  static bool VulkanLoaderIsUsable() {
+    rex::platform::DynamicLibrary loader;
+    if (!loader.Load(rex::platform::lib_names::kVulkanLoader)) {
+      return false;
+    }
+    return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
   }
 
   // Path policy. Called before logging is initialized, so keep this silent.

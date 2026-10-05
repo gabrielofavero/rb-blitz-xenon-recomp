@@ -8,7 +8,10 @@
 # Fields
 #   key       the cvar name; also the profile key, and - when argv = "flag" - the
 #             --flag the launcher passes to the game
-#   tab       general | graphics | controller. There is no `experimental` (D14).
+#   tab       general | graphics | controller. There is no `experimental` (D14). The key
+#             is the schema's own name for the tab; the launcher labels the graphics tab
+#             "Audio / Video" (schema_view's DisplayTabName), because it holds the audio
+#             rows too.
 #   group     must match a [[group]] with the same tab
 #   label     the row's text in the tab
 #   kind      bool | int | float | enum | string | path_dir | path_file
@@ -28,6 +31,10 @@
 #             at all. `multi_monitor` is the only rule today (a machine with one display
 #             has no monitor to choose between); the tab hides the row and the focus ring
 #             skips it, so a hidden row is never a focus trap.
+#   choices_from  enum only, optional: where the row's choices really come from when the
+#             build decides them. `gpu_backends` is the only rule today, and the
+#             build passes the backends it compiled in (--backends) so a payload cannot
+#             offer a renderer it does not have. Such a row declares no `choices` itself.
 #
 # `applies = "live"` claims that the running game re-reads the value, so the row must
 # carry a comment naming the mechanism that does it, on the same line as `applies` or on
@@ -46,16 +53,24 @@
 # the SDK has no audio_volume cvar yet (D14). Per-button remapping is absent because it
 # is planned work, not a setting (D13).
 #
-# Three more absences are deliberate, and are decisions rather than omissions:
-#   * The graphics backend (D3D12 vs Vulkan) is a build-time link choice
-#     (REXGLUE_USE_D3D12/REXGLUE_USE_VULKAN, D3D12=ON and Vulkan=OFF in this build), not a
-#     cvar, so there is no row for it: a setting nobody can act on would be a lie.
+# Two more absences are deliberate, and are decisions rather than omissions:
 #   * `video_mode_refresh_rate` and the free-form `video_mode_width`/`video_mode_height`
 #     are not exposed. The guest refresh rate changes how the title paces itself, and the
 #     runtime's own preset list is the only set of resolutions known to be safe, so
 #     resolution is a curated enum and the refresh rate is left alone.
 #   * `window_width`/`window_height` are not exposed either: the resolution preset already
 #     sizes the startup window, and two controls for one window can only disagree.
+#
+# And one row whose choices are a decision too:
+#   * The renderer's *choices* are the backends this build compiled in, not a fixed list
+#     (`choices_from` below). A payload built without Vulkan cannot offer it, because
+#     picking it would leave the game with no renderer at all - so the row lists what the
+#     build actually has. `gpu_backend` itself is a cvar of this project, not of the SDK
+#     (src/rb_blitz_app.h), because selecting the backend is a decision the *app* makes
+#     when it loads the GPU plugin.
+#   * A backend the *machine* cannot run is refused by the game and not by this list: the
+#     app probes the Vulkan loader before committing (src/rb_blitz_app.h), logs why, and
+#     boots on the backend the build would have picked by itself. See D18.
 
 schema_version = 1
 
@@ -63,8 +78,9 @@ schema_version = 1
 # Groups
 #
 # A group with no rows yet is declared `status = "unavailable"` together with the one
-# line the tab shows for it, so an unbuilt category is named instead of being drawn as a
-# disabled widget that looks like a setting (D14).
+# line that records *why*, so an unbuilt category is named in the schema and in
+# --dump-layout rather than being drawn as a disabled widget that looks like a setting,
+# or as a heading with an apology under it (D14, D18).
 # ---------------------------------------------------------------------------
 
 [[group]]
@@ -260,6 +276,45 @@ guest vblank interval, which changes how the title's own timing behaves.
 # ---------------------------------------------------------------------------
 # Graphics - Rendering
 # ---------------------------------------------------------------------------
+
+# The graphics backend the game renders with. The choices are the backends this build
+# compiled in (`choices_from`), and the default is the one the plugin picks when nothing
+# names a backend - so leaving this row alone passes nothing and changes nothing.
+[[setting]]
+key         = "gpu_backend"
+tab         = "graphics"
+group       = "Rendering"
+label       = "Renderer"
+kind        = "enum"
+choices_from = "gpu_backends"
+default     = "d3d12"
+applies     = "restart"
+argv        = "flag"
+tooltip = """
+Which graphics backend the game renders with: Direct3D 12 or Vulkan. Only the backends this
+build compiled in are offered - the GPU plugin cannot run one it was not built with - and the
+choice is made while the game starts, so it needs a restart.
+"""
+
+# The runtime has two anti-aliasing mechanisms and they are independent: this one is a
+# post-process pass over the finished frame, and native_2x_msaa below is about resolving the
+# title's own multisampled render targets. Both are exposed rather than merged into one
+# "quality" row, because one setting that silently changed two mechanisms would be a lie
+# about what it does.
+[[setting]]
+key     = "swap_post_effect"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Anti-aliasing (post-process)"
+kind    = "enum"
+choices = ["none", "fxaa", "fxaa_extreme"]
+default = "none"
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Smooth the finished frame: none, FXAA or FXAA Extreme. It runs after the title has drawn, so
+it costs a little GPU time and does not change how the game itself renders. Needs a restart.
+"""
 
 [[setting]]
 key     = "native_2x_msaa"

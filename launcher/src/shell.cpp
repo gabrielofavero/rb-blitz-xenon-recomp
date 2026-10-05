@@ -32,10 +32,8 @@ constexpr const char* kBodyId = "##body";
 std::size_t SchemaFocusEntries(const TabLayout& tab) {
   std::size_t entries = 0;
   for (const LayoutGroup& group : tab.groups) {
-    for (const LayoutRow& row : group.rows) {
-      if (row.setting != nullptr) {
-        entries += FocusEntriesFor(*row.setting);
-      }
+    for (const settings::Setting* row : group.rows) {
+      entries += FocusEntriesFor(*row);
     }
   }
   return entries;
@@ -220,11 +218,6 @@ bool Shell::Frame() {
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);
 
-  ImGui::TextUnformatted("Rock Band Blitz Launcher");
-  ImGui::SameLine();
-  ImGui::TextDisabled(
-      "Tab / Up / Down move  |  Left / Right switches tab  |  Enter activates  |  Esc quits");
-
   // The tab strip is the model's, not ImGui's tab bar. Two reasons: the selection must change
   // on the frame the key is read, and the ring - which A3's pad will drive - has to be the
   // only thing that moves it. ImGui's own tab bar would also answer Ctrl+Tab behind our back.
@@ -244,21 +237,17 @@ bool Shell::Frame() {
       ImGui::PopStyleColor();
     }
   }
-  // B4: a change the profile has not been saved with. It sits beside the tabs rather than only in
-  // the General tab's block, because a badge's action or (B2/B3) a row's edit can happen on
-  // another tab, and "did that stick?" must not depend on looking at a different tab.
-  if (session_.Dirty()) {
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.25f, 1.0f));
-    ImGui::TextUnformatted("unsaved changes");
-    ImGui::PopStyleColor();
-  }
   ImGui::Separator();
 
-  // The tab body is its own scrolling region under a fixed header, so a tab taller than the
-  // window scrolls its rows while the strip stays where the user can reach it. The popups the
-  // tabs open are keyed off this same id stack, which is why they are drawn from here too.
-  if (ImGui::BeginChild(kBodyId, ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
+  // The tab body is its own scrolling region above the bottom bar, so a tab taller than the
+  // window scrolls its rows while the strip and the bar stay where the user can reach them.
+  // The bar's height is reserved here rather than measured afterwards: the body has to know how
+  // much room it does *not* have before it draws, and the outer window must never scroll - a
+  // scrolled window would move the bar off its own edge. The popups the tabs open are keyed off
+  // this same id stack, which is why they are drawn from here too.
+  const float bar_height = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y +
+                           ImGui::GetStyle().WindowPadding.y;
+  if (ImGui::BeginChild(kBodyId, ImVec2(0.0f, -bar_height), ImGuiChildFlags_None,
                         ImGuiWindowFlags_None)) {
     if (tab_ < layout_.size()) {
       // The two tabs with a block of their own after the schema's rows draw it here, once the
@@ -277,25 +266,131 @@ bool Shell::Frame() {
   }
   ImGui::EndChild();
 
+  const bool running = DrawBottomBar();
+
   ImGui::End();
   action_ = NavAction::kNone;
+  return running;
+}
+
+Shell::StatusLine Shell::CurrentStatus() const {
+  StatusLine line;
+  // Ordered by what the user has to act on: a failure first, then "this is not saved", then
+  // whatever the last action did. A block that is fine says nothing at all - the bar is empty
+  // on a first run, and that is the ordinary case.
+  if (!save_error_.empty()) {
+    line.text = save_error_;
+    line.error = true;
+    return line;
+  }
+  if (const std::string refusal = session_.Refusal(); !session_.CanSave() && !refusal.empty()) {
+    line.text = refusal;
+    line.error = true;
+    return line;
+  }
+  if (session_.Dirty()) {
+    line.text = "Unsaved changes";
+    line.warning = true;
+    return line;
+  }
+  if (!general_.status_error().empty()) {
+    line.text = general_.status_error();
+    line.error = true;
+    return line;
+  }
+  if (!save_note_.empty()) {
+    line.text = save_note_;
+    return line;
+  }
+  line.text = general_.status_message();
+  return line;
+}
+
+bool Shell::DrawBottomBar() {
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const StatusLine status = CurrentStatus();
+
+  // The status is the left half of the bar. It is drawn first, and when there is nothing to
+  // say the line is still opened with a spacer: SameLine below continues from the *previous
+  // line*, and with no line at all the buttons would be placed over the tab strip.
+  if (!status.text.empty()) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          status.error    ? ImVec4(0.95f, 0.42f, 0.38f, 1.0f)
+                          : status.warning ? ImVec4(0.95f, 0.75f, 0.25f, 1.0f)
+                                           : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(status.text.c_str());
+    ImGui::PopStyleColor();
+  } else {
+    ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight()));
+  }
+
+  const bool running = game_.Running();
+  const char* labels[3] = {"Close", "Save", running ? "Game is running" : "Launch Game"};
+  float total = 0.0f;
+  for (const char* label : labels) {
+    total += ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
+  }
+  total += style.ItemSpacing.x * 2.0f;
+
+  // Right-aligned, in the order they read: the two that end a session, then the one it is for.
+  // The x is set explicitly rather than derived from the text, so a long status line cannot
+  // push the buttons off the edge.
+  ImGui::SameLine();
+  ImGui::SetCursorPosX(ImGui::GetWindowWidth() - style.WindowPadding.x - total);
+  if (ImGui::Button(labels[0])) {
+    return false;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button(labels[1])) {
+    save_error_.clear();
+    const SaveOutcome outcome = session_.Save();
+    if (!outcome.ok) {
+      save_note_.clear();
+      save_error_ = "Cannot save: " + outcome.error;
+    } else {
+      save_note_ = outcome.wrote ? "Saved" : "Nothing to save: the profile already matches";
+    }
+  }
+  ImGui::SameLine();
+  // A second copy of the title writing the same save folder is not something to discover by
+  // trying, so the button stays down until the game the launcher started has exited.
+  ImGui::BeginDisabled(running);
+  if (ImGui::Button(labels[2])) {
+    LaunchGame();
+  }
+  ImGui::EndDisabled();
   return true;
+}
+
+void Shell::LaunchGame() {
+  save_error_.clear();
+  save_note_.clear();
+  // A change on screen that the run would not see is a bug the user cannot explain, so the
+  // launcher writes first: "which profile did it read?" must not be a question.
+  if (session_.CanSave() && session_.Dirty()) {
+    const SaveOutcome outcome = session_.Save();
+    if (!outcome.ok) {
+      save_error_ = "Cannot save the settings, so the game was not started: " + outcome.error;
+      return;
+    }
+  }
+  const LaunchTarget target = FallbackTarget(session_.profile().target, general_.state());
+  const LaunchCommand command = BuildLaunchCommand(session_, roots_, target);
+  std::string error;
+  if (!game_.Start(command, &error)) {
+    save_error_ = "Cannot start the game: " + error;
+    return;
+  }
+  save_note_ = "Started " + command.executable.filename().string();
 }
 
 void Shell::DrawTab(const TabLayout& tab, FocusModel& ring) {
   std::size_t row_index = 0;
   for (const LayoutGroup& group : tab.groups) {
-    // A category this build has nothing for is hidden outright rather than naming itself
-    // (D14 allows either; the plan's "reduce the useless text" is the newer instruction).
-    if (group.unavailable) {
-      continue;
-    }
     ImGui::SeparatorText(group.group->name.data());
-    for (const LayoutRow& row : group.rows) {
-      if (row.setting == nullptr) {
-        continue;
-      }
-      const settings::Setting& setting = *row.setting;
+    for (const settings::Setting* row : group.rows) {
+      const settings::Setting& setting = *row;
       RowScope scope(setting.key);
       // A row whose widget is a line of radios (an enum) needs the width for them, so it takes
       // most of the row and keeps its label in what is left; everything else is a single

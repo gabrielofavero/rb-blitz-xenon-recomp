@@ -12,27 +12,29 @@ both executables compile. The General tab is real (B1): it detects the Ultimate 
 the launch target and the two locations and says why a value was refused — and when the payload
 is missing, the Ultimate entry becomes the *Install Ultimate* action ([B8](../docs/plans/launcher-plan.md)),
 which drives the installer's own helper. Saving, the precedence badge, import/export and the
-settings location are real too (B4), the Graphics tab's rows are editable (B2), and the
+settings location are real too (B4), the Audio / Video tab's rows are editable (B2), and the
 Controller tab's button-mapping block rebinds the pad for real (D16) — the launcher writes
 `[remap]` and `rb_blitz.exe` reads it back through the shared vocabulary in
-[`../src/launcher/remap.h`](../src/launcher/remap.h). The bottom bar
-(A2), the controller navigation (A3) and launching the game (B7) arrive with the prompts that
-follow, so what exists here now is a launcher that shows and edits every schema row, installs
-the Ultimate payload, saves what it changed, rebinds the pad, and is fully drivable with the
-keyboard.
+[`../src/launcher/remap.h`](../src/launcher/remap.h). The window's own chrome is finished
+(A2): *Close*, *Save* and *Launch Game* live on the bottom bar, and Launch Game is B7's
+contract — it saves what is unsaved, builds the command line from the schema and starts the
+game. The controller navigation (A3) arrives with the prompt that follows, so what exists here
+now is a launcher that shows and edits every schema row, installs the Ultimate payload, saves
+what it changed, rebinds the pad, starts the game, and is fully drivable with the keyboard.
 
 | Path | What it is |
 | --- | --- |
 | `main.cpp` | The entry point: opens the window, loads the profile for the window geometry, loads the UI font, runs the frame loop, saves the size on the way out (P0.4, A1, B4) |
 | `src/schema_view.{h,cpp}` | The generated table turned into tabs, groups and rows — no ImGui, no SDL (A1) |
 | `src/nav.{h,cpp}` | The focus ring and the one `NavSource` seam a device plugs into (A1, D6) |
-| `src/shell.{h,cpp}` | The tab shell: the strip, the scrolling body, the ring, and one editable widget per `kind` (A1, B2) |
+| `src/shell.{h,cpp}` | The tab shell: the strip, the scrolling body, the bottom bar, the ring, and one editable widget per `kind` (A1, A2, B2) |
 | `src/settings_edit.{h,cpp}` | The per-kind editor that writes a row's change into the profile (B2) |
 | `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with, and the precedence badge (A1, B1, B2, B4) |
 | `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers, and the Ultimate install (B1, B8) |
 | `src/controller_tab.{h,cpp}` | The Controller tab's button-mapping block: the control list, the three-second capture and the resets (D16) |
+| `src/game_launch.{h,cpp}` | Contract 3's argv, and the process the launcher starts with it — no ImGui, no SDL (B7) |
 | `src/install_ultimate.{h,cpp}` | B8's action: runs `rb_blitz_setup_helper.exe install-ultimate` and reports its progress, with the manual route when it fails |
-| `src/ultimate_state.{h,cpp}` | D5's four payload states and the target fallback — no ImGui, no SDL (B1) |
+| `src/ultimate_state.{h,cpp}` | D5's four payload states, the target fallback and where the game is — no ImGui, no SDL (B1) |
 | `src/path_validate.{h,cpp}` | The schema's `validate` rules, reusing `src/fs/path_policy.h` and `src/fs/dlc_layout.h` (B1) |
 | `src/profile_session.{h,cpp}` | The write path: what a save would change, a reset, import/export, the settings location, and the precedence rule — no ImGui, no SDL (B4) |
 | `src/game_config.{h,cpp}` | A read-only reader for the game's own `rb_blitz.toml`, which outranks the profile (B4, D3) |
@@ -100,11 +102,17 @@ Two things make the window readable rather than merely present, and both are in 
   `kMinWindowHeight`, 720×520 points) rather than a fixed one, so the window is draggable,
   maximizable and restorable like any other, and cannot be dragged smaller than the layout
   can be read at.
-- **A tab taller than the window scrolls.** The tab strip and the unsaved-changes marker sit
-  in a fixed header and the rows live in a scrolling child under it (`kBodyId` in
-  `src/shell.cpp`), so the wheel, and the ring's `SetScrollHereY`, both move the rows and
-  never the strip. The Graphics tab and the Controller tab are both taller than a small
-  window, which is what that is for.
+- **It opens expanded.** `SDL_MaximizeWindow` runs after the window is shown — maximizing a
+  *hidden* window is a request Windows answers when the window appears, and it did not, which
+  left the window merely clamped to the work area with the maximize box already used up. A
+  maximized window reports the work area rather than the size the user chose, so the exit-time
+  geometry write is skipped while it is: what the profile remembers is the size to restore to,
+  not "as big as this display".
+- **A tab taller than the window scrolls.** The tab strip sits in a fixed header, the rows
+  live in a scrolling child under it (`kBodyId` in `src/shell.cpp`), and the bottom bar is
+  pinned below that, so the wheel and the ring's `SetScrollHereY` move the rows and never the
+  chrome. The Audio / Video tab and the Controller tab are both taller than a small window,
+  which is what that is for.
 
 `--dump-display` prints all of it — the usable bounds, the content scale, the size the
 window would open at and the face that was loaded — so the DPI story is checkable on a build
@@ -118,7 +126,9 @@ changes no C++ at all:
 
 - **Three tabs**, in the table's own order, because the tab list is data (R9), each labelled
   the way a person reads it (`General`, not the lowercase key the schema spells —
-  `DisplayTabName`). The strip is ours rather than `ImGui::BeginTabBar`, so the selection
+  `DisplayTabName`, which is also where `graphics` becomes **Audio / Video**: the tab holds
+  the audio rows too, and its schema key is the schema's business rather than the user's).
+  The strip is ours rather than `ImGui::BeginTabBar`, so the selection
   changes on the frame the key is read and nothing moves it but the ring (A3's pad included),
   and so the strip can stay put while the tab body scrolls under it.
 - **One row per `[[setting]]`**, grouped by `group` in the table's order, with one
@@ -133,9 +143,9 @@ changes no C++ at all:
 - **A group this build has nothing for is hidden**, not drawn as its name plus the
   group's own `note`: empty categories (*Ultimate (advanced)*, *Developer*, *Devices*,
   *Keyboard*, *Manual*) are declared in the schema and shown by `--dump-layout`, but the
-  tabs leave them out rather than spending the window on text that offers nothing. D14
-  allows either; hiding is the newer instruction.
-- **A row can carry a `visible` rule**, and one does: *Graphics → Window → Monitor* declares
+  tabs leave them out rather than spending the window on text that offers nothing. A group
+  whose only rows were hidden by a `visible` rule is the same case, and is left out too.
+- **A row can carry a `visible` rule**, and one does: *Audio / Video → Window → Monitor* declares
   `visible = "multi_monitor"`, so a machine with one display has nothing to choose between and
   gets no row. The rule is applied in `schema_view` when the layout is built, not by the code
   that draws, because the ring that decides what is focusable and the loop that draws are two
@@ -146,6 +156,11 @@ changes no C++ at all:
   focused index. Moving wraps, so `End` then `Down` returns to the first row. Keys are
   translated in exactly one place and become `NavAction`s; the gamepad is a stub
   `NavSource` until A3 fills it in, and the shell does not know which device answered.
+- **The bottom bar (A2)** is the window's, not a tab's, and it is where a session ends: the
+  state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right.
+  There is no title text and no key legend at the top — the window's own title bar names the
+  launcher and the tab, and the bar's own controls say what they do. A2's other half, the
+  focused row's tooltip, is still owed (the schema already requires the text for it).
 - **Window geometry** is read from the profile at startup and written back on the way out,
   and only when it changed — so a launcher nobody resized neither creates `launcher.toml`
   nor touches its mtime. A profile that does not parse is never written over (D2). The
@@ -167,18 +182,21 @@ pointer and the keyboard never disagree about the selection (D6).
 
 `--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
 window — the headless half of A1's verification, and what says out loud if a row ever
-reaches the table without a tooltip. `--dump-general` prints what the General tab would
+reaches the table without a tooltip. An enum row also prints its `choices`, which is the
+only way to ask a payload "does this build offer Vulkan?" without a screen.
+`--dump-general` prints what the General tab would
 decide for a given game root and profile, `--dump-profile` prints B4's write path and the
 **precedence audit** — one line per row the game's own `rb_blitz.toml` decides, in the words
-the badge uses — and `--dump-display` prints what the launcher made of the display, which is
-the only way to check the DPI story without a screenshot (B1/B4/B2's verification, without
-the OCR):
+the badge uses — `--dump-display` prints what the launcher made of the display, which is
+the only way to check the DPI story without a screenshot, and `--print-command` prints the
+exact command line *Launch Game* would run (B1/B4/B2/B7's verification):
 
 ```
 rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
 rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\Games\rb_blitz" --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-profile=out\profile.txt --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-display
+rb_blitz_launcher.exe --print-command --launcher_profile=out\p.toml
 ```
 
 ## The General tab (B1)
@@ -264,8 +282,24 @@ nothing to mount is shown and started as the retail game, and the profile keeps 
 chose, so installing the payload later needs no remembering and no save can record a fallback
 the user never picked.
 
+**Where the game is** (D4's first-run detection, and the reason the target row knows what to
+offer). The launcher's own folder first — the installer puts the data at `<launcher>\game` —
+then the launcher's folder itself, for a dump that sits beside it, and then **up the tree**:
+`out\build\<preset>` is a development tree, and the checkout's own `game` is three levels
+above it. Six levels is the limit, and the nearest match wins. Before that search existed the
+launcher run from a build folder reported "Ultimate is not installed" however complete the
+payload was. `--game_data_root=<path>` still overrides everything, because a user who names a
+folder has said where the game is and is not asking to be second-guessed.
 
-## The Graphics tab (B2)
+```
+D:\Coding\decomps\360\rb-blitz-xenon-recomp> out\build\win-amd64-release\rb_blitz_launcher.exe --dump-general
+game root      : D:\Coding\decomps\360\rb-blitz-xenon-recomp\game (found)
+ultimate root  : D:\Coding\decomps\360\rb-blitz-xenon-recomp\game\ultimate
+ultimate       : ready
+```
+
+
+## The Audio / Video tab (B2)
 
 Every row here is editable, and every one is a projection of a cvar — the launcher owns no
 graphics state of its own. The widgets come from the schema, so the tab has no per-setting
@@ -278,8 +312,9 @@ code:
 | `enum` | a row of radios | one ring entry per choice, so a pad can reach every value |
 | a row with no editor | read-only | drawn disabled rather than ignoring the click |
 
-Changes land in the session's profile, which is what B4's **Save** writes; the tab strip's
-"unsaved changes" marker is the feedback. Rows whose `applies` is `restart` carry
+Changes land in the session's profile, and the bottom bar's **Save** is what writes it; the
+bar's own left half is the feedback, showing "Unsaved changes" while a save would write and
+nothing at all when there is nothing to say. A row whose `applies` is `restart` carries
 `(needs restart)` after the widget — the six `live` rows (`fullscreen`, `vsync`,
 `present_letterbox`, the two safe areas, `audio_mute`) do not, and their tooltips name what
 makes the change land.
@@ -288,6 +323,56 @@ The Display group is one row, **Resolution**, an `enum` over the presets the run
 parser accepts. It is deliberately not a free field: see "What is deliberately not here"
 below for why the free-form size, the guest video mode's dimensions and the guest refresh
 rate are all absent.
+
+**Renderer.** `gpu_backend` is this *project's* cvar (`src/main.cpp`), not the SDK's, and
+`RbBlitzApp::SelectGpuBackend` is what acts on it: the SDK loads the GPU plugin with its own
+"any" backend, and this names one instead — returning without touching anything when the value
+is empty or `any`, so nothing changes for a user who never touches the row.
+
+Two things have to be true before a named backend is used, and each degrades to the working
+renderer rather than refusing to boot — loudly, because the log names what could not be
+provided:
+
+- **The payload must have the backend.** A backend that is not compiled into `rexgpu-xenos.dll`
+  fails to load and leaves the SDK's own load to pick the one that is. This is what the choices
+  below are about.
+- **The machine must be able to run it.** The SDK loads `vulkan-1.dll` at run time rather than
+  linking it, so on a box with no Vulkan driver the plugin happily builds a Vulkan graphics
+  system and the failure only lands later, inside presentation setup — by which point the
+  backend is committed and there is nothing left to fall back to. `SelectGpuBackend` therefore
+  checks the loader (and that it exports `vkGetInstanceProcAddr`) first. Whether it has a usable
+  *device* is left to the provider, which has to initialize Vulkan anyway.
+
+The row's choices are **what the build compiled in**, which is why they come from CMake rather
+than from the `.toml` (`choices_from = "gpu_backends"`, and `--backends=d3d12,vulkan` on the
+embed step). A D3D12-only payload offers one renderer, because offering Vulkan would be
+offering a renderer that cannot run. `--dump-layout` prints every enum's choices, so which
+renderers a payload offers is answered without opening a window.
+
+This tree now compiles **both** backends (`REXGLUE_USE_D3D12=ON` and `REXGLUE_USE_VULKAN=ON`),
+which is what turned the row into a real choice:
+
+```powershell
+git -C rexglue-sdk submodule update --init --recursive `
+    thirdparty/vulkan-headers thirdparty/vulkan-memory-allocator `
+    thirdparty/spirv-headers thirdparty/glslang thirdparty/spirv-tools
+cmake --preset win-amd64-release -DREXGLUE_USE_VULKAN=ON
+cmake --build out/build/win-amd64-release
+rb_blitz_launcher.exe --dump-layout      # Renderer = d3d12  choices: d3d12, vulkan
+```
+
+Verified on this machine (AMD Radeon, driver 0x800161): with `--gpu_backend=vulkan` the log
+shows `Vulkan instance API version 1.4.309` and a `VulkanPresenter: Created 3840x2160
+swapchain`, and a capture of the title screen renders through it; with `--gpu_backend=d3d12`
+the DXGI/D3D12 path is unchanged. The fallback was exercised too, by putting a `vulkan-1.dll`
+that is not a Vulkan loader beside the executable: the log then reads `graphics backend
+'vulkan' was asked for, but vulkan-1.dll is not usable here` and the game boots on D3D12.
+
+**Anti-aliasing** is two rows, because the runtime has two mechanisms and they are
+independent: `native_2x_msaa` resolves the title's own multisampled render targets on the host,
+and `swap_post_effect` (`none` / `fxaa` / `fxaa_extreme`) runs a post-process pass over the
+finished frame. Merging them into one "quality" row would have made one setting quietly change
+two mechanisms.
 
 
 ## The profile — `launcher.toml`
@@ -327,10 +412,13 @@ over it until it is fixed (D2: "never lose a hand-edited file").
 
 ## Saving, the precedence badge and the settings location (B4)
 
-The rows below the General tab's three settings are the write path, and they are in the focus
-ring like everything else — Save, *Reset to defaults*, *Import*, *Export* and *Change settings
-location*. `src/profile_session.{h,cpp}` decides; `src/profile_ui.{h,cpp}` is buttons and
-wording, and it is dependency-free on purpose so all of this is testable without a window
+**Save is the bottom bar's**, next to *Close* and *Launch Game*, because that is where a user
+looks for "did that stick?" — it is not a property of the settings-file block, and a Save
+button at the end of one tab's rows was both easy to miss and easy to mistake for "save this
+tab". Below the General tab's three settings are the rest of the write path, and they are in
+the focus ring like everything else — *Reset to defaults*, *Import*, *Export* and *Change
+settings location*. `src/profile_session.{h,cpp}` decides; `src/profile_ui.{h,cpp}` is buttons
+and wording, and it is dependency-free on purpose so all of this is testable without a window
 (`tests/launcher_profile_session_tests.cpp`, `ctest -R launcher_session`).
 
 **A save writes what changed and nothing else.** A setting equal to its compiled default is
@@ -341,8 +429,9 @@ without being asked (A1), it is written from the profile as the file last had it
 that did not change is not written, so a launcher nobody resized neither creates the profile
 nor touches it.
 
-**Nothing is written over a file that did not parse.** The block says so, Save refuses with the
-reason, and *Import* stays live — reading a profile you trust is the way out of a broken one.
+**Nothing is written over a file that did not parse.** The bottom bar says so, Save refuses
+with the reason, and *Import* stays live — reading a profile you trust is the way out of a
+broken one.
 
 **A reset names exactly what it will remove.** The confirmation lists the `[settings]` keys it
 will drop (by label and by key name, so a key this build does not know is still named) and the
@@ -374,12 +463,53 @@ it, so "the default" has one representation on disk. An override that named the 
 (`--launcher_profile`, `RBBLITZ_LAUNCHER_PROFILE`) refuses the change with a reason, because a
 pointer that has no effect would make the next run disagree with this one.
 
-The tab strip carries an "unsaved changes" marker whenever a save would write, because a
-badge's action or a row's edit can happen on any tab and "did that stick?" must not depend on
-looking at a different one. The block itself says nothing when there is nothing to say — no
-file path, no "Saved" — and prints only the two things worth printing: a file it could not
-read, and changes that are not written yet. Where the settings live is the one piece of the
-block's own state a user needs, and the folder picker opens at that folder.
+The **bottom bar's left half** carries the "unsaved changes" warning whenever a save would
+write, because a badge's action or a row's edit can happen on any tab and "did that stick?"
+must not depend on looking at a different one. It says nothing when there is nothing to say —
+no file path, no "Saved" — and prints only what needs the user: a file it could not read,
+changes that are not written yet, or the last action's outcome.
+
+## Launching the game (B7)
+
+*Launch Game*, on the right of the bottom bar, is Contract 3:
+
+```
+rb_blitz.exe
+  --game_data_root="<game root>"
+  [--user_data_root="<save folder>"]              # only where the profile overrides it
+  [--dlc_root="<dlc folder>"]                     # likewise
+  --ultimate_mode=0|1                             # the stored target, D5's fallback applied
+  [--license_mask=0]                              # the demo target only
+  --launcher_profile="<resolved profile path>"
+  + every managed row whose value differs from its compiled default
+```
+
+The command line is built by `BuildLaunchCommand` (`src/game_launch.{h,cpp}`), which is pure
+string work — no process, no window — and `--print-command` prints exactly what it produces.
+That is deliberate: the contract is then a unit test
+(`tests/launcher_launch_tests.cpp`, `ctest -R launcher_launch`) and the dry run and a real
+start are the same code path.
+
+Three rules come from the contract and are worth stating where they are implemented:
+
+- **A row is passed only where the profile moved it off its compiled default.** The whole
+  registry is never passed: for every other row the game's own `rb_blitz.toml` outranks the
+  profile (D3), and passing a value the user never chose would take that away.
+- **A value that is text is quoted**, and every path is quoted, with the Windows rule for
+  backslashes before a quote. A folder with a space in it is one argument.
+- **The executable is the first token of the command line**, even though `CreateProcessW` also
+  takes it separately: the C runtime reads `argv` from that one string, and without `argv[0]`
+  the game would read `--game_data_root` as its first argument.
+
+Starting it is the other half: the launcher **saves first** when something is unsaved (a run
+that did not see the change on screen would be a bug nobody could explain), refuses politely
+when the game's executable or the game data is missing, quotes everything through
+`CreateProcessW` with the install folder as the working directory, and then keeps the process
+handle so the button reads *Game is running* and stays down until the game exits — a second
+copy of the title writing one save folder is not something to discover by trying.
+
+A failure is reported in the bar's left half with the reason; the launcher itself stays open,
+so the user can fix the folder and try again.
 
 ## The Controller tab, and button mapping (D16)
 
@@ -480,7 +610,7 @@ The target builds `rb_blitz_embed_settings`, runs it over `config/settings.toml`
 the header and prints what it produced:
 
 ```
-embed_settings: 19 rows in 13 groups (general 3, graphics 14, controller 2)
+embed_settings: 21 rows in 13 groups (general 3, graphics 16, controller 2)
 ```
 
 A schema the tool refuses fails the build. It refuses, deliberately:
@@ -502,7 +632,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | Field | Meaning |
 | --- | --- |
 | `key` | The cvar name; also the profile key and, when `argv = "flag"`, the `--flag` the launcher passes to the game |
-| `tab` | `general`, `graphics` or `controller` |
+| `tab` | `general`, `graphics` or `controller`. The key is the schema's own name for the tab; `DisplayTabName` is what the strip shows (`graphics` reads as **Audio / Video**) |
 | `group` | Must match a `[[group]]` declared for the same tab |
 | `label` | The row's text in the tab |
 | `kind` | `bool`, `int`, `float`, `enum`, `string`, `path_dir`, `path_file` |
@@ -511,8 +641,9 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | `tooltip` | The user-facing sentence shown in the bottom bar. Never empty |
 | `argv` | `flag` emits `--<key>=<value>`; `none` is a launcher-level row the launcher translates itself |
 | `choices` | `enum` only: the allowed values |
+| `choices_from` | `enum` only, optional: where the choices really come from when the *build* decides them. `gpu_backends` is the only rule there is — the backends CMake compiled in, passed to the embed step as `--backends=` — and such a row declares no `choices` of its own |
 | `min` / `max` | `int` / `float` only, optional: the range the row's slider is bounded to. Both or neither, and the default must sit inside it. They are the cvar's own `.range(...)` where it has one, so the slider cannot offer a value the runtime would clamp |
-| `visible` | Optional, and empty for every row but one: a rule the *machine* has to satisfy for the row to exist at all. `multi_monitor` is the only rule there is — *Graphics → Window → Monitor* is hidden when one display is attached, because there is nothing to choose between |
+| `visible` | Optional, and empty for every row but one: a rule the *machine* has to satisfy for the row to exist at all. `multi_monitor` is the only rule there is — *Audio / Video → Window → Monitor* is hidden when one display is attached, because there is nothing to choose between |
 | `validate` | `path_dir` / `path_file` only: `exists`, `dlc_layout` or `inside_game_root:forbid`, separated by `\|` |
 
 `argv = "none"` exists for exactly one row: `launch.target` is not a cvar, and the
@@ -541,16 +672,16 @@ note   = "Per-button remapping is not available in this build."
 That is how an unbuilt category is recorded without drawing a disabled widget that looks
 like a setting ([D14](../docs/plans/launcher-plan.md)). A group that *has* rows must not be
 `unavailable`; the tool refuses that combination. The five groups declared this way today are
-the General tab's *Ultimate (advanced)*, the Graphics tab's *Developer*, and the Controller
+the General tab's *Ultimate (advanced)*, the Audio / Video tab's *Developer*, and the Controller
 tab's *Devices*, *Keyboard* and *Manual* — the work
 [§1.1](../docs/plans/launcher-plan.md) defers past M1.
 
-**The tabs do not draw them.** A group with nothing in it is left out of its tab entirely,
-so the window is spent on rows that do something; the `note` stays in the schema and in
-`--dump-layout`'s output, which is where a reader goes to see what is not built yet. D14
-allows either ("its name plus one line, **or is hidden**"); hiding is the newer instruction,
-and the General tab shows the one exception that matters — the Ultimate *install* action —
-instead of a sentence about the payload being missing.
+**The tabs do not draw them.** A group with nothing in it is left out of its tab entirely — the
+name and the note included — so the window is spent on rows that do something. Both stay in the
+schema and in `--dump-layout`'s output, marked `unbuilt`, which is where a reader goes to see
+what is not built yet. The one place a "this is missing" message earns its space is the Ultimate
+*install* action, which is a button that does something rather than a sentence about a payload
+that is not there.
 
 ## `live` vs `restart`
 
@@ -611,10 +742,12 @@ it and `--dump-layout` will still name it.
   collapses to `bilinear`). Hiding them is the rule in
   [D12](../docs/plans/launcher-plan.md): a build flag is not something a user can act on
   from the launcher.
-- **The graphics backend.** D3D12 vs Vulkan is a build-time link choice
-  (`REXGLUE_USE_D3D12=ON` / `REXGLUE_USE_VULKAN=OFF` on Windows), not a cvar, so there is no
-  row for it: a setting nobody can act on would be a lie. `gpu_plugin` selects the GPU
-  emulation plugin, not the renderer, and the game already sets it to `xenos` itself.
+- **The renderer, as a hand-written list.** The Renderer row exists, but its choices are not
+  written anywhere by hand: `choices_from = "gpu_backends"` takes them from CMake, so the
+  launcher cannot offer a backend the payload was not built with. A D3D12-only build (this one
+  by default) therefore shows one choice rather than a Vulkan entry that would be refused at
+  boot. `gpu_plugin` is a different thing — it selects the GPU *emulation plugin*, not the
+  renderer, and the game already sets it to `xenos` itself.
 - **A free resolution field.** Resolution is an `enum` over exactly the
   presets the runtime's own parser accepts
   (`rexglue-sdk/include/rex/graphics/video_mode_util.h`: 720p, 1080p, 1440p, 4k), because

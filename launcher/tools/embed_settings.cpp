@@ -429,6 +429,11 @@ struct SettingRow {
   // Optional preconditions the runtime environment has to satisfy for the row to be shown at
   // all, e.g. "multi_monitor". Empty means the row is always shown.
   std::string visible;
+  // Optional rule naming where an enum row's choices really come from, when the build decides
+  // them: "gpu_backends" (the backends this build compiled in). Empty for a row that spells its
+  // own `choices` out. Such a row must not declare `choices` at all - two sources for one list
+  // is exactly the disagreement this exists to prevent.
+  std::string choices_from;
   // Optional bounds for an int/float row, so the widget's slider carries the row's real
   // limits instead of the launcher inventing one.
   bool has_range = false;
@@ -545,7 +550,8 @@ std::string LiveEvidence(const Document& document, const Value& applies) {
   return {};
 }
 
-std::unique_ptr<Schema> Build(const Document& document) {
+std::unique_ptr<Schema> Build(const Document& document,
+                              const std::vector<std::string>& backends) {
   auto schema = std::make_unique<Schema>();
   schema->schema_version = document.schema_version;
 
@@ -587,7 +593,8 @@ std::unique_ptr<Schema> Build(const Document& document) {
       }
     } else if (entry.Find("note") != nullptr) {
       Fail(Location(entry.line) + "group `" + group.name +
-           "` has a note but no status; a note is the one line an unavailable group shows");
+           "` has a note but no status; a note is the reason an unavailable group records "
+           "why it is empty, and is printed by --dump-layout");
     }
 
     const auto key = std::make_pair(static_cast<int>(group.tab), group.name);
@@ -697,26 +704,64 @@ std::unique_ptr<Schema> Build(const Document& document) {
 
     const Value* choices = entry.Find("choices");
     const Value* validate = entry.Find("validate");
+    if (const Value* from = entry.Find("choices_from"); from != nullptr) {
+      if (from->is_array || from->text.empty()) {
+        Fail(Location(from->line) + "row `" + row.key + "` has an empty `choices_from` rule");
+        continue;
+      }
+      if (from->text != "gpu_backends") {
+        Fail(Location(from->line) + "row `" + row.key + "` has unknown choices_from rule `" +
+             from->text + "`; expected gpu_backends");
+        continue;
+      }
+      row.choices_from = from->text;
+    }
     if (row.kind == Kind::kEnum) {
-      if (choices == nullptr || !choices->is_array || choices->list.empty()) {
-        Fail(Location(line) + "enum row `" + row.key + "` has no `choices`");
-        continue;
-      }
-      for (const std::string& choice : choices->list) {
-        if (!row.choices.empty()) {
-          row.choices += ",";
+      if (!row.choices_from.empty()) {
+        if (choices != nullptr) {
+          Fail(Location(line) + "enum row `" + row.key +
+               "` has both `choices` and `choices_from`; the build's list is the only one it "
+               "can have");
+          continue;
         }
-        row.choices += choice;
+        if (backends.empty()) {
+          Fail(Location(line) + "enum row `" + row.key +
+               "` takes its choices from the build, but no backends were named; pass "
+               "`--backends=<list>`");
+          continue;
+        }
+        for (const std::string& backend : backends) {
+          if (!row.choices.empty()) {
+            row.choices += ",";
+          }
+          row.choices += backend;
+        }
+        if (std::find(backends.begin(), backends.end(), row.default_text) == backends.end()) {
+          Fail(Location(line) + "enum row `" + row.key + "` defaults to `" + row.default_text +
+               "`, which this build cannot render with (" + row.choices + ")");
+          continue;
+        }
+      } else {
+        if (choices == nullptr || !choices->is_array || choices->list.empty()) {
+          Fail(Location(line) + "enum row `" + row.key + "` has no `choices`");
+          continue;
+        }
+        for (const std::string& choice : choices->list) {
+          if (!row.choices.empty()) {
+            row.choices += ",";
+          }
+          row.choices += choice;
+        }
+        if (std::find(choices->list.begin(), choices->list.end(), row.default_text) ==
+            choices->list.end()) {
+          Fail(Location(line) + "enum row `" + row.key + "` defaults to `" +
+               row.default_text + "`, which is not one of its choices");
+          continue;
+        }
       }
-      if (std::find(choices->list.begin(), choices->list.end(), row.default_text) ==
-          choices->list.end()) {
-        Fail(Location(line) + "enum row `" + row.key + "` defaults to `" +
-             row.default_text + "`, which is not one of its choices");
-        continue;
-      }
-    } else if (choices != nullptr) {
+    } else if (choices != nullptr || !row.choices_from.empty()) {
       Fail(Location(line) + "row `" + row.key +
-           "` has `choices` but its kind is not enum");
+           "` has `choices`/`choices_from` but its kind is not enum");
       continue;
     }
 
@@ -927,8 +972,9 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "\n"
       << "enum class Tab : std::uint8_t {\n  kGeneral,\n  kGraphics,\n  kController,\n};\n"
       << "\n"
-      << "// A tab's category. `unavailable` groups have no rows and carry the one line the tab\n"
-      << "// shows for them instead of an empty or disabled widget (D14).\n"
+      << "// A tab's category. `unavailable` groups have no rows: the tab does not draw them at\n"
+      << "// all, and they exist so --dump-layout can name what this build does not fill (D14,\n"
+      << "// D18).\n"
       << "struct Group {\n"
       << "  std::string_view name;\n"
       << "  Tab tab;\n"
@@ -1010,17 +1056,23 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
 struct Arguments {
   fs::path settings;
   fs::path header;
+  // The graphics backends this build compiled in, in the order they should be offered. A row
+  // that declares `choices_from = "gpu_backends"` gets exactly this list, so the launcher cannot
+  // offer a renderer the payload was not built with.
+  std::vector<std::string> backends;
 };
 
 void PrintUsage() {
   std::fprintf(stderr,
                "usage: rb_blitz_embed_settings --settings <settings.toml> --header <out.h>\n"
+               "                                 [--backends=d3d12,vulkan]\n"
                "\n"
                "Compiles the launcher's settings schema, and refuses a table with a duplicate\n"
                "key, a row without a tooltip, or a `live` row without an evidence comment.\n");
 }
 
 bool ParseArguments(int argc, char** argv, Arguments* out) {
+  constexpr std::string_view kBackendsPrefix = "--backends=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument = argv[index];
     auto take = [&](fs::path* target) {
@@ -1038,6 +1090,16 @@ bool ParseArguments(int argc, char** argv, Arguments* out) {
     } else if (argument == "--header") {
       if (!take(&out->header)) {
         return false;
+      }
+    } else if (argument.size() > kBackendsPrefix.size() &&
+               argument.substr(0, kBackendsPrefix.size()) == kBackendsPrefix) {
+      out->backends =
+          SplitList(argument.substr(kBackendsPrefix.size()), ',');
+      for (const std::string& backend : out->backends) {
+        if (backend != "d3d12" && backend != "vulkan") {
+          Fail("unknown graphics backend `" + backend + "`; expected d3d12 or vulkan");
+          return false;
+        }
       }
     } else if (argument == "--help" || argument == "-h") {
       PrintUsage();
@@ -1073,7 +1135,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::unique_ptr<Schema> schema = Build(document);
+  std::unique_ptr<Schema> schema = Build(document, arguments.backends);
   if (g_failures != 0) {
     std::fprintf(stderr, "embed_settings: %d problem(s) in %s\n", g_failures,
                  arguments.settings.string().c_str());

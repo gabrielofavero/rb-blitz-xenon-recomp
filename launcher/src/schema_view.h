@@ -22,26 +22,18 @@
 
 namespace rb_blitz::launcher {
 
-// One line in a tab. Exactly one pointer is set: a setting the ring can land on, or the
-// single line an unavailable group shows instead of rows (D14).
-struct LayoutRow {
-  const settings::Setting* setting = nullptr;
-  const settings::Group* note_group = nullptr;
-};
-
-// A group's rows, in the table's order. `unavailable` means no rows are drawn: the group
-// is its name plus one line, never a disabled widget that looks like a setting (D14).
+// A group's rows, in the table's order. Only groups this build has something to draw in are
+// here at all: a category with nothing in it is not a setting, so it is not on the tab (D14).
 struct LayoutGroup {
   const settings::Group* group = nullptr;
-  std::vector<LayoutRow> rows;
-  bool unavailable = false;
+  std::vector<const settings::Setting*> rows;
 };
 
 struct TabLayout {
   settings::Tab tab = settings::Tab::kGeneral;
-  std::vector<LayoutGroup> groups;
-  std::size_t row_count = 0;    // focusable settings across every group
-  std::size_t note_count = 0;   // groups rendered as a name and one line
+  std::vector<LayoutGroup> groups;             // what the tab draws
+  std::vector<const settings::Group*> unbuilt; // what it does not, named only by the dump
+  std::size_t row_count = 0;    // focusable settings across every drawn group
   std::size_t hidden_count = 0; // rows the environment kept out of this tab
 };
 
@@ -49,8 +41,9 @@ struct TabLayout {
 // the schema is what adds a tab to the launcher.
 std::vector<settings::Tab> TabOrder();
 
-// The tab's name as a person reads it - "General", not the lowercase key the schema spells.
-// The strip, the headings and the window title all use this.
+// The tab's name as a person reads it. Most tabs are their schema key capitalised, but the
+// graphics tab is drawn as "Audio / Video": it holds the audio rows too, and the key it is
+// spelled with in the schema is the file's business, not the user's.
 std::string DisplayTabName(settings::Tab tab);
 
 // What a row's `visible` rule is decided from. Passed in rather than looked up, so this module
@@ -66,10 +59,9 @@ struct RowEnvironment {
 // rule is always visible.
 bool SettingVisible(const settings::Setting& setting, const RowEnvironment& environment);
 
-// The tab's groups and rows, with the rows the environment hides already left out - so a
-// caller that draws this layout cannot draw, or focus, a row that is not there. A group marked
-// unavailable, and a group with no rows at all, both become one note row carrying the group's
-// own text.
+// The tab's groups and rows, with the rows the environment hides - and the groups this build
+// has nothing to draw in - left out. A caller that draws this layout cannot draw, or focus, a
+// row that is not there, and cannot show a category that has nothing in it.
 TabLayout BuildTabLayout(settings::Tab tab, const RowEnvironment& environment = {});
 
 std::vector<TabLayout> BuildLayout(const RowEnvironment& environment = {});
@@ -86,12 +78,15 @@ std::vector<std::string_view> SettingChoices(const settings::Setting& setting);
 // each choice is drawn as its own radio the ring can land on, and one for anything else.
 std::size_t FocusEntriesFor(const settings::Setting& setting);
 
-// The one line a group with nothing to draw shows. A group declared unavailable without a
-// note still says something honest rather than rendering an empty heading.
+// The one line a group with nothing to draw would have shown. Nothing on screen reads it any
+// more - the category is simply absent - so it survives only as what --dump-layout prints for a
+// group this build does not fill, which is the record of what is still owed.
 std::string_view GroupNoteText(const settings::Group& group);
 
 // A stable, human-readable rendering of the layout: the evidence --dump-layout prints
-// that every schema row reaches a tab and every row carries a tooltip.
+// that every schema row reaches a tab and every row carries a tooltip. An enum row also
+// prints its choices, because one row's are decided by the build rather than by the schema
+// (`choices_from`) and "is this build offering Vulkan?" must be answerable without a window.
 std::string DescribeLayout(const std::vector<TabLayout>& layout);
 
 }  // namespace rb_blitz::launcher

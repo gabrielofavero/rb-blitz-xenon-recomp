@@ -96,14 +96,8 @@ std::string DescribeGeneral(const ProfileSession& session, const GameRoots& root
   // rows exist or what they are called.
   const TabLayout layout = BuildTabLayout(settings::Tab::kGeneral);
   for (const LayoutGroup& group : layout.groups) {
-    for (const LayoutRow& row : group.rows) {
-      if (row.setting == nullptr) {
-        out += "group          : ";
-        out += row.note_group->name;
-        out += " (unavailable)\n";
-        continue;
-      }
-      const settings::Setting& setting = *row.setting;
+    for (const settings::Setting* row : group.rows) {
+      const settings::Setting& setting = *row;
       if (setting.kind != settings::Kind::kPathDir && setting.kind != settings::Kind::kPathFile) {
         continue;  // the target row is already reported above
       }
@@ -161,11 +155,8 @@ std::string DescribePrecedence(const ProfileSession& session) {
   std::size_t badged = 0;
   for (const TabLayout& tab : BuildLayout()) {
     for (const LayoutGroup& group : tab.groups) {
-      for (const LayoutRow& row : group.rows) {
-        if (row.setting == nullptr) {
-          continue;
-        }
-        const settings::Setting& setting = *row.setting;
+      for (const settings::Setting* row : group.rows) {
+        const settings::Setting& setting = *row;
         const std::string_view launcher_value = LauncherValueText(session, setting);
         const RowOverride over =
             session.OverrideFor(setting.key, launcher_value, setting.default_text);
