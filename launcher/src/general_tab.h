@@ -4,9 +4,10 @@
 // The General tab (docs/plans/launcher-plan.md D4, D5; prompt B1).
 //
 // It draws the three rows §1.1 gives M1 - the launch target with the payload availability the
-// files say, and the save and DLC locations - and edits them in the profile it is handed. B4
-// is what writes that profile to disk, B8 is what adds the *Install Ultimate...* action, and
-// the game-directory override and *Verify installation* are D4's later rows, not M1's.
+// files say, and the save and DLC locations - and edits them in the session's profile, which
+// B4's block at the end of the tab is what writes to disk. B8 is what adds the *Install
+// Ultimate...* action, and the game-directory override and *Verify installation* are D4's later
+// rows, not M1's.
 //
 // The rules are not re-implemented here: the payload state comes from ultimate_state.h, the
 // value rules from path_validate.h (which is src/fs/dlc_layout.h and src/fs/path_policy.h),
@@ -22,6 +23,8 @@
 #include "launcher/profile.h"
 #include "nav.h"
 #include "path_validate.h"
+#include "profile_session.h"
+#include "profile_ui.h"
 #include "schema_view.h"
 #include "ultimate_state.h"
 
@@ -29,15 +32,25 @@ namespace rb_blitz::launcher {
 
 class GeneralTab {
  public:
+  // The rows B4 adds after the settings rows: the profile block at the end of the tab
+  // (launcher/src/profile_ui.h). The tab's ring has to be sized for them, which is why this is
+  // public.
+  static constexpr std::size_t kExtraRows = ProfilePanel::kRowCount;
+
   explicit GeneralTab(GameRoots roots);
 
   // `action` is this frame's NavAction. B1's rows are the first with anything to activate, so
-  // Enter and Space on the focused row open the folder picker / move the target on.
-  void Draw(const TabLayout& tab, FocusModel& ring, Profile& profile, NavAction action);
+  // Enter and Space on the focused row open the folder picker / move the target on; B4's block
+  // answers the same way.
+  void Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& session, NavAction action);
 
   // What the last Draw read off the file system. Exposed so the caller can say it out loud
   // rather than the tab being the only thing that knows.
   UltimateState state() const { return state_; }
+
+  // True while B4's reset confirmation is up, so the shell leaves Escape to it instead of
+  // reading it as "leave the launcher" (A1).
+  bool ModalOpen() const { return panel_.ModalOpen(); }
 
   // SDL's dialog callback target. Public only because the C callback needs it; nothing else
   // in the launcher calls it.
@@ -56,14 +69,17 @@ class GeneralTab {
   // The verdict for a row's current value, computed once per value rather than every frame:
   // the DLC rule walks the folder, and a row that is not being edited does not change.
   const PathVerdict& VerdictFor(std::string_view key, const std::string& value);
-  void ApplyChosenPath(Profile& profile);
-  void DrawTargetValue(Profile& profile, std::size_t index, FocusModel& ring, NavAction action);
-  void DrawPathValue(const settings::Setting& setting, float value_width, Profile& profile,
-                     std::size_t index, FocusModel& ring, NavAction action);
-  void DrawMessages(const settings::Setting& setting, const Profile& profile);
+  void ApplyChosenPath(ProfileSession& session);
+  void DrawTargetValue(ProfileSession& session, std::size_t index, FocusModel& ring,
+                       NavAction action);
+  void DrawPathValue(const settings::Setting& setting, float value_width,
+                     ProfileSession& session, std::size_t index, FocusModel& ring,
+                     NavAction action);
+  void DrawMessages(const settings::Setting& setting, ProfileSession& session);
 
   GameRoots roots_;
   UltimateState state_ = UltimateState::kMissing;
+  ProfilePanel panel_;
   std::vector<PathRowState> path_rows_;
   // The last value each path row was judged at, so the rules are applied when something
   // changes and not sixty times a second.

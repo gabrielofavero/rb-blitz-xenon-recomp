@@ -79,6 +79,12 @@ struct Options {
   // B1's headless evidence, so the four states can be asserted on text instead of OCR.
   bool dump_general = false;
   std::string dump_general_path;
+  // --dump-profile[=<path>] prints B4's write path and the precedence audit - where the settings
+  // file is, whether it is portable, what a save would change, what a reset would remove, and
+  // every row the game's own rb_blitz.toml decides - and leaves. The badge is the one part of
+  // B4 that otherwise only exists on screen.
+  bool dump_profile = false;
+  std::string dump_profile_path;
 };
 
 Options ParseOptions(int argc, char** argv) {
@@ -87,12 +93,19 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kGameDataPrefix = "--game_data_root=";
   constexpr std::string_view kDumpPrefix = "--dump-layout=";
   constexpr std::string_view kDumpGeneralPrefix = "--dump-general=";
+  constexpr std::string_view kDumpProfilePrefix = "--dump-profile=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--dump-layout") {
       options.dump_layout = true;
     } else if (argument == "--dump-general") {
       options.dump_general = true;
+    } else if (argument == "--dump-profile") {
+      options.dump_profile = true;
+    } else if (argument.size() > kDumpProfilePrefix.size() &&
+               argument.substr(0, kDumpProfilePrefix.size()) == kDumpProfilePrefix) {
+      options.dump_profile = true;
+      options.dump_profile_path = std::string(argument.substr(kDumpProfilePrefix.size()));
     } else if (argument.size() > kDumpGeneralPrefix.size() &&
                argument.substr(0, kDumpGeneralPrefix.size()) == kDumpGeneralPrefix) {
       options.dump_general = true;
@@ -136,13 +149,10 @@ int DumpLayout(const std::string& path) {
   return Emit(all, path, complete ? 0 : 1);
 }
 
-// The General tab, decided without a window. Both inputs are D2's own resolution, so the
-// report describes exactly the profile and the root the launcher itself would use.
-int DumpGeneral(const Options& options) {
+// The session both dump modes describe: D2's own resolution from the same inputs the launcher
+// itself uses, so a report is about the profile and the root the launcher would really pick.
+rb_blitz::launcher::ProfileSession MakeDumpSession(const Options& options) {
   const fs::path launcher_dir = ExecutableDir();
-  const rb_blitz::launcher::GameRoots roots =
-      rb_blitz::launcher::DetectGameRoots(launcher_dir, options.game_data_root);
-
   rb_blitz::launcher::ProfilePathInputs inputs =
       rb_blitz::launcher::ProfilePathInputsFromEnvironment(launcher_dir);
   inputs.command_line_value = options.profile_path;
@@ -152,7 +162,32 @@ int DumpGeneral(const Options& options) {
   if (!profile_path.empty()) {
     load = rb_blitz::launcher::LoadProfile(profile_path);
   }
-  return Emit(rb_blitz::launcher::DescribeGeneral(load, roots), options.dump_general_path, 0);
+  return rb_blitz::launcher::ProfileSession(std::move(inputs), std::move(load));
+}
+
+// The General tab, decided without a window.
+int DumpGeneral(const Options& options) {
+  const rb_blitz::launcher::GameRoots roots =
+      rb_blitz::launcher::DetectGameRoots(ExecutableDir(), options.game_data_root);
+  const rb_blitz::launcher::ProfileSession session = MakeDumpSession(options);
+  return Emit(rb_blitz::launcher::DescribeGeneral(session, roots), options.dump_general_path, 0);
+}
+
+int DumpProfile(const Options& options) {
+  const rb_blitz::launcher::ProfileSession session = MakeDumpSession(options);
+
+  std::string text = "settings file  : ";
+  text += session.path().empty() ? "(nowhere to save)" : session.path().string();
+  text += session.portable() ? " (portable, from the marker beside the launcher)\n" : "\n";
+  if (session.path_from_override()) {
+    text += "                 an override named it, so portable mode cannot move it\n";
+  }
+  text += "writable       : ";
+  text += session.CanSave() ? "yes\n" : ("no, " + session.Refusal() + "\n");
+  text += "dirty          : ";
+  text += session.Dirty() ? "yes, a save would write\n" : "no, a save would not touch the file\n";
+  text += rb_blitz::launcher::DescribePrecedence(session);
+  return Emit(text, options.dump_profile_path, 0);
 }
 
 // Where the running executable lives. SDL_GetBasePath returns SDL's own cached buffer
@@ -177,6 +212,9 @@ int main(int argc, char** argv) {
   if (options.dump_general) {
     return DumpGeneral(options);
   }
+  if (options.dump_profile) {
+    return DumpProfile(options);
+  }
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -190,20 +228,21 @@ int main(int argc, char** argv) {
   path_inputs.command_line_value = options.profile_path;
   const fs::path profile_path = rb_blitz::launcher::ResolveProfilePath(path_inputs);
 
-  rb_blitz::launcher::Profile profile;
-  bool profile_writable = true;
+  rb_blitz::launcher::ProfileLoadResult load;
   if (!profile_path.empty()) {
-    const rb_blitz::launcher::ProfileLoadResult loaded =
-        rb_blitz::launcher::LoadProfile(profile_path);
-    profile = loaded.profile;
-    // A malformed file is left exactly as it is and never written over (D2). The window
-    // still opens, with the compiled defaults, and the geometry is simply not saved.
-    profile_writable = loaded.usable();
-    if (!profile_writable) {
+    load = rb_blitz::launcher::LoadProfile(profile_path);
+    if (!load.usable()) {
+      // A malformed file is left exactly as it is and is never written over (D2). The window
+      // still opens, with the compiled defaults, and B4's block says so out loud.
       std::fprintf(stderr, "%s is not usable, leaving it alone: %s\n",
-                   profile_path.string().c_str(), loaded.error.c_str());
+                   profile_path.string().c_str(), load.error.c_str());
     }
   }
+  rb_blitz::launcher::ProfileSession session(std::move(path_inputs), std::move(load));
+  // A1's window size comes from the profile as it was loaded; B4's block edits the session's own
+  // copy, and the geometry on the way out is written from what the file last had (see below).
+  const int stored_width = session.profile().window_width;
+  const int stored_height = session.profile().window_height;
 
   // Where the game's data is: the override the game itself takes, then the installer's layout
   // next to the launcher (B1). The General tab reads the Ultimate state from it.
@@ -214,8 +253,8 @@ int main(int argc, char** argv) {
   const float ui_scale = display_scale > 0.0f ? display_scale : 1.0f;
 
   SDL_Window* window = SDL_CreateWindow(
-      kWindowTitle, WindowDimension(profile.window_width, kDefaultWidth),
-      WindowDimension(profile.window_height, kDefaultHeight),
+      kWindowTitle, WindowDimension(stored_width, kDefaultWidth),
+      WindowDimension(stored_height, kDefaultHeight),
       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window == nullptr) {
     Fatal("SDL_CreateWindow");
@@ -270,7 +309,7 @@ int main(int argc, char** argv) {
   SDL_ShowWindow(window);
 
   std::unique_ptr<rb_blitz::launcher::Shell> shell =
-      std::make_unique<rb_blitz::launcher::Shell>(profile, roots);
+      std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots);
 
   // The title names the current tab. It is the only piece of the launcher's state a script
   // can read back (MainWindowTitle), which is what makes A1's "tab through every tab"
@@ -354,22 +393,20 @@ int main(int argc, char** argv) {
   ImGui_ImplSDLGPU3_Shutdown();
   ImGui::DestroyContext();
 
-  // A1's geometry persistence (D2): the size, and only when it changed, so a launcher the
-  // user never resized neither creates the profile nor touches its mtime. Logical points,
-  // because that is what the profile stores.
-  if (profile_writable && !profile_path.empty()) {
+  // A1's geometry persistence (D2), now through B4's session: the size, and only when it
+  // changed, so a launcher the user never resized neither creates the profile nor touches its
+  // mtime. What is written is the profile as the file last had it, so a setting the user changed
+  // and did not save is not written by the back door either - the panel called it unsaved, and it
+  // stays unsaved.
+  {
     int width = 0;
     int height = 0;
     SDL_GetWindowSize(window, &width, &height);
-    if (width > 0 && height > 0 &&
-        (width != profile.window_width || height != profile.window_height)) {
-      profile.window_width = width;
-      profile.window_height = height;
-      std::string error;
-      if (!rb_blitz::launcher::SaveProfile(profile_path, profile, &error)) {
-        std::fprintf(stderr, "could not save the window size to %s: %s\n",
-                     profile_path.string().c_str(), error.c_str());
-      }
+    const rb_blitz::launcher::SaveOutcome outcome =
+        shell->session().SaveWindowGeometry(width, height);
+    if (!outcome.ok) {
+      std::fprintf(stderr, "could not save the window size to %s: %s\n",
+                   shell->session().path().string().c_str(), outcome.error.c_str());
     }
   }
 

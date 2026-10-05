@@ -100,12 +100,20 @@ struct ProfileLoadResult {
 // checks `usable()` cannot save over a file it did not understand.
 ProfileLoadResult LoadProfile(const std::filesystem::path& path);
 
+// The exact bytes a save would write, without writing them: the document patched with the
+// keys this module owns, everything else in `source_text` byte-for-byte as it was. This is
+// what lets a caller answer "would saving change anything?" before touching the file, and
+// what an export copies. Returns false and fills `error` when `source_text` does not parse.
+bool ComposeProfile(const Profile& profile, std::string* text, std::string* error);
+
 // Writes the profile, patching the keys it owns and leaving the rest of the document
 // alone. The path comes from ResolveProfilePath, which is what keeps the default out of
 // the install folder (D2). Returns false and fills `error` when it cannot write.
 //
 // The model is authoritative and the file is not re-read, so saving the same Profile
-// twice writes the same bytes; `source_text` is not updated by a save.
+// twice writes the same bytes; `source_text` is not updated by a save. A save whose bytes
+// would be identical to what is already on disk does not open the file at all, so the
+// mtime of an unchanged profile stays the moment it really last changed.
 bool SaveProfile(const std::filesystem::path& path, const Profile& profile, std::string* error);
 
 // Renders a fresh document, for a first run. Omits `[settings]` when there are none.

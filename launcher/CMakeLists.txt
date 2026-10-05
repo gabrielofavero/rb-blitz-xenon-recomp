@@ -50,10 +50,13 @@ set_source_files_properties(${RBBLITZ_IMGUI_BACKENDS} PROPERTIES
 
 set(RBBLITZ_LAUNCHER_SOURCES
     main.cpp
+    src/game_config.cpp
     src/general_report.cpp
     src/general_tab.cpp
     src/nav.cpp
     src/path_validate.cpp
+    src/profile_session.cpp
+    src/profile_ui.cpp
     src/row_ui.cpp
     src/schema_view.cpp
     src/shell.cpp

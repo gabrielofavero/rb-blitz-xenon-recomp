@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// rb_blitz - ReXGlue Recompiled Project
+//
+// The launcher's write path (docs/plans/launcher-plan.md D2, D3; prompt B4).
+//
+// P0.3's profile module is the format: it patches the keys it owns into the document it was
+// given and leaves everything else byte for byte as it was. This is the session on top of it -
+// the file's path, what a save would change, whether saving is allowed at all, and the two
+// decisions B4 adds on top of "write the model": a reset that can name what it removes, and
+// portable mode, whose switch is a marker file rather than a setting inside the profile.
+//
+// The file is the authority for "did anything change": `Dirty` and `Save` make the same byte
+// comparison, so a profile that was edited and edited back is not reported as unsaved, and a
+// save that would not change a byte does not touch the file (B4's mtime rule).
+//
+// Dependency-free (no ImGui, no SDL, no SDK) so all four of B4's verify items run as tests
+// rather than as a screenshot.
+
+#pragma once
+
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "game_config.h"
+#include "launcher/profile.h"
+#include "launcher/profile_path.h"
+
+namespace rb_blitz::launcher {
+
+// What a write did. `ok` with `wrote == false` is the ordinary case of nothing to change: the
+// file already held exactly these bytes.
+struct SaveOutcome {
+  bool ok = true;
+  bool wrote = false;
+  std::string error;
+};
+
+// What a *Reset to defaults* would remove, named exactly (B4): the settings keys that would be
+// dropped from `[settings]`, and the launch fields that would be cleared, in words. Empty
+// means the reset would do nothing, which is worth saying before the user confirms it.
+struct ResetPlan {
+  std::vector<std::string> settings;  // cvar names, as the file spells them
+  std::vector<std::string> launch;    // "the launch target", "the save location", ...
+
+  bool empty() const { return settings.empty() && launch.empty(); }
+};
+
+// The game's own file deciding one row (D3 ranks 3 and 4).
+struct RowOverride {
+  bool overridden = false;
+  std::string game_value;
+};
+
+// The sentence the precedence badge shows (B4): what the game's own file says, and why it wins.
+// Pure text, so the panel and a headless report say exactly the same thing.
+std::string OverrideNoteText(std::string_view launcher_value, std::string_view game_value);
+
+class ProfileSession {
+ public:
+  // `inputs` is D2's resolution order, kept whole: the portable switch re-resolves with it, so
+  // an override that named the file still names it afterwards. `load` is what was read, kept
+  // whole because a file that did not parse must not be written over (D2).
+  ProfileSession(ProfilePathInputs inputs, ProfileLoadResult load);
+
+  Profile& profile() { return load_.profile; }
+  const Profile& profile() const { return load_.profile; }
+
+  // The file this session writes. It moves when the portable switch does.
+  const std::filesystem::path& path() const { return path_; }
+
+  bool portable() const { return portable_; }
+  // True when argv or the environment named the file, so the portable switch cannot move it -
+  // D2's order puts an explicit choice above the marker, and the UI says so.
+  bool path_from_override() const { return path_from_override_; }
+  // The directory the portable marker lives in: the launcher's own, which is where the game's
+  // executable and its `rb_blitz.toml` are too (D1: both ship in the payload).
+  const std::filesystem::path& executable_dir() const { return inputs_.executable_dir; }
+
+  // False when the file on disk did not parse. The session then refuses to write anything,
+  // rather than replacing a file it did not understand (D2: never lose a hand-edited file).
+  bool CanSave() const { return load_.usable(); }
+  // The reason saving is refused, or empty.
+  std::string Refusal() const;
+
+  // True when a save would change the file. Recomputed rather than remembered, because it is
+  // the same comparison Save makes and a byte comparison of a few hundred bytes is cheaper than
+  // a change-tracking bug - and because the profile can be edited straight through `profile()`.
+  //
+  // A profile with no file yet is dirty only once something differs from what was loaded, so a
+  // launcher nobody has touched does not claim unsaved changes on first run.
+  bool Dirty() const;
+
+  // True when the file this session writes is on disk. "Saved" is only worth saying when there
+  // is something to have saved.
+  bool has_file() const;
+
+  // D2's write path: a value equal to the compiled default is *dropped* instead of written, so
+  // the file records what differs from the defaults and nothing else. `default_text` and the
+  // value's style come from the schema row.
+  void SetSetting(std::string_view key, std::string value, std::string_view default_text,
+                  ValueStyle style);
+
+  // Writes the profile. Unknown keys, comments and tables in the document it was loaded from
+  // are patched around rather than rewritten - that is P0.3's module, and this only decides
+  // whether to call it.
+  SaveOutcome Save();
+
+  // The same document, to a file the user named. The session's own file is not touched.
+  SaveOutcome ExportTo(const std::filesystem::path& target) const;
+
+  // A1's geometry persistence, which is the one thing the launcher keeps without being asked.
+  // Only a size that actually changed is written (so a launcher nobody resized neither creates
+  // the profile nor touches its mtime), and what is written is the profile as the file last had
+  // it plus the new size - a setting the user changed and did not save stays unsaved, which is
+  // what the panel says about it.
+  SaveOutcome SaveWindowGeometry(int width, int height);
+
+  // Adopts another document as this session's profile: a backup, another machine's file, or a
+  // hand-edited one. A file that does not parse is refused and nothing changes - the file the
+  // user picked is left exactly where it is (B4's "do not delete a file you failed to parse").
+  // The file the session writes does not move, and nothing is written until Save() or the
+  // caller saves.
+  bool ImportFrom(const std::filesystem::path& source, std::string* error);
+
+  ResetPlan WhatResetWouldRemove() const;
+  // Back to the compiled defaults: every recorded setting is dropped and the launch fields are
+  // cleared. The window's geometry is not a setting and is left alone, so the launcher does not
+  // resize itself out from under the user.
+  void ResetToDefaults();
+
+  struct PortableOutcome {
+    bool ok = true;
+    bool changed = false;  // false when it was already in the state that was asked for
+    std::string error;
+  };
+
+  // D2's portable mode. The marker beside the executable is the whole switch; the profile's own
+  // `portable` field is written to agree with it but never decides anything.
+  //
+  // Turning it on carries the current settings to the new location rather than starting from
+  // the defaults, and the file it leaves behind is kept: switching where settings live is not
+  // the place to delete a settings file. If the new location cannot be written the marker is
+  // put back the way it was and the failure is reported - "portable" pointing at a read-only
+  // install folder is exactly the case B4 has to survive.
+  PortableOutcome SetPortable(bool on);
+
+  // The game's own file, re-read when it changes on disk. Badge input only: the launcher never
+  // writes it (D2).
+  const GameConfig& game_config() const;
+
+  // Whether the game's own file, not the launcher, decides this row. The launcher passes a row
+  // on the command line only when its value differs from the compiled default (D3 rank 1);
+  // for every other row the game's file outranks the profile at equal rank, because the game
+  // applies it second.
+  RowOverride OverrideFor(std::string_view key, std::string_view launcher_value,
+                          std::string_view compiled_default) const;
+
+ private:
+  void RefreshGameConfig() const;
+
+  ProfilePathInputs inputs_;
+  std::filesystem::path path_;
+  ProfileLoadResult load_;
+  // The profile as the file last had it: what the exit-time geometry write starts from, and the
+  // reason a change the user did not save cannot be written by the back door.
+  Profile saved_;
+  bool portable_ = false;
+  bool path_from_override_ = false;
+
+  mutable GameConfig game_config_;
+  mutable bool game_config_read_ = false;
+  mutable std::filesystem::file_time_type game_config_stamp_{};
+};
+
+}  // namespace rb_blitz::launcher

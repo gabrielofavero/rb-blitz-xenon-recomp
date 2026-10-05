@@ -65,7 +65,7 @@ void GeneralTab::OnFolderChosen(const char* const* filelist) {
   chosen_path_ = filelist[0];
 }
 
-void GeneralTab::ApplyChosenPath(Profile& profile) {
+void GeneralTab::ApplyChosenPath(ProfileSession& session) {
   const std::string path = chosen_path_;
   chosen_path_.clear();
   const settings::Setting* setting = FindSetting(chosen_key_);
@@ -83,7 +83,7 @@ void GeneralTab::ApplyChosenPath(Profile& profile) {
     return;
   }
 
-  SetProfilePath(&profile, setting->key, path);
+  SetProfilePath(&session.profile(), setting->key, path);
   message_key_.clear();
   message_.clear();
   RowStateFor(setting->key).source.clear();
@@ -107,8 +107,9 @@ const PathVerdict& GeneralTab::VerdictFor(std::string_view key, const std::strin
   return VerdictFor(key, value);
 }
 
-void GeneralTab::DrawTargetValue(Profile& profile, std::size_t index, FocusModel& ring,
+void GeneralTab::DrawTargetValue(ProfileSession& session, std::size_t index, FocusModel& ring,
                                  NavAction action) {
+  Profile& profile = session.profile();
   struct Option {
     LaunchTarget target;
     const char* label;
@@ -123,9 +124,15 @@ void GeneralTab::DrawTargetValue(Profile& profile, std::size_t index, FocusModel
   const bool activated =
       action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
 
+  // D5: the target the launcher will actually start, which is the stored choice except while the
+  // payload is missing. It is computed for the screen and not written to the profile: the row and
+  // its warning say what will happen, and installing the payload later restores the choice
+  // without the user having to remember what it was (B4).
+  const LaunchTarget effective = FallbackTarget(profile.target, state_);
+
   std::size_t current = 0;
   for (std::size_t i = 0; i < option_count; ++i) {
-    if (options[i].target == profile.target) {
+    if (options[i].target == effective) {
       current = i;
     }
   }
@@ -148,7 +155,7 @@ void GeneralTab::DrawTargetValue(Profile& profile, std::size_t index, FocusModel
     if (ultimate && !UltimateSelectable(state_)) {
       ImGui::BeginDisabled();
     }
-    bool selected = profile.target == option.target;
+    bool selected = effective == option.target;
     if (ImGui::RadioButton(label.c_str(), selected)) {
       profile.target = option.target;
     }
@@ -159,10 +166,10 @@ void GeneralTab::DrawTargetValue(Profile& profile, std::size_t index, FocusModel
 }
 
 void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_width,
-                               Profile& profile, std::size_t index, FocusModel& ring,
+                               ProfileSession& session, std::size_t index, FocusModel& ring,
                                NavAction action) {
   PathRowState& state = RowStateFor(setting.key);
-  const std::string& current = ProfilePathValue(profile, setting.key);
+  const std::string& current = ProfilePathValue(session.profile(), setting.key);
   if (state.source != current) {
     state.source = current;
     const std::size_t count = std::min(current.size(), sizeof(state.buffer) - 1);
@@ -199,7 +206,7 @@ void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_wid
   }
 }
 
-void GeneralTab::DrawMessages(const settings::Setting& setting, const Profile& profile) {
+void GeneralTab::DrawMessages(const settings::Setting& setting, ProfileSession& session) {
   if (setting.key == "launch.target") {
     const std::string_view state_text = UltimateStateText(state_);
     if (!state_text.empty()) {
@@ -219,7 +226,8 @@ void GeneralTab::DrawMessages(const settings::Setting& setting, const Profile& p
   // A path row's own value is judged every time it changes, not only when it is picked: a
   // hand-edited profile that points a writable root into the game data is refused out loud
   // too (D4), rather than only being caught the first time somebody touches the row.
-  const PathVerdict& verdict = VerdictFor(setting.key, ProfilePathValue(profile, setting.key));
+  const PathVerdict& verdict =
+      VerdictFor(setting.key, ProfilePathValue(session.profile(), setting.key));
   if (!verdict.ok) {
     ImGui::PushStyleColor(ImGuiCol_Text, kError);
     ImGui::TextWrapped("%s", verdict.reason.c_str());
@@ -233,14 +241,17 @@ void GeneralTab::DrawMessages(const settings::Setting& setting, const Profile& p
     ImGui::TextWrapped("%s", message_.c_str());
     ImGui::PopStyleColor();
   }
+  // And B4's precedence badge, which every tab's rows can carry.
+  DrawOverrideBadge(setting, session);
 }
 
-void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, Profile& profile, NavAction action) {
+void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& session,
+                      NavAction action) {
   // The file system is the authority, and it is read every frame rather than remembered: four
   // stat calls per frame is nothing, and a state detected once would be a stale promise (D5).
   state_ = DetectUltimateState(roots_.game_root);
   if (!chosen_path_.empty()) {
-    ApplyChosenPath(profile);
+    ApplyChosenPath(session);
   }
 
   std::size_t row_index = 0;
@@ -261,19 +272,23 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, Profile& profile, 
       DrawRowLabel(setting, row_index, ring, columns.label_width);
       ImGui::SameLine();
       if (setting.key == "launch.target") {
-        DrawTargetValue(profile, row_index, ring, action);
+        DrawTargetValue(session, row_index, ring, action);
       } else if (setting.kind == settings::Kind::kPathDir ||
                  setting.kind == settings::Kind::kPathFile) {
-        DrawPathValue(setting, columns.value_width, profile, row_index, ring, action);
+        DrawPathValue(setting, columns.value_width, session, row_index, ring, action);
       } else {
         ImGui::BeginDisabled();
-        DrawReadOnlyValue(setting, columns.value_width);
+        DrawReadOnlyValue(setting, columns.value_width,
+                          LauncherValueText(session, setting));
         ImGui::EndDisabled();
       }
-      DrawMessages(setting, profile);
+      DrawMessages(setting, session);
       ++row_index;
     }
   }
+
+  // B4's block, at the end of the tab and in the ring: Save, Reset, Import, Export, Portable.
+  panel_.Draw(row_index, session, ring, action);
 }
 
 }  // namespace rb_blitz::launcher

@@ -25,6 +25,30 @@ is removed from this file, not from the log.
 
 ## Accepted (by design, not bugs)
 
+- **Two settings files, and the game's own wins at equal rank** (launcher D3). The launcher
+  keeps `launcher.toml` where D2 puts it, and the game loads it as a config file at the top of
+  `OnConfigurePaths`; the game's own `rb_blitz.toml`, next to its executable, is loaded after it
+  at the same rank, so for any row the launcher does not pass on the command line the game's file
+  is what the game will really use. That is deliberate: an in-game change made through the F4
+  overlay's *Save to config* must not be silently undone by the launcher. It is a *limit*
+  because it means the launcher's value can be right and still not be the one in effect — and
+  a user who changes a display setting in-game and then sees the launcher's own value is not
+  looking at a bug. The launcher's answer is to say so (B4's badge, on every tab, with the value
+  the game will use and a *Copy the effective value* action that writes the launcher's file and
+  never the game's). Ordering, once, for the record: argv → `RBBLITZ_*` → `rb_blitz.toml` →
+  `launcher.toml` → compiled defaults. (`--dump-profile` prints every badged row, which is the
+  audit for this rule without a screenshot.)
+- **The launcher's declared limits, as of A1/B1/B4.** (1) The badge's *Copy the effective value*
+  button is reachable by mouse only: a second focusable target per row is a change to the focus
+  model, and a pad binding for it belongs with A5; the row can be set to the same value by hand
+  from the pad or the keyboard in the meantime. (2) The launcher's 200 %-DPI leg is unmeasured —
+  the machine that verified A1 runs at 100 %, so DPI-aware layout is scaled but not eyeballed at
+  a second step. (3) A successful pick in the folder, import and export dialogs was driven by
+  hand (typing the path), not by the observation harness; the open-and-cancel half is scripted.
+  (4) A save is explicit: the window size is kept on the way out (A1), and everything a row or a
+  badge changed is written when *Save* is pressed, so a change can be reconsidered first — the tab
+  strip says "unsaved changes" while one is pending.
+
 - **The Debug preset runs the guest route, and Release is still the configuration acceptance
   runs on.** Until 2026-09-29 the Debug preset stopped at the first A on the title screen, on
   the SDK's `XamAlloc_entry` assert — a parameter the implementation never reads. It is not an

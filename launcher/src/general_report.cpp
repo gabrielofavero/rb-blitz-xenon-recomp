@@ -6,6 +6,7 @@
 #include "general_report.h"
 
 #include "path_validate.h"
+#include "row_ui.h"
 #include "schema_view.h"
 
 namespace rb_blitz::launcher {
@@ -31,25 +32,45 @@ const std::string& ProfilePathValue(const Profile& profile, std::string_view key
 
 }  // namespace
 
-std::string DescribeGeneral(const ProfileLoadResult& load, const GameRoots& roots) {
-  const Profile& profile = load.profile;
+std::string DescribeGeneral(const ProfileSession& session, const GameRoots& roots) {
+  const Profile& profile = session.profile();
   const UltimateState state = DetectUltimateState(roots.game_root);
 
   std::string out;
+  out += "settings file  : ";
+  out += session.path().empty() ? "(nowhere to save)" : session.path().string();
+  out += session.portable() ? " (portable)\n" : "\n";
   out += "profile        : ";
-  switch (load.status) {
-    case ProfileStatus::kOk:
-      out += "ok";
-      break;
-    case ProfileStatus::kMissingFile:
-      out += "not there yet";
-      break;
-    case ProfileStatus::kMalformed:
-      out += "MALFORMED, left alone: ";
-      out += load.error;
-      break;
+  if (!session.CanSave()) {
+    out += "MALFORMED, left alone: ";
+    out += session.Refusal();
+  } else if (session.path().empty()) {
+    out += "nowhere to keep it";
+  } else if (session.Dirty()) {
+    out += "unsaved changes";
+  } else {
+    out += "saved";
   }
   out += "\n";
+  const ResetPlan reset = session.WhatResetWouldRemove();
+  out += "reset would    : ";
+  if (reset.empty()) {
+    out += "remove nothing\n";
+  } else {
+    out += "remove ";
+    bool first = true;
+    for (const std::string& key : reset.settings) {
+      out += first ? "" : ", ";
+      out += key;
+      first = false;
+    }
+    for (const std::string& item : reset.launch) {
+      out += first ? "" : ", ";
+      out += item;
+      first = false;
+    }
+    out += "\n";
+  }
   out += "game root      : ";
   out += roots.game_root.string();
   out += roots.game_root_found ? " (found)\n" : " (not found)\n";
@@ -104,8 +125,67 @@ std::string DescribeGeneral(const ProfileLoadResult& load, const GameRoots& root
       } else {
         out += "    ok\n";
       }
+      // B4: the same precedence line the row's badge draws, when the game's own file decides it.
+      const RowOverride over =
+          session.OverrideFor(setting.key, LauncherValueText(session, setting),
+                              setting.default_text);
+      if (over.overridden) {
+        out += "    badge: ";
+        out += OverrideNoteText(LauncherValueText(session, setting), over.game_value);
+        out += "\n";
+      }
     }
   }
+  return out;
+}
+
+std::string DescribePrecedence(const ProfileSession& session) {
+  const GameConfig& config = session.game_config();
+
+  std::string out;
+  out += "game config    : ";
+  out += config.path.string();
+  if (!config.present) {
+    out += " (not there: nothing to override anything)\n";
+  } else if (config.unreadable) {
+    out += " (unreadable: ";
+    out += config.error;
+    out += ")\n";
+  } else {
+    out += "\n";
+  }
+
+  // Every tab, in the table's order: the badge is decided per row, and a run that only looked
+  // at the General tab would never see the case it exists for (a display or input row the
+  // launcher leaves at its compiled default and the game's own file then decides).
+  std::size_t badged = 0;
+  for (const TabLayout& tab : BuildLayout()) {
+    for (const LayoutGroup& group : tab.groups) {
+      for (const LayoutRow& row : group.rows) {
+        if (row.setting == nullptr) {
+          continue;
+        }
+        const settings::Setting& setting = *row.setting;
+        const std::string_view launcher_value = LauncherValueText(session, setting);
+        const RowOverride over =
+            session.OverrideFor(setting.key, launcher_value, setting.default_text);
+        if (!over.overridden) {
+          continue;
+        }
+        ++badged;
+        out += "badge ";
+        out += settings::TabName(tab.tab);
+        out += " ";
+        out += setting.key;
+        out += " : ";
+        out += OverrideNoteText(launcher_value, over.game_value);
+        out += "\n";
+      }
+    }
+  }
+  out += "rows badged    : ";
+  out += std::to_string(badged);
+  out += "\n";
   return out;
 }
 

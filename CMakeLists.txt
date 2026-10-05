@@ -349,6 +349,18 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_launcher_general_tests PRIVATE src launcher/src)
     add_test(NAME launcher_general COMMAND rb_blitz_launcher_general_tests)
+
+    # B4's write path: the session on top of the profile module, plus the reader for the game's
+    # own file that the precedence badge is decided from.
+    add_executable(rb_blitz_launcher_session_tests
+        tests/launcher_profile_session_tests.cpp
+        launcher/src/game_config.cpp
+        launcher/src/profile_session.cpp
+        src/launcher/profile.cpp
+        src/launcher/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_launcher_session_tests PRIVATE src launcher/src)
+    add_test(NAME launcher_session COMMAND rb_blitz_launcher_session_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,

@@ -781,48 +781,69 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
   return result;
 }
 
+bool ComposeProfile(const Profile& profile, std::string* text, std::string* error) {
+  if (profile.source_text.empty()) {
+    *text = RenderProfile(profile);
+    return true;
+  }
+
+  Layout layout;
+  std::string reason;
+  if (!Scan(profile.source_text, &layout, &reason)) {
+    *error = reason;
+    return false;
+  }
+
+  Pending pending;
+  Schedule(layout, &pending, "", "schema_version", std::to_string(kProfileSchemaVersion),
+           ValueStyle::kBare);
+  Schedule(layout, &pending, "launcher", "version", std::to_string(profile.launcher_version),
+           ValueStyle::kBare);
+  Schedule(layout, &pending, "launcher", "portable", BoolText(profile.portable),
+           ValueStyle::kBare);
+  Schedule(layout, &pending, "window", "width", std::to_string(profile.window_width),
+           ValueStyle::kBare);
+  Schedule(layout, &pending, "window", "height", std::to_string(profile.window_height),
+           ValueStyle::kBare);
+  Schedule(layout, &pending, "launch", "target", LaunchTargetLiteral(profile.target),
+           ValueStyle::kBasic);
+  Schedule(layout, &pending, "launch", "game_dir", profile.game_dir, ValueStyle::kBasic);
+  Schedule(layout, &pending, "launch", "user_data_dir", profile.user_data_dir,
+           ValueStyle::kBasic);
+  Schedule(layout, &pending, "launch", "dlc_dir", profile.dlc_dir, ValueStyle::kBasic);
+  for (const ProfileSetting& setting : profile.settings) {
+    Schedule(layout, &pending, "settings", setting.key, setting.value, setting.style);
+  }
+  // `[settings]` is modelled as a whole, so a key the model no longer has is dropped.
+  // Everything outside it is untouched, which is what protects a newer launcher's keys.
+  for (const KeyRef& ref : layout.keys) {
+    if (ref.section == "settings" && profile.FindSetting(ref.key) == nullptr) {
+      pending.edits.push_back(Edit{ref.line_begin, ref.line_end, ""});
+    }
+  }
+
+  *text = Apply(layout, pending);
+  return true;
+}
+
 bool SaveProfile(const fs::path& path, const Profile& profile, std::string* error) {
   std::string text;
-  if (profile.source_text.empty()) {
-    text = RenderProfile(profile);
-  } else {
-    Layout layout;
-    std::string reason;
-    if (!Scan(profile.source_text, &layout, &reason)) {
-      *error = path.string() + ": " + reason;
-      return false;
-    }
-
-    Pending pending;
-    Schedule(layout, &pending, "", "schema_version", std::to_string(kProfileSchemaVersion),
-             ValueStyle::kBare);
-    Schedule(layout, &pending, "launcher", "version", std::to_string(profile.launcher_version),
-             ValueStyle::kBare);
-    Schedule(layout, &pending, "launcher", "portable", BoolText(profile.portable),
-             ValueStyle::kBare);
-    Schedule(layout, &pending, "window", "width", std::to_string(profile.window_width),
-             ValueStyle::kBare);
-    Schedule(layout, &pending, "window", "height", std::to_string(profile.window_height),
-             ValueStyle::kBare);
-    Schedule(layout, &pending, "launch", "target", LaunchTargetLiteral(profile.target),
-             ValueStyle::kBasic);
-    Schedule(layout, &pending, "launch", "game_dir", profile.game_dir, ValueStyle::kBasic);
-    Schedule(layout, &pending, "launch", "user_data_dir", profile.user_data_dir,
-             ValueStyle::kBasic);
-    Schedule(layout, &pending, "launch", "dlc_dir", profile.dlc_dir, ValueStyle::kBasic);
-    for (const ProfileSetting& setting : profile.settings) {
-      Schedule(layout, &pending, "settings", setting.key, setting.value, setting.style);
-    }
-    // `[settings]` is modelled as a whole, so a key the model no longer has is dropped.
-    // Everything outside it is untouched, which is what protects a newer launcher's keys.
-    for (const KeyRef& ref : layout.keys) {
-      if (ref.section == "settings" && profile.FindSetting(ref.key) == nullptr) {
-        pending.edits.push_back(Edit{ref.line_begin, ref.line_end, ""});
-      }
-    }
-
-    text = Apply(layout, pending);
+  if (!ComposeProfile(profile, &text, error)) {
+    *error = path.string() + ": " + *error;
+    return false;
   }
+
+  // A save that would not change a byte leaves the file alone, so an unchanged profile keeps
+  // the mtime of its last real change instead of earning a new one every time the launcher
+  // closes.
+  std::string current;
+  if (ReadWholeFile(path, &current, error)) {
+    if (current == text) {
+      error->clear();
+      return true;
+    }
+  }
+  error->clear();
 
   std::error_code code;
   if (!path.parent_path().empty()) {

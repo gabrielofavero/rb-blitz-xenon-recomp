@@ -77,20 +77,23 @@ class GamepadNavSource : public NavSource {
 
 }  // namespace
 
-Shell::Shell(Profile profile, GameRoots roots)
+Shell::Shell(ProfileSession session, GameRoots roots)
     : roots_(std::move(roots)),
-      profile_(std::move(profile)),
+      session_(std::move(session)),
       general_(roots_),
       layout_(BuildLayout()),
       keyboard_(std::make_unique<KeyboardNavSource>()),
       gamepad_(std::make_unique<GamepadNavSource>()) {
-  // D5: a profile that has never chosen a target comes up on Ultimate only while the payload
-  // is usable. "Ultimate" with nothing to mount is a promise the launcher cannot keep, and
-  // saying so here is better than starting a boot that cannot honour it.
-  profile_.target = FallbackTarget(profile_.target, DetectUltimateState(roots_.game_root));
+  // D5's target fallback lives in the General tab, which applies it to what it shows rather than
+  // to the profile (B4): with a write path, mutating the stored target here would have made a
+  // window resize record a choice the user never made.
   rings_.resize(layout_.size());
   for (std::size_t index = 0; index < layout_.size(); ++index) {
-    rings_[index].Reset(layout_[index].row_count);
+    // B4's profile block is focusable too, and it lives at the end of the General tab, so that
+    // tab's ring is the settings rows plus the block. Everything else is one ring per row.
+    const std::size_t extra =
+        layout_[index].tab == settings::Tab::kGeneral ? GeneralTab::kExtraRows : 0;
+    rings_[index].Reset(layout_[index].row_count + extra);
   }
 }
 
@@ -156,7 +159,11 @@ bool Shell::Frame() {
     action = gamepad_->Poll();
   }
   if (action == NavAction::kCancel) {
-    return false;
+    // Escape belongs to B4's reset confirmation while it is up; with nothing modal on screen it
+    // is "leave the launcher" (A1).
+    if (!general_.ModalOpen()) {
+      return false;
+    }
   }
   ApplyAction(action);
   action_ = action;
@@ -193,11 +200,20 @@ bool Shell::Frame() {
       ImGui::PopStyleColor();
     }
   }
+  // B4: a change the profile has not been saved with. It sits beside the tabs rather than only in
+  // the General tab's block, because a badge's action or (B2/B3) a row's edit can happen on
+  // another tab, and "did that stick?" must not depend on looking at a different tab.
+  if (session_.Dirty()) {
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.25f, 1.0f));
+    ImGui::TextUnformatted("unsaved changes");
+    ImGui::PopStyleColor();
+  }
   ImGui::Separator();
 
   if (tab_ < layout_.size()) {
     if (layout_[tab_].tab == settings::Tab::kGeneral) {
-      general_.Draw(layout_[tab_], rings_[tab_], profile_, action_);
+      general_.Draw(layout_[tab_], rings_[tab_], session_, action_);
     } else {
       DrawTab(layout_[tab_], rings_[tab_]);
     }
@@ -227,8 +243,11 @@ void Shell::DrawTab(const TabLayout& tab, FocusModel& ring) {
       DrawRowLabel(setting, row_index, ring, columns.label_width);
       ImGui::SameLine();
       ImGui::BeginDisabled();
-      DrawReadOnlyValue(setting, columns.value_width);
+      DrawReadOnlyValue(setting, columns.value_width, LauncherValueText(session_, setting));
       ImGui::EndDisabled();
+      // B4's precedence badge: a row the game's own file decides says so here too, so the
+      // warning does not depend on which tab the user is looking at.
+      DrawOverrideBadge(setting, session_);
       ++row_index;
     }
   }

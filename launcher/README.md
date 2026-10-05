@@ -9,22 +9,26 @@ what is in this directory *today* and how to change it.
 Today this directory holds the **launcher executable** with its **three-tab shell**
 ([A1](../docs/plans/launcher-plan.md)), its **settings schema**, and the profile module that
 both executables compile. The General tab is real (B1): it detects the Ultimate payload, edits
-the launch target and the two locations and says why a value was refused. The bottom bar (A2),
-the controller navigation (A3), the write path (B4) and launching the game (B7) arrive with the
-prompts that follow, so what exists here now is a launcher that shows every schema row, edits
-General, and is fully drivable with the keyboard.
+the launch target and the two locations and says why a value was refused. Saving, the
+precedence badge, import/export and portable mode are real too (B4). The bottom bar (A2), the
+controller navigation (A3) and launching the game (B7) arrive with the prompts that follow, so
+what exists here now is a launcher that shows every schema row, edits General, saves what it
+changed, and is fully drivable with the keyboard.
 
 | Path | What it is |
 | --- | --- |
-| `main.cpp` | The entry point: opens the window, loads the profile for the window size, runs the frame loop, saves the size on the way out (P0.4, A1) |
+| `main.cpp` | The entry point: opens the window, loads the profile for the window size, runs the frame loop, saves the size on the way out (P0.4, A1, B4) |
 | `src/schema_view.{h,cpp}` | The generated table turned into tabs, groups and rows — no ImGui, no SDL (A1) |
 | `src/nav.{h,cpp}` | The focus ring and the one `NavSource` seam a device plugs into (A1, D6) |
 | `src/shell.{h,cpp}` | The tab shell: the strip, the ring, and the read-only widget per `kind` (A1) |
-| `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with (A1, B1) |
+| `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with, and the precedence badge (A1, B1, B4) |
 | `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers (B1) |
 | `src/ultimate_state.{h,cpp}` | D5's four payload states and the target fallback — no ImGui, no SDL (B1) |
 | `src/path_validate.{h,cpp}` | The schema's `validate` rules, reusing `src/fs/path_policy.h` and `src/fs/dlc_layout.h` (B1) |
-| `src/general_report.{h,cpp}` | What `--dump-general` prints (B1) |
+| `src/profile_session.{h,cpp}` | The write path: what a save would change, a reset, import/export, portable mode, and the precedence rule — no ImGui, no SDL (B4) |
+| `src/game_config.{h,cpp}` | A read-only reader for the game's own `rb_blitz.toml`, which outranks the profile (B4, D3) |
+| `src/profile_ui.{h,cpp}` | The profile block at the end of the General tab (B4) |
+| `src/general_report.{h,cpp}` | What `--dump-general` and `--dump-profile` print (B1, B4) |
 | `rb_blitz_launcher.rc` | The exe icon — `assets/blitz.ico`, through the same resource mechanism as the game |
 | `config/settings.toml` | The schema: one `[[setting]]` per row the launcher shows, one `[[group]]` per category (Contract 1) |
 | `tools/embed_settings.cpp` | Compiles — and validates — the schema into the header below |
@@ -102,11 +106,15 @@ pointer and the keyboard never disagree about the selection (D6).
 `--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
 window — the headless half of A1's verification, and what says out loud if a row ever
 reaches the table without a tooltip. `--dump-general` prints what the General tab would
-decide for a given game root and profile (B1's verification, without the OCR):
+decide for a given game root and profile, and `--dump-profile` prints B4's write path and the
+**precedence audit** — one line per row the game's own `rb_blitz.toml` decides, in the words
+the badge uses, which is the only way to check that rule without a screenshot (B1/B4's
+verification, without the OCR):
 
 ```
 rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
 rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\Games\rb_blitz" --launcher_profile=out\p.toml
+rb_blitz_launcher.exe --dump-profile=out\profile.txt --launcher_profile=out\p.toml
 ```
 
 ## The General tab (B1)
@@ -148,8 +156,13 @@ rules are the runtime's and not the tab's:
 
 A refusal keeps the value the profile already holds and states the reason under the row; a
 value already in the profile is judged the same way, so a hand-edited file is flagged rather
-than trusted. Editing a row changes the **session's** profile only: turning that into
-`launcher.toml` is B4.
+than trusted. Editing a row changes the session's profile, and a change reaches the disk when
+the profile block below the rows is saved (B4).
+
+D5's target fallback is a **display** decision, not a stored one: a stored "Ultimate" with
+nothing to mount is shown and started as the retail game, and the profile keeps what the user
+chose, so installing the payload later needs no remembering and no save can record a fallback
+the user never picked.
 
 
 ## The profile — `launcher.toml`
@@ -178,6 +191,52 @@ parse is reported with a reason and left on disk untouched — the launcher refu
 over it until it is fixed (D2: "never lose a hand-edited file").
 
 `tests/launcher_profile_tests.cpp` pins both halves: `ctest -R launcher_profile`.
+
+
+## Saving, the precedence badge and portable mode (B4)
+
+The rows below the General tab's three settings are the write path, and they are in the focus
+ring like everything else — Save, *Reset to defaults…*, *Import…*, *Export…* and the portable
+switch. `src/profile_session.{h,cpp}` decides; `src/profile_ui.{h,cpp}` is buttons and wording,
+and it is dependency-free on purpose so all of this is testable without a window
+(`tests/launcher_profile_session_tests.cpp`, `ctest -R launcher_session`).
+
+**A save writes what changed and nothing else.** A setting equal to its compiled default is
+*dropped* from `[settings]` rather than written out, so the table is the list of what differs,
+and a save whose bytes would be identical does not open the file at all — an unchanged profile
+keeps the mtime of its last real change. The window size is the one thing the launcher keeps
+without being asked (A1), it is written from the profile as the file last had it, and a size
+that did not change is not written, so a launcher nobody resized neither creates the profile
+nor touches it.
+
+**Nothing is written over a file that did not parse.** The block says so, Save refuses with the
+reason, and *Import…* stays live — reading a profile you trust is the way out of a broken one.
+
+**A reset names exactly what it will remove.** The confirmation lists the `[settings]` keys it
+will drop (by label and by key name, so a key this build does not know is still named) and the
+launch fields it will clear, and says the window size is not one of them. The reset happens in
+the session, so the file it changes is the user's to write with Save.
+
+**The precedence badge (D3).** The game applies its own `rb_blitz.toml` *after* the launcher's
+profile at equal rank, so for a row the launcher leaves at its compiled default — and therefore
+never passes on the command line — the game's file is what the game will use. Those rows carry
+a line saying so, in the words `OverrideNoteText` produces, with a *Copy the effective value*
+button that adopts the game's value into the launcher's own file. The game's file is never
+written: it belongs to the game and to the F4 overlay's *Save to config* (D2). With a pad or a
+keyboard the row can be set to match by hand instead; the button itself is mouse-only, because a
+second focusable target per row is a focus-model change and belongs with A5.
+
+**Portable mode** is a marker file beside the launcher (`rb_blitz_launcher.portable`) and not a
+setting, because the marker is what selects where settings live (D2). Turning it on carries the
+current settings to the new location rather than starting from the defaults, and the file it
+leaves behind is kept — switching where settings live is not the place to delete a settings
+file. If the new location cannot be written, the marker is put back as it was and the failure is
+reported. An override that named the file (`--launcher_profile`, `RBBLITZ_LAUNCHER_PROFILE`)
+still names it, and the block says so.
+
+The tab strip carries an "unsaved changes" marker whenever a save would write, because a
+badge's action or a row's edit can happen on any tab and "did that stick?" must not depend on
+looking at a different one.
 
 
 ## Building the table
