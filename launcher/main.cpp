@@ -28,6 +28,7 @@
 #include "schema_view.h"
 #include "shell.h"
 #include "ultimate_state.h"
+#include "virtual_pad.h"
 
 #include <algorithm>
 #include <cmath>
@@ -112,6 +113,18 @@ struct Options {
   // assertable without booting anything - and it is the first thing a bug report wants.
   bool print_command = false;
   std::string print_command_path;
+  // --focus-log=<path> writes what the focus ring and the input devices did, and leaves the
+  // window alone (A3). It is how "the pad moved the ring" and "the bar named the focused row" are
+  // read back without a screenshot: a WIN32 process has no console to print to, so it is a file.
+  std::string focus_log_path;
+  // --no-gamepad opens no pad for navigation (D6's recovery switch). A pad that is holding a
+  // direction down - a snapped stick, a cushion on the D-pad - cannot move the ring while it is
+  // set, and the launcher is otherwise unusable with one plugged in.
+  bool no_gamepad = false;
+  // --test-pad=<script> attaches a virtual pad and presses it on a schedule (launcher/src/
+  // virtual_pad.h). It is A3's evidence hook: a pad plugging in mid-session, moving the ring and
+  // being unplugged again, on a machine with no controller attached to it.
+  std::string test_pad_script;
 };
 
 Options ParseOptions(int argc, char** argv) {
@@ -123,6 +136,8 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kDumpProfilePrefix = "--dump-profile=";
   constexpr std::string_view kDumpDisplayPrefix = "--dump-display=";
   constexpr std::string_view kPrintCommandPrefix = "--print-command=";
+  constexpr std::string_view kFocusLogPrefix = "--focus-log=";
+  constexpr std::string_view kTestPadPrefix = "--test-pad=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--dump-layout") {
@@ -135,6 +150,14 @@ Options ParseOptions(int argc, char** argv) {
       options.dump_display = true;
     } else if (argument == "--print-command") {
       options.print_command = true;
+    } else if (argument == "--no-gamepad") {
+      options.no_gamepad = true;
+    } else if (argument.size() > kTestPadPrefix.size() &&
+               argument.substr(0, kTestPadPrefix.size()) == kTestPadPrefix) {
+      options.test_pad_script = std::string(argument.substr(kTestPadPrefix.size()));
+    } else if (argument.size() > kFocusLogPrefix.size() &&
+               argument.substr(0, kFocusLogPrefix.size()) == kFocusLogPrefix) {
+      options.focus_log_path = std::string(argument.substr(kFocusLogPrefix.size()));
     } else if (argument.size() > kPrintCommandPrefix.size() &&
                argument.substr(0, kPrintCommandPrefix.size()) == kPrintCommandPrefix) {
       options.print_command = true;
@@ -437,6 +460,20 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // A3's two switches, and the pad a machine with no controller can be tested with. The script is
+  // checked here, before there is a window to clean up: one this build cannot parse is worth
+  // saying out loud rather than discovering from a pad that never presses anything.
+  rb_blitz::launcher::ShellEnvironment shell_environment;
+  shell_environment.gamepads = !options.no_gamepad;
+  shell_environment.focus_log_path = options.focus_log_path;
+  rb_blitz::launcher::VirtualPad test_pad;
+  if (!options.test_pad_script.empty() && !test_pad.Start(options.test_pad_script, nullptr)) {
+    std::fprintf(stderr, "--test-pad: '%s' is not a script this build understands\n",
+                 options.test_pad_script.c_str());
+    SDL_Quit();
+    return 2;
+  }
+
   // D2's order: the executable's directory and the environment first, then argv on top.
   const fs::path launcher_dir = ExecutableDir();
   rb_blitz::launcher::ProfilePathInputs path_inputs =
@@ -569,7 +606,8 @@ int main(int argc, char** argv) {
   SDL_free(displays);
 
   std::unique_ptr<rb_blitz::launcher::Shell> shell =
-      std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots, environment);
+      std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots, environment,
+                                                  shell_environment);
 
   // The title names the current tab. It is the only piece of the launcher's state a script
   // can read back (MainWindowTitle), which is what makes A1's "tab through every tab"
@@ -588,6 +626,11 @@ int main(int argc, char** argv) {
 
   bool done = false;
   while (!done) {
+    // The scripted pad is pressed before the event pump rather than after: SDL applies a virtual
+    // joystick's state when it is pumped, so a press set here is one this same frame can see.
+    if (!test_pad.finished()) {
+      test_pad.Update(static_cast<double>(SDL_GetTicks()) / 1000.0);
+    }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       ImGui_ImplSDL3_ProcessEvent(&event);
@@ -653,6 +696,10 @@ int main(int argc, char** argv) {
   ImGui_ImplSDLGPU3_Shutdown();
   ImGui::DestroyContext();
 
+  // The pads are the shell's, and SDL's gamepad subsystem is about to be shut down with SDL_Quit:
+  // closing a pad after that would be touching a handle SDL has already freed, so the shell - and
+  // the pad handles it owns - go first.
+
   // A1's geometry persistence (D2), now through B4's session: the size, and only when it
   // changed, so a launcher the user never resized neither creates the profile nor touches its
   // mtime. What is written is the profile as the file last had it, so a setting the user changed
@@ -682,6 +729,10 @@ int main(int argc, char** argv) {
   SDL_ReleaseWindowFromGPUDevice(gpu_device, window);
   SDL_DestroyGPUDevice(gpu_device);
   SDL_DestroyWindow(window);
+  // The shell's pads are closed by this, and the virtual pad is taken away, both before the gamepad
+  // subsystem goes: the geometry above is the last thing that needs the shell.
+  shell.reset();
+  test_pad.Stop();
   SDL_Quit();
   return 0;
 }

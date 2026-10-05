@@ -11,6 +11,7 @@
 
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "row_ui.h"
@@ -122,8 +123,7 @@ void ProfilePanel::ApplyPendingDialogs(ProfileSession& session) {
   status_ = "Imported " + path;
 }
 
-bool ProfilePanel::Item(std::size_t index, const FocusModel& ring, NavAction action,
-                        const char* label) {
+bool ProfilePanel::Item(std::size_t index, FocusModel& ring, NavAction action, const char* label) {
   const bool focused = action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
   // The ring is visible on the row labels (A1); a button says the same thing the tab strip does
   // for the selected tab, so focus is never invisible without needing a second drawing primitive.
@@ -135,11 +135,36 @@ bool ProfilePanel::Item(std::size_t index, const FocusModel& ring, NavAction act
   if (in_ring) {
     ImGui::PopStyleColor();
   }
+  // A pointer is a device like any other (D6): hovering a button adopts the ring, the same way
+  // hovering a row label does. Without it the bar (A2) would keep describing the last row the
+  // keyboard or the ring left behind while the mouse pointed somewhere else.
+  ring.FocusIf(index, ImGui::IsItemHovered());
   // In the ring and out of sight is not usable: bring it back, exactly as a row does (row_ui).
   if (in_ring && !ImGui::IsItemVisible()) {
     ImGui::SetScrollHereY(0.5f);
   }
   return clicked || focused;
+}
+
+std::string ProfilePanel::HelpText(std::size_t row) {
+  switch (row) {
+    case 0:
+      return "Sets every setting in this file back to the value the build was compiled with. "
+             "The window size is not one of them, and nothing is removed from disk until Save.";
+    case 1:
+      return "Replaces what is on screen with a profile from a file you choose. This is also how "
+             "a profile that would not parse is replaced: a file the launcher could not read is "
+             "never written over.";
+    case 2:
+      return "Writes a copy of the profile as it is on screen to a file you choose, so a setup "
+             "that works can be carried to another machine.";
+    case 3:
+      return "Moves where the profile is looked for and written, so several installs can share "
+             "one. Choose the folder that holds the settings, not the file itself.";
+    default:
+      break;
+  }
+  return "(nothing to say about this one)";
 }
 
 void ProfilePanel::DrawResetModal(ProfileSession& session, bool was_open, NavAction action) {

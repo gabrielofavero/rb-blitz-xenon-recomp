@@ -16,18 +16,24 @@ settings location are real too (B4), the Audio / Video tab's rows are editable (
 Controller tab's button-mapping block rebinds the pad for real (D16) — the launcher writes
 `[remap]` and `rb_blitz.exe` reads it back through the shared vocabulary in
 [`../src/launcher/remap.h`](../src/launcher/remap.h). The window's own chrome is finished
-(A2): *Close*, *Save* and *Launch Game* live on the bottom bar, and Launch Game is B7's
-contract — it saves what is unsaved, builds the command line from the schema and starts the
-game. The controller navigation (A3) arrives with the prompt that follows, so what exists here
-now is a launcher that shows and edits every schema row, installs the Ultimate payload, saves
-what it changed, rebinds the pad, starts the game, and is fully drivable with the keyboard.
+(A2): *Close*, *Save* and *Launch Game* live on the bottom bar, under the focused row's own help
+— its tooltip and how to operate it — and Launch Game is B7's contract: it saves what is unsaved,
+builds the command line from the schema and starts the game. The controller navigation (A3) is
+real too, so a pad shows and edits every schema row alongside the keyboard, which stays a peer
+rather than a fallback. What exists here now is a launcher that shows and edits every schema row,
+installs the Ultimate payload, saves what it changed, rebinds the pad, starts the game, and is
+drivable with the keyboard, the mouse or a controller.
 
 | Path | What it is |
 | --- | --- |
 | `main.cpp` | The entry point: opens the window, loads the profile for the window geometry, loads the UI font, runs the frame loop, saves the size on the way out (P0.4, A1, B4) |
 | `src/schema_view.{h,cpp}` | The generated table turned into tabs, groups and rows — no ImGui, no SDL (A1) |
 | `src/nav.{h,cpp}` | The focus ring and the one `NavSource` seam a device plugs into (A1, D6) |
-| `src/shell.{h,cpp}` | The tab shell: the strip, the scrolling body, the bottom bar, the ring, and one editable widget per `kind` (A1, A2, B2) |
+| `src/pad_nav.{h,cpp}` | The pad's rules — the binding table, the deadzone, the repeat — with no SDL in them at all (A3, D6) |
+| `src/pad_source.{h,cpp}` | The pad as a device: which pads are open, what they are called, and what they are asking for (A3) |
+| `src/virtual_pad.{h,cpp}` | A scripted virtual pad, so the pad path is checkable on a desk with no controller on it (A3, `--test-pad`) |
+| `src/focus_log.{h,cpp}` | The `--focus-log` trace: what the ring and the input devices did, written only when it changes (A3, A2) |
+| `src/shell.{h,cpp}` | The tab shell: the strip, the scrolling body, the bottom bar and its help region, the ring, and one editable widget per `kind` (A1, A2, B2) |
 | `src/settings_edit.{h,cpp}` | The per-kind editor that writes a row's change into the profile (B2) |
 | `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with, and the precedence badge (A1, B1, B2, B4) |
 | `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers, and the Ultimate install (B1, B8) |
@@ -154,13 +160,14 @@ changes no C++ at all:
   out, so a rule that hides more than it meant to is visible there.
 - **One focus ring per tab** (`src/nav.cpp`): a flat, ordered list of the tab's rows and a
   focused index. Moving wraps, so `End` then `Down` returns to the first row. Keys are
-  translated in exactly one place and become `NavAction`s; the gamepad is a stub
-  `NavSource` until A3 fills it in, and the shell does not know which device answered.
+  translated in exactly one place and become `NavAction`s; a pad produces the same vocabulary
+  through its own source (`src/pad_source.cpp`, A3), and the shell does not know which device
+  answered.
 - **The bottom bar (A2)** is the window's, not a tab's, and it is where a session ends: the
-  state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right.
-  There is no title text and no key legend at the top — the window's own title bar names the
-  launcher and the tab, and the bar's own controls say what they do. A2's other half, the
-  focused row's tooltip, is still owed (the schema already requires the text for it).
+  state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right, and
+  under them the focused row's own help — its tooltip, and how to operate it. There is no title
+  text and no key legend at the top: the window's own title bar names the launcher and the tab,
+  and the bar's own controls say what they do.
 - **Window geometry** is read from the profile at startup and written back on the way out,
   and only when it changed — so a launcher nobody resized neither creates `launcher.toml`
   nor touches its mtime. A profile that does not parse is never written over (D2). The
@@ -175,10 +182,63 @@ changes no C++ at all:
 | `Home` / `End` | First / last row |
 | `Right` / `PageDown` | Next tab (`Left` / `PageUp` goes back) |
 | `Enter` / `Space` | Operate the focused row: pick a target, open the folder picker, toggle a checkbox, step a slider, choose an enum entry, or start the Ultimate install |
-| `Esc` / `B` | Leave |
+| `Esc` / `B` | Leave, or cancel whatever is modal |
+
+| Pad | What it does |
+| --- | --- |
+| D-pad / left stick | Next and previous row; left and right move between tabs (`src/pad_nav.cpp`, with `kStickDeadzone` of 8000 as the band around the centre that means nothing) |
+| `A` | Operate the focused row — the same thing `Enter` does |
+| `B` / `Back` | Leave, or cancel. D6 gave `Back` a "reload profile / quit" menu; there is no such menu, and the half of it that exists is the quit — A5 owns the recovery it was for |
+| `LB` / `RB` | Previous and next tab |
+| `Start` | Launch the game: the bar's *Launch Game* without the mouse, refused in the same cases the button is disabled in |
+| Hold a direction | It repeats after 0.45 s and then every 0.12 s, so a held D-pad walks the list. Nothing else repeats: a held `A` would press *Install Ultimate* again |
 
 The mouse is a device too: clicking a row focuses it, and hovering adopts the ring, so the
-pointer and the keyboard never disagree about the selection (D6).
+pointer and the keyboard never disagree about the selection (D6). A hovered *button* adopts it
+too — the bar must describe whatever the pointer is on, not the last row the ring left behind.
+
+A pad and the keyboard are peers, not alternatives: the first device to answer wins the frame,
+and either can take over mid-session (`--no-gamepad` opens no pad for navigation at all, which
+is the recovery switch for a pad holding a direction down by itself). Two attached pads are
+merged into one state, so pressing either moves the ring; the buttons the bar names are the
+last pad's that was used, so a pad that says it is a PlayStation one is told to press *Cross*
+rather than *A* (`SDL_GetGamepadButtonLabel`, and the family's own names for the shoulders and
+`Start` where the database has none — the face labels are the database's answer, the rest are
+this project's short table).
+
+Inserting or removing a pad mid-session is handled by polling: `SDL_GetGamepads` is read once a
+frame, pads that appeared are opened and pads that have gone are closed, and a button that was
+held when a pad left simply arrives as a state with nothing in it — there is no release event to
+wait for. This matters more than it looks: **SDL reads a pad's state only through a handle
+somebody opened**, and `SDL_GetGamepadFromID` answers with nothing for a pad nobody has, so a
+capture that read SDL directly would see silence that looks exactly like a pad at rest. Both
+readers — the ring's source and the remap block's listen — go through `PadRegistry`
+(`src/pad_source.h`) for that reason.
+
+### The focused row's help (A2, D7)
+
+The bar's second and third lines are the row under the ring: the row's own `tooltip` from the
+schema table, and the hints for it — key names or the pad's button names, following the last
+device used. Three things about it are deliberate:
+
+- **Every row has one, by construction.** `tools/embed_settings.cpp` refuses to build a row
+  without a tooltip, so the bar's text cannot be missing; the rows that are not settings — B4's
+  four buttons, D16's 35 mapping rows — carry theirs beside the code that draws them
+  (`ProfilePanel::HelpText`, `ControllerTab::HelpText`), and the shell asks *them* rather than
+  keeping a second table to fall out of step. The walk from a ring entry to a row is one
+  function (`schema_view.cpp`'s `SettingForEntry`), counting entries the same way the ring was
+  sized, which is why the two cannot disagree; a tab with no rows at all is D7's explicit `—`.
+- **The tooltip is re-wrapped, not repeated.** The line breaks in `settings.toml` are the file's
+  own wrapping, and the bar's width is a number the file cannot know, so the text is flattened
+  (`FlattenHelpText`) and drawn into the width the hints leave. Two lines, always reserved even
+  when one would do, because the body was given the rest of the window *before* the bar was
+  drawn: a bar that measured itself afterwards could not have told the body how much room it had.
+  Text longer than two lines is cut at a word with an ellipsis — it never pushes the three
+  actions off the bar.
+- **The hints say what the row does, not what the window does.** `RowActionVerb` is one word per
+  kind — *Toggle*, *Adjust*, *Edit*, *Choose*, *Browse* — and the two global hints follow. The
+  hints are dropped from the end when the window is too narrow for all of them, so the row's own
+  verb is the last thing to go.
 
 `--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
 window — the headless half of A1's verification, and what says out loud if a row ever
@@ -198,6 +258,37 @@ rb_blitz_launcher.exe --dump-profile=out\profile.txt --launcher_profile=out\p.to
 rb_blitz_launcher.exe --dump-display
 rb_blitz_launcher.exe --print-command --launcher_profile=out\p.toml
 ```
+
+Three switches are about the launcher's own input rather than about a setting (A3):
+
+```
+rb_blitz_launcher.exe --focus-log=out\focus.txt --launcher_profile=out\p.toml
+rb_blitz_launcher.exe --no-gamepad
+rb_blitz_launcher.exe --test-pad="family=sony;a;down;down:1200;right;detach"
+```
+
+`--focus-log=<path>` writes one line whenever the ring moves or the input device changes —
+`tab=graphics entry=0/27 row=resolution enter=Choose`, `device gamepad name=… confirm=Cross …`,
+`pads count=2 name="Virtual Pad"`. A window title can say which tab is up and nothing more, so
+this is how "the pad moved the ring, mid-session, without disturbing anything" is read back: a
+diff of a small text file instead of a screenshot nobody can inspect twice. It writes only on a
+change, and nothing reads it back.
+
+`--no-gamepad` opens no pad *for navigation* (D6's recovery switch). A pad holding a direction
+down — a snapped stick, a cushion on the D-pad — would otherwise walk the ring forever; the pads
+are still opened, because the Controller tab's listen is asked for one press at a time and a
+launcher that cannot be remapped is a worse trap than one that cannot be moved by a pad.
+
+`--test-pad=<script>` attaches SDL's virtual joystick and presses it on a schedule, because the
+pad path is otherwise only testable on a desk with a controller on it: a virtual pad lives
+inside the process that attached it, so nothing outside this one could press it. Steps are
+`;`-separated — `attach`, `detach`, `up`/`down`/`left`/`right`, `a`/`b`/`x`/`y`/`lb`/`rb`/
+`start`/`back`, `lstick=X,Y`, `family=xbox|sony` — each held for `:ms` (120 by default) and
+starting 400 ms after the one before. The pad arrives 1.2 s in, so "plugged in mid-session" is
+what the default schedule means. The virtual pad brings its own mapping (installed before it is
+opened, because a mapping only reaches an opened pad through a reload), which is what makes
+`family=` able to say what the pad claims to be — and what makes a run independent of what the
+mapping database happens to have for a hardware id that matches nothing.
 
 ## The General tab (B1)
 
@@ -509,7 +600,8 @@ handle so the button reads *Game is running* and stays down until the game exits
 copy of the title writing one save folder is not something to discover by trying.
 
 A failure is reported in the bar's left half with the reason; the launcher itself stays open,
-so the user can fix the folder and try again.
+so the user can fix the folder and try again. `Start` on a pad is the same launch without the
+mouse (A3), refused in the same cases the button is disabled in.
 
 ## The Controller tab, and button mapping (D16)
 
@@ -521,7 +613,9 @@ ones they did not.
 There is no input-source choice anywhere, deliberately. The game is single-player, so the
 launcher listens to **every** connected pad, the keyboard and the mouse in the same frame, and a
 keyboard assigned here is what makes the keyboard press a pad button at all — the SDK's SDL
-driver maps no keys to pad buttons.
+driver maps no keys to pad buttons. The pads it reads are the ones the launcher has open
+(`PadRegistry`, A3): SDL reports a pad's state only through an opened handle, so a capture that
+queried SDL for itself would read silence and look exactly like a pad nobody was touching.
 
 **Every control a 360 pad has is listed**, bound or not, because the list is the answer to "what
 can I rebind?". A row shows its control, what the control answers to, and two buttons:

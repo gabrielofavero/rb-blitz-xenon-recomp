@@ -38,7 +38,7 @@ is removed from this file, not from the log.
   never the game's). Ordering, once, for the record: argv → `RBBLITZ_*` → `rb_blitz.toml` →
   `launcher.toml` → compiled defaults. (`--dump-profile` prints every badged row, which is the
   audit for this rule without a screenshot.)
-- **The launcher's declared limits, as of A1/B1/B4.** (1) The badge's *Copy the effective value*
+- **The launcher's declared limits, as of A1/B1/B4/A3/A2.** (1) The badge's *Copy the effective value*
   button is reachable by mouse only: a second focusable target per row is a change to the focus
   model, and a pad binding for it belongs with A5; the row can be set to the same value by hand
   from the pad or the keyboard in the meantime. (2) The launcher's 200 %-DPI leg is unmeasured —
@@ -47,7 +47,33 @@ is removed from this file, not from the log.
   hand (typing the path), not by the observation harness; the open-and-cancel half is scripted.
   (4) A save is explicit: the window size is kept on the way out (A1), and everything a row or a
   badge changed is written when *Save* is pressed, so a change can be reconsidered first — the tab
-  strip says "unsaved changes" while one is pending.
+  strip says "unsaved changes" while one is pending. (5) **The bar's three actions are mouse-only on
+  the keyboard**: a pad can launch (`Start`) and leave (`B`, `Back`), but *Save* has no key and the
+  bar is not part of any tab's ring — putting it there is a focus-model change, and A5 is the prompt
+  that owns "usable with the keyboard only". (6) **A long tooltip loses its tail**: the bar reserves
+  two lines and cuts at a word with an ellipsis rather than growing, because the body was given the
+  rest of the window before the bar was drawn. (7) **The pad's tuning is fixed**: an 8000 deadzone
+  and a 0.45 s/0.12 s repeat, both constants rather than rows (C1 owns making them settings), and
+  with two pads attached their state is merged rather than chosen between — which is D17's answer,
+  and the bar's button names follow the last pad used, so the hints can change under a user holding
+  two pads of different families. (8) **A pad's buttons were pressed by SDL's virtual joystick, not
+  by hand**: `--test-pad` is the hook (`launcher/src/virtual_pad.h`), a real XInput pad was attached
+  and opened throughout but never pressed, so "a hand press on real hardware" is the manual pass's
+  (§6 wave 4). (9) A window that is restored or moved reads as the pointer having moved, because the
+  pointer's window-relative position changes — the hints then say key names until the pad is used
+  again. It is cosmetic and only visible while something resizes the window.
+
+- **Every build directory writes the same generated settings header.**
+  `launcher/out/generated/settings_table.h` is a fixed source-tree path (`launcher/CMakeLists.txt`,
+  P0.2), so a tree configured with different backends overwrites the other's copy and the *last*
+  build to regenerate decides what *every* binary offers — measured on 2026-10-05: the Release tree
+  offers `Renderer = d3d12, vulkan`, and a Debug build (which has `REXGLUE_USE_VULKAN=OFF`)
+  regenerating the shared file leaves the Release binary offering `d3d12` alone until it is rebuilt.
+  The build does not notice, because the custom command's inputs did not change. Workaround: build the
+  tree whose backends you want last, or re-run it by hand —
+  `rb_blitz_embed_settings.exe --settings launcher/config/settings.toml --header launcher/out/generated/settings_table.h --backends=d3d12,vulkan`
+  — and check with `--dump-layout`, which prints each enum row's choices. Making the header
+  per-build-directory is a change to P0.2's contract, not a bug fix.
 
 - **The Debug preset runs the guest route, and Release is still the configuration acceptance
   runs on.** Until 2026-09-29 the Debug preset stopped at the first A on the title screen, on

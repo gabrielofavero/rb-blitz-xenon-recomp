@@ -78,6 +78,23 @@ std::vector<std::string_view> SettingChoices(const settings::Setting& setting);
 // each choice is drawn as its own radio the ring can land on, and one for anything else.
 std::size_t FocusEntriesFor(const settings::Setting& setting);
 
+// The row a ring entry belongs to, or nullptr for an entry a tab's own block owns (the block
+// after the schema's rows - B4's panel, D16's mapping table). The walk is the same arithmetic
+// that sized the ring, in the same order the tab draws its rows, which is the only way the
+// bottom bar can name the focused row without a second copy of the order to fall out of step
+// with (A2).
+const settings::Setting* SettingForEntry(const TabLayout& tab, std::size_t entry);
+
+// What Enter and Space do on a row of this kind, as the bottom bar's hint line says it (A2): a
+// verb, not a sentence. A row with a range is adjusted rather than typed, and an enum's choices
+// are picked, so the bar can say what the key does before the user spends a press finding out.
+std::string_view RowActionVerb(const settings::Setting& setting);
+
+// A row's tooltip as one run of text, which is the form the bottom bar wraps (A2). The line
+// breaks in the schema file are the file's own wrapping - they keep a .toml readable - and the
+// bar's width is a number the file cannot know, so it re-wraps what it is given.
+std::string FlattenHelpText(std::string_view text);
+
 // The one line a group with nothing to draw would have shown. Nothing on screen reads it any
 // more - the category is simply absent - so it survives only as what --dump-layout prints for a
 // group this build does not fill, which is the record of what is still owed.

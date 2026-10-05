@@ -69,8 +69,18 @@ Two rules keep the "leave it blank" instruction honest:
 M1 keeps R7/R8 as hard requirements: the launcher is navigable end to end with a pad, mouse and
 keyboard, with the bottom bar naming the focused row's tooltip and the current control hints (A2, A3).
 
-The prompts M1 needs are the S1+S2 cut in §6.3, with **B3**/**B6** building the Controller tab's input
-group instead of the withdrawn Experimental tab.
+The prompts M1 needed were the S1+S2 cut, with **B3**/**B6** building the Controller tab's input
+group instead of the withdrawn Experimental tab — and all of them are built, **A3** and **A2** last;
+§6.3 says so in one place.
+
+> **Amended 2026-10-05 (D17, D18; §5.2 re-cut).** Three things in the table above are no longer true of
+> the tree. (1) The Controller tab's *Input* group does **not** have an input-form row: `input_backend`
+> is a real cvar but not a user-facing choice, because the remap listens to every device at once (D17).
+> (2) The Graphics tab holds two rows §1.1 did not name — **Renderer** (`gpu_backend`, this project's
+> own cvar) and **Anti-aliasing (post-process)** — and the free-form resolution size was dropped rather
+> than built (D18). (3) "A group with no rows renders as its name plus one line" became "**is hidden,
+> name and all**" (D18); the unbuilt categories are recorded in the schema and named by `--dump-layout`
+> instead of drawn. Everything else in the table shipped, and §5.2 is the ledger of what did.
 
 ---
 
@@ -256,6 +266,27 @@ above degrades to that by flipping one flag in the schema table.
 - The launcher must be usable with **no** controller and with a **misbehaving** one: the nav bindings
   are themselves editable in the profile (A5), and a `--no-gamepad` switch exists for recovery.
 
+**Built (A3), and what the build settled.** The pad's side of this is
+`launcher/src/pad_nav.{h,cpp}` (the binding table above, the deadzone, the repeat — no SDL) and
+`launcher/src/pad_source.{h,cpp}` (the open pads, their names, their state). Three things the
+decision did not say and the work had to:
+
+- **`Back` has no menu to open.** D6 gave it "reload profile / quit"; no such menu exists, and the
+  half of the sentence that does is *quit*, so `Back` cancels — which is also what `B` does and what
+  `Esc` does. A5 owns the recovery the menu was for.
+- **Which pad's buttons the bar names.** With two attached there is no "the" pad, so the names
+  follow the **last pad used**, and the labels themselves are the mapping database's
+  (`SDL_GetGamepadButtonLabel`) with this project's short table for the shoulders and `Start`, which
+  the database does not name. A pad that says nothing gets the 360's letters.
+- **A pad has to be *opened* before SDL will read it at all.** `SDL_GetGamepadFromID` answers with
+  nothing for a pad nobody opened, which is silence that looks exactly like a pad at rest — so one
+  owner (`PadRegistry`) opens them, and the remap block's listen reads them there too. That last part
+  was a real bug the prompt found: C5's capture queried SDL for itself, so it could not see a pad
+  press at all.
+
+`Start` launches the game (`NavAction::kLaunch`, the bar's *Launch Game* without the mouse) and
+`--focus-log` is the evidence hook the verification needed — see §7's rows.
+
 ### D7 — The bottom bar
 
 One fixed strip at the bottom of the window, above the confirm/cancel row:
@@ -271,6 +302,21 @@ One fixed strip at the bottom of the window, above the confirm/cancel row:
   for keyboard, switching with the last input device used.
 - RPCS3 is the reference: the value is the tooltip *before* the confirm, not a floating ImGui tooltip.
   Floating tooltips are allowed in addition, never instead.
+
+**Built (A2), and what the build settled.** The help line is the row's `tooltip` — flattened to one
+run of text and re-wrapped to the width the hints leave, two lines with an ellipsis where a third
+would have started — and the hints are the row's verb (*Toggle*, *Adjust*, *Edit*, *Choose*,
+*Browse*) followed by the two global ones, in key names or in the pad's own button names depending on
+which device moved last. Three consequences worth stating:
+
+- **No floating tooltip was added.** D7 allows one in addition; the bar's copy is the contract, and a
+  tooltip that appears whenever the pointer crosses a row is noise over a panel that is read.
+- **Rows that are not settings have their help beside them.** `ProfilePanel::HelpText` and
+  `ControllerTab::HelpText` are the sentences for the block buttons, asked by the shell rather than
+  copied into it — the alternative was a second table in the shell to fall out of step with the block.
+- **The entry-to-row walk is one function.** `schema_view`'s `SettingForEntry` counts ring entries
+  exactly as the ring was sized (`FocusEntriesFor`), so the bar cannot describe a different row from
+  the one the ring is on — a tab's own block is the tail it reports as "not a setting".
 
 ### D8 — The installer's finish page
 
@@ -357,6 +403,13 @@ of the table until it does (P0.2's rule).
 > Two rows the plan did not list were added, both because a widget needs them: `min`/`max` bounds on a
 > numeric row (the cvar's own `.range(...)`), so a slider cannot offer a value the runtime would clamp.
 
+> **Amended 2026-10-05 (D18).** Two more rows followed, and one of the plan's rows is gone:
+> **Renderer** (`gpu_backend` — this project's own cvar, not the SDK's, with its choices taken from
+> what the *build* compiled in) and **Anti-aliasing (post-process)** (`swap_post_effect`, kept separate
+> from the native-MSAA row because the two mechanisms are independent). Gone: the free-form resolution
+> size this decision allowed and the feedback rejected. `launcher/config/settings.toml` is the live
+> list and `--dump-layout` prints it, choices included — the plan is not.
+
 ### D13 — Controller tab, honestly split in two
 
 **Phase C-A — everything that exists today.** Input form (`input_backend`: sdl/xinput), the **mouse
@@ -394,6 +447,17 @@ all three:
 > the rest of C-A (the device list, deadzone, `mnk_mode`, the `keybind_*` editor) is unbuilt. Phase C-B
 > is **built**, with the scope D17 settles: one `[remap]` table keyed by control, no per-device storage,
 > and the panel in `launcher/src/controller_tab.{h,cpp}`.
+>
+> **The per-device storage sentence in C-A is retracted too (D17).** Nothing is keyed by SDL GUID: the
+> remap is one table, the game is single-player, and nothing distinguishes two pads. §5.3's C1 no longer
+> asks for per-device files — it asks for the device *list* and its identity, the deadzone and `mnk_mode`.
+>
+> **And C-B's two ordering sentences are spent.** C3/C4/C5 landed inside this plan, so "this plan's
+> wave 4" and "the Controller tab's read-only state only exists between waves 2 and 4" describe nothing
+> now. The placeholder row for an unbuilt group is gone as well — D18 hides the group instead of naming
+> it, so the "not available in this build" line is not what an empty Controller tab shows any more.
+> What is left of lane C is C1 (the device list), C2 (the keyboard panel) and C6 (the rails).
+
 
 ### D14 — The tabs: General, Graphics, Controller. Experimental is withdrawn (2026-10-03)
 
@@ -428,6 +492,11 @@ Two rules keep "leave the unimplemented categories blank" honest:
 > setting. The General tab is the one place a missing feature became an action rather than a sentence:
 > when the Ultimate payload is absent, the greyed-out third target is replaced by *Install Ultimate…*
 > (B8), which is what the user wanted to do anyway.
+>
+> **Two table rows above are out of date (2026-10-05).** *Input form / `input_backend`* is **not** a row
+> anywhere (D17): with the remap listening to every device, the backend is not a user-facing choice. And
+> the Ultimate advanced cell's "named but empty" is wrong in one word — the group is **empty and hidden**,
+> which is the rule the amendment above settles for all five.
 
 ---
 
@@ -568,8 +637,8 @@ their older wording where they disagree.
   outcome otherwise, and nothing at all when there is nothing to say. **Save moves out of the
   settings-file block** and onto the bar — it is not a property of one tab's rows, and a Save button
   at the end of a list is both easy to miss and easy to mistake for "save this tab". The block keeps
-  *Reset to defaults*, *Import*, *Export* and *Change settings location*. A2's other half, the focused
-  row's tooltip, is still owed.
+  *Reset to defaults*, *Import*, *Export* and *Change settings location*. A2's other half — the focused
+  row's tooltip and its hints — sits under the same line, and is built: see D7.
 - **The Graphics tab is renamed Audio / Video.** Its schema key stays `graphics` — the `.toml`'s
   business, not the user's — and `DisplayTabName` is the one place that turns a tab key into a label.
   "Audio / Video" is also what the tab actually is: it has held the audio rows since B2.
@@ -613,7 +682,10 @@ their older wording where they disagree.
 
 ## 4. Contracts that must exist before parallel work
 
-These are Wave 0. Everything else can be built against them by someone who has read only this section.
+These were Wave 0 and are all built: every contract below is a file in the tree, so a session can
+work against it by reading only this section. Where a contract's shipped shape differs from the sketch
+below — Contract 2's `[window]`/`[remap]` tables, Contract 1's `choices_from` — the decision record
+(D17, D18) says why, and `launcher/README.md` is the description of what exists.
 
 ### 4.1 `launcher/config/settings.toml` — the settings schema (Contract 1)
 
@@ -748,7 +820,7 @@ installer instead.
 
 ### 5.1 The preamble every prompt assumes
 
-Paste this above any prompt below (it is the shared context the plan does not repeat 26 times):
+Paste this above any prompt below (it is the shared context the plan does not repeat seventeen times):
 
 > Repository: `rb_blitz`, a ReXGlue recompilation of Rock Band Blitz (Xbox 360) for Windows. Read
 > `docs/plans/launcher-plan.md` first: it holds the decisions (§3) and the contracts (§4) this work
@@ -761,159 +833,72 @@ Paste this above any prompt below (it is the shared context the plan does not re
 > or flag what the faithful behaviour is and why you deviated. Verification is evidence, not opinion:
 > name the command you ran and the output you saw.
 
-### 5.2 Prompt index
+### 5.2 The prompt ledger
 
-| ID | Prompt | Lane | Depends on | Stage |
+**Built.** Seventeen prompts are done, and this table is the record of them: what shipped, and which
+decision changed the answer. Their original bodies are in this file's history (`git log -p
+docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
+session should read as instructions, and every deviation it would have described is now a row in §3.
+
+| ID | Shipped as | Amended by |
+| --- | --- | --- |
+| P0.2 | `launcher/config/settings.toml`, `tools/embed_settings.cpp`, the generated table, its CMake target and `launcher/README.md` | D18 (`choices_from`, so one row's choices come from the build) |
+| P0.3 | `src/launcher/profile.{h,cpp}`, `profile_path.{h,cpp}`, `tests/launcher_profile_tests.cpp` | D17/D2: the settings *folder* is chosen and recorded in a pointer file, so the portable marker is one input to a larger order |
+| P0.4 | `launcher/CMakeLists.txt`, `main.cpp`, SDL_GPU + ImGui backends, the exe icon, the README's backend note | D16 (size, font, DPI), D18 (opens maximized) |
+| P0.5 | `make_payload.ps1` (`-LauncherDir`, role `payload-rb_blitz_launcher.exe`), `build.ps1` (`-SkipLauncher`, `-LauncherTarget`), the installer README | — |
+| B6 | `mouse_ui_nav` in `src/input/mouse_ui.cpp`, its gate in `OnPreSetup`, its Controller row | — |
+| A1 | `launcher/src/{shell,schema_view,nav}.{h,cpp}`, geometry through the profile, `--dump-layout`/`--dump-display` | D16, D17 (quiet text), D18 (no header text, the bottom bar, unbuilt groups hidden) |
+| B2 | every Audio / Video row editable, one widget per `kind`, `(needs restart)` badges | D18: the Renderer and post-process-AA rows; the free-form resolution size was dropped |
+| B3 | Controller → Input: `mouse_ui_nav`, `guide_button` | D17: `input_backend` is deliberately not a row; D18: unbuilt groups are hidden rather than named |
+| B5 | the game loads `launcher_profile` as a config file at the top of `OnConfigurePaths`, then re-derives the four path cvars | — |
+| D1 | the launcher in the payload, in `[UninstallDelete]`, and in the installer tests | — |
+| B4 | the writer, the precedence badge (with *Copy the effective value*), Import/Export, *Change settings location* | D17: portable mode replaced by a chosen folder; the panel stopped narrating itself |
+| B8 | *Install Ultimate* through the helper, cancellable, with the manual route on failure | — |
+| C3 | `src/launcher/remap.{h,cpp}` (the vocabulary), `src/input/remap.{h,cpp}` (the game's filter), SDK patch 0010 | D17: one `[remap]` table keyed by control, not a profile per device; the seam is the SDK's state filter |
+| C4 | the grammar, the serialiser, the round trip, unknown-token tolerance, `[remap]` persistence | D17: no hysteresis, no per-device keying, the game's `keybind_*` untouched |
+| C5 | `launcher/src/controller_tab.{h,cpp}`: one row per control, a three-second capture, per-control and global resets | D17: capture adds rather than resolving conflicts; no per-device enable/disable. A3: the pads it reads are the launcher's open ones, because SDL reads a pad only through a handle somebody opened |
+| A3 | `launcher/src/{pad_nav,pad_source,virtual_pad,focus_log}.{h,cpp}`, the real `GamepadNavSource`, `NavAction::kLaunch`, `--focus-log`, `--no-gamepad`, `--test-pad`, the README's pad table | D6: `Back`'s menu is not built (the cancel half is), and the bar's glyphs come from the pad that was last used rather than from "the" pad |
+| A2 | `Shell::DrawBottomBar`'s help region, `schema_view`'s `SettingForEntry`/`RowActionVerb`/`FlattenHelpText`, `ProfilePanel::HelpText`, `ControllerTab::HelpText`, hover-adopts-the-ring on both blocks | D7: the hints follow the last device used, and the tooltip is re-wrapped to the bar's width rather than drawn as the file wrapped it |
+
+**Open.** Fifteen prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+column means the prompt beside it names a finished prompt rather than an open one — B1, B7 and E1 are
+each their own dependency because only half of each went out; §5.3 says which half.
+
+| ID | Prompt | Lane | Depends on | Unblocks |
 | --- | --- | --- | --- | --- |
-| P0.2 | Settings schema + projector | P | — | S1 |
-| P0.3 | Profile module + path resolution | P | — | S1 |
-| P0.4 | Launcher target spike (window, backend choice) | P | — | S1 |
-| P0.5 | Packaging contract (payload/build script) | P | D1 | S1 |
-| B6 | Game-side mouse-support toggle | B | — | S2 |
-| A1 | Tab shell + focus model | A | P0.4 | S1 |
-| A4 | Cover art pipeline | A | P0.4 | S3 |
-| B2 | Graphics tab | B | A1, P0.2 | S2 |
-| B3 | Controller tab: input group + empty-group rule | B | A1, P0.2, B6 | S2 |
-| B5 | Game-side profile loading | B | P0.3 | S2 |
-| E1 | Launcher unit tests in CTest | E | P0.2, P0.3 | S1 |
-| D1 | Launcher in the payload | D | P0.5 | S1 |
-| A2 | Bottom bar (tooltip + hints) | A | A1 | S2 |
-| A3 | Controller navigation | A | A1 | S3 |
-| B1 | General tab | B | A1, P0.2, P0.3 | S2 |
-| B4 | Profile save, precedence surfacing, portable mode | B | P0.2, P0.3, B5 | S2 |
-| B7 | Launch the game | B | B1, B4 | S1/S2 |
-| C1 | Device list + per-device profiles | C | A1, P0.3 | S3 |
-| D2 | Shortcuts and tasks | D | D1 | S1 |
-| D3 | Finish-page three-way choice | D | D1 | S1 |
-| A5 | Accessibility + nav-binding recovery | A | A2, A3 | S4 |
-| B8 | *Install Ultimate…* via the helper | B | B1 | S4 |
-| C2 | Keyboard mapping panel | C | C1 | S4 |
-| D4 | First-run prefill from `install-manifest.toml` | D | D1, B4 | S4 |
-| E2 | UI capture harness | E | A1, A2, A3 | S4 |
-| C3 | Remap core, headless | C | C1 | S5 |
-| C4 | Remap grammar + persistence | C | C3 | S5 |
-| C5 | Pad remap panel (the launcher is the panel) | C | C4, C2 | S5 |
-| C6 | Remap safety rails | C | C5 | S5 |
-| D5 | Installer tests + README tables | D | D1–D4 | S4 |
-| E3 | End-to-end acceptance script | E | B7, D1, D3 | S5 |
-| E4 | Docs, backlog, standing limits, audit | E | all | S5 |
+| A4 | Cover art pipeline | A | P0.4 *(built)* | — |
+| A5 | Accessibility and recovery | A | A3, A2 *(built)* | — |
+| B1 | General tab: the two deferred rows | B | B1 *(built)* | — |
+| B7 | Launch: command display, failure detail | B | B7 *(built)* | E3 |
+| C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
+| C2 | Keyboard mapping panel | C | C5 *(built)* | — |
+| C6 | Remap safety rails | C | C5 *(built)* | — |
+| D2 | Shortcuts and tasks | D | D1 *(built)* | D5 |
+| D3 | Finish-page three-way choice | D | D1 *(built)* | D5 |
+| D4 | First-run prefill from the manifest | D | D1, B4 *(built)* | D5 |
+| D5 | Installer tests and README tables | D | D2, D3, D4 | — |
+| E1 | The launcher test names in `build-and-run.md` | E | E1 *(built)* | — |
+| E2 | Launcher capture harness | E | A2 *(built)* | E4 |
+| E3 | End-to-end acceptance | E | B7, D1 *(built)*, D3 | E4 |
+| E4 | Docs, backlog, standing limits | E | all of the above | — |
 
-Stages: **S1** walking skeleton (a launcher that launches the game, and an installer that ships it),
-**S2** settings surface, **S3** input + art, **S4** installer polish + verification, **S5** the absorbed
-remap work (C3–C6) and release-quality evidence. **M1 (§1.1) is the S1+S2 cut**, minus the pieces it
-defers — §6.3 names them.
+The four groups those fall into, which is what §6 schedules:
 
-### 5.3 The prompts
+- **Make it ship** — D2, D3, D4, D5, and B7's remainder.
+- **The Controller tab's remaining lanes** — C1, C2, C6.
+- **Art and evidence** — A4, E2, E3, E4, and A5's recovery half.
+- **Finish M1** — done: A3 and A2 are built, and E1's one-line note with them. M1 was defined (§1.1)
+  as "navigable end to end with a pad, mouse and keyboard, with the bottom bar naming the focused
+  row's tooltip and the current control hints", and that is what the launcher does now (§7's rows).
 
-#### P0.2 — Settings schema and its projector
+### 5.3 The prompts that are left
 
-> **Goal.** Create `launcher/config/settings.toml` (Contract 1 in
-> `docs/plans/launcher-plan.md` §4.1) and `launcher/tools/embed_settings.cpp`, which compiles it into
-> `launcher/out/generated/settings_table.h`. Cover the **M1 row set (§1.1)** — every row of the General
-> and Graphics tabs, plus the Controller tab's *Input* group — with `key`, `tab`, `group`, `label`,
-> `kind`, `default`, `applies` and a real `tooltip`; no placeholders, and no row for a feature that does
-> not exist (D14). Declare groups that have no rows yet with `status = "unavailable"` so the tab can
-> name them. Source the rows
-> from: `rexglue-sdk/src/ui/window.cpp`, `graphics/flags.cpp`, `graphics/cache.cpp`, `ui/presenter.cpp`
-> (display/graphics), `src/audio/*` and `sdl_audio_driver.cpp` (audio), `src/input/input_system.cpp`,
-> `mnk/mnk_input_driver.cpp` (input), `src/hooks/ultimate.cpp`, `src/hooks/dlc.cpp`,
-> `rexglue-sdk/include/rex/runtime.h` and `rex_app.h:98-115` (paths/input). Cross-check the
-> "live vs restart" column against each setting's own change callback and keep its honesty; hide
-> the `present_*` rows that `REXGLUE_ENABLE_FIDELITYFX=OFF` compiles out.
-> **Deliverable.** The toml, the tool, the generated header, a CMake target for the generator (build
-> tree, like `installer/CMakeLists.txt` does for `rb_blitz_embed_config`), and `launcher/README.md`
-> describing the table and how to add a row.
-> **Verify.** Build the generator; assert it fails on a duplicate `key`, on a missing `tooltip`, and on
-> `applies = "live"` without an evidence comment; print the row count per tab.
-> **Don't.** Do not invent cvars that do not exist; if a row needs one (e.g. master volume), mark it
-> `status = "unavailable"` and leave it out of the table with a one-line note in the README.
-
-#### P0.3 — Profile module and path resolution
-
-> **Goal.** `src/launcher/profile_path.{h,cpp}` + `src/launcher/profile.{h,cpp}`: resolve and
-> read/write the profile described in `docs/plans/launcher-plan.md` §4.2 and D2, with **no SDK
-> dependency** so both `rb_blitz.exe` and `rb_blitz_launcher.exe` can compile it and the tests can run
-> without booting anything. Implement: the resolution order (`--launcher_profile` / env /
-> portable marker / `%APPDATA%\rb_blitz\launcher.toml`), a lossless round-trip (unknown keys and
-> comments preserved as far as the format allows), and a "parse failure keeps the file and reports the
-> reason" path.
-> **Deliverable.** The module plus `tests/launcher_profile_tests.cpp` (harness `tests/check.h`, wired in
-> the root `CMakeLists.txt` `if(BUILD_TESTING)` block, like `rb_blitz_path_policy_tests`) covering:
-> default path, portable override, damaged file, unknown-key preservation, and a profile with zero
-> settings.
-> **Verify.** `cmake --build out/build/<preset> --target rb_blitz_launcher_profile_tests; ctest -R launcher_profile`.
-> **Don't.** Do not add a second settings file format; do not write into the install folder unless the
-> portable marker exists.
-
-#### P0.4 — Launcher target spike
-
-> **Goal.** Make `rb_blitz_launcher.exe` build and open a window, and pin down the renderer backend
-> decision recorded in D1. Create `launcher/CMakeLists.txt` (+ `add_subdirectory(launcher)` at the end
-> of the root `CMakeLists.txt`), a `main.cpp` that creates an SDL3 window, initialises ImGui with
-> `imgui_impl_sdl3.cpp` + your chosen renderer backend, draws a placeholder, and exits on Esc, `B`, or
-> window close. Link `imgui` (OBJECT target, `rexglue-sdk/thirdparty/CMakeLists.txt:231-242`) and
-> `SDL3::SDL3` static; do **not** link `rex::runtime`.
-> **Deliverable.** The target plus a short "why this backend" note in `launcher/README.md`, and the
-> launcher's exe icon from `assets/blitz.ico` (same `.rc` mechanism as the game, `CMakeLists.txt:32-36`).
-> **Verify.** Build, run, close cleanly (exit code 0, no leaked handles), and confirm the exe imports
-> only OS DLLs and the static SDL3/CRT you linked (`llvm-readobj --coff-imports`), because D10 depends
-> on that list.
-> **Don't.** No settings, no tabs, no game launch yet; this prompt is only allowed to answer "does the
-> stack work here".
-
-#### P0.5 — Packaging contract
-
-> **Goal.** Make the payload able to carry the launcher, without touching the wizard yet.
-> In `installer/tools/make_payload.ps1`, add `rb_blitz_launcher.exe` to `$wanted` (from the game build
-> dir), include it in the import-derived DLL check the script performs, and give it its own manifest
-> role (`payload-rb_blitz_launcher.exe`) in `payload-manifest.toml`. In `installer/build.ps1`, add the
-> launcher build step (before the payload step) and a `-SkipLauncher` switch, plus `-LauncherTarget`
-> if the exe lives somewhere other than the game build dir. Document both in
-> `installer/README.md` ("Layout", "Building it", the payload allow-list table).
-> **Verify.** Run `installer\tools\make_payload.ps1 -Clean` against a build tree that has the launcher
-> and against one that does not (must fail with a clear message, not a missing file); run the installer
-> test suite (`ctest --preset installer-release`) and keep it green.
-> **Don't.** Do not change the wizard, the helper or the pins; the file list is the game plus one exe.
-
-#### B6 — Game-side mouse-support toggle
-
-> **Goal.** Turn the unconditional mouse navigation into a flag. Add a cvar named `mouse_ui_nav`
-> (category `Input` — the Experimental tab no longer exists, D14), default **on** so today's behaviour
-> is unchanged when the file says nothing, and gate the `InstallMouseUiNavigation(...)` call in
-> `RbBlitzApp::OnPreSetup` (`src/rb_blitz_app.h:36`) on it.
-> Log one line either way, in the style of the existing `content licence:` / `dlc:` lines, so a capture
-> proves which mode booted. Register it with `.lifecycle(kRequiresRestart)` unless you can show it
-> installs and uninstalls cleanly at runtime — say which and why in a comment.
-> **Deliverable.** The cvar, the gate, the log line, a row in `launcher/config/settings.toml`'s
-> Controller → Input group (coordinate with P0.2; if that file does not exist yet, leave a TODO naming
-> it), and a `docs/known-issues.md` line only if a limit exists.
-> **Verify.** Two runs of the existing acceptance route (`scripts/acceptance_launches.ps1`) or a short
-> `scripts/drive_ui.ps1` run with `--mouse_ui_nav=0` and with `1`: the boot log must show the
-> line and the mouse must be inert in the off case, with the pad still working.
-> **Don't.** Do not touch `src/input/ui_nav.h` arithmetic or its tests; this is a gate, not a rewrite.
-
-#### A1 — Tab shell and focus model
-
-> **Goal.** Build the launcher's shell in `launcher/`: three tabs from the schema table's `tab` values
-> (General, Graphics, Controller — there is no Experimental, D14),
-> groups per `group`, and one widget per `kind` (`bool`, `int`, `float`, `enum`, `string`, `path_dir`,
-> `path_file`). Implement a single input-agnostic focus model — a flat, ordered list of rows per tab
-> with a focused index — with `Tab`/`Shift+Tab`, arrows, `Home`/`End`, `Enter`/`Space`, and the
-> controller path stubbed behind one interface so A3 can fill it in without touching widget code.
-> Persist and restore window geometry through `src/launcher/profile.{h,cpp}` (P0.3). DPI-aware layout:
-> the UI must be legible at 100% and 200%; use ImGui's font scaling rather than fixed pixel maths.
-> **Deliverable.** Working shell with all three tabs rendering the schema rows read-only, a group with
-> no rows rendered as its name plus one line (never a dead widget, D14), plus
-> `launcher/README.md` notes on adding a row.
-> **Verify.** Run it; tab through every row of every tab; screenshot at 100% and 200% DPI
-> (`scripts/capture_window.ps1`).
-> **Don't.** Do not implement saving yet (B4), the bottom bar (A2), gamepad input (A3), or the General
-> tab's availability logic (B1).
+Each block now says what is already in the tree, so a session does not rebuild it.
 
 #### A4 — Cover art pipeline
 
 > **Goal.** Give the launcher the installer's cover image. Extend the art pipeline so a launcher build
-> produces either `assets/wizard-*.bmp`-style files or (preferred) an embedded blob
+> produces either `assets/wizard-*.bmp`-style files or an embedding tool
 > (`launcher/tools/embed_art.cpp` → generated header, same shape as `installer/tools/embed_config.cpp`),
 > pick the ladder step nearest the panel size instead of stretching, and draw the cover beside the tabs
 > with `assets/blitz.png` as the badge. Absence of the art must be a supported configuration: a flat
@@ -927,392 +912,219 @@ defers — §6.3 names them.
 > **Don't.** Do not commit any artwork; do not make the build fail when the download fails — that is
 > `make_art.ps1`'s existing rule and it stays.
 
-#### B2 — Graphics tab
-
-> **Goal.** Make every Graphics row from `launcher/config/settings.toml` (P0.2) editable, with a
-> "needs restart" badge on `applies = "restart"` rows, with the live/restart truth read from each
-> setting's own change callback. Resolution is a curated list plus a custom size; fullscreen,
-> monitor, V-Sync, MSAA, anisotropic, render scale, letterbox, safe area, overscan cutoff, dither,
-> mute, audio buffer. Write values into the profile (B4 supplies the writer; until then, in-memory plus
-> a TODO naming B4). Where a value is read-only at runtime, render it read-only rather than silently
-> ignoring the click.
-> **Deliverable.** The tab, with the schema's tooltip on every row and a value preview.
-> **Verify.** Set resolution/fullscreen/safe-area to non-defaults, save (or dump the profile), launch
-> the game through B7, and show the values in the game's own log or in `rb_blitz.toml`'s effective
-> output; for V-Sync, the pacing rig (`scripts/measure_pacing_input.ps1`) is the evidence
-> standard if you claim it took effect.
-> **Don't.** Do not add rows for compiled-out features; do not claim a setting is live without a
-> change-callback citation.
-
-#### B3 — Controller tab: the input group, and the empty-group rule
-
-> **Goal.** Build the Controller tab's *Input* group — the part of the tab that exists today and is in
-> M1 (§1.1): the `input_backend` selector (sdl/xinput) with its "needs restart" badge, the
-> **mouse-support toggle** (B6's `mouse_ui_nav`, default on, tooltip explaining that it drives the
-> guest's menus by mouse), and `guide_button` pass-through. Render the groups M1 does not build (device
-> list/deadzone → C1, keyboard mappings → C2, per-pad remap → C3–C6) as their **name plus one honest
-> line** — "Per-button remapping is not available in this build" — never as a disabled control or an
-> empty table (D14).
-> **Deliverable.** The tab's Input group, its rows in `launcher/config/settings.toml`, and a
-> `launcher/README.md` note recording, per toggle: cvar, default, live-or-restart, evidence.
-> **Verify.** Toggle mouse support off and on: two runs of the existing acceptance route
-> (`scripts/acceptance_launches.ps1`) or a short `scripts/drive_ui.ps1` run with `--mouse_ui_nav=0` and
-> `1` — the boot log must show the line, and the mouse must be inert in the off case with the pad still
-> working. Confirm the unbuilt groups render as text, not widgets, in both DPI steps.
-> **Don't.** Do not implement per-button remapping here (C3–C6); do not expose anything the project
-> deliberately deferred (frame-rate unlock); do not invent a guest patch (stream checksum) that does not
-> exist.
-
-#### B5 — Game-side profile loading
-
-> **Goal.** Implement D3 in the game: a shared profile-path module call plus `rex::cvar::LoadConfig`-based
-> application of the launcher profile at the top of `RbBlitzApp::OnConfigurePaths`, then re-derive the
-> four path cvars into `paths.*` (they are read before any config file loads —
-> `rexglue-sdk/src/ui/rex_app.cpp:110-158`), then keep the existing "writable roots must not be inside
-> the game root" redirection (`src/fs/path_policy.h`) working on the launcher's values. Register
-> `launcher_profile` as a cvar so `--launcher_profile=` works and the F4 overlay can show it. Log the
-> resolved profile path and the paths it changed, so a bug report is diagnosable from the boot log.
-> **Deliverable.** The change in `src/rb_blitz_app.h` (+ `src/launcher/*`), tests for the path
-> precedence (`tests/path_policy_tests.cpp` neighbours, dependency-free), and a README paragraph
-> stating the precedence order from D3.
-> **Verify.** Four boots: no profile; profile only; profile + `rb_blitz.toml` disagreeing (toml must
-> win); profile + `--flag` disagreeing (command line must win). Assert each on the log lines and on the
-> actual directories used (the game logs its roots/saves; `--user_data_root` isolation is already used
-> by `scripts/acceptance_persistence.ps1`).
-> **Don't.** Do not change the SDK; do not add a new settings source that outranks the command line;
-> do not touch `rb_blitz.toml` from the game side.
-
-#### E1 — Launcher unit tests in CTest
-
-> **Goal.** Wire the launcher's host tests into the existing CTest set: the schema projector (P0.2),
-> the profile round-trip (P0.3), and the argv builder (B7, added when it exists, at least as a
-> placeholder file now). Follow the repo convention exactly: `tests/check.h`, no external deps, SDK-free,
-> one `add_test` per binary, named like the existing ones.
-> **Deliverable.** CMake wiring plus at least one test per module, and a `docs/build-and-run.md` line
-> naming the new test names in the test-run section.
-> **Verify.** `ctest` from the game build tree runs them all green; deliberately break one assertion and
-> show it failing (evidence that the tests run, not just exist).
-
-#### D1 — Launcher in the payload
-
-> **Goal.** Now that `make_payload.ps1` can carry the launcher (P0.5), make the wizard and helper treat
-> it as a first-class payload file: extend the helper's role expectations if they are enumerated, add
-> `{app}\rb_blitz_launcher.exe` to `[UninstallDelete]` (`installer/setup.iss:153-166`), and make sure
-> `verify-payload` fails loudly if the launcher is missing from an install that claims to have it. Do
-> **not** create a shortcut here (that is D2).
-> **Deliverable.** The setup script and helper changes plus manifest/report mentions
-> (`install-manifest.toml`, `install-report.txt`), and `installer/tests/installer_tests.cpp` coverage
-> of the new payload entry.
-> **Verify.** `installer\build.ps1` end to end (embed mode), then inspect the produced install folder:
-> both exes, hashes verified, `install-manifest.toml` naming the launcher; run the helper's suite.
-> **Don't.** Do not change the pins or introduce a download for the launcher; it travels with the
-> payload.
-
-#### A2 — Bottom bar
-
-> **Goal.** Implement D7: a fixed bottom strip showing (a) the tooltip of the hovered/focused row from
-> the schema table, (b) the control hints for that row, switching between keyboard names and controller
-> glyphs based on the last input device used, and (c) the confirm/cancel affordances for the current
-> context. Long tooltips wrap to two lines and never resize the window. Rows without a tooltip are a
-> bug in the schema, not a UI case: assert on it in debug builds.
-> **Deliverable.** The bar plus a `launcher/README.md` note on the tooltip contract.
-> **Verify.** Screenshots with the mouse on three different rows, including one with a long tooltip;
-> `scripts/frame_diff.ps1` between "hover nothing" and "hover the row" must show the bar's text region
-> changing.
-> **Don't.** Do not use floating tooltips as the only surface; the bar is the requirement.
-
-#### A3 — Controller navigation
-
-> **Goal.** Implement D6 on top of A1's focus model: SDL3 `GameController` open/hotplug, D-pad and left
-> stick navigation with repeat and a deadzone, `A`/`B`/`LB`/`RB`/`Start`/`Back` as specified, glyph
-> rendering that matches the connected device's family where the DB tells us, and graceful degradation
-> when a pad disconnects mid-navigation or when two pads are connected (first takes focus, the other
-> can take over on input). Mouse and controller must interleave without fighting: the last device to
-> move owns the focus ring.
-> **Deliverable.** Navigation code behind the interface A1 stubbed, plus `launcher/README.md`'s input
-> table.
-> **Verify.** Two pads, hotplug during navigation, and a keyboard-only session; screenshot the focus
-> ring and the bottom bar's glyphs for each; record the pad models used in the plan's §7 evidence
-> column.
-> **Don't.** Do not implement remapping here (C5); do not add a second input library.
-
-#### B1 — General tab
-
-> **Goal.** Implement D4/D5 for M1's five General rows (§1.1): the launch-target radio (Common / Demo /
-> Ultimate) with availability
-> detection from the filesystem, the tooltips from D5, the DLC directory picker (validating
-> `<title_id>/<content_type>/<package>` with the same rules `src/fs/dlc_layout.h` encodes), the save
-> directory picker (validating against `src/fs/path_policy.h`: never inside the game root — and say so
-> in the tooltip), the game directory (detected next to the launcher, overridable), and a
-> *Verify installation* action driving `verify-game`/`verify-payload` from D6/§4.6.
-> **Deliverable.** The tab plus the D5 state machine in a testable, dependency-free module
-> (`launcher/src/ultimate_state.{h,cpp}` + unit test: four states from directory fixtures).
-> **Verify.** Unit test for the four states; manual run against (1) a vanilla install, (2) a payload
-> install, (3) a payload with the `.ark` deleted (must warn, not crash), (4) a save dir inside the game
-> root (must refuse with the reason).
-> **Don't.** Do not implement the download here (B8); do not silently accept an invalid DLC layout.
-
-#### B4 — Profile save, precedence surfacing, portable mode
-
-> **Goal.** Implement D2's write path and the parts of D3 a user can see: save only what changed into
-> `launcher.toml`; keep a hand-edited file's unknown keys; a *Reset to defaults* that names exactly what
-> it will remove; Import/Export of the profile; portable mode (marker file) with a one-line explanation
-> that settings then live next to the exe; and a badge for rows that `rb_blitz.toml` overrides, with a
-> "copy the effective value" action instead of silently rewriting the game's file.
-> **Deliverable.** The writer, the badge, the import/export, the portable switch, plus a
-> `docs/known-issues.md` entry documenting the precedence as a standing limit (it is one).
-> **Verify.** Round-trip a profile with unknown keys and comments intact; save with no changes (must
-> not touch the mtime); attempt to save with a read-only file (must report, not crash); portable mode
-> with the install folder read-only.
-> **Don't.** Do not write `rb_blitz.toml`; do not delete a file you failed to parse.
-
-> **Superseded in part, 2026-10-05.** Built, with the portable switch replaced by *Change settings
-> location* — a folder the user picks, recorded in a pointer file (D17, D2's amendment). The panel also
-> stopped saying the settings file's path out loud: it prints the two things worth printing (a file it
-> could not read, and changes not yet written) and nothing else.
-
-#### B7 — Launch the game
-
-> **Goal.** Implement §4.3: build the argv from the schema (paths always; other flags only where they
-> differ from the compiled default), validate before spawning (game exe present, game data present,
-> profile dir writable), `CreateProcessW` with the install folder as working directory and the right
-> quoting, then exit the launcher (or hide it) with a code that a script can assert on. Refuse a second
-> instance while the game runs; surface a start failure with the exact command line and the game's log
-> path (the game writes a log next to its exe by default).
-> **Deliverable.** The launcher plus `--print-command` (dry run, prints argv, exits 0) so tests and the
-> acceptance script can assert the contract without booting the game.
-> **Verify.** `--print-command` snapshot test (E1); then a real launch asserting the game's boot log
-> shows the expected roots, `ultimate:` line, `license_mask` line and the mouse-nav line.
-> **Don't.** Do not pass empty flags; do not pass the whole registry, only the managed set; do not
-> block on the game.
-
-#### C1 — Device list and per-device profiles
-
-> **Goal.** Implement Controller Phase C-A from D13: enumerate SDL controllers plus one synthetic
-> "Keyboard" row; store each device's settings in its own profile file keyed by SDL GUID (falling back
-> to ordinal), so a second pad never overwrites the first; `input_backend` selection (sdl/xinput) with
-> the honest note that changing it needs a restart; deadzone; `mnk_mode` (keyboard drives the pad) —
-> and, per R13, **never** disable the keyboard because a pad is selected. Show live device identity
-> (name, GUID, ordinal, connected now) so a bug report can name the pad.
-> **Deliverable.** The panel plus the profile-file-per-device write path, plus a unit test for the file
-> naming and for "two devices, no overwrite".
-> **Verify.** Two pads (or a pad and a fake device via SDL's virtual joystick) → two files, both intact;
-> disconnect/reconnect keeps the same file; keyboard-only session shows one row.
-> **Don't.** Do not implement per-button remapping (that is C3–C5); do not key profiles by row order.
-
-#### D2 — Shortcuts and tasks
-
-> **Goal.** Implement D9: a `launchericon` `[Tasks]` entry (checked by default) and a `[Icons]` entry
-> for the launcher on the desktop and in the program group, keeping the game's own entries and their
-> `--game_data_root="{app}\game"` argument so the game remains runnable standalone. Name the two
-> shortcuts so they are distinguishable in a list. Add the silent-install parameter for the new task to
-> the table in `installer/README.md`.
-> **Deliverable.** `installer/setup.iss` changes plus README rows.
-> **Verify.** Interactive install on a scratch folder: both shortcuts appear with the right targets;
-> `/VERYSILENT` with and without `/LAUNCHERICON=1`; confirm the game shortcut still launches the game
-> directly with data.
-> **Don't.** Do not repoint the game's shortcut at the launcher; do not remove `AllowNoIcons`.
-
-#### D3 — Finish-page three-way choice
-
-> **Goal.** Implement D8. Remove the `[Run]` entries and put the three-way radio on the finish page:
-> *Open the game* (through the launcher, honouring the profile's target), *Open the launcher*,
-> *Do nothing* — with *Open the game* preselected, and nothing at all launched under `/VERYSILENT`.
-> The page must behave in both embed and download installs and must not run anything when the install
-> failed (`InstallSucceeded` check as today).
-> **Deliverable.** `installer/setup.iss` code changes plus a three-point manual checklist recorded in
-> `installer/README.md` (the wizard has no test harness — say so rather than implying coverage).
-> **Verify.** `installer\build.ps1 -SkipTests -SkipPayload` compiles; three interactive installs, one per
-> choice, each landing where it says; one silent install launching nothing.
-> **Don't.** Do not add a download or an elevation; do not reorder the wizard's pages.
-
 #### A5 — Accessibility and navigation recovery
 
 > **Goal.** Make the launcher usable by someone whose first choice is wrong: rebindable launcher
-> navigation (in the profile, with a reset that needs only the keyboard), `--no-gamepad` and
-> `--safe-mode` switches that skip profile application and start on defaults, consistent focus rings at
-> every DPI step, no colour-only signalling (badges carry text), and a keyboard-only walkthrough that
-> never traps focus.
+> navigation (in the profile, with a reset that needs only the keyboard — A3 is what makes this
+> meaningful), `--no-gamepad` and `--safe-mode` switches that skip profile application and start on
+> defaults, consistent focus rings at every DPI step, no colour-only signalling (the badges already
+> carry text), and a keyboard-only walkthrough that never traps focus.
 > **Deliverable.** The switches, the nav-binding editor, and a `launcher/README.md` "if something goes
 > wrong" section written as recovery steps.
 > **Verify.** Corrupt the profile deliberately → `--safe-mode` starts clean; bind navigation to an
 > unused key and back; complete every tab with the keyboard only.
 > **Don't.** Do not require a controller to recover; do not hide the recovery switches in the UI only.
 
-#### B8 — *Install Ultimate…* via the helper
+#### B1 — General tab: the two deferred rows
 
-> **Goal.** Implement D5's action and §4.6's contract: locate `rb_blitz_setup_helper.exe` next to the
-> game (the installer puts it in `{app}`), run
-> `install-ultimate --dest "<game root>" --from-pinned --summary <file> --progress <file>` with a
-> cancellable modal progress bar driven by the progress file, then re-run the availability probe and
-> refresh the General tab. Handle: helper missing (point at the installer), no pinned URL in this build
-> (say so, offer a zip/folder picker — `--from-zip`/`--from-dir`), and failure (show the helper's
-> `error=` line verbatim).
-> **Deliverable.** The action, the progress UI, and README text stating what it downloads and from
-> where, plus a note that the launcher never bundles the mod.
-> **Verify.** Run it on a vanilla install with network access (payload appears under
-> `<game>\ultimate`, fingerprints verified) and offline (clean, actionable error, nothing half-written);
-> confirm a merged-payload install and a damaged one both behave per D5.
-> **Don't.** Do not shell out to anything but the helper; do not let the launcher download from a URL
-> the installer's pins do not name.
+> **Goal.** The two rows §1.1 left for later, on a tab that is otherwise built (target with
+> filesystem availability, save and DLC pickers with their rules, *Install Ultimate*):
+>
+> - the **game-directory override** — the row that says where the game is when detection got it wrong,
+>   honoured exactly as `--game_data_root` is today (`DetectGameRoots` already takes an override; the
+>   row is what gives it a UI);
+> - ***Verify installation***, driving the helper's read-only `verify-game` / `verify-payload` per
+>   §4.6, reporting what it found rather than a pass/fail.
+>
+> **Deliverable.** The rows, their `settings.toml` entries where they are cvars, and the General
+> report (`--dump-general`) learning about the override.
+> **Verify.** Point the override at a payload install, a vanilla install and an empty folder: the tab
+> must say which it found, and *Verify installation* must agree with the game's own boot lines.
+> **Don't.** Do not implement first-run prefill here (D4); do not make the override a second source of
+> truth for the profile's own paths.
+
+#### B7 — Launch: command display, failure detail
+
+> **Goal.** The three things B7's implementation still owes. Built already: `BuildLaunchCommand`
+> (Contract 3, pure), `GameProcess` (`CreateProcessW`, install folder as working directory, the
+> executable as `argv[0]`), `--print-command`, the launch-time save when something is unsaved, and the
+> *Game is running* state that keeps a second copy from starting. Still owed:
+>
+> - a **"Copy command line"** affordance showing exactly what was run — §4.3's own rule, and the
+>   first thing a bug report needs;
+> - the **game's log path** in a start-failure message, because the game is a WIN32-subsystem binary
+>   and its own log is the only place a boot failure is visible;
+> - the **profile directory writability** check before spawning, so "the launcher wrote a profile the
+>   game cannot read" fails in the launcher rather than in the game.
+>
+> **Deviation to keep, not fix.** The launcher stays open on success and holds the child's handle; it
+> does not exit or hide. That is what makes "Game is running" possible and keeps the window the user
+> was already using.
+> **Deliverable.** The three items, and `launcher/README.md`'s launch section kept in step.
+> **Verify.** The `--print-command` snapshot test already exists; add a failing-start case (rename
+> `rb_blitz.exe` away) asserting the message names the command line and the log path.
+> **Don't.** Do not pass empty flags, do not pass the whole registry, do not block on the game.
+
+#### C1 — Device list, deadzone and `mnk_mode`
+
+> **Goal.** The Controller tab's *Devices* group, on D13 and D17's premises rather than C1's original
+> ones. Enumerate SDL controllers plus the keyboard, show live identity (name, GUID, ordinal,
+> connected now) so a bug report can name a pad, expose the **deadzone**, and expose **`mnk_mode`**
+> (the keyboard drives the pad) — and per R13, **never** disable the keyboard because a pad exists.
+> **Not this prompt.** Per-device settings files keyed by SDL GUID. D17 removed the need for them: the
+> remap is one `[remap]` table keyed by control, the game is single-player, and nothing distinguishes
+> two pads. D17 says when that comes back — a user who actually runs two pads with different layouts.
+> **Deliverable.** The panel rows and the README note recording, per row: cvar, default,
+> live-or-restart, and the evidence for whichever `applies` value it claims.
+> **Verify.** Two pads attached (a second can be SDL's virtual joystick): both appear with stable
+> identity, disconnect/reconnect keeps the same row, and a keyboard-only session shows the keyboard
+> with the pad rows simply absent rather than disabled.
+> **Don't.** Do not add a per-device file format; do not key anything by row order.
 
 #### C2 — Keyboard mapping panel
 
-> **Goal.** Implement the keyboard half of R13 honestly on what exists today: edit the 25
-> `keybind_*` strings ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:33-59](../../rexglue-sdk/src/input/mnk/mnk_input_driver.cpp))
-> with real capture, the comma-alternatives grammar preserved, modifiers supported
-> (`Shift+Up`, `Ctrl+A` — `TakeModifiers`), conflict detection with Replace/Swap/Cancel, `Esc` cancels
-> capture, reserved keys (`F3`, `F4`, `F7`, backtick, `Esc`) refuse to be bound and say why, and the
-> profile refuses to save a layout that leaves the guest unable to reach Start/Back. Note in the UI that
-> these bindings are live without a restart and that the game's own Controls screen shows a *different*
-> thing (the guest's preset layer).
-> **Deliverable.** The panel + a validator module with unit tests (`launcher/src/keybind_validate.*`),
-> plus README text on the two layers.
-> **Verify.** Unit tests for parse/serialize round-trip and the reserved/conflict rules; a real capture
-> session for three actions, then a launch proving the new mapping works in the game's menus.
-> **Don't.** Do not invent a new grammar for keyboard sources; reuse the shipped one.
+> **Goal.** The Controller tab's *Keyboard* group, which is the honest half of R13 and is untouched:
+> edit the 25 `keybind_*` strings
+> ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:33-59](../../rexglue-sdk/src/input/mnk/mnk_input_driver.cpp))
+> with real capture, the shipped comma-alternatives grammar preserved, modifiers supported
+> (`Shift+Up`, `Ctrl+A` — `TakeModifiers`), conflict handling, `Esc` cancels capture, reserved keys
+> (`F3`, `F4`, `F7`, backtick, `Esc`) refuse to be bound and say why, and the profile refuses to save
+> a layout that leaves the guest unable to reach Start/Back. Note in the UI that these bindings are
+> live without a restart, and that the guest's own Controls screen shows a *different* thing.
+> **Depends on nothing open.** C1's device list is not a prerequisite. Reuse C5's capture pattern — a
+> three-second listen on a rising edge — rather than inventing a second one.
+> **Deliverable.** The panel plus a validator module with unit tests
+> (`launcher/src/keybind_validate.{h,cpp}`), plus README text on the two layers.
+> **Verify.** Unit tests for parse/serialize round-trip and the reserved/conflict rules; a real
+> capture session for three actions, then a launch proving the new mapping works in the game's menus.
+> **Don't.** Do not invent a new grammar for keyboard sources; do not confuse these with the remap's
+> `key:` sources — those press a *pad* button for the guest, these are the keys the guest itself
+> reads.
+
+#### C6 — Remap safety rails
+
+> **Goal.** The rails at the launcher's level, on the panel C5 built: refuse to save a profile that
+> leaves Start or Back unbound (or that a menu could not be escaped from), make the reserved overlay
+> hotkeys (`F3`, `F4`, `F7`, backtick, `Esc`) non-offerable rather than silently broken, keep the
+> documented panic path reachable without a working controller, and add a "test the layout" screen
+> showing which guest-visible buttons a push would produce.
+> **Already free, and the reason the rest is worth doing.** A capture that captures nothing changes
+> nothing, so a half-armed capture is never persisted; and a profile with no `[remap]` rows installs
+> no filter at all, so the panic path already exists — it is *Reset all bindings* in the panel, or
+> deleting `[remap]` by hand. What is missing is the refusal and the test screen.
+> **Deliverable.** The validator with unit tests, the test screen, and README text stating the panic
+> path as a recovery step.
+> **Verify.** Attempt to save a layout with Start unbound (refused, with the reason); apply the panic
+> path to a deliberately broken profile and show the game booting with shipped behaviour.
+> **Don't.** Do not make the panic path require the GUI.
+
+#### D2 — Shortcuts and tasks
+
+> **Goal.** Implement D9: a `launchericon` `[Tasks]` entry (checked by default) and `[Icons]` entries
+> for the launcher in the program group and on the desktop, keeping the game's own entries and their
+> `--game_data_root="{app}\game"` argument so the game stays runnable standalone. Name the two
+> shortcuts so they are distinguishable in a list. Add the new task's silent-install parameter to the
+> table in `installer/README.md`.
+> **Deliverable.** `installer/setup.iss` changes plus README rows.
+> **Verify.** Interactive install on a scratch folder: both shortcuts appear with the right targets;
+> `/VERYSILENT` with and without `/LAUNCHERICON=1`; the game shortcut still launches the game directly
+> with data.
+> **Don't.** Do not repoint the game's shortcut at the launcher; do not remove `AllowNoIcons`.
+
+#### D3 — Finish-page three-way choice
+
+> **Goal.** Implement D8. Remove the `[Run]` entries and put the three-way radio on the finish page:
+> *Open the game* (through the launcher, honouring the profile's target), *Open the launcher*,
+> *Do nothing* — *Open the game* preselected, and nothing at all launched under `/VERYSILENT`. The
+> page must behave in both embed and download installs and must not run anything when the install
+> failed (`InstallSucceeded`, as today).
+> **Deliverable.** `installer/setup.iss` code changes plus a three-point manual checklist recorded in
+> `installer/README.md` (the wizard has no test harness — say so rather than implying coverage).
+> **Verify.** `installer\build.ps1 -SkipTests -SkipPayload` compiles; three interactive installs, one
+> per choice, each landing where it says; one silent install launching nothing.
+> **Don't.** Do not add a download or an elevation; do not reorder the wizard's pages.
 
 #### D4 — First-run prefill from `install-manifest.toml`
 
 > **Goal.** On first run (no profile), derive defaults from the machine's install instead of asking:
-> find `rb_blitz.exe` next to the launcher, read `install-manifest.toml`
-> (`[install] directory`/`game_directory`/`payload_commit`, `[game_data] source`/`directory`/
-> `ultimate_installed`), prefill the General tab from it, and write the first profile only when the user
-> confirms. Handle: no manifest (installed by hand or by an older installer) → detect folders from the
-> filesystem instead; a manifest whose paths no longer exist → say which and offer to re-scan; and a
-> second install of the launcher elsewhere.
+> find `rb_blitz.exe` next to the launcher, read `install-manifest.toml` (`[install]
+> directory`/`game_directory`/`payload_commit`, `[game_data] source`/`directory`/`ultimate_installed`),
+> prefill the General tab from it, and write the first profile only when the user confirms. Handle: no
+> manifest (installed by hand or by an older installer) → detect from the filesystem as B1 now does; a
+> manifest whose paths no longer exist → say which and offer to re-scan; a second launcher install
+> elsewhere.
 > **Deliverable.** The prefill module with unit tests over fixture manifests, plus README text.
-> **Verify.** Unit tests for the three cases; manual run on the install produced by D1/D3.
-> **Don't.** Do not write a profile without the user's confirmation, and do not fail to start when the
+> **Verify.** Unit tests for the three cases; a manual run on an install produced by D1/D3.
+> **Don't.** Do not write a profile without the user's confirmation; do not fail to start when the
 > manifest is missing.
-
-#### E2 — UI capture harness
-
-> **Goal.** A repeatable way to prove the launcher's UI, in the spirit of the existing capture scripts:
-> `scripts/capture_launcher.ps1` (start the launcher on a fixed profile and a fixed window size, capture
-> the window with `scripts/capture_window.ps1` after driving it with synthetic input — keyboard first,
-> gamepad via SDL virtual joystick if available) and assertions with `scripts/frame_diff.ps1`: tab
-> switching changes the content region, hovering a row changes the bottom bar's tooltip region, focus
-> moves one row per press. Exit non-zero on a failed assertion, like `acceptance_song.ps1` does.
-> **Deliverable.** The script plus a paragraph in `launcher/README.md` and a row in
-> `docs/build-and-run.md`'s verification list.
-> **Verify.** Run it twice and show both runs passing; deliberately break a tooltip and show the script
-> failing.
-> **Don't.** Do not assert on pixel-exact screenshots (fonts and DPI differ); assert on regions and on
-> the launcher's own `--dump-state` output where a text assertion is possible — add that switch if it
-> helps.
-
-#### C3 — Remap core, headless
-
-> **Goal.** Build the remap core in this plan's lane C, on the decision recorded in D13 — do not open a
-> second project. Its gates: the core must be headless-testable, must sit above the guest input
-> boundary at the choke point §2.5 identifies, and must be byte-identical pass-through when a device
-> has no custom profile ("the custom layer is off by default"). What this prompt adds on top: the **file**
-> schema the launcher writes (per device, sources and actions, analogue thresholds and hysteresis) and a
-> loader in the game that reads it where the profile is read (B5's insertion point), plus a log line
-> naming the device and the profile in force.
-> **Deliverable.** The core, its headless tests, and the schema documented in one place both the launcher
-> and the game link to.
-> **Verify.** The pass-through proof: with no profile, diff the
-> input-related log lines against a run of the build without the feature — they must match.
-> **Don't.** Do not put remap data in `remap_*` cvars if per-device names are needed — cvars are
-> registered at compile time, so the file is the contract (D13). Do not build the panel yet (C5).
-
-> **Superseded in part, 2026-10-05.** Built, but narrowed by D17: one `[remap]` table keyed by pad
-> control rather than per device, sources `pad:`/`key:`/`mouse:`, thresholds without hysteresis, and the
-> seam is the SDK's `InputSystem::SetStateFilter` (patch 0010) rather than a state machine inside the
-> project. Read D17 first; the rest of this prompt is what is still open.
-
-#### C4 — Remap grammar and persistence
-
-> **Goal.** The second parser for the `Pad*` source class and its grammar, the serialiser, per-device
-> profile storage keyed by SDL GUID with the "any pad"
-> fallback, the thresholds with hysteresis for analogue sources, and the rules that keep a profile
-> coherent (no half-armed capture, no unbound Start/Back — C6 turns those into UI refusals). Keep the
-> keyboard half on the shipped `keybind_*` cvars untouched; the custom layer *reads* them.
-> **Deliverable.** Parser/serialiser with unit tests (round-trip, unknown tokens, `,`-alternatives,
-> modifiers), the profile write path, and the grammar added to the shared schema doc from C3.
-> **Verify.** Unit tests for the grammar and the profile files; a hand-written profile loaded by the game
-> and reported in its log; a profile written by the core re-read by the launcher (both directions).
-> **Don't.** Do not extend the SDK's own `keybind_*` cvars with `Pad*` tokens; do not key profiles by
-> device ordinal.
-
-> **Superseded in part, 2026-10-05.** The parser, the serialiser, the round trip, unknown-token
-> tolerance and the `,`-alternatives are built (`src/launcher/remap.{h,cpp}`,
-> `tests/launcher_remap_tests.cpp`); the per-device storage, the hysteresis and the reading of the
-> game's `keybind_*` cvars are not, and D17 says why. `pad:` sources are read beside the pad rather than
-> out of the game's own configuration, because the SDK's SDL driver maps no keys to pad buttons at all.
-
-#### C5 — Pad remap panel
-
-> **Goal.** The remap panel, host-side in the launcher: one row per action
-> with capture, analogue-source thresholds with hysteresis, per-device profiles plus an "any pad"
-> fallback, conflict Replace/Swap/Cancel, per-device enable/disable, and the same honesty rules as C2
-> (what the guest's own Controls screen shows versus what this layer does).
-> **Deliverable.** The panel plus unit tests for the capture/conflict rules.
-> **Verify.** Capture a full layout for a real pad, launch, and show the mapping taking effect in the
-> guest's menu navigation; then disable the device and show byte-identical pass-through again.
-> **Don't.** Do not present this as configuring the game's presets; do not persist a half-armed capture.
-
-> **Superseded in part, 2026-10-05.** The panel is built (`launcher/src/controller_tab.{h,cpp}`): one row
-> per control, a three-second capture that listens to every device, and per-control and global resets.
-> Capture *adds* rather than resolving conflicts, and there is no per-device enable/disable — D17 has the
-> reasoning. What it says about honesty stands: the panel is not the guest's Controls screen and does
-> not claim to be.
-
-#### C6 — Remap safety rails
-
-> **Goal.** Implement the safety rails at the launcher's level: refuse to save a profile
-> that leaves Start/Back or menu navigation unbound; reserved overlay hotkeys not offerable; a documented
-> panic path (`--no-remap` plus a profile key that bypasses everything) reachable without a working
-> controller; never persist a half-armed capture; and a "test the layout" screen that shows the
-> guest-visible buttons a push would produce.
-> **Deliverable.** Validators with unit tests, the test screen, and README recovery steps.
-> **Verify.** Attempt to save a broken layout (refused, with the reason); apply the panic path from a
-> deliberately broken profile and show the game booting with shipped behaviour.
-> **Don't.** Do not make the panic path require the GUI.
-
-> **Still open, 2026-10-05.** Only two of these are in place, and they are the two that came for free:
-> a listen that captures nothing changes nothing, so a capture is never half-written; and the panic path
-> is the launcher's own *Reset all bindings* plus deleting `[remap]` by hand, since a profile with no
-> rows installs no filter at all. The unbound-Start/Back validator, the "not offerable" reserved keys,
-> and the test screen are not built.
 
 #### D5 — Installer tests and README tables
 
 > **Goal.** Close the loop on the installer: extend `installer/tests/installer_tests.cpp` for the new
-> payload entry (D1) and the new manifest/report fields; update `installer/README.md`'s tables (payload
-> allow-list, layout, silent parameters, finish-page manual checklist); note in the README that the
-> helper is now also invoked by the launcher (B8) and which three commands are allowed.
-> **Deliverable.** Tests + documentation, no behaviour change.
+> payload entry (D1, already covered) and for the new manifest/report fields; update
+> `installer/README.md`'s tables (payload allow-list, layout, silent parameters, the finish-page
+> checklist D3 adds); and state that the helper is now also invoked by the launcher (B8) and which
+> three commands are allowed (§4.6).
+> **Deliverable.** Tests plus documentation, no behaviour change.
 > **Verify.** `ctest --preset installer-release` green; `installer\build.ps1` end to end.
 > **Don't.** Do not add a test that needs the network or a game dump.
+
+#### E1 — The launcher test names in `build-and-run.md`
+
+> **Goal.** One line of documentation. E1's substance is done — five launcher targets are wired into
+> CTest and green: `launcher_profile`, `launcher_general`, `launcher_session`, `launcher_remap`,
+> `launcher_launch`. The "the tests actually run" evidence exists for the newest of them (a wrong
+> expectation in `launcher_launch_tests.cpp` printed `[ FAIL ] … 1 of 30 checks failed` before it was
+> corrected); `docs/build-and-run.md`'s test section names the game's targets and not the launcher's.
+> **Deliverable.** The `build-and-run.md` line (or table row), naming the five and what each covers.
+> **Verify.** `ctest --test-dir out/build/win-amd64-release -N` lists exactly those names.
+> **Don't.** Do not re-document the harness; `tests/check.h` and the convention are already described.
+
+#### E2 — Launcher capture harness
+
+> **Goal.** A repeatable way to prove the launcher's UI, in the spirit of the existing capture
+> scripts: `scripts/capture_launcher.ps1` (start the launcher on a fixed profile and a fixed window
+> size, drive it with synthetic input — keyboard first, gamepad via SDL's virtual joystick if
+> available — and capture with `scripts/capture_window.ps1`) and assertions with
+> `scripts/frame_diff.ps1`: switching tabs changes the content region, focusing a row changes the
+> bottom bar's help region, focus moves one row per press. Exit non-zero on a failed assertion, like
+> `acceptance_song.ps1` does.
+> **Depends on A2** for the help region to assert on; the tab and focus assertions can be written
+> first.
+> **Deliverable.** The script, a paragraph in `launcher/README.md`, and a row in
+> `docs/build-and-run.md`'s verification list.
+> **Verify.** Run it twice and show both passing; deliberately break a tooltip and show it failing.
+> **Don't.** Do not assert on pixel-exact screenshots (fonts and DPI differ). Prefer the launcher's
+> own headless output where a text assertion is possible — `--dump-layout` (rows and now enum
+> choices), `--dump-general`, `--dump-profile`, `--dump-display`, `--print-command` all exist and need
+> no window.
 
 #### E3 — End-to-end acceptance
 
 > **Goal.** `scripts/acceptance_launcher.ps1`: from a built installer, install silently into a scratch
 > folder with a fixed profile path, write a profile with non-default values, run
-> `rb_blitz_launcher.exe --print-command` and assert the argv contract, then actually launch and assert
-> the game's boot log lines (roots, `ultimate:`, `license_mask`, mouse-nav mode, DLC packages) — the same
-> evidence standard as `scripts/acceptance_launches.ps1`. Cover: launch target Ultimate with a payload,
-> Vanilla without, Demo (`--license_mask=0`), and a save dir override isolated like
-> `scripts/acceptance_persistence.ps1` does.
+> `rb_blitz_launcher.exe --print-command` and assert the argv contract, then actually launch and
+> assert the game's boot log lines (roots, `ultimate:`, `license_mask`, mouse-nav mode, DLC packages)
+> — the same evidence standard as `scripts/acceptance_launches.ps1`. Cover: the Ultimate target with a
+> payload, the retail target without, Demo (`--license_mask=0`), and a save-dir override isolated the
+> way `scripts/acceptance_persistence.ps1` isolates one.
 > **Deliverable.** The script, its exit codes, a summary file, and a `docs/build-and-run.md` section.
-> **Verify.** Run it twice on the same machine (idempotent) and show it failing when the launcher exe is
-> renamed away.
-> **Don't.** Do not require a controller or an interactive desktop; the controller path stays manual and
-> is recorded as such.
+> **Verify.** Run it twice on the same machine (idempotent) and show it failing when the launcher exe
+> is renamed away.
+> **Don't.** Do not require a controller or an interactive desktop; the controller path stays manual
+> and is recorded as such.
 
 #### E4 — Docs, backlog, standing limits, audit
 
-> **Goal.** Finish the paper trail: a launcher section in the root `README.md` (what it is, where
-> settings live, how to launch the game without it), a complete `launcher/README.md`, a
-> [docs/backlog.md](../backlog.md) entry for this plan in the launcher section, `docs/known-issues.md` entries for every standing limit you created
-> (precedence between `rb_blitz.toml` and the profile, no pad remap before C5, art licensing, portable
-> mode, launcher- and game-version skew), and a row in the distributable audit task of the backlog
-> for the two new packaging decisions (embedded cover art, helper reuse).
-> **Deliverable.** Documentation only, in the repo's voice (state the behaviour and why, name the
-> evidence).
+> **Goal.** Finish the paper trail. Already done: `launcher/README.md` is the living description, the
+> two-settings-files precedence limit is in `docs/known-issues.md`, and §3 of `docs/backlog.md`
+> carries this plan. Still owed: a launcher section in the root `README.md` (what it is, where the
+> settings live, how to launch the game without it); `known-issues.md` entries for the limits this work
+> created and has not yet recorded (art licensing, launcher/game version skew, and the renderer's
+> machine-dependence); and a distributable-audit row for the packaging decisions (embedded cover art,
+> helper reuse).
+> **Deliverable.** Documentation only, in the repo's voice: state the behaviour and why, and name the
+> evidence.
 > **Verify.** Every link resolves; `git status` shows no art, no game files, no binaries.
 > **Don't.** Do not add a new markdown file where an existing one is the right home.
 
@@ -1320,100 +1132,86 @@ defers — §6.3 names them.
 
 ## 6. Order and parallelization
 
-### 6.1 Dependency graph
+### 6.1 Dependency graph (what is left)
 
 ```mermaid
 graph LR
-  P02[P0.2 schema] --> A1[A1 tab shell]
-  P04[P0.4 target spike] --> A1
-  P03[P0.3 profile module] --> B5[B5 game reads profile]
-  P02 --> B2[B2 graphics]
-  P02 --> B3[B3 controller input]
-  B6[B6 mouse toggle] --> B3
-  A1 --> A2[A2 bottom bar]
-  A1 --> A3[A3 pad nav]
-  A1 --> B1[B1 general]
-  A1 --> C1[C1 devices]
-  A1 --> A4[A4 art]
-  B1 --> B4[B4 save/precedence]
-  B5 --> B4
-  B4 --> B7[B7 launch]
-  B1 --> B7
-  B1 --> B8[B8 install ultimate]
-  A2 --> A5[A5 recovery]
-  A3 --> A5
-  C1 --> C2[C2 keyboard mapping]
-  C1 --> C3[C3 remap core]
-  C3 --> C4[C4 grammar/persistence]
-  C2 --> C5[C5 remap panel]
-  C4 --> C5
-  C5 --> C6[C6 safety rails]
-  P05[P0.5 packaging] --> D1[D1 payload]
-  P04 --> P05
-  D1 --> D2[D2 shortcuts]
-  D1 --> D3[D3 finish page]
-  D1 --> D4[D4 first run]
-  B4 --> D4
-  D1 --> D5[D5 installer tests/docs]
-  P02 --> E1[E1 unit tests]
-  P03 --> E1
-  B7 --> E3[E3 e2e acceptance]
-  D1 --> E3
+  A4[A4 cover art]
+  A5[A5 recovery]
+  B1[B1 general remainder]
+  B7[B7 launch detail] --> E3[E3 e2e acceptance]
+  C1[C1 devices]
+  C2[C2 keyboard panel]
+  C6[C6 safety rails]
+  D2[D2 shortcuts] --> D5[D5 installer docs]
+  D3[D3 finish page] --> D5
+  D4[D4 first run] --> D5
   D3 --> E3
-  A3 --> E2[E2 ui capture]
-  A2 --> E2
-  E3 --> E4[E4 docs/audit]
-  E2 --> E4
+  A4 --> E4[E4 docs/audit]
+  A5 --> E4
+  B1 --> E4
+  C1 --> E4
+  C2 --> E4
+  C6 --> E4
+  D5 --> E4
+  E2[E2 capture harness] --> E4
+  E3 --> E4
 ```
 
 ### 6.2 Waves
 
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
-| **0** | P0.2, P0.3, P0.4, B6 | four independent sessions. P0.4 answers the renderer question (D1); P0.5 follows P0.4 immediately. Nothing here needs the launcher to exist yet except P0.4 itself. |
-| **1** | A1, A4, B2′, B3′, B5, E1, D1 | A1 is the bottleneck: start it first. B2′/B3′ are "schema rows exist and render read-only" halves of B2/B3 if you want them earlier; otherwise run the full B2/B3 here. D1 needs P0.5 only. |
-| **2** | A2, A3, B1, B4, C1, D2, D3, D4 | widest wave: seven independent sessions. B4 is on the critical path — give it a strong session. |
-| **3** | B7, B8, C2, A5, E2, D5 | B7 unlocks E3. |
-| **4** | C3, C4, E3 | C3/C4 are this plan's remap core (D13); they can start as early as wave 2 if a session is free, since they depend only on C1. C5/C6 follow in wave 5. |
-| **5** | C5, C6, E4, one manual pass | manual pass: controller navigation, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
+| **1** | A5, B1, B7, C1, C2, C6, D2, D3 | eight independent sessions, none of them gated by anything open. C2 and C6 need nothing open, and the three installer prompts touch only `installer/`. |
+| **2** | A4, D4, E2 | A4 needs only the built P0.4, D4 only the built D1/B4, and E2 only the bar A2 built. |
+| **3** | D5 | needs D2/D3/D4. |
+| **4** | E3, E4, one manual pass | E3 needs B7/D3; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path: **P0.2 → A1 → B1 → B4 → B7 → E3 → E4** (7 steps).
+Critical path over what is left: **D3 → E3 → E4** — three steps, with the packaging lane
+(D2/D4 → D5 → E4) the same length beside it. Everything else is two steps or one.
 
-If you only have one session at a time, run: P0.4 → P0.5 → D1 → P0.2 → P0.3 → A1 → B1 → B4 → B7 → D2
-→ D3 → E3 → E4, and fold B6, A2, A3, B2, B3, C1, C2, B8, D4, D5, E1, E2, C3–C6 in afterwards in any
-order that respects §6.1.
+If you only have one session at a time, run: **D2 → D3 → D4 → B7 → D5 → E2 → E3 → E4**, folding C1,
+C2, C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
 
-**M1 — "the launcher with the graphical settings" (§1.1).** Prompts: P0.4, P0.2, P0.3, A1, A2, A3, B2,
-B3, B6, B1, B4, B5, B7, E1 — a launcher that opens on three tabs, is fully navigable with a controller,
-mouse and keyboard, shows the Graphics settings (all of D12) and the General launch target + save/DLC
-rows, writes them to the profile, and launches the game with them. Packaging it so the installer ships
-it (P0.5, D1, and the wizard work in D2/D3) is unchanged work and is what turns "runs" into "ships".
+**M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
+naming the focused row's tooltip and the current control hints" is what the launcher does: A3's pad
+source drives the same ring the keyboard and the pointer do, and A2's bar names the focused row and
+says how to operate it, in key names or in the pad's own button names. Everything else M1 named —
+P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and the M1 cut's original
+"Controller tab input group" listed `input_backend`, which D17 removed: that is a shortening of M1,
+not a gap in it.
 
-Deferred past M1, and none of them changes an interface M1 builds: A4 (art), B8 (*Install Ultimate…*),
-C1/C2 (device list, keyboard mapping — the Controller tab's remaining groups), C3–C6 (per-pad remap),
-D4 (first-run prefill), D5, E2, E3, E4.
+**Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
+Controller tab's remaining lanes (C1, C2, C6), packaging (D2–D5), first-run prefill (D4), and the
+evidence lane (E2, E3, E4).
 
 ---
 
 ## 7. Verification matrix
 
-| Requirement | How it is proven | Where |
-| --- | --- | --- |
-| R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests | D1, D5 |
-| R4 standalone uses launcher settings | four-boot precedence test (none / profile only / profile+`rb_blitz.toml` / profile+argv) | B5 |
-| R4 defaults when never configured | boot with no profile: log shows compiled defaults | B5 |
-| R6 finish-page choice | three interactive installs + one silent | D3 |
-| R7 controller control | two pads, hotplug, keyboard-only session, screenshots | A3, A5 |
-| R8 bottom-bar tooltip | capture + frame diff between hover states | A2, E2 |
-| R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 |
-| R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8 |
-| R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 |
-| R13 per-device profiles survive | two devices → two files; plugin order changed → same files | C1 |
-| R9/R10/R12 three tabs, M1 rows live | launcher shows General/Graphics/Controller; Graphics rows editable; General shows target + save + DLC | A1, B2, B3, B1 |
-| R14 no Experimental tab; mouse toggle on Controller | tab list has no Experimental; two boots with `mouse_ui_nav` off/on, log + behaviour | B3, B6, D14 |
-| R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4, E3 |
+State as of 2026-10-05. A row whose `Where` names only built prompts is already proven — the evidence
+is the test or the headless report named beside it, and `docs/build-and-run.md` is where the commands
+live. The rows that still name an open prompt are the ones §6 schedules.
+
+| Requirement | How it is proven | Where | State |
+| --- | --- | --- | --- |
+| R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests | D1, D5 | built (D5's tables still owed) |
+| R4 standalone uses launcher settings | four-boot precedence test (none / profile only / profile+`rb_blitz.toml` / profile+argv) | B5 | built; `--dump-profile` prints the precedence audit |
+| R4 defaults when never configured | boot with no profile: log shows compiled defaults | B5 | built |
+| R6 finish-page choice | three interactive installs + one silent | D3 | **open** |
+| R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 4). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
+| R7 the bar follows the device | `device gamepad name="Virtual Pad" confirm=Cross cancel=Circle shoulders=L1/R1 start=Options` in the trace, and the capture reading `Cross Choose  Circle Quit  L1/R1 Switch tab  Options Launch`; the same bar before the pad moved read `Enter Choose  Esc Quit  Tab Switch tab`; a keyboard-only session (three Down, End, Home, Tab and Right, all in the trace) never left the key names | A3, A2 | built |
+| R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
+| R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2 | built — `scripts/frame_diff.ps1` was not needed: the tooltip text in the capture is the stronger evidence |
+| R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist; E3 **open** |
+| R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8 | built; `tests/launcher_ultimate_state_tests.cpp` |
+| R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |
+| ~~R13 per-device profiles survive~~ | **withdrawn with D17**: there are no per-device files to survive — one `[remap]` table keyed by control | — | removed |
+| R9/R10/R12 three tabs, M1 rows live | launcher shows General/Audio / Video/Controller; the tab's rows editable; General shows target + save + DLC | A1, B2, B3, B1 | built (built rows unchanged by D18 except the additions it lists) |
+| R14 no Experimental tab; mouse toggle on Controller | tab list has no Experimental; two boots with `mouse_ui_nav` off/on, log + behaviour | B3, B6, D14 | built |
+| R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4, E3 | **open** |
 
 Anything not in this table is not verified, and should be said out loud rather than implied.
 
@@ -1423,11 +1221,12 @@ Anything not in this table is not verified, and should be said out loud rather t
 
 | Risk | Why it is a risk | Mitigation |
 | --- | --- | --- |
-| The launcher's renderer backend | SDL_GPU + vendored ImGui may need a shader/back-end detour | it is P0.4, the first thing built; fallback named in D1 |
+| ~~The launcher's renderer backend~~ | **resolved**: P0.4 chose SDL_GPU, and D18 turned the *game's* backend into a real setting | D18; both backends are now compiled and the Renderer row picks between them |
+| The renderer a user picks may not run | a payload can carry Vulkan while the machine has no Vulkan driver | D18: the app probes the loader, logs why, and boots on the other backend |
 | Two settings files, one user | `rb_blitz.toml` and `launcher.toml` can disagree; the F4 overlay writes the former | precedence is fixed (D3), surfaced as a badge (B4), recorded as a standing limit |
 | Machine-wide installs | `{app}` may be read-only; the launcher's own log and the game's `rb_blitz.toml` writes fail there | the profile never lives in `{app}`; the launcher degrades to a warning |
 | Controller-only users | a bad mapping can make the game unreachable | C6's panic path, A5's recovery switches, "never persist a half-armed capture" |
-| Remap scope creep | lane C is a whole project folded into this one (D13), so its kill gates are now this plan's risk | C3/C4 keep their headless-core and pass-through gates, and sit in their own waves; a failed gate stops C5/C6, not the launcher |
+| Remap scope creep | lane C was a whole project folded into this one (D13) | **spent**: C3/C4/C5 shipped inside the plan, and D17 narrowed them (one table, no per-device keying). What is left is C6, whose rails are what keep a bad mapping recoverable |
 | Art licensing | the cover is not ours | identical posture to the installer; build-time fetch, gitignored, absence supported, recorded in the audit |
 | Version skew | launcher and game can be different builds | the launch contract passes the profile path and the launcher prints `--version`; E3 asserts both |
 | Silent-install surprises | new tasks/params can change unattended behaviour | new parameter defaults are documented and tested (D2, D3, D5) |
@@ -1582,21 +1381,35 @@ C-lane prompts, the DAG and the waves.
 withdrawn and its rows re-homed (D14) — and the current deliverable is **M1** (§1.1), the launcher
 with the graphical settings; everything else is planned, not dropped.
 
-Still open, for you before or during Wave 0:
+**Settled 2026-10-05:** where the settings live (D17 replaced portable mode with a chosen folder, so
+question 2 below is answered — the default stays `%APPDATA%`, and moving it is a button rather than a
+mode); the whole controller lane's shape (D17: one `[remap]` table, no per-device files, no
+input-source choice); and the window's own chrome plus the renderer row (D18). Question 5's ordering
+concern is answered by B7 as built: the launcher holds the child's handle but does not hold the pad,
+and the game is started *after* the launcher's own SDL session, which has no controller open of its
+own outside a listen.
+
+Still open, for you before or during Wave 1:
 
 1. **Should the launcher be the primary entry point** (Start menu and desktop), with the game's own
-   shortcut as the standalone option? D9 recommends yes.
-2. **Portable mode**: worth it, or is `%APPDATA%` always right?
+   shortcut as the standalone option? D9 recommends yes, and D2 is the prompt that acts on it.
+2. ~~**Portable mode**: worth it, or is `%APPDATA%` always right?~~ **Answered 2026-10-05 (D17):**
+   `%APPDATA%` is the default and a *Change settings location* button moves it; the marker file still
+   resolves, so no install is broken by the change.
 
 For the running artifacts (answer with a boot, not an opinion):
 
 3. Does `--license_mask=0` actually produce a *playable* trial (menus, one song) rather than a refusal?
-   D4's Demo target depends on the answer.
+   D4's Demo target depends on the answer. *(E3 is the prompt that would answer it in passing.)*
 4. Is the F4 overlay's `SaveConfig` the only writer of `rb_blitz.toml` in practice, or does a normal
    boot write it too? (It should not: `SaveConfig` runs from the overlay only.)
-5. Does a second `SDL_GameController` in a different process see the pad while the game has it open? If
-   not, the launcher must be closed before the game starts — which it is, but the ordering should be
-   measured, not assumed.
+5. ~~Does a second `SDL_GameController` in a different process see the pad while the game has it open?~~
+   **Answered 2026-10-05 (A3).** Yes, on Windows through SDL's XInput path: with the launcher holding
+   every attached pad open — which A3 made it do for its whole life, not just during a listen — and the
+   game started from it (B7 keeps the launcher alive), the game's own log shows
+   `SDL OnControllerDeviceAdded: "XInput Controller #1", JoystickType(1), GameControllerType(2),
+   VendorID(0x0B05), ProductID(0x1B4C)` and `connection order 0`. The same log lists one pad, not two:
+   the launcher's virtual joystick (`--test-pad`) is process-local, which is what that hook is for.
 
 ---
 

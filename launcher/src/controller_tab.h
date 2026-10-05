@@ -22,6 +22,10 @@
 // ImGui - so SDL is asked what is down each frame and a capture is a *rising edge* over the
 // previous frame. That is also what keeps the click that started the listen from assigning
 // itself: the mouse button is already down when the listen begins, so it has no edge left.
+//
+// The pads it reads are the launcher's open ones (A3's PadRegistry): SDL only reports a pad's
+// state through a handle somebody opened, so a capture that opened its own would be reading a
+// different pad from the one the focus ring is following.
 
 #pragma once
 
@@ -36,6 +40,7 @@
 #include "launcher/profile.h"
 #include "launcher/remap.h"
 #include "nav.h"
+#include "pad_source.h"
 #include "profile_session.h"
 #include "schema_view.h"
 
@@ -57,6 +62,11 @@ class ControllerTab {
   // shift the schema's own rows, which are drawn before these.
   static constexpr std::size_t kRowCount = kControlRows * 2 + 1;
 
+  // `pads` is the launcher's open pads (A3). A capture reads them through the registry rather
+  // than opening anything itself: SDL only reads a pad somebody has opened, so the registry is
+  // what makes a listen able to see a pad press at all.
+  explicit ControllerTab(const PadRegistry& pads) : pads_(pads) {}
+
   // Draws the block. `first_row` is the ring index of the first control's Assign button.
   void Draw(std::size_t first_row, FocusModel& ring, ProfileSession& session, NavAction action);
 
@@ -64,11 +74,17 @@ class ControllerTab {
   // launcher while the user is waiting for the countdown.
   bool Listening() const { return listening_.has_value(); }
 
+  // What the bottom bar says about one of the block's rows, in the ring's own order (A2). The
+  // schema's rows carry their own tooltip; these are buttons, so their sentence is built here
+  // from the control the row belongs to - `row / 2` is the control, `row % 2` is which of its two
+  // buttons it is, in the same arithmetic the draw loop uses.
+  static std::string HelpText(std::size_t row);
+
  private:
   using Source = remap::Source;
 
   // One button, ring-reachable, disabled when `enabled` is false.
-  bool Item(std::size_t index, const FocusModel& ring, NavAction action, const char* label,
+  bool Item(std::size_t index, FocusModel& ring, NavAction action, const char* label,
             bool enabled);
 
   void BeginListening(remap::Target target);
@@ -89,13 +105,17 @@ class ControllerTab {
     bool right_trigger = false;
   };
 
+  // The launcher's open pads (A3). Not owned: the shell holds the registry, because the focus
+  // ring needs the same pads the capture does.
+  const PadRegistry& pads_;
+
   // The control being rebound, and when the listen runs out.
   std::optional<remap::Target> listening_;
   double listen_until_ = 0.0;
 
   // The previous frame's input, which is the half of "rising edge" that is not SDL's.
   std::vector<bool> key_down_;
-  std::vector<PadSnapshot> pads_;
+  std::vector<PadSnapshot> pads_snapshot_;
   uint32_t mouse_down_ = 0;
 
   // The last thing the block did, so a capture, a reset and a listen that found nothing all

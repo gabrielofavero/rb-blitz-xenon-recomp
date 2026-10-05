@@ -242,7 +242,7 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
   }
 }
 
-bool ControllerTab::Item(std::size_t index, const FocusModel& ring, NavAction action,
+bool ControllerTab::Item(std::size_t index, FocusModel& ring, NavAction action,
                          const char* label, bool enabled) {
   const bool focused = action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
   const bool in_ring = !ring.Empty() && ring.Index() == index;
@@ -259,10 +259,33 @@ bool ControllerTab::Item(std::size_t index, const FocusModel& ring, NavAction ac
   if (!enabled) {
     ImGui::EndDisabled();
   }
+  // A pointer is a device like any other (D6): hovering adopts the ring, so the bottom bar
+  // describes the button the mouse is over rather than the last one the keyboard left behind.
+  ring.FocusIf(index, ImGui::IsItemHovered());
   if (in_ring && !ImGui::IsItemVisible()) {
     ImGui::SetScrollHereY(0.5f);
   }
   return enabled && (clicked || focused);
+}
+
+std::string ControllerTab::HelpText(std::size_t row) {
+  const std::vector<remap::Target>& targets = remap::Targets();
+  if (row >= targets.size() * 2) {
+    return "Removes every assignment at once, so every control goes back to what the pad reports "
+           "by itself. This is also the way out of a layout that made the game unusable, and it "
+           "needs no controller and no working mapping to reach.";
+  }
+  const std::string label(remap::TargetLabel(targets[row / 2]));
+  if (row % 2 == 0) {
+    return label +
+           ": assigns what answers for it. A listen takes the first input it sees within three "
+           "seconds - a pad button, a key or a mouse button - and adds to what is already there, "
+           "so one control can answer to several inputs. An empty row means the pad's own button "
+           "still reaches the game unchanged.";
+  }
+  return label +
+         ": removes every assignment from it, which is what giving a control back to the pad's "
+         "own button means.";
 }
 
 void ControllerTab::BeginListening(remap::Target target) {
@@ -276,14 +299,17 @@ void ControllerTab::BeginListening(remap::Target target) {
 
 std::optional<remap::Source> ControllerTab::CapturedInput() const {
   // Pads first: a listen is usually about the pad, so a tie should go to the device the user is
-  // holding.
-  int pad_count = 0;
-  SDL_JoystickID* pad_ids = SDL_GetGamepads(&pad_count);
+  // holding. The handles come from the registry, because a pad has to be *opened* before SDL will
+  // read it at all (pad_source.h) - asking here without opening it would look exactly like a pad
+  // nobody is touching.
   std::optional<remap::Source> captured;
-  for (int i = 0; i < pad_count && !captured; ++i) {
+  for (SDL_Gamepad* pad : pads_.pads()) {
+    if (captured) {
+      break;
+    }
     const PadSnapshot* previous = nullptr;
-    for (const PadSnapshot& snapshot : pads_) {
-      if (snapshot.id == pad_ids[i]) {
+    for (const PadSnapshot& snapshot : pads_snapshot_) {
+      if (snapshot.id == SDL_GetGamepadID(pad)) {
         previous = &snapshot;
         break;
       }
@@ -291,10 +317,6 @@ std::optional<remap::Source> ControllerTab::CapturedInput() const {
     if (previous == nullptr) {
       // A pad that appeared while the listen was running. Its first frame is the state its
       // edges will be measured against, so it cannot capture on the frame it arrives.
-      continue;
-    }
-    SDL_Gamepad* pad = SDL_GetGamepadFromID(pad_ids[i]);
-    if (pad == nullptr) {
       continue;
     }
     for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT && !captured; ++button) {
@@ -321,7 +343,6 @@ std::optional<remap::Source> ControllerTab::CapturedInput() const {
       captured = remap::Source{remap::SourceKind::kPad, "right_trigger"};
     }
   }
-  SDL_free(pad_ids);
   if (captured) {
     return captured;
   }
@@ -378,35 +399,27 @@ void ControllerTab::SnapshotInput() {
     key_down_[scancode] = keys[scancode];
   }
 
-  int pad_count = 0;
-  SDL_JoystickID* pad_ids = SDL_GetGamepads(&pad_count);
-  for (int i = 0; i < pad_count; ++i) {
-    PadSnapshot* snapshot = nullptr;
-    for (PadSnapshot& existing : pads_) {
-      if (existing.id == pad_ids[i]) {
-        snapshot = &existing;
-        break;
-      }
-    }
-    if (snapshot == nullptr) {
-      pads_.push_back(PadSnapshot{pad_ids[i], {}, false, false});
-      snapshot = &pads_.back();
-    }
-    snapshot->buttons.assign(static_cast<std::size_t>(SDL_GAMEPAD_BUTTON_COUNT), false);
-    SDL_Gamepad* pad = SDL_GetGamepadFromID(pad_ids[i]);
-    if (pad == nullptr) {
-      continue;
-    }
+  // The registry's pads, and only those: a pad nobody opened cannot be read, so snapshotting one
+  // would record a button that is always up and a capture that would never fire. The list is
+  // rebuilt rather than merged, so a pad that has gone cannot leave a stale snapshot behind to be
+  // the "previous frame" a reconnected one is measured against.
+  std::vector<PadSnapshot> snapshots;
+  snapshots.reserve(pads_.count());
+  for (SDL_Gamepad* pad : pads_.pads()) {
+    PadSnapshot snapshot;
+    snapshot.id = SDL_GetGamepadID(pad);
+    snapshot.buttons.assign(static_cast<std::size_t>(SDL_GAMEPAD_BUTTON_COUNT), false);
     for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; ++button) {
-      snapshot->buttons[static_cast<std::size_t>(button)] =
+      snapshot.buttons[static_cast<std::size_t>(button)] =
           SDL_GetGamepadButton(pad, static_cast<SDL_GamepadButton>(button));
     }
-    snapshot->left_trigger =
+    snapshot.left_trigger =
         TriggerAxisPressed(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
-    snapshot->right_trigger =
+    snapshot.right_trigger =
         TriggerAxisPressed(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
+    snapshots.push_back(std::move(snapshot));
   }
-  SDL_free(pad_ids);
+  pads_snapshot_ = std::move(snapshots);
 
   mouse_down_ = SDL_GetMouseState(nullptr, nullptr);
 }

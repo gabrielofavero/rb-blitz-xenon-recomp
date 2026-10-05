@@ -22,6 +22,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 
 #include "nav.h"
 #include "profile_session.h"
@@ -48,6 +49,12 @@ class ProfilePanel {
   const std::string& status_message() const { return status_; }
   const std::string& status_error() const { return status_error_; }
 
+  // What the bottom bar says about one of the block's items, in the ring's own order (A2). The
+  // schema's rows carry their own tooltip; these four are buttons rather than settings, so their
+  // sentence lives here, with the buttons it describes - a table in the shell would be a second
+  // copy of this block's order to keep in step.
+  static std::string HelpText(std::size_t row);
+
   // SDL's dialog callbacks, which fire during the event pump. Public only because the C
   // callbacks need them; nothing else calls them.
   void OnImportChosen(const char* const* filelist);
@@ -60,7 +67,7 @@ class ProfilePanel {
   void DrawResetModal(ProfileSession& session, bool was_open, NavAction action);
   void ApplyPendingDialogs(ProfileSession& session);
   // One button, ring-reachable: true when it was clicked or activated this frame.
-  bool Item(std::size_t index, const FocusModel& ring, NavAction action, const char* label);
+  bool Item(std::size_t index, FocusModel& ring, NavAction action, const char* label);
 
   bool modal_open_ = false;
   // The dialogs answer asynchronously, so the choice is recorded and applied by the next Draw.

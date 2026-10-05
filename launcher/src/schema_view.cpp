@@ -137,6 +137,59 @@ std::size_t FocusEntriesFor(const settings::Setting& setting) {
   return count == 0 ? 1 : count;
 }
 
+const settings::Setting* SettingForEntry(const TabLayout& tab, std::size_t entry) {
+  for (const LayoutGroup& group : tab.groups) {
+    for (const settings::Setting* row : group.rows) {
+      const std::size_t entries = FocusEntriesFor(*row);
+      if (entry < entries) {
+        return row;
+      }
+      entry -= entries;
+    }
+  }
+  return nullptr;
+}
+
+std::string_view RowActionVerb(const settings::Setting& setting) {
+  switch (setting.kind) {
+    case settings::Kind::kBool:
+      return "Toggle";
+    case settings::Kind::kInt:
+    case settings::Kind::kFloat:
+      // A row with a range steps through it; one without is typed like any other text.
+      return setting.has_range ? "Adjust" : "Edit";
+    case settings::Kind::kEnum:
+      return "Choose";
+    case settings::Kind::kString:
+      return "Edit";
+    case settings::Kind::kPathDir:
+    case settings::Kind::kPathFile:
+      return "Browse";
+  }
+  return "Activate";
+}
+
+std::string FlattenHelpText(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  bool pending_space = false;
+  for (const char character : text) {
+    const bool blank = character == ' ' || character == '\t' || character == '\n' ||
+                       character == '\r';
+    if (blank) {
+      // A run of blanks is one space, and a run that ends the text is nothing at all.
+      pending_space = !out.empty();
+      continue;
+    }
+    if (pending_space) {
+      out += ' ';
+      pending_space = false;
+    }
+    out += character;
+  }
+  return out;
+}
+
 std::string DescribeLayout(const std::vector<TabLayout>& layout) {
   std::string out;
   for (const TabLayout& tab : layout) {

@@ -8,8 +8,8 @@
 // vocabulary, so moving the ring is one code path and no widget learns which device moved
 // it (D6's "the last device to move owns the focus ring").
 //
-// Dependency-free on purpose - no ImGui, no SDL - so the shape is unit-testable (E1) and
-// A3 can fill the gamepad source without touching widget code.
+// Dependency-free on purpose - no ImGui, no SDL - so the shape is unit-testable (E1), and so the
+// pad's own rules could be written without a widget learning that anything changed (A3).
 
 #pragma once
 
@@ -17,8 +17,8 @@
 
 namespace rb_blitz::launcher {
 
-// What a device asked for. A1 maps keys to these and stubs the pad source; A3 makes the
-// pad source return the same values.
+// What a device asked for. The keyboard (A1) and the pad (A3) both answer in these words, and
+// nothing downstream asks which of the two said it.
 enum class NavAction {
   kNone,
   kNext,
@@ -29,6 +29,9 @@ enum class NavAction {
   kPreviousTab,
   kActivate,
   kCancel,
+  // Start on a pad (D6): not a move of the ring, so it is the shell's own rather than anything a
+  // widget answers - it is the launch the bottom bar's button offers, without the mouse.
+  kLaunch,
 };
 
 // The focus ring for one tab. Every move wraps, because the row list is a ring: Next on
@@ -53,8 +56,8 @@ class FocusModel {
   std::size_t index_ = 0;
 };
 
-// The single seam a device plugs into (D6). A1 supplies the keyboard source and a stub
-// gamepad source; A3 fills the stub in behind this same interface.
+// The single seam a device plugs into (D6). A1 supplies the keyboard source; A3 supplies the
+// pad's (launcher/src/pad_source.h), which is the only file that knows SDL has a pad in it.
 class NavSource {
  public:
   virtual ~NavSource() = default;

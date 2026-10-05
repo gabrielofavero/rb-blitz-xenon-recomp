@@ -88,21 +88,63 @@ class KeyboardNavSource : public NavSource {
   }
 };
 
-// The pad is A3's work; the seam exists now so A3 fills it in without touching a widget.
-class GamepadNavSource : public NavSource {
- public:
-  NavAction Poll() override { return NavAction::kNone; }
-};
+// The pad is a device like any other (A3, D6): what launcher/src/pad_source.h produces is the
+// same NavAction the keyboard produces, so nothing below this point can tell which one moved the
+// ring. The stub that stood here is what the pad was built behind.
+
+// The help region's height in text lines (A2, D7). Two, and reserved whether or not the row's
+// help needs them: the body is given the rest of the window *before* the help is drawn, so a bar
+// that measured itself afterwards would be a bar whose height the body could not have been told.
+constexpr int kHelpLines = 2;
+
+// The bar's own height, from the same pieces the bar draws with: the line of controls and status,
+// the help under it, and the window's bottom padding.
+float BottomBarHeight(const ImGuiStyle& style) {
+  return ImGui::GetFrameHeight() + style.ItemSpacing.y +
+         ImGui::GetTextLineHeight() * static_cast<float>(kHelpLines) + style.WindowPadding.y;
+}
+
+// A run of text cut to what will fit in `max_lines` lines at this width, with an ellipsis where it
+// was cut. The row's tooltip is a sentence or two and the bar has room for two lines of it: what
+// does not fit is not shown rather than allowed to push the three actions off the bar (A2's
+// "don't"). The cut is at a word boundary, because half a word reads as a rendering fault.
+std::string FitToLines(const std::string& text, float wrap_width, int max_lines) {
+  if (text.empty() || wrap_width <= 0.0f) {
+    return text;
+  }
+  const float room = ImGui::GetTextLineHeight() * static_cast<float>(max_lines);
+  if (ImGui::CalcTextSize(text.c_str(), nullptr, false, wrap_width).y <= room) {
+    return text;
+  }
+  constexpr const char* kEllipsis = "...";
+  std::string fitted = text;
+  while (!fitted.empty() &&
+         ImGui::CalcTextSize((fitted + kEllipsis).c_str(), nullptr, false, wrap_width).y > room) {
+    const std::size_t space = fitted.find_last_of(' ');
+    if (space == std::string::npos) {
+      return kEllipsis;
+    }
+    fitted.erase(space);
+  }
+  return fitted + kEllipsis;
+}
+
+const char* const kNoHelpText = "\xe2\x80\x94";  // D7's explicit empty state: an em dash.
 
 }  // namespace
 
-Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment)
-    : roots_(std::move(roots)),
+Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment,
+             ShellEnvironment shell_environment)
+    : log_(shell_environment.focus_log_path),
+      roots_(std::move(roots)),
       session_(std::move(session)),
       general_(roots_),
+      controller_(pads_),
       layout_(BuildLayout(environment)),
-      keyboard_(std::make_unique<KeyboardNavSource>()),
-      gamepad_(std::make_unique<GamepadNavSource>()) {
+      keyboard_(std::make_unique<KeyboardNavSource>()) {
+  if (shell_environment.gamepads) {
+    gamepad_ = std::make_unique<GamepadNavSource>(pads_);
+  }
   // D5's target fallback lives in the General tab, which applies it to what it shows rather than
   // to the profile (B4): with a write path, mutating the stored target here would have made a
   // window resize record a choice the user never made.
@@ -178,11 +220,32 @@ void Shell::ApplyAction(NavAction action) {
 }
 
 bool Shell::Frame() {
-  // One action per frame from whichever device produced it (D6).
+  // The pads are matched against what SDL says is connected before anything reads one, so a pad
+  // plugged in this frame is usable in it: the ring's source and C5's capture both read the
+  // registry rather than opening anything themselves.
+  pads_.Refresh();
+
+  // One action per frame from whichever device produced it (D6). The keyboard answers first
+  // because it is the one a user can always reach - and because a pad whose stick is resting
+  // against its stop should not be able to out-shout a deliberate key.
   NavAction action = keyboard_->Poll();
-  if (action == NavAction::kNone) {
+  const bool keyboard_acted = action != NavAction::kNone;
+  const ImVec2 mouse_delta = ImGui::GetIO().MouseDelta;
+  if (keyboard_acted || mouse_delta.x != 0.0f || mouse_delta.y != 0.0f) {
+    // The mouse and the keyboard share one set of hints: both are the desk, and the pad's glyphs
+    // are for someone holding a pad.
+    device_ = InputDevice::kKeyboard;
+  }
+  if (action == NavAction::kNone && gamepad_ != nullptr) {
     action = gamepad_->Poll();
   }
+  if (!keyboard_acted && gamepad_ != nullptr && gamepad_->saw_input()) {
+    // A press that a modal swallowed still counts as "the pad is what the user is holding".
+    device_ = InputDevice::kGamepad;
+  }
+  LogPads();
+  LogDevice();
+
   if (action == NavAction::kCancel) {
     // Escape belongs to the modal that is up - B4's reset confirmation, or B8's install
     // progress - and only means "leave the launcher" when nothing modal is on screen (A1). A
@@ -191,6 +254,15 @@ bool Shell::Frame() {
     if (!general_.ModalOpen() && !controller_.Listening()) {
       return false;
     }
+  }
+  if (action == NavAction::kLaunch) {
+    // Start, on a pad (D6): the launch the bottom bar's button offers, without the mouse. It is
+    // refused in exactly the cases the button is disabled in, and it never reaches the tabs - a
+    // row has no "launch me" of its own.
+    if (!general_.ModalOpen() && !controller_.Listening() && !game_.Running()) {
+      LaunchGame();
+    }
+    action = NavAction::kNone;
   }
   // A modal owns the launcher while it is up, so the tab cannot be changed behind it: its own
   // tab has to keep being drawn for its state machine to keep running, and walking away from it
@@ -210,6 +282,9 @@ bool Shell::Frame() {
   }
   ApplyAction(action);
   action_ = action;
+  // After the ring has moved, so the trace names the row the user will see, and after the device
+  // rule above, so a move and the device that made it land on one pair of lines.
+  LogFocus();
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -219,8 +294,8 @@ bool Shell::Frame() {
                    ImGuiWindowFlags_NoSavedSettings);
 
   // The tab strip is the model's, not ImGui's tab bar. Two reasons: the selection must change
-  // on the frame the key is read, and the ring - which A3's pad will drive - has to be the
-  // only thing that moves it. ImGui's own tab bar would also answer Ctrl+Tab behind our back.
+  // on the frame the key is read, and the ring - which the pad drives as well (A3) - has to be
+  // the only thing that moves it. ImGui's own tab bar would also answer Ctrl+Tab behind our back.
   for (std::size_t index = 0; index < layout_.size(); ++index) {
     if (index != 0) {
       ImGui::SameLine();
@@ -245,8 +320,7 @@ bool Shell::Frame() {
   // much room it does *not* have before it draws, and the outer window must never scroll - a
   // scrolled window would move the bar off its own edge. The popups the tabs open are keyed off
   // this same id stack, which is why they are drawn from here too.
-  const float bar_height = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y +
-                           ImGui::GetStyle().WindowPadding.y;
+  const float bar_height = BottomBarHeight(ImGui::GetStyle());
   if (ImGui::BeginChild(kBodyId, ImVec2(0.0f, -bar_height), ImGuiChildFlags_None,
                         ImGuiWindowFlags_None)) {
     if (tab_ < layout_.size()) {
@@ -309,6 +383,9 @@ Shell::StatusLine Shell::CurrentStatus() const {
 bool Shell::DrawBottomBar() {
   const ImGuiStyle& style = ImGui::GetStyle();
   const StatusLine status = CurrentStatus();
+  // Where this line starts, so the help line can be placed under it from the same arithmetic
+  // BottomBarHeight used - the bar cannot ask ImGui where it is once the text is drawn.
+  const float line_top = ImGui::GetCursorPosY();
 
   // The status is the left half of the bar. It is drawn first, and when there is nothing to
   // say the line is still opened with a spacer: SameLine below continues from the *previous
@@ -360,7 +437,105 @@ bool Shell::DrawBottomBar() {
     LaunchGame();
   }
   ImGui::EndDisabled();
+
+  // Under the buttons: the focused row's own help, which is where D7 puts it and where RPCS3 puts
+  // it too - the value is read before the press, not after a floating tooltip has come and gone.
+  // The tooltip takes the room the hints do not, and the hints are measured first for that
+  // reason: whatever else is cut, the row's help is not.
+  const HelpEntry help = HelpForEntry(FocusedRow());
+  const std::string hints = HintLine(help);
+  const std::string* hint_source = hints.empty() ? nullptr : &hints;
+  const float hints_width = hint_source == nullptr
+                                ? 0.0f
+                                : ImGui::CalcTextSize(hint_source->c_str()).x;
+  const float left = style.WindowPadding.x;
+  const float right = ImGui::GetWindowWidth() - style.WindowPadding.x;
+  const float help_top = line_top + ImGui::GetFrameHeight() + style.ItemSpacing.y;
+  const float tip_width = right - left - hints_width - style.ItemSpacing.x * 2.0f;
+
+  ImGui::SetCursorPos(ImVec2(left, help_top));
+  const std::string tip =
+      help.text.empty() ? std::string(kNoHelpText) : FitToLines(help.text, tip_width, kHelpLines);
+  if (help.text.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  }
+  ImGui::PushTextWrapPos(left + tip_width);
+  ImGui::TextUnformatted(tip.c_str());
+  ImGui::PopTextWrapPos();
+  if (help.text.empty()) {
+    ImGui::PopStyleColor();
+  }
+  if (hint_source != nullptr) {
+    // Back up to the help line's own top: the hints belong beside the row's help, not under it,
+    // and a wrapped tooltip would otherwise have moved them down a line of its own.
+    ImGui::SetCursorPos(ImVec2(right - hints_width, help_top));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(hint_source->c_str());
+    ImGui::PopStyleColor();
+  }
   return true;
+}
+
+Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
+  if (tab_ >= layout_.size() || rings_[tab_].Empty()) {
+    return HelpEntry{};
+  }
+  const TabLayout& tab = layout_[tab_];
+  // The schema's own rows first, in the order the ring was sized in: the walk and the draw agree
+  // because they count entries the same way (schema_view's FocusEntriesFor), which is the only
+  // reason the bar can name the row the user is looking at.
+  if (const settings::Setting* setting = SettingForEntry(tab, entry)) {
+    return HelpEntry{FlattenHelpText(setting->tooltip), RowActionVerb(*setting)};
+  }
+  // What is left is the block a tab draws after its schema rows - B4's panel, D16's mapping table
+  // - whose sentences only those blocks know, so they are asked rather than copied here.
+  const std::size_t schema_entries = SchemaFocusEntries(tab);
+  const std::size_t local = entry >= schema_entries ? entry - schema_entries : 0;
+  switch (tab.tab) {
+    case settings::Tab::kGeneral:
+      return HelpEntry{ProfilePanel::HelpText(local), "Activate"};
+    case settings::Tab::kController:
+      return HelpEntry{ControllerTab::HelpText(local), "Activate"};
+    case settings::Tab::kGraphics:
+      break;
+  }
+  return HelpEntry{};
+}
+
+std::string Shell::HintLine(const HelpEntry& help) const {
+  const bool pad = device_ == InputDevice::kGamepad && gamepad_ != nullptr;
+  const PadButtonNames names = pad ? gamepad_->names() : PadButtonNames{};
+  std::vector<std::string> parts;
+  if (!help.verb.empty()) {
+    parts.push_back(std::string(pad ? names.confirm : "Enter") + " " + std::string(help.verb));
+  }
+  parts.push_back(std::string(pad ? names.cancel : "Esc") + " Quit");
+  parts.push_back(pad ? std::string(names.shoulder_left) + "/" + std::string(names.shoulder_right) +
+                            " Switch tab"
+                      : std::string("Tab Switch tab"));
+  if (pad) {
+    parts.push_back(std::string(names.start) + " Launch");
+  }
+
+  // Composed here and cut from the end if the window is too narrow for all of it: a hint that has
+  // run under the row's help is worse than a hint nobody read, and the last one is the one a user
+  // is least likely to need.
+  const float room = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2.0f;
+  const float spacing = ImGui::GetStyle().ItemSpacing.x * 2.0f;
+  std::string line;
+  float width = 0.0f;
+  for (const std::string& part : parts) {
+    const float part_width = ImGui::CalcTextSize(part.c_str()).x + (line.empty() ? 0.0f : spacing);
+    if (!line.empty() && width + part_width > room) {
+      break;
+    }
+    if (!line.empty()) {
+      line += "    ";
+    }
+    line += part;
+    width += part_width;
+  }
+  return line;
 }
 
 void Shell::LaunchGame() {
@@ -383,6 +558,86 @@ void Shell::LaunchGame() {
     return;
   }
   save_note_ = "Started " + command.executable.filename().string();
+}
+
+void Shell::LogFocus() {
+  if (!log_.enabled()) {
+    return;
+  }
+  const settings::Tab tab = CurrentTab();
+  const std::size_t entry = FocusedRow();
+  if (logged_focus_ && tab == logged_tab_ && entry == logged_entry_) {
+    return;
+  }
+  logged_focus_ = true;
+  logged_tab_ = tab;
+  logged_entry_ = entry;
+
+  const std::size_t count = tab_ < rings_.size() ? rings_[tab_].Count() : 0;
+  std::string text = "tab=";
+  text += settings::TabName(tab);
+  text += " entry=" + std::to_string(entry) + "/" + std::to_string(count);
+  if (tab_ < layout_.size()) {
+    if (const settings::Setting* setting = SettingForEntry(layout_[tab_], entry)) {
+      text += " row=";
+      text += setting->key;
+    } else {
+      // The block a tab draws after its rows: named rather than numbered, because "which button
+      // of the mapping table is that?" is the question the trace is meant to answer.
+      text += tab == settings::Tab::kGeneral ? " row=settings-file-block"
+                                             : " row=button-mapping-block";
+    }
+  }  const HelpEntry help = HelpForEntry(entry);
+  if (!help.verb.empty()) {
+    text += " enter=";
+    text += help.verb;
+  }
+  log_.Write("focus", text);
+}
+
+void Shell::LogDevice() {
+  if (!log_.enabled() || (logged_device_.has_value() && *logged_device_ == device_)) {
+    return;
+  }
+  logged_device_ = device_;
+  if (device_ != InputDevice::kGamepad || gamepad_ == nullptr) {
+    log_.Write("device", "keyboard");
+    return;
+  }
+  const PadButtonNames names = gamepad_->names();
+  std::string text = "gamepad name=\"";
+  text += gamepad_->name();
+  text += "\" confirm=";
+  text += names.confirm;
+  text += " cancel=";
+  text += names.cancel;
+  text += " shoulders=";
+  text += names.shoulder_left;
+  text += "/";
+  text += names.shoulder_right;
+  text += " start=";
+  text += names.start;
+  log_.Write("device", text);
+}
+
+void Shell::LogPads() {
+  if (!log_.enabled()) {
+    return;
+  }
+  const std::string name = gamepad_ == nullptr ? std::string() : gamepad_->name();
+  if (logged_pads_ && pads_.count() == logged_pad_count_ && name == logged_pad_name_) {
+    return;
+  }
+  logged_pads_ = true;
+  logged_pad_count_ = pads_.count();
+  logged_pad_name_ = name;
+  std::string text = "count=" + std::to_string(pads_.count());
+  if (!name.empty()) {
+    text += " name=\"";
+    text += name;
+    text += "\"";
+  }
+  log_.Write("pads", text);
 }
 
 void Shell::DrawTab(const TabLayout& tab, FocusModel& ring) {

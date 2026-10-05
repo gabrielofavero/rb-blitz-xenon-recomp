@@ -70,12 +70,15 @@ set_source_files_properties(${RBBLITZ_IMGUI_BACKENDS} PROPERTIES
 set(RBBLITZ_LAUNCHER_SOURCES
     main.cpp
     src/controller_tab.cpp
+    src/focus_log.cpp
     src/game_config.cpp
     src/game_launch.cpp
     src/general_report.cpp
     src/general_tab.cpp
     src/install_ultimate.cpp
     src/nav.cpp
+    src/pad_nav.cpp
+    src/pad_source.cpp
     src/path_validate.cpp
     src/profile_session.cpp
     src/profile_ui.cpp
@@ -84,6 +87,7 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/settings_edit.cpp
     src/shell.cpp
     src/ultimate_state.cpp
+    src/virtual_pad.cpp
     # The profile and remap modules are shared with the game and dependency-free on purpose
     # (P0.3, D16), which is what lets the launcher compile them too: the profile module is how
     # A1 remembers the window geometry, and the remap module is the vocabulary the Controller
@@ -166,4 +170,28 @@ if(BUILD_TESTING)
         target_compile_options(rb_blitz_launcher_launch_tests PRIVATE -Wall -Wextra)
     endif()
     add_test(NAME launcher_launch COMMAND rb_blitz_launcher_launch_tests)
+
+    # A3's pad rules and A2's help: the deadzone, the repeat, the binding table, and the walk from
+    # a ring entry to the row the bar names. Both are dependency-free - no SDL, no ImGui, no
+    # window - which is the whole reason the pad's decisions live in pad_nav.cpp rather than in the
+    # SDL glue beside it. It needs the generated table for the same reason the launch tests do.
+    add_executable(rb_blitz_launcher_nav_tests
+        "${CMAKE_SOURCE_DIR}/tests/launcher_pad_nav_tests.cpp"
+        "${CMAKE_SOURCE_DIR}/tests/launcher_help_tests.cpp"
+        src/pad_nav.cpp
+        src/schema_view.cpp
+    )
+    target_include_directories(rb_blitz_launcher_nav_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/out/generated")
+    add_dependencies(rb_blitz_launcher_nav_tests rb_blitz_launcher_settings)
+    set_target_properties(rb_blitz_launcher_nav_tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:rb_blitz>")
+    if(MSVC)
+        target_compile_options(rb_blitz_launcher_nav_tests PRIVATE /W4 /utf-8 /EHsc)
+    else()
+        target_compile_options(rb_blitz_launcher_nav_tests PRIVATE -Wall -Wextra)
+    endif()
+    add_test(NAME launcher_nav COMMAND rb_blitz_launcher_nav_tests)
 endif()
