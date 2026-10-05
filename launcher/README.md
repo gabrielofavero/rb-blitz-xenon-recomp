@@ -6,14 +6,19 @@ the decisions and the order the work happens in are in
 [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md); this file is about
 what is in this directory *today* and how to change it.
 
-Today this directory holds the **launcher executable**, its **settings schema**, and the
-profile module that both executables compile; the tabs, the bottom bar and the controller
-navigation arrive with the prompts that follow ([D1](../docs/plans/launcher-plan.md) has
-the shape), so what exists here now is the window the rest of them draw into.
+Today this directory holds the **launcher executable** with its **three-tab shell**
+([A1](../docs/plans/launcher-plan.md)), its **settings schema**, and the profile module that
+both executables compile. The bottom bar (A2), the controller navigation (A3), the write
+path (B4) and launching the game (B7) arrive with the prompts that follow, so what exists
+here now is a launcher that shows every schema row, read-only, and is fully drivable with
+the keyboard.
 
 | Path | What it is |
 | --- | --- |
-| `main.cpp` | The entry point: opens the window, runs the frame loop, leaves on Esc, B or close (P0.4) |
+| `main.cpp` | The entry point: opens the window, loads the profile for the window size, runs the frame loop, saves the size on the way out (P0.4, A1) |
+| `src/schema_view.{h,cpp}` | The generated table turned into tabs, groups and rows — no ImGui, no SDL (A1) |
+| `src/nav.{h,cpp}` | The focus ring and the one `NavSource` seam a device plugs into (A1, D6) |
+| `src/shell.{h,cpp}` | The tab shell: the strip, one read-only widget per `kind`, the ring (A1) |
 | `rb_blitz_launcher.rc` | The exe icon — `assets/blitz.ico`, through the same resource mechanism as the game |
 | `config/settings.toml` | The schema: one `[[setting]]` per row the launcher shows, one `[[group]]` per category (Contract 1) |
 | `tools/embed_settings.cpp` | Compiles — and validates — the schema into the header below |
@@ -52,9 +57,49 @@ out\build\<preset>\rb_blitz_launcher.exe
 It is written to the build root, next to `rb_blitz.exe` (D1): one directory holds what
 a payload snapshot copies (P0.5), and one place is what a user is told to run from.
 
-The window is a placeholder by design: it names the backend and the three ways out, and
-nothing else. It is a WIN32-subsystem executable, so a bring-up failure reports itself in
-a message box and returns non-zero instead of printing to a console nothing owns.
+The window is a WIN32-subsystem executable, so a bring-up failure reports itself in a
+message box and returns non-zero instead of printing to a console nothing owns.
+
+## The shell — tabs, rows and the focus ring (A1)
+
+The shell is the model's, not ImGui's. Every row it draws comes from the generated table
+(`src/schema_view.cpp`), so the launcher holds no per-setting knowledge and adding a row
+changes no C++ at all:
+
+- **Three tabs**, in the table's own order, because the tab list is data (R9). The strip is
+  ours rather than `ImGui::BeginTabBar`, so the selection changes on the frame the key is
+  read and nothing moves it but the ring (A3's pad included).
+- **One row per `[[setting]]`**, grouped by `group` in the table's order, with one
+  widget per `kind` — `bool`, `int`, `float`, `enum`, `string`, `path_dir`, `path_file`.
+  A1 draws them read-only, showing the compiled default; B4 wires the edit path.
+- **A group with nothing to draw** is its name plus the group's own `note`, never a
+  disabled widget that looks like a setting (D14).
+- **One focus ring per tab** (`src/nav.cpp`): a flat, ordered list of the tab's rows and a
+  focused index. Moving wraps, so `End` then `Down` returns to the first row. Keys are
+  translated in exactly one place and become `NavAction`s; the gamepad is a stub
+  `NavSource` until A3 fills it in, and the shell does not know which device answered.
+- **Window geometry** is read from the profile at startup and written back on the way out,
+  and only when it changed — so a launcher nobody resized neither creates `launcher.toml`
+  nor touches its mtime. A profile that does not parse is never written over (D2).
+
+| Keys | What they do |
+| --- | --- |
+| `Down` / `Tab` | Next row (`Up` / `Shift+Tab` goes back) |
+| `Home` / `End` | First / last row |
+| `Right` / `PageDown` | Next tab (`Left` / `PageUp` goes back) |
+| `Enter` / `Space` | Reserved for B4; A1's rows are read-only |
+| `Esc` / `B` | Leave |
+
+The mouse is a device too: clicking a row focuses it, and hovering adopts the ring, so the
+pointer and the keyboard never disagree about the selection (D6).
+
+`--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
+window — the headless half of A1's verification, and what says out loud if a row ever
+reaches the table without a tooltip:
+
+```
+rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
+```
 
 
 ## The profile — `launcher.toml`
@@ -195,6 +240,10 @@ hot-reloadable, but the input system is built once from the factory, so the row 
 3. Add the `[[setting]]` to `config/settings.toml` under a declared group, with a
    tooltip written for the person reading the bottom bar.
 4. Rebuild `rb_blitz_launcher_settings` and check the printed row count moved.
+
+That is the whole change: the shell renders whatever the table says, in the table's order,
+so a new row appears in its tab, in its group, with its `kind`'s widget — no launcher code
+is edited to add one (A1).
 
 If the setting's category is not built yet, declare the group with
 `status = "unavailable"` and a `note` instead of adding a placeholder row.

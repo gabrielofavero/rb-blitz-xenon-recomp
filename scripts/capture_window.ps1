@@ -1,7 +1,10 @@
 # Capture a screenshot of the rb_blitz game window (or the full virtual screen
 # as a fallback) to a PNG for inspection during bring-up.
 param(
-    [string]$OutFile = "out/bringup-capture.png"
+    [string]$OutFile = "out/bringup-capture.png",
+    # Which window to capture. The game is the default; the launcher's A1 run
+    # captures rb_blitz_launcher the same way.
+    [string]$ProcessName = "rb_blitz"
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -27,8 +30,8 @@ public class Win32 {
 # window is measured; the process is per-invocation, so nothing else is affected.
 try { [Win32]::SetProcessDpiAwareness(2) | Out-Null } catch { [Win32]::SetProcessDPIAware() | Out-Null }
 
-$proc = Get-Process rb_blitz -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $proc) { Write-Error "rb_blitz not running"; exit 1 }
+$proc = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $proc) { Write-Error "$ProcessName not running"; exit 1 }
 
 $h = $proc.MainWindowHandle
 if ($h -eq [IntPtr]::Zero) { Write-Error "no main window"; exit 1 }

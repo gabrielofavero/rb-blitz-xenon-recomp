@@ -48,7 +48,16 @@ set(RBBLITZ_IMGUI_BACKENDS
 set_source_files_properties(${RBBLITZ_IMGUI_BACKENDS} PROPERTIES
     COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,GNU>:-w>")
 
-set(RBBLITZ_LAUNCHER_SOURCES main.cpp ${RBBLITZ_IMGUI_BACKENDS})
+set(RBBLITZ_LAUNCHER_SOURCES
+    main.cpp
+    src/nav.cpp
+    src/schema_view.cpp
+    src/shell.cpp
+    # The profile module is shared with the game and SDK-free on purpose (P0.3), which is
+    # what lets the launcher compile it too: it is how A1 remembers the window geometry.
+    "${CMAKE_SOURCE_DIR}/src/launcher/profile.cpp"
+    "${CMAKE_SOURCE_DIR}/src/launcher/profile_path.cpp"
+    ${RBBLITZ_IMGUI_BACKENDS})
 
 if(WIN32)
     # Same icon mechanism as the game (root CMakeLists.txt): the .rc carries
@@ -80,6 +89,12 @@ endif()
 # imgui's target exposes only its own directory; the backends live beside it, and the
 # launcher includes them directly.
 target_include_directories(rb_blitz_launcher PRIVATE
-    "${REXSDK_DIR}/thirdparty/imgui/backends")
+    "${REXSDK_DIR}/thirdparty/imgui/backends"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"            # nav.h, schema_view.h, shell.h
+    "${CMAKE_CURRENT_SOURCE_DIR}/out/generated"  # settings_table.h (P0.2)
+    "${CMAKE_SOURCE_DIR}/src")                   # src/launcher/profile*.h
+
+# The shell includes the generated table, so the table has to exist before it compiles.
+add_dependencies(rb_blitz_launcher rb_blitz_launcher_settings)
 
 target_link_libraries(rb_blitz_launcher PRIVATE imgui SDL3::SDL3)
