@@ -639,6 +639,11 @@ their older wording where they disagree.
   at the end of a list is both easy to miss and easy to mistake for "save this tab". The block keeps
   *Reset to defaults*, *Import*, *Export* and *Change settings location*. A2's other half — the focused
   row's tooltip and its hints — sits under the same line, and is built: see D7.
+  > **Amended 2026-10-05 (B7).** The bar also carries *Copy command line*, §4.3's affordance: the
+  > exact command a launch would run, on the clipboard, whether or not the command is ok. It is not
+  > a session-ending action, so the enumeration above is unchanged in meaning; a failed start adds a
+  > modal *beside* the bar's one-line reason, because the command line and the log path do not fit
+  > on one line.
 - **The Graphics tab is renamed Audio / Video.** Its schema key stays `graphics` — the `.toml`'s
   business, not the user's — and `DisplayTabName` is the one place that turns a tab key into a label.
   "Audio / Video" is also what the tab actually is: it has held the audio rows since B2.
@@ -675,8 +680,9 @@ their older wording where they disagree.
 - **B7 is implemented**: `BuildLaunchCommand` (pure, contract 3), `GameProcess`
   (`CreateProcessW`, the install folder as the working directory, the handle kept so a second launch is
   refused while the game runs), `--print-command` as the dry run, and the launcher saving first when
-  something is unsaved. What B7 still owes: the "Copy command line" affordance, the game's log path in
-  a failure message, and E3's end-to-end assertion against a real boot.
+  something is unsaved. What B7 still owed — the "Copy command line" affordance, the game's log path in
+  a failure message and the pre-spawn profile check — is built 2026-10-05; E3's end-to-end assertion
+  against a real boot remains.
 
 ---
 
@@ -790,8 +796,9 @@ Rules: quote every path; never pass an empty flag; log the exact argv in the lau
 > (`tests/launcher_launch_tests.cpp`) as well as a launch. Two additions the launcher makes: the
 > executable is the command line's first token as well as `CreateProcessW`'s `lpApplicationName`
 > (the C runtime reads `argv` from the one string), and *Launch Game* saves first when something is
-> unsaved. The "Copy command line" affordance and the game's log path in a failure message are still
-> owed.
+> unsaved. **Completed 2026-10-05:** *Copy command line* on the bottom bar and in the failed-start
+> modal, the game's log folder in that message, and `LaunchReadiness` (the profile must be readable
+> and its folder writable) before anything is spawned.
 
 ### 4.4 The packaging contract (Contract 4)
 
@@ -835,7 +842,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Twenty prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty-one prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -862,9 +869,10 @@ session should read as instructions, and every deviation it would have described
 | D2 | the `launchericon` task, the two launcher `[Icons]` rows (Start menu always, desktop by task) and `/LAUNCHERICON` in `installer/setup.iss` + `installer/README.md` | D9 (the task defaults and the silent switch) |
 | D3 | the three-way finish page in `installer/setup.iss` (the `[Run]` entry removed, three radios, `/RUNATEND`) and `installer/README.md`'s finish-page section and manual checklist | D8 (the page and its three choices) |
 | D4 | `launcher/src/prefill.{h,cpp}`, the first-run application in `main.cpp`, `--dump-prefill`, the fixture-manifest cases in `tests/launcher_profile_session_tests.cpp`, the README's first-run section (the run on a real install is the §6 wave-4 manual pass's) | D4 (the General tab's rows; the prefill seeds the fields behind them) |
+| B7 | the *Copy command line* bar button and failed-start modal, `LaunchFailureMessage`/`GameLogDirectory`/`LaunchReadiness` in `game_launch.{h,cpp}`, and the failing-start and readiness cases in `tests/launcher_launch_tests.cpp` | D18 (the launch contract §4.3 completes) |
 
-**Open.** Twelve prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
-column means the prompt beside it names a finished prompt rather than an open one — B1, B7 and E1 are
+**Open.** Eleven prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+column means the prompt beside it names a finished prompt rather than an open one — B1 and E1 are
 each their own dependency because only half of each went out; §5.3 says which half.
 
 | ID | Prompt | Lane | Depends on | Unblocks |
@@ -872,19 +880,18 @@ each their own dependency because only half of each went out; §5.3 says which h
 | A4 | Cover art pipeline | A | P0.4 *(built)* | — |
 | A5 | Accessibility and recovery | A | A3, A2 *(built)* | — |
 | B1 | General tab: the two deferred rows | B | B1 *(built)* | — |
-| B7 | Launch: command display, failure detail | B | B7 *(built)* | E3 |
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
 | D5 | Installer tests and README tables | D | D3 *(built)*, D4 *(built)* | — |
 | E1 | The launcher test names in `build-and-run.md` | E | E1 *(built)* | — |
 | E2 | Launcher capture harness | E | A2 *(built)* | E4 |
-| E3 | End-to-end acceptance | E | B7, D1 *(built)*, D3 *(built)* | E4 |
+| E3 | End-to-end acceptance | E | B7 *(built)*, D1 *(built)*, D3 *(built)* | E4 |
 | E4 | Docs, backlog, standing limits | E | all of the above | — |
 
 The four groups those fall into, which is what §6 schedules:
 
-- **Make it ship** — D5, and B7's remainder.
+- **Make it ship** — D5.
 - **The Controller tab's remaining lanes** — C1, C2, C6.
 - **Art and evidence** — A4, E2, E3, E4, and A5's recovery half.
 - **Finish M1** — done: A3 and A2 are built, and E1's one-line note with them. M1 was defined (§1.1)
@@ -942,28 +949,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > must say which it found, and *Verify installation* must agree with the game's own boot lines.
 > **Don't.** Do not implement first-run prefill here (D4); do not make the override a second source of
 > truth for the profile's own paths.
-
-#### B7 — Launch: command display, failure detail
-
-> **Goal.** The three things B7's implementation still owes. Built already: `BuildLaunchCommand`
-> (Contract 3, pure), `GameProcess` (`CreateProcessW`, install folder as working directory, the
-> executable as `argv[0]`), `--print-command`, the launch-time save when something is unsaved, and the
-> *Game is running* state that keeps a second copy from starting. Still owed:
->
-> - a **"Copy command line"** affordance showing exactly what was run — §4.3's own rule, and the
->   first thing a bug report needs;
-> - the **game's log path** in a start-failure message, because the game is a WIN32-subsystem binary
->   and its own log is the only place a boot failure is visible;
-> - the **profile directory writability** check before spawning, so "the launcher wrote a profile the
->   game cannot read" fails in the launcher rather than in the game.
->
-> **Deviation to keep, not fix.** The launcher stays open on success and holds the child's handle; it
-> does not exit or hide. That is what makes "Game is running" possible and keeps the window the user
-> was already using.
-> **Deliverable.** The three items, and `launcher/README.md`'s launch section kept in step.
-> **Verify.** The `--print-command` snapshot test already exists; add a failing-start case (rename
-> `rb_blitz.exe` away) asserting the message names the command line and the log path.
-> **Don't.** Do not pass empty flags, do not pass the whole registry, do not block on the game.
 
 #### C1 — Device list, deadzone and `mnk_mode`
 
@@ -1099,7 +1084,6 @@ graph LR
   A4[A4 cover art]
   A5[A5 recovery]
   B1[B1 general remainder]
-  B7[B7 launch detail] --> E3[E3 e2e acceptance]
   C1[C1 devices]
   C2[C2 keyboard panel]
   C6[C6 safety rails]
@@ -1112,24 +1096,25 @@ graph LR
   C6 --> E4
   D5 --> E4
   E2[E2 capture harness] --> E4
-  E3 --> E4
+  E3[E3 e2e acceptance] --> E4
 ```
 
 ### 6.2 Waves
 
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
-| **1** | A5, B1, B7, C1, C2, C6 | six independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
+| **1** | A5, B1, C1, C2, C6 | five independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
 | **2** | A4, E2 | A4 needs only the built P0.4 and E2 only the bar A2 built. |
 | **3** | D5 | needs D3/D4, both built; it is the installer's own tables and tests. |
-| **4** | E3, E4, one manual pass | E3 needs B7; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
+| **4** | E3, E4, one manual pass | neither needs anything open; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path over what is left: **B7 → E3 → E4** — three steps. Everything else is two steps or one.
+Critical path over what is left: **E3 → E4** — two steps, and D5 → E4, E2 → E4 and A4 → E4 are
+the same length. Everything else is one step.
 
-If you only have one session at a time, run: **B7 → D5 → E2 → E3 → E4**, folding C1,
-C2, C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
+If you only have one session at a time, run: **D5 → E2 → E3 → E4**, folding C1, C2,
+C6, A4, A5 and B1 in afterwards in any order that respects §6.1.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
 naming the focused row's tooltip and the current control hints" is what the launcher does: A3's pad

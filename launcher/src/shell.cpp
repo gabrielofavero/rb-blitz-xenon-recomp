@@ -25,6 +25,10 @@ constexpr const char* kWindowId = "Rock Band Blitz Launcher";
 // while the strip and the unsaved-changes marker stay put.
 constexpr const char* kBodyId = "##body";
 
+// B7's failed-start detail, shown as a modal: the exact command line and the game's log path do
+// not fit on the bar's one status line, and a bug report wants both at once.
+constexpr const char* kLaunchErrorPopup = "Cannot start the game";
+
 // How many ring entries a tab's schema rows take. A tab's own block of rows starts after them
 // (GeneralTab::kExtraRows, ControllerTab::kRowCount), so the loop that sizes the ring and the
 // loop that draws it have to agree on this number - which is why both ask here rather than each
@@ -247,11 +251,12 @@ bool Shell::Frame() {
   LogDevice();
 
   if (action == NavAction::kCancel) {
-    // Escape belongs to the modal that is up - B4's reset confirmation, or B8's install
-    // progress - and only means "leave the launcher" when nothing modal is on screen (A1). A
-    // listen that is running owns Escape too: cancelling it is what a user pressing Escape
-    // while counting down means, and quitting the launcher instead would be a trap.
-    if (!general_.ModalOpen() && !controller_.Listening()) {
+    // Escape belongs to the modal that is up - B4's reset confirmation, B8's install progress,
+    // or B7's failed-start detail - and only means "leave the launcher" when nothing modal is on
+    // screen (A1). A listen that is running owns Escape too: cancelling it is what a user
+    // pressing Escape while counting down means, and quitting the launcher instead would be a
+    // trap.
+    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_) {
       return false;
     }
   }
@@ -259,7 +264,8 @@ bool Shell::Frame() {
     // Start, on a pad (D6): the launch the bottom bar's button offers, without the mouse. It is
     // refused in exactly the cases the button is disabled in, and it never reaches the tabs - a
     // row has no "launch me" of its own.
-    if (!general_.ModalOpen() && !controller_.Listening() && !game_.Running()) {
+    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_ &&
+        !game_.Running()) {
       LaunchGame();
     }
     action = NavAction::kNone;
@@ -268,7 +274,7 @@ bool Shell::Frame() {
   // tab has to keep being drawn for its state machine to keep running, and walking away from it
   // would leave the helper installing with nothing watching. A listen needs the same handling
   // for the same reason - its countdown only advances while its tab is on screen.
-  const bool owns_keyboard = general_.ModalOpen() || controller_.Listening();
+  const bool owns_keyboard = general_.ModalOpen() || controller_.Listening() || launch_modal_open_;
   if (owns_keyboard &&
       (action == NavAction::kNextTab || action == NavAction::kPreviousTab)) {
     action = NavAction::kNone;
@@ -341,6 +347,9 @@ bool Shell::Frame() {
   ImGui::EndChild();
 
   const bool running = DrawBottomBar();
+  // B7's failed-start detail is drawn from inside this window so its popup shares the id stack
+  // LaunchGame opened it in; it owns Escape while it is up.
+  DrawLaunchModal(action_);
 
   ImGui::End();
   action_ = NavAction::kNone;
@@ -403,16 +412,17 @@ bool Shell::DrawBottomBar() {
   }
 
   const bool running = game_.Running();
-  const char* labels[3] = {"Close", "Save", running ? "Game is running" : "Launch Game"};
+  const char* labels[4] = {"Close", "Save", "Copy command line",
+                           running ? "Game is running" : "Launch Game"};
   float total = 0.0f;
   for (const char* label : labels) {
     total += ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
   }
-  total += style.ItemSpacing.x * 2.0f;
+  total += style.ItemSpacing.x * 3.0f;
 
-  // Right-aligned, in the order they read: the two that end a session, then the one it is for.
-  // The x is set explicitly rather than derived from the text, so a long status line cannot
-  // push the buttons off the edge.
+  // Right-aligned, in the order they read: the two that end a session, the copy a bug report
+  // wants, then the one it is for. The x is set explicitly rather than derived from the text, so
+  // a long status line cannot push the buttons off the edge.
   ImGui::SameLine();
   ImGui::SetCursorPosX(ImGui::GetWindowWidth() - style.WindowPadding.x - total);
   if (ImGui::Button(labels[0])) {
@@ -430,10 +440,18 @@ bool Shell::DrawBottomBar() {
     }
   }
   ImGui::SameLine();
+  // B7: the exact command line, always available - a value that did not apply is the other bug
+  // report this answers, and what the launcher *would* run is part of the diagnosis even when
+  // the command is not ok.
+  if (ImGui::Button(labels[2])) {
+    ImGui::SetClipboardText(FormatLaunchCommand(CurrentLaunchCommand()).c_str());
+    save_note_ = "Command line copied";
+  }
+  ImGui::SameLine();
   // A second copy of the title writing the same save folder is not something to discover by
   // trying, so the button stays down until the game the launcher started has exited.
   ImGui::BeginDisabled(running);
-  if (ImGui::Button(labels[2])) {
+  if (ImGui::Button(labels[3])) {
     LaunchGame();
   }
   ImGui::EndDisabled();
@@ -538,9 +556,15 @@ std::string Shell::HintLine(const HelpEntry& help) const {
   return line;
 }
 
+LaunchCommand Shell::CurrentLaunchCommand() const {
+  const LaunchTarget target = FallbackTarget(session_.profile().target, general_.state());
+  return BuildLaunchCommand(session_, roots_, target);
+}
+
 void Shell::LaunchGame() {
   save_error_.clear();
   save_note_.clear();
+  launch_error_.clear();
   // A change on screen that the run would not see is a bug the user cannot explain, so the
   // launcher writes first: "which profile did it read?" must not be a question.
   if (session_.CanSave() && session_.Dirty()) {
@@ -550,14 +574,51 @@ void Shell::LaunchGame() {
       return;
     }
   }
-  const LaunchTarget target = FallbackTarget(session_.profile().target, general_.state());
-  const LaunchCommand command = BuildLaunchCommand(session_, roots_, target);
+  // B7's pre-spawn check: what the game is about to read must be usable now, or the launch fails
+  // here with a reason instead of in the game, which would ignore the profile in silence.
+  if (const std::string problem = LaunchReadiness(session_); !problem.empty()) {
+    save_error_ = "The game was not started: " + problem;
+    return;
+  }
+  const LaunchCommand command = CurrentLaunchCommand();
+  launch_command_ = command;
   std::string error;
   if (!game_.Start(command, &error)) {
-    save_error_ = "Cannot start the game: " + error;
+    save_error_ = "Cannot start the game: " + (error.empty() ? command.error : error);
+    launch_error_ = LaunchFailureMessage(command, error);
+    launch_popup_requested_ = true;
     return;
   }
   save_note_ = "Started " + command.executable.filename().string();
+}
+
+void Shell::DrawLaunchModal(NavAction action) {
+  if (launch_popup_requested_) {
+    launch_popup_requested_ = false;
+    ImGui::OpenPopup(kLaunchErrorPopup);
+  }
+  if (ImGui::BeginPopupModal(kLaunchErrorPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.42f, 0.38f, 1.0f));
+    ImGui::TextWrapped("%s", launch_error_.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+    // The same bytes the bar's Copy button produces, so the two can never disagree.
+    if (ImGui::Button("Copy command line")) {
+      ImGui::SetClipboardText(FormatLaunchCommand(launch_command_).c_str());
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close") || action == NavAction::kCancel) {
+      launch_error_.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  launch_modal_open_ = ImGui::IsPopupOpen(kLaunchErrorPopup);
+  if (!launch_modal_open_) {
+    // ImGui may have closed the popup on Escape itself; either way the sentence is spent once
+    // the popup is gone, so the next failure starts from a clean slate.
+    launch_error_.clear();
+  }
 }
 
 void Shell::LogFocus() {

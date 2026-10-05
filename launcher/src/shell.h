@@ -73,12 +73,17 @@ class Shell {
   void ApplyAction(NavAction action);
   void RequestTab(int delta);
   void DrawTab(const TabLayout& tab, FocusModel& ring);
-  // The bottom bar (A2): what the settings file is doing on the left, the three actions that end
+  // The bottom bar (A2): what the settings file is doing on the left, the actions that end
   // a session on the right, and under them the focused row's own help and the hints for it.
   // Returns false when Close was chosen.
   bool DrawBottomBar();
   // B7: save what is unsaved, build Contract 3's command line and start the game.
   void LaunchGame();
+  // B7's "Copy command line" affordance and the failed-start detail, which is a modal because a
+  // command line and a log path do not fit on one bar line. Both read the same builder a launch
+  // does, so what is copied is exactly what was run.
+  LaunchCommand CurrentLaunchCommand() const;
+  void DrawLaunchModal(NavAction action);
 
   // The one line the bar shows, and whether it is news (red), a warning (yellow) or just the
   // last thing that happened (dim).
@@ -131,10 +136,18 @@ class Shell {
   InputDevice device_ = InputDevice::kKeyboard;
   // B7: the game the bottom bar started, if it is still running.
   GameProcess game_;
-  // The bottom bar's own messages. The profile panel keeps the ones its actions produce; these
-  // are the two the bar itself is responsible for.
+  // B7: the bottom bar's own messages. The profile panel keeps the ones its actions produce;
+  // these are the ones the bar is responsible for. `launch_error_` is the whole failed-start
+  // sentence (command line and log path included) and is what the modal shows; `launch_command_`
+  // is the exact command it names, kept so the modal's own Copy button has the same bytes the
+  // bar's Copy button produces. `launch_modal_open_` is one frame behind the popup on purpose:
+  // the shell reads Escape before it draws, so it must know the modal was up last frame.
   std::string save_error_;
   std::string save_note_;
+  std::string launch_error_;
+  LaunchCommand launch_command_;
+  bool launch_popup_requested_ = false;
+  bool launch_modal_open_ = false;
   // What the trace last reported, so it writes a line when something changes and not sixty times
   // a second.
   bool logged_focus_ = false;

@@ -212,6 +212,68 @@ void TestRefusals(const Scratch& scratch) {
   CHECK_CONTAINS(line, "\"" + command.executable.string() + "\" --game_data_root=");
 }
 
+void TestFailureDetail(const Scratch& scratch) {
+  BeginCase("B7: a start failure names the exact command line and the game's log path");
+
+  ProfileSession session = scratch.Session();
+  // Rename the game away: the start cannot be ok, and the message has to say so usefully.
+  const fs::path exe = scratch.install / kGameExecutableName;
+  const fs::path away = scratch.install / "rb_blitz.exe.away";
+  std::error_code ec;
+  fs::rename(exe, away, ec);
+  const LaunchCommand command =
+      BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kCommon);
+  CHECK_FALSE(command.ok);
+
+  const std::string message = LaunchFailureMessage(command, command.error);
+  CHECK_CONTAINS(message, command.error);
+  // The two facts the prompt asks for: what was run, and where the game's only record goes.
+  CHECK_CONTAINS(message, FormatLaunchCommand(command));
+  CHECK_CONTAINS(message, GameLogDirectory(command).string());
+  CHECK_CONTAINS(message, "log");
+  CHECK_STR_EQ(GameLogDirectory(command).string(), (scratch.install / "logs").string());
+  // The log file is named for the executable, so the message names a file, not just a folder.
+  CHECK_CONTAINS(message, command.executable.stem().string() + "_001.log");
+
+  fs::rename(away, exe, ec);
+}
+
+void TestReadiness(const Scratch& scratch) {
+  BeginCase("B7: a first run with nothing written has nothing to refuse");
+
+  {
+    ProfileSession fresh = scratch.Session();
+    CHECK_TRUE(LaunchReadiness(fresh).empty());
+  }
+
+  BeginCase("B7: a settings folder that is not a folder is refused before the game starts");
+
+  {
+    const fs::path blocker = scratch.base / "not-a-folder";
+    WriteText(blocker, "this is a file, not a settings folder");
+    ProfilePathInputs inputs;
+    inputs.executable_dir = scratch.install;
+    inputs.app_data_dir = scratch.app_data;
+    inputs.command_line_value = (blocker / "launcher.toml").string();
+    ProfileSession session(std::move(inputs), ProfileLoadResult{});
+    const std::string problem = LaunchReadiness(session);
+    CHECK_FALSE(problem.empty());
+    CHECK_CONTAINS(problem, "not a folder");
+    CHECK_CONTAINS(problem, blocker.string());
+  }
+
+  BeginCase("B7: a profile that is written and readable passes the check");
+
+  {
+    ProfileSession session = scratch.Session();
+    session.profile().target = LaunchTarget::kCommon;
+    const SaveOutcome saved = session.Save();
+    CHECK_TRUE(saved.ok);
+    CHECK_TRUE(saved.wrote);
+    CHECK_TRUE(LaunchReadiness(session).empty());
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -219,5 +281,7 @@ int main() {
   TestCommandShape(scratch);
   TestOnlyDifferencesArePassed(scratch);
   TestRefusals(scratch);
+  TestFailureDetail(scratch);
+  TestReadiness(scratch);
   return Finish();
 }

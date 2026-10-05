@@ -628,15 +628,32 @@ Three rules come from the contract and are worth stating where they are implemen
   the game would read `--game_data_root` as its first argument.
 
 Starting it is the other half: the launcher **saves first** when something is unsaved (a run
-that did not see the change on screen would be a bug nobody could explain), refuses politely
-when the game's executable or the game data is missing, quotes everything through
-`CreateProcessW` with the install folder as the working directory, and then keeps the process
-handle so the button reads *Game is running* and stays down until the game exits — a second
-copy of the title writing one save folder is not something to discover by trying.
+that did not see the change on screen would be a bug nobody could explain), checks that what the
+game is about to read is usable, refuses politely when the game's executable or the game data is
+missing, quotes everything through `CreateProcessW` with the install folder as the working
+directory, and then keeps the process handle so the button reads *Game is running* and stays
+down until the game exits — a second copy of the title writing one save folder is not something
+to discover by trying.
 
-A failure is reported in the bar's left half with the reason; the launcher itself stays open,
-so the user can fix the folder and try again. `Start` on a pad is the same launch without the
-mouse (A3), refused in the same cases the button is disabled in.
+**Before spawning, two things are checked** (`LaunchReadiness`), because the game reads the
+profile as a config file and `LoadConfig` treats a file it cannot open exactly like one that is
+not there: it starts on the compiled defaults and says so only in its own log. So the profile
+the game is about to read must be readable, and the folder holding it must be writable — a
+settings folder that is not writable is reported before the game starts, not silently after it.
+A profile that has never been written is not an error: there is nothing to read, and the
+defaults are the right answer.
+
+**The exact command line is always available.** *Copy command line*, on the bottom bar, puts
+`FormatLaunchCommand`'s bytes on the clipboard — the same builder a real start uses, so a value
+that did not reach the game is answerable from the paste. When a start fails, the whole detail
+is shown as a modal instead of one bar line, because it carries three things: the reason, the
+command line, and the folder the game writes its own log into (`<install folder>\logs`, a file
+named like `rb_blitz_001.log`) — the only record a WIN32-subsystem start leaves. The modal's own
+*Copy command line* is the same bytes as the bar's.
+
+The launcher itself stays open on a failure, so the user can fix the folder and try again.
+`Start` on a pad is the same launch without the mouse (A3), refused in the same cases the button
+is disabled in.
 
 ## The Controller tab, and button mapping (D16)
 

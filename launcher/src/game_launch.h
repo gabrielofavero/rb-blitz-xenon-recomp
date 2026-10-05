@@ -50,6 +50,28 @@ std::string FormatLaunchCommand(const LaunchCommand& command);
 LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots& roots,
                                  LaunchTarget target);
 
+// Where the game writes its own log. The runtime names the folder `<exe dir>\logs` and the files
+// `<app name>_NNN.log` (`rexglue-sdk/src/ui/rex_app.cpp`, `core/logging.cpp`), and the launcher
+// starts the game with the install folder as the working directory, so this is where a boot
+// failure's only record lands - a WIN32-subsystem binary prints nothing else.
+std::filesystem::path GameLogDirectory(const LaunchCommand& command);
+
+// The whole sentence a failed start shows: the reason, the exact command line the launcher built
+// (still printable when the command is not `ok`), and where the game's own log goes. Pure, so the
+// failing-start case is asserted by a test rather than by reading a bar.
+std::string LaunchFailureMessage(const LaunchCommand& command, std::string_view error);
+
+// What the launcher checks before it spawns anything, so a problem the game would meet silently
+// is refused here with a reason instead. Empty when the launch may go ahead.
+//
+// The game reads the profile as a config file, and `rex::cvar::LoadConfig` treats a file it
+// cannot open exactly like a file that is not there - it starts on the compiled defaults and says
+// so only in its own log. So the launcher verifies that the file the game is about to read is
+// readable, and that the folder holding it is writable: if it is not, "the launcher wrote a
+// profile" cannot be kept true. A profile that has not been written yet is not an error - there
+// is nothing to read, and the defaults are the right answer.
+std::string LaunchReadiness(const ProfileSession& session);
+
 // The started game. Owns the process handle, so "is it still running?" does not need a name or
 // a PID lookup, and closes it when the launcher lets go.
 class GameProcess {

@@ -5,6 +5,7 @@
 
 #include "game_launch.h"
 
+#include <fstream>
 #include <system_error>
 #include <string>
 #include <string_view>
@@ -161,6 +162,84 @@ LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots&
   }
   command.ok = command.error.empty();
   return command;
+}
+
+std::filesystem::path GameLogDirectory(const LaunchCommand& command) {
+  return command.executable.parent_path() / "logs";
+}
+
+std::string LaunchFailureMessage(const LaunchCommand& command, std::string_view error) {
+  std::string out = "Cannot start the game: ";
+  out += error.empty() ? "the launcher could not start it" : std::string(error);
+  out += "\n\nThe command line was:\n";
+  out += FormatLaunchCommand(command);
+  out += "\n\nThe game writes its own log under ";
+  out += GameLogDirectory(command).string();
+  out += ", as a file named like ";
+  out += command.executable.stem().string();
+  out += "_001.log - that log is the only record a start leaves.";
+  return out;
+}
+
+namespace {
+
+// Proves a folder can be written by putting a file in it and taking it away again. Windows does
+// not enforce the read-only attribute on a *directory* for creation, so the permissions bits
+// cannot answer this; the write can.
+bool DirectoryWritable(const std::filesystem::path& dir, std::string* why) {
+  std::error_code code;
+  if (!std::filesystem::exists(dir, code)) {
+    // Nothing to write into yet: a save creates it, and a parent that cannot be created is
+    // caught when that save runs.
+    return true;
+  }
+  if (!std::filesystem::is_directory(dir, code) || code) {
+    *why = "is not a folder";
+    return false;
+  }
+  const std::filesystem::path probe = dir / ".rb_blitz_launcher_write_probe";
+  {
+    std::ofstream file(probe, std::ios::binary | std::ios::trunc);
+    if (!file) {
+      *why = "cannot be written to";
+      return false;
+    }
+    file << 'x';
+    if (!file) {
+      *why = "cannot be written to";
+      return false;
+    }
+  }
+  std::error_code ignored;
+  std::filesystem::remove(probe, ignored);
+  return true;
+}
+
+}  // namespace
+
+std::string LaunchReadiness(const ProfileSession& session) {
+  const std::filesystem::path profile = session.path();
+  if (profile.empty()) {
+    // The launcher passes no profile path, so there is nothing the game could fail to read.
+    return {};
+  }
+
+  std::error_code code;
+  if (std::filesystem::exists(profile, code) && !code) {
+    std::ifstream file(profile, std::ios::binary);
+    if (!file) {
+      return "the settings file " + profile.string() +
+             " cannot be read, so the game would start on its defaults instead";
+    }
+  }
+
+  const std::filesystem::path dir = profile.parent_path();
+  std::string why;
+  if (!DirectoryWritable(dir, &why)) {
+    return "the settings folder " + dir.string() + " " + why +
+           ", so the profile the game reads cannot be kept";
+  }
+  return {};
 }
 
 GameProcess::~GameProcess() { Release(); }
