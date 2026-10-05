@@ -54,6 +54,10 @@ TabLayout BuildTabLayout(settings::Tab tab);
 
 std::vector<TabLayout> BuildLayout();
 
+// The one row with this key, or nullptr. The General tab (B1) uses it to find the row a
+// picked path belongs to, and B7 will use it to turn a profile into the game's argv.
+const settings::Setting* FindSetting(std::string_view key);
+
 // The one line a group with nothing to draw shows. A group declared unavailable without a
 // note still says something honest rather than rendering an empty heading.
 std::string_view GroupNoteText(const settings::Group& group);

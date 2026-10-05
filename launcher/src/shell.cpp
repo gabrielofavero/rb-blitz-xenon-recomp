@@ -7,30 +7,31 @@
 
 #include "imgui.h"
 
-#include <algorithm>
-#include <charconv>
-#include <cstdlib>
-#include <cstring>
+#include <memory>
 #include <string>
-#include <system_error>
+#include <utility>
+
+#include "row_ui.h"
 
 namespace rb_blitz::launcher {
 namespace {
 
-// The one window's ImGui id. NoImGuiWindowFlags_NoSavedSettings means ImGui never writes an
-// ini for it, so the name is only an identity.
+// The one window's ImGui id. ImGuiWindowFlags_NoSavedSettings means ImGui never writes an ini
+// for it, so the name is only an identity.
 constexpr const char* kWindowId = "rb_blitz launcher";
-
-constexpr float kMinValueWidth = 160.0f;
-constexpr float kMaxValueWidth = 360.0f;
-constexpr float kMinLabelWidth = 120.0f;
-constexpr std::size_t kTextBufferSize = 512;
 
 // The keyboard's mapping (A1). ImGui's own navigation is deliberately off, so every key the
 // launcher binds is translated here and nowhere else.
 class KeyboardNavSource : public NavSource {
  public:
   NavAction Poll() override {
+    // While a text field is being edited the ring must not steal the keys the caret needs -
+    // ImGui's navigation is off, so nothing else would stop it - and Escape belongs to the
+    // field (ImGui reverts it), not to the launcher. A second Escape, with no field active,
+    // leaves.
+    if (ImGui::GetIO().WantTextInput) {
+      return NavAction::kNone;
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_B, false)) {
       return NavAction::kCancel;
     }
@@ -74,115 +75,19 @@ class GamepadNavSource : public NavSource {
   NavAction Poll() override { return NavAction::kNone; }
 };
 
-int ParseIntOrZero(std::string_view text) {
-  int value = 0;
-  const char* first = text.data();
-  const char* last = text.data() + text.size();
-  if (std::from_chars(first, last, value).ec != std::errc{}) {
-    return 0;
-  }
-  return value;
-}
-
-float ParseFloatOrZero(std::string_view text) {
-  const std::string owned(text);
-  char* end = nullptr;
-  const float value = std::strtof(owned.c_str(), &end);
-  return end == owned.c_str() ? 0.0f : value;
-}
-
-void CopyToBuffer(std::string_view text, char (&buffer)[kTextBufferSize]) {
-  const std::size_t count = std::min(text.size(), kTextBufferSize - 1);
-  std::memcpy(buffer, text.data(), count);
-  buffer[count] = '\0';
-}
-
-// One widget per schema kind, showing the compiled default (Contract 1's `default_text`).
-// A1 draws them read-only: B4 wires the edit path, and nothing here writes anything.
-void DrawValueWidget(const settings::Setting& setting, float width) {
-  switch (setting.kind) {
-    case settings::Kind::kBool: {
-      bool value = setting.default_text == "true";
-      ImGui::Checkbox("##value", &value);
-      return;
-    }
-    case settings::Kind::kInt: {
-      int value = ParseIntOrZero(setting.default_text);
-      ImGui::SetNextItemWidth(width);
-      ImGui::InputInt("##value", &value);
-      return;
-    }
-    case settings::Kind::kFloat: {
-      float value = ParseFloatOrZero(setting.default_text);
-      ImGui::SetNextItemWidth(width);
-      ImGui::InputFloat("##value", &value);
-      return;
-    }
-    case settings::Kind::kEnum: {
-      const std::string current(setting.default_text);
-      ImGui::SetNextItemWidth(width);
-      if (ImGui::BeginCombo("##value", current.c_str())) {
-        ImGui::EndCombo();
-      }
-      return;
-    }
-    case settings::Kind::kString: {
-      char text[kTextBufferSize] = {};
-      CopyToBuffer(setting.default_text, text);
-      ImGui::SetNextItemWidth(width);
-      ImGui::InputText("##value", text, sizeof(text), ImGuiInputTextFlags_ReadOnly);
-      return;
-    }
-    case settings::Kind::kPathDir:
-    case settings::Kind::kPathFile: {
-      char text[kTextBufferSize] = {};
-      CopyToBuffer(setting.default_text.empty() ? std::string_view("(game default)")
-                                               : setting.default_text,
-                   text);
-      const float browse_width =
-          ImGui::CalcTextSize("Browse...").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-      ImGui::SetNextItemWidth(
-          std::max(kMinValueWidth * 0.5f, width - browse_width - ImGui::GetStyle().ItemSpacing.x));
-      ImGui::InputText("##value", text, sizeof(text), ImGuiInputTextFlags_ReadOnly);
-      ImGui::SameLine();
-      ImGui::Button("Browse...", ImVec2(browse_width, 0.0f));
-      return;
-    }
-  }
-}
-
-// One setting row: the label is the focus target, the value sits beside it and never takes
-// the ring. Clicking the label focuses it, and hovering adopts the ring so the mouse and the
-// keyboard agree on one selection (D6).
-void DrawSettingRow(const settings::Setting& setting, std::size_t index, FocusModel& ring) {
-  ImGui::PushID(setting.key.data());
-
-  const float spacing = ImGui::GetStyle().ItemSpacing.x;
-  const float available = ImGui::GetContentRegionAvail().x;
-  const float value_width = std::clamp(available * 0.35f, kMinValueWidth, kMaxValueWidth);
-  const float label_width = std::max(kMinLabelWidth, available - value_width - spacing);
-
-  const bool focused = !ring.Empty() && ring.Index() == index;
-  const std::string label(setting.label);
-  if (ImGui::Selectable(label.c_str(), focused, ImGuiSelectableFlags_None,
-                        ImVec2(label_width, 0.0f))) {
-    ring.SetIndex(index);
-  }
-  ring.FocusIf(index, ImGui::IsItemHovered());
-
-  ImGui::SameLine();
-  ImGui::BeginDisabled();
-  DrawValueWidget(setting, value_width);
-  ImGui::EndDisabled();
-  ImGui::PopID();
-}
-
 }  // namespace
 
-Shell::Shell()
-    : layout_(BuildLayout()),
+Shell::Shell(Profile profile, GameRoots roots)
+    : roots_(std::move(roots)),
+      profile_(std::move(profile)),
+      general_(roots_),
+      layout_(BuildLayout()),
       keyboard_(std::make_unique<KeyboardNavSource>()),
       gamepad_(std::make_unique<GamepadNavSource>()) {
+  // D5: a profile that has never chosen a target comes up on Ultimate only while the payload
+  // is usable. "Ultimate" with nothing to mount is a promise the launcher cannot keep, and
+  // saying so here is better than starting a boot that cannot honour it.
+  profile_.target = FallbackTarget(profile_.target, DetectUltimateState(roots_.game_root));
   rings_.resize(layout_.size());
   for (std::size_t index = 0; index < layout_.size(); ++index) {
     rings_[index].Reset(layout_[index].row_count);
@@ -217,9 +122,6 @@ void Shell::ApplyAction(NavAction action) {
     case NavAction::kPreviousTab:
       RequestTab(-1);
       return;
-    case NavAction::kNone:
-    case NavAction::kCancel:  // Frame() answers this before ApplyAction is called
-      return;
     default:
       break;
   }
@@ -240,11 +142,9 @@ void Shell::ApplyAction(NavAction action) {
     case NavAction::kLast:
       ring.MoveLast();
       break;
-    case NavAction::kActivate:
-      // A1's rows are read-only. B4 is what gives Enter and Space something to do, and A2
-      // is what names the action in the bottom bar.
-      break;
     default:
+      // kActivate belongs to the tab - B1's General rows are the first with anything to
+      // activate - so it is left alone here and handed to the tab when it is drawn.
       break;
   }
 }
@@ -259,6 +159,7 @@ bool Shell::Frame() {
     return false;
   }
   ApplyAction(action);
+  action_ = action;
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -269,7 +170,9 @@ bool Shell::Frame() {
 
   ImGui::TextUnformatted("rb_blitz launcher");
   ImGui::SameLine();
-  ImGui::TextDisabled("Up/Down or Tab moves  |  Left/Right or PageUp/PageDown changes tab  |  Esc or B quits");
+  ImGui::TextDisabled(
+      "Up/Down or Tab moves  |  Left/Right or PageUp/PageDown changes tab  |  Enter opens or "
+      "changes  |  Esc or B quits");
 
   // The tab strip is the model's, not ImGui's tab bar. Two reasons: the selection must change
   // on the frame the key is read, and the ring - which A3's pad will drive - has to be the
@@ -293,10 +196,15 @@ bool Shell::Frame() {
   ImGui::Separator();
 
   if (tab_ < layout_.size()) {
-    DrawTab(layout_[tab_], rings_[tab_]);
+    if (layout_[tab_].tab == settings::Tab::kGeneral) {
+      general_.Draw(layout_[tab_], rings_[tab_], profile_, action_);
+    } else {
+      DrawTab(layout_[tab_], rings_[tab_]);
+    }
   }
 
   ImGui::End();
+  action_ = NavAction::kNone;
   return true;
 }
 
@@ -313,7 +221,14 @@ void Shell::DrawTab(const TabLayout& tab, FocusModel& ring) {
         ImGui::Spacing();
         continue;
       }
-      DrawSettingRow(*row.setting, row_index, ring);
+      const settings::Setting& setting = *row.setting;
+      const RowColumns columns = RowColumnWidths();
+      RowScope scope(setting.key);
+      DrawRowLabel(setting, row_index, ring, columns.label_width);
+      ImGui::SameLine();
+      ImGui::BeginDisabled();
+      DrawReadOnlyValue(setting, columns.value_width);
+      ImGui::EndDisabled();
       ++row_index;
     }
   }

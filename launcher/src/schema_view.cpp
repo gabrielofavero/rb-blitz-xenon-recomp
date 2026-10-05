@@ -69,6 +69,15 @@ std::vector<TabLayout> BuildLayout() {
   return layout;
 }
 
+const settings::Setting* FindSetting(std::string_view key) {
+  for (const settings::Setting& setting : settings::kSettings) {
+    if (setting.key == key) {
+      return &setting;
+    }
+  }
+  return nullptr;
+}
+
 std::string DescribeLayout(const std::vector<TabLayout>& layout) {
   std::string out;
   for (const TabLayout& tab : layout) {

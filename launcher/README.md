@@ -8,17 +8,23 @@ what is in this directory *today* and how to change it.
 
 Today this directory holds the **launcher executable** with its **three-tab shell**
 ([A1](../docs/plans/launcher-plan.md)), its **settings schema**, and the profile module that
-both executables compile. The bottom bar (A2), the controller navigation (A3), the write
-path (B4) and launching the game (B7) arrive with the prompts that follow, so what exists
-here now is a launcher that shows every schema row, read-only, and is fully drivable with
-the keyboard.
+both executables compile. The General tab is real (B1): it detects the Ultimate payload, edits
+the launch target and the two locations and says why a value was refused. The bottom bar (A2),
+the controller navigation (A3), the write path (B4) and launching the game (B7) arrive with the
+prompts that follow, so what exists here now is a launcher that shows every schema row, edits
+General, and is fully drivable with the keyboard.
 
 | Path | What it is |
 | --- | --- |
 | `main.cpp` | The entry point: opens the window, loads the profile for the window size, runs the frame loop, saves the size on the way out (P0.4, A1) |
 | `src/schema_view.{h,cpp}` | The generated table turned into tabs, groups and rows — no ImGui, no SDL (A1) |
 | `src/nav.{h,cpp}` | The focus ring and the one `NavSource` seam a device plugs into (A1, D6) |
-| `src/shell.{h,cpp}` | The tab shell: the strip, one read-only widget per `kind`, the ring (A1) |
+| `src/shell.{h,cpp}` | The tab shell: the strip, the ring, and the read-only widget per `kind` (A1) |
+| `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with (A1, B1) |
+| `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers (B1) |
+| `src/ultimate_state.{h,cpp}` | D5's four payload states and the target fallback — no ImGui, no SDL (B1) |
+| `src/path_validate.{h,cpp}` | The schema's `validate` rules, reusing `src/fs/path_policy.h` and `src/fs/dlc_layout.h` (B1) |
+| `src/general_report.{h,cpp}` | What `--dump-general` prints (B1) |
 | `rb_blitz_launcher.rc` | The exe icon — `assets/blitz.ico`, through the same resource mechanism as the game |
 | `config/settings.toml` | The schema: one `[[setting]]` per row the launcher shows, one `[[group]]` per category (Contract 1) |
 | `tools/embed_settings.cpp` | Compiles — and validates — the schema into the header below |
@@ -87,7 +93,7 @@ changes no C++ at all:
 | `Down` / `Tab` | Next row (`Up` / `Shift+Tab` goes back) |
 | `Home` / `End` | First / last row |
 | `Right` / `PageDown` | Next tab (`Left` / `PageUp` goes back) |
-| `Enter` / `Space` | Reserved for B4; A1's rows are read-only |
+| `Enter` / `Space` | Operate the focused row — on General, open the folder picker or move the target on (B1). A read-only row has nothing to operate yet (B4) |
 | `Esc` / `B` | Leave |
 
 The mouse is a device too: clicking a row focuses it, and hovering adopts the ring, so the
@@ -95,11 +101,55 @@ pointer and the keyboard never disagree about the selection (D6).
 
 `--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
 window — the headless half of A1's verification, and what says out loud if a row ever
-reaches the table without a tooltip:
+reaches the table without a tooltip. `--dump-general` prints what the General tab would
+decide for a given game root and profile (B1's verification, without the OCR):
 
 ```
 rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
+rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\Games\rb_blitz" --launcher_profile=out\p.toml
 ```
+
+## The General tab (B1)
+
+Three rows, which is the whole of M1's General scope (§1.1, D4): the launch target, the save
+location and the DLC location. *Verify installation*, the game-directory override and
+*Install Ultimate…* are later (B8 and D4 say so); nothing here pretends otherwise.
+
+**The launch target** is a radio group, and it is never a dead option (D5). What the files
+say is a *state* (`src/ultimate_state.cpp`), read from the same header the runtime's own check
+uses (`src/hooks/ultimate_plan.h`), so "the launcher says ready" and "the game mounts it"
+cannot drift:
+
+| State | What the files look like | What the tab says |
+| --- | --- | --- |
+| Ready | the payload pair under `<game root>\ultimate\gen\` | nothing — it just works |
+| Also present | the same pair at the game root's top level ("merged") | that it is merged |
+| Missing | neither location has it | that it is not installed, so the retail game will start |
+| Damaged | `patch_xbox.hdr` without `patch_xbox_0.ark` | the runtime's own wording: "a damaged disc" |
+
+Ultimate stays selectable in every state; what changes is the **default**: a stored
+"Ultimate" with nothing to mount comes up as the retail game, and the tab says why
+(`FallbackTarget`). The four states are pinned by
+`tests/launcher_ultimate_state_tests.cpp` from directory fixtures.
+
+**The two locations** are path rows with a typed field, a `Browse…` button and `Enter` on the
+focused row opening the same picker. Every value — picked, typed, or already in the profile —
+is judged by the row's own `validate` string from the schema (`src/path_validate.cpp`), so the
+rules are the runtime's and not the tab's:
+
+- `inside_game_root:forbid` refuses a folder inside the game data, because the runtime
+  redirects its writable roots to the platform user folder and the row would silently do
+  something else (D4).
+- `dlc_layout` refuses a folder that is not `<title_id>/<content_type>/<package>`, using
+  `src/fs/dlc_layout.h`'s own wording. An absent or empty folder is fine and says so — an
+  empty DLC folder is the normal case.
+- A rule this build does not know is refused rather than waved through, so a schema that
+  grows one fails loudly instead of silently accepting anything.
+
+A refusal keeps the value the profile already holds and states the reason under the row; a
+value already in the profile is judged the same way, so a hand-edited file is flagged rather
+than trusted. Editing a row changes the **session's** profile only: turning that into
+`launcher.toml` is B4.
 
 
 ## The profile — `launcher.toml`

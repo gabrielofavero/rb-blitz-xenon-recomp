@@ -21,10 +21,12 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 
+#include "general_report.h"
 #include "launcher/profile.h"
 #include "launcher/profile_path.h"
 #include "schema_view.h"
 #include "shell.h"
+#include "ultimate_state.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -48,6 +50,9 @@ constexpr int kMaxWindowSize = 8192;
 
 namespace fs = std::filesystem;
 
+// Defined with the rest of the path helpers below; the dump modes need it before the loop.
+fs::path ExecutableDir();
+
 // A WIN32-subsystem executable has no console, so a bring-up failure would otherwise be
 // silent. Name the step that failed and let SDL say why.
 void Fatal(const char* step) {
@@ -59,6 +64,9 @@ void Fatal(const char* step) {
 struct Options {
   // --launcher_profile=<path>, the highest-priority step of D2's resolution order.
   std::string profile_path;
+  // --game_data_root=<path>, the game's own flag for where its data is. The launcher takes it
+  // too, because that is how a shortcut to the launcher already points at an install (B1).
+  std::string game_data_root;
   // --dump-layout[=<path>] prints the rows the shell would draw and leaves, before any
   // window is created. It is A1's headless evidence that every schema row reaches a tab,
   // and the part of the launcher a build machine can run. With no path it writes to stdout;
@@ -66,16 +74,29 @@ struct Options {
   // own to be captured from.
   bool dump_layout = false;
   std::string dump_layout_path;
+  // --dump-general[=<path>] prints what the General tab would decide - the game root it found,
+  // D5's Ultimate state, the effective target, and each path row's verdict - and leaves. It is
+  // B1's headless evidence, so the four states can be asserted on text instead of OCR.
+  bool dump_general = false;
+  std::string dump_general_path;
 };
 
 Options ParseOptions(int argc, char** argv) {
   Options options;
   constexpr std::string_view kProfilePrefix = "--launcher_profile=";
+  constexpr std::string_view kGameDataPrefix = "--game_data_root=";
   constexpr std::string_view kDumpPrefix = "--dump-layout=";
+  constexpr std::string_view kDumpGeneralPrefix = "--dump-general=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--dump-layout") {
       options.dump_layout = true;
+    } else if (argument == "--dump-general") {
+      options.dump_general = true;
+    } else if (argument.size() > kDumpGeneralPrefix.size() &&
+               argument.substr(0, kDumpGeneralPrefix.size()) == kDumpGeneralPrefix) {
+      options.dump_general = true;
+      options.dump_general_path = std::string(argument.substr(kDumpGeneralPrefix.size()));
     } else if (argument.size() > kDumpPrefix.size() &&
                argument.substr(0, kDumpPrefix.size()) == kDumpPrefix) {
       options.dump_layout = true;
@@ -83,11 +104,28 @@ Options ParseOptions(int argc, char** argv) {
     } else if (argument.size() >= kProfilePrefix.size() &&
                argument.substr(0, kProfilePrefix.size()) == kProfilePrefix) {
       options.profile_path = std::string(argument.substr(kProfilePrefix.size()));
+    } else if (argument.size() >= kGameDataPrefix.size() &&
+               argument.substr(0, kGameDataPrefix.size()) == kGameDataPrefix) {
+      options.game_data_root = std::string(argument.substr(kGameDataPrefix.size()));
     }
-    // Anything else is the game's business, not the launcher's: the launch contract is
-    // one-way (Contract 3), so an unknown switch here is not fatal.
+    // Anything else is somebody else's business: the launch contract is one-way
+    // (Contract 3), so an unknown switch here is not fatal.
   }
   return options;
+}
+
+int Emit(const std::string& text, const std::string& path, int code) {
+  if (path.empty()) {
+    std::fputs(text.c_str(), stdout);
+    return code;
+  }
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    std::fprintf(stderr, "cannot write %s\n", path.c_str());
+    return 2;
+  }
+  file << text;
+  return file.good() ? code : 1;
 }
 
 int DumpLayout(const std::string& path) {
@@ -95,27 +133,34 @@ int DumpLayout(const std::string& path) {
   const bool complete = text.find("MISSING-TOOLTIP") == std::string::npos;
   const std::string all =
       text + (complete ? "every row carries a tooltip\n" : "a row is missing its tooltip\n");
-  if (path.empty()) {
-    std::fputs(all.c_str(), stdout);
-    return complete ? 0 : 1;
-  }
-  std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  if (!file) {
-    std::fprintf(stderr, "cannot write %s\n", path.c_str());
-    return 2;
-  }
-  file << all;
-  return file.good() && complete ? 0 : 1;
+  return Emit(all, path, complete ? 0 : 1);
 }
 
+// The General tab, decided without a window. Both inputs are D2's own resolution, so the
+// report describes exactly the profile and the root the launcher itself would use.
+int DumpGeneral(const Options& options) {
+  const fs::path launcher_dir = ExecutableDir();
+  const rb_blitz::launcher::GameRoots roots =
+      rb_blitz::launcher::DetectGameRoots(launcher_dir, options.game_data_root);
+
+  rb_blitz::launcher::ProfilePathInputs inputs =
+      rb_blitz::launcher::ProfilePathInputsFromEnvironment(launcher_dir);
+  inputs.command_line_value = options.profile_path;
+  const fs::path profile_path = rb_blitz::launcher::ResolveProfilePath(inputs);
+
+  rb_blitz::launcher::ProfileLoadResult load;
+  if (!profile_path.empty()) {
+    load = rb_blitz::launcher::LoadProfile(profile_path);
+  }
+  return Emit(rb_blitz::launcher::DescribeGeneral(load, roots), options.dump_general_path, 0);
+}
+
+// Where the running executable lives. SDL_GetBasePath returns SDL's own cached buffer
+// (thirdparty/sdl3/src/filesystem/SDL_filesystem.c: the CachedBasePath global), so it is not
+// the caller's to free and stays valid for the process's life.
 fs::path ExecutableDir() {
   const char* base = SDL_GetBasePath();
-  if (base == nullptr) {
-    return {};
-  }
-  const fs::path dir(base);
-  SDL_free(const_cast<char*>(base));
-  return dir;
+  return base == nullptr ? fs::path{} : fs::path(base);
 }
 
 int WindowDimension(int value, int fallback) {
@@ -129,6 +174,9 @@ int main(int argc, char** argv) {
   if (options.dump_layout) {
     return DumpLayout(options.dump_layout_path);
   }
+  if (options.dump_general) {
+    return DumpGeneral(options);
+  }
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -136,8 +184,9 @@ int main(int argc, char** argv) {
   }
 
   // D2's order: the executable's directory and the environment first, then argv on top.
+  const fs::path launcher_dir = ExecutableDir();
   rb_blitz::launcher::ProfilePathInputs path_inputs =
-      rb_blitz::launcher::ProfilePathInputsFromEnvironment(ExecutableDir());
+      rb_blitz::launcher::ProfilePathInputsFromEnvironment(launcher_dir);
   path_inputs.command_line_value = options.profile_path;
   const fs::path profile_path = rb_blitz::launcher::ResolveProfilePath(path_inputs);
 
@@ -155,6 +204,11 @@ int main(int argc, char** argv) {
                    profile_path.string().c_str(), loaded.error.c_str());
     }
   }
+
+  // Where the game's data is: the override the game itself takes, then the installer's layout
+  // next to the launcher (B1). The General tab reads the Ultimate state from it.
+  const rb_blitz::launcher::GameRoots roots =
+      rb_blitz::launcher::DetectGameRoots(launcher_dir, options.game_data_root);
 
   const float display_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   const float ui_scale = display_scale > 0.0f ? display_scale : 1.0f;
@@ -216,7 +270,7 @@ int main(int argc, char** argv) {
   SDL_ShowWindow(window);
 
   std::unique_ptr<rb_blitz::launcher::Shell> shell =
-      std::make_unique<rb_blitz::launcher::Shell>();
+      std::make_unique<rb_blitz::launcher::Shell>(profile, roots);
 
   // The title names the current tab. It is the only piece of the launcher's state a script
   // can read back (MainWindowTitle), which is what makes A1's "tab through every tab"

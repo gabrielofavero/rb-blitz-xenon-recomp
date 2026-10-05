@@ -50,9 +50,14 @@ set_source_files_properties(${RBBLITZ_IMGUI_BACKENDS} PROPERTIES
 
 set(RBBLITZ_LAUNCHER_SOURCES
     main.cpp
+    src/general_report.cpp
+    src/general_tab.cpp
     src/nav.cpp
+    src/path_validate.cpp
+    src/row_ui.cpp
     src/schema_view.cpp
     src/shell.cpp
+    src/ultimate_state.cpp
     # The profile module is shared with the game and SDK-free on purpose (P0.3), which is
     # what lets the launcher compile it too: it is how A1 remembers the window geometry.
     "${CMAKE_SOURCE_DIR}/src/launcher/profile.cpp"

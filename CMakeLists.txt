@@ -337,6 +337,18 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_launcher_profile_tests PRIVATE src)
     add_test(NAME launcher_profile COMMAND rb_blitz_launcher_profile_tests)
+
+    # The General tab's decidable half (B1): D5's four Ultimate states from directory
+    # fixtures, the launch-target fallback, where the game is detected, and the schema's
+    # `validate` rules. Dependency-free like the profile tests, and compiled from
+    # launcher/src because the launcher is what puts them on screen.
+    add_executable(rb_blitz_launcher_general_tests
+        tests/launcher_ultimate_state_tests.cpp
+        launcher/src/path_validate.cpp
+        launcher/src/ultimate_state.cpp
+    )
+    target_include_directories(rb_blitz_launcher_general_tests PRIVATE src launcher/src)
+    add_test(NAME launcher_general COMMAND rb_blitz_launcher_general_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,
