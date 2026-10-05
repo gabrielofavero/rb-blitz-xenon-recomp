@@ -78,6 +78,30 @@ const settings::Setting* FindSetting(std::string_view key) {
   return nullptr;
 }
 
+std::vector<std::string_view> SettingChoices(const settings::Setting& setting) {
+  std::vector<std::string_view> choices;
+  const std::string_view text = setting.choices;
+  std::size_t start = 0;
+  while (start < text.size()) {
+    const std::size_t comma = text.find(',', start);
+    const std::size_t end = comma == std::string_view::npos ? text.size() : comma;
+    choices.push_back(text.substr(start, end - start));
+    if (comma == std::string_view::npos) {
+      break;
+    }
+    start = comma + 1;
+  }
+  return choices;
+}
+
+std::size_t FocusEntriesFor(const settings::Setting& setting) {
+  if (setting.kind != settings::Kind::kEnum) {
+    return 1;
+  }
+  const std::size_t count = SettingChoices(setting).size();
+  return count == 0 ? 1 : count;
+}
+
 std::string DescribeLayout(const std::vector<TabLayout>& layout) {
   std::string out;
   for (const TabLayout& tab : layout) {

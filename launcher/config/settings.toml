@@ -21,6 +21,9 @@
 #   choices   enum only: the allowed values, e.g. ["sdl", "xinput"]
 #   validate  path_dir / path_file only: `exists`, `dlc_layout` or
 #             `inside_game_root:forbid`, separated by `|`
+#   min/max   int / float only, optional: the range the row's widget is bounded to, so
+#             the slider carries the cvar's real limits. Both or neither, and the
+#             default must sit inside it.
 #
 # `applies = "live"` claims that the running game re-reads the value, so the row must
 # carry a comment naming the mechanism that does it, on the same line as `applies` or on
@@ -38,6 +41,17 @@
 # something a user can act on from the launcher (D12). Master volume is absent because
 # the SDK has no audio_volume cvar yet (D14). Per-button remapping is absent because it
 # is planned work, not a setting (D13).
+#
+# Three more absences are deliberate, and are decisions rather than omissions:
+#   * The graphics backend (D3D12 vs Vulkan) is a build-time link choice
+#     (REXGLUE_USE_D3D12/REXGLUE_USE_VULKAN, D3D12=ON and Vulkan=OFF in this build), not a
+#     cvar, so there is no row for it: a setting nobody can act on would be a lie.
+#   * `video_mode_refresh_rate` and the free-form `video_mode_width`/`video_mode_height`
+#     are not exposed. The guest refresh rate changes how the title paces itself, and the
+#     runtime's own preset list is the only set of resolutions known to be safe, so
+#     resolution is a curated enum and the refresh rate is left alone.
+#   * `window_width`/`window_height` are not exposed either: the resolution preset already
+#     sizes the startup window, and two controls for one window can only disagree.
 
 schema_version = 1
 
@@ -175,82 +189,30 @@ inside the game data folder is refused for the same reason as the save location.
 # Graphics - Display
 # ---------------------------------------------------------------------------
 
+# One curated list, not a free-form size: the tokens are exactly the resolution presets the
+# runtime's own parser accepts (rexglue-sdk/include/rex/graphics/video_mode_util.h), applied
+# to both the guest video mode and the startup window. The default is 720p because that is what
+# an unset `resolution` resolves to (video_mode_width/height default to 1280x720), so leaving
+# the row alone passes nothing and gets exactly the same picture.
 [[setting]]
 key     = "resolution"
 tab     = "graphics"
 group   = "Display"
-label   = "Resolution preset"
-kind    = "string"
-default = ""
+label   = "Resolution"
+kind    = "enum"
+choices = ["720p", "1080p", "1440p", "4k"]
+default = "720p"
 applies = "restart"
 argv    = "flag"
 tooltip = """
-Common width x height for the guest video mode and the startup window: 720p, 1080p,
-1440p, 4k, or an explicit size such as 1280x720. Empty leaves both to the two rows
-below.
-"""
-
-[[setting]]
-key     = "video_mode_width"
-tab     = "graphics"
-group   = "Display"
-label   = "Guest video mode width"
-kind    = "int"
-default = 1280
-applies = "restart"
-argv    = "flag"
-tooltip = "Width the title renders at, in pixels (640 to 4095)."
-
-[[setting]]
-key     = "video_mode_height"
-tab     = "graphics"
-group   = "Display"
-label   = "Guest video mode height"
-kind    = "int"
-default = 720
-applies = "restart"
-argv    = "flag"
-tooltip = "Height the title renders at, in pixels (480 to 4095)."
-
-[[setting]]
-key     = "video_mode_refresh_rate"
-tab     = "graphics"
-group   = "Display"
-label   = "Guest refresh rate"
-kind    = "float"
-default = 60.0
-applies = "restart"
-argv    = "flag"
-tooltip = """
-Guest video mode refresh rate in Hz (24 to 240). The title's own frame pacing follows
-it, so a wrong value changes how the game runs, not just how it looks.
+Render resolution, applied to both the guest video mode and the startup window: 720p, 1080p,
+1440p or 4k. The title's own aspect handling is left to the letterbox row below. Needs a
+restart.
 """
 
 # ---------------------------------------------------------------------------
 # Graphics - Window
 # ---------------------------------------------------------------------------
-
-[[setting]]
-key     = "window_width"
-tab     = "graphics"
-group   = "Window"
-label   = "Window width"
-kind    = "int"
-default = 0
-applies = "restart"
-argv    = "flag"
-tooltip = "Startup window width in logical pixels (0 to 8192). 0 uses the app default."
-
-[[setting]]
-key     = "window_height"
-tab     = "graphics"
-group   = "Window"
-label   = "Window height"
-kind    = "int"
-default = 0
-applies = "restart"
-argv    = "flag"
-tooltip = "Startup window height in logical pixels (0 to 8192). 0 uses the app default."
 
 [[setting]]
 key     = "fullscreen"
@@ -270,6 +232,8 @@ group   = "Window"
 label   = "Monitor"
 kind    = "int"
 default = 0
+min     = 0
+max     = 16
 applies = "restart"
 argv    = "flag"
 tooltip = "Monitor to display on: 0 is the default, 1 the primary, 2 the second, and so on (0 to 16)."
@@ -329,6 +293,8 @@ group   = "Rendering"
 label   = "Render scale"
 kind    = "int"
 default = 1
+min     = 1
+max     = 8
 applies = "restart"
 argv    = "flag"
 tooltip = """
@@ -358,6 +324,8 @@ group   = "Presentation"
 label   = "Safe area (horizontal)"
 kind    = "int"
 default = 90
+min     = 0
+max     = 100
 applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:944)
 argv    = "flag"
 tooltip = """
@@ -372,6 +340,8 @@ group   = "Presentation"
 label   = "Safe area (vertical)"
 kind    = "int"
 default = 90
+min     = 0
+max     = 100
 applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:908)
 argv    = "flag"
 tooltip = """
@@ -423,6 +393,8 @@ group   = "Audio"
 label   = "Audio buffer (frames)"
 kind    = "int"
 default = 8
+min     = 4
+max     = 64
 applies = "restart"
 argv    = "flag"
 tooltip = "Maximum buffered audio frames (4 to 64). Lower values reduce latency and can stutter."

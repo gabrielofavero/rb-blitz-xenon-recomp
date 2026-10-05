@@ -426,6 +426,11 @@ struct SettingRow {
   std::string choices;   // comma-separated, empty unless kEnum
   std::string validate;  // pipe-separated rules, empty unless a path kind
   std::string evidence;  // the `live:` comment's tail, empty unless kLive
+  // Optional bounds for an int/float row, so the widget's slider carries the row's real
+  // limits instead of the launcher inventing one.
+  bool has_range = false;
+  std::string min_text;
+  std::string max_text;
   bool argv_flag = true;
 };
 
@@ -755,6 +760,40 @@ std::unique_ptr<Schema> Build(const Document& document) {
       continue;
     }
 
+    // Optional bounds, so a numeric row's widget is a slider over the range the cvar really
+    // accepts rather than a free field the launcher has to guess about.
+    const Value* min_value = entry.Find("min");
+    const Value* max_value = entry.Find("max");
+    if (min_value != nullptr || max_value != nullptr) {
+      if (row.kind != Kind::kInt && row.kind != Kind::kFloat) {
+        Fail(Location(line) + "row `" + row.key +
+             "` has `min`/`max` but its kind is not int or float");
+        continue;
+      }
+      if (min_value == nullptr || max_value == nullptr || min_value->is_array ||
+          max_value->is_array || !IsNumeric(min_value->text, row.kind == Kind::kFloat) ||
+          !IsNumeric(max_value->text, row.kind == Kind::kFloat)) {
+        Fail(Location(line) + "row `" + row.key +
+             "` needs a numeric `min` and `max`");
+        continue;
+      }
+      const double low = std::strtod(min_value->text.c_str(), nullptr);
+      const double high = std::strtod(max_value->text.c_str(), nullptr);
+      const double fallback = std::strtod(row.default_text.c_str(), nullptr);
+      if (low >= high) {
+        Fail(Location(line) + "row `" + row.key + "` has min >= max");
+        continue;
+      }
+      if (fallback < low || fallback > high) {
+        Fail(Location(line) + "row `" + row.key + "` defaults to `" + row.default_text +
+             "`, which is outside its own min/max");
+        continue;
+      }
+      row.has_range = true;
+      row.min_text = min_value->text;
+      row.max_text = max_value->text;
+    }
+
     schema->settings.push_back(std::move(row));
   }
 
@@ -881,7 +920,8 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "\n"
       << "// One row. `choices` and `validate` are comma- and pipe-separated respectively\n"
       << "// (empty when the kind does not use them); `evidence` is the `live:` comment that\n"
-      << "// backs `applies == Applies::kLive`.\n"
+      << "// backs `applies == Applies::kLive`; `has_range` carries the optional `min`/`max`\n"
+      << "// of a numeric row so its widget can be a slider over the real limits.\n"
       << "struct Setting {\n"
       << "  std::string_view key;\n"
       << "  Tab tab;\n"
@@ -894,6 +934,9 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "  std::string_view choices;\n"
       << "  std::string_view validate;\n"
       << "  std::string_view evidence;\n"
+      << "  bool has_range;\n"
+      << "  std::string_view min_text;\n"
+      << "  std::string_view max_text;\n"
       << "  bool argv_flag;\n"
       << "};\n"
       << "\n"
@@ -933,6 +976,9 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
         << ", .tooltip = " << CppLiteral(row.tooltip) << ", .choices = " << CppLiteral(row.choices)
         << ", .validate = " << CppLiteral(row.validate)
         << ", .evidence = " << CppLiteral(row.evidence)
+        << ", .has_range = " << (row.has_range ? "true" : "false")
+        << ", .min_text = " << CppLiteral(row.min_text)
+        << ", .max_text = " << CppLiteral(row.max_text)
         << ", .argv_flag = " << (row.argv_flag ? "true" : "false") << "},\n";
   }
   out << "}};\n"

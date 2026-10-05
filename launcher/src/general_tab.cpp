@@ -22,8 +22,9 @@ namespace rb_blitz::launcher {
 namespace {
 
 // Not constexpr: ImVec4 has no constexpr constructor.
-const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
 const ImVec4 kError{0.95f, 0.42f, 0.38f, 1.0f};
+
+constexpr const char* kInstallPopup = "Install Ultimate";
 
 // The profile field a path row owns. B4 generalises this; M1's General tab has exactly two
 // path rows and both are named here so nothing else has to guess.
@@ -107,62 +108,132 @@ const PathVerdict& GeneralTab::VerdictFor(std::string_view key, const std::strin
   return VerdictFor(key, value);
 }
 
-void GeneralTab::DrawTargetValue(ProfileSession& session, std::size_t index, FocusModel& ring,
-                                 NavAction action) {
+void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, FocusModel& ring,
+                                NavAction action) {
   Profile& profile = session.profile();
-  struct Option {
-    LaunchTarget target;
-    const char* label;
-  };
-  const Option options[] = {
-      {LaunchTarget::kCommon, "Rock Band Blitz (Common)"},
-      {LaunchTarget::kDemo, "Rock Band Blitz Demo"},
-      {LaunchTarget::kUltimate, "Rock Band Blitz Ultimate"},
-  };
-  const std::size_t option_count = sizeof(options) / sizeof(options[0]);
-
-  const bool activated =
-      action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
-
   // D5: the target the launcher will actually start, which is the stored choice except while the
-  // payload is missing. It is computed for the screen and not written to the profile: the row and
-  // its warning say what will happen, and installing the payload later restores the choice
-  // without the user having to remember what it was (B4).
+  // payload is missing. It is computed for the screen and not written to the profile: the row
+  // says what will happen, and installing the payload later restores the choice without the user
+  // having to remember what it was (B4).
   const LaunchTarget effective = FallbackTarget(profile.target, state_);
 
-  std::size_t current = 0;
-  for (std::size_t i = 0; i < option_count; ++i) {
-    if (options[i].target == effective) {
-      current = i;
+  // D5's "never hard-disable": when the payload is not there, the Ultimate entry is not shown
+  // greyed with an explanation - the entry that would install it takes its place, so the row
+  // always offers something the user can do.
+  if (!UltimateAvailable(state_)) {
+    if (DrawFocusableRadio("Rock Band Blitz", first_row, ring, action,
+                           effective == LaunchTarget::kCommon)) {
+      profile.target = LaunchTarget::kCommon;
     }
-  }
-  if (activated) {
-    current = (current + 1) % option_count;
-    profile.target = options[current].target;
+    if (DrawFocusableRadio("Rock Band Blitz Demo", first_row + 1, ring, action,
+                           effective == LaunchTarget::kDemo)) {
+      profile.target = LaunchTarget::kDemo;
+    }
+
+    const std::size_t index = first_row + 2;
+    const bool focused = !ring.Empty() && ring.Index() == index;
+    if (focused) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    }
+    const bool clicked = ImGui::Button("Install Ultimate...");
+    if (focused) {
+      ImGui::PopStyleColor();
+    }
+    ring.FocusIf(index, ImGui::IsItemHovered());
+    if (clicked) {
+      ring.SetIndex(index);
+    }
+    if (focused && !ImGui::IsItemVisible()) {
+      ImGui::SetScrollHereY(0.5f);
+    }
+    if (clicked || (focused && action == NavAction::kActivate)) {
+      std::string error;
+      install_.Start(roots_.game_root, session.executable_dir(), &error);
+      // Opened by the modal itself, outside this row's ImGui id scope: a popup is keyed by the
+      // id stack it is opened in, and BeginPopupModal is not inside DrawTargetRows.
+      install_requested_ = true;
+    }
+    return;
   }
 
-  for (std::size_t i = 0; i < option_count; ++i) {
-    const Option& option = options[i];
-    const bool ultimate = option.target == LaunchTarget::kUltimate;
-    // D5: the row says what the files say instead of being greyed out, and "merged" is
-    // distinguished from a payload in its own folder.
-    std::string label(option.label);
-    if (ultimate && state_ == UltimateState::kAlsoPresent) {
-      label += " (merged)";
-    } else if (ultimate && !UltimateAvailable(state_)) {
-      label += " (not installed)";
-    }
-    if (ultimate && !UltimateSelectable(state_)) {
-      ImGui::BeginDisabled();
-    }
-    bool selected = effective == option.target;
-    if (ImGui::RadioButton(label.c_str(), selected)) {
-      profile.target = option.target;
-    }
-    if (ultimate && !UltimateSelectable(state_)) {
-      ImGui::EndDisabled();
-    }
+  if (DrawFocusableRadio("Rock Band Blitz", first_row, ring, action,
+                         effective == LaunchTarget::kCommon)) {
+    profile.target = LaunchTarget::kCommon;
   }
+  if (DrawFocusableRadio("Rock Band Blitz Demo", first_row + 1, ring, action,
+                         effective == LaunchTarget::kDemo)) {
+    profile.target = LaunchTarget::kDemo;
+  }
+  if (DrawFocusableRadio("Rock Band Blitz Ultimate", first_row + 2, ring, action,
+                         effective == LaunchTarget::kUltimate)) {
+    profile.target = LaunchTarget::kUltimate;
+  }
+}
+
+void GeneralTab::DrawInstallModal(NavAction action) {
+  // The helper is watched through its own progress file, so the download and the frame loop
+  // run side by side rather than one blocking the other.
+  install_.Poll();
+  if (install_requested_) {
+    install_requested_ = false;
+    ImGui::OpenPopup(kInstallPopup);
+  }
+  if (ImGui::BeginPopupModal(kInstallPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (install_.Busy()) {
+      ImGui::TextUnformatted("Downloading and installing the Ultimate mod...");
+      if (install_.progress_percent() >= 0) {
+        ImGui::ProgressBar(install_.progress_percent() / 100.0f, ImVec2(360.0f, 0.0f));
+      } else {
+        // Indeterminate: the helper has not written its first progress line yet.
+        ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()), ImVec2(360.0f, 0.0f));
+      }
+      if (!install_.progress_detail().empty()) {
+        ImGui::TextDisabled("%s", install_.progress_detail().c_str());
+      }
+      ImGui::Spacing();
+      if (ImGui::Button("Cancel") || action == NavAction::kCancel) {
+        install_.Cancel();
+      }
+    } else if (install_.status() == UltimateInstaller::Status::kSucceeded) {
+      ImGui::TextWrapped("%s", install_.message().c_str());
+      ImGui::Spacing();
+      if (ImGui::Button("Close") || action == NavAction::kCancel) {
+        install_.Reset();
+        ImGui::CloseCurrentPopup();
+      }
+    } else {
+      // Failed, or cancelled: the same honest exit either way - what went wrong, and the two
+      // manual steps that do not depend on the helper at all.
+      ImGui::PushStyleColor(ImGuiCol_Text, kError);
+      ImGui::TextWrapped("%s", install_.message().c_str());
+      ImGui::PopStyleColor();
+      ImGui::Spacing();
+      ImGui::TextUnformatted("You can install it by hand instead:");
+      if (!install_.manual_url().empty()) {
+        ImGui::BulletText("Download the Rock Band Blitz Ultimate release:");
+        ImGui::TextWrapped("%s", install_.manual_url().c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Open the download page")) {
+          OpenInShell(install_.manual_url());
+        }
+      } else {
+        ImGui::BulletText("Download the Rock Band Blitz Ultimate release from its GitHub page.");
+      }
+      ImGui::BulletText("Unpack the Xbox folder of that archive into:");
+      ImGui::TextWrapped("%s", install_.manual_destination().string().c_str());
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Open that folder")) {
+        OpenFolder(install_.manual_destination());
+      }
+      ImGui::Spacing();
+      if (ImGui::Button("Close") || action == NavAction::kCancel) {
+        install_.Reset();
+        ImGui::CloseCurrentPopup();
+      }
+    }
+    ImGui::EndPopup();
+  }
+  install_modal_open_ = ImGui::IsPopupOpen(kInstallPopup);
 }
 
 void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_width,
@@ -207,22 +278,6 @@ void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_wid
 }
 
 void GeneralTab::DrawMessages(const settings::Setting& setting, ProfileSession& session) {
-  if (setting.key == "launch.target") {
-    const std::string_view state_text = UltimateStateText(state_);
-    if (!state_text.empty()) {
-      ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-      ImGui::TextWrapped("%s", std::string(state_text).c_str());
-      ImGui::PopStyleColor();
-    }
-    if (!roots_.game_root_found) {
-      const std::string text = "No game folder was found next to the launcher (looked for " +
-                               (roots_.game_root / "default.xex").string() +
-                               "), so nothing here has been verified against an install.";
-      ImGui::TextDisabled("%s", text.c_str());
-    }
-    return;
-  }
-
   // A path row's own value is judged every time it changes, not only when it is picked: a
   // hand-edited profile that points a writable root into the game data is refused out loud
   // too (D4), rather than only being caught the first time somebody touches the row.
@@ -254,28 +309,44 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
     ApplyChosenPath(session);
   }
 
+  // While the install notice is up it owns the keyboard, so the rows behind it do not act on a
+  // keypress meant for it. B4's block is *not* gated here: it decides for itself whether its own
+  // confirmation is up, and it is the one that can still be answering.
+  const NavAction rows_action = install_modal_open_ ? NavAction::kNone : action;
+
   std::size_t row_index = 0;
   for (const LayoutGroup& group : tab.groups) {
+    // A category this build has nothing for is hidden outright rather than naming itself.
+    if (group.unavailable) {
+      continue;
+    }
     ImGui::SeparatorText(group.group->name.data());
     for (const LayoutRow& row : group.rows) {
       if (row.setting == nullptr) {
-        // A group with nothing to draw is its name and one line (D14).
-        const std::string note(GroupNoteText(*row.note_group));
-        ImGui::TextWrapped("%s", note.c_str());
-        ImGui::Spacing();
         continue;
       }
 
       const settings::Setting& setting = *row.setting;
-      const RowColumns columns = RowColumnWidths();
       RowScope scope(setting.key);
+      // The launch target is not a labelled row: it is a stack of choices under the group's
+      // own heading, and it occupies kTargetRows ring rows.
+      if (setting.key == "launch.target") {
+        DrawTargetRows(session, row_index, ring, rows_action);
+        if (!roots_.game_root_found) {
+          ImGui::TextDisabled(
+              "No game folder was found next to the launcher, so nothing here has been "
+              "checked against an install.");
+        }
+        row_index += kTargetRows;
+        continue;
+      }
+
+      const RowColumns columns = RowColumnWidths();
       DrawRowLabel(setting, row_index, ring, columns.label_width);
       ImGui::SameLine();
-      if (setting.key == "launch.target") {
-        DrawTargetValue(session, row_index, ring, action);
-      } else if (setting.kind == settings::Kind::kPathDir ||
-                 setting.kind == settings::Kind::kPathFile) {
-        DrawPathValue(setting, columns.value_width, session, row_index, ring, action);
+      if (setting.kind == settings::Kind::kPathDir ||
+          setting.kind == settings::Kind::kPathFile) {
+        DrawPathValue(setting, columns.value_width, session, row_index, ring, rows_action);
       } else {
         ImGui::BeginDisabled();
         DrawReadOnlyValue(setting, columns.value_width,
@@ -289,6 +360,8 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
 
   // B4's block, at the end of the tab and in the ring: Save, Reset, Import, Export, Portable.
   panel_.Draw(row_index, session, ring, action);
+  // B8's progress/result notice, which owns the keyboard while it is up.
+  DrawInstallModal(action);
 }
 
 }  // namespace rb_blitz::launcher

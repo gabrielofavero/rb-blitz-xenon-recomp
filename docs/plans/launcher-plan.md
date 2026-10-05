@@ -334,6 +334,23 @@ filtering, render scale, letterbox, safe area/overscan, overscan cutoff, ditheri
 M1 ships this tab in full (§1.1); a row for a feature that does not exist yet (master volume) stays out
 of the table until it does (P0.2's rule).
 
+> **Amended 2026-10-05 (built).** The tab ships as decided, with three changes that came out of reading
+> the rows against what the runtime really accepts:
+>
+> - **Resolution is a curated `enum`, not a free size.** The list is exactly the presets
+>   `rexglue-sdk/include/rex/graphics/video_mode_util.h` parses (`720p`, `1080p`, `1440p`, `4k`), because
+>   those are the sizes known to be safe; `video_mode_width`/`video_mode_height` are no longer rows, so
+>   there is nothing to type a 21:9 size into. The runtime's own default is 1280×720, which is why `720p`
+>   is the row's default and passes nothing.
+> - **The guest refresh rate row (`video_mode_refresh_rate`) is withdrawn.** It changes how the title
+>   paces itself, and nothing has established that any value other than the default is safe, so
+>   offering it would be offering a change nobody can vouch for.
+> - **`window_width`/`window_height` are withdrawn.** The resolution preset already sizes the startup
+>   window (`window_sdl.cpp`), and two controls for one window can only disagree.
+>
+> Two rows the plan did not list were added, both because a widget needs them: `min`/`max` bounds on a
+> numeric row (the cvar's own `.range(...)`), so a slider cannot offer a value the runtime would clamp.
+
 ### D13 — Controller tab, honestly split in two
 
 **Phase C-A — everything that exists today.** Input form (`input_backend`: sdl/xinput), the **mouse
@@ -391,6 +408,14 @@ Two rules keep "leave the unimplemented categories blank" honest:
 - Every row that *is* shown states whether it is a real runtime behaviour or a build-time fact, in the
   repo's hook-hygiene spirit ("every hook states the faithful behaviour and the reason for deviating").
 
+> **Amended 2026-10-05 (built).** The second half of the first rule is the one that ships: the five
+> `unavailable` groups are declared in the schema and named by `--dump-layout`, and the tabs **hide them**
+> rather than spending the window on a heading and a sentence that offer the user nothing. The `note`
+> text stays in the schema, so nothing is lost — it just is not read out to someone who came to change a
+> setting. The General tab is the one place a missing feature became an action rather than a sentence:
+> when the Ultimate payload is absent, the greyed-out third target is replaced by *Install Ultimate…*
+> (B8), which is what the user wanted to do anyway.
+
 ---
 
 ### D15 — Reusing the game's own UI art
@@ -421,6 +446,28 @@ phases.
 
 ---
 
+### D16 — The window: its name, its size, its face
+
+Decided 2026-10-05, from reading the first running build.
+
+- **The name is "Rock Band Blitz Launcher".** The window title, the in-window heading and the ImGui
+  window id all use it; the title keeps the ` — <tab>` suffix, which is the one piece of launcher state
+  a script can read back (`MainWindowTitle`), and it is what makes "tab through every tab" checkable.
+- **The window opens at 1100×640 in logical points**, sized so every tab's content fits without
+  scrolling, and it is clamped to the display's work area. A size the profile already holds is used as
+  it is, so a user's own resize is respected.
+- **The geometry is stored in points, not pixels, and multiplied by the display's content scale when
+  the window is created.** SDL sizes a window in the same units ImGui measures the UI in, so without
+  that multiplication a 300% display would get a window a third the size with physically tiny text —
+  which is exactly what the first build did. `--dump-display` prints the work area, the content scale,
+  the size the window would open at and the face it loaded, so this is checkable without a screenshot.
+- **The UI face is the machine's, loaded at runtime** (`segoeui.ttf`, then `tahoma.ttf`, then
+  `arial.ttf`, from `%SystemRoot%\Fonts`), with ImGui's built-in face as the fallback. Nothing is
+  redistributed and no font file is added to the repository — the same posture as the cover art (D11),
+  and for the same reason.
+
+---
+
 ## 4. Contracts that must exist before parallel work
 
 These are Wave 0. Everything else can be built against them by someone who has read only this section.
@@ -446,8 +493,13 @@ applies  = "restart"            # restart | live
 tooltip  = "Width of the guest's video mode. Restart required."
 ```
 
-Rules: `enum` entries carry `choices`; `path_dir` entries carry `validate` (`exists|dlc_layout|inside_game_root:forbid`);
+Rules: `enum` entries carry `choices`; a numeric entry may carry `min`/`max` (both or neither, the
+default inside); `path_dir` entries carry `validate` (`exists|dlc_layout|inside_game_root:forbid`);
 `applies = "live"` is only allowed with an evidence comment naming the change callback.
+
+> **Amended 2026-10-05 (built).** The example above (`video_mode_width`, `Resolution width`) is the row
+> this build withdrew: resolution is one `enum` over the runtime's preset list, and a numeric row that
+> remains carries the cvar's own range so its widget is a bounded slider. See D12's amendment.
 
 **Tabs and groups.** `tab` is one of `general | graphics | controller` — there is no `experimental`
 (D14). M1's row set (§1.1) is every `general` row (`launch.target`, `user_data_root`, `dlc_root`), every

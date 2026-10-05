@@ -37,9 +37,9 @@ be a file reference plus a cached copy rather than an RB3-shaped bitmap.
 
 The `.tex` names and the corpus are here to work against:
 
-    python scripts/hmx_milo.py info  extracted/ui/splash/gen/splash.milo_xbox
-    python scripts/hmx_milo.py list  extracted/ui/splash/gen/splash.milo_xbox --assets
-    python scripts/hmx_milo.py dump  extracted/ui/splash/gen/splash.milo_xbox --chunk 3
+    python scripts/hmx_milo.py info  assets/game/360/ui/splash/gen/splash.milo_xbox
+    python scripts/hmx_milo.py list  assets/game/360/ui/splash/gen/splash.milo_xbox --assets
+    python scripts/hmx_milo.py dump  assets/game/360/ui/splash/gen/splash.milo_xbox --chunk 3
 
 References: the chunk table and the deflate framing come from the RB3 decompilation
 (`freeqaz/rb3-xenon`, ``utl/ChunkStream``); every claim here was re-verified against

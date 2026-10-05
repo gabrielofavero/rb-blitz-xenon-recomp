@@ -53,12 +53,14 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/game_config.cpp
     src/general_report.cpp
     src/general_tab.cpp
+    src/install_ultimate.cpp
     src/nav.cpp
     src/path_validate.cpp
     src/profile_session.cpp
     src/profile_ui.cpp
     src/row_ui.cpp
     src/schema_view.cpp
+    src/settings_edit.cpp
     src/shell.cpp
     src/ultimate_state.cpp
     # The profile module is shared with the game and SDK-free on purpose (P0.3), which is
@@ -106,3 +108,9 @@ target_include_directories(rb_blitz_launcher PRIVATE
 add_dependencies(rb_blitz_launcher rb_blitz_launcher_settings)
 
 target_link_libraries(rb_blitz_launcher PRIVATE imgui SDL3::SDL3)
+
+if(WIN32)
+    # B8 opens the OS shell (the default browser for the pinned release URL, Explorer for the
+    # folder a manual install goes into) through ShellExecuteW.
+    target_link_libraries(rb_blitz_launcher PRIVATE shell32)
+endif()

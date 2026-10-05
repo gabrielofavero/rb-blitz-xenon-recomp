@@ -12,13 +12,14 @@
 #include <utility>
 
 #include "row_ui.h"
+#include "settings_edit.h"
 
 namespace rb_blitz::launcher {
 namespace {
 
 // The one window's ImGui id. ImGuiWindowFlags_NoSavedSettings means ImGui never writes an ini
 // for it, so the name is only an identity.
-constexpr const char* kWindowId = "rb_blitz launcher";
+constexpr const char* kWindowId = "Rock Band Blitz Launcher";
 
 // The keyboard's mapping (A1). ImGui's own navigation is deliberately off, so every key the
 // launcher binds is translated here and nowhere else.
@@ -89,11 +90,20 @@ Shell::Shell(ProfileSession session, GameRoots roots)
   // window resize record a choice the user never made.
   rings_.resize(layout_.size());
   for (std::size_t index = 0; index < layout_.size(); ++index) {
-    // B4's profile block is focusable too, and it lives at the end of the General tab, so that
-    // tab's ring is the settings rows plus the block. Everything else is one ring per row.
+    // A row takes one ring entry, except an enum, which takes one per choice because each
+    // choice is drawn as its own radio (schema_view's FocusEntriesFor). B4's profile block is
+    // focusable too and lives at the end of the General tab, so that tab adds its rows.
+    std::size_t entries = 0;
+    for (const LayoutGroup& group : layout_[index].groups) {
+      for (const LayoutRow& row : group.rows) {
+        if (row.setting != nullptr) {
+          entries += FocusEntriesFor(*row.setting);
+        }
+      }
+    }
     const std::size_t extra =
         layout_[index].tab == settings::Tab::kGeneral ? GeneralTab::kExtraRows : 0;
-    rings_[index].Reset(layout_[index].row_count + extra);
+    rings_[index].Reset(entries + extra);
   }
 }
 
@@ -159,11 +169,18 @@ bool Shell::Frame() {
     action = gamepad_->Poll();
   }
   if (action == NavAction::kCancel) {
-    // Escape belongs to B4's reset confirmation while it is up; with nothing modal on screen it
-    // is "leave the launcher" (A1).
+    // Escape belongs to the modal that is up - B4's reset confirmation, or B8's install
+    // progress - and only means "leave the launcher" when nothing modal is on screen (A1).
     if (!general_.ModalOpen()) {
       return false;
     }
+  }
+  // A modal owns the launcher while it is up, so the tab cannot be changed behind it: its own
+  // tab has to keep being drawn for its state machine to keep running, and walking away from it
+  // would leave the helper installing with nothing watching.
+  if (general_.ModalOpen() &&
+      (action == NavAction::kNextTab || action == NavAction::kPreviousTab)) {
+    action = NavAction::kNone;
   }
   ApplyAction(action);
   action_ = action;
@@ -175,11 +192,10 @@ bool Shell::Frame() {
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);
 
-  ImGui::TextUnformatted("rb_blitz launcher");
+  ImGui::TextUnformatted("Rock Band Blitz Launcher");
   ImGui::SameLine();
   ImGui::TextDisabled(
-      "Up/Down or Tab moves  |  Left/Right or PageUp/PageDown changes tab  |  Enter opens or "
-      "changes  |  Esc or B quits");
+      "Tab / Up / Down move  |  Left / Right switches tab  |  Enter activates  |  Esc quits");
 
   // The tab strip is the model's, not ImGui's tab bar. Two reasons: the selection must change
   // on the frame the key is read, and the ring - which A3's pad will drive - has to be the
@@ -227,28 +243,38 @@ bool Shell::Frame() {
 void Shell::DrawTab(const TabLayout& tab, FocusModel& ring) {
   std::size_t row_index = 0;
   for (const LayoutGroup& group : tab.groups) {
+    // A category this build has nothing for is hidden outright rather than naming itself
+    // (D14 allows either; the plan's "reduce the useless text" is the newer instruction).
+    if (group.unavailable) {
+      continue;
+    }
     ImGui::SeparatorText(group.group->name.data());
     for (const LayoutRow& row : group.rows) {
       if (row.setting == nullptr) {
-        // A group with nothing to draw is its name and one line, never a disabled widget
-        // that looks like a setting (D14).
-        const std::string note(GroupNoteText(*row.note_group));
-        ImGui::TextWrapped("%s", note.c_str());
-        ImGui::Spacing();
         continue;
       }
       const settings::Setting& setting = *row.setting;
-      const RowColumns columns = RowColumnWidths();
       RowScope scope(setting.key);
+      // A row whose widget is a line of radios (an enum) needs the width for them, so it takes
+      // most of the row and keeps its label in what is left; everything else is a single
+      // widget in a value column beside a full-width label.
+      const RowColumns columns =
+          RowColumnWidths(setting.kind == settings::Kind::kEnum ? 0.72f : 0.35f);
       DrawRowLabel(setting, row_index, ring, columns.label_width);
       ImGui::SameLine();
-      ImGui::BeginDisabled();
-      DrawReadOnlyValue(setting, columns.value_width, LauncherValueText(session_, setting));
-      ImGui::EndDisabled();
+      // B2: the row is the widget its kind calls for, and what it changes lands in the
+      // profile - which B4's Save is what writes to disk.
+      DrawEditableSetting(setting, columns.value_width, row_index, ring, action_, session_);
+      // D12: the row's own truth. A restart row says so rather than letting a user believe the
+      // change took effect while the game is not even running.
+      if (setting.applies == settings::Applies::kRestart) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(needs restart)");
+      }
       // B4's precedence badge: a row the game's own file decides says so here too, so the
       // warning does not depend on which tab the user is looking at.
       DrawOverrideBadge(setting, session_);
-      ++row_index;
+      row_index += FocusEntriesFor(setting);
     }
   }
 }

@@ -26,11 +26,11 @@ possible without touching the archive index: ``swap`` writes a copy of the
 untouched.
 
 Usage:
-    python scripts/hmx_tex.py info   extracted/ui/image/gen/default_album_art_keep.png_xbox
-    python scripts/hmx_tex.py export extracted/ui/image/gen/default_album_art_keep.png_xbox --out art.png
-    python scripts/hmx_tex.py export extracted/ui/image/gen/default_album_art_keep.png_xbox --out art.dds
-    python scripts/hmx_tex.py import art.png --template extracted/ui/image/gen/default_album_art_keep.png_xbox --out new.png_xbox
-    python scripts/hmx_tex.py swap   art.png --template extracted/ui/image/gen/default_album_art_keep.png_xbox \\
+    python scripts/hmx_tex.py info   assets/game/360/ui/image/gen/default_album_art_keep.png_xbox
+    python scripts/hmx_tex.py export assets/game/360/ui/image/gen/default_album_art_keep.png_xbox --out art.png
+    python scripts/hmx_tex.py export assets/game/360/ui/image/gen/default_album_art_keep.png_xbox --out art.dds
+    python scripts/hmx_tex.py import art.png --template assets/game/360/ui/image/gen/default_album_art_keep.png_xbox --out new.png_xbox
+    python scripts/hmx_tex.py swap   art.png --template assets/game/360/ui/image/gen/default_album_art_keep.png_xbox \\
                                      --hdr game/gen/main_xbox.hdr --patch-dir out/mods-texture
 
 ``--patch-dir`` writes a small overlay archive (``gen/patch_xbox.hdr`` plus
@@ -576,7 +576,7 @@ def main(argv):
     swap.add_argument("--patch-dir", help="write a small overlay archive here instead "
                                           "(<dir>/gen/patch_xbox.hdr and _0.ark)")
     swap.add_argument("--entry", help="in-archive path (default: --template under --root)")
-    swap.add_argument("--root", default="extracted", help="extraction root (default: extracted)")
+    swap.add_argument("--root", default="assets/game/360", help="extraction root (default: assets/game/360)")
     swap.add_argument("--overwrite", action="store_true")
     swap.set_defaults(func=cmd_swap)
 

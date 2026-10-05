@@ -225,7 +225,7 @@ void TestMissingFile() {
   CHECK_TRUE(result.usable());
   CHECK_TRUE(result.error.empty());
   CHECK_EQ(result.profile.window_width, 1100);
-  CHECK_EQ(result.profile.window_height, 720);
+  CHECK_EQ(result.profile.window_height, 640);
   CHECK_TRUE(result.profile.target == LaunchTarget::kUltimate);
   CHECK_TRUE(result.profile.settings.empty());
   CHECK_FALSE(fs::exists(path));
@@ -475,7 +475,7 @@ void TestRenderProfile() {
   const std::string text = RenderProfile(profile);
   CHECK_TRUE(text.find("schema_version = 1\n") == 0);
   CHECK_TRUE(text.find("[launcher]\nversion = 1\nportable = false") != std::string::npos);
-  CHECK_TRUE(text.find("[window]\nwidth = 1100\nheight = 720") != std::string::npos);
+  CHECK_TRUE(text.find("[window]\nwidth = 1100\nheight = 640") != std::string::npos);
   CHECK_TRUE(text.find("[launch]\ntarget = \"ultimate\"") != std::string::npos);
 
   // A fresh file is loadable, and its values match what was rendered.

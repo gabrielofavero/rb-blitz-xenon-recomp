@@ -264,7 +264,7 @@ then scheduled against the answer, not against the word.
 ### D14 — Never commit retail content
 
 Unchanged and load-bearing for R1/R2/R4/R9: no `.xex`, no ark, no scene, no texture in the
-repository; `game/` and `extracted/` stay gitignored; every derived artifact stays on the user's
+repository; `game/` and the `assets/game/` extraction trees stay gitignored; every derived artifact stays on the user's
 machine.
 
 ### D15 — A same-build baseline is part of every capture prompt

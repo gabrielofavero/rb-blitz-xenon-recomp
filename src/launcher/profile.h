@@ -58,8 +58,11 @@ struct Profile {
   // The file's own record of portable mode. The marker beside the executable is what
   // actually selects the location (D2); this field only says what the file was told.
   bool portable = false;
+  // The launcher window's own geometry, in logical points - the same unit SDL reports a
+  // window in once the display's content scale is divided out. main() multiplies it by that
+  // scale to size the window, so the number means the same thing on a 100% and a 300% display.
   int window_width = 1100;
-  int window_height = 720;
+  int window_height = 640;
   LaunchTarget target = LaunchTarget::kUltimate;
   std::string game_dir;
   std::string user_data_dir;  // empty = the game's own default

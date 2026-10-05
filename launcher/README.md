@@ -9,20 +9,24 @@ what is in this directory *today* and how to change it.
 Today this directory holds the **launcher executable** with its **three-tab shell**
 ([A1](../docs/plans/launcher-plan.md)), its **settings schema**, and the profile module that
 both executables compile. The General tab is real (B1): it detects the Ultimate payload, edits
-the launch target and the two locations and says why a value was refused. Saving, the
-precedence badge, import/export and portable mode are real too (B4). The bottom bar (A2), the
-controller navigation (A3) and launching the game (B7) arrive with the prompts that follow, so
-what exists here now is a launcher that shows every schema row, edits General, saves what it
-changed, and is fully drivable with the keyboard.
+the launch target and the two locations and says why a value was refused — and when the payload
+is missing, the Ultimate entry becomes the *Install Ultimate…* action ([B8](../docs/plans/launcher-plan.md)),
+which drives the installer's own helper. Saving, the precedence badge, import/export and
+portable mode are real too (B4), and the Graphics tab's rows are editable (B2). The bottom bar
+(A2), the controller navigation (A3) and launching the game (B7) arrive with the prompts that
+follow, so what exists here now is a launcher that shows and edits every schema row, installs
+the Ultimate payload, saves what it changed, and is fully drivable with the keyboard.
 
 | Path | What it is |
 | --- | --- |
-| `main.cpp` | The entry point: opens the window, loads the profile for the window size, runs the frame loop, saves the size on the way out (P0.4, A1, B4) |
+| `main.cpp` | The entry point: opens the window, loads the profile for the window geometry, loads the UI font, runs the frame loop, saves the size on the way out (P0.4, A1, B4) |
 | `src/schema_view.{h,cpp}` | The generated table turned into tabs, groups and rows — no ImGui, no SDL (A1) |
 | `src/nav.{h,cpp}` | The focus ring and the one `NavSource` seam a device plugs into (A1, D6) |
-| `src/shell.{h,cpp}` | The tab shell: the strip, the ring, and the read-only widget per `kind` (A1) |
-| `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with, and the precedence badge (A1, B1, B4) |
-| `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers (B1) |
+| `src/shell.{h,cpp}` | The tab shell: the strip, the ring, and one editable widget per `kind` (A1, B2) |
+| `src/settings_edit.{h,cpp}` | The per-kind editor that writes a row's change into the profile (B2) |
+| `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with, and the precedence badge (A1, B1, B2, B4) |
+| `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers, and the Ultimate install (B1, B8) |
+| `src/install_ultimate.{h,cpp}` | B8's action: runs `rb_blitz_setup_helper.exe install-ultimate` and reports its progress, with the manual route when it fails |
 | `src/ultimate_state.{h,cpp}` | D5's four payload states and the target fallback — no ImGui, no SDL (B1) |
 | `src/path_validate.{h,cpp}` | The schema's `validate` rules, reusing `src/fs/path_policy.h` and `src/fs/dlc_layout.h` (B1) |
 | `src/profile_session.{h,cpp}` | The write path: what a save would change, a reset, import/export, portable mode, and the precedence rule — no ImGui, no SDL (B4) |
@@ -70,6 +74,28 @@ a payload snapshot copies (P0.5), and one place is what a user is told to run fr
 The window is a WIN32-subsystem executable, so a bring-up failure reports itself in a
 message box and returns non-zero instead of printing to a console nothing owns.
 
+### The window size, the font, and DPI
+
+Two things make the window readable rather than merely present, and both are in `main.cpp`:
+
+- **The face is the machine's, not ours.** ImGui's built-in font is a 13px pixel face;
+  the launcher asks the OS for a real outline font instead (`segoeui.ttf`, then
+  `tahoma.ttf`, then `arial.ttf`, from `%SystemRoot%\Fonts`) and falls back to the built-in
+  face only when none of them is there. Nothing is redistributed with the launcher and no
+  font file is added to the repository — absence is a supported configuration, exactly as it
+  is for the cover art (D11).
+- **The size is kept in points and scaled by the display.** SDL sizes a window in the same
+  units ImGui measures the UI in, and the UI is scaled by the display's content scale, so a
+  window whose geometry is stored in points has to be multiplied by that scale at creation
+  time: on a 300% display, 1100×640 points becomes a 3300×1920-pixel window rather than a
+  window a third the size with tiny text. `SDL_GetDisplayUsableBounds` clamps the result to
+  the work area, so a small panel gets a smaller window (and scrolls) instead of one that
+  hangs off the screen.
+
+`--dump-display` prints all of it — the usable bounds, the content scale, the size the
+window would open at and the face that was loaded — so the DPI story is checkable on a build
+machine rather than only from a screenshot of someone's monitor.
+
 ## The shell — tabs, rows and the focus ring (A1)
 
 The shell is the model's, not ImGui's. Every row it draws comes from the generated table
@@ -81,23 +107,36 @@ changes no C++ at all:
   read and nothing moves it but the ring (A3's pad included).
 - **One row per `[[setting]]`**, grouped by `group` in the table's order, with one
   widget per `kind` — `bool`, `int`, `float`, `enum`, `string`, `path_dir`, `path_file`.
-  A1 draws them read-only, showing the compiled default; B4 wires the edit path.
-- **A group with nothing to draw** is its name plus the group's own `note`, never a
-  disabled widget that looks like a setting (D14).
+  A1 drew them read-only; B2 makes them editable: a `bool` is a checkbox, an `int`/`float`
+  with `min`/`max` is a slider, an `enum` is a row of radios (one ring entry each), and a
+  string is a text field. A kind without an editor — a path outside the General tab — is
+  drawn read-only rather than ignoring the click, and its value comes from the profile.
+- **A restart row says so**: a row whose `applies` is `restart` carries a quiet
+  `(needs restart)` after its widget, because a change that only lands on the next boot
+  must not look like it just happened (D12).
+- **A group this build has nothing for is hidden**, not drawn as its name plus the
+  group's own `note`: empty categories (*Ultimate (advanced)*, *Developer*, *Devices*,
+  *Keyboard*, *Manual*) are declared in the schema and shown by `--dump-layout`, but the
+  tabs leave them out rather than spending the window on text that offers nothing. D14
+  allows either; hiding is the newer instruction.
 - **One focus ring per tab** (`src/nav.cpp`): a flat, ordered list of the tab's rows and a
   focused index. Moving wraps, so `End` then `Down` returns to the first row. Keys are
   translated in exactly one place and become `NavAction`s; the gamepad is a stub
   `NavSource` until A3 fills it in, and the shell does not know which device answered.
 - **Window geometry** is read from the profile at startup and written back on the way out,
   and only when it changed — so a launcher nobody resized neither creates `launcher.toml`
-  nor touches its mtime. A profile that does not parse is never written over (D2).
+  nor touches its mtime. A profile that does not parse is never written over (D2). The
+  number is in logical points and is multiplied by the display's content scale when the
+  window is created, so a 300% monitor gets a window three times as large in pixels rather
+  than one a third the size; `--dump-display` prints the work area, the scale, the size the
+  window would open at and the font face it loaded.
 
 | Keys | What they do |
 | --- | --- |
 | `Down` / `Tab` | Next row (`Up` / `Shift+Tab` goes back) |
 | `Home` / `End` | First / last row |
 | `Right` / `PageDown` | Next tab (`Left` / `PageUp` goes back) |
-| `Enter` / `Space` | Operate the focused row — on General, open the folder picker or move the target on (B1). A read-only row has nothing to operate yet (B4) |
+| `Enter` / `Space` | Operate the focused row: pick a target, open the folder picker, toggle a checkbox, step a slider, choose an enum entry, or start the Ultimate install |
 | `Esc` / `B` | Leave |
 
 The mouse is a device too: clicking a row focuses it, and hovering adopts the ring, so the
@@ -106,39 +145,68 @@ pointer and the keyboard never disagree about the selection (D6).
 `--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
 window — the headless half of A1's verification, and what says out loud if a row ever
 reaches the table without a tooltip. `--dump-general` prints what the General tab would
-decide for a given game root and profile, and `--dump-profile` prints B4's write path and the
+decide for a given game root and profile, `--dump-profile` prints B4's write path and the
 **precedence audit** — one line per row the game's own `rb_blitz.toml` decides, in the words
-the badge uses, which is the only way to check that rule without a screenshot (B1/B4's
-verification, without the OCR):
+the badge uses — and `--dump-display` prints what the launcher made of the display, which is
+the only way to check the DPI story without a screenshot (B1/B4/B2's verification, without
+the OCR):
 
 ```
 rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
 rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\Games\rb_blitz" --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-profile=out\profile.txt --launcher_profile=out\p.toml
+rb_blitz_launcher.exe --dump-display
 ```
 
 ## The General tab (B1)
 
 Three rows, which is the whole of M1's General scope (§1.1, D4): the launch target, the save
-location and the DLC location. *Verify installation*, the game-directory override and
-*Install Ultimate…* are later (B8 and D4 say so); nothing here pretends otherwise.
+location and the DLC location. *Verify installation* and the game-directory override are later
+(D4 says so); nothing here pretends otherwise.
 
-**The launch target** is a radio group, and it is never a dead option (D5). What the files
-say is a *state* (`src/ultimate_state.cpp`), read from the same header the runtime's own check
-uses (`src/hooks/ultimate_plan.h`), so "the launcher says ready" and "the game mounts it"
-cannot drift:
+**The launch target** is a stack of radios under the group heading, one per choice, each its
+own focus-ring entry — so the row says what the choices are and nothing else, instead of
+repeating the game's name three times and then explaining itself in a second sentence.
+It is never a dead option (D5). What the files say is a *state*
+(`src/ultimate_state.cpp`), read from the same header the runtime's own check uses
+(`src/hooks/ultimate_plan.h`), so "the launcher says ready" and "the game mounts it" cannot
+drift:
 
-| State | What the files look like | What the tab says |
+| State | What the files look like | What the tab shows |
 | --- | --- | --- |
-| Ready | the payload pair under `<game root>\ultimate\gen\` | nothing — it just works |
-| Also present | the same pair at the game root's top level ("merged") | that it is merged |
-| Missing | neither location has it | that it is not installed, so the retail game will start |
-| Damaged | `patch_xbox.hdr` without `patch_xbox_0.ark` | the runtime's own wording: "a damaged disc" |
+| Ready | the payload pair under `<game root>\ultimate\gen\` | the three radios, Ultimate included |
+| Also present | the same pair at the game root's top level ("merged") | the three radios, Ultimate included |
+| Missing | neither location has it | two radios and an *Install Ultimate…* action instead of a greyed-out third |
+| Damaged | `patch_xbox.hdr` without `patch_xbox_0.ark` | the same — the install is the repair |
 
 Ultimate stays selectable in every state; what changes is the **default**: a stored
-"Ultimate" with nothing to mount comes up as the retail game, and the tab says why
-(`FallbackTarget`). The four states are pinned by
-`tests/launcher_ultimate_state_tests.cpp` from directory fixtures.
+"Ultimate" with nothing to mount comes up as the retail game, and installing the payload
+later restores the choice without the user having to remember it (`FallbackTarget`). The
+four states are pinned by `tests/launcher_ultimate_state_tests.cpp` from directory fixtures.
+
+***Install Ultimate…*** (B8) is what replaces the disabled option, so there is nothing to
+explain and nothing to grey out. It runs the helper the installer put in the install folder:
+
+```
+rb_blitz_setup_helper.exe install-ultimate --dest "<game root>" --from-pinned
+                          --progress <tmp> --summary <tmp> --log <tmp>
+```
+
+- The child runs **without a window and without blocking the frame loop**; the modal shows
+  the helper's own progress file (percent, then the current step) and can be cancelled. A
+  cancelled run kills the helper and removes `<game root>\.staging`, because the mod is
+  staged there and only moved into place after it verifies — cancelling leaves the game's
+  own files alone and leaves no half-written payload.
+- When it is done, the summary's `ok=1` closes with a confirmation and the tab's file-system
+  probe simply re-runs, so the third radio comes back on the next frame.
+- When it fails — the helper is missing, the build has no pinned URL, the download failed —
+  the modal shows the helper's `error=` line verbatim and then the two manual steps: the
+  pinned release URL (read out of the helper itself with `version --summary`, so the launcher
+  never duplicates the pin) and the folder to unpack the archive's `Xbox` directory into,
+  `<game root>\ultimate`, with buttons that open each.
+
+The launcher never bundles the mod and never downloads it itself; that stays the installer's
+helper and the installer's pin (D5, §4.6).
 
 **The two locations** are path rows with a typed field, a `Browse…` button and `Enter` on the
 focused row opening the same picker. Every value — picked, typed, or already in the profile —
@@ -163,6 +231,31 @@ D5's target fallback is a **display** decision, not a stored one: a stored "Ulti
 nothing to mount is shown and started as the retail game, and the profile keeps what the user
 chose, so installing the payload later needs no remembering and no save can record a fallback
 the user never picked.
+
+
+## The Graphics tab (B2)
+
+Every row here is editable, and every one is a projection of a cvar — the launcher owns no
+graphics state of its own. The widgets come from the schema, so the tab has no per-setting
+code:
+
+| Kind | Widget | Notes |
+| --- | --- | --- |
+| `bool` | checkbox | Enter or Space on the focused row toggles it |
+| `int` / `float` with `min`/`max` | slider | the bounds are the cvar's own `.range(...)` |
+| `enum` | a row of radios | one ring entry per choice, so a pad can reach every value |
+| a row with no editor | read-only | drawn disabled rather than ignoring the click |
+
+Changes land in the session's profile, which is what B4's **Save** writes; the tab strip's
+"unsaved changes" marker is the feedback. Rows whose `applies` is `restart` carry
+`(needs restart)` after the widget — the six `live` rows (`fullscreen`, `vsync`,
+`present_letterbox`, the two safe areas, `audio_mute`) do not, and their tooltips name what
+makes the change land.
+
+The Display group is one row, **Resolution**, an `enum` over the presets the runtime's own
+parser accepts. It is deliberately not a free field: see "What is deliberately not here"
+below for why the free-form size, the guest video mode's dimensions and the guest refresh
+rate are all absent.
 
 
 ## The profile — `launcher.toml`
@@ -249,7 +342,7 @@ The target builds `rb_blitz_embed_settings`, runs it over `config/settings.toml`
 the header and prints what it produced:
 
 ```
-embed_settings: 25 rows in 13 groups (general 3, graphics 19, controller 3)
+embed_settings: 20 rows in 13 groups (general 3, graphics 14, controller 3)
 ```
 
 A schema the tool refuses fails the build. It refuses, deliberately:
@@ -261,7 +354,10 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 - a **`group` that is not declared** for that tab, an unknown `tab`, `kind` or `argv`,
   an `enum` without `choices` (or whose default is not one of them), a `path_*` row
   without `validate`, and a `tab = "experimental"` (there is no such tab,
-  [D14](../docs/plans/launcher-plan.md)).
+  [D14](../docs/plans/launcher-plan.md));
+- **`min`/`max` on a non-numeric row, one of the two without the other, a `min >= max`, or a
+  default outside the range** — the bounds are what the widget is built from, so a bad pair
+  would be a slider that cannot show the row's own default.
 
 ## The fields
 
@@ -277,6 +373,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | `tooltip` | The user-facing sentence shown in the bottom bar. Never empty |
 | `argv` | `flag` emits `--<key>=<value>`; `none` is a launcher-level row the launcher translates itself |
 | `choices` | `enum` only: the allowed values |
+| `min` / `max` | `int` / `float` only, optional: the range the row's slider is bounded to. Both or neither, and the default must sit inside it. They are the cvar's own `.range(...)` where it has one, so the slider cannot offer a value the runtime would clamp |
 | `validate` | `path_dir` / `path_file` only: `exists`, `dlc_layout` or `inside_game_root:forbid`, separated by `\|` |
 
 `argv = "none"` exists for exactly one row: `launch.target` is not a cvar, and the
@@ -292,7 +389,7 @@ are multi-line TOML strings, so they read as sentences in the file and become `\
 ## Groups, and the empty-group rule
 
 A group with no rows yet is declared `status = "unavailable"` together with the single
-line the tab shows for it:
+line that names it:
 
 ```toml
 [[group]]
@@ -302,12 +399,19 @@ status = "unavailable"
 note   = "Per-button remapping is not available in this build."
 ```
 
-That is how an unbuilt category is named without drawing a disabled widget that looks
-like a setting ([D14](../docs/plans/launcher-plan.md), and the two rules in §1.1). A
-group that *has* rows must not be `unavailable`; the tool refuses that combination. The
-five groups declared this way today are the General tab's *Ultimate (advanced)*, the
-Graphics tab's *Developer*, and the Controller tab's *Devices*, *Keyboard* and *Manual* —
-the work [§1.1](../docs/plans/launcher-plan.md) defers past M1.
+That is how an unbuilt category is recorded without drawing a disabled widget that looks
+like a setting ([D14](../docs/plans/launcher-plan.md)). A group that *has* rows must not be
+`unavailable`; the tool refuses that combination. The five groups declared this way today are
+the General tab's *Ultimate (advanced)*, the Graphics tab's *Developer*, and the Controller
+tab's *Devices*, *Keyboard* and *Manual* — the work
+[§1.1](../docs/plans/launcher-plan.md) defers past M1.
+
+**The tabs do not draw them.** A group with nothing in it is left out of its tab entirely,
+so the window is spent on rows that do something; the `note` stays in the schema and in
+`--dump-layout`'s output, which is where a reader goes to see what is not built yet. D14
+allows either ("its name plus one line, **or is hidden**"); hiding is the newer instruction,
+and the General tab shows the one exception that matters — the Ultimate *install* action —
+instead of a sentence about the payload being missing.
 
 ## `live` vs `restart`
 
@@ -345,17 +449,19 @@ hot-reloadable, but the input system is built once from the factory, so the row 
    CAS/FSR parameters behind `REXGLUE_ENABLE_FIDELITYFX=OFF`) does not belong in the
    table: no row is added to fill a category ([D14](../docs/plans/launcher-plan.md)).
 2. Read the setting's own change callback or its use site and decide `applies` from it,
-   not from the lifecycle tag.
+   not from the lifecycle tag. If the cvar declares a `.range(...)`, put it in `min`/`max`
+   so the row's slider is bounded by the runtime's own limits.
 3. Add the `[[setting]]` to `config/settings.toml` under a declared group, with a
    tooltip written for the person reading the bottom bar.
 4. Rebuild `rb_blitz_launcher_settings` and check the printed row count moved.
 
 That is the whole change: the shell renders whatever the table says, in the table's order,
 so a new row appears in its tab, in its group, with its `kind`'s widget — no launcher code
-is edited to add one (A1).
+is edited to add one (A1, B2).
 
 If the setting's category is not built yet, declare the group with
-`status = "unavailable"` and a `note` instead of adding a placeholder row.
+`status = "unavailable"` and a `note` instead of adding a placeholder row; the tab will hide
+it and `--dump-layout` will still name it.
 
 ## What is deliberately not here
 
@@ -364,8 +470,21 @@ If the setting's category is not built yet, declare the group with
   collapses to `bilinear`). Hiding them is the rule in
   [D12](../docs/plans/launcher-plan.md): a build flag is not something a user can act on
   from the launcher.
+- **The graphics backend.** D3D12 vs Vulkan is a build-time link choice
+  (`REXGLUE_USE_D3D12=ON` / `REXGLUE_USE_VULKAN=OFF` on Windows), not a cvar, so there is no
+  row for it: a setting nobody can act on would be a lie. `gpu_plugin` selects the GPU
+  emulation plugin, not the renderer, and the game already sets it to `xenos` itself.
+- **A free resolution or frame-rate field.** Resolution is an `enum` over exactly the
+  presets the runtime's own parser accepts
+  (`rexglue-sdk/include/rex/graphics/video_mode_util.h`: 720p, 1080p, 1440p, 4k), because
+  those are the sizes known to be safe — the free-form `1280x720`-style value, the guest
+  video mode's own width/height, and the guest refresh rate are all absent on purpose. The
+  refresh rate changes how the title paces itself, and frame-rate unlocking is a project
+  non-goal, so nothing offers to change either.
+- **A window-size row.** The resolution preset already sizes the startup window
+  (`window_sdl.cpp`), and `window_width`/`window_height` would be a second control for the
+  same thing, able to disagree with the first.
 - **Master volume.** The SDK has no `audio_volume` cvar yet, so the Audio group has mute
   and buffer size and nothing else.
-- **Frame-rate unlocking.** A project non-goal; no row.
 - **Per-button remapping.** Planned work, not a setting
-  ([D13](../docs/plans/launcher-plan.md)) — the *Manual* group is declared, and empty.
+  ([D13](../docs/plans/launcher-plan.md)) — the *Manual* group is declared, and not drawn.

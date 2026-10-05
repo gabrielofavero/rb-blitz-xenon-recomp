@@ -29,6 +29,7 @@
 #include "ultimate_state.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -38,20 +39,31 @@
 
 namespace {
 
-constexpr const char* kWindowTitle = "rb_blitz launcher";
+constexpr const char* kWindowTitle = "Rock Band Blitz Launcher";
 
 // The profile's own defaults (src/launcher/profile.h), used when a stored size is missing or
-// nonsense. SDL window sizes are logical points, and so is what the profile stores: a DPI
-// change moves the pixels the user sees, not the number in the file.
+// nonsense. The number is in logical points, the same unit the profile stores: a DPI change
+// moves the pixels the user sees, not the number in the file. main() multiplies it by the
+// display's content scale, so a 300% display opens a window three times as large in pixels
+// rather than one a third the size. The size is chosen so every tab's content - the General
+// tab's settings-file block included - fits without scrolling at 100%.
 constexpr int kDefaultWidth = 1100;
-constexpr int kDefaultHeight = 720;
-constexpr int kMinWindowSize = 640;
+constexpr int kDefaultHeight = 640;
+constexpr int kMinWindowSize = 400;
 constexpr int kMaxWindowSize = 8192;
+
+// The point size of the UI face before DPI scaling. ImGui's built-in face is a 13px pixel
+// font; a real outline font at 16px reads as a normal application window.
+constexpr float kUiFontSize = 16.0f;
 
 namespace fs = std::filesystem;
 
 // Defined with the rest of the path helpers below; the dump modes need it before the loop.
 fs::path ExecutableDir();
+// Defined with the window helpers below; --dump-display reports what they decide.
+int WindowDimension(int value, int fallback);
+void FitToDisplay(int* width, int* height);
+std::string LoadUiFont();
 
 // A WIN32-subsystem executable has no console, so a bring-up failure would otherwise be
 // silent. Name the step that failed and let SDL say why.
@@ -85,6 +97,11 @@ struct Options {
   // B4 that otherwise only exists on screen.
   bool dump_profile = false;
   std::string dump_profile_path;
+  // --dump-display[=<path>] prints what the launcher made of the display - the usable bounds,
+  // the content scale, the window size it would open at, and the face it loaded - and leaves.
+  // A1's "legible at 100% and 200%" is otherwise only checkable from a screenshot.
+  bool dump_display = false;
+  std::string dump_display_path;
 };
 
 Options ParseOptions(int argc, char** argv) {
@@ -94,6 +111,7 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kDumpPrefix = "--dump-layout=";
   constexpr std::string_view kDumpGeneralPrefix = "--dump-general=";
   constexpr std::string_view kDumpProfilePrefix = "--dump-profile=";
+  constexpr std::string_view kDumpDisplayPrefix = "--dump-display=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--dump-layout") {
@@ -102,6 +120,12 @@ Options ParseOptions(int argc, char** argv) {
       options.dump_general = true;
     } else if (argument == "--dump-profile") {
       options.dump_profile = true;
+    } else if (argument == "--dump-display") {
+      options.dump_display = true;
+    } else if (argument.size() > kDumpDisplayPrefix.size() &&
+               argument.substr(0, kDumpDisplayPrefix.size()) == kDumpDisplayPrefix) {
+      options.dump_display = true;
+      options.dump_display_path = std::string(argument.substr(kDumpDisplayPrefix.size()));
     } else if (argument.size() > kDumpProfilePrefix.size() &&
                argument.substr(0, kDumpProfilePrefix.size()) == kDumpProfilePrefix) {
       options.dump_profile = true;
@@ -190,6 +214,47 @@ int DumpProfile(const Options& options) {
   return Emit(text, options.dump_profile_path, 0);
 }
 
+// What the launcher made of the display: the work area it clamps to, the content scale it
+// scales by, the window size it would open at, and the face it loaded. Headless, because a DPI
+// report that needs a screenshot cannot be checked on a build machine.
+int DumpDisplay(const std::string& path) {
+  if (!SDL_Init(SDL_INIT_VIDEO)) {
+    std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+    return 1;
+  }
+  const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+  SDL_Rect bounds{};
+  SDL_GetDisplayUsableBounds(display, &bounds);
+  const float content_scale = SDL_GetDisplayContentScale(display);
+
+  const float scale = content_scale > 0.0f ? content_scale : 1.0f;
+  const auto to_units = [scale](int points) {
+    return static_cast<int>(std::lround(points * scale));
+  };
+  int want_width = WindowDimension(to_units(kDefaultWidth), to_units(kDefaultWidth));
+  int want_height = WindowDimension(to_units(kDefaultHeight), to_units(kDefaultHeight));
+  FitToDisplay(&want_width, &want_height);
+
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  const std::string face = LoadUiFont();
+
+  std::string text;
+  text += "usable bounds  : " + std::to_string(bounds.w) + "x" + std::to_string(bounds.h) + "\n";
+  text += "content scale  : " + std::to_string(content_scale) + "\n";
+  text += "ui scale       : " + std::to_string(scale) + "\n";
+  text += "default points : " + std::to_string(kDefaultWidth) + "x" +
+          std::to_string(kDefaultHeight) + "\n";
+  text += "opening window : " + std::to_string(want_width) + "x" + std::to_string(want_height) +
+          "\n";
+  text += "font base size : " + std::to_string(static_cast<int>(kUiFontSize)) + "\n";
+  text += "font face      : " + face + "\n";
+
+  ImGui::DestroyContext();
+  SDL_Quit();
+  return Emit(text, path, 0);
+}
+
 // Where the running executable lives. SDL_GetBasePath returns SDL's own cached buffer
 // (thirdparty/sdl3/src/filesystem/SDL_filesystem.c: the CachedBasePath global), so it is not
 // the caller's to free and stays valid for the process's life.
@@ -200,6 +265,48 @@ fs::path ExecutableDir() {
 
 int WindowDimension(int value, int fallback) {
   return value > 0 ? std::clamp(value, kMinWindowSize, kMaxWindowSize) : fallback;
+}
+
+// Keeps the wanted size on screen. The launcher is resizable and its tabs scroll, so this is
+// not a layout constraint - it only stops the first frame from opening larger than the display
+// work area (a 900pt default on a 720p-ish laptop panel, for instance).
+void FitToDisplay(int* width, int* height) {
+  SDL_Rect bounds{};
+  if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds)) {
+    return;
+  }
+  if (bounds.w > 0) {
+    *width = std::min(*width, static_cast<int>(bounds.w));
+  }
+  if (bounds.h > 0) {
+    *height = std::min(*height, static_cast<int>(bounds.h));
+  }
+}
+
+// Loads a neutral UI face from the operating system. Nothing is redistributed with the
+// launcher: the font is the machine's, and a machine without any of these falls back to
+// ImGui's built-in face rather than failing to start. Returns the face it used, so
+// --dump-display can say which one that was.
+std::string LoadUiFont() {
+  ImGuiIO& io = ImGui::GetIO();
+  const char* root = SDL_getenv("SystemRoot");
+  const std::string fonts_dir =
+      std::string(root != nullptr && root[0] != '\0' ? root : "C:\\Windows") + "\\Fonts\\";
+  for (const char* name : {"segoeui.ttf", "tahoma.ttf", "arial.ttf"}) {
+    const std::string path = fonts_dir + name;
+    std::error_code code;
+    if (!fs::exists(path, code)) {
+      continue;
+    }
+    ImFontConfig config;
+    config.OversampleH = 2;
+    config.OversampleV = 1;
+    if (io.Fonts->AddFontFromFileTTF(path.c_str(), kUiFontSize, &config) != nullptr) {
+      return name;
+    }
+  }
+  io.Fonts->AddFontDefault();
+  return "ImGui's built-in face";
 }
 
 }  // namespace
@@ -214,6 +321,9 @@ int main(int argc, char** argv) {
   }
   if (options.dump_profile) {
     return DumpProfile(options);
+  }
+  if (options.dump_display) {
+    return DumpDisplay(options.dump_display_path);
   }
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -252,10 +362,18 @@ int main(int argc, char** argv) {
   const float display_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   const float ui_scale = display_scale > 0.0f ? display_scale : 1.0f;
 
-  SDL_Window* window = SDL_CreateWindow(
-      kWindowTitle, WindowDimension(stored_width, kDefaultWidth),
-      WindowDimension(stored_height, kDefaultHeight),
-      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+  // SDL sizes a window in the same units the UI is measured in, and the UI is scaled by the
+  // display's content scale, so a size kept in points is multiplied by it here. That is what
+  // makes the stored number mean the same thing on a 300% display and on a 100% one.
+  const auto to_units = [ui_scale](int points) {
+    return static_cast<int>(std::lround(points * ui_scale));
+  };
+  int want_width = WindowDimension(to_units(stored_width), to_units(kDefaultWidth));
+  int want_height = WindowDimension(to_units(stored_height), to_units(kDefaultHeight));
+  FitToDisplay(&want_width, &want_height);
+  SDL_Window* window =
+      SDL_CreateWindow(kWindowTitle, want_width, want_height,
+                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window == nullptr) {
     Fatal("SDL_CreateWindow");
     SDL_Quit();
@@ -292,6 +410,7 @@ int main(int argc, char** argv) {
   // its own imgui.ini into whatever directory the launcher was started from.
   io.IniFilename = nullptr;
 
+  LoadUiFont();
   ImGui::StyleColorsDark();
   ImGuiStyle& style = ImGui::GetStyle();
   style.ScaleAllSizes(ui_scale);
@@ -402,8 +521,11 @@ int main(int argc, char** argv) {
     int width = 0;
     int height = 0;
     SDL_GetWindowSize(window, &width, &height);
+    // Back to the points the profile keeps, so the number survives a different-DPI monitor.
+    const int point_width = static_cast<int>(std::lround(width / ui_scale));
+    const int point_height = static_cast<int>(std::lround(height / ui_scale));
     const rb_blitz::launcher::SaveOutcome outcome =
-        shell->session().SaveWindowGeometry(width, height);
+        shell->session().SaveWindowGeometry(point_width, point_height);
     if (!outcome.ok) {
       std::fprintf(stderr, "could not save the window size to %s: %s\n",
                    shell->session().path().string().c_str(), outcome.error.c_str());

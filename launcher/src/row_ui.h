@@ -29,7 +29,10 @@ struct RowColumns {
   float value_width = 0.0f;
 };
 
-RowColumns RowColumnWidths();
+// `value_fraction` is how much of the width the value column takes. A single widget - a slider,
+// a checkbox, a text field - is comfortable at a third; a row of radios is not, so an enum row
+// asks for most of the width and keeps its label in what is left.
+RowColumns RowColumnWidths(float value_fraction = 0.35f);
 
 // Scopes a row's ImGui ids to its key, so the label and the value widget of one row cannot
 // collide with the next row's - or with another tab's copy of the same key.
@@ -50,6 +53,17 @@ bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusMode
 // passes LauncherValueText, which is the compiled default until something overrides it.
 void DrawReadOnlyValue(const settings::Setting& setting, float value_width,
                        std::string_view value_text);
+
+// A radio button the ring can land on: hovering it adopts the ring, clicking focuses it, and
+// Enter or Space on the focused entry chooses it. True when it was chosen this frame. Used by
+// the launch target and by every enum row, which is why it lives here rather than in one tab.
+bool DrawFocusableRadio(const char* label, std::size_t index, FocusModel& ring, NavAction action,
+                        bool selected);
+
+// How a value is written back: a string setting as a quoted TOML string, everything else as a
+// bare token (src/launcher/profile.h's ValueStyle). The editor and the precedence badge both
+// need the same answer.
+ValueStyle StyleForKind(settings::Kind kind);
 
 // The value the launcher would hand the game for this row: what the profile records, or the
 // compiled default it has not overridden. Once there is a writer (B4) this - not the default -

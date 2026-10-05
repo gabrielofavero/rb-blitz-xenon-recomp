@@ -19,11 +19,11 @@
 # directory. Nothing here is ever committed.
 #
 # Usage:
-#   .\scripts\extract_assets.ps1                          # game\ -> extracted\
+#   .\scripts\extract_assets.ps1                          # game\ -> assets\game\360\
 #   .\scripts\extract_assets.ps1 -Clean                   # wipe the tree first
 #   .\scripts\extract_assets.ps1 -SkipOverlay             # base archive only
 #   .\scripts\extract_assets.ps1 -Platform ps3 -GameRoot `
-#       "C:\Games\Emulators\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"      # -> extracted-ps3\
+#       "C:\Games\Emulators\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"      # -> assets\game\ps3\
 #   .\scripts\extract_assets.ps1 -GameRoot D:\rb_blitz -OutDir D:\rb_blitz_assets
 param(
     [string]$GameRoot = "game",
@@ -56,8 +56,8 @@ $gameRootAbs = Resolve-Input $GameRoot
 # 360 one is the Ultimate payload beside the game root, the PS3 one is the title
 # update in gen\ next to the base archive.
 $layouts = @{
-    xbox = @{ Suffix = "xbox"; Base = "gen\main_xbox.hdr"; Overlay = "ultimate\gen\patch_xbox.hdr" }
-    ps3  = @{ Suffix = "ps3";  Base = "gen\main_ps3.hdr";  Overlay = "gen\patch_ps3.hdr" }
+    xbox = @{ Suffix = "xbox"; Base = "gen\main_xbox.hdr"; Overlay = "ultimate\gen\patch_xbox.hdr"; OutDir = "assets\game\360" }
+    ps3  = @{ Suffix = "ps3";  Base = "gen\main_ps3.hdr";  Overlay = "gen\patch_ps3.hdr";         OutDir = "assets\game\ps3" }
 }
 
 if ($Platform -eq "auto") {
@@ -78,7 +78,7 @@ if (-not (Test-Path $mainHdr)) {
 
 # Default output is per platform, so a PS3 extraction cannot overwrite a 360 one.
 if (-not $OutDir) {
-    $OutDir = if ($Platform -eq "xbox") { "extracted" } else { "extracted-$Platform" }
+    $OutDir = $layout.OutDir
 }
 $outAbs = Resolve-Input $OutDir
 $skipOverlay = $SkipOverlay -or $SkipUltimate

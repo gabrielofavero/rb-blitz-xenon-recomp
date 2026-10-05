@@ -20,9 +20,9 @@ they are not ARK archives and this tool does not open them.
 powershell -ExecutionPolicy Bypass -File .\scripts\extract_assets.ps1
 ```
 
-The base archive is unpacked into `extracted\` first and the Ultimate patch is then
+The base archive is unpacked into `assets\game\360\` first and the Ultimate patch is then
 written over it in place, so the result is the file tree the title reads with Ultimate
-installed. The folder is gitignored (`/extracted/`) — like `game\`, it is retail content
+installed. The folder is gitignored (`/assets/game/`) — like `game\`, it is retail content
 and is never committed. Flags: `-Clean` (wipe the tree first), `-SkipUltimate`,
 `-GameRoot` / `-OutDir` (point at another dump or output path), `-DryRun`.
 
@@ -32,8 +32,8 @@ reader for these archives that takes any `.hdr`:
 ```powershell
 python scripts\hmx_ark.py list    --hdr game\gen\main_xbox.hdr           # index, by type
 python scripts\hmx_ark.py list    --hdr game\gen\main_xbox.hdr -v        # every entry
-python scripts\hmx_ark.py extract --hdr game\gen\main_xbox.hdr --out extracted `
-                                  --manifest extracted\_ark_main_xbox.json
+python scripts\hmx_ark.py extract --hdr game\gen\main_xbox.hdr --out assets\game\360 `
+                                  --manifest assets\game\360\_ark_main_xbox.json
 ```
 
 `extract` writes the index as JSON (`--manifest`), replaces existing files only with
@@ -71,8 +71,8 @@ puts them, and `_ark_main_xbox.json` / `_ark_patch_xbox.json` are the two indexe
   Blitz has none, so every extracted file is a straight copy of its ark bytes.
 - **Strange entry paths.** Two entries start with `./`, and 41 more carry the build
   tree's `../../system/run/...` prefix. A `..` component is written as `dotdot\` — the
-  convention other ARK extractors use — so an entry can never escape `extracted\` while
-  nothing is dropped and every path stays unique.
+  convention other ARK extractors use — so an entry can never escape the extraction
+  root while nothing is dropped and every path stays unique.
 - **Not everything is readable yet.** `.mid`, `.mogg` and `.bik` come out as plaintext and
   are immediately usable, and the `.png_xbox` / `.bmp_xbox` textures have a decoded
   envelope (the section below). `.dtb` (compiled DTA) still carries the engine-side
@@ -97,10 +97,10 @@ Xbox 360 GPU reads it that way. [scripts/hmx_tex.py](../scripts/hmx_tex.py) deco
 re-encodes that: pure-Python DXT1/DXT5 with mip generation, no third-party codecs.
 
 ```powershell
-python scripts\hmx_tex.py info   extracted\ui\image\gen\esrb_keep.bmp_xbox
-python scripts\hmx_tex.py export extracted\ui\image\gen\esrb_keep.bmp_xbox art.png
-python scripts\hmx_tex.py export extracted\ui\image\gen\esrb_keep.bmp_xbox art.dds
-python scripts\hmx_tex.py import art.png --template extracted\ui\...\esrb_keep.bmp_xbox `
+python scripts\hmx_tex.py info   assets\game\360\ui\image\gen\esrb_keep.bmp_xbox
+python scripts\hmx_tex.py export assets\game\360\ui\image\gen\esrb_keep.bmp_xbox art.png
+python scripts\hmx_tex.py export assets\game\360\ui\image\gen\esrb_keep.bmp_xbox art.dds
+python scripts\hmx_tex.py import art.png --template assets\game\360\ui\...\esrb_keep.bmp_xbox `
                                       --out new.bmp_xbox
 ```
 
@@ -110,10 +110,10 @@ PSNR on round-tripped art. `swap` is `import` plus the archive write:
 
 ```powershell
 # small overlay archive: gen\patch_xbox.hdr + _0.ark, the title's own patch-ark route
-python scripts\hmx_tex.py swap art.png --template extracted\...\esrb_keep.bmp_xbox `
+python scripts\hmx_tex.py swap art.png --template assets\game\360\...\esrb_keep.bmp_xbox `
                                        --hdr game\gen\main_xbox.hdr --patch-dir out\mod
 # full-size copy of the base archive with just this entry replaced
-python scripts\hmx_tex.py swap art.png --template extracted\...\esrb_keep.bmp_xbox `
+python scripts\hmx_tex.py swap art.png --template assets\game\360\...\esrb_keep.bmp_xbox `
                                        --hdr game\gen\main_xbox.hdr --out out\main_xbox_0.ark
 ```
 
@@ -159,10 +159,10 @@ directory — `Tex` and its 13 `.tex` assets (`splash_logo.tex`, `list_panel.tex
 owns which texture. [scripts/hmx_milo.py](../scripts/hmx_milo.py) reads all of that:
 
 ```powershell
-python scripts\hmx_milo.py info extracted\ui\splash\gen\splash.milo_xbox --out-dir out\milo
-python scripts\hmx_milo.py list extracted\ui\splash\gen\splash.milo_xbox --textures
-python scripts\hmx_milo.py dump extracted\ui\splash\gen\splash.milo_xbox --chunk 3 --out chunk3.bin
-python scripts\hmx_milo.py records extracted\ui --root extracted   # the map below
+python scripts\hmx_milo.py info assets\game\360\ui\splash\gen\splash.milo_xbox --out-dir out\milo
+python scripts\hmx_milo.py list assets\game\360\ui\splash\gen\splash.milo_xbox --textures
+python scripts\hmx_milo.py dump assets\game\360\ui\splash\gen\splash.milo_xbox --chunk 3 --out chunk3.bin
+python scripts\hmx_milo.py records assets\game\360\ui --root assets\game\360   # the map below
 ```
 
 ### The map: which scene owns which UI art

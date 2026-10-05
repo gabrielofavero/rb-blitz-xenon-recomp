@@ -49,13 +49,13 @@ cd out\build\win-amd64-release
 
 Each launch writes a new `logs\rb_blitz_NNN.log`. Pointing `--game_data_root` at an Ultimate payload root is supported and only warns; pointing it at the wrong dump behaves the same way, so check the `game data identity:` line at the top of the log instead of assuming a clean boot means the right game.
 
-**Extract the assets.** The title's content is one ARK archive pair under `game\gen\`, plus the Ultimate payload's overlay pair. One command unpacks both into a gitignored `extracted\` — byte-exact, with a JSON index per archive:
+**Extract the assets.** The title's content is one ARK archive pair under `game\gen\`, plus the Ultimate payload's overlay pair. One command unpacks both into a gitignored `assets\game\360\` — byte-exact, with a JSON index per archive:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\extract_assets.ps1
 ```
 
-The PlayStation 3 build is the same game in the same container, so the same script unpacks it too — `-Platform ps3 -GameRoot <the dump's USRDIR>` writes `extracted-ps3\`, and every tool in `scripts\` reads that dump unchanged. [assets.md](docs/assets.md) has the resulting layout, the archive format, the two-platform comparison, and what is still obfuscated.
+The PlayStation 3 build is the same game in the same container, so the same script unpacks it too — `-Platform ps3 -GameRoot <the dump's USRDIR>` writes `assets\game\ps3\`, and every tool in `scripts\` reads that dump unchanged. [assets.md](docs/assets.md) has the resulting layout, the archive format, the two-platform comparison, and what is still obfuscated.
 
 **Tests** are SDK-free and game-data-free, about half a second:
 

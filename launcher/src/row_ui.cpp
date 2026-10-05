@@ -25,12 +25,6 @@ constexpr std::size_t kTextBufferSize = 512;
 // Not constexpr: ImVec4 has no constexpr constructor.
 const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
 
-// A string setting is written back as a quoted TOML string, everything else as a bare token
-// (src/launcher/profile.h's ValueStyle).
-ValueStyle StyleForKind(settings::Kind kind) {
-  return kind == settings::Kind::kString ? ValueStyle::kBasic : ValueStyle::kBare;
-}
-
 int ParseIntOrZero(std::string_view text) {
   int value = 0;
   const char* first = text.data();
@@ -56,17 +50,46 @@ void CopyToBuffer(std::string_view text, char (&buffer)[kTextBufferSize]) {
 
 }  // namespace
 
-RowColumns RowColumnWidths() {
+RowColumns RowColumnWidths(float value_fraction) {
   RowColumns columns;
   const float spacing = ImGui::GetStyle().ItemSpacing.x;
   const float available = ImGui::GetContentRegionAvail().x;
-  columns.value_width = std::clamp(available * 0.35f, kMinValueWidth, kMaxValueWidth);
+  // A single widget is capped so the label keeps a readable column; a row that asks for most
+  // of the width (an enum's radios) is not capped below what it asked for.
+  const float ceiling = value_fraction > 0.5f ? available : kMaxValueWidth;
+  columns.value_width = std::clamp(available * value_fraction, kMinValueWidth, ceiling);
   columns.label_width = std::max(kMinLabelWidth, available - columns.value_width - spacing);
   return columns;
 }
 
 RowScope::RowScope(std::string_view key) { ImGui::PushID(std::string(key).c_str()); }
 RowScope::~RowScope() { ImGui::PopID(); }
+
+bool DrawFocusableRadio(const char* label, std::size_t index, FocusModel& ring, NavAction action,
+                        bool selected) {
+  const bool focused = !ring.Empty() && ring.Index() == index;
+  if (focused) {
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
+  const bool clicked = ImGui::RadioButton(label, selected);
+  if (focused) {
+    ImGui::PopStyleColor(2);
+  }
+  ring.FocusIf(index, ImGui::IsItemHovered());
+  if (clicked) {
+    ring.SetIndex(index);
+  }
+  if (focused && !ImGui::IsItemVisible()) {
+    ImGui::SetScrollHereY(0.5f);
+  }
+  return clicked || (focused && action == NavAction::kActivate);
+}
+
+ValueStyle StyleForKind(settings::Kind kind) {
+  return kind == settings::Kind::kString ? ValueStyle::kBasic : ValueStyle::kBare;
+}
 
 bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusModel& ring,
                   float label_width) {

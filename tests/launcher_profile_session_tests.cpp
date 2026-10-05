@@ -293,7 +293,7 @@ void TestWindowGeometry(Scratch& scratch) {
   ProfileSession session = MakeSession(install, app_data);
 
   // A launcher nobody resized does not create the profile at all (A1's rule, kept).
-  const SaveOutcome unchanged = session.SaveWindowGeometry(1100, 720);
+  const SaveOutcome unchanged = session.SaveWindowGeometry(1100, 640);
   CHECK_TRUE(unchanged.ok);
   CHECK_FALSE(unchanged.wrote);
   CHECK_FALSE(fs::exists(profile_path));
@@ -383,7 +383,7 @@ void TestFreshProfile(Scratch& scratch) {
   reverted.profile().target = LaunchTarget::kUltimate;
   CHECK_FALSE(reverted.Dirty());
   // So a save here would not create a file either (the same rule the geometry write follows).
-  CHECK_FALSE(reverted.SaveWindowGeometry(1100, 720).wrote);
+  CHECK_FALSE(reverted.SaveWindowGeometry(1100, 640).wrote);
   CHECK_FALSE(fs::exists(other_app_data / "rb_blitz" / "launcher.toml"));
 }
 

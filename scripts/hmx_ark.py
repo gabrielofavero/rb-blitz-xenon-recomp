@@ -24,9 +24,9 @@ verified against the retail dump - it is not a port of either.
 
 Usage:
     python scripts/hmx_ark.py list    --hdr game/gen/main_xbox.hdr
-    python scripts/hmx_ark.py extract --hdr game/gen/main_xbox.hdr --out extracted
-    python scripts/hmx_ark.py extract --hdr game/gen/main_xbox.hdr --out extracted \\
-                                      --manifest extracted/_ark_main.json
+    python scripts/hmx_ark.py extract --hdr game/gen/main_xbox.hdr --out assets/game/360
+    python scripts/hmx_ark.py extract --hdr game/gen/main_xbox.hdr --out assets/game/360 \\
+                                      --manifest assets/game/360/_ark_main.json
 """
 import argparse
 import json

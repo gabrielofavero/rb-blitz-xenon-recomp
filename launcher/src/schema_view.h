@@ -58,6 +58,14 @@ std::vector<TabLayout> BuildLayout();
 // picked path belongs to, and B7 will use it to turn a profile into the game's argv.
 const settings::Setting* FindSetting(std::string_view key);
 
+// An enum row's `choices`, split into their own tokens in the schema's order. Empty for a
+// kind that has none.
+std::vector<std::string_view> SettingChoices(const settings::Setting& setting);
+
+// How many entries a row takes in its tab's focus ring: one per choice for an enum, because
+// each choice is drawn as its own radio the ring can land on, and one for anything else.
+std::size_t FocusEntriesFor(const settings::Setting& setting);
+
 // The one line a group with nothing to draw shows. A group declared unavailable without a
 // note still says something honest rather than rendering an empty heading.
 std::string_view GroupNoteText(const settings::Group& group);
