@@ -837,6 +837,43 @@ does not. The pad leg uses A3's virtual pad, so a controller is not required —
 `--no-gamepad` is what keeps one that happens to be plugged in out of the keyboard leg's
 counts.
 
+**The installed end to end run** is
+[scripts/acceptance_launcher.ps1](../scripts/acceptance_launcher.ps1): it silent-installs the
+built setup into `out\launcher-acceptance\app`, writes a profile per leg, asserts the command
+line `--print-command` prints *before* starting anything, then boots the game and reads the
+log the game writes. Four legs, so that the payload, the licence and the save folder each
+have a run that differs from the others by one thing:
+
+| Leg | What it is | The lines it has to show |
+| --- | --- | --- |
+| `retail` | before the mod is installed: the payload's folder is not on disk | `ultimate: off, booting the retail game data`, `license_mask = 1 (default; …)` |
+| `ultimate` | after the install's own `rb_blitz_setup_helper.exe install-ultimate` (B8's command, folder source, no download) | `ultimate: payload …`, the content-device patch, the overlay, `d: => \Device\BlitzOverlay` |
+| `demo` | the XBLA trial | `--license_mask=0` on the command line and `license_mask = 0 (configured)` |
+| `save` | a `--user_data_root` override under `out\`, isolated the way `acceptance_persistence.ps1` isolates one | the log's `User data:` line, and the title's files under that folder |
+
+Every leg also has to show the install's own game folder as the booted root (checked by the
+hash of the `default.xex` it ran), the DLC folder the profile named, and the pad rebinding
+that only the profile can supply.
+
+```powershell
+cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+.\scripts\acceptance_launcher.ps1                  # install, then all four legs
+.\scripts\acceptance_launcher.ps1 -Only retail,demo  # one or two of them
+.\scripts\acceptance_launcher.ps1 -SkipInstall       # reuse the install already there
+```
+
+Exit 0 means every leg booted, closed cleanly and showed what its target implies; 1 means a
+check failed; 2 means nothing was measured — no installer, no dump, or no launcher in the
+install (renaming `rb_blitz_launcher.exe` away is the documented way to see that one). The
+evidence — the install, a profile and a printed command line per leg, the game's own log per
+leg, `summary.json` — lands in `out\launcher-acceptance\`. It needs no controller, no clicks
+and no capture, but it boots the game, so it needs a GPU; the controller path stays manual
+([launcher-plan.md](plans/launcher-plan.md) §6.2). What it asserts are the rows Contract 3
+passes (`--key=value`), because that is how the launcher's settings reach the game — the
+profile is read by the game for `[remap]` and is *not* loaded as a config file, which is
+measured in [launcher-plan.md](plans/launcher-plan.md) §11 together with what follows from
+it.
+
 ## 5. What a good run looks like (B-009, music)
 
 The hook logs only the first 8 AES calls, so a long run stays quiet. One combined

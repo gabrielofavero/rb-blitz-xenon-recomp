@@ -842,7 +842,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Twenty-four prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty-five prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -857,7 +857,7 @@ session should read as instructions, and every deviation it would have described
 | A1 | `launcher/src/{shell,schema_view,nav}.{h,cpp}`, geometry through the profile, `--dump-layout`/`--dump-display` | D16, D17 (quiet text), D18 (no header text, the bottom bar, unbuilt groups hidden) |
 | B2 | every Audio / Video row editable, one widget per `kind`, `(needs restart)` badges | D18: the Renderer and post-process-AA rows; the free-form resolution size was dropped |
 | B3 | Controller → Input: `mouse_ui_nav`, `guide_button` | D17: `input_backend` is deliberately not a row; D18: unbuilt groups are hidden rather than named |
-| B5 | the game loads `launcher_profile` as a config file at the top of `OnConfigurePaths`, then re-derives the four path cvars | — |
+| B5 | the game gets the launcher's rows as argv — every managed row the profile moved off its compiled default is passed as `--<key>=<value>` (Contract 3) — and resolves the profile itself for `[remap]` | §11.6: the "profile applied as a config file" half of D3 is not in the tree (measured 2026-10-05, E3) |
 | D1 | the launcher in the payload, in `[UninstallDelete]`, and in the installer tests | — |
 | B4 | the writer, the precedence badge (with *Copy the effective value*), Import/Export, *Change settings location* | D17: portable mode replaced by a chosen folder; the panel stopped narrating itself |
 | B8 | *Install Ultimate* through the helper, cancellable, with the manual route on failure | — |
@@ -873,8 +873,9 @@ session should read as instructions, and every deviation it would have described
 | D5 | the manifest/report field assertions in `installer/tests/installer_tests.cpp` and `installer/README.md`'s manifest-field list and "the helper has two callers" note | — |
 | E1 | the six launcher test targets named in `docs/build-and-run.md`'s new launcher section, with what each covers and the tree that has `BUILD_TESTING` on | — |
 | E2 | `scripts/capture_launcher.ps1` (the headless reports, the keyboard leg and the pad leg), `capture_window.ps1 -ClientArea`, the README's "How it is checked" section and the same `build-and-run.md` section | A2/D7: the bar's help is the *row's*, so the harness asserts on the presses that cross a row and reports the ones inside a row's choices |
+| E3 | `scripts/acceptance_launcher.ps1`: the silent install, the four legs (retail, ultimate, demo, save), the argv contract, the boot-log assertions, its exit codes and `summary.json`, plus the `build-and-run.md` section and the README's "How it is checked" entry | §11's two findings: the profile is not loaded as a config file, and the General tab's path rows and the launch command use different stores. R4's row in §7 changed state because of the first |
 
-**Open.** Eight prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
+**Open.** Seven prompts, and the only ones §5.3 still describes. A `*(built)*` in the *Depends on*
 column means the prompt beside it names a finished prompt rather than an open one — B1 is
 its own dependency because only half of it went out; §5.3 says which half.
 
@@ -886,18 +887,17 @@ its own dependency because only half of it went out; §5.3 says which half.
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
-| E3 | End-to-end acceptance | E | B7 *(built)*, D1 *(built)*, D3 *(built)* | E4 |
 | E4 | Docs, backlog, standing limits | E | all of the above | — |
 
 The four groups those fall into, which is what §6 schedules:
 
 - **The Controller tab's remaining lanes** — C1, C2, C6.
-- **Art and evidence** — A4, E3, E4, and A5's recovery half.
-- **Finish M1** — done, and now completely: A3 and A2 are built, E1's test names and E2's
-  capture harness are in `docs/build-and-run.md`, and the launcher they describe is the one
-  §7's rows were measured on. M1 was defined (§1.1) as "navigable end to end with a pad,
-  mouse and keyboard, with the bottom bar naming the focused row's tooltip and the current
-  control hints", and that is what the launcher does now.
+- **Art and evidence** — A4 and E4, and A5's recovery half.
+- **Finish M1** — done, and now completely: A3 and A2 are built, E1's test names, E2's
+  capture harness and E3's installed run are in `docs/build-and-run.md`, and the launcher
+  they describe is the one §7's rows were measured on. M1 was defined (§1.1) as "navigable
+  end to end with a pad, mouse and keyboard, with the bottom bar naming the focused row's
+  tooltip and the current control hints", and that is what the launcher does now.
 
 ### 5.3 The prompts that are left
 
@@ -1004,21 +1004,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > path to a deliberately broken profile and show the game booting with shipped behaviour.
 > **Don't.** Do not make the panic path require the GUI.
 
-#### E3 — End-to-end acceptance
-
-> **Goal.** `scripts/acceptance_launcher.ps1`: from a built installer, install silently into a scratch
-> folder with a fixed profile path, write a profile with non-default values, run
-> `rb_blitz_launcher.exe --print-command` and assert the argv contract, then actually launch and
-> assert the game's boot log lines (roots, `ultimate:`, `license_mask`, mouse-nav mode, DLC packages)
-> — the same evidence standard as `scripts/acceptance_launches.ps1`. Cover: the Ultimate target with a
-> payload, the retail target without, Demo (`--license_mask=0`), and a save-dir override isolated the
-> way `scripts/acceptance_persistence.ps1` isolates one.
-> **Deliverable.** The script, its exit codes, a summary file, and a `docs/build-and-run.md` section.
-> **Verify.** Run it twice on the same machine (idempotent) and show it failing when the launcher exe
-> is renamed away.
-> **Don't.** Do not require a controller or an interactive desktop; the controller path stays manual
-> and is recorded as such.
-
 #### E4 — Docs, backlog, standing limits, audit
 
 > **Goal.** Finish the paper trail. Already done: `launcher/README.md` is the living description, the
@@ -1053,7 +1038,6 @@ graph LR
   C1 --> E4
   C2 --> E4
   C6 --> E4
-  E3[E3 e2e acceptance] --> E4
 ```
 
 ### 6.2 Waves
@@ -1062,17 +1046,17 @@ graph LR
 | --- | --- | --- |
 | **1** | A5, B1, C1, C2, C6 | five independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
 | **2** | A4 | A4 needs only the built P0.4. E2 ran here and is built. |
-| **3** | E3, E4, one manual pass | neither needs anything open; E4 is last by definition. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
+| **3** | E4, one manual pass | E4 is last by definition; it also writes up what E3 measured and could not fix. Manual pass: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, one real install, one real Ultimate install. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Critical path over what is left: **E3 → E4** and **A4 → E4** — two steps each, so either can go
-first. Everything else is one step.
+Critical path over what is left: **A4 → E4** — two steps. Everything else is one step, and E3
+walked its own two (E3 → E4) already.
 
-If you only have one session at a time, run: **E3 → E4**, folding C1, C2,
-C6, A4, A5 and B1 in afterwards in any order that respects §6.1. E2 walked this road one step
-earlier and left the harness behind: `scripts/capture_launcher.ps1` is how a change to the ring,
-the bar or a tab's body is re-measured.
+If you only have one session at a time, run: **E4**, folding C1, C2, C6, A4, A5 and B1 in before
+it in any order that respects §6.1. E2 and E3 left their harnesses behind:
+`scripts/capture_launcher.ps1` re-measures the ring, the bar and a tab's body, and
+`scripts/acceptance_launcher.ps1` re-installs and re-boots the four legs.
 
 **M1 (§1.1) is finished.** "Navigable end to end with a pad, mouse and keyboard, with the bottom bar
 naming the focused row's tooltip and the current control hints" is what the launcher does: A3's pad
@@ -1083,9 +1067,9 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 not a gap in it.
 
 **Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), the
-Controller tab's remaining lanes (C1, C2, C6), and the evidence lane's end-to-end half (E3, E4).
-E2's harness is built. Packaging
-(D3–D5) and first-run prefill (D4) are built.
+Controller tab's remaining lanes (C1, C2, C6), and the evidence lane, which is finished —
+E2's harness and E3's installed run are built, and E4 writes up what E3 measured.
+Packaging (D3–D5) and first-run prefill (D4) are built.
 
 ---
 
@@ -1097,8 +1081,9 @@ live. The rows that still name an open prompt are the ones §6 schedules.
 
 | Requirement | How it is proven | Where | State |
 | --- | --- | --- | --- |
-| R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests | D1, D5 | built |
-| R4 standalone uses launcher settings | four-boot precedence test (none / profile only / profile+`rb_blitz.toml` / profile+argv) | B5 | built; `--dump-profile` prints the precedence audit |
+| R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests, and now the installed launcher's own `--print-command` | D1, D5, E3 | built |
+| R4 launched by the launcher uses launcher settings | the rows a profile moved off their defaults are passed as argv (asserted on `--print-command`) and read back out of the boot log: `--user_data_root` is the log's `User data:`, `--dlc_root` is the `dlc: … in <folder>` line, the target is `--ultimate_mode`, and `[remap]` is the profile's own rebinding line | B5, B7, E3 | built — the installed build, four legs, 94 checks (`scripts/acceptance_launcher.ps1`) |
+| ~~R4 a double-click (no launcher) uses launcher settings~~ | **E3 measured that it does not**: D3's rank 4 — the profile applied as a config file — is not in the tree (a top-level key in a profile handed to `--launcher_profile` does not reach a cvar), so the launcher's rows reach the game only as argv | B5, E3 | **open** — §11's first finding |
 | R4 defaults when never configured | boot with no profile: log shows compiled defaults | B5 | built |
 | R6 finish-page choice | three interactive installs + one silent | D3 | built — `ISCC` compiles it; the three installs and the silent one are the manual pass's (§6 wave 3), and `installer/README.md` carries the checklist |
 | R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 3). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
@@ -1106,13 +1091,13 @@ live. The rows that still name an open prompt are the ones §6 schedules.
 | R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
 | R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2, E2 | built — and now measured rather than read: `scripts/capture_launcher.ps1` diffs the bar's help strip, where a press that leaves a row moves 6.7-10.4% of it and the three choices of the launch target move 0% by design (the sentence is the row's) |
 | R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring one `--focus-log` entry, every press moves the body crop (0.19-4.28%), `Right` changes the title to *Audio / Video* and moves 16.0-18.1% of the body, `Left` returns to a 0% body, and a session that pressed nothing moves 0% of both crops | E2 | built |
-| R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist; E3 **open** |
-| R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8 | built; `tests/launcher_ultimate_state_tests.cpp` |
+| R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist, and now for the installed build: E3's four legs read the licence, the DLC folder and the save folder back out of the log; the two General-tab path rows are §11's second finding |
+| R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8, E3 | built; `tests/launcher_ultimate_state_tests.cpp`, and E3's `ultimate` leg is the installed helper adding the mod to a retail install from a folder, after the `retail` leg booted without it |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |
 | ~~R13 per-device profiles survive~~ | **withdrawn with D17**: there are no per-device files to survive — one `[remap]` table keyed by control | — | removed |
 | R9/R10/R12 three tabs, M1 rows live | launcher shows General/Audio / Video/Controller; the tab's rows editable; General shows target + save + DLC | A1, B2, B3, B1 | built (built rows unchanged by D18 except the additions it lists) |
 | R14 no Experimental tab; mouse toggle on Controller | tab list has no Experimental; two boots with `mouse_ui_nav` off/on, log + behaviour | B3, B6, D14 | built |
-| R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4 *(built)*, E3 | **open** (E3's run; the first-run prefill's "never overwrite an existing profile" is proven) |
+| R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4 *(built)*, E3 | **open** — E3 covers the install and the four boots it enables, not the uninstall/reinstall pair; the first-run prefill's "never overwrite an existing profile" is proven |
 
 Anything not in this table is not verified, and should be said out loud rather than implied.
 
@@ -1303,7 +1288,11 @@ Still open, for you before or during Wave 1:
 For the running artifacts (answer with a boot, not an opinion):
 
 3. Does `--license_mask=0` actually produce a *playable* trial (menus, one song) rather than a refusal?
-   D4's Demo target depends on the answer. *(E3 is the prompt that would answer it in passing.)*
+   D4's Demo target depends on the answer. **Partly answered 2026-10-05 (E3):** the demo route boots
+   with the mask on the command line and `content licence: license_mask = 0 (configured)` in the log,
+   with no `[FATAL]`, and closes cleanly (`scripts/acceptance_launcher.ps1`). Whether the *guest* then
+   offers a playable trial rather than a refusal is still open — E3 stops at the boot, and the route
+   that would answer it is `scripts/acceptance_song.ps1 -UltimateMode 0` plus `--license_mask=0`.
 4. Is the F4 overlay's `SaveConfig` the only writer of `rb_blitz.toml` in practice, or does a normal
    boot write it too? (It should not: `SaveConfig` runs from the overlay only.)
 5. ~~Does a second `SDL_GameController` in a different process see the pad while the game has it open?~~
@@ -1314,16 +1303,54 @@ For the running artifacts (answer with a boot, not an opinion):
    VendorID(0x0B05), ProductID(0x1B4C)` and `connection order 0`. The same log lists one pad, not two:
    the launcher's virtual joystick (`--test-pad`) is process-local, which is what that hook is for.
 
+**Two things E3 measured that the plan had wrong, and the decision they need** (both from
+`scripts/acceptance_launcher.ps1`'s run, and neither fixed by it — they are design, not evidence):
+
+6. **D3's rank 4 is not in the tree.** The table above says `launcher.toml` is applied by the game
+   *as a config file* (`rex::cvar::LoadConfig(profile_path)`) at the top of `OnConfigurePaths`. It is
+   not: `rex::cvar::LoadConfig` is called once, on `<exe folder>\<name>.toml`
+   (`rexglue-sdk/src/ui/rex_app.cpp:158`), and nothing in `src/` loads the profile. Measured
+   2026-10-05: a profile with a top-level `license_mask = 0`, handed to `--launcher_profile`, still
+   boots as `license_mask = 1 (default; the title is treated as purchased)`. What *does* work is rank
+   1 — the launcher passes every row it has moved off its default as `--<key>=<value>`, and E3's legs
+   read three of those back out of the boot log. So the launcher's own "Launch Game" is covered and a
+   double-click is not: the game started without the launcher (the Start-menu shortcut, or the exe
+   itself) sees `rb_blitz.toml` and the compiled defaults, and none of the launcher's rows. Decision
+   needed, and the options are not equivalent: implement rank 4 (apply the profile's `[settings]` at
+   `Source::kConfig` before the game's own file, which is what D3 describes and what R4's standalone
+   half needs), or accept it and drop rank 4 from D3 and from R4's row in §7. Until then R4's
+   standalone half is **open** and the standing limit in `docs/known-issues.md` is wrong about the
+   mechanism (its conclusion, "the game's file wins for a row the launcher does not pass", holds
+   either way).
+7. **The General tab's two path rows and the launch command read different stores.** `Save game
+   location` and `DLC location` are written by the panel into `[launch] user_data_dir` / `dlc_dir`
+   (`launcher/src/general_tab.cpp`, `ProfilePathValue`/`SetProfilePath`), which is also what
+   `--dump-general` reports; `BuildLaunchCommand` builds `--user_data_root` / `--dlc_root` from
+   `[settings] user_data_root` / `dlc_root` (`launcher/src/game_launch.cpp`, `RowValue`). Measured
+   2026-10-05 with a profile whose two halves disagree: `--dump-general` printed
+   `row dlc_root = (empty)` while the printed command line carried
+   `--dlc_root="D:\...\game\dlc"` — so a folder a user picks in the panel is shown by the panel and
+   never reaches the game. E3's legs therefore write the `[settings]` spelling the contract reads.
+   The fix is small and belongs with whoever owns the row's storage (B1/B4): one store, not two, and a
+   test that the panel's own value is what `--print-command` carries. It is not E3's to choose, so it
+   is recorded here rather than changed quietly.
+8. **The mouse row's log line is not evidence of the row.** `mouse_ui: the mouse navigates the menus`
+   is printed when the driver is *installed*, which happens whatever the cvar says — the driver reads
+   `mouse_ui_nav` per event (`MouseUiInputDriver::IsEnabled`). The prompt for E3 asked for the
+   mouse-nav mode out of the boot log; measured 2026-10-05, `--no-mouse_ui_nav` and
+   `--mouse_ui_nav=false` both leave that line in place, so E3 asserts the row on the command line
+   and says why. If the mode wants to be visible in the log, the line has to carry the value.
+
 ---
 
 ### 11.1 Also open, for the art (D15, §10)
 
-6. **Is a capture good enough to ship as the look**, or does the launcher wait for route 1 (runtime
+9. **Is a capture good enough to ship as the look**, or does the launcher wait for route 1 (runtime
    read)? Answer by building P0's slot list and looking at a filled launcher next to a filled game.
    The capture route is unblocked today, so this is a cheap answer.
-7. **Does the launcher need the game's fonts?** The prompts are glyphs from `buttons.tex`; the rest
+10. **Does the launcher need the game's fonts?** The prompts are glyphs from `buttons.tex`; the rest
    of the launcher's text is ImGui's. Reusing the game's font means carrying the `Glyph` table too
-   (§10.4's next step), which is only worth it if the answer to 6 is "the look matters a lot".
+   (§10.4's next step), which is only worth it if the answer to 9 is "the look matters a lot".
 
 ---
 ## 12. Sources

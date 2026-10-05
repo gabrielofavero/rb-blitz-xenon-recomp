@@ -862,7 +862,7 @@ every device at once (D16), so "which backend" is not a user-facing choice any m
 
 ## How it is checked
 
-Three ways, in the order of what they cost:
+Four ways, in the order of what they cost:
 
 - **The unit tests**, named after the module they cover — `ctest -R launcher`. The six
   targets, what each one pins and where the host harness lives are in
@@ -880,6 +880,14 @@ Three ways, in the order of what they cost:
   leaves a row rewrites the bar's help line, and a tab switch changes the body — with a
   session that pressed nothing as the control, so "everything is different" cannot pass as
   "that action worked".
+- **The installed run, end to end.**
+  [scripts/acceptance_launcher.ps1](../scripts/acceptance_launcher.ps1) silent-installs the
+  built setup into a scratch folder, then boots the game from the installed launcher's own
+  command line four times: the retail route with no payload on disk, the Ultimate route
+  after the install's helper adds the mod, the demo trial, and a save folder overridden into
+  `out/`. It is the only one of the four that checks the *installed* artefacts and the game
+  they boot (what each leg asserts is in
+  [build-and-run.md §4](../docs/build-and-run.md)).
 
 The capture harness is also where the ring's shape is visible: a row that offers a choice
 counts as one focus entry *per choice* (the launch target's common/demo/ultimate are
@@ -888,6 +896,16 @@ leave the bar's help saying the same sentence — the sentence belongs to the ro
 harness reports those presses rather than asserting on them, and asserts on the ones that
 crossed a row boundary. `-SkipWindow` runs the two text layers alone, which needs no
 desktop.
+
+What the installed run measures about how settings travel is worth knowing when changing
+any of this: the launcher's rows reach the game as `--key=value` arguments
+(Contract 3, `src/game_launch.cpp`), and the game reads the profile itself only for
+`[remap]`. A profile is *not* loaded as a config file — a top-level key in it does not reach
+a cvar — so a game started without the launcher in front of it never sees those rows, and
+the acceptance legs assert the `[settings]` spelling the launch command reads. Both facts,
+and the two path rows whose General-tab store is `[launch]` while the launch command reads
+`[settings]`, are recorded in
+[the plan's open questions](../docs/plans/launcher-plan.md).
 
 ## How to add a row
 
