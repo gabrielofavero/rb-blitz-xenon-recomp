@@ -35,7 +35,7 @@ build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultima
 | Game data | Download package / extracted folder / keep what is already installed. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. |
 | Ultimate | Not at all, download the pinned release, use a zip, or use a folder. |
 | Progress | One bar, four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
-| Finish | "Launch Rock Band Blitz" (unticked in silent installs). |
+| Finish | A three-way choice — open the game, open the launcher, or do nothing — with the game preselected ([details below](#the-finish-page)). |
 
 ### Shortcuts
 
@@ -54,6 +54,29 @@ beside itself.
 The names are deliberately different so a list can tell them apart, and the
 game's shortcut is never repointed at the launcher: the game has to stay runnable
 on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
+
+### The finish page
+
+The last page asks what to do when the wizard closes, with the game preselected:
+
+| Choice | What it starts |
+| --- | --- |
+| **Open Rock Band Blitz** (or **Open Rock Band Blitz Ultimate** when the mod was installed) | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads the launcher's profile on its own, so it still follows the target the install left behind. |
+| **Open the launcher** | `rb_blitz_launcher.exe`, which finds the game beside itself. |
+| **Do nothing** | Nothing; the wizard just closes. |
+
+The old single `Launch Rock Band Blitz` checkbox is gone: Inno Setup's `[Run]`
+entries are checkboxes, not a choice, and only one of them could be the post-install
+action. The wizard has no test harness, so this page is checked by hand rather than
+implied to be covered:
+
+1. Install with **Open Rock Band Blitz** selected — the game starts.
+2. Install with **Open the launcher** selected — the launcher window opens.
+3. Install with **Do nothing** selected — nothing starts.
+4. `/VERYSILENT` with no `/RUNATEND` — nothing starts; `/VERYSILENT /RUNATEND=game`
+   — the game starts.
+
+A failed install never starts anything.
 
 A copy of everything the helper did is left next to the game as
 `install-manifest.toml` (machine-readable, includes the source, the file count,
@@ -326,6 +349,7 @@ Setup's own switches.
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
 | `/LAUNCHERICON` | `1` | Silent installs only: also create the launcher's desktop shortcut. Omitted, nothing is added to the desktop. |
+| `/RUNATEND` | `game` (wizard default), `launcher`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. |
 | `/DIR` | folder | Install folder (Inno Setup). |
 | `/ALLUSERS`, `/CURRENTUSER` | — | Machine-wide instead of the default per-user install (Inno Setup). |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | — | Usual unattended switches (Inno Setup). |
@@ -339,8 +363,8 @@ RockBandBlitzSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /ULTIMATESOURCE=pin
 ```
 
-A silent install never launches the game. A silent *uninstall* always keeps the
-game data (see below).
+A silent install launches nothing unless `/RUNATEND` asks for it (see the finish
+page above); a silent *uninstall* always keeps the game data (see below).
 
 ## The helper contract
 

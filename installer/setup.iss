@@ -162,8 +162,9 @@ Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeNa
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: launchericon
 
-[Run]
-Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#AppShortName}}"; Flags: postinstall nowait skipifsilent; Check: InstallSucceeded
+; D8 replaced the single postinstall [Run] entry with the finish page's three-way
+; choice (see [Code] below): Inno can run at most one entry with a checkbox, and
+; the wizard now asks open game / open launcher / do nothing.
 
 [UninstallDelete]
 ; Files the helper wrote that Inno Setup never saw: the ones it downloaded, the
@@ -235,6 +236,13 @@ const
   UltimateZipParam = 'ULTIMATEZIP';
   UltimateFolderParam = 'ULTIMATEFOLDER';
   LauncherIconParam = 'LAUNCHERICON';
+  RunAtEndParam = 'RUNATEND';
+
+  { D8: what the finish page can do. Strings rather than indexes, because the same
+    values are what /RUNATEND accepts on a silent install (README.md). }
+  RunAtEndGame = 'game';
+  RunAtEndLauncher = 'launcher';
+  RunAtEndNothing = 'none';
 
   { The launcher's desktop icon: the [Tasks] name, shared by the [Icons] entry
     and the code that applies D9's default and the silent switch above. }
@@ -289,6 +297,14 @@ var
   gUltimateFolder: String;
   gUltimateSourceDescription: String;
   gUltimateVersion: String;
+
+  gInstalled: Boolean;
+  gFinishReached: Boolean;
+  gRunAtEnd: String;
+
+  EndGameRadio: TNewRadioButton;
+  EndLauncherRadio: TNewRadioButton;
+  EndNothingRadio: TNewRadioButton;
 
 // --- small helpers --------------------------------------------------------
 
@@ -353,6 +369,84 @@ end;
 function ParamLauncherIcon: String;
 begin
   Result := Trim(ExpandConstant('{param:LAUNCHERICON|}'));
+end;
+
+// D8: the finish page's three-way choice. The game is the interactive default; a
+// silent install does nothing unless /RUNATEND asks for one, as the old
+// skipifsilent [Run] entry did. The radios set gRunAtEnd; DeinitializeSetup runs
+// it after the wizard closes.
+function ParamRunAtEnd: String;
+begin
+  Result := Lowercase(Trim(ExpandConstant('{param:RUNATEND|}')));
+end;
+
+procedure ResolveRunAtEnd;
+var
+  requested: String;
+begin
+  requested := ParamRunAtEnd;
+  if requested <> '' then
+    gRunAtEnd := requested
+  else if WizardSilent then
+    gRunAtEnd := RunAtEndNothing
+  else
+    gRunAtEnd := RunAtEndGame;
+end;
+
+function RunAtEndProblem: String;
+begin
+  Result := '';
+  if (gRunAtEnd <> RunAtEndGame) and (gRunAtEnd <> RunAtEndLauncher) and
+     (gRunAtEnd <> RunAtEndNothing) then
+    Result := RunAtEndParam + ' must be ' + RunAtEndGame + ', ' + RunAtEndLauncher + ' or ' +
+              RunAtEndNothing + ', not ''' + gRunAtEnd + '''.';
+end;
+
+procedure EndGameRadioClick(Sender: TObject);
+begin
+  gRunAtEnd := RunAtEndGame;
+end;
+
+procedure EndLauncherRadioClick(Sender: TObject);
+begin
+  gRunAtEnd := RunAtEndLauncher;
+end;
+
+procedure EndNothingRadioClick(Sender: TObject);
+begin
+  gRunAtEnd := RunAtEndNothing;
+end;
+
+// The finished label's height depends on its text and the DPI, so the radios are
+// placed under it when the page is shown rather than at start-up. The first one
+// names the target the install left behind.
+procedure LayoutFinishChoices;
+var
+  top, step, width: Integer;
+begin
+  width := WizardForm.FinishedLabel.Width;
+  step := ScaleY(21);
+  top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(8);
+
+  if gUltimateActive then
+    EndGameRadio.Caption := 'Open {#AppShortName} Ultimate'
+  else
+    EndGameRadio.Caption := 'Open {#AppShortName}';
+  EndLauncherRadio.Caption := 'Open the launcher';
+  EndNothingRadio.Caption := 'Do nothing';
+
+  EndGameRadio.Left := WizardForm.FinishedLabel.Left;
+  EndGameRadio.Top := top;
+  EndGameRadio.Width := width;
+  EndGameRadio.Height := step;
+  EndLauncherRadio.Left := WizardForm.FinishedLabel.Left;
+  EndLauncherRadio.Top := top + step;
+  EndLauncherRadio.Width := width;
+  EndLauncherRadio.Height := step;
+  EndNothingRadio.Left := WizardForm.FinishedLabel.Left;
+  EndNothingRadio.Top := top + step * 2;
+  EndNothingRadio.Width := width;
+  EndNothingRadio.Height := step;
 end;
 
 function ReadAllText(const path: String): String;
@@ -916,6 +1010,8 @@ function InitializeSetup: Boolean;
 begin
   gFailed := False;
   gFailureText := '';
+  gInstalled := False;
+  gFinishReached := False;
   gGameSourceBytes := 0;
   gUltimateActive := False;
   gUltimateMode := 'none';
@@ -998,6 +1094,25 @@ begin
     if index >= 0 then
       WizardForm.TasksList.Checked[index] := False;
   end;
+
+  // D8: the finish page's choice. The [Run] entry is gone; these three radios
+  // replace it, and DeinitializeSetup runs whichever is selected. RunList is
+  // hidden because it would otherwise list the [Run] entries that no longer
+  // exist.
+  EndGameRadio := TNewRadioButton.Create(WizardForm);
+  EndGameRadio.Parent := WizardForm.FinishedPage;
+  EndGameRadio.OnClick := @EndGameRadioClick;
+
+  EndLauncherRadio := TNewRadioButton.Create(WizardForm);
+  EndLauncherRadio.Parent := WizardForm.FinishedPage;
+  EndLauncherRadio.OnClick := @EndLauncherRadioClick;
+
+  EndNothingRadio := TNewRadioButton.Create(WizardForm);
+  EndNothingRadio.Parent := WizardForm.FinishedPage;
+  EndNothingRadio.OnClick := @EndNothingRadioClick;
+
+  WizardForm.RunList.Visible := False;
+  ResolveRunAtEnd;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -1195,6 +1310,13 @@ begin
     Exit;
   end;
 
+  problem := RunAtEndProblem;
+  if problem <> '' then
+  begin
+    Result := problem;
+    Exit;
+  end;
+
   needed := RequiredBytes;
   if not RunQuietProbe('check-space --dest ' + QuoteArg(gAppDir) + ' --required-bytes ' +
                        Int64ToStr(needed)) then
@@ -1332,6 +1454,7 @@ begin
   end;
 
   gStageActive := False;
+  gInstalled := not gFailed;
 end;
 
 function InstallSucceeded: Boolean;
@@ -1432,4 +1555,56 @@ begin
     Result := 9
   else
     Result := 0;
+end;
+
+// D8: place and arm the finish page's choice. A failed install has nothing to
+// run, and a silent one has no page to ask on, so the radios only appear on a
+// successful interactive install.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID <> wpFinished then
+    Exit;
+  if gFailed or WizardSilent then
+  begin
+    EndGameRadio.Visible := False;
+    EndLauncherRadio.Visible := False;
+    EndNothingRadio.Visible := False;
+    Exit;
+  end;
+  gFinishReached := True;
+  LayoutFinishChoices;
+  EndGameRadio.Checked := gRunAtEnd = RunAtEndGame;
+  EndLauncherRadio.Checked := gRunAtEnd = RunAtEndLauncher;
+  EndNothingRadio.Checked := gRunAtEnd = RunAtEndNothing;
+end;
+
+// D8: the chosen action, after the wizard has closed. The game is started with
+// the same argument its shortcut carries, and it reads the launcher's profile on
+// its own (Contract 3), so this honours the target the install left behind
+// without a second process; the launcher's entry is the launcher itself.
+procedure DeinitializeSetup;
+var
+  exePath, parameters: String;
+  code: Integer;
+begin
+  if not gInstalled then
+    Exit;
+  // An interactive install runs the choice only once the finish page was shown;
+  // a silent one has no page, so gInstalled is enough.
+  if (not WizardSilent) and (not gFinishReached) then
+    Exit;
+  if gRunAtEnd = RunAtEndGame then
+  begin
+    exePath := ExpandConstant('{app}\{#GameExeName}');
+    parameters := '--game_data_root=' + QuoteArg(ExpandConstant('{app}\{#GameDirName}'));
+  end
+  else if gRunAtEnd = RunAtEndLauncher then
+  begin
+    exePath := ExpandConstant('{app}\{#LauncherExeName}');
+    parameters := '';
+  end
+  else
+    Exit;
+  if not Exec(exePath, parameters, ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, code) then
+    Log('run at end: could not start ' + exePath + ': ' + SysErrorMessage(code));
 end;
