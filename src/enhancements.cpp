@@ -5,8 +5,10 @@
 // and the one boot line that reports them. See src/enhancements.h for why the
 // names carry the table prefix and docs/engine/toggles.md for the table itself.
 //
-// Every toggle here is off by default and every one is honest about being
-// unimplemented, because a user reading --help or a log must not be able to
+// Every toggle here is off by default, and every one is honest about what it does
+// today: a description that ends in "Not implemented" is a toggle that gates
+// nothing yet, and R5 - the first implemented one - says what it edits and which
+// key names what it hides. A user reading --help or a log must not be able to
 // mistake a planned feature for a working one. The faithful (off) behaviour is
 // named in each description; that is the same record the project requires of a
 // hook, applied to a plan.
@@ -22,6 +24,8 @@
 
 #include <rex/cvar.h>
 #include <rex/logging.h>
+
+#include "ui/menu_options.h"
 
 REXCVAR_DEFINE_BOOL(enhancements_expand_resolution, false, "Enhancements",
                     "R1 custom resolutions: expand the guest's own layout (menu background, HUD, "
@@ -49,8 +53,16 @@ REXCVAR_DEFINE_BOOL(enhancements_icon_schemes, false, "Enhancements",
 
 REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, false, "Enhancements",
                     "R5 hiding categories: remove named entries from the main menu's option list, "
-                    "in the list the guest navigates and not only in the drawing. Faithful: every "
-                    "shipped entry is present. Not implemented.")
+                    "in the list the guest navigates and not only in the drawing. Needs "
+                    "enhancements_hidden_menu_options to name them. Faithful: every shipped entry "
+                    "is present.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_STRING(enhancements_hidden_menu_options, rb_blitz::menu_options::kDefaultRows,
+                      "Enhancements",
+                      "R5 the main menu rows enhancements_hide_menu_options hides, comma "
+                      "separated. The compiled default is the three that only ever worked online: "
+                      "splash_leaderboard, splash_achievements, splash_dlc.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_native_mouse, false, "Enhancements",
@@ -141,6 +153,9 @@ void LogToggles() {
   }
   REXLOG_INFO("enhancements: {} = \"{}\" (R8 scheme; empty means unnamed)",
               "enhancements_controller_scheme", REXCVAR_GET(enhancements_controller_scheme));
+  REXLOG_INFO("enhancements: {} = \"{}\" (R5 rows; the three offline-dead entries by default)",
+              "enhancements_hidden_menu_options",
+              REXCVAR_GET(enhancements_hidden_menu_options));
 }
 
 }  // namespace rb_blitz::enhancements

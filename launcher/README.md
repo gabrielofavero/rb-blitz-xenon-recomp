@@ -332,9 +332,19 @@ mapping database happens to have for a hardware id that matches nothing.
 
 ## The General tab (B1)
 
-Three rows, which is the whole of M1's General scope (§1.1, D4): the launch target, the save
-location and the DLC location. *Verify installation* and the game-directory override are later
-(D4 says so); nothing here pretends otherwise.
+Five rows in four groups: the launch target, the save location and the DLC location — the whole of
+M1's General scope (§1.1, D4) — plus R5's two rows under a *Main menu* heading. *Verify installation*
+and the game-directory override are later (D4 says so); nothing here pretends otherwise.
+
+**The main-menu rows** are the first enhancement this tab carries: *Hide offline menu items*
+(`enhancements_hide_menu_options`, a check box) and *Menu items to hide*
+(`enhancements_hidden_menu_options`, a text field naming the title's own rows). They remove the
+Leaderboards, Achievements and Downloadable Content rows — the three whose screens need Rock Central
+— from the menu the game shows when it is offline, and they are off by default like every other
+toggle. What the edit is, why it has to keep the file's length, and the runs that prove it are in
+[main-menu-flow.md](../docs/engine/main-menu-flow.md); the rows themselves are the project's own
+cvars, not the runtime's, so the tab passes them like any other row that is not on its compiled
+default.
 
 **The launch target** is a stack of radios under the group heading, one per choice — *Rock Band
 Blitz*, *Rock Band Blitz (Trial)* and *Rock Band Blitz Ultimate* — each its own focus-ring row, so

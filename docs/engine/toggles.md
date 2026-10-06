@@ -2,8 +2,10 @@
 
 The contract for the nine customization features in
 [plans/customization-plan.md](../plans/customization-plan.md) (R1–R9). **Every toggle is off by
-default, and every one is unimplemented.** This page is the table the plan's contract 1 promises: what
-each toggle gates, what the faithful (off) behaviour is, and which prompt implements it.
+default.** This page is the table the plan's contract 1 promises: what each toggle gates, what the
+faithful (off) behaviour is, and which prompt implements it — or, for the eight that are still
+planned, what will. Only R5 has been implemented so far; its own page
+([main-menu-flow.md](main-menu-flow.md)) is the evidence behind it.
 
 The cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
 boot log, not by this page.
@@ -36,6 +38,7 @@ before the Ultimate and DLC layers:
 [info] enhancements: enhancements_expand_resolution = off (default) - R1 custom resolutions
 ...
 [info] enhancements: enhancements_controller_scheme = "" (R8 scheme; empty means unnamed)
+[info] enhancements: enhancements_hidden_menu_options = "splash_leaderboard,splash_achievements,splash_dlc" (R5 rows; the three offline-dead entries by default)
 ```
 
 The value and the **source** are both stated (`default`, `config`, `environment`, `command line`,
@@ -50,15 +53,17 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `ui_scale` | R2 UI accessibility: scale guest text and the main-menu logo through the game's own font/layout metrics | the design's text and logo sizes | U2 |
 | `skip_offline_dialog` | R3 auto offline mode: answer "Proceed in Offline Mode?" for the player, enabling offline mode | the prompt is shown and the player chooses | I1 |
 | `icon_schemes` | R4 different icons: replaceable button glyphs and controller-layout art per scheme | the art the title ships | A1, A2 |
-| `hide_menu_options` | R5 hiding categories: remove named entries from the main menu's option list (the list the guest navigates, not only the drawing) | every shipped entry is present | U1 → later |
+| `hide_menu_options` | R5 hiding categories: remove named entries from the main menu's option list (the list the guest navigates, not only the drawing). Needs `enhancements_hidden_menu_options` to name them; the compiled default is the three rows that only ever worked online | every shipped entry is present | U1 ([main-menu-flow.md](main-menu-flow.md)) |
 | `native_mouse` | R6 different input waves: the engine's own pointer path instead of the synthetic pad | the pad the guest actually reads ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp)) | I2 → later |
 | `dlc_cache` | R7 DLC cache: persist the DLC enumeration host-side, with an explicit refresh | the guest's own scan, once per boot | D1, D2 |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones | the songs the title puts there | C1 → later |
 
 `enhancements_controller_scheme` is the one non-boolean cvar here: R8's parameter, not a toggle of
-its own. R5 and R9 will grow a companion key the same way when their implementing prompts know what a
-"named entry" and a "DLC song" are; those keys are added then, not guessed now.
+its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to
+decide what a "named entry" is: the name the title gives the row (`splash_leaderboard`,
+`splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9 grows its key the
+same way when its prompt knows what a "DLC song" is.
 
 ## Adding a toggle
 

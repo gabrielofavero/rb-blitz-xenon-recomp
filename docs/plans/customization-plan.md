@@ -32,7 +32,7 @@ for this scope.
 | R2 | UI accessibility: resize text, main menu logo | the guest's font/Glyph model and the menu's anchoring model, then a scale lever; the logo is a scene object, so it shares R1's scene work (§4 D5, U2, A1) |
 | R3 | auto offline mode: skip the main menu dialog | force the **"Proceed in Offline Mode?"** branch, named in [rb3-references.md](../rb3-references.md) §3 as a live midasm candidate **[tree]** `docs/rb3-references.md:161`, and confirmed present in the guest image **[tree]** `docs/history/bringup-log.md:520`; must still *enable* offline mode, not merely dismiss (§4 D10, I1) |
 | R4 | different icons: asset swapping on button schemes and controller layouts | the button sheet is a font glyph table inside `ui/resource/fonts/gen/buttons.milo_xbox`, and the pad diagrams are four 1024² images per family inside `controller_config.milo_xbox` **[tree]** [launcher-plan.md](launcher-plan.md) §10.1; needs the scene-buffer-offset research that §10.4 left open (S8, A1, A2) |
-| R5 | hiding categories: hide menu options on main menu | the main menu's option list model, then a filter; data-side if the list is data, a hook if it is code (§4 D12, U1) |
+| R5 | hiding categories: hide menu options on main menu | the main menu's option list model, then a filter; data-side if the list is data, a hook if it is code (§4 D12, U1) — **answered:** it is data (a compiled DTA the panel copies into its row list), and it is hidden by a byte-neutral rewrite of that one file as it is read ([engine/main-menu-flow.md](../engine/main-menu-flow.md)) |
 | R6 | different input waves (native mouse support) | staged input work, ending at a real pointer if the engine has a pointer path at all; the current mouse is a synthetic pad **[tree]** `src/input/mouse_ui.h`, `src/input/ui_nav.h` (§4 D13, I2) |
 | R7 | save the DLC cache so load does not re-search; refresh button on the main menu | a host-side cache of the DLC enumeration plus a guest-side refresh affordance; the guest's own `songcache:` stays authoritative **[tree]** [dlc.md](../dlc.md) §4, [rb3-references.md](../rb3-references.md) §6 group 9 (§4 D8, D1, D2) |
 | R8 | force a predefined controller scheme (default) on load | the controller layout is persisted in the guest's own options/save; force it before the guest reads it, opt-in, with a backup (§4 D9, D3) |
@@ -81,9 +81,11 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
 - **No name for anything.** `config/functions.toml` forces three entries and names **none** of them,
   so the tree is ~38k `sub_XXXXXXXX` symbols **[tree]** [rb3-references.md](../rb3-references.md) §2,
   `config/functions.toml`.
-- **No flow maps.** There is no document saying which function decides the main menu's option list,
-  which one sizes the background, which one builds the song list, or which one reads the controller
-  layout. The bring-up log holds chronology, not structure.
+- **No flow maps.** There is no document saying which function sizes the background, which one builds
+  the song list, or which one reads the controller layout. The bring-up log holds chronology, not
+  structure. The main menu's own flow now has one —
+  [engine/main-menu-flow.md](../engine/main-menu-flow.md), landed 2026-10-06 with U1 and R5 — which is
+  also the template the rest should follow.
 - ~~**No guest-state visibility.**~~ — **landed 2026-10-04 (P2).** The probe records an ordered trace
   of points placed in hooks and draws an ImGui overlay with the guest's requested video mode, the
   window and the present path: [docs/engine/probe.md](../engine/probe.md). The one gap it states
@@ -246,12 +248,29 @@ already reports it.
 scene's data, the enhancement is a data overlay (D6 route 1), not a hook. A hook is the fallback, and
 it records its guest address per [backlog.md](../backlog.md) §6.
 
+**Answered 2026-10-06 (U1).** The options *are* data — a compiled DTA (`splash.dtb`) inside the ark —
+and the edit is data too: the same bytes a patched payload entry would carry. What R5 does *not* use
+is D6 route 1 as written, because the ark index fixes each entry's offset **and** size
+(`patch_xbox.hdr` / `main_xbox.hdr`), so an overlay only works if the replacement is exactly as long
+as the original. The rewrite that keeps the length is byte-neutral (§
+[engine/main-menu-flow.md](../engine/main-menu-flow.md) §5), which makes the read that carries the
+file the natural place to apply it: nothing is repacked, nothing under `game/` is written, and D14 is
+untouched. The retail file's content-checksum row is corrected in the image when it is found, because
+a patched file whose digest moved is a dirty-disc error.
+
 ### D12 — Hiding options must not strand navigation
 
 **Proposal:** a hidden option is removed from the list the guest navigates, never merely made
 invisible. The mouse layer already re-measures row pitch per screen
 **[tree]** `src/input/ui_nav.h` (`MenuHoverAligner`), so a shorter list is safe *if* the change is in
 the model and not in the drawing.
+
+**Kept 2026-10-06 (U1).** Verified, not assumed: the panel copies the file's array into its own row
+list and then navigates *that* list, and its action table (`switch {start.lst selected_sym}`) is keyed
+by the same row names — so a removed row cannot be selected, and no case has to change with it. The
+boot that hid the three rows OCR'd a four-row menu (Ultimate) and a three-row menu (retail) with no
+fault, and the harness's stock needle (`DOWNLOAD CONTENT`) no longer matches, which is the same
+statement from the other side.
 
 ### D13 — Define "native mouse" before scheduling it
 
@@ -622,6 +641,16 @@ table, which `[functions]` cannot name.
 > **Verify.** The probe's dumped labels match the captured main menu (OCR), in order.
 > **Don't.** Do not hide anything yet (D12 covers the rule when it is done).
 
+> **Landed 2026-10-06, with R5 — which is why it landed rather than stopped here.**
+> [docs/engine/main-menu-flow.md](../engine/main-menu-flow.md) is the option-list map: the panel's
+> `check_trial` statement, the array verbatim from both shipped files, the loader's conditional
+> behaviour, the edit shape and the runs that prove it. The "probe that dumps every option id + label"
+> this goal asked for is the boot log's own record instead: the read hook names the file it patched
+> (size + digest) and the rows it removed, and `scripts/observe_ui.ps1 -State main-menu -Ocr` reads the
+> resulting labels back. R5 ([src/ui/menu_options.cpp](../../src/ui/menu_options.cpp),
+> [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp)) is the filter, and it is off by
+> default.
+
 #### A1 — Icon/button-sheet swap route
 
 > **Goal.** Establish how to change the icons the guest actually draws: the `buttons.milo_xbox` glyph
@@ -917,7 +946,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 | Q1 | Does the guest reflow, crop, stretch or letterbox at a non-16:9 mode? | R2, R3, U2 | R1 |
 | Q2 | Are UI elements safe-area anchored or absolute? | R2, U2 | S7 |
 | Q3 | Does the engine have any pointer/cursor path? | R6, I2 | S6, I2 |
-| Q4 | Where are the main-menu options authored (data or code)? | R5 | U1 |
+| Q4 | Where are the main-menu options authored (data or code)? | R5 | U1 — **answered 2026-10-06:** data, a compiled DTA in the ark |
 | Q5 | Is the main-menu song list the song list, or its own setlist? | R9 | C1 |
 | Q6 | Is `songcache:` parseable/writable host-side, and is it the DLC search result? | R7 | S5, D1 |
 | Q7 | Is the DLC refresh button the launcher's or the guest's main menu? | R7 | D8, §1.1 (this plan proposes: refresh entry point first, in-game affordance after the main-menu map) |

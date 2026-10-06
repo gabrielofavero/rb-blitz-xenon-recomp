@@ -178,6 +178,31 @@ void TestOnlyDifferencesArePassed(const Scratch& scratch) {
   CHECK_NOT_CONTAINS(again.arguments, "--launch.target");
 }
 
+void TestMainMenuRows(const Scratch& scratch) {
+  BeginCase("R5: the main menu's two rows travel as one bool and one quoted list");
+
+  ProfileSession session = scratch.Session();
+  // Both defaults are off/compiled, so an untouched profile passes neither: the game's own
+  // defaults decide, which is what keeps the faithful path faithful.
+  const LaunchCommand untouched =
+      BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_NOT_CONTAINS(untouched.arguments, "--enhancements_hide_menu_options");
+  CHECK_NOT_CONTAINS(untouched.arguments, "--enhancements_hidden_menu_options");
+
+  // The bool's compiled default is false, so turning it on has to be passed; the row list is a
+  // string, so the value travels quoted (a comma is not a shell separator, but the row's own
+  // spaces would be).
+  session.SetSetting("enhancements_hide_menu_options", "true", "false", ValueStyle::kBare);
+  session.SetSetting("enhancements_hidden_menu_options", "splash_leaderboard, splash_dlc",
+                     "splash_leaderboard,splash_achievements,splash_dlc", ValueStyle::kBasic);
+  const LaunchCommand command =
+      BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_TRUE(command.ok);
+  CHECK_CONTAINS(command.arguments, "--enhancements_hide_menu_options=true");
+  CHECK_CONTAINS(command.arguments,
+                 "--enhancements_hidden_menu_options=\"splash_leaderboard, splash_dlc\"");
+}
+
 void TestRefusals(const Scratch& scratch) {
   BeginCase("no game data root: the command is printed, and says why it cannot start");
 
@@ -280,6 +305,7 @@ int main() {
   const Scratch scratch;
   TestCommandShape(scratch);
   TestOnlyDifferencesArePassed(scratch);
+  TestMainMenuRows(scratch);
   TestRefusals(scratch);
   TestFailureDetail(scratch);
   TestReadiness(scratch);

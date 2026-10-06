@@ -73,11 +73,34 @@ puts them, and `_ark_main_xbox.json` / `_ark_patch_xbox.json` are the two indexe
   tree's `../../system/run/...` prefix. A `..` component is written as `dotdot\` — the
   convention other ARK extractors use — so an entry can never escape the extraction
   root while nothing is dropped and every path stays unique.
-- **Not everything is readable yet.** `.mid`, `.mogg` and `.bik` come out as plaintext and
-  are immediately usable, and the `.png_xbox` / `.bmp_xbox` textures have a decoded
-  envelope (the section below). `.dtb` (compiled DTA) still carries the engine-side
-  `dtbcrypt` layer, and the pixel data inside a `.milo_xbox` is chunked *and* compressed
-  — see "Texture swapping" for exactly how far that goes.
+- **Not everything is readable.** `.mid`, `.mogg` and `.bik` come out as plaintext and are
+  immediately usable, and the `.png_xbox` / `.bmp_xbox` textures have a decoded envelope
+  (the section below). The pixel data inside a `.milo_xbox` is still chunked *and*
+  compressed — see "Texture swapping" for exactly how far that goes. `.dtb` (compiled
+  DTA) is decoded now: see "Compiled DTA" below.
+
+## Compiled DTA (`.dtb`)
+
+A `.dtb` entry is `[u32 seed][body]`, and the body is xored with the same Park–Miller
+stream the ark header uses, seeded from that dword and advanced one byte per body byte.
+What is left after decoding is a tree of nodes:
+
+```
+body = 0x01 | u16 root_arity | u16 line | u16 deprecated | node*
+node = [u32 tag] + payload
+```
+
+| Tag | Kind | Payload |
+| --- | --- | --- |
+| `0x00` int, `0x01` float, `0x06` unhandled, `0x08` else, `0x09` endif, `0x24` autorun | scalar | `[u32 value]` |
+| `0x02` var, `0x03` func, `0x04` object, `0x05` symbol, `0x07` ifdef, `0x12` string, `0x20` define, `0x21` include, `0x22` merge, `0x23` ifndef, `0x25` undef | text | `[u32 length][bytes]` |
+| `0x10` array `( … )`, `0x11` command `{ … }`, `0x13` property `[ … ]` | block | `[u16 arity][u16 line][u16 deprecated]` + children |
+
+[src/ui/menu_options.cpp](../src/ui/menu_options.cpp) is this format's reader *and* writer in
+this tree — it decodes the body, re-serializes every node it parsed, and refuses a file whose
+bytes do not come back identical, which is what makes an edit to a compiled DTA safe to make.
+The loader's own behaviour (what `#ifdef` does to the nodes it guards, and why a directive is
+never a thing to delete) is in [engine/main-menu-flow.md](engine/main-menu-flow.md).
 
 ## Textures
 
@@ -500,8 +523,10 @@ builds against a MiloEditor clone; see the project file for the path.
 The archive layout and the header cipher are public community knowledge, not something
 this project worked out alone: [OpenNyx](https://github.com/mtolly/onyx)'s
 `Onyx.Harmonix.Ark` is the implementation the descriptions here were checked against,
-and xorloser's published `dtbcrypt` documents the same 32-bit generator for the `.dtb`
-files. [scripts/hmx_ark.py](../scripts/hmx_ark.py) is an independent implementation of
+xorloser's published `dtbcrypt` documents the same 32-bit generator for both the `.hdr`
+and the `.dtb` bodies, and the node grammar above was read out of the engine's own
+`DataArray::Load` in the public RB3 tree. [scripts/hmx_ark.py](../scripts/hmx_ark.py) and
+[src/ui/menu_options.cpp](../src/ui/menu_options.cpp) are independent implementations of
 that format in this repository's own tooling style — no code is vendored or translated —
 and every claim above was re-verified against the dump rather than assumed.
 

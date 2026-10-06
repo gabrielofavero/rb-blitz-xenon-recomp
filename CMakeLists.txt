@@ -85,6 +85,7 @@ set(RBBLITZ_SOURCES
     src/enhancements.cpp
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
+    src/hooks/menu_filter.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
     src/input/remap.cpp
@@ -92,6 +93,7 @@ set(RBBLITZ_SOURCES
     src/launcher/profile.cpp
     src/launcher/profile_path.cpp
     src/launcher/remap.cpp
+    src/ui/menu_options.cpp
 )
 
 if(WIN32)
@@ -325,6 +327,16 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_dlc_library_tests PRIVATE src)
     add_test(NAME dlc_library COMMAND rb_blitz_dlc_library_tests)
+
+    # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
+    # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built
+    # in the test itself - no boot, and no retail content (D14).
+    add_executable(rb_blitz_menu_options_tests
+        tests/menu_options_tests.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_menu_options_tests PRIVATE src)
+    add_test(NAME menu_options COMMAND rb_blitz_menu_options_tests)
 
     add_executable(rb_blitz_ultimate_plan_tests
         tests/ultimate_plan_tests.cpp

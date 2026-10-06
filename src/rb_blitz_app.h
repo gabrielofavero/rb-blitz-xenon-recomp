@@ -60,6 +60,7 @@
 #include "diag/probe.h"
 #include "enhancements.h"
 #include "fs/path_policy.h"
+#include "hooks/menu_filter.h"
 #include "hooks/dlc.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
@@ -195,6 +196,10 @@ class RbBlitzApp : public rex::ReXApp {
   void OnPostLoadXexImage() override {
     LogBootIdentity();
     rb_blitz::enhancements::LogToggles();
+    // R5 reads its own cvars here, before the guest starts: the read hook that
+    // applies the menu filter runs on guest threads and must not touch the
+    // registry, so the toggle and the row list are captured once (P1's D7).
+    rb_blitz::menu_filter::Configure();
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
     // After ultimate::Configure, which decides what the guest-visible game tree
     // looks like: DLC is resolved by the SDK content manager from a host path, so

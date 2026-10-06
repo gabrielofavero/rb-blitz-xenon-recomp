@@ -99,6 +99,13 @@ tab    = "general"
 status = "unavailable"
 note   = "The Ultimate content-device, song-blacklist and disk-error edits are not editable in this build."
 
+# R5: what the title's own main menu lists offline. Its own group because it is not
+# an Ultimate patch bit - the edit is made when the menu's file is read, in either
+# launch target, and applies to the retail content as well.
+[[group]]
+name = "Main menu"
+tab  = "general"
+
 [[group]]
 name = "Display"
 tab  = "graphics"
@@ -201,6 +208,45 @@ validate = "dlc_layout|inside_game_root:forbid"
 tooltip = """
 DLC folder, laid out as <title_id>/<content_type>/<package>. Empty uses the game
 folder's dlc directory.
+"""
+
+# ---------------------------------------------------------------------------
+# General - Main menu
+# ---------------------------------------------------------------------------
+
+# R5. Leaderboards, achievements and downloadable content are the three rows whose
+# screens need Rock Central, and offline each one is a notice at best. The title's
+# compiled menu file is edited when it is read (src/hooks/menu_filter.cpp), so the
+# row list is a cvar rather than a file the user patches: the ark index fixes every
+# entry's size, and the edit is byte-neutral.
+[[setting]]
+key     = "enhancements_hide_menu_options"
+tab     = "general"
+group   = "Main menu"
+label   = "Hide offline menu items"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Removes the main menu's Leaderboards, Achievements and Downloadable Content rows,
+which are online-only and do nothing offline. The rows below name them. Needs a
+restart.
+"""
+
+[[setting]]
+key     = "enhancements_hidden_menu_options"
+tab     = "general"
+group   = "Main menu"
+label   = "Menu items to hide"
+kind    = "string"
+default = "splash_leaderboard,splash_achievements,splash_dlc"
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Which main menu rows the setting above removes, by the title's own names
+(splash_leaderboard, splash_achievements, splash_dlc), separated by commas. Empty
+hides the three defaults. Needs a restart.
 """
 
 # ---------------------------------------------------------------------------
