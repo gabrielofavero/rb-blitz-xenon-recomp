@@ -43,6 +43,7 @@ using namespace rb_blitz::test;
 // are the title's own, because they are what the toggle's default list matches.
 
 constexpr uint32_t kInt = 0x00;
+constexpr uint32_t kVar = 0x02;
 constexpr uint32_t kSymbol = 0x05;
 constexpr uint32_t kIfdef = 0x07;
 constexpr uint32_t kElse = 0x08;
@@ -50,6 +51,7 @@ constexpr uint32_t kEndif = 0x09;
 constexpr uint32_t kArray = 0x10;
 constexpr uint32_t kCommand = 0x11;
 constexpr uint32_t kString = 0x12;
+constexpr uint32_t kDefine = 0x20;
 constexpr uint32_t kSeed = 0x1234ABCDu;
 
 void PushU16(std::vector<uint8_t>* out, uint16_t value) {
@@ -87,8 +89,8 @@ std::vector<uint8_t> Scalar(uint32_t tag, uint32_t value) {
   return out;
 }
 
-std::vector<uint8_t> Block(uint32_t tag, uint16_t line,
-                           std::initializer_list<std::vector<uint8_t>> kids) {
+std::vector<uint8_t> BlockOf(uint32_t tag, uint16_t line,
+                             const std::vector<std::vector<uint8_t>>& kids) {
   std::vector<uint8_t> out;
   PushU32(&out, tag);
   PushU16(&out, static_cast<uint16_t>(kids.size()));
@@ -98,6 +100,11 @@ std::vector<uint8_t> Block(uint32_t tag, uint16_t line,
     out.insert(out.end(), kid.begin(), kid.end());
   }
   return out;
+}
+
+std::vector<uint8_t> Block(uint32_t tag, uint16_t line,
+                           std::initializer_list<std::vector<uint8_t>> kids) {
+  return BlockOf(tag, line, std::vector<std::vector<uint8_t>>(kids));
 }
 
 // The option array: the rows the menu opens and closes with, the achievement
@@ -206,6 +213,140 @@ std::vector<uint8_t> LocaleFile(const std::string& key, const std::string& text,
   return file;
 }
 
+// --- the server-connect fixture -------------------------------------------
+//
+// A compiled DTA shaped like `ui/net/gen/server_connect.dtb`: the states as
+// root-level `#define NAME (value)` pairs, the panel object whose `update_state`
+// handler the edit adds its transitions to, the conditional this build skips -
+// the one place leftover bytes can be parked - and the button handler that sets
+// the same state, which is the code the skip stands in for. That second handler
+// is what makes a second-pass check necessary: the file already says `set_state`,
+// just not in the handler being edited.
+//
+// What a case has to be able to vary is the payment. Each constant's value list
+// carries filler of its own, so a fixture can pay with more than the transitions
+// cost, less, or exactly as much.
+
+constexpr const char* kPaidConstants[] = {
+    "kServerConnectPanel_StartProcess",
+    "kServerConnectPanel_StartSongCache",
+    "kServerConnectPanel_EndSongCache",
+    "kServerConnectPanel_StartPostLogin",
+    "kServerConnectPanel_StartEnumeratingContent",
+    "kServerConnectPanel_CheckingFacebookPermission",
+    "kServerConnectPanel_RequestingFacebookToken",
+    "kServerConnectPanel_WaitingForTrialEnumeration",
+};
+constexpr size_t kPaidConstantCount = sizeof(kPaidConstants) / sizeof(kPaidConstants[0]);
+
+constexpr char kPanelHandlerName[] = "update_state";
+constexpr char kSkippedMacro[] = "HX_PS3";
+
+// The fewest bytes a value list element can take: a text node's own header, with an
+// empty text behind it.
+constexpr size_t kFillerHeader = 8;
+
+// A root-level `#define NAME ( 37 "xxxx..." )`: two nodes, and `filler` extra bytes
+// in the value list, which keep it a valid list of values and are what the edit
+// spends. The pair is returned as two nodes because the root count in the file's
+// header counts nodes, not statements. Without `state_values` a constant keeps an
+// empty list, which is 8 bytes less to pay with - the shape a file needs to be
+// refused with.
+std::vector<std::vector<uint8_t>> StateConstant(const std::string& name, size_t filler,
+                                                bool state_values) {
+  std::vector<std::vector<uint8_t>> value;
+  if (state_values) {
+    value.push_back(Scalar(kInt, 37));
+  }
+  if (filler > 0) {
+    value.push_back(Name(kString, std::string(filler - kFillerHeader, 'x')));
+  }
+  return {Name(kDefine, name), BlockOf(kArray, 3, value)};
+}
+
+void PushAll(std::vector<std::vector<uint8_t>>* to,
+             const std::vector<std::vector<uint8_t>>& nodes) {
+  to->insert(to->end(), nodes.begin(), nodes.end());
+}
+
+std::vector<uint8_t> ServerConnectBody(const std::vector<size_t>& filler, bool skipped_block,
+                                      size_t constants = kPaidConstantCount,
+                                      bool state_values = true) {
+  std::vector<std::vector<uint8_t>> root;
+  // The states the panel's own code names, which a rewritten file still resolves.
+  for (const char* state : {"kServerConnectPanel_Inactive", "kServerConnectPanel_Failed",
+                            "kServerConnectPanel_NoValidLoginCandidate",
+                            "kServerConnectPanel_OfflineMode", "kServerConnectPanel_Connected"}) {
+    PushAll(&root, StateConstant(state, 0, true));
+  }
+  for (size_t i = 0; i < constants; ++i) {
+    PushAll(&root, StateConstant(kPaidConstants[i], filler[i], state_values));
+  }
+
+  // The statement that draws the state's label is the handler's first command; the
+  // statements around it are its siblings, which is where the edit's own go.
+  std::vector<std::vector<uint8_t>> handler{
+      Name(kSymbol, kPanelHandlerName),
+      BlockOf(kArray, 59, {Name(kVar, "state")}),
+      BlockOf(kCommand, 60,
+              {Name(kSymbol, "status.lbl"), Name(kSymbol, "set"), Name(kSymbol, "text_token"),
+               BlockOf(kCommand, 61,
+                       {Name(kSymbol, "switch"), Name(kVar, "state"),
+                        BlockOf(kArray, 62, {Name(kSymbol, "kServerConnectPanel_Inactive"),
+                                             Name(kString, "")})})})};
+  if (skipped_block) {
+    handler.push_back(Name(kIfdef, kSkippedMacro));
+    handler.push_back(BlockOf(kCommand, 89,
+                              {Name(kSymbol, "if"),
+                               BlockOf(kCommand, 89, {Name(kSymbol, "=="), Name(kVar, "state"),
+                                                      Name(kSymbol, "kServerConnectPanel_Failed")}),
+                               BlockOf(kCommand, 90, {Name(kSymbol, "status.lbl"),
+                                                      Name(kSymbol, "set_token_fmt"),
+                                                      Name(kSymbol, "trophy_disk_space_error")})}));
+    handler.push_back(Scalar(kEndif, 0));
+  }
+  handler.push_back(BlockOf(kCommand, 94, {Name(kSymbol, "back.ihp"),
+                                           Name(kSymbol, "set_showing"), Name(kSymbol, "FALSE")}));
+
+  root.push_back(BlockOf(
+      kCommand, 52,
+      {Name(kSymbol, "new"), Name(kSymbol, "ServerConnectPanel"),
+       Name(kSymbol, "server_connect_panel"),
+       BlockOf(kArray, 53, {Name(kSymbol, "file"), Name(kString, "server_connect.milo")}),
+       BlockOf(kArray, 59, handler),
+       BlockOf(kArray, 149,
+               {Name(kSymbol, "BUTTON_DOWN_MSG"),
+                BlockOf(kCommand, 166, {Name(kVar, "this"), Name(kSymbol, "set_state"),
+                                        Name(kSymbol, "kServerConnectPanel_OfflineMode")})})}));
+
+  std::vector<uint8_t> body{0x01};
+  PushU16(&body, static_cast<uint16_t>(root.size()));
+  PushU16(&body, 1);
+  PushU16(&body, 0);
+  for (const std::vector<uint8_t>& node : root) {
+    body.insert(body.end(), node.begin(), node.end());
+  }
+  return body;
+}
+
+std::vector<uint8_t> ServerConnectFile(const std::vector<size_t>& filler, bool skipped_block,
+                                      size_t constants = kPaidConstantCount,
+                                      bool state_values = true) {
+  const std::vector<uint8_t> body = ServerConnectBody(filler, skipped_block, constants, state_values);
+  std::vector<uint8_t> file(body.size() + 4);
+  EncodeFile(kSeed, body.data(), body.size(), file.data());
+  return file;
+}
+
+// A fixture whose payment is spread over the constants evenly, which is what the
+// cases that only need the edit to apply use.
+std::vector<uint8_t> ServerConnectFile(size_t filler_per_constant, bool skipped_block,
+                                       size_t constants = kPaidConstantCount,
+                                       bool state_values = true) {
+  return ServerConnectFile(std::vector<size_t>(kPaidConstantCount, filler_per_constant),
+                           skipped_block, constants, state_values);
+}
+
 // --- reading the fixture back ---------------------------------------------
 //
 // The test parses the file itself, with its own reading of the grammar, so a
@@ -269,7 +410,7 @@ bool ParseNode(const std::vector<uint8_t>& body, size_t* pos, Node* out) {
   return true;
 }
 
-std::vector<Node> ReadRoot(const std::vector<uint8_t>& file) {
+std::vector<Node> ReadRoot(const std::vector<uint8_t>& file, size_t* end = nullptr) {
   // The keystream is its own inverse, so encoding the stored body hands back the
   // decoded one.
   std::vector<uint8_t> scratch(file.size());
@@ -284,6 +425,11 @@ std::vector<Node> ReadRoot(const std::vector<uint8_t>& file) {
       return {};
     }
     root.push_back(node);
+  }
+  if (end != nullptr) {
+    // Where the file's own root count says the last node ends: a header count that
+    // does not add up to the body is the desync the read hook cannot survive.
+    *end = pos;
   }
   return root;
 }
@@ -433,6 +579,79 @@ std::string FirstMacro(const std::vector<Node>& root) {
   }
   return {};
 }
+
+// --- reading the server-connect fixture back ------------------------------
+
+bool HasText(const Node& node, const std::string& text) {
+  if (node.text == text) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasText(kid, text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+size_t CountText(const Node& node, const std::string& text) {
+  size_t count = node.text == text ? 1 : 0;
+  for (const Node& kid : node.kids) {
+    count += CountText(kid, text);
+  }
+  return count;
+}
+
+size_t CountTextIn(const std::vector<Node>& root, const std::string& text) {
+  size_t count = 0;
+  for (const Node& node : root) {
+    count += CountText(node, text);
+  }
+  return count;
+}
+
+// The panel's `update_state` array: its first element names the handler, and the
+// statements that follow are its siblings.
+const Node* FindHandler(const std::vector<Node>& root) {
+  for (const Node& node : root) {
+    if (node.tag != kCommand) {
+      continue;
+    }
+    for (const Node& kid : node.kids) {
+      if (kid.tag == kArray && !kid.kids.empty() && kid.kids[0].text == kPanelHandlerName) {
+        return &kid;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// The handler's first command: the statement that draws the state's label. A
+// command's children are the arguments of its call, so an edit that appends to
+// this one hands `set` more arguments instead of adding a statement.
+const Node* LabelStatement(const Node& handler) {
+  for (const Node& kid : handler.kids) {
+    if (kid.tag == kCommand) {
+      return &kid;
+    }
+  }
+  return nullptr;
+}
+
+// How many of an array's elements are commands. Null answers zero, so a lookup that
+// failed fails a check rather than the run.
+size_t CountCommands(const Node* array) {
+  if (array == nullptr) {
+    return 0;
+  }
+  size_t count = 0;
+  for (const Node& kid : array->kids) {
+    count += kid.tag == kCommand ? 1 : 0;
+  }
+  return count;
+}
+
+
 
 }  // namespace
 
@@ -772,5 +991,175 @@ int main() {
     CHECK_TRUE(tail_intact);
   }
 
+  // --- the offline prompts --------------------------------------------------
+
+  BeginCase("the server-connect fixture is refused when its constants cannot pay");
+  {
+    // Value lists with nothing in them: the same names as the retail file, 8 bytes
+    // less to pay with each, which is 64 bytes short of what the transitions cost.
+    std::vector<uint8_t> file = ServerConnectFile(0, true, kPaidConstantCount, false);
+    const std::vector<uint8_t> before = file;
+    const Skipped refused = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("cost more than the constants pay") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+    // Both sides of the arithmetic are reported even when it refuses, so a caller
+    // can tell how far off the payment was: an empty value list is 8 bytes a
+    // constant short, 64 in all.
+    CHECK_TRUE(refused.added > 0);
+    CHECK_TRUE(refused.removed > 0);
+    CHECK_EQ(refused.added - refused.removed, 64);
+  }
+
+  BeginCase("the offline prompts are skipped on the panel's own file");
+  {
+    std::vector<uint8_t> file = ServerConnectFile(200, true);
+    const size_t size = file.size();
+    std::vector<uint8_t> untouched = file;
+
+    const Skipped skipped = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_TRUE(skipped.applied);
+    CHECK_EQ(skipped.file_size, size);
+    CHECK_EQ(skipped.padding, skipped.removed - skipped.added);
+    CHECK_TRUE(skipped.digest_before[0] != skipped.digest_after[0]);
+
+    // The file still parses as one file, and its root count still adds up: a header
+    // count that no longer matches the body is the desync the loader would read
+    // garbage from.
+    size_t end = 0;
+    const std::vector<Node> root = ReadRoot(file, &end);
+    CHECK_TRUE(!root.empty());
+    CHECK_EQ(end, size - 4);
+
+    // Every constant the payment named is gone, and the states the panel's own code
+    // names are still there: the define, the button handler's own mention of it, and
+    // one per added transition.
+    for (const char* name : kPaidConstants) {
+      CHECK_EQ(CountTextIn(root, name), 0);
+    }
+    CHECK_EQ(CountTextIn(root, "kServerConnectPanel_Failed"), 3);
+    CHECK_EQ(CountTextIn(root, "kServerConnectPanel_OfflineMode"), 4);
+
+    // The two transitions join the handler's statements, as commands of their own.
+    std::vector<Node> before_root = ReadRoot(untouched);
+    const Node* handler = FindHandler(root);
+    const Node* fresh = FindHandler(before_root);
+    const Node* label = handler != nullptr ? LabelStatement(*handler) : nullptr;
+    const Node* fresh_label = fresh != nullptr ? LabelStatement(*fresh) : nullptr;
+    // Looked up through helpers that answer null rather than throwing, so a fixture
+    // that grew a different shape fails a check instead of taking the run down.
+    const auto last = [](const Node* array, size_t back) -> const Node* {
+      return array == nullptr || array->kids.size() < back ? nullptr
+                                                          : &array->kids[array->kids.size() - back];
+    };
+    const Node* advance = last(handler, 2);
+    const Node* accept = last(handler, 1);
+    CHECK_TRUE(handler != nullptr && fresh != nullptr && label != nullptr &&
+               fresh_label != nullptr && advance != nullptr && accept != nullptr);
+    CHECK_EQ(CountCommands(handler), CountCommands(fresh) + 2);
+    CHECK_EQ(advance != nullptr ? advance->tag : 0, kCommand);
+    CHECK_TRUE(advance != nullptr && HasText(*advance, "||"));
+    CHECK_TRUE(advance != nullptr && HasText(*advance, "kServerConnectPanel_Failed"));
+    CHECK_TRUE(advance != nullptr && HasText(*advance, "set_state"));
+    CHECK_EQ(accept != nullptr ? accept->tag : 0, kCommand);
+    CHECK_TRUE(accept != nullptr && HasText(*accept, "goto_screen"));
+    CHECK_TRUE(accept != nullptr && HasText(*accept, "main_menu"));
+
+    // The statement that draws the label is untouched: its children are the
+    // arguments of a `set` call, so a statement appended there would be one more
+    // argument - a fault in the guest rather than a skipped prompt.
+    CHECK_TRUE(label != nullptr && fresh_label != nullptr &&
+               label->kids.size() == fresh_label->kids.size());
+    CHECK_TRUE(label != nullptr && HasText(*label, "text_token"));
+
+    // The leftover is parked in the block the build skips, which is the only place
+    // in the file bytes can be added and never read.
+    CHECK_EQ(CountTextIn(root, kSkippedMacro), 1);
+    CHECK_TRUE(CountTextIn(root, std::string(skipped.padding - 8, ' ')) == 1);
+  }
+
+  BeginCase("the payment can be exactly what the transitions cost");
+  {
+    // No filler at all: the eight constants the edit spends have the lengths the
+    // retail file's own do, and they add up to exactly what the two transitions
+    // cost - which is why the shipped file needs no padding, and why a file that
+    // pays to the byte is still the same length afterwards.
+    std::vector<uint8_t> file = ServerConnectFile(0, true);
+    const size_t size = file.size();
+    const Skipped exact = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_TRUE(exact.applied);
+    CHECK_EQ(exact.padding, 0);
+    CHECK_EQ(exact.removed, exact.added);
+    CHECK_EQ(exact.file_size, size);
+    size_t end = 0;
+    const std::vector<Node> root = ReadRoot(file, &end);
+    CHECK_TRUE(!root.empty());
+    CHECK_EQ(end, size - 4);
+    CHECK_TRUE(FindHandler(root) != nullptr);
+    CHECK_TRUE(FindHandler(root) != nullptr && HasText(*FindHandler(root), "goto_screen"));
+  }
+
+  BeginCase("a file that is not the panel's is left alone");
+  {
+    std::vector<uint8_t> file = FixtureFile(false);
+    const std::vector<uint8_t> before = file;
+    const Skipped refused = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("does not define the server-connect panel") !=
+               std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("a panel missing one of the constants it pays with is refused");
+  {
+    std::vector<uint8_t> file = ServerConnectFile(200, true, kPaidConstantCount - 1);
+    const std::vector<uint8_t> before = file;
+    const Skipped refused = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find(kPaidConstants[kPaidConstantCount - 1]) != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("a second pass over a patched file is refused");
+  {
+    std::vector<uint8_t> file = ServerConnectFile(200, true);
+    CHECK_TRUE(SkipOfflinePrompts(file.data(), file.size()).applied);
+    const std::vector<uint8_t> before = file;
+    const Skipped again = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_FALSE(again.applied);
+    CHECK_TRUE(again.reason.find("already skips the prompts") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("a leftover with no skipped block to park it in is refused");
+  {
+    // The file hands over more than the edit spends and has no conditional to put
+    // the remainder in, so there is nowhere for those bytes to live.
+    std::vector<uint8_t> file = ServerConnectFile(200, false);
+    const std::vector<uint8_t> before = file;
+    const Skipped refused = SkipOfflinePrompts(file.data(), file.size());
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("no skipped block") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("the bytes after the server-connect file are left alone");
+  {
+    const std::vector<uint8_t> before = ServerConnectFile(200, true);
+    std::vector<uint8_t> block(before.size() + 4096, 0xA5);
+    std::memcpy(block.data(), before.data(), before.size());
+    const Skipped skipped = SkipOfflinePrompts(block.data(), block.size());
+    CHECK_TRUE(skipped.applied);
+    CHECK_EQ(skipped.file_size, before.size());
+    bool tail_intact = true;
+    for (size_t i = before.size(); i < block.size(); ++i) {
+      tail_intact = tail_intact && block[i] == 0xA5;
+    }
+    CHECK_TRUE(tail_intact);
+  }
+
   return Finish();
 }
+
+
+

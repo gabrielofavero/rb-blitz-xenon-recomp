@@ -110,6 +110,12 @@ note   = "The Ultimate content-device, song-blacklist and disk-error edits are n
 name = "Main menu"
 tab  = "interface"
 
+# R3: the flow from the title screen into the game, which is not the menu itself - the panel it
+# edits runs before the menu is shown and is reached from the title screen's start button.
+[[group]]
+name = "Startup"
+tab  = "interface"
+
 [[group]]
 name = "Display"
 tab  = "graphics"
@@ -270,6 +276,28 @@ tooltip = """
 Rock Band Blitz Ultimate's own settings screen is called "Mod Settings"; this draws
 it as "Ultimate Settings" instead, the name the mod itself uses. Shown only when the
 Ultimate payload is installed. Needs a restart.
+"""
+
+# R3, and the interface tab's second group: what happens between the title screen
+# and the menu. With Rock Central gone the connect process cannot succeed, and the
+# title asks the player two questions before it shows the menu - first the
+# failed-login notice, then "Proceed in Offline Mode?". Both are that panel's own
+# state transitions written into it when it is read (src/ui/menu_options.cpp), so
+# both can happen on their own.
+[[setting]]
+key     = "enhancements_skip_offline_dialog"
+tab     = "interface"
+group   = "Startup"
+label   = "Hide offline mode prompts"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Starting a game asks two questions before it will show the menu: that Rock Central
+cannot be reached, and whether to proceed in offline mode. With this on both answers
+are given for you, so a start goes straight to the menu in offline mode. Needs a
+restart.
 """
 
 # ---------------------------------------------------------------------------

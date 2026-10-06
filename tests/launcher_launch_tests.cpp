@@ -216,6 +216,20 @@ void TestMainMenuRows(const Scratch& scratch) {
   const LaunchCommand off = BuildLaunchCommand(rename, scratch.Roots(), LaunchTarget::kUltimate);
   CHECK_TRUE(off.ok);
   CHECK_CONTAINS(off.arguments, "--enhancements_rename_mod_settings=false");
+
+  BeginCase("R3: the offline-skip row ships on too, and turning it off is what has to travel");
+
+  // Same shape as R10: the row's default is the game's compiled default, so an untouched
+  // profile passes nothing and the game skips the prompts by itself.
+  ProfileSession skip = scratch.Session();
+  const LaunchCommand skip_default =
+      BuildLaunchCommand(skip, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_NOT_CONTAINS(skip_default.arguments, "--enhancements_skip_offline_dialog");
+
+  skip.SetSetting("enhancements_skip_offline_dialog", "false", "true", ValueStyle::kBare);
+  const LaunchCommand skip_off = BuildLaunchCommand(skip, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_TRUE(skip_off.ok);
+  CHECK_CONTAINS(skip_off.arguments, "--enhancements_skip_offline_dialog=false");
 }
 
 void TestRefusals(const Scratch& scratch) {

@@ -368,7 +368,11 @@ function Invoke-Run([int]$Run) {
     # The DLC sources are passed only when named, so a run that is not about DLC
     # keeps the default root and the pre-library behaviour. Paths are quoted: a
     # library folder usually has a space in it ("YARG Songs").
+    # The title's two dialogs are pinned on: this run's route was measured pressing
+    # A at each of them, and the skip now ships on by default
+    # (docs/engine/main-menu-flow.md, R3).
     $launchArgs = @("--game_data_root=""$GameRoot""", "--ultimate_mode=$UltimateMode",
+                    "--enhancements_skip_offline_dialog=false",
                     "--mnk_mode=1", "--log_level=debug", "--log_flush_interval=1",
                     "--log_max_file_size_mb=100")
     if ($DlcRoot) { $launchArgs += "--dlc_root=""$DlcRoot""" }

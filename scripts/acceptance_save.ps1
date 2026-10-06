@@ -241,8 +241,13 @@ function Invoke-Leg([string]$Name, [scriptblock]$Body) {
 }
 
 function New-Process([string]$UserRoot) {
+    # The route below walks the title's two dialogs (three accepts to the menu), and
+    # the offline skip ships on by default, so the shape this run was measured with
+    # is pinned here instead of left to the default
+    # (docs/engine/main-menu-flow.md, R3).
     $argv = @(
         "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", "--mnk_mode=1",
+        "--enhancements_skip_offline_dialog=false",
         "--no_mouse_ui_nav", "--user_data_root=$UserRoot",
         "--log_noisy=true", "--log_level=trace", "--log_flush_interval=1", "--log_max_file_size_mb=200"
     )

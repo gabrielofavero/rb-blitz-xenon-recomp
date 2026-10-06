@@ -30,7 +30,7 @@ for this scope.
 | --- | --- | --- |
 | R1 | custom resolutions, non-16:9 (ultrawide, portrait, user current), everywhere: menu background, HUD, 3D, song select, power-up menu | the guest's own video mode is the lever (`video_mode_width/height` / `resolution` **[tree]** `rexglue-sdk/src/ui/window.cpp:50-62`), so the research question is *what the guest does* at a non-16:9 mode, not how to scale the host window (§4 D4, R1–R3) |
 | R2 | UI accessibility: resize text, main menu logo | the guest's font/Glyph model and the menu's anchoring model, then a scale lever; the logo is a scene object, so it shares R1's scene work (§4 D5, U2, A1) |
-| R3 | auto offline mode: skip the main menu dialog | force the **"Proceed in Offline Mode?"** branch, named in [rb3-references.md](../rb3-references.md) §3 as a live midasm candidate **[tree]** `docs/rb3-references.md:161`, and confirmed present in the guest image **[tree]** `docs/history/bringup-log.md:520`; must still *enable* offline mode, not merely dismiss (§4 D10, I1) |
+| R3 | auto offline mode: skip the main menu dialog | **answered:** the two questions are the `server_connect_panel`'s own states, and what answers them is the panel's own file — the state move and the screen change its `BUTTON_DOWN_MSG` handler already performs — so they are written into `update_state` as two statements, paid for by eight unused state constants. Not a midasm hook: the decision is data, not a branch instruction. Offline mode is still *entered* (D10); what is skipped is being asked ([engine/main-menu-flow.md](../engine/main-menu-flow.md) §7, I1) |
 | R4 | different icons: asset swapping on button schemes and controller layouts | the button sheet is a font glyph table inside `ui/resource/fonts/gen/buttons.milo_xbox`, and the pad diagrams are four 1024² images per family inside `controller_config.milo_xbox` **[tree]** [launcher-plan.md](launcher-plan.md) §10.1; needs the scene-buffer-offset research that §10.4 left open (S8, A1, A2) |
 | R5 | hiding categories: hide menu options on main menu | the main menu's option list model, then a filter; data-side if the list is data, a hook if it is code (§4 D12, U1) — **answered:** it is data (a compiled DTA the panel copies into its row list), and it is hidden by a byte-neutral rewrite of that one file as it is read ([engine/main-menu-flow.md](../engine/main-menu-flow.md)) |
 | R6 | different input waves (native mouse support) | staged input work, ending at a real pointer if the engine has a pointer path at all; the current mouse is a synthetic pad **[tree]** `src/input/mouse_ui.h`, `src/input/ui_nav.h` (§4 D13, I2) |
@@ -803,6 +803,41 @@ table, which `[functions]` cannot name.
 > behaving as before.
 > **Don't.** Do not return past the whole state machine; do not force the branch when the guest is
 > already offline in a way that changes the stored state.
+
+> **Landed 2026-10-06, without the midasm hook the goal expected — there is no branch to force.** The
+> decision is *data*. The panel the title opens when a game is started is a compiled DTA
+> (`ui/net/gen/server_connect.dtb`), whose `server_connect_panel` owns the whole exchange, and the two
+> accepts are its own `BUTTON_DOWN_MSG` handler: a state move to `kServerConnectPanel_OfflineMode`, then
+> the splash panel's state to `main_menu`. R3 writes those two statements into `update_state`, where
+> the state is already known, and pays for them with eight `#define`s of connect-process states that no
+> file in either ark and no string in the image refers to. §7 of
+> [engine/main-menu-flow.md](../engine/main-menu-flow.md) has the file, the bytes, the two node shapes
+> that faulted before it worked, and why the statement a patch writes has to be a *statement* and not
+> another argument of the call beside it. **It ships on:** with no Rock Central to reach, the failure
+> and both answers to it are not the player's to choose — and the launcher's row is what turns it back
+> into the stock two questions.
+>
+> **Deliverable.** [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) (`SkipOfflinePrompts`), the
+> read hook and the checksum row in [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp), the
+> toggle `enhancements_skip_offline_dialog` in [src/enhancements.cpp](../../src/enhancements.cpp), the
+> launcher row in [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface*
+> tab's *Startup* group), the map in §7, and the log line `menu_filter: the offline prompts are skipped
+> (518 bytes of unused state constants paid for 518 bytes of transitions): a start goes straight to the
+> menu in offline mode`.
+>
+> **Verified.** Off: one accept reaches the failed-connect dialog
+> (`observe_ui.ps1 -State "offline prompt" -SkipOfflinePrompts 0`, OCR `…ANNOT CONNECT TO ROCK
+> CENTRAL…`). On: the same single accept reaches the menu (`observe_ui.ps1 -State main-menu -Ocr`, its
+> stock needle matches), with `content checksum row at guest 0X82804154 now holds the patched digest`
+> in the log and no dirty-disc screen. The edit is proven offline against the retail file too:
+> 11,646 bytes in and out, `removed = added = 518`, root arity `84 → 68`, and the patched file parses
+> exactly to its end. The harness carries the pair as
+> [scripts/ui_states.ps1](../../scripts/ui_states.ps1)'s `offline-prompt` state and its
+> `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob.
+>
+> **Don't.** Still holds: the edit performs the two transitions the buttons would, in the order they
+> would, and writes nothing else — the mode itself is still the guest's to enter, and no state the
+> guest stores is touched.
 
 #### E2 — Acceptance extensions for enhancements
 

@@ -50,6 +50,12 @@ param(
     # When set, this run becomes the baseline for the state: its capture and a
     # metadata file (build hash, capture hash, OCR text) are written here.
     [string]$BaselineDir,
+    # Whether the game is allowed to skip the title's two offline dialogs (R3, on by
+    # default in the game and in the launcher). 0 drives the dialogs, which is what
+    # the offline-prompt state needs; either answer also chooses the route in
+    # ui_states.ps1, because a route that accepts once too often opens a menu row
+    # instead of stopping at the menu.
+    [string]$SkipOfflinePrompts = "1",
     [string]$OutDir = "out/observations",
     [string]$BuildDir = "out/build/win-amd64-release",
     [string]$GameRoot,
@@ -85,6 +91,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+# ui_states.ps1 builds its routes when it is dot-sourced, so the answer about the
+# offline prompts has to be in the environment first; the game is launched with the
+# same answer below.
+$env:RBBLITZ_SKIP_OFFLINE_PROMPTS = $SkipOfflinePrompts
+$skipOfflineFlag = if ($SkipOfflinePrompts -eq "0") { "false" } else { "true" }
 . (Join-Path $PSScriptRoot "ui_states.ps1")
 
 function Invoke-Child([string]$Script, [hashtable]$Named) {
@@ -204,7 +215,8 @@ if ($running) {
     # --no-mouse_ui_nav: the mouse is a second synthetic pad on the same guest
     # slot, and where the pointer happens to rest must not decide what a capture
     # shows (scripts/acceptance_screens.ps1 turns it off for the same reason).
-    $launchArgs = @("--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", "--no-mouse_ui_nav")
+    $launchArgs = @("--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode",
+                    "--enhancements_skip_offline_dialog=$skipOfflineFlag", "--no-mouse_ui_nav")
     if ($Windowed) { $launchArgs += "--fullscreen=0" }
     $proc = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
     $launched = $true
@@ -217,6 +229,7 @@ $report = [ordered]@{
     state          = $State
     note           = $spec.Note
     ultimate_mode  = $UltimateMode
+    skip_offline_prompts = $(if ($SkipOfflinePrompts -eq "0") { "off (the title's two dialogs are driven)" } else { "on (one accept reaches the menu)" })
     binary_sha256  = Get-Hash $exe
     launched       = $launched
     window         = $(if ($Windowed) { "desktop window (capture includes the window chrome)" } else { "fullscreen (capture is the guest output and nothing else)" })

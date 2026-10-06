@@ -192,8 +192,13 @@ function Start-RbBlitz {
     # out/build/<preset>/rb_blitz.toml: that profile is gitignored and
     # machine-specific, and the route is injected keystrokes, so a fresh checkout
     # has no input path until the flag is given.
+    # The skip the title's two dialogs now ship with is pinned off for the same
+    # reason the input is named: the route below accepts three times to reach the
+    # menu, which is the shape it was measured with
+    # (docs/engine/main-menu-flow.md, R3).
     return Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList `
         "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
+        "--enhancements_skip_offline_dialog=false", `
         "--user_data_root=$UserDataRoot", "--log_noisy=true", "--log_level=trace", `
         "--mnk_mode=1"
 }

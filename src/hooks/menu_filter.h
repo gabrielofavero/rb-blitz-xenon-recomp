@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// R5: hiding the main menu's offline-dead rows (docs/engine/main-menu-flow.md,
-// docs/engine/toggles.md).
+// R5: hiding the main menu's offline-dead rows, R10: naming the Ultimate mod's own
+// settings row, and R3: answering the offline-mode prompts (docs/engine/
+// main-menu-flow.md, docs/engine/toggles.md).
 //
-// The main menu's option list lives in `ui/splash/gen/splash.dtb`, which the
-// title reads out of an ark in 64 KiB blocks and then compiles into its own DTA
-// objects. The block the file arrives in is therefore the only place an edit
-// can be made without touching the player's copy of the game - and the edit has
-// to keep the file's length, because the ark index describes offsets and sizes
-// (src/ui/menu_options.h).
+// The main menu's option list lives in `ui/splash/gen/splash.dtb`, and the panel a
+// start goes through in `ui/net/gen/server_connect.dtb` - both read out of an ark
+// in 64 KiB blocks and then compiled by the title into its own DTA objects. The
+// block a file arrives in is therefore the only place an edit can be made without
+// touching the player's copy of the game - and the edit has to keep the file's
+// length, because the ark index describes offsets and sizes (src/ui/menu_options.h).
 //
 // Two things are checked on every read:
 //
-//   * whether the block carries the splash file at all, by its own header
-//     (src/ui/menu_options.cpp, LooksLikeDtb), and
+//   * whether the block carries a file these edits are for, by the file's own
+//     header first and then by what it defines (src/ui/menu_options.cpp), and
 //   * whether that file is one the title checks against its content database.
 //
 // The second decides what a patch owes: the title's database holds a {name,
@@ -27,17 +28,20 @@
 // title knows" true instead of switching the check off. A file whose digest is
 // not in the database is patched as it is.
 //
-// Faithful behaviour is the toggle being off: nothing is read, nothing is
-// rewritten, and `enhancements_hide_menu_options` logs its own state at boot.
+// Faithful behaviour is a toggle being off: nothing is read, nothing is rewritten,
+// and each toggle logs its own state at boot. Two default on - R10 and R3, whose
+// subjects are the mod's own name and the two questions a start otherwise asks - and
+// their defaults are stated where they are defined (src/enhancements.cpp).
 
 #pragma once
 
 namespace rb_blitz::menu_filter {
 
-// Logs what the filter will do, once, after the toggles are final: whether it
-// is on and which rows it was told to hide. The row list is the one thing a
-// user can get wrong, so it is echoed in the boot log. Also the point where the
-// cvars are read: the read hook itself must not touch the registry per read.
+// Logs what the filter will do, once, after the toggles are final: which edits
+// are on and which rows the menu one was told to hide. The row list is the one
+// thing a user can get wrong, so it is echoed in the boot log. Also the point
+// where the cvars are read: the read hook itself must not touch the registry per
+// read.
 void Configure();
 
 }  // namespace rb_blitz::menu_filter

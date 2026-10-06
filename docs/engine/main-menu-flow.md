@@ -18,6 +18,13 @@ needed to build anything (D14).
 [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp) (the read hook and the checksum row) and
 [src/enhancements.cpp](../../src/enhancements.cpp) (the cvars). Off by default.
 
+**The second edit, and §7.** R3 takes the two questions the title asks before it will draw its menu
+off an offline install's path. It is the same kind of rewrite as R5 — bytes moved inside one compiled
+DTA, delivered at the read that carries it — but of a different file (`server_connect.dtb`, the panel
+the title opens when a game is started) and for a different reason: the questions cannot be answered
+when there is nothing to connect to, so they are answered as they arrive. It is on by default, and
+§7 is what it took.
+
 **Evidence convention** (as in the plan): **[tree]** is this working tree with `file:line`;
 **[cited]** is a build product — a log line or a capture from a run on this machine; **[assumed]** is
 reasoned and not yet measured.
@@ -201,7 +208,84 @@ The edit is refused, with the reason logged, when the pair is not in the file, w
 `#ifdef`, or when the name is too short to pay for the new text: a mod version whose strings changed is
 left exactly as it ships.
 
-## 7. Evidence
+## 7. The offline prompts (R3)
+
+**The questions.** Starting a game runs the title's connect process. On an install with no Rock
+Central to reach, that process can only fail, and the panel that owns it asks the player twice before
+the title draws its menu: `Cannot connect to Rock Central. To connect, sign in to an Xbox
+LIVE-enabled profile, …`, and then `Proceed in Offline Mode? …`. Both are the same panel's states, and
+both are answered with A — R3 answers them as they arrive, so a start goes straight to the menu.
+
+**The file.** `ui/net/gen/server_connect.dtb` (**11,646 bytes**, at offset **316,968,392** of
+`game/gen/main_xbox_0.ark` **[cited]**, and present in the retail ark only: the Ultimate payload does
+not carry it). It defines the panel object `server_connect_panel`, a `ServerConnectPanel`, and its
+handlers are `enter` (`start_connect_process`), `update_state ($state)`, `get_save_data`,
+`name_updated` and `BUTTON_DOWN_MSG`. The states are the file's own `#define kServerConnectPanel_*
+(n)` run, and `update_state` is what the panel's class calls on every state change: the state arrives
+as that handler's `$state` argument, and the handler selects the text (a `switch` on `$state`) and the
+buttons (the `set_showing` statements beside it) that the state draws.
+
+**What the two accepts do.** They are in the file already, in `BUTTON_DOWN_MSG`'s first
+`kAction_Confirm` case, which is a `cond` over the state the panel is in:
+
+```
+{cond ( {|| {== $state kServerConnectPanel_OfflineMode} {== $state kServerConnectPanel_Connected} } )
+      { {splash_panel loaded_dir} set state main_menu }
+      { ui goto_screen splash_screen } }
+{cond ( {|| {== $state kServerConnectPanel_Failed} {== $state kServerConnectPanel_NoValidLoginCandidate} } )
+      { $this set_state kServerConnectPanel_OfflineMode } }
+```
+
+So the first accept is a state move — a failed login becomes `OfflineMode` — and the second is the
+screen change that leaves the panel for the menu. Both are statements the file already has, so the
+edit writes them into `update_state`'s own statement list, where the state is already known:
+
+| Added to `update_state` | Bytes |
+| --- | --- |
+| `{if {|| {== $state kServerConnectPanel_Failed} {== $state kServerConnectPanel_NoValidLoginCandidate}} {$this set_state kServerConnectPanel_OfflineMode}}` | 267 |
+| `{if {== $state kServerConnectPanel_OfflineMode} {{splash_panel loaded_dir} set state main_menu} {ui goto_screen splash_screen}}` | 251 |
+
+**The payment.** 518 bytes, and they come from inside the file, as R5's and R10's do: eight state
+constants that nothing in the game refers to.
+
+| Move | Bytes |
+| --- | --- |
+| eight `#define NAME (n)` pairs removed — `StartProcess`, `StartSongCache`, `EndSongCache`, `StartPostLogin`, `StartEnumeratingContent`, `CheckingFacebookPermission`, `RequestingFacebookToken`, `WaitingForTrialEnumeration` | −518 |
+| the two transitions above | +518 |
+
+The claim is checked, not assumed: every `.dtb` in the retail ark and in the payload (131 + 42) was
+decoded and searched for each name, and so was the decrypted `default.xex` — no file and no string in
+the image carries one, so a file without them runs the same. They name transient steps of the connect
+process which the file's own handler never labels, and the arithmetic is exact: the retail file pays
+to the byte, `removed = added = 518`, and no leftover has to be parked. A file that pays *more* parks
+the difference inside the `#ifdef HX_PS3` command the loader skips (as R5 and R10 park theirs).
+
+**Three rules the file taught, each of them a fault first.** Two are about the shape of a compiled
+DTA, and both were found by hand, on a boot that faulted:
+
+1. **A command's children are its arguments.** The first attempt appended the two statements *inside*
+   the handler's first statement, `{status.lbl set text_token {switch $state …}}` — which is a call:
+   `status.lbl.set(text_token, <switch>)`. Two more children made it a call with more arguments, and
+   the guest faulted reading a null object (`read of guest 0x00000008`) at the first state change —
+   whatever the added statement said. A *verbatim copy of a shipped statement* faulted the same way,
+   which is what proved the placement and not the text was wrong. The statements belong in the
+   handler's own list, as siblings of that call.
+2. **A condition is a command, not an array.** `{if {== $state X} …}` is a command node (tag `0x11`),
+   the shape the file's own line-89 `if` uses; `(== $state X)` is an array (tag `0x10`), which is a
+   *list value*. Written as arrays the same edit faulted differently (`write of guest 0x7014FED0`),
+   so the two mistakes are distinguishable in a log.
+3. **The root count in a compiled DTA's header counts nodes, not statements.** A `#define NAME (n)` is
+   two root nodes, so writing the number of *statements* into the header desynchronizes the parse: the
+   guest read 14 phantom nodes past the end of the tree and faulted. The edit writes the node count
+   (`84 → 68` here) and refuses any file that grows or shrinks.
+
+**When it is refused.** Every refusal writes nothing and logs its reason: the file is not the panel's;
+one of the eight constants is missing (a file whose names changed); the transitions cost more than the
+constants pay; a leftover exists and the handler carries no `#ifdef HX_PS3` command to park it in; the
+handler already carries the skip, so a second pass over a patched file says so; the rebuilt node
+stream is not exactly as long as the input; or the root array outgrew what the header can count.
+
+## 8. Evidence
 
 | Run | What was seen |
 | --- | --- |
@@ -218,18 +302,25 @@ left exactly as it ships.
 | `rb_blitz.exe` with default cvars (R10 on, R5 off), Ultimate payload **[cited]** | `menu_filter: relabelled "Mod Settings" to "Ultimate Settings" (5 bytes taken from an unused macro name)`, then `4094 bytes, digest fdf135ad… -> 72359ac0…` and `patched a file at byte 44974 of a 65536 byte plain read`; the main-menu OCR reads `… HELP & OPTIONS ULTIMATE SETTINGS EXIT GAME` |
 | the same, the mod's Other Settings page, R10 **on** vs **off** **[cited]** | both runs OCR `OTHERSETTINGS / Unlock All / Unlock Online Only Achievements` — the branch the edit borrows from did not move, and it is the branch the guest already took |
 | the same, `--enhancements_rename_mod_settings=false` (the control) **[cited]** | the main-menu OCR reads `… HELP & OPTIONS MOD SETTINGS EXIT GAME`; the log carries `menu_filter: R10 off`, no patch line, and no digest |
+| the R3 transform run against the real `server_connect.dtb`, off-tree **[cited]** | 11,646 bytes in, 11,646 out, `removed=added=518`, no padding, root `84 → 68`, `017ced37… → 40aa89a7…`; the patched file parses *exactly* to its end (11,642 of 11,642 body bytes) and the 4,096 bytes the read carries behind it are untouched |
+| `rb_blitz.exe` with the default cvars (R3 on, R5 and R10 off), vanilla **[cited]** | `menu_filter: the offline prompts are skipped (518 bytes of unused state constants paid for 518 bytes of transitions): a start goes straight to the menu in offline mode` and `content checksum row at guest 0X82804154 now holds the patched digest`; one A reaches the menu |
+| `scripts/observe_ui.ps1 -State main-menu -Ocr` with R3 on (its default) **[cited]** | passed: the state's own needle (`DOWNLOAD CONTENT`) is on the screen after the route's **single** accept — the boot-flow change the toggle makes |
+| `scripts/observe_ui.ps1 -State "offline prompt" -Ocr -SkipOfflinePrompts 0` (the control) **[cited]** | passed: OCR `BLITZ ANNOT CONNECT TO ROCK CENTRAL. TO CONNECT, SIGN IN TO AN XBOX LIVE-ENABLED PROFILE, …`, and the log carries `menu_filter: R3 off; the failed-login and offline-mode prompts are shown` |
+| the same pair driven by hand on the real title **[cited]** | on: one A, alive, menu OCR `BLITZ … LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS ULTIMATE SETTINGS EXIT GAME`; off: one A, alive, the failed-connect dialog |
+| `tests/menu_options_tests.cpp` (the R3 cases) **[tree]** | over a synthetic panel fixture: the file is skipped, its length and its root count still add up, the eight constants are gone, the added statements are the handler's last two commands, the label-drawing command's own argument count is untouched, the payment can be exact (no filler), a file that cannot pay is refused with both sides of the arithmetic reported, and every refusal path |
 
-## 8. Where it lives
+## 9. Where it lives
 
 | Piece | File |
 | --- | --- |
-| the edit (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) |
+| the edits (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) (`HideRows`, `RenameLabel`, `SkipOfflinePrompts`) |
 | the read hook, the checksum row, the cvars' boot read | [src/hooks/menu_filter.h](../../src/hooks/menu_filter.h), [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp) |
-| the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`) |
-| the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group; R10's row is `visible = "ultimate_installed"`) |
-| the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp) |
+| the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
+| the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |
+| the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/launcher_launch_tests.cpp](../../tests/launcher_launch_tests.cpp) (R3's argv) |
+| the harness | [scripts/ui_states.ps1](../../scripts/ui_states.ps1) (the `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob and the `offline-prompt` state), [scripts/observe_ui.ps1](../../scripts/observe_ui.ps1) (`-SkipOfflinePrompts`) |
 
-## 9. Open
+## 10. Open
 
 - **A read that does not carry the whole file is not patched.** The block the ark reads is the unit
   the hook sees; a file split across two reads is left alone (the log says
@@ -254,3 +345,13 @@ left exactly as it ships.
   re-measured here). R5 neither causes nor fixes it.
 - **The row list is a string cvar**, so a typo hides nothing and says why
   (`none of the named rows are in the option list`). It is restart-scoped: the edit happens at load.
+- **R3's edit is coupled to this build's two statements.** The payment is the file's own constants, so
+  the edit is byte-neutral, but the *statements* it writes are this build's: a file whose `update_state`
+  no longer has a first command, or whose eight constants changed name, is refused rather than
+  half-edited. Measured on this machine's retail file only — an Ultimate payload carries no
+  `server_connect.dtb` at all, so there is one file to be right about.
+- **R3's first read of the file is left alone.** The log carries
+  `menu_filter: skip offline prompts left a .dtb read alone: the node stream does not parse` once,
+  roughly 100 ms before the read that is patched. It is a read this edit does not recognise (the
+  grammar of that read is not a compiled DTA), the caller still gets its bytes untouched, and the boot
+  that follows is the patched one — recorded here because the line looks like a failure and is not.

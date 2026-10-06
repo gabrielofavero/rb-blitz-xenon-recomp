@@ -31,6 +31,7 @@
 REXCVAR_DECLARE(bool, enhancements_hide_menu_options);
 REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
 REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
+REXCVAR_DECLARE(bool, enhancements_skip_offline_dialog);
 
 namespace {
 
@@ -41,8 +42,9 @@ struct Settings {
   bool hide_rows = false;
   std::vector<std::string> rows;
   bool rename_settings_row = false;
+  bool skip_offline_prompts = false;
 
-  bool Any() const { return hide_rows || rename_settings_row; }
+  bool Any() const { return hide_rows || rename_settings_row || skip_offline_prompts; }
 };
 
 Settings g_settings;
@@ -201,6 +203,24 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
     }
   }
 
+  if (g_settings.skip_offline_prompts) {
+    // The panel a start goes through: without Rock Central its connect process
+    // fails, and the title asks the player twice before it shows the menu.
+    const rb_blitz::menu_options::Skipped skipped =
+        rb_blitz::menu_options::SkipOfflinePrompts(file, available);
+    if (skipped.applied) {
+      REXLOG_INFO("menu_filter: the offline prompts are skipped ({} bytes of unused state "
+                  "constants paid for {} bytes of transitions{}): a start goes straight to the "
+                  "menu in offline mode",
+                  skipped.removed, skipped.added,
+                  skipped.padding == 0 ? "" : ", with the leftover parked in a skipped block");
+      RetargetIfNeeded(base, skipped.file_size, skipped.digest_before, skipped.digest_after);
+      patched = true;
+    } else {
+      LogRejectionOnce("skip offline prompts", skipped.reason);
+    }
+  }
+
   return patched;
 }
 
@@ -260,6 +280,7 @@ void Configure() {
   g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
   g_settings.rows = menu_options::ParseRowNames(REXCVAR_GET(enhancements_hidden_menu_options));
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
+  g_settings.skip_offline_prompts = REXCVAR_GET(enhancements_skip_offline_dialog);
   if (g_settings.rows.empty()) {
     g_settings.rows = menu_options::ParseRowNames(menu_options::kDefaultRows);
     REXLOG_WARN("menu_filter: enhancements_hidden_menu_options is empty; hiding the compiled "
@@ -278,6 +299,12 @@ void Configure() {
                 menu_options::kModSettingsLabel, menu_options::kUltimateSettingsLabel);
   } else {
     REXLOG_INFO("menu_filter: R10 off; the mod's own label is drawn as it ships");
+  }
+  if (g_settings.skip_offline_prompts) {
+    REXLOG_INFO("menu_filter: answering the offline-mode prompts for the player (R3); a start "
+                "goes straight to the main menu");
+  } else {
+    REXLOG_INFO("menu_filter: R3 off; the failed-login and offline-mode prompts are shown");
   }
 }
 

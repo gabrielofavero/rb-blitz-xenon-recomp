@@ -123,6 +123,10 @@ constexpr uint32_t kIfdef = 0x07;
 constexpr uint32_t kIfndef = 0x23;
 constexpr uint32_t kEndif = 0x09;
 constexpr uint32_t kArray = 0x10;
+constexpr uint32_t kCommand = 0x11;
+constexpr uint32_t kProperty = 0x13;
+constexpr uint32_t kVar = 0x02;
+constexpr uint32_t kDefine = 0x20;
 constexpr uint32_t kSymbol = 0x05;
 constexpr uint32_t kString = 0x12;
 
@@ -393,6 +397,17 @@ void WriteFile(const Loaded& loaded, const std::vector<uint8_t>& nodes, uint8_t*
   }
 }
 
+// The root header's arity is a *count* of the nodes that follow it, so an edit that
+// adds or removes a root node has to move it. The header is stored through the same
+// keystream as the nodes, so the two bytes are xored with the stream's own first
+// bytes and the rest of the header is left alone.
+void WriteRootArity(const Loaded& loaded, uint16_t arity, uint8_t* file) {
+  Keystream stream = StreamFor(loaded.seed);
+  stream.Next();  // the "an array is present" byte
+  file[4 + 1] = static_cast<uint8_t>(arity & 0xFF) ^ stream.Next();
+  file[4 + 2] = static_cast<uint8_t>(arity >> 8) ^ stream.Next();
+}
+
 // The menu's option array, found by the two rows that open and close it.
 Node* FindOptionArray(Node& node) {
   if (node.tag == kArray) {
@@ -430,6 +445,154 @@ size_t MatchEndif(const std::vector<Node>& kids, size_t index) {
     }
   }
   return kids.size();
+}
+
+// --- the offline prompts ---------------------------------------------------
+//
+// The second file these edits are for: `ui/net/gen/server_connect.dtb`, the panel
+// the title opens when a game is started from the title screen. It defines
+// `server_connect_panel`, a `ServerConnectPanel` object, and its `update_state`
+// handler is what the panel's class calls on every state change - the state
+// arrives as that handler's `$state` argument.
+//
+// The state numbers are the file's own `#define kServerConnectPanel_*` runs, and
+// the handler is where the file says what each state looks like. With no Rock
+// Central to talk to, the connect process fails into
+// `kServerConnectPanel_NoValidLoginCandidate`; the player's first A moves the state
+// to `kServerConnectPanel_OfflineMode`, and their second A leaves the screen. Both
+// presses are this file's own logic, so both can be written into it: the two
+// transitions below happen when the state they wait for arrives, instead of when a
+// button does. They are appended to `update_state`'s statement list, beside the
+// statements that draw each state.
+constexpr char kPanelObject[] = "server_connect_panel";
+constexpr char kPanelHandler[] = "update_state";
+constexpr char kPanelSetState[] = "set_state";
+constexpr char kPanelFailed[] = "kServerConnectPanel_Failed";
+constexpr char kPanelNoLogin[] = "kServerConnectPanel_NoValidLoginCandidate";
+constexpr char kPanelOffline[] = "kServerConnectPanel_OfflineMode";
+
+// A `var` node's payload is the name the compiler prints with a `$` in front of it,
+// so `$state` is the text "state" and `$this` is "this".
+constexpr char kVarState[] = "state";
+constexpr char kVarThis[] = "this";
+
+// What pays for them. These are state constants that no file in the game refers to
+// and no string in the image carries, so a file without them compiles and runs the
+// same; the evidence is docs/engine/main-menu-flow.md. They name transient steps of
+// the connect process, which the file's own handler never labels, and their lengths
+// are exactly what the two transitions cost. The edit refuses to write anything
+// when the arithmetic does not balance, so a file that ever spells one of these
+// differently loses nothing but the skip.
+constexpr const char* kPaidStateConstants[] = {
+    "kServerConnectPanel_StartProcess",
+    "kServerConnectPanel_StartSongCache",
+    "kServerConnectPanel_EndSongCache",
+    "kServerConnectPanel_StartPostLogin",
+    "kServerConnectPanel_StartEnumeratingContent",
+    "kServerConnectPanel_CheckingFacebookPermission",
+    "kServerConnectPanel_RequestingFacebookToken",
+    "kServerConnectPanel_WaitingForTrialEnumeration",
+};
+
+bool IsBlockTag(uint32_t tag) {
+  return tag == kArray || tag == kCommand || tag == kProperty;
+}
+
+Node TextNode(uint32_t tag, std::string_view text) {
+  Node node;
+  node.tag = tag;
+  node.text.assign(text.begin(), text.end());
+  return node;
+}
+
+Node CommandNode(std::vector<Node> kids, uint16_t line) {
+  Node node;
+  node.tag = kCommand;
+  node.line = line;
+  node.kids = std::move(kids);
+  return node;
+}
+
+// `{ == $state <state> }`, the test the file's own handlers are built out of. A
+// condition is a *command* in these files (`DataArray`'s node tag 0x11), while an
+// array (0x10) is a list value: the two are different nodes that print alike, and
+// evaluating a list where a condition belongs reads a null pointer in the guest.
+Node StateIs(std::string_view state, uint16_t line) {
+  return CommandNode({TextNode(kSymbol, "=="), TextNode(kVar, kVarState), TextNode(kSymbol, state)},
+                     line);
+}
+
+// The first A: the failed state becomes the offline one, which is what takes the
+// panel off the failed-login message. Both states a failed connect can settle in
+// are listed, exactly as the file's own button handler lists them.
+Node AutoAdvance(uint16_t line) {
+  return CommandNode(
+      {TextNode(kSymbol, "if"),
+       CommandNode({TextNode(kSymbol, "||"), StateIs(kPanelFailed, line),
+                    StateIs(kPanelNoLogin, line)},
+                   line),
+       CommandNode({TextNode(kVar, kVarThis), TextNode(kSymbol, kPanelSetState),
+                    TextNode(kSymbol, kPanelOffline)},
+                   line)},
+      line);
+}
+
+// The second A: off the offline-mode question and back to the title screen's main
+// menu - the same two calls, in the same order, the file's own handler makes there.
+Node AutoAccept(uint16_t line) {
+  return CommandNode(
+      {TextNode(kSymbol, "if"), StateIs(kPanelOffline, line),
+       CommandNode({CommandNode({TextNode(kSymbol, "splash_panel"),
+                                 TextNode(kSymbol, "loaded_dir")},
+                                line),
+                    TextNode(kSymbol, "set"), TextNode(kSymbol, "state"),
+                    TextNode(kSymbol, "main_menu")},
+                   line),
+       CommandNode({TextNode(kSymbol, "ui"), TextNode(kSymbol, "goto_screen"),
+                    TextNode(kSymbol, "splash_screen")},
+                   line)},
+      line);
+}
+
+// Whether any node in the tree carries this text, whatever kind of node it is: the
+// names a file is recognised by are bare words, and a file spells those as symbols,
+// functions or strings depending on where they sit - `ServerConnectPanel`'s handler
+// list is the same file's own text, not a shape to be guessed.
+bool ContainsText(const Node& node, std::string_view text) {
+  if (!node.text.empty() && IsText(node, text)) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (ContainsText(kid, text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Whether this handler already carries the skip, so that a second pass over an
+// already patched file says so rather than reporting its missing constants. Only
+// this one handler is looked at: the file's own button handler sets the same state,
+// and that is the code the skip replaces.
+bool AlreadySkipsTransitions(const Node& handler) { return ContainsText(handler, kPanelSetState); }
+
+// The first command after an `#ifdef` on the macro this build does not define: the
+// one place in a file where bytes can be parked and never read, because the loader
+// skips over them. Searched for anywhere in the handler, because the conditional the
+// panel carries sits inside the statement that draws the state's label.
+Node* FindSkippedBlock(Node& node) {
+  for (size_t i = 0; i + 1 < node.kids.size(); ++i) {
+    if (node.kids[i].tag == kIfdef && IsText(node.kids[i], kSpareMacro) &&
+        node.kids[i + 1].tag == kCommand) {
+      return &node.kids[i + 1];
+    }
+  }
+  for (Node& kid : node.kids) {
+    if (Node* found = FindSkippedBlock(kid)) {
+      return found;
+    }
+  }
+  return nullptr;
 }
 
 }  // namespace
@@ -662,6 +825,136 @@ Renamed RenameLabel(uint8_t* file, size_t available, std::string_view key,
   Sha1Digest(file, renamed.file_size, renamed.digest_after);
   renamed.applied = true;
   return renamed;
+}
+
+Skipped SkipOfflinePrompts(uint8_t* file, size_t available) {
+  Skipped skipped;
+  Loaded loaded;
+  if (!LoadFile(file, available, &loaded, &skipped.reason)) {
+    return skipped;
+  }
+  skipped.file_size = loaded.file_size;
+
+  // The panel is the object the file defines; nothing else in the title carries
+  // that name, so it is also how the caller recognises the file.
+  Node* panel = nullptr;
+  for (Node& node : loaded.root) {
+    if (node.tag == kCommand && ContainsText(node, kPanelObject)) {
+      panel = &node;
+      break;
+    }
+  }
+  if (panel == nullptr) {
+    skipped.reason = "the file does not define the server-connect panel";
+    return skipped;
+  }
+
+  // Its state handler, and the command inside it that draws the state's label - the
+  // line the added statements borrow so a dumped file reads as more of the same.
+  Node* body = nullptr;
+  Node* handler = nullptr;
+  for (Node& kid : panel->kids) {
+    if (kid.tag != kArray || !ContainsText(kid, kPanelHandler)) {
+      continue;
+    }
+    for (Node& part : kid.kids) {
+      if (part.tag == kCommand) {
+        body = &part;
+        break;
+      }
+    }
+    if (body != nullptr) {
+      handler = &kid;
+      break;
+    }
+  }
+  if (body == nullptr) {
+    skipped.reason = "the panel has no update_state body to edit";
+    return skipped;
+  }
+  if (AlreadySkipsTransitions(*handler)) {
+    skipped.reason = "the panel already skips the prompts";
+    return skipped;
+  }
+
+  // The two transitions carry the handler's own line, so a dumped patched file
+  // reads as one more part of the handler they were put in.
+  const Node advance = AutoAdvance(body->line);
+  const Node accept = AutoAccept(body->line);
+  skipped.added = NodeSize(advance) + NodeSize(accept);
+
+  // The payment: one root-level `#define NAME (value)` pair per constant.
+  std::vector<size_t> doomed;
+  for (const char* name : kPaidStateConstants) {
+    size_t at = loaded.root.size();
+    for (size_t i = 0; i + 1 < loaded.root.size(); ++i) {
+      if (loaded.root[i].tag == kDefine && IsText(loaded.root[i], name) &&
+          IsBlockTag(loaded.root[i + 1].tag)) {
+        at = i;
+        break;
+      }
+    }
+    if (at == loaded.root.size()) {
+      skipped.reason = std::string("the file does not define ") + name;
+      return skipped;
+    }
+    doomed.push_back(at);
+    skipped.removed += NodeSize(loaded.root[at]) + NodeSize(loaded.root[at + 1]);
+  }
+
+  if (skipped.added > skipped.removed) {
+    skipped.reason = "the transitions cost more than the constants pay";
+    return skipped;
+  }
+
+  // A constant that is not exactly the length this build's copy is leaves a
+  // leftover; it is parked inside a conditional this build skips, where the loader
+  // reads past it and nothing can reach it.
+  const size_t surplus = skipped.removed - skipped.added;
+  if (surplus > 0) {
+    Node* spare = FindSkippedBlock(*handler);
+    if (spare == nullptr || surplus < 9) {
+      skipped.reason = "no skipped block to park the leftover bytes in";
+      return skipped;
+    }
+    spare->kids.push_back(TextNode(kSymbol, std::string(surplus - 8, ' ')));
+    skipped.padding = surplus;
+  }
+
+  // The transitions go into the handler's own statement list, which is where the
+  // statements around the label-drawing command live. They cannot go inside that
+  // command: a command node's children are its *arguments*, so a statement appended
+  // there is one more argument to the `set` call and the guest faults on it.
+  // This runs before the payment is erased, because `handler` points into the node
+  // list and removing an earlier root node would move what it points at.
+  handler->kids.push_back(advance);
+  handler->kids.push_back(accept);
+
+  std::sort(doomed.begin(), doomed.end());
+  for (size_t i = doomed.size(); i > 0; --i) {
+    const size_t at = doomed[i - 1];
+    loaded.root.erase(loaded.root.begin() + at, loaded.root.begin() + at + 2);
+  }
+
+  const std::vector<uint8_t> rebuilt = SerializeAll(loaded);
+  if (rebuilt.size() != loaded.node_bytes) {
+    skipped.reason = "the edit does not preserve the file's length";
+    skipped.removed = 0;
+    skipped.added = 0;
+    skipped.padding = 0;
+    return skipped;
+  }
+  if (loaded.root.size() > 0xFFFFu) {
+    skipped.reason = "the file's root array is longer than its header can count";
+    return skipped;
+  }
+
+  Sha1Digest(file, skipped.file_size, skipped.digest_before);
+  WriteFile(loaded, rebuilt, file);
+  WriteRootArity(loaded, static_cast<uint16_t>(loaded.root.size()), file);
+  Sha1Digest(file, skipped.file_size, skipped.digest_after);
+  skipped.applied = true;
+  return skipped;
 }
 
 // --- SHA-1 ----------------------------------------------------------------

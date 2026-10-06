@@ -382,8 +382,13 @@ $r = [ordered]@{
 }
 
 Get-ChildItem (Join-Path $logs "*.log") -ErrorAction SilentlyContinue | Remove-Item -Force
+# --enhancements_skip_offline_dialog=false: this run's routes were measured walking
+# the title's two dialogs (Wait-ForMenu accepts three times), and the skip ships on
+# by default, so the route's shape is pinned here rather than left to the default
+# (docs/engine/main-menu-flow.md, R3).
 $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru `
     -ArgumentList "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
+                  "--enhancements_skip_offline_dialog=false", `
                   "--mnk_mode=1", "--no-mouse_ui_nav", "--log_level=debug", "--log_flush_interval=1", `
                   "--log_max_file_size_mb=100"
 

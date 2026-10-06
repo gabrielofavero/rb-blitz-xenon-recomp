@@ -2,11 +2,12 @@
 
 The contract for the customization features in
 [plans/customization-plan.md](../plans/customization-plan.md) (R1–R9, plus R10 below, which a
-follow-up request added). **Every toggle is off by default, with one deliberate exception:** R10
-ships on, because its subject is the Ultimate mod's own screen and it does nothing without that mod
-installed. This page is the table the plan's contract 1 promises: what each toggle gates, what the
-faithful (off) behaviour is, and which prompt implements it — or, for the eight that are still
-planned, what will. R5 and R10 are implemented; their evidence is
+follow-up request added). **Every toggle is off by default, with two deliberate exceptions:** R3
+ships on, because the two questions it answers can no longer be answered on an install with no Rock
+Central to reach, and R10 ships on, because its subject is the Ultimate mod's own screen and it does
+nothing without that mod installed. This page is the table the plan's contract 1 promises: what each
+toggle gates, what the faithful (off) behaviour is, and which prompt implements it — or, for the
+eight that are still planned, what will. R3, R5 and R10 are implemented; their evidence is
 [main-menu-flow.md](main-menu-flow.md).
 
 The cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
@@ -36,9 +37,10 @@ implementing prompt that can apply its toggle live relaxes that lifecycle and up
 before the Ultimate and DLC layers:
 
 ```text
-[info] enhancements: 10 toggle(s), off by default except R10 (docs/engine/toggles.md)
+[info] enhancements: 10 toggle(s), off by default except R3 and R10 (docs/engine/toggles.md)
 [info] enhancements: enhancements_expand_resolution = off (default) - R1 custom resolutions
 ...
+[info] enhancements: enhancements_skip_offline_dialog = on (default) - R3 skip the offline prompts
 [info] enhancements: enhancements_rename_mod_settings = on (default) - R10 rename the mod's settings row
 [info] enhancements: enhancements_controller_scheme = "" (R8 scheme; empty means unnamed)
 [info] enhancements: enhancements_hidden_menu_options = "splash_leaderboard,splash_achievements,splash_dlc" (R5 rows; the three offline-dead entries by default)
@@ -54,7 +56,7 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | --- | --- | --- | --- |
 | `expand_resolution` | R1 custom resolutions: expand the guest's own layout (menu background, HUD, 3D, song selection, power-up menu) for a non-16:9 video mode | the guest's 16:9 layout is drawn as authored; the presenter's letterbox/safe-area path handles the window | R2, R3 (research R1) |
 | `ui_scale` | R2 UI accessibility: scale guest text and the main-menu logo through the game's own font/layout metrics | the design's text and logo sizes | U2 |
-| `skip_offline_dialog` | R3 auto offline mode: answer "Proceed in Offline Mode?" for the player, enabling offline mode | the prompt is shown and the player chooses | I1 |
+| `skip_offline_dialog` | R3 skip the offline prompts: answer both of the title's failed-connect questions - "Cannot connect to Rock Central" and "Proceed in Offline Mode?" - as they arrive, so a start goes straight to the menu in offline mode | both questions are asked and the player answers them | [main-menu-flow.md](main-menu-flow.md) § "the offline prompts" |
 | `icon_schemes` | R4 different icons: replaceable button glyphs and controller-layout art per scheme | the art the title ships | A1, A2 |
 | `hide_menu_options` | R5 hiding categories: remove named entries from the main menu's option list (the list the guest navigates, not only the drawing). Needs `enhancements_hidden_menu_options` to name them; the compiled default is the three rows that only ever worked online | every shipped entry is present | U1 ([main-menu-flow.md](main-menu-flow.md)) |
 | `native_mouse` | R6 different input waves: the engine's own pointer path instead of the synthetic pad | the pad the guest actually reads ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp)) | I2 → later |
@@ -63,11 +65,16 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones | the songs the title puts there | C1 → later |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |
 
-**R10 is the one toggle that ships on.** The row it renames belongs to the Ultimate mod, so a run
-without that payload has neither the file nor the label and the toggle has nothing to do — the
-faithful path and the feature are the same boot. Its switch in the launcher is shown only where the
-mod is installed (`visible = "ultimate_installed"`), and turning it off is what passes
-`--enhancements_rename_mod_settings=false`.
+**R3 and R10 are the toggles that ship on.** R10's row belongs to the Ultimate mod, so a run without
+that payload has neither the file nor the label and the toggle has nothing to do — the faithful path
+and the feature are the same boot. Its switch in the launcher is shown only where the mod is
+installed (`visible = "ultimate_installed"`), and turning it off is what passes
+`--enhancements_rename_mod_settings=false`. R3 is on because the failure it handles is not a
+preference: with no Rock Central to reach, the title's connect attempt can only fail, so the two
+questions have one answer each and asking them is a dead end. It edits a file of the title's own,
+which is why the launcher can also ship it on, and turning it off is what passes
+`--enhancements_skip_offline_dialog=false` — the switch for the two questions, for anyone who wants
+to see them again.
 
 `enhancements_controller_scheme` is the one non-boolean cvar here: R8's parameter, not a toggle of
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to

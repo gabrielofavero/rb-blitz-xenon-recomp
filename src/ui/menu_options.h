@@ -130,6 +130,45 @@ struct Renamed {
 Renamed RenameLabel(uint8_t* file, size_t available, std::string_view key,
                     std::string_view from, std::string_view to);
 
+// What one SkipOfflinePrompts call did, in the same terms.
+struct Skipped {
+  bool applied = false;   // the file was rewritten
+  size_t file_size = 0;   // the .dtb's own length, 4-byte seed included
+  size_t removed = 0;     // bytes the state constants this edit pays with gave up
+  size_t added = 0;       // bytes the two transitions take
+  size_t padding = 0;     // filler that balanced them, inside a skipped block
+  uint8_t digest_before[20] = {};
+  uint8_t digest_after[20] = {};
+  std::string reason;     // why nothing was written, when applied is false
+};
+
+// Takes the two offline questions out of the panel the title opens when the player
+// starts a game: `ui/net/gen/server_connect.dtb`, the file that defines the
+// `ServerConnectPanel` object `server_connect_panel`.
+//
+// Starting a game runs that panel's connect process. On a console with no Rock
+// Central the login fails into `kServerConnectPanel_NoValidLoginCandidate`, and the
+// panel then *asks* twice - once with the failed-login text, and once with
+// "Proceed in Offline Mode?" - before it hands control back to the title screen's
+// main menu. The player's two presses do exactly two things: the first moves the
+// panel's state to `kServerConnectPanel_OfflineMode`, the second sets the splash
+// panel's state to `main_menu` and goes back to the splash screen. This edit makes
+// both happen as soon as the failed state is entered, so a start goes straight to
+// the menu, in offline mode, with nothing asked.
+//
+// The handler it edits is the panel's own `update_state`, which runs on every state
+// change, and the two transitions are added to that handler's list of statements -
+// not inside the command that draws the state's label, whose children are the
+// arguments of a `set` call. The money it spends is the file's own state constants -
+// names no file in the game refers to and no string in the image carries, so
+// removing them changes nothing that can be observed. See
+// docs/engine/main-menu-flow.md for how each of those claims was established.
+//
+// Refuses the file unless it is the panel's, every constant it pays with is there,
+// the result is exactly as long as the input, and any leftover from the payment can
+// be parked inside a conditional the build skips.
+Skipped SkipOfflinePrompts(uint8_t* file, size_t available);
+
 // SHA-1 of `size` bytes, as the title's own content checksum uses it (the value
 // a patched file's database row has to be given so the title still recognises
 // it). Written to `out`, 20 bytes.

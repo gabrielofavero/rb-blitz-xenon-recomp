@@ -25,10 +25,25 @@
 $script:UiClampUp = @()
 for ($i = 0; $i -lt 8; $i++) { $script:UiClampUp += "key:lstick_up" }
 
-# Title -> sign-in dialog -> offline prompt -> main menu. Three accepts, because
-# the title raises two dialogs before it draws its menu (measured, and what
-# scripts/acceptance_screens.ps1's Wait-ForMenu drives when a B left the menu).
-$script:UiTitleToMenu = @("key:a", "wait:6", "key:a", "wait:6", "key:a", "wait:5")
+# Whether the run is driving a build that skips the title's two offline dialogs
+# (R3, on by default in the game and in the launcher). The title raises both before
+# it draws its menu, so a route that accepts one time too many does not stop at the
+# menu - it accepts whatever row the menu's own accept opens. Scripts that launch the
+# game put their answer in the environment before dot-sourcing this file, because the
+# routes below are built here, once: `RBBLITZ_SKIP_OFFLINE_PROMPTS=0` drives the
+# dialogs (scripts/observe_ui.ps1 -SkipOfflinePrompts 0).
+$script:UiSkipOfflinePrompts = $env:RBBLITZ_SKIP_OFFLINE_PROMPTS -ne "0"
+
+# Title -> main menu: one accept per dialog the title raises before its menu. With
+# the skip off that is the sign-in dialog, the offline prompt, and the menu - the
+# three accepts scripts/acceptance_screens.ps1's Wait-ForMenu drives when a B left
+# the menu; with it on the failed connect becomes the offline mode on its own, and
+# the menu is one accept away.
+$script:UiTitleToMenu = @("key:a", "wait:6")
+if (-not $script:UiSkipOfflinePrompts) {
+    $script:UiTitleToMenu += @("key:a", "wait:6", "key:a")
+}
+$script:UiTitleToMenu += @("wait:5")
 
 # How long the window takes to appear and the title screen to be drawn.
 $script:UiBootToTitle = @("wait:28")
@@ -58,7 +73,7 @@ function New-UiMenuState([int]$Downs) {
 }
 
 $script:UiStateOrder = @(
-    "boot", "title", "main-menu", "song-list", "in-song", "pause",
+    "boot", "title", "offline-prompt", "main-menu", "song-list", "in-song", "pause",
     "help-options", "controls", "calibration", "audio-video", "credits",
     "leaderboards", "download", "exit-confirm"
 )
@@ -84,6 +99,18 @@ $script:UiStates["title"] = @{
     # draw from that distribution, which runs from under 0.05 % to nearly 19 %. The
     # 2.5 % ceiling the two low draws once suggested was not a floor: it failed a run
     # of the same build. OCR of 'TO START' is the control instead.
+    Settled = $false
+}
+$script:UiStates["offline-prompt"] = @{
+    Needle = "ROCK CENTRAL"; Settle = 4
+    Note = "the failed-connect dialog; only reachable with -SkipOfflinePrompts 0 (R3)"
+    Route  = @($script:UiBootToTitle) + @("key:a", "wait:10")
+    # Measured 2026-10-06 (R3): ten seconds after the accept that starts a game, OCR
+    # read "annot connect to Rock Central. To connect, sign in to an Xbox
+    # LIVE-enabled profile, congect to Xb x LIVE, and return to the titlgscreen." -
+    # the needle is the part of it OCR gets right, and the dialog waits for a button
+    # rather than timing out. It draws the same animated background as the menu, so
+    # its frame is not gated on a diff either.
     Settled = $false
 }
 $script:UiStates["main-menu"] = @{

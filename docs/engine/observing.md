@@ -38,7 +38,8 @@ It joins scripts that already existed rather than re-implementing any of them
 | --- | --- | --- |
 | `boot` | — | the window, before the splash finishes |
 | `title` | `TO START` | wait for the title screen |
-| `main-menu` | `DOWNLOAD CONTENT` | title → sign-in → offline prompt → menu |
+| `offline-prompt` | `ROCK CENTRAL` | title → the accept that starts a game → the failed-connect dialog |
+| `main-menu` | `DOWNLOAD CONTENT` | title → the accept that starts a game → menu |
 | `song-list` | `YOUR SONGS` | menu, A on row 0 (PLAY) |
 | `in-song` | — | …and A on the list's first row (Random Song) |
 | `pause` | — | …and START |
@@ -56,6 +57,18 @@ the ones [acceptance_screens.ps1](../../scripts/acceptance_screens.ps1) already 
 properties of the guest's menus make a route safe to write this way: **a list clamps at both ends**
 (so eight taps up is the first row, whatever the highlight was) and **a list resets its highlight to
 the first row whenever it is entered**.
+
+**How many accepts reach the menu is a setting, not a fact.** R3
+([main-menu-flow.md](main-menu-flow.md) §7) makes the title's failed connect become the offline mode on
+its own, so one accept reaches the menu on a default build and three reach it when the two dialogs are
+driven — and a route that accepts once too many does not stop at the menu, it accepts whatever row the
+menu's own accept opens. `-SkipOfflinePrompts 0` drives the dialogs (it passes
+`--enhancements_skip_offline_dialog=false` and the routes are built for it), which is the only way to
+reach the `offline-prompt` state; the default is the shipped behaviour, one accept.
+[scripts/ui_states.ps1](../../scripts/ui_states.ps1) reads that answer from
+`RBBLITZ_SKIP_OFFLINE_PROMPTS` because it builds the routes when it is dot-sourced, and the acceptance
+scripts that walk the three-accept route pin the flag for the same reason (they were measured with the
+dialogs in the way).
 
 A state may also carry a **`Crop`**, because some screens only give up their text in a band. Measured:
 the How to Play title is stylised, and a full-frame OCR of a 3840×2160 capture loses it entirely —
@@ -228,6 +241,10 @@ the settled states only. Raise either deliberately, not to make a test pass.
   that did not read — the harness noticing — but `song-list` is the counter-example: both of its
   readings were the one-time entry tutorial, so it agreed with itself about the wrong screen. Until a
   route can wait on a needle, a menu-chain `percent` is not a measurement of the screen it names.
+  **R3 removed two of the three dialogs that run had to wait through** (see "The states" above): the
+  shipped default reaches the menu in one accept, so a route is two `wait`s shorter than it was and the
+  baseline above is now the `-SkipOfflinePrompts 0` case on purpose. The remaining wait — the failed
+  connect itself, which takes seconds and has no fixed length — is what the route still cannot see.
 - **The harness can change what the next run sees.** `in-song` starts a song and the guest writes its
   save; the entry tutorial that `song-list` captured is the kind of thing a save decides. A baseline
   set is only comparable to another taken from the same save state, and nothing records that yet.

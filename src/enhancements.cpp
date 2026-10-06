@@ -5,9 +5,11 @@
 // and the one boot line that reports them. See src/enhancements.h for why the
 // names carry the table prefix and docs/engine/toggles.md for the table itself.
 //
-// Every toggle here is off by default except R10, whose subject is the Ultimate
-// mod's own name: it only does anything when that payload is installed, and the
-// launcher hides its row when it is not. Every toggle is honest about what it does
+// Every toggle here is off by default except R3 and R10. R10's subject is the
+// Ultimate mod's own name: it only does anything when that payload is installed, and
+// the launcher hides its row when it is not. R3's subject is a question with one
+// answer: with Rock Central gone, a start can only go offline, so the two questions
+// it asks first are asked to confirm what the game has already worked out. Every toggle is honest about what it does
 // today: a description that ends in "Not implemented" is a toggle that gates
 // nothing yet, and R5 and R10 - the implemented pair - say what they edit and
 // which keys name it. A user reading --help or a log must not be able to mistake
@@ -42,10 +44,18 @@ REXCVAR_DEFINE_BOOL(enhancements_ui_scale, false, "Enhancements",
                     "Not implemented.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_skip_offline_dialog, false, "Enhancements",
-                    "R3 auto offline mode: answer the \"Proceed in Offline Mode?\" prompt for the "
-                    "player, enabling offline mode without the interaction. Faithful: the prompt "
-                    "is shown and the player chooses. Not implemented.")
+// The second toggle whose default is on, because the question it removes has one
+// answer: Rock Central is gone, so a start that asks "cannot connect" and then
+// "proceed in offline mode?" is asking the player to confirm what the game has
+// already worked out. The edit is the title's own two transitions made to happen on
+// their own (src/ui/menu_options.cpp), so the offline mode the second one enters is
+// the same mode the player's second press enters.
+REXCVAR_DEFINE_BOOL(enhancements_skip_offline_dialog, true, "Enhancements",
+                    "R3 auto offline mode: take the failed-login and \"Proceed in Offline "
+                    "Mode?\" questions out of the panel a game start goes through, so the title "
+                    "shows the main menu in offline mode as soon as the start is pressed. "
+                    "Faithful: the title asks both questions and the player answers them, which "
+                    "is the same pair of transitions.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_icon_schemes, false, "Enhancements",
@@ -139,7 +149,7 @@ constexpr std::array<ToggleRow, 10> kToggles{{
      [] { return REXCVAR_GET(enhancements_expand_resolution); }},
     {"enhancements_ui_scale", "R2 UI accessibility",
      [] { return REXCVAR_GET(enhancements_ui_scale); }},
-    {"enhancements_skip_offline_dialog", "R3 offline-mode skip",
+    {"enhancements_skip_offline_dialog", "R3 skip the offline prompts",
      [] { return REXCVAR_GET(enhancements_skip_offline_dialog); }},
     {"enhancements_icon_schemes", "R4 icon schemes",
      [] { return REXCVAR_GET(enhancements_icon_schemes); }},
@@ -160,7 +170,8 @@ constexpr std::array<ToggleRow, 10> kToggles{{
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default except R10 (docs/engine/toggles.md)",
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3 and R10 "
+              "(docs/engine/toggles.md)",
               kToggles.size());
   for (const ToggleRow& row : kToggles) {
     REXLOG_INFO("enhancements: {} = {} ({}) - {}", row.name, row.enabled() ? "on" : "off",

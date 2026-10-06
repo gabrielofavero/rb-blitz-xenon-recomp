@@ -444,17 +444,23 @@ those edits have nothing to do with the launch target they happen to sit beside:
 guest's own data, in either target, and more of them are planned (R2's UI scale, R4's icons and R9's
 menu songs all belong here when they land).
 
-Its one group today is *Main menu*:
+Its groups today are *Startup* and *Main menu*:
 
 | Row | What it does |
 | --- | --- |
+| *Hide offline mode prompts* (`enhancements_skip_offline_dialog`) | answers the title's two failed-connect questions — "Cannot connect to Rock Central" and "Proceed in Offline Mode?" — as they arrive, so one A on the title screen goes straight to the menu in offline mode. Ships **on**: with no Rock Central to reach, both questions have one answer each, and this is the row that asks for them back |
 | *Hide offline menu items* (`enhancements_hide_menu_options`) | removes the main menu's Leaderboards, Achievements and Downloadable Content rows — the three whose screens need Rock Central |
 | *Menu items to hide* (`enhancements_hidden_menu_options`) | which rows that means, by the title's own names |
 | *Rename Mod Settings* (`enhancements_rename_mod_settings`) | draws the Ultimate mod's own screen as "Ultimate Settings"; ships **on**, and its row declares `visible = "ultimate_installed"`, so it is not shown at all where the payload is missing — a row about the mod's own screen has nothing to say there, and the runtime's own `DetectUltimateState` answers that question rather than a second guess at the file layout |
 
-What the two edits are, why each has to keep a file's length, and the runs that prove them are in
-[main-menu-flow.md](../docs/engine/main-menu-flow.md). The rows are the project's own cvars, not the
-runtime's, so the tab passes them like any other row that is not on its compiled default.
+What the three edits are, why each has to keep a file's length, and the runs that prove them are in
+[main-menu-flow.md](../docs/engine/main-menu-flow.md) (§7 is the offline prompts, R3). The rows are the
+project's own cvars, not the runtime's, so the tab passes them like any other row that is not on its
+compiled default.
+
+*Startup* is the group for what happens before the menu is drawn, which is why the offline-prompt row
+sits there rather than beside the menu rows it saves the player from: the edit is to the panel the
+title opens when a game is started, and the menu rows are what that panel then leads to.
 
 ## The Audio / Video tab (B2)
 
