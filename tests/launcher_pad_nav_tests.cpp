@@ -60,10 +60,14 @@ void TestBindingTable() {
   CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kTabForward), 0.0), NavAction::kNextTab);
   CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kTabBack), 0.0), NavAction::kPreviousTab);
   CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kLaunch), 0.0), NavAction::kLaunch);
-  // A direction is one thing whichever input sent it: the D-pad's left and right are the tab
-  // strip's, exactly as the keyboard's own arrows are.
-  CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kLeft), 0.0), NavAction::kPreviousTab);
-  CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kRight), 0.0), NavAction::kNextTab);
+  // Up and down walk the rows; left and right walk the options inside the focused row, and the
+  // shoulders are the tab strip's (the D-pad's left and right no longer switch tabs).
+  CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kLeft), 0.0), NavAction::kPreviousOption);
+  CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kRight), 0.0), NavAction::kNextOption);
+  // The right stick scrolls the tab body, and it is the only action a mouse and a keyboard do not
+  // need to produce.
+  CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kScrollUp), 0.0), NavAction::kScrollUp);
+  CHECK_EQ(PadNavModel{}.Update(Pressed(PadNavButton::kScrollDown), 0.0), NavAction::kScrollDown);
 }
 
 void TestEdgesAreNotStates() {

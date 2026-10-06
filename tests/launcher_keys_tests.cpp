@@ -113,26 +113,29 @@ void TestTriggerGrammar() {
 }
 
 void TestDefaultsAreWhatTheLauncherRead() {
-  BeginCase("the defaults are the keys A1 hardcoded");
+  BeginCase("the defaults are the keys the launcher ships");
   const Table table;
   CHECK_EQ(table.ChangedCount(), 0u);
-  // Every action has a row of its own, so the ones below are the source's own reads: Tab and Down
-  // forward, Shift+Tab and Up back, Home and End, the arrows and the page keys for the tabs, Enter
-  // and Space to activate, Escape and B to cancel.
+  // Up and Down walk the rows, Left and Right walk the options in the focused row, Home and End
+  // jump, the page keys switch tabs, Enter and Space activate, Escape and B cancel.
   CHECK_STR_EQ(table.BindingText(NavAction::kNext), "Tab, Down");
   CHECK_STR_EQ(table.BindingText(NavAction::kPrevious), "Shift+Tab, Up");
+  CHECK_STR_EQ(table.BindingText(NavAction::kNextOption), "Right");
+  CHECK_STR_EQ(table.BindingText(NavAction::kPreviousOption), "Left");
   CHECK_STR_EQ(table.BindingText(NavAction::kFirst), "Home");
   CHECK_STR_EQ(table.BindingText(NavAction::kLast), "End");
-  CHECK_STR_EQ(table.BindingText(NavAction::kNextTab), "Right, Page Down");
-  CHECK_STR_EQ(table.BindingText(NavAction::kPreviousTab), "Left, Page Up");
+  // The arrows no longer switch tabs: RB/LB do that on a pad, and the page keys do it on a
+  // keyboard, so Left and Right are free for the row they are on.
+  CHECK_STR_EQ(table.BindingText(NavAction::kNextTab), "Page Down");
+  CHECK_STR_EQ(table.BindingText(NavAction::kPreviousTab), "Page Up");
   CHECK_STR_EQ(table.BindingText(NavAction::kActivate), "Enter, Keypad Enter, Space");
   CHECK_STR_EQ(table.BindingText(NavAction::kCancel), "Escape, B");
-  // A5 adds the four the bar's buttons and the badge owned, so a keyboard alone can do them.
+  // A5 adds the two the bar's buttons and the badge owned, so a keyboard alone can do them. The
+  // command-line copy is gone: it was a bug-report affordance, not something to put in a menu.
   CHECK_STR_EQ(table.BindingText(NavAction::kSave), "Ctrl+S");
-  CHECK_STR_EQ(table.BindingText(NavAction::kCopyCommand), "Ctrl+C");
   CHECK_STR_EQ(table.BindingText(NavAction::kLaunch), "Ctrl+Enter");
   CHECK_STR_EQ(table.BindingText(NavAction::kCopyEffectiveValue), "Ctrl+Shift+C");
-  // The panel's spelling and the file's are the same key with two names for the six the key cap
+  // The panel's spelling and the file's are the same key with two names for the keys the key cap
   // spells differently.
   CHECK_STR_EQ(nav_bindings::KeyLabel("DownArrow"), "Down");
   CHECK_STR_EQ(nav_bindings::KeyLabel("PageUp"), "Page Up");
@@ -148,17 +151,18 @@ void TestChordsBeforeBareKeys() {
   // A bare key is the key whatever is held with it: Shift+Down has always moved the ring forward.
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("DownArrow", Shift())) == NavAction::kNext);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("UpArrow")) == NavAction::kPrevious);
-  CHECK_TRUE(nav_bindings::Resolve(table, WithKey("RightArrow")) == NavAction::kNextTab);
+  CHECK_TRUE(nav_bindings::Resolve(table, WithKey("RightArrow")) == NavAction::kNextOption);
+  CHECK_TRUE(nav_bindings::Resolve(table, WithKey("LeftArrow")) == NavAction::kPreviousOption);
+  CHECK_TRUE(nav_bindings::Resolve(table, WithKey("PageDown")) == NavAction::kNextTab);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("PageUp")) == NavAction::kPreviousTab);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("Space")) == NavAction::kActivate);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("KeypadEnter")) == NavAction::kActivate);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("Escape")) == NavAction::kCancel);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("B")) == NavAction::kCancel);
-  // The four A5 added, and the case that makes the exact-modifier rule worth having: S on its own
-  // is bound to nothing, so it does not save.
+  // The two A5 kept, and the case that makes the exact-modifier rule worth having: S on its own is
+  // bound to nothing, so it does not save.
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("S", Ctrl())) == NavAction::kSave);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("S")) == NavAction::kNone);
-  CHECK_TRUE(nav_bindings::Resolve(table, WithKey("C", Ctrl())) == NavAction::kCopyCommand);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("Enter", Ctrl())) == NavAction::kLaunch);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("Enter")) == NavAction::kActivate);
   CHECK_TRUE(nav_bindings::Resolve(table, WithKey("C", CtrlShift())) ==
@@ -176,6 +180,8 @@ void TestRepeatIsTheActionsOwn() {
   BeginCase("a move repeats and a decision does not");
   CHECK_TRUE(nav_bindings::Repeats(NavAction::kNext));
   CHECK_TRUE(nav_bindings::Repeats(NavAction::kPrevious));
+  CHECK_TRUE(nav_bindings::Repeats(NavAction::kNextOption));
+  CHECK_TRUE(nav_bindings::Repeats(NavAction::kPreviousOption));
   CHECK_TRUE(nav_bindings::Repeats(NavAction::kNextTab));
   CHECK_TRUE(nav_bindings::Repeats(NavAction::kPreviousTab));
   CHECK_FALSE(nav_bindings::Repeats(NavAction::kActivate));

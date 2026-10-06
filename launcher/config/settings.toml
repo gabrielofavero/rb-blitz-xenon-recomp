@@ -168,9 +168,9 @@ default = "ultimate"
 applies = "restart"
 argv    = "none"
 tooltip = """
-What the launcher starts: Common is the retail game, Demo is its XBLA trial, and
-Ultimate mounts the Ultimate payload. Ultimate is the default only while its files are
-present - the launcher checks them and says so when they are not.
+Rock Band Blitz is the base game, unlocked. Rock Band Blitz (Trial) is its XBLA demo. Rock Band
+Blitz Ultimate is the base game plus the community mod: offline score saving, cheats, custom gems
+and song search.
 """
 
 [[setting]]
@@ -184,9 +184,8 @@ applies = "restart"
 argv    = "flag"
 validate = "inside_game_root:forbid"
 tooltip = """
-Where the title's saves and globaloptions live. Empty uses Documents\\rb_blitz. A folder
-inside the game data folder is refused, because the runtime would redirect it to the
-platform user folder and the setting would silently do something else.
+Where the title's saves live. Empty uses Documents\\Rock Band Blitz. A folder inside
+the game data folder is refused.
 """
 
 [[setting]]
@@ -200,9 +199,8 @@ applies = "restart"
 argv    = "flag"
 validate = "dlc_layout|inside_game_root:forbid"
 tooltip = """
-DLC directory, laid out as <title_id>/<content_type>/<package>. Empty uses the game
-folder's dlc directory. Packages are mounted read-only where they lie, and a folder
-inside the game data folder is refused for the same reason as the save location.
+DLC folder, laid out as <title_id>/<content_type>/<package>. Empty uses the game
+folder's dlc directory.
 """
 
 # ---------------------------------------------------------------------------
@@ -224,11 +222,7 @@ choices = ["720p", "1080p", "1440p", "4k"]
 default = "720p"
 applies = "restart"
 argv    = "flag"
-tooltip = """
-Render resolution, applied to both the guest video mode and the startup window: 720p, 1080p,
-1440p or 4k. The title's own aspect handling is left to the letterbox row below. Needs a
-restart.
-"""
+tooltip = "Render resolution: 720p, 1080p, 1440p or 4k. Needs a restart."
 
 # ---------------------------------------------------------------------------
 # Graphics - Window
@@ -268,10 +262,7 @@ kind    = "bool"
 default = true
 applies = "live"   # live: the GPU vsync worker re-reads it every iteration (graphics_system.cpp:164)
 argv    = "flag"
-tooltip = """
-Pace presentation to the display's refresh instead of running free. Off removes the
-guest vblank interval, which changes how the title's own timing behaves.
-"""
+tooltip = "Pace presentation to the display's refresh. Off lets the title run free."
 
 # ---------------------------------------------------------------------------
 # Graphics - Rendering
@@ -291,9 +282,8 @@ default     = "d3d12"
 applies     = "restart"
 argv        = "flag"
 tooltip = """
-Which graphics backend the game renders with: Direct3D 12 or Vulkan. Only the backends this
-build compiled in are offered - the GPU plugin cannot run one it was not built with - and the
-choice is made while the game starts, so it needs a restart.
+Which renderer to use. Only the backends this build compiled in are offered. Needs a
+restart.
 """
 
 # The runtime has two anti-aliasing mechanisms and they are independent: this one is a
@@ -311,10 +301,7 @@ choices = ["none", "fxaa", "fxaa_extreme"]
 default = "none"
 applies = "restart"
 argv    = "flag"
-tooltip = """
-Smooth the finished frame: none, FXAA or FXAA Extreme. It runs after the title has drawn, so
-it costs a little GPU time and does not change how the game itself renders. Needs a restart.
-"""
+tooltip = "Smooth the finished frame: none, FXAA or FXAA Extreme. Needs a restart."
 
 [[setting]]
 key     = "native_2x_msaa"
@@ -325,25 +312,22 @@ kind    = "bool"
 default = true
 applies = "restart"
 argv    = "flag"
-tooltip = """
-Resolve the title's 2x MSAA render targets natively on the host. Off leaves that
-resolve to the guest's own path.
-"""
+tooltip = "Resolve the title's 2x MSAA render targets on the host. Needs a restart."
 
 [[setting]]
 key     = "anisotropic_override"
 tab     = "graphics"
 group   = "Rendering"
 label   = "Anisotropic filtering"
-kind    = "enum"
-choices = ["-1", "0", "1", "2", "3", "4", "5"]
-default = "3"
+kind    = "int"
+default = 3
+min     = -1
+max     = 5
 applies = "restart"
 argv    = "flag"
 tooltip = """
-Force anisotropic filtering for eligible textures: -1 keeps the guest's own value, 0
-disables it, and 1 to 5 force 1x, 2x, 4x, 8x or 16x. Higher values stay sharper at
-oblique angles and cost more sampling.
+Anisotropic filtering: -1 keeps the game's own value, 0 disables it, and 1 to 5 force 1x
+to 16x. Sharper at oblique angles, at more sampling cost.
 """
 
 [[setting]]
@@ -357,10 +341,7 @@ min     = 1
 max     = 8
 applies = "restart"
 argv    = "flag"
-tooltip = """
-Integer scale for both draw axes (1 to 8): 1 leaves the title's resolution alone, and
-higher values render at that multiple. Costs fill rate quickly.
-"""
+tooltip = "Render at this multiple of the title's resolution (1 to 8). Costs fill rate."
 
 # ---------------------------------------------------------------------------
 # Graphics - Presentation
@@ -375,7 +356,7 @@ kind    = "bool"
 default = true
 applies = "live"   # live: re-read on every paint (presenter.cpp:925 and :960)
 argv    = "flag"
-tooltip = "Keep the title's aspect ratio with black bars instead of stretching the frame to the window."
+tooltip = "Keep the title's aspect ratio with black bars instead of stretching the frame."
 
 [[setting]]
 key     = "present_safe_area_x"
@@ -388,10 +369,7 @@ min     = 0
 max     = 100
 applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:944)
 argv    = "flag"
-tooltip = """
-Horizontal safe area as a percentage (0 to 100), used when overscan cutoff is on: 100
-keeps the full width, lower values crop more.
-"""
+tooltip = "Horizontal safe area, 0 to 100, when overscan cutoff is on."
 
 [[setting]]
 key     = "present_safe_area_y"
@@ -404,10 +382,7 @@ min     = 0
 max     = 100
 applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:908)
 argv    = "flag"
-tooltip = """
-Vertical safe area as a percentage (0 to 100), used when overscan cutoff is on: 100
-keeps the full height, lower values crop more.
-"""
+tooltip = "Vertical safe area, 0 to 100, when overscan cutoff is on."
 
 [[setting]]
 key     = "present_allow_overscan_cutoff"
@@ -418,7 +393,7 @@ kind    = "bool"
 default = false
 applies = "restart"
 argv    = "flag"
-tooltip = "Crop the presented frame to the safe area above instead of showing the whole guest frame."
+tooltip = "Crop the presented frame to the safe area above."
 
 [[setting]]
 key     = "present_dither"
@@ -430,7 +405,6 @@ default = false
 applies = "restart"
 argv    = "flag"
 tooltip = "Enable output dithering in the final present pass."
-
 # ---------------------------------------------------------------------------
 # Graphics - Audio
 # ---------------------------------------------------------------------------
@@ -444,7 +418,7 @@ kind    = "bool"
 default = false
 applies = "live"   # live: re-read for every buffer the SDL audio callback fills (sdl_audio_driver.cpp:198)
 argv    = "flag"
-tooltip = "Mute the game's audio output on the host."
+tooltip = "Mute the game's audio."
 
 [[setting]]
 key     = "audio_maxqframes"
@@ -457,7 +431,7 @@ min     = 4
 max     = 64
 applies = "restart"
 argv    = "flag"
-tooltip = "Maximum buffered audio frames (4 to 64). Lower values reduce latency and can stutter."
+tooltip = "Maximum buffered audio frames (4 to 64). Lower is lower latency."
 
 # ---------------------------------------------------------------------------
 # Controller - Input
@@ -483,11 +457,7 @@ kind    = "bool"
 default = true
 applies = "restart"
 argv    = "flag"
-tooltip = """
-Drive the title's own menus with the mouse: moving the pointer moves the selection, and
-the left and right buttons press A and B. The navigation is installed when the game
-starts, so this needs a restart.
-"""
+tooltip = "Drive the title's menus with the mouse. Needs a restart."
 
 [[setting]]
 key     = "guide_button"
@@ -498,8 +468,4 @@ kind    = "bool"
 default = false
 applies = "restart"
 argv    = "flag"
-tooltip = """
-Pass the guide button through to the guest instead of leaving it to the host. The
-XInput backend picks its guide-capable entry point while starting, so this needs a
-restart.
-"""
+tooltip = "Pass the guide button through to the guest instead of the host. Needs a restart."

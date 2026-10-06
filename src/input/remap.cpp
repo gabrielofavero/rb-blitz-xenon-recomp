@@ -127,11 +127,11 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
   // from.
   auto context = std::make_shared<RemapContext>();
   context->table = rb_blitz::launcher::remap::Table::FromRows(profile->remap);
-  if (context->table.BoundCount() == 0) {
-    REXLOG_INFO("remap: the launcher profile binds no buttons, the pad is untouched");
-    return;
-  }
-  if (!context->table.AnySourceSet()) {
+  // The table always has work to do, even with no `[remap]` rows: every control without a row has
+  // the launcher's default binding - its own pad control plus a keyboard key - which is how a
+  // keyboard works without the profile being edited. `BoundCount` is how many the *user* rebound,
+  // which is what the log names.
+  if (context->table.BoundCount() > 0 && !context->table.AnySourceSet()) {
     // A table of empty bindings is a pad that does nothing, which is a real thing to want and a
     // terrible thing to hit by accident. It is honoured, and said out loud.
     REXLOG_WARN(
@@ -170,8 +170,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           state.gamepad.right_trigger = out.right_trigger;
         });
     REXLOG_INFO(
-        "remap: {} pad control(s) rebound by the launcher profile (--launcher_profile <path> "
-        "names another file)",
+        "remap: {} user rebind(s) from the launcher profile; every other control answers to its "
+        "default pad button and keyboard key (--launcher_profile <path> names another file)",
         bound);
     return system;
   };

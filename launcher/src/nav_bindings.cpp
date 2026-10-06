@@ -72,22 +72,31 @@ struct ActionInfo {
   std::string_view defaults;
 };
 
-// One row per action, in the order a frame resolves them by, with the defaults the launcher's own
-// keyboard source has always read (A1). The order is also the tie-break: a frame that sees both a
-// move and an activation asks for the move, which is what the hardcoded source did.
-constexpr std::array<ActionInfo, 12> kActionInfo{{
+// One row per action, in the order a frame resolves them by, with the defaults the launcher ships
+// with. The order is also the tie-break: a frame that sees both a move and an activation asks for
+// the move, which is what the hardcoded source did.
+//
+// The keys are no longer the profile's to change: an [nav] table is still parsed and round-tripped
+// but the launcher always reads these defaults, so a hand-edited file cannot lock a user out of
+// the window that would fix it. The scheme is written down in launcher/README.md.
+constexpr std::array<ActionInfo, 13> kActionInfo{{
     {NavAction::kNext, "next", "Next row",
-     "Moves the ring on by one, wrapping at the end of the tab.", "Tab, DownArrow"},
+     "Moves the ring down one row.", "Tab, DownArrow"},
     {NavAction::kPrevious, "previous", "Previous row",
-     "Moves the ring back by one, wrapping at the start of the tab.",
-     "Shift+Tab, UpArrow"},
+     "Moves the ring up one row.", "Shift+Tab, UpArrow"},
+    {NavAction::kNextOption, "next_option", "Next option",
+     "Moves the ring right, inside the focused row: the next choice, button or slider step.",
+     "RightArrow"},
+    {NavAction::kPreviousOption, "previous_option", "Previous option",
+     "Moves the ring left, inside the focused row: the previous choice, button or slider step.",
+     "LeftArrow"},
     {NavAction::kFirst, "first", "First row", "Moves the ring to the first row of the tab.",
      "Home"},
     {NavAction::kLast, "last", "Last row", "Moves the ring to the last row of the tab.", "End"},
     {NavAction::kNextTab, "next_tab", "Next tab",
-     "Moves to the next tab, wrapping at the last one.", "RightArrow, PageDown"},
+     "Moves to the next tab, wrapping at the last one.", "PageDown"},
     {NavAction::kPreviousTab, "previous_tab", "Previous tab",
-     "Moves to the previous tab, wrapping at the first one.", "LeftArrow, PageUp"},
+     "Moves to the previous tab, wrapping at the first one.", "PageUp"},
     {NavAction::kActivate, "activate", "Activate",
      "Does what the focused row says it does: picks a value, presses a button, or starts the "
      "Ultimate install.",
@@ -97,14 +106,9 @@ constexpr std::array<ActionInfo, 12> kActionInfo{{
      "is. It is the one binding worth leaving alone.",
      "Escape, B"},
     {NavAction::kLaunch, "launch", "Launch the game",
-     "Does what *Launch Game* on the bottom bar does, so the game can be started without a mouse "
-     "or a pad.", "Ctrl+Enter"},
+     "Does what *Launch Game* on the bottom bar does: saves, then starts the game.", "Ctrl+Enter"},
     {NavAction::kSave, "save", "Save",
      "Writes the profile, exactly as the bottom bar's *Save* does.", "Ctrl+S"},
-    {NavAction::kCopyCommand, "copy_command", "Copy command line",
-     "Puts the exact command line the game would be started with on the clipboard, so a keyboard "
-     "alone can read what a launch does.",
-     "Ctrl+C"},
     {NavAction::kCopyEffectiveValue, "copy_effective_value", "Copy the game's value",
      "Does what the precedence badge's *Copy the effective value* button does, for the row the ring "
      "is on: when the game's own rb_blitz.toml decides that row, this takes the value the game will "
@@ -391,6 +395,8 @@ bool Repeats(NavAction action) {
   switch (action) {
     case NavAction::kNext:
     case NavAction::kPrevious:
+    case NavAction::kNextOption:
+    case NavAction::kPreviousOption:
     case NavAction::kNextTab:
     case NavAction::kPreviousTab:
       return true;
@@ -403,7 +409,7 @@ bool Repeats(NavAction action) {
 
 bool IsBarAction(NavAction action) {
   return action == NavAction::kLaunch || action == NavAction::kSave ||
-         action == NavAction::kCopyCommand || action == NavAction::kCopyEffectiveValue;
+         action == NavAction::kCopyEffectiveValue;
 }
 
 Table::Table() {

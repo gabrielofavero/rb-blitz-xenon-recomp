@@ -82,16 +82,11 @@ constexpr MouseCapture kMouseCaptures[] = {
     {SDL_BUTTON_MASK(SDL_BUTTON_X2), "x2"},
 };
 
-const std::vector<remap::Source>* RowSources(const remap::Table& table, remap::Target target) {
-  return table.Bindings(target);
-}
-
 // The value column's text: the sources, or nothing at all for a control the pad still reports
 // by itself. Twenty-odd rows of "unchanged" would be twenty-odd rows of noise, and the column
 // being empty is a clear enough way to say it - the "?" beside the heading is where the rule is
 // written down.
-std::string BindingText(const remap::Table& table, remap::Target target) {
-  const std::vector<remap::Source>* sources = RowSources(table, target);
+std::string BindingText(const std::vector<remap::Source>* sources) {
   if (sources == nullptr) {
     return {};
   }
@@ -129,19 +124,20 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
   ImGui::SmallButton("?");
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip(
-        "A control with nothing assigned is the pad's own: the game sees it exactly as the pad\n"
-        "reports it.\n"
+        "Every control already answers to its own pad button and a keyboard key: the D-pad is\n"
+        "WASD, the face buttons are the I/J/K/L diamond, the shoulders are Q/E, and the sticks,\n"
+        "Back and Start have their own keys.\n"
         "\n"
         "Assign adds to what a control already has, so one button can answer to several inputs.\n"
         "Press Assign again to add another.\n"
         "\n"
-        "Reset removes the assignment, which is what returning a control to the pad's own\n"
-        "behaviour means. Reset all does that for every control at once.\n"
+        "Reset removes your own row, which puts the control back to that default.\n"
+        "Reset all does that for every control at once.\n"
         "\n"
-        "The keyboard is not part of the game's own controls, so a key assigned here is what\n"
-        "makes the keyboard press a pad button.\n"
+        "The triggers and Guide are left to the pad: a keyboard cannot stand in for a trigger's\n"
+        "travel, and Guide belongs to the platform.\n"
         "\n"
-        "Escape cancels a listen. Assignments are written by Save, on the General tab.");
+        "Escape cancels a listen. Assignments are written by Save, on the bottom bar.");
   }
   ImGui::Spacing();
 
@@ -157,24 +153,31 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
 
   const remap::Table table = remap::Table::FromRows(session.profile().remap);
   const std::vector<remap::Target>& targets = remap::Targets();
-  // The assignment column is sized rather than stretched: with a stretched one the buttons
-  // march off to the window's far edge and a row reads as three unrelated things. Capped at a
-  // readable width so a maximized window does not spread the same three into the same gap.
-  const float available = ImGui::GetContentRegionAvail().x;
-  const float label_width = ImGui::CalcTextSize("Right trigger").x + ImGui::GetStyle().CellPadding.x * 4.0f;
-  const float actions_width = ImGui::CalcTextSize("Assign").x +
-                              ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().ItemSpacing.x +
-                              ImGui::GetStyle().CellPadding.x * 4.0f;
+  // The assignment column stretches, and the control and action columns are fixed. A stretched
+  // assignment column means the two action buttons keep exactly the width they need and the slack
+  // goes to the text next to them - rather than the other way round, where a scrollbar or a
+  // narrow window clips the Reset button.
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float label_width =
+      ImGui::CalcTextSize("Right trigger").x + style.CellPadding.x * 4.0f;
+  const float button_pad = style.FramePadding.x * 2.0f;
+  const float assign_width =
+      std::max(ImGui::CalcTextSize("Assign").x, ImGui::CalcTextSize("Cancel").x) + button_pad;
+  const float reset_width = ImGui::CalcTextSize("Reset").x + button_pad;
+  const float actions_width = assign_width + reset_width + style.ItemSpacing.x +
+                              style.CellPadding.x * 4.0f;
   ImGui::BeginTable("##bindings", 3,
-                    ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings);
+                    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings);
   ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthFixed, label_width);
-  ImGui::TableSetupColumn("Assigned to", ImGuiTableColumnFlags_WidthFixed,
-                          std::clamp(available * 0.45f, 320.0f, 900.0f));
+  ImGui::TableSetupColumn("Assigned to", ImGuiTableColumnFlags_WidthStretch, 1.0f);
   ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed, actions_width);
   for (std::size_t index = 0; index < targets.size(); ++index) {
     const remap::Target target = targets[index];
     const bool listening_here = listening_ && *listening_ == target;
-    const bool assigned = table.IsBound(target);
+    // What presses the control: the user's row, or the binding the launcher ships. Reset only
+    // applies to the user's own row - a control on its default has nothing to remove.
+    const std::vector<remap::Source>* sources = table.Effective(target);
+    const bool user_bound = table.IsBound(target);
 
     // A table disambiguates its columns but not its rows, so every row's "Assign" would be the
     // same ImGui id and the click would land on the first row that submitted one. The row's own
@@ -191,12 +194,12 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
       ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
       ImGui::Text("Listening... %.1fs", listen_until_ - now);
       ImGui::PopStyleColor();
-    } else if (assigned && RowSources(table, target)->empty()) {
+    } else if (sources != nullptr && sources->empty()) {
       ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-      ImGui::TextUnformatted(BindingText(table, target).c_str());
+      ImGui::TextUnformatted(BindingText(sources).c_str());
       ImGui::PopStyleColor();
-    } else if (assigned) {
-      ImGui::TextUnformatted(BindingText(table, target).c_str());
+    } else if (sources != nullptr) {
+      ImGui::TextUnformatted(BindingText(sources).c_str());
     }
 
     ImGui::TableSetColumnIndex(2);
@@ -213,11 +216,11 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
       }
     }
     ImGui::SameLine();
-    if (Item(first_row + index * 2 + 1, ring, action, "Reset", assigned && !listening_)) {
+    if (Item(first_row + index * 2 + 1, ring, action, "Reset", user_bound && !listening_)) {
       remap::Table reset = table;
       reset.Reset(target);
       session.profile().remap = reset.ToRows();
-      status_ = std::string(remap::TargetLabel(target)) + " is back to the pad's own";
+      status_ = std::string(remap::TargetLabel(target)) + " is back to the default";
     }
     ImGui::PopID();
   }
@@ -229,7 +232,7 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
     remap::Table reset = table;
     reset.ResetAll();
     session.profile().remap = reset.ToRows();
-    status_ = "Every control is back to the pad's own";
+    status_ = "Every control is back to the keys it ships with";
   }
 
   // Only while a listen is running: the edges it looks for are measured against the previous
@@ -276,21 +279,17 @@ bool ControllerTab::Item(std::size_t index, FocusModel& ring, NavAction action,
 std::string ControllerTab::HelpText(std::size_t row) {
   const std::vector<remap::Target>& targets = remap::Targets();
   if (row >= targets.size() * 2) {
-    return "Removes every assignment at once, so every control goes back to what the pad reports "
-           "by itself. This is also the way out of a layout that made the game unusable, and it "
-           "needs no controller and no working mapping to reach.";
+    return "Removes every assignment at once, so every control goes back to the keys it ships with.";
   }
   const std::string label(remap::TargetLabel(targets[row / 2]));
   if (row % 2 == 0) {
-    return label +
-           ": assigns what answers for it. A listen takes the first input it sees within three "
-           "seconds - a pad button, a key or a mouse button - and adds to what is already there, "
-           "so one control can answer to several inputs. An empty row means the pad's own button "
-           "still reaches the game unchanged.";
+    return label + ": adds the next input it sees - a pad button, a key or a mouse button - to "
+                   "what already presses it.";
   }
-  return label +
-         ": removes every assignment from it, which is what giving a control back to the pad's "
-         "own button means.";
+  // The default a Reset restores is both devices': the control's own pad button and a key, which
+  // is what the block's own rule above says.
+  return label + ": removes your assignments, putting the control back to its own pad button and "
+                 "its key.";
 }
 
 void ControllerTab::BeginListening(remap::Target target) {

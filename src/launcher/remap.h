@@ -18,9 +18,12 @@
 //     (`mouse:`). The pad's own controls are named with the target vocabulary, because the
 //     SDK's pad mapping is one physical control per bit and the pad's buttons are labelled that
 //     way anyway.
-//   * A target with no row in `[remap]` is left exactly as the pad reported it, so an empty
-//     table is the stock behaviour. A target with a row binds to a comma-separated list, and an
-//     empty list means nothing presses it at all.
+//   * A target with no row in `[remap]` has the binding this module ships for it (`DefaultSources`):
+//     the pad's own control plus a keyboard key, so a keyboard is a complete stand-in for the
+//     pad without the profile having to say so. The two analog triggers and Guide have no default:
+//     a keyboard cannot stand in for a trigger's travel, and Guide belongs to the platform.
+//   * A target with a row binds to a comma-separated list, and an empty list means nothing presses
+//     it at all.
 //
 // SDK-free and SDL-free on purpose: the game and the launcher both compile this, and the tests
 // exercise the whole rewrite without a pad, a window or a profile on disk (the same rule
@@ -119,6 +122,13 @@ struct Binding {
   std::vector<Source> sources;
 };
 
+// The binding a control has when the profile says nothing about it: the pad's own control plus a
+// keyboard key chosen to mirror the pad on a keyboard for this game (the left hand on the D-pad's
+// WASD, the right hand on the face buttons' IJKL diamond, and Q/E, Z/C, V/N and Backspace/Return
+// around them). Empty - nullptr - for the analog triggers and Guide, which are left to the pad.
+// The sources read `state` before any rewriting, so a default is the identity for a pad user.
+const std::vector<Source>* DefaultSources(Target target);
+
 // The `[remap]` table of the profile.
 class Table {
  public:
@@ -133,6 +143,12 @@ class Table {
   // The target's sources, or nullptr when the target has no row - which means the pad's own
   // reporting is left alone. An empty list is a real binding: it means the control is off.
   const std::vector<Source>* Bindings(Target target) const;
+
+  // What actually presses `target`: the row the user bound, or the binding this module ships when
+  // the profile says nothing. nullptr only for a control with no default and no row - the analog
+  // triggers and Guide - which keeps the pad's own reporting. This is the one the game applies and
+  // the panel shows, so a keyboard works without the profile having to be edited.
+  const std::vector<Source>* Effective(Target target) const;
 
   bool IsBound(Target target) const { return Bindings(target) != nullptr; }
   // True when the target is bound to nothing.

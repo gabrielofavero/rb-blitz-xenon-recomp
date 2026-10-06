@@ -75,9 +75,13 @@ NavAction ActionForPadButton(PadNavButton button) {
     case PadNavButton::kDown:
       return NavAction::kNext;
     case PadNavButton::kLeft:
-      return NavAction::kPreviousTab;
+      return NavAction::kPreviousOption;
     case PadNavButton::kRight:
-      return NavAction::kNextTab;
+      return NavAction::kNextOption;
+    case PadNavButton::kScrollUp:
+      return NavAction::kScrollUp;
+    case PadNavButton::kScrollDown:
+      return NavAction::kScrollDown;
     case PadNavButton::kConfirm:
       return NavAction::kActivate;
     case PadNavButton::kCancel:
@@ -96,11 +100,12 @@ NavAction ActionForPadButton(PadNavButton button) {
 
 namespace {
 
-// Only the four directions repeat. A confirm that repeated would press the row under the ring
-// again and again, which for the *Install Ultimate* row is a second download.
+// Only the directions repeat. A confirm that repeated would press the row under the ring again and
+// again, which for the *Install Ultimate* row is a second download.
 constexpr bool Repeats(PadNavButton button) {
   return button == PadNavButton::kUp || button == PadNavButton::kDown ||
-         button == PadNavButton::kLeft || button == PadNavButton::kRight;
+         button == PadNavButton::kLeft || button == PadNavButton::kRight ||
+         button == PadNavButton::kScrollUp || button == PadNavButton::kScrollDown;
 }
 
 }  // namespace

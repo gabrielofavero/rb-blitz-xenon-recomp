@@ -88,6 +88,13 @@ PadNavState ReadPad(SDL_Gamepad* pad) {
                                       /*positive=*/false);
   state[PadNavButton::kRight] = Pushed(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_AXIS_LEFTX,
                                        /*positive=*/true);
+  // The right stick is the only control with no D-pad twin: it scrolls the tab body's scrollbar.
+  // A wider deadzone than the left stick's is deliberate - the scroll is a glance, not a command,
+  // and a stick resting off-centre must not walk the list on its own.
+  const AxisDirection scroll =
+      AxisDirectionFor(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY), kScrollStickDeadzone);
+  state[PadNavButton::kScrollUp] = scroll == AxisDirection::kNegative;
+  state[PadNavButton::kScrollDown] = scroll == AxisDirection::kPositive;
   return state;
 }
 

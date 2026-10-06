@@ -555,7 +555,6 @@ int main(int argc, char** argv) {
   rb_blitz::launcher::ShellEnvironment shell_environment;
   shell_environment.gamepads = !options.no_gamepad;
   shell_environment.focus_log_path = options.focus_log_path;
-  shell_environment.safe_mode = options.safe_mode;
   rb_blitz::launcher::VirtualPad test_pad;
   if (!options.test_pad_script.empty() && !test_pad.Start(options.test_pad_script, nullptr)) {
     std::fprintf(stderr, "--test-pad: '%s' is not a script this build understands\n",
@@ -724,20 +723,10 @@ int main(int argc, char** argv) {
       std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots, environment,
                                                   shell_environment);
 
-  // The title names the current tab. It is the only piece of the launcher's state a script
-  // can read back (MainWindowTitle), which is what makes A1's "tab through every tab"
-  // checkable rather than eyeballed - and it tells the user where they are in the taskbar.
-  std::string window_title;
-  const auto sync_title = [&]() {
-    const std::string wanted =
-        std::string(kWindowTitle) + " - " +
-        rb_blitz::launcher::DisplayTabName(shell->CurrentTab());
-    if (wanted != window_title) {
-      window_title = wanted;
-      SDL_SetWindowTitle(window, window_title.c_str());
-    }
-  };
-  sync_title();
+  // The window's title is the launcher's name and nothing else. It deliberately does not name the
+  // current tab: the tab strip already shows which tab is up, and a title that changes on every
+  // switch is noise in the taskbar. A script that needs the tab reads the focus trace instead.
+  SDL_SetWindowTitle(window, kWindowTitle);
 
   bool done = false;
   while (!done) {
@@ -771,7 +760,6 @@ int main(int argc, char** argv) {
     // Escape and B leave from inside the shell, because the keys are the focus model's to
     // read (A1); the window's close button is the event loop's.
     const bool running = shell->Frame();
-    sync_title();
 
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();

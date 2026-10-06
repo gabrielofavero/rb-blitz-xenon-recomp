@@ -57,9 +57,9 @@ class ControllerTab {
   // mis-click does not lock the panel, and the countdown is on screen the whole time.
   static constexpr double kListenSeconds = 3.0;
 
-  // The block's focusable rows: one Assign and one Reset per control, then Reset all. The
-  // shell sizes the tab's ring with this, so it has to be exactly right - a mismatch would
-  // shift the schema's own rows, which are drawn before these.
+  // The block's flat focus entries: one Assign and one Reset per control, then Reset all. The
+  // shell sizes each control's row with two options and Reset all with one, so this is the sum
+  // and must stay in step with the fields the panel draws.
   static constexpr std::size_t kRowCount = kControlRows * 2 + 1;
 
   // `pads` is the launcher's open pads (A3). A capture reads them through the registry rather

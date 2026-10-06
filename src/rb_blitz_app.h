@@ -176,11 +176,15 @@ class RbBlitzApp : public rex::ReXApp {
     redirect_if_inside_game_root(paths.cache_root);
     redirect_if_inside_game_root(paths.update_data_root);
 
-    // Writable roots default outside the game tree (platform user dir).
-    if (paths.user_data_root.empty()) {
-      paths.user_data_root = rex::filesystem::GetUserFolder() / "rb_blitz";
+    // Writable roots default outside the game tree (platform user dir). The runtime has already
+    // filled user_data_root with GetUserFolder()/GetName() ("rb_blitz") before this hook, so when
+    // nothing named a root explicitly it is replaced with the folder the launcher's *Save game
+    // location* row shows - one spelling of the default, in both places. An explicit
+    // --user_data_root, the cvar, or a hand-edited profile is left exactly as it is.
+    if (REXCVAR_GET(user_data_root).empty()) {
+      paths.user_data_root = rex::filesystem::GetUserFolder() / "Rock Band Blitz";
     }
-    if (paths.cache_root.empty()) {
+    if (REXCVAR_GET(cache_root).empty()) {
       paths.cache_root = paths.user_data_root / "cache";
     }
   }

@@ -99,10 +99,18 @@ bool DrawBool(const settings::Setting& setting, std::size_t index, FocusModel& r
               NavAction action, ProfileSession& session, std::string_view current) {
   bool value = current == "true";
   bool changed = false;
-  // Enter or Space on the focused row toggles it, the same as clicking the box: one press,
-  // one change.
-  if (action == NavAction::kActivate && !ring.Empty() && ring.Index() == index) {
+  // Enter or Space on the focused row toggles it, the same as clicking the box: one press, one
+  // change. Left and Right also set it - left off, right on - so the horizontal pair does
+  // something on a row that has only the one option.
+  const bool in_ring = !ring.Empty() && ring.Index() == index;
+  if (in_ring && action == NavAction::kActivate) {
     value = !value;
+    changed = true;
+  } else if (in_ring && action == NavAction::kNextOption) {
+    value = true;
+    changed = true;
+  } else if (in_ring && action == NavAction::kPreviousOption) {
+    value = false;
     changed = true;
   }
   const bool focused = BeginFocus(index, ring);
@@ -123,10 +131,17 @@ bool DrawInt(const settings::Setting& setting, float value_width, std::size_t in
   const int high = setting.has_range ? ParseIntOrZero(setting.max_text) : 0;
   int value = ParseIntOrZero(current);
   bool changed = false;
-  // With the focus on the row, Enter or Space steps it; a slider is not a keyboard-navigable
-  // widget while ImGui's own navigation is off (A1).
-  if (action == NavAction::kActivate && !ring.Empty() && ring.Index() == index) {
+  // With the focus on the row, Enter or Space steps it up and Left/Right step it down and up - the
+  // horizontal pair is how a slider is changed now that ImGui's own navigation is off (A1).
+  const bool in_ring = !ring.Empty() && ring.Index() == index;
+  if (in_ring && action == NavAction::kActivate) {
     value = setting.has_range ? std::min(value + 1, high) : value + 1;
+    changed = true;
+  } else if (in_ring && action == NavAction::kNextOption) {
+    value = setting.has_range ? std::min(value + 1, high) : value + 1;
+    changed = true;
+  } else if (in_ring && action == NavAction::kPreviousOption) {
+    value = setting.has_range ? std::max(value - 1, low) : value - 1;
     changed = true;
   }
   const bool focused = BeginFocus(index, ring);
@@ -152,8 +167,15 @@ bool DrawFloat(const settings::Setting& setting, float value_width, std::size_t 
   const float high = setting.has_range ? ParseFloatOrZero(setting.max_text) : 0.0f;
   float value = ParseFloatOrZero(current);
   bool changed = false;
-  if (action == NavAction::kActivate && !ring.Empty() && ring.Index() == index) {
+  const bool in_ring = !ring.Empty() && ring.Index() == index;
+  if (in_ring && action == NavAction::kActivate) {
     value = setting.has_range ? std::min(value + 1.0f, high) : value + 1.0f;
+    changed = true;
+  } else if (in_ring && action == NavAction::kNextOption) {
+    value = setting.has_range ? std::min(value + 1.0f, high) : value + 1.0f;
+    changed = true;
+  } else if (in_ring && action == NavAction::kPreviousOption) {
+    value = setting.has_range ? std::max(value - 1.0f, low) : value - 1.0f;
     changed = true;
   }
   const bool focused = BeginFocus(index, ring);

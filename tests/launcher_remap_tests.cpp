@@ -284,7 +284,7 @@ void TestTableRoundTrip() {
 }
 
 void TestRewrite() {
-  BeginCase("D16: an unbound control is the pad's own, and a bound one is the binding's");
+  BeginCase("D16: a control with no row is the pad's own plus the default key, and a bound one is the binding's");
 
   PadState pad;
   pad.buttons = static_cast<uint16_t>(TargetBit(Target::kA) | TargetBit(Target::kY));
@@ -496,10 +496,53 @@ void TestProfileKeepsTheTable() {
 
 }  // namespace
 
+void TestDefaultsGiveTheKeyboardAPad() {
+  BeginCase("D16: every digital control has a default pad-plus-keyboard binding");
+
+  // A control with no row still has a binding: its own pad control plus a keyboard key. The pad
+  // source reads the state before any rewriting, so the pad keeps working exactly as it did.
+  const std::vector<Source>* a = DefaultSources(Target::kA);
+  CHECK_TRUE(a != nullptr);
+  if (a != nullptr) {
+    CHECK_EQ(a->size(), 2u);
+    CHECK_TRUE((*a)[0] == (Source{SourceKind::kPad, "a"}));
+    CHECK_TRUE((*a)[1] == (Source{SourceKind::kKey, "K"}));
+  }
+  // The analog triggers and Guide have no default and keep the pad's own reporting.
+  CHECK_TRUE(DefaultSources(Target::kLeftTrigger) == nullptr);
+  CHECK_TRUE(DefaultSources(Target::kRightTrigger) == nullptr);
+  CHECK_TRUE(DefaultSources(Target::kGuide) == nullptr);
+
+  // An empty table means the defaults; an explicit row still wins over one.
+  const Table empty;
+  CHECK_TRUE(empty.Effective(Target::kA) == DefaultSources(Target::kA));
+  const Table bound = Table::FromRows(Bindings({"a=pad:b"}));
+  CHECK_TRUE(bound.Effective(Target::kA) != nullptr);
+  CHECK_EQ(bound.Effective(Target::kA)->size(), 1u);
+
+  // The keyboard key reaches the guest even though the profile never named it: this is what makes
+  // a keyboard a complete stand-in for the pad.
+  FakeDevice device;
+  device.down = {Source{SourceKind::kKey, "K"}};
+  const PadState none;
+  CHECK_EQ(Run(empty, none, &device).buttons & TargetBit(Target::kA), TargetBit(Target::kA));
+
+  // And with nothing pressed the pad is exactly as the pad reported it: the defaults are the
+  // identity for a pad user, triggers and all.
+  FakeDevice idle;
+  PadState pad;
+  pad.buttons = static_cast<uint16_t>(TargetBit(Target::kA) | TargetBit(Target::kY));
+  pad.left_trigger = 200;
+  const PadState same = Run(empty, pad, &idle);
+  CHECK_EQ(same.buttons, pad.buttons);
+  CHECK_EQ(same.left_trigger, pad.left_trigger);
+}
+
 int main() {
   TestVocabulary();
   TestTableRoundTrip();
   TestRewrite();
+  TestDefaultsGiveTheKeyboardAPad();
   TestProfileKeepsTheTable();
   return Finish();
 }

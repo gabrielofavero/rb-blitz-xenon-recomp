@@ -151,18 +151,15 @@ bool ProfilePanel::Item(std::size_t index, FocusModel& ring, NavAction action, c
 std::string ProfilePanel::HelpText(std::size_t row) {
   switch (row) {
     case 0:
-      return "Sets every setting in this file back to the value the build was compiled with. "
-             "The window size is not one of them, and nothing is removed from disk until Save.";
+      return "Sets every setting back to the value the build was compiled with. Nothing leaves "
+             "disk until Save.";
     case 1:
-      return "Replaces what is on screen with a profile from a file you choose. This is also how "
-             "a profile that would not parse is replaced: a file the launcher could not read is "
-             "never written over.";
+      return "Replaces what is on screen with a profile from a file you choose.";
     case 2:
-      return "Writes a copy of the profile as it is on screen to a file you choose, so a setup "
-             "that works can be carried to another machine.";
+      return "Writes a copy of the profile as it is on screen to a file you choose.";
     case 3:
       return "Moves where the profile is looked for and written, so several installs can share "
-             "one. Choose the folder that holds the settings, not the file itself.";
+             "one.";
     default:
       break;
   }

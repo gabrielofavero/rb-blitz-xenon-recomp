@@ -140,9 +140,10 @@ changes no C++ at all:
 - **One row per `[[setting]]`**, grouped by `group` in the table's order, with one
   widget per `kind` — `bool`, `int`, `float`, `enum`, `string`, `path_dir`, `path_file`.
   A1 drew them read-only; B2 makes them editable: a `bool` is a checkbox, an `int`/`float`
-  with `min`/`max` is a slider, an `enum` is a row of radios (one ring entry each), and a
-  string is a text field. A kind without an editor — a path outside the General tab — is
-  drawn read-only rather than ignoring the click, and its value comes from the profile.
+  with `min`/`max` is a slider, an `enum` is a row of radios (one *option* each: Left and
+  Right walk them), and a string is a text field. A kind without an editor — a path outside
+  the General tab — is drawn read-only rather than ignoring the click, and its value comes
+  from the profile.
 - **A restart row says so**: a row whose `applies` is `restart` carries a quiet
   `(needs restart)` after its widget, because a change that only lands on the next boot
   must not look like it just happened (D12).
@@ -158,16 +159,16 @@ changes no C++ at all:
   different pieces of code — the only way they cannot disagree about a hidden row is for the
   row to be gone before either of them sees it. `--dump-layout` counts the rows each rule kept
   out, so a rule that hides more than it meant to is visible there.
-- **One focus ring per tab** (`src/nav.cpp`): a flat, ordered list of the tab's rows and a
-  focused index. Moving wraps, so `End` then `Down` returns to the first row. Keys are
-  translated in exactly one place and become `NavAction`s; a pad produces the same vocabulary
-  through its own source (`src/pad_source.cpp`, A3), and the shell does not know which device
-  answered.
+- **One focus ring per tab** (`src/nav.cpp`): an ordered list of the tab's rows, each with the
+  options it offers side by side, and the flat entry the ring is on. Up and Down move between
+  rows, Left and Right between a row's options; both wrap. Keys are translated in exactly one
+  place and become `NavAction`s; a pad produces the same vocabulary through its own source
+  (`src/pad_source.cpp`, A3), and the shell does not know which device answered.
 - **The bottom bar (A2)** is the window's, not a tab's, and it is where a session ends: the
   state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right, and
   under them the focused row's own help — its tooltip, and how to operate it. There is no title
-  text and no key legend at the top: the window's own title bar names the launcher and the tab,
-  and the bar's own controls say what they do.
+  text and no key legend at the top: the window's own title bar names the launcher, and the tab
+  strip says which tab is up.
 - **Window geometry** is read from the profile at startup and written back on the way out,
   and only when it changed — so a launcher nobody resized neither creates `launcher.toml`
   nor touches its mtime. A profile that does not parse is never written over (D2). The
@@ -178,39 +179,41 @@ changes no C++ at all:
 
 | Keys | What they do |
 | --- | --- |
-| `Down` / `Tab` | Next row (`Up` / `Shift+Tab` goes back) |
+| `Down` / `Up` (`Tab` / `Shift+Tab`) | Move the ring down / up a **row** |
+| `Right` / `Left` | Move the ring along the focused row's **options**: an enum's choices, a row of buttons (Import/Export/Reset), a slider's value, or the bottom bar's Close/Save/Launch |
 | `Home` / `End` | First / last row |
-| `Right` / `PageDown` | Next tab (`Left` / `PageUp` goes back) |
-| `Enter` / `Space` | Operate the focused row: pick a target, open the folder picker, toggle a checkbox, step a slider, choose an enum entry, or start the Ultimate install |
+| `PageDown` / `PageUp` | Next / previous tab (`LB`/`RB` on a pad) |
+| `Enter` / `Space` | Operate the focused option, or the focused row: toggle a checkbox, choose an enum entry, step a slider, open the folder picker, or start the Ultimate install |
 | `Esc` / `B` | Leave, or cancel whatever is modal |
-| `Ctrl+S` / `Ctrl+C` | The bar's *Save* and *Copy command line*, so a keyboard alone can finish and diagnose a session |
-| `Ctrl+Enter` | The bar's *Launch Game*, so a keyboard alone can start the game |
+| `Ctrl+S` | The bar's *Save*, so a keyboard alone can finish a session |
+| `Ctrl+Enter` | The bar's *Launch Game*: it saves first, then starts the game |
 | `Ctrl+Shift+C` | The precedence badge's *Copy the effective value*, for the row the ring is on — the bar names it on the rows that carry a badge |
 
-**All of those are the profile's to change** (A5). They are the `[nav]` table of
-`launcher.toml`, and the **Launcher keys** block at the end of the General tab is the editor:
-one row per action, *Assign* to capture the next key pressed within three seconds, *Reset* to
-put one action back to the keys it ships with, and *Reset every launcher key* for all of them
-at once. The table above is what a profile with no `[nav]` table does, which is also what
-`--safe-mode` starts from.
-
-Two rules about the vocabulary, both of them in `src/nav_bindings.cpp`:
+The keys are the launcher's own and are **not** configurable: a hand-edited profile cannot lock a
+user out of the window that would fix it, which is the trap a rebindable table invited. The two
+rules the vocabulary still follows, both in `src/nav_bindings.cpp`:
 
 - A key on its own and the same key with `Ctrl`, `Shift` or `Alt` are different bindings, and a
   chord is resolved before a bare key. That is what keeps `Shift+Tab` meaning "back" while `Tab`
   means "forward", and what lets `Ctrl+S` save on a keyboard where `S` is bound to nothing.
   A bare key is the key whatever else is held with it, so `Shift+Down` has always moved the ring.
-- A *move* repeats while it is held and a decision does not. This is the one thing A1's
-  hardcoded source said and a rebindable table cannot (`Tab` did not repeat and the arrows did);
-  a held `Tab` now walks the ring like a held arrow.
+- A *move* repeats while it is held and a decision does not. `Tab` did not repeat and the arrows
+  did; now every move repeats and nothing else does — a held `Enter` would press *Install
+  Ultimate* again.
+
+The bottom bar's own three controls — *Close*, *Save* and *Launch Game* — are the last row of the
+ring, so pressing `Up` on the first row (or `Down` on the last) lands on them; `Left` and `Right`
+choose between them and `Enter`/`A` presses one. That is how a controller reaches *Close* without
+a mouse.
 
 | Pad | What it does |
 | --- | --- |
-| D-pad / left stick | Next and previous row; left and right move between tabs (`src/pad_nav.cpp`, with `kStickDeadzone` of 8000 as the band around the centre that means nothing) |
+| D-pad / left stick | Up and down walk the rows; left and right walk the options inside the focused row (`src/pad_nav.cpp`, with `kStickDeadzone` of 8000 as the band around the centre that means nothing) |
 | `A` | Operate the focused row — the same thing `Enter` does |
-| `B` / `Back` | Leave, or cancel. D6 gave `Back` a "reload profile / quit" menu; there is no such menu, and the half of it that exists is the quit — A5 owns the recovery it was for |
+| `B` / `Back` | Leave, or cancel |
 | `LB` / `RB` | Previous and next tab |
 | `Start` | Launch the game: the bar's *Launch Game* without the mouse, refused in the same cases the button is disabled in |
+| Right stick | Scrolls the tab body, so a long tab can be skimmed without moving the ring |
 | Hold a direction | It repeats after 0.45 s and then every 0.12 s, so a held D-pad walks the list. Nothing else repeats: a held `A` would press *Install Ultimate* again |
 
 The mouse is a device too: clicking a row focuses it, and hovering adopts the ring, so the
@@ -243,18 +246,19 @@ device used. Three things about it are deliberate:
 
 - **Every row has one, by construction.** `tools/embed_settings.cpp` refuses to build a row
   without a tooltip, so the bar's text cannot be missing; the rows that are not settings — B4's
-  four buttons, D16's 35 mapping rows — carry theirs beside the code that draws them
-  (`ProfilePanel::HelpText`, `ControllerTab::HelpText`), and the shell asks *them* rather than
-  keeping a second table to fall out of step. The walk from a ring entry to a row is one
-  function (`schema_view.cpp`'s `SettingForEntry`), counting entries the same way the ring was
-  sized, which is why the two cannot disagree; a tab with no rows at all is D7's explicit `—`.
+  four buttons, D16's mapping rows and the bottom bar's three — carry theirs beside the code that
+  draws them (`ProfilePanel::HelpText`, `ControllerTab::HelpText`, the shell's own), and the shell
+  asks *them* rather than keeping a second table to fall out of step. The walk from a ring entry to
+  a row is one function (`schema_view.cpp`'s `SettingForEntry`), counting entries the same way the
+  ring was sized, which is why the two cannot disagree; a tab with no rows at all is D7's explicit
+  `—`.
 - **The tooltip is re-wrapped, not repeated.** The line breaks in `settings.toml` are the file's
   own wrapping, and the bar's width is a number the file cannot know, so the text is flattened
   (`FlattenHelpText`) and drawn into the width the hints leave. Two lines, always reserved even
   when one would do, because the body was given the rest of the window *before* the bar was
   drawn: a bar that measured itself afterwards could not have told the body how much room it had.
-  Text longer than two lines is cut at a word with an ellipsis — it never pushes the three
-  actions off the bar.
+  A sentence taller than two lines is clipped; the tooltips are written to fit, and the right
+  stick drives the body's own scrollbar rather than the bar.
 - **The hints say what the row does, not what the window does.** `RowActionVerb` is one word per
   kind — *Toggle*, *Adjust*, *Edit*, *Choose*, *Browse* — and the two global hints follow. The
   hints are dropped from the end when the window is too narrow for all of them, so the row's own
@@ -290,8 +294,8 @@ rb_blitz_launcher.exe --test-pad="family=sony;a;down;down:1200;right;detach"
 ```
 
 `--focus-log=<path>` writes one line whenever the ring moves or the input device changes —
-`tab=graphics entry=0/27 row=resolution enter=Choose`, `device gamepad name=… confirm=Cross …`,
-`pads count=2 name="Virtual Pad"`. A window title can say which tab is up and nothing more, so
+`tab=graphics entry=0/24 rowindex=0/17 row=resolution enter=Choose`, `device gamepad name=… confirm=Cross …`,
+`pads count=2 name="Virtual Pad"`. A screenshot can say which tab is up and nothing more, so
 this is how "the pad moved the ring, mid-session, without disturbing anything" is read back: a
 diff of a small text file instead of a screenshot nobody can inspect twice. It writes only on a
 change, and nothing reads it back.
@@ -318,9 +322,10 @@ Three rows, which is the whole of M1's General scope (§1.1, D4): the launch tar
 location and the DLC location. *Verify installation* and the game-directory override are later
 (D4 says so); nothing here pretends otherwise.
 
-**The launch target** is a stack of radios under the group heading, one per choice, each its
-own focus-ring entry — so the row says what the choices are and nothing else, instead of
-repeating the game's name three times and then explaining itself in a second sentence.
+**The launch target** is a stack of radios under the group heading, one per choice — *Rock Band
+Blitz*, *Rock Band Blitz (Trial)* and *Rock Band Blitz Ultimate* — each its own focus-ring row, so
+Up and Down move between them. What each one is lives in the row's tooltip rather than in a
+description under it.
 It is never a dead option (D5). What the files say is a *state*
 (`src/ultimate_state.cpp`), read from the same header the runtime's own check uses
 (`src/hooks/ultimate_plan.h`), so "the launcher says ready" and "the game mounts it" cannot
@@ -364,13 +369,14 @@ rb_blitz_setup_helper.exe install-ultimate --dest "<game root>" --from-pinned
 The launcher never bundles the mod and never downloads it itself; that stays the installer's
 helper and the installer's pin (D5, §4.6).
 
-**The two locations** are path rows with a typed field, a `Browse` button and `Enter` on the
-focused row opening the same picker. The field shows the path the game will *use*, not the one
-that was typed: an empty profile value means the game's own default, and a blank field would
-hide where the saves are about to go. Those defaults are the game's own arithmetic -
-`Documents\rb_blitz` for the save folder (`src/rb_blitz_app.h`), `<game root>\dlc` for DLC
-(`src/fs/dlc_layout.h`) - so the launcher repeats them rather than inventing a third answer.
-Editing the field is still how a value is overridden.
+**The two locations** are path rows with a typed field and a `Browse` button. The ring lands on
+*Browse* rather than on the title above the row — the title is a label, and the button is the thing
+a keyboard or a pad can press — and `Enter`/`A` opens the same picker. The field shows the path the
+game will *use*, not the one that was typed: an empty profile value means the game's own default,
+and a blank field would hide where the saves are about to go. Those defaults are the game's own
+arithmetic - `Documents\Rock Band Blitz` for the save folder (`src/rb_blitz_app.h`), `<game
+root>\dlc` for DLC (`src/fs/dlc_layout.h`) - so the launcher repeats them rather than inventing a
+third answer. Editing the field is still how a value is overridden.
 
 Every value — picked, typed, or already in the profile — is
 judged by the row's own `validate` string from the schema (`src/path_validate.cpp`), so the
@@ -420,10 +426,13 @@ code:
 
 | Kind | Widget | Notes |
 | --- | --- | --- |
-| `bool` | checkbox | Enter or Space on the focused row toggles it |
-| `int` / `float` with `min`/`max` | slider | the bounds are the cvar's own `.range(...)` |
-| `enum` | a row of radios | one ring entry per choice, so a pad can reach every value |
+| `bool` | checkbox | `Enter`/`Space` toggles it; `Left`/`Right` sets it off/on |
+| `int` / `float` with `min`/`max` | slider | the bounds are the cvar's own `.range(...)`; the ring lands on the slider and `Left`/`Right` steps it |
+| `enum` | a row of radios | one option per choice, so `Left`/`Right` walks the choices and `Enter`/`A` picks one |
 | a row with no editor | read-only | drawn disabled rather than ignoring the click |
+
+*Anisotropic filtering* is an `int` slider over the cvar's own `-1` to `5` range: `-1` keeps the
+game's own value, `0` disables it, and `1`–`5` force 1x up to 16x.
 
 Changes land in the session's profile, and the bottom bar's **Save** is what writes it; the
 bar's own left half is the feedback, showing "Unsaved changes" while a save would write and
@@ -663,13 +672,12 @@ settings folder that is not writable is reported before the game starts, not sil
 A profile that has never been written is not an error: there is nothing to read, and the
 defaults are the right answer.
 
-**The exact command line is always available.** *Copy command line*, on the bottom bar, puts
-`FormatLaunchCommand`'s bytes on the clipboard — the same builder a real start uses, so a value
-that did not reach the game is answerable from the paste. When a start fails, the whole detail
-is shown as a modal instead of one bar line, because it carries three things: the reason, the
-command line, and the folder the game writes its own log into (`<install folder>\logs`, a file
-named like `rb_blitz_001.log`) — the only record a WIN32-subsystem start leaves. The modal's own
-*Copy command line* is the same bytes as the bar's.
+**The exact command line is always available.** With the *Copy command line* bar button gone — the
+bar is a place to finish a session, not a developer console — `FormatLaunchCommand`'s bytes are
+shown where a developer would want them: the failed-start modal. When a start fails, the whole
+detail is shown as a modal instead of one bar line, because it carries three things: the reason,
+the command line, and the folder the game writes its own log into (`<install folder>\logs`, a file
+named like `rb_blitz_001.log`) — the only record a WIN32-subsystem start leaves.
 
 The launcher itself stays open on a failure, so the user can fix the folder and try again.
 `Start` on a pad is the same launch without the mouse (A3), refused in the same cases the button
@@ -696,14 +704,22 @@ can I rebind?". A row shows its control, what the control answers to, and two bu
   Adding rather than replacing is what makes *several inputs, one button* work: press Assign,
   press the pad button; press Assign again, press the key. Nothing captured leaves the row
   alone, and the countdown is on screen the whole time.
-- **Reset** removes the assignment, which is what returning a control to the pad's own
-  behaviour means. *Reset all bindings* does that for every control at once.
+- **Reset** removes the user's own row, which puts the control back to the default below.
+  *Reset all bindings* does that for every control at once.
 
-A row with nothing assigned is the pad's own: the game sees it exactly as the SDK mapped it,
-which is why an empty `[remap]` table is the stock behaviour and why a control the user never
-touched has no row at all. A control bound to an *empty* list is the other thing — nothing
-presses it — and that is writable by hand (the grammar allows it, the panel shows it in warning
-colour) even though the panel does not offer it.
+**Every control already answers to its own pad button *and* a keyboard key**, so a keyboard is a
+complete stand-in for the pad without editing anything: the D-pad mirrors WASD for the left hand,
+the four face buttons mirror the pad's diamond on `I`/`J`/`K`/`L` for the right, the shoulders are
+`Q`/`E`, the stick clicks are `V`/`N`, and Back/Start are Backspace/Return. That is
+`remap::DefaultSources` (`../src/launcher/remap.h`), and it is what the game applies: a `pad:`
+source reads the pad's state *before* any rewriting, so the pad behaves exactly as it did and the
+key is an addition. The two analog triggers and Guide have no default — a keyboard cannot stand in
+for a trigger's travel, and Guide belongs to the platform.
+
+The bindings are stored only when the user changes one, so a profile nobody has rebound has no
+`[remap]` table at all and the defaults are what both processes read. A control bound to an *empty*
+list is "nothing presses it", which is writable by hand (the grammar allows it, the panel shows it
+in warning colour) even though the panel does not offer it.
 
 The capture is polled rather than event-driven, because the launcher's event pump already
 belongs to ImGui: SDL is asked what is down each frame and a capture is a **rising edge** over
@@ -886,25 +902,23 @@ Two things a settings file can do to a launcher, and what to do about each. Both
 command-line only on purpose: they are for the case where the window is not usable enough to
 change a setting in it, so a switch reachable only from the window would be no switch at all.
 
-**The keys have stopped working.** Bind every movement key to something you do not have, or
-import a profile that did, and the ring cannot be moved - so the *Launcher keys* block that
-would fix it cannot be reached either. Recover with:
+**The window opens at a nonsense size.** A `launcher.toml` whose `[window]` size is smaller than
+the content can use - or larger than the display - leaves the window unusable. The keys are the
+launcher's own now, so a bad binding can no longer lock the ring, and the size is the one thing a
+profile can still set that can. Recover with:
 
 ```
 rb_blitz_launcher.exe --safe-mode
 ```
 
-Safe mode starts the launcher on the compiled defaults for its **own** behaviour: the keys the
-ring reads, and the size the window opens at. Those two are the only things a profile can set
-that can leave the window unusable, which is why they are exactly what the switch takes away.
-Everything else still loads - the settings rows, the launch target, `[remap]` - and the bottom
-bar says safe mode is on rather than leaving you to wonder which window you are looking at.
+Safe mode starts the launcher on the compiled default for its **own** behaviour: the size the
+window opens at. Everything else still loads - the keys are always the fixed defaults, and the
+settings rows, the launch target and `[remap]` load as usual - and the bottom bar says safe mode
+is on rather than leaving you to wonder which window you are looking at.
 
-It is still a launcher you can *save* from, and that is deliberate: the point of the switch is
-to let you reach *Reset every launcher key* in the *Launcher keys* block, and a launcher that
-refused to write would leave the fix unrecorded. The one write it does skip is A1's window
-size - the window opened at the default size, so the size it ends at is not a choice you made,
-and a switch for reading a damaged profile should not be the thing that writes to it.
+It is still a launcher you can *save* from, and that is deliberate. The one write it does skip is
+A1's window size - the window opened at the default size, so the size it ends at is not a choice
+you made, and a switch for reading a damaged profile should not be the thing that writes to it.
 
 **The settings file cannot be read at all.** A `launcher.toml` with a TOML error in it is
 reported on the bottom bar and never written over (D2: a hand-edited file is never lost to a
@@ -942,7 +956,7 @@ Four ways, in the order of what they cost:
 - **The captures.** [scripts/capture_launcher.ps1](../scripts/capture_launcher.ps1) starts
   the launcher on a fixture profile, drives it with synthetic keys, captures the client
   area and measures crops of it against each other with `frame_diff.ps1`. Its claims are
-  the three the text cannot carry: one press moves the ring one focus entry, a press that
+  the three the text cannot carry: a press moves the ring on, a press that
   leaves a row rewrites the bar's help line, and a tab switch changes the body — with a
   session that pressed nothing as the control, so "everything is different" cannot pass as
   "that action worked".
@@ -955,13 +969,13 @@ Four ways, in the order of what they cost:
   they boot (what each leg asserts is in
   [build-and-run.md §4](../docs/build-and-run.md)).
 
-The capture harness is also where the ring's shape is visible: a row that offers a choice
-counts as one focus entry *per choice* (the launch target's common/demo/ultimate are
-entries 0, 1 and 2 of the General tab), so a few presses inside it move the highlight and
-leave the bar's help saying the same sentence — the sentence belongs to the row. The
-harness reports those presses rather than asserting on them, and asserts on the ones that
-crossed a row boundary. `-SkipWindow` runs the two text layers alone, which needs no
-desktop.
+The capture harness is also where the ring's shape is visible. Up and Down walk the *rows*, and
+Left and Right walk a row's *options*: a row that offers a choice is one row with one option per
+choice (the launch target's common/trial/ultimate are rows 0, 1 and 2 of the General tab), so a
+Down press steps over the whole row and leaves the bar's help saying the same sentence — the
+sentence belongs to the row. The walkthrough leg therefore laps each tab's *rows* and checks the
+trace's `rowindex=`, and the harness asserts the presses that crossed a row boundary rather than
+counting entries. `-SkipWindow` runs the two text layers alone, which needs no desktop.
 
 What the installed run measures about how settings travel is worth knowing when changing
 any of this: the launcher's rows reach the game as `--key=value` arguments

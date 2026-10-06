@@ -3,18 +3,18 @@
 //
 // The launcher's own keys (docs/plans/launcher-plan.md A5, D6).
 //
-// D6 gave the launcher a keyboard and A3 gave it a pad; this is what makes the keyboard
-// recoverable. Which key does what is the profile's `[nav]` table, so a user whose hand is not on
-// the arrow keys - or who has bound the ring to a key their keyboard does not have - can say so
-// rather than being locked out of the window that would let them fix it.
+// D6 gave the launcher a keyboard and A3 gave it a pad; this is what decides which key does what.
+// The keys are **fixed** now: the table below ships with the launcher and nothing reads a profile's
+// `[nav]` table, so a hand-edited file cannot lock a user out of the window that would fix it. The
+// scheme is written down in launcher/README.md.
 //
-// The shape is deliberately the remap table's (src/launcher/remap.h): a row per action, a value
-// that is a comma-separated list, an unknown row kept verbatim so a newer launcher's work survives
-// a round trip through this one, and defaults that are exactly the behaviour the launcher had
-// before any of this existed.
+// The Table type is still the remap table's shape (src/launcher/remap.h) - a row per action, a
+// comma-separated value, an unknown row kept verbatim, and `[nav]` still round-trips through the
+// profile module - because that is what the tests exercise and what a newer launcher's file
+// survives through this one. What changed is that `FromRows` is no longer consulted for input.
 //
 // No ImGui and no SDL: a key is a *name* here, and what a name means is the shell's business
-// (launcher/src/nav_keys.h resolves one against ImGui's own key table). That is what lets every
+// (launcher/src/nav_keys.h reads ImGui's own key table into these names). That is what lets every
 // rule below - the chord precedence, the repeat rule, the round trip through the file - be a test
 // rather than a screenshot.
 //
@@ -26,9 +26,7 @@
 //     nothing at all. A bare key, on the other hand, is the key whatever else is held with it:
 //     `Shift+Down` has always moved the ring.
 //   * A *move* repeats while it is held and a discrete action does not, so the repeat is a
-//     property of the action rather than of the key that happens to be bound to it. This is the
-//     one thing a rebindable table cannot keep from A1's hardcoded source, which gave Tab no
-//     repeat while the arrows had one; a held Tab now walks the ring like a held arrow.
+//     property of the action rather than of the key that happens to be bound to it.
 
 #pragma once
 
@@ -97,18 +95,19 @@ bool NameMatches(std::string_view left, std::string_view right);
 // would be the pad moving the ring behind --no-gamepad's back.
 bool IsBindableName(std::string_view name);
 
-// Every action the `[nav]` table can bind, in the order a frame resolves two keys pressed
-// together by: the moves, then the tab switches, then the three that end a session. `kNone` is
+// Every action a table can bind, in the order a frame resolves two keys pressed together by: the
+// moves, then the tab switches, then the actions that end a session. `kNone` is
 // not one of them: a binding says what a key does, never that it does nothing.
 //
 // How many that is, for a caller that has to size a focus ring before it can ask - the General
 // tab's block counts its rows off this. A static_assert in the implementation is what keeps the
 // number and the table from drifting apart.
 const std::vector<NavAction>& BindableActions();
-inline constexpr std::size_t kActionCount = 12;
+inline constexpr std::size_t kActionCount = 13;
 
-// The name the profile spells an action as ("next", "next_tab", "copy_command") and the words the
-// panel shows ("Next row"). ParseAction answers nothing for an action this build does not know.
+// The name the profile spells an action as ("next", "next_tab", "copy_effective_value") and the
+// words the panel shows ("Next row"). ParseAction answers nothing for an action this build does
+// not know.
 std::string_view ActionName(NavAction action);
 std::optional<NavAction> ParseAction(std::string_view name);
 std::string_view ActionLabel(NavAction action);
@@ -120,12 +119,14 @@ std::string DefaultBindingText(NavAction action);
 
 // True when a held key may repeat this action, and when the action is one the bottom bar or the
 // precedence badge owns rather than one that moves the ring (A5 binds those so that a keyboard
-// alone can start the game, save, read the command line, and take the value the game's own file
-// decides - the four things that were mouse-only).
+// alone can start the game, save, and take the value the game's own file decides - the things
+// that were mouse-only).
 bool Repeats(NavAction action);
 bool IsBarAction(NavAction action);
 
-// The `[nav]` table of the profile.
+// The launcher's key table, with the shape of the profile's `[nav]` table (see the header): one
+// row per action, plus whatever a newer launcher's file held. The launcher reads only the fixed
+// defaults; the type stays because the tests exercise the rules through it.
 class Table {
  public:
   // The defaults: every action bound to what the launcher's own source has always read.

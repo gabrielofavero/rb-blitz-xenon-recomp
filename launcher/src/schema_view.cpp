@@ -137,6 +137,25 @@ std::size_t FocusEntriesFor(const settings::Setting& setting) {
   return count == 0 ? 1 : count;
 }
 
+std::vector<std::size_t> SchemaRowOptions(const TabLayout& tab) {
+  std::vector<std::size_t> rows;
+  for (const LayoutGroup& group : tab.groups) {
+    for (const settings::Setting* row : group.rows) {
+      // The launch target is drawn as its choices stacked under the group heading rather than as
+      // one line of radios, so each choice is a row of its own - the same shape the General tab
+      // draws it with (general_tab.cpp's DrawTargetRows).
+      if (row->key == "launch.target") {
+        for (std::size_t choice = 0; choice < FocusEntriesFor(*row); ++choice) {
+          rows.push_back(1);
+        }
+      } else {
+        rows.push_back(FocusEntriesFor(*row));
+      }
+    }
+  }
+  return rows;
+}
+
 const settings::Setting* SettingForEntry(const TabLayout& tab, std::size_t entry) {
   for (const LayoutGroup& group : tab.groups) {
     for (const settings::Setting* row : group.rows) {

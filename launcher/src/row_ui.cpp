@@ -123,11 +123,23 @@ ValueStyle StyleForKind(settings::Kind kind) {
 }
 
 bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusModel& ring,
-                  float label_width) {
-  const bool focused = !ring.Empty() && ring.Index() == index;
+                  float label_width, bool focusable) {
+  const bool focused = focusable && !ring.Empty() && ring.Index() == index;
   const std::string label(setting.label);
+  // Frame height rather than text height: the label and the widget beside it sit on the same line,
+  // and a text-height selectable leaves the widget a few units lower - the "offset" between a
+  // slider and its title.
   const bool clicked = ImGui::Selectable(label.c_str(), focused, ImGuiSelectableFlags_None,
-                                         ImVec2(label_width, 0.0f));
+                                         ImVec2(label_width, ImGui::GetFrameHeight()));
+  // A label the column is too narrow for is cut without an ellipsis by ImGui, so the full text is
+  // offered on hover - the bottom bar names the row too, but a mouse user should not have to look
+  // away from the row they are pointing at.
+  if (ImGui::IsItemHovered() && ImGui::CalcTextSize(label.c_str()).x > label_width) {
+    ImGui::SetTooltip("%s", label.c_str());
+  }
+  if (!focusable) {
+    return false;
+  }
   // A5: the ring is drawn as well as coloured, so the label of the focused row carries the outline
   // even on a display where the highlight is hard to see.
   DrawFocusOutline(focused);

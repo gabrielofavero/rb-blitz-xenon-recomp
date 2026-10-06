@@ -79,7 +79,6 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/nav.cpp
     src/nav_bindings.cpp
     src/nav_keys.cpp
-    src/nav_ui.cpp
     src/pad_nav.cpp
     src/pad_source.cpp
     src/path_validate.cpp

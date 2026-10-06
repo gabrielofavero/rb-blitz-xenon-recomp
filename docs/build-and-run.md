@@ -816,16 +816,16 @@ CTest list is a leftover); the same run carries the game's own tests, so
 writes a fixture profile, runs the headless reports above, then starts the launcher on
 that profile and drives it with synthetic keys, capturing the client area
 (`capture_window.ps1 -ClientArea`) and measuring crops against each other with
-`frame_diff.ps1`. What it asserts is what text cannot: one press moves the ring one focus
-entry, a press that leaves a row rewrites the bar's help line, a tab switch changes the
+`frame_diff.ps1`. What it asserts is what text cannot: a press moves the ring on, a
+press that leaves a row rewrites the bar's help line, a tab switch changes the
 body and coming back returns to it, and a session with no input at all changes nothing.
-The launcher's ring has one entry per *choice* as well as per row, so a few presses
-inside the launch target's three choices are a 0% help diff by design — those numbers are
+A row that offers a choice is one row with one option per choice, so a few presses beside
+the launch target's three choices are a 0% help diff by design — those numbers are
 in the summary rather than asserted on.
 
 ```powershell
 cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
-.\scripts\capture_launcher.ps1                 # headless + keyboard + pad + the four A5 legs
+.\scripts\capture_launcher.ps1                 # headless + keyboard + pad + the three legs
 .\scripts\capture_launcher.ps1 -SkipWindow     # the headless assertions alone
 .\scripts\capture_launcher.ps1 -SkipScale      # everything but the four-scale leg (the slowest)
 ```
@@ -838,15 +838,14 @@ does not. The pad leg uses A3's virtual pad, so a controller is not required —
 `--no-gamepad` is what keeps one that happens to be plugged in out of the keyboard leg's
 counts.
 
-Four legs beyond the pictures, one per thing only a running launcher can be asked, each
-skippable on its own (`-SkipKeys`, `-SkipWalkthrough`, `-SkipScale`, `-SkipSafeMode`):
+Three legs beyond the pictures, one per thing only a running launcher can be asked, each
+skippable on its own (`-SkipWalkthrough`, `-SkipScale`, `-SkipSafeMode`):
 
 | Leg | What it drives | What it asserts |
 | --- | --- | --- |
-| `walkthrough` | `Home` and a fixed budget of `Down` on each tab, then one read of the trace | every entry of every tab's ring is reached, the ring wraps back to the first entry, and both of the General tab's blocks — B4's and A5's — are in the ring at all. A lap that could not reach a row is what "never traps focus" would look like |
-| `keys` | Assign a key on the *Launcher keys* block, press it, `Ctrl+S`, then that action's *Reset* and `Ctrl+S` again | the capture binds the key and does not let that key move the ring while it runs; the new key moves the ring with no restart; `Ctrl+S` writes `[nav]`; *Reset* takes the row back out of the file, and `Tab` works again |
+| `walkthrough` | `Home` and a fixed budget of `Down` on each tab, then one read of the trace | every row of every tab's ring is reached, the ring wraps back to the first row, and the General tab's own blocks — B4's and the bottom bar's row — are in the ring at all. A lap that could not reach a row is what "never traps focus" would look like |
 | `scale` | the same leg at `--ui-scale=1.0`, `1.5`, `2.0` (the machine's own scale is the fourth step, which the keyboard leg already runs) | at every step the crops the harness computes out of that scale still land where the claims are: no input is a still picture, a press moves the ring's own region, and leaving the first row rewrites the help strip |
-| `safe-mode` | a profile with every movement key unbound, then a profile that does not parse at all | without `--safe-mode` no key moves the ring (the trap), and with it the ring moves again; a file that did not parse is `writable: no` without the switch and replaceable with it, and safe mode leaves the file byte for byte as it was |
+| `safe-mode` | a profile that does not parse, and a file that cannot be read at all | without `--safe-mode` the unreadable file is refused (`writable: no`); with it the profile is replaceable by a save, the launcher starts on the compiled defaults, and safe mode leaves the file byte for byte as it was |
 
 The `scale` leg is the slow one — it starts three more launchers and takes ~40 captures —
 which is why it has its own switch rather than being folded into the keyboard leg.

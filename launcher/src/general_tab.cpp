@@ -62,7 +62,7 @@ std::string EffectivePath(const settings::Setting& setting, const Profile& profi
     if (documents == nullptr) {
       return {};
     }
-    return (std::filesystem::path(documents) / "rb_blitz").string();
+    return (std::filesystem::path(documents) / "Rock Band Blitz").string();
   }
   if (setting.key == "dlc_root" && !roots.game_root.empty()) {
     return (roots.game_root / "dlc").string();
@@ -155,7 +155,7 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
                            effective == LaunchTarget::kCommon)) {
       profile.target = LaunchTarget::kCommon;
     }
-    if (DrawFocusableRadio("Rock Band Blitz Demo", first_row + 1, ring, action,
+    if (DrawFocusableRadio("Rock Band Blitz (Trial)", first_row + 1, ring, action,
                            effective == LaunchTarget::kDemo)) {
       profile.target = LaunchTarget::kDemo;
     }
@@ -196,7 +196,7 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
                          effective == LaunchTarget::kCommon)) {
     profile.target = LaunchTarget::kCommon;
   }
-  if (DrawFocusableRadio("Rock Band Blitz Demo", first_row + 1, ring, action,
+  if (DrawFocusableRadio("Rock Band Blitz (Trial)", first_row + 1, ring, action,
                          effective == LaunchTarget::kDemo)) {
     profile.target = LaunchTarget::kDemo;
   }
@@ -298,13 +298,24 @@ void GeneralTab::DrawPathValue(const settings::Setting& setting, float value_wid
                                         ImGuiInputTextFlags_EnterReturnsTrue);
   const bool committed = entered || ImGui::IsItemDeactivatedAfterEdit();
   ImGui::SameLine();
-  const bool browsed = ImGui::Button("Browse", ImVec2(browse_width, 0.0f));
 
-  // Enter and Space on the focused row open the picker, the same as the button. That is the
-  // controller-friendly half of R7 - a pad cannot type a path - and the typed field beside it
-  // is for the mouse and the keyboard.
-  const bool activated =
-      action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
+  // The ring lands on *Browse*, not on the title above the row: the title is a label and the button
+  // is the thing a keyboard or a pad can press (R7's controller-friendly half).
+  const bool focused = !ring.Empty() && ring.Index() == index;
+  if (focused) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
+  const bool browsed = ImGui::Button("Browse", ImVec2(browse_width, 0.0f));
+  if (focused) {
+    ImGui::PopStyleColor();
+  }
+  DrawFocusOutline(focused);
+  AdoptRingOnHover(index, ring);
+  if (focused && !ImGui::IsItemVisible()) {
+    ImGui::SetScrollHereY(0.5f);
+  }
+
+  const bool activated = action == NavAction::kActivate && focused;
   if (browsed || activated) {
     chosen_key_ = std::string(setting.key);
     const std::string start = current.empty() ? shown : current;
@@ -344,7 +355,7 @@ void GeneralTab::DrawMessages(const settings::Setting& setting, ProfileSession& 
 }
 
 void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& session,
-                      NavAction action, NavKeysPanel& keys, bool safe_mode) {
+                      NavAction action) {
   // The file system is the authority, and it is read every frame rather than remembered: four
   // stat calls per frame is nothing, and a state detected once would be a stale promise (D5).
   state_ = DetectUltimateState(roots_.game_root);
@@ -377,7 +388,9 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
       const bool is_path =
           setting.kind == settings::Kind::kPathDir || setting.kind == settings::Kind::kPathFile;
       const RowColumns columns = RowColumnWidths(is_path ? 0.62f : 0.35f);
-      DrawRowLabel(setting, row_index, ring, columns.label_width);
+      // A path row's title is a label, not a focus target: the ring lands on the *Browse* button
+      // beside the field, which is the thing a keyboard or a pad can press.
+      DrawRowLabel(setting, row_index, ring, columns.label_width, /*focusable=*/!is_path);
       ImGui::SameLine();
       if (is_path) {
         DrawPathValue(setting, columns.value_width, session, row_index, ring, rows_action);
@@ -394,10 +407,6 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
 
   // B4's block, at the end of the tab and in the ring: Save, Reset, Import, Export, Portable.
   panel_.Draw(row_index, session, ring, action);
-  // A5's launcher-keys block after it, on this tab because this is the tab that owns the
-  // launcher's own file: the block that resets the keys is the block that repairs the file a bad
-  // binding came out of.
-  keys.Draw(row_index + ProfilePanel::kRowCount, session, ring, action, safe_mode);
   // B8's progress/result notice, which owns the keyboard while it is up.
   DrawInstallModal(action);
 }

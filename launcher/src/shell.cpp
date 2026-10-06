@@ -30,10 +30,9 @@ constexpr const char* kBodyId = "##body";
 // not fit on the bar's one status line, and a bug report wants both at once.
 constexpr const char* kLaunchErrorPopup = "Cannot start the game";
 
-// How many ring entries a tab's schema rows take. A tab's own block of rows starts after them
-// (GeneralTab::kExtraRows, ControllerTab::kRowCount), so the loop that sizes the ring and the
-// loop that draws it have to agree on this number - which is why both ask here rather than each
-// doing its own arithmetic.
+// How many flat ring entries a tab's schema rows take. A tab's own block of rows starts after
+// them, so the loop that sizes the ring and the walk that names the focused row have to agree on
+// this number - which is why both ask here rather than each doing its own arithmetic.
 std::size_t SchemaFocusEntries(const TabLayout& tab) {
   std::size_t entries = 0;
   for (const LayoutGroup& group : tab.groups) {
@@ -45,9 +44,9 @@ std::size_t SchemaFocusEntries(const TabLayout& tab) {
 }
 
 // The keyboard's mapping (A1, A5). ImGui's own navigation is deliberately off, so every key the
-// launcher reads is decided here and nowhere else, and *which* keys those are is the profile's
-// `[nav]` table rather than a list in this file: nav_bindings owns the rules, nav_keys the
-// translation, and this holds the one reference that makes the pair a device.
+// launcher reads is decided here and nowhere else, and *which* keys those are is the fixed table
+// nav_bindings ships: nav_bindings owns the rules, nav_keys the translation, and this holds the
+// one reference that makes the pair a device.
 class KeyboardNavSource : public NavSource {
  public:
   explicit KeyboardNavSource(const nav_bindings::Table& keys) : keys_(keys) {}
@@ -85,32 +84,19 @@ float BottomBarHeight(const ImGuiStyle& style) {
          ImGui::GetTextLineHeight() * static_cast<float>(kHelpLines) + style.WindowPadding.y;
 }
 
-// A run of text cut to what will fit in `max_lines` lines at this width, with an ellipsis where it
-// was cut. The row's tooltip is a sentence or two and the bar has room for two lines of it: what
-// does not fit is not shown rather than allowed to push the three actions off the bar (A2's
-// "don't"). The cut is at a word boundary, because half a word reads as a rendering fault.
-std::string FitToLines(const std::string& text, float wrap_width, int max_lines) {
-  if (text.empty() || wrap_width <= 0.0f) {
-    return text;
-  }
-  const float room = ImGui::GetTextLineHeight() * static_cast<float>(max_lines);
-  if (ImGui::CalcTextSize(text.c_str(), nullptr, false, wrap_width).y <= room) {
-    return text;
-  }
-  constexpr const char* kEllipsis = "...";
-  std::string fitted = text;
-  while (!fitted.empty() &&
-         ImGui::CalcTextSize((fitted + kEllipsis).c_str(), nullptr, false, wrap_width).y > room) {
-    const std::size_t space = fitted.find_last_of(' ');
-    if (space == std::string::npos) {
-      return kEllipsis;
-    }
-    fitted.erase(space);
-  }
-  return fitted + kEllipsis;
-}
-
+// The bar's help is drawn inside the two reserved lines and clipped; the tooltips are written to
+// fit, and the right stick drives the body's scrollbar rather than the bar.
 const char* const kNoHelpText = "\xe2\x80\x94";  // D7's explicit empty state: an em dash.
+
+// The bottom bar's own three controls, as the options of the ring's last row: Close, Save and
+// Launch Game. They are options rather than rows because Left and Right walk them and Up on the
+// first row (or Down on the last) lands on them - the only way a controller reaches Close without
+// a mouse. `kBarOptions` is the row's width, which the ring is sized with.
+constexpr std::size_t kBarOptions = 3;
+const char* const kBarHelp[kBarOptions] = {
+    "Leaves the launcher. Changes that are not saved are lost unless Save or Launch Game is used.",
+    "Writes the settings file, exactly as the Settings file block does.",
+    "Saves anything unsaved, then starts the game."};
 
 }  // namespace
 
@@ -123,27 +109,38 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
       controller_(pads_),
       layout_(BuildLayout(environment)),
       keyboard_(std::make_unique<KeyboardNavSource>(keys_)) {
-  safe_mode_ = shell_environment.safe_mode;
-  RefreshKeys();
   if (shell_environment.gamepads) {
     gamepad_ = std::make_unique<GamepadNavSource>(pads_);
   }
   // D5's target fallback lives in the General tab, which applies it to what it shows rather than
   // to the profile (B4): with a write path, mutating the stored target here would have made a
   // window resize record a choice the user never made.
+  //
+  // A ring is a list of rows, each with the number of options Left and Right can move between: an
+  // enum is one row with one option per choice, the profile block one row of four buttons, a
+  // control's Assign/Reset one row of two, and the bottom bar a last row of Close/Save/Launch so it
+  // is reachable without a mouse (D6's "every tab with the keyboard only"). A row the environment
+  // hides never reaches the layout, so the ring cannot land on one.
   rings_.resize(layout_.size());
   for (std::size_t index = 0; index < layout_.size(); ++index) {
-    // A row takes one ring entry, except an enum, which takes one per choice because each
-    // choice is drawn as its own radio (schema_view's FocusEntriesFor). B4's profile block is
-    // focusable too and lives at the end of the General tab, and D16's mapping block at the end
-    // of the Controller tab, so those tabs add their rows. A row the environment hides is not
-    // in the layout at all, so the ring cannot land on one.
-    const std::size_t extra = layout_[index].tab == settings::Tab::kGeneral
-                                  ? GeneralTab::kExtraRows
-                                  : (layout_[index].tab == settings::Tab::kController
-                                         ? ControllerTab::kRowCount
-                                         : 0);
-    rings_[index].Reset(SchemaFocusEntries(layout_[index]) + extra);
+    std::vector<std::size_t> rows = SchemaRowOptions(layout_[index]);
+    switch (layout_[index].tab) {
+      case settings::Tab::kGeneral:
+        // B4's block: Reset to defaults, Import, Export, Change settings location, side by side.
+        rows.push_back(ProfilePanel::kRowCount);
+        break;
+      case settings::Tab::kController:
+        // D16's mapping table: one row per control, Assign and Reset side by side, then Reset all.
+        for (std::size_t control = 0; control < kControlRows; ++control) {
+          rows.push_back(2);
+        }
+        rows.push_back(1);
+        break;
+      case settings::Tab::kGraphics:
+        break;
+    }
+    rows.push_back(kBarOptions);
+    rings_[index].Reset(std::move(rows));
   }
 }
 
@@ -153,16 +150,6 @@ settings::Tab Shell::CurrentTab() const {
 
 std::size_t Shell::FocusedRow() const {
   return tab_ < rings_.size() ? rings_[tab_].Index() : 0;
-}
-
-void Shell::RefreshKeys() {
-  if (safe_mode_) {
-    // --safe-mode: the defaults, whatever the file says, and they stay the defaults for the whole
-    // session even if the panel assigns something - the panel says so, and the assignment is what
-    // Save writes for the next start.
-    return;
-  }
-  keys_ = nav_bindings::Table::FromRows(session_.profile().nav);
 }
 
 void Shell::RequestTab(int delta) {
@@ -199,6 +186,12 @@ void Shell::ApplyAction(NavAction action) {
     case NavAction::kPrevious:
       ring.MovePrevious();
       break;
+    case NavAction::kNextOption:
+      ring.MoveNextOption();
+      break;
+    case NavAction::kPreviousOption:
+      ring.MovePreviousOption();
+      break;
     case NavAction::kFirst:
       ring.MoveFirst();
       break;
@@ -217,9 +210,6 @@ bool Shell::Frame() {
   // plugged in this frame is usable in it: the ring's source and C5's capture both read the
   // registry rather than opening anything themselves.
   pads_.Refresh();
-  // A5: the profile's own keys, before the frame's keys are read, so a binding assigned in the
-  // panel last frame is the one this frame answers to.
-  RefreshKeys();
 
   // One action per frame from whichever device produced it (D6). The keyboard answers first
   // because it is the one a user can always reach - and because a pad whose stick is resting
@@ -247,24 +237,22 @@ bool Shell::Frame() {
     // or B7's failed-start detail - and only means "leave the launcher" when nothing modal is on
     // screen (A1). A listen that is running owns Escape too: cancelling it is what a user
     // pressing Escape while counting down means, and quitting the launcher instead would be a
-    // trap. A5's key capture is the third owner, for the same reason.
-    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_ &&
-        !nav_keys_.Capturing()) {
+    // trap.
+    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_) {
       return false;
     }
   }
-  // Whether a modal, a listen or a capture owns the keyboard this frame. A modal owns it because
-  // its own tab has to keep being drawn for its state machine to keep running, and walking away
-  // would leave the helper installing with nothing watching; a listen and a capture own it because
-  // the key being pressed *is* the input being captured.
-  const bool owns_keyboard =
-      general_.ModalOpen() || controller_.Listening() || launch_modal_open_ || nav_keys_.Capturing();
+  // Whether a modal or a listen owns the keyboard this frame. A modal owns it because its own tab
+  // has to keep being drawn for its state machine to keep running, and walking away would leave the
+  // helper installing with nothing watching; a listen owns it because the key being pressed *is*
+  // the input being captured.
+  const bool owns_keyboard = general_.ModalOpen() || controller_.Listening() || launch_modal_open_;
 
   if (nav_bindings::IsBarAction(action)) {
-    // A5: the four actions the bottom bar's buttons and B4's badge own, bound to keys so that a
-    // keyboard alone can start the game, save, read the command line and take the value the game's
-    // own file decides. Refused in exactly the cases the buttons are, and never passed to a tab - no
-    // row has a "save me" of its own.
+    // A5: the actions the bottom bar's buttons and B4's badge own, bound to keys so that a keyboard
+    // alone can start the game, save, and take the value the game's own file decides. Refused in
+    // exactly the cases the buttons are, and never passed to a tab - no row has a "save me" of its
+    // own.
     if (!owns_keyboard) {
       switch (action) {
         case NavAction::kLaunch:
@@ -275,15 +263,22 @@ bool Shell::Frame() {
         case NavAction::kSave:
           SaveProfile();
           break;
-        case NavAction::kCopyCommand:
-          CopyCommandLine();
-          break;
         case NavAction::kCopyEffectiveValue:
           CopyEffectiveValue();
           break;
         default:
           break;
       }
+    }
+    action = NavAction::kNone;
+  }
+  if (action == NavAction::kScrollUp || action == NavAction::kScrollDown) {
+    // The right stick scrolls the tab body, so a long tab can be skimmed without moving the ring.
+    // It belongs to the shell, so it is spent here and never reaches a tab. A modal owns the frame,
+    // so it is dropped while one is up.
+    if (!owns_keyboard) {
+      const float step = ImGui::GetTextLineHeight() * 3.0f;
+      pending_scroll_ += action == NavAction::kScrollUp ? -step : step;
     }
     action = NavAction::kNone;
   }
@@ -296,12 +291,6 @@ bool Shell::Frame() {
     // While a listen is running the key being pressed is the *input being captured*, not a
     // command: Space has to assign Space rather than press whatever the ring happens to be on.
     // Escape still cancels the listen, and clicking is what the ring's own button is for.
-    action = NavAction::kNone;
-  }
-  if (nav_keys_.Capturing() && action != NavAction::kCancel) {
-    // The same rule for A5's capture, and the one place it differs from a listen: everything but
-    // Escape is dropped here rather than only the activation, because the capture reads the key
-    // itself and a bound key pressed to be captured must not also move the ring behind it.
     action = NavAction::kNone;
   }
   ApplyAction(action);
@@ -345,15 +334,23 @@ bool Shell::Frame() {
   // scrolled window would move the bar off its own edge. The popups the tabs open are keyed off
   // this same id stack, which is why they are drawn from here too.
   const float bar_height = BottomBarHeight(ImGui::GetStyle());
-  if (ImGui::BeginChild(kBodyId, ImVec2(0.0f, -bar_height), ImGuiChildFlags_None,
-                        ImGuiWindowFlags_None)) {
+  // AlwaysUseWindowPadding: without it a borderless child has no padding at all, so the focus
+  // outline - drawn a few units outside the item - is clipped at the body's left and right edges.
+  if (ImGui::BeginChild(kBodyId, ImVec2(0.0f, -bar_height),
+                        ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_None)) {
+    // The right stick's scroll lands here, once the child exists and ImGui knows its content
+    // height; the amount is spent whether or not it moved anything.
+    if (pending_scroll_ != 0.0f) {
+      ImGui::SetScrollY(ImGui::GetScrollY() + pending_scroll_);
+      pending_scroll_ = 0.0f;
+    }
     if (tab_ < layout_.size()) {
       // The two tabs with a block of their own after the schema's rows draw it here, once the
       // generic renderer has taken its share of the ring - which is why the count of rows a tab
       // draws and the count its ring was sized for are the same arithmetic in one place
       // (SchemaFocusEntries) rather than two.
       if (layout_[tab_].tab == settings::Tab::kGeneral) {
-        general_.Draw(layout_[tab_], rings_[tab_], session_, action_, nav_keys_, safe_mode_);
+        general_.Draw(layout_[tab_], rings_[tab_], session_, action_);
       } else if (layout_[tab_].tab == settings::Tab::kController) {
         DrawTab(layout_[tab_], rings_[tab_]);
         controller_.Draw(SchemaFocusEntries(layout_[tab_]), rings_[tab_], session_, action_);
@@ -435,70 +432,118 @@ bool Shell::DrawBottomBar() {
     ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight()));
   }
 
+  // The bottom bar's own controls, and the last row of every tab's ring: Close, Save and Launch
+  // Game. When the ring is on that row - reached by pressing Up on the first row or Down on the
+  // last - Left and Right choose between them and Activate presses one, which is how a controller
+  // or a keyboard reaches Close without a mouse.
   const bool running = game_.Running();
-  const char* labels[4] = {"Close", "Save", "Copy command line",
-                           running ? "Game is running" : "Launch Game"};
+  const bool bar_focused =
+      tab_ < rings_.size() && !rings_[tab_].Empty() &&
+      rings_[tab_].Row() + 1 == rings_[tab_].RowCount();
+  const std::size_t bar_option = bar_focused ? rings_[tab_].Option() : 0;
+  const std::size_t bar_start =
+      tab_ < rings_.size() && !rings_[tab_].Empty()
+          ? rings_[tab_].RowStart(rings_[tab_].RowCount() - 1)
+          : 0;
+  const char* labels[kBarOptions] = {"Close", "Save",
+                                     running ? "Game is running" : "Launch Game"};
   float total = 0.0f;
   for (const char* label : labels) {
     total += ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
   }
-  total += style.ItemSpacing.x * 3.0f;
+  total += style.ItemSpacing.x * 2.0f;
 
-  // Right-aligned, in the order they read: the two that end a session, the copy a bug report
-  // wants, then the one it is for. The x is set explicitly rather than derived from the text, so
-  // a long status line cannot push the buttons off the edge.
+  // Right-aligned, in the order they read: the two that end a session, then the game. The x is set
+  // explicitly rather than derived from the text, so a long status line cannot push them off the
+  // edge.
+  bool close = false;
+  bool save = false;
+  bool launch = false;
   ImGui::SameLine();
   ImGui::SetCursorPosX(ImGui::GetWindowWidth() - style.WindowPadding.x - total);
-  if (ImGui::Button(labels[0])) {
-    return false;
+  for (std::size_t option = 0; option < kBarOptions; ++option) {
+    if (option != 0) {
+      ImGui::SameLine();
+    }
+    const bool focused = bar_focused && bar_option == option;
+    // A second copy of the title writing the same save folder is not something to discover by
+    // trying, so Launch stays down until the game the launcher started has exited.
+    const bool disabled = option == 2 && running;
+    if (disabled) {
+      ImGui::BeginDisabled();
+    }
+    if (focused) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    }
+    const bool clicked = ImGui::Button(labels[option]);
+    if (focused) {
+      ImGui::PopStyleColor();
+    }
+    DrawFocusOutline(focused);
+    // The pointer is a device like any other (D6): hovering a bar button adopts the ring there, so
+    // the bar describes what the mouse is on.
+    AdoptRingOnHover(bar_start + option, rings_[tab_]);
+    if (disabled) {
+      ImGui::EndDisabled();
+      // B7: the save happens first, and the button says so - a launch that silently wrote the file
+      // would leave "which profile did it read?" unanswerable.
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Saves your changes, then starts the game.");
+      }
+    }
+    if (option == 0) {
+      close = clicked;
+    } else if (option == 1) {
+      save = clicked;
+    } else {
+      launch = clicked;
+    }
   }
-  ImGui::SameLine();
-  if (ImGui::Button(labels[1])) {
-    SaveProfile();
+  // Activate on the focused bar option presses it, exactly as a click would.
+  if (bar_focused && action_ == NavAction::kActivate) {
+    if (bar_option == 0) {
+      close = true;
+    } else if (bar_option == 1) {
+      save = true;
+    } else if (!running) {
+      launch = true;
+    }
   }
-  ImGui::SameLine();
-  // B7: the exact command line, always available - a value that did not apply is the other bug
-  // report this answers, and what the launcher *would* run is part of the diagnosis even when
-  // the command is not ok.
-  if (ImGui::Button(labels[2])) {
-    CopyCommandLine();
-  }
-  ImGui::SameLine();
-  // A second copy of the title writing the same save folder is not something to discover by
-  // trying, so the button stays down until the game the launcher started has exited.
-  ImGui::BeginDisabled(running);
-  if (ImGui::Button(labels[3])) {
-    LaunchGame();
-  }
-  ImGui::EndDisabled();
 
   // Under the buttons: the focused row's own help, which is where D7 puts it and where RPCS3 puts
   // it too - the value is read before the press, not after a floating tooltip has come and gone.
-  // The tooltip takes the room the hints do not, and the hints are measured first for that
-  // reason: whatever else is cut, the row's help is not.
+  // The help takes the room the hints do not, and the hints are measured first for that reason:
+  // whatever else is cut, the row's help is not. The sentence longer than the two reserved lines is
+  // not cut with an ellipsis any more: it is clipped, and the right stick scrolls it.
   const HelpEntry help = HelpForEntry(FocusedRow());
   const std::string hints = HintLine(help);
   const std::string* hint_source = hints.empty() ? nullptr : &hints;
-  const float hints_width = hint_source == nullptr
-                                ? 0.0f
-                                : ImGui::CalcTextSize(hint_source->c_str()).x;
+  const float hints_width =
+      hint_source == nullptr ? 0.0f : ImGui::CalcTextSize(hint_source->c_str()).x;
   const float left = style.WindowPadding.x;
   const float right = ImGui::GetWindowWidth() - style.WindowPadding.x;
   const float help_top = line_top + ImGui::GetFrameHeight() + style.ItemSpacing.y;
   const float tip_width = right - left - hints_width - style.ItemSpacing.x * 2.0f;
 
-  ImGui::SetCursorPos(ImVec2(left, help_top));
-  const std::string tip =
-      help.text.empty() ? std::string(kNoHelpText) : FitToLines(help.text, tip_width, kHelpLines);
+  const std::string full =
+      help.text.empty() ? std::string(kNoHelpText) : help.text;
+  // Two lines, always reserved even when one would do: the body was given the rest of the window
+  // *before* the bar was drawn. A sentence taller than that is clipped - the tooltips are written
+  // to fit, and the body's own scrollbar is what the right stick drives.
+  const float help_height = ImGui::GetTextLineHeight() * static_cast<float>(kHelpLines);
+  ImGui::PushClipRect(ImVec2(left, help_top), ImVec2(left + tip_width, help_top + help_height),
+                      true);
   if (help.text.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
   }
+  ImGui::SetCursorPos(ImVec2(left, help_top));
   ImGui::PushTextWrapPos(left + tip_width);
-  ImGui::TextUnformatted(tip.c_str());
+  ImGui::TextUnformatted(full.c_str());
   ImGui::PopTextWrapPos();
   if (help.text.empty()) {
     ImGui::PopStyleColor();
   }
+  ImGui::PopClipRect();
   if (hint_source != nullptr) {
     // Back up to the help line's own top: the hints belong beside the row's help, not under it,
     // and a wrapped tooltip would otherwise have moved them down a line of its own.
@@ -506,6 +551,15 @@ bool Shell::DrawBottomBar() {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextUnformatted(hint_source->c_str());
     ImGui::PopStyleColor();
+  }
+  if (close) {
+    return false;
+  }
+  if (save) {
+    SaveProfile();
+  }
+  if (launch) {
+    LaunchGame();
   }
   return true;
 }
@@ -515,25 +569,26 @@ Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
     return HelpEntry{};
   }
   const TabLayout& tab = layout_[tab_];
+  // The bottom bar's own row is the last one of every tab's ring; its entries come after every
+  // block the tab draws, so it is checked before the blocks below.
+  const std::size_t bar_start = rings_[tab_].RowStart(rings_[tab_].RowCount() - 1);
+  if (entry >= bar_start) {
+    const std::size_t option = std::min(entry - bar_start, kBarOptions - 1);
+    return HelpEntry{kBarHelp[option], "Activate"};
+  }
   // The schema's own rows first, in the order the ring was sized in: the walk and the draw agree
   // because they count entries the same way (schema_view's FocusEntriesFor), which is the only
   // reason the bar can name the row the user is looking at.
   if (const settings::Setting* setting = SettingForEntry(tab, entry)) {
     return HelpEntry{FlattenHelpText(setting->tooltip), RowActionVerb(*setting)};
   }
-  // What is left is the block a tab draws after its schema rows - B4's panel and A5's launcher
-  // keys on General, D16's mapping table on Controller - whose sentences only those blocks know,
-  // so they are asked rather than copied here.
+  // What is left is the block a tab draws after its schema rows - B4's panel on General, D16's
+  // mapping table on Controller - whose sentences only those blocks know, so they are asked rather
+  // than copied here.
   const std::size_t schema_entries = SchemaFocusEntries(tab);
   const std::size_t local = entry >= schema_entries ? entry - schema_entries : 0;
   switch (tab.tab) {
     case settings::Tab::kGeneral:
-      // A5's block is the second one on this tab, and it starts where B4's ends: the two counts are
-      // the same arithmetic the tab draws with, which is the only reason the bar can name the item
-      // the user is looking at.
-      if (local >= ProfilePanel::kRowCount) {
-        return HelpEntry{NavKeysPanel::HelpText(local - ProfilePanel::kRowCount), "Activate"};
-      }
       return HelpEntry{ProfilePanel::HelpText(local), "Activate"};
     case settings::Tab::kController:
       return HelpEntry{ControllerTab::HelpText(local), "Activate"};
@@ -628,7 +683,6 @@ void Shell::LaunchGame() {
     return;
   }
   const LaunchCommand command = CurrentLaunchCommand();
-  launch_command_ = command;
   std::string error;
   if (!game_.Start(command, &error)) {
     save_error_ = "Cannot start the game: " + (error.empty() ? command.error : error);
@@ -648,11 +702,6 @@ void Shell::SaveProfile() {
     return;
   }
   save_note_ = outcome.wrote ? "Saved" : "Nothing to save: the profile already matches";
-}
-
-void Shell::CopyCommandLine() {
-  ImGui::SetClipboardText(FormatLaunchCommand(CurrentLaunchCommand()).c_str());
-  save_note_ = "Command line copied";
 }
 
 const settings::Setting* Shell::FocusedSetting() const {
@@ -695,11 +744,6 @@ void Shell::DrawLaunchModal(NavAction action) {
     ImGui::TextWrapped("%s", launch_error_.c_str());
     ImGui::PopStyleColor();
     ImGui::Spacing();
-    // The same bytes the bar's Copy button produces, so the two can never disagree.
-    if (ImGui::Button("Copy command line")) {
-      ImGui::SetClipboardText(FormatLaunchCommand(launch_command_).c_str());
-    }
-    ImGui::SameLine();
     if (ImGui::Button("Close") || action == NavAction::kCancel) {
       launch_error_.clear();
       ImGui::CloseCurrentPopup();
@@ -731,26 +775,30 @@ void Shell::LogFocus() {
   std::string text = "tab=";
   text += settings::TabName(tab);
   text += " entry=" + std::to_string(entry) + "/" + std::to_string(count);
+  if (tab_ < rings_.size()) {
+    // The row the ring is on, and how many there are: "which row" for a reader, and the row count
+    // for a harness that wants to check a Down-walk laps every row rather than every entry.
+    text += " rowindex=" + std::to_string(rings_[tab_].Row()) + "/" +
+            std::to_string(rings_[tab_].RowCount());
+  }
   if (tab_ < layout_.size()) {
-    if (const settings::Setting* setting = SettingForEntry(layout_[tab_], entry)) {
+    const std::size_t bar_start = rings_[tab_].RowStart(rings_[tab_].RowCount() - 1);
+    if (entry >= bar_start) {
+      // The bottom bar's own row, named after the button rather than numbered.
+      static const char* const kBarRowNames[kBarOptions] = {"bar:close", "bar:save", "bar:launch"};
+      text += " row=";
+      text += kBarRowNames[std::min(entry - bar_start, kBarOptions - 1)];
+    } else if (const settings::Setting* setting = SettingForEntry(layout_[tab_], entry)) {
       text += " row=";
       text += setting->key;
     } else {
       // The block a tab draws after its rows: named rather than numbered, because "which button
-      // of the mapping table is that?" is the question the trace is meant to answer. The General
-      // tab has two of them now, and A5's block names the job its row does - "next:assign" - which
-      // is what a reader and an assertion both need and an entry index cannot give.
-      const std::size_t schema_entries = SchemaFocusEntries(layout_[tab_]);
-      if (tab == settings::Tab::kGeneral &&
-          entry >= schema_entries + ProfilePanel::kRowCount) {
-        text += " row=";
-        text += NavKeysPanel::RowName(entry - schema_entries - ProfilePanel::kRowCount);
-      } else {
-        text += tab == settings::Tab::kGeneral ? " row=settings-file-block"
-                                               : " row=button-mapping-block";
-      }
+      // of the mapping table is that?" is the question the trace is meant to answer.
+      text += tab == settings::Tab::kGeneral ? " row=settings-file-block"
+                                             : " row=button-mapping-block";
     }
-  }  const HelpEntry help = HelpForEntry(entry);
+  }
+  const HelpEntry help = HelpForEntry(entry);
   if (!help.verb.empty()) {
     text += " enter=";
     text += help.verb;

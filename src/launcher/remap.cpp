@@ -226,6 +226,43 @@ bool TargetIsTrigger(Target target) {
   return target == Target::kLeftTrigger || target == Target::kRightTrigger;
 }
 
+const std::vector<Source>* DefaultSources(Target target) {
+  // One entry per target, indexed by the enum's own value, so adding a target without a default is
+  // a compile-time-visible hole rather than a silent one. A control listed here answers to its own
+  // pad control *and* a keyboard key; the pad source reads the state before any rewriting, so the
+  // pad keeps working exactly as it did.
+  static const std::array<std::optional<std::vector<Source>>, 17> kDefaults = [] {
+    std::array<std::optional<std::vector<Source>>, 17> all;
+    const auto set = [&all](Target control, const char* key) {
+      std::vector<Source> sources;
+      sources.push_back(Source{SourceKind::kPad, std::string(TargetName(control))});
+      sources.push_back(Source{SourceKind::kKey, key});
+      all[static_cast<std::size_t>(control)] = std::move(sources);
+    };
+    // The D-pad mirrors WASD for the left hand; the four face buttons mirror the pad's diamond on
+    // IJKL (I north, J west, K south, L east) for the right.
+    set(Target::kDpadUp, "W");
+    set(Target::kDpadDown, "S");
+    set(Target::kDpadLeft, "A");
+    set(Target::kDpadRight, "D");
+    set(Target::kY, "I");
+    set(Target::kX, "J");
+    set(Target::kA, "K");
+    set(Target::kB, "L");
+    set(Target::kLeftShoulder, "Q");
+    set(Target::kRightShoulder, "E");
+    set(Target::kLeftThumb, "V");
+    set(Target::kRightThumb, "N");
+    set(Target::kBack, "Backspace");
+    set(Target::kStart, "Return");
+    // The triggers and Guide are deliberately absent: a keyboard cannot stand in for a trigger's
+    // travel, and Guide belongs to the platform.
+    return all;
+  }();
+  const auto& slot = kDefaults[static_cast<std::size_t>(target)];
+  return slot.has_value() ? &*slot : nullptr;
+}
+
 bool operator==(const Source& left, const Source& right) {
   return left.kind == right.kind && left.name == right.name;
 }
@@ -280,6 +317,13 @@ const std::vector<Source>* Table::Bindings(Target target) const {
   return nullptr;
 }
 
+const std::vector<Source>* Table::Effective(Target target) const {
+  if (const std::vector<Source>* bound = Bindings(target)) {
+    return bound;
+  }
+  return DefaultSources(target);
+}
+
 bool Table::IsDisabled(Target target) const {
   const std::vector<Source>* sources = Bindings(target);
   return sources != nullptr && sources->empty();
@@ -318,7 +362,7 @@ void Apply(const Table& table, const PadState& state, DownFn down, void* context
   // both see the pad as it was and neither can feed the other.
   *out = state;
   for (const Target target : Targets()) {
-    const std::vector<Source>* sources = table.Bindings(target);
+    const std::vector<Source>* sources = table.Effective(target);
     if (sources == nullptr) {
       continue;
     }

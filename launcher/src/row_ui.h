@@ -44,10 +44,12 @@ class RowScope {
   RowScope& operator=(const RowScope&) = delete;
 };
 
-// The row's focus target: its label. Clicking it focuses the row and hovering adopts the ring,
-// so the mouse and the keyboard agree on one selection (A1, D6). Returns true on click.
+// The row's label. With `focusable` true it is the row's focus target: clicking it focuses the row
+// and hovering adopts the ring, so the mouse and the keyboard agree on one selection (A1, D6), and
+// it returns true on click. A path row passes false, because the thing the ring lands on there is
+// the *Browse* button rather than the title above it.
 bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusModel& ring,
-                  float label_width);
+                  float label_width, bool focusable = true);
 
 // One widget per schema kind (Contract 1). `value_text` is the value the row shows; the caller
 // passes LauncherValueText, which is the compiled default until something overrides it.
@@ -76,8 +78,8 @@ bool PointerAdoptsFocus();
 
 // The whole rule in one call: the focused item is the one under the pointer, when the pointer has
 // just moved there. Every focusable item in the launcher goes through this rather than each
-// deciding for itself - row_ui, settings_edit, profile_ui, controller_tab and nav_ui all have one
-// of these lines, and one copy of the rule is the only way they can agree.
+// deciding for itself - row_ui, settings_edit, profile_ui and controller_tab all have one of these
+// lines, and one copy of the rule is the only way they can agree.
 void AdoptRingOnHover(std::size_t index, FocusModel& ring);
 
 // How a value is written back: a string setting as a quoted TOML string, everything else as a

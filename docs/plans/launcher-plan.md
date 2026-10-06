@@ -271,6 +271,16 @@ above degrades to that by flipping one flag in the schema table.
 > block at the end of the General tab is the editor, `--safe-mode` starts on the defaults whatever the
 > file says, and the focus ring is drawn as a shape as well as coloured. What the build settled is
 > under this decision's own section below.
+>
+> **Amended (keys fixed, block removed).** The user asked for the opposite of the sentence above:
+> a launcher whose own keys are **not** configurable. `nav_bindings.cpp` still ships the table and
+> still round-trips a `[nav]` table through the profile, but nothing reads the file for input — the
+> defaults are what every frame resolves against, and the scheme is written down in
+> `launcher/README.md` instead of being editable. `nav_ui.{h,cpp}` (the *Launcher keys* block) and
+> the `Assign`/`Reset` rows are gone, and with them the harness's rebinding leg; `--safe-mode` stays,
+> because what it really recovers is a profile that did not parse (its keys half is now a no-op).
+> The same round replaced the flat ring with rows-plus-options, so Left and Right walk *within* a row
+> and Up and Down walk rows. See `launcher/README.md` for what exists now.
 
 **Built (A3), and what the build settled.** The pad's side of this is
 `launcher/src/pad_nav.{h,cpp}` (the binding table above, the deadzone, the repeat — no SDL) and
@@ -295,11 +305,11 @@ decision did not say and the work had to:
 `--focus-log` is the evidence hook the verification needed — see §7's rows.
 
 **Built (A5), and what the build settled.** The keyboard's half of this is
-`launcher/src/nav_bindings.{h,cpp}` (the vocabulary, the defaults, the resolution rules — no ImGui),
-`launcher/src/nav_keys.{h,cpp}` (the one file that knows a name is an ImGui key) and
-`launcher/src/nav_ui.{h,cpp}` (the *Launcher keys* block at the end of the General tab, next to B4's).
-The keys are the profile's `[nav]` table, so D6's "the nav bindings are themselves editable" is what
-it says rather than what it hoped. Four things the decision did not say and the work had to:
+`launcher/src/nav_bindings.{h,cpp}` (the vocabulary, the defaults, the resolution rules — no ImGui)
+and `launcher/src/nav_keys.{h,cpp}` (the one file that knows a name is an ImGui key). The *Launcher
+keys* block — `launcher/src/nav_ui.{h,cpp}` — is **gone**: see the amendment under D6, which is where
+the "the keys are the profile's" half of this paragraph was withdrawn. The vocabulary it left behind
+is still the profile's `[nav]` table's shape, and the rules below are what the work had to settle:
 
 - **A chord is not a bare key, and the chord is resolved first.** `Shift+Tab` is a different binding
   from `Tab`, and matching the held modifiers *exactly* is what keeps them different; a bare key is
@@ -310,12 +320,13 @@ it says rather than what it hoped. Four things the decision did not say and the 
   which a rebindable table cannot say — the key is the user's now. So a *move* repeats while held and
   a *decision* does not, and a held Tab walks the ring like a held arrow. It is a stated change in
   behaviour, in the README and here.
-- **The four mouse-only actions are bound too.** D6's list stopped at navigation, which left *Save*,
-  *Copy command line*, *Launch Game* and B4's *Copy the effective value* reachable by pointer only.
-  A5 binds those as well (`Ctrl+S`, `Ctrl+C`, `Ctrl+Enter`, `Ctrl+Shift+C`), because "usable without a
-  mouse" is only true if the whole session is, and the hints on the bar name the keys that are
-  *bound* — a rebound key is what the bar tells the user to press, and an action with no key at all
-  gets no hint rather than a wrong one.
+- **The mouse-only actions are bound too.** D6's list stopped at navigation, which left *Save*,
+  *Launch Game* and B4's *Copy the effective value* reachable by pointer only. A5 bound those as well
+  (`Ctrl+S`, `Ctrl+Enter`, `Ctrl+Shift+C`), because "usable without a mouse" is only true if the whole
+  session is, and the hints on the bar name the keys that are *bound* — a rebound key is what the bar
+  tells the user to press, and an action with no key at all gets no hint rather than a wrong one. The
+  fourth, *Copy command line* (`Ctrl+C`), was bound here and has since been removed from the launcher
+  altogether: see the amendment under §3's bottom-bar bullet.
 - **The pointer had to stop stealing the ring.** Hover-adopting the ring every frame (D6's "mouse hover
   sets focus", as A1 wrote it) means a pointer left resting over a row takes it back on *every* frame,
   so a keyboard walk around a tab is dragged to that row — and a row that scrolls into place under a
@@ -589,6 +600,10 @@ round of feedback (below).
   capitalized where a person reads them (`General`, not the schema's `general` key).
   > **Amended 2026-10-05 (D18).** There is no in-window heading any more: the frame's own title bar
   > carries the name, and the legend that used to sit beside it is gone with it.
+  > **Amended (title fixed).** The user asked for the suffix out — a taskbar entry that renames itself
+  > on every tab switch is noise, and the tab strip already says where you are. The title is the plain
+  > name now, and the script hook the suffix provided is `--focus-log` instead (its `focus tab=…`
+  > lines are what `scripts/capture_launcher.ps1` reads); `SDL_SetWindowTitle` is called once.
 - **The window opens at 1280×840 in logical points**, clamped to the display's work area less its own
   frame, and its **minimum size is 720×520 points** — a minimum, not a fixed size, so the window is
   draggable, maximizable from the frame's own maximize box, and restorable. A size the profile already
@@ -694,6 +709,12 @@ their older wording where they disagree.
   > a session-ending action, so the enumeration above is unchanged in meaning; a failed start adds a
   > modal *beside* the bar's one-line reason, because the command line and the log path do not fit
   > on one line.
+  > **Amended (Copy command line removed).** The user asked for it out — it is a developer's
+  > affordance on a bar that is a player's last step — so the bar is *Close*, *Save*, *Launch Game*
+  > again, and the exact command line survives where only a developer would look for it: the
+  > failed-start modal. `NavAction::kCopyCommand`, the `Ctrl+C` binding that A5 added for it, and the
+  > clipboard write behind it are all gone; `game_launch.{h,cpp}`'s `FormatLaunchCommand` and
+  > `--print-command` are the way to ask the same question headlessly.
 - **The Graphics tab is renamed Audio / Video.** Its schema key stays `graphics` — the `.toml`'s
   business, not the user's — and `DisplayTabName` is the one place that turns a tab key into a label.
   "Audio / Video" is also what the tab actually is: it has held the audio rows since B2.
@@ -838,17 +859,18 @@ rb_blitz.exe
   + every schema entry whose value differs from the compiled default
 ```
 
-Rules: quote every path; never pass an empty flag; log the exact argv in the launcher's own log and in a
-"Copy command line" affordance, because that is the first thing a bug report needs.
+Rules: quote every path; never pass an empty flag; log the exact argv in the launcher's own log and say it
+out loud when a start fails, because that is the first thing a bug report needs.
 
 > **Implemented 2026-10-05 (B7, D18).** `BuildLaunchCommand` (`launcher/src/game_launch.cpp`) builds
 > exactly this and `--print-command` prints it, so the contract is a unit test
 > (`tests/launcher_launch_tests.cpp`) as well as a launch. Two additions the launcher makes: the
 > executable is the command line's first token as well as `CreateProcessW`'s `lpApplicationName`
 > (the C runtime reads `argv` from the one string), and *Launch Game* saves first when something is
-> unsaved. **Completed 2026-10-05:** *Copy command line* on the bottom bar and in the failed-start
-> modal, the game's log folder in that message, and `LaunchReadiness` (the profile must be readable
-> and its folder writable) before anything is spawned.
+> unsaved. **Completed 2026-10-05:** the game's log folder and the command line in the failed-start
+> modal, and `LaunchReadiness` (the profile must be readable and its folder writable) before anything
+> is spawned. The *Copy command line* bar button this completion note also covered was removed again
+> afterwards — the failed-start modal is where the command line lives now.
 
 ### 4.4 The packaging contract (Contract 4)
 
@@ -1113,8 +1135,8 @@ what is missing.
 | R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 3). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
 | R7 the bar follows the device | `device gamepad name="Virtual Pad" confirm=Cross cancel=Circle shoulders=L1/R1 start=Options` in the trace, and the capture reading `Cross Choose  Circle Quit  L1/R1 Switch tab  Options Launch`; the same bar before the pad moved read `Enter Choose  Esc Quit  Tab Switch tab`; a keyboard-only session (three Down, End, Home, Tab and Right, all in the trace) never left the key names | A3, A2 | built |
 | R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
-| R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2, E2 | built — and now measured rather than read: `scripts/capture_launcher.ps1` diffs the bar's help strip, where a press that leaves a row moves 6.7-10.4% of it and the three choices of the launch target move 0% by design (the sentence is the row's) |
-| R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring one `--focus-log` entry, every press moves the body crop (0.19-4.28%), `Right` changes the title to *Audio / Video* and moves 16.0-18.1% of the body, `Left` returns to a 0% body, and a session that pressed nothing moves 0% of both crops | E2 | built |
+| R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2, E2 | built — and now measured rather than read: `scripts/capture_launcher.ps1` diffs the bar's help strip, where a press that leaves a row moves 6.7-10.4% of it and the three rows of the launch target move 0% by design (the sentence is the row's) |
+| R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring on in `--focus-log`, every press moves the body crop (0.19-4.28%), a tab switch changes the body by 16.0-18.1%, going back returns it to 0%, and a session that pressed nothing moves 0% of both crops | E2 | built. The tab switch is read off the trace's `tab=` now, not off the window title: the title stopped naming the tab |
 | R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist, and now for the installed build: E3's four legs read the licence, the DLC folder and the save folder back out of the log; the two General-tab path rows are §11's second finding |
 | R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8, E3 | built; `tests/launcher_ultimate_state_tests.cpp`, and E3's `ultimate` leg is the installed helper adding the mod to a retail install from a folder, after the `retail` leg booted without it |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |
@@ -1135,7 +1157,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 | The renderer a user picks may not run | a payload can carry Vulkan while the machine has no Vulkan driver | D18: the app probes the loader, logs why, and boots on the other backend |
 | Two settings files, one user | `rb_blitz.toml` and `launcher.toml` can disagree; the F4 overlay writes the former | precedence is fixed (D3), surfaced as a badge (B4), recorded as a standing limit |
 | Machine-wide installs | `{app}` may be read-only; the launcher's own log and the game's `rb_blitz.toml` writes fail there | the profile never lives in `{app}`; the launcher degrades to a warning |
-| Controller-only users | a bad mapping can make the game unreachable | C6's panic path, A5's recovery switches (built: `--safe-mode`, `--no-gamepad`, and the Launcher keys block's Reset every key), "never persist a half-armed capture" |
+| Controller-only users | a bad mapping can make the game unreachable | C6's panic path, A5's recovery switches (built: `--safe-mode` — now the recovery for a profile that did not parse — and `--no-gamepad`), "never persist a half-armed capture" |
 | Remap scope creep | lane C was a whole project folded into this one (D13) | **spent**: C3/C4/C5 shipped inside the plan, and D17 narrowed them (one table, no per-device keying). What is left is C6, whose rails are what keep a bad mapping recoverable |
 | Art licensing | the cover is not ours | identical posture to the installer: the image is fetched at build time, gitignored, and absence is supported. The launcher has no cover at all until A4; both halves are recorded in `docs/known-issues.md`, and `docs/distributable.md` gains the packaging rows that say what covers them |
 | Version skew | launcher and game can be different builds | the shared seam is versioned where it can be (`[remap]` rows kept verbatim, the profile's `schema_version` refused rather than reinterpreted) and an unknown `--flag` is logged; E3 asserts the shared half end to end, and the rest is a standing limit in `docs/known-issues.md` |

@@ -99,7 +99,7 @@ std::string ProfileSession::SafeModeNote() const {
   if (replacing_) {
     return "Safe mode: the settings file could not be read, and Save will replace it.";
   }
-  return "Safe mode: the launcher's own keys and window size are the defaults, not the file's.";
+  return "Safe mode: the window opens at the default size rather than the file's.";
 }
 
 std::string OverrideNoteText(std::string_view launcher_value, std::string_view game_value) {

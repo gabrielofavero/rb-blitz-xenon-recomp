@@ -78,6 +78,14 @@ std::vector<std::string_view> SettingChoices(const settings::Setting& setting);
 // each choice is drawn as its own radio the ring can land on, and one for anything else.
 std::size_t FocusEntriesFor(const settings::Setting& setting);
 
+// The option count of every focusable row a tab's schema draws, in draw order - one entry per
+// *row*, not per choice. An enum is one row with as many options as it has choices, so Left and
+// Right walk its radios while Up and Down step over the row. The launch target is the exception:
+// the General tab draws its choices stacked, so each choice is a row of its own. The shell sizes
+// each ring from this and the tab draws in the same order, which is the only way the two can
+// agree about where a row begins.
+std::vector<std::size_t> SchemaRowOptions(const TabLayout& tab);
+
 // The row a ring entry belongs to, or nullptr for an entry a tab's own block owns (the block
 // after the schema's rows - B4's panel, D16's mapping table). The walk is the same arithmetic
 // that sized the ring, in the same order the tab draws its rows, which is the only way the

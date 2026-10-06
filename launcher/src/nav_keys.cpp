@@ -28,25 +28,6 @@ void ForEachNamedKey(Fn&& visit) {
 
 }  // namespace
 
-ImGuiKey KeyForName(std::string_view name) {
-  ImGuiKey found = ImGuiKey_None;
-  ForEachNamedKey([&](ImGuiKey key, const char* key_name) {
-    if (!nav_bindings::NameMatches(name, key_name)) {
-      return true;
-    }
-    found = key;
-    return false;
-  });
-  return found;
-}
-
-std::string NameForKey(ImGuiKey key) {
-  if (key == ImGuiKey_None) {
-    return {};
-  }
-  return ImGui::GetKeyName(key);
-}
-
 nav_bindings::Presses ReadPresses() {
   const ImGuiIO& io = ImGui::GetIO();
   nav_bindings::Presses presses;
@@ -66,24 +47,6 @@ nav_bindings::Presses ReadPresses() {
     return true;
   });
   return presses;
-}
-
-std::optional<nav_bindings::Trigger> CapturedTrigger() {
-  const ImGuiIO& io = ImGui::GetIO();
-  std::optional<nav_bindings::Trigger> captured;
-  ForEachNamedKey([&](ImGuiKey key, const char* name) {
-    if (!ImGui::IsKeyPressed(key, false)) {
-      return true;
-    }
-    nav_bindings::Trigger trigger;
-    trigger.key = name;
-    trigger.ctrl = io.KeyCtrl;
-    trigger.shift = io.KeyShift;
-    trigger.alt = io.KeyAlt;
-    captured = std::move(trigger);
-    return false;
-  });
-  return captured;
 }
 
 }  // namespace rb_blitz::launcher::nav_keys

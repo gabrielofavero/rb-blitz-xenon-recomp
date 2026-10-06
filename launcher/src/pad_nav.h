@@ -24,7 +24,8 @@ namespace rb_blitz::launcher {
 
 // What a pad can ask the launcher to do, one entry per binding D6 names. The order is the order
 // the model resolves two presses in the same frame by, and it reads as the priority a player
-// would expect: a direction before a face button.
+// would expect: a direction before a face button, and the right stick's scroll last of all - so a
+// stick leaning off-centre can only ever scroll, never starve a real press of its turn.
 enum class PadNavButton : std::uint8_t {
   kUp,
   kDown,
@@ -35,6 +36,8 @@ enum class PadNavButton : std::uint8_t {
   kTabForward,
   kTabBack,
   kLaunch,
+  kScrollUp,
+  kScrollDown,
   kCount,
 };
 
@@ -70,6 +73,11 @@ struct PadNavState {
 // way out is the usual number; it is a constant here rather than a setting because D6's "with a
 // deadzone" should be one value a test can hold on to.
 inline constexpr int kStickDeadzone = 8000;
+
+// The right stick's scroll band. Wider than the ring's: a scroll is a glance rather than a
+// command, and a pad whose right stick does not rest at exactly zero must not walk the list on its
+// own while the ring's own deadzone would have called the same lean "nothing".
+inline constexpr int kScrollStickDeadzone = 14000;
 
 enum class AxisDirection {
   kNeutral,

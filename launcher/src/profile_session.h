@@ -89,15 +89,14 @@ class ProfileSession {
   std::string Refusal() const;
 
   // A5's `--safe-mode`, and the whole of what it means: the launcher starts from the compiled
-  // defaults for its *own* behaviour - the keys the ring reads and the size the window opens at,
-  // both of which `main()` takes from the defaults rather than from the file - because those two
-  // are the only things a profile can set that can leave the launcher unusable.
+  // default for its *own* behaviour - the size the window opens at, which `main()` takes from the
+  // defaults rather than from the file - because that is the one thing a profile can set that can
+  // leave the launcher unusable. The keys are fixed defaults now, so there is nothing there to
+  // recover.
   //
-  // What it deliberately does *not* do is stop reading or writing the file. A launcher that
-  // refused to save would leave a user who has just pressed *Reset every launcher key* unable to
-  // keep the fix, which is the trap the switch exists to open. So the settings rows, the launch
-  // target and `[remap]` load and save as they always did, and the only case where safe mode can
-  // write something the ordinary path would refuse is a file that did not parse at all: it is
+  // What it deliberately does *not* do is stop reading or writing the file. The settings rows, the
+  // launch target and `[remap]` load and save as they always did, and the only case where safe mode
+  // can write something the ordinary path would refuse is a file that did not parse at all: it is
   // replaced rather than patched, `SafeModeNote` says so on the bottom bar before the button is
   // pressed, and it is the recovery for a user who has no other copy of the file to import.
   void SetSafeMode(bool on);
