@@ -253,18 +253,79 @@ const StfsEntry* FindStfsEntry(const StfsContainer& container, std::string_view 
   return nullptr;
 }
 
-bool CopyOne(const fs::path& source, const fs::path& destination, std::string* error) {
+// Chunk size for the copies the wizard watches. A megabyte keeps the progress
+// file to about one line per percent of the stage without ever holding a whole
+// file in memory.
+constexpr std::size_t kCopyChunkBytes = 1u << 20;
+
+// Copies `source` to `destination`, calling `on_copied` with the bytes copied so
+// far when it is set. One file of a dump is most of the dump's bytes, and the
+// wizard only moves while the helper reports, so without the chunked form the
+// import would sit at the start of its stage and then jump to the end of it.
+bool CopyOne(const fs::path& source, const fs::path& destination, std::string* error,
+             const std::function<void(std::uint64_t)>& on_copied = {}) {
   if (!EnsureParentDirectory(destination, error)) {
     return false;
   }
-  std::error_code code;
-  fs::copy_file(source, destination, fs::copy_options::overwrite_existing, code);
-  if (code) {
-    SetError(error, S("cannot copy ", Display(source), " to ", Display(destination), ": ",
-                     code.message()));
+
+  if (!on_copied) {
+    std::error_code code;
+    fs::copy_file(source, destination, fs::copy_options::overwrite_existing, code);
+    if (code) {
+      SetError(error, S("cannot copy ", Display(source), " to ", Display(destination), ": ",
+                       code.message()));
+      return false;
+    }
+    return true;
+  }
+
+  std::FILE* in = _wfopen(source.c_str(), L"rb");
+  if (in == nullptr) {
+    SetError(error, S("cannot read ", Display(source), ": ", LastWin32Error()));
     return false;
   }
-  return true;
+  std::FILE* out = _wfopen(destination.c_str(), L"wb");
+  if (out == nullptr) {
+    SetError(error, S("cannot create ", Display(destination), ": ", LastWin32Error()));
+    std::fclose(in);
+    return false;
+  }
+
+  std::vector<std::uint8_t> buffer(kCopyChunkBytes);
+  std::uint64_t copied = 0;
+  bool ok = true;
+  while (ok) {
+    const std::size_t read = std::fread(buffer.data(), 1, buffer.size(), in);
+    if (read == 0) {
+      ok = std::ferror(in) == 0;
+      if (!ok) {
+        SetError(error, S("cannot read ", Display(source), ": ", LastWin32Error()));
+      }
+      break;
+    }
+    if (std::fwrite(buffer.data(), 1, read, out) != read) {
+      SetError(error, S("cannot write ", Display(destination), ": ", LastWin32Error()));
+      ok = false;
+      break;
+    }
+    copied += read;
+    on_copied(copied);
+  }
+
+  const bool flushed = std::fflush(out) == 0;
+  const bool closed = std::fclose(out) == 0;
+  std::fclose(in);
+  if (ok && (!flushed || !closed)) {
+    SetError(error, S("cannot finalise ", Display(destination), ": ", LastWin32Error()));
+    ok = false;
+  }
+  if (!ok) {
+    // A half-written file is worse than none: the staging directory is removed
+    // on the way out, but this copy may have been made outside it.
+    std::string ignored;
+    RemoveFile(destination, &ignored);
+  }
+  return ok;
 }
 
 bool MoveOne(const fs::path& source, const fs::path& destination, std::string* error) {
@@ -878,8 +939,10 @@ bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_ro
     return false;
   }
 
+  // The copy gets the bulk of the stage: it is the only part of the import that
+  // reads and writes the whole dump, while the check that follows only reads it.
   const std::uint64_t total = plan.PresentBytes();
-  StepProgress step(progress, total, 0, 90);
+  StepProgress step(progress, total, 0, 75);
   progress.Report(0, plan.kind == GameSourceKind::kFolder ? "copying your dump"
                                                           : "unpacking the package");
 
@@ -896,10 +959,14 @@ bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_ro
     const fs::path target = staging / relative;
 
     if (plan.kind == GameSourceKind::kFolder) {
-      if (!CopyOne(plan.location / relative, target, error)) {
+      std::uint64_t reported = 0;
+      if (!CopyOne(plan.location / relative, target, error, [&](std::uint64_t bytes) {
+            done += bytes - reported;
+            reported = bytes;
+            step.Report(done, file.path);
+          })) {
         return false;
       }
-      done += file.size;
     } else {
       const StfsEntry* entry = FindStfsEntry(container, file.path);
       if (entry == nullptr) {
@@ -910,7 +977,16 @@ bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_ro
       if (!sink.Open(target, error)) {
         return false;
       }
-      const Sink write = std::ref(sink);
+      // The sink is where the extraction writes, so counting its bytes reports
+      // progress without the extractor knowing anything about progress.
+      const Sink write = [&](const std::uint8_t* data, std::size_t size) {
+        if (!sink(data, size)) {
+          return false;
+        }
+        done += size;
+        step.Report(done, file.path);
+        return true;
+      };
       const bool extracted = container.Extract(*entry, write, error);
       std::string close_reason;
       const bool closed = sink.Close(&close_reason);
@@ -919,13 +995,14 @@ bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_ro
                          WriteFailureReason(sink, close_reason, error)));
         return false;
       }
-      done += sink.bytes_written();
     }
     ++copied;
     step.Report(done, file.path);
   }
 
-  progress.Report(90, "checking the imported files");
+  // Hashing the staged copy is a second full read of the dump, so it gets the
+  // rest of the stage bar that the copy did not use.
+  progress.Report(75, "checking the imported files");
   std::string evidence;
   if (!RequireMatch(GameFingerprintConfig(), staging, Roles(kGameRoles),
                     S("data read from ", plan.description), &evidence, error)) {

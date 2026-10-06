@@ -13,10 +13,13 @@
 schema_version = 1
 
 [installer]
-name = "Rock Band Blitz (Xenon recomp)"
+# `name` titles the wizard and names the entry in Add/Remove Programs; the
+# uninstall entry itself shows `short_name`, so the program the user sees there
+# is "Rock Band Blitz" and not "Rock Band Blitz Xenon Recomp version 0.1.0".
+name = "Rock Band Blitz Xenon Recomp"
 short_name = "Rock Band Blitz"
 version = "0.1.0"
-publisher = "Rock Band Blitz Xenon Recomp"
+publisher = "Gabriel Fávero"
 homepage_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp"
 support_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp/issues"
 # Folder offered under {localappdata}\Programs and appended to the install

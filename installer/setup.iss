@@ -1,5 +1,5 @@
 ; ---------------------------------------------------------------------------
-; Rock Band Blitz (Xenon recomp) - installer wizard.
+; Rock Band Blitz Xenon Recomp - installer wizard.
 ;
 ; This script is presentation and sequencing only. Everything that touches game
 ; data, downloads or hashes files is done by rb_blitz_setup_helper.exe (see
@@ -105,8 +105,13 @@ WizardStyle=modern
 DisableWelcomePage=no
 ShowLanguageDialog=no
 SetupLogging=yes
-LicenseFile={#ProjectDirPath}LICENSE
 SetupIconFile={#ProjectDirPath}assets\blitz.ico
+; Add/Remove Programs names the program, not the build: this is the one place the
+; name a user sees is the short one, because "{#AppName} {#AppVersion}" there reads
+; like the game has a "(Xenon Recomp) version 0.1.0" edition. The GPL text no
+; longer has a page of its own either - nothing in this wizard is agreed to, so
+; the licence lives with the sources (see README.md).
+UninstallDisplayName={#AppShortName}
 UninstallDisplayIcon={app}\{#GameExeName}
 
 ; The side image is optional: it only appears when tools/make_art.ps1 produced it.
@@ -131,12 +136,26 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
 WelcomeLabel1=Welcome to the {#AppName} setup
-WelcomeLabel2=This wizard puts a ready-to-play build of Rock Band Blitz on your PC, without compiling anything.%n%nIt needs the game data taken from an Xbox 360 copy that you own - either a game folder you have already extracted or the package you downloaded. No game files are included or downloaded by this installer, and it is not affiliated with or endorsed by the game's publisher.%n%nContinue when the folder or the package is at hand.
+WelcomeLabel2=This is a PC decompilation project of the Xbox 360 version of Rock Band Blitz.%n%nIt installs a ready-to-play build and takes the game data from your own Xbox 360 copy: an extracted game folder or the package. No game files are included or downloaded, and this is not affiliated with or endorsed by the game's publisher.%n%nContinue when the folder or the package is at hand.
+WizardSelectTasks=Shortcuts
+SelectTasksDesc=Choose which shortcuts to create.
+SelectTasksLabel2=Select the shortcuts you would like Setup to create, then click Next.
+; Inno Setup counts only the files it places itself - the recompiled build, about
+; 67 MB - while the game data the user supplies is several hundred megabytes more
+; and is not known until the next page. Its own sentence would therefore be a
+; confidently wrong answer to "is there room?"; the wizard measures the real
+; requirement before the install starts instead.
+DiskSpaceMBLabel=The game data you provide is not counted here; the free space is checked again before the install starts.
 
 [Tasks]
-; D9: the launcher's desktop shortcut is offered checked; the game's stays
-; unchecked, as it always has been. A silent install is conservative - it only
-; creates the launcher one when /LAUNCHERICON=1 asks (see README.md).
+; Every shortcut is a task, so this page is the one place that decides what is
+; created. The Start menu pair is checked, as those two have always been created;
+; the launcher's desktop shortcut is checked (D9) and the game's desktop shortcut
+; stays unchecked, as it always has been. A silent install creates every checked
+; task, except the launcher's desktop shortcut, which only /LAUNCHERICON=1 asks
+; for (see README.md).
+Name: "startmenu"; Description: "Create a &Start menu shortcut for the game"
+Name: "startmenulauncher"; Description: "Create a Start menu shortcut for the &launcher"
 Name: "launchericon"; Description: "Create a &desktop shortcut for the launcher"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
@@ -154,11 +173,12 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 #endif
 
 [Icons]
-; Two shortcuts, with names a Start-menu list can tell apart. The game's keeps
-; its --game_data_root argument: it must stay runnable without the launcher
-; (Contract 4). The launcher's takes none; it finds the game beside itself.
-Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"
-Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"
+; Four shortcuts, each behind the [Tasks] entry the Shortcuts page shows, with
+; names a Start-menu list can tell apart. The game's keeps its --game_data_root
+; argument: it must stay runnable without the launcher (Contract 4). The
+; launcher's takes none; it finds the game beside itself.
+Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: startmenu
+Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: startmenulauncher
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: launchericon
 
@@ -252,10 +272,19 @@ const
   MethodPackage = 0;
   MethodFolder = 1;
   MethodInstalled = 2;
-  UltimateNothing = 0;
-  UltimatePinned = 1;
-  UltimateZip = 2;
-  UltimateFolder = 3;
+  { The mod's choices in the order the page lists them: the pinned download first
+    and "do not install" last, with the user's own copy in between. }
+  UltimatePinned = 0;
+  UltimateZip = 1;
+  UltimateFolder = 2;
+  UltimateNothing = 3;
+
+  { The wizard's own registration key: the AppId from [Setup], which Inno Setup
+    registers an installation under. Read back at start-up to find a game that is
+    already installed, so this is also the one place that GUID would have to
+    change if AppId ever does. }
+  AppIdGuid = '{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}';
+  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + AppIdGuid + '_is1';
 
   { Values the build script pinned. }
   PayloadSizeBytes = {#PayloadSize};
@@ -301,6 +330,7 @@ var
   gInstalled: Boolean;
   gFinishReached: Boolean;
   gRunAtEnd: String;
+  gStageVisible: Boolean;
 
   EndGameRadio: TNewRadioButton;
   EndLauncherRadio: TNewRadioButton;
@@ -418,32 +448,32 @@ begin
 end;
 
 // The finished label's height depends on its text and the DPI, so the radios are
-// placed under it when the page is shown rather than at start-up. The first one
-// names the target the install left behind.
+// placed under it when the page is shown rather than at start-up. They read top
+// to bottom in the order they are listed here, and the game is named once: with
+// the mod installed the install folder is still the same game, so "Launch
+// Rock Band Blitz" is the honest caption for both.
 procedure LayoutFinishChoices;
 var
-  top, step, width: Integer;
+  top, step, left, width: Integer;
 begin
+  left := WizardForm.FinishedLabel.Left;
   width := WizardForm.FinishedLabel.Width;
   step := ScaleY(21);
   top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(8);
 
-  if gUltimateActive then
-    EndGameRadio.Caption := 'Open {#AppShortName} Ultimate'
-  else
-    EndGameRadio.Caption := 'Open {#AppShortName}';
   EndLauncherRadio.Caption := 'Open the launcher';
+  EndGameRadio.Caption := 'Launch {#AppShortName}';
   EndNothingRadio.Caption := 'Do nothing';
 
-  EndGameRadio.Left := WizardForm.FinishedLabel.Left;
-  EndGameRadio.Top := top;
-  EndGameRadio.Width := width;
-  EndGameRadio.Height := step;
-  EndLauncherRadio.Left := WizardForm.FinishedLabel.Left;
-  EndLauncherRadio.Top := top + step;
+  EndLauncherRadio.Left := left;
+  EndLauncherRadio.Top := top;
   EndLauncherRadio.Width := width;
   EndLauncherRadio.Height := step;
-  EndNothingRadio.Left := WizardForm.FinishedLabel.Left;
+  EndGameRadio.Left := left;
+  EndGameRadio.Top := top + step;
+  EndGameRadio.Width := width;
+  EndGameRadio.Height := step;
+  EndNothingRadio.Left := left;
   EndNothingRadio.Top := top + step * 2;
   EndNothingRadio.Width := width;
   EndNothingRadio.Height := step;
@@ -640,9 +670,29 @@ begin
   PumpStagePaint;
 end;
 
-procedure HideStage;
+// A progress page is not part of the wizard's page order: nothing displays it
+// unless this does, and without it the whole post-install half of the install
+// runs behind Inno Setup's own bar - which is still sitting at 100% from the
+// payload, so the wizard looks frozen for the minutes the game data takes.
+//
+// Shown once for the whole install rather than per stage, so the page does not
+// blink back to the installing page between stages; the stages are consecutive.
+procedure BeginStages;
 begin
-  StagePage.SetProgress(0, 100);
+  if not gStageVisible then
+  begin
+    StagePage.Show;
+    gStageVisible := True;
+  end;
+end;
+
+procedure EndStages;
+begin
+  if gStageVisible then
+  begin
+    StagePage.Hide;
+    gStageVisible := False;
+  end;
 end;
 
 procedure PollStage(const startPercent, endPercent: Integer);
@@ -700,7 +750,6 @@ begin
     gFailureText := ''
   else
     gFailureText := HelperError(gStageSummaryFile);
-  HideStage;
 end;
 
 // --- what each stage reports back ----------------------------------------
@@ -1002,6 +1051,109 @@ begin
     Result := Result + Times(UltimateArchiveBytes, 3);
 end;
 
+// --- a game that is already installed -------------------------------------
+
+// The next dotted component of a version string, as a number. Anything that is
+// not a number counts as 0 - which is also what a component the string does not
+// have counts as, so "1.0" and "1.0.0" compare equal.
+function NextVersionPart(const text: String; var index: Integer): Integer;
+var
+  part: String;
+begin
+  part := '';
+  while (index <= Length(text)) and (text[index] <> '.') do
+  begin
+    part := part + text[index];
+    index := index + 1;
+  end;
+  if (index <= Length(text)) and (text[index] = '.') then
+    index := index + 1;
+  Result := StrToIntDef(Trim(part), 0);
+end;
+
+// -1, 0 or 1: which of two dotted numeric versions is newer.
+function CompareVersions(const left, right: String): Integer;
+var
+  leftIndex, rightIndex, leftPart, rightPart: Integer;
+begin
+  leftIndex := 1;
+  rightIndex := 1;
+  repeat
+    leftPart := NextVersionPart(left, leftIndex);
+    rightPart := NextVersionPart(right, rightIndex);
+    if leftPart <> rightPart then
+    begin
+      if leftPart < rightPart then
+        Result := -1
+      else
+        Result := 1;
+      Exit;
+    end;
+  until (leftIndex > Length(left)) and (rightIndex > Length(right));
+  Result := 0;
+end;
+
+// One branch of the registry, whose Add/Remove Programs entry Inno Setup wrote
+// when it installed the game. `dir` is empty when there is no usable one: a
+// registration whose folder the user has since deleted is not an install to warn
+// about, since the wizard would simply install into it again.
+function QueryPreviousInstall(const root: Integer; var dir, version: String): Boolean;
+begin
+  dir := '';
+  version := '';
+  Result := RegQueryStringValue(root, UninstallKey, 'InstallLocation', dir) and (dir <> '');
+  if not Result then
+    Exit;
+  if not DirExists(dir) then
+  begin
+    Result := False;
+    Exit;
+  end;
+  RegQueryStringValue(root, UninstallKey, 'DisplayVersion', version);
+  dir := RemoveBackslashUnlessRoot(dir);
+end;
+
+function PreviousInstall(var dir, version: String): Boolean;
+begin
+  Result := QueryPreviousInstall(HKCU, dir, version) or
+            QueryPreviousInstall(HKLM, dir, version);
+end;
+
+// The flow when the game is already installed. The same version is a reinstall;
+// a lower one is an update and a higher one a downgrade, and either direction can
+// change what the game writes to its saves, so both say so. Answering No leaves
+// the machine exactly as it was, before the first page is shown.
+function ConfirmExistingInstall: Boolean;
+var
+  dir, version, question: String;
+  comparison: Integer;
+begin
+  Result := True;
+  if WizardSilent then
+    Exit;
+  if not PreviousInstall(dir, version) then
+    Exit;
+
+  comparison := CompareVersions(version, '{#AppVersion}');
+  if version = '' then
+    question := 'Rock Band Blitz is already installed in:' + kCrLf + kCrLf + dir + kCrLf + kCrLf +
+                'Continue and install it again?'
+  else if comparison = 0 then
+    question := 'Rock Band Blitz ' + version + ' is already installed in:' + kCrLf + kCrLf + dir +
+                kCrLf + kCrLf +
+                'Install it again, replacing the game files? Your game data and settings are kept.'
+  else if comparison < 0 then
+    question := 'Rock Band Blitz ' + version + ' is installed in:' + kCrLf + kCrLf + dir + kCrLf + kCrLf +
+                'This will update it to {#AppVersion}. Saves made with the older version may not ' +
+                'load afterwards.' + kCrLf + kCrLf + 'Continue?'
+  else
+    question := 'Rock Band Blitz ' + version + ' is installed in:' + kCrLf + kCrLf + dir + kCrLf + kCrLf +
+                'This installer is older ({#AppVersion}) and will downgrade it. Saves made with ' +
+                'the newer version may not load afterwards.' + kCrLf + kCrLf + 'Continue?';
+
+  Result := MsgBox(question, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
+
 // ==========================================================================
 // wizard events
 // ==========================================================================
@@ -1012,11 +1164,15 @@ begin
   gFailureText := '';
   gInstalled := False;
   gFinishReached := False;
+  gStageVisible := False;
   gGameSourceBytes := 0;
   gUltimateActive := False;
   gUltimateMode := 'none';
   gPayloadDownload := PayloadIsDownload <> 0;
-  Result := True;
+  // Asked before the first page: an install that is already on the machine is the
+  // one thing the wizard has to settle before the user starts answering, and No
+  // ends setup without touching anything.
+  Result := ConfirmExistingInstall;
 end;
 
 procedure InitializeWizard;
@@ -1032,51 +1188,55 @@ begin
   gProgressFile := JoinPath(gTempDir, 'rbblitz-progress.txt');
 
   MethodPage := CreateInputOptionPage(wpSelectDir,
-    'Where does the game data come from?',
-    'Rock Band Blitz needs the files from your own Xbox 360 copy.',
-    'Choose the way you want to provide them. Nothing is uploaded anywhere, and the folder or package is only read.',
+    'Xbox 360 Game Files',
+    'Rock Band Blitz needs the files from your own Xbox 360 copy. Choose the way you want to provide them.',
+    '',
     True, False);
-  MethodPage.Add('Use the Xbox 360 package I downloaded (GOD/STFS file)');
+  MethodPage.Add('Use the Xbox 360 package (GOD/STFS file)');
   MethodPage.Add('Use a game folder I have already extracted');
-  MethodPage.Add('Keep the game data that is already installed in the folder above');
+  MethodPage.Add('Use the game data already installed in the install folder');
   MethodPage.SelectedValueIndex := MethodPackage;
 
+  // PackagePage is created after FolderPage, not after MethodPage: Inno Setup
+  // inserts a page directly behind the page it is given, so two pages sharing one
+  // parent come out in reverse - and the mod's page would land between the folder
+  // question and the folder it asks about.
   FolderPage := CreateInputDirPage(MethodPage.ID,
-    'Where is the extracted game folder?',
-    'Point at the folder that holds the game files (default.xex and the gen folder).',
-    'The folder may be the extract root or a folder above it: the installer looks for the game files, it does not need them at the top.',
+    'Game folder location',
+    '',
+    '',
     False, '');
   FolderPage.Add('Extracted game folder:');
 
-  PackagePage := CreateInputFilePage(MethodPage.ID,
-    'Where is the Xbox 360 package?',
-    'Point at the package file you downloaded from your console or from the store.',
-    'This is the container file that holds the game data. It is read once, and only the game files inside it are copied.');
+  PackagePage := CreateInputFilePage(FolderPage.ID,
+    'Xbox 360 package location',
+    '',
+    '');
   PackagePage.Add('Xbox 360 package:', 'All files|*.*', '');
 
   UltimatePage := CreateInputOptionPage(PackagePage.ID,
     'Rock Band Blitz Ultimate',
-    'An optional community mod that adds the songs and the modes of the console versions.',
-    'It is not required to play, and this installer does not distribute it: it downloads the pinned release from the mod''s own project page, or uses a copy you provide.',
+    'A community mod by ultimate-mods-rb that adds the songs and the modes of the console versions. Recommended: it complements this recompilation.',
+    'Choose if you want to install it, and how.',
     True, False);
-  UltimatePage.Add('Do not install the mod');
   UltimatePage.Add('Download Rock Band Blitz Ultimate {#UltimateVersion} from its GitHub release');
   UltimatePage.Add('Install from a zip file I have');
   UltimatePage.Add('Install from a folder I have');
+  UltimatePage.Add('Do not install the mod');
   UltimatePage.SelectedValueIndex := UltimateNothing;
   if '{#UltimateUrl}' = '' then
     UltimatePage.CheckListBox.ItemEnabled[UltimatePinned] := False;
 
   UltimateZipPage := CreateInputFilePage(UltimatePage.ID,
-    'Which zip file?',
-    'Point at the Rock Band Blitz Ultimate zip you downloaded.',
-    'The archive must hold the mod''s gen/patch_xbox.hdr and gen/patch_xbox_0.ark files.');
+    'Ultimate zip location',
+    '',
+    '');
   UltimateZipPage.Add('Ultimate zip file:', 'Zip archives|*.zip|All files|*.*', '.zip');
 
   UltimateFolderPage := CreateInputDirPage(UltimateZipPage.ID,
-    'Which folder?',
-    'Point at the folder that holds the extracted Rock Band Blitz Ultimate files.',
-    'The folder may be the extract root or a folder above it: the installer looks for the mod''s gen/patch_xbox.hdr file.',
+    'Ultimate folder location',
+    '',
+    '',
     False, '');
   UltimateFolderPage.Add('Ultimate folder:');
 
@@ -1346,6 +1506,7 @@ begin
   gGameDetailsFile := JoinPath(gAppDir, 'game-source-details.txt');
   gFailed := False;
   gStageActive := True;
+  BeginStages;
 
   // 1. the recompiled build
   if gPayloadDownload then
@@ -1356,6 +1517,7 @@ begin
                     PayloadStart, PayloadEnd) then
     begin
       gFailed := True;
+      EndStages;
       SuppressibleMsgBox('The recompiled build could not be installed:' + kCrLf + kCrLf + gFailureText +
                          kCrLf + kCrLf + 'Nothing else was installed. Check your internet connection and ' +
                          'run the installer again.', mbError, MB_OK, IDOK);
@@ -1370,6 +1532,7 @@ begin
                     'verify-payload --dest ' + QuoteArg(gAppDir), PayloadStart, PayloadEnd) then
     begin
       gFailed := True;
+      EndStages;
       SuppressibleMsgBox('The recompiled build does not match what this installer should have placed:' +
                          kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
                          'Nothing else was installed. Run the installer again.', mbError, MB_OK, IDOK);
@@ -1394,6 +1557,7 @@ begin
                     GameStart, GameEnd) then
     begin
       gFailed := True;
+      EndStages;
       SuppressibleMsgBox('The game data could not be imported:' + kCrLf + kCrLf + gFailureText +
                          kCrLf + kCrLf + 'The recompiled build is in place, but the game cannot run ' +
                          'without the data. Run the installer again with a working source.',
@@ -1453,6 +1617,7 @@ begin
                        mbError, MB_OK, IDOK);
   end;
 
+  EndStages;
   gStageActive := False;
   gInstalled := not gFailed;
 end;
@@ -1486,9 +1651,7 @@ begin
   if UninstallSilent then
     keepData := True
   else
-    keepData := SuppressibleMsgBox('Delete the imported Rock Band Blitz game data as well?' + kCrLf +
-                                   kCrLf + 'Answer No to keep it, for example to reinstall later ' +
-                                   'without the disc or the package again.',
+    keepData := SuppressibleMsgBox('Delete the imported Rock Band Blitz game data as well?',
                                    mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDNO;
   if keepData then
     args := args + ' --keep-game-data';
@@ -1514,8 +1677,18 @@ function UpdateReadyMemo(const Space, NewLine, MemoUserInfoInfo, MemoDirInfo, Me
 var
   lines: String;
   method: Integer;
+  ignored: String;
 begin
-  lines := MemoDirInfo + NewLine;
+  // Inno Setup's MemoDirInfo does not end with a line break, so both breaks here
+  // are wanted: one to close its last line, one to leave the blank line that
+  // separates every section of this memo. Without the second, the lines below
+  // read as more sub-items of the destination folder.
+  lines := MemoDirInfo + NewLine + NewLine;
+  // The mod line has to say what is about to happen, and until this call the
+  // answers have not been resolved: PrepareToInstall does that, and it runs after
+  // this page was shown. Answering nothing here is deliberate - a choice
+  // PrepareToInstall cannot use is its to report, on its own page.
+  ignored := ResolveUltimateChoice;
   method := ChosenGameMethod;
   if method = MethodInstalled then
     lines := lines + Space + 'Game data: keep what is already installed' + NewLine
@@ -1544,9 +1717,18 @@ begin
   // Recorded, not verified: the commit the recompiled build was built from.
   if '{#PayloadCommit}' <> '' then
     lines := lines + ' (commit ' + Copy('{#PayloadCommit}', 1, 12) + ')';
-  lines := lines + NewLine;
 
-  Result := lines + MemoGroupInfo + MemoTasksInfo;
+  // Inno Setup's own Memo* strings carry no line break of their own at either
+  // end, so every section boundary is written here: one break to close the last
+  // line, one to leave the blank line that keeps the sections apart. Without them
+  // the whole memo reads as a single block of settings.
+  lines := lines + NewLine;
+  if MemoGroupInfo <> '' then
+    lines := lines + NewLine + MemoGroupInfo;
+  if MemoTasksInfo <> '' then
+    lines := lines + NewLine + MemoTasksInfo;
+
+  Result := lines;
 end;
 
 function GetCustomSetupExitCode: Integer;

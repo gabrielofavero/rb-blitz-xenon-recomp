@@ -23,6 +23,11 @@ The Rock Band Blitz Ultimate mod is never embedded and never re-hosted; its
 release URL lives in config\pins.toml and the user's copy is downloaded from
 upstream, or supplied by the user, while the installer runs. See README.md.
 
+The setup executable is named RockBandBlitzSetup-<version>.exe, or
+RockBandBlitzSetup-latest.exe when the [payload] commit pin is "latest", which is
+the repository's own pin: a build that is not cut from a pinned commit is a
+rolling build and should not be named like a release.
+
 .PARAMETER PayloadUrl
 Download the recompiled build from this URL at install time instead of embedding
 it. Requires -PayloadSha256.
@@ -341,6 +346,11 @@ if ($commitSpec) {
     $embedArgs += @('--payload-commit', $payloadCommit)
 }
 
+# A build whose pin is "latest" is a rolling build of whatever the checkout is at,
+# not a release cut from a tag: it is named after that rather than after the
+# version string it shares with every other build of the same cycle.
+$latestBuild = $commitSpec -ieq 'latest'
+
 if ($PayloadUrl) {
     if (-not $PayloadSha256) {
         if (-not $AllowUnverifiedPayload) {
@@ -460,14 +470,20 @@ Write-Step 'Compiling the setup executable'
 $iscc = Find-Iscc
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
+if ($latestBuild) { $setupBaseName = 'RockBandBlitzSetup-latest' }
+else { $setupBaseName = "RockBandBlitzSetup-$appVersion" }
+
+# /F overrides OutputBaseFilename, so the name lives here rather than in the
+# script: the version in it is the one this build actually compiled in.
 $isccArgs = @('/Q',
               "/DGeneratedDir=$generatedDir",
               "/DDistDir=$distDir",
               "/DArtDir=$artDir",
+              "/F$setupBaseName",
               $setupScript)
 Invoke-Native -Exe $iscc -Arguments $isccArgs -What 'ISCC'
 
-$setupExe = Join-Path $distDir "RockBandBlitzSetup-$appVersion.exe"
+$setupExe = Join-Path $distDir "$setupBaseName.exe"
 if (-not (Test-Path -LiteralPath $setupExe)) { throw "ISCC reported success but $setupExe is missing." }
 
 $setupInfo = Get-Item -LiteralPath $setupExe
@@ -476,6 +492,11 @@ $setupHash = (Get-FileHash -LiteralPath $setupExe -Algorithm SHA256).Hash.ToLowe
 Write-Host ''
 Write-Host 'Built' -ForegroundColor Green
 Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
+if ($latestBuild) {
+    Write-Host  '             named "latest": the [payload] commit pin is "latest", so this is a'
+    Write-Host  '             rolling build of the checkout rather than a release. Pin a commit to'
+    Write-Host  '             name it after the version instead.'
+}
 Write-Host ('   size    : {0}' -f (Get-SizeText $setupInfo.Length))
 Write-Host ('   sha256  : {0}' -f $setupHash)
 Write-Host ('   helper  : {0}' -f (Get-SizeText $helperSize))

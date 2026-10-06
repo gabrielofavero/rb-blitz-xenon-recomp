@@ -3,8 +3,8 @@
 A standalone Windows installer that puts a ready-to-play Rock Band Blitz build on
 a machine that has never seen this repository. The user answers four questions
 (where to install, where the game data comes from, whether they want Rock Band
-Blitz Ultimate) and gets a folder with a launchable `rb_blitz.exe` in it — no
-compiler, no CMake, no instructions to follow.
+Blitz Ultimate, which shortcuts to create) and gets a folder with a launchable
+`rb_blitz.exe` in it — no compiler, no CMake, no instructions to follow.
 
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
@@ -30,30 +30,56 @@ build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultima
 | Page | What happens |
 | --- | --- |
 | Welcome | What the installer needs (a copy of the game they own), what it refuses to do (no game files included or downloaded). |
-| Licence | The project's GPL-2.0 text. |
-| Install folder | Any writable folder; the default is under the user's own profile, so no administrator rights are needed (`/ALLUSERS` still forces a machine-wide install). |
-| Game data | Download package / extracted folder / keep what is already installed. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. |
-| Ultimate | Not at all, download the pinned release, use a zip, or use a folder. |
-| Progress | One bar, four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
-| Finish | A three-way choice — open the game, open the launcher, or do nothing — with the game preselected ([details below](#the-finish-page)). |
+| Install folder | Any writable folder; the default is under the user's own profile, so no administrator rights are needed (`/ALLUSERS` still forces a machine-wide install). Skipped when an install is already registered, because Inno Setup then knows where the game is ([details below](#a-game-that-is-already-installed)). |
+| Xbox 360 Game Files | The package / an extracted game folder / keep the data that is already installed in the install folder. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. The folder or package page follows it, and asks for nothing but the location. |
+| Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release, use a zip, use a folder, or do not install it. |
+| Shortcuts | Which of the four shortcuts to create ([details below](#shortcuts)). |
+| Ready to install | The destination, the answers, and the commit this build is, for a last look before anything is written. |
+| Progress | One bar across four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
+| Finish | A three-way choice — open the launcher, launch the game, or do nothing ([details below](#the-finish-page)). |
+
+The licence has no page: nothing in this wizard is agreed to, so the GPL-2.0 text
+is not shown on the way past. It ships with the sources, and the installer is
+built from them.
 
 ### Shortcuts
 
-The installer writes two Start-menu shortcuts and offers two desktop ones. The
-game's shortcut keeps its `--game_data_root="{app}\game"` argument, so the game
-still launches standalone; the launcher's takes no arguments and finds the game
-beside itself.
+Four shortcuts, one per `[Tasks]` entry, so the wizard's Shortcuts page is the one
+place that decides what is created and in what form a silent install can change
+it. The game's shortcut keeps its `--game_data_root="{app}\game"` argument, so the
+game still launches standalone; the launcher's takes no arguments and finds the
+game beside itself.
 
-| Where | Shortcut | Default |
-| --- | --- | --- |
-| Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | always |
-| Start menu | **Rock Band Blitz Launcher** — the settings launcher | always |
-| Desktop | **Rock Band Blitz Launcher** — the `launchericon` task | checked in the wizard; in a silent install only with `/LAUNCHERICON=1` |
-| Desktop | **Rock Band Blitz** — the `desktopicon` task | unchecked, as before |
+| Task | Where | Shortcut | Default |
+| --- | --- | --- | --- |
+| `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | checked |
+| `startmenulauncher` | Start menu | **Rock Band Blitz Launcher** — the settings launcher | checked |
+| `launchericon` | Desktop | **Rock Band Blitz Launcher** | checked in the wizard; in a silent install only with `/LAUNCHERICON=1` |
+| `desktopicon` | Desktop | **Rock Band Blitz** — the game | unchecked, as before |
 
 The names are deliberately different so a list can tell them apart, and the
 game's shortcut is never repointed at the launcher: the game has to stay runnable
 on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
+A silent install creates every checked task, which is the two Start-menu shortcuts
+(and the launcher's desktop one with `/LAUNCHERICON=1`), exactly as before the page
+existed; `/MERGETASKS=!startmenu,!startmenulauncher` (Inno Setup) takes any of them
+away.
+
+### A game that is already installed
+
+The wizard looks for the game before it shows its first page, using the Add/Remove
+Programs entry of a previous install (the AppId in `[Setup]`) for the folder and
+the version. An install that is there and the same version is offered as a
+reinstall; a lower one is an update and a higher one a downgrade, and both warn
+that saves made with the other version may not load, because the game's save
+format is not part of what the installer records. Answering No ends setup before
+it changes anything, and a silent install does not ask — it has no page to ask on
+and no way to answer, so it installs.
+
+The install folder page is skipped in that case: Inno Setup keeps the previous
+folder, so an update lands on the game rather than beside it. It is the user's
+choice to change it — the page still exists for an install that is not registered
+anywhere, and `/DIR` overrides it either way.
 
 ### The finish page
 
@@ -61,8 +87,8 @@ The last page asks what to do when the wizard closes, with the game preselected:
 
 | Choice | What it starts |
 | --- | --- |
-| **Open Rock Band Blitz** (or **Open Rock Band Blitz Ultimate** when the mod was installed) | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads the launcher's profile on its own, so it still follows the target the install left behind. |
 | **Open the launcher** | `rb_blitz_launcher.exe`, which finds the game beside itself. |
+| **Launch Rock Band Blitz** | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads the launcher's profile on its own, so it still follows the target the install left behind. It is named once rather than "… Ultimate" when the mod is installed: the install folder is the same game either way. |
 | **Do nothing** | Nothing; the wizard just closes. |
 
 The old single `Launch Rock Band Blitz` checkbox is gone: Inno Setup's `[Run]`
@@ -70,7 +96,7 @@ entries are checkboxes, not a choice, and only one of them could be the post-ins
 action. The wizard has no test harness, so this page is checked by hand rather than
 implied to be covered:
 
-1. Install with **Open Rock Band Blitz** selected — the game starts.
+1. Install with **Launch Rock Band Blitz** selected — the game starts.
 2. Install with **Open the launcher** selected — the launcher window opens.
 3. Install with **Do nothing** selected — nothing starts.
 4. `/VERYSILENT` with no `/RUNATEND` — nothing starts; `/VERYSILENT /RUNATEND=game`
@@ -138,7 +164,10 @@ That one command:
 6. refreshes the optional side wizard image;
 7. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
 
-Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`. Use
+Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, or
+`RockBandBlitzSetup-latest.exe` when the `[payload] commit` pin is `latest` — the
+repository's own pin, which is a rolling build of the checkout rather than a
+release cut from a tag, and is named so nobody mistakes one for the other. Use
 `-Preset installer-release-msvc` from a Visual Studio developer prompt, and
 `-SkipArt`, `-SkipTests`, `-SkipLauncher`, `-LauncherTarget`, `-SkipPayload`,
 `-SkipSetup`, `-IsccPath` as needed — `Get-Help .\build.ps1 -Full` documents all
@@ -255,7 +284,7 @@ One file, parsed at build time, embedded into both halves:
 
 | Section | Keys | Meaning |
 | --- | --- | --- |
-| `[installer]` | `name`, `version`, `publisher`, URLs, `default_dir_name`, `min_windows_build` | Everything the wizard's own resources need. `default_dir_name` is appended to the folder the user picks; `min_windows_build` is `10.0.17763` because the runtime and its DLLs are x86-64-v2. |
+| `[installer]` | `name`, `short_name`, `version`, `publisher`, URLs, `default_dir_name`, `min_windows_build` | Everything the wizard's own resources need. `name` titles the wizard, `short_name` is the program Add/Remove Programs lists, and `publisher` is the author rather than the project; `default_dir_name` is appended to the folder the user picks; `min_windows_build` is `10.0.17763` because the runtime and its DLLs are x86-64-v2. Values may be UTF-8 — the generated `pins.iss` is, and Inno Setup reads it as UTF-8 — so an accented name arrives intact; a byte that is not valid UTF-8 is refused at build time instead. |
 | `[payload]` | `version`, `url`, `sha256`, `size`, `commit` | `version`, `url`, `sha256` and `size` are empty in the repository: a pin that does not exist yet fails with "no payload source configured" instead of downloading nothing, and the release workflow fills it in (or overrides it with `-PayloadUrl`/`-PayloadSha256`/`-PayloadSize`). `commit` is the exception — it ships as `latest`, which `build.ps1` resolves to the newest commit of the checkout before the pins are compiled in, so that every install can tell which build it is: see "Recording which build this is". |
 | `[ultimate]` | `version`, `url`, `sha256`, `size`, repository/release URLs, `archive_prefix`, `destination_dir` | The Ultimate release the wizard offers and the helper downloads. |
 
@@ -356,6 +385,7 @@ Setup's own switches.
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
 | `/LAUNCHERICON` | `1` | Silent installs only: also create the launcher's desktop shortcut. Omitted, nothing is added to the desktop. |
+| `/MERGETASKS` | `!startmenu,!startmenulauncher` (Inno Setup) | Takes individual shortcuts away from a silent install; every checked task is created without it. |
 | `/RUNATEND` | `game` (wizard default), `launcher`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. |
 | `/DIR` | folder | Install folder (Inno Setup). |
 | `/ALLUSERS`, `/CURRENTUSER` | — | Machine-wide instead of the default per-user install (Inno Setup). |
@@ -413,14 +443,19 @@ Two properties matter for reliability:
   page is only given back when the stage ends.)
 * **Progress is a file, not a window.** The helper draws nothing: it appends to
   `--progress` and the wizard repaints the bar and the status line itself, so a
-  stage behaves the same in silent and in interactive installs.
+  stage behaves the same in silent and in interactive installs. The reports are
+  fine-grained enough to be worth watching — the game data import counts the bytes
+  of each file as they land, inside the 360 MB archive as well as between files —
+  because a bar that only moves per file would sit still for the whole import and
+  then jump to the end of it.
 
 ## Uninstall
 
 The uninstaller runs the helper once (`uninstall-cleanup`) and then removes the
-install folder. The imported game data — several hundred megabytes the user may
-well want to keep, for example to reinstall later without the disc or the package
-again — is only deleted if the user answers yes; a silent uninstall keeps it. The
+install folder. It asks one question — "Delete the imported Rock Band Blitz game
+data as well?" — and the imported data is only deleted if the user answers yes:
+several hundred megabytes the user may well want to keep, for example to reinstall
+later without the disc or the package again. A silent uninstall keeps it. The
 mod's `ultimate\` folder lives inside the game data and follows it. The launcher
 (`rb_blitz_launcher.exe`) travels in the payload and is removed with it;
 `launcher.toml`, the user's own settings, is deliberately left behind — like the

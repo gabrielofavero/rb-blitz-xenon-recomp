@@ -747,7 +747,7 @@ static void TestConfig() {
       "schema_version = 1\n"
       "\n"
       "[installer]\n"
-      "name = \"Rock Band Blitz (Xenon recomp)\"\n"
+      "name = \"Rock Band Blitz Xenon Recomp\"\n"
       "count = 42\n"
       "enabled = true\n"
       "\n"
@@ -763,7 +763,7 @@ static void TestConfig() {
   const rb_blitz::installer::TomlTable* installer = document.Find("installer");
   CHECK_TRUE(installer != nullptr);
   CHECK_FALSE(installer->is_array);
-  CHECK_STR_EQ(installer->GetString("name", "<none>"), "Rock Band Blitz (Xenon recomp)");
+  CHECK_STR_EQ(installer->GetString("name", "<none>"), "Rock Band Blitz Xenon Recomp");
   CHECK_EQ(installer->GetUnsigned("count", 0), 42u);
   CHECK_TRUE(installer->GetBool("enabled", false));
   CHECK_FALSE(installer->GetBool("missing", false));
@@ -784,7 +784,12 @@ static void TestConfig() {
   const std::string pinned_commit = ReadCommitPin(pins_text);
   CHECK_TRUE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, kStandInCommit), &pins, &error));
   CHECK_EQ(pins.schema_version, 1u);
+  // The wizard's own titles and both names the user sees come from here: `name`
+  // titles the wizard, `short_name` is the program Add/Remove Programs lists, and
+  // the publisher is the author rather than the project.
+  CHECK_STR_EQ(pins.installer.name, "Rock Band Blitz Xenon Recomp");
   CHECK_STR_EQ(pins.installer.short_name, "Rock Band Blitz");
+  CHECK_CONTAINS(pins.installer.publisher, "Gabriel F");
   CHECK_STR_EQ(pins.installer.default_dir_name, "Rock Band Blitz");
   CHECK_STR_EQ(pins.installer.min_windows_build, "10.0.17763");
   CHECK_STR_EQ(pins.ultimate.version, "2.11");

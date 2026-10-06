@@ -291,6 +291,39 @@ bool ApplyOverride(PinsFile* pins, std::string_view table_name, std::string_view
 
 // --- output ---------------------------------------------------------------
 
+// True when `text` is well-formed UTF-8, which is the only thing a define with a
+// non-ASCII byte in it may be: Inno Setup 6 reads its scripts as UTF-8, so a name
+// like "Gabriel Fávero" reaches the wizard's resources intact, while a byte that
+// is not UTF-8 reaches it as a replacement character in a version resource.
+bool IsValidUtf8(std::string_view text) {
+  std::size_t index = 0;
+  while (index < text.size()) {
+    const auto lead = static_cast<unsigned char>(text[index]);
+    std::size_t continuation = 0;
+    if (lead < 0x80) {
+      continuation = 0;
+    } else if ((lead & 0xE0) == 0xC0) {
+      continuation = 1;
+    } else if ((lead & 0xF0) == 0xE0) {
+      continuation = 2;
+    } else if ((lead & 0xF8) == 0xF0) {
+      continuation = 3;
+    } else {
+      return false;
+    }
+    if (index + continuation >= text.size()) {
+      return false;
+    }
+    for (std::size_t offset = 1; offset <= continuation; ++offset) {
+      if ((static_cast<unsigned char>(text[index + offset]) & 0xC0) != 0x80) {
+        return false;
+      }
+    }
+    index += continuation + 1;
+  }
+  return true;
+}
+
 // ISPP string literals are double quoted and escape an embedded quote by
 // doubling it. Values are single line by construction; that is checked rather
 // than assumed, because a stray newline in pins.toml would silently truncate the
@@ -300,14 +333,10 @@ bool EmitIsppString(std::ostream& out, std::string_view name, const std::string&
     Fail("ISPP define " + std::string(name) + " spans more than one line");
     return false;
   }
-  for (const char character : value) {
-    if (static_cast<unsigned char>(character) > 0x7F) {
-      // setup.iss is read as ANSI unless it carries a UTF-8 BOM; rather than
-      // depend on how the include is decoded, keep the defines ASCII and give a
-      // clear message if someone puts an accent in a name.
-      Fail("ISPP define " + std::string(name) + " is not ASCII: '" + value + "'");
-      return false;
-    }
+  if (!IsValidUtf8(value)) {
+    Fail("ISPP define " + std::string(name) + " is not valid UTF-8: '" + value +
+         "'. Inno Setup reads the defines as UTF-8, so pins.toml has to be UTF-8 too.");
+    return false;
   }
   out << "#define " << name << " \"" << ReplaceAll(value, "\"", "\"\"") << "\"\n";
   return true;
