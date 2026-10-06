@@ -14,6 +14,8 @@
 #include <string>
 #include <system_error>
 
+#include "focus_ring.h"
+
 namespace rb_blitz::launcher {
 namespace {
 
@@ -77,7 +79,8 @@ bool DrawFocusableRadio(const char* label, std::size_t index, FocusModel& ring, 
   if (focused) {
     ImGui::PopStyleColor(2);
   }
-  ring.FocusIf(index, ImGui::IsItemHovered());
+  DrawFocusOutline(focused);
+  AdoptRingOnHover(index, ring);
   if (clicked) {
     ring.SetIndex(index);
   }
@@ -85,6 +88,34 @@ bool DrawFocusableRadio(const char* label, std::size_t index, FocusModel& ring, 
     ImGui::SetScrollHereY(0.5f);
   }
   return clicked || (focused && action == NavAction::kActivate);
+}
+
+void DrawFocusOutline(bool focused) {
+  if (!focused) {
+    return;
+  }
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float font_size = ImGui::GetFontSize();
+  const float padding = focus_ring::Padding(font_size);
+  const ImVec2 min = ImGui::GetItemRectMin();
+  const ImVec2 max = ImGui::GetItemRectMax();
+  // ImGuiCol_NavCursor is the theme's own "this is what the keyboard is on" colour, so the ring
+  // follows a theme change rather than hard-coding an accent; the shape is what makes it a signal
+  // rather than a shade, which is why it is drawn at all.
+  ImGui::GetWindowDrawList()->AddRect(ImVec2(min.x - padding, min.y - padding),
+                                      ImVec2(max.x + padding, max.y + padding),
+                                      ImGui::GetColorU32(ImGuiCol_NavCursor),
+                                      focus_ring::Rounding(style.FrameRounding), 0,
+                                      focus_ring::Thickness(font_size));
+}
+
+bool PointerAdoptsFocus() {
+  const ImVec2 delta = ImGui::GetIO().MouseDelta;
+  return delta.x != 0.0f || delta.y != 0.0f;
+}
+
+void AdoptRingOnHover(std::size_t index, FocusModel& ring) {
+  ring.FocusIf(index, PointerAdoptsFocus() && ImGui::IsItemHovered());
 }
 
 ValueStyle StyleForKind(settings::Kind kind) {
@@ -97,10 +128,13 @@ bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusMode
   const std::string label(setting.label);
   const bool clicked = ImGui::Selectable(label.c_str(), focused, ImGuiSelectableFlags_None,
                                          ImVec2(label_width, 0.0f));
+  // A5: the ring is drawn as well as coloured, so the label of the focused row carries the outline
+  // even on a display where the highlight is hard to see.
+  DrawFocusOutline(focused);
   if (clicked) {
     ring.SetIndex(index);
   }
-  ring.FocusIf(index, ImGui::IsItemHovered());
+  AdoptRingOnHover(index, ring);
   // A row the ring has moved to is brought into view. Without this a tab taller than the window
   // - which both the Graphics tab and B4's profile block are - would be reachable by the wheel
   // and not by the keyboard or the pad, and A5's "complete every tab with the keyboard only"
@@ -110,7 +144,6 @@ bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusMode
   }
   return clicked;
 }
-
 void DrawReadOnlyValue(const settings::Setting& setting, float value_width,
                        std::string_view value_text) {
   switch (setting.kind) {

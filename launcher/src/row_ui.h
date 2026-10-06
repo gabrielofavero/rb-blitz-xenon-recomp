@@ -60,6 +60,26 @@ void DrawReadOnlyValue(const settings::Setting& setting, float value_width,
 bool DrawFocusableRadio(const char* label, std::size_t index, FocusModel& ring, NavAction action,
                         bool selected);
 
+// A5's second drawing primitive: the outline that says "the ring is here" without saying it in
+// colour alone. Called straight after the item was submitted, so it marks the item ImGui just
+// drew, and it draws nothing when `focused` is false. The geometry is focus_ring.h's, which is
+// where the "one rule at every display scale" claim is stated and tested.
+void DrawFocusOutline(bool focused);
+
+// The pointer is a device like any other (D6), and a device *acts*: the ring is adopted when the
+// pointer moves onto a row, which is what hovering means, and not while it merely rests over one.
+// The distinction is A5's, and it is the difference between a mouse and a mouse-shaped trap: a
+// pointer left sitting over a row used to take the ring back on every frame, so a keyboard walk
+// around a tab was dragged to that row - and a row that scrolls into place under a stationary
+// pointer moved it further. A pointer that has not moved has not chosen anything.
+bool PointerAdoptsFocus();
+
+// The whole rule in one call: the focused item is the one under the pointer, when the pointer has
+// just moved there. Every focusable item in the launcher goes through this rather than each
+// deciding for itself - row_ui, settings_edit, profile_ui, controller_tab and nav_ui all have one
+// of these lines, and one copy of the rule is the only way they can agree.
+void AdoptRingOnHover(std::size_t index, FocusModel& ring);
+
 // How a value is written back: a string setting as a quoted TOML string, everything else as a
 // bare token (src/launcher/profile.h's ValueStyle). The editor and the precedence badge both
 // need the same answer.

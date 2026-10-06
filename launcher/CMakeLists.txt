@@ -77,6 +77,9 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/general_tab.cpp
     src/install_ultimate.cpp
     src/nav.cpp
+    src/nav_bindings.cpp
+    src/nav_keys.cpp
+    src/nav_ui.cpp
     src/pad_nav.cpp
     src/pad_source.cpp
     src/path_validate.cpp
@@ -172,15 +175,20 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME launcher_launch COMMAND rb_blitz_launcher_launch_tests)
 
-    # A3's pad rules and A2's help: the deadzone, the repeat, the binding table, and the walk from
-    # a ring entry to the row the bar names. Both are dependency-free - no SDL, no ImGui, no
-    # window - which is the whole reason the pad's decisions live in pad_nav.cpp rather than in the
-    # SDL glue beside it. It needs the generated table for the same reason the launch tests do.
+    # A3's pad rules, A2's help, and A5's keys: the deadzone, the repeat, the binding table, the
+    # binding table A5 makes rebindable - with its chord precedence and its `[nav]` round trip -
+    # and the walk from a ring entry to the row the bar names. All dependency-free - no SDL, no
+    # ImGui, no window - which is the whole reason the pad's decisions live in pad_nav.cpp and the
+    # keys' in nav_bindings.cpp rather than in the glue beside them. It needs the generated table
+    # for the same reason the launch tests do.
     add_executable(rb_blitz_launcher_nav_tests
         "${CMAKE_SOURCE_DIR}/tests/launcher_pad_nav_tests.cpp"
         "${CMAKE_SOURCE_DIR}/tests/launcher_help_tests.cpp"
+        "${CMAKE_SOURCE_DIR}/tests/launcher_keys_tests.cpp"
         src/pad_nav.cpp
+        src/nav_bindings.cpp
         src/schema_view.cpp
+        "${CMAKE_SOURCE_DIR}/src/launcher/profile.cpp"
     )
     target_include_directories(rb_blitz_launcher_nav_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/src"

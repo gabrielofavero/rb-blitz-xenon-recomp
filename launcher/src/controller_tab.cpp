@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <string>
 #include <utility>
+
+#include "row_ui.h"
+
 namespace rb_blitz::launcher {
 namespace {
 
@@ -256,12 +259,14 @@ bool ControllerTab::Item(std::size_t index, FocusModel& ring, NavAction action,
   if (in_ring) {
     ImGui::PopStyleColor();
   }
+  // A5: the outline as well as the colour, so the ring is legible without relying on the shade.
+  DrawFocusOutline(in_ring);
   if (!enabled) {
     ImGui::EndDisabled();
   }
   // A pointer is a device like any other (D6): hovering adopts the ring, so the bottom bar
   // describes the button the mouse is over rather than the last one the keyboard left behind.
-  ring.FocusIf(index, ImGui::IsItemHovered());
+  AdoptRingOnHover(index, ring);
   if (in_ring && !ImGui::IsItemVisible()) {
     ImGui::SetScrollHereY(0.5f);
   }

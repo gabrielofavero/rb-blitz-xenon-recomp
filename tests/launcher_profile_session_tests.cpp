@@ -285,6 +285,77 @@ void TestSaveWithNothingChanged(Scratch& scratch) {
   CHECK_CONTAINS(nowhere_outcome.error, "nowhere to save");
 }
 
+void TestSafeMode(Scratch& scratch) {
+  BeginCase("A5: --safe-mode starts on the defaults, and replaces a file it could not read");
+
+  const fs::path install = scratch.Make("safe-install");
+  const fs::path app_data = scratch.Make("safe-appdata");
+  const fs::path profile_path = app_data / "rb_blitz" / kProfileFileName;
+  WriteText(profile_path, kHandEdited);
+  const ProfileLoadResult loaded = LoadProfile(profile_path);
+  CHECK_TRUE(loaded.usable());
+
+  // A file that reads: safe mode changes nothing about what may be written, because the switch is
+  // about the launcher's own behaviour (main() takes the keys and the window size from the
+  // defaults) and not about the file.
+  ProfileSession good = MakeSession(install, app_data, loaded);
+  CHECK_TRUE(good.SafeModeNote().empty());
+  good.SetSafeMode(true);
+  CHECK_TRUE(good.CanSave());
+  CHECK_FALSE(good.SafeModeNote().empty());
+  CHECK_TRUE(good.Refusal().empty());
+  // The one write safe mode skips is the window size: the window opened at the default size, so the
+  // size it ends at is not something the user chose, and a switch for reading a profile must not be
+  // the thing that writes to it.
+  const SaveOutcome geometry = good.SaveWindowGeometry(1600, 1000);
+  CHECK_TRUE(geometry.ok);
+  CHECK_FALSE(geometry.wrote);
+  CHECK_STR_EQ(ReadText(profile_path), kHandEdited);
+  // A save the user asks for still works, and says so.
+  good.profile().SetString("save_note", "C:\\saves");
+  const SaveOutcome saved = good.Save();
+  CHECK_TRUE(saved.ok);
+  CHECK_TRUE(saved.wrote);
+  CHECK_CONTAINS(ReadText(profile_path), "save_note = \"C:\\\\saves\"");
+
+  BeginCase("A5: a file that did not parse can be replaced, and only in safe mode");
+
+  // The file has to be the one the session resolves to, or the two halves are about different
+  // files: `path_` comes from the inputs, and a load names its own file.
+  const fs::path broken_app_data = scratch.Make("safe-broken-appdata");
+  const fs::path broken_path = broken_app_data / "rb_blitz" / kProfileFileName;
+  WriteText(broken_path, "schema_version = \"one\"\n");
+  const ProfileLoadResult broken = LoadProfile(broken_path);
+
+  // Without the switch, D2's rule stands: nothing is written over a file the launcher could not
+  // read, and the reason names it.
+  ProfileSession strict = MakeSession(install, broken_app_data, broken);
+  CHECK_FALSE(strict.CanSave());
+  CHECK_FALSE(strict.Save().ok);
+  CHECK_STR_EQ(ReadText(broken_path), "schema_version = \"one\"\n");
+
+  // With it, Save is the way out for a user who has no copy to import: what is written is the
+  // compiled defaults plus whatever is on screen, and the sentence on the bottom bar says so
+  // before the button is pressed.
+  ProfileSession replaced = MakeSession(install, broken_app_data, broken);
+  replaced.SetSafeMode(true);
+  CHECK_TRUE(replaced.CanSave());
+  CHECK_CONTAINS(replaced.SafeModeNote(), "replace");
+  // The launcher starts on the defaults, so there is something to save the moment safe mode is on:
+  // an empty file is not what the model says.
+  CHECK_TRUE(replaced.Dirty());
+  const SaveOutcome outcome = replaced.Save();
+  CHECK_TRUE(outcome.ok);
+  CHECK_TRUE(outcome.wrote);
+  const std::string text = ReadText(broken_path);
+  CHECK_TRUE(text.find("schema_version = 1") == 0);
+  CHECK_FALSE(text.find("schema_version = \"one\"") != std::string::npos);
+  CHECK_TRUE(LoadProfile(broken_path).usable());
+  // ...and the geometry stays out of it, even on the way out of a session that just wrote.
+  const SaveOutcome after = replaced.SaveWindowGeometry(1600, 1000);
+  CHECK_FALSE(after.wrote);
+}
+
 void TestWindowGeometry(Scratch& scratch) {
   BeginCase("A1/B4: the window size is kept on the way out, and only when it changed");
 
@@ -902,6 +973,7 @@ int main() {
   Scratch scratch;
   TestRoundTrip(scratch);
   TestSaveWithNothingChanged(scratch);
+  TestSafeMode(scratch);
   TestWindowGeometry(scratch);
   TestWindowGeometryUnwritable(scratch);
   TestFreshProfile(scratch);

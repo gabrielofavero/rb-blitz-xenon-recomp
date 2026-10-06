@@ -79,8 +79,27 @@ ProfileSession::ProfileSession(ProfilePathInputs inputs, ProfileLoadResult load)
 }
 
 std::string ProfileSession::Refusal() const {
-  // LoadProfile already names the path and the line, so this adds nothing to it.
+  // LoadProfile already names the path and the line, so this adds nothing to it. The one refusal
+  // that is the launcher's own rather than the file's is safe mode's window size, which is not a
+  // refusal to save the profile at all: it is the one write safe mode skips.
   return load_.usable() ? std::string{} : load_.error;
+}
+
+void ProfileSession::SetSafeMode(bool on) {
+  safe_mode_ = on;
+  // Set once, when safe mode is turned on: a file that did not parse can be replaced by a save,
+  // and a file that did parse cannot (there is nothing to recover from).
+  replacing_ = on && !load_.usable();
+}
+
+std::string ProfileSession::SafeModeNote() const {
+  if (!safe_mode_) {
+    return {};
+  }
+  if (replacing_) {
+    return "Safe mode: the settings file could not be read, and Save will replace it.";
+  }
+  return "Safe mode: the launcher's own keys and window size are the defaults, not the file's.";
 }
 
 std::string OverrideNoteText(std::string_view launcher_value, std::string_view game_value) {
@@ -166,6 +185,12 @@ SaveOutcome ProfileSession::Save() {
 
 SaveOutcome ProfileSession::SaveWindowGeometry(int width, int height) {
   SaveOutcome outcome;
+  if (safe_mode_) {
+    // The window opened at the default size (main()), so the size it ends at is not something the
+    // user chose - and a switch for reading a profile the launcher cannot use must not be the
+    // thing that writes to it. Nothing to do is not a failure.
+    return outcome;
+  }
   bool changed = false;
   if (width > 0 && width != saved_.window_width) {
     saved_.window_width = width;
@@ -267,6 +292,11 @@ ResetPlan ProfileSession::WhatResetWouldRemove() const {
   if (!profile.remap.empty()) {
     plan.launch.push_back("every button binding, back to the pad as it came");
   }
+  // ...and the launcher's own keys are one too (A5): a reset that left the ring bound to a key
+  // the user was trying to get rid of would be the same mistake.
+  if (!profile.nav.empty()) {
+    plan.launch.push_back("every launcher key binding, back to the keys it ships with");
+  }
   return plan;
 }
 
@@ -282,6 +312,7 @@ void ProfileSession::ResetToDefaults() {
   // Every recorded setting goes, which is what makes the next save drop every `[settings]` key.
   profile.settings.clear();
   profile.remap.clear();
+  profile.nav.clear();
 }
 
 ProfileSession::LocationOutcome ProfileSession::SetSettingsDir(const fs::path& dir) {

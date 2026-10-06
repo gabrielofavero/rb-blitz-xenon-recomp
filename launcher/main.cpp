@@ -131,6 +131,18 @@ struct Options {
   // virtual_pad.h). It is A3's evidence hook: a pad plugging in mid-session, moving the ring and
   // being unplugged again, on a machine with no controller attached to it.
   std::string test_pad_script;
+  // --safe-mode (A5) starts the launcher on the compiled defaults for its *own* behaviour: the
+  // keys the ring reads and the size the window opens at. Those two are the only things a profile
+  // can set that can leave the window unusable, so they are what the switch takes away - and the
+  // file itself is still read and still written, because a launcher that could not save would
+  // leave a user who has just reset the keys unable to keep the fix.
+  bool safe_mode = false;
+  // --ui-scale=<factor> (A5) overrides the display's content scale, which is normally what the
+  // window and the whole UI are sized by. It exists twice over: as the accessibility answer for a
+  // display whose scale the user does not want to change, and as the only way a build machine can
+  // take a picture at a scale its monitor is not - which is how E2 checks the focus ring and the
+  // bar at 100%, 150%, 200% and 300% without four monitors.
+  std::string ui_scale_text;
 };
 
 Options ParseOptions(int argc, char** argv) {
@@ -145,6 +157,7 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kPrintCommandPrefix = "--print-command=";
   constexpr std::string_view kFocusLogPrefix = "--focus-log=";
   constexpr std::string_view kTestPadPrefix = "--test-pad=";
+  constexpr std::string_view kUiScalePrefix = "--ui-scale=";
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--dump-layout") {
@@ -164,6 +177,11 @@ Options ParseOptions(int argc, char** argv) {
     } else if (argument.size() > kTestPadPrefix.size() &&
                argument.substr(0, kTestPadPrefix.size()) == kTestPadPrefix) {
       options.test_pad_script = std::string(argument.substr(kTestPadPrefix.size()));
+    } else if (argument.size() > kUiScalePrefix.size() &&
+               argument.substr(0, kUiScalePrefix.size()) == kUiScalePrefix) {
+      options.ui_scale_text = std::string(argument.substr(kUiScalePrefix.size()));
+    } else if (argument == "--safe-mode") {
+      options.safe_mode = true;
     } else if (argument.size() > kFocusLogPrefix.size() &&
                argument.substr(0, kFocusLogPrefix.size()) == kFocusLogPrefix) {
       options.focus_log_path = std::string(argument.substr(kFocusLogPrefix.size()));
@@ -204,8 +222,7 @@ Options ParseOptions(int argc, char** argv) {
   return options;
 }
 
-int Emit(const std::string& text, const std::string& path, int code) {
-  if (path.empty()) {
+int Emit(const std::string& text, const std::string& path, int code) {  if (path.empty()) {
     std::fputs(text.c_str(), stdout);
     return code;
   }
@@ -239,7 +256,11 @@ rb_blitz::launcher::ProfileSession MakeDumpSession(const Options& options) {
   if (!profile_path.empty()) {
     load = rb_blitz::launcher::LoadProfile(profile_path);
   }
-  return rb_blitz::launcher::ProfileSession(std::move(inputs), std::move(load));
+  rb_blitz::launcher::ProfileSession session(std::move(inputs), std::move(load));
+  // A5: a report has to describe the session the launcher would really have, and --safe-mode
+  // changes what may be written - so it is set here too rather than only in the windowed path.
+  session.SetSafeMode(options.safe_mode);
+  return session;
 }
 
 // The General tab, decided without a window.
@@ -284,6 +305,12 @@ int DumpProfile(const Options& options) {
   }
   text += "writable       : ";
   text += session.CanSave() ? "yes\n" : ("no, " + session.Refusal() + "\n");
+  // A5: safe mode is a fact about the *session* rather than about the file, and a report that
+  // left it out would describe a launcher nobody is running. The second line is the one case
+  // where safe mode changes what a save does.
+  if (const std::string note = session.SafeModeNote(); !note.empty()) {
+    text += "safe mode      : yes, " + note + "\n";
+  }
   text += "dirty          : ";
   text += session.Dirty() ? "yes, a save would write\n" : "no, a save would not touch the file\n";
   text += rb_blitz::launcher::DescribePrecedence(session);
@@ -315,10 +342,30 @@ int DumpPrefill(const Options& options) {
   return Emit(rb_blitz::launcher::DescribePrefill(plan), options.dump_prefill_path, 0);
 }
 
+// The scale the whole UI is drawn at: the display's content scale, or A5's --ui-scale override
+// when it is given and readable. The clamp is not fussiness - a scale of zero or a negative one
+// would divide the stored window size by nothing, and 8x would ask for a window no display has -
+// so a number outside the range is treated as no override at all and said out loud on stderr.
+float UiScaleFrom(const std::string& text, float display_scale) {
+  const float fallback = display_scale > 0.0f ? display_scale : 1.0f;
+  if (text.empty()) {
+    return fallback;
+  }
+  const std::string owned(text);
+  char* end = nullptr;
+  const float wanted = std::strtof(owned.c_str(), &end);
+  if (end == owned.c_str() || !(wanted >= 0.5f && wanted <= 4.0f)) {
+    std::fprintf(stderr, "--ui-scale: '%s' is not a scale between 0.5 and 4, using %.2f\n",
+                 text.c_str(), static_cast<double>(fallback));
+    return fallback;
+  }
+  return wanted;
+}
+
 // What the launcher made of the display: the work area it clamps to, the content scale it
 // scales by, the window size it would open at, and the face it loaded. Headless, because a DPI
 // report that needs a screenshot cannot be checked on a build machine.
-int DumpDisplay(const std::string& path) {
+int DumpDisplay(const Options& options) {
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
@@ -327,8 +374,7 @@ int DumpDisplay(const std::string& path) {
   SDL_Rect bounds{};
   SDL_GetDisplayUsableBounds(display, &bounds);
   const float content_scale = SDL_GetDisplayContentScale(display);
-
-  const float scale = content_scale > 0.0f ? content_scale : 1.0f;
+  const float scale = UiScaleFrom(options.ui_scale_text, content_scale);
   const auto to_units = [scale](int points) {
     return static_cast<int>(std::lround(points * scale));
   };
@@ -346,6 +392,8 @@ int DumpDisplay(const std::string& path) {
   text += "usable bounds  : " + std::to_string(bounds.w) + "x" + std::to_string(bounds.h) + "\n";
   text += "content scale  : " + std::to_string(content_scale) + "\n";
   text += "ui scale       : " + std::to_string(scale) + "\n";
+  text += "scale source   : ";
+  text += options.ui_scale_text.empty() ? "the display's content scale\n" : "--ui-scale\n";
   text += "default points : " + std::to_string(kDefaultWidth) + "x" +
           std::to_string(kDefaultHeight) + "\n";
   text += "opening window : " + std::to_string(want_width) + "x" + std::to_string(want_height) +
@@ -355,7 +403,7 @@ int DumpDisplay(const std::string& path) {
 
   ImGui::DestroyContext();
   SDL_Quit();
-  return Emit(text, path, 0);
+  return Emit(text, options.dump_display_path, 0);
 }
 
 // Where the running executable lives. SDL_GetBasePath returns SDL's own cached buffer
@@ -490,7 +538,7 @@ int main(int argc, char** argv) {
     return DumpPrefill(options);
   }
   if (options.dump_display) {
-    return DumpDisplay(options.dump_display_path);
+    return DumpDisplay(options);
   }
   if (options.print_command) {
     return PrintCommand(options);
@@ -507,6 +555,7 @@ int main(int argc, char** argv) {
   rb_blitz::launcher::ShellEnvironment shell_environment;
   shell_environment.gamepads = !options.no_gamepad;
   shell_environment.focus_log_path = options.focus_log_path;
+  shell_environment.safe_mode = options.safe_mode;
   rb_blitz::launcher::VirtualPad test_pad;
   if (!options.test_pad_script.empty() && !test_pad.Start(options.test_pad_script, nullptr)) {
     std::fprintf(stderr, "--test-pad: '%s' is not a script this build understands\n",
@@ -533,10 +582,20 @@ int main(int argc, char** argv) {
     }
   }
   rb_blitz::launcher::ProfileSession session(std::move(path_inputs), std::move(load));
+  // A5's --safe-mode, set before anything reads the session's own behaviour: what it changes is
+  // what a *save* may do (a file that did not parse may be replaced), and the two things below
+  // that are the launcher's own and are therefore taken from the defaults instead of the file.
+  session.SetSafeMode(options.safe_mode);
+  if (options.safe_mode) {
+    std::fprintf(stderr, "safe mode: %s\n", session.SafeModeNote().c_str());
+  }
   // A1's window size comes from the profile as it was loaded; B4's block edits the session's own
   // copy, and the geometry on the way out is written from what the file last had (see below).
-  const int stored_width = session.profile().window_width;
-  const int stored_height = session.profile().window_height;
+  // In safe mode the stored size is ignored along with the keys: it is one of the two things a
+  // profile can set that can leave the window unusable, and the default size is what the switch
+  // promises.
+  const int stored_width = options.safe_mode ? 0 : session.profile().window_width;
+  const int stored_height = options.safe_mode ? 0 : session.profile().window_height;
 
   // Where the game's data is: the override the game itself takes, then the installer's layout
   // next to the launcher (B1). The General tab reads the Ultimate state from it.
@@ -556,7 +615,10 @@ int main(int argc, char** argv) {
   }
 
   const float display_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-  const float ui_scale = display_scale > 0.0f ? display_scale : 1.0f;
+  // A5's --ui-scale, which is what makes "the same ring at every DPI step" measurable on one
+  // machine: the layout below is scaled by this number, so a harness can capture at 1.0 and at 2.0
+  // and compare the two in *points* rather than in pixels.
+  const float ui_scale = UiScaleFrom(options.ui_scale_text, display_scale);
 
   // SDL sizes a window in the same units the UI is measured in, and the UI is scaled by the
   // display's content scale, so a size kept in points is multiplied by it here. That is what

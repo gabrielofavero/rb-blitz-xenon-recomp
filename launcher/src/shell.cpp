@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "row_ui.h"
+#include "nav_keys.h"
 #include "settings_edit.h"
 
 namespace rb_blitz::launcher {
@@ -43,10 +44,14 @@ std::size_t SchemaFocusEntries(const TabLayout& tab) {
   return entries;
 }
 
-// The keyboard's mapping (A1). ImGui's own navigation is deliberately off, so every key the
-// launcher binds is translated here and nowhere else.
+// The keyboard's mapping (A1, A5). ImGui's own navigation is deliberately off, so every key the
+// launcher reads is decided here and nowhere else, and *which* keys those are is the profile's
+// `[nav]` table rather than a list in this file: nav_bindings owns the rules, nav_keys the
+// translation, and this holds the one reference that makes the pair a device.
 class KeyboardNavSource : public NavSource {
  public:
+  explicit KeyboardNavSource(const nav_bindings::Table& keys) : keys_(keys) {}
+
   NavAction Poll() override {
     // While a text field is being edited the ring must not steal the keys the caret needs -
     // ImGui's navigation is off, so nothing else would stop it - and Escape belongs to the
@@ -55,41 +60,13 @@ class KeyboardNavSource : public NavSource {
     if (ImGui::GetIO().WantTextInput) {
       return NavAction::kNone;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_B, false)) {
-      return NavAction::kCancel;
-    }
-    const bool shift = ImGui::GetIO().KeyShift;
-    // A held arrow repeats; a held Tab does not, because Tab is also the focus-move key.
-    if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
-      return shift ? NavAction::kPrevious : NavAction::kNext;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
-      return NavAction::kNext;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
-      return NavAction::kPrevious;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) {
-      return NavAction::kFirst;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_End, false)) {
-      return NavAction::kLast;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) ||
-        ImGui::IsKeyPressed(ImGuiKey_PageDown, false)) {
-      return NavAction::kNextTab;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true) ||
-        ImGui::IsKeyPressed(ImGuiKey_PageUp, false)) {
-      return NavAction::kPreviousTab;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
-        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
-        ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
-      return NavAction::kActivate;
-    }
-    return NavAction::kNone;
+    return nav_bindings::Resolve(keys_, nav_keys::ReadPresses());
   }
+
+ private:
+  // The shell's table, not a copy: the panel can rebind a key mid-session, and the next frame's
+  // press has to be read with what the profile says now.
+  const nav_bindings::Table& keys_;
 };
 
 // The pad is a device like any other (A3, D6): what launcher/src/pad_source.h produces is the
@@ -145,7 +122,9 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
       general_(roots_),
       controller_(pads_),
       layout_(BuildLayout(environment)),
-      keyboard_(std::make_unique<KeyboardNavSource>()) {
+      keyboard_(std::make_unique<KeyboardNavSource>(keys_)) {
+  safe_mode_ = shell_environment.safe_mode;
+  RefreshKeys();
   if (shell_environment.gamepads) {
     gamepad_ = std::make_unique<GamepadNavSource>(pads_);
   }
@@ -174,6 +153,16 @@ settings::Tab Shell::CurrentTab() const {
 
 std::size_t Shell::FocusedRow() const {
   return tab_ < rings_.size() ? rings_[tab_].Index() : 0;
+}
+
+void Shell::RefreshKeys() {
+  if (safe_mode_) {
+    // --safe-mode: the defaults, whatever the file says, and they stay the defaults for the whole
+    // session even if the panel assigns something - the panel says so, and the assignment is what
+    // Save writes for the next start.
+    return;
+  }
+  keys_ = nav_bindings::Table::FromRows(session_.profile().nav);
 }
 
 void Shell::RequestTab(int delta) {
@@ -228,6 +217,9 @@ bool Shell::Frame() {
   // plugged in this frame is usable in it: the ring's source and C5's capture both read the
   // registry rather than opening anything themselves.
   pads_.Refresh();
+  // A5: the profile's own keys, before the frame's keys are read, so a binding assigned in the
+  // panel last frame is the one this frame answers to.
+  RefreshKeys();
 
   // One action per frame from whichever device produced it (D6). The keyboard answers first
   // because it is the one a user can always reach - and because a pad whose stick is resting
@@ -255,26 +247,46 @@ bool Shell::Frame() {
     // or B7's failed-start detail - and only means "leave the launcher" when nothing modal is on
     // screen (A1). A listen that is running owns Escape too: cancelling it is what a user
     // pressing Escape while counting down means, and quitting the launcher instead would be a
-    // trap.
-    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_) {
+    // trap. A5's key capture is the third owner, for the same reason.
+    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_ &&
+        !nav_keys_.Capturing()) {
       return false;
     }
   }
-  if (action == NavAction::kLaunch) {
-    // Start, on a pad (D6): the launch the bottom bar's button offers, without the mouse. It is
-    // refused in exactly the cases the button is disabled in, and it never reaches the tabs - a
-    // row has no "launch me" of its own.
-    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_ &&
-        !game_.Running()) {
-      LaunchGame();
+  // Whether a modal, a listen or a capture owns the keyboard this frame. A modal owns it because
+  // its own tab has to keep being drawn for its state machine to keep running, and walking away
+  // would leave the helper installing with nothing watching; a listen and a capture own it because
+  // the key being pressed *is* the input being captured.
+  const bool owns_keyboard =
+      general_.ModalOpen() || controller_.Listening() || launch_modal_open_ || nav_keys_.Capturing();
+
+  if (nav_bindings::IsBarAction(action)) {
+    // A5: the four actions the bottom bar's buttons and B4's badge own, bound to keys so that a
+    // keyboard alone can start the game, save, read the command line and take the value the game's
+    // own file decides. Refused in exactly the cases the buttons are, and never passed to a tab - no
+    // row has a "save me" of its own.
+    if (!owns_keyboard) {
+      switch (action) {
+        case NavAction::kLaunch:
+          if (!game_.Running()) {
+            LaunchGame();
+          }
+          break;
+        case NavAction::kSave:
+          SaveProfile();
+          break;
+        case NavAction::kCopyCommand:
+          CopyCommandLine();
+          break;
+        case NavAction::kCopyEffectiveValue:
+          CopyEffectiveValue();
+          break;
+        default:
+          break;
+      }
     }
     action = NavAction::kNone;
   }
-  // A modal owns the launcher while it is up, so the tab cannot be changed behind it: its own
-  // tab has to keep being drawn for its state machine to keep running, and walking away from it
-  // would leave the helper installing with nothing watching. A listen needs the same handling
-  // for the same reason - its countdown only advances while its tab is on screen.
-  const bool owns_keyboard = general_.ModalOpen() || controller_.Listening() || launch_modal_open_;
   if (owns_keyboard &&
       (action == NavAction::kNextTab || action == NavAction::kPreviousTab)) {
     action = NavAction::kNone;
@@ -284,6 +296,12 @@ bool Shell::Frame() {
     // While a listen is running the key being pressed is the *input being captured*, not a
     // command: Space has to assign Space rather than press whatever the ring happens to be on.
     // Escape still cancels the listen, and clicking is what the ring's own button is for.
+    action = NavAction::kNone;
+  }
+  if (nav_keys_.Capturing() && action != NavAction::kCancel) {
+    // The same rule for A5's capture, and the one place it differs from a listen: everything but
+    // Escape is dropped here rather than only the activation, because the capture reads the key
+    // itself and a bound key pressed to be captured must not also move the ring behind it.
     action = NavAction::kNone;
   }
   ApplyAction(action);
@@ -335,7 +353,7 @@ bool Shell::Frame() {
       // draws and the count its ring was sized for are the same arithmetic in one place
       // (SchemaFocusEntries) rather than two.
       if (layout_[tab_].tab == settings::Tab::kGeneral) {
-        general_.Draw(layout_[tab_], rings_[tab_], session_, action_);
+        general_.Draw(layout_[tab_], rings_[tab_], session_, action_, nav_keys_, safe_mode_);
       } else if (layout_[tab_].tab == settings::Tab::kController) {
         DrawTab(layout_[tab_], rings_[tab_]);
         controller_.Draw(SchemaFocusEntries(layout_[tab_]), rings_[tab_], session_, action_);
@@ -369,6 +387,12 @@ Shell::StatusLine Shell::CurrentStatus() const {
   if (const std::string refusal = session_.Refusal(); !session_.CanSave() && !refusal.empty()) {
     line.text = refusal;
     line.error = true;
+    return line;
+  }
+  // A5: safe mode says what it did, before anything else the file might have to say - the whole
+  // point of the switch is that the window is not the window the file asked for.
+  if (const std::string note = session_.SafeModeNote(); !note.empty()) {
+    line.text = note;
     return line;
   }
   if (session_.Dirty()) {
@@ -430,22 +454,14 @@ bool Shell::DrawBottomBar() {
   }
   ImGui::SameLine();
   if (ImGui::Button(labels[1])) {
-    save_error_.clear();
-    const SaveOutcome outcome = session_.Save();
-    if (!outcome.ok) {
-      save_note_.clear();
-      save_error_ = "Cannot save: " + outcome.error;
-    } else {
-      save_note_ = outcome.wrote ? "Saved" : "Nothing to save: the profile already matches";
-    }
+    SaveProfile();
   }
   ImGui::SameLine();
   // B7: the exact command line, always available - a value that did not apply is the other bug
   // report this answers, and what the launcher *would* run is part of the diagnosis even when
   // the command is not ok.
   if (ImGui::Button(labels[2])) {
-    ImGui::SetClipboardText(FormatLaunchCommand(CurrentLaunchCommand()).c_str());
-    save_note_ = "Command line copied";
+    CopyCommandLine();
   }
   ImGui::SameLine();
   // A second copy of the title writing the same save folder is not something to discover by
@@ -505,12 +521,19 @@ Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
   if (const settings::Setting* setting = SettingForEntry(tab, entry)) {
     return HelpEntry{FlattenHelpText(setting->tooltip), RowActionVerb(*setting)};
   }
-  // What is left is the block a tab draws after its schema rows - B4's panel, D16's mapping table
-  // - whose sentences only those blocks know, so they are asked rather than copied here.
+  // What is left is the block a tab draws after its schema rows - B4's panel and A5's launcher
+  // keys on General, D16's mapping table on Controller - whose sentences only those blocks know,
+  // so they are asked rather than copied here.
   const std::size_t schema_entries = SchemaFocusEntries(tab);
   const std::size_t local = entry >= schema_entries ? entry - schema_entries : 0;
   switch (tab.tab) {
     case settings::Tab::kGeneral:
+      // A5's block is the second one on this tab, and it starts where B4's ends: the two counts are
+      // the same arithmetic the tab draws with, which is the only reason the bar can name the item
+      // the user is looking at.
+      if (local >= ProfilePanel::kRowCount) {
+        return HelpEntry{NavKeysPanel::HelpText(local - ProfilePanel::kRowCount), "Activate"};
+      }
       return HelpEntry{ProfilePanel::HelpText(local), "Activate"};
     case settings::Tab::kController:
       return HelpEntry{ControllerTab::HelpText(local), "Activate"};
@@ -523,16 +546,40 @@ Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
 std::string Shell::HintLine(const HelpEntry& help) const {
   const bool pad = device_ == InputDevice::kGamepad && gamepad_ != nullptr;
   const PadButtonNames names = pad ? gamepad_->names() : PadButtonNames{};
+  // A5: on a keyboard the hints name the keys that are *bound*, not the ones that were bound when
+  // this line was written - which is also what makes the line honest about a binding the user has
+  // changed: it says what to press, or (for an action with no key at all) says nothing.
+  const auto keyboard_key = [this](NavAction action) -> std::string {
+    const std::vector<nav_bindings::Trigger>& triggers = keys_.Triggers(action);
+    return triggers.empty() ? std::string{} : nav_bindings::TriggerLabel(triggers.front());
+  };
   std::vector<std::string> parts;
   if (!help.verb.empty()) {
-    parts.push_back(std::string(pad ? names.confirm : "Enter") + " " + std::string(help.verb));
+    const std::string key = pad ? std::string(names.confirm) : keyboard_key(NavAction::kActivate);
+    if (!key.empty()) {
+      parts.push_back(key + " " + std::string(help.verb));
+    }
   }
-  parts.push_back(std::string(pad ? names.cancel : "Esc") + " Quit");
+  if (const std::string quit = pad ? std::string(names.cancel) : keyboard_key(NavAction::kCancel);
+      !quit.empty()) {
+    parts.push_back(quit + " Quit");
+  }
   parts.push_back(pad ? std::string(names.shoulder_left) + "/" + std::string(names.shoulder_right) +
                             " Switch tab"
-                      : std::string("Tab Switch tab"));
+                      : keyboard_key(NavAction::kNextTab) + " Switch tab");
   if (pad) {
     parts.push_back(std::string(names.start) + " Launch");
+  }
+  // B4's badge, when the focused row carries one: the button is mouse-only, and this is where a
+  // keyboard user learns which key does the same thing (A5).
+  if (const settings::Setting* setting = FocusedSetting(); !pad && setting != nullptr) {
+    const std::string_view value = LauncherValueText(session_, *setting);
+    if (session_.OverrideFor(setting->key, value, setting->default_text).overridden) {
+      const std::string key = keyboard_key(NavAction::kCopyEffectiveValue);
+      if (!key.empty()) {
+        parts.push_back(key + " Copy the game's value");
+      }
+    }
   }
 
   // Composed here and cut from the end if the window is too narrow for all of it: a hint that has
@@ -592,6 +639,52 @@ void Shell::LaunchGame() {
   save_note_ = "Started " + command.executable.filename().string();
 }
 
+void Shell::SaveProfile() {
+  save_error_.clear();
+  const SaveOutcome outcome = session_.Save();
+  if (!outcome.ok) {
+    save_note_.clear();
+    save_error_ = "Cannot save: " + outcome.error;
+    return;
+  }
+  save_note_ = outcome.wrote ? "Saved" : "Nothing to save: the profile already matches";
+}
+
+void Shell::CopyCommandLine() {
+  ImGui::SetClipboardText(FormatLaunchCommand(CurrentLaunchCommand()).c_str());
+  save_note_ = "Command line copied";
+}
+
+const settings::Setting* Shell::FocusedSetting() const {
+  if (tab_ >= layout_.size() || rings_[tab_].Empty()) {
+    return nullptr;
+  }
+  return SettingForEntry(layout_[tab_], rings_[tab_].Index());
+}
+
+void Shell::CopyEffectiveValue() {
+  // B4's one-action badge, reachable from the keyboard (A5). It works on the row the ring is on,
+  // so it says what it did *and* says when there was nothing to do - a key that silently did
+  // nothing is worse than one that explains itself.
+  const settings::Setting* setting = FocusedSetting();
+  if (setting == nullptr) {
+    save_note_ = "No row to take a value from: move the ring onto a setting first";
+    return;
+  }
+  const std::string_view launcher_value = LauncherValueText(session_, *setting);
+  const RowOverride over =
+      session_.OverrideFor(setting->key, launcher_value, setting->default_text);
+  if (!over.overridden) {
+    save_note_ = std::string(setting->label) +
+                 " is not overridden: the game's own rb_blitz.toml does not set it";
+    return;
+  }
+  session_.SetSetting(setting->key, over.game_value, setting->default_text,
+                      StyleForKind(setting->kind));
+  save_note_ = std::string(setting->label) + " is now " + over.game_value +
+               ", the value the game will use (not saved yet)";
+}
+
 void Shell::DrawLaunchModal(NavAction action) {
   if (launch_popup_requested_) {
     launch_popup_requested_ = false;
@@ -644,9 +737,18 @@ void Shell::LogFocus() {
       text += setting->key;
     } else {
       // The block a tab draws after its rows: named rather than numbered, because "which button
-      // of the mapping table is that?" is the question the trace is meant to answer.
-      text += tab == settings::Tab::kGeneral ? " row=settings-file-block"
-                                             : " row=button-mapping-block";
+      // of the mapping table is that?" is the question the trace is meant to answer. The General
+      // tab has two of them now, and A5's block names the job its row does - "next:assign" - which
+      // is what a reader and an assertion both need and an entry index cannot give.
+      const std::size_t schema_entries = SchemaFocusEntries(layout_[tab_]);
+      if (tab == settings::Tab::kGeneral &&
+          entry >= schema_entries + ProfilePanel::kRowCount) {
+        text += " row=";
+        text += NavKeysPanel::RowName(entry - schema_entries - ProfilePanel::kRowCount);
+      } else {
+        text += tab == settings::Tab::kGeneral ? " row=settings-file-block"
+                                               : " row=button-mapping-block";
+      }
     }
   }  const HelpEntry help = HelpForEntry(entry);
   if (!help.verb.empty()) {

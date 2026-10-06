@@ -469,6 +469,97 @@ void TestErase() {
   CHECK_STR_EQ(again.profile.settings[0].key, "ultimate_mode");
 }
 
+void TestNavTable() {
+  BeginCase("the [nav] table A5 reads, writes and leaves alone");
+  Scratch scratch;
+  const fs::path path = scratch.base / "nav.toml";
+  // Every structural key is present, so a save with no edits has nothing to add and has to leave
+  // the file byte for byte as it was - comments, spacing and a row this build does not know
+  // included. That is the guarantee `[settings]` and `[remap]` already make, and the reason the
+  // rows are modelled as a whole rather than merged in.
+  WriteFile(path, MakeText({
+                       "schema_version = 1",
+                       "[launcher]",
+                       "version = 1",
+                       "portable = false",
+                       "[window]",
+                       "width = 1280",
+                       "height = 840",
+                       "[launch]",
+                       "target = \"common\"",
+                       "game_dir = \"\"",
+                       "user_data_dir = \"\"",
+                       "dlc_dir = \"\"",
+                       "[nav]",
+                       "next = \"J\"   # the key I actually reach for",
+                       "cancel = \"\"",
+                       "from_a_newer_launcher = \"Hyper+Q\"",
+                       "[settings]",
+                       "video_mode_width = 1280",
+                   }));
+
+  ProfileLoadResult loaded = LoadProfile(path);
+  CHECK_TRUE(loaded.status == ProfileStatus::kOk);
+  CHECK_EQ(loaded.profile.nav.size(), 3);
+  CHECK_STR_EQ(loaded.profile.nav[0].key, "next");
+  CHECK_STR_EQ(loaded.profile.nav[0].value, "J");
+  CHECK_TRUE(loaded.profile.nav[0].style == ValueStyle::kBasic);
+  Profile profile = loaded.profile;
+
+  std::string error;
+  const std::string before = ReadFile(path);
+  CHECK_TRUE(SaveProfile(path, profile, &error));
+  CHECK_STR_EQ(ReadFile(path), before);
+
+  // Binding one action and dropping another patches `[nav]` in place, and a row this build does
+  // not know is left exactly where it was.
+  ProfileSetting* next = nullptr;
+  for (ProfileSetting& row : profile.nav) {
+    if (row.key == "next") {
+      next = &row;
+    }
+  }
+  CHECK_TRUE(next != nullptr);
+  if (next != nullptr) {
+    next->value = "J, DownArrow";
+  }
+  profile.nav.erase(profile.nav.begin() + 1);  // the empty `cancel` row
+  CHECK_TRUE(SaveProfile(path, profile, &error));
+
+  const std::string text = ReadFile(path);
+  CHECK_TRUE(text.find("next = \"J, DownArrow\"   # the key I actually reach for") !=
+             std::string::npos);
+  CHECK_TRUE(text.find("cancel") == std::string::npos);
+  CHECK_TRUE(text.find("from_a_newer_launcher = \"Hyper+Q\"") != std::string::npos);
+  CHECK_TRUE(text.find("[settings]\nvideo_mode_width = 1280") != std::string::npos);
+
+  const ProfileLoadResult again = LoadProfile(path);
+  CHECK_TRUE(again.status == ProfileStatus::kOk);
+  CHECK_EQ(again.profile.nav.size(), 2);
+  CHECK_STR_EQ(again.profile.nav[1].key, "from_a_newer_launcher");
+  CHECK_EQ(again.profile.settings.size(), 1);
+
+  // Back to the defaults: every row goes. The table's own header stays behind, which is what
+  // dropping every `[settings]` row does too - the header is not one of the keys the writer owns -
+  // and an empty table is a file the launcher reads as "nobody has rebound these".
+  Profile untouched = again.profile;
+  untouched.nav.clear();
+  CHECK_TRUE(SaveProfile(path, untouched, &error));
+  const std::string cleared = ReadFile(path);
+  CHECK_TRUE(cleared.find("next =") == std::string::npos);
+  CHECK_TRUE(cleared.find("from_a_newer_launcher") == std::string::npos);
+  const ProfileLoadResult defaults = LoadProfile(path);
+  CHECK_TRUE(defaults.status == ProfileStatus::kOk);
+  CHECK_TRUE(defaults.profile.nav.empty());
+
+  // And a rendered document carries the table last, after `[remap]`, in the order it holds.
+  Profile fresh;
+  fresh.nav.push_back(ProfileSetting{"next", "J", ValueStyle::kBasic});
+  fresh.nav.push_back(ProfileSetting{"cancel", "", ValueStyle::kBasic});
+  const std::string rendered = RenderProfile(fresh);
+  CHECK_TRUE(rendered.find("[nav]\nnext = \"J\"\ncancel = \"\"\n") != std::string::npos);
+}
+
 void TestRenderProfile() {
   BeginCase("a fresh profile renders every structural key");
   const Profile profile;
@@ -513,6 +604,7 @@ int main() {
   TestEdits();
   TestMissingSectionAppendedLast();
   TestErase();
+  TestNavTable();
   TestRenderProfile();
   TestQuoting();
   return Finish();

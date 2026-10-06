@@ -173,7 +173,9 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
     if (focused) {
       ImGui::PopStyleColor();
     }
-    ring.FocusIf(index, ImGui::IsItemHovered());
+    // A5's outline, so this entry reads as focused the same way the two radios above it do.
+    DrawFocusOutline(focused);
+    AdoptRingOnHover(index, ring);
     if (clicked) {
       ring.SetIndex(index);
     }
@@ -342,7 +344,7 @@ void GeneralTab::DrawMessages(const settings::Setting& setting, ProfileSession& 
 }
 
 void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& session,
-                      NavAction action) {
+                      NavAction action, NavKeysPanel& keys, bool safe_mode) {
   // The file system is the authority, and it is read every frame rather than remembered: four
   // stat calls per frame is nothing, and a state detected once would be a stale promise (D5).
   state_ = DetectUltimateState(roots_.game_root);
@@ -392,6 +394,10 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
 
   // B4's block, at the end of the tab and in the ring: Save, Reset, Import, Export, Portable.
   panel_.Draw(row_index, session, ring, action);
+  // A5's launcher-keys block after it, on this tab because this is the tab that owns the
+  // launcher's own file: the block that resets the keys is the block that repairs the file a bad
+  // binding came out of.
+  keys.Draw(row_index + ProfilePanel::kRowCount, session, ring, action, safe_mode);
   // B8's progress/result notice, which owns the keyboard while it is up.
   DrawInstallModal(action);
 }

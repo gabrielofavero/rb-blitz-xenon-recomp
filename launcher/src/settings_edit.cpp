@@ -62,7 +62,9 @@ int ResizeCallback(ImGuiInputTextCallbackData* data) {
 }
 
 // The visible focus state every row shares: the frame takes the same colour the selected tab
-// does, so the ring is never invisible without a second drawing primitive (A1).
+// does, and A5 draws the outline around it as well (row_ui's DrawFocusOutline) so the ring is a
+// shape and not only a shade. Both call sites go through here, which is why the outline is added
+// once rather than at every widget.
 bool BeginFocus(std::size_t index, FocusModel& ring) {
   const bool focused = !ring.Empty() && ring.Index() == index;
   if (focused) {
@@ -76,10 +78,11 @@ bool BeginFocus(std::size_t index, FocusModel& ring) {
 }
 
 void EndFocus(std::size_t index, FocusModel& ring, bool focused) {
+  DrawFocusOutline(focused);
   if (focused) {
     ImGui::PopStyleColor(3);
   }
-  ring.FocusIf(index, ImGui::IsItemHovered());
+  AdoptRingOnHover(index, ring);
   // In the ring and out of sight is not usable, so the row is brought back into view exactly
   // as a read-only row was (A1/A5).
   if (focused && !ImGui::IsItemVisible()) {

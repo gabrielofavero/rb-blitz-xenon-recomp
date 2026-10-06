@@ -25,6 +25,7 @@
 #include "install_ultimate.h"
 #include "launcher/profile.h"
 #include "nav.h"
+#include "nav_ui.h"
 #include "path_validate.h"
 #include "profile_session.h"
 #include "profile_ui.h"
@@ -42,16 +43,24 @@ class GeneralTab {
   static constexpr std::size_t kTargetRows = 3;
 
   // The rows B4 adds after the settings rows: the profile block at the end of the tab
-  // (launcher/src/profile_ui.h). The tab's ring has to be sized for them, which is why this is
-  // public. The launch target's extra entries come from its choices, not from here.
-  static constexpr std::size_t kExtraRows = ProfilePanel::kRowCount;
+  // (launcher/src/profile_ui.h), and A5's launcher-keys block after it (launcher/src/nav_ui.h).
+  // The tab's ring has to be sized for them, which is why this is public. The launch target's
+  // extra entries come from its choices, not from here.
+  static constexpr std::size_t kExtraRows = ProfilePanel::kRowCount + NavKeysPanel::kRowCount;
 
   explicit GeneralTab(GameRoots roots);
 
   // `action` is this frame's NavAction. B1's rows are the first with anything to activate, so
   // Enter and Space on the focused row pick a target, open the folder picker, or start the
-  // Ultimate install; B4's block answers the same way.
-  void Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& session, NavAction action);
+  // Ultimate install; B4's block and A5's answer the same way.
+  //
+  // `keys` is the shell's launcher-keys block rather than a member of this tab, because the shell
+  // has to ask whether a capture is running *before* it reads the keyboard (A5) - the same reason
+  // the shell owns the pad and the focus log. `safe_mode` is the shell's too: `--safe-mode` says
+  // the keys in force are the defaults whatever the file says, and the block has to say so out
+  // loud because assigning a key still writes the file.
+  void Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& session, NavAction action,
+            NavKeysPanel& keys, bool safe_mode);
 
   // What the last Draw read off the file system. Exposed so the caller can say it out loud
   // rather than the tab being the only thing that knows.

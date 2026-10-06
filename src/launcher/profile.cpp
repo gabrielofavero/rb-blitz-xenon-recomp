@@ -783,6 +783,8 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
       profile.settings.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     } else if (ref.section == "remap") {
       profile.remap.push_back(ProfileSetting{ref.key, ref.value, ref.style});
+    } else if (ref.section == "nav") {
+      profile.nav.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     }
   }
 
@@ -827,16 +829,22 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
   for (const ProfileSetting& binding : profile.remap) {
     Schedule(layout, &pending, "remap", binding.key, binding.value, binding.style);
   }
-  // `[settings]` and `[remap]` are modelled as a whole, so a key the model no longer has is
-  // dropped. Everything outside them is untouched, which is what protects a newer launcher's
+  for (const ProfileSetting& binding : profile.nav) {
+    Schedule(layout, &pending, "nav", binding.key, binding.value, binding.style);
+  }
+  // `[settings]`, `[remap]` and `[nav]` are modelled as a whole, so a key the model no longer has
+  // is dropped. Everything outside them is untouched, which is what protects a newer launcher's
   // keys.
   for (const KeyRef& ref : layout.keys) {
-    const bool modelled = ref.section == "settings" || ref.section == "remap";
+    const bool modelled =
+        ref.section == "settings" || ref.section == "remap" || ref.section == "nav";
     if (!modelled) {
       continue;
     }
-    const std::vector<ProfileSetting>& rows =
-        ref.section == "settings" ? profile.settings : profile.remap;
+    const std::vector<ProfileSetting>& rows = ref.section == "settings"
+                                                  ? profile.settings
+                                                  : (ref.section == "remap" ? profile.remap
+                                                                            : profile.nav);
     const bool kept = std::any_of(rows.begin(), rows.end(), [&](const ProfileSetting& row) {
       return row.key == ref.key;
     });
@@ -915,6 +923,13 @@ std::string RenderProfile(const Profile& profile) {
     text += newline;
     text += "[remap]" + newline;
     for (const ProfileSetting& binding : profile.remap) {
+      text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
+    }
+  }
+  if (!profile.nav.empty()) {
+    text += newline;
+    text += "[nav]" + newline;
+    for (const ProfileSetting& binding : profile.nav) {
       text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
     }
   }

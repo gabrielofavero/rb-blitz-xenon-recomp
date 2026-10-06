@@ -197,6 +197,8 @@ void TestButtonNames() {
 
 // The other half of this binary: A2's help, in tests/launcher_help_tests.cpp.
 void RunLauncherHelpChecks();
+// ...and the third: A5's keys, in tests/launcher_keys_tests.cpp.
+void RunLauncherKeysChecks();
 
 int main() {
   TestDeadzone();
@@ -209,5 +211,6 @@ int main() {
   TestStateAny();
   TestButtonNames();
   RunLauncherHelpChecks();
+  RunLauncherKeysChecks();
   return rb_blitz::test::Finish();
 }

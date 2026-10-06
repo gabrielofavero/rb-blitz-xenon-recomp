@@ -81,10 +81,29 @@ class ProfileSession {
   const std::filesystem::path& executable_dir() const { return inputs_.executable_dir; }
 
   // False when the file on disk did not parse. The session then refuses to write anything,
-  // rather than replacing a file it did not understand (D2: never lose a hand-edited file).
-  bool CanSave() const { return load_.usable(); }
+  // rather than replacing a file it did not understand (D2: never lose a hand-edited file). One
+  // case overrides that refusal: A5's safe mode, where replacing the file the launcher could not
+  // read *is* the recovery, and `SafeModeNote` is the sentence that says so.
+  bool CanSave() const { return load_.usable() || (safe_mode_ && replacing_); }
   // The reason saving is refused, or empty.
   std::string Refusal() const;
+
+  // A5's `--safe-mode`, and the whole of what it means: the launcher starts from the compiled
+  // defaults for its *own* behaviour - the keys the ring reads and the size the window opens at,
+  // both of which `main()` takes from the defaults rather than from the file - because those two
+  // are the only things a profile can set that can leave the launcher unusable.
+  //
+  // What it deliberately does *not* do is stop reading or writing the file. A launcher that
+  // refused to save would leave a user who has just pressed *Reset every launcher key* unable to
+  // keep the fix, which is the trap the switch exists to open. So the settings rows, the launch
+  // target and `[remap]` load and save as they always did, and the only case where safe mode can
+  // write something the ordinary path would refuse is a file that did not parse at all: it is
+  // replaced rather than patched, `SafeModeNote` says so on the bottom bar before the button is
+  // pressed, and it is the recovery for a user who has no other copy of the file to import.
+  void SetSafeMode(bool on);
+  bool safe_mode() const { return safe_mode_; }
+  // The sentence the bottom bar shows while safe mode is on, and empty when it is not.
+  std::string SafeModeNote() const;
 
   // True when a save would change the file. Recomputed rather than remembered, because it is
   // the same comparison Save makes and a byte comparison of a few hundred bytes is cheaper than
@@ -117,6 +136,11 @@ class ProfileSession {
   // the profile nor touches its mtime), and what is written is the profile as the file last had
   // it plus the new size - a setting the user changed and did not save stays unsaved, which is
   // what the panel says about it.
+  //
+  // In safe mode this is the one write that is skipped: the window opened at the default size, so
+  // the size it ends at says nothing about what the user wants remembered, and a switch for
+  // *reading* a broken profile must not be the thing that writes to it. `ok` with `wrote` false
+  // is what that looks like.
   SaveOutcome SaveWindowGeometry(int width, int height);
 
   // Adopts another document as this session's profile: a backup, another machine's file, or a
@@ -180,6 +204,11 @@ class ProfileSession {
   mutable GameConfig game_config_;
   mutable bool game_config_read_ = false;
   mutable std::filesystem::file_time_type game_config_stamp_{};
+
+  // A5's safe mode: the launcher's own behaviour comes from the defaults (main()), and a file
+  // that could not be read may be replaced rather than refused.
+  bool safe_mode_ = false;
+  bool replacing_ = false;
 };
 
 }  // namespace rb_blitz::launcher

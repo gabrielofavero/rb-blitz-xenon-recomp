@@ -135,10 +135,12 @@ bool ProfilePanel::Item(std::size_t index, FocusModel& ring, NavAction action, c
   if (in_ring) {
     ImGui::PopStyleColor();
   }
+  // A5: the outline, so the ring is a shape rather than a colour alone.
+  DrawFocusOutline(in_ring);
   // A pointer is a device like any other (D6): hovering a button adopts the ring, the same way
   // hovering a row label does. Without it the bar (A2) would keep describing the last row the
   // keyboard or the ring left behind while the mouse pointed somewhere else.
-  ring.FocusIf(index, ImGui::IsItemHovered());
+  AdoptRingOnHover(index, ring);
   // In the ring and out of sight is not usable: bring it back, exactly as a row does (row_ui).
   if (in_ring && !ImGui::IsItemVisible()) {
     ImGui::SetScrollHereY(0.5f);

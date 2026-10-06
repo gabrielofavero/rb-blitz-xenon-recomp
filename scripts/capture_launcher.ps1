@@ -69,6 +69,15 @@ param(
     [string]$PadScript = "family=xbox;down:200;down:200",
     [switch]$SkipWindow,
     [switch]$SkipPadLeg,
+    # A5's three legs, each a switch so a session can run the one it is working on:
+    #   -SkipKeys         the rebinding leg (bind J, save, put it back)
+    #   -SkipWalkthrough  the lap of every tab's ring, which is the "never traps focus" check
+    #   -SkipScale        the four-scale leg, which is the focus-ring-at-every-DPI-step check
+    #   -SkipSafeMode     the locked-out-profile leg
+    [switch]$SkipKeys,
+    [switch]$SkipWalkthrough,
+    [switch]$SkipScale,
+    [switch]$SkipSafeMode,
     # A few pixels of jitter are not a moved UI: the control pair is the *same* state
     # captured twice, and what it is allowed to differ by. Measured on this machine, it
     # differs by none at all.
@@ -87,6 +96,16 @@ param(
     # the crop's area in PowerShell, and the claims here ("the body changed") are about
     # whole rows of text rather than single pixels.
     [int]$CropScale = 4,
+    # A5's scale leg: the UI scales the harness re-measures the two crops at, with
+    # --ui-scale. The machine's own scale is not in the list because the keyboard leg above
+    # already runs at it (measured: 3.0 here), which is how the leg has four steps on one
+    # machine rather than one.
+    [double[]]$UiScales = @(1.0, 1.5, 2.0),
+    # The walkthrough leg's budget: Home plus this many Downs per tab. More than any ring in the
+    # launcher has (the largest is the Controller tab's 37 entries), and deliberately blind -
+    # the leg presses first and reads the trace once at the end, because a harness that reads the
+    # log between presses is measuring its own timing.
+    [int]$LapPresses = 45,
     [int]$SettleSeconds = 2,
     [int]$WindowTimeoutSec = 40
 )
@@ -241,7 +260,9 @@ public class RbLauncherWin32 {
 
 # The keys this harness sends, and whether the injected event has to say it is extended.
 # The navigation cluster is extended on a real keyboard; the letters, Tab, Enter, Space
-# and Escape are not.
+# and Escape are not. `Modifier` is the virtual key held down around the press, which is
+# how a chord is sent: A5 binds Ctrl+S to Save and Ctrl+C to the command line, so the
+# harness has to be able to press one.
 $keys = @{
     "down"      = @{ Vk = 0x28; Extended = $true }
     "up"        = @{ Vk = 0x26; Extended = $true }
@@ -253,6 +274,12 @@ $keys = @{
     "enter"     = @{ Vk = 0x0D; Extended = $false }
     "space"     = @{ Vk = 0x20; Extended = $false }
     "escape"    = @{ Vk = 0x1B; Extended = $false }
+    # Letters, for the rebinding leg: J is a key no default binding names.
+    "j"         = @{ Vk = 0x4A; Extended = $false }
+    "s"         = @{ Vk = 0x53; Extended = $false }
+    "c"         = @{ Vk = 0x43; Extended = $false }
+    "ctrl+s"    = @{ Vk = 0x53; Extended = $false; Modifier = 0x11 }
+    "ctrl+c"    = @{ Vk = 0x43; Extended = $false; Modifier = 0x11 }
 }
 
 function Get-LauncherWindow([int]$ProcessId, [int]$TimeoutSec) {
@@ -301,9 +328,20 @@ function Send-KeyToLauncher([int]$ProcessId, [string]$Name) {
     $h = Focus-LauncherWindow $ProcessId
     $scan = [RbLauncherWin32]::MapVirtualKey([uint32]$key.Vk, 0)
     $flags = if ($key.Extended) { [uint32]1 } else { [uint32]0 }
+    if ($key.Modifier) {
+        # Held around the key, not sent as its own press: the launcher reads the modifiers
+        # from ImGui's state, which is what makes "Ctrl+S" one binding and "S" another.
+        $modifierScan = [RbLauncherWin32]::MapVirtualKey([uint32]$key.Modifier, 0)
+        [RbLauncherWin32]::keybd_event([byte]$key.Modifier, [byte]$modifierScan, 0, [IntPtr]::Zero)
+        Start-Sleep -Milliseconds 60
+    }
     [RbLauncherWin32]::keybd_event([byte]$key.Vk, [byte]$scan, $flags, [IntPtr]::Zero)
     Start-Sleep -Milliseconds 120
     [RbLauncherWin32]::keybd_event([byte]$key.Vk, [byte]$scan, ($flags -bor 2), [IntPtr]::Zero)
+    if ($key.Modifier) {
+        Start-Sleep -Milliseconds 60
+        [RbLauncherWin32]::keybd_event([byte]$key.Modifier, [byte]$modifierScan, 2, [IntPtr]::Zero)
+    }
     Start-Sleep -Milliseconds 250
 }
 
@@ -318,18 +356,61 @@ function Save-Frame([string]$Name) {
 
 # The focus trace's own lines: "<ms>ms focus tab=<tab> entry=<i>/<n> row=<key>". Only the
 # focus lines, and only the fields the assertions read.
+#
+# The lines come back inside an object rather than as an array, and every caller reads
+# `.Lines`. PowerShell unrolls an array that crosses a function boundary, so a one-line trace
+# returned directly arrives as the *line*: `$trace.Count` would then be the line's own Count
+# field (the ring's size, 34) instead of the number of lines, and `$trace[0]` would index into
+# nothing. Neither the comma operator nor @() around the call is reliable across two nested
+# functions, and a field is.
 function Get-FocusTrace([string]$Path) {
     $rows = New-Object System.Collections.ArrayList
-    if (-not (Test-Path $Path)) { return $rows.ToArray() }
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        if ($line -match "focus tab=(\S+) entry=(\d+)/(\d+)( row=(\S+))?") {
-            $rows.Add([pscustomobject]@{
-                Tab = $Matches[1]; Entry = [int]$Matches[2]; Count = [int]$Matches[3]
-                Row = if ($Matches[5]) { $Matches[5] } else { "" }
-            }) | Out-Null
+    if (Test-Path $Path) {
+        foreach ($line in Get-Content -LiteralPath $Path) {
+            if ($line -match "focus tab=(\S+) entry=(\d+)/(\d+)( row=(\S+))?") {
+                $rows.Add([pscustomobject]@{
+                    Tab = $Matches[1]; Entry = [int]$Matches[2]; Count = [int]$Matches[3]
+                    Row = if ($Matches[5]) { $Matches[5] } else { "" }
+                }) | Out-Null
+            }
         }
     }
-    return $rows.ToArray()
+    return [pscustomobject]@{ Lines = $rows.ToArray() }
+}
+
+# The same lines, but only once the launcher has written its first one: a log that has been
+# opened but not yet written is an empty answer, and an empty answer read as "the ring has
+# nowhere to go" is the harness's mistake rather than the launcher's.
+function Wait-FocusTrace([string]$Path, [int]$TimeoutSec = 15) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $lines = (Get-FocusTrace $Path).Lines
+        if ($lines.Count -gt 0) { return [pscustomobject]@{ Lines = $lines } }
+        Start-Sleep -Milliseconds 250
+    }
+    return [pscustomobject]@{ Lines = @() }
+}
+
+# The row of the launcher-keys block the ring is on, as --focus-log names it ("next:assign"),
+# or empty when the ring is somewhere else.
+function Get-FocusedKeyRow([string]$Path) {
+    $lines = @((Get-FocusTrace $Path).Lines)
+    if ($lines.Count -eq 0) { return "" }
+    $row = $lines[$lines.Count - 1].Row
+    if ($row -match "^launcher-key:(.+)$") { return $Matches[1] }
+    return ""
+}
+
+# Down presses until the ring is on the row asked for, or the budget runs out. The block is the
+# General tab's second, and this is how a leg gets to one of its twenty-five buttons without a
+# second copy of the ring's arithmetic in the harness. The trace is re-read once more at the end,
+# because the last press's line is the answer to the question this function is asked.
+function Step-ToKeyRow([int]$ProcessId, [string]$Path, [string]$Wanted, [int]$Budget = 90) {
+    for ($press = 0; $press -lt $Budget; $press++) {
+        if ((Get-FocusedKeyRow $Path) -eq $Wanted) { return $true }
+        Send-KeyToLauncher $ProcessId "down"
+    }
+    return ((Get-FocusedKeyRow $Path) -eq $Wanted)
 }
 
 # The profile with its two window numbers masked, which is what two profiles have to look
@@ -350,7 +431,7 @@ function Get-ProfileGeometry([string]$Text) {
 # else - every other row is then the build's own default, which is what the body of a tab
 # shows. Rendered, not copied from the machine's own profile: a harness that inherited the
 # developer's settings would measure those instead.
-function Write-Fixture([string]$Path, [string]$TargetName) {
+function Write-Fixture([string]$Path, [string]$TargetName, [string]$Extra = "") {
     $text = @"
 schema_version = 1
 
@@ -368,7 +449,22 @@ game_dir = ""
 user_data_dir = ""
 dlc_dir = ""
 "@
+    if ($Extra) { $text += "`n$Extra`n" }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
     Set-Content -LiteralPath $Path -Value $text -NoNewline -Encoding ascii
+}
+
+# One windowed leg: start the launcher with these arguments, wait for its window, and hand
+# back both so the caller can drive it. Every A5 leg does this and none of them needs a
+# different kind of start, which is why it is one function rather than four copies.
+function Start-Launcher([string[]]$Arguments) {
+    $running = @(Get-Process rb_blitz_launcher -ErrorAction SilentlyContinue)
+    if ($running.Count -ne 0) {
+        throw "a launcher is already running (pid $($running[0].Id)); close it and run again"
+    }
+    $process = Start-Process -FilePath $exe -ArgumentList $Arguments -PassThru
+    $hwnd = Get-LauncherWindow $process.Id $WindowTimeoutSec
+    return [pscustomobject]@{ Process = $process; Window = $hwnd }
 }
 
 # --------------------------------------------------------------- headless leg ---
@@ -424,6 +520,13 @@ if ($SkipWindow) {
 $summary = $null
 $keyboard = $null
 $pad = $null
+$keyBindings = $null
+$walkthrough = $null
+$scales = $null
+$safeMode = $null
+# The walk's rows are filled in by the keyboard leg and read by the report, so the list is made
+# here: a run with -SkipWindow has no walk, and the summary has to be able to say so.
+$walk = New-Object System.Collections.ArrayList
 $diffs = New-Object System.Collections.ArrayList
 
 function Stop-Launcher([System.Diagnostics.Process]$Process) {
@@ -473,9 +576,18 @@ if (-not $SkipWindow) {
     $title = Get-WindowTitle $process.Id
     Add-Check "window" "the title names the first tab" ($title -eq "Rock Band Blitz Launcher - General") $title
 
+    # One throwaway capture before anything is asserted. capture_window.ps1 restores the
+    # window to read its pixels (`ShowWindow(h, 9)`), so the *first* capture of a leg is of
+    # the maximized layout and every later one is of the restored window. On this machine
+    # those two are the same size at the display's own scale and differ at a smaller one -
+    # where the restored window is narrow enough to lose a hint from the help strip - so the
+    # warm-up is what makes the idle pair below a pair of the same layout rather than a
+    # measurement of that first restore. It is not an assertion: it exists to be thrown away.
+    $null = Save-Frame "warmup"
+    Start-Sleep -Milliseconds 400
+
     $first = Save-Frame "keyboard-00"
-    Add-Check "window" "the launcher window can be captured" $first.Ok $first.Text
-    if (-not $first.Ok) {
+    Add-Check "window" "the launcher window can be captured" $first.Ok $first.Text    if (-not $first.Ok) {
         Stop-Launcher $process | Out-Null
         throw "no capture: the claims below are about pixels"
     }
@@ -534,7 +646,7 @@ if (-not $SkipWindow) {
         Add-Check "window" "every press was captured" $false "$($walk.Count) of $DownPresses"
     }
 
-    $trace = Get-FocusTrace $focusLog
+    $trace = (Get-FocusTrace $focusLog).Lines
     $entries = @($trace | ForEach-Object { $_.Entry })
     $tabs = @($trace | ForEach-Object { $_.Tab } | Select-Object -Unique)
     Add-Check "window" "the trace names one tab for the whole walk" ($tabs.Count -eq 1) ($tabs -join ",")
@@ -640,7 +752,7 @@ if (-not $SkipWindow -and -not $SkipPadLeg -and $PadScript) {
         # after it is let go of (launcher/src/virtual_pad.cpp), and the pad arrives at the
         # start - so the wait is the script's length plus room for the window to be up.
         Start-Sleep -Seconds ([Math]::Max(4, $SettleSeconds + 4))
-        $padTrace = Get-FocusTrace $padLog
+        $padTrace = (Get-FocusTrace $padLog).Lines
         $padText = if (Test-Path $padLog) { (Get-Content -LiteralPath $padLog -Raw) } else { "" }
         Add-Check "pad" "the scripted pad announces itself" `
             ($padText -match 'device gamepad name="Virtual Pad"') `
@@ -656,8 +768,399 @@ if (-not $SkipWindow -and -not $SkipPadLeg -and $PadScript) {
     }
 }
 
-# --------------------------------------------------------------------- report ---
+# ---------------------------------------------------- the A5 legs (walking, keys, DPI) ---
 
+# The walkthrough: a lap of every tab's ring with the keyboard alone, which is A5's "complete
+# every tab with the keyboard only" and its "never traps focus" in one measurement. No crop
+# is taken, because the launcher's own trace is the better oracle here: it names the entry
+# the ring is on and how many there are, so a lap either visited all of them or it did not.
+$walkthrough = $null
+if (-not $SkipWindow -and -not $SkipWalkthrough) {
+    $walkLog = Join-Path $capDir "walkthrough-focus.log"
+    if (Test-Path $walkLog) { Remove-Item $walkLog -Force }
+    $leg = Start-Launcher @(
+        "--launcher_profile=$ProfilePath", "--game_data_root=$GameRoot",
+        "--focus-log=$walkLog", "--no-gamepad"
+    )
+    if ($leg.Window -eq [IntPtr]::Zero) {
+        Add-Check "walkthrough" "the launcher opens for the walkthrough" $false "pid $($leg.Process.Id)"
+        Stop-Launcher $leg.Process | Out-Null
+    } else {
+        Add-Check "walkthrough" "the launcher opens for the walkthrough" $true ""
+        Start-Sleep -Seconds $SettleSeconds
+        # A lap per tab, driven blind and read once at the end. The leg deliberately does *not*
+        # count entries as it goes: the log is a file, and reading it between presses is how a
+        # harness ends up measuring its own timing rather than the launcher's. So each tab gets
+        # Home and then a fixed budget of Downs - more than any ring here has - and the analysis
+        # below asks the one question that matters of the whole run at once: did the ring visit
+        # every entry the tab says it has, and come back round to the first one?
+        $tabs = @(
+            @{ Name = "General"; Key = "general" }
+            @{ Name = "Audio / Video"; Key = "graphics" }
+            @{ Name = "Controller"; Key = "controller" }
+        )
+        foreach ($tab in $tabs) {
+            $title = Get-WindowTitle $leg.Process.Id
+            Add-Check "walkthrough" "the walk starts on $($tab.Name)" `
+                ($title -eq "Rock Band Blitz Launcher - $($tab.Name)") $title
+            # Home first, so a lap starts at entry 0 whatever the tab was left on, and so the
+            # wrap below is a wrap rather than "it happened to be near the end".
+            Send-KeyToLauncher $leg.Process.Id "home"
+            for ($press = 0; $press -lt $LapPresses; $press++) {
+                Send-KeyToLauncher $leg.Process.Id "down"
+            }
+            Send-KeyToLauncher $leg.Process.Id "right"
+        }
+        Start-Sleep -Milliseconds 500
+        $afterWalk = Get-WindowTitle $leg.Process.Id
+        Add-Check "walkthrough" "Right wrapped from the last tab to the first" `
+            ($afterWalk -eq "Rock Band Blitz Launcher - General") $afterWalk
+        $clean = Stop-Launcher $leg.Process
+        Add-Check "walkthrough" "Escape still leaves after the walk" $clean ""
+
+        # One read, then everything the walk was for. The lines are grouped into runs of one tab,
+        # which is what the three tab switches make them.
+        $lines = @((Get-FocusTrace $walkLog).Lines)
+        Add-Check "walkthrough" "the walk left a trace" ($lines.Count -gt ($tabs.Count * 2)) `
+            "$($lines.Count) line(s)"
+        for ($index = 0; $index -lt $tabs.Count; $index++) {
+            $tab = $tabs[$index]
+            $run = New-Object System.Collections.ArrayList
+            $started = $false
+            foreach ($line in $lines) {
+                if ($line.Tab -eq $tab.Key) {
+                    $started = $true
+                    $run.Add($line) | Out-Null
+                } elseif ($started) {
+                    # A run ends at the first line of the next tab, and never resumes: the walk
+                    # visits each tab once.
+                    break
+                }
+            }
+            $entries = @($run | ForEach-Object { $_.Entry })
+            $count = if ($run.Count -gt 0) { $run[0].Count } else { 0 }
+            Add-Check "walkthrough" "$($tab.Name) has a ring to walk ($count entries)" `
+                ($count -ge 2) "$count entries"
+            # Every entry the tab claims, visited: a ring the keyboard cannot reach the end of
+            # would leave a hole in this set.
+            $missing = @()
+            for ($entry = 0; $entry -lt $count; $entry++) {
+                if ($entries -notcontains $entry) { $missing += $entry }
+            }
+            Add-Check "walkthrough" "a lap of $($tab.Name) reaches all $count entries" `
+                ($missing.Count -eq 0) ("missing: " + ($missing -join ","))
+            # ...and it wraps: an entry 0 that follows the last entry is a ring, not a wall.
+            $wrapped = $false
+            for ($i = 1; $i -lt $entries.Count; $i++) {
+                if ($entries[$i] -eq 0 -and $entries[$i - 1] -eq ($count - 1)) { $wrapped = $true }
+            }
+            Add-Check "walkthrough" "a lap of $($tab.Name) comes back round to the first entry" `
+                $wrapped "entries: $($entries -join ',')"
+            $ringTabs = @($run | ForEach-Object { $_.Tab } | Select-Object -Unique)
+            Add-Check "walkthrough" "the lap stays on one tab" ($ringTabs.Count -eq 1) ($ringTabs -join ",")
+            $rows = @($run | ForEach-Object { $_.Row } | Where-Object { $_ } | Select-Object -Unique)
+            $distinct = @($entries | Select-Object -Unique)
+            $laps.Add([pscustomobject]@{
+                Tab = $tab.Name; Entries = $count; Visited = $distinct.Count; Rows = $rows
+            }) | Out-Null
+            # The two blocks the General tab draws after its rows have to be in the ring: a lap
+            # that never named them would mean they are drawn outside it, which is the one way
+            # this tab's settings could become keyboard-unreachable.
+            if ($tab.Key -eq "general") {
+                Add-Check "walkthrough" "the lap reaches the launcher-keys block" `
+                    (@($rows | Where-Object { $_ -match "^launcher-key:" }).Count -gt 0) ($rows -join ",")
+                Add-Check "walkthrough" "the lap reaches the settings-file block" `
+                    ($rows -contains "settings-file-block") ($rows -join ",")
+            }
+        }
+        $walkthrough = [pscustomobject]@{ Laps = $laps.ToArray(); Lines = $lines }
+    }
+}
+
+# The rebinding leg: bind navigation to an unused key, save it with the key A5 binds to Save,
+# and put it back. Everything it asserts is read out of the profile on disk or out of the
+# trace, so "the binding arrived" and "the binding came back" are file facts rather than
+# screen facts.
+$keyBindings = $null
+if (-not $SkipWindow -and -not $SkipKeys) {
+    $keysDir = Join-Path $capDir "keys"
+    $keysProfile = Join-Path $keysDir "launcher.toml"
+    Write-Fixture $keysProfile $Target
+    $keysLog = Join-Path $keysDir "focus.log"
+    if (Test-Path $keysLog) { Remove-Item $keysLog -Force }
+    $leg = Start-Launcher @(
+        "--launcher_profile=$keysProfile", "--game_data_root=$GameRoot",
+        "--focus-log=$keysLog", "--no-gamepad"
+    )
+    if ($leg.Window -eq [IntPtr]::Zero) {
+        Add-Check "keys" "the launcher opens for the rebinding leg" $false "pid $($leg.Process.Id)"
+        Stop-Launcher $leg.Process | Out-Null
+    } else {
+        Add-Check "keys" "the launcher opens for the rebinding leg" $true ""
+        Start-Sleep -Seconds $SettleSeconds
+        # Walk to the first action's Assign by watching the trace name that row rather than
+        # counting entries here: the count is the tab's business, and a second copy of it in the
+        # harness would be the thing that breaks when the block grows.
+        $reached = Step-ToKeyRow $leg.Process.Id $keysLog "next:assign"
+        Add-Check "keys" "the ring reaches the first action's Assign row" $reached (Get-FocusedKeyRow $keysLog)
+
+        if ($reached) {
+            $trace = (Get-FocusTrace $keysLog).Lines
+            $assignEntry = $trace[$trace.Count - 1].Entry
+            $ringCount = $trace[$trace.Count - 1].Count
+
+            # Assign, then press J: the capture takes the first key it sees, and J is a key no
+            # default binding names. Enter and J are both sent, and the *ring must not move* in
+            # between: while a capture is running the key being pressed is the input being
+            # captured, not a command.
+            Send-KeyToLauncher $leg.Process.Id "enter"
+            Send-KeyToLauncher $leg.Process.Id "j"
+            Start-Sleep -Milliseconds 600
+            $afterCapture = (Get-FocusTrace $keysLog).Lines
+            Add-Check "keys" "a capture does not let the key it captures move the ring" `
+                ($afterCapture[$afterCapture.Count - 1].Entry -eq $assignEntry) `
+                "entry $($afterCapture[$afterCapture.Count - 1].Entry) of $ringCount"
+            # The binding is live: the launcher rebuilds the table from the profile every frame,
+            # so J has to move the ring without a restart. It is also what says the capture has
+            # ended - a capture still running would swallow the press.
+            $beforeJ = (Get-FocusTrace $keysLog).Lines.Count
+            Send-KeyToLauncher $leg.Process.Id "j"
+            $afterJ = (Get-FocusTrace $keysLog).Lines
+            Add-Check "keys" "the key that was just assigned moves the ring" `
+                ($afterJ.Count -gt $beforeJ) "$beforeJ -> $($afterJ.Count) trace line(s)"
+            # Save with the key A5 binds to the bar's Save button.
+            Send-KeyToLauncher $leg.Process.Id "ctrl+s"
+            Start-Sleep -Milliseconds 400
+            $saved = if (Test-Path -LiteralPath $keysProfile) { Get-Content -LiteralPath $keysProfile -Raw } else { "" }
+            Add-Check "keys" "Ctrl+S writes the profile" ($saved -match '(?m)^\[nav\]') ""
+            Add-Check "keys" "the assigned key is in the [nav] table" `
+                ($saved -match '(?m)^next = "Tab, DownArrow, J"') `
+                (($saved -split "`n" | Where-Object { $_ -match "^next" }) -join " ").Trim()
+
+            # ...and back: that action's Reset row returns it to the two keys it ships with. The
+            # ring is on the Assign row when this starts - J moved it a row - so the walk is by
+            # name again rather than "one press down". Save afterwards and the file has no `next`
+            # row at all, because a profile records only what differs from the defaults.
+            $atReset = Step-ToKeyRow $leg.Process.Id $keysLog "next:reset"
+            Add-Check "keys" "the ring reaches that action's Reset row" $atReset (Get-FocusedKeyRow $keysLog)
+            Send-KeyToLauncher $leg.Process.Id "enter"
+            Start-Sleep -Milliseconds 300
+            Send-KeyToLauncher $leg.Process.Id "ctrl+s"
+            Start-Sleep -Milliseconds 400
+            $reset = if (Test-Path -LiteralPath $keysProfile) { Get-Content -LiteralPath $keysProfile -Raw } else { "" }
+            Add-Check "keys" "Reset takes the action back to the keys it ships with" `
+                ($reset -notmatch '(?m)^next = ') `
+                (($reset -split "`n" | Where-Object { $_ -match "^next" }) -join " ").Trim()
+            # The ring answers Tab again, which is what "back" means: the trace moved on a Tab
+            # press and the profile says nothing about `next`.
+            $beforeTab = (Get-FocusTrace $keysLog).Lines.Count
+            Send-KeyToLauncher $leg.Process.Id "tab"
+            $afterTab = (Get-FocusTrace $keysLog).Lines
+            Add-Check "keys" "the default key works again after the reset" `
+                ($afterTab.Count -gt $beforeTab) "$beforeTab -> $($afterTab.Count) trace line(s)"
+            $clean = Stop-Launcher $leg.Process
+            Add-Check "keys" "Escape leaves the rebinding leg's launcher" $clean ""
+        } else {
+            Stop-Launcher $leg.Process | Out-Null
+        }
+        $keyBindings = [pscustomobject]@{
+            Profile = $keysProfile; Trace = (Get-FocusTrace $keysLog).Lines
+            After = if (Test-Path -LiteralPath $keysProfile) { Get-Content -LiteralPath $keysProfile -Raw } else { "" }
+        }
+    }
+}
+
+# The scale leg: the same two claims the keyboard leg above makes, made at three more UI
+# scales. The machine's own scale is the fourth step (the keyboard leg is that one), and the
+# claim is not "the picture is identical" - it cannot be, the UI is a different size - but
+# that the crops the harness computes out of the scale still contain what they are meant to:
+# with no input the pair is identical, one press moves the ring's own region, and a press
+# that crosses a row rewrites the help strip. A ring or a bar that did not scale would put
+# the crops in the wrong place at one of these steps and fail one of the three.
+$scales = $null
+if (-not $SkipWindow -and -not $SkipScale) {
+    $scaleReport = New-Object System.Collections.ArrayList
+    foreach ($scale in $UiScales) {
+        $scaleDir = Join-Path $capDir ("scale-" + $scale)
+        $scaleProfile = Join-Path $scaleDir "launcher.toml"
+        Write-Fixture $scaleProfile $Target
+        $scaleLog = Join-Path $scaleDir "focus.log"
+        if (Test-Path $scaleLog) { Remove-Item $scaleLog -Force }
+        $leg = Start-Launcher @(
+            "--launcher_profile=$scaleProfile", "--game_data_root=$GameRoot",
+            "--focus-log=$scaleLog", "--no-gamepad", "--ui-scale=$scale"
+        )
+        if ($leg.Window -eq [IntPtr]::Zero) {
+            Add-Check "scale $scale" "the launcher opens at this scale" $false "pid $($leg.Process.Id)"
+            Stop-Launcher $leg.Process | Out-Null
+            continue
+        }
+        Start-Sleep -Seconds $SettleSeconds
+        # The same throwaway capture the keyboard leg takes, and for the same reason: the first
+        # capture of a leg restores the window, and this leg exists to measure layouts that a
+        # restored window can differ from.
+        $null = Save-Frame ("scale-" + $scale + "-warmup")
+        Start-Sleep -Milliseconds 400
+        $first = Save-Frame ("scale-" + $scale + "-00")
+        Start-Sleep -Milliseconds 800
+        $second = Save-Frame ("scale-" + $scale + "-01")
+        $size = Get-FrameSize $first.Path
+        $region = Get-Region $scale $size.W $size.H
+        $idle = Get-DiffPercent (Save-Crop $first.Path "help" $region.Help 200) `
+                                (Save-Crop $second.Path "help" $region.Help 201)
+        Add-Check "scale $scale" "the crops land on a still picture at this scale ($idle% <= $NoisePercent%)" `
+            ($idle -ge 0 -and $idle -le $NoisePercent) "$idle%"
+        # Four presses, which is enough to cross a row on any tab whose first row is the launch
+        # target's three choices: the fourth press leaves it.
+        $frames = @($second.Path)
+        $bodyMin = -1.0
+        $helpMax = -1.0
+        for ($press = 1; $press -le 4; $press++) {
+            Send-KeyToLauncher $leg.Process.Id "down"
+            $frame = Save-Frame ("scale-" + $scale + "-" + ("{0:D2}" -f ($press + 1)))
+            if (-not $frame.Ok) { break }
+            $body = Get-DiffPercent (Save-Crop $frames[$press - 1] "body" $region.Body (300 + $press)) `
+                                    (Save-Crop $frame.Path "body" $region.Body (400 + $press))
+            $help = Get-DiffPercent (Save-Crop $frames[$press - 1] "help" $region.Help (300 + $press)) `
+                                    (Save-Crop $frame.Path "help" $region.Help (400 + $press))
+            if ($bodyMin -lt 0 -or $body -lt $bodyMin) { $bodyMin = $body }
+            if ($help -gt $helpMax) { $helpMax = $help }
+            $frames += $frame.Path
+        }
+        Add-Check "scale $scale" "a press moves the ring's own region ($bodyMin% >= $PressBodyPercent%)" `
+            ($bodyMin -ge $PressBodyPercent) "smallest: $bodyMin%"
+        Add-Check "scale $scale" "leaving the first row rewrites the help strip ($helpMax% >= $HelpChangePercent%)" `
+            ($helpMax -ge $HelpChangePercent) "largest: $helpMax%"
+        $clean = Stop-Launcher $leg.Process
+        Add-Check "scale $scale" "Escape leaves at this scale" $clean ""
+        $scaleReport.Add([pscustomobject]@{
+            Scale = $scale; UiScale = $uiScale; ClientSize = "$($size.W)x$($size.H)"
+            BarPixels = $region.BarPixels; HelpPixels = $region.Help.H
+            Idle = $idle; PressBodyMin = $bodyMin; RowHelpMax = $helpMax
+        }) | Out-Null
+    }
+    # And the switch the leg is built on is the switch the launcher reports: --dump-display
+    # says which scale it used and where that number came from.
+    $scaled = Invoke-Dump "dump-display"
+    Add-Check "scale" "--dump-display names the scale's source" `
+        ($scaled.Text -match "scale source\s+:\s+the display's content scale") ""
+    $scales = $scaleReport.ToArray()
+}
+
+# The safe-mode leg: a profile that has taken every movement key away, which is the one way a
+# launcher can be made unusable by its own settings file. Without the switch, nothing but
+# Escape works; with it, the launcher starts on the defaults - and writes nothing, so the
+# file the user is about to repair is exactly as they left it.
+$safeMode = $null
+if (-not $SkipSafeMode) {
+    $lockedDir = Join-Path $capDir "locked-out"
+    $lockedProfile = Join-Path $lockedDir "launcher.toml"
+    $lockedNav = @"
+[nav]
+next = ""
+previous = ""
+first = ""
+last = ""
+next_tab = ""
+previous_tab = ""
+"@
+    Write-Fixture $lockedProfile $Target $lockedNav
+    $lockedBefore = Get-Content -LiteralPath $lockedProfile -Raw
+
+    # Headless: what the launcher says about the file, with and without the switch.
+    $strictDump = Join-Path $capDir "locked-strict.txt"
+    $safeDump = Join-Path $capDir "locked-safe.txt"
+    $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
+        "--dump-profile=$strictDump", "--launcher_profile=$lockedProfile")
+    $strictText = if (Test-Path $strictDump) { Get-Content -LiteralPath $strictDump -Raw } else { "" }
+    $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
+        "--dump-profile=$safeDump", "--launcher_profile=$lockedProfile", "--safe-mode")
+    $safeText = if (Test-Path $safeDump) { Get-Content -LiteralPath $safeDump -Raw } else { "" }
+    Add-Check "safe-mode" "the readable profile stays writable without the switch" `
+        ($strictText -match "writable\s+: yes") ""
+    Add-Check "safe-mode" "the switch says what it did" `
+        ($safeText -match "safe mode\s+: yes") `
+        (($safeText -split "`n" | Where-Object { $_ -match "safe mode" }) -join " ").Trim()
+
+    # A file that does not parse at all: refused without the switch (D2's rule), replaceable
+    # with it, which is the recovery for a user who has no copy of the file to import.
+    $brokenDir = Join-Path $capDir "broken"
+    New-Item -ItemType Directory -Force -Path $brokenDir | Out-Null
+    $brokenProfile = Join-Path $brokenDir "launcher.toml"
+    Set-Content -LiteralPath $brokenProfile -Value 'schema_version = "one"' -NoNewline -Encoding ascii
+    $brokenStrict = Join-Path $capDir "broken-strict.txt"
+    $brokenSafe = Join-Path $capDir "broken-safe.txt"
+    $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
+        "--dump-profile=$brokenStrict", "--launcher_profile=$brokenProfile")
+    $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
+        "--dump-profile=$brokenSafe", "--launcher_profile=$brokenProfile", "--safe-mode")
+    $brokenStrictText = if (Test-Path $brokenStrict) { Get-Content -LiteralPath $brokenStrict -Raw } else { "" }
+    $brokenSafeText = if (Test-Path $brokenSafe) { Get-Content -LiteralPath $brokenSafe -Raw } else { "" }
+    Add-Check "safe-mode" "a file that did not parse is refused without the switch" `
+        ($brokenStrictText -match "writable\s+: no") ""
+    Add-Check "safe-mode" "the switch offers to replace it instead" `
+        ($brokenSafeText -match "writable\s+: yes" -and $brokenSafeText -match "will replace it") ""
+    Add-Check "safe-mode" "nothing was written while only looking" `
+        ((Get-Content -LiteralPath $brokenProfile -Raw) -eq 'schema_version = "one"') ""
+
+    if (-not $SkipWindow) {
+        # The locked-out profile in the window: without the switch the ring cannot be moved at
+        # all - which is the trap - and with it every default key works again.
+        $lockedLog = Join-Path $lockedDir "focus.log"
+        if (Test-Path $lockedLog) { Remove-Item $lockedLog -Force }
+        $leg = Start-Launcher @(
+            "--launcher_profile=$lockedProfile", "--game_data_root=$GameRoot",
+            "--focus-log=$lockedLog", "--no-gamepad"
+        )
+        if ($leg.Window -eq [IntPtr]::Zero) {
+            Add-Check "safe-mode" "the launcher opens with a locked-out profile" $false "pid $($leg.Process.Id)"
+            Stop-Launcher $leg.Process | Out-Null
+        } else {
+            Add-Check "safe-mode" "the launcher opens with a locked-out profile" $true ""
+            Start-Sleep -Seconds $SettleSeconds
+            $before = (Wait-FocusTrace $lockedLog).Lines.Count
+            for ($press = 0; $press -lt 3; $press++) { Send-KeyToLauncher $leg.Process.Id "down" }
+            $afterLocked = (Get-FocusTrace $lockedLog).Lines.Count
+            Add-Check "safe-mode" "without the switch no key moves the ring" `
+                ($afterLocked -eq $before) "$before -> $afterLocked trace line(s)"
+            $clean = Stop-Launcher $leg.Process
+            Add-Check "safe-mode" "Escape still leaves the locked-out launcher" $clean ""
+            # The run wrote the window's size, which is A1's own rule and not this leg's
+            # business: what matters is that nothing in [nav] changed.
+            $lockedAfter = Get-Content -LiteralPath $lockedProfile -Raw
+            Add-Check "safe-mode" "nothing rewrote the keys" `
+                (($lockedAfter -match '(?m)^next = ""') -and ($lockedAfter -match '(?m)^previous = ""')) ""
+
+            $safeLog = Join-Path $lockedDir "safe-focus.log"
+            if (Test-Path $safeLog) { Remove-Item $safeLog -Force }
+            $leg = Start-Launcher @(
+                "--launcher_profile=$lockedProfile", "--game_data_root=$GameRoot",
+                "--focus-log=$safeLog", "--no-gamepad", "--safe-mode"
+            )
+            Start-Sleep -Seconds $SettleSeconds
+            $before = (Wait-FocusTrace $safeLog).Lines.Count
+            for ($press = 0; $press -lt 3; $press++) { Send-KeyToLauncher $leg.Process.Id "down" }
+            $afterSafe = (Get-FocusTrace $safeLog).Lines.Count
+            Add-Check "safe-mode" "the switch starts on the defaults, so Down moves the ring" `
+                ($afterSafe -gt $before) "$before -> $afterSafe trace line(s)"
+            $clean = Stop-Launcher $leg.Process
+            Add-Check "safe-mode" "Escape leaves the safe-mode launcher" $clean ""
+            # The promise that makes the switch safe to use on a file worth repairing: safe
+            # mode writes nothing, not even the window size it opened at.
+            Add-Check "safe-mode" "safe mode left the file byte for byte as it was" `
+                ((Get-Content -LiteralPath $lockedProfile -Raw) -eq $lockedBefore) `
+                ("now: " + (Get-ProfileGeometry (Get-Content -LiteralPath $lockedProfile -Raw)) +
+                 " (was " + (Get-ProfileGeometry $lockedBefore) + ")")
+            $safeMode = [pscustomobject]@{
+                Profile = $lockedProfile; LockedTrace = (Get-FocusTrace $lockedLog).Lines
+                SafeTrace = (Get-FocusTrace $safeLog).Lines; BrokenStrict = $brokenStrictText
+                BrokenSafe = $brokenSafeText
+            }
+        }
+    }
+}
+
+# --------------------------------------------------------------------- report ---
 $failed = @($checks | Where-Object { -not $_.Ok })
 Write-Host "`n=== checks ==="
 $checks | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
@@ -672,6 +1175,7 @@ foreach ($f in $failed) { Write-Host "FAILED [$($f.Leg)] $($f.Check) - $($f.Deta
     Exe = $exe; Profile = $ProfilePath; Target = $Target; GameRoot = $GameRoot
     UiScale = $uiScale; DownPresses = $DownPresses; CropScale = $CropScale
     Keyboard = $keyboard; Pad = $pad; Walk = $walk.ToArray()
+    Walkthrough = $walkthrough; KeyBindings = $keyBindings; Scales = $scales; SafeMode = $safeMode
     Diffs = $diffs.ToArray(); Checks = $checks.ToArray()
 } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $capDir "summary.json")
 

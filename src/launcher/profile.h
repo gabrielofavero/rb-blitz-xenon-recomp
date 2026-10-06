@@ -72,6 +72,12 @@ struct Profile {
   // did not. The game reads it to rewrite the pad state the guest asks for (src/launcher/remap.h):
   // a table is not a scalar, so it is not one of the `[settings]` keys.
   std::vector<ProfileSetting> remap;  // file order
+  // The `[nav]` table (A5): one row per launcher action the user rebound and nothing for the ones
+  // they left alone, which is why a profile nobody has rebound has no `[nav]` table at all. Only
+  // the launcher reads it - the game's profile reader wants `[remap]` - and it is the one table
+  // whose contents can lock a user out of the window that would fix them, which is what
+  // `--safe-mode` exists for.
+  std::vector<ProfileSetting> nav;  // file order
 
   // The document as read, so a save can patch it. Empty when there was no file, in which
   // case a save renders a fresh one. Treat as read-only.

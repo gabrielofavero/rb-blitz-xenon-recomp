@@ -800,7 +800,7 @@ cover:
 | `launcher_session` | `rb_blitz_launcher_session_tests` | B4's write path — save, dirty, reset, import/export, moving the settings folder — and D4's first-run prefill |
 | `launcher_remap` | `rb_blitz_launcher_remap_tests` | the `[remap]` vocabulary: the grammar, the serialiser, the round trip |
 | `launcher_launch` | `rb_blitz_launcher_launch_tests` | Contract 3: the argv the game is started with, the pre-spawn readiness check, and B7's failure sentence |
-| `launcher_nav` | `rb_blitz_launcher_nav_tests` | A3's pad rules (deadzone, repeat, binding table) and A2's walk from a ring entry to the row the bar names |
+| `launcher_nav` | `rb_blitz_launcher_nav_tests` | A3's pad rules (deadzone, repeat, binding table), A2's walk from a ring entry to the row the bar names, and A5's keys — the chord grammar, the defaults, the chord-before-bare-key rule, the repeat rule, the `[nav]` round trip, and the focus ring's scaling |
 
 ```powershell
 cmake --build --preset win-amd64-debug
@@ -825,17 +825,31 @@ in the summary rather than asserted on.
 
 ```powershell
 cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
-.\scripts\capture_launcher.ps1                 # headless + keyboard + pad legs
+.\scripts\capture_launcher.ps1                 # headless + keyboard + pad + the four A5 legs
 .\scripts\capture_launcher.ps1 -SkipWindow     # the headless assertions alone
+.\scripts\capture_launcher.ps1 -SkipScale      # everything but the four-scale leg (the slowest)
 ```
 
-Frames, crops, both `--focus-log` traces and `summary.json` land in
+Frames, crops, every `--focus-log` trace and `summary.json` land in
 `out\launcher-capture\`; the run prints one line per check and exits non-zero if any
 failed. It needs an interactive desktop (the window is captured from the screen, and the
 launcher's window has to own the foreground before a key is sent), while `-SkipWindow`
 does not. The pad leg uses A3's virtual pad, so a controller is not required — and
 `--no-gamepad` is what keeps one that happens to be plugged in out of the keyboard leg's
 counts.
+
+Four legs beyond the pictures, one per thing only a running launcher can be asked, each
+skippable on its own (`-SkipKeys`, `-SkipWalkthrough`, `-SkipScale`, `-SkipSafeMode`):
+
+| Leg | What it drives | What it asserts |
+| --- | --- | --- |
+| `walkthrough` | `Home` and a fixed budget of `Down` on each tab, then one read of the trace | every entry of every tab's ring is reached, the ring wraps back to the first entry, and both of the General tab's blocks — B4's and A5's — are in the ring at all. A lap that could not reach a row is what "never traps focus" would look like |
+| `keys` | Assign a key on the *Launcher keys* block, press it, `Ctrl+S`, then that action's *Reset* and `Ctrl+S` again | the capture binds the key and does not let that key move the ring while it runs; the new key moves the ring with no restart; `Ctrl+S` writes `[nav]`; *Reset* takes the row back out of the file, and `Tab` works again |
+| `scale` | the same leg at `--ui-scale=1.0`, `1.5`, `2.0` (the machine's own scale is the fourth step, which the keyboard leg already runs) | at every step the crops the harness computes out of that scale still land where the claims are: no input is a still picture, a press moves the ring's own region, and leaving the first row rewrites the help strip |
+| `safe-mode` | a profile with every movement key unbound, then a profile that does not parse at all | without `--safe-mode` no key moves the ring (the trap), and with it the ring moves again; a file that did not parse is `writable: no` without the switch and replaceable with it, and safe mode leaves the file byte for byte as it was |
+
+The `scale` leg is the slow one — it starts three more launchers and takes ~40 captures —
+which is why it has its own switch rather than being folded into the keyboard leg.
 
 **The installed end to end run** is
 [scripts/acceptance_launcher.ps1](../scripts/acceptance_launcher.ps1): it silent-installs the

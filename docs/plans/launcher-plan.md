@@ -266,6 +266,12 @@ above degrades to that by flipping one flag in the schema table.
 - The launcher must be usable with **no** controller and with a **misbehaving** one: the nav bindings
   are themselves editable in the profile (A5), and a `--no-gamepad` switch exists for recovery.
 
+> **Built 2026-10-05 (A5), for the keyboard half of the same rule.** The keys are the profile's
+> `[nav]` table, which is what "the nav bindings are themselves editable" means; the *Launcher keys*
+> block at the end of the General tab is the editor, `--safe-mode` starts on the defaults whatever the
+> file says, and the focus ring is drawn as a shape as well as coloured. What the build settled is
+> under this decision's own section below.
+
 **Built (A3), and what the build settled.** The pad's side of this is
 `launcher/src/pad_nav.{h,cpp}` (the binding table above, the deadzone, the repeat — no SDL) and
 `launcher/src/pad_source.{h,cpp}` (the open pads, their names, their state). Three things the
@@ -273,7 +279,8 @@ decision did not say and the work had to:
 
 - **`Back` has no menu to open.** D6 gave it "reload profile / quit"; no such menu exists, and the
   half of the sentence that does is *quit*, so `Back` cancels — which is also what `B` does and what
-  `Esc` does. A5 owns the recovery the menu was for.
+  `Esc` does. A5 built the recovery the menu was for (the *Launcher keys* block, `--safe-mode`), and
+  the menu itself remains unbuilt.
 - **Which pad's buttons the bar names.** With two attached there is no "the" pad, so the names
   follow the **last pad used**, and the labels themselves are the mapping database's
   (`SDL_GetGamepadButtonLabel`) with this project's short table for the shoulders and `Start`, which
@@ -286,6 +293,49 @@ decision did not say and the work had to:
 
 `Start` launches the game (`NavAction::kLaunch`, the bar's *Launch Game* without the mouse) and
 `--focus-log` is the evidence hook the verification needed — see §7's rows.
+
+**Built (A5), and what the build settled.** The keyboard's half of this is
+`launcher/src/nav_bindings.{h,cpp}` (the vocabulary, the defaults, the resolution rules — no ImGui),
+`launcher/src/nav_keys.{h,cpp}` (the one file that knows a name is an ImGui key) and
+`launcher/src/nav_ui.{h,cpp}` (the *Launcher keys* block at the end of the General tab, next to B4's).
+The keys are the profile's `[nav]` table, so D6's "the nav bindings are themselves editable" is what
+it says rather than what it hoped. Four things the decision did not say and the work had to:
+
+- **A chord is not a bare key, and the chord is resolved first.** `Shift+Tab` is a different binding
+  from `Tab`, and matching the held modifiers *exactly* is what keeps them different; a bare key is
+  the key whatever else is held with it, so `Shift+Down` still moves the ring forward. The rule is one
+  function (`nav_bindings::Resolve`) and a test, because "which of my two bindings did that press
+  mean?" is the question a rebindable table makes possible and a hardcoded list did not.
+- **The repeat belongs to the action, not to the key.** A1 gave Tab no repeat and the arrows one,
+  which a rebindable table cannot say — the key is the user's now. So a *move* repeats while held and
+  a *decision* does not, and a held Tab walks the ring like a held arrow. It is a stated change in
+  behaviour, in the README and here.
+- **The four mouse-only actions are bound too.** D6's list stopped at navigation, which left *Save*,
+  *Copy command line*, *Launch Game* and B4's *Copy the effective value* reachable by pointer only.
+  A5 binds those as well (`Ctrl+S`, `Ctrl+C`, `Ctrl+Enter`, `Ctrl+Shift+C`), because "usable without a
+  mouse" is only true if the whole session is, and the hints on the bar name the keys that are
+  *bound* — a rebound key is what the bar tells the user to press, and an action with no key at all
+  gets no hint rather than a wrong one.
+- **The pointer had to stop stealing the ring.** Hover-adopting the ring every frame (D6's "mouse hover
+  sets focus", as A1 wrote it) means a pointer left resting over a row takes it back on *every* frame,
+  so a keyboard walk around a tab is dragged to that row — and a row that scrolls into place under a
+  stationary pointer drags it further. The walkthrough leg in `scripts/capture_launcher.ps1` is what
+  found this; the ring is now adopted when the pointer **moves** onto a row (`row_ui.h`'s
+  `AdoptRingOnHover`), and every focusable item in the launcher goes through that one call. A pointer
+  that has not moved has not chosen anything.
+
+**Built (A5): the recovery switches.** `--safe-mode` starts the launcher on the compiled defaults for
+its *own* behaviour — the keys the ring reads and the size the window opens at, which are the only
+two things a profile can set that can leave the window unusable. It deliberately still reads and still
+*writes* the file: the point of the switch is to reach *Reset every launcher key*, and a launcher that
+refused to save would leave that fix unrecorded. The single write it skips is A1's geometry. One case
+is new and is D2's rule with a door in it: under `--safe-mode` a file that did not parse may be
+*replaced* by a save rather than refused, which is the recovery for a user with no second copy, and the
+bottom bar says so before the button is pressed. `--ui-scale=<f>` overrides the display's content scale
+— the accessibility answer for a display whose scale the user does not want to change, and the only way
+a build machine can take a picture at a scale its monitor is not, which is how E2 re-measures the ring
+and the bar at four steps on one machine. `launcher/README.md`'s "If something goes wrong" section is
+the recovery steps, written for someone whose window is not usable enough to change a setting in it.
 
 ### D7 — The bottom bar
 
@@ -842,7 +892,7 @@ Paste this above any prompt below (it is the shared context the plan does not re
 
 ### 5.2 The prompt ledger
 
-**Built.** Twenty-six prompts are done, and this table is the record of them: what shipped, and which
+**Built.** Twenty-seven prompts are done, and this table is the record of them: what shipped, and which
 decision changed the answer. Their original bodies are in this file's history (`git log -p
 docs/plans/launcher-plan.md`) rather than below — a prompt whose work is finished is not something a
 session should read as instructions, and every deviation it would have described is now a row in §3.
@@ -875,24 +925,24 @@ session should read as instructions, and every deviation it would have described
 | E2 | `scripts/capture_launcher.ps1` (the headless reports, the keyboard leg and the pad leg), `capture_window.ps1 -ClientArea`, the README's "How it is checked" section and the same `build-and-run.md` section | A2/D7: the bar's help is the *row's*, so the harness asserts on the presses that cross a row and reports the ones inside a row's choices |
 | E3 | `scripts/acceptance_launcher.ps1`: the silent install, the four legs (retail, ultimate, demo, save), the argv contract, the boot-log assertions, its exit codes and `summary.json`, plus the `build-and-run.md` section and the README's "How it is checked" entry | §11's two findings: the profile is not loaded as a config file, and the General tab's path rows and the launch command use different stores. R4's row in §7 changed state because of the first |
 | E4 | the root README's launcher section, `known-issues.md`'s new entries (art licensing, version skew, renderer machine-dependence, and what E3 measured), and `distributable.md`'s packaging rows | — (E3's two findings are what the new entries write up, and two of them correct claims the plan and `known-issues.md` were carrying about how settings travel) |
+| A5 | the `[nav]` table and its editor (`launcher/src/nav_bindings.{h,cpp}`, `nav_keys.{h,cpp}`, `nav_ui.{h,cpp}`), `--safe-mode` and `--ui-scale`, `focus_ring.h` and the ring every focusable item now draws, `tests/launcher_keys_tests.cpp`, the harness's four legs, and the README's recovery section | D6: the keys are the profile's rather than the source's; the pointer adopts the ring only when it *moves*, which is the bug the walkthrough leg found; D2: safe mode may replace a file that did not parse, and skips the geometry write |
 
-**Open.** Six prompts: A4, A5, B1, C1, C2 and C6 — the art, the recovery half, and the Controller
+**Open.** Five prompts: A4, B1, C1, C2 and C6 — the art, and the Controller
 tab's remaining lanes. None is gated by anything, each is one step from the documentation that owns
 its evidence, and §5.3 is the only place they are described.
 
 | ID | Prompt | Lane | Depends on | Unblocks |
 | --- | --- | --- | --- | --- |
 | A4 | Cover art pipeline | A | P0.4 *(built)* | — |
-| A5 | Accessibility and recovery | A | A3, A2 *(built)* | — |
 | B1 | General tab: the two deferred rows | B | B1 *(built)* | — |
 | C1 | Device list, deadzone, `mnk_mode` | C | A1 *(built)* | — |
 | C2 | Keyboard mapping panel | C | C5 *(built)* | — |
 | C6 | Remap safety rails | C | C5 *(built)* | — |
 
-The three groups those fall into, which is what §6 schedules:
+The two groups those fall into, which is what §6 schedules:
 
 - **The Controller tab's remaining lanes** — C1, C2, C6.
-- **Art and recovery** — A4 and A5.
+- **Art** — A4.
 - **Finish M1** — done, and completely: A3 and A2 are built, E1's test names, E2's capture
   harness and E3's installed run are in `docs/build-and-run.md`, and the launcher they describe is
   the one §7's rows were measured on. M1 was defined (§1.1) as "navigable end to end with a pad,
@@ -900,6 +950,9 @@ The three groups those fall into, which is what §6 schedules:
   hints", and that is what the launcher does now.
 - **The evidence lane** — done: E1, E2, E3 and E4 are built, and E4's write-up is where E3's two
   measurements live (§11.6, §11.7).
+- **Recovery** — done (A5): the keys are the profile's, `--safe-mode` and `--ui-scale` exist, the
+  focus ring is a shape rather than only a shade, and `launcher/README.md` carries the recovery
+  steps.
 
 ### 5.3 The prompts that are left
 
@@ -921,19 +974,6 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > both (`scripts/capture_window.ps1`).
 > **Don't.** Do not commit any artwork; do not make the build fail when the download fails — that is
 > `make_art.ps1`'s existing rule and it stays.
-
-#### A5 — Accessibility and navigation recovery
-
-> **Goal.** Make the launcher usable by someone whose first choice is wrong: rebindable launcher
-> navigation (in the profile, with a reset that needs only the keyboard — A3 is what makes this
-> meaningful), `--no-gamepad` and `--safe-mode` switches that skip profile application and start on
-> defaults, consistent focus rings at every DPI step, no colour-only signalling (the badges already
-> carry text), and a keyboard-only walkthrough that never traps focus.
-> **Deliverable.** The switches, the nav-binding editor, and a `launcher/README.md` "if something goes
-> wrong" section written as recovery steps.
-> **Verify.** Corrupt the profile deliberately → `--safe-mode` starts clean; bind navigation to an
-> unused key and back; complete every tab with the keyboard only.
-> **Don't.** Do not require a controller to recover; do not hide the recovery switches in the UI only.
 
 #### B1 — General tab: the two deferred rows
 
@@ -1015,27 +1055,27 @@ Each block now says what is already in the tree, so a session does not rebuild i
 ```mermaid
 graph LR
   A4[A4 cover art]
-  A5[A5 recovery]
   B1[B1 general remainder]
   C1[C1 devices]
   C2[C2 keyboard panel]
   C6[C6 safety rails]
 ```
 
-Six prompts, and none of them depends on another: the evidence lane that used to sit under all of
-them (E1-E4) is built, and what each of these still owes is its own evidence, in its own file.
+Five prompts, and none of them depends on another: the evidence lane that used to sit under all of
+them (E1-E4) is built, A5's recovery went out with it, and what each of these still owes is its own
+evidence, in its own file.
 
 ### 6.2 Waves
 
 | Wave | Run in parallel | Notes |
 | --- | --- | --- |
-| **1** | A5, B1, C1, C2, C6 | five independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
+| **1** | B1, C1, C2, C6 | four independent sessions, none of them gated by anything open. C2 and C6 need nothing open. |
 | **2** | A4 | A4 needs only the built P0.4. |
 | **3** | one manual pass | The only work left that cannot be done at a keyboard, and the only part of §6 the evidence lane could not script: controller navigation on real pads pressed by hand, per-pad remap on real hardware, the three finish-page choices, and one real Ultimate install driven through the wizard. E2's pad leg and E3's helper leg cover the scripted halves of the last two. |
 
 ### 6.3 Critical path, and the shortest useful cut
 
-Nothing is on a critical path any more: A4, A5, B1, C1, C2 and C6 are independent, one step each, and
+Nothing is on a critical path any more: A4, B1, C1, C2 and C6 are independent, one step each, and
 the evidence lane's own two-step chains (E2 → E4, E3 → E4) are finished. If you only have one session
 at a time, take them in any order that respects §6.1; the harnesses they will be re-measured with are
 already in the tree — `scripts/capture_launcher.ps1` for the ring, the bar and a tab's body,
@@ -1050,9 +1090,9 @@ P0.2/P0.3/P0.4, A1, B1, B2, B3, B4, B5, B6, B7, E1 — was already built, and th
 "Controller tab input group" listed `input_backend`, which D17 removed: that is a shortening of M1,
 not a gap in it.
 
-**Post-M1** is unchanged in shape and now has no stale premises: art (A4) and recovery (A5), and the
-Controller tab's remaining lanes (C1, C2, C6). Packaging (D3–D5), first-run prefill (D4) and the whole
-evidence lane (E1–E4) are built, and §11 carries the two decisions E3's evidence left open.
+**Post-M1** is unchanged in shape and now has no stale premises: art (A4), and the Controller tab's
+remaining lanes (C1, C2, C6). Packaging (D3–D5), first-run prefill (D4), the whole evidence lane
+(E1–E4) and recovery (A5) are built, and §11 carries the two decisions E3's evidence left open.
 
 ---
 
@@ -1095,7 +1135,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 | The renderer a user picks may not run | a payload can carry Vulkan while the machine has no Vulkan driver | D18: the app probes the loader, logs why, and boots on the other backend |
 | Two settings files, one user | `rb_blitz.toml` and `launcher.toml` can disagree; the F4 overlay writes the former | precedence is fixed (D3), surfaced as a badge (B4), recorded as a standing limit |
 | Machine-wide installs | `{app}` may be read-only; the launcher's own log and the game's `rb_blitz.toml` writes fail there | the profile never lives in `{app}`; the launcher degrades to a warning |
-| Controller-only users | a bad mapping can make the game unreachable | C6's panic path, A5's recovery switches, "never persist a half-armed capture" |
+| Controller-only users | a bad mapping can make the game unreachable | C6's panic path, A5's recovery switches (built: `--safe-mode`, `--no-gamepad`, and the Launcher keys block's Reset every key), "never persist a half-armed capture" |
 | Remap scope creep | lane C was a whole project folded into this one (D13) | **spent**: C3/C4/C5 shipped inside the plan, and D17 narrowed them (one table, no per-device keying). What is left is C6, whose rails are what keep a bad mapping recoverable |
 | Art licensing | the cover is not ours | identical posture to the installer: the image is fetched at build time, gitignored, and absence is supported. The launcher has no cover at all until A4; both halves are recorded in `docs/known-issues.md`, and `docs/distributable.md` gains the packaging rows that say what covers them |
 | Version skew | launcher and game can be different builds | the shared seam is versioned where it can be (`[remap]` rows kept verbatim, the profile's `schema_version` refused rather than reinterpreted) and an unknown `--flag` is logged; E3 asserts the shared half end to end, and the rest is a standing limit in `docs/known-issues.md` |

@@ -183,6 +183,26 @@ changes no C++ at all:
 | `Right` / `PageDown` | Next tab (`Left` / `PageUp` goes back) |
 | `Enter` / `Space` | Operate the focused row: pick a target, open the folder picker, toggle a checkbox, step a slider, choose an enum entry, or start the Ultimate install |
 | `Esc` / `B` | Leave, or cancel whatever is modal |
+| `Ctrl+S` / `Ctrl+C` | The bar's *Save* and *Copy command line*, so a keyboard alone can finish and diagnose a session |
+| `Ctrl+Enter` | The bar's *Launch Game*, so a keyboard alone can start the game |
+| `Ctrl+Shift+C` | The precedence badge's *Copy the effective value*, for the row the ring is on — the bar names it on the rows that carry a badge |
+
+**All of those are the profile's to change** (A5). They are the `[nav]` table of
+`launcher.toml`, and the **Launcher keys** block at the end of the General tab is the editor:
+one row per action, *Assign* to capture the next key pressed within three seconds, *Reset* to
+put one action back to the keys it ships with, and *Reset every launcher key* for all of them
+at once. The table above is what a profile with no `[nav]` table does, which is also what
+`--safe-mode` starts from.
+
+Two rules about the vocabulary, both of them in `src/nav_bindings.cpp`:
+
+- A key on its own and the same key with `Ctrl`, `Shift` or `Alt` are different bindings, and a
+  chord is resolved before a bare key. That is what keeps `Shift+Tab` meaning "back" while `Tab`
+  means "forward", and what lets `Ctrl+S` save on a keyboard where `S` is bound to nothing.
+  A bare key is the key whatever else is held with it, so `Shift+Down` has always moved the ring.
+- A *move* repeats while it is held and a decision does not. This is the one thing A1's
+  hardcoded source said and a rebindable table cannot (`Tab` did not repeat and the arrows did);
+  a held `Tab` now walks the ring like a held arrow.
 
 | Pad | What it does |
 | --- | --- |
@@ -859,6 +879,52 @@ hot-reloadable, but the input system is built once from the factory, so the row 
 said so. It is gone now for a different reason — with the remap in place the launcher listens to
 every device at once (D16), so "which backend" is not a user-facing choice any more, and the
 `input_backend` cvar keeps its own default.
+
+## If something goes wrong (A5)
+
+Two things a settings file can do to a launcher, and what to do about each. Both switches are
+command-line only on purpose: they are for the case where the window is not usable enough to
+change a setting in it, so a switch reachable only from the window would be no switch at all.
+
+**The keys have stopped working.** Bind every movement key to something you do not have, or
+import a profile that did, and the ring cannot be moved - so the *Launcher keys* block that
+would fix it cannot be reached either. Recover with:
+
+```
+rb_blitz_launcher.exe --safe-mode
+```
+
+Safe mode starts the launcher on the compiled defaults for its **own** behaviour: the keys the
+ring reads, and the size the window opens at. Those two are the only things a profile can set
+that can leave the window unusable, which is why they are exactly what the switch takes away.
+Everything else still loads - the settings rows, the launch target, `[remap]` - and the bottom
+bar says safe mode is on rather than leaving you to wonder which window you are looking at.
+
+It is still a launcher you can *save* from, and that is deliberate: the point of the switch is
+to let you reach *Reset every launcher key* in the *Launcher keys* block, and a launcher that
+refused to write would leave the fix unrecorded. The one write it does skip is A1's window
+size - the window opened at the default size, so the size it ends at is not a choice you made,
+and a switch for reading a damaged profile should not be the thing that writes to it.
+
+**The settings file cannot be read at all.** A `launcher.toml` with a TOML error in it is
+reported on the bottom bar and never written over (D2: a hand-edited file is never lost to a
+Launcher that did not understand it). The ways out, in the order worth trying:
+
+- **Fix the line.** The bar prints the path and the line's own complaint.
+- **Import a good profile** - *Import* on the General tab replaces what is on screen with a file
+  you choose, and it stays live when the file on disk did not parse, because reading a profile
+  you trust is the way out of a damaged one.
+- **`--safe-mode`, then Save.** With the switch on, Save *replaces* the file instead of refusing
+  to touch it: what is written is the compiled defaults plus whatever is on screen, and the bar
+  says so before the button is pressed. This is the recovery for a user with no second copy, and
+  it is the only case where safe mode can write something the ordinary path would refuse.
+
+`--launcher_profile=<path>` points the launcher at a profile somewhere else entirely, which is
+also how a profile that is not in the settings folder at all can be used without moving the
+settings folder to it. `--dump-profile` prints what the launcher made of the file - where it is,
+whether it can be written, whether a save would change it, and every row the game's own
+`rb_blitz.toml` decides - without opening a window, which is the fastest way to find out *why*
+something is wrong.
 
 ## How it is checked
 

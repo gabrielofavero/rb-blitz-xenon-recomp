@@ -32,6 +32,14 @@ enum class NavAction {
   // Start on a pad (D6): not a move of the ring, so it is the shell's own rather than anything a
   // widget answers - it is the launch the bottom bar's button offers, without the mouse.
   kLaunch,
+  // The three the bottom bar and the precedence badge own, and the reason A5 binds them: the bar's
+  // buttons and B4's *Copy the effective value* were mouse-only, so a keyboard alone could not
+  // save, read the command line, start the game, or take the value the game's own file decides.
+  // None of them moves the ring; kCopyEffectiveValue acts on the row the ring is on, which is why
+  // it belongs in this vocabulary rather than beside the badge that draws it.
+  kSave,
+  kCopyCommand,
+  kCopyEffectiveValue,
 };
 
 // The focus ring for one tab. Every move wraps, because the row list is a ring: Next on

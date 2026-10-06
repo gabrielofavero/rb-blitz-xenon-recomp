@@ -28,6 +28,8 @@
 #include "controller_tab.h"
 #include "launcher/profile.h"
 #include "nav.h"
+#include "nav_bindings.h"
+#include "nav_ui.h"
 #include "pad_source.h"
 #include "profile_session.h"
 #include "schema_view.h"
@@ -47,6 +49,11 @@ struct ShellEnvironment {
   bool gamepads = true;
   // --focus-log: where the trace of the ring and the input devices goes, empty for nowhere.
   std::string focus_log_path;
+  // A5's --safe-mode: the keys the ring reads are the compiled defaults whatever the profile says.
+  // The block that edits them still writes the file - which is how a set of keys that locked a user
+  // out is repaired - and it says out loud that the change arrives on the next start rather than
+  // this one.
+  bool safe_mode = false;
 };
 
 class Shell {
@@ -79,6 +86,17 @@ class Shell {
   bool DrawBottomBar();
   // B7: save what is unsaved, build Contract 3's command line and start the game.
   void LaunchGame();
+  // The bar's own two writes, split out of DrawBottomBar so a bound key (A5's Ctrl+S and Ctrl+C)
+  // does exactly what the button does rather than a second copy of it: the save, and the command
+  // line on the clipboard.
+  void SaveProfile();
+  void CopyCommandLine();
+  // A5's fourth bound action: B4's badge copies the value the game's own file decides, which was
+  // mouse-only until now. It acts on the row the ring is on, and says so on the bar when that row
+  // is not one the game overrides.
+  void CopyEffectiveValue();
+  // The setting the ring is on, or nullptr when this tab's ring is past its schema rows.
+  const settings::Setting* FocusedSetting() const;
   // B7's "Copy command line" affordance and the failed-start detail, which is a modal because a
   // command line and a log path do not fit on one bar line. Both read the same builder a launch
   // does, so what is copied is exactly what was run.
@@ -119,10 +137,25 @@ class Shell {
   void LogDevice();
   void LogPads();
 
+  // A5: the keys the ring reads, rebuilt from the profile before the frame's keys are read, so a
+  // binding assigned in the panel is the one the next press uses. Under --safe-mode it is never
+  // rebuilt: the defaults are what the switch means, and the panel says so.
+  void RefreshKeys();
+
+  // A5's own table member, and why it is a member at all: a binding the panel assigns this frame
+  // is what the next frame's press has to be read with. `safe_mode_` is the switch that stops it
+  // being taken from the file.
+  bool safe_mode_ = false;
+
   PadRegistry pads_;
   FocusLog log_;
   GameRoots roots_;
   ProfileSession session_;
+  // Declared before the keyboard source below, which holds a reference to it.
+  nav_bindings::Table keys_;
+  // A5's block: the shell's rather than the General tab's, because the shell has to ask whether a
+  // capture owns the keyboard before it reads one.
+  NavKeysPanel nav_keys_;
   GeneralTab general_;
   ControllerTab controller_;
   std::vector<TabLayout> layout_;
