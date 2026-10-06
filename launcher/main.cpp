@@ -250,12 +250,23 @@ int Emit(const std::string& text, const std::string& path, int code) {  if (path
   return file.good() ? code : 1;
 }
 
-int DumpLayout(const std::string& path) {
-  const std::string text = rb_blitz::launcher::DescribeLayout(rb_blitz::launcher::BuildLayout());
+int DumpLayout(const Options& options) {
+  // The dump is evidence about *this* install, so it asks the same question the shell asks: the
+  // Ultimate payload's presence decides R10's row, which is the one rule a build machine can
+  // answer without a display. `multiple_monitors` is left at its default - no SDL, no display
+  // list - which is the "has not looked" answer the rule was written to fail open on.
+  const rb_blitz::launcher::GameRoots roots =
+      rb_blitz::launcher::DetectGameRoots(ExecutableDir(), options.game_data_root);
+  rb_blitz::launcher::RowEnvironment environment;
+  environment.ultimate_installed = rb_blitz::launcher::UltimateAvailable(
+      rb_blitz::launcher::DetectUltimateState(roots.game_root));
+
+  const std::string text = rb_blitz::launcher::DescribeLayout(
+      rb_blitz::launcher::BuildLayout(environment));
   const bool complete = text.find("MISSING-TOOLTIP") == std::string::npos;
   const std::string all =
       text + (complete ? "every row carries a tooltip\n" : "a row is missing its tooltip\n");
-  return Emit(all, path, complete ? 0 : 1);
+  return Emit(all, options.dump_layout_path, complete ? 0 : 1);
 }
 
 // The session both dump modes describe: D2's own resolution from the same inputs the launcher
@@ -544,7 +555,7 @@ std::string LoadUiFont() {
 int main(int argc, char** argv) {
   const Options options = ParseOptions(argc, argv);
   if (options.dump_layout) {
-    return DumpLayout(options.dump_layout_path);
+    return DumpLayout(options);
   }
   if (options.dump_general) {
     return DumpGeneral(options);
@@ -730,12 +741,17 @@ int main(int argc, char** argv) {
   SDL_MaximizeWindow(window);
 
   // The facts a row's `visible` rule is decided from, read once: a machine with one display has
-  // no monitor to choose between, so the Monitor row is not shown at all.
+  // no monitor to choose between, so the Monitor row is not shown at all, and a row about the
+  // Ultimate mod's own screen has nothing to say where the mod is not installed. Both come from
+  // the same sources the tabs use - SDL's display list and D5's state probe - so what the layout
+  // hides and what the tab draws cannot disagree.
   int display_count = 0;
   SDL_DisplayID* displays = SDL_GetDisplays(&display_count);
   rb_blitz::launcher::RowEnvironment environment;
   environment.multiple_monitors = displays != nullptr && display_count > 1;
   SDL_free(displays);
+  environment.ultimate_installed = rb_blitz::launcher::UltimateAvailable(
+      rb_blitz::launcher::DetectUltimateState(roots.game_root));
 
   std::unique_ptr<rb_blitz::launcher::Shell> shell =
       std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots, environment,

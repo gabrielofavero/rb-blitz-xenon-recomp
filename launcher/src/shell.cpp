@@ -138,6 +138,10 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
         break;
       case settings::Tab::kGraphics:
         break;
+      case settings::Tab::kInterface:
+        // An interface row is a schema row and nothing else: no block is drawn under it, so the
+        // ring is exactly the rows the tab has.
+        break;
     }
     rows.push_back(kBarOptions);
     rings_[index].Reset(std::move(rows));
@@ -593,6 +597,8 @@ Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
     case settings::Tab::kController:
       return HelpEntry{ControllerTab::HelpText(local), "Activate"};
     case settings::Tab::kGraphics:
+      break;
+    case settings::Tab::kInterface:
       break;
   }
   return HelpEntry{};

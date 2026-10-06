@@ -44,6 +44,14 @@ a whole-function hook with the guest address recorded → a named data/code patc
 an SDK patch file" **[tree]** [backlog.md](../backlog.md) §6. So the preparation this plan plans is
 the first two rungs: **know the flow and name it**, then pick the cheapest rung that reaches it.
 
+**R10 (added 2026-10-06, after the plan's own R1–R9).** A follow-up request asked that the Ultimate
+mod's "Mod Settings" row be drawn as "Ultimate Settings", on by default and only shown in the launcher
+where the mod is installed. It is R5's sibling in every respect — the same compiled-DTA edit, the same
+edit-at-read delivery, one more cvar — so it is recorded as R10 rather than folded into R5, whose
+subject (hiding rows that need the network) is a different claim. Its evidence is
+[engine/main-menu-flow.md](../engine/main-menu-flow.md) § "the label", and it is the one enhancement
+whose default is on.
+
 ### 1.1 What "code preparation" means here, and what it does not
 
 In scope, per prompt: symbol names in `config/functions.toml`, flow maps with recorded guest
@@ -204,8 +212,10 @@ which is P1 there and is *not* on this plan's critical path.
 and [src/enhancements.h](../../src/enhancements.h); the table is
 [docs/engine/toggles.md](../engine/toggles.md).
 
-**As built:** every enhancement is one `rb_blitz.toml` key under `[enhancements]`, default **off**,
-and the runtime's own nesting rule makes the cvar name the table path joined with `_`
+**As built:** every enhancement is one `rb_blitz.toml` key under `[enhancements]`, default **off**
+(except R10, whose default is on because its subject is the mod's own screen — see
+[engine/toggles.md](../engine/toggles.md)), and the runtime's own nesting rule makes the cvar name
+the table path joined with `_`
 (`ApplyTomlTable`, `rexglue-sdk/src/core/cvar.cpp`): `[enhancements] skip_offline_dialog = true`
 sets `enhancements_skip_offline_dialog`. **The `enh_<feature>` spelling first proposed here was
 wrong** — the flat-cvar namespace of this runtime is the table path, so a name that is not the path
@@ -213,8 +223,10 @@ would be unreachable from the TOML table it is documented under. Every toggle ca
 `kRequiresRestart` (what they gate is decided at load) and logs `on`/`off` with the source that set
 it, so "the toggle did nothing" and "the toggle was never on" cannot be confused.
 
-The launcher plan's Graphics tab is where they surface later (D12 there); this plan does not build
-that UI.
+The launcher plan's tabs are where they surface later (D12 there); this plan does not build that UI.
+As built on 2026-10-06 the launcher has four of them (General, Interface, Audio / Video, Controller),
+and the two toggles that are implemented — R5 and R10 — are on **Interface**, the tab for edits to
+the game's own screens.
 
 ### D8 — The DLC cache is host-side; the guest's cache is untouched
 
@@ -649,7 +661,9 @@ table, which `[functions]` cannot name.
 > (size + digest) and the rows it removed, and `scripts/observe_ui.ps1 -State main-menu -Ocr` reads the
 > resulting labels back. R5 ([src/ui/menu_options.cpp](../../src/ui/menu_options.cpp),
 > [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp)) is the filter, and it is off by
-> default.
+> default. **R10 landed with it:** the same module and the same hook also rename the mod's own
+> settings label, which needed the mirror image of R5's trick — bytes taken *out* of an unused macro
+> name rather than put into one.
 
 #### A1 — Icon/button-sheet swap route
 

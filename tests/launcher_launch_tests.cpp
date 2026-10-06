@@ -201,6 +201,21 @@ void TestMainMenuRows(const Scratch& scratch) {
   CHECK_CONTAINS(command.arguments, "--enhancements_hide_menu_options=true");
   CHECK_CONTAINS(command.arguments,
                  "--enhancements_hidden_menu_options=\"splash_leaderboard, splash_dlc\"");
+
+  BeginCase("R10: the one row whose default is on is passed when it is turned off");
+
+  // The rename row ships on, so the interesting direction is off: a profile that has not moved
+  // it passes nothing and the game draws "Ultimate Settings", and unchecking it is what has to
+  // reach the game.
+  ProfileSession rename = scratch.Session();
+  const LaunchCommand on_by_default =
+      BuildLaunchCommand(rename, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_NOT_CONTAINS(on_by_default.arguments, "--enhancements_rename_mod_settings");
+
+  rename.SetSetting("enhancements_rename_mod_settings", "false", "true", ValueStyle::kBare);
+  const LaunchCommand off = BuildLaunchCommand(rename, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_TRUE(off.ok);
+  CHECK_CONTAINS(off.arguments, "--enhancements_rename_mod_settings=false");
 }
 
 void TestRefusals(const Scratch& scratch) {

@@ -709,12 +709,14 @@ if (-not $SkipWindow) {
     # The tab switch: the title is the launcher's own report of the selected tab (A1), and
     # the body is where the change has to be visible. The strip and the bar are outside the
     # body crop, so a difference in it is the tab's own content and not the highlighted
-    # button that says which tab is selected.
+    # button that says which tab is selected. One press is one tab, and the tab after
+    # General is Interface (the schema's order: general, interface, graphics, controller);
+    # the walkthrough leg walks every lap of that order.
     $lastFrame = $frames[$frames.Count - 1]
     Send-KeyToLauncher $process.Id "pagedown"
     $tabFrame = Save-Frame "keyboard-tab"
     $tabAfter = Get-FocusedTab $focusLog
-    Add-Check "window" "Page Down moves to the next tab" ($tabAfter -eq "graphics") $tabAfter
+    Add-Check "window" "Page Down moves to the next tab" ($tabAfter -eq "interface") $tabAfter
     $bodyDiff = Get-DiffPercent (Save-Crop $lastFrame "body" $region.Body 90) `
                                 (Save-Crop $tabFrame.Path "body" $region.Body 91)
     $diffs.Add([pscustomobject]@{ Leg = "keyboard"; Pair = "tab switch body"; Percent = $bodyDiff }) | Out-Null
@@ -832,6 +834,7 @@ if (-not $SkipWindow -and -not $SkipWalkthrough) {
         # every entry the tab says it has, and come back round to the first one?
         $tabs = @(
             @{ Name = "General"; Key = "general" }
+            @{ Name = "Interface"; Key = "interface" }
             @{ Name = "Audio / Video"; Key = "graphics" }
             @{ Name = "Controller"; Key = "controller" }
         )

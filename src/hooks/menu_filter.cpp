@@ -27,17 +27,22 @@
 #include <windows.h>
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
+// Define named symbols the same way, so the cvar declarations live next to their table.
 REXCVAR_DECLARE(bool, enhancements_hide_menu_options);
 REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
+REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
 
 namespace {
 
-// The row list and the toggle, read once at boot: they are restart-scoped, and
+// The row list and the toggles, read once at boot: they are restart-scoped, and
 // reading them on a guest thread would be a lock nobody needs. A guest read
-// that arrives before the boot hook has run finds the faithful default, off.
+// that arrives before the boot hook has run finds the faithful defaults.
 struct Settings {
-  bool enabled = false;
+  bool hide_rows = false;
   std::vector<std::string> rows;
+  bool rename_settings_row = false;
+
+  bool Any() const { return hide_rows || rename_settings_row; }
 };
 
 Settings g_settings;
@@ -129,47 +134,78 @@ uint32_t RetargetChecksumRow(uint8_t* base, const uint8_t before[20], const uint
   return rewritten;
 }
 
-// A guest read that carries a .dtb which is not the menu's, or whose edit cannot
-// balance. Both look like "the toggle did nothing" unless the reason is written
-// down - but the title reads a few hundred .dtb files, so each distinct reason is
-// written once rather than once per file. The reasons come from a fixed set in
-// menu_options.cpp, so this stays bounded.
-void LogRejectionOnce(const std::string& reason) {
+// A guest read that carries a .dtb which is not one of the files these edits are
+// for, or one whose edit cannot balance. Both look like "the toggle did nothing"
+// unless the reason is written down - but the title reads a few hundred .dtb
+// files, so each distinct reason is written once rather than once per file. The
+// reasons come from a fixed set in menu_options.cpp, so this stays bounded.
+void LogRejectionOnce(const char* edit, const std::string& reason) {
   static std::mutex mutex;
   static std::set<std::string> logged;
   std::lock_guard<std::mutex> lock(mutex);
-  if (logged.insert(reason).second) {
-    REXLOG_INFO("menu_filter: a .dtb read was left alone: {}", reason);
+  if (logged.insert(std::string(edit) + ": " + reason).second) {
+    REXLOG_INFO("menu_filter: {} left a .dtb read alone: {}", edit, reason);
   }
 }
 
-// Patch the menu's file in place when this buffer carries all of it. True when
-// the bytes were rewritten.
-bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
-  const rb_blitz::menu_options::Outcome outcome =
-      rb_blitz::menu_options::HideRows(file, available, g_settings.rows);
-  if (!outcome.applied) {
-    LogRejectionOnce(outcome.reason);
-    return false;
-  }
-
-  REXLOG_INFO("menu_filter: hid {} row(s) from the main menu's option list ({} bytes moved into "
-              "the list's #ifdef macro name): {}",
-              outcome.removed.size(), outcome.freed, Joined(outcome.removed));
-
-  const uint32_t rows =
-      RetargetChecksumRow(base, outcome.digest_before, outcome.digest_after);
-  REXLOG_INFO("menu_filter: {} bytes, digest {} -> {}", outcome.file_size,
-              HexDigest(outcome.digest_before), HexDigest(outcome.digest_after));
+// The title's content database holds a digest per file and refuses one that does
+// not match it, so a patched file's row has to be given the patched digest. The
+// payload's own files are not in the database at all: the mod's reads come through
+// the overlay device the database does not describe, and then there is no row to
+// correct.
+void RetargetIfNeeded(uint8_t* base, size_t file_size, const uint8_t before[20],
+                      const uint8_t after[20]) {
+  const uint32_t rows = RetargetChecksumRow(base, before, after);
+  REXLOG_INFO("menu_filter: {} bytes, digest {} -> {}", file_size, HexDigest(before),
+              HexDigest(after));
   if (rows == 0) {
     REXLOG_INFO("menu_filter:   the title's content database does not carry this file, so no row "
                 "had to be corrected");
   }
-  return true;
+}
+
+// Patch whatever this buffer carries that these edits are for. True when the bytes
+// were rewritten - a candidate that is one file but not the other must not stop the
+// scan, because a single read block can carry both.
+bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
+  bool patched = false;
+
+  if (g_settings.hide_rows) {
+    const rb_blitz::menu_options::Outcome outcome =
+        rb_blitz::menu_options::HideRows(file, available, g_settings.rows);
+    if (outcome.applied) {
+      REXLOG_INFO("menu_filter: hid {} row(s) from the main menu's option list ({} bytes moved "
+                  "into the list's #ifdef macro name): {}",
+                  outcome.removed.size(), outcome.freed, Joined(outcome.removed));
+      RetargetIfNeeded(base, outcome.file_size, outcome.digest_before, outcome.digest_after);
+      patched = true;
+    } else {
+      LogRejectionOnce("hide rows", outcome.reason);
+    }
+  }
+
+  if (g_settings.rename_settings_row) {
+    // The Ultimate mod's own settings row: a run without the payload never reads
+    // this file, so there is nothing to leave alone.
+    const rb_blitz::menu_options::Renamed renamed = rb_blitz::menu_options::RenameLabel(
+        file, available, rb_blitz::menu_options::kModSettingsKey,
+        rb_blitz::menu_options::kModSettingsLabel, rb_blitz::menu_options::kUltimateSettingsLabel);
+    if (renamed.applied) {
+      REXLOG_INFO("menu_filter: relabelled \"{}\" to \"{}\" ({} bytes taken from an unused macro "
+                  "name)",
+                  renamed.from, renamed.to, renamed.borrowed);
+      RetargetIfNeeded(base, renamed.file_size, renamed.digest_before, renamed.digest_after);
+      patched = true;
+    } else {
+      LogRejectionOnce("rename label", renamed.reason);
+    }
+  }
+
+  return patched;
 }
 
 void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
-  if (!g_configured || !g_settings.enabled) {
+  if (!g_configured || !g_settings.Any()) {
     return;
   }
   const uint32_t length = ctx.r9.u32;
@@ -190,9 +226,7 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
       continue;
     }
     if (PatchFile(base, host + at, length - at)) {
-      REXLOG_INFO("menu_filter: patched the menu's file at byte {} of a {} byte {} read", at,
-                  length, which);
-      return;
+      REXLOG_INFO("menu_filter: patched a file at byte {} of a {} byte {} read", at, length, which);
     }
   }
 }
@@ -223,8 +257,9 @@ ReadFunc ResolveOriginal(bool scatter) {
 namespace rb_blitz::menu_filter {
 
 void Configure() {
-  g_settings.enabled = REXCVAR_GET(enhancements_hide_menu_options);
+  g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
   g_settings.rows = menu_options::ParseRowNames(REXCVAR_GET(enhancements_hidden_menu_options));
+  g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
   if (g_settings.rows.empty()) {
     g_settings.rows = menu_options::ParseRowNames(menu_options::kDefaultRows);
     REXLOG_WARN("menu_filter: enhancements_hidden_menu_options is empty; hiding the compiled "
@@ -232,12 +267,18 @@ void Configure() {
                 menu_options::kDefaultRows);
   }
   g_configured = true;
-  if (!g_settings.enabled) {
-    REXLOG_INFO("menu_filter: off (R5); the main menu lists every row the title ships");
-    return;
+  if (g_settings.hide_rows) {
+    REXLOG_INFO("menu_filter: hiding {} row(s) from the main menu (R5): {}", g_settings.rows.size(),
+                Joined(g_settings.rows));
+  } else {
+    REXLOG_INFO("menu_filter: R5 off; the main menu lists every row the title ships");
   }
-  REXLOG_INFO("menu_filter: on (R5); hiding {} row(s) from the main menu: {}", g_settings.rows.size(),
-              Joined(g_settings.rows));
+  if (g_settings.rename_settings_row) {
+    REXLOG_INFO("menu_filter: relabelling the mod's \"{}\" row to \"{}\" (R10)",
+                menu_options::kModSettingsLabel, menu_options::kUltimateSettingsLabel);
+  } else {
+    REXLOG_INFO("menu_filter: R10 off; the mod's own label is drawn as it ships");
+  }
 }
 
 }  // namespace rb_blitz::menu_filter

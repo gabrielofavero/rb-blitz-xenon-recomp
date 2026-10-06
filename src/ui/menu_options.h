@@ -38,6 +38,13 @@
 // is undefined once it grows, which makes that conditional drop its (empty)
 // block and costs the menu nothing else.
 //
+// The same idea, read the other way, is how a *label* is relabelled: the Ultimate
+// mod's settings row is drawn from a locale value ("Mod Settings"), and a longer
+// label needs bytes this file can only give up in one place - the name of an
+// `#ifdef` whose macro the build does not define (the file's strings for the
+// other platform). A name that matches no macro keeps matching none when it is
+// shortened, so the branch the guest takes is the same one it took before.
+//
 // SDK-free on purpose: tests/menu_options_tests.cpp exercises it against a
 // synthetic fixture, with no boot and no retail content (D14).
 
@@ -55,6 +62,14 @@ namespace rb_blitz::menu_options {
 // list, and the downloadable-content browser. This is the compiled default of
 // `enhancements_hidden_menu_options`, so an unconfigured run hides these.
 inline constexpr char kDefaultRows[] = "splash_leaderboard,splash_achievements,splash_dlc";
+
+// The Ultimate mod's own settings row: the key its locale entry is filed under,
+// the label it ships with, and the one this build draws instead
+// (`enhancements_rename_mod_settings`). The row is the mod's, so a run without the
+// payload has neither the file nor the label, and the edit never happens.
+inline constexpr char kModSettingsKey[] = "mod_settings";
+inline constexpr char kModSettingsLabel[] = "Mod Settings";
+inline constexpr char kUltimateSettingsLabel[] = "Ultimate Settings";
 
 // What one call did, in the terms a log line and the tests both need.
 struct Outcome {
@@ -89,6 +104,31 @@ std::vector<std::string> ParseRowNames(std::string_view text);
 // the array must carry the `#ifdef` element the freed bytes are paid back with,
 // and the result must be exactly as long as the input.
 Outcome HideRows(uint8_t* file, size_t available, const std::vector<std::string>& names);
+
+// What one RenameLabel call did, in the same terms.
+struct Renamed {
+  bool applied = false;   // the file was rewritten
+  size_t file_size = 0;   // the .dtb's own length, 4-byte seed included
+  // Bytes the unused macro name gave up, i.e. how much longer the new label is.
+  // Zero when the two labels are the same length, which needs no donor.
+  int32_t borrowed = 0;
+  std::string from;  // the label that was there
+  std::string to;    // the label that is there now
+  uint8_t digest_before[20] = {};
+  uint8_t digest_after[20] = {};
+  std::string reason;  // why nothing was written, when applied is false
+};
+
+// Rewrites the locale label `from` of the entry filed under `key` to `to`, in
+// place, keeping the file's length. A longer label takes the bytes it needs from
+// the name of an `#ifdef` that guards this build's other-platform strings: that
+// macro matches nothing here, so the conditional is skipped before and after the
+// name changes, and no branch decision moves.
+//
+// Refuses the file unless the entry is there, the name is long enough to pay with
+// (or the label is not longer at all), and the rewrite balances.
+Renamed RenameLabel(uint8_t* file, size_t available, std::string_view key,
+                    std::string_view from, std::string_view to);
 
 // SHA-1 of `size` bytes, as the title's own content checksum uses it (the value
 // a patched file's database row has to be given so the title still recognises

@@ -5,13 +5,15 @@
 // and the one boot line that reports them. See src/enhancements.h for why the
 // names carry the table prefix and docs/engine/toggles.md for the table itself.
 //
-// Every toggle here is off by default, and every one is honest about what it does
+// Every toggle here is off by default except R10, whose subject is the Ultimate
+// mod's own name: it only does anything when that payload is installed, and the
+// launcher hides its row when it is not. Every toggle is honest about what it does
 // today: a description that ends in "Not implemented" is a toggle that gates
-// nothing yet, and R5 - the first implemented one - says what it edits and which
-// key names what it hides. A user reading --help or a log must not be able to
-// mistake a planned feature for a working one. The faithful (off) behaviour is
-// named in each description; that is the same record the project requires of a
-// hook, applied to a plan.
+// nothing yet, and R5 and R10 - the implemented pair - say what they edit and
+// which keys name it. A user reading --help or a log must not be able to mistake
+// a planned feature for a working one. The faithful (off) behaviour is named in
+// each description; that is the same record the project requires of a hook,
+// applied to a plan.
 //
 // Each cvar carries kRequiresRestart rather than the hot-reload default: what
 // these gate is guest behaviour decided at load, so "changed live" would be a
@@ -63,6 +65,17 @@ REXCVAR_DEFINE_STRING(enhancements_hidden_menu_options, rb_blitz::menu_options::
                       "R5 the main menu rows enhancements_hide_menu_options hides, comma "
                       "separated. The compiled default is the three that only ever worked online: "
                       "splash_leaderboard, splash_achievements, splash_dlc.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+// The one toggle whose default is on, because its subject is the mod's own name:
+// the row only exists when the Ultimate payload is installed, and it only ever
+// reads "Mod Settings" there. A run without the payload has neither the file nor
+// the label, so the edit has nothing to do; the launcher hides the row in that
+// case too (launcher/config/settings.toml, `visible = "ultimate_installed"`).
+REXCVAR_DEFINE_BOOL(enhancements_rename_mod_settings, true, "Enhancements",
+                    "R10 rename the mod's settings row: draw the row the Ultimate mod adds as "
+                    "\"Ultimate Settings\", which is the name the mod itself uses. Faithful: the "
+                    "mod's own label, \"Mod Settings\".")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_native_mouse, false, "Enhancements",
@@ -121,7 +134,7 @@ struct ToggleRow {
 
 // One row per feature in docs/plans/customization-plan.md R1-R9. This table is
 // what the log walks, so a toggle that is not here is a toggle nobody sees.
-constexpr std::array<ToggleRow, 9> kToggles{{
+constexpr std::array<ToggleRow, 10> kToggles{{
     {"enhancements_expand_resolution", "R1 custom resolutions",
      [] { return REXCVAR_GET(enhancements_expand_resolution); }},
     {"enhancements_ui_scale", "R2 UI accessibility",
@@ -140,12 +153,14 @@ constexpr std::array<ToggleRow, 9> kToggles{{
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
     {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs",
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
+    {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
+     [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},
 }};
 
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default (docs/engine/toggles.md)",
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R10 (docs/engine/toggles.md)",
               kToggles.size());
   for (const ToggleRow& row : kToggles) {
     REXLOG_INFO("enhancements: {} = {} ({}) - {}", row.name, row.enabled() ? "on" : "off",

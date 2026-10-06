@@ -61,11 +61,11 @@ Four properties of that shape are what make the feature safe:
 **[tree]** the module's own reading of that shape is in
 [src/ui/menu_options.cpp:268-282](../../src/ui/menu_options.cpp) (the locator) and
 [src/ui/menu_options.cpp:440-457](../../src/ui/menu_options.cpp) (the removal); the quoted statements
-were dumped from the retail entry on this machine **[cited]** (§6).
+were dumped from the retail entry on this machine **[cited]** (§7).
 
 ## 2. The file
 
-`splash.dtb` — 8,808 bytes in the payload ark, 7,148 in the retail one **[cited]** (§6). Both arks
+`splash.dtb` — 8,808 bytes in the payload ark, 7,148 in the retail one **[cited]** (§7). Both arks
 carry it; the payload's copy is the one that wins when the Ultimate overlay is mounted.
 
 ```
@@ -164,7 +164,44 @@ Two smaller pieces complete the delivery:
   at guest `0x82804364` **[cited]**. The payload's digest is not in the image at all: the mod's files
   come through the overlay device the database does not describe.
 
-## 6. Evidence
+## 6. The label (R10)
+
+The mod's settings row is a locale entry, and its text is data too: the panel's row is the symbol
+`mod_settings`, and the engine draws whatever that key resolves to.
+
+```
+{mod_settings  "Mod Settings"}
+```
+
+The entries live in `ulti/locale/gen/locale_mod.dtb` — the mod's own locale file, inside the payload
+ark — and each is an array of exactly two elements, `[symbol key][string text]`, which is the shape
+every locale file in this title uses. A run without the payload never reads that file, so
+`enhancements_rename_mod_settings` has nothing to do and the launcher does not show the row.
+
+Making that label read **"Ultimate Settings"** is five bytes longer, and the length is the ark's, so
+the same rule applies: the bytes have to come from inside the file. They come from the one thing in
+it that can give them up without changing anything the guest does — **the name of an `#ifdef` whose
+macro this build does not define.** The file carries the other platform's strings behind
+`#ifdef HX_PS3`; the loader skips that branch here because the name matches no macro, and *that* is
+what the skip depends on, not which name it is. So:
+
+| Move | Bytes |
+| --- | --- |
+| `"Mod Settings"` → `"Ultimate Settings"` | +5 |
+| `HX_PS3` → `H` (the unused name pays) | −5 |
+
+Nothing else moves, and the branch decisions cannot: an undefined macro is undefined whatever it is
+called. A *shorter* label gives the bytes back the other way (the name grows by the difference, which
+is R5's move in reverse), and a label of the same length needs no donor at all. The module takes bytes
+only from the one name it knows is not defined in this build (`kSpareMacro` in
+[src/ui/menu_options.cpp](../../src/ui/menu_options.cpp)) — never from an arbitrary conditional, since
+shortening a *defined* macro's name would throw away the branch it guards.
+
+The edit is refused, with the reason logged, when the pair is not in the file, when there is no such
+`#ifdef`, or when the name is too short to pay for the new text: a mod version whose strings changed is
+left exactly as it ships.
+
+## 7. Evidence
 
 | Run | What was seen |
 | --- | --- |
@@ -176,29 +213,42 @@ Two smaller pieces complete the delivery:
 | the same, vanilla (`--ultimate_mode=0`) **[cited]** | the retail file patched, and `content checksum row at guest 0x82804364 now holds the patched digest`; no dirty-disc screen |
 | `scripts/observe_ui.ps1 -State main-menu -Ocr` with the toggle **on**, both targets **[cited]** | OCR `BLITZ ALTIMAT PLAY HELP & OPTIONS MOD SETTINGS EXIT GAME` (Ultimate) and `BLITZ PLAY HELP & OPTIONS EXIT GAME` (vanilla) — `LEADERBOARDS` and `ACHIEVEMENTS` are gone from both, `DOWNLOAD CONTENT` from the vanilla one, and the harness's own stock needle (`DOWNLOAD CONTENT`) no longer matches |
 | the same runs with the toggle **off** (the control) **[cited]** | OCR `PLAY LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS DOWNLOAD CONTENT EXIT GAME` (vanilla — the harness's needle matches and the state passes, so the stock screen is unchanged) and `PLAY LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS MOD SETTINGS EXIT GAME` (Ultimate: that payload's own menu draws no DLC row); the log carries `menu_filter: off (R5)` and nothing else, so the read path is not even scanned |
-| `tests/menu_options_tests.cpp` **[tree]** | 59 checks over a synthetic fixture: the grammar round trip, the default list, a row inside the block, a row outside it, an absent row, an empty list, a name the file only uses as structure, the bytes a read block carries behind the file, and the refusal paths. No retail content is used (D14) |
+| `tests/menu_options_tests.cpp` **[tree]** | over a synthetic fixture: the grammar round trip, the default list, a row inside the block, a row outside it, an absent row, an empty list, a name the file only uses as structure, the bytes a read block carries behind the file, the label rename (grown, shortened, same length, refused), and every refusal path. No retail content is used (D14) |
+| the same transform run against the real `locale_mod.dtb`, off-tree **[cited]** | 4,094 bytes in, 4,094 out, `Mod Settings` → `Ultimate Settings`, `HX_PS3` → `H`, the achievement strings untouched, and both files parse to the end with the same root arity (82) |
+| `rb_blitz.exe` with default cvars (R10 on, R5 off), Ultimate payload **[cited]** | `menu_filter: relabelled "Mod Settings" to "Ultimate Settings" (5 bytes taken from an unused macro name)`, then `4094 bytes, digest fdf135ad… -> 72359ac0…` and `patched a file at byte 44974 of a 65536 byte plain read`; the main-menu OCR reads `… HELP & OPTIONS ULTIMATE SETTINGS EXIT GAME` |
+| the same, the mod's Other Settings page, R10 **on** vs **off** **[cited]** | both runs OCR `OTHERSETTINGS / Unlock All / Unlock Online Only Achievements` — the branch the edit borrows from did not move, and it is the branch the guest already took |
+| the same, `--enhancements_rename_mod_settings=false` (the control) **[cited]** | the main-menu OCR reads `… HELP & OPTIONS MOD SETTINGS EXIT GAME`; the log carries `menu_filter: R10 off`, no patch line, and no digest |
 
-## 7. Where it lives
+## 8. Where it lives
 
 | Piece | File |
 | --- | --- |
 | the edit (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) |
 | the read hook, the checksum row, the cvars' boot read | [src/hooks/menu_filter.h](../../src/hooks/menu_filter.h), [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp) |
-| the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`) |
-| the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (General → "Main menu") |
+| the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`) |
+| the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group; R10's row is `visible = "ultimate_installed"`) |
 | the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp) |
 
-## 8. Open
+## 9. Open
 
 - **A read that does not carry the whole file is not patched.** The block the ark reads is the unit
   the hook sees; a file split across two reads is left alone (the log says
   `the node stream runs past the bytes available`). Measured: both shipped files arrive whole.
 - **The names, not the path, are the identity.** Any file carrying an array with `splash_start` and
   `splash_exit` *and* the named rows is edited. No other file in either ark is one, but a future
-  content pack could be; the log names the file it patched (size + digest) so that is visible.
+  content pack could be; the log names the file it patched (size + digest) so that is visible. The
+  label edit is anchored the same way, on `mod_settings` **and** the text it ships with, so a mod
+  version whose strings changed is left alone rather than half-renamed.
 - **The list needs a conditional to pay for the freed bytes.** A file whose option array has no
   `#ifdef` is refused (`the option list carries no conditional to take the freed bytes`), because the
   edit has nowhere to put them. Both shipped files have one.
+- **The label needs that unused macro name.** `ulti/locale/gen/locale_mod.dtb` has one (`#ifdef
+  HX_PS3`, six characters, five of which pay for "Ultimate"); a rebuild of the mod without it, or one
+  whose label already reads differently, is refused with the reason logged and drawn as it ships.
+- **The launcher's row is shown from a startup snapshot** of whether the payload is installed
+  (`DetectUltimateState`), taken where the launch target's own state is read. Installing Ultimate
+  from the launcher *during* a session therefore shows the row on the next start, not in that one —
+  the same restart-scoped promise the row itself makes about its value.
 - **The trial target is not this feature's to fix.** With `--license_mask=0` the *stock* payload
   faults at boot, before R5's read hook is involved (measured while choosing a launch target, not
   re-measured here). R5 neither causes nor fixes it.

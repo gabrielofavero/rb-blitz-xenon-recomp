@@ -389,7 +389,10 @@ bool ParseDocument(const std::string& text, Document* out) {
 
 enum class Kind { kBool, kInt, kFloat, kEnum, kString, kPathDir, kPathFile };
 enum class Applies { kRestart, kLive };
-enum class Tab { kGeneral, kGraphics, kController };
+// The tab set and its order, both of which are this list: General first, then Interface (the
+// game's own screens), then the two technical tabs. Adding a tab here adds it to the launcher
+// (R9's "the tab list is data"), and `kTabNames` below is generated from the same order.
+enum class Tab { kGeneral, kInterface, kGraphics, kController };
 
 const std::map<std::string, Kind, std::less<>>& Kinds() {
   static const std::map<std::string, Kind, std::less<>> kinds = {
@@ -402,9 +405,23 @@ const std::map<std::string, Kind, std::less<>>& Kinds() {
 
 const std::map<std::string, Tab, std::less<>>& Tabs() {
   static const std::map<std::string, Tab, std::less<>> tabs = {
-      {"general", Tab::kGeneral}, {"graphics", Tab::kGraphics}, {"controller", Tab::kController},
+      {"general", Tab::kGeneral}, {"interface", Tab::kInterface}, {"graphics", Tab::kGraphics},
+      {"controller", Tab::kController},
   };
   return tabs;
+}
+
+// The tab set as a message can name it, so a refusal lists what the schema accepts instead of a
+// hand-written list that can go stale. Alphabetical, because the map is.
+std::string TabList() {
+  std::string list;
+  for (const auto& entry : Tabs()) {
+    if (!list.empty()) {
+      list += ", ";
+    }
+    list += entry.first;
+  }
+  return list;
 }
 
 struct GroupRow {
@@ -481,12 +498,10 @@ std::optional<Tab> ReadTab(const Entry& entry) {
   const auto found = Tabs().find(tab);
   if (found == Tabs().end()) {
     if (tab == "experimental") {
-      Fail(Location(entry.line) +
-           "tab `experimental` does not exist: the tab set is General, Graphics, "
-           "Controller (D14)");
+      Fail(Location(entry.line) + "tab `experimental` does not exist: the tab set is " + TabList() +
+           " (D14)");
     } else {
-      Fail(Location(entry.line) + "unknown tab `" + tab +
-           "`; expected general, graphics or controller");
+      Fail(Location(entry.line) + "unknown tab `" + tab + "`; expected " + TabList());
     }
     return std::nullopt;
   }
@@ -849,9 +864,9 @@ std::unique_ptr<Schema> Build(const Document& document,
         Fail(Location(line) + "row `" + row.key + "` has an empty `visible` rule");
         continue;
       }
-      if (visible->text != "multi_monitor") {
+      if (visible->text != "multi_monitor" && visible->text != "ultimate_installed") {
         Fail(Location(visible->line) + "row `" + row.key + "` has unknown visible rule `" +
-             visible->text + "`; expected multi_monitor");
+             visible->text + "`; expected multi_monitor or ultimate_installed");
         continue;
       }
       row.visible = visible->text;
@@ -913,6 +928,8 @@ std::string_view TabConstant(Tab tab) {
   switch (tab) {
     case Tab::kGeneral:
       return "Tab::kGeneral";
+    case Tab::kInterface:
+      return "Tab::kInterface";
     case Tab::kGraphics:
       return "Tab::kGraphics";
     case Tab::kController:
@@ -970,7 +987,8 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "\n"
       << "enum class Applies : std::uint8_t {\n  kRestart,\n  kLive,\n};\n"
       << "\n"
-      << "enum class Tab : std::uint8_t {\n  kGeneral,\n  kGraphics,\n  kController,\n};\n"
+      << "enum class Tab : std::uint8_t {\n  kGeneral,\n  kInterface,\n  kGraphics,\n "
+         " kController,\n};\n"
       << "\n"
       << "// A tab's category. `unavailable` groups have no rows: the tab does not draw them at\n"
       << "// all, and they exist so --dump-layout can name what this build does not fill (D14,\n"
@@ -1005,7 +1023,8 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "  bool argv_flag;\n"
       << "};\n"
       << "\n"
-      << "inline constexpr std::string_view kTabNames[] = {\"general\", \"graphics\", \"controller\"};\n"
+      << "inline constexpr std::string_view kTabNames[] = {\"general\", \"interface\",\n"
+         "                                                \"graphics\", \"controller\"};\n"
       << "inline constexpr std::string_view kKindNames[] = {\"bool\",   \"int\",    \"float\",\n"
       << "                                               \"enum\",   \"string\", \"path_dir\",\n"
       << "                                               \"path_file\"};\n"

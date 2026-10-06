@@ -138,7 +138,8 @@ The shell is the model's, not ImGui's. Every row it draws comes from the generat
 (`src/schema_view.cpp`), so the launcher holds no per-setting knowledge and adding a row
 changes no C++ at all:
 
-- **Three tabs**, in the table's own order, because the tab list is data (R9), each labelled
+- **Four tabs**, in the table's own order — General, Interface, Audio / Video, Controller — because
+  the tab list is data (R9), each labelled
   the way a person reads it (`General`, not the lowercase key the schema spells —
   `DisplayTabName`, which is also where `graphics` becomes **Audio / Video**: the tab holds
   the audio rows too, and its schema key is the schema's business rather than the user's).
@@ -160,13 +161,16 @@ changes no C++ at all:
   *Keyboard*, *Manual*) are declared in the schema and shown by `--dump-layout`, but the
   tabs leave them out rather than spending the window on text that offers nothing. A group
   whose only rows were hidden by a `visible` rule is the same case, and is left out too.
-- **A row can carry a `visible` rule**, and one does: *Audio / Video → Window → Monitor* declares
-  `visible = "multi_monitor"`, so a machine with one display has nothing to choose between and
-  gets no row. The rule is applied in `schema_view` when the layout is built, not by the code
-  that draws, because the ring that decides what is focusable and the loop that draws are two
-  different pieces of code — the only way they cannot disagree about a hidden row is for the
+- **A row can carry a `visible` rule**, and two do: *Audio / Video → Window → Monitor* declares
+  `visible = "multi_monitor"` (a machine with one display has nothing to choose between, so it gets
+  no row), and *Interface → Main menu → Rename Mod Settings* declares
+  `visible = "ultimate_installed"` (a row about the Ultimate mod's own screen has nothing to say
+  where the mod is not installed). The rule is applied in `schema_view` when the layout is built, not
+  by the code that draws, because the ring that decides what is focusable and the loop that draws are
+  two different pieces of code — the only way they cannot disagree about a hidden row is for the
   row to be gone before either of them sees it. `--dump-layout` counts the rows each rule kept
-  out, so a rule that hides more than it meant to is visible there.
+  out, so a rule that hides more than it meant to is visible there, and it answers the Ultimate
+  question from this install (`DetectUltimateState`) rather than assuming.
 - **One focus ring per tab** (`src/nav.cpp`): an ordered list of the tab's rows, each with the
   options it offers side by side, and the flat entry the ring is on. Up and Down move between
   rows, Left and Right between a row's options; both wrap. Keys are translated in exactly one
@@ -332,19 +336,9 @@ mapping database happens to have for a hardware id that matches nothing.
 
 ## The General tab (B1)
 
-Five rows in four groups: the launch target, the save location and the DLC location — the whole of
-M1's General scope (§1.1, D4) — plus R5's two rows under a *Main menu* heading. *Verify installation*
-and the game-directory override are later (D4 says so); nothing here pretends otherwise.
-
-**The main-menu rows** are the first enhancement this tab carries: *Hide offline menu items*
-(`enhancements_hide_menu_options`, a check box) and *Menu items to hide*
-(`enhancements_hidden_menu_options`, a text field naming the title's own rows). They remove the
-Leaderboards, Achievements and Downloadable Content rows — the three whose screens need Rock Central
-— from the menu the game shows when it is offline, and they are off by default like every other
-toggle. What the edit is, why it has to keep the file's length, and the runs that prove it are in
-[main-menu-flow.md](../docs/engine/main-menu-flow.md); the rows themselves are the project's own
-cvars, not the runtime's, so the tab passes them like any other row that is not on its compiled
-default.
+Three rows in two groups — the launch target, the save location and the DLC location — which is the
+whole of M1's General scope (§1.1, D4). *Verify installation* and the game-directory override are
+later (D4 says so); nothing here pretends otherwise.
 
 **The launch target** is a stack of radios under the group heading, one per choice — *Rock Band
 Blitz*, *Rock Band Blitz (Trial)* and *Rock Band Blitz Ultimate* — each its own focus-ring row, so
@@ -441,6 +435,26 @@ ultimate root  : D:\Coding\decomps\360\rb-blitz-xenon-recomp\game\ultimate
 ultimate       : ready
 ```
 
+
+## The Interface tab
+
+The tab for edits to **the game's own screens** — what the player sees and navigates — as opposed to
+the install (General), the picture (Audio / Video) and the controls (Controller). It exists because
+those edits have nothing to do with the launch target they happen to sit beside: they change the
+guest's own data, in either target, and more of them are planned (R2's UI scale, R4's icons and R9's
+menu songs all belong here when they land).
+
+Its one group today is *Main menu*:
+
+| Row | What it does |
+| --- | --- |
+| *Hide offline menu items* (`enhancements_hide_menu_options`) | removes the main menu's Leaderboards, Achievements and Downloadable Content rows — the three whose screens need Rock Central |
+| *Menu items to hide* (`enhancements_hidden_menu_options`) | which rows that means, by the title's own names |
+| *Rename Mod Settings* (`enhancements_rename_mod_settings`) | draws the Ultimate mod's own screen as "Ultimate Settings"; ships **on**, and its row declares `visible = "ultimate_installed"`, so it is not shown at all where the payload is missing — a row about the mod's own screen has nothing to say there, and the runtime's own `DetectUltimateState` answers that question rather than a second guess at the file layout |
+
+What the two edits are, why each has to keep a file's length, and the runs that prove them are in
+[main-menu-flow.md](../docs/engine/main-menu-flow.md). The rows are the project's own cvars, not the
+runtime's, so the tab passes them like any other row that is not on its compiled default.
 
 ## The Audio / Video tab (B2)
 
@@ -842,7 +856,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | Field | Meaning |
 | --- | --- |
 | `key` | The cvar name; also the profile key and, when `argv = "flag"`, the `--flag` the launcher passes to the game |
-| `tab` | `general`, `graphics` or `controller`. The key is the schema's own name for the tab; `DisplayTabName` is what the strip shows (`graphics` reads as **Audio / Video**) |
+| `tab` | `general`, `interface`, `graphics` or `controller` — which is also the tab order. The key is the schema's own name for the tab; `DisplayTabName` is what the strip shows (`graphics` reads as **Audio / Video**) |
 | `group` | Must match a `[[group]]` declared for the same tab |
 | `label` | The row's text in the tab |
 | `kind` | `bool`, `int`, `float`, `enum`, `string`, `path_dir`, `path_file` |
@@ -853,7 +867,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | `choices` | `enum` only: the allowed values |
 | `choices_from` | `enum` only, optional: where the choices really come from when the *build* decides them. `gpu_backends` is the only rule there is — the backends CMake compiled in, passed to the embed step as `--backends=` — and such a row declares no `choices` of its own |
 | `min` / `max` | `int` / `float` only, optional: the range the row's slider is bounded to. Both or neither, and the default must sit inside it. They are the cvar's own `.range(...)` where it has one, so the slider cannot offer a value the runtime would clamp |
-| `visible` | Optional, and empty for every row but one: a rule the *machine* has to satisfy for the row to exist at all. `multi_monitor` is the only rule there is — *Audio / Video → Window → Monitor* is hidden when one display is attached, because there is nothing to choose between |
+| `visible` | Optional: a rule the *machine* or the *install* has to satisfy for the row to exist at all. Two rules exist — `multi_monitor` (*Audio / Video → Window → Monitor* is hidden when one display is attached, because there is nothing to choose between) and `ultimate_installed` (*Interface → Main menu → Rename Mod Settings* is hidden when the Ultimate payload is not installed, because the row it configures belongs to the mod) |
 | `validate` | `path_dir` / `path_file` only: `exists`, `dlc_layout` or `inside_game_root:forbid`, separated by `\|` |
 
 `argv = "none"` exists for exactly one row: `launch.target` is not a cvar, and the
@@ -1025,7 +1039,11 @@ and the two path rows whose General-tab store is `[launch]` while the launch com
    not from the lifecycle tag. If the cvar declares a `.range(...)`, put it in `min`/`max`
    so the row's slider is bounded by the runtime's own limits.
 3. Add the `[[setting]]` to `config/settings.toml` under a declared group, with a
-   tooltip written for the person reading the bottom bar.
+   tooltip written for the person reading the bottom bar. The tab is the group's, and the tab
+   set is fixed by the schema compiler (`tools/embed_settings.cpp`): General (the install and
+   the launch), Interface (the game's own screens), graphics ("Audio / Video"), controller.
+   A row whose setting is none of those is a new tab, which is one entry in that list plus
+   the groups it holds — not a row.
 4. Rebuild `rb_blitz_launcher_settings` and check the printed row count moved.
 
 That is the whole change: the shell renders whatever the table says, in the table's order,

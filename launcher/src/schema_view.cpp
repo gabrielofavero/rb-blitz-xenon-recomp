@@ -44,6 +44,9 @@ bool SettingVisible(const settings::Setting& setting, const RowEnvironment& envi
   if (setting.visible == "multi_monitor") {
     return environment.multiple_monitors;
   }
+  if (setting.visible == "ultimate_installed") {
+    return environment.ultimate_installed;
+  }
   return true;
 }
 

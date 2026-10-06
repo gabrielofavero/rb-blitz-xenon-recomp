@@ -123,6 +123,8 @@ constexpr uint32_t kIfdef = 0x07;
 constexpr uint32_t kIfndef = 0x23;
 constexpr uint32_t kEndif = 0x09;
 constexpr uint32_t kArray = 0x10;
+constexpr uint32_t kSymbol = 0x05;
+constexpr uint32_t kString = 0x12;
 
 struct Node {
   uint32_t tag = 0;
@@ -132,6 +134,10 @@ struct Node {
   std::vector<uint8_t> text;  // text payloads
   std::vector<Node> kids;     // block payloads
 };
+
+// The largest root arity a compiled DTA in this title could plausibly carry,
+// used to reject a byte pattern that only looks like a file header.
+constexpr size_t kMaxNodes = 1u << 14;
 
 // The three first names the menu's option array always lists; an array that has
 // both is the menu's, and no other array in the game does.
@@ -258,10 +264,133 @@ size_t NodeSize(const Node& node) {
   return scratch.size();
 }
 
-bool IsText(const Node& node, const char* text) {
-  const size_t length = std::strlen(text);
-  return node.text.size() == length &&
-         std::memcmp(node.text.data(), text, length) == 0;
+bool IsText(const Node& node, std::string_view text) {
+  return node.text.size() == text.size() &&
+         (text.empty() || std::memcmp(node.text.data(), text.data(), text.size()) == 0);
+}
+
+bool IsText(const Node& node, const char* text) { return IsText(node, std::string_view(text)); }
+
+// The name of the macro this title's own data uses for the halves of a file that
+// only the PS3 build sees. It is not defined in this build, so a conditional on it
+// is skipped - and what makes the loader skip it is that the name matches no
+// macro, not which name it is. Shortening it (or padding it) therefore changes no
+// branch, which is what makes it the one thing in a file that can give bytes up.
+constexpr char kSpareMacro[] = "HX_PS3";
+
+// The first node with this tag and this text, anywhere in the tree.
+Node* FindDirective(Node& node, uint32_t tag, std::string_view text) {
+  if (node.tag == tag && IsText(node, text)) {
+    return &node;
+  }
+  for (Node& kid : node.kids) {
+    if (Node* found = FindDirective(kid, tag, text)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+// A locale entry is an array of exactly two elements - the key it is filed under
+// and the text it draws - which is the shape every locale file in this title uses.
+Node* FindLocaleValue(Node& node, std::string_view key, std::string_view text) {
+  if (node.tag == kArray && node.kids.size() == 2 && node.kids[0].tag == kSymbol &&
+      node.kids[1].tag == kString && IsText(node.kids[0], key) && IsText(node.kids[1], text)) {
+    return &node.kids[1];
+  }
+  for (Node& kid : node.kids) {
+    if (Node* found = FindLocaleValue(kid, key, text)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+// A decoded file: the seed it is stored through, its nodes, and the lengths those
+// nodes came out of.
+struct Loaded {
+  uint32_t seed = 0;
+  std::vector<Node> root;
+  size_t node_bytes = 0;  // the node stream, without the seven-byte root header
+  size_t file_size = 0;   // the seed, the header and the nodes
+};
+
+// Decodes `available` bytes of the caller's buffer and parses the root array. The
+// file's own length comes from the root's arity, so a .dtb that sits inside a
+// larger read is handled exactly; anything after the last node belongs to the next
+// file. Only a file this module can reproduce byte for byte is accepted: it proves
+// the grammar is the one the file was written with.
+bool LoadFile(const uint8_t* file, size_t available, Loaded* out, std::string* reason) {
+  if (file == nullptr || available < 11) {
+    *reason = "too short to be a .dtb";
+    return false;
+  }
+  out->seed = LoadU32(file);
+  const size_t body_size = available - 4;
+  std::vector<uint8_t> body(body_size);
+  Keystream stream = StreamFor(out->seed);
+  for (size_t i = 0; i < body_size; ++i) {
+    body[i] = file[4 + i] ^ stream.Next();
+  }
+  if (body[0] != 0x01) {
+    *reason = "not a compiled DTA array";
+    return false;
+  }
+  const uint16_t root_arity = LoadU16(body.data() + 1);
+  if (root_arity == 0 || root_arity > kMaxNodes) {
+    *reason = "implausible root arity";
+    return false;
+  }
+  Reader reader{body.data(), body.size(), 7};
+  out->root.clear();
+  out->root.reserve(root_arity);
+  for (uint16_t i = 0; i < root_arity; ++i) {
+    Node node;
+    if (!ParseNode(reader, node, 0)) {
+      *reason = "the node stream does not parse";
+      return false;
+    }
+    out->root.push_back(std::move(node));
+  }
+  const size_t body_used = reader.pos;
+  out->node_bytes = body_used - 7;
+  out->file_size = body_used + 4;
+  if (out->file_size > available) {
+    *reason = "the node stream runs past the bytes available";
+    return false;
+  }
+  std::vector<uint8_t> check;
+  check.reserve(out->node_bytes);
+  for (const Node& node : out->root) {
+    SerializeNode(node, &check);
+  }
+  if (check.size() != out->node_bytes ||
+      std::memcmp(check.data(), body.data() + 7, out->node_bytes) != 0) {
+    *reason = "the node stream does not reserialize";
+    return false;
+  }
+  return true;
+}
+
+std::vector<uint8_t> SerializeAll(const Loaded& loaded) {
+  std::vector<uint8_t> nodes;
+  nodes.reserve(loaded.node_bytes);
+  for (const Node& node : loaded.root) {
+    SerializeNode(node, &nodes);
+  }
+  return nodes;
+}
+
+// Writes a node stream back through the file's own seed, so nothing but the edited
+// nodes changes: the seed and the root header are left exactly as they were.
+void WriteFile(const Loaded& loaded, const std::vector<uint8_t>& nodes, uint8_t* file) {
+  Keystream stream = StreamFor(loaded.seed);
+  for (size_t i = 0; i < 7; ++i) {  // the root header, which is not touched
+    stream.Next();
+  }
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    file[4 + 7 + i] = nodes[i] ^ stream.Next();
+  }
 }
 
 // The menu's option array, found by the two rows that open and close it.
@@ -302,10 +431,6 @@ size_t MatchEndif(const std::vector<Node>& kids, size_t index) {
   }
   return kids.size();
 }
-
-// The largest root arity a compiled DTA in this title could plausibly carry,
-// used to reject a byte pattern that only looks like a file header.
-constexpr size_t kMaxNodes = 1u << 14;
 
 }  // namespace
 
@@ -360,72 +485,18 @@ std::vector<std::string> ParseRowNames(std::string_view text) {
 Outcome HideRows(uint8_t* file, size_t available,
                  const std::vector<std::string>& names) {
   Outcome outcome;
-  if (file == nullptr || available < 11) {
-    outcome.reason = "too short to be a .dtb";
-    return outcome;
-  }
   if (names.empty()) {
     outcome.reason = "no rows were named";
     return outcome;
   }
-
-  const uint32_t seed = LoadU32(file);
-  const size_t body_size = available - 4;
-
-  // Decode the whole window and parse the root array. The file's own length
-  // comes from the root's arity, so a .dtb that sits inside a larger read is
-  // handled exactly; anything after the last node belongs to the next file.
-  std::vector<uint8_t> body(body_size);
-  {
-    Keystream stream = StreamFor(seed);
-    for (size_t i = 0; i < body_size; ++i) {
-      body[i] = file[4 + i] ^ stream.Next();
-    }
-  }
-  if (body[0] != 0x01) {
-    outcome.reason = "not a compiled DTA array";
+  Loaded loaded;
+  if (!LoadFile(file, available, &loaded, &outcome.reason)) {
     return outcome;
   }
-  Reader reader{body.data(), body.size(), 7};
-  const uint16_t root_arity = LoadU16(body.data() + 1);
-  if (root_arity == 0 || root_arity > kMaxNodes) {
-    outcome.reason = "implausible root arity";
-    return outcome;
-  }
-  std::vector<Node> root;
-  root.reserve(root_arity);
-  for (uint16_t i = 0; i < root_arity; ++i) {
-    Node node;
-    if (!ParseNode(reader, node, 0)) {
-      outcome.reason = "the node stream does not parse";
-      return outcome;
-    }
-    root.push_back(std::move(node));
-  }
-  const size_t body_used = reader.pos;
-  outcome.file_size = body_used + 4;
-  if (outcome.file_size > available) {
-    outcome.reason = "the node stream runs past the bytes available";
-    outcome.file_size = 0;
-    return outcome;
-  }
-  // Only a file this module can reproduce byte for byte is safe to rewrite: it
-  // proves the grammar above is the one the file was written with.
-  {
-    std::vector<uint8_t> check;
-    check.reserve(body_used - 7);
-    for (const Node& node : root) {
-      SerializeNode(node, &check);
-    }
-    if (check.size() != body_used - 7 ||
-        std::memcmp(check.data(), body.data() + 7, body_used - 7) != 0) {
-      outcome.reason = "the node stream does not reserialize";
-      return outcome;
-    }
-  }
+  outcome.file_size = loaded.file_size;
 
   Node* array = nullptr;
-  for (Node& node : root) {
+  for (Node& node : loaded.root) {
     if ((array = FindOptionArray(node)) != nullptr) {
       break;
     }
@@ -507,13 +578,8 @@ Outcome HideRows(uint8_t* file, size_t available,
   // ark index has no room for a different size, and a patch that cannot balance
   // is not written at all. What is rebuilt is the node stream, which starts
   // after the seven-byte root header.
-  const size_t node_bytes = body_used - 7;
-  std::vector<uint8_t> rebuilt;
-  rebuilt.reserve(node_bytes);
-  for (const Node& node : root) {
-    SerializeNode(node, &rebuilt);
-  }
-  if (rebuilt.size() != node_bytes) {
+  const std::vector<uint8_t> rebuilt = SerializeAll(loaded);
+  if (rebuilt.size() != loaded.node_bytes) {
     outcome.applied = false;
     outcome.reason = "the edit does not preserve the file's length";
     outcome.removed.clear();
@@ -524,18 +590,78 @@ Outcome HideRows(uint8_t* file, size_t available,
   // Write it back through the file's own seed, so nothing but the edited nodes
   // changes, then prove the caller's buffer now holds that file.
   Sha1Digest(file, outcome.file_size, outcome.digest_before);
-  {
-    Keystream stream = StreamFor(seed);
-    for (size_t i = 0; i < 7; ++i) {  // the root header, which is not touched
-      stream.Next();
-    }
-    for (size_t i = 0; i < rebuilt.size(); ++i) {
-      file[4 + 7 + i] = rebuilt[i] ^ stream.Next();
-    }
-  }
+  WriteFile(loaded, rebuilt, file);
   Sha1Digest(file, outcome.file_size, outcome.digest_after);
   outcome.applied = true;
   return outcome;
+}
+
+Renamed RenameLabel(uint8_t* file, size_t available, std::string_view key,
+                    std::string_view from, std::string_view to) {
+  Renamed renamed;
+  if (from == to) {
+    renamed.reason = "the label already says that";
+    return renamed;
+  }
+  Loaded loaded;
+  if (!LoadFile(file, available, &loaded, &renamed.reason)) {
+    return renamed;
+  }
+  renamed.file_size = loaded.file_size;
+
+  Node* value = nullptr;
+  for (Node& node : loaded.root) {
+    if ((value = FindLocaleValue(node, key, from)) != nullptr) {
+      break;
+    }
+  }
+  if (value == nullptr) {
+    renamed.reason = "the file has no such label";
+    return renamed;
+  }
+
+  const int64_t delta = static_cast<int64_t>(to.size()) - static_cast<int64_t>(from.size());
+  if (delta != 0) {
+    Node* spare = nullptr;
+    for (Node& node : loaded.root) {
+      if ((spare = FindDirective(node, kIfdef, kSpareMacro)) != nullptr) {
+        break;
+      }
+    }
+    if (spare == nullptr) {
+      renamed.reason = "no unused macro name to take the bytes from";
+      return renamed;
+    }
+    if (delta > 0) {
+      // A longer label eats the name; a name shorter than the claim is refused
+      // rather than padded from somewhere else.
+      if (spare->text.size() <= static_cast<size_t>(delta)) {
+        renamed.reason = "the unused macro name is too short";
+        return renamed;
+      }
+      spare->text.resize(spare->text.size() - static_cast<size_t>(delta));
+    } else {
+      spare->text.insert(spare->text.end(), static_cast<size_t>(-delta), uint8_t{'z'});
+    }
+    renamed.borrowed = static_cast<int32_t>(delta);
+  }
+
+  renamed.from.assign(from);
+  renamed.to.assign(to);
+  value->text.assign(to.begin(), to.end());
+
+  const std::vector<uint8_t> rebuilt = SerializeAll(loaded);
+  if (rebuilt.size() != loaded.node_bytes) {
+    renamed.reason = "the edit does not preserve the file's length";
+    renamed.borrowed = 0;
+    return renamed;
+  }
+
+  Sha1Digest(file, renamed.file_size, renamed.digest_before);
+  WriteFile(loaded, rebuilt, file);
+  Sha1Digest(file, renamed.file_size, renamed.digest_after);
+  renamed.applied = true;
+  return renamed;
 }
 
 // --- SHA-1 ----------------------------------------------------------------

@@ -53,6 +53,11 @@ struct RowEnvironment {
   // because there is nothing to choose between. A caller that has not looked - --dump-layout, a
   // test - leaves this true, so no rule hides a row by accident.
   bool multiple_monitors = true;
+  // False only when the Ultimate payload is known not to be installed: the rule R10's row
+  // needs, because the row it configures names the mod's own screen. Read once, from the same
+  // file-system probe the General tab's launch target uses, so the two cannot disagree about
+  // whether the mod is there (`UltimateAvailable`, src/ultimate_state.h).
+  bool ultimate_installed = true;
 };
 
 // False when a row declares a `visible` rule this environment does not satisfy. A row with no

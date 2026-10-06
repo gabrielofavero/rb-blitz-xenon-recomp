@@ -8,10 +8,12 @@
 # Fields
 #   key       the cvar name; also the profile key, and - when argv = "flag" - the
 #             --flag the launcher passes to the game
-#   tab       general | graphics | controller. There is no `experimental` (D14). The key
-#             is the schema's own name for the tab; the launcher labels the graphics tab
-#             "Audio / Video" (schema_view's DisplayTabName), because it holds the audio
-#             rows too.
+#   tab       general | interface | graphics | controller - the order too. There is no
+#             `experimental` (D14). The key is the schema's own name for the tab; the launcher
+#             labels the graphics tab "Audio / Video" (schema_view's DisplayTabName), because it
+#             holds the audio rows too. `interface` is the tab for edits to the game's own
+#             screens - what the player sees and navigates - so an interface enhancement goes
+#             there and not into the technical tabs.
 #   group     must match a [[group]] with the same tab
 #   label     the row's text in the tab
 #   kind      bool | int | float | enum | string | path_dir | path_file
@@ -28,9 +30,11 @@
 #             the slider carries the cvar's real limits. Both or neither, and the
 #             default must sit inside it.
 #   visible   optional: a precondition the machine has to satisfy for the row to be shown
-#             at all. `multi_monitor` is the only rule today (a machine with one display
-#             has no monitor to choose between); the tab hides the row and the focus ring
-#             skips it, so a hidden row is never a focus trap.
+#             at all. `multi_monitor` (a machine with one display has no monitor to
+#             choose between) and `ultimate_installed` (a row about the Ultimate
+#             mod's own menu has nothing to say where the mod is not installed); the
+#             tab hides the row and the focus ring skips it, so a hidden row is never
+#             a focus trap.
 #   choices_from  enum only, optional: where the row's choices really come from when the
 #             build decides them. `gpu_backends` is the only rule today, and the
 #             build passes the backends it compiled in (--backends) so a payload cannot
@@ -99,12 +103,12 @@ tab    = "general"
 status = "unavailable"
 note   = "The Ultimate content-device, song-blacklist and disk-error edits are not editable in this build."
 
-# R5: what the title's own main menu lists offline. Its own group because it is not
-# an Ultimate patch bit - the edit is made when the menu's file is read, in either
-# launch target, and applies to the retail content as well.
+# R5 and R10: the game's own main menu. Its own group because neither is an Ultimate patch bit -
+# both edits are made when the menu's files are read, in either launch target, and R5 applies to
+# the retail content as well.
 [[group]]
 name = "Main menu"
-tab  = "general"
+tab  = "interface"
 
 [[group]]
 name = "Display"
@@ -211,7 +215,7 @@ folder's dlc directory.
 """
 
 # ---------------------------------------------------------------------------
-# General - Main menu
+# Interface - Main menu
 # ---------------------------------------------------------------------------
 
 # R5. Leaderboards, achievements and downloadable content are the three rows whose
@@ -221,7 +225,7 @@ folder's dlc directory.
 # entry's size, and the edit is byte-neutral.
 [[setting]]
 key     = "enhancements_hide_menu_options"
-tab     = "general"
+tab     = "interface"
 group   = "Main menu"
 label   = "Hide offline menu items"
 kind    = "bool"
@@ -236,7 +240,7 @@ restart.
 
 [[setting]]
 key     = "enhancements_hidden_menu_options"
-tab     = "general"
+tab     = "interface"
 group   = "Main menu"
 label   = "Menu items to hide"
 kind    = "string"
@@ -247,6 +251,25 @@ tooltip = """
 Which main menu rows the setting above removes, by the title's own names
 (splash_leaderboard, splash_achievements, splash_dlc), separated by commas. Empty
 hides the three defaults. Needs a restart.
+"""
+
+# R10, and the one row whose default is on: it names the mod's own screen, so the
+# only run it can affect is one with the mod installed - which is exactly the
+# condition the row is shown under.
+[[setting]]
+key     = "enhancements_rename_mod_settings"
+tab     = "interface"
+group   = "Main menu"
+label   = "Rename Mod Settings"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+visible = "ultimate_installed"
+tooltip = """
+Rock Band Blitz Ultimate's own settings screen is called "Mod Settings"; this draws
+it as "Ultimate Settings" instead, the name the mod itself uses. Shown only when the
+Ultimate payload is installed. Needs a restart.
 """
 
 # ---------------------------------------------------------------------------

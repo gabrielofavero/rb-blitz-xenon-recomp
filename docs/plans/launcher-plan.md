@@ -5,9 +5,17 @@ gates the release-readiness tasks in [backlog.md](../backlog.md).
 
 > **Current milestone: M1 — "the launcher with the graphical settings" (§1.1), decided 2026-10-03.**
 > The plan below still describes the whole launcher. M1 is the cut that is in scope *right now*:
-> three tabs (General, Graphics, Controller), with the Graphics tab whole, the General tab limited to
-> the launch target plus the save and DLC locations, and the Controller tab's unbuilt parts named but
-> empty. Everything outside M1 is planned, not dropped.
+> three tabs at that cut (General, Graphics, Controller), with the Graphics tab whole, the General
+> tab limited to the launch target plus the save and DLC locations, and the Controller tab's unbuilt
+> parts named but empty. Everything outside M1 is planned, not dropped.
+>
+> **Amended 2026-10-06: a fourth tab, Interface, between General and Audio / Video.** A follow-up
+> request asked for a place for edits to *the game's own screens* — the menu rows R5 hides, the label
+> R10 renames — rather than mixing them into a General tab whose subject is the install and the
+> launch. The tab set and its order are data (`launcher/config/settings.toml`'s `tab`, compiled into
+> `kTabNames`), so this is a group and its rows moving plus one entry in the schema compiler's tab
+> list; the walkthrough leg of `scripts/capture_launcher.ps1` walks all four laps and the keyboard
+> leg's "Page Down moves to the next tab" check reads the new order.
 
 This document is written as a **prompt plan**: every unit of work is a self-contained prompt you can
 hand to a fresh agent session, plus the order it must run in and what can run beside what (§6).
@@ -522,6 +530,15 @@ all three:
 
 ### D14 — The tabs: General, Graphics, Controller. Experimental is withdrawn (2026-10-03)
 
+> **Amended 2026-10-06 — the tab set is four.** A fifth home, **Interface**, was added after General
+> for edits to the *game's own* screens, which none of the three tabs owned: General is the install and
+> the launch, Graphics ("Audio / Video") is the emulator's presentation, Controller is input. The first
+> tenant is the *Main menu* group (R5's two hide rows, R10's rename row) moved off General — those rows
+> write the game's menu data, not the launch target. Adding a tab is data: one entry in the schema
+> compiler's tab list (`launcher/tools/embed_settings.cpp`) plus the groups that name it. Nothing in this
+> decision changes — the Experimental tab stays withdrawn, and the rule below still holds: a group
+> renders as its name plus one line or is hidden, never as a dead widget.
+
 The launcher has **three** tabs. The planned Experimental tab (R14) is scrapped: a tab that exists
 because "we were not sure where this belongs" is where settings go to be forgotten, and every row it
 held has an obvious home.
@@ -729,7 +746,10 @@ their older wording where they disagree.
   > `--print-command` are the way to ask the same question headlessly.
 - **The Graphics tab is renamed Audio / Video.** Its schema key stays `graphics` — the `.toml`'s
   business, not the user's — and `DisplayTabName` is the one place that turns a tab key into a label.
-  "Audio / Video" is also what the tab actually is: it has held the audio rows since B2.
+  "Audio / Video" is also what the tab actually is: it has held the audio rows since B2. The
+  *Interface* tab (2026-10-06) is the same mechanism with nothing to rename: its key and its label
+  are both "Interface", and `DisplayTabName` capitalises it like any other tab whose label is its
+  key.
 - **A category with nothing to show is hidden outright, name and note included.** D14 allowed either;
   this settles it. The General tab's *Ultimate (advanced)*, the Graphics tab's *Developer* and the
   Controller tab's *Devices*/*Keyboard*/*Manual* are declared in the schema, counted and named by
@@ -800,9 +820,9 @@ tooltip  = "Width of the guest's video mode. Restart required."
 Rules: `enum` entries carry `choices`; a numeric entry may carry `min`/`max` (both or neither, the
 default inside); `path_dir` entries carry `validate` (`exists|dlc_layout|inside_game_root:forbid`);
 `applies = "live"` is only allowed with an evidence comment naming the change callback; and an entry may
-carry `visible` — a rule the *machine* has to satisfy for the row to exist at all (`multi_monitor` is
-the only one), applied when the layout is built so the ring and the drawing cannot disagree about it
-(D17).
+carry `visible` — a rule the *machine* or the *install* has to satisfy for the row to exist at all
+(`multi_monitor` and `ultimate_installed`), applied when the layout is built so the ring and the
+drawing cannot disagree about it (D17).
 
 > **Amended 2026-10-05 (built).** The example above (`video_mode_width`, `Resolution width`) is the row
 > this build withdrew: resolution is one `enum` over the runtime's preset list, and a numeric row that
@@ -1153,7 +1173,7 @@ what is missing.
 | R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8, E3 | built; `tests/launcher_ultimate_state_tests.cpp`, and E3's `ultimate` leg is the installed helper adding the mod to a retail install from a folder, after the `retail` leg booted without it |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |
 | ~~R13 per-device profiles survive~~ | **withdrawn with D17**: there are no per-device files to survive — one `[remap]` table keyed by control | — | removed |
-| R9/R10/R12 three tabs, M1 rows live | launcher shows General/Audio / Video/Controller; the tab's rows editable; General shows target + save + DLC | A1, B2, B3, B1 | built (built rows unchanged by D18 except the additions it lists). The General tab also carries R5's two rows under their own *Main menu* group (added 2026-10-06, `--dump-layout` reports `tab general: 5 rows, 3 groups`), so the criterion above is still met by the three rows it names |
+| R9/R10/R12 three tabs, M1 rows live | launcher shows General/Audio / Video/Controller; the tab's rows editable; General shows target + save + DLC | A1, B2, B3, B1 | built (built rows unchanged by D18 except the additions it lists). Four tabs since 2026-10-06: the General tab is back to its own three rows and the *Interface* tab carries the *Main menu* group - R5's two rows and R10's one (`--dump-layout` reports `tab general: 3 rows, 2 groups` and `tab interface: 3 rows, 1 groups`, or `2` there with the payload absent, `1 hidden by rule`). The criterion above is still met by the three General rows it names, and the walkthrough leg of `scripts/capture_launcher.ps1` walks all four laps |
 | R14 no Experimental tab; mouse toggle on Controller | tab list has no Experimental; two boots with `mouse_ui_nav` off/on, log + behaviour | B3, B6, D14 | built |
 | R15 settings survive an uninstall/reinstall | install, uninstall (keep game data), reinstall, profile intact | D4 *(built)*, E3 | **open** — E3 covers the install and the four boots it enables, not the uninstall/reinstall pair; the first-run prefill's "never overwrite an existing profile" is proven |
 

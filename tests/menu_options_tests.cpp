@@ -45,9 +45,11 @@ using namespace rb_blitz::test;
 constexpr uint32_t kInt = 0x00;
 constexpr uint32_t kSymbol = 0x05;
 constexpr uint32_t kIfdef = 0x07;
+constexpr uint32_t kElse = 0x08;
 constexpr uint32_t kEndif = 0x09;
 constexpr uint32_t kArray = 0x10;
 constexpr uint32_t kCommand = 0x11;
+constexpr uint32_t kString = 0x12;
 constexpr uint32_t kSeed = 0x1234ABCDu;
 
 void PushU16(std::vector<uint8_t>* out, uint16_t value) {
@@ -155,6 +157,55 @@ std::vector<uint8_t> FixtureFile(bool second_ifdef) {
   return file;
 }
 
+// --- the locale fixture ---------------------------------------------------
+//
+// A compiled locale file, shaped like the one the Ultimate mod ships: entries are
+// two-element arrays of `[key text]`, and the strings for the platform this build
+// is *not* run on sit behind an `#ifdef` on that platform's macro. That macro does
+// not exist here, so the conditional is skipped - which is exactly why its name can
+// be shortened to pay for a longer label without changing which branch the loader
+// takes.
+
+std::vector<uint8_t> LocaleEntry(const std::string& key, const std::string& text) {
+  return Block(kArray, 1, {Name(kSymbol, key), Name(kString, text)});
+}
+
+constexpr char kSecondPlatformMacro[] = "HX_PS3";
+
+// `spare_name` is the name of the macro the unused branch is guarded by, so a test
+// can make it too short to pay with; empty leaves the conditional out entirely.
+std::vector<uint8_t> LocaleBody(const std::string& key, const std::string& text,
+                                const std::string& spare_name) {
+  std::vector<std::vector<uint8_t>> kids{
+      LocaleEntry("screenshot_taken", "Screenshot Saved"),
+      LocaleEntry(key, text),
+      LocaleEntry("reboot_warning", "Some changes to settings require a reboot."),
+  };
+  if (!spare_name.empty()) {
+    kids.push_back(Name(kIfdef, spare_name));
+    kids.push_back(LocaleEntry("os_online_acc", "Unlock Online Only Trophies"));
+    kids.push_back(Scalar(kElse, 0));
+    kids.push_back(LocaleEntry("os_online_acc", "Unlock Online Only Achievements"));
+    kids.push_back(Scalar(kEndif, 0));
+  }
+  std::vector<uint8_t> body{0x01};
+  PushU16(&body, static_cast<uint16_t>(kids.size()));
+  PushU16(&body, 1);
+  PushU16(&body, 0);
+  for (const std::vector<uint8_t>& kid : kids) {
+    body.insert(body.end(), kid.begin(), kid.end());
+  }
+  return body;
+}
+
+std::vector<uint8_t> LocaleFile(const std::string& key, const std::string& text,
+                                const std::string& spare_name) {
+  const std::vector<uint8_t> body = LocaleBody(key, text, spare_name);
+  std::vector<uint8_t> file(body.size() + 4);
+  EncodeFile(kSeed, body.data(), body.size(), file.data());
+  return file;
+}
+
 // --- reading the fixture back ---------------------------------------------
 //
 // The test parses the file itself, with its own reading of the grammar, so a
@@ -206,7 +257,7 @@ bool ParseNode(const std::vector<uint8_t>& body, size_t* pos, Node* out) {
     }
     return true;
   }
-  if (out->tag == kInt || out->tag == 0x06 || out->tag == kEndif) {
+  if (out->tag == kInt || out->tag == 0x06 || out->tag == kEndif || out->tag == kElse) {
     return take32(&out->scalar);
   }
   uint32_t length = 0;
@@ -324,6 +375,63 @@ std::string Join(const std::vector<std::string>& rows) {
     text += row;
   }
   return text;
+}
+
+// Every text filed under a locale key, in file order - there can be more than one,
+// which is how a file carries a string per platform. The locale fixture's entries
+// are root-level siblings, so these walk the whole root.
+void CollectLocaleIn(const Node& node, const std::string& key, std::vector<std::string>* out) {
+  if (node.tag == kArray && node.kids.size() == 2 && node.kids[0].tag == kSymbol &&
+      node.kids[0].text == key) {
+    out->push_back(node.kids[1].text);
+  }
+  for (const Node& kid : node.kids) {
+    CollectLocaleIn(kid, key, out);
+  }
+}
+
+std::vector<std::string> CollectLocale(const std::vector<Node>& root, const std::string& key) {
+  std::vector<std::string> texts;
+  for (const Node& node : root) {
+    CollectLocaleIn(node, key, &texts);
+  }
+  return texts;
+}
+
+std::string LocaleTextOf(const std::vector<Node>& root, const std::string& key) {
+  const std::vector<std::string> texts = CollectLocale(root, key);
+  return texts.empty() ? std::string() : texts.front();
+}
+
+size_t CountTagIn(const std::vector<Node>& root, uint32_t tag) {
+  size_t count = 0;
+  for (const Node& node : root) {
+    count += CountTag(node, tag);
+  }
+  return count;
+}
+
+std::string FirstMacroIn(const Node& node) {
+  if (node.tag == kIfdef) {
+    return node.text;
+  }
+  for (const Node& kid : node.kids) {
+    const std::string found = FirstMacroIn(kid);
+    if (!found.empty()) {
+      return found;
+    }
+  }
+  return {};
+}
+
+std::string FirstMacro(const std::vector<Node>& root) {
+  for (const Node& node : root) {
+    const std::string found = FirstMacroIn(node);
+    if (!found.empty()) {
+      return found;
+    }
+  }
+  return {};
 }
 
 }  // namespace
@@ -523,6 +631,145 @@ int main() {
     CHECK_EQ(ParseRowNames("").size(), 0);
     CHECK_EQ(ParseRowNames(" , , ").size(), 0);
     CHECK_EQ(ParseRowNames("one").size(), 1);
+  }
+
+  BeginCase("the Ultimate label grows into the unused macro's name");
+  {
+    // The mod's settings row is drawn from a locale value, and "Ultimate Settings"
+    // is five characters longer than the "Mod Settings" it replaces. The five bytes
+    // come out of the name of the macro that guards the other platform's strings:
+    // that macro is not defined here, so the conditional is skipped before and
+    // after the name shrinks, and the guest takes the same branch it always took.
+    std::vector<uint8_t> file =
+        LocaleFile(kModSettingsKey, kModSettingsLabel, kSecondPlatformMacro);
+    const std::vector<uint8_t> before = file;
+    const Renamed renamed = RenameLabel(file.data(), file.size(), kModSettingsKey,
+                                        kModSettingsLabel, kUltimateSettingsLabel);
+    CHECK_TRUE(renamed.applied);
+    CHECK_EQ(renamed.file_size, before.size());
+    CHECK_EQ(renamed.borrowed, 5);
+    CHECK_TRUE(renamed.from == kModSettingsLabel);
+    CHECK_TRUE(renamed.to == kUltimateSettingsLabel);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) != 0);
+
+    std::vector<Node> root = ReadRoot(file);
+    CHECK_TRUE(LocaleTextOf(root, kModSettingsKey) == kUltimateSettingsLabel);
+    // Six characters gave up exactly the five the label needed.
+    CHECK_TRUE(FirstMacro(root) == "H");
+    // The conditional is still one balanced pair, and the string behind it - the
+    // one this build never reads - says what it said before.
+    CHECK_EQ(CountTagIn(root, kIfdef), 1);
+    CHECK_EQ(CountTagIn(root, kElse), 1);
+    CHECK_EQ(CountTagIn(root, kEndif), 1);
+    const std::vector<std::string> acc = CollectLocale(root, "os_online_acc");
+    CHECK_EQ(acc.size(), 2);
+    CHECK_TRUE(acc[0] == "Unlock Online Only Trophies");
+    CHECK_TRUE(acc[1] == "Unlock Online Only Achievements");
+    // Nothing else in the file moved.
+    CHECK_TRUE(LocaleTextOf(root, "screenshot_taken") == "Screenshot Saved");
+    CHECK_TRUE(LocaleTextOf(root, "reboot_warning") ==
+               "Some changes to settings require a reboot.");
+  }
+
+  BeginCase("a label that is not there, or under another key, is refused");
+  {
+    std::vector<uint8_t> file =
+        LocaleFile(kModSettingsKey, kModSettingsLabel, kSecondPlatformMacro);
+    const std::vector<uint8_t> before = file;
+    const Renamed missed = RenameLabel(file.data(), file.size(), kModSettingsKey,
+                                       "Mod Settings!", kUltimateSettingsLabel);
+    CHECK_FALSE(missed.applied);
+    CHECK_TRUE(missed.reason.find("no such label") != std::string::npos);
+    // The text is the anchor, so a file that has the words under a different key is
+    // not this feature's business.
+    const Renamed other = RenameLabel(file.data(), file.size(), "mod_game",
+                                      kModSettingsLabel, kUltimateSettingsLabel);
+    CHECK_FALSE(other.applied);
+    CHECK_TRUE(other.reason.find("no such label") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("a label of the same length needs no donor at all");
+  {
+    // No conditional in the file at all: the swap is byte-for-byte.
+    std::vector<uint8_t> file = LocaleFile(kModSettingsKey, kModSettingsLabel, "");
+    const Renamed renamed = RenameLabel(file.data(), file.size(), kModSettingsKey,
+                                        kModSettingsLabel, "Mods Setting");
+    CHECK_TRUE(renamed.applied);
+    CHECK_EQ(renamed.borrowed, 0);
+    CHECK_EQ(renamed.file_size, file.size());
+    std::vector<Node> root = ReadRoot(file);
+    CHECK_TRUE(LocaleTextOf(root, kModSettingsKey) == "Mods Setting");
+  }
+
+  BeginCase("a shorter label gives the bytes back to the macro name");
+  {
+    std::vector<uint8_t> file =
+        LocaleFile(kModSettingsKey, kModSettingsLabel, kSecondPlatformMacro);
+    const size_t size = file.size();
+    const Renamed renamed =
+        RenameLabel(file.data(), file.size(), kModSettingsKey, kModSettingsLabel, "Mod");
+    CHECK_TRUE(renamed.applied);
+    CHECK_EQ(renamed.file_size, size);
+    CHECK_EQ(renamed.borrowed, -9);
+    std::vector<Node> root = ReadRoot(file);
+    CHECK_TRUE(FirstMacro(root) == std::string(kSecondPlatformMacro) + "zzzzzzzzz");
+    CHECK_TRUE(LocaleTextOf(root, kModSettingsKey) == "Mod");
+  }
+
+  BeginCase("a growth with nothing to pay with is refused");
+  {
+    std::vector<uint8_t> file = LocaleFile(kModSettingsKey, kModSettingsLabel, "");
+    const std::vector<uint8_t> before = file;
+    const Renamed refused = RenameLabel(file.data(), file.size(), kModSettingsKey,
+                                        kModSettingsLabel, kUltimateSettingsLabel);
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("no unused macro name") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("only the macro this build does not define may pay for the bytes");
+  {
+    // A conditional on some *other* name is not a donor: whether that macro is
+    // defined is the guest's business, and shortening a defined one would throw
+    // away the branch it guards.
+    std::vector<uint8_t> file = LocaleFile(kModSettingsKey, kModSettingsLabel, "HX_WII");
+    const std::vector<uint8_t> before = file;
+    const Renamed refused = RenameLabel(file.data(), file.size(), kModSettingsKey,
+                                        kModSettingsLabel, kUltimateSettingsLabel);
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("no unused macro name") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("a growth the name cannot pay for is refused");
+  {
+    const std::string longer = "Ultimate Settings, and more besides";
+    std::vector<uint8_t> file =
+        LocaleFile(kModSettingsKey, kModSettingsLabel, kSecondPlatformMacro);
+    const std::vector<uint8_t> before = file;
+    const Renamed refused = RenameLabel(file.data(), file.size(), kModSettingsKey,
+                                        kModSettingsLabel, longer);
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("too short") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("the bytes after the locale file are left alone");
+  {
+    const std::vector<uint8_t> before =
+        LocaleFile(kModSettingsKey, kModSettingsLabel, kSecondPlatformMacro);
+    std::vector<uint8_t> block(before.size() + 4096, 0xA5);
+    std::memcpy(block.data(), before.data(), before.size());
+    const Renamed renamed = RenameLabel(block.data(), block.size(), kModSettingsKey,
+                                        kModSettingsLabel, kUltimateSettingsLabel);
+    CHECK_TRUE(renamed.applied);
+    CHECK_EQ(renamed.file_size, before.size());
+    bool tail_intact = true;
+    for (size_t i = before.size(); i < block.size(); ++i) {
+      tail_intact = tail_intact && block[i] == 0xA5;
+    }
+    CHECK_TRUE(tail_intact);
   }
 
   return Finish();

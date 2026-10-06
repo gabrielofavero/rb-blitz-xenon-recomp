@@ -1,11 +1,13 @@
 # Enhancement toggles
 
-The contract for the nine customization features in
-[plans/customization-plan.md](../plans/customization-plan.md) (R1–R9). **Every toggle is off by
-default.** This page is the table the plan's contract 1 promises: what each toggle gates, what the
+The contract for the customization features in
+[plans/customization-plan.md](../plans/customization-plan.md) (R1–R9, plus R10 below, which a
+follow-up request added). **Every toggle is off by default, with one deliberate exception:** R10
+ships on, because its subject is the Ultimate mod's own screen and it does nothing without that mod
+installed. This page is the table the plan's contract 1 promises: what each toggle gates, what the
 faithful (off) behaviour is, and which prompt implements it — or, for the eight that are still
-planned, what will. Only R5 has been implemented so far; its own page
-([main-menu-flow.md](main-menu-flow.md)) is the evidence behind it.
+planned, what will. R5 and R10 are implemented; their evidence is
+[main-menu-flow.md](main-menu-flow.md).
 
 The cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
 boot log, not by this page.
@@ -34,9 +36,10 @@ implementing prompt that can apply its toggle live relaxes that lifecycle and up
 before the Ultimate and DLC layers:
 
 ```text
-[info] enhancements: 9 toggle(s), off by default (docs/engine/toggles.md)
+[info] enhancements: 10 toggle(s), off by default except R10 (docs/engine/toggles.md)
 [info] enhancements: enhancements_expand_resolution = off (default) - R1 custom resolutions
 ...
+[info] enhancements: enhancements_rename_mod_settings = on (default) - R10 rename the mod's settings row
 [info] enhancements: enhancements_controller_scheme = "" (R8 scheme; empty means unnamed)
 [info] enhancements: enhancements_hidden_menu_options = "splash_leaderboard,splash_achievements,splash_dlc" (R5 rows; the three offline-dead entries by default)
 ```
@@ -58,12 +61,21 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `dlc_cache` | R7 DLC cache: persist the DLC enumeration host-side, with an explicit refresh | the guest's own scan, once per boot | D1, D2 |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones | the songs the title puts there | C1 → later |
+| `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |
+
+**R10 is the one toggle that ships on.** The row it renames belongs to the Ultimate mod, so a run
+without that payload has neither the file nor the label and the toggle has nothing to do — the
+faithful path and the feature are the same boot. Its switch in the launcher is shown only where the
+mod is installed (`visible = "ultimate_installed"`), and turning it off is what passes
+`--enhancements_rename_mod_settings=false`.
 
 `enhancements_controller_scheme` is the one non-boolean cvar here: R8's parameter, not a toggle of
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to
 decide what a "named entry" is: the name the title gives the row (`splash_leaderboard`,
 `splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9 grows its key the
-same way when its prompt knows what a "DLC song" is.
+same way when its prompt knows what a "DLC song" is. R10 needs no key: what it renames is the mod's
+own row, and the two labels it moves between are the module's constants
+(`src/ui/menu_options.h`) rather than a user's list.
 
 ## Adding a toggle
 
