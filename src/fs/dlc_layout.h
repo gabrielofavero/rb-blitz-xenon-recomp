@@ -105,33 +105,61 @@ inline std::filesystem::path ResolveDlcRoot(const std::string_view configured,
   return root.lexically_normal();
 }
 
-// What src/hooks/dlc.cpp does with the configured root. Every value but kRegister
-// is a refusal to add the root, which leaves the SDK's own content root as the only
-// source - the faithful behaviour - and the hook says why in the log.
+// True when the root holds the layout above - at least one child directory named like
+// a content-root level. A folder of loose containers has none, which is what makes it
+// a flat library instead (src/fs/dlc_library.h). Read from the first level only: a
+// library may nest any way it likes below its own root, and it is the presence of the
+// title level, not of any package, that distinguishes the two.
+inline bool HasStructuredLayout(const std::filesystem::path& dlc_root) {
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dlc_root, ec);
+  if (ec) {
+    return false;
+  }
+  for (const auto& entry : it) {
+    if (entry.is_directory(ec) && !ec && IsContentRootName(entry.path().filename().string())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// What src/hooks/dlc.cpp does with what it found. Every value but the three
+// registrations is a refusal to add a source, which leaves the SDK's own content root
+// as the only one - the faithful behaviour - and the hook says why in the log.
 enum class DlcRegistration {
-  kNoDirectory,       // nothing at the configured path
-  kNoPackages,        // the directory is there but holds no <title_id>/<content_type>/<package>
-  kNoContentManager,  // no content manager to register the root with
-  kRegister,          // packages were found and there is a manager to hand them to
+  kNoDirectory,       // nothing at the configured root, and no library configured
+  kNoSource,          // sources were configured but none holds a mountable package
+  kNoContentManager,  // no content manager to register the sources with
+  kRegisterStructured,           // the <title_id>/<content_type>/<package> root alone
+  kRegisterLibrary,              // a flat library alone (src/fs/dlc_library.h)
+  kRegisterBoth,                 // both: a structured root and at least one library
 };
 
-// The order is the hook's and each step is a precondition of the next: a directory
-// that is not there is not scanned, a scan that found nothing is not reported as
-// unregisterable, and the root is only offered to a manager that exists.
-// `package_count` is what ScanDlcRoot() accepted.
-constexpr DlcRegistration DecideDlcRegistration(bool root_is_directory,
-                                                std::size_t package_count,
+// The order is the hook's and each step is a precondition of the next: a source that
+// holds nothing is not reported as unregisterable, and sources are only offered to a
+// manager that exists. `structured_packages` is what ScanDlcRoot() accepted;
+// `library_packages` is what ScanDlcLibraries() accepted. `configured` is whether
+// anything at all was asked for - a root to scan or a library to scan - so that a
+// truly empty configuration reads differently from a configured one that found
+// nothing.
+constexpr DlcRegistration DecideDlcRegistration(bool configured, std::size_t structured_packages,
+                                                std::size_t library_packages,
                                                 bool has_content_manager) {
-  if (!root_is_directory) {
+  if (!configured) {
     return DlcRegistration::kNoDirectory;
   }
-  if (package_count == 0) {
-    return DlcRegistration::kNoPackages;
+  if (structured_packages == 0 && library_packages == 0) {
+    return DlcRegistration::kNoSource;
   }
   if (!has_content_manager) {
     return DlcRegistration::kNoContentManager;
   }
-  return DlcRegistration::kRegister;
+  if (structured_packages != 0 && library_packages != 0) {
+    return DlcRegistration::kRegisterBoth;
+  }
+  return structured_packages != 0 ? DlcRegistration::kRegisterStructured
+                                  : DlcRegistration::kRegisterLibrary;
 }
 
 namespace detail {

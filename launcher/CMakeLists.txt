@@ -112,7 +112,30 @@ else()
     add_executable(rb_blitz_launcher ${RBBLITZ_LAUNCHER_SOURCES})
 endif()
 
+# The release version the window title shows. It is read out of installer/config/pins.toml - the
+# project's own release record, and the file the setup executable is named from - rather than
+# written again here, so a launcher and the installer that shipped it cannot claim to be different
+# releases. A release that stamps its version some other way (a tag, CI) passes it instead:
+# -DRBBLITZ_VERSION=1.2.3.
+set(RBBLITZ_VERSION "" CACHE STRING "Version shown in the launcher's window title")
+if(RBBLITZ_VERSION STREQUAL "")
+    file(READ "${CMAKE_SOURCE_DIR}/installer/config/pins.toml" RBBLITZ_PINS_TOML)
+    string(REGEX MATCH "\\[installer\\][^\\[]*" RBBLITZ_INSTALLER_PINS "${RBBLITZ_PINS_TOML}")
+    string(REGEX MATCH "version[ \t]*=[ \t]*\"([0-9][^\"]*)\"" RBBLITZ_PINS_VERSION
+                 "${RBBLITZ_INSTALLER_PINS}")
+    set(RBBLITZ_VERSION "${CMAKE_MATCH_1}")
+    if(RBBLITZ_VERSION STREQUAL "")
+        message(FATAL_ERROR
+            "launcher: no [installer] version in installer/config/pins.toml. The launcher's window "
+            "title is the release version, so a release that cannot read it is worse than one that "
+            "does not build: fix that file, or configure with -DRBBLITZ_VERSION=<version>.")
+    endif()
+endif()
+
 target_compile_features(rb_blitz_launcher PRIVATE cxx_std_20)
+# Quotes included: the macro is a C++ string literal in the launcher's sources, so the value has to
+# arrive as one command-line argument with the quotes still around it.
+target_compile_definitions(rb_blitz_launcher PRIVATE RBBLITZ_LAUNCHER_VERSION="${RBBLITZ_VERSION}")
 
 # D1 puts the launcher next to rb_blitz.exe in the build root rather than beside this
 # file, because that is the directory the payload snapshot reads (P0.5) and the one a

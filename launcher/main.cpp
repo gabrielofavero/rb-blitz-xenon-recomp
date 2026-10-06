@@ -26,6 +26,7 @@
 #include "launcher/profile.h"
 #include "launcher/profile_path.h"
 #include "prefill.h"
+#include "row_ui.h"
 #include "schema_view.h"
 #include "shell.h"
 #include "ultimate_state.h"
@@ -42,7 +43,21 @@
 
 namespace {
 
-constexpr const char* kWindowTitle = "Rock Band Blitz Launcher";
+// The launcher's window title: the name, then the release it came from - so "which build is this?"
+// is answered by the frame the user is already looking at, and a bug report can be taken from a
+// screenshot or from Alt-Tab. The number is `RBBLITZ_LAUNCHER_VERSION`, which launcher/CMakeLists.txt
+// reads out of installer/config/pins.toml: the same record the setup executable is named from, so
+// the two cannot disagree about which release is installed. The guard is only for a translation
+// unit compiled outside that build (a syntax-only run); the build always defines it.
+#ifndef RBBLITZ_LAUNCHER_VERSION
+#define RBBLITZ_LAUNCHER_VERSION "0.0.0"
+#endif
+
+const char* WindowTitle() {
+  static const std::string title =
+      std::string("Rock Band Blitz Launcher (v") + RBBLITZ_LAUNCHER_VERSION + ")";
+  return title.c_str();
+}
 
 // The profile's own defaults (src/launcher/profile.h), used when a stored size is missing or
 // nonsense. The number is in logical points, the same unit the profile stores: a DPI change
@@ -77,7 +92,7 @@ std::string LoadUiFont();
 void Fatal(const char* step) {
   char message[512];
   std::snprintf(message, sizeof(message), "%s failed:\n%s", step, SDL_GetError());
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, message, nullptr);
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, WindowTitle(), message, nullptr);
 }
 
 struct Options {
@@ -398,6 +413,9 @@ int DumpDisplay(const Options& options) {
           std::to_string(kDefaultHeight) + "\n";
   text += "opening window : " + std::to_string(want_width) + "x" + std::to_string(want_height) +
           "\n";
+  // The title the window is created with, so which release this is can be asserted on text
+  // instead of on a picture of a title bar.
+  text += "window title   : " + std::string(WindowTitle()) + "\n";
   text += "font base size : " + std::to_string(static_cast<int>(kUiFontSize)) + "\n";
   text += "font face      : " + face + "\n";
 
@@ -634,7 +652,7 @@ int main(int argc, char** argv) {
                                     to_units(kMinWindowHeight));
   FitToDisplay(&want_width, &want_height);
   SDL_Window* window =
-      SDL_CreateWindow(kWindowTitle, want_width, want_height,
+      SDL_CreateWindow(WindowTitle(), want_width, want_height,
                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window == nullptr) {
     Fatal("SDL_CreateWindow");
@@ -723,10 +741,21 @@ int main(int argc, char** argv) {
       std::make_unique<rb_blitz::launcher::Shell>(std::move(session), roots, environment,
                                                   shell_environment);
 
-  // The window's title is the launcher's name and nothing else. It deliberately does not name the
-  // current tab: the tab strip already shows which tab is up, and a title that changes on every
-  // switch is noise in the taskbar. A script that needs the tab reads the focus trace instead.
-  SDL_SetWindowTitle(window, kWindowTitle);
+  // The window's title is the launcher's name and the release version, and nothing else. It
+  // deliberately does not name the current tab: the tab strip already shows which tab is up, and a
+  // title that changes on every switch is noise in the taskbar. A script that needs the tab reads
+  // the focus trace instead. (The ImGui window's own id is still the bare name - shell.cpp's
+  // kWindowId - because that one is an identity, not something anyone reads.)
+  SDL_SetWindowTitle(window, WindowTitle());
+
+  // Where the pointer is on the *desktop*, which is what "the mouse moved" means for the ring that
+  // follows the mouse (D6, row_ui.h). Measured once per frame and passed to the rows: what ImGui
+  // sees is the pointer's position inside the window, so a window that is created, maximized or
+  // restored under a still pointer looks to it exactly like a pointer that moved - measured, the
+  // ring jumped to the row under the pointer a moment after the launcher opened.
+  float pointer_x = 0.0f;
+  float pointer_y = 0.0f;
+  SDL_GetGlobalMouseState(&pointer_x, &pointer_y);
 
   bool done = false;
   while (!done) {
@@ -747,6 +776,13 @@ int main(int argc, char** argv) {
     if (done) {
       break;
     }
+
+    float pointer_now_x = 0.0f;
+    float pointer_now_y = 0.0f;
+    SDL_GetGlobalMouseState(&pointer_now_x, &pointer_now_y);
+    rb_blitz::launcher::SetPointerMoved(pointer_now_x != pointer_x || pointer_now_y != pointer_y);
+    pointer_x = pointer_now_x;
+    pointer_y = pointer_now_y;
 
     if ((SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0) {
       SDL_Delay(10);

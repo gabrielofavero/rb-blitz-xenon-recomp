@@ -19,6 +19,7 @@ namespace {
 // Not constexpr: ImVec4 has no constexpr constructor.
 const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
 
+
 // The trigger reading the SDK treats as pressed: it keeps a trigger as the byte `value >> 7` and
 // compares that against HID_SDL_TRIGG_THRES, so the same arithmetic here captures a press at the
 // moment the game would see it.
@@ -153,24 +154,18 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
 
   const remap::Table table = remap::Table::FromRows(session.profile().remap);
   const std::vector<remap::Target>& targets = remap::Targets();
-  // The assignment column stretches, and the control and action columns are fixed. A stretched
-  // assignment column means the two action buttons keep exactly the width they need and the slack
-  // goes to the text next to them - rather than the other way round, where a scrollbar or a
-  // narrow window clips the Reset button.
-  const ImGuiStyle& style = ImGui::GetStyle();
-  const float label_width =
-      ImGui::CalcTextSize("Right trigger").x + style.CellPadding.x * 4.0f;
-  const float button_pad = style.FramePadding.x * 2.0f;
-  const float assign_width =
-      std::max(ImGui::CalcTextSize("Assign").x, ImGui::CalcTextSize("Cancel").x) + button_pad;
-  const float reset_width = ImGui::CalcTextSize("Reset").x + button_pad;
-  const float actions_width = assign_width + reset_width + style.ItemSpacing.x +
-                              style.CellPadding.x * 4.0f;
+  // Three columns - the control, what presses it, and the row's own two buttons - with an equal share
+  // of the width each, so the three sit at even intervals down the whole list and the row reads as
+  // one small table. Left to themselves the columns end up at whatever distance their own text
+  // happens to make: a one-letter control's binding starts a hair away from it, and a wide one's
+  // further along, which is the "everything at a different distance" this replaces. Equal shares
+  // also put the buttons about two thirds across, which is where the schema tabs put the widget
+  // their own rows drive, and safely clear of the scrollbar this list always has.
   ImGui::BeginTable("##bindings", 3,
-                    ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings);
-  ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthFixed, label_width);
-  ImGui::TableSetupColumn("Assigned to", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-  ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed, actions_width);
+                    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings);
+  ImGui::TableSetupColumn("Control");
+  ImGui::TableSetupColumn("Assigned to");
+  ImGui::TableSetupColumn("##actions");
   for (std::size_t index = 0; index < targets.size(); ++index) {
     const remap::Target target = targets[index];
     const bool listening_here = listening_ && *listening_ == target;
@@ -190,6 +185,10 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
 
     ImGui::TableSetColumnIndex(1);
     ImGui::AlignTextToFramePadding();
+    // Wrapped at the column's own edge rather than clipped at it: the binding is the one column
+    // whose text can outgrow the room it has (a control bound to several inputs), and a binding on
+    // two lines is readable where one that runs out of its cell is not.
+    ImGui::PushTextWrapPos(0.0f);
     if (listening_here) {
       ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
       ImGui::Text("Listening... %.1fs", listen_until_ - now);
@@ -201,6 +200,7 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
     } else if (sources != nullptr) {
       ImGui::TextUnformatted(BindingText(sources).c_str());
     }
+    ImGui::PopTextWrapPos();
 
     ImGui::TableSetColumnIndex(2);
     // Only one listen at a time: while one is running, every other row's Assign is disabled

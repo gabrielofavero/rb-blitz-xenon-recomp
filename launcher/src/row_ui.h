@@ -74,7 +74,12 @@ void DrawFocusOutline(bool focused);
 // pointer left sitting over a row used to take the ring back on every frame, so a keyboard walk
 // around a tab was dragged to that row - and a row that scrolls into place under a stationary
 // pointer moved it further. A pointer that has not moved has not chosen anything.
-bool PointerAdoptsFocus();
+//
+// What counts as moved is the *pointer* moving, measured on the desktop, which is why this is a
+// per-frame value main.cpp sets from SDL's global mouse state rather than ImGui's own delta: that
+// delta is measured inside the window, so a window that is created, maximized or restored under a
+// still pointer gives it exactly the same shape as a real move.
+void SetPointerMoved(bool moved);
 
 // The whole rule in one call: the focused item is the one under the pointer, when the pointer has
 // just moved there. Every focusable item in the launcher goes through this rather than each

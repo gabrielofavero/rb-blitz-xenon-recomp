@@ -317,6 +317,15 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_dlc_layout_tests PRIVATE src)
     add_test(NAME dlc_layout COMMAND rb_blitz_dlc_layout_tests)
 
+    # The flat DLC library (src/fs/dlc_library.h): what a package says it is, what a
+    # recursive walk of a dumped song folder finds, and the names the guest can carry
+    # back. SDK-free like the layout tests above, and for the same reason.
+    add_executable(rb_blitz_dlc_library_tests
+        tests/dlc_library_tests.cpp
+    )
+    target_include_directories(rb_blitz_dlc_library_tests PRIVATE src)
+    add_test(NAME dlc_library COMMAND rb_blitz_dlc_library_tests)
+
     add_executable(rb_blitz_ultimate_plan_tests
         tests/ultimate_plan_tests.cpp
     )

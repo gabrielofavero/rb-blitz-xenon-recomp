@@ -222,7 +222,7 @@ and *Install Ultimate…* are later (§1.1, B8).
 | Rock Band Blitz (**Common**) | `--ultimate_mode=0` | "ultimate: off, booting the retail game data" |
 | Rock Band Blitz **Demo** | `--license_mask=0` | the XBLA trial path; the project's own note is that a licence-less boot takes the trial mode that does not keep scores ([src/rb_blitz_app.h](../../src/rb_blitz_app.h), `ApplyContentLicense`) |
 | Rock Band Blitz **Ultimate** | `--ultimate_mode=1` (auto) | payload at `<game root>\ultimate\gen\patch_xbox.hdr` is mounted and the mod's 12-byte edits are re-applied host-side ([src/hooks/ultimate.cpp:231-260](../../src/hooks/ultimate.cpp)) |
-| Save game location | `user_data_root` | default `Documents\rb_blitz`; the title's own saves and `globaloptions` live there |
+| Save game location | `user_data_root` | default `Documents\Rock Band Blitz`; the title's own saves and `globaloptions` live there |
 | DLC location | `dlc_root` | `<title_id>/<content_type>/<package>`, mounted in place read-only ([docs/dlc.md](../dlc.md)) |
 
 The launcher must refuse a save/DLC directory **inside** the game root, and say why: the runtime
@@ -604,6 +604,15 @@ round of feedback (below).
   > on every tab switch is noise, and the tab strip already says where you are. The title is the plain
   > name now, and the script hook the suffix provided is `--focus-log` instead (its `focus tab=…`
   > lines are what `scripts/capture_launcher.ps1` reads); `SDL_SetWindowTitle` is called once.
+  > **Amended (version in the title).** The user asked for the release version on the title too, and
+  > left the wording to the build: it is `Rock Band Blitz Launcher (v0.1.0)` — the name, then the
+  > version in brackets, so the window keeps reading as one name in the taskbar and Alt-Tab rather
+  > than as two titles that happen to be adjacent. The number is not written in the launcher: it is
+  > read at configure time out of `installer/config/pins.toml`'s `[installer] version`, the record the
+  > setup executable is named from, and handed to the sources as `RBBLITZ_LAUNCHER_VERSION`
+  > (`-DRBBLITZ_VERSION=` overrides it for a release that stamps its version another way). A payload
+  > and the installer that shipped it therefore cannot claim different releases. `--dump-display`
+  > prints the title, which is how the version is asserted without a picture of a title bar.
 - **The window opens at 1280×840 in logical points**, clamped to the display's work area less its own
   frame, and its **minimum size is 720×520 points** — a minimum, not a fixed size, so the window is
   draggable, maximizable from the frame's own maximize box, and restorable. A size the profile already
@@ -691,6 +700,9 @@ their older wording where they disagree.
   user looks for a window's name, and the bottom bar's controls say what they do. A strip of
   instructions above the content is text a user reads once and scrolls past for the rest of the
   launcher's life; the keyboard table stays in `launcher/README.md`, where it is looked up on purpose.
+  > **Amended (D16).** The title does not name the tab and does not stop at the name: see D16, where
+  > the suffix came out and the release version went in, so the sentence above describes a title this
+  > build no longer has.
 - **It opens expanded.** `SDL_MaximizeWindow` runs after `SDL_ShowWindow` — maximizing a *hidden*
   window is a request Windows answers when the window appears, and it did not, leaving the window
   merely clamped to the work area with the maximize box already spent. Because a maximized window
@@ -937,7 +949,7 @@ session should read as instructions, and every deviation it would have described
 | C4 | the grammar, the serialiser, the round trip, unknown-token tolerance, `[remap]` persistence | D17: no hysteresis, no per-device keying, the game's `keybind_*` untouched |
 | C5 | `launcher/src/controller_tab.{h,cpp}`: one row per control, a three-second capture, per-control and global resets | D17: capture adds rather than resolving conflicts; no per-device enable/disable. A3: the pads it reads are the launcher's open ones, because SDL reads a pad only through a handle somebody opened |
 | A3 | `launcher/src/{pad_nav,pad_source,virtual_pad,focus_log}.{h,cpp}`, the real `GamepadNavSource`, `NavAction::kLaunch`, `--focus-log`, `--no-gamepad`, `--test-pad`, the README's pad table | D6: `Back`'s menu is not built (the cancel half is), and the bar's glyphs come from the pad that was last used rather than from "the" pad |
-| A2 | `Shell::DrawBottomBar`'s help region, `schema_view`'s `SettingForEntry`/`RowActionVerb`/`FlattenHelpText`, `ProfilePanel::HelpText`, `ControllerTab::HelpText`, hover-adopts-the-ring on both blocks | D7: the hints follow the last device used, and the tooltip is re-wrapped to the bar's width rather than drawn as the file wrapped it |
+| A2 | `Shell::DrawBottomBar`'s help region, `schema_view`'s `SettingForEntry`/`RowActionVerb`/`FlattenHelpText`, `ProfilePanel::HelpText`, `ControllerTab::HelpText`, hover-adopts-the-ring on both blocks | D7: the hints follow the last device used, and the tooltip is re-wrapped to the bar's width rather than drawn as the file wrapped it. Amended (the pointer rule): "hovering" is the pointer moving *on the desktop* (`main.cpp` → `row_ui.cpp`'s `SetPointerMoved`), because ImGui's delta inside the window cannot tell a pointer that moved from a window that moved under it |
 | D2 | the `launchericon` task, the two launcher `[Icons]` rows (Start menu always, desktop by task) and `/LAUNCHERICON` in `installer/setup.iss` + `installer/README.md` | D9 (the task defaults and the silent switch) |
 | D3 | the three-way finish page in `installer/setup.iss` (the `[Run]` entry removed, three radios, `/RUNATEND`) and `installer/README.md`'s finish-page section and manual checklist | D8 (the page and its three choices) |
 | D4 | `launcher/src/prefill.{h,cpp}`, the first-run application in `main.cpp`, `--dump-prefill`, the fixture-manifest cases in `tests/launcher_profile_session_tests.cpp`, the README's first-run section (the run on a real install is the §6 wave-3 manual pass's) | D4 (the General tab's rows; the prefill seeds the fields behind them) |
@@ -1136,7 +1148,7 @@ what is missing.
 | R7 the bar follows the device | `device gamepad name="Virtual Pad" confirm=Cross cancel=Circle shoulders=L1/R1 start=Options` in the trace, and the capture reading `Cross Choose  Circle Quit  L1/R1 Switch tab  Options Launch`; the same bar before the pad moved read `Enter Choose  Esc Quit  Tab Switch tab`; a keyboard-only session (three Down, End, Home, Tab and Right, all in the trace) never left the key names | A3, A2 | built |
 | R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
 | R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2, E2 | built — and now measured rather than read: `scripts/capture_launcher.ps1` diffs the bar's help strip, where a press that leaves a row moves 6.7-10.4% of it and the three rows of the launch target move 0% by design (the sentence is the row's) |
-| R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring on in `--focus-log`, every press moves the body crop (0.19-4.28%), a tab switch changes the body by 16.0-18.1%, going back returns it to 0%, and a session that pressed nothing moves 0% of both crops | E2 | built. The tab switch is read off the trace's `tab=` now, not off the window title: the title stopped naming the tab |
+| R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring on in `--focus-log` (read off the *end* of the trace, because the ring also adopts the row under the pointer when the window is maximized — one line no press made), every press moves the body crop (0.19-4.28%), a tab switch changes the body by 16.0-18.1%, going back returns it to 0%, and a session that pressed nothing moves 0% of both crops; the window title is asserted as well — the launcher's name and the release version, and no tab — from the OS and from `--dump-display` | E2 | built. The tab switch is read off the trace's `tab=` now, and the version off the title: the title stopped naming the tab and started naming the release |
 | R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist, and now for the installed build: E3's four legs read the licence, the DLC folder and the save folder back out of the log; the two General-tab path rows are §11's second finding |
 | R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8, E3 | built; `tests/launcher_ultimate_state_tests.cpp`, and E3's `ultimate` leg is the installed helper adding the mod to a retail install from a folder, after the `retail` leg booted without it |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |
@@ -1413,7 +1425,7 @@ For the running artifacts (answer with a boot, not an opinion):
   `rexglue-sdk/src/ui/rex_app.cpp:106-158` (path setup before config load),
   `rexglue-sdk/include/rex/rex_app.h:98-115` (the hooks),
   `rexglue-sdk/thirdparty/CMakeLists.txt:231-255` (imgui + SDL3 configuration).
-- [docs/dlc.md](../dlc.md) — DLC layout and the save containers under `Documents\rb_blitz`.
+- [docs/dlc.md](../dlc.md) — DLC layout and the save containers under `Documents\Rock Band Blitz`.
 - [docs/known-issues.md](../known-issues.md), [docs/backlog.md](../backlog.md) — the standing limits and
   the deferred features this plan must not quietly un-defer.
 - **The art research (§10):** [scripts/hmx_milo.py](../../scripts/hmx_milo.py) — the scene reader whose

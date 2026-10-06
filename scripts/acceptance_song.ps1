@@ -41,6 +41,14 @@ param(
     [string]$BuildDir = "out/build/win-amd64-release",
     [string]$OutDir = "out/m5-acceptance",
     [string]$GameRoot,
+    # DLC sources, passed through to the game. Empty means the default
+    # <GameRoot>/dlc (docs/dlc.md §2) and no library. A flat library adds its songs
+    # to the same artist-sorted list, so -Song counts them too.
+    [string]$DlcRoot,
+    [string]$DlcLibrary = "",
+    # Present the library under this 8-hex-digit content type (docs/dlc.md §2.1);
+    # empty keeps each package's own.
+    [string]$DlcLibraryContentType = "",
     # 1-based row in the artist-sorted song list. Row 1 is the "Random Song"
     # entry, then the bundled songs by artist: One Week (2), These Days (3),
     # Death on Two Legs (4).
@@ -357,10 +365,16 @@ function Invoke-Run([int]$Run) {
     # command-line equivalent, so the cap below is what keeps a run's log in one
     # file instead. `log_flush_interval` is what makes the file readable while the
     # guest is still running; with the default (0) it is flushed at shutdown.
-    $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru `
-        -ArgumentList "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
-                      "--mnk_mode=1", "--log_level=debug", "--log_flush_interval=1", `
-                      "--log_max_file_size_mb=100"
+    # The DLC sources are passed only when named, so a run that is not about DLC
+    # keeps the default root and the pre-library behaviour. Paths are quoted: a
+    # library folder usually has a space in it ("YARG Songs").
+    $launchArgs = @("--game_data_root=""$GameRoot""", "--ultimate_mode=$UltimateMode",
+                    "--mnk_mode=1", "--log_level=debug", "--log_flush_interval=1",
+                    "--log_max_file_size_mb=100")
+    if ($DlcRoot) { $launchArgs += "--dlc_root=""$DlcRoot""" }
+    if ($DlcLibrary) { $launchArgs += "--dlc_library=""$DlcLibrary""" }
+    if ($DlcLibraryContentType) { $launchArgs += "--dlc_library_content_type=$DlcLibraryContentType" }
+    $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
 
     try {
         # 1. Title screen. Boot is 25-40s; the OCR wait is what makes a slow boot

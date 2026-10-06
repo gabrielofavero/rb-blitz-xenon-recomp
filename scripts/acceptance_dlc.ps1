@@ -7,7 +7,8 @@
 # that proof, and it runs the two halves docs/dlc.md §5 names:
 #
 #   * `dlc: N package(s) for title(s) ... (read-only, mounted in place)` - the host
-#     hook found and registered the packages;
+#     hook found and registered the packages; a flat library reports the same shape
+#     of line, so the leg's package count is the sum of either source;
 #   * `XamContentAggregateCreateEnumerator: added M items` - the guest's own
 #     enumeration returned them (M > 0), where the count is 0 with no packages;
 #   * and the song list itself, read with Windows OCR, naming a song that only the
@@ -20,6 +21,10 @@
 # caches its song list into `songcache` and a reused root could serve a cached DLC
 # song to the control leg.
 #
+# -DlcLibrary adds the flat library half of docs/dlc.md §2.1 to the positive leg
+# (`--dlc_library`), with the control leg pointed at a library path that does not
+# exist as well, so the same two legs prove either source.
+#
 # The expected song is configuration, not a constant of the format: this dump's
 # `game/dlc/45410914/00000002/<package>` is the "Rock Band Blitz Soundtrack"
 # (content type 0x00000002, title 45410914), whose first artist-sorted row is
@@ -30,6 +35,7 @@
 # Usage:
 #   .\scripts\acceptance_dlc.ps1
 #   .\scripts\acceptance_dlc.ps1 -ExpectedSong "KIDS IN THE STREET,SO FAR AWAY"
+#   .\scripts\acceptance_dlc.ps1 -DlcLibrary "D:\Games\YARG Songs" -ExpectedSong "HERE WITHOUT YOU"
 #   .\scripts\acceptance_dlc.ps1 -SkipControl
 #
 # Writes out/m7-dlc/<leg>-*.png, a copy of each run's log and summary.json, prints
@@ -41,6 +47,10 @@ param(
     # Root of the <title_id>/<content_type>/<package> layout. Empty means the
     # default, <GameRoot>/dlc (docs/dlc.md §2).
     [string]$DlcRoot,
+    # A ';'-separated flat DLC library: folders of STFS packages in any arrangement,
+    # each mounted under the title id and content type its own header names
+    # (docs/dlc.md §2.1). Empty means no library, which is the pre-library behaviour.
+    [string]$DlcLibrary = "",
     # One or more song titles, comma-separated, that only the DLC package carries.
     [string]$ExpectedSong = "KIDS IN THE STREET",
     [string]$UltimateMode = "0",
@@ -65,6 +75,9 @@ New-Item -ItemType Directory -Force -Path $capDir | Out-Null
 if (-not (Test-Path $exe)) { throw "not found: $exe" }
 if (-not (Test-Path (Join-Path $GameRoot "default.xex"))) { throw "no default.xex under $GameRoot" }
 if (-not (Test-Path $DlcRoot)) { throw "no DLC root at $DlcRoot - nothing for the positive leg to load" }
+foreach ($lib in ($DlcLibrary -split ";" | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+    if (-not (Test-Path $lib)) { throw "no DLC library at $lib" }
+}
 
 $expected = @($ExpectedSong.Split(",") | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
 if ($expected.Count -eq 0) { throw "-ExpectedSong named no song" }
@@ -136,16 +149,10 @@ function Invoke-Actions([string[]]$Actions) {
     Invoke-ChildScript "drive_ui.ps1" @{ Actions = ($Actions -join ","); BuildDir = $BuildDir; OutDir = $OutDir } | Out-Null
 }
 
-function Reset-Highlight {
-    $actions = @()
-    for ($i = 0; $i -lt 8; $i++) { $actions += "key:lstick_up" }
-    Invoke-Actions $actions
-}
-
 # ------------------------------------------------------------------- legs ---
 
-function Invoke-Leg([string]$Name, [string]$DlcRootPath, [int]$MinPackages, [int]$MinItems, [int]$MaxItems) {
-    Write-Host "=== $Name (dlc_root=$DlcRootPath) ==="
+function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath, [int]$MinPackages, [int]$MinItems, [int]$MaxItems) {
+    Write-Host "=== $Name (dlc_root=$DlcRootPath library=$DlcLibraryPath) ==="
     $legDir = Join-Path $capDir "$Name-userdata"
     if (Test-Path $legDir) { Remove-Item -Recurse -Force $legDir }
     New-Item -ItemType Directory -Force -Path $legDir | Out-Null
@@ -153,22 +160,38 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [int]$MinPackages, [int
 
     $notes = New-Object System.Collections.ArrayList
     $row = [ordered]@{
-        Leg = $Name; DlcRoot = $DlcRootPath; SongList = $false; DlcSong = $false
-        Packages = 0; AggregateItems = -1; Fatal = $false; Expected = ($expected -join " & ")
-        FoundSongs = ""; Notes = ""
+        Leg = $Name; DlcRoot = $DlcRootPath; DlcLibrary = $DlcLibraryPath; SongList = $false
+        DlcSong = $false; Packages = 0; AggregateItems = -1; Fatal = $false
+        Expected = ($expected -join " & "); FoundSongs = ""; Notes = ""
     }
-    $proc = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList `
-        "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", "--mnk_mode=1", `
-        "--no_mouse_ui_nav", "--user_data_root=$legDir", "--dlc_root=$DlcRootPath", `
-        "--log_level=debug", "--log_flush_interval=1", "--log_max_file_size_mb=200"
+    # --dlc_library is passed only when a library was named, so a leg that is not
+    # about one runs with the pre-library behaviour alone. Paths are quoted: a library
+    # usually has a space in it ("YARG Songs"), and Start-Process joins the array into
+    # one command line without quoting on its own.
+    $launchArgs = @("--game_data_root=""$GameRoot""", "--ultimate_mode=$UltimateMode",
+        "--mnk_mode=1", "--no_mouse_ui_nav", "--user_data_root=""$legDir""",
+        "--dlc_root=""$DlcRootPath""", "--log_level=debug", "--log_flush_interval=1",
+        "--log_max_file_size_mb=200")
+    if ($DlcLibraryPath) { $launchArgs += "--dlc_library=""$DlcLibraryPath""" }
+    $proc = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
     try {
         if (-not (Wait-ForWindow $proc $BootTimeoutSec)) { $notes.Add("no game window appeared") | Out-Null }
         else {
-            Start-Sleep -Seconds 20
-            # Title -> sign-in dialog -> offline prompt -> main menu (A on each),
-            # then PLAY (the main menu's first row) -> song list.
-            Invoke-Actions @("key:a", "wait:6", "key:a", "wait:6", "key:a", "wait:8")
-            Reset-Highlight
+            # Screen-driven, the way scripts/acceptance_song.ps1 walks the same route: a
+            # leg with a large library spends minutes discovering content before the
+            # title screen is even interactive, and fixed waits desynchronised the route
+            # (measured: with D:\Games\YARG Songs the A presses landed before the
+            # dialogs and the run ended on the Rock Central prompt).
+            $null = Wait-ForScreen (Join-Path $capDir "$Name-title.png") "TO START" $BootTimeoutSec "${Name}: title screen"
+            Invoke-Actions @("key:a")
+            $null = Wait-ForScreen (Join-Path $capDir "$Name-signin.png") "ROCK CENTRAL" $ScreenTimeoutSec "${Name}: sign-in dialog"
+            Invoke-Actions @("key:a")
+            $null = Wait-ForScreen (Join-Path $capDir "$Name-offline.png") "OFFLINE MODE" $ScreenTimeoutSec "${Name}: offline prompt"
+            Invoke-Actions @("key:a")
+            $null = Wait-ForScreen (Join-Path $capDir "$Name-menu.png") "PLAY" $ScreenTimeoutSec "${Name}: main menu"
+            # PLAY is the main menu's first row, so no highlight reset is needed; the
+            # song list is what the whole leg waits for, and building it is what mounts
+            # every package a big library carries.
             Invoke-Actions @("key:a")
             $text = Wait-ForScreen (Join-Path $capDir "$Name-songs.png") "YOUR SONGS" $ScreenTimeoutSec "${Name}: song list"
             $row.SongList = $text.Contains("YOUR SONGS")
@@ -193,8 +216,11 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [int]$MinPackages, [int
     $logText = Get-LogText $log
     $row.Fatal = [bool]($logText | Select-String -Pattern "\[FATAL\]" -Quiet)
     if ($row.Fatal) { $notes.Add("the log contains [FATAL]") | Out-Null }
-    $m = [regex]::Match($logText, "dlc: (\d+) package\(s\)")
-    if ($m.Success) { $row.Packages = [int]$m.Groups[1].Value }
+    # Both the structured root and a library report `dlc: N package(s) ...`, so the
+    # leg's count is the sum of what either source registered.
+    foreach ($p in [regex]::Matches($logText, "dlc: (\d+) package\(s\)")) {
+        $row.Packages += [int]$p.Groups[1].Value
+    }
     foreach ($a in [regex]::Matches($logText, "XamContentAggregateCreateEnumerator: added (\d+) items")) {
         $n = [int]$a.Groups[1].Value
         if ($n -gt $row.AggregateItems) { $row.AggregateItems = $n }
@@ -217,23 +243,26 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [int]$MinPackages, [int
 # The positive leg expects the packages docs/dlc.md §2 describes. The count is not
 # hard-coded: it is whatever the hook reports, as long as it is at least one, and
 # the guest's enumerator agrees it got something.
-$dlc = Invoke-Leg "dlc" $DlcRoot 1 1 2147483647
+$dlc = Invoke-Leg "dlc" $DlcRoot $DlcLibrary 1 1 2147483647
 $dlcPass = $dlc.SongList -and $dlc.DlcSong -and ($dlc.Packages -ge 1) -and
            ($dlc.AggregateItems -ge 1) -and -not $dlc.Fatal
 
 $controlPass = $true
 $control = $null
 if (-not $SkipControl) {
-    # A path that does not exist: the hook refuses the root (docs/dlc.md §3) and
+    # Paths that do not exist: the hook refuses both sources (docs/dlc.md §3) and
     # the guest's enumerator must come back empty, with the DLC song not on the list.
+    # A library only joins the control leg when the positive leg had one, so a run
+    # without -DlcLibrary keeps the original control shape.
     $absent = Join-Path $capDir "no-dlc-root"
-    $control = Invoke-Leg "control" $absent 0 0 0
+    $absentLibrary = if ($DlcLibrary) { Join-Path $capDir "no-dlc-library" } else { "" }
+    $control = Invoke-Leg "control" $absent $absentLibrary 0 0 0
     $controlPass = $control.SongList -and -not $control.DlcSong -and
                    ($control.AggregateItems -le 0) -and -not $control.Fatal
 }
 
 $summary = [pscustomobject]@{
-    ExpectedSongs = $expected; GameRoot = $GameRoot; DlcRoot = $DlcRoot
+    ExpectedSongs = $expected; GameRoot = $GameRoot; DlcRoot = $DlcRoot; DlcLibrary = $DlcLibrary
     Dlc = $dlcPass; Control = $controlPass; SkipControl = [bool]$SkipControl
     DlcLeg = $dlc; ControlLeg = $control
 }

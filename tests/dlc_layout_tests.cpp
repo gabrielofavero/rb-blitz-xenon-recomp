@@ -226,21 +226,62 @@ int main() {
   BeginCase("the registration decision is a precondition chain, in the hook's order");
   {
     // src/hooks/dlc.cpp asks this and does nothing else with the answer, so the
-    // four outcomes and their order are the whole of what it decides. Each step is
-    // a precondition of the next: the counts below are deliberately contradictory
-    // (a missing directory that "found" packages) to pin that the earlier question
-    // wins.
-    CHECK_TRUE(DecideDlcRegistration(false, 0, false) == DlcRegistration::kNoDirectory);
-    CHECK_TRUE(DecideDlcRegistration(false, 3, true) == DlcRegistration::kNoDirectory);
+    // outcomes and their order are the whole of what it decides. Each step is a
+    // precondition of the next: nothing configured at all reads differently from
+    // something configured that holds nothing, a source that holds nothing is not
+    // reported as unregisterable, and a count from the other source is deliberately
+    // passed where the hook cannot produce it (structured packages with no configured
+    // source) to pin that the counts, not the inputs, are what a registration is made
+    // of.
+    CHECK_TRUE(DecideDlcRegistration(false, 0, 0, false) == DlcRegistration::kNoDirectory);
+    CHECK_TRUE(DecideDlcRegistration(false, 0, 0, true) == DlcRegistration::kNoDirectory);
+    CHECK_TRUE(DecideDlcRegistration(false, 3, 2, true) == DlcRegistration::kNoDirectory);
 
-    CHECK_TRUE(DecideDlcRegistration(true, 0, false) == DlcRegistration::kNoPackages);
-    CHECK_TRUE(DecideDlcRegistration(true, 0, true) == DlcRegistration::kNoPackages);
+    CHECK_TRUE(DecideDlcRegistration(true, 0, 0, false) == DlcRegistration::kNoSource);
+    CHECK_TRUE(DecideDlcRegistration(true, 0, 0, true) == DlcRegistration::kNoSource);
 
-    CHECK_TRUE(DecideDlcRegistration(true, 1, false) == DlcRegistration::kNoContentManager);
-    CHECK_TRUE(DecideDlcRegistration(true, 7, false) == DlcRegistration::kNoContentManager);
+    CHECK_TRUE(DecideDlcRegistration(true, 1, 0, false) == DlcRegistration::kNoContentManager);
+    CHECK_TRUE(DecideDlcRegistration(true, 0, 7, false) == DlcRegistration::kNoContentManager);
+    CHECK_TRUE(DecideDlcRegistration(true, 1, 7, false) == DlcRegistration::kNoContentManager);
 
-    CHECK_TRUE(DecideDlcRegistration(true, 1, true) == DlcRegistration::kRegister);
-    CHECK_TRUE(DecideDlcRegistration(true, 7, true) == DlcRegistration::kRegister);
+    CHECK_TRUE(DecideDlcRegistration(true, 1, 0, true) == DlcRegistration::kRegisterStructured);
+    CHECK_TRUE(DecideDlcRegistration(true, 7, 0, true) == DlcRegistration::kRegisterStructured);
+    CHECK_TRUE(DecideDlcRegistration(true, 0, 3, true) == DlcRegistration::kRegisterLibrary);
+    CHECK_TRUE(DecideDlcRegistration(true, 0, 1, true) == DlcRegistration::kRegisterLibrary);
+
+    // Both sources at once: the structured root and a library each keep their own
+    // items, so the two are registered together rather than one replacing the other.
+    CHECK_TRUE(DecideDlcRegistration(true, 1, 1, true) == DlcRegistration::kRegisterBoth);
+    CHECK_TRUE(DecideDlcRegistration(true, 7, 9, true) == DlcRegistration::kRegisterBoth);
+  }
+
+  BeginCase("a root is the structured layout only when it has a title level");
+  {
+    Scratch s;
+    // The shipped layout, and the one that is a file rather than a package.
+    WriteFile(s.root / "45410914" / "00000002" / kRb3Package, "LIVE a container");
+    CHECK_TRUE(HasStructuredLayout(s.root));
+
+    // A flat library: containers at the top, nothing that looks like a title level.
+    Scratch flat;
+    WriteFile(flat.root / "Adele - Skyfall", "CON a container");
+    WriteFile(flat.root / "ACDC - Back in Black", "CON a container");
+    CHECK_FALSE(HasStructuredLayout(flat.root));
+
+    // Nested is still a library: the title level is read at the root alone.
+    Scratch nested;
+    WriteFile(nested.root / "packs" / "45410914" / "00000002" / kRb3Package, "CON a container");
+    CHECK_FALSE(HasStructuredLayout(nested.root));
+
+    // Lower case is not a title level, the same way ScanDlcRoot refuses it: the SDK
+    // looks the directory up with fmt("{:08X}"), so a folder of loose containers named
+    // like that is read as a library instead.
+    Scratch lower;
+    WriteFile(lower.root / "4541091a" / "00000002" / kRb3Package, "LIVE x");
+    CHECK_FALSE(HasStructuredLayout(lower.root));
+
+    Scratch missing;
+    CHECK_FALSE(HasStructuredLayout(missing.base / "nothing-here"));
   }
 
   BeginCase("what was scanned is what the decision is made from");
@@ -250,16 +291,17 @@ int main() {
     // take a root - so the only thing standing between the hook and registering is
     // the scan. This is the case that used to be "nothing to mount".
     const DlcScanResult empty = ScanDlcRoot(s.root);
-    CHECK_TRUE(DecideDlcRegistration(true, empty.packages.size(), true) ==
-               DlcRegistration::kNoPackages);
+    CHECK_TRUE(DecideDlcRegistration(true, empty.packages.size(), 0, true) ==
+               DlcRegistration::kNoSource);
 
     WriteFile(s.root / "45410914" / "00000002" / kRb3Package, "LIVE a container");
     const DlcScanResult one = ScanDlcRoot(s.root);
     CHECK_EQ(one.packages.size(), 1);
-    CHECK_TRUE(DecideDlcRegistration(true, one.packages.size(), true) == DlcRegistration::kRegister);
+    CHECK_TRUE(DecideDlcRegistration(true, one.packages.size(), 0, true) ==
+               DlcRegistration::kRegisterStructured);
     // A scan that found a package but no manager still refuses, and the package is
     // not lost - the caller has it, it just has nowhere to hand it.
-    CHECK_TRUE(DecideDlcRegistration(true, one.packages.size(), false) ==
+    CHECK_TRUE(DecideDlcRegistration(true, one.packages.size(), 0, false) ==
                DlcRegistration::kNoContentManager);
   }
 

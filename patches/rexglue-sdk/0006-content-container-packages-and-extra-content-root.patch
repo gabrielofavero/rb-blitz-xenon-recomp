@@ -1,8 +1,18 @@
 diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
-index 949d185..6b0badb 100644
+index 949d185..6f8dc44 100644
 --- a/include/rex/system/xam/content_manager.h
 +++ b/include/rex/system/xam/content_manager.h
-@@ -130,6 +130,10 @@ class ContentPackage {
+@@ -13,7 +13,9 @@
+ 
+ #include <memory>
+ #include <string>
++#include <string_view>
+ #include <unordered_map>
++#include <utility>
+ #include <vector>
+ #include <rex/math.h>
+ #include <rex/memory.h>
+@@ -130,6 +132,10 @@ class ContentPackage {
  
    uint32_t GetPackageLicense() const { return license_; }
  
@@ -13,15 +23,32 @@ index 949d185..6b0badb 100644
   private:
    KernelState* kernel_state_;
    std::string root_name_;
-@@ -137,6 +141,7 @@ class ContentPackage {
+@@ -137,6 +143,24 @@ class ContentPackage {
    std::filesystem::path package_path_;
    XCONTENT_AGGREGATE_DATA content_data_;
    uint32_t license_ = 0;
 +  bool mounted_ = false;
++};
++
++// One package whose identity comes from its own STFS header rather than from the
++// directory it sits in. The extra content root (below) has to be a real
++// title_id/content_type tree, but a flat library - a folder of dumped containers,
++// nested to any depth - has neither level, so each container is placed here under
++// the title id and content type it names in its own header.
++//
++// `file_name` is what the enumerator hands the guest and what the guest hands back
++// to open the item, so it must fit XCONTENT_DATA::file_name_raw (42 bytes) and be
++// unique within (title_id, content_type). It is not a host path: `host_path` is the
++// package on disk, however the library happens to name and nest it.
++struct ExtraContentItem {
++  std::filesystem::path host_path;
++  std::string file_name;
++  uint32_t title_id = 0;
++  XContentType content_type = XContentType::kMarketplaceContent;
  };
  
  class ContentManager {
-@@ -171,6 +176,16 @@ class ContentManager {
+@@ -171,6 +195,28 @@ class ContentManager {
                                   XContentType content_type, XCONTENT_AGGREGATE_DATA& data) const;
  
    std::filesystem::path ResolveGameUserContentPath();
@@ -35,10 +62,22 @@ index 949d185..6b0badb 100644
 +  void set_extra_content_root(const std::filesystem::path& path) { extra_content_root_ = path; }
 +  const std::filesystem::path& extra_content_root() const { return extra_content_root_; }
 +
++  // A flat DLC library, laid out however the dumped containers happen to lie: each
++  // item carries the title id and content type read from its own header. Items are
++  // listed and opened like extra-root content, and no write path (create, thumbnail,
++  // install, delete) ever resolves into a host_path, so a library cannot be modified
++  // by the title.
++  void set_extra_content_library(std::vector<ExtraContentItem> items) {
++    extra_content_library_ = std::move(items);
++  }
++  const std::vector<ExtraContentItem>& extra_content_library() const {
++    return extra_content_library_;
++  }
++
    bool IsContentOpen(const XCONTENT_AGGREGATE_DATA& data) const;
    void CloseOpenedFilesFromContent(const std::string_view root_name);
  
-@@ -184,7 +199,19 @@ class ContentManager {
+@@ -184,7 +230,26 @@ class ContentManager {
  
   private:
    std::filesystem::path ResolvePackageRoot(uint64_t xuid, XContentType content_type,
@@ -50,6 +89,13 @@ index 949d185..6b0badb 100644
 +  // extra_content_root_/title_id/content_type/
 +  std::filesystem::path ResolveExtraPackageRoot(XContentType content_type,
 +                                                uint32_t title_id) const;
++  // The library item the guest named, or null. Linear: a library is a few thousand
++  // entries at most and this runs once per mount, not per frame.
++  const ExtraContentItem* FindExtraContentItem(uint32_t title_id, XContentType content_type,
++                                               std::string_view file_name) const;
++  // Whether a package the open path resolved came from the extra root or the library,
++  // and so has no `.header` file to carry its license mask.
++  bool IsExtraContent(const std::filesystem::path& package_path) const;
 +  // Reads one directory of a content root: a directory per item (the form
 +  // InstallContent/CreateContent write) or the item's STFS container itself.
 +  void AppendContentFromDirectory(const std::filesystem::path& package_root, uint32_t device_id,
@@ -59,19 +105,51 @@ index 949d185..6b0badb 100644
    std::filesystem::path ResolvePackagePath(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
    std::filesystem::path ResolvePackageHeaderPath(const std::string_view file_name, uint64_t xuid,
                                                   uint32_t title_id,
-@@ -198,6 +225,7 @@ class ContentManager {
+@@ -198,6 +263,8 @@ class ContentManager {
  
    KernelState* kernel_state_;
    std::filesystem::path root_path_;
 +  std::filesystem::path extra_content_root_;
++  std::vector<ExtraContentItem> extra_content_library_;
  
    // TODO(benvanik): remove use of global lock, it's bad here!
    rex::thread::global_critical_region global_critical_region_;
+diff --git a/src/kernel/xam/xam_content_aggregate.cpp b/src/kernel/xam/xam_content_aggregate.cpp
+index de4a527..9e291c4 100644
+--- a/src/kernel/xam/xam_content_aggregate.cpp
++++ b/src/kernel/xam/xam_content_aggregate.cpp
+@@ -143,8 +143,8 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+     AddODDContentTest(e, content_type_enum);
+   }
+ 
+-  REXKRNL_DEBUG("XamContentAggregateCreateEnumerator: added {} items to enumerator",
+-                e->item_count());
++  REXKRNL_DEBUG("XamContentAggregateCreateEnumerator: added {} items to enumerator (device={}, type={:08X})",
++                e->item_count(), device_id, uint32_t(content_type_enum));
+ 
+   *handle_out = e->handle();
+   return X_ERROR_SUCCESS;
 diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
-index bd6c797..5e6914c 100644
+index bd6c797..9c2c6a2 100644
 --- a/src/system/xam/content_manager.cpp
 +++ b/src/system/xam/content_manager.cpp
-@@ -38,6 +38,26 @@ static const char* kGameContentHeaderDirName = "Headers";
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <algorithm>
+ #include <array>
+ #include <cstring>
+ #include <queue>
+@@ -20,6 +21,7 @@
+ #include <rex/filesystem/devices/host_path_device.h>
+ #include <rex/filesystem/devices/stfs_container_device.h>
+ #include <rex/string.h>
++#include <rex/system/flags.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xam/content_device.h>
+ #include <rex/system/xam/content_manager.h>
+@@ -38,6 +40,26 @@ static const char* kGameContentHeaderDirName = "Headers";
  
  static int content_device_id_ = 0;
  
@@ -98,7 +176,7 @@ index bd6c797..5e6914c 100644
  ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view root_name,
                                 const XCONTENT_AGGREGATE_DATA& data,
                                 const std::filesystem::path& package_path)
-@@ -45,15 +65,36 @@ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view
+@@ -45,15 +67,36 @@ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view
    device_path_ = fmt::format("\\Device\\Content\\{0}\\", ++content_device_id_);
    content_data_ = data;
  
@@ -138,7 +216,7 @@ index bd6c797..5e6914c 100644
    auto fs = kernel_state_->file_system();
    fs->UnregisterSymbolicLink(root_name_ + ":");
    fs->UnregisterDevice(device_path_);
-@@ -86,7 +127,7 @@ ContentManager::ContentManager(KernelState* kernel_state, const std::filesystem:
+@@ -86,7 +129,7 @@ ContentManager::ContentManager(KernelState* kernel_state, const std::filesystem:
  ContentManager::~ContentManager() = default;
  
  std::filesystem::path ContentManager::ResolvePackageRoot(uint64_t xuid, XContentType content_type,
@@ -147,7 +225,7 @@ index bd6c797..5e6914c 100644
    if (title_id == kCurrentlyRunningTitleId) {
      title_id = kernel_state_->title_id();
    }
-@@ -99,8 +140,8 @@ std::filesystem::path ContentManager::ResolvePackageRoot(uint64_t xuid, XContent
+@@ -99,8 +142,8 @@ std::filesystem::path ContentManager::ResolvePackageRoot(uint64_t xuid, XContent
    return root_path_ / xuid_str / title_id_str / content_type_str;
  }
  
@@ -158,7 +236,7 @@ index bd6c797..5e6914c 100644
    uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
  
    // DLCs are stored in common directory
-@@ -114,6 +155,34 @@ std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
+@@ -114,6 +157,81 @@ std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
    return package_root / rex::to_path(data.file_name());
  }
  
@@ -176,24 +254,71 @@ index bd6c797..5e6914c 100644
 +         fmt::format("{:08X}", uint32_t(content_type));
 +}
 +
++const ExtraContentItem* ContentManager::FindExtraContentItem(uint32_t title_id,
++                                                             XContentType content_type,
++                                                             const std::string_view file_name) const {
++  for (const auto& item : extra_content_library_) {
++    if (item.title_id == title_id && item.content_type == content_type &&
++        item.file_name == file_name) {
++      return &item;
++    }
++  }
++  return nullptr;
++}
++
++bool ContentManager::IsExtraContent(const std::filesystem::path& package_path) const {
++  for (const auto& item : extra_content_library_) {
++    if (item.host_path == package_path) {
++      return true;
++    }
++  }
++  if (!extra_content_root_.empty()) {
++    // Element-wise, so the root being a prefix of the path is a match while a sibling
++    // directory whose name shares that prefix is not. The spelling is the one the
++    // root was built from, which is what ResolveExtraPackageRoot() joins.
++    const auto root = extra_content_root_.lexically_normal();
++    const auto path = package_path.lexically_normal();
++    return std::mismatch(root.begin(), root.end(), path.begin(), path.end()).first == root.end();
++  }
++  return false;
++}
++
 +std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
 +                                                         const XCONTENT_AGGREGATE_DATA& data) {
 +  auto package_path = ResolvePrimaryPackagePath(xuid, data);
-+  if (std::filesystem::exists(package_path) || extra_content_root_.empty()) {
++  if (std::filesystem::exists(package_path)) {
 +    return package_path;
 +  }
 +
-+  // Read-only fallback, so a package that only exists in the extra root opens (and
-+  // reports as existing) exactly like an installed one.
-+  auto extra_path = ResolveExtraPackageRoot(data.content_type, data.title_id) /
-+                    rex::to_path(data.file_name());
-+  return std::filesystem::exists(extra_path) ? extra_path : package_path;
++  // Read-only fallbacks, so a package that only exists in a registered extra source
++  // opens (and reports as existing) exactly like an installed one.
++  if (!extra_content_root_.empty()) {
++    auto extra_path = ResolveExtraPackageRoot(data.content_type, data.title_id) /
++                      rex::to_path(data.file_name());
++    if (std::filesystem::exists(extra_path)) {
++      return extra_path;
++    }
++  }
++
++  // A library item has no directory to resolve against: its identity is the header's
++  // own title id and content type, so it is looked up by what the enumerator handed
++  // the guest rather than by a path the extra root could build.
++  uint32_t title_id = uint32_t(data.title_id);
++  if (title_id == kCurrentlyRunningTitleId) {
++    title_id = kernel_state_->title_id();
++  }
++  if (const ExtraContentItem* item =
++          FindExtraContentItem(title_id, data.content_type, data.file_name())) {
++    return item->host_path;
++  }
++
++  return package_path;
 +}
 +
  std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string_view file_name,
                                                                 uint64_t xuid, uint32_t title_id,
                                                                 XContentType content_type) const {
-@@ -136,6 +205,37 @@ std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string
+@@ -136,6 +254,37 @@ std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string
           final_name;
  }
  
@@ -231,7 +356,7 @@ index bd6c797..5e6914c 100644
  std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device_id, uint64_t xuid,
                                                                   XContentType content_type,
                                                                   uint32_t title_id) {
-@@ -147,26 +247,19 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
+@@ -147,26 +296,41 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
  
    // Search path:
    // content_root/xuid/title_id/type_name/*
@@ -241,20 +366,6 @@ index bd6c797..5e6914c 100644
 -    if (file_info.type != rex::filesystem::FileInfo::Type::kDirectory) {
 -      // Directories only.
 -      continue;
--    }
--
--    XCONTENT_AGGREGATE_DATA content_data;
--    if (XSUCCEEDED(ReadContentHeaderFile(rex::path_to_utf8(file_info.name), xuid, title_id,
--                                         content_type, content_data))) {
--      result.emplace_back(std::move(content_data));
--    } else {
--      content_data.device_id = device_id;
--      content_data.content_type = content_type;
--      content_data.set_display_name(rex::path_to_utf16(file_info.name));
--      content_data.set_file_name(rex::path_to_utf8(file_info.name));
--      content_data.title_id = title_id;
--      content_data.xuid = xuid;
--      result.emplace_back(std::move(content_data));
 +  AppendContentFromDirectory(ResolvePackageRoot(xuid, content_type, title_id), device_id, xuid,
 +                             content_type, title_id, /*read_headers=*/true, &result);
 +
@@ -269,9 +380,43 @@ index bd6c797..5e6914c 100644
 +      AppendContentFromDirectory(ResolveExtraPackageRoot(content_type, title_id), device_id, 0,
 +                                 content_type, title_id, /*read_headers=*/false, &result);
      }
++  }
+ 
+-    XCONTENT_AGGREGATE_DATA content_data;
+-    if (XSUCCEEDED(ReadContentHeaderFile(rex::path_to_utf8(file_info.name), xuid, title_id,
+-                                         content_type, content_data))) {
+-      result.emplace_back(std::move(content_data));
+-    } else {
+-      content_data.device_id = device_id;
+-      content_data.content_type = content_type;
+-      content_data.set_display_name(rex::path_to_utf16(file_info.name));
+-      content_data.set_file_name(rex::path_to_utf8(file_info.name));
+-      content_data.title_id = title_id;
+-      content_data.xuid = xuid;
+-      result.emplace_back(std::move(content_data));
++  // Flat library items, under the same xuid=0 pass as the extra root and for the same
++  // reason: the enumerator lists common content in a second, xuid = 0 pass, so
++  // listing them on the user pass too would duplicate every one of them.
++  if (!extra_content_library_.empty()) {
++    const uint64_t profile_xuid = kernel_state_->user_profile()->xuid();
++    if (xuid == 0 || profile_xuid == 0) {
++      for (const auto& item : extra_content_library_) {
++        if (item.title_id != title_id || item.content_type != content_type) {
++          continue;
++        }
++        XCONTENT_AGGREGATE_DATA content_data;
++        content_data.device_id = device_id;
++        content_data.content_type = content_type;
++        content_data.set_display_name(rex::path_to_utf16(rex::to_path(item.file_name)));
++        content_data.set_file_name(item.file_name);
++        content_data.title_id = title_id;
++        content_data.xuid = 0;
++        result.emplace_back(std::move(content_data));
++      }
+     }
    }
  
-@@ -180,6 +273,11 @@ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
+@@ -180,6 +344,11 @@ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
      return nullptr;
    }
    auto package = std::make_unique<ContentPackage>(kernel_state_, root_name, data, package_path);
@@ -283,7 +428,7 @@ index bd6c797..5e6914c 100644
    return package;
  }
  
-@@ -264,7 +362,7 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_
+@@ -264,7 +433,7 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_
      }
    }
  
@@ -292,7 +437,7 @@ index bd6c797..5e6914c 100644
    if (std::filesystem::exists(package_path)) {
      return X_ERROR_ALREADY_EXISTS;
    }
-@@ -272,7 +370,9 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_
+@@ -272,7 +441,9 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_
      return X_ERROR_ACCESS_DENIED;
    }
    auto package = ResolvePackage(root_name, xuid, data);
@@ -303,7 +448,7 @@ index bd6c797..5e6914c 100644
  
    {
      auto global_lock = global_critical_region_.Acquire();
-@@ -299,7 +399,11 @@ X_RESULT ContentManager::OpenContent(const std::string_view root_name, uint64_t
+@@ -299,11 +470,29 @@ X_RESULT ContentManager::OpenContent(const std::string_view root_name, uint64_t
      return X_ERROR_FILE_NOT_FOUND;
    }
    auto package = ResolvePackage(root_name, xuid, data);
@@ -316,7 +461,25 @@ index bd6c797..5e6914c 100644
    package->LoadPackageLicenseMask(ResolvePackageHeaderPath(
        data.file_name(), xuid, kernel_state_->title_id(), data.content_type));
    content_license = package->GetPackageLicense();
-@@ -351,7 +455,8 @@ X_RESULT ContentManager::GetContentThumbnail(uint64_t xuid, const XCONTENT_AGGRE
+ 
++  // Content served from the extra root or a flat library has no `.header` file beside
++  // it - those directories hold the packages and nothing else - so its license is only
++  // what the container itself carries, and a package dumped unsigned (a custom-song
++  // CON has no license entries at all) reads as "not licensed" to a title that asks
++  // for the license of what it just opened, which is how one refuses to play it while
++  // still listing it. An installed package would have had a `.header` carrying the
++  // mask. Fall back to the configured mask, the same value XamContentGetLicenseMask
++  // answers with, so an extra source reports what the console would have owned. A
++  // container that does carry entries keeps them, and an explicitly configured
++  // `license_mask = 0` (the trial path) is returned unchanged.
++  if (content_license == 0 && IsExtraContent(package_path)) {
++    content_license = REXCVAR_GET(license_mask);
++  }
++
+   {
+     auto global_lock = global_critical_region_.Acquire();
+     if (open_packages_.count(string::string_key_case(root_name))) {
+@@ -351,7 +540,8 @@ X_RESULT ContentManager::GetContentThumbnail(uint64_t xuid, const XCONTENT_AGGRE
  X_RESULT ContentManager::SetContentThumbnail(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
                                               std::vector<uint8_t> buffer) {
    auto global_lock = global_critical_region_.Acquire();
@@ -326,7 +489,7 @@ index bd6c797..5e6914c 100644
    std::filesystem::create_directories(package_path);
    if (std::filesystem::exists(package_path)) {
      auto thumb_path = package_path / kThumbnailFileName;
-@@ -372,7 +477,7 @@ X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_D
+@@ -372,7 +562,7 @@ X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_D
      return X_ERROR_ACCESS_DENIED;
    }
  
@@ -335,7 +498,7 @@ index bd6c797..5e6914c 100644
    std::error_code ec;
    auto dir_removed = std::filesystem::remove_all(package_path, ec);
    if (ec) {
-@@ -419,7 +524,7 @@ X_RESULT ContentManager::UnmountAndDeleteContent(uint64_t xuid,
+@@ -419,7 +609,7 @@ X_RESULT ContentManager::UnmountAndDeleteContent(uint64_t xuid,
    delete package;
  
    // Delete phase: remove package directory and .header file
@@ -344,7 +507,7 @@ index bd6c797..5e6914c 100644
  
    uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
    auto header_path =
-@@ -599,7 +704,7 @@ X_RESULT ContentManager::InstallContent(const std::filesystem::path& package_pat
+@@ -599,7 +789,7 @@ X_RESULT ContentManager::InstallContent(const std::filesystem::path& package_pat
      content_data.set_display_name(rex::path_to_utf16(package_path.filename()));
    }
  
@@ -353,7 +516,7 @@ index bd6c797..5e6914c 100644
  
    // Create destination directory
    std::error_code ec;
-@@ -632,12 +737,7 @@ X_RESULT ContentManager::InstallContent(const std::filesystem::path& package_pat
+@@ -632,12 +822,7 @@ X_RESULT ContentManager::InstallContent(const std::filesystem::path& package_pat
    }
  
    // Compute license mask from STFS header licenses

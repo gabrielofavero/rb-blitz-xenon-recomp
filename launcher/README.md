@@ -121,8 +121,16 @@ Two things make the window readable rather than merely present, and both are in 
   which is what that is for.
 
 `--dump-display` prints all of it — the usable bounds, the content scale, the size the
-window would open at and the face that was loaded — so the DPI story is checkable on a build
-machine rather than only from a screenshot of someone's monitor.
+window would open at, the window title and the face that was loaded — so the DPI story is
+checkable on a build machine rather than only from a screenshot of someone's monitor.
+
+**The window title carries the release version** — `Rock Band Blitz Launcher (v0.1.0)` — and
+nothing else: not the tab, because the strip already says which tab is up. The number is
+`RBBLITZ_LAUNCHER_VERSION`, which `CMakeLists.txt` reads out of `installer/config/pins.toml`, the
+record the setup executable is named from as well, so a launcher and the installer that shipped it
+cannot claim to be different releases. A release that stamps its version some other way passes it:
+`-DRBBLITZ_VERSION=1.2.3`. `--dump-display` prints the title, so which release a window belongs to
+is answerable without a picture of a title bar.
 
 ## The shell — tabs, rows and the focus ring (A1)
 
@@ -167,8 +175,8 @@ changes no C++ at all:
 - **The bottom bar (A2)** is the window's, not a tab's, and it is where a session ends: the
   state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right, and
   under them the focused row's own help — its tooltip, and how to operate it. There is no title
-  text and no key legend at the top: the window's own title bar names the launcher, and the tab
-  strip says which tab is up.
+  text and no key legend at the top: the window's own title bar names the launcher and the release
+  it came from, and the tab strip says which tab is up.
 - **Window geometry** is read from the profile at startup and written back on the way out,
   and only when it changed — so a launcher nobody resized neither creates `launcher.toml`
   nor touches its mtime. A profile that does not parse is never written over (D2). The
@@ -219,6 +227,12 @@ a mouse.
 The mouse is a device too: clicking a row focuses it, and hovering adopts the ring, so the
 pointer and the keyboard never disagree about the selection (D6). A hovered *button* adopts it
 too — the bar must describe whatever the pointer is on, not the last row the ring left behind.
+"Hovering" means the pointer *moved* onto the row: the launcher measures that on the desktop
+(`SDL_GetGlobalMouseState`, once a frame in `main.cpp`) rather than from ImGui's delta inside the
+window, because a window that is created, maximized or restored under a still pointer produces the
+same delta as a real move — measured, the ring used to jump to the row under the pointer a moment
+after the launcher opened, and a harness that captured two frames with nothing pressed saw the help
+strip and the body move under it.
 
 A pad and the keyboard are peers, not alternatives: the first device to answer wins the frame,
 and either can take over mid-session (`--no-gamepad` opens no pad for navigation at all, which
@@ -698,7 +712,11 @@ driver maps no keys to pad buttons. The pads it reads are the ones the launcher 
 queried SDL for itself would read silence and look exactly like a pad nobody was touching.
 
 **Every control a 360 pad has is listed**, bound or not, because the list is the answer to "what
-can I rebind?". A row shows its control, what the control answers to, and two buttons:
+can I rebind?". A row shows its control, what the control answers to, and two buttons — three
+columns that each take an equal share of the width, so the three land at even intervals down the
+whole list rather than at whatever distance their own text happens to make. The buttons sit about
+two thirds across, which is where the schema tabs put the widget their own rows drive, and well
+clear of the scrollbar this list always brings:
 
 - **Assign** listens for three seconds and adds the first input it sees, from any device.
   Adding rather than replacing is what makes *several inputs, one button* work: press Assign,

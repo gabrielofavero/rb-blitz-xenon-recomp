@@ -24,6 +24,11 @@ constexpr float kMaxValueWidth = 360.0f;
 constexpr float kMinLabelWidth = 120.0f;
 constexpr std::size_t kTextBufferSize = 512;
 
+// Whether the pointer moved on the desktop this frame. Set once a frame by main.cpp, from SDL's
+// global mouse state - row_ui.h says why the pointer's own movement, and not ImGui's delta inside
+// the window, is what the rule is written against.
+bool pointer_moved = false;
+
 // Not constexpr: ImVec4 has no constexpr constructor.
 const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
 
@@ -109,13 +114,10 @@ void DrawFocusOutline(bool focused) {
                                       focus_ring::Thickness(font_size));
 }
 
-bool PointerAdoptsFocus() {
-  const ImVec2 delta = ImGui::GetIO().MouseDelta;
-  return delta.x != 0.0f || delta.y != 0.0f;
-}
+void SetPointerMoved(bool moved) { pointer_moved = moved; }
 
 void AdoptRingOnHover(std::size_t index, FocusModel& ring) {
-  ring.FocusIf(index, PointerAdoptsFocus() && ImGui::IsItemHovered());
+  ring.FocusIf(index, pointer_moved && ImGui::IsItemHovered());
 }
 
 ValueStyle StyleForKind(settings::Kind kind) {

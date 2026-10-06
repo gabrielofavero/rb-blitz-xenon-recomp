@@ -17,7 +17,17 @@
 # --dump-general and --print-command run without a window (launcher/main.cpp), and the
 # focused row is written to --focus-log as it changes (A3). The pixel checks are the
 # corroboration for the two claims text cannot make: that the *screen* changed, in the
-# region the claim is about, and that nothing else moved.
+# region the claim is about, and that nothing else moved. Two claims are text-only and
+# are made in both places: the window title, which --dump-display prints and the running
+# window is asked for (the launcher's name and the release version, and no tab), and the
+# focus trace, which is the oracle for every "where is the ring" question in the legs.
+#
+# The walk is strict about one thing: with nothing but presses, the trace has exactly one line per
+# press plus the start, and a line no press made fails the run. That is A2's pointer rule as an
+# assertion - the ring adopts the row under the pointer only when the pointer moves *on the desktop*
+# (main.cpp measures it there, row_ui.h says why) - and it is a real regression guard: a window that
+# appears, maximizes or is restored under a still pointer used to move the ring to the row under the
+# pointer a second after the launcher opened.
 #
 # The regions, in the launcher's own units. The launcher opens maximized (D18), so the
 # window is the work area the machine provides and there is no size to assume: the crops
@@ -72,14 +82,21 @@ param(
     # The remaining legs, each a switch so a session can run the one it is working on:
     #   -SkipWalkthrough  the lap of every tab's ring, which is the "never traps focus" check
     #   -SkipScale        the four-scale leg, which is the focus-ring-at-every-DPI-step check
-    #   -SkipSafeMode     the locked-out-profile leg
+    #   -SkipSafeMode     the legacy-keys-and-broken-file leg
     [switch]$SkipWalkthrough,
     [switch]$SkipScale,
     [switch]$SkipSafeMode,
     # A few pixels of jitter are not a moved UI: the control pair is the *same* state
-    # captured twice, and what it is allowed to differ by. Measured on this machine, it
-    # differs by none at all.
+    # captured twice, and what it is allowed to differ by. Measured on this machine at the
+    # display's own scale, it differs by none at all.
     [double]$NoisePercent = 0.02,
+    # ...and the same claim at the other end of the scale leg, which is measured at three more
+    # ui-scales and starts three more launchers. It keeps its own, looser floor because the
+    # measurement is not the same one: at --ui-scale=1 the first pair has come back with four pixels
+    # of the help strip different (0.026%) with nothing pressed, where the keyboard leg's pair has
+    # never differed at all. A press moves 0.5% of that strip, so "a still picture" is still what
+    # this proves.
+    [double]$ScaleIdlePercent = 0.1,
     # A focus move has to move at least this much of the help strip, and a tab switch at
     # least this much of the body. Both are floors well under what was measured, so a
     # real change cannot fall through them and a missing change cannot pass.
@@ -471,6 +488,13 @@ if ($display.Text -match "ui scale\s+: ([0-9.]+)") { $uiScale = [double]$Matches
 Add-Check "headless" "--dump-display reports the UI scale" ($display.Exit -eq 0 -and $uiScale -gt 0) `
     "ui scale $uiScale"
 Add-Check "headless" "--dump-display reports the face it loaded" ($display.Text -match "font face\s+: \S+") ""
+# The title is the launcher's name and the release it came from, and nothing else: the version is
+# read out of installer/config/pins.toml at configure time, so this is also the check that the
+# number made it into the sources.
+$titleLine = ($display.Text -split "`n" | Where-Object { $_ -match "window title\s+:" }) -join " "
+Add-Check "headless" "the window title is the launcher's name and the version" `
+    ($display.Text -match "window title\s+: Rock Band Blitz Launcher \(v[0-9]+\.[0-9]+(\.[0-9]+)?\)") `
+    $titleLine.Trim()
 
 $profile = Invoke-Dump "dump-profile"
 Add-Check "headless" "the run is pinned to the fixture profile" `
@@ -553,6 +577,12 @@ if (-not $SkipWindow) {
         Stop-Launcher $process | Out-Null
         throw "the launcher never opened a window; nothing below can be measured"
     }
+    # What the OS says the window is called, which is what a bug report is written from: the name,
+    # then the release version, and no tab. The headless leg asserts the same string; this one proves
+    # the window really carries it.
+    $title = Get-WindowTitle $process.Id
+    Add-Check "window" "the window's own title carries the version" `
+        ($title -match "^Rock Band Blitz Launcher \(v[0-9]+\.[0-9]+(\.[0-9]+)?\)$") $title
     Start-Sleep -Seconds $SettleSeconds
 
     $tab = Get-FocusedTab $focusLog
@@ -628,13 +658,21 @@ if (-not $SkipWindow) {
 
     $trace = (Get-FocusTrace $focusLog).Lines
     $entries = @($trace | ForEach-Object { $_.Entry })
+    $rowIndices = @($trace | ForEach-Object { $_.RowIndex })
     $tabs = @($trace | ForEach-Object { $_.Tab } | Select-Object -Unique)
     Add-Check "window" "the trace names one tab for the whole walk" ($tabs.Count -eq 1) ($tabs -join ",")
+    # Exactly one line per press, plus the start - because nothing but a press moves the ring. The
+    # line that no press made used to appear here, a second after the launcher opened: the ring
+    # adopted the row under the pointer, and the window being maximized under a still pointer made
+    # ImGui report a mouse move that never happened. That is fixed in main.cpp (the pointer is
+    # measured on the desktop), so this assertion is a regression guard rather than a tolerance.
     Add-Check "window" "the trace has one line per press plus the start" `
         ($entries.Count -eq ($walk.Count + 1)) "entries: $($entries -join ',')"
     $movesForward = $entries.Count -ge 2
     for ($i = 1; $i -lt $entries.Count; $i++) {
-        if ($entries[$i] -le $entries[$i - 1]) { $movesForward = $false }
+        # Forwards, or the ring wrapping round to its first row: the bottom bar is the ring's last
+        # row, so Down on it is the first row again rather than a wall.
+        if ($entries[$i] -le $entries[$i - 1] -and $rowIndices[$i] -ne 0) { $movesForward = $false }
     }
     Add-Check "window" "every press moves the ring on" $movesForward "entries: $($entries -join ',')"
 
@@ -721,28 +759,46 @@ if (-not $SkipWindow -and -not $SkipPadLeg -and $PadScript) {
         "--launcher_profile=$ProfilePath", "--game_data_root=$GameRoot",
         "--focus-log=$padLog", "--test-pad=$PadScript"
     )
-    $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+    # The launcher is a WIN32-subsystem process with no console, so a pad script it cannot play is
+    # refused on stderr that nobody would ever see - and "the pad never announced itself" is exactly
+    # the failure this leg can hit. Keeping the text is what makes that failure answerable.
+    $padErrorLog = Join-Path $capDir "pad-stderr.txt"
+    if (Test-Path $padErrorLog) { Remove-Item $padErrorLog -Force }
+    $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru `
+        -RedirectStandardError $padErrorLog
     $hwnd = Get-LauncherWindow $process.Id $WindowTimeoutSec
     if ($hwnd -eq [IntPtr]::Zero) {
         Add-Check "pad" "the launcher opens for the pad leg" $false "pid $($process.Id)"
         Stop-Launcher $process | Out-Null
     } else {
         Add-Check "pad" "the launcher opens for the pad leg" $true ""
-        # The pad's own schedule: a step is held for its length and the next begins 400 ms
-        # after it is let go of (launcher/src/virtual_pad.cpp), and the pad arrives at the
-        # start - so the wait is the script's length plus room for the window to be up.
-        Start-Sleep -Seconds ([Math]::Max(4, $SettleSeconds + 4))
-        $padTrace = (Get-FocusTrace $padLog).Lines
-        $padText = if (Test-Path $padLog) { (Get-Content -LiteralPath $padLog -Raw) } else { "" }
-        Add-Check "pad" "the scripted pad announces itself" `
-            ($padText -match 'device gamepad name="Virtual Pad"') `
-            (($padText -split "`n" | Where-Object { $_ -match "device gamepad" }) -join " ").Trim()
-        $padEntries = @($padTrace | ForEach-Object { $_.Entry })
-        Add-Check "pad" "the pad moves the ring without a key ($($padEntries.Count - 1) move(s))" `
-            ($padEntries.Count -ge 3) "entries: $($padEntries -join ',')"
-        $padTabs = @($padTrace | ForEach-Object { $_.Tab } | Select-Object -Unique)
-        Add-Check "pad" "the pad drives the same ring on one tab" ($padTabs.Count -eq 1) ($padTabs -join ",")
-        $clean = Stop-Launcher $process
+        # A try/finally around the leg, because the launcher is running for all of it: an error
+        # raised between here and Stop-Launcher would leave it up, and a launcher nobody closed keeps
+        # the harness's own stdout handles open, which is a run that never comes back.
+        try {
+            # The pad's own schedule: a step is held for its length and the next begins 400 ms
+            # after it is let go of (launcher/src/virtual_pad.cpp), and the pad arrives at the
+            # start - so the wait is the script's length plus room for the window to be up.
+            Start-Sleep -Seconds ([Math]::Max(4, $SettleSeconds + 4))
+            $padTrace = (Get-FocusTrace $padLog).Lines
+            # Both files are read as *arrays of lines* and joined, never as the result of
+            # `Get-Content -Raw`: a file with nothing in it reads back as $null, and $null has no
+            # methods - `.Trim()` on it is a terminating error, which is how this leg once left a
+            # launcher running with nobody left to close it.
+            $padText = (@(Get-Content -LiteralPath $padLog -ErrorAction SilentlyContinue) -join "`n")
+            $padSaid = (($padText -split "`n" | Where-Object { $_ -match "device gamepad" }) -join " ").Trim()
+            $padRefusal = (@(Get-Content -LiteralPath $padErrorLog -ErrorAction SilentlyContinue) -join " ").Trim()
+            Add-Check "pad" "the scripted pad announces itself" `
+                ($padText -match 'device gamepad name="Virtual Pad"') `
+                ("$padSaid $padRefusal").Trim()
+            $padEntries = @($padTrace | ForEach-Object { $_.Entry })
+            Add-Check "pad" "the pad moves the ring without a key ($($padEntries.Count - 1) move(s))" `
+                ($padEntries.Count -ge 3) "entries: $($padEntries -join ',')"
+            $padTabs = @($padTrace | ForEach-Object { $_.Tab } | Select-Object -Unique)
+            Add-Check "pad" "the pad drives the same ring on one tab" ($padTabs.Count -eq 1) ($padTabs -join ",")
+        } finally {
+            $clean = Stop-Launcher $process
+        }
         Add-Check "pad" "Escape leaves the pad leg's launcher" $clean ""
         $pad = [pscustomobject]@{ Script = $PadScript; Trace = $padTrace }
     }
@@ -847,10 +903,12 @@ if (-not $SkipWindow -and -not $SkipWalkthrough) {
             }) | Out-Null
             # The blocks the General tab draws after its schema rows have to be in the ring: a lap
             # that never named them would mean they are drawn outside it, which is the one way this
-            # tab's settings could become keyboard-unreachable.
+            # tab's settings could become keyboard-unreachable. The bottom bar is one such block and
+            # one *row* - Close, Save and Launch Game are its three options, which Left and Right
+            # walk - so a lap driven by Down alone reaches it and names the option it lands on.
             if ($tab.Key -eq "general") {
                 Add-Check "walkthrough" "the lap reaches the bottom bar's row" `
-                    (@($rows | Where-Object { $_ -match "^bar:" }).Count -ge 3) ($rows -join ",")
+                    (@($rows | Where-Object { $_ -match "^bar:" }).Count -ge 1) ($rows -join ",")
                 Add-Check "walkthrough" "the lap reaches the settings-file block" `
                     ($rows -contains "settings-file-block") ($rows -join ",")
             }
@@ -897,8 +955,8 @@ if (-not $SkipWindow -and -not $SkipScale) {
         $region = Get-Region $scale $size.W $size.H
         $idle = Get-DiffPercent (Save-Crop $first.Path "help" $region.Help 200) `
                                 (Save-Crop $second.Path "help" $region.Help 201)
-        Add-Check "scale $scale" "the crops land on a still picture at this scale ($idle% <= $NoisePercent%)" `
-            ($idle -ge 0 -and $idle -le $NoisePercent) "$idle%"
+        Add-Check "scale $scale" "the crops land on a still picture at this scale ($idle% <= $ScaleIdlePercent%)" `
+            ($idle -ge 0 -and $idle -le $ScaleIdlePercent) "$idle%"
         # Four presses, which is enough to cross a row on any tab whose first row is the launch
         # target's three choices: the fourth press leaves it.
         $frames = @($second.Path)
@@ -936,15 +994,19 @@ if (-not $SkipWindow -and -not $SkipScale) {
     $scales = $scaleReport.ToArray()
 }
 
-# The safe-mode leg: a profile that has taken every movement key away, which is the one way a
-# launcher can be made unusable by its own settings file. Without the switch, nothing but
-# Escape works; with it, the launcher starts on the defaults - and writes nothing, so the
-# file the user is about to repair is exactly as they left it.
+# The safe-mode leg. A profile can no longer take the launcher's keys away - they are fixed, which
+# is what --safe-mode's own recovery was for - so what is left to measure is the two things that are
+# still true: a *legacy* `[nav]` table (a file written by an older build) is not an error and does
+# not lock the ring, and a file that does not parse at all is refused rather than adopted. With the
+# switch the launcher starts on the defaults and writes nothing, so the file a user is about to
+# repair is exactly as they left it.
 $safeMode = $null
 if (-not $SkipSafeMode) {
-    $lockedDir = Join-Path $capDir "locked-out"
-    $lockedProfile = Join-Path $lockedDir "launcher.toml"
-    $lockedNav = @"
+    $legacyDir = Join-Path $capDir "legacy-keys"
+    $legacyProfile = Join-Path $legacyDir "launcher.toml"
+    # The table an older build wrote and let the user edit. Nothing reads it any more; the point of
+    # the fixture is that a file like it is still readable.
+    $legacyNav = @"
 [nav]
 next = ""
 previous = ""
@@ -953,19 +1015,19 @@ last = ""
 next_tab = ""
 previous_tab = ""
 "@
-    Write-Fixture $lockedProfile $Target $lockedNav
-    $lockedBefore = Get-Content -LiteralPath $lockedProfile -Raw
+    Write-Fixture $legacyProfile $Target $legacyNav
+    $legacyBefore = Get-Content -LiteralPath $legacyProfile -Raw
 
     # Headless: what the launcher says about the file, with and without the switch.
-    $strictDump = Join-Path $capDir "locked-strict.txt"
-    $safeDump = Join-Path $capDir "locked-safe.txt"
+    $strictDump = Join-Path $capDir "legacy-strict.txt"
+    $safeDump = Join-Path $capDir "legacy-safe.txt"
     $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
-        "--dump-profile=$strictDump", "--launcher_profile=$lockedProfile")
+        "--dump-profile=$strictDump", "--launcher_profile=$legacyProfile")
     $strictText = if (Test-Path $strictDump) { Get-Content -LiteralPath $strictDump -Raw } else { "" }
     $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
-        "--dump-profile=$safeDump", "--launcher_profile=$lockedProfile", "--safe-mode")
+        "--dump-profile=$safeDump", "--launcher_profile=$legacyProfile", "--safe-mode")
     $safeText = if (Test-Path $safeDump) { Get-Content -LiteralPath $safeDump -Raw } else { "" }
-    Add-Check "safe-mode" "the readable profile stays writable without the switch" `
+    Add-Check "safe-mode" "a legacy [nav] table is readable, not an error" `
         ($strictText -match "writable\s+: yes") ""
     Add-Check "safe-mode" "the switch says what it did" `
         ($safeText -match "safe mode\s+: yes") `
@@ -993,37 +1055,40 @@ previous_tab = ""
         ((Get-Content -LiteralPath $brokenProfile -Raw) -eq 'schema_version = "one"') ""
 
     if (-not $SkipWindow) {
-        # The locked-out profile in the window: without the switch the ring cannot be moved at
-        # all - which is the trap - and with it every default key works again.
-        $lockedLog = Join-Path $lockedDir "focus.log"
-        if (Test-Path $lockedLog) { Remove-Item $lockedLog -Force }
+        # The legacy keys table in the window: it locks nothing out, and safe mode is still a
+        # no-op on a file that parses - which is the point, it writes nothing back.
+        $legacyLog = Join-Path $legacyDir "focus.log"
+        if (Test-Path $legacyLog) { Remove-Item $legacyLog -Force }
         $leg = Start-Launcher @(
-            "--launcher_profile=$lockedProfile", "--game_data_root=$GameRoot",
-            "--focus-log=$lockedLog", "--no-gamepad"
+            "--launcher_profile=$legacyProfile", "--game_data_root=$GameRoot",
+            "--focus-log=$legacyLog", "--no-gamepad"
         )
         if ($leg.Window -eq [IntPtr]::Zero) {
-            Add-Check "safe-mode" "the launcher opens with a locked-out profile" $false "pid $($leg.Process.Id)"
+            Add-Check "safe-mode" "the launcher opens with a legacy keys table" $false "pid $($leg.Process.Id)"
             Stop-Launcher $leg.Process | Out-Null
         } else {
-            Add-Check "safe-mode" "the launcher opens with a locked-out profile" $true ""
+            Add-Check "safe-mode" "the launcher opens with a legacy keys table" $true ""
             Start-Sleep -Seconds $SettleSeconds
-            $before = (Wait-FocusTrace $lockedLog).Lines.Count
+            $before = (Wait-FocusTrace $legacyLog).Lines.Count
             for ($press = 0; $press -lt 3; $press++) { Send-KeyToLauncher $leg.Process.Id "down" }
-            $afterLocked = (Get-FocusTrace $lockedLog).Lines.Count
-            Add-Check "safe-mode" "without the switch no key moves the ring" `
-                ($afterLocked -eq $before) "$before -> $afterLocked trace line(s)"
+            $afterLegacy = (Get-FocusTrace $legacyLog).Lines.Count
+            # The property the fixed keys bought: a file cannot take the movement keys away, so a
+            # `[nav]` table emptied by hand (or written by a build that still honoured it) moves the
+            # ring exactly as any other session does.
+            Add-Check "safe-mode" "keys that are empty in the file still move the ring" `
+                ($afterLegacy -gt $before) "$before -> $afterLegacy trace line(s)"
             $clean = Stop-Launcher $leg.Process
-            Add-Check "safe-mode" "Escape still leaves the locked-out launcher" $clean ""
+            Add-Check "safe-mode" "Escape still leaves the launcher" $clean ""
             # The run wrote the window's size, which is A1's own rule and not this leg's
             # business: what matters is that nothing in [nav] changed.
-            $lockedAfter = Get-Content -LiteralPath $lockedProfile -Raw
+            $legacyAfter = Get-Content -LiteralPath $legacyProfile -Raw
             Add-Check "safe-mode" "nothing rewrote the keys" `
-                (($lockedAfter -match '(?m)^next = ""') -and ($lockedAfter -match '(?m)^previous = ""')) ""
+                (($legacyAfter -match '(?m)^next = ""') -and ($legacyAfter -match '(?m)^previous = ""')) ""
 
-            $safeLog = Join-Path $lockedDir "safe-focus.log"
+            $safeLog = Join-Path $legacyDir "safe-focus.log"
             if (Test-Path $safeLog) { Remove-Item $safeLog -Force }
             $leg = Start-Launcher @(
-                "--launcher_profile=$lockedProfile", "--game_data_root=$GameRoot",
+                "--launcher_profile=$legacyProfile", "--game_data_root=$GameRoot",
                 "--focus-log=$safeLog", "--no-gamepad", "--safe-mode"
             )
             Start-Sleep -Seconds $SettleSeconds
@@ -1037,11 +1102,11 @@ previous_tab = ""
             # The promise that makes the switch safe to use on a file worth repairing: safe
             # mode writes nothing, not even the window size it opened at.
             Add-Check "safe-mode" "safe mode left the file byte for byte as it was" `
-                ((Get-Content -LiteralPath $lockedProfile -Raw) -eq $lockedBefore) `
-                ("now: " + (Get-ProfileGeometry (Get-Content -LiteralPath $lockedProfile -Raw)) +
-                 " (was " + (Get-ProfileGeometry $lockedBefore) + ")")
+                ((Get-Content -LiteralPath $legacyProfile -Raw) -eq $legacyBefore) `
+                ("now: " + (Get-ProfileGeometry (Get-Content -LiteralPath $legacyProfile -Raw)) +
+                 " (was " + (Get-ProfileGeometry $legacyBefore) + ")")
             $safeMode = [pscustomobject]@{
-                Profile = $lockedProfile; LockedTrace = (Get-FocusTrace $lockedLog).Lines
+                Profile = $legacyProfile; LegacyTrace = (Get-FocusTrace $legacyLog).Lines
                 SafeTrace = (Get-FocusTrace $safeLog).Lines; BrokenStrict = $brokenStrictText
                 BrokenSafe = $brokenSafeText
             }

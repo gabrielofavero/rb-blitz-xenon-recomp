@@ -433,8 +433,8 @@ cmake --build --preset win-amd64-release
 ctest --test-dir out\build\win-amd64-release --output-on-failure
 ```
 
-Expected output is `8/8` passing (`crypto_keytable`, `payload_overlay`, `path_policy`,
-`fingerprint`, `ui_nav`, `dlc_layout`, `ultimate_plan`, `toolchain`). Exactly one case needs the dump at
+Expected output is `9/9` passing (`crypto_keytable`, `payload_overlay`, `path_policy`,
+`fingerprint`, `ui_nav`, `dlc_layout`, `dlc_library`, `ultimate_plan`, `toolchain`). Exactly one case needs the dump at
 all (`fingerprint_real_game_dump` hashes `game\default.xex`), and it prints
 `[ SKIP ]` instead of running when the dump is absent or, with
 `RBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, when it is not the supported revision. A failing check
@@ -472,8 +472,12 @@ suggests renaming it to `default_vanilla.xex` before installing) —
 DLC needs no command-line change either: packages dropped in
 `<game_data_root>/dlc/<title_id>/<content_type>/<package>` are mounted in place and
 read-only at boot, and `--dlc_root` (or `dlc_root` in `rb_blitz.toml`) points
-somewhere else if they live elsewhere — [dlc.md](dlc.md), which also names the boot
-log line that says what was found.
+somewhere else if they live elsewhere. A dumped song folder — thousands of loose
+`CON`/`LIVE` containers with no arrangement at all — goes in `--dlc_library` instead (or
+straight into `--dlc_root`, which is read as a library when it is not the layout
+above); each package is placed under the title id and content type its own header
+names, recursively, and nothing is copied or linked — [dlc.md](dlc.md), which also
+names the boot log line that says what was found.
 
 Every boot logs the identity of both halves, so a log states which binary ran
 against which image before any other evidence is read:
@@ -614,7 +618,7 @@ pressing on into an unknown one. `-Pause` and this run write their screens to
 with a copy of each run's log and a `summary.json` beside them.
 
 The storage counterpart runs five cases against a *dedicated* writable
-root rather than the user's `Documents\rb_blitz`, and checks each run's own trace
+root rather than the user's `Documents\Rock Band Blitz`, and checks each run's own trace
 log as well as the files it leaves behind — creation, restart byte-identity, a
 missing root, a corrupt payload, a corrupt header:
 
@@ -645,6 +649,7 @@ install folder with no `rb_blitz.toml`):
 .\scripts\acceptance_save.ps1                  # save/load round trip on its own
 .\scripts\acceptance_save.ps1 -Steps 3         # -15 ms instead of -10 ms
 .\scripts\acceptance_dlc.ps1                   # DLC visibility on its own
+.\scripts\acceptance_dlc.ps1 -SkipControl -DlcLibrary "D:\Games\YARG Songs" -ExpectedSong "LYCANTHROPE"
 ```
 
 * `acceptance_save.ps1` changes the **manual calibration** offset through the guest's
@@ -663,6 +668,11 @@ install folder with no `rb_blitz.toml`):
   control leg points `--dlc_root` at a path that does not exist and requires the same
   song to be *absent*, so a pass cannot come from the bundled game data. Each leg
   uses a fresh writable root, because the guest caches its song list into `songcache`.
+  `-DlcLibrary` adds a flat library to the positive leg and points the control leg at a
+  library path that does not exist too, so the same two legs prove either source
+  ([dlc.md](dlc.md) §2.1). `acceptance_song.ps1` takes the same `-DlcLibrary` /
+  `-DlcLibraryContentType` passthrough and is what proves a library song actually
+  *plays*.
 
 Evidence lands in `out\m7-dev\`, `out\m7-installed\` and, per standalone run,
 `out\m7-save\` / `out\m7-dlc\`; `out\alpha-acceptance.json` is the combined verdict.
@@ -819,9 +829,18 @@ that profile and drives it with synthetic keys, capturing the client area
 `frame_diff.ps1`. What it asserts is what text cannot: a press moves the ring on, a
 press that leaves a row rewrites the bar's help line, a tab switch changes the
 body and coming back returns to it, and a session with no input at all changes nothing.
+It also asserts the window's own title — the launcher's name and the release version, and
+no tab — from the OS (`MainWindowTitle`) and from `--dump-display`, which is where the
+version a release stamped is checkable without a screenshot.
 A row that offers a choice is one row with one option per choice, so a few presses beside
 the launch target's three choices are a 0% help diff by design — those numbers are
 in the summary rather than asserted on.
+
+One launcher behaviour shows up in the trace as a line no press made, and the walk tolerates
+it rather than being written around it: the ring adopts the row under the pointer when the
+pointer moves *inside the window*, and the window is maximized a moment after it is shown, so
+with the pointer resting over a row the ring lands there before the first key is sent. The
+presses are therefore read off the *end* of the trace.
 
 ```powershell
 cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
@@ -845,7 +864,7 @@ skippable on its own (`-SkipWalkthrough`, `-SkipScale`, `-SkipSafeMode`):
 | --- | --- | --- |
 | `walkthrough` | `Home` and a fixed budget of `Down` on each tab, then one read of the trace | every row of every tab's ring is reached, the ring wraps back to the first row, and the General tab's own blocks — B4's and the bottom bar's row — are in the ring at all. A lap that could not reach a row is what "never traps focus" would look like |
 | `scale` | the same leg at `--ui-scale=1.0`, `1.5`, `2.0` (the machine's own scale is the fourth step, which the keyboard leg already runs) | at every step the crops the harness computes out of that scale still land where the claims are: no input is a still picture, a press moves the ring's own region, and leaving the first row rewrites the help strip |
-| `safe-mode` | a profile that does not parse, and a file that cannot be read at all | without `--safe-mode` the unreadable file is refused (`writable: no`); with it the profile is replaceable by a save, the launcher starts on the compiled defaults, and safe mode leaves the file byte for byte as it was |
+| `safe-mode` | a profile that carries a legacy `[nav]` keys table, and a file that does not parse at all | the legacy table is readable and locks nothing out — the launcher's keys are fixed, so a file cannot take the movement keys away, and the keys still move the ring; a file that does not parse is refused (`writable: no`) without `--safe-mode`, and replaceable by a save with it; and safe mode leaves the file byte for byte as it was |
 
 The `scale` leg is the slow one — it starts three more launchers and takes ~40 captures —
 which is why it has its own switch rather than being folded into the keyboard leg.
