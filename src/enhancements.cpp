@@ -97,8 +97,14 @@ REXCVAR_DEFINE_BOOL(enhancements_native_mouse, false, "Enhancements",
 REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, false, "Enhancements",
                     "R7 DLC cache: persist the flat DLC library's enumeration in the save "
                     "folder and read it back when a fingerprint proves the tree unchanged, so "
-                    "a boot does not open every package and read its header again. The refresh "
-                    "is --refresh_dlc_cache. Faithful: the library is scanned once per boot.")
+                    "a boot does not open every package and read its header again; the "
+                    "discovery screen's progress bar is given the library's package count, the "
+                    "main menu row that refreshes the library is drawn as \"Refresh Song "
+                    "Library\", and a boot answered out of the cache says \"Loading Song "
+                    "Cache\". Off by default. The refresh is --refresh_dlc_cache. Faithful: "
+                    "the library is scanned once per boot, the row keeps its shipped label, "
+                    "the discovery screen says what it ships with, and the bar is the "
+                    "title's own.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_force_controller_scheme, false, "Enhancements",

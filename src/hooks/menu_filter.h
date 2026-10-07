@@ -5,12 +5,15 @@
 // settings row, and R3: answering the offline-mode prompts (docs/engine/
 // main-menu-flow.md, docs/engine/toggles.md).
 //
-// The main menu's option list lives in `ui/splash/gen/splash.dtb`, and the panel a
-// start goes through in `ui/net/gen/server_connect.dtb` - both read out of an ark
-// in 64 KiB blocks and then compiled by the title into its own DTA objects. The
-// block a file arrives in is therefore the only place an edit can be made without
-// touching the player's copy of the game - and the edit has to keep the file's
-// length, because the ark index describes offsets and sizes (src/ui/menu_options.h).
+// The main menu's option list lives in `ui/splash/gen/splash.dtb`, the panel a
+// start goes through in `ui/net/gen/server_connect.dtb`, and the two labels R7
+// rewrites in `ui/locale/eng/gen/locale_keep.dtb` - all read out of an ark in 64 KiB
+// blocks and then compiled by the title into its own DTA objects. A block is therefore
+// where an edit is made without touching the player's copy of the game - and the edit
+// has to keep the file's length, because the ark index describes offsets and sizes
+// (src/ui/menu_options.h). The locale is larger than one block, so a candidate that a
+// read cuts short is remembered and patched on the read that continues it: the ark's
+// blocks land straight after one another in guest memory, measured in the boot trace.
 //
 // Two things are checked on every read:
 //

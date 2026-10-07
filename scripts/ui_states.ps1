@@ -119,6 +119,11 @@ $script:UiStates["main-menu"] = @{
     # The main menu draws the same animated background as the title screen and has
     # the same measured problem (see the title entry): a same-build pair whose
     # capture OCR'd as this menu differed by 17.71 % of the frame.
+    #
+    # The needle is the stock row list, so it is a run with R5 off and R7 off. R5
+    # removes the row, and R7 redraws it as "REFRESH SONG LIBRARY" (docs/dlc.md
+    # §4.2); both are off by default, and a run with either on is checked by the
+    # toggle's own acceptance instead of this route.
     Settled = $false
 }
 $script:UiStates["song-list"] = @{

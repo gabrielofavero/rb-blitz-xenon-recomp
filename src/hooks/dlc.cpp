@@ -209,11 +209,18 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
 // rewrites the cache. Anything that makes the proof fail is a miss: the scan always
 // runs, so a cache can never hide a package. Shared by the boot path and the in-game
 // refresh so the two can never disagree about what the cache means.
+//
+// `cache_hit`, when given, is set only on the branch that answers out of the persisted
+// file - the boot path reports it so the menu can say the enumeration was loaded rather
+// than discovered (rb_blitz::dlc::CacheServedThisBoot()).
 fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool force_refresh,
                                         const std::vector<std::filesystem::path>& roots,
                                         const uint32_t force_content_type,
                                         const std::filesystem::path& cache_path,
-                                        const char* when) {
+                                        const char* when, bool* cache_hit = nullptr) {
+  if (cache_hit != nullptr) {
+    *cache_hit = false;
+  }
   bool fingerprint_ok = false;
   fs::DlcTreeFingerprint fingerprint;
   if (cache_enabled && !roots.empty()) {
@@ -235,6 +242,9 @@ fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool for
       if (fs::DlcCacheMatches(cached, roots, force_content_type, fingerprint, &match_reason)) {
         REXLOG_INFO("dlc: library cache hit for {} package(s) over {} file(s) in {}",
                     cached.items.size(), fingerprint.file_count, cache_path.string());
+        if (cache_hit != nullptr) {
+          *cache_hit = true;
+        }
         return fs::ToLibraryScanResult(cached);
       }
       REXLOG_INFO("dlc: library cache ignored ({}), scanning", match_reason);
@@ -292,6 +302,12 @@ rex::system::xam::ContentManager* ContentManagerOf(rex::Runtime* runtime) {
 rex::Runtime* g_runtime = nullptr;
 std::filesystem::path g_game_data_root;
 bool g_cache_enabled = false;
+
+// R7's two answers about this boot, for the callers that draw the result: whether
+// the enumeration came out of the persisted cache, and how many packages the flat
+// library holds. Written in Configure(), read from guest threads afterwards.
+bool g_cache_served = false;
+std::size_t g_content_count = 0;
 
 }  // namespace
 
@@ -360,7 +376,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   const std::filesystem::path cache_path = fs::DlcCachePath(runtime->cache_root());
   const fs::LibraryScanResult library =
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
-                        cache_path, "this boot");
+                        cache_path, "this boot", &g_cache_served);
+  g_content_count = library.items.size();
+  if (g_cache_served) {
+    REXLOG_INFO("dlc: the DLC enumeration was loaded from the cache this boot (R7); the "
+                "main menu says so (\"Loading Song Cache\")");
+  }
 
   if (!library.items.empty()) {
     if (force_content_type != 0) {
@@ -473,5 +494,9 @@ void RefreshConfigured() {
 }
 
 bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }
+
+bool CacheServedThisBoot() { return g_cache_served; }
+
+std::size_t ContentItemCount() { return g_content_count; }
 
 }  // namespace rb_blitz::dlc

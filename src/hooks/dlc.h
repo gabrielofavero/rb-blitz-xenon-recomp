@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 
 namespace rex {
@@ -47,5 +48,19 @@ void RefreshConfigured();
 // run. A hook checks this before it does any work - including reading the path a call
 // names - so a run with the toggle off pays nothing.
 bool RefreshArmed();
+
+// True when this boot's library enumeration came out of the persisted cache rather than
+// a scan, i.e. R7 was on and the fingerprint proved the tree unchanged. The menu filter
+// reads it to pick the label the discovery screen draws: the title's own "Discovering
+// Downloadable Content" when the walk is real, and a "loading cache" label when the host
+// answered from the file it wrote last boot. False before Configure() and with R7 off.
+bool CacheServedThisBoot();
+
+// How many content packages this layer will present to the title's enumerator: the
+// entries of the flat library handed to the content manager, which is the DLC a dumped
+// song folder adds. Zero with no library, before Configure() or when the content manager
+// was not reached. The discovery screen's progress bar is given this as its total
+// (src/hooks/content_progress.cpp).
+std::size_t ContentItemCount();
 
 }  // namespace rb_blitz::dlc

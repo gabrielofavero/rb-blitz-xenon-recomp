@@ -83,6 +83,7 @@ set(RBBLITZ_SOURCES
     src/diag/probe_points.cpp
     src/diag/probe_trace.cpp
     src/enhancements.cpp
+    src/hooks/content_progress.cpp
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
     src/hooks/dlc_refresh.cpp

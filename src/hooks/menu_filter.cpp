@@ -21,6 +21,7 @@
 #include <rex/system/xmemory.h>
 #include <rex/types.h>
 
+#include "hooks/dlc.h"
 #include "ui/menu_options.h"
 
 #if defined(_WIN32)
@@ -46,14 +47,30 @@ struct Settings {
   bool rename_settings_row = false;
   bool skip_offline_prompts = false;
   bool tap_refresh_row = false;
+  bool relabel_refresh_row = false;
+  bool relabel_cache_load = false;
 
   bool Any() const {
-    return hide_rows || rename_settings_row || skip_offline_prompts || tap_refresh_row;
+    return hide_rows || rename_settings_row || skip_offline_prompts || tap_refresh_row ||
+           relabel_refresh_row || relabel_cache_load;
   }
 };
 
 Settings g_settings;
 bool g_configured = false;
+
+// A candidate file the last read cut short: where its bytes are in guest memory, how
+// many contiguous bytes followed them, and the archive offset they came from. The next
+// read either continues it (and the edit runs on the whole file) or clears it. Per thread:
+// a file is read by one thread, and a shared slot would be a race the read hook has no
+// lock for.
+struct Pending {
+  uint8_t* buffer = nullptr;  // the guest buffer the previous read filled
+  size_t file_offset = 0;     // where in that buffer the candidate file starts
+  size_t length = 0;          // how many contiguous bytes the run holds so far
+  uint64_t offset = 0;        // the archive byte offset `buffer` was read from
+};
+thread_local Pending g_pending;
 
 // The title's content database lives in the loaded image as {const char* name;
 // u8 sha1[20]} rows, and a patched file's digest has to be corrected there. The
@@ -242,6 +259,42 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
     }
   }
 
+  if (g_settings.relabel_refresh_row) {
+    // The row the refresh job was given draws its label from the locale key it is filed
+    // under (`splash_dlc` -> "Download Content"); with R7 on the key names a refresh, so
+    // the label says so. The locale file is 76 KB and arrives in two archive blocks; the
+    // read that completes it is the one this edit runs on.
+    const rb_blitz::menu_options::Renamed renamed = rb_blitz::menu_options::RenameLabel(
+        file, available, rb_blitz::menu_options::kDlcRowKey,
+        rb_blitz::menu_options::kDlcRowLabel, rb_blitz::menu_options::kDlcRowRefreshLabel);
+    if (renamed.applied) {
+      REXLOG_INFO("menu_filter: relabelled the downloadable-content row \"{}\" to \"{}\" ({} "
+                  "bytes taken from an unused macro name)",
+                  renamed.from, renamed.to, renamed.borrowed);
+      RetargetIfNeeded(base, renamed.file_size, renamed.digest_before, renamed.digest_after);
+      patched = true;
+    } else {
+      LogRejectionOnce("relabel the refresh row", renamed.reason);
+    }
+  }
+
+  if (g_settings.relabel_cache_load && rb_blitz::dlc::CacheServedThisBoot()) {
+    // This boot's enumeration came out of the host cache, so the connect panel is not
+    // discovering anything: its status line says what it is really doing.
+    const rb_blitz::menu_options::Renamed renamed = rb_blitz::menu_options::RenameLabel(
+        file, available, rb_blitz::menu_options::kEnumeratingContentKey,
+        rb_blitz::menu_options::kDiscoveringContentLabel, rb_blitz::menu_options::kLoadingCacheLabel);
+    if (renamed.applied) {
+      REXLOG_INFO("menu_filter: relabelled \"{}\" to \"{}\" ({} bytes taken from an unused macro "
+                  "name); the enumeration is coming from the cache (R7)",
+                  renamed.from, renamed.to, renamed.borrowed);
+      RetargetIfNeeded(base, renamed.file_size, renamed.digest_before, renamed.digest_after);
+      patched = true;
+    } else {
+      LogRejectionOnce("relabel the cache load", renamed.reason);
+    }
+  }
+
   return patched;
 }
 
@@ -258,17 +311,66 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
   if (host == nullptr) {
     return;
   }
+
+  // The byte offset is the plain read's eighth argument (r10 points at a u64).
+  // NtReadFileScatter's r10 is a segment array instead, so a scatter read neither
+  // continues a split file nor starts one.
+  const bool plain = std::strcmp(which, "plain") == 0;
+  bool have_offset = false;
+  uint64_t offset = 0;
+  if (plain && ctx.r10.u32 != 0) {
+    if (const uint8_t* at = rex::memory::GuestPtr<const uint8_t*>(base, ctx.r10.u32)) {
+      offset = 0;
+      for (int i = 0; i < 8; ++i) {
+        offset = (offset << 8) | at[i];
+      }
+      have_offset = true;
+    }
+  }
+
+  // A file larger than one 64 KiB block - the game's English locale is 76 KB - arrives
+  // as two reads, and the title puts the second block straight after the first in guest
+  // memory. So a candidate that did not parse in one read is remembered, and the read
+  // that continues the same guest buffer at the next archive offset completes it.
+  if (g_pending.buffer != nullptr) {
+    const bool continues = have_offset && host == g_pending.buffer + g_pending.length &&
+                           offset == g_pending.offset + g_pending.length;
+    if (continues) {
+      const size_t total = g_pending.length + length - g_pending.file_offset;
+      if (PatchFile(base, g_pending.buffer + g_pending.file_offset, total)) {
+        REXLOG_INFO("menu_filter: patched a file at byte {} of two {} byte {} reads ({} bytes)",
+                    g_pending.file_offset, g_pending.length, which, total);
+      }
+    }
+    g_pending = Pending{};
+  }
+
   // The ark aligns neither its entries nor their seeds, so every byte of the
   // block is a candidate for the file's first byte. The header test is what
   // makes the scan cheap enough to run on every read, and the edit's own
   // validation is what keeps a false positive harmless.
+  constexpr size_t kNoCandidate = static_cast<size_t>(-1);
+  size_t unfinished = kNoCandidate;
   for (size_t at = 0; at + 11 <= length; ++at) {
     if (!rb_blitz::menu_options::LooksLikeDtb(host + at, length - at)) {
       continue;
     }
     if (PatchFile(base, host + at, length - at)) {
       REXLOG_INFO("menu_filter: patched a file at byte {} of a {} byte {} read", at, length, which);
+    } else {
+      // Either not a file these edits are for, or one this read cut short - and the
+      // next read, if it continues this buffer, is what tells the two apart.
+      unfinished = at;
     }
+  }
+
+  // Remember only what no edit handled: a patched file needs no second look, and the
+  // one that spans reads is the candidate nearest the end of the block.
+  if (plain && have_offset && unfinished != kNoCandidate) {
+    g_pending.buffer = host;
+    g_pending.file_offset = unfinished;
+    g_pending.length = length;
+    g_pending.offset = offset;
   }
 }
 
@@ -315,7 +417,14 @@ void Configure() {
     g_settings.rows.erase(
         std::remove(g_settings.rows.begin(), g_settings.rows.end(), std::string("splash_dlc")),
         g_settings.rows.end());
-    REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache (R7)");
+    // The same toggle repaints the row and the discovery screen: the row's shipped label
+    // ("Download Content") is an online-store name for something that now refreshes a
+    // library, and the discovery screen's is a lie whenever the host cache answered.
+    g_settings.relabel_refresh_row = true;
+    g_settings.relabel_cache_load = true;
+    REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache and is "
+                "drawn as \"{}\" (R7)",
+                menu_options::kDlcRowRefreshLabel);
   }
   g_configured = true;
   if (g_settings.hide_rows) {

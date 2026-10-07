@@ -324,6 +324,22 @@ The row is only reachable with `enhancements_dlc_cache` on: R5's compiled defaul
 so the boot that turns R7 on also takes that name out of the hidden list — a row that refreshes the
 cache is not an offline-dead row.
 
+**The two labels.** The row ships as `DOWNLOAD CONTENT` and the connect panel's status line as
+`Discovering Downloadable Content`, both entries of the game's English locale
+(`ui/locale/eng/gen/locale_keep.dtb`). R7 rewrites both (`RenameLabel`, src/ui/menu_options.h for the
+constants): the row becomes `Refresh Song Library` — what it now does — and the status line becomes
+`Loading Song Cache` whenever the host answered this boot's enumeration out of the cache
+(`dlc: CacheServedThisBoot()`), because then there is no discovery to announce. The locale is the file
+§10's split-read rule exists for: its two 64 KiB blocks are read back to back into one guest buffer,
+and the read that completes the file is the one the edit runs on.
+
+**The progress bar.** The same panel carries one — `progress_bar.grp` and `content_percent.lbl` in
+`ui/net/gen/server_connect.milo_xbox`, on both platforms — driven by a Flow that reads the panel's
+`current_content` and `total_content`. Nothing in the DTA sets them, so the engine's own object does
+(§9's `content_progress.cpp`); the one thing it cannot know is the total, which
+`enhancements_dlc_cache` now supplies from the DLC layer's package count. See
+[dlc.md](../dlc.md) §4.2.
+
 **What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
 plus its padding, an action that already carries the sentinel (a second pass), and any file that is
 not a `.dtb` this module can re-serialize: each leaves the file exactly as it was and logs why.
@@ -359,7 +375,8 @@ not a `.dtb` this module can re-serialize: each leaves the file exactly as it wa
 | --- | --- |
 | the edits (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) (`HideRows`, `RenameLabel`, `SkipOfflinePrompts`, `TapRefreshCache`) |
 | the read hook, the checksum row, the cvars' boot read | [src/hooks/menu_filter.h](../../src/hooks/menu_filter.h), [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp) |
-| the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`) |
+| the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`, `CacheServedThisBoot`, `ContentItemCount`) |
+| the discovery screen's progress bar (R7) | [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp), [src/hooks/content_progress.h](../../src/hooks/content_progress.h) |
 | the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
 | the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |
 | the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/launcher_launch_tests.cpp](../../tests/launcher_launch_tests.cpp) (R3's argv) |
@@ -367,9 +384,15 @@ not a `.dtb` this module can re-serialize: each leaves the file exactly as it wa
 
 ## 10. Open
 
-- **A read that does not carry the whole file is not patched.** The block the ark reads is the unit
-  the hook sees; a file split across two reads is left alone (the log says
-  `the node stream runs past the bytes available`). Measured: both shipped files arrive whole.
+- **A file that spans two reads is patched on the read that completes it.** The ark is read in
+  64 KiB blocks, so a file larger than one block — the game's own English locale, 76 KB — arrives as
+  two reads. The hook remembers the read that left a `.dtb` unfinished (its guest buffer, where the
+  candidate starts, and the archive offset), and when the next read continues that same buffer at the
+  next archive offset the file is patched whole. Measured: the locale's two blocks are read back to
+  back into one guest buffer (offsets `0x12CF0000` and `0x12D00000`, buffers 64 KiB apart), which is
+  what makes the two labels of §7.1 possible. It joins one pair of reads — enough for a file up to
+  128 KiB, which every locale in the ark is — and a file read into non-contiguous memory, or one that
+  needs a third block, is still left alone.
 - **The names, not the path, are the identity.** Any file carrying an array with `splash_start` and
   `splash_exit` *and* the named rows is edited. No other file in either ark is one, but a future
   content pack could be; the log names the file it patched (size + digest) so that is visible. The
@@ -378,16 +401,14 @@ not a `.dtb` this module can re-serialize: each leaves the file exactly as it wa
 - **The list needs a conditional to pay for the freed bytes.** A file whose option array has no
   `#ifdef` is refused (`the option list carries no conditional to take the freed bytes`), because the
   edit has nowhere to put them. Both shipped files have one.
-- **The refresh row still reads "Download Content".** Its label is the locale entry `splash_dlc` in
-  the game's own English locale file, which is 76 KB and arrives as *two* reads (a 64 KiB block and
-  the remainder), so the module's rule — one read carries one whole file — refuses it
-  (`the node stream does not parse`) and the row's text is the shipped one. The edit itself is
-  unaffected (§7.1); what is missing is a way to patch a file whose bytes span two reads. Renaming
-  would need the hook to hold the first read back until it has the whole file, which is its own
-  piece of work.
+- **The labels are English-only.** Both R7 labels (§7.1) are rewritten in
+  `ui/locale/eng/gen/locale_keep.dtb`, the file the English build reads; the shipped translations of
+  the same keys are untouched, and the anchor is the key *and* the English text, so a locale whose
+  entry already reads differently is refused with the reason logged and drawn as it ships.
 - **The label needs that unused macro name.** `ulti/locale/gen/locale_mod.dtb` has one (`#ifdef
   HX_PS3`, six characters, five of which pay for "Ultimate"); a rebuild of the mod without it, or one
-  whose label already reads differently, is refused with the reason logged and drawn as it ships.
+  whose label already reads differently, is refused with the reason logged and drawn as it ships. The
+  English locale has the same construct twenty-one times over, which is what pays for R7's two labels.
 - **The launcher's row is shown from a startup snapshot** of whether the payload is installed
   (`DetectUltimateState`), taken where the launch target's own state is read. Installing Ultimate
   from the launcher *during* a session therefore shows the row on the next start, not in that one —

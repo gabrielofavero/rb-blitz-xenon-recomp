@@ -306,11 +306,42 @@ where [src/hooks/dlc_refresh.cpp](../src/hooks/dlc_refresh.cpp) hears it and re-
 scan on the thread that asked. Measured end to end on 2026-10-06 with the library
 above: the press logged `refresh asked for from the main menu
 ("songcache:\rbbz_dlc_refresh")`, re-scanned 1,402 packages in ~15 s, and rewrote the
-cache file (its modification time moved from the previous boot to the press). The row
-draws the label the title ships for it — `DOWNLOAD CONTENT` — because that label is an
-entry in the game's own English locale file, which is larger than one read and therefore
-not something this module patches ([main-menu-flow.md](engine/main-menu-flow.md) §
-"Open"). The row's *action* is what R7 rewrites; its text is the retail one.
+cache file (its modification time moved from the previous boot to the press).
+
+**What the row and the discovery screen say.** The row's action is what R7 rewrites, and
+its *text* is rewritten too. Both labels R7 changes live in the game's own English locale
+(`ui/locale/eng/gen/locale_keep.dtb`, 76,726 bytes), which is larger than one 64 KiB
+archive read — so for a long time the row kept the label the title ships for it,
+`DOWNLOAD CONTENT`, an online-store name for something that now refreshes a library.
+The read that *completes* the file is the one the edit runs on
+([src/hooks/menu_filter.cpp](../src/hooks/menu_filter.cpp) remembers the read that cut a
+`.dtb` short and patches the file when the next read continues it in guest memory); the
+two blocks of this locale are read back to back into one guest buffer, measured in the
+boot trace. R7 rewrites:
+
+| Entry | Ships as | R7 draws |
+| --- | --- | --- |
+| `splash_dlc` — the main menu row the refresh job is given | `Download Content` | `Refresh Song Library` |
+| `server_connect_enumerating_content` — the connect panel's status line while it enumerates | `Discovering Downloadable Content` | `Loading Song Cache`, only when this boot's enumeration came out of the cache |
+
+The second is conditional on `dlc: CacheServedThisBoot()`: when the host answered from the
+file it wrote last boot there is no discovery happening, and the screen says what it is
+really doing. Both edits are byte-neutral like the rest of the module (the label's growth
+or shrinkage is paid for, or parked in, the name of an `#ifdef` the loader already skips)
+and both retarget the title's content-database row for the file, so a patched locale is
+still the file the title knows.
+
+**The progress bar.** The discovery screen also has a progress bar — on PS3 and on the
+360 build alike, it is the same asset: `ui/net/gen/server_connect.milo_xbox` carries
+`progress_bar.grp` and `content_percent.lbl`, and a Flow whose own comments read *"How
+much content we've enumerated so far"* / *"How much content we need to enumerate, -1 if
+we're not enumerating right now"*. Nothing in the DTA sets those two values, so the
+engine's own code does — through one small object,
+[src/hooks/content_progress.cpp](../src/hooks/content_progress.cpp) hooks
+`SetTotal`/`Increment`/`Complete`. What the engine cannot know is the *total*: the title
+enumerates its DLC one item per presented frame and is never told how many there are, so
+the Flow is handed -1 and hides the bar. With R7 on this build gives it the count of
+packages the DLC layer registered, which is the number the title is about to read.
 
 ## 5. Limits
 

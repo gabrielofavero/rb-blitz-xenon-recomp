@@ -62,6 +62,7 @@
 #include "fs/path_policy.h"
 #include "hooks/menu_filter.h"
 #include "hooks/dlc.h"
+#include "hooks/content_progress.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
@@ -206,6 +207,10 @@ class RbBlitzApp : public rex::ReXApp {
     // the two do not interact, but the DLC log line reads better next to the boot
     // identity and the payload line than before them.
     rb_blitz::dlc::Configure(runtime(), game_data_root());
+    // After dlc::Configure, whose package count is what the discovery screen's progress
+    // bar is given: the toggle is read here, before the guest starts, and the count is
+    // read from the DLC layer when the bar's own hooks run (src/hooks/content_progress.cpp).
+    rb_blitz::content_progress::Configure();
   }
 
   // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no

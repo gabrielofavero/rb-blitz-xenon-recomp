@@ -71,6 +71,26 @@ inline constexpr char kModSettingsKey[] = "mod_settings";
 inline constexpr char kModSettingsLabel[] = "Mod Settings";
 inline constexpr char kUltimateSettingsLabel[] = "Ultimate Settings";
 
+// R7's two labels, both entries of the game's own English locale
+// (`ui/locale/eng/gen/locale_keep.dtb`, read out of the ark in two blocks - see
+// src/hooks/menu_filter.cpp for how a file that spans two reads is still patched).
+//
+// The main menu's downloadable-content row is the row R7 gives the refresh job to
+// (`TapRefreshCache`). It ships as "Download Content", which is an online-store label
+// and says nothing about refreshing a library, so with R7 on it is redrawn as the
+// refresh it now performs.
+inline constexpr char kDlcRowKey[] = "splash_dlc";
+inline constexpr char kDlcRowLabel[] = "Download Content";
+inline constexpr char kDlcRowRefreshLabel[] = "Refresh Song Library";
+
+// The connect panel's own status line for the content enumeration
+// (`server_connect.dtb` maps `kServerConnectPanel_EnumeratingContent` to this token).
+// With R7 on and the host's enumeration answered from the persisted cache there is no
+// discovery happening, so the screen says what it is doing instead.
+inline constexpr char kEnumeratingContentKey[] = "server_connect_enumerating_content";
+inline constexpr char kDiscoveringContentLabel[] = "Discovering Downloadable Content";
+inline constexpr char kLoadingCacheLabel[] = "Loading Song Cache";
+
 // What one call did, in the terms a log line and the tests both need.
 struct Outcome {
   bool applied = false;      // the file was rewritten

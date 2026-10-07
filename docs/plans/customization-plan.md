@@ -820,6 +820,16 @@ table, which `[functions]` cannot name.
 > ([bringup-log.md](../history/bringup-log.md) B-016, patch 0012, fixed 2026-10-07). R7 still
 > neither sets `vsync` nor recommends it - the row belongs to the player - but nothing about the
 > feature now depends on the fault being there or gone.
+>
+> **Its two labels, and the bar the panel already had (2026-10-07).** The refresh row kept the label
+> the title ships (`DOWNLOAD CONTENT`), because the entry lives in the game's 76 KB English locale
+> and the filter's rule was one read carries one whole file. The hook now joins the two reads that
+> carry it, and R7 rewrites both its labels (`Refresh Song Library`, and `Loading Song Cache` in place
+> of `Discovering Downloadable Content` on a boot the cache answered) — [dlc.md](../dlc.md) §4.2.
+> The same panel turned out to ship a *progress bar* on both platforms, driven by the engine's own
+> two properties; the total is the one value the title is never told, so
+> [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp) gives it the library's
+> package count. R7's default stays **off**: the toggle is not stable enough to ship on yet.
 
 #### D3 — Controller-scheme force-on-load design
 

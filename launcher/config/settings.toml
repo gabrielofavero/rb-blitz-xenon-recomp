@@ -242,9 +242,12 @@ tooltip = """
 A dumped song folder is read by opening every package, every time the game starts
 with a folder of DLC. With this on the result is cached in the save folder and reused
 on later starts while the folder is unchanged, and the emulator stops waiting out its
-simulated per-package load time, so a large library starts much sooner. Refresh the
-cache from the main menu's bottom row, or pass --refresh_dlc_cache to do it at the
-next start. Needs a restart.
+simulated per-package load time, so a large library starts much sooner. The main menu
+row that refreshes the library is drawn as "Refresh Song Library", the discovery
+screen's progress bar is given the library's package count, and a start that loads the
+enumeration from the cache says "Loading Song Cache" instead of "Discovering
+Downloadable Content". Refresh the cache from that main menu row, or pass
+--refresh_dlc_cache to do it at the next start. Needs a restart.
 """
 
 # ---------------------------------------------------------------------------
