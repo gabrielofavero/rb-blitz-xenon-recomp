@@ -347,6 +347,59 @@ std::vector<uint8_t> ServerConnectFile(size_t filler_per_constant, bool skipped_
                            skipped_block, constants, state_values);
 }
 
+// --- the downloadable-content fixture -------------------------------------
+//
+// A compiled DTA shaped like `ui/splash/gen/splash.dtb` where R7 matters: the
+// command that turns the highlight into a case - a `switch` over the panel's state,
+// whose case list is one array per row, each beginning with the row's own name - and
+// the downloadable-content case, the one TapRefreshCache rewrites. The case's action
+// is an `if_else` of whatever size the case asks for, because that size is the whole
+// budget the replacement gets: the case's bytes go back exactly as they came.
+
+constexpr char kDlcFixtureRow[] = "splash_dlc";
+
+std::vector<uint8_t> DlcAction(size_t filler) {
+  // `{if_else {is_online} "xxx..."}`: what the action *is* does not matter to the
+  // edit, only that the case carries exactly one action of a size the test can aim
+  // at - `filler` 0 leaves an action shorter than the call it has to hold.
+  return Block(kCommand, 71,
+               {Name(kSymbol, "if_else"),
+                Block(kCommand, 71, {Name(kSymbol, "is_online")}),
+                Name(kString, std::string(filler, 'x'))});
+}
+
+// `with_row` false leaves the case out, which is the file the edit has to refuse;
+// `row` renames it, which is the file it has to leave alone.
+std::vector<uint8_t> DlcBody(size_t action_filler, bool with_row = true,
+                             const char* row = kDlcFixtureRow) {
+  std::vector<std::vector<uint8_t>> cases{
+      BlockOf(kArray, 70, {Name(kSymbol, "splash_start"),
+                           BlockOf(kCommand, 70, {Name(kSymbol, "do"), Scalar(kInt, 2)})}),
+      BlockOf(kArray, 70, {Name(kSymbol, "splash_options")}),
+  };
+  if (with_row) {
+    cases.push_back(BlockOf(kArray, 70, {Name(kSymbol, row), DlcAction(action_filler)}));
+  }
+  const std::vector<uint8_t> switch_command =
+      BlockOf(kCommand, 69, {Name(kSymbol, "switch"), Name(kVar, "state"),
+                             BlockOf(kArray, 68, cases)});
+
+  std::vector<uint8_t> body{0x01};
+  PushU16(&body, 1);
+  PushU16(&body, 1);
+  PushU16(&body, 0);
+  body.insert(body.end(), switch_command.begin(), switch_command.end());
+  return body;
+}
+
+std::vector<uint8_t> DlcCaseFile(size_t action_filler, bool with_row = true,
+                                 const char* row = kDlcFixtureRow) {
+  const std::vector<uint8_t> body = DlcBody(action_filler, with_row, row);
+  std::vector<uint8_t> file(body.size() + 4);
+  EncodeFile(kSeed, body.data(), body.size(), file.data());
+  return file;
+}
+
 // --- reading the fixture back ---------------------------------------------
 //
 // The test parses the file itself, with its own reading of the grammar, so a
@@ -649,6 +702,21 @@ size_t CountCommands(const Node* array) {
     count += kid.tag == kCommand ? 1 : 0;
   }
   return count;
+}
+
+// The switch case for a row: an array whose *first* element names the row. The case
+// list and the option list both hold the name - only the case holds it first - so
+// this is the same rule the edit itself looks the row up with.
+const Node* FindCase(const std::vector<Node>& root, const std::string& name) {
+  for (const Node& node : root) {
+    if (node.tag == kArray && !node.kids.empty() && node.kids[0].text == name) {
+      return &node;
+    }
+    if (const Node* found = FindCase(node.kids, name)) {
+      return found;
+    }
+  }
+  return nullptr;
 }
 
 
@@ -1151,6 +1219,101 @@ int main() {
     const Skipped skipped = SkipOfflinePrompts(block.data(), block.size());
     CHECK_TRUE(skipped.applied);
     CHECK_EQ(skipped.file_size, before.size());
+    bool tail_intact = true;
+    for (size_t i = before.size(); i < block.size(); ++i) {
+      tail_intact = tail_intact && block[i] == 0xA5;
+    }
+    CHECK_TRUE(tail_intact);
+  }
+
+  BeginCase("the downloadable-content row is given the refresh");
+  {
+    std::vector<uint8_t> file = DlcCaseFile(400);
+    const size_t size = file.size();
+    std::vector<uint8_t> untouched = file;
+
+    const Tapped tapped = TapRefreshCache(file.data(), file.size());
+    CHECK_TRUE(tapped.applied);
+    CHECK_EQ(tapped.file_size, size);
+    // The retail action is longer than the call, so the difference is padding: the
+    // ark index fixes this file's length, so a shorter action has to give its bytes
+    // back rather than shorten the file.
+    CHECK_TRUE(tapped.padding > 0);
+    // The digest is the whole 20 bytes, not its first one: a longer path can leave the
+    // first byte of the two digests agreeing by chance.
+    CHECK_TRUE(std::memcmp(tapped.digest_before, tapped.digest_after, 20) != 0);
+
+    // Still one file, with a root count that still adds up.
+    size_t end = 0;
+    const std::vector<Node> root = ReadRoot(file, &end);
+    CHECK_TRUE(!root.empty());
+    CHECK_EQ(end, size - 4);
+
+    // The row's action is now the sentinel call and nothing else: one argument that
+    // names the call, one that names the file no file has, one value the block
+    // evaluates and discards.
+    const Node* row = FindCase(root, kDlcFixtureRow);
+    CHECK_TRUE(row != nullptr);
+    if (row != nullptr) {
+      CHECK_EQ(row->kids.size(), 2);
+      CHECK_TRUE(HasText(*row, "file_exists"));
+      // The mount prefix is part of the path the host sees, so it is part of what the
+      // module writes; a bare name is answered inside the engine and never reaches a
+      // file call (docs/engine/main-menu-flow.md §7.1).
+      CHECK_TRUE(HasText(*row, "songcache:/rbbz_dlc_refresh"));
+      CHECK_EQ(CountText(*row, std::string(tapped.padding, 'z')), 1);
+      CHECK_EQ(CountText(*row, std::string(400, 'x')), 0);
+    }
+    // Its neighbours are untouched.
+    std::vector<Node> before_root = ReadRoot(untouched);
+    CHECK_EQ(CountTextIn(root, "splash_start"), CountTextIn(before_root, "splash_start"));
+    CHECK_EQ(CountTextIn(root, "splash_options"), CountTextIn(before_root, "splash_options"));
+    CHECK_EQ(CountTextIn(root, "switch"), CountTextIn(before_root, "switch"));
+  }
+
+  BeginCase("a row that already refreshes, and a file without the row");
+  {
+    std::vector<uint8_t> file = DlcCaseFile(400);
+    CHECK_TRUE(TapRefreshCache(file.data(), file.size()).applied);
+    const std::vector<uint8_t> before = file;
+    const Tapped again = TapRefreshCache(file.data(), file.size());
+    CHECK_FALSE(again.applied);
+    CHECK_TRUE(again.reason.find("already refreshes") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+
+    // The retail file has the row; a payload that renamed it does not, and the edit
+    // refuses rather than adding one (the option list is the file's own business).
+    std::vector<uint8_t> renamed = DlcCaseFile(400, true, "splash_store");
+    const std::vector<uint8_t> renamed_before = renamed;
+    const Tapped missing = TapRefreshCache(renamed.data(), renamed.size());
+    CHECK_FALSE(missing.applied);
+    CHECK_TRUE(missing.reason.find("no downloadable-content row") != std::string::npos);
+    CHECK_TRUE(std::memcmp(renamed.data(), renamed_before.data(), renamed_before.size()) == 0);
+
+    std::vector<uint8_t> absent = DlcCaseFile(400, false);
+    CHECK_FALSE(TapRefreshCache(absent.data(), absent.size()).applied);
+  }
+
+  BeginCase("a row whose action cannot hold the call is refused");
+  {
+    // The replacement needs the call plus the padding's own empty text node; an
+    // action shorter than that cannot be balanced, so the file is left alone.
+    std::vector<uint8_t> file = DlcCaseFile(0);
+    const std::vector<uint8_t> before = file;
+    const Tapped refused = TapRefreshCache(file.data(), file.size());
+    CHECK_FALSE(refused.applied);
+    CHECK_TRUE(refused.reason.find("too short") != std::string::npos);
+    CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
+  }
+
+  BeginCase("the bytes after the downloadable-content file are left alone");
+  {
+    const std::vector<uint8_t> before = DlcCaseFile(400);
+    std::vector<uint8_t> block(before.size() + 4096, 0xA5);
+    std::memcpy(block.data(), before.data(), before.size());
+    const Tapped tapped = TapRefreshCache(block.data(), block.size());
+    CHECK_TRUE(tapped.applied);
+    CHECK_EQ(tapped.file_size, before.size());
     bool tail_intact = true;
     for (size_t i = before.size(); i < block.size(); ++i) {
       tail_intact = tail_intact && block[i] == 0xA5;

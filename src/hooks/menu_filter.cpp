@@ -7,6 +7,7 @@
 
 #include "hooks/menu_filter.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -32,6 +33,7 @@ REXCVAR_DECLARE(bool, enhancements_hide_menu_options);
 REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
 REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
 REXCVAR_DECLARE(bool, enhancements_skip_offline_dialog);
+REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 
 namespace {
 
@@ -43,8 +45,11 @@ struct Settings {
   std::vector<std::string> rows;
   bool rename_settings_row = false;
   bool skip_offline_prompts = false;
+  bool tap_refresh_row = false;
 
-  bool Any() const { return hide_rows || rename_settings_row || skip_offline_prompts; }
+  bool Any() const {
+    return hide_rows || rename_settings_row || skip_offline_prompts || tap_refresh_row;
+  }
 };
 
 Settings g_settings;
@@ -221,6 +226,22 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
     }
   }
 
+  if (g_settings.tap_refresh_row) {
+    // R7: give the downloadable-content row the refresh job. The row's action becomes a
+    // `file_exists` on a name no file has; src/hooks/dlc_refresh.cpp hears the question.
+    const rb_blitz::menu_options::Tapped tapped =
+        rb_blitz::menu_options::TapRefreshCache(file, available);
+    if (tapped.applied) {
+      REXLOG_INFO("menu_filter: the downloadable-content row now refreshes the DLC cache ({} "
+                  "bytes of its action paid for the call)",
+                  tapped.padding);
+      RetargetIfNeeded(base, tapped.file_size, tapped.digest_before, tapped.digest_after);
+      patched = true;
+    } else {
+      LogRejectionOnce("tap refresh row", tapped.reason);
+    }
+  }
+
   return patched;
 }
 
@@ -281,11 +302,20 @@ void Configure() {
   g_settings.rows = menu_options::ParseRowNames(REXCVAR_GET(enhancements_hidden_menu_options));
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
   g_settings.skip_offline_prompts = REXCVAR_GET(enhancements_skip_offline_dialog);
+  g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
   if (g_settings.rows.empty()) {
     g_settings.rows = menu_options::ParseRowNames(menu_options::kDefaultRows);
     REXLOG_WARN("menu_filter: enhancements_hidden_menu_options is empty; hiding the compiled "
                 "default ({}) instead",
                 menu_options::kDefaultRows);
+  }
+  if (g_settings.tap_refresh_row) {
+    // R7 gives the downloadable-content row a new job (TapRefreshCache), so it must stay in
+    // the list even though R5's compiled default hides it.
+    g_settings.rows.erase(
+        std::remove(g_settings.rows.begin(), g_settings.rows.end(), std::string("splash_dlc")),
+        g_settings.rows.end());
+    REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache (R7)");
   }
   g_configured = true;
   if (g_settings.hide_rows) {

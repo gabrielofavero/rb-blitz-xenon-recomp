@@ -777,6 +777,37 @@ table, which `[functions]` cannot name.
 > **Don't.** Do not touch the guest's `songcache:`; do not cache anything whose staleness could hide
 > a package (a missed cache must never equal a missing package).
 
+> **Landed 2026-10-06 (the host half of R7).** [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) is the
+> fingerprint (every regular file's root-relative path, size and mtime, hashed in sorted order), the
+> file format and the load/save/match API; [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) reads it
+> before the library scan and writes it after, behind `enhancements_dlc_cache`, with
+> `--refresh_dlc_cache` forcing the re-scan. `ctest -R dlc_cache` covers the prompt's list, and the
+> design is recorded in [dlc.md](../dlc.md) §4.1 rather than a new `content-flow.md`, because S5 is
+> still open. Measured on `D:\Games\YARG Songs` (1,402 packages): a cold boot scanned and wrote the
+> cache in **14.5 s**, and the next boot's fingerprint hit in **7 ms**; a refresh re-scanned and
+> rewrote the file, and the toggle off left the file untouched.
+>
+> **The in-game refresh affordance (Q7), landed 2026-10-06.** The main menu is compiled guest DTA
+> ([main-menu-flow.md](../engine/main-menu-flow.md)), and the research found that no new row is
+> needed: the *downloadable-content row itself* can be the affordance.
+> `TapRefreshCache` ([src/ui/menu_options.cpp](../../src/ui/menu_options.cpp)) rewrites that switch
+> case's action into `{do {file_exists "rbbz_dlc_refresh"} "zzz…"}`, byte-neutral against the action
+> it replaces, and [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) hears the question at
+> the kernel's file entry points and re-runs the scan
+> ([main-menu-flow.md](../engine/main-menu-flow.md) §7.1). The row is exempted from R5's compiled
+> default — a row that is hidden cannot ask for anything — so `enhancements_dlc_cache` both caches
+> the enumeration and un-hides the row that refreshes it, and the guest's own `songcache:` is left
+> alone (D8).
+>
+> **And the rest of the boot, the same day.** Caching the enumeration turned out to be the *smaller*
+> half: on 1,402 packages the title's own discovery cost **662 s**, of which **280 s** was the SDK's
+> fixed 100 ms wait inside every deferred overlapped completion — and a content mount defers the
+> whole mount through that path. Patch [0011](../patches/README.md) makes the wait the cvar
+> `deferred_overlapped_delay_ms` (default 100, the faithful value), and R7's toggle sets it to 0:
+> the same discovery measures **379 s**. The title then writes its own 1.1 MB `songcache` at the end
+> of it, after which a boot mounts **no** package and reaches the main menu in **57.5 s** — which is
+> why the interrupted cold boot was the expensive one, and why both halves had to land together.
+
 #### D3 — Controller-scheme force-on-load design
 
 > **Goal.** Design R8 against S6's finding of where the scheme lives: the write target, the timing
@@ -951,7 +982,7 @@ it is cheaper to learn that now than after R1's and R4's asset work.
 | R4 a swapped icon is drawn by the guest and nothing else moved | hash of untouched entries + baseline diff + OCR control | A1, A2 |
 | R5 hiding is a model change, not a paint change | option-list probe matches the capture before, and navigation still reaches every remaining row | U1, D12 |
 | R6 input waves each have one measurable acceptance | per-wave capture/log evidence named in the wave list | I2 |
-| R7 the cache is correct and never hides a package | `ctest -R dlc_cache` plus a cold/warm boot timing | D1, D2 |
+| R7 the cache is correct and never hides a package | `ctest -R dlc_cache` plus a cold/warm boot timing, plus the menu row's press in a running title (log, cache file mtime, no fault); `scripts/acceptance_song.ps1 -DlcLibrary` and `scripts/acceptance_save.ps1` both pass with the toggle on | D1, D2 |
 | R8 forcing is opt-in, backed up, and idempotent | `ctest -R controller_scheme` plus two boots (forced, already-correct) | D3 |
 | R9 main-menu songs follow the content | probe list before/after DLC load + capture | C1 |
 | The maps are trustworthy | every address resolves to a name; a fresh session can answer "who builds the song list" from docs only | S2–S8, E3 |
@@ -997,8 +1028,8 @@ Anything not in this table is not verified, and should be said out loud rather t
 | Q3 | Does the engine have any pointer/cursor path? | R6, I2 | S6, I2 |
 | Q4 | Where are the main-menu options authored (data or code)? | R5 | U1 — **answered 2026-10-06:** data, a compiled DTA in the ark |
 | Q5 | Is the main-menu song list the song list, or its own setlist? | R9 | C1 |
-| Q6 | Is `songcache:` parseable/writable host-side, and is it the DLC search result? | R7 | S5, D1 |
-| Q7 | Is the DLC refresh button the launcher's or the guest's main menu? | R7 | D8, §1.1 (this plan proposes: refresh entry point first, in-game affordance after the main-menu map) |
+| Q6 | Is `songcache:` parseable/writable host-side, and is it the DLC search result? | R7 | ~~S5, D1~~ **Answered 2026-10-06:** it is the title's own cache *of* the DLC search — 18 KB for a handful of songs, **1.1 MB** for a 1,402-package library, written when a discovery *finishes*, and a boot that finds it mounts no package at all ([dlc.md](../dlc.md) §4.2). It is not written host-side: the enumeration cache the host owns is [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2). |
+| Q7 | Is the DLC refresh button the launcher's or the guest's main menu? | R7 | **Answered 2026-10-06 (by the request): the guest's main menu** — the downloadable-content row, given the job by a byte-neutral rewrite and heard by a host hook ([main-menu-flow.md](../engine/main-menu-flow.md) §7.1). The launcher keeps the toggle and `--refresh_dlc_cache`. |
 | Q8 | Is the controller layout a save value, a DTA, or both? | R8 | S6, D3 |
 | Q9 | Does portrait mean true rotation or a letterboxed portrait? | R1 | R1, then a decision that is not this plan's to make |
 | Q10 | Do the toggles surface in the launcher's Graphics tab, and under which group? | — | [launcher-plan.md](launcher-plan.md) D12/D14 |

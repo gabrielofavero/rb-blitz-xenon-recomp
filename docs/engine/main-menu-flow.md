@@ -285,6 +285,49 @@ constants pay; a leftover exists and the handler carries no `#ifdef HX_PS3` comm
 handler already carries the skip, so a second pass over a patched file says so; the rebuilt node
 stream is not exactly as long as the input; or the root array outgrew what the header can count.
 
+## 7.1 The refresh row (R7)
+
+R7's refresh is asked for from the menu, and the row that asks is the same `splash_dlc` case R5
+*removes* from the list by default. `TapRefreshCache` rewrites that case's action into a call to the
+title's own `file_exists` on a name no file has:
+
+```
+{splash_dlc {do {file_exists "songcache:/rbbz_dlc_refresh"} "zzz…"}}
+```
+
+The call is the signal — the engine asks the host a file question, and
+[src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) is watching the kernel's file entry
+points for that name — and the string after it is the padding that makes the case's bytes come out
+exactly as they went in. `file_exists` answers false, so nothing the player can see changes; what
+changes is that the host hears the question
+([docs/dlc.md](../dlc.md) §4.2).
+
+Three properties of the shape are what make it safe:
+
+| Property | Why it matters here |
+| --- | --- |
+| The case's action is data, and the switch only takes a case whose row is selected | giving the row a new action cannot affect any other row, and the old action (an `if_else` on the store) is what the replacement is measured against |
+| The call is `file_exists`, a builtin the title registers itself (`DataFunc`) | no new file is needed, nothing is written, and a missing file is the answer the guest already handles |
+| The sentinel is a *device* path the guest's own file layer has to resolve | the host sees the name in the path it is handed, so no guest state has to be read to recognise it |
+
+**Why the device matters, and how it was measured.** The first cut asked for a bare name, the second
+for one under the game-data mount (`d:/rbbz_dlc_refresh`); neither reached the host at all. Both are
+answered out of data the title already has: the option list's own symbol table for a bare name, and
+the ark it mapped at boot for a `d:` path. `songcache:` is a device the title owns and opens files
+through (`songcache:\songcache` is one of the five paths a warm boot's file calls amount to), so a
+miss on it becomes an `NtQueryFullAttributesFile`/`NtCreateFile` like any other. The guest's import
+table pins the surface: the recompiled title imports no CRT file entry point at all — no
+`GetFileAttributesA`, no `FindFirstFileA` (`generated/default/rb_blitz_funcs.h`) — so the `Nt` calls
+are the only way a guest file question can reach the host, and the hook watches those three.
+
+The row is only reachable with `enhancements_dlc_cache` on: R5's compiled default hides `splash_dlc`,
+so the boot that turns R7 on also takes that name out of the hidden list — a row that refreshes the
+cache is not an offline-dead row.
+
+**What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
+plus its padding, an action that already carries the sentinel (a second pass), and any file that is
+not a `.dtb` this module can re-serialize: each leaves the file exactly as it was and logs why.
+
 ## 8. Evidence
 
 | Run | What was seen |
@@ -297,7 +340,7 @@ stream is not exactly as long as the input; or the root array outgrew what the h
 | the same, vanilla (`--ultimate_mode=0`) **[cited]** | the retail file patched, and `content checksum row at guest 0x82804364 now holds the patched digest`; no dirty-disc screen |
 | `scripts/observe_ui.ps1 -State main-menu -Ocr` with the toggle **on**, both targets **[cited]** | OCR `BLITZ ALTIMAT PLAY HELP & OPTIONS MOD SETTINGS EXIT GAME` (Ultimate) and `BLITZ PLAY HELP & OPTIONS EXIT GAME` (vanilla) — `LEADERBOARDS` and `ACHIEVEMENTS` are gone from both, `DOWNLOAD CONTENT` from the vanilla one, and the harness's own stock needle (`DOWNLOAD CONTENT`) no longer matches |
 | the same runs with the toggle **off** (the control) **[cited]** | OCR `PLAY LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS DOWNLOAD CONTENT EXIT GAME` (vanilla — the harness's needle matches and the state passes, so the stock screen is unchanged) and `PLAY LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS MOD SETTINGS EXIT GAME` (Ultimate: that payload's own menu draws no DLC row); the log carries `menu_filter: off (R5)` and nothing else, so the read path is not even scanned |
-| `tests/menu_options_tests.cpp` **[tree]** | over a synthetic fixture: the grammar round trip, the default list, a row inside the block, a row outside it, an absent row, an empty list, a name the file only uses as structure, the bytes a read block carries behind the file, the label rename (grown, shortened, same length, refused), and every refusal path. No retail content is used (D14) |
+| `tests/menu_options_tests.cpp` **[tree]** | over a synthetic fixture: the grammar round trip, the default list, a row inside the block, a row outside it, an absent row, an empty list, a name the file only uses as structure, the bytes a read block carries behind the file, the label rename (grown, shortened, same length, refused), the downloadable-content row's refresh (applied, padded, a second pass refused, an absent row refused, a too-short action refused, the bytes behind the file left alone), and every refusal path. No retail content is used (D14) |
 | the same transform run against the real `locale_mod.dtb`, off-tree **[cited]** | 4,094 bytes in, 4,094 out, `Mod Settings` → `Ultimate Settings`, `HX_PS3` → `H`, the achievement strings untouched, and both files parse to the end with the same root arity (82) |
 | `rb_blitz.exe` with default cvars (R10 on, R5 off), Ultimate payload **[cited]** | `menu_filter: relabelled "Mod Settings" to "Ultimate Settings" (5 bytes taken from an unused macro name)`, then `4094 bytes, digest fdf135ad… -> 72359ac0…` and `patched a file at byte 44974 of a 65536 byte plain read`; the main-menu OCR reads `… HELP & OPTIONS ULTIMATE SETTINGS EXIT GAME` |
 | the same, the mod's Other Settings page, R10 **on** vs **off** **[cited]** | both runs OCR `OTHERSETTINGS / Unlock All / Unlock Online Only Achievements` — the branch the edit borrows from did not move, and it is the branch the guest already took |
@@ -308,13 +351,15 @@ stream is not exactly as long as the input; or the root array outgrew what the h
 | `scripts/observe_ui.ps1 -State "offline prompt" -Ocr -SkipOfflinePrompts 0` (the control) **[cited]** | passed: OCR `BLITZ ANNOT CONNECT TO ROCK CENTRAL. TO CONNECT, SIGN IN TO AN XBOX LIVE-ENABLED PROFILE, …`, and the log carries `menu_filter: R3 off; the failed-login and offline-mode prompts are shown` |
 | the same pair driven by hand on the real title **[cited]** | on: one A, alive, menu OCR `BLITZ … LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS ULTIMATE SETTINGS EXIT GAME`; off: one A, alive, the failed-connect dialog |
 | `tests/menu_options_tests.cpp` (the R3 cases) **[tree]** | over a synthetic panel fixture: the file is skipped, its length and its root count still add up, the eight constants are gone, the added statements are the handler's last two commands, the label-drawing command's own argument count is untouched, the payment can be exact (no filler), a file that cannot pay is refused with both sides of the arithmetic reported, and every refusal path |
+| `rb_blitz.exe --enhancements_dlc_cache=true`, the row pressed at the main menu **[cited]** | the retail file patched (`the downloadable-content row now refreshes the DLC cache (331 bytes of its action paid for the call)`), the press logged `dlc: refresh asked for from the main menu ("songcache:\rbbz_dlc_refresh")` → `refresh requested, re-scanning the libraries and rewriting …\dlc_library.cache` → `refreshed the running title's DLC library: 1402 package(s)`, ~15 s later the cache file's modification time had moved to the press and the game was still alive on the same screen |
 
 ## 9. Where it lives
 
 | Piece | File |
 | --- | --- |
-| the edits (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) (`HideRows`, `RenameLabel`, `SkipOfflinePrompts`) |
+| the edits (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) (`HideRows`, `RenameLabel`, `SkipOfflinePrompts`, `TapRefreshCache`) |
 | the read hook, the checksum row, the cvars' boot read | [src/hooks/menu_filter.h](../../src/hooks/menu_filter.h), [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp) |
+| the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`) |
 | the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
 | the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |
 | the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/launcher_launch_tests.cpp](../../tests/launcher_launch_tests.cpp) (R3's argv) |
@@ -333,6 +378,13 @@ stream is not exactly as long as the input; or the root array outgrew what the h
 - **The list needs a conditional to pay for the freed bytes.** A file whose option array has no
   `#ifdef` is refused (`the option list carries no conditional to take the freed bytes`), because the
   edit has nowhere to put them. Both shipped files have one.
+- **The refresh row still reads "Download Content".** Its label is the locale entry `splash_dlc` in
+  the game's own English locale file, which is 76 KB and arrives as *two* reads (a 64 KiB block and
+  the remainder), so the module's rule — one read carries one whole file — refuses it
+  (`the node stream does not parse`) and the row's text is the shipped one. The edit itself is
+  unaffected (§7.1); what is missing is a way to patch a file whose bytes span two reads. Renaming
+  would need the hook to hold the first read back until it has the whole file, which is its own
+  piece of work.
 - **The label needs that unused macro name.** `ulti/locale/gen/locale_mod.dtb` has one (`#ifdef
   HX_PS3`, six characters, five of which pay for "Ultimate"); a rebuild of the mod without it, or one
   whose label already reads differently, is refused with the reason logged and drawn as it ships.

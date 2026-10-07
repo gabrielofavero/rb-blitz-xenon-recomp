@@ -7,8 +7,9 @@ ships on, because the two questions it answers can no longer be answered on an i
 Central to reach, and R10 ships on, because its subject is the Ultimate mod's own screen and it does
 nothing without that mod installed. This page is the table the plan's contract 1 promises: what each
 toggle gates, what the faithful (off) behaviour is, and which prompt implements it — or, for the
-eight that are still planned, what will. R3, R5 and R10 are implemented; their evidence is
-[main-menu-flow.md](main-menu-flow.md).
+seven that are still planned, what will. R3, R5, R7 and R10 are implemented; R3, R5 and R10's
+evidence is [main-menu-flow.md](main-menu-flow.md), R7's is
+[src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) and [dlc.md](../dlc.md) §4.1.
 
 The cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
 boot log, not by this page.
@@ -60,7 +61,7 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `icon_schemes` | R4 different icons: replaceable button glyphs and controller-layout art per scheme | the art the title ships | A1, A2 |
 | `hide_menu_options` | R5 hiding categories: remove named entries from the main menu's option list (the list the guest navigates, not only the drawing). Needs `enhancements_hidden_menu_options` to name them; the compiled default is the three rows that only ever worked online | every shipped entry is present | U1 ([main-menu-flow.md](main-menu-flow.md)) |
 | `native_mouse` | R6 different input waves: the engine's own pointer path instead of the synthetic pad | the pad the guest actually reads ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp)) | I2 → later |
-| `dlc_cache` | R7 DLC cache: persist the DLC enumeration host-side, with an explicit refresh | the guest's own scan, once per boot | D1, D2 |
+| `dlc_cache` | R7 DLC cache: persist the flat DLC library's enumeration in the save folder and reuse it while a fingerprint proves the tree unchanged, and — because the host's walk of the library is the *smaller* half of what a large library costs a boot — drop the SDK's emulated per-package mount latency (`deferred_overlapped_delay_ms = 0`, patch 0011) for the run. The refresh is the main menu's last row, backed by `--refresh_dlc_cache` | the library is walked and every package's header read once per boot, and every mount the title makes waits out the emulated 100 ms | [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2), [dlc.md](../dlc.md) §4.1, [main-menu-flow.md](main-menu-flow.md) § "the refresh row" |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones | the songs the title puts there | C1 → later |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |

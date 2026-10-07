@@ -1,0 +1,60 @@
+diff --git a/include/rex/system/flags.h b/include/rex/system/flags.h
+index 902bffd..39ff443 100644
+--- a/include/rex/system/flags.h
++++ b/include/rex/system/flags.h
+@@ -22,6 +22,10 @@ REXCVAR_DECLARE(bool, kernel_pix);
+ REXCVAR_DECLARE(std::string, cl);
+ REXCVAR_DECLARE(bool, kernel_debug_monitor);
+ REXCVAR_DECLARE(bool, kernel_cert_monitor);
++// Local patch: patches/rexglue-sdk/0011-deferred-overlapped-delay-cvar.patch. Storage
++// lives in this DLL's kernel_state.cpp; this is the declaration a host writes through
++// to make a title's content-mount-heavy boot cheaper (docs/dlc.md, R7).
++REXCVAR_DECLARE(uint32_t, deferred_overlapped_delay_ms);
+ REXCVAR_DECLARE(bool, ignore_thread_priorities);
+ REXCVAR_DECLARE(bool, ignore_thread_affinities);
+ REXCVAR_DECLARE(bool, writable_executable_memory);
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index 697399c..f3fb455 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -43,9 +43,23 @@
+ #include <rex/system/xthread.h>
+ #include <rex/system/xtimer.h>
+ 
+-namespace rex::system {
++// Local patch: patches/rexglue-sdk/0011-deferred-overlapped-delay-cvar.patch.
++// What used to be a constant. The console's storage answers asynchronously and this
++// is the emulated latency; 100 ms is what the SDK has always used and stays the
++// default. It is a cvar because a title that mounts thousands of content packages -
++// a dumped DLC library - pays it once per package, which is minutes of a boot
++// (docs/dlc.md, R7); lowering it trades the async timing being less like the
++// hardware's for that boot time back. Read per completion, so it can be lowered by
++// the host after boot. Defined at global scope, like every other cvar: the
++// declaration in <rex/system/flags.h> is what a host writes through.
++REXCVAR_DEFINE_UINT32(deferred_overlapped_delay_ms, 100, "Kernel",
++                      "How long a deferred overlapped completion waits before it runs, in "
++                      "milliseconds. The console's storage is asynchronous and this emulated "
++                      "latency is what makes a title that mounts many content packages slow to "
++                      "boot; 100 is the SDK's own value and the faithful one.")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+-constexpr uint32_t kDeferredOverlappedDelayMillis = 100;
++namespace rex::system {
+ 
+ // This is a global object initialized with the XboxkrnlModule.
+ // It references the current kernel state object that all kernel methods should
+@@ -1227,9 +1241,11 @@ void KernelState::CompleteOverlappedDeferredEx(
+         if (pre_callback) {
+           pre_callback();
+         }
+-        REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped_ptr,
+-                     kDeferredOverlappedDelayMillis);
+-        rex::thread::Sleep(std::chrono::milliseconds(kDeferredOverlappedDelayMillis));
++        const uint32_t delay_ms = REXCVAR_GET(deferred_overlapped_delay_ms);
++        if (delay_ms != 0) {
++          REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped_ptr, delay_ms);
++          rex::thread::Sleep(std::chrono::milliseconds(delay_ms));
++        }
+         uint32_t extended_error, length;
+         REXSYS_DEBUG("Deferred overlapped {:08X}: running completion", overlapped_ptr);
+         auto result = completion_callback(extended_error, length);

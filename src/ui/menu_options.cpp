@@ -570,6 +570,27 @@ bool ContainsText(const Node& node, std::string_view text) {
   return false;
 }
 
+// The same, but matching anywhere inside a node's text rather than the whole of it. A
+// sentinel is a *name* the host recognises inside whatever path the engine resolves it
+// to, so the row that carries it has to be recognised the same way: the replacement
+// writes a mounted path, and the check for "already refreshed" must not depend on the
+// mount being spelled the same today as it was yesterday.
+bool ContainsTextWithin(const Node& node, std::string_view needle) {
+  if (!node.text.empty()) {
+    const uint8_t* n_first = reinterpret_cast<const uint8_t*>(needle.data());
+    if (std::search(node.text.begin(), node.text.end(), n_first, n_first + needle.size()) !=
+        node.text.end()) {
+      return true;
+    }
+  }
+  for (const Node& kid : node.kids) {
+    if (ContainsTextWithin(kid, needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Whether this handler already carries the skip, so that a second pass over an
 // already patched file says so rather than reporting its missing constants. Only
 // this one handler is looked at: the file's own button handler sets the same state,
@@ -589,6 +610,39 @@ Node* FindSkippedBlock(Node& node) {
   }
   for (Node& kid : node.kids) {
     if (Node* found = FindSkippedBlock(kid)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+// The main menu's downloadable-content row: the name the option array files it under,
+// and the switch case `(splash_dlc <action...>)` that decides what it does. R7
+// repurposes that one row rather than adding one, so nothing in the option array moves.
+constexpr char kDlcRowName[] = "splash_dlc";
+
+// The name the row's DTA asks for. No file has it, so the title's own `file_exists`
+// answers false and nothing the player can see changes; what changes is that the
+// engine asks the host, and src/hooks/dlc_refresh.cpp is watching. The *device* is
+// what makes the engine resolve the name at all: a path under `d:` is answered out of
+// the ark the title already has mapped (measured: no host call is made for one), while
+// a device it owns - the title opens `songcache:\songcache` itself at startup - is
+// asked through the guest's file calls, which is where the host sees the name.
+constexpr char kRefreshSentinelPath[] = "songcache:/rbbz_dlc_refresh";
+
+// What the host looks for inside the path it is handed. Kept apart from the path
+// above so a change of mount cannot break the hook, and vice versa.
+constexpr char kRefreshSentinel[] = "rbbz_dlc_refresh";
+
+// The switch case for `name`: an array whose *first* element is the row's name. The
+// option array lists the same name too, but never first - `splash_start` opens it - so
+// the two are not confusable.
+Node* FindSwitchCase(Node& node, std::string_view name) {
+  if (node.tag == kArray && !node.kids.empty() && IsText(node.kids[0], name)) {
+    return &node;
+  }
+  for (Node& kid : node.kids) {
+    if (Node* found = FindSwitchCase(kid, name)) {
       return found;
     }
   }
@@ -757,6 +811,79 @@ Outcome HideRows(uint8_t* file, size_t available,
   Sha1Digest(file, outcome.file_size, outcome.digest_after);
   outcome.applied = true;
   return outcome;
+}
+
+Tapped TapRefreshCache(uint8_t* file, size_t available) {
+  Tapped tapped;
+  Loaded loaded;
+  if (!LoadFile(file, available, &loaded, &tapped.reason)) {
+    return tapped;
+  }
+  tapped.file_size = loaded.file_size;
+
+  Node* row = nullptr;
+  for (Node& node : loaded.root) {
+    if ((row = FindSwitchCase(node, kDlcRowName)) != nullptr) {
+      break;
+    }
+  }
+  if (row == nullptr) {
+    tapped.reason = "the file has no downloadable-content row";
+    return tapped;
+  }
+  if (row->kids.size() < 2) {
+    tapped.reason = "the downloadable-content row carries no action";
+    return tapped;
+  }
+  for (size_t i = 1; i < row->kids.size(); ++i) {
+    if (ContainsTextWithin(row->kids[i], kRefreshSentinel)) {
+      tapped.reason = "the row already refreshes the cache";
+      return tapped;
+    }
+  }
+
+  // What the original action costs, so the replacement can be padded back to it: the ark
+  // index fixes this file's length, so a shorter action gives the difference back rather
+  // than shortening the file.
+  size_t original = 0;
+  for (size_t i = 1; i < row->kids.size(); ++i) {
+    original += NodeSize(row->kids[i]);
+  }
+
+  // `{do {file_exists "rbbz_dlc_refresh"} "<padding>"}`: the call is the signal, and the
+  // padding is a value the block evaluates and discards, which makes the case's bytes
+  // come out exactly as they went in.
+  const Node call =
+      CommandNode({TextNode(kSymbol, "file_exists"), TextNode(kString, kRefreshSentinelPath)}, 0);
+  constexpr size_t kCommandHeader = 10;  // tag + arity/line/deprecated
+  constexpr size_t kTextHeader = 8;      // tag + length
+  const size_t fixed = kCommandHeader + NodeSize(call) + kTextHeader;
+  if (original < fixed) {
+    tapped.reason = "the downloadable-content row's action is too short to hold the refresh";
+    return tapped;
+  }
+  const size_t padding = original - fixed;
+  Node replacement = CommandNode({call, TextNode(kString, std::string(padding, 'z'))}, 0);
+  if (NodeSize(replacement) != original) {
+    tapped.reason = "the refresh action does not balance the row's length";
+    return tapped;
+  }
+
+  row->kids.resize(1);
+  row->kids.push_back(std::move(replacement));
+
+  const std::vector<uint8_t> rebuilt = SerializeAll(loaded);
+  if (rebuilt.size() != loaded.node_bytes) {
+    tapped.reason = "the edit does not preserve the file's length";
+    return tapped;
+  }
+
+  Sha1Digest(file, tapped.file_size, tapped.digest_before);
+  WriteFile(loaded, rebuilt, file);
+  Sha1Digest(file, tapped.file_size, tapped.digest_after);
+  tapped.applied = true;
+  tapped.padding = padding;
+  return tapped;
 }
 
 Renamed RenameLabel(uint8_t* file, size_t available, std::string_view key,

@@ -220,6 +220,32 @@ DLC folder, laid out as <title_id>/<content_type>/<package>. Empty uses the game
 folder's dlc directory.
 """
 
+# R7. A flat DLC library is read by opening every container and reading its identity
+# header, every boot (src/fs/dlc_library.h). With this on the enumeration is persisted
+# beside the saves and reused while a fingerprint proves the tree unchanged
+# (src/fs/dlc_cache.h, docs/dlc.md §4.1). The toggle also drops the emulator's
+# per-package mount latency for the run (deferred_overlapped_delay_ms = 0,
+# patches/rexglue-sdk/0011): on 1,402 packages the title's own discovery is 662 s with
+# the SDK's 100 ms and 379 s without it (docs/dlc.md §4.2). The refresh is the main
+# menu's last row, and --refresh_dlc_cache does the same at boot.
+[[setting]]
+key     = "enhancements_dlc_cache"
+tab     = "general"
+group   = "Paths"
+label   = "Cache DLC library scan"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+A dumped song folder is read by opening every package, every time the game starts
+with a folder of DLC. With this on the result is cached in the save folder and reused
+on later starts while the folder is unchanged, and the emulator stops waiting out its
+simulated per-package load time, so a large library starts much sooner. Refresh the
+cache from the main menu's bottom row, or pass --refresh_dlc_cache to do it at the
+next start. Needs a restart.
+"""
+
 # ---------------------------------------------------------------------------
 # Interface - Main menu
 # ---------------------------------------------------------------------------

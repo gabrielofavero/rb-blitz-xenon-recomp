@@ -95,9 +95,10 @@ REXCVAR_DEFINE_BOOL(enhancements_native_mouse, false, "Enhancements",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, false, "Enhancements",
-                    "R7 DLC cache: persist the DLC enumeration host-side so a boot does not "
-                    "re-search every package, with an explicit refresh. Faithful: the guest's own "
-                    "scan, once per boot. Not implemented.")
+                    "R7 DLC cache: persist the flat DLC library's enumeration in the save "
+                    "folder and read it back when a fingerprint proves the tree unchanged, so "
+                    "a boot does not open every package and read its header again. The refresh "
+                    "is --refresh_dlc_cache. Faithful: the library is scanned once per boot.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_force_controller_scheme, false, "Enhancements",

@@ -85,6 +85,7 @@ set(RBBLITZ_SOURCES
     src/enhancements.cpp
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
+    src/hooks/dlc_refresh.cpp
     src/hooks/menu_filter.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
@@ -327,6 +328,15 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_dlc_library_tests PRIVATE src)
     add_test(NAME dlc_library COMMAND rb_blitz_dlc_library_tests)
+
+    # The R7 enumeration cache (src/fs/dlc_cache.h): the fingerprint, the round trip and
+    # the ways a cache is refused. SDK-free like the two DLC tests above, and for the
+    # same reason - the decision is host logic and runs without booting the game.
+    add_executable(rb_blitz_dlc_cache_tests
+        tests/dlc_cache_tests.cpp
+    )
+    target_include_directories(rb_blitz_dlc_cache_tests PRIVATE src)
+    add_test(NAME dlc_cache COMMAND rb_blitz_dlc_cache_tests)
 
     # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
     # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built

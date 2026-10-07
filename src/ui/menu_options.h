@@ -119,8 +119,7 @@ struct Renamed {
   std::string reason;  // why nothing was written, when applied is false
 };
 
-// Rewrites the locale label `from` of the entry filed under `key` to `to`, in
-// place, keeping the file's length. A longer label takes the bytes it needs from
+// Rewrites the locale label `from` of the entry filed under `key` to `to`, in// place, keeping the file's length. A longer label takes the bytes it needs from
 // the name of an `#ifdef` that guards this build's other-platform strings: that
 // macro matches nothing here, so the conditional is skipped before and after the
 // name changes, and no branch decision moves.
@@ -168,6 +167,34 @@ struct Skipped {
 // the result is exactly as long as the input, and any leftover from the payment can
 // be parked inside a conditional the build skips.
 Skipped SkipOfflinePrompts(uint8_t* file, size_t available);
+
+// What one TapRefreshCache call did, in the same terms.
+struct Tapped {
+  bool applied = false;   // the file was rewritten
+  size_t file_size = 0;   // the .dtb's own length, 4-byte seed included
+  size_t padding = 0;     // bytes given back to the file as a discarded value
+  uint8_t digest_before[20] = {};
+  uint8_t digest_after[20] = {};
+  std::string reason;     // why nothing was written, when applied is false
+};
+
+// R7's in-game trigger, as data. The main menu's downloadable-content row
+// (`splash_dlc`) is dead offline - its own action shows a "store unavailable" notice -
+// so instead of adding a row, this gives that row a job: its action becomes a call to
+// the title's own `file_exists` on a name no file has
+// (`d:/rbbz_dlc_refresh`; the mount prefix is what makes the engine's own file layer
+// resolve it through the guest's file calls instead of stopping at a name it cannot
+// place). src/hooks/dlc_refresh.cpp watches the kernel file calls the engine then
+// makes, sees the name in the path, and re-runs the DLC scan. The query answers false,
+// so nothing the player sees changes; the refresh is the host's reaction to being asked.
+//
+// Byte-neutral like the rest of this module: the replacement action is padded back to
+// the bytes the original one used, with a value inside a `do` block that the guest
+// evaluates and discards, so the ark index sees the same length.
+//
+// Refuses the file unless it carries that row, the row's action is long enough to hold
+// the call, and the result is exactly as long as the input.
+Tapped TapRefreshCache(uint8_t* file, size_t available);
 
 // SHA-1 of `size` bytes, as the title's own content checksum uses it (the value
 // a patched file's database row has to be given so the title still recognises

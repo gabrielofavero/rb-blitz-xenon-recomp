@@ -75,12 +75,17 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
+#include <rex/system/flags.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/content_manager.h>
 #include <rex/system/xcontent.h>
 
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
+#include "fs/dlc_cache.h"
+
+// Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
+REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 
 namespace rb_blitz::dlc {
 namespace {
@@ -113,6 +118,17 @@ REXCVAR_DEFINE_STRING(dlc_library_content_type, "", "Runtime",
                       "saved-game packages (00000001) as marketplace content (00000002), "
                       "which is what makes a dumped custom-song folder listable and "
                       "playable; the other packages keep their own type.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+// R7's one-shot. With enhancements_dlc_cache on, a normal boot reads the persisted
+// enumeration when it can be proved current; this flag says "do not trust it": the
+// library is scanned again and the cache rewritten, which is the refresh. It is read
+// once at boot and changes nothing on its own, so it is restart-scoped like the rest.
+REXCVAR_DEFINE_BOOL(refresh_dlc_cache, false, "Runtime",
+                    "R7: ignore the persisted DLC enumeration this boot, re-scan the "
+                    "configured libraries and rewrite the cache. Only meaningful with "
+                    "enhancements_dlc_cache on. Faithful: a boot reads a current cache "
+                    "when there is one.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 std::string JoinTitles(const std::vector<fs::DlcPackage>& packages) {
@@ -170,12 +186,121 @@ std::string JoinLibraryGroups(const std::vector<fs::LibraryItem>& items) {
   return text;
 }
 
+// The library roots the boot path and the in-game refresh both read: the structured
+// root when it is *not* the layout (a dumped song folder), plus every configured
+// library. Naming the same folder twice is harmless because the scan keys a package by
+// its own identity.
+std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::path& game_data_root,
+                                                        const std::filesystem::path& root,
+                                                        const bool root_is_library) {
+  std::vector<std::filesystem::path> roots;
+  if (root_is_library) {
+    roots.push_back(root);
+  }
+  for (const std::string& entry : fs::SplitPathList(REXCVAR_GET(dlc_library))) {
+    std::error_code ec;
+    roots.push_back(std::filesystem::absolute(fs::ResolveDlcRoot(entry, game_data_root), ec));
+  }
+  return roots;
+}
+
+// Reads the library enumeration from the cache when the toggle is on, the tree is
+// unchanged and no refresh was asked for; otherwise scans and, when the toggle is on,
+// rewrites the cache. Anything that makes the proof fail is a miss: the scan always
+// runs, so a cache can never hide a package. Shared by the boot path and the in-game
+// refresh so the two can never disagree about what the cache means.
+fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool force_refresh,
+                                        const std::vector<std::filesystem::path>& roots,
+                                        const uint32_t force_content_type,
+                                        const std::filesystem::path& cache_path,
+                                        const char* when) {
+  bool fingerprint_ok = false;
+  fs::DlcTreeFingerprint fingerprint;
+  if (cache_enabled && !roots.empty()) {
+    std::string reason;
+    fingerprint_ok = fs::ComputeLibraryFingerprint(roots, &fingerprint, &reason);
+    if (!fingerprint_ok) {
+      REXLOG_WARN("dlc: the DLC libraries could not be fingerprinted ({}), scanning {}", reason,
+                  when);
+    }
+  }
+
+  if (cache_enabled && !roots.empty() && fingerprint_ok && !force_refresh) {
+    fs::DlcLibraryCache cached;
+    std::string cache_reason;
+    if (!fs::LoadDlcCache(cache_path, &cached, &cache_reason)) {
+      REXLOG_INFO("dlc: no usable library cache ({}), scanning", cache_reason);
+    } else {
+      std::string match_reason;
+      if (fs::DlcCacheMatches(cached, roots, force_content_type, fingerprint, &match_reason)) {
+        REXLOG_INFO("dlc: library cache hit for {} package(s) over {} file(s) in {}",
+                    cached.items.size(), fingerprint.file_count, cache_path.string());
+        return fs::ToLibraryScanResult(cached);
+      }
+      REXLOG_INFO("dlc: library cache ignored ({}), scanning", match_reason);
+    }
+  } else if (cache_enabled && force_refresh && !roots.empty()) {
+    REXLOG_INFO("dlc: refresh requested, re-scanning the libraries and rewriting {}",
+                cache_path.string());
+  }
+
+  fs::LibraryScanResult library = fs::ScanDlcLibraries(roots, force_content_type);
+  for (const auto& rejected : library.rejected) {
+    REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
+  }
+  if (cache_enabled && fingerprint_ok) {
+    std::string save_reason;
+    const fs::DlcLibraryCache cache =
+        fs::MakeDlcLibraryCache(roots, force_content_type, fingerprint, library);
+    if (fs::SaveDlcCache(cache_path, cache, &save_reason)) {
+      REXLOG_INFO("dlc: library cache written for {} package(s) to {}", library.items.size(),
+                  cache_path.string());
+    } else {
+      REXLOG_WARN("dlc: library cache not written ({}), the libraries are scanned every boot",
+                  save_reason);
+    }
+  }
+  return library;
+}
+
+// One content type for the whole library when one was named; otherwise
+// fs::LibraryContentType() adapts each package. A value that is not hex digits is
+// reported and ignored rather than silently dropping the override or the library.
+// Read by both the boot path and the refresh so the two agree.
+uint32_t ForceContentTypeFromCvar() {
+  uint32_t force_content_type = 0;
+  const std::string content_type_override = REXCVAR_GET(dlc_library_content_type);
+  if (!content_type_override.empty()) {
+    if (!fs::ParseHex32(content_type_override, &force_content_type) || force_content_type == 0) {
+      REXLOG_WARN("dlc: dlc_library_content_type '{}' is not an 8-digit hex content type, "
+                  "adapting each package instead",
+                  content_type_override);
+      force_content_type = 0;
+    }
+  }
+  return force_content_type;
+}
+
+// The content manager the DLC sources are handed to, or null before the guest exists.
+rex::system::xam::ContentManager* ContentManagerOf(rex::Runtime* runtime) {
+  rex::system::KernelState* kernel_state = runtime != nullptr ? runtime->kernel_state() : nullptr;
+  return kernel_state != nullptr ? kernel_state->content_manager() : nullptr;
+}
+
+// What the boot path resolved, kept so the in-game refresh - which runs from a
+// filesystem hook with no arguments - can rebuild the same sources and cache.
+rex::Runtime* g_runtime = nullptr;
+std::filesystem::path g_game_data_root;
+bool g_cache_enabled = false;
+
 }  // namespace
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   if (runtime == nullptr) {
     return;
   }
+  g_runtime = runtime;
+  g_game_data_root = game_data_root;
 
   std::error_code ec;
   const std::filesystem::path root =
@@ -189,7 +314,6 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // and produces no scan's worth of noise.
   fs::DlcScanResult scan;
   bool structured = false;
-  std::vector<std::filesystem::path> library_roots;
   if (is_directory) {
     structured = fs::HasStructuredLayout(root);
     if (structured) {
@@ -197,37 +321,47 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       for (const auto& rejected : scan.rejected) {
         REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
       }
-    } else {
-      library_roots.push_back(root);
     }
   }
 
-  // Configured libraries join it; naming the same folder twice is harmless because the
-  // scan keys a package by its own identity.
-  for (const std::string& entry : fs::SplitPathList(REXCVAR_GET(dlc_library))) {
-    std::error_code entry_ec;
-    library_roots.push_back(
-        std::filesystem::absolute(fs::ResolveDlcRoot(entry, game_data_root), entry_ec));
+  // A dlc_root that is not the structured layout is a library too, so pointing it at a
+  // dumped song folder needs no other configuration; the configured libraries join it.
+  const std::vector<std::filesystem::path> library_roots =
+      DiscoverLibraryRoots(game_data_root, root, is_directory && !structured);
+
+  const uint32_t force_content_type = ForceContentTypeFromCvar();
+
+  // R7. With enhancements_dlc_cache on, the result of the library scan is persisted
+  // beside the user's saves and read back when it can be proved to describe the same
+  // tree, so a boot does not open every container and read its header again. Anything
+  // that makes the proof fail - no file, a damaged one, a changed tree, a different
+  // library list - falls through to the scan below, because a cache must never be able
+  // to hide a package. --refresh_dlc_cache forces that scan-and-write path.
+  const bool cache_enabled = REXCVAR_GET(enhancements_dlc_cache);
+  g_cache_enabled = cache_enabled;
+  if (cache_enabled) {
+    // R7 answers for the whole wait a large library costs, not just for the host's walk
+    // of it. The cache makes that walk instant, but the boot still mounts every package
+    // once per enumeration pass, and each of those opens waits out the emulator's
+    // emulated storage latency - a fixed 100 ms per deferred overlapped completion
+    // (rexglue-sdk/0011). Measured on D:\Games\YARG Songs (1402 packages): 2803 of them,
+    // 280 s of the 667 s the "Discovering Downloadable Content" screen takes. Zero keeps
+    // the completion asynchronous - it still runs on the dispatch thread, still sets the
+    // overlapped, still queues the completion routine - and only drops the wait.
+    REXCVAR_SET(deferred_overlapped_delay_ms, 0);
+    REXLOG_INFO("dlc: the emulated mount latency the title waits out per package is off "
+                "this boot (deferred_overlapped_delay_ms = 0, R7)");
+  }
+  const bool refresh_requested = REXCVAR_GET(refresh_dlc_cache);
+  if (refresh_requested && !cache_enabled) {
+    REXLOG_WARN("dlc: --refresh_dlc_cache has no effect while enhancements_dlc_cache is off");
   }
 
-  // One content type for the whole library when one was named; otherwise
-  // fs::LibraryContentType() adapts each package. A value that is not hex digits is
-  // reported and ignored rather than silently dropping the override or the library.
-  uint32_t force_content_type = 0;
-  const std::string content_type_override = REXCVAR_GET(dlc_library_content_type);
-  if (!content_type_override.empty()) {
-    if (!fs::ParseHex32(content_type_override, &force_content_type) || force_content_type == 0) {
-      REXLOG_WARN("dlc: dlc_library_content_type '{}' is not an 8-digit hex content type, "
-                  "adapting each package instead",
-                  content_type_override);
-      force_content_type = 0;
-    }
-  }
+  const std::filesystem::path cache_path = fs::DlcCachePath(runtime->cache_root());
+  const fs::LibraryScanResult library =
+      LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
+                        cache_path, "this boot");
 
-  const fs::LibraryScanResult library = fs::ScanDlcLibraries(library_roots, force_content_type);
-  for (const auto& rejected : library.rejected) {
-    REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
-  }
   if (!library.items.empty()) {
     if (force_content_type != 0) {
       REXLOG_INFO("dlc: library packages presented as content type {} (dlc_library_content_type)",
@@ -239,9 +373,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     }
   }
 
-  rex::system::KernelState* kernel_state = runtime->kernel_state();
-  rex::system::xam::ContentManager* content_manager =
-      kernel_state != nullptr ? kernel_state->content_manager() : nullptr;
+  rex::system::xam::ContentManager* content_manager = ContentManagerOf(runtime);
 
   const std::size_t structured_count = structured ? scan.packages.size() : 0;
   const std::size_t library_count = library.items.size();
@@ -294,5 +426,52 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                 JoinLibraryGroups(library.items), JoinLibraryRoots(library_roots));
   }
 }
+
+void Refresh(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
+  if (runtime == nullptr) {
+    return;
+  }
+
+  std::error_code ec;
+  const std::filesystem::path root =
+      std::filesystem::absolute(fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
+  const bool is_directory = std::filesystem::is_directory(root, ec) && !ec;
+  const bool structured = is_directory && fs::HasStructuredLayout(root);
+  const std::vector<std::filesystem::path> library_roots =
+      DiscoverLibraryRoots(game_data_root, root, is_directory && !structured);
+
+  // The explicit refresh never accepts the cache: the tree is read again and the cache
+  // rewritten, which is what the in-game row asks for. It runs on the thread that asked,
+  // so the game itself is the loading screen while the scan is happening.
+  const fs::LibraryScanResult library = LoadOrScanLibrary(
+      /*cache_enabled=*/true, /*force_refresh=*/true, library_roots, ForceContentTypeFromCvar(),
+      fs::DlcCachePath(runtime->cache_root()), "the refresh");
+
+  rex::system::xam::ContentManager* content_manager = ContentManagerOf(runtime);
+  if (content_manager == nullptr) {
+    REXLOG_WARN("dlc: refresh found {} package(s) but there is no content manager to update",
+                library.items.size());
+    return;
+  }
+
+  std::vector<rex::system::xam::ExtraContentItem> items;
+  items.reserve(library.items.size());
+  for (const auto& item : library.items) {
+    items.push_back(
+        {item.host_path, item.file_name, item.title_id, rex::system::XContentType(item.content_type)});
+  }
+  content_manager->set_extra_content_library(std::move(items));
+  REXLOG_INFO("dlc: refreshed the running title's DLC library: {} package(s) in {}",
+              library.items.size(), JoinLibraryRoots(library_roots));
+}
+
+void RefreshConfigured() {
+  if (!g_cache_enabled || g_runtime == nullptr) {
+    return;
+  }
+  Refresh(g_runtime, g_game_data_root);
+}
+
+bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }
 
 }  // namespace rb_blitz::dlc

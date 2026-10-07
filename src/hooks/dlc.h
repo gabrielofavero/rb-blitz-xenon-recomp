@@ -29,4 +29,23 @@ namespace rb_blitz::dlc {
 // returns, leaving the content root as the only DLC source.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
 
+// R7's in-game refresh: re-scan the configured DLC libraries, rewrite the enumeration
+// cache and hand the content manager the fresh list, so a package dropped in while the
+// title is running is enumerated from then on. Never reads the cache - that is the
+// point - and runs on the calling thread, so whatever asked for it is the progress
+// display. Safe to call before the guest exists; a missing content manager is logged
+// and nothing else happens.
+void Refresh(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+
+// The same refresh, using the runtime and root Configure() was given. This is what the
+// in-game trigger calls: it runs from a filesystem hook that has no arguments, and it
+// does nothing unless the R7 toggle is on. Cheap to call - the toggle and the pointers
+// are read without touching any registry - so a hook may call it freely.
+void RefreshConfigured();
+
+// Whether an in-game refresh can happen at all: the R7 toggle is on and Configure() has
+// run. A hook checks this before it does any work - including reading the path a call
+// names - so a run with the toggle off pays nothing.
+bool RefreshArmed();
+
 }  // namespace rb_blitz::dlc

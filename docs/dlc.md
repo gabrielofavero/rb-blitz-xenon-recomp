@@ -132,6 +132,8 @@ read and the name — is [src/fs/dlc_library.h](../src/fs/dlc_library.h), pinned
 | `--dlc_root`, or `dlc_root` in `rb_blitz.toml` | `<game_data_root>/dlc` | root of the layout in §2; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library`, or `dlc_library` in `rb_blitz.toml` | *(empty)* | `;`-separated folders of §2.1; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
+| `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | off | R7: persist the library enumeration (§4.1) and reuse it while the tree it describes is unchanged, and drop the emulator's per-package mount latency for the run; changing it needs a relaunch |
+| `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's last row asks for the same thing in a running title (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
 and every write path in the content manager (create, thumbnail, install, delete)
@@ -161,8 +163,114 @@ it is writable, marketplace content in it belongs under `0000000000000000`, and
 `--user_data_root` moves it. The DLC root exists so that game packages share neither
 that directory nor its write access.
 
+## 4.1 The library enumeration cache (R7)
+
+A §2.1 library is read by opening every regular file and reading the 868-byte STFS
+identity prefix out of each container
+(`ReadPackageIdentity`, [src/fs/dlc_library.h](../src/fs/dlc_library.h)). On this
+machine's `D:\Games\YARG Songs` (1,402 packages, 28.4 GB, exFAT) that open-and-read
+takes ~0.7 s warm, every boot, before the guest even starts; a stat-only walk of the
+same tree takes ~0.18 s. R7 stores the scan's *result* so the second number, plus a
+comparison, is all a boot pays.
+
+With `enhancements_dlc_cache` on, the resolved library list, the content-type override
+and the scan's items are written to `<cache_root>/dlc_library.cache` (`cache_root` is
+`<user_data_root>/cache` — the save folder's own cache directory, seen in
+[src/rb_blitz_app.h](../src/rb_blitz_app.h) `OnConfigurePaths`). The next boot
+fingerprints the tree — every regular file's root-relative path, size and modification
+time, hashed in sorted-path order so directory iteration order cannot change it — and
+reuses the cache only when the fingerprint, the roots and the override all match. Any
+difference, a missing or damaged file, or an unreadable root is a **miss**: the library
+is scanned exactly as it is today and the cache is rewritten, so a cache can never hide
+a package. `--refresh_dlc_cache` forces that miss.
+
+The cached items are what the host hands the content manager
+(`set_extra_content_library()`); the guest's own enumeration, mounting and `songcache:`
+are untouched, which is D8's rule for R7 — the cache is a host-side fast path over the
+same answer, never a second authority (docs/engine/toggles.md). The format is in
+[src/fs/dlc_cache.h](../src/fs/dlc_cache.h) and its round trip, fingerprint movement and
+refusal paths are pinned by
+[tests/dlc_cache_tests.cpp](../tests/dlc_cache_tests.cpp), SDK-free like the two DLC
+tests beside it.
+
+## 4.2 The rest of the boot a large library costs (R7)
+
+The host's walk of the library is the smaller half of what a large library costs, and
+R7 answers for both halves. Measured 2026-10-06 on `D:\Games\YARG Songs` (1,402
+packages), release build, nothing cached:
+
+| Part of the boot | Cost | R7's answer |
+| --- | --- | --- |
+| boot to the title screen | ~18-21 s | — (unchanged; the title's own startup) |
+| the host's walk of the library | 14.5 s cold, ~180 ms for a stat-only walk | the persisted enumeration: 7 ms |
+| the title's own discovery — *"Discovering Downloadable Content"*, between the start press and the menu | **662 s** | the mount latency below: 379 s |
+| — of which: 2,803 deferred overlapped completions, each sleeping the SDK's fixed 100 ms | **280 s** | `deferred_overlapped_delay_ms = 0` |
+| — of which: 2,798 STFS package mounts (2 per package: the title opens each package once per pass) and the guest's own work between them | ~382 s | unchanged — a package is still mounted and read |
+
+The 100 ms is `KernelState::CompleteOverlappedDeferredEx`'s emulated storage latency
+(`constexpr kDeferredOverlappedDelayMillis` before patch
+[0011](../patches/README.md)), and `XamContentCreate` — the call a content mount goes
+through — defers *the whole mount* through it. So with `enhancements_dlc_cache` on the
+host sets `--deferred_overlapped_delay_ms=0` for the run
+([src/hooks/dlc.cpp](../src/hooks/dlc.cpp)): 662 s becomes 379 s. Nothing else changes
+— the completion still runs on the dispatch thread, still sets the overlapped, still
+queues the completion routine — and with the toggle off the value is the SDK's own 100,
+so the faithful boot is byte-for-byte the boot this project had before R7.
+
+### The title caches this itself, and R7 is what lets it finish
+
+`XamContentAggregateCreateEnumerator` is the guest's enumeration, and the title pays
+for it exactly once: after a *complete* discovery it writes its own
+`B13EBABEBABEBABE\5841122D\00000001\songcache\songcache` — 18 KB for an install with a
+handful of songs, **1.1 MB** for this 1,402-package library. A boot that finds that
+cache mounts **no package at all** and reaches the main menu in **57.5 s** (measured;
+`0` `Loading STFS header file` lines), against 390 s for the cold boot above.
+
+That cache is only written at the *end* of a discovery, which is what makes the two
+halves of R7 matter together: on a 1,402-package library the cold discovery was
+11 minutes and a boot that was interrupted never got its cache written, so every boot
+paid the cold price again. With the host walk cached and the mount latency gone the
+same first boot is ~6.3 minutes and the second is ~1 minute; with the title's cache
+warm, R7's remaining contribution is the 14.5 s of host walk per boot.
+
+**The refresh.** The main menu's last row
+([main-menu-flow.md](engine/main-menu-flow.md) §7.1) asks the host to
+re-run the scan and rewrite `<cache_root>/dlc_library.cache`, and `--refresh_dlc_cache`
+does the same at boot: both make the persisted enumeration a *fresh* answer for the
+boot about to use it. Neither touches the title's own `songcache`, which is the title's
+business — a package the scan has just discovered is a package the title has not read
+yet, so its own discovery reads it and extends its own cache.
+
+**The row the player presses.** The row's action becomes
+`{do {file_exists "songcache:/rbbz_dlc_refresh"} "zzz…"}`: the title's own `file_exists`
+on a name no file has, padded back to the action it replaces. `songcache:` is the part
+that was measured: a name under the game-data mount (`d:/…`) is answered out of the ark
+the title already has mapped and never becomes a guest file call at all, while a device
+the title owns is asked through `NtCreateFile`/`NtQueryFullAttributesFile` — which is
+where [src/hooks/dlc_refresh.cpp](../src/hooks/dlc_refresh.cpp) hears it and re-runs the
+scan on the thread that asked. Measured end to end on 2026-10-06 with the library
+above: the press logged `refresh asked for from the main menu
+("songcache:\rbbz_dlc_refresh")`, re-scanned 1,402 packages in ~15 s, and rewrote the
+cache file (its modification time moved from the previous boot to the press). The row
+draws the label the title ships for it — `DOWNLOAD CONTENT` — because that label is an
+entry in the game's own English locale file, which is larger than one read and therefore
+not something this module patches ([main-menu-flow.md](engine/main-menu-flow.md) §
+"Open"). The row's *action* is what R7 rewrites; its text is the retail one.
+
 ## 5. Limits
 
+- **Verified in game: the boot R7 is for (2026-10-06).** With `enhancements_dlc_cache`
+  on and the same 1,402-package library: a boot with no title `songcache` mounted all
+  1,402 packages and reached the main menu in **390 s** (against **662 s** with the SDK's
+  100 ms mount latency left in place, and 11 minutes before R7 existed); the title then
+  wrote its own 1.1 MB `songcache`, and the next boot mounted **no** package and reached
+  the menu in **57.5 s**, of which R7's host cache saves the 14.5 s the walk would have
+  cost. A full acceptance run in that cold state
+  (`scripts/acceptance_song.ps1 -DlcLibrary` on `155`) reported `Boot`, `SongList`,
+  `Playing`, `Results` and `SongSeen` all true with a 225-second playback and no
+  `[FATAL]`, and the refresh row's press re-scanned the library and rewrote the cache
+  (§4.2). With the toggle off, the delay is the SDK's own default and the enumeration is
+  scanned as before, so the faithful boot is the one this project had before R7.
 - **Verified in game with a flat library (2026-10-05).** `D:\Games\YARG Songs` — 1402
   containers, of which 1401 are `CON` saved-game packages (RB3 936, RB2 214, RB1 251)
   and one a `LIVE` marketplace package — joined `game/dlc` as `--dlc_library`. The hook
