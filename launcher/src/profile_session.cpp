@@ -230,8 +230,46 @@ SaveOutcome ProfileSession::SaveWindowGeometry(int width, int height) {
   return outcome;
 }
 
-SaveOutcome ProfileSession::ExportTo(const fs::path& target) const {
+SaveOutcome ProfileSession::SaveUpdateDeclined(const std::string& version) {
   SaveOutcome outcome;
+  if (version.empty() || version == saved_.update_declined_version) {
+    // Nothing to record, or the file already says it: a launcher asked about a release it has
+    // already declined does not touch the file.
+    return outcome;
+  }
+  if (safe_mode_ && !load_.usable()) {
+    // A file that did not parse, in the mode that can replace it: answering an update prompt is
+    // not the user asking for that, so the file is left exactly as it is and the question is
+    // simply asked again next time.
+    return outcome;
+  }
+  if (!CanSave()) {
+    outcome.ok = false;
+    outcome.error = Refusal();
+    return outcome;
+  }
+  if (path_.empty()) {
+    outcome.ok = false;
+    outcome.error = "nowhere to save the settings: no profile path could be resolved";
+    return outcome;
+  }
+
+  // `saved_` is the profile as the file last had it, so a setting the user changed and did not
+  // save is not written by the back door (the same rule the geometry write follows).
+  saved_.update_declined_version = version;
+  std::string error;
+  if (!SaveProfile(path_, saved_, &error)) {
+    outcome.ok = false;
+    outcome.error = error;
+    return outcome;
+  }
+  outcome.wrote = true;
+  // The model keeps it too, so the panel's own save cannot write the old answer back.
+  load_.profile.update_declined_version = version;
+  return outcome;
+}
+
+SaveOutcome ProfileSession::ExportTo(const fs::path& target) const {  SaveOutcome outcome;
   if (!CanSave()) {
     outcome.ok = false;
     outcome.error = Refusal();

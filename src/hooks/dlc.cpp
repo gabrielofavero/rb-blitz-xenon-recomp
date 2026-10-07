@@ -120,6 +120,21 @@ REXCVAR_DEFINE_STRING(dlc_library_content_type, "", "Runtime",
                       "playable; the other packages keep their own type.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// The scan's second lever on a cold library. The per-file cost of a first open is not
+// the disk - it is whatever inspects a file the antivirus has not seen (measured ~16 ms
+// per file cold against ~0.03 ms warm, on an NVMe SSD, and charged per file rather than
+// per byte), so opening several at once overlaps it: the production scan measured 5.6x
+// faster per file cold (16.1 ms/file against 2.9 ms/file, disjoint cold trees). The
+// walk and the merge stay on the calling thread and in walk order, so the answer -
+// items, names, counters, rejections - is exactly the same at any thread count
+// (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
+REXCVAR_DEFINE_UINT32(dlc_scan_threads, 0, "Runtime",
+                      "Threads used to read a DLC library's package headers: 0 (the "
+                      "default) uses the machine's core count, capped at 8; 1 reads "
+                      "them on the calling thread. The scan's result is identical at "
+                      "any thread count.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 // R7's one-shot. With enhancements_dlc_cache on, a normal boot reads the persisted
 // enumeration when it can be proved current; this flag says "do not trust it": the
 // library is scanned again and the cache rewritten, which is the refresh. It is read
@@ -254,7 +269,12 @@ fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool for
                 cache_path.string());
   }
 
-  fs::LibraryScanResult library = fs::ScanDlcLibraries(roots, force_content_type);
+  // Read here rather than passed in, so the boot path and the in-game refresh cannot
+  // disagree about the thread count the way they cannot disagree about the cache.
+  const uint32_t scan_threads = REXCVAR_GET(dlc_scan_threads);
+  REXLOG_DEBUG("dlc: scanning {} library root(s) for package headers on {} thread(s)",
+               roots.size(), scan_threads == 0 ? fs::DefaultDlcScanThreads() : scan_threads);
+  fs::LibraryScanResult library = fs::ScanDlcLibraries(roots, force_content_type, scan_threads);
   for (const auto& rejected : library.rejected) {
     REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
   }

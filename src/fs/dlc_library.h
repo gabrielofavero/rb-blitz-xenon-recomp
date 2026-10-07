@@ -14,13 +14,18 @@
 // linking packages into a title_id/content_type tree, so the content manager has to
 // resolve the library in place. Nothing here copies or renames a package.
 //
-// Kept free of any SDK dependency for the same reason src/fs/dlc_layout.h is: it is
-// host path arithmetic, directory reading and a fixed-offset header read, and
-// tests/dlc_library_tests.cpp has to cover it without booting the game.
-// See docs/dlc.md.
+// The walk is host path arithmetic, directory reading and a fixed-offset header read,
+// and it is kept free of any SDK dependency for the same reason src/fs/dlc_layout.h is:
+// tests/dlc_library_tests.cpp has to cover it without booting the game. The header
+// reads are the whole cost of a cold scan (~17 ms per package on this machine's
+// library, against ~2 ms for the walk itself), so a scan reads them on a small pool;
+// the walk and the merge stay on the calling thread, in walk order, so the answer does
+// not depend on how many threads read it. See docs/dlc.md §2.1 and §4.1.
 
 #pragma once
 
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -31,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "fs/dlc_layout.h"
@@ -75,10 +81,17 @@ inline uint32_t LoadBigEndian32(const uint8_t* bytes) {
          uint32_t(bytes[3]);
 }
 
+// A size the caller does not know. The walk in ScanDlcLibraries() reads the size off
+// the directory entry, where it is free, so the scanner passes it in rather than
+// paying a second stat per package; a caller that only has a path passes this and the
+// size is stat'd as it always was.
+inline constexpr std::uintmax_t kSizeUnknown = static_cast<std::uintmax_t>(-1);
+
 // Reads the four magic bytes first, so an unrelated file in a library costs one small
 // read and is silently not a package; a file that does carry the magic but cannot be
 // mounted is reported instead. `reason` is only written for kUnreadable.
 inline PackageIdentityResult ReadPackageIdentity(const std::filesystem::path& path,
+                                                 const std::uintmax_t known_size,
                                                  PackageIdentity* identity, std::string* reason) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -94,11 +107,14 @@ inline PackageIdentityResult ReadPackageIdentity(const std::filesystem::path& pa
     return PackageIdentityResult::kNotPackage;
   }
 
-  std::error_code ec;
-  const std::uintmax_t size = std::filesystem::file_size(path, ec);
-  if (ec) {
-    *reason = "cannot be read";
-    return PackageIdentityResult::kUnreadable;
+  std::uintmax_t size = known_size;
+  if (size == kSizeUnknown) {
+    std::error_code ec;
+    size = std::filesystem::file_size(path, ec);
+    if (ec) {
+      *reason = "cannot be read";
+      return PackageIdentityResult::kUnreadable;
+    }
   }
   if (size < kStfsHeaderSize) {
     *reason = "shorter than an STFS header, so it cannot be mounted";
@@ -117,6 +133,13 @@ inline PackageIdentityResult ReadPackageIdentity(const std::filesystem::path& pa
     return PackageIdentityResult::kUnreadable;
   }
   return PackageIdentityResult::kRead;
+}
+
+// The size-less form, for a caller that only has the path (the tests, and anything
+// outside the scanner).
+inline PackageIdentityResult ReadPackageIdentity(const std::filesystem::path& path,
+                                                 PackageIdentity* identity, std::string* reason) {
+  return ReadPackageIdentity(path, kSizeUnknown, identity, reason);
 }
 
 // The file name as UTF-8, which is the encoding XCONTENT_DATA carries (rex::to_path()
@@ -293,17 +316,72 @@ constexpr uint32_t LibraryContentType(uint32_t own_content_type, uint32_t forced
   return own_content_type == kSavedGameContentType ? kMarketplaceContentType : own_content_type;
 }
 
+// A library holds enough packages for the pool below to be worth starting.
+inline constexpr std::size_t kMinParallelScanFiles = 16;
+
+// The worker count a scan uses when it is not told one: enough to overlap the per-file
+// cost a cold library pays, without opening a whole directory at once. Measured on this
+// machine, a *first* open of a file costs ~16 ms while the same read warmed costs
+// ~0.03 ms - a 500x gap that is not the SSD, and one charged per file rather than per
+// byte (2,170 never-touched FFmpeg sources of 10-100 KB each measured the same 16.7 ms
+// cold). Spreading the opens over eight threads measured **5.6x faster per file cold**
+// on the production scan - 16.1 ms/file against 2.9 ms/file, two disjoint cold trees.
+// Capped, so a machine with many cores does not open hundreds of files at once.
+inline uint32_t DefaultDlcScanThreads() {
+  const unsigned hardware = std::thread::hardware_concurrency();
+  if (hardware <= 1) {
+    return 1;
+  }
+  return std::min(hardware, 8u);
+}
+
+namespace detail {
+
+// One regular file the walk found, with the size the directory entry already carried.
+struct LibraryJob {
+  std::filesystem::path path;
+  std::uintmax_t size = kSizeUnknown;
+};
+
+// What the walk saw, in the order it saw it: either a directory that could not be
+// read, or a file whose identity is to be read. Keeping that order is what lets the
+// answers computed in parallel be merged back into exactly the result the walk would
+// have produced on its own - item order, name assignment (which is order-dependent)
+// and the rejected list all included.
+struct LibraryWalkEvent {
+  bool is_file = false;
+  std::size_t job = 0;
+  std::string entry;  // the directory that could not be read, when !is_file
+};
+
+struct LibraryJobOutcome {
+  PackageIdentityResult result = PackageIdentityResult::kNotPackage;
+  PackageIdentity identity;
+  std::string reason;
+};
+
+}  // namespace detail
+
 // Walks every root (recursively, following real directories but not directory
 // symlinks, which could loop) and returns one item per mountable container. A missing
 // root is reported; an absent library is otherwise not an error.
 //
 // `force_content_type` overrides LibraryContentType() for every package when it is not
 // zero.
+//
+// `scan_threads` is how many threads read the packages' headers: 0 picks
+// DefaultDlcScanThreads(), 1 keeps every read on the calling thread (what this did
+// before the pool existed), and any other value is that many workers. The reads are
+// independent and are merged in walk order afterwards, so the thread count cannot
+// change the answer - the same library answers identically at 1 and at 8.
 inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::path>& roots,
-                                          const uint32_t force_content_type = 0) {
-  LibraryScanResult result;
-  std::map<uint64_t, std::set<std::string>> used_names;
-
+                                          const uint32_t force_content_type = 0,
+                                          const uint32_t scan_threads = 0) {
+  // The walk first, on this thread: it is directory reads and the sizes the directory
+  // entries already carry (measured 2 ms for 1,402 packages), and it is what fixes the
+  // order everything below is merged in.
+  std::vector<detail::LibraryJob> jobs;
+  std::vector<detail::LibraryWalkEvent> events;
   std::vector<std::filesystem::path> pending(roots.rbegin(), roots.rend());
   while (!pending.empty()) {
     const std::filesystem::path directory = pending.back();
@@ -313,7 +391,9 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
     std::filesystem::directory_iterator entries(
         directory, std::filesystem::directory_options::skip_permission_denied, ec);
     if (ec) {
-      result.rejected.push_back({directory.generic_string(), "cannot be read"});
+      detail::LibraryWalkEvent event;
+      event.entry = directory.generic_string();
+      events.push_back(std::move(event));
       continue;
     }
 
@@ -328,31 +408,95 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
         continue;
       }
 
-      ++result.files_seen;
+      // The size is here already; passing it on is what saves ReadPackageIdentity() a
+      // second stat of the same file.
+      std::error_code size_ec;
+      const std::uintmax_t size = entry.file_size(size_ec);
 
-      PackageIdentity identity;
-      std::string reason;
-      switch (ReadPackageIdentity(entry.path(), &identity, &reason)) {
-        case PackageIdentityResult::kNotPackage:
-          ++result.other_files;
-          continue;
-        case PackageIdentityResult::kUnreadable:
-          result.rejected.push_back({entry.path().generic_string(), std::move(reason)});
-          continue;
-        case PackageIdentityResult::kRead:
-          break;
-      }
+      detail::LibraryJob job;
+      job.path = entry.path();
+      job.size = size_ec ? kSizeUnknown : size;
 
-      const uint32_t content_type =
-          LibraryContentType(identity.content_type, force_content_type);
-      if (force_content_type == 0 && identity.content_type != content_type) {
-        ++result.adapted_saved_games;
-      }
-      const uint64_t group = (uint64_t(identity.title_id) << 32) | content_type;
-      std::string name = UniqueLibraryFileName(Utf8FileName(entry.path()), identity,
-                                               &used_names[group]);
-      result.items.push_back({entry.path(), std::move(name), identity.title_id, content_type});
+      detail::LibraryWalkEvent event;
+      event.is_file = true;
+      event.job = jobs.size();
+      events.push_back(std::move(event));
+      jobs.push_back(std::move(job));
     }
+  }
+
+  // Then the headers, on a pool when there is one. Every job writes only its own
+  // outcome, so the workers share nothing but the queue.
+  std::vector<detail::LibraryJobOutcome> outcomes(jobs.size());
+  const auto read_one = [&](const std::size_t index) {
+    detail::LibraryJobOutcome& outcome = outcomes[index];
+    outcome.result = ReadPackageIdentity(jobs[index].path, jobs[index].size, &outcome.identity,
+                                         &outcome.reason);
+  };
+
+  uint32_t threads = scan_threads == 0 ? DefaultDlcScanThreads() : scan_threads;
+  if (jobs.size() < kMinParallelScanFiles) {
+    threads = 1;
+  }
+  if (threads <= 1) {
+    for (std::size_t i = 0; i < jobs.size(); ++i) {
+      read_one(i);
+    }
+  } else {
+    std::atomic<std::size_t> next{0};
+    std::vector<std::thread> pool;
+    pool.reserve(threads);
+    for (uint32_t worker = 0; worker < threads; ++worker) {
+      pool.emplace_back([&]() {
+        for (;;) {
+          const std::size_t index = next.fetch_add(1, std::memory_order_relaxed);
+          if (index >= jobs.size()) {
+            break;
+          }
+          read_one(index);
+        }
+      });
+    }
+    for (auto& thread : pool) {
+      thread.join();
+    }
+  }
+
+  // And the merge, back on this thread and in walk order: the counters, the rejected
+  // list and the name a package is filed under are all order-dependent, so replaying
+  // the events is what makes the answer the one the sequential scan produced.
+  LibraryScanResult result;
+  std::map<uint64_t, std::set<std::string>> used_names;
+  for (const detail::LibraryWalkEvent& event : events) {
+    if (!event.is_file) {
+      result.rejected.push_back({event.entry, "cannot be read"});
+      continue;
+    }
+
+    ++result.files_seen;
+    detail::LibraryJobOutcome& outcome = outcomes[event.job];
+    switch (outcome.result) {
+      case PackageIdentityResult::kNotPackage:
+        ++result.other_files;
+        continue;
+      case PackageIdentityResult::kUnreadable:
+        result.rejected.push_back(
+            {jobs[event.job].path.generic_string(), std::move(outcome.reason)});
+        continue;
+      case PackageIdentityResult::kRead:
+        break;
+    }
+
+    const PackageIdentity& identity = outcome.identity;
+    const uint32_t content_type = LibraryContentType(identity.content_type, force_content_type);
+    if (force_content_type == 0 && identity.content_type != content_type) {
+      ++result.adapted_saved_games;
+    }
+    const uint64_t group = (uint64_t(identity.title_id) << 32) | content_type;
+    std::string name =
+        UniqueLibraryFileName(Utf8FileName(jobs[event.job].path), identity, &used_names[group]);
+    result.items.push_back(
+        {jobs[event.job].path, std::move(name), identity.title_id, content_type});
   }
 
   return result;

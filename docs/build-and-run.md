@@ -795,8 +795,8 @@ cd d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\build\win-amd64-release
 `--launcher_profile` is step 1 of the order the launcher and the game share, so naming one
 keeps a run away from `%APPDATA%\rb_blitz\launcher.toml` — which is what the harnesses
 below do. What the launcher decided is also readable without a window: `--dump-layout`,
-`--dump-display`, `--dump-profile`, `--dump-general`, `--dump-prefill` and
-`--print-command` each write their report to a file and exit, so the launcher's own
+`--dump-display`, `--dump-profile`, `--dump-general`, `--dump-prefill`, `--dump-update`
+and `--print-command` each write their report to a file and exit, so the launcher's own
 output is the first thing to reach for on a build machine that has no display to look at.
 
 **Its unit tests** are the same kind of host test as the game's — dependency-free, no
@@ -811,6 +811,7 @@ cover:
 | `launcher_remap` | `rb_blitz_launcher_remap_tests` | the `[remap]` vocabulary: the grammar, the serialiser, the round trip |
 | `launcher_launch` | `rb_blitz_launcher_launch_tests` | Contract 3: the argv the game is started with, the pre-spawn readiness check, and B7's failure sentence |
 | `launcher_nav` | `rb_blitz_launcher_nav_tests` | A3's pad rules (deadzone, repeat, binding table), A2's walk from a ring entry to the row the bar names, and A5's keys — the chord grammar, the defaults, the chord-before-bare-key rule, the repeat rule, the `[nav]` round trip, and the focus ring's scaling |
+| `launcher_update` | `rb_blitz_launcher_update_tests` | D19's update check, minus the request: the release manifest, the dotted-version comparison, whether an update is offered, and whether the user is asked (once per release, never twice for the same one) |
 
 ```powershell
 cmake --build --preset win-amd64-debug
@@ -820,7 +821,7 @@ ctest --test-dir out\build\win-amd64-debug -R launcher --output-on-failure
 `win-amd64-debug` is the preset whose tree is configured with tests here
 (`out\build\win-amd64-release` was configured with `BUILD_TESTING=OFF`, which is why its
 CTest list is a leftover); the same run carries the game's own tests, so
-`ctest --test-dir out\build\win-amd64-debug -N` lists the six below beside them.
+`ctest --test-dir out\build\win-amd64-debug -N` lists the seven below beside them.
 
 **The captures** are [scripts/capture_launcher.ps1](../scripts/capture_launcher.ps1): it
 writes a fixture profile, runs the headless reports above, then starts the launcher on

@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Compiles the installer's configuration into the two files the build consumes:
+// Compiles the installer's configuration into the files the build consumes:
 //
 //   generated/embedded_config.h  the pins and both fingerprint files as string
 //                                literals, for rb_blitz_setup_helper.exe
 //   generated/pins.iss           the same pins as Inno Setup preprocessor
 //                                defines, for setup.iss
+//   generated/update.toml        the release manifest a launcher checks and an
+//                                updater installs from (installer/README.md,
+//                                section "Updating")
 //
-// Both come from installer/config/pins.toml, so the wizard and the helper cannot
-// disagree about what they are installing. Run with --help for the argument list.
+// All three come from installer/config/pins.toml, so the wizard, the helper, the
+// launcher's update check and the updater cannot disagree about what they are
+// installing. Run with --help for the argument list.
 //
 // This file is deliberately standalone: it is the first thing the installer build
 // compiles, so it must not depend on anything in src/.
@@ -163,6 +167,21 @@ struct PinsTable {
   std::string String(std::string_view key, std::string_view fallback = {}) const {
     const PinsValue* value = Find(key);
     return value != nullptr ? value->text : std::string(fallback);
+  }
+
+  // A bare true/false. A quoted "true" is refused rather than guessed at: the flag
+  // decides whether an update asks the user for their game files again, and a
+  // release that got it wrong would be answered on the wrong page.
+  bool Bool(std::string_view key, bool fallback = false) const {
+    const PinsValue* value = Find(key);
+    if (value == nullptr) {
+      return fallback;
+    }
+    if (!value->was_quoted && (value->text == "true" || value->text == "false")) {
+      return value->text == "true";
+    }
+    Fail("[" + name + "] " + std::string(key) + " must be true or false");
+    return fallback;
   }
 };
 
@@ -350,12 +369,43 @@ void EmitIsppNumber(std::ostream& out, std::string_view name, const std::string&
   out << "#define " << name << " " << (numeric ? trimmed : "0") << "\n";
 }
 
+// The update manifest is TOML because both readers already parse a TOML subset
+// (src/config.cpp, launcher/src/update_manifest.cpp), and neither of those subsets
+// has escapes: a value that would need one is refused here rather than written in
+// a form one of them would misread.
+void EmitTomlString(std::ostream& out, std::string_view name, const std::string& value) {
+  if (value.find('"') != std::string::npos || value.find('\n') != std::string::npos ||
+      value.find('\r') != std::string::npos) {
+    Fail("update.toml value " + std::string(name) +
+         " contains a quote or a line break, which the readers cannot unescape");
+    return;
+  }
+  if (!IsValidUtf8(value)) {
+    Fail("update.toml value " + std::string(name) + " is not valid UTF-8: '" + value + "'");
+    return;
+  }
+  out << name << " = \"" << value << "\"\n";
+}
+
+void EmitTomlBool(std::ostream& out, std::string_view name, bool value) {
+  out << name << " = " << (value ? "true" : "false") << "\n";
+}
+
+void EmitTomlNumber(std::ostream& out, std::string_view name, const std::string& value) {
+  const std::string trimmed = Trim(value);
+  const bool numeric =
+      !trimmed.empty() &&
+      std::all_of(trimmed.begin(), trimmed.end(), [](char c) { return c >= '0' && c <= '9'; });
+  out << name << " = " << (numeric ? trimmed : "0") << "\n";
+}
+
 struct Arguments {
   fs::path pins;
   fs::path game_fingerprints;
   fs::path ultimate_fingerprints;
   fs::path header;
   fs::path ispp;
+  fs::path update_manifest;
   std::map<std::string, std::string, std::less<>> overrides;  // "table.key" -> value
 };
 
@@ -370,7 +420,7 @@ bool IsCommitId(std::string_view text) {
 
 std::string Usage() {
   return "usage: rb_blitz_embed_config --pins <f> --game-fingerprints <f> "
-         "--ultimate-fingerprints <f> --header <f> --ispp <f>\n"
+         "--ultimate-fingerprints <f> --header <f> --ispp <f> --update-manifest <f>\n"
          "                             [--payload-version <v>] [--payload-url <u>]\n"
          "                             [--payload-sha256 <h>] [--payload-size <n>]\n"
          "                             [--payload-commit <id>]\n";
@@ -405,6 +455,8 @@ bool ParseArguments(int argc, char** argv, Arguments* out) {
       out->header = *value;
     } else if (name == "--ispp") {
       out->ispp = *value;
+    } else if (name == "--update-manifest") {
+      out->update_manifest = *value;
     } else if (name == "--payload-version") {
       out->overrides["payload.version"] = *value;
     } else if (name == "--payload-url") {
@@ -426,7 +478,8 @@ bool ParseArguments(int argc, char** argv, Arguments* out) {
            {&Arguments::game_fingerprints, "--game-fingerprints"},
            {&Arguments::ultimate_fingerprints, "--ultimate-fingerprints"},
            {&Arguments::header, "--header"},
-           {&Arguments::ispp, "--ispp"}}) {
+           {&Arguments::ispp, "--ispp"},
+           {&Arguments::update_manifest, "--update-manifest"}}) {
     if ((out->*key).empty()) {
       Fail(flag + " is required");
       return false;
@@ -507,8 +560,9 @@ int main(int argc, char** argv) {
   const PinsTable* installer = pins.Find("installer");
   const PinsTable* payload = pins.Find("payload");
   const PinsTable* ultimate = pins.Find("ultimate");
-  if (installer == nullptr || payload == nullptr || ultimate == nullptr) {
-    Fail("pins.toml is missing an [installer], [payload] or [ultimate] table");
+  const PinsTable* update = pins.Find("update");
+  if (installer == nullptr || payload == nullptr || ultimate == nullptr || update == nullptr) {
+    Fail("pins.toml is missing an [installer], [payload], [ultimate] or [update] table");
     return 1;
   }
   const std::string pinned_commit = payload->String("commit");
@@ -560,6 +614,13 @@ int main(int argc, char** argv) {
   EmitIsppString(ispp, "UltimateReleaseUrl", ultimate->String("release_url"));
   EmitIsppString(ispp, "UltimateDestinationDir", ultimate->String("destination_dir"));
   ispp << "\n";
+  ispp << "// The update channel (docs/plans/launcher-plan.md D19): where a launcher\n";
+  ispp << "// looks, the folder under the user's local application data the updater is\n";
+  ispp << "// placed in, and whether this release needs the user's game files again.\n";
+  EmitIsppString(ispp, "UpdateManifestUrl", update->String("manifest_url"));
+  EmitIsppString(ispp, "UpdateDirName", update->String("dir_name"));
+  EmitIsppNumber(ispp, "UpdateRequiresGameData", update->Bool("requires_game_data") ? "1" : "0");
+  ispp << "\n";
   ispp << "#endif\n";
   if (g_failures == 0 && !WriteTextFile(arguments.ispp, ispp.str())) {
     return 1;
@@ -568,8 +629,42 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // update.toml: the file the release publishes for the launcher's check and for the
+  // updater that installs the newer build. Everything in it is already in the pins,
+  // so it is written here rather than by hand - a second copy of the version would be
+  // a second answer to "which release is this".
+  //
+  // `payload_url` empty (the embed-mode build) is not a failure: it is the state of a
+  // release whose payload travels inside the setup executable, and both readers treat
+  // it as "no update to offer" rather than as one that cannot happen.
+  std::ostringstream manifest;
+  manifest << "# Generated by tools/embed_config.cpp from installer/config/pins.toml.\n";
+  manifest << "# Do not edit; edit pins.toml and rebuild, then publish this file as the\n";
+  manifest << "# release asset update.toml, next to the setup executable and the payload\n";
+  manifest << "# archive (installer/README.md, section Cutting a release).\n";
+  manifest << "#\n";
+  manifest << "# schema_version is the manifest's own shape, not the pins': an updater\n";
+  manifest << "# refuses one it does not understand rather than guessing at it\n";
+  manifest << "# (src/config.h, kUpdateManifestSchemaVersion).\n";
+  manifest << "schema_version = 1\n\n";
+  EmitTomlString(manifest, "version", installer->String("version"));
+  EmitTomlBool(manifest, "requires_game_data", update->Bool("requires_game_data"));
+  EmitTomlString(manifest, "payload_version", payload->String("version"));
+  EmitTomlString(manifest, "payload_url", payload->String("url"));
+  EmitTomlString(manifest, "payload_sha256", payload->String("sha256"));
+  EmitTomlNumber(manifest, "payload_size", payload->String("size"));
+  EmitTomlString(manifest, "payload_commit", pinned_commit);
+  if ((g_failures == 0) && ValidateEmbeddable("update.toml", manifest.str()) &&
+      !WriteTextFile(arguments.update_manifest, manifest.str())) {
+    return 1;
+  }
+  if (g_failures != 0) {
+    return 1;
+  }
+
   std::fprintf(stdout,
-               "embed_config: wrote %s (%zu bytes) and %s\n", arguments.header.string().c_str(),
-               header.size(), arguments.ispp.string().c_str());
+               "embed_config: wrote %s (%zu bytes), %s and %s\n",
+               arguments.header.string().c_str(), header.size(),
+               arguments.ispp.string().c_str(), arguments.update_manifest.string().c_str());
   return 0;
 }

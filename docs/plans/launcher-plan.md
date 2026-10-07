@@ -787,6 +787,54 @@ their older wording where they disagree.
   a failure message and the pre-spawn profile check — is built 2026-10-05; E3's end-to-end assertion
   against a real boot remains.
 
+### D19 — Checking for updates, and the updater the installer leaves
+
+Decided 2026-10-07, from the fifth round of feedback: *"check for new versions … silently, on every
+open … an update button on the save/close panel … if he chooses yes, run a modified version of the
+installer on latest."* Supersedes §9's "auto-update … (project non-goals)" — the check and the
+one-click install are in scope now; a store, a mod browser and everything else online stay out.
+
+- **The check is silent, and its failures are silent too.** One HTTPS GET of a release manifest,
+  on a worker thread, with short timeouts: the window appears whether or not the network answers.
+  A missing network, a 404, a manifest with a schema this build does not understand and a release
+  with nothing to install are all the same answer — *nothing to offer* — because a launcher that
+  reported its own failures would interrupt a user who asked for a settings window.
+- **The version it compares is the launcher's own.** `[installer] version` from
+  `installer/config/pins.toml` reaches the launcher as `RBBLITZ_LAUNCHER_VERSION` (D16's title
+  already used it), and the manifest's `version` is the release's. After an update the payload has
+  replaced the launcher, so the launcher *is* the newer build and the check settles on its own:
+  there is no "installed version" record to keep in step, and the same file names the version, the
+  release manifest's URL and the setup executable.
+- **The manifest is generated with the pins, not written by hand.** `tools/embed_config.cpp` emits
+  `update.toml` from `pins.toml`, and the release publishes it as an asset; the URL the launcher
+  checks is the *latest* release's copy of it, so a launcher built today finds tomorrow's release
+  without being rebuilt. It carries what the launcher decides with (`version`,
+  `requires_game_data`, `payload_url`) and what the updater installs with (`payload_*`), and its
+  own `schema_version` is what a future release can change.
+- **The button is always in the bar, and only its state changes.** *Update* joins Close, Save and
+  Launch Game as the leftmost of the bar's four controls — a bar that grew a button a second after
+  it opened would move everything beside it — disabled while checking and when there is nothing to
+  install, enabled when there is, with the tooltip saying which state it is in.
+- **The question is asked once per release.** Accepting starts the updater and the launcher leaves
+  (the updater has to be able to replace the executable the window is running in, and it opens the
+  launcher again when it is done). Declining records the version in the profile's `[update]
+  declined_version`; the same release is never asked about again, and a newer one is asked about on
+  its own — which is the only case a second prompt is allowed.
+- **The updater is the installer, built for less.** `setup.iss` is compiled a second time with
+  `/DUpdaterMode=1`: the same wizard with the pages an update has no question about removed
+  (welcome, install folder, shortcuts, the mod, the summary) and no payload of its own, since the
+  release manifest names what to install. The setup executable embeds it and places it under the
+  user's local application data — never the install folder, which is the game's own and what the
+  payload audit allows. An install with no updater (one made by an older setup, or by hand) sends
+  the user to the release page instead and records the version as answered.
+- **"Recompiling the game" is a flag on the release, not a guess.** `[update] requires_game_data`
+  travels in the manifest, and it is what decides whether the updater goes straight to the progress
+  bar (the payload alone changed, the game data is kept) or asks for the package or the folder again
+  first. Nothing in the launcher tries to infer it.
+- **Both halves are inspectable.** `--dump-update` runs the check in the foreground and prints what
+  the launcher would decide, including *why* a check produced nothing; `-DRBBLITZ_UPDATE_URL` points
+  a build at a test server, which is how the path is exercised without a release existing.
+
 ---
 
 ## 4. Contracts that must exist before parallel work
@@ -1199,9 +1247,13 @@ Anything not in this table is not verified, and should be said out loud rather t
 
 ## 9. Non-goals
 
-- Auto-update, a store, a mod browser, achievements or anything online (project non-goals).
+- A store, a mod browser, achievements, leaderboards or anything else online. **Auto-update is no
+  longer on this list**: D19 built the silent check, the *Update* button and the updater the setup
+  executable leaves behind. What stays out is everything around it — a choose-your-version dialog,
+  downgrades, a channel selector, beta branches.
 - A second installer, or the launcher growing an installer: importing game data and re-placing the
-  payload stay the wizard's job (§4.6).
+  payload stay the wizard's job (§4.6). D19 runs a build of *that* wizard rather than teaching the
+  launcher to install — the launcher's part is one GET, one question and one `CreateProcessW`.
 - Unlocking frame rate, or exposing compiled-out graphics features.
 - A guest-visible settings screen: the launcher only projects cvars, it does not own the game's own UI.
 - Editing the guest's own Controls presets.

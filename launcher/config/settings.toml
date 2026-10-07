@@ -250,6 +250,30 @@ Downloadable Content". Refresh the cache from that main menu row, or pass
 --refresh_dlc_cache to do it at the next start. Needs a restart.
 """
 
+# A cold library read is not disk-bound: the per-file cost of a *first* open is the
+# antivirus's on-open scan, measured at ~16 ms per file against ~0.03 ms once the file
+# has been seen, on an NVMe SSD (docs/dlc.md §4.1). Opening several at once overlaps
+# it - 5.6x measured with the pool on (16.1 ms/file to 2.9 ms/file) - and the result is
+# identical at any thread count, because the walk and the merge stay on one thread in
+# walk order (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
+[[setting]]
+key     = "dlc_scan_threads"
+tab     = "general"
+group   = "Paths"
+label   = "DLC scan threads"
+kind    = "int"
+default = 0
+min     = 0
+max     = 32
+applies = "restart"
+argv    = "flag"
+tooltip = """
+How many threads read a DLC library's package headers. 0, the default, uses the
+machine's core count (up to 8); 1 reads them one at a time. A cold library is several
+times sooner to read with the pool, and the scan's result is the same either way.
+Needs a restart.
+"""
+
 # ---------------------------------------------------------------------------
 # Interface - Main menu
 # ---------------------------------------------------------------------------

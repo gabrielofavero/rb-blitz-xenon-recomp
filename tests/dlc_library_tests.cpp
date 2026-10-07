@@ -346,5 +346,59 @@ int main() {
     }
   }
 
+  BeginCase("the thread count cannot change the answer");
+  {
+    Scratch s;
+    // Past kMinParallelScanFiles, so the pool actually runs; long names that force the
+    // hash suffix, and duplicate names that force a rename, so the assignment order is
+    // observable in the result rather than only in the counters.
+    for (uint32_t i = 0; i < kMinParallelScanFiles + 9; ++i) {
+      WritePackage(s.base / "songs" / ("Panic at the Disco - Lying Is The Most Fun A Girl " +
+                                       std::to_string(i)),
+                   "CON ", kRb3TitleId, kSavedGame);
+    }
+    WritePackage(s.base / "same" / "dupe", "CON ", kRb2TitleId, kSavedGame);
+    WritePackage(s.base / "other" / "dupe", "CON ", kRb2TitleId, kSavedGame);
+    WriteFile(s.base / "notes.txt", "not a container");
+    // A container the walk cannot file: no title id, and one too short to mount.
+    WritePackage(s.base / "broken", "LIVE", 0, kMarketplace);
+    WriteFile(s.base / "truncated", "CON \x00\x00\x00\x00");
+
+    const LibraryScanResult one = ScanDlcLibraries({s.base}, 0, 1);
+    const LibraryScanResult many = ScanDlcLibraries({s.base}, 0, 4);
+    CHECK_TRUE(one.items.size() >= kMinParallelScanFiles);
+    CHECK_EQ(one.items.size(), many.items.size());
+    CHECK_EQ(one.files_seen, many.files_seen);
+    CHECK_EQ(one.other_files, many.other_files);
+    CHECK_EQ(one.adapted_saved_games, many.adapted_saved_games);
+    CHECK_EQ(one.rejected.size(), many.rejected.size());
+
+    // Compared as sets, because the walk order is the filesystem's; what the thread
+    // count could disturb is *which* packages are listed and under which name, and
+    // which uploads are rejected. A lost or reassigned name fails here.
+    const auto items_of = [](const LibraryScanResult& scan) {
+      std::set<std::string> keys;
+      for (const auto& item : scan.items) {
+        keys.insert(item.host_path.generic_string() + "|" + item.file_name + "|" +
+                    std::to_string(item.title_id) + "|" + std::to_string(item.content_type));
+      }
+      return keys;
+    };
+    const auto rejected_of = [](const LibraryScanResult& scan) {
+      std::set<std::string> keys;
+      for (const auto& rejected : scan.rejected) {
+        keys.insert(rejected.entry + "|" + rejected.reason);
+      }
+      return keys;
+    };
+    CHECK_TRUE(items_of(one) == items_of(many));
+    CHECK_TRUE(rejected_of(one) == rejected_of(many));
+
+    // And the default (a pool, on a machine with cores) answers the same again.
+    const LibraryScanResult automatic = ScanDlcLibraries({s.base});
+    CHECK_TRUE(items_of(automatic) == items_of(one));
+    CHECK_TRUE(rejected_of(automatic) == rejected_of(one));
+  }
+
   return Finish();
 }

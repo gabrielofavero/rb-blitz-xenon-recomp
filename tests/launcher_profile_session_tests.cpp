@@ -356,8 +356,66 @@ void TestSafeMode(Scratch& scratch) {
   CHECK_FALSE(after.wrote);
 }
 
-void TestWindowGeometry(Scratch& scratch) {
-  BeginCase("A1/B4: the window size is kept on the way out, and only when it changed");
+// D19's record: the release the user answered "Not now" to. It is what keeps the launcher from
+// asking about the same release twice, so it has to survive a save, a reopen, and a save by the
+// panel - and it must not disturb anything else in the file.
+void TestUpdateDecline(Scratch& scratch) {
+  BeginCase("D19: a declined release is recorded, and only once");
+
+  const fs::path install = scratch.Make("update-install");
+  const fs::path app_data = scratch.Make("update-appdata");
+  const fs::path profile_path = app_data / "rb_blitz" / "launcher.toml";
+  ProfileSession session = MakeSession(install, app_data);
+
+  // A profile that has never been asked about an update has no `[update]` table at all.
+  CHECK_TRUE(session.SaveUpdateDeclined("0.2.0").wrote);
+  const std::string declined = ReadText(profile_path);
+  CHECK_CONTAINS(declined, "[update]");
+  CHECK_CONTAINS(declined, "declined_version = \"0.2.0\"");
+  // Asking again - or being told the same thing twice - does not touch the file.
+  CHECK_FALSE(session.SaveUpdateDeclined("0.2.0").wrote);
+  CHECK_TRUE(session.SaveUpdateDeclined("").wrote == false);
+
+  BeginCase("D19: the record survives a reopen, and a newer release replaces it");
+
+  ProfileLoadResult load = LoadProfile(profile_path);
+  CHECK_TRUE(load.usable());
+  CHECK_STR_EQ(load.profile.update_declined_version, "0.2.0");
+  ProfileSession reopened = MakeSession(install, app_data, std::move(load));
+  // The prompt's rule, read back: the same release is not asked about again, a newer one is.
+  CHECK_STR_EQ(reopened.profile().update_declined_version, "0.2.0");
+  CHECK_TRUE(reopened.SaveUpdateDeclined("0.3.0").wrote);
+  CHECK_CONTAINS(ReadText(profile_path), "declined_version = \"0.3.0\"");
+
+  BeginCase("D19: the key this module does not own survives, like every other unknown key");
+
+  WriteText(profile_path,
+            "schema_version = 1\n"
+            "\n"
+            "[update]\n"
+            "declined_version = \"0.4.0\"\n"
+            "last_checked = \"from a newer launcher\"\n");
+  ProfileLoadResult with_extra = LoadProfile(profile_path);
+  CHECK_TRUE(with_extra.usable());
+  ProfileSession session2 = MakeSession(install, app_data, std::move(with_extra));
+  CHECK_STR_EQ(session2.profile().update_declined_version, "0.4.0");
+  CHECK_TRUE(session2.Save().ok);
+  const std::string kept = ReadText(profile_path);
+  CHECK_CONTAINS(kept, "declined_version = \"0.4.0\"");
+  CHECK_CONTAINS(kept, "last_checked = \"from a newer launcher\"");
+
+  BeginCase("D19: an unsaved edit is not written by the decline's own save");
+
+  session2.profile().game_dir = "D:\\Games";
+  const SaveOutcome decline = session2.SaveUpdateDeclined("0.5.0");
+  CHECK_TRUE(decline.ok);
+  CHECK_TRUE(decline.wrote);
+  const std::string after = ReadText(profile_path);
+  CHECK_CONTAINS(after, "declined_version = \"0.5.0\"");
+  CHECK_NOT_CONTAINS(after, "D:\\\\Games");
+}
+
+void TestWindowGeometry(Scratch& scratch) {  BeginCase("A1/B4: the window size is kept on the way out, and only when it changed");
 
   const fs::path install = scratch.Make("geometry-install");
   const fs::path app_data = scratch.Make("geometry-appdata");
@@ -975,6 +1033,7 @@ int main() {
   TestSaveWithNothingChanged(scratch);
   TestSafeMode(scratch);
   TestWindowGeometry(scratch);
+  TestUpdateDecline(scratch);
   TestWindowGeometryUnwritable(scratch);
   TestFreshProfile(scratch);
   TestReset(scratch);

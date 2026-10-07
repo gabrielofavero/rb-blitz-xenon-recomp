@@ -16,7 +16,7 @@ settings location are real too (B4), the Audio / Video tab's rows are editable (
 Controller tab's button-mapping block rebinds the pad for real (D16) — the launcher writes
 `[remap]` and `rb_blitz.exe` reads it back through the shared vocabulary in
 [`../src/launcher/remap.h`](../src/launcher/remap.h). The window's own chrome is finished
-(A2): *Close*, *Save* and *Launch Game* live on the bottom bar, under the focused row's own help
+(A2): the bar's own controls - *Update*, *Close*, *Save* and *Launch Game* - live on the bottom, under the focused row's own help
 — its tooltip and how to operate it — and Launch Game is B7's contract: it saves what is unsaved,
 builds the command line from the schema and starts the game. The controller navigation (A3) is
 real too, so a pad shows and edits every schema row alongside the keyboard, which stays a peer
@@ -177,7 +177,7 @@ changes no C++ at all:
   place and become `NavAction`s; a pad produces the same vocabulary through its own source
   (`src/pad_source.cpp`, A3), and the shell does not know which device answered.
 - **The bottom bar (A2)** is the window's, not a tab's, and it is where a session ends: the
-  state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right, and
+  state of the settings file on the left, *Update*, *Close*, *Save* and *Launch Game* on the right, and
   under them the focused row's own help — its tooltip, and how to operate it. There is no title
   text and no key legend at the top: the window's own title bar names the launcher and the release
   it came from, and the tab strip says which tab is up.
@@ -192,7 +192,7 @@ changes no C++ at all:
 | Keys | What they do |
 | --- | --- |
 | `Down` / `Up` (`Tab` / `Shift+Tab`) | Move the ring down / up a **row** |
-| `Right` / `Left` | Move the ring along the focused row's **options**: an enum's choices, a row of buttons (Import/Export/Reset), a slider's value, or the bottom bar's Close/Save/Launch |
+| `Right` / `Left` | Move the ring along the focused row's **options**: an enum's choices, a row of buttons (Import/Export/Reset), a slider's value, or the bottom bar's Update/Close/Save/Launch |
 | `Home` / `End` | First / last row |
 | `PageDown` / `PageUp` | Next / previous tab (`LB`/`RB` on a pad) |
 | `Enter` / `Space` | Operate the focused option, or the focused row: toggle a checkbox, choose an enum entry, step a slider, open the folder picker, or start the Ultimate install |
@@ -608,6 +608,20 @@ over it until it is fixed (D2: "never lose a hand-edited file").
 
 `tests/launcher_profile_tests.cpp` pins both halves: `ctest -R launcher_profile`.
 
+The tables in it, and who reads them:
+
+| Table | Written by | Read by |
+| --- | --- | --- |
+| `[launcher]`, `[window]` | the launcher: the format's version, portable mode, the window size (A1) | the launcher only |
+| `[launch]` | the General tab: the target and the three path rows | the launcher (the game gets them on its command line, Contract 3) |
+| `[settings]` | the rows that are not `[launch]` paths, keyed by cvar | the launcher, and the game as its own config file |
+| `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
+| `[nav]` | the launcher's own key bindings (A5) | the launcher only |
+| `[update]` | `declined_version`, the release the user answered *Not now* to (D19) | the launcher only |
+
+`[update]` exists only while it has something in it, like `[nav]`, and a key beside
+`declined_version` that this build does not know survives a save like any other unknown key.
+
 
 ## Saving, the precedence badge and the settings location (B4)
 
@@ -726,6 +740,77 @@ named like `rb_blitz_001.log`) — the only record a WIN32-subsystem start leave
 The launcher itself stays open on a failure, so the user can fix the folder and try again.
 `Start` on a pad is the same launch without the mouse (A3), refused in the same cases the button
 is disabled in.
+
+## Checking for updates (D19)
+
+The bar's leftmost control, *Update*, is the one thing in the launcher that talks to the
+network, and it is built to be forgettable: it checks on every start, it never reports its own
+failures, and it asks the user exactly once per release.
+
+**The check.** One HTTPS GET of a release manifest, on a worker thread so the window appears
+whether or not the network answers (`src/update_launcher.cpp`; WinHTTP with short timeouts and
+the machine's own proxy configuration). The URL is `manifest_url` in
+[`installer/config/pins.toml`](../installer/config/pins.toml), compiled in at configure time, so
+a launcher and the installer that shipped it cannot point at different releases. An empty
+`manifest_url` — a build with no release channel — checks nothing.
+
+The URL names the *latest* release's asset, which is what makes the check work forever without
+being rebuilt: GitHub resolves `/releases/latest/download/update.toml` to the newest release.
+
+**The rule** (`src/update_check.cpp`, pure and unit-tested) is four questions:
+
+1. Did the fetch and the parse succeed? A missing network, a 404, a manifest with a schema this
+   build does not understand — all of them end the same way: *nothing to offer*, and nothing is
+   said about it. This is why the tooltip's "you are running the newest release" is not a
+   promise: a launcher that cannot check cannot tell.
+2. Is the manifest's `version` newer than the version of the launcher that is running
+   (`RBBLITZ_LAUNCHER_VERSION`, from the same pins file)? After an update the payload has
+   replaced the launcher, so the launcher *is* the newer build and the check settles on its own
+   — there is no "installed version" to keep in step.
+3. Does the release name a payload an updater could install? A release built with its payload
+   inside the setup executable (`[payload] url` empty) publishes no `payload_url`, so there is
+   nothing to install and no update is offered.
+4. Was this release already declined? `[update] declined_version` in `launcher.toml` records the
+   last version the user answered *Not now* to. The question is asked when the available release
+   is *newer* than that record, which gives D19's two behaviours exactly: never twice for the
+   same release, and once for each new one.
+
+**The button.** It is always in the bar — it is the last row of every tab's ring like Close,
+Save and Launch — and only its *state* changes: disabled while checking and when there is
+nothing to install (the tooltip says which of those it is), enabled when there is. A bar that
+grew a button a second after it opened would move everything beside it. Pressing it opens the
+prompt.
+
+**The prompt.** One modal, one question, and the answer is remembered:
+
+- *Update now* starts the updater and the launcher **leaves** — the updater has to be able to
+  replace the executable this window is running in, and it opens the launcher again when it is
+  done.
+- *Not now* (or Escape) writes the version into the profile. The button stays available for the
+  rest of the session and every later one; the question does not come back for that release, and
+  does come back for a newer one.
+- If there is no updater to run — a launcher installed by hand, or by an installer that predates
+  this — the release page opens instead and the version is recorded the same way: the user has
+  been told, which is what "never asked twice" is about.
+
+**The updater** is `%LOCALAPPDATA%\rb_blitz\update\RockBandBlitzUpdater.exe`: a second build of
+the installer wizard, put there by the setup executable and deliberately not in the install
+folder ([installer/README.md](../installer/README.md), section "Updating"). It fetches the same
+manifest for itself, installs the build it names, and asks for the game files again only when the
+release says it has to (`requires_game_data`). The launcher never runs it with arguments: what to
+install is the release's own business.
+
+**The check is inspectable.** `--dump-update[=<path>]` runs the same three steps in the
+foreground and prints what the launcher would decide — the manifest's version, whether an update
+would be offered, whether the user would be asked, what the button would say, and where the
+updater is — including the reason a check produced nothing. It is the answer to "why did the
+launcher not offer me the update", and a build that has to exercise the whole path without a
+release existing points itself at a test server:
+
+```powershell
+cmake --preset win-amd64-release -DRBBLITZ_UPDATE_URL=http://127.0.0.1:8731/update.toml
+rb_blitz_launcher.exe --dump-update=out\update-report.txt
+```
 
 ## The Controller tab, and button mapping (D16)
 
@@ -988,19 +1073,26 @@ whether it can be written, whether a save would change it, and every row the gam
 `rb_blitz.toml` decides - without opening a window, which is the fastest way to find out *why*
 something is wrong.
 
+`--no-update-check` makes no network request for the run (D19), so the bar's *Update* control is
+inert and says so. It is what a capture harness passes - a button whose state depends on whether
+a release exists cannot be part of a pixel comparison - and it is the switch for a machine that
+cannot reach the release page anyway: a firewall, a proxy that answers with a login page, or a
+metered link. The check itself is written to be invisible on such a machine, so the switch is
+about not waiting for it rather than about what it would say.
+
 ## How it is checked
 
 Four ways, in the order of what they cost:
 
-- **The unit tests**, named after the module they cover — `ctest -R launcher`. The six
+- **The unit tests**, named after the module they cover — `ctest -R launcher`. The seven
   targets, what each one pins and where the host harness lives are in
   [build-and-run.md §3](../docs/build-and-run.md); the pattern is the same as the game's:
   no window, no SDL, no game image.
 - **The headless reports.** `--dump-layout`, `--dump-display`, `--dump-profile`,
-  `--dump-general`, `--dump-prefill` and `--print-command` each write what the launcher
-  decided to a file and exit, before any window is created. They are the reason a claim
-  about a row, a path, a target or a command line is asserted on *text* on a build machine
-  instead of read out of a screenshot by eye.
+  `--dump-general`, `--dump-prefill`, `--dump-update` and `--print-command` each write what the
+  launcher decided to a file and exit, before any window is created. They are the reason a claim
+  about a row, a path, a target, an update or a command line is asserted on *text* on a build
+  machine instead of read out of a screenshot by eye.
 - **The captures.** [scripts/capture_launcher.ps1](../scripts/capture_launcher.ps1) starts
   the launcher on a fixture profile, drives it with synthetic keys, captures the client
   area and measures crops of it against each other with `frame_diff.ps1`. Its claims are

@@ -40,6 +40,10 @@ target_compile_features(rb_blitz_embed_config PRIVATE cxx_std_20)
 
 set(RBBLITZ_EMBEDDED_CONFIG "${RBBLITZ_INSTALLER_GENERATED}/embedded_config.h")
 set(RBBLITZ_ISPP_PINS "${RBBLITZ_INSTALLER_GENERATED}/pins.iss")
+# The release manifest: published as the asset `update.toml` (a launcher's update
+# check reads it, and the updater installs the payload it names), and read by
+# installer/build.ps1, which prints it in the list of what a release has to publish.
+set(RBBLITZ_UPDATE_MANIFEST "${RBBLITZ_INSTALLER_GENERATED}/update.toml")
 
 set(RBBLITZ_CONFIG_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/config/pins.toml"
@@ -47,20 +51,21 @@ set(RBBLITZ_CONFIG_SOURCES
     "${RBBLITZ_ROOT}/config/game_fingerprints.toml")
 
 add_custom_command(
-    OUTPUT "${RBBLITZ_EMBEDDED_CONFIG}" "${RBBLITZ_ISPP_PINS}"
+    OUTPUT "${RBBLITZ_EMBEDDED_CONFIG}" "${RBBLITZ_ISPP_PINS}" "${RBBLITZ_UPDATE_MANIFEST}"
     COMMAND rb_blitz_embed_config
             --pins "${CMAKE_CURRENT_SOURCE_DIR}/config/pins.toml"
             --game-fingerprints "${RBBLITZ_ROOT}/config/game_fingerprints.toml"
             --ultimate-fingerprints "${CMAKE_CURRENT_SOURCE_DIR}/config/ultimate_fingerprints.toml"
             --header "${RBBLITZ_EMBEDDED_CONFIG}"
             --ispp "${RBBLITZ_ISPP_PINS}"
+            --update-manifest "${RBBLITZ_UPDATE_MANIFEST}"
             ${RBBLITZ_EMBED_EXTRA_ARGS}
     DEPENDS rb_blitz_embed_config ${RBBLITZ_CONFIG_SOURCES}
-    COMMENT "Embedding installer config (pins + fingerprints)"
+    COMMENT "Embedding installer config (pins + fingerprints + update manifest)"
     VERBATIM)
 
 add_custom_target(rb_blitz_installer_config
-    DEPENDS "${RBBLITZ_EMBEDDED_CONFIG}" "${RBBLITZ_ISPP_PINS}")
+    DEPENDS "${RBBLITZ_EMBEDDED_CONFIG}" "${RBBLITZ_ISPP_PINS}" "${RBBLITZ_UPDATE_MANIFEST}")
 
 # --------------------------------------------------------------------------
 # Helper: the work the Inno wizard cannot do in Pascal - STFS extraction, zip
@@ -108,9 +113,11 @@ add_custom_command(TARGET rb_blitz_setup_helper POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${RBBLITZ_INSTALLER_STAGE}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RBBLITZ_ISPP_PINS}"
             "${RBBLITZ_INSTALLER_STAGE}/pins.iss"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RBBLITZ_UPDATE_MANIFEST}"
+            "${RBBLITZ_INSTALLER_STAGE}/update.toml"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:rb_blitz_setup_helper>"
             "${RBBLITZ_INSTALLER_STAGE}/rb_blitz_setup_helper.exe"
-    COMMENT "Staging the helper and pins.iss for Inno Setup"
+    COMMENT "Staging the helper, pins.iss and update.toml for Inno Setup"
     VERBATIM)
 
 if(MSVC)

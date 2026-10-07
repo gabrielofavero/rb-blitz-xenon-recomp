@@ -3,9 +3,9 @@
 Builds the Rock Band Blitz setup executable (rb_blitz_setup_helper.exe + setup.iss + ISCC).
 
 .DESCRIPTION
-One command, three artefacts: the native helper, the payload the installer puts on
-disk, and the setup executable the user downloads. Nothing here is needed to play
-the game - this script only builds the installer.
+One command, four artefacts: the native helper, the payload the installer puts on
+disk, the updater the launcher runs, and the setup executable the user downloads.
+Nothing here is needed to play the game - this script only builds the installer.
 
 The recompiled build travels one of two ways, and this script has to be told which:
 
@@ -17,7 +17,9 @@ The recompiled build travels one of two ways, and this script has to be told whi
   * downloaded at install time (-PayloadUrl -PayloadSha256). Nothing is embedded
     and the user's machine fetches the release asset instead. Pass -PayloadSize
     too when the size is known: the wizard uses it to check free space before it
-    starts.
+    starts. Only this mode makes a release updatable: an update installs the build
+    the release manifest names, and a build that pinned no download has none to
+    name.
 
 The Rock Band Blitz Ultimate mod is never embedded and never re-hosted; its
 release URL lives in config\pins.toml and the user's copy is downloaded from
@@ -27,6 +29,13 @@ The setup executable is named RockBandBlitzSetup-<version>.exe, or
 RockBandBlitzSetup-latest.exe when the [payload] commit pin is "latest", which is
 the repository's own pin: a build that is not cut from a pinned commit is a
 rolling build and should not be named like a release.
+
+Two more files are built and are what the launcher's Update button needs, because
+they are what an update is: RockBandBlitzUpdater.exe (this same wizard built with
+/DUpdaterMode=1, embedded into the setup executable and placed under the user's
+local application data) and update.toml (the release manifest, published as a
+release asset, which a launcher compares its version against). Both are printed at
+the end with what a release has to publish. See README.md, section "Updating".
 
 .PARAMETER PayloadUrl
 Download the recompiled build from this URL at install time instead of embedding
@@ -97,7 +106,7 @@ Do not refresh the side wizard image (tools\make_art.ps1). It is optional and is
 not committed, so a failed download is not a build failure.
 
 .PARAMETER SkipSetup
-Build and test the helper only; do not compile the setup executable.
+Build and test the helper only; do not compile the setup executable or the updater.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
@@ -463,15 +472,39 @@ if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
 }
 
 # --------------------------------------------------------------------------
-# 5. the setup executable
+# 5. the updater, and the setup executable that carries it
 # --------------------------------------------------------------------------
-Write-Step 'Compiling the setup executable'
+Write-Step 'Compiling the updater'
 
 $iscc = Find-Iscc
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+New-Item -ItemType Directory -Force -Path $generatedDir | Out-Null
 
 if ($latestBuild) { $setupBaseName = 'RockBandBlitzSetup-latest' }
 else { $setupBaseName = "RockBandBlitzSetup-$appVersion" }
+
+# The updater is this same wizard built with /DUpdaterMode=1: it carries no payload
+# (it installs the build the release manifest names) and drops the pages it has no
+# question about. The setup executable embeds it and puts it under the user's local
+# application data, which is what the launcher runs when an update is accepted
+# (README.md, section "Updating"). It is compiled *first*, because the setup's
+# [Files] entry reads the file at compile time.
+$updaterBaseName = 'RockBandBlitzUpdater'
+$updaterExe = Join-Path $generatedDir "$updaterBaseName.exe"
+$updaterArgs = @('/Q',
+                 "/DGeneratedDir=$generatedDir",
+                 "/DDistDir=$generatedDir",
+                 "/DArtDir=$artDir",
+                 '/DUpdaterMode=1',
+                 "/F$updaterBaseName",
+                 $setupScript)
+Invoke-Native -Exe $iscc -Arguments $updaterArgs -What 'ISCC (updater)'
+if (-not (Test-Path -LiteralPath $updaterExe)) {
+    throw "ISCC reported success but $updaterExe is missing."
+}
+Write-Host "   updater : $(Get-SizeText (Get-Item -LiteralPath $updaterExe).Length) -> $updaterExe"
+
+Write-Step 'Compiling the setup executable'
 
 # /F overrides OutputBaseFilename, so the name lives here rather than in the
 # script: the version in it is the one this build actually compiled in.
@@ -489,6 +522,13 @@ if (-not (Test-Path -LiteralPath $setupExe)) { throw "ISCC reported success but 
 $setupInfo = Get-Item -LiteralPath $setupExe
 $setupHash = (Get-FileHash -LiteralPath $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
 
+# The release manifest: what a launcher compares its version against and what an
+# updater installs the build from. It is generated with the pins, and it belongs
+# next to the setup executable because a release publishes both (README.md,
+# section "Cutting a release").
+$updateManifest = Join-Path $distDir 'update.toml'
+Copy-Item -LiteralPath (Join-Path $generatedDir 'update.toml') -Destination $updateManifest -Force
+
 Write-Host ''
 Write-Host 'Built' -ForegroundColor Green
 Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
@@ -500,15 +540,28 @@ if ($latestBuild) {
 Write-Host ('   size    : {0}' -f (Get-SizeText $setupInfo.Length))
 Write-Host ('   sha256  : {0}' -f $setupHash)
 Write-Host ('   helper  : {0}' -f (Get-SizeText $helperSize))
+Write-Host ('   updater : {0}' -f (Get-SizeText (Get-Item -LiteralPath $updaterExe).Length))
+Write-Host ('   update  : {0}' -f $updateManifest)
 Write-Host ('   commit  : {0}' -f $(if ($generatedCommit) { $generatedCommit } else { 'not recorded' }))
 if ($embedPayload) {
     Write-Host ('   payload : embedded from {0}' -f $PayloadDir)
     Write-Host  '             the setup executable is not byte-reproducible across build machines (ISCC'
     Write-Host  '             embeds the payload it finds in that directory), so publish the checksum you'
     Write-Host  '             measured here rather than a fixed one.'
+    Write-Host  '             NOTE: an update installs the payload the release manifest names, and this'
+    Write-Host  '             build pinned none, so its manifest offers no update to install. Publish the'
+    Write-Host  '             payload archive and rebuild with -PayloadUrl/-PayloadSha256/-PayloadSize'
+    Write-Host  '             to make this release updatable.'
 } else {
     Write-Host ("   payload : downloaded from {0} at install time" -f $PayloadUrl)
     Write-Host  '             the release asset this URL points at is not byte-reproducible either: the zip'
     Write-Host  '             make_payload.ps1 writes depends on the deflate implementation of the machine'
     Write-Host  '             that ran it. Publish the checksum, and pass the same one here.'
+}
+Write-Host ''
+Write-Host 'Publish, in one release:'
+Write-Host ("   {0}" -f $setupInfo.Name)
+Write-Host  '   update.toml            the asset a launcher checks for a newer release'
+if (-not $embedPayload) {
+    Write-Host  '   the payload archive that -PayloadUrl points at'
 }

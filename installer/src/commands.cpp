@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "config.h"
+#include "download.h"
 #include "install.h"
 #include "stfs.h"
 #include "util.h"
@@ -615,6 +616,74 @@ int CommandProbeArchive(const std::vector<std::string>& args) {
                              " entries)"));
 }
 
+// --- the update channel ---------------------------------------------------
+
+// Fetches update.toml - the release manifest a launcher's update check reads and
+// the updater installs from - and reports what it says. The file is kept at
+// --dest so the updater can hand the same bytes to its stages, and the values are
+// reported even when the manifest turns out to be unusable, because the wizard
+// still has something to tell the user.
+int CommandFetchUpdate(const std::vector<std::string>& args) {
+  CommandContext context;
+  if (!Begin(args, Keys({"url", "dest"}), &context)) {
+    return kUsage;
+  }
+  const std::string url = context.Get("url");
+  if (url.empty()) {
+    return Fail(&context,
+                "fetch-update needs --url: this build has no update channel pinned (see "
+                "[update] manifest_url in installer/config/pins.toml)");
+  }
+  const fs::path dest = PathFromUtf8(context.Get("dest"));
+  if (dest.empty()) {
+    return Fail(&context, "fetch-update needs --dest");
+  }
+  if (!EnsureParentDirectory(dest, &context.error)) {
+    return Fail(&context, context.error);
+  }
+
+  DownloadRequest request;
+  request.url = url;
+  request.destination = dest;
+  DownloadResult download;
+  std::string error;
+  if (!DownloadToFile(request, &download, &error)) {
+    return Fail(&context, error);
+  }
+
+  std::string text;
+  if (!ReadFileText(dest, &text, &error)) {
+    return Fail(&context, error);
+  }
+  UpdateManifest manifest;
+  if (!ParseUpdateManifest(text, &manifest, &error)) {
+    return Fail(&context, error);
+  }
+
+  // Written before the two checks below, so a caller that has to give up still has
+  // the version to name.
+  context.summary.Number("schema_version", manifest.schema_version);
+  context.summary.Text("version", manifest.version);
+  context.summary.Flag("requires_game_data", manifest.requires_game_data);
+  context.summary.Text("payload_version", manifest.payload_version);
+  context.summary.Text("payload_url", manifest.payload_url);
+  context.summary.Text("payload_sha256", manifest.payload_sha256);
+  context.summary.Number("payload_size", manifest.payload_size);
+  context.summary.Text("payload_commit", manifest.payload_commit);
+  context.summary.Number("bytes", download.size);
+
+  if (!manifest.HasPayload()) {
+    // The download and the parse both succeeded, so this is not a failure of the
+    // command; it is a release whose payload travels inside its setup executable,
+    // which an updater cannot install from. The user is told to fetch that file.
+    return Fail(&context, S("release ", manifest.version,
+                            " was built without a published payload: download its setup "
+                            "executable from the release page instead"));
+  }
+  return Succeed(&context, S("the newest release is ", manifest.version, " (",
+                             HumanBytes(manifest.payload_size), " of payload)"));
+}
+
 // --- payload --------------------------------------------------------------
 
 int CommandInstallPayload(const std::vector<std::string>& args) {
@@ -775,7 +844,8 @@ int CommandFinalize(const std::vector<std::string>& args) {
   CommandContext context;
   if (!Begin(args,
              Keys({"dest", "game-source", "payload-source", "payload-version", "ultimate",
-                   "ultimate-source", "ultimate-version", "installer-version"}),
+                   "ultimate-source", "ultimate-version", "installer-version",
+                   "payload-commit"}),
              &context)) {
     return kUsage;
   }
@@ -789,7 +859,11 @@ int CommandFinalize(const std::vector<std::string>& args) {
   install.install_dir = PathFromUtf8(dest);
   install.game_dir = GameRoot(install.install_dir);
   install.installer_version = context.Get("installer-version", kHelperVersion);
+  // The pinned commit is the build this *installer* was built from; an updater
+  // records the commit of the build it installed instead, which the release
+  // manifest carries.
   install.payload_commit = pins.payload.commit;
+  Override(&install.payload_commit, context.options, "payload-commit");
 
   std::string error;
   if (!VerifyPayload(install.install_dir, pins, &install.payload, &error)) {
@@ -884,6 +958,10 @@ int CommandVersion(const std::vector<std::string>& args) {
   context.summary.Flag("payload_download_pinned", pins.payload.HasDownload());
   context.summary.Text("ultimate", pins.ultimate.version);
   context.summary.Text("ultimate_url", pins.ultimate.url);
+  // The update channel, so a bug report can name what a launcher would look at and
+  // which release asked for the game files again.
+  context.summary.Text("update_manifest_url", pins.update.manifest_url);
+  context.summary.Flag("update_requires_game_data", pins.update.requires_game_data);
   context.summary.Text("game_fingerprints", "embedded");
   std::string line = S("helper ", kHelperVersion, ", installer ", pins.installer.version,
                        ", payload ", pins.payload.version);
@@ -912,6 +990,9 @@ constexpr CommandSpec kCommands[] = {
     {"probe-archive", CommandProbeArchive,
      "--archive <file> --kind payload|ultimate [--details <file>]",
      "kind entries sha256 root has_manifest required present complete description"},
+    {"fetch-update", CommandFetchUpdate, "--url <url> --dest <file>",
+     "schema_version version requires_game_data payload_version payload_url payload_sha256 "
+     "payload_size payload_commit bytes"},
     {"install-payload", CommandInstallPayload,
      "--dest <dir> [--from-pinned|--from-zip <p>|--from-dir <d>|--from-url <u>] [--sha256 <h>] "
      "[--size <n>] [--version <v>] [--progress <file>]",
@@ -929,13 +1010,14 @@ constexpr CommandSpec kCommands[] = {
      "game_dir evidence"},
     {"finalize", CommandFinalize,
      "--dest <dir> [--game-source <text>] [--payload-source <text>] [--payload-version <v>] "
-     "[--ultimate 0|1] [--ultimate-source <text>] [--ultimate-version <v>] "
+     "[--payload-commit <id>] [--ultimate 0|1] [--ultimate-source <text>] [--ultimate-version <v>] "
      "[--installer-version <v>]",
      "manifest report game_dir ultimate_installed"},
     {"uninstall-cleanup", CommandUninstallCleanup, "--dest <dir> [--keep-game-data]",
      "game_data_kept removed removed_items"},
     {"version", CommandVersion, "", "helper installer payload payload_commit "
                                     "payload_download_pinned ultimate ultimate_url "
+                                    "update_manifest_url update_requires_game_data "
                                     "game_fingerprints"},
 };
 

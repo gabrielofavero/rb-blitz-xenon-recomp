@@ -761,7 +761,8 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
   };
   if (!read_string("launch", "game_dir", &profile.game_dir) ||
       !read_string("launch", "user_data_dir", &profile.user_data_dir) ||
-      !read_string("launch", "dlc_dir", &profile.dlc_dir)) {
+      !read_string("launch", "dlc_dir", &profile.dlc_dir) ||
+      !read_string("update", "declined_version", &profile.update_declined_version)) {
     return result;
   }
 
@@ -832,10 +833,24 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
   for (const ProfileSetting& binding : profile.nav) {
     Schedule(layout, &pending, "nav", binding.key, binding.value, binding.style);
   }
+  // `[update]` is written only while it has something to say, like `[nav]`: a profile that
+  // has never declined an update has no table, and one whose decline is cleared loses it.
+  if (!profile.update_declined_version.empty()) {
+    Schedule(layout, &pending, "update", "declined_version", profile.update_declined_version,
+             ValueStyle::kBasic);
+  }
   // `[settings]`, `[remap]` and `[nav]` are modelled as a whole, so a key the model no longer has
   // is dropped. Everything outside them is untouched, which is what protects a newer launcher's
   // keys.
   for (const KeyRef& ref : layout.keys) {
+    if (ref.section == "update") {
+      // Only the one key this module owns is dropped, so anything a newer launcher records
+      // beside it survives the save.
+      if (ref.key == "declined_version" && profile.update_declined_version.empty()) {
+        pending.edits.push_back(Edit{ref.line_begin, ref.line_end, ""});
+      }
+      continue;
+    }
     const bool modelled =
         ref.section == "settings" || ref.section == "remap" || ref.section == "nav";
     if (!modelled) {
@@ -932,6 +947,12 @@ std::string RenderProfile(const Profile& profile) {
     for (const ProfileSetting& binding : profile.nav) {
       text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
     }
+  }
+  if (!profile.update_declined_version.empty()) {
+    text += newline;
+    text += "[update]" + newline;
+    text += "declined_version = " +
+            RenderValue(profile.update_declined_version, ValueStyle::kBasic) + newline;
   }
   return text;
 }

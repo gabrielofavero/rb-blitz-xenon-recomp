@@ -830,6 +830,22 @@ table, which `[functions]` cannot name.
 > two properties; the total is the one value the title is never told, so
 > [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp) gives it the library's
 > package count. R7's default stays **off**: the toggle is not stable enough to ship on yet.
+>
+> **What the scan itself costs, and the pool that answers for it (2026-10-07).** R7's cache removes
+> the library walk when the tree is unchanged, but the walk it removes is not disk work: measured on
+> `D:\Games\YARG Songs` and confirmed on never-touched trees, a *first* open of a file costs ~16 ms
+> while the same read warmed costs ~0.03 ms — a 500x gap charged per file rather than per byte, so
+> 2,170 untouched FFmpeg sources of 10-100 KB each measured the same 16.7 ms. A single-threaded cold
+> scan of the library is therefore **~22 s**, and every cache miss — a first boot, a refresh, or a
+> boot with the toggle off — paid all of it.
+> [src/fs/dlc_library.h](../../src/fs/dlc_library.h) now walks and merges on the calling thread, in
+> walk order, and reads the headers on a small pool: the production scan measured **5.6x faster per
+> file cold** (16.1 ms/file on one thread against 2.9 ms/file on eight, disjoint cold trees), ~4 s for
+> the library instead of ~22 s, with items, names, counters and rejections identical at any thread
+> count ([tests/dlc_library_tests.cpp](../../tests/dlc_library_tests.cpp) pins that). The
+> `dlc_scan_threads` cvar names the count (0 = the machine's cores, capped at 8) and is independent of
+> `enhancements_dlc_cache`: the pool speeds up the scan the cache falls back to, and the cache removes
+> the scan the pool would have run. [dlc.md](../dlc.md) §4.1.
 
 #### D3 — Controller-scheme force-on-load design
 

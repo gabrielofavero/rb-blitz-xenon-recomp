@@ -90,6 +90,8 @@ set(RBBLITZ_LAUNCHER_SOURCES
     src/settings_edit.cpp
     src/shell.cpp
     src/ultimate_state.cpp
+    src/update_check.cpp
+    src/update_launcher.cpp
     src/virtual_pad.cpp
     # The profile and remap modules are shared with the game and dependency-free on purpose
     # (P0.3, D16), which is what lets the launcher compile them too: the profile module is how
@@ -117,10 +119,16 @@ endif()
 # written again here, so a launcher and the installer that shipped it cannot claim to be different
 # releases. A release that stamps its version some other way (a tag, CI) passes it instead:
 # -DRBBLITZ_VERSION=1.2.3.
+#
+# The update channel is read from the same file, for the same reason (D19): a launcher that
+# checked a URL the release it shipped with did not publish would either find nothing or
+# find someone else's file, and neither is visible until a user complains.
+file(READ "${CMAKE_SOURCE_DIR}/installer/config/pins.toml" RBBLITZ_PINS_TOML)
+string(REGEX MATCH "\\[installer\\][^\\[]*" RBBLITZ_INSTALLER_PINS "${RBBLITZ_PINS_TOML}")
+string(REGEX MATCH "\\[update\\][^\\[]*" RBBLITZ_UPDATE_PINS "${RBBLITZ_PINS_TOML}")
+
 set(RBBLITZ_VERSION "" CACHE STRING "Version shown in the launcher's window title")
 if(RBBLITZ_VERSION STREQUAL "")
-    file(READ "${CMAKE_SOURCE_DIR}/installer/config/pins.toml" RBBLITZ_PINS_TOML)
-    string(REGEX MATCH "\\[installer\\][^\\[]*" RBBLITZ_INSTALLER_PINS "${RBBLITZ_PINS_TOML}")
     string(REGEX MATCH "version[ \t]*=[ \t]*\"([0-9][^\"]*)\"" RBBLITZ_PINS_VERSION
                  "${RBBLITZ_INSTALLER_PINS}")
     set(RBBLITZ_VERSION "${CMAKE_MATCH_1}")
@@ -132,10 +140,35 @@ if(RBBLITZ_VERSION STREQUAL "")
     endif()
 endif()
 
+# Where the launcher asks whether a newer release exists, and where it sends a user whose
+# update cannot be installed automatically. An empty manifest_url is a supported
+# configuration - a build with no release channel - and the launcher then checks nothing and
+# says nothing, which is what D19 asks of a check that cannot be completed.
+#
+# Read from pins.toml, or passed in: -DRBBLITZ_UPDATE_URL=<url> is what a build that has to
+# check a channel other than the release one uses (a staging release, or a test server serving
+# an update.toml - which is how --dump-update is exercised on a build machine without a
+# release existing yet). An empty value means "read pins.toml".
+set(RBBLITZ_UPDATE_URL "" CACHE STRING "Release manifest the launcher's update check fetches")
+if(RBBLITZ_UPDATE_URL STREQUAL "")
+    # Searched over the whole file rather than inside the [update] table: the key is written
+    # once, and a section-scoped match would end at the first bracket in a comment that
+    # explains the pins - which is how a documented value stops being read.
+    string(REGEX MATCH "manifest_url[ \t]*=[ \t]*\"([^\"]*)\"" RBBLITZ_UPDATE_MATCH
+                 "${RBBLITZ_PINS_TOML}")
+    set(RBBLITZ_UPDATE_URL "${CMAKE_MATCH_1}")
+endif()
+string(REGEX MATCH "homepage_url[ \t]*=[ \t]*\"([^\"]*)\"" RBBLITZ_HOMEPAGE_MATCH
+             "${RBBLITZ_INSTALLER_PINS}")
+set(RBBLITZ_HOMEPAGE_URL "${CMAKE_MATCH_1}")
+
 target_compile_features(rb_blitz_launcher PRIVATE cxx_std_20)
 # Quotes included: the macro is a C++ string literal in the launcher's sources, so the value has to
 # arrive as one command-line argument with the quotes still around it.
-target_compile_definitions(rb_blitz_launcher PRIVATE RBBLITZ_LAUNCHER_VERSION="${RBBLITZ_VERSION}")
+target_compile_definitions(rb_blitz_launcher PRIVATE
+    RBBLITZ_LAUNCHER_VERSION="${RBBLITZ_VERSION}"
+    RBBLITZ_LAUNCHER_UPDATE_URL="${RBBLITZ_UPDATE_URL}"
+    RBBLITZ_LAUNCHER_RELEASES_URL="${RBBLITZ_HOMEPAGE_URL}/releases/latest")
 
 # D1 puts the launcher next to rb_blitz.exe in the build root rather than beside this
 # file, because that is the directory the payload snapshot reads (P0.5) and the one a
@@ -165,8 +198,10 @@ target_link_libraries(rb_blitz_launcher PRIVATE imgui SDL3::SDL3)
 
 if(WIN32)
     # B8 opens the OS shell (the default browser for the pinned release URL, Explorer for the
-    # folder a manual install goes into) through ShellExecuteW.
-    target_link_libraries(rb_blitz_launcher PRIVATE shell32)
+    # folder a manual install goes into) through ShellExecuteW. D19's update check is one HTTPS
+    # GET, over WinHTTP, for the same reason the installer's helper uses it: it is part of
+    # Windows, it honours the machine's proxy configuration, and it needs no extra DLL.
+    target_link_libraries(rb_blitz_launcher PRIVATE shell32 winhttp)
 endif()
 
 # B7's launch contract, as a test: the argv the launcher hands the game is built from the

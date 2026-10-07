@@ -1374,8 +1374,98 @@ static void TestUltimate() {
 // The wizard only ever sees `--summary`, so a rejected command line has to leave
 // its reason there: a silent exit 2 is what the wizard reports as "the helper did
 // not say what went wrong".
-static void TestCommandLine() {
-  BeginCase("a rejected command line still reports through the summary");
+// The release manifest, and the command that fetches it (D19). The file the
+// repository generates is cross-checked against the pins it came from - drift
+// between them would make a launcher offer an update that cannot be installed, or
+// miss the one that can.
+static void TestUpdateManifest() {
+  BeginCase("the generated update manifest matches the pins it came from");
+
+  const fs::path manifest_path =
+      fs::path(RBBLITZ_INSTALLER_CONFIG_DIR) / ".." / "out" / "generated" / "update.toml";
+  const std::string text = ReadFileOrEmpty(manifest_path);
+  CHECK_FALSE(text.empty());
+
+  UpdateManifest manifest;
+  std::string error;
+  CHECK_TRUE(ParseUpdateManifest(text, &manifest, &error));
+  const Pins pins = EmbeddedPins();
+  CHECK_EQ(manifest.schema_version, kUpdateManifestSchemaVersion);
+  CHECK_STR_EQ(manifest.version, pins.installer.version);
+  CHECK_EQ(manifest.requires_game_data, pins.update.requires_game_data);
+  CHECK_STR_EQ(manifest.payload_version, pins.payload.version);
+  CHECK_STR_EQ(manifest.payload_url, pins.payload.url);
+  CHECK_STR_EQ(manifest.payload_sha256, pins.payload.sha256);
+  CHECK_EQ(manifest.payload_size, pins.payload.size);
+  CHECK_STR_EQ(manifest.payload_commit, pins.payload.commit);
+  // The repository ships no payload download pin, so its manifest has no payload
+  // to install from: the state both readers turn into "nothing to offer".
+  CHECK_EQ(manifest.HasPayload(), pins.payload.HasDownload());
+
+  BeginCase("a manifest an updater cannot use is refused");
+
+  // Absent is the one thing that means false: the flag describes the delta from
+  // the release before, and a manifest written before it existed is a
+  // payload-only release.
+  UpdateManifest loose;
+  CHECK_TRUE(ParseUpdateManifest("schema_version = 1\nversion = \"1.2.3\"\n", &loose, &error));
+  CHECK_FALSE(loose.requires_game_data);
+  CHECK_FALSE(loose.HasPayload());
+
+  CHECK_FALSE(ParseUpdateManifest("schema_version = 2\nversion = \"1.2.3\"\n", &loose, &error));
+  CHECK_CONTAINS(error, "schema_version");
+  CHECK_FALSE(ParseUpdateManifest("schema_version = 1\n", &loose, &error));
+  CHECK_CONTAINS(error, "version");
+  // A URL with nothing to check it against is refused rather than downloaded: the
+  // update path is the one place a wrong build could land silently.
+  CHECK_FALSE(ParseUpdateManifest(
+      "schema_version = 1\nversion = \"1.2.3\"\npayload_url = \"https://example.invalid/p.zip\"\n",
+      &loose, &error));
+  CHECK_CONTAINS(error, "payload");
+  CHECK_TRUE(ParseUpdateManifest(
+      "schema_version = 1\nversion = \"1.2.3\"\nrequires_game_data = true\n"
+      "payload_version = \"1.2.3\"\npayload_url = \"https://example.invalid/p.zip\"\n"
+      "payload_sha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n"
+      "payload_size = 4096\npayload_commit = \"1234567890ABCDEF1234567890ABCDEF12345678\"\n",
+      &loose, &error));
+  CHECK_TRUE(loose.requires_game_data);
+  CHECK_TRUE(loose.HasPayload());
+  CHECK_EQ(loose.payload_size, 4096u);
+  // Hashes and commit ids fold to lower case as they do everywhere else, so a
+  // manifest written in upper case still compares equal.
+  CHECK_STR_EQ(loose.payload_commit, "1234567890abcdef1234567890abcdef12345678");
+
+  BeginCase("fetch-update refuses a command line it cannot act on");
+
+  const fs::path summary = g_root / "update/summary.txt";
+  EnsureDirectory(g_root / "update", nullptr);
+  CHECK_EQ(RunCommand({"fetch-update", "--dest", (g_root / "update/update.toml").string(),
+                       "--summary", summary.string()}),
+           kFailedExitCode);
+  CHECK_CONTAINS(ReadFileOrEmpty(summary), "ok=0");
+  CHECK_CONTAINS(ReadFileOrEmpty(summary), "manifest_url");
+
+  BeginCase("finalize records the commit of the build an updater installed");
+
+  // An updater installs a payload the pinned commit of its own build does not
+  // describe, so the release manifest's commit is what it records. The folder here
+  // holds no payload, so the command fails on that - past the command line, which
+  // is what this checks.
+  const fs::path finalize_summary = g_root / "update/finalize.txt";
+  EnsureDirectory(g_root / "update/empty", nullptr);
+  CHECK_EQ(RunCommand({"finalize", "--dest", (g_root / "update/empty").string(), "--payload-commit",
+                       std::string(kStandInCommit), "--installer-version", "1.2.3", "--summary",
+                       finalize_summary.string()}),
+           kFailedExitCode);
+  const std::string finalize_text = ReadFileOrEmpty(finalize_summary);
+  CHECK_FALSE(finalize_text.find("unknown option") != std::string::npos);
+  CHECK_CONTAINS(finalize_text, "ok=0");
+}
+
+// The wizard only ever sees `--summary`, so a rejected command line has to leave
+// its reason there: a silent exit 2 is what the wizard reports as "the helper did
+// not say what went wrong".
+static void TestCommandLine() {  BeginCase("a rejected command line still reports through the summary");
 
   const fs::path summary = g_root / "cli/summary.txt";
   const fs::path space_summary = g_root / "cli/space.txt";
@@ -1428,6 +1518,7 @@ int main() {
   TestGameImport();
   TestPayloadAndFinalize();
   TestUltimate();
+  TestUpdateManifest();
   TestCommandLine();
 
   const int result = rb_blitz::test::Finish();

@@ -78,6 +78,13 @@ struct Profile {
   // whose contents can lock a user out of the window that would fix them, which is what
   // `--safe-mode` exists for.
   std::vector<ProfileSetting> nav;  // file order
+  // The `[update]` table (D19): the release version the user answered "no" to, and nothing
+  // when they have never been asked. It is remembered per version rather than as "the user
+  // said no once", which is what makes the launcher ask again when a release newer than the
+  // declined one arrives - and never again for the same one. Like `[nav]`, the table exists
+  // only while it has something in it, so a profile that has never met an update does not
+  // grow an empty one.
+  std::string update_declined_version;
 
   // The document as read, so a save can patch it. Empty when there was no file, in which
   // case a save renders a fresh one. Treat as read-only.

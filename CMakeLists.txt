@@ -409,6 +409,17 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_launcher_remap_tests PRIVATE src)
     add_test(NAME launcher_remap COMMAND rb_blitz_launcher_remap_tests)
+
+    # D19's update check: the release manifest, the version comparison, and the two decisions
+    # that come out of them (is there an update, and should the user be asked). Dependency-free
+    # like the profile tests - the fetch and the updater are launcher/src/update_launcher.cpp,
+    # which is the platform half and is not compiled here, so every rule is decided from text.
+    add_executable(rb_blitz_launcher_update_tests
+        tests/launcher_update_tests.cpp
+        launcher/src/update_check.cpp
+    )
+    target_include_directories(rb_blitz_launcher_update_tests PRIVATE launcher/src)
+    add_test(NAME launcher_update COMMAND rb_blitz_launcher_update_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,

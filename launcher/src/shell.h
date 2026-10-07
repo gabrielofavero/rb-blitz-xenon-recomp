@@ -34,6 +34,8 @@
 #include "schema_view.h"
 #include "settings_table.h"
 #include "ultimate_state.h"
+#include "update_check.h"
+#include "update_launcher.h"
 
 namespace rb_blitz::launcher {
 
@@ -48,6 +50,11 @@ struct ShellEnvironment {
   bool gamepads = true;
   // --focus-log: where the trace of the ring and the input devices goes, empty for nowhere.
   std::string focus_log_path;
+  // D19: where the launcher asks whether a newer release exists. Empty for a build with no
+  // release channel, which then checks nothing and says nothing. The URL is compiled in from
+  // installer/config/pins.toml - the same file the installer and the release manifest come
+  // from - so a launcher cannot check a release the installer beside it would not install.
+  std::string update_manifest_url;
 };
 
 class Shell {
@@ -70,6 +77,15 @@ class Shell {
   // the settings folder moved it.
   ProfileSession& session() { return session_; }
 
+  // D19: true once the user accepted the update prompt. The caller starts the updater and
+  // leaves - the launcher has to be gone before the update replaces it, and it opens again when
+  // the updater is done.
+  bool update_accepted() const { return update_accepted_; }
+
+  // What the update check has answered, for a report or a test. `--dump-update` uses the same
+  // rule on the same manifest, so what it prints is what this would decide.
+  const UpdateReport& update_report() const { return update_report_; }
+
  private:
   void ApplyAction(NavAction action);
   void RequestTab(int delta);
@@ -80,6 +96,12 @@ class Shell {
   bool DrawBottomBar();
   // B7: save what is unsaved, build Contract 3's command line and start the game.
   void LaunchGame();
+  // D19: the update prompt, opened by itself the first time a check finds a release the user
+  // has not already declined. Accepting starts the updater and leaves (UpdateAccepted); Not now
+  // records the version in the profile, so the question is asked once per release.
+  void DrawUpdatePrompt(NavAction action);
+  void AcceptUpdate();
+  void DeclineUpdate();
   // The bar's own two writes, split out of DrawBottomBar so a bound key (A5's Ctrl+S) does exactly
   // what the button does rather than a second copy of it: the save.
   void SaveProfile();
@@ -94,6 +116,11 @@ class Shell {
   // run.
   LaunchCommand CurrentLaunchCommand() const;
   void DrawLaunchModal(NavAction action);
+
+  // D19's check and what it has answered. The check itself runs on its own thread
+  // (update_launcher.h) so the window appears whether or not the network answers; this only
+  // reads what it has found, once per frame, and decides whether to ask the user.
+  void RefreshUpdateReport();
 
   // The one line the bar shows, and whether it is news (red), a warning (yellow) or just the
   // last thing that happened (dim).
@@ -163,6 +190,16 @@ class Shell {
   std::string launch_error_;
   bool launch_popup_requested_ = false;
   bool launch_modal_open_ = false;
+  // D19: the update check, what it has answered, and the prompt's own state. `update_asked_`
+  // is per session: the prompt is opened once, and never again while the launcher is running,
+  // whatever the user answers.
+  UpdateChecker update_check_;
+  UpdateReport update_report_;
+  std::string update_note_;  // the sentence the prompt shows after a fallback
+  bool update_asked_ = false;
+  bool update_prompt_requested_ = false;
+  bool update_prompt_open_ = false;
+  bool update_accepted_ = false;
   // What the trace last reported, so it writes a line when something changes and not sixty times
   // a second.
   bool logged_focus_ = false;

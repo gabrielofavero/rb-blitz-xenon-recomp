@@ -52,6 +52,34 @@ size = 0
 # (write one here, or pass -PayloadCommit <id>); empty means "record nothing".
 commit = "latest"
 
+[update]
+# How a launcher finds out that a newer release exists, and how it installs it
+# (docs/plans/launcher-plan.md D19, installer/README.md section "Updating").
+#
+# `manifest_url` is where the launcher looks on every start. tools/embed_config.cpp
+# compiles it into the launcher and also generates the file it points at
+# (out/generated/update.toml, published as the release asset `update.toml`), so the
+# version a launcher compares itself against is this file's installer version and
+# never a second copy of it. The URL names the *latest* release's asset on purpose:
+# GitHub redirects it, so a launcher built today keeps finding tomorrow's release
+# without being rebuilt.
+manifest_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases/latest/download/update.toml"
+# The folder, under the user's own local application data, that holds the updater
+# the setup executable puts on disk (RockBandBlitzUpdater.exe). It is deliberately
+# not the install folder: the launcher's folder carries the game and its payload, and
+# a second copy of an installer in it would be one more file to explain (and one more
+# file the payload audit has to allow). The launcher resolves the same folder, so the
+# two have to agree: see kUpdateDirName in launcher/src/update_launcher.cpp.
+dir_name = "rb_blitz"
+# Whether this release changes what the game reads out of the user's own game
+# files. `false` - the usual case, where a release only moves the recompiled
+# code around - installs the payload and keeps the game data that is already
+# there, going straight to the progress bar. `true` asks for the package or the
+# folder again, because this release's payload needs the data re-derived from it.
+# It describes the delta from the release before it, so it is written by whoever
+# cuts the release, and it travels in update.toml.
+requires_game_data = false
+
 [ultimate]
 # Rock Band Blitz Ultimate, a fan mod maintained at the repository below. Its
 # files are downloaded on demand from the upstream release - never mirrored,

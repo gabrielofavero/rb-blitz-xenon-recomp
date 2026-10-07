@@ -10,11 +10,24 @@
 ; Build it with build.ps1, which compiles the helper, refreshes the payload
 ; snapshot and calls ISCC. See README.md.
 ;
+; The same script is compiled twice, and /DUpdaterMode decides which of the two
+; builds the result is (README.md, section "Updating"):
+;
+;   the setup executable, as before - it embeds (or downloads) the payload and
+;   asks all four questions, and it puts RockBandBlitzUpdater.exe under the
+;   user's local application data;
+;
+;   the updater - the same wizard with the payload taken from the release
+;   manifest instead of its own build, and with the pages it has no question
+;   about removed. The launcher runs it when the user accepts an update, so it
+;   never carries a payload and never touches the install folder's shortcuts.
+;
 ; The directories below can be overridden from the command line so a release can
 ; point at artefacts built elsewhere:
-;   /DGeneratedDir=<dir>  holds pins.iss and a copy of the helper
+;   /DGeneratedDir=<dir>  holds pins.iss, update.toml, a copy of the helper and
+;                         the updater the setup embeds
 ;   /DPayloadDir=<dir>    holds the recompiled build that gets embedded
-;   /DDistDir=<dir>       receives the setup executable
+;   /DDistDir=<dir>       receives the setup executable (and the updater)
 ;   /DArtDir=<dir>        optional side wizard image (default: the repository's
 ;                         assets\ directory; see tools/make_art.ps1)
 ; ---------------------------------------------------------------------------
@@ -48,6 +61,17 @@
 #define LauncherExeName "rb_blitz_launcher.exe"
 #define GameDirName "game"
 
+; The updater the setup executable places under the user's local application data
+; (see "Updating" in README.md). build.ps1 compiles it from this same script with
+; /DUpdaterMode=1 before the setup, so the setup can embed it - a build without it
+; is refused below rather than shipping a launcher whose Update button cannot work.
+#ifndef UpdaterExeName
+  #define UpdaterExeName "RockBandBlitzUpdater.exe"
+#endif
+#ifndef UpdaterExePath
+  #define UpdaterExePath GeneratedDirPath + UpdaterExeName
+#endif
+
 #if !FileExists(GeneratedDirPath + "pins.iss")
   #error pins.iss is missing from the generated directory: run build.ps1 (or the helper build) first.
 #endif
@@ -57,11 +81,20 @@
   #error the helper is missing from the generated directory: build.ps1 copies it there.
 #endif
 
+#ifndef UpdaterMode
+  #if !FileExists(UpdaterExePath)
+    #error the updater is missing from the generated directory: build.ps1 compiles it before the setup.
+  #endif
+#endif
+
 ; Without a pinned download the recompiled build has to travel inside the setup
 ; executable, so the payload directory must have been made first. With a pinned
-; download it is fetched at install time and nothing is embedded.
-#if (PayloadHasDownload == 0) && (!FileExists(PayloadDirPath + "payload-manifest.toml"))
-  #error no payload to embed: pass /DPayloadUrl and /DPayloadSha256, or create the payload snapshot first.
+; download it is fetched at install time and nothing is embedded. The updater
+; never embeds one: it installs the payload its release manifest names.
+#ifndef UpdaterMode
+  #if (PayloadHasDownload == 0) && (!FileExists(PayloadDirPath + "payload-manifest.toml"))
+    #error no payload to embed: pass /DPayloadUrl and /DPayloadSha256, or create the payload snapshot first.
+  #endif
 #endif
 
 ; Setup's version resource needs four components; the app version has three.
@@ -102,7 +135,9 @@ OutputBaseFilename=RockBandBlitzSetup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+#ifndef UpdaterMode
 DisableWelcomePage=no
+#endif
 ShowLanguageDialog=no
 SetupLogging=yes
 SetupIconFile={#ProjectDirPath}assets\blitz.ico
@@ -154,22 +189,44 @@ DiskSpaceMBLabel=The game data you provide is not counted here; the free space i
 ; stays unchecked, as it always has been. A silent install creates every checked
 ; task, except the launcher's desktop shortcut, which only /LAUNCHERICON=1 asks
 ; for (see README.md).
+;
+; The updater has no shortcuts page and creates none: the install it is updating
+; already has whatever the user asked for, and re-creating a shortcut the user has
+; since deleted is not an update's job.
+#ifndef UpdaterMode
 Name: "startmenu"; Description: "Create a &Start menu shortcut for the game"
 Name: "startmenulauncher"; Description: "Create a Start menu shortcut for the &launcher"
 Name: "launchericon"; Description: "Create a &desktop shortcut for the launcher"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
+#endif
 
 [Files]
 ; The wizard needs the helper while it is still on screen (to check the user's
 ; choices and the free space), so it is extracted to the temporary directory as
 ; well. Temporary files must sit at the very top when solid compression is on.
 Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{tmp}"; Flags: dontcopy noencryption
+#ifndef UpdaterMode
+; The helper lands in the install folder with the rest of the wizard's own files.
 Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: ignoreversion
-#if PayloadHasDownload == 0
+#else
+; The updater repairs a missing helper but never replaces one that is there. Its own
+; helper is the build of whatever release last put this updater in place, which can be
+; older than the helper a later release left behind; copying it over would be an update
+; that moved a file backwards. A full install is what refreshes the helper.
+Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: onlyifdoesntexist
+#endif
+#ifndef UpdaterMode
+; The updater, under the user's local application data rather than in the install
+; folder: the launcher looks for it there, and the install folder is the game's own
+; (the payload audit lists what may ship in it). It is small - a wizard with no
+; payload in it - and [UninstallDelete] takes it away again.
+Source: "{#UpdaterExePath}"; DestDir: "{localappdata}\{#UpdateDirName}\update"; Flags: ignoreversion
+  #if PayloadHasDownload == 0
 ; The recompiled build and its runtime DLLs, straight into the install folder.
 ; The payload directory is a plain snapshot of the release build (see
 ; tools/make_payload.ps1); its dev-only configuration file is not part of it.
 Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+  #endif
 #endif
 
 [Icons]
@@ -177,10 +234,12 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 ; names a Start-menu list can tell apart. The game's keeps its --game_data_root
 ; argument: it must stay runnable without the launcher (Contract 4). The
 ; launcher's takes none; it finds the game beside itself.
+#ifndef UpdaterMode
 Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: startmenu
 Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: startmenulauncher
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: launchericon
+#endif
 
 ; D8 replaced the single postinstall [Run] entry with the finish page's three-way
 ; choice (see [Code] below): Inno can run at most one entry with a checkbox, and
@@ -204,6 +263,11 @@ Type: files; Name: "{app}\game-source-details.txt"
 Type: files; Name: "{app}\install.log"
 Type: filesandordirs; Name: "{app}\.staging"
 Type: filesandordirs; Name: "{app}\{#GameDirName}\.staging"
+; The updater the setup placed under the user's local application data, and the
+; folder it lives in. It is outside the install folder on purpose (D19): the
+; launcher runs it, and a second copy of an installer inside the game's own
+; directory would be one more file the payload audit has to allow.
+Type: filesandordirs; Name: "{localappdata}\{#UpdateDirName}\update"
 Type: dirifempty; Name: "{app}"
 
 [Code]
@@ -248,6 +312,14 @@ const
   UltimateHeaderRel = 'gen\patch_xbox.hdr';
   UltimateWrapperDir = 'Xbox';
 
+  { The updater: a second build of this script (/DUpdaterMode=1) that carries no
+    payload and installs the build the release manifest names. The setup executable
+    puts it under the user's local application data, where the launcher looks for it
+    (launcher/src/update_launcher.cpp resolves the same folder). }
+  UpdaterDirName = '{#UpdateDirName}';
+  UpdaterLeafDir = 'update';
+  UpdateManifestRel = 'rbblitz-update.toml';
+
   { Silent-mode parameters (see README.md). }
   MethodParam = 'GAMEMETHOD';
   GameFolderParam = 'GAMEFOLDER';
@@ -290,6 +362,9 @@ const
   PayloadSizeBytes = {#PayloadSize};
   PayloadIsDownload = {#PayloadHasDownload};
   UltimateArchiveBytes = {#UltimateSize};
+  { The release manifest a launcher checks and the updater installs from. Empty in
+    a build that has no release channel, which the updater then says out loud. }
+  UpdateManifestUrl = '{#UpdateManifestUrl}';
 
 var
   MethodPage: TInputOptionWizardPage;
@@ -320,6 +395,7 @@ var
   gPayloadDownload: Boolean;
   gPayloadSource: String;
   gPayloadVersion: String;
+  gPayloadSize: Int64;
   gUltimateActive: Boolean;
   gUltimateMode: String;
   gUltimateArchive: String;
@@ -331,6 +407,20 @@ var
   gFinishReached: Boolean;
   gRunAtEnd: String;
   gStageVisible: Boolean;
+
+  { The updater's own state (see "Updating" in README.md). It is initialised either
+    way - the setup executable reads none of it - so the same code compiles into
+    both builds without a second set of globals. }
+  gUpdater: Boolean;
+  gUpdateManifestFile: String;
+  gUpdateTargetDir: String;
+  gUpdateVersion: String;
+  gUpdateRequiresGameData: Boolean;
+  gUpdatePayloadVersion: String;
+  gUpdatePayloadUrl: String;
+  gUpdatePayloadSha256: String;
+  gUpdatePayloadCommit: String;
+  gUpdatePayloadSize: Int64;
 
   EndGameRadio: TNewRadioButton;
   EndLauncherRadio: TNewRadioButton;
@@ -362,6 +452,20 @@ begin
     Result := leaf
   else
     Result := AddBackslash(root) + leaf;
+end;
+
+// The scratch files every stage and probe writes. Resolved before the first page
+// rather than in InitializeWizard, because the updater reads the release manifest
+// from here while Setup is still deciding which pages to show.
+procedure InitTempPaths;
+begin
+  gTempDir := ExpandConstant('{tmp}');
+  gStageSummaryFile := JoinPath(gTempDir, 'rbblitz-stage-summary.txt');
+  gProbeSummaryFile := JoinPath(gTempDir, 'rbblitz-probe-summary.txt');
+  gProbeDetailsFile := JoinPath(gTempDir, 'rbblitz-probe-details.txt');
+  gProbeLogFile := JoinPath(gTempDir, 'rbblitz-probe.log');
+  gProgressFile := JoinPath(gTempDir, 'rbblitz-progress.txt');
+  gUpdateManifestFile := JoinPath(gTempDir, UpdateManifestRel);
 end;
 
 // Inno Setup only expands constants that are written out literally, hence one
@@ -414,6 +518,15 @@ procedure ResolveRunAtEnd;
 var
   requested: String;
 begin
+  // An update ends where it started: the launcher is what asked the user, and
+  // coming back to it - one release newer - is what the user agreed to. The three
+  // finish-page radios are not shown for it either (CurPageChanged), so this is the
+  // only thing that decides.
+  if gUpdater then
+  begin
+    gRunAtEnd := RunAtEndLauncher;
+    Exit;
+  end;
   requested := ParamRunAtEnd;
   if requested <> '' then
     gRunAtEnd := requested
@@ -615,6 +728,70 @@ begin
   Result := SummaryFlag(gProbeSummaryFile, 'ok');
 end;
 
+// --- the release manifest (the updater) -----------------------------------
+
+// Fetches update.toml - what the newest release is, where its payload is and
+// whether it needs the user's game files again - and fills the gUpdate* globals.
+// Runs before the first page is chosen, because both answers decide which pages
+// this wizard shows at all, and a wizard that asked for the package and then
+// found out it was not needed would have asked a question for nothing.
+//
+// Failing here ends Setup: the updater has no payload of its own, so there is
+// nothing it could install without the manifest, and saying so is the only honest
+// answer. The launcher's Update button is still there, so the user can try again.
+function FetchUpdateManifest: Boolean;
+var
+  reason: String;
+begin
+  Result := False;
+  gUpdateRequiresGameData := False;
+  gUpdatePayloadVersion := '';
+  gUpdatePayloadUrl := '';
+  gUpdatePayloadSha256 := '';
+  gUpdatePayloadCommit := '';
+  gUpdatePayloadSize := 0;
+
+  if UpdateManifestUrl = '' then
+  begin
+    SuppressibleMsgBox('This updater was built without an update channel, so it cannot find ' +
+                       'out what to install.' + kCrLf + kCrLf +
+                       'Download the newest setup from the release page instead.',
+                       mbError, MB_OK, IDOK);
+    Exit;
+  end;
+
+  DeleteFile(gUpdateManifestFile);
+  if not RunQuietProbe('fetch-update --url ' + QuoteArg(UpdateManifestUrl) +
+                       ' --dest ' + QuoteArg(gUpdateManifestFile)) then
+  begin
+    reason := HelperError(gProbeSummaryFile);
+    SuppressibleMsgBox('The newest release could not be checked:' + kCrLf + kCrLf + reason + kCrLf + kCrLf +
+                       'Check the internet connection and try the update again.',
+                       mbError, MB_OK, IDOK);
+    Exit;
+  end;
+
+  gUpdateVersion := Trim(SummaryText(gProbeSummaryFile, 'version', ''));
+  if gUpdateVersion = '' then
+  begin
+    SuppressibleMsgBox('The release manifest does not say which version it is, so nothing was ' +
+                       'installed.' + kCrLf + kCrLf +
+                       'Download the newest setup from the release page instead.',
+                       mbError, MB_OK, IDOK);
+    Exit;
+  end;
+
+  gUpdateRequiresGameData := SummaryFlag(gProbeSummaryFile, 'requires_game_data');
+  gUpdatePayloadVersion := Trim(SummaryText(gProbeSummaryFile, 'payload_version', gUpdateVersion));
+  gUpdatePayloadUrl := Trim(SummaryText(gProbeSummaryFile, 'payload_url', ''));
+  gUpdatePayloadSha256 := Trim(SummaryText(gProbeSummaryFile, 'payload_sha256', ''));
+  gUpdatePayloadCommit := Trim(SummaryText(gProbeSummaryFile, 'payload_commit', ''));
+  gUpdatePayloadSize := SummaryBytes(gProbeSummaryFile, 'payload_size');
+  if gUpdatePayloadVersion = '' then
+    gUpdatePayloadVersion := gUpdateVersion;
+  Result := True;
+end;
+
 function ProgressLine(const index: Integer): String;
 var
   lines: TArrayOfString;
@@ -770,15 +947,30 @@ begin
   Result := JoinPath(WizardDirValue, GameDirName);
 end;
 
-function GameDataPresent: Boolean;
+// The two files whose presence means "there is a usable game root in this folder".
+// Written once because three callers ask it about three different folders: the
+// wizard's destination, and - in the updater - the install the registry names.
+function GameDataIn(const dir: String): Boolean;
 begin
   Result := False;
-  if WizardDirValue = '' then
+  if dir = '' then
     Exit;
-  if not DirExists(GameDataDirectory) then
-    Exit;
-  Result := FileExists(JoinPath(GameDataDirectory, GameEntryPointRel)) and
-            FileExists(JoinPath(GameDataDirectory, GameArchiveDataRel));
+  Result := FileExists(JoinPath(JoinPath(dir, GameDirName), GameEntryPointRel)) and
+            FileExists(JoinPath(JoinPath(dir, GameDirName), GameArchiveDataRel));
+end;
+
+function GameDataPresent: Boolean;
+begin
+  Result := GameDataIn(WizardDirValue);
+end;
+
+// Whether the updater still has to ask where the game data comes from: the release
+// says its payload changes what the game reads out of it, or the data is not in the
+// install folder any more (deleted, or the install was moved by hand). Both are the
+// same question to the wizard - the game-data pages - so it is asked once, here.
+function UpdateNeedsGamePages: Boolean;
+begin
+  Result := gUpdateRequiresGameData or (not GameDataIn(gUpdateTargetDir));
 end;
 
 procedure ProbeGameFolder(const folder: String);
@@ -871,6 +1063,15 @@ function ChosenGameMethod: Integer;
 var
   method, folder, package: String;
 begin
+  if gUpdater and (not UpdateNeedsGamePages) then
+  begin
+    // The game-data pages were not shown, so there is no answer to read: the data
+    // that is already in the install folder is kept, and UpdateNeedsGamePages has
+    // just checked it is complete.
+    Result := MethodInstalled;
+    Exit;
+  end;
+
   if not WizardSilent then
   begin
     Result := MethodPage.SelectedValueIndex;
@@ -1040,8 +1241,8 @@ begin
   Result := gGameSourceBytes + FreeSpaceSlackMiB * MegabyteBytes;
   if gPayloadDownload then
   begin
-    if PayloadSizeBytes > 0 then
-      Result := Result + Times(PayloadSizeBytes, 3)
+    if gPayloadSize > 0 then
+      Result := Result + Times(gPayloadSize, 3)
     else
       Result := Result + PayloadDownloadFallbackMiB * MegabyteBytes;
   end
@@ -1154,11 +1355,33 @@ begin
   Result := MsgBox(question, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 end;
 
+// The version an install records in the Add/Remove Programs entry. Inno Setup
+// writes its own AppVersion there, which is the version of the *executable* that
+// ran - and an updater is an older build than the release it installs, so it has
+// to correct the entry afterwards (D19). Without this, a machine that has been
+// updated twice would report the version of the first updater it ever ran, and the
+// next real install would offer to "update" an install that is already newer.
+procedure WriteInstalledVersion(const version: String);
+var
+  root: Integer;
+begin
+  if version = '' then
+    Exit;
+  if IsAdminInstallMode then
+    root := HKLM
+  else
+    root := HKCU;
+  if not RegWriteStringValue(root, UninstallKey, 'DisplayVersion', version) then
+    Log('could not record the installed version ' + version + ' in the uninstall entry');
+end;
+
 // ==========================================================================
 // wizard events
 // ==========================================================================
 
 function InitializeSetup: Boolean;
+var
+  targetDir, installedVersion: String;
 begin
   gFailed := False;
   gFailureText := '';
@@ -1169,23 +1392,55 @@ begin
   gUltimateActive := False;
   gUltimateMode := 'none';
   gPayloadDownload := PayloadIsDownload <> 0;
+  gPayloadSize := PayloadSizeBytes;
+  gUpdater := False;
+  gUpdateTargetDir := '';
+  InitTempPaths;
+
+#ifdef UpdaterMode
+  // The updater's first question is the release manifest, not the user: it is what
+  // says which build to install and whether this update needs the game files again.
+  // Both answers decide which pages exist for this run, so it is fetched before the
+  // first one is shown.
+  gUpdater := True;
+  gRunAtEnd := RunAtEndLauncher;
+  if not FetchUpdateManifest then
+  begin
+    Result := False;
+    Exit;
+  end;
+  // What it installs over has to be there: an updater has no destination page and
+  // no payload of its own, so with no install to update it would write into the
+  // default folder as if it were a fresh install.
+  if not PreviousInstall(targetDir, installedVersion) then
+  begin
+    SuppressibleMsgBox('This updater updates an installation that is already on this machine, ' +
+                       'and there is none.' + kCrLf + kCrLf +
+                       'Run the setup executable once to install Rock Band Blitz first.',
+                       mbError, MB_OK, IDOK);
+    Result := False;
+    Exit;
+  end;
+  gUpdateTargetDir := targetDir;
+  Log('updater: ' + installedVersion + ' -> ' + gUpdateVersion + ' in ' + targetDir);
+  // The payload is always downloaded: an updater carries none of its own, and the
+  // release manifest names the one this version installs.
+  gPayloadDownload := True;
+  gPayloadSize := gUpdatePayloadSize;
+  Result := True;
+#else
   // Asked before the first page: an install that is already on the machine is the
   // one thing the wizard has to settle before the user starts answering, and No
   // ends setup without touching anything.
   Result := ConfirmExistingInstall;
+#endif
 end;
 
 procedure InitializeWizard;
 var
   index: Integer;
 begin
-  gTempDir := ExpandConstant('{tmp}');
   gAppDir := '';
-  gStageSummaryFile := JoinPath(gTempDir, 'rbblitz-stage-summary.txt');
-  gProbeSummaryFile := JoinPath(gTempDir, 'rbblitz-probe-summary.txt');
-  gProbeDetailsFile := JoinPath(gTempDir, 'rbblitz-probe-details.txt');
-  gProbeLogFile := JoinPath(gTempDir, 'rbblitz-probe.log');
-  gProgressFile := JoinPath(gTempDir, 'rbblitz-progress.txt');
 
   MethodPage := CreateInputOptionPage(wpSelectDir,
     'Xbox 360 Game Files',
@@ -1278,6 +1533,29 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
+#ifdef UpdaterMode
+  // The updater asks as little as it can, and nothing it can answer itself: no
+  // welcome, no folder (Inno Setup keeps the one the install was registered with),
+  // no shortcuts (the install already has them), no Ultimate pages (the mod is
+  // neither reinstalled nor removed), and no summary - the answers are the
+  // wizard's own, so there is nothing for the user to confirm.
+  //
+  // The game-data pages are the exception: this release may need the user's files
+  // again, and then they are the whole reason the update cannot simply run.
+  if (PageID = wpWelcome) or (PageID = wpSelectDir) or (PageID = wpSelectTasks) or
+     (PageID = wpReady) or (PageID = UltimatePage.ID) or (PageID = UltimateZipPage.ID) or
+     (PageID = UltimateFolderPage.ID) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if (not UpdateNeedsGamePages) and ((PageID = MethodPage.ID) or (PageID = FolderPage.ID) or
+                                     (PageID = PackagePage.ID)) then
+  begin
+    Result := True;
+    Exit;
+  end;
+#endif
   if WizardSilent then
   begin
     Result := (PageID = MethodPage.ID) or (PageID = FolderPage.ID) or (PageID = PackagePage.ID) or
@@ -1411,6 +1689,11 @@ var
 begin
   NeedsRestart := False;
   gAppDir := WizardDirValue;
+  // The updater has no destination page, so the folder the install is registered
+  // with is the destination - the same one Inno Setup would have pre-selected, read
+  // here so the install cannot land beside an installation it is updating.
+  if gUpdater and (gUpdateTargetDir <> '') then
+    gAppDir := gUpdateTargetDir;
   gLogFile := JoinPath(gAppDir, 'install.log');
   gGameDetailsFile := JoinPath(gAppDir, 'game-source-details.txt');
   gFailureText := '';
@@ -1497,7 +1780,18 @@ var
   args: String;
   method: Integer;
   problem: String;
+  installerVersion: String;
 begin
+  // The registry entry Inno Setup wrote carries the version of the executable that
+  // ran, which for an updater is older than the release it just installed. Corrected
+  // after Setup's own work, so this is the value the next install reads back.
+  if CurStep = ssDone then
+  begin
+    if gUpdater and gInstalled then
+      WriteInstalledVersion(gUpdateVersion);
+    Exit;
+  end;
+
   if CurStep <> ssPostInstall then
     Exit;
 
@@ -1509,7 +1803,31 @@ begin
   BeginStages;
 
   // 1. the recompiled build
-  if gPayloadDownload then
+  if gUpdater then
+  begin
+    // An updater has no payload of its own: the release manifest names the build
+    // this version installs, and the helper downloads and verifies it the same way
+    // it does for a pinned release.
+    args := 'install-payload --dest ' + QuoteArg(gAppDir) +
+            ' --from-url ' + QuoteArg(gUpdatePayloadUrl) +
+            ' --sha256 ' + QuoteArg(gUpdatePayloadSha256) +
+            ' --size ' + Int64ToStr(gUpdatePayloadSize) +
+            ' --version ' + QuoteArg(gUpdatePayloadVersion);
+    if not RunStage('Installing the new build',
+                    'Downloading the recompiled build this release ships and checking it...',
+                    args, PayloadStart, PayloadEnd) then
+    begin
+      gFailed := True;
+      EndStages;
+      SuppressibleMsgBox('The new build could not be installed:' + kCrLf + kCrLf + gFailureText +
+                         kCrLf + kCrLf +
+                         'Nothing was changed. Check your internet connection and run the ' +
+                         'update again from the launcher.', mbError, MB_OK, IDOK);
+      Exit;
+    end;
+    NoteSource(gStageSummaryFile, 'source', 'version', gPayloadSource, gPayloadVersion);
+  end
+  else if gPayloadDownload then
   begin
     args := 'install-payload --dest ' + QuoteArg(gAppDir) + ' --from-pinned';
     if not RunStage('Downloading the recompiled build',
@@ -1590,13 +1908,21 @@ begin
   end;
 
   // 4. the record of what is on disk
+  if gUpdater then
+    installerVersion := gUpdateVersion
+  else
+    installerVersion := '{#AppVersion}';
   args := 'finalize --dest ' + QuoteArg(gAppDir) +
           ' --game-source ' + QuoteArg(gGameSourceDescription) +
-          ' --installer-version ' + QuoteArg('{#AppVersion}');
+          ' --installer-version ' + QuoteArg(installerVersion);
   if gPayloadSource <> '' then
     args := args + ' --payload-source ' + QuoteArg(gPayloadSource);
   if gPayloadVersion <> '' then
     args := args + ' --payload-version ' + QuoteArg(gPayloadVersion);
+  // The pinned commit is the build this *updater* was built from; the manifest's is
+  // the build it just installed, which is the one the install manifest should name.
+  if gUpdater and (gUpdatePayloadCommit <> '') then
+    args := args + ' --payload-commit ' + QuoteArg(gUpdatePayloadCommit);
   if gUltimateActive then
   begin
     args := args + ' --ultimate 1';
@@ -1740,13 +2066,13 @@ begin
 end;
 
 // D8: place and arm the finish page's choice. A failed install has nothing to
-// run, and a silent one has no page to ask on, so the radios only appear on a
-// successful interactive install.
+// run, a silent one has no page to ask on, and an update has already been told
+// what to do - so the radios only appear on a successful interactive install.
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID <> wpFinished then
     Exit;
-  if gFailed or WizardSilent then
+  if gUpdater or gFailed or WizardSilent then
   begin
     EndGameRadio.Visible := False;
     EndLauncherRadio.Visible := False;

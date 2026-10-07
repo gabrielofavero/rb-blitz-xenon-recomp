@@ -142,6 +142,18 @@ class ProfileSession {
   // is what that looks like.
   SaveOutcome SaveWindowGeometry(int width, int height);
 
+  // D19: records the release version the user answered "Not now" to, so the launcher does not
+  // ask about it again - in this session or in any later one. A newer release than the recorded
+  // one is asked about on its own, which is the whole reason the version is what is written
+  // rather than "the user said no once".
+  //
+  // The same shape as the geometry write: only a version that actually differs is written (a
+  // second "Not now" for the same release touches nothing), what is written is the profile as
+  // the file last had it plus this, and a file the launcher could not parse is left alone unless
+  // safe mode was asked for - the user's answer to an update prompt is not a request to replace
+  // a settings file this build could not read.
+  SaveOutcome SaveUpdateDeclined(const std::string& version);
+
   // Adopts another document as this session's profile: a backup, another machine's file, or a
   // hand-edited one. A file that does not parse is refused and nothing changes - the file the
   // user picked is left exactly where it is (B4's "do not delete a file you failed to parse").

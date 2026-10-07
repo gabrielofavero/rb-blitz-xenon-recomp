@@ -287,6 +287,15 @@ bool Pins::Validate(std::string* error) const {
   if (SafeRelativePath(ultimate.destination_dir, &reason).empty()) {
     return fail(S("[ultimate] ", reason));
   }
+  // A build with no release channel is a supported configuration (a payload built
+  // from a working tree, say), so the URL may be empty; the folder the updater
+  // goes in may not, because the wizard resolves it either way.
+  if (update.dir_name.empty()) {
+    return fail("[update] dir_name is required");
+  }
+  if (SafeRelativePath(update.dir_name, &reason).empty()) {
+    return fail(S("[update] ", reason));
+  }
   return true;
 }
 
@@ -299,9 +308,11 @@ bool ParsePins(std::string_view text, Pins* out, std::string* error) {
   const TomlTable* installer_table = document.Find("installer");
   const TomlTable* payload_table = document.Find("payload");
   const TomlTable* ultimate_table = document.Find("ultimate");
-  if (installer_table == nullptr || payload_table == nullptr || ultimate_table == nullptr) {
+  const TomlTable* update_table = document.Find("update");
+  if (installer_table == nullptr || payload_table == nullptr || ultimate_table == nullptr ||
+      update_table == nullptr) {
     if (error != nullptr) {
-      *error = "pins.toml must contain [installer], [payload] and [ultimate]";
+      *error = "pins.toml must contain [installer], [payload], [ultimate] and [update]";
     }
     return false;
   }
@@ -334,10 +345,61 @@ bool ParsePins(std::string_view text, Pins* out, std::string* error) {
   pins.ultimate.archive_prefix = ReadString(ultimate_table, "archive_prefix");
   pins.ultimate.destination_dir = ReadString(ultimate_table, "destination_dir");
 
+  pins.update.manifest_url = ReadString(update_table, "manifest_url");
+  pins.update.dir_name = ReadString(update_table, "dir_name");
+  pins.update.requires_game_data = update_table->GetBool("requires_game_data", false);
+
   if (!pins.Validate(error)) {
     return false;
   }
   *out = std::move(pins);
+  return true;
+}
+
+bool ParseUpdateManifest(std::string_view text, UpdateManifest* out, std::string* error) {
+  TomlDocument document;
+  if (!ParseTomlSubset(text, &document, error)) {
+    return false;
+  }
+  const TomlTable* root = document.Find("");
+  if (root == nullptr) {
+    SetError(error, "update.toml has no keys");
+    return false;
+  }
+
+  UpdateManifest manifest;
+  manifest.schema_version = static_cast<int>(root->GetUnsigned("schema_version", 0));
+  if (manifest.schema_version != kUpdateManifestSchemaVersion) {
+    SetError(error, S("update.toml says schema_version ", manifest.schema_version,
+                      ", which this build does not understand (it knows ",
+                      kUpdateManifestSchemaVersion,
+                      "): download the newest setup from the release page instead"));
+    return false;
+  }
+  manifest.version = ReadString(root, "version");
+  if (manifest.version.empty()) {
+    SetError(error, "update.toml has no version");
+    return false;
+  }
+  // Absent means false: a release that changes the files the game reads has to say
+  // so, and one that does not is the case that keeps the game data.
+  manifest.requires_game_data = root->GetBool("requires_game_data", false);
+  manifest.payload_version = ReadString(root, "payload_version");
+  manifest.payload_url = ReadString(root, "payload_url");
+  manifest.payload_sha256 = Lower(ReadString(root, "payload_sha256"));
+  manifest.payload_size = root->GetUnsigned("payload_size", 0);
+  manifest.payload_commit = Lower(ReadString(root, "payload_commit"));
+
+  // Only a manifest that pins a download to install from has to be complete. The
+  // launcher reads the same file to decide whether to offer an update at all, and
+  // treats the absence of a payload source as "nothing to offer" rather than as a
+  // reason to say something.
+  if (!manifest.payload_url.empty() &&
+      (!IsSha256Hex(manifest.payload_sha256) || manifest.payload_size == 0)) {
+    SetError(error, "update.toml pins a payload url without a 64-character sha256 and a size");
+    return false;
+  }
+  *out = std::move(manifest);
   return true;
 }
 

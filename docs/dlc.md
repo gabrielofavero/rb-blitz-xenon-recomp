@@ -121,9 +121,12 @@ explicit `--license_mask=0` (the trial path) is returned unchanged.
 `ContentManager::set_extra_content_root()` resolves §2 by building a path from the
 title id and content type; a library item has no such path, so it is handed to
 `ContentManager::set_extra_content_library()` instead, and both the enumerator and
-the open path consult the same list. The host half — the recursive scan, the header
+the open path consult the same list. The host half — the recursive walk, the header
 read and the name — is [src/fs/dlc_library.h](../src/fs/dlc_library.h), pinned by
-[tests/dlc_library_tests.cpp](../tests/dlc_library_tests.cpp).
+[tests/dlc_library_tests.cpp](../tests/dlc_library_tests.cpp). A cold library's
+headers are read on a pool, because that read is the whole cost of a scan; the walk and
+the merge stay on the calling thread in walk order, so the result does not depend on how
+many threads read it (§4.1).
 
 ## 3. Configuration
 
@@ -132,6 +135,7 @@ read and the name — is [src/fs/dlc_library.h](../src/fs/dlc_library.h), pinned
 | `--dlc_root`, or `dlc_root` in `rb_blitz.toml` | `<game_data_root>/dlc` | root of the layout in §2; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library`, or `dlc_library` in `rb_blitz.toml` | *(empty)* | `;`-separated folders of §2.1; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
+| `--dlc_scan_threads` | `0` | threads that read a §2.1 library's package headers: `0` uses the machine's core count (capped at 8), `1` reads them on the calling thread (§4.1). The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | off | R7: persist the library enumeration (§4.1) and reuse it while the tree it describes is unchanged, and drop the emulator's per-package mount latency for the run; changing it needs a relaunch |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's last row asks for the same thing in a running title (§4.1) |
 
@@ -172,6 +176,29 @@ machine's `D:\Games\YARG Songs` (1,402 packages, 28.4 GB, exFAT) that open-and-r
 takes ~0.7 s warm, every boot, before the guest even starts; a stat-only walk of the
 same tree takes ~0.18 s. R7 stores the scan's *result* so the second number, plus a
 comparison, is all a boot pays.
+
+**A cold read is 500x a warm one, and it is what a scan actually costs.** Measured
+2026-10-07 on the same library: a *first* open of each package costs **~16 ms per
+file**, the same scan run again costs **~0.03 ms per file**, and the walk between them
+is ~2 ms for all 1,402 entries. A 500x gap on the same bytes is not the SSD, and it is
+charged *per file* rather than per byte: 2,170 never-touched FFmpeg sources of 10-100 KB
+each measured the same 16.7 ms cold against 0.035 ms warm. It is whatever inspects a
+file the antivirus has not seen yet — so a single-threaded cold walk of
+`D:\Games\YARG Songs` is **~22 s** (measured), and the only ways past it are to not open
+the files (the cache, below) or to overlap the opens.
+
+**The scan reads the headers on a pool.** Because the cost is serialized per file and
+independent of file size, opening several at once divides it: the production scan
+measured **5.6x faster per file cold** (16.1 ms/file on one thread against 2.9 ms/file
+on eight, on two disjoint never-touched trees), which is ~4 s for the library above
+instead of ~22 s. `dlc_scan_threads` names the count — `0` (the default) is the
+machine's core count capped at 8, `1` keeps the reads on the calling thread — and it
+cannot change the answer: the walk and the merge stay on one thread and in walk order,
+so items, names, counters and rejections are identical at any count
+([tests/dlc_library_tests.cpp](../tests/dlc_library_tests.cpp) pins that, and a warm
+tree is unaffected either way). The same cost disappears outright if the library folder
+is excluded from the antivirus's real-time scan; that is the machine's policy, not the
+host's, and the pool is what the host can do by itself.
 
 With `enhancements_dlc_cache` on, the resolved library list, the content-type override
 and the scan's items are written to `<cache_root>/dlc_library.cache` (`cache_root` is

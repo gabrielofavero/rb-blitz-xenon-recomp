@@ -74,6 +74,19 @@ struct PinsPayload {
   bool HasDownload() const { return !url.empty(); }
 };
 
+// How a launcher learns that a newer release exists, and where the updater that
+// installs one lives (docs/plans/launcher-plan.md D19).
+struct PinsUpdate {
+  // Where the launcher asks. Empty means this build has no release channel and no
+  // launcher compiled from it checks anything.
+  std::string manifest_url;
+  // The folder under the user's local application data that holds the updater.
+  std::string dir_name;
+  // Whether this release's payload changes what the game reads from the user's own
+  // game files: `false` keeps them, `true` asks for them again.
+  bool requires_game_data = false;
+};
+
 struct PinsUltimate {
   std::string version;
   std::string url;
@@ -90,12 +103,49 @@ struct Pins {
   PinsInstaller installer;
   PinsPayload payload;
   PinsUltimate ultimate;
+  PinsUpdate update;
 
   // Validates what the installer depends on and reports the first problem.
   bool Validate(std::string* error) const;
 };
 
 bool ParsePins(std::string_view text, Pins* out, std::string* error);
+
+// --- the update manifest --------------------------------------------------
+
+// update.toml, the one file a release publishes for the launcher's update check
+// and for the updater that does the work. tools/embed_config.cpp generates it from
+// the pins, so the version in it cannot drift from the version the setup executable
+// is named after, and the release publishes it as the asset update.toml.
+//
+// Two readers, one document:
+//   * the launcher reads `version` and `requires_game_data` - is there an update,
+//     and will it ask for the game files again;
+//   * the updater reads `payload_*` - what to install, from where, and what it
+//     should hash to.
+//
+// `payload_url` empty is the honest state of a release that was built with its
+// payload embedded (installer/build.ps1 without -PayloadUrl): there is nothing to
+// download, so there is nothing for an updater to do, and both readers treat the
+// manifest as "no update to offer" rather than offering one that cannot happen.
+struct UpdateManifest {
+  int schema_version = 0;
+  std::string version;
+  bool requires_game_data = false;
+  std::string payload_version;
+  std::string payload_url;
+  std::string payload_sha256;
+  std::uint64_t payload_size = 0;
+  std::string payload_commit;
+
+  bool HasPayload() const { return !payload_url.empty(); }
+};
+
+// The manifest schema this build understands. A manifest that needs a newer
+// updater is refused with a message naming the release page, rather than acted on.
+inline constexpr int kUpdateManifestSchemaVersion = 1;
+
+bool ParseUpdateManifest(std::string_view text, UpdateManifest* out, std::string* error);
 
 // The embedded copies, parsed and validated once per process.
 const Pins& EmbeddedPins();

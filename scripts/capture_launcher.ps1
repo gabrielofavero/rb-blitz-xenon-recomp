@@ -565,11 +565,14 @@ if (-not $SkipWindow) {
     if (Test-Path $focusLog) { Remove-Item $focusLog -Force }
     $arguments = @(
         "--launcher_profile=$ProfilePath", "--game_data_root=$GameRoot",
-        "--focus-log=$focusLog", "--no-gamepad"
+        "--focus-log=$focusLog", "--no-gamepad", "--no-update-check"
     )
     # --no-gamepad: a pad plugged into the machine is not allowed to move the ring, or the
     # "one press, one row" count would be a count of the pad's presses too. The pad has its
     # own leg below.
+    # --no-update-check: the bar's Update control is enabled or disabled by what the network
+    # answers and by whether a release exists, and a capture that compares pixels cannot have
+    # a control whose state changes with the outside world (D19).
     $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
     $hwnd = Get-LauncherWindow $process.Id $WindowTimeoutSec
     Add-Check "window" "the launcher opens a window" ($hwnd -ne [IntPtr]::Zero) "pid $($process.Id)"
@@ -759,7 +762,7 @@ if (-not $SkipWindow -and -not $SkipPadLeg -and $PadScript) {
     if (Test-Path $padLog) { Remove-Item $padLog -Force }
     $arguments = @(
         "--launcher_profile=$ProfilePath", "--game_data_root=$GameRoot",
-        "--focus-log=$padLog", "--test-pad=$PadScript"
+        "--focus-log=$padLog", "--test-pad=$PadScript", "--no-update-check"
     )
     # The launcher is a WIN32-subsystem process with no console, so a pad script it cannot play is
     # refused on stderr that nobody would ever see - and "the pad never announced itself" is exactly
