@@ -812,9 +812,14 @@ table, which `[functions]` cannot name.
 > `XamAppEnumerateContentAggregate` calls, one per presented frame, **54.4 s** of a **78.8 s**
 > launch-to-menu against **104.7 s** with the toggle off, the host at ~3% of it ([dlc.md](../dlc.md)
 > §4.3). `--vsync=false` cuts that phase to **19.7 s** and leaves the title's song clock alone
-> (226 s against 225 s), but two V-Sync-off runs crashed in `rex::system::XEvent::Set`
-> (`rexruntime.dll + 0x2C49C8`, `event_` = -1) — so the finding is documented as a caution and
-> deliberately **not** wired into R7: the toggle neither sets `vsync` nor recommends it.
+> (226 s against 225 s), and repeated warm boots land at **49.6-76.6 s**. The V-Sync-off crashes
+> that first argued against mentioning it turned out to be an SDK use-after-free behind
+> `KeSetEvent`, reachable in any boot and certain in a fast one: `ObDereferenceObject` created the
+> object it was dereferencing and released that creation's only reference, leaving the guest's
+> KEVENT carrying a handle the object table then handed to a thread
+> ([bringup-log.md](../history/bringup-log.md) B-016, patch 0012, fixed 2026-10-07). R7 still
+> neither sets `vsync` nor recommends it - the row belongs to the player - but nothing about the
+> feature now depends on the fault being there or gone.
 
 #### D3 — Controller-scheme force-on-load design
 

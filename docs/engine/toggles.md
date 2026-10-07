@@ -81,9 +81,9 @@ to see them again.
 library — the walk of the tree and the emulated per-package mount latency — and what remains of a
 warm boot is the title's own enumeration, which advances one item per presented frame and which no
 cache can shorten ([dlc.md](../dlc.md) §4.3). The one lever on that is the launcher's own *V-Sync*
-row (Graphics ▸ Window), deliberately left alone: it halves the phase, and two V-Sync-off runs have
-crashed in the SDK's KEVENT path, so R7 neither sets it nor recommends it (§4.3 records the numbers
-and the fault).
+row (Graphics ▸ Window), deliberately left alone: R7 neither sets it nor recommends it, and the SDK
+fault that once made a V-Sync-off boot unsafe to suggest is fixed separately
+([bringup-log.md](../history/bringup-log.md) B-016).
 
 `enhancements_controller_scheme` is the one non-boolean cvar here: R8's parameter, not a toggle of
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to

@@ -26,6 +26,7 @@ checkout.
 | `rexglue-sdk/0009-log-levels-table-not-cvars.patch` | `cvar::ApplyTomlTable` (`src/core/cvar.cpp`) walks every table in the profile, so the SDK's own `[log.levels]` convention produced a pending cvar named `log_levels_<category>` for every per-category log level. The logging subsystem reads that table straight out of the file (`ParseCategoryLevelsFromConfig` in `src/core/logging.cpp`) and never registers those keys, so they sat in the pending-value store for the whole run and would be named by `FinalizeInit`'s "unknown cvar" report alongside real typos — which made the report useless for its purpose. `[log.levels]` is now left to the logging subsystem. With the report trustworthy, this project finalizes the registry last, in `RbBlitzApp::OnPreLaunchModule`, so a misspelled key in `rb_blitz.toml` (or an unmatched `--flag`) is logged instead of silently dropped (the limit recorded in [../docs/known-issues.md](../docs/known-issues.md) on 2026-10-03). | yes |
 | `rexglue-sdk/0010-input-system-state-filter.patch` | `InputSystem::GetState` merges every device assigned to a user, and the merge only ever *adds* input — so a title that wants to rebind the pad cannot do it with a driver, and the pad the guest is handed is the SDK's own translation with no seam over it. Adds `InputSystem::SetStateFilter`, a callback run on the merged state just before it is handed back, so a title can rewrite what the guest sees (used by [../src/input/remap.cpp](../src/input/remap.cpp) for the launcher's `[remap]` table, D17 in [../docs/plans/launcher-plan.md](../docs/plans/launcher-plan.md)). Ten lines: one `std::function` member, one setter, one call. Not a defect fix, so an upstream candidate only if the same need is general enough to be wanted there. | maybe |
 | `rexglue-sdk/0011-deferred-overlapped-delay-cvar.patch` | `KernelState::CompleteOverlappedDeferredEx` slept a hard-coded 100 ms (`constexpr kDeferredOverlappedDelayMillis`) inside every deferred overlapped completion, to make the console's asynchronous storage look asynchronous. That is per completion, and a title that mounts a large content library pays it once per package: measured on a 1402-package library, `XamContentCreate` (which defers the whole mount through this path, `src/kernel/xam/xam_content.cpp`) is entered 2803 times on the way to the main menu, so 280 s of the 667 s the title's own "Discovering Downloadable Content" screen takes. The constant becomes the cvar `deferred_overlapped_delay_ms` (default **100**, the faithful value; a `uint32_t` in the `Kernel` category, hot-reload, and declared in `include/rex/system/flags.h` for a host to write through), read per completion and skipped entirely at 0. [../src/hooks/dlc.cpp](../src/hooks/dlc.cpp) sets it to 0 when R7's `enhancements_dlc_cache` toggle is on, because the cache alone answers for only the host's walk of the library and not for the per-package wait the toggle promises to remove. Nothing else changes: the completion still runs on the dispatch thread, still sets the overlapped, still queues the completion routine, so only the wait goes. Not a defect fix — the emulated latency is a deliberate choice — so an upstream candidate only if a settable delay is wanted there. | maybe |
+| `rexglue-sdk/0012-stale-native-object-handles.patch` | `XObject::GetNativeObject` finds a guest-initialised object again through the handle it stashed in that object's dispatch header (`wait_list_flink` = `kXObjSignature`, `wait_list_blink` = the handle). Two things were wrong with trusting that handle unconditionally, and together they were a use-after-free rather than a mis-read (B-016 in [../docs/known-issues.md](../docs/known-issues.md), found while measuring a V-Sync-off boot): **(1)** nothing checked the *type* the header claims against the object the handle names - upstream's own `TODO: assert if the type of the object != as_type` - and handle slots are reused, so a structure the guest keeps using after the object behind it is gone resolves to whatever object holds the slot by then (measured: an `XThread` and an `XEnumerator`, 6 ms after the event that owned it was destroyed), which the typed entry points then read through a blind cast (`ev->Set(...)` is a direct call to `XEvent::Set`, so `+0x68` of a thread was read as its `event_` - that is the `event_ = 0xFFFFFFFFFFFFFFFF` of the two minidumps); and **(2)** `ObDereferenceObject_entry` (`src/kernel/xboxkrnl/xboxkrnl_ob.cpp`) resolved its pointer through `GetNativeObject`, which *creates* an object for a structure it has never seen, and then called `ReleaseHandle()` - the inverse of a reference this SDK hands out, and one it had not handed out here - dropping the creation's only handle reference, removing the object from the object table and letting it be deleted with the signature and handle still stashed in the guest's own KEVENT. Adds `XObject::LookupNativeObject` (follow the stashed handle only while it names an object of the type the header claims; never create), makes `GetNativeObject` treat an unfollowable handle exactly like a structure that was never initialised, checks the caller's type expectation in `GetNativeObject<T>` on top of the header's, and uses the lookup in `ObDereferenceObject`. Anomalies are logged (rate-limited `object: ...` warns) instead of faulting. **Standing limit:** a handle recycled by an object of the same type is still followed, because no pointer-to-object link is recorded for structures the guest initialises itself. | yes |
 
 ## Apply / verify
 
@@ -85,7 +86,9 @@ and `src/kernel/xam/xam_input.cpp` for 0004; `src/codegen/manifest.cpp`,
 for 0006; `src/kernel/xam/xam_info.cpp` for
 0007; `src/system/xex_module.cpp` and `src/system/user_module.cpp` for 0008; `src/core/cvar.cpp` for 0009;
 `include/rex/input/input_system.h` and `src/input/input_system.cpp` for 0010;
-`include/rex/system/flags.h` and `src/system/kernel_state.cpp` for 0011).
+`include/rex/system/flags.h` and `src/system/kernel_state.cpp` for 0011);
+`include/rex/system/xobject.h`, `src/system/xobject.cpp` and
+`src/kernel/xboxkrnl/xboxkrnl_ob.cpp` for 0012).
 
 `ignore = dirty` hides work-tree edits only. A **moved gitlink is still
 reported**: verified 2026-09-19 by pointing the index entry at a different
@@ -98,13 +101,15 @@ audits the work tree on every run: each modified file must match a patch here
 `core.abbrev`). Anything else is listed as `UNEXPECTED` and the script exits 1.
 
 ```
-SDK work tree      : 27 patched, 0 UNEXPECTED, 0 untracked
+SDK work tree      : 33 patched, 0 UNEXPECTED, 0 untracked
     patched    : include/rex/codegen/function_node.h
     patched    : include/rex/graphics/d3d12/shared_memory.h
     patched    : include/rex/graphics/d3d12/texture_cache.h
     patched    : include/rex/graphics/pipeline/texture/cache.h
     patched    : include/rex/input/input_system.h
+    patched    : include/rex/system/flags.h
     patched    : include/rex/system/xam/content_manager.h
+    patched    : include/rex/system/xobject.h
     patched    : include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
     patched    : include/rex/ui/graphics_upload_buffer_pool.h
     patched    : src/codegen/function_graph.cpp
@@ -116,13 +121,17 @@ SDK work tree      : 27 patched, 0 UNEXPECTED, 0 untracked
     patched    : src/graphics/d3d12/texture_cache.cpp
     patched    : src/graphics/pipeline/texture/cache.cpp
     patched    : src/input/input_system.cpp
+    patched    : src/kernel/xam/xam_content_aggregate.cpp
     patched    : src/kernel/xam/xam_info.cpp
     patched    : src/kernel/xam/xam_input.cpp
     patched    : src/kernel/xboxkrnl/xboxkrnl_io.cpp
+    patched    : src/kernel/xboxkrnl/xboxkrnl_ob.cpp
     patched    : src/kernel/xboxkrnl/xboxkrnl_video.cpp
+    patched    : src/system/kernel_state.cpp
     patched    : src/system/user_module.cpp
     patched    : src/system/xam/content_manager.cpp
     patched    : src/system/xex_module.cpp
+    patched    : src/system/xobject.cpp
     patched    : src/system/xthread.cpp
     patched    : src/ui/d3d12/d3d12_upload_buffer_pool.cpp
     patched    : src/ui/graphics_upload_buffer_pool.cpp

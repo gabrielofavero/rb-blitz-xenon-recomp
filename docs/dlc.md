@@ -263,7 +263,7 @@ The lever on it is therefore the launcher's own **Graphics ▸ Window ▸ V-Sync
 with `--vsync=false` the same 2,809 calls arrive every **7.0 ms** and the phase takes
 **19.7 s**, against 47 s.
 
-Three measured facts, in the order they should weigh — and the last one decides it.
+Three measured facts, in the order they should weigh.
 
 - **Gameplay timing is not frame-paced.** [scripts/acceptance_song.ps1](../scripts/acceptance_song.ps1)
   with `REX_VSYNC=false` played the same song for **226 s** against 225 s with V-Sync on,
@@ -272,23 +272,21 @@ Three measured facts, in the order they should weigh — and the last one decide
   rate does not move it. The loading loop and the song clock are two different clocks, and
   only the loop reads the frame.
 - **The gain is real but host-dependent.** Repeated warm boots with `--vsync=false` came in
-  at 52.4, 52.9, 67.7 and 68.2 s launch-to-menu against 78.8 s with V-Sync on: the phase is
-  shorter every time, by how much is an hour-of-the-machine number
+  at 49.3-76.6 s launch-to-menu against 78.8 s with V-Sync on: the phase is shorter every
+  time, by how much is an hour-of-the-machine number
   ([known-issues.md](known-issues.md), "frame pacing" limit 4).
-- **V-Sync-off runs have crashed, so don't wire it into R7.** Two runs on 2026-10-06 died
-  with an access violation at the *same instruction* — `rex::system::XEvent::Set`
-  (`mov rcx, [rcx + 0x68]` / `mov rax, [rcx]`, reading `event_` = `0xFFFFFFFFFFFFFFFF`, which
-  is a read of address -1) — reached from `xeKeSetEvent` on the title's own audio thread
-  (`%LOCALAPPDATA%\CrashDumps\rb_blitz.exe.*.dmp`, 20:42:47 and 22:15:08, both faulting at
-  `rexruntime.dll + 0x2C49C8`, and the DLL's bytes at that offset are identical to the
-  dumps'). Neither crash was in R7's path: no package was mounted, the guest was in the
-  enumeration and the host accounted for ~3% of it — the invalid native handle belongs to
-  the SDK's guest-KEVENT mapping (a released or never-initialized `event_`), and a faster
-  guest is what the crashing runs have in common. The rest of that day's V-Sync-on runs —
-  the acceptances and boot probes around them — were clean, and six further V-Sync-off runs
-  afterwards were too, so the fault is intermittent rather than deterministic. Until it is
-  understood, V-Sync stays the player's own row and no R7 surface — tooltip, doc or default
-  — says "turn V-Sync off to load DLC faster".
+- **The fault that argued against recommending it is fixed** (2026-10-07). V-Sync-off runs
+  died in `rex::system::XEvent::Set` with `event_ = -1`, which turned out to be an SDK
+  use-after-free reachable in *any* boot but certain in a fast one: `ObDereferenceObject`
+  created the object it was dereferencing and then released that creation's only reference,
+  so an `XEvent` died while the guest's KEVENT still carried its handle and the slot was
+  handed to a thread. [Patch 0012](../patches/rexglue-sdk/0012-stale-native-object-handles.patch)
+  refuses a stashed handle that does not name an object of the type the dispatch header
+  claims and no longer creates one in a dereference
+  ([bringup-log.md](history/bringup-log.md) B-016). Since then 13 of 13 V-Sync-off boots are
+  clean, and the song acceptance passes with it both off and on. R7 still neither sets
+  `vsync` nor recommends it — the row belongs to the player — but this page no longer has a
+  reason to warn about it.
 
 **The refresh.** The main menu's last row
 ([main-menu-flow.md](engine/main-menu-flow.md) §7.1) asks the host to

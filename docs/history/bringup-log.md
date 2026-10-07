@@ -3840,3 +3840,110 @@ baseline metadata now records the scale, the capture size and the OCR verdict.
   needle never read and it agreed with itself about the wrong screen. `in-song` accepts *Random Song*
   and writes the save, so the next run starts from a different machine. Both are in observing.md's
   open list; naming the tutorial's owner is S2's.
+### B-016: a use-after-free behind `KeSetEvent`, and the two halves of it (2026-10-07)
+
+Found while measuring what a V-Sync-off boot buys R7 ([dlc.md](../dlc.md) §4.3): a boot with
+`--vsync=false` was the only configuration that ever died, and it died inside the SDK.
+
+#### The fault
+
+- **`rex::system::XEvent::Set` faulting with `event_ = 0xFFFFFFFFFFFFFFFF`.** Two minidumps
+  (`%LOCALAPPDATA%\CrashDumps`, 2026-10-06 20:42:47 and 22:15:08) carry the same
+  `EXCEPTION_ACCESS_VIOLATION` at `rexruntime.dll + 0x2C49C8`, with
+  `ExceptionInformation[1] = 0xFFFFFFFFFFFFFFFF` - the address the faulting read used. Parsing the
+  dumps' module list and comparing the DLL's bytes at that offset against the dumped code page shows
+  the same instruction in both (`mov rcx, [rcx + 0x68]` / `mov rax, [rcx]`: `event_.get()` then its
+  vtable), and the return address on the stack above it (`rexruntime + 0x4972B4`) is the call site
+  inside `xeKeSetEvent`. So the crashing thread was the title's own, calling `KeSetEvent`, and the
+  `XEvent` it was given had `-1` where its `event_` member is.
+- **`event_` cannot become `-1` on its own.** It is a `std::unique_ptr` that is either null or a live
+  host event, so the object was not the `XEvent` the call site thought it had. The offsets agree with
+  that reading: `XObject` ends at `0x60` (`manual_reset_`) and `event_` follows at `0x68`, so `+0x68`
+  of *any* `XObject` subclass is that subclass's first member or two.
+
+#### The mechanism, measured
+
+Three temporary probes in the SDK (in `xobject.cpp`, `object_table.cpp` and `xboxkrnl_ob.cpp`), then
+a one-boot run: `EVREF` on every reference-count transition of an event at or below two, every
+`AddHandle`/`RemoveHandle`, `EVNEW`/`EVID`/`EVDEL` on event creation/initialisation/destruction, and
+the dispatch header and resolved object of every native-pointer lookup that disagreed with the type
+the header claimed (`NOBJBAD`). One boot reproduced the whole chain at millisecond resolution:
+
+```text
+[t29736] XamAppEnumerateContentAggregate(255, 00000000, 30097030, ...)
+[t29736] EVREF retain this=0x24a52d6d700 handle=F80000FC refs=2
+[t29736] EVNEW  this=0x24a52d6d700 handle=F80000FC
+[t29736] EVID   this=0x24a52d6d700 handle=F80000FC native=130097018 event_=0x24a52d3f5b0 manual=true type=0
+[t29736] EVREF ObDereferenceObject native_ptr=30097018 object=0x24a52d6d700 type=2 calls=85
+[t29736] EVREF ReleaseHandle->RemoveHandle handle=F80000FC type=2 refs=0
+[t29736] EVREF RemoveHandle handle=F80000FC object=0x24a52d6d700 remaining_handles=0
+[t29736] EVREF release this=0x24a52d6d700 refs=1
+[t29736] EVREF release this=0x24a52d6d700 refs=0
+[t29736] EVDEL  this=0x24a52d6d700 handle=F80000FC guest=00000000
+[t30600] NOBJBAD native_ptr=130097018 hdr(type=0 flink=52455800 blink=F80000FC) dispatch_type=0
+         handle=F80000FC object=0x24a55d866c0 type=12
+```
+
+- **`ObDereferenceObject` was creating the object it was dereferencing, and then killing it.** The
+  guest initialises this KEVENT itself - the XDK inlines `KeInitializeEvent`, which is why the SDK
+  sees no call for it - so the first thing that happened to guest 0x30097018 was
+  `ObDereferenceObject_entry`'s `GetNativeObject`, which *creates* an object for a structure it has
+  never been told about and stashes its handle in the dispatch header. The `ReleaseHandle()` that
+  follows is the inverse of a reference this SDK handed out (`ObReferenceObjectByHandle`,
+  `ObOpenObjectByPointer` and `ObLookupThreadByThreadId` all `RetainHandle` and all say so), but here
+  it lands on the *creation's* reference: `handle_ref_count` 1 -> 0 -> `RemoveHandle`, the object
+  leaves the table, and the caller's `object_ref` takes the last pointer reference, so the object is
+  **deleted** - with the signature and the handle it had just stashed still sitting in the guest's own
+  KEVENT.
+- **The object table reuses handle slots**, and the title's enumeration churns them: in the same
+  millisecond the freed slot `F80000FC` was taken by an `XEnumerator`, and within the run by
+  `XThread`s as well. Every later `KeSetEvent`/`KeWaitForSingleObject` on that structure found the
+  signature, looked the handle up, and got that thread.
+- **Nothing checked the type, so the lookup's answer was used as an `XEvent`.** `GetNativeObject`
+  returned whatever the stashed handle named, and its callers cast the result to the type they asked
+  for and call non-virtually (`ev->Set(...)` compiles to a direct call to `XEvent::Set`), so the
+  aliased object's `+0x68` was read as `event_`. That is the `-1` in the dump: an `XThread` field,
+  read as a pointer. Upstream left this as `TODO: assert if the type of the object != as_type`.
+- **The window is the frame rate.** The hole needs the title to keep using a structure after the
+  object behind it is gone, and the object table to hand the slot on before the next use. Both
+  happened on **every** V-Sync-off boot measured (3 of 3, on the first iteration each), where the
+  enumeration runs ~2.4x faster - and 1 of those 3 took the second half of the chain and died.
+  Of the ~87 `ObDereferenceObject` calls a boot makes, exactly **3** were for events, and those 3 were
+  the create-and-kill cases: every other one found an object this SDK had really handed out, and its
+  release is balanced.
+
+#### The fix
+
+All four changes are in [patch 0012](../../patches/rexglue-sdk/0012-stale-native-object-handles.patch):
+
+- **`XObject::LookupNativeObject`** follows a stashed handle only while it names an object of the type
+  the dispatch header claims, and never creates one. `GetNativeObject` uses it, so a structure whose
+  handle cannot be followed - closed by the guest, or removed with its object - is now treated exactly
+  like one that was never initialised: it is initialised again, which is what the create-on-first-use
+  path was always for. Rate-limited `warn` lines in the log say when it happens and what the handle
+  had become.
+- **`XObject::GetNativeObject<T>`** checks the caller's expectation on top of the header's, which is
+  the `TODO` above made real: an entry point that asks for an event and is handed a semaphore now gets
+  nothing (and the callers already handle "no object" for every Ke* entry point) instead of reading a
+  foreign object's fields through a typed pointer.
+- **`ObDereferenceObject`** must find the object, not make one. It is the only call site in the SDK
+  that created an object it was releasing.
+
+#### Verified
+
+- **Before:** 3 of 3 V-Sync-off boots opened the hole on the first iteration and one crashed with the
+  dump signature above. **After:** 13 of 13 V-Sync-off boots (three loops, 4 + 6 + 3) log **zero**
+  anomaly lines and zero `[FATAL]`, and reach the main menu in 49.3-76.6 s - which is also the
+  confirmation that the lever is worth documenting: the same warm boot with V-Sync on measures 78.8 s.
+- `scripts/acceptance_song.ps1 -DlcLibrary "D:\Games\YARG Songs"` plays the same song the V-Sync-on
+  baseline plays (225 s) with `Boot`/`SongList`/`Playing`/`Results`/`SongSeen` true, no `[FATAL]` and a
+  clean shutdown - measured with `REX_VSYNC=false` (before and after the fix) and with V-Sync on;
+  `scripts/acceptance_save.ps1` passes its three legs (change, reload, revert), which is the path that
+  tears objects down and restores them; `ctest` is 14/14.
+- **One standing limit.** The lookup can still be handed an object of the *right type* that is the
+  wrong object, if the slot was taken by another event between the structure's last use and the next.
+  The SDK keeps no pointer-to-object link for objects the guest initialises itself
+  (`InitializeNative` never records the guest pointer, so `guest_object()` is 0 for them), so identity
+  beyond the type is not checkable there. That case is silent - the guest signals or waits on a
+  different event of the same type - rather than fatal, and it is the reason the type check is the
+  fix and not a full identity check.

@@ -1,0 +1,319 @@
+diff --git a/include/rex/system/xobject.h b/include/rex/system/xobject.h
+index 0a43f07..c2df457 100644
+--- a/include/rex/system/xobject.h
++++ b/include/rex/system/xobject.h
+@@ -203,6 +203,25 @@ class XObject {
+   static object_ref<T> GetNativeObject(KernelState* kernel_state, void* native_ptr,
+                                        int32_t as_type = -1);
+ 
++  // Follows the handle this SDK stashed in a guest-initialised object's dispatch
++  // header (which is how GetNativeObject finds such an object again) back to the
++  // object it names, and never creates one. Returns nothing when the header was
++  // not initialised here, when the handle no longer names an object, or when the
++  // object it names is not of the type the header claims: handle slots are
++  // reused, so a handle whose object is gone can name an unrelated object by the
++  // time the guest asks about it again.
++  static object_ref<XObject> LookupNativeObject(KernelState* kernel_state, void* native_ptr,
++                                                int32_t as_type = -1);
++
++  // Logs the native-pointer bookkeeping above going wrong: a stashed handle that
++  // no longer names an object of the type its dispatch header claims, or a
++  // caller asking for a type the header does not name. Both are rate-limited -
++  // the first is repaired (the structure is initialised again), the second is
++  // refused - and both mean the guest's structure and this SDK's object table
++  // have drifted apart, which is worth a line in the log but not a fault.
++  static void ReportNativeObjectAnomaly(const char* what, const void* native_ptr, int32_t as_type,
++                                        const XObject* object);
++
+  protected:
+   bool SaveObject(stream::ByteStream* stream);
+   bool RestoreObject(stream::ByteStream* stream);
+@@ -370,11 +389,31 @@ object_ref<T> retain_object(T* ptr) {
+   return object_ref<T>(ptr);
+ }
+ 
++// True when an object resolved for a native pointer may be used as a T. The
++// dispatch header's own type is what GetNativeObject validates; this is the
++// caller's expectation on top of it, because the caller reaches the object
++// through a typed pointer (an event entry point that is handed a semaphore's
++// object would read the wrong member). XObject itself accepts any object.
++template <typename T>
++bool NativeObjectIsTypeOf(const XObject* object) {
++  if constexpr (requires { T::kObjectType; }) {
++    return object->type() == T::kObjectType;
++  } else {
++    (void)object;
++    return true;
++  }
++}
++
+ template <typename T>
+ object_ref<T> XObject::GetNativeObject(KernelState* kernel_state, void* native_ptr,
+                                        int32_t as_type) {
+-  return object_ref<T>(
+-      reinterpret_cast<T*>(GetNativeObject(kernel_state, native_ptr, as_type).release()));
++  auto object = GetNativeObject(kernel_state, native_ptr, as_type);
++  if (object && !NativeObjectIsTypeOf<T>(object.get())) {
++    ReportNativeObjectAnomaly("caller and dispatch header disagree", native_ptr, as_type,
++                              object.get());
++    object.reset();
++  }
++  return object_ref<T>(reinterpret_cast<T*>(object.release()));
+ }
+ 
+ }  // namespace rex::system
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+index 5709e6d..763267e 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+@@ -161,7 +161,13 @@ u32 ObDereferenceObject_entry(u32 native_ptr) {
+     return 0;
+   }
+ 
+-  auto object = XObject::GetNativeObject<XObject>(
++  // A dereference releases a reference this SDK handed out (ObReferenceObject*,
++  // ObOpenObjectByPointer and ObLookupThreadByThreadId all retain the handle, and
++  // say so), so the object has to exist already: this must find one, not make
++  // one. Creating it here would leave the guest structure carrying a handle to
++  // an object nothing references, which is the dangling handle the next
++  // Ke*Event call on it would follow.
++  auto object = XObject::LookupNativeObject(
+       REX_KERNEL_STATE(), REX_KERNEL_MEMORY()->TranslateVirtual(native_ptr));
+   if (object) {
+     object->ReleaseHandle();
+diff --git a/src/system/xobject.cpp b/src/system/xobject.cpp
+index d358f39..5f5857b 100644
+--- a/src/system/xobject.cpp
++++ b/src/system/xobject.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <atomic>
+ #include <vector>
+ 
+ #include <rex/chrono/clock.h>
+@@ -367,6 +368,65 @@ void XObject::SetNativePointer(uint32_t native_ptr, bool uninitialized) {
+   guest_object_ptr_ = native_ptr;
+ }
+ 
++namespace {
++// The object type an X_DISPATCH_HEADER's type field names, or Undefined when
++// this SDK hands out no object for it. These are the types this SDK can have
++// stashed a handle into: XEvent and XThread create their guest structure
++// (CreateNative), and events, mutants and semaphores that the guest initialises
++// itself get one stashed on first use (GetNativeObject). A thread's structure is
++// included because ObLookupThreadByThreadId hands the guest a thread pointer it
++// expects to be able to dereference again.
++XObject::Type DispatchObjectType(int32_t dispatch_type) {
++  switch (dispatch_type) {
++    case 0x00:  // EventNotificationObject (manual reset)
++    case 0x01:  // EventSynchronizationObject (auto reset)
++      return XObject::Type::Event;
++    case 0x02:  // MutantObject
++      return XObject::Type::Mutant;
++    case 0x05:  // SemaphoreObject
++      return XObject::Type::Semaphore;
++    case 0x06:  // ThreadObject
++      return XObject::Type::Thread;
++    default:
++      return XObject::Type::Undefined;
++  }
++}
++}  // namespace
++
++object_ref<XObject> XObject::LookupNativeObject(KernelState* kernel_state, void* native_ptr,
++                                               int32_t as_type) {
++  assert_not_null(native_ptr);
++
++  auto header = reinterpret_cast<X_DISPATCH_HEADER*>(native_ptr);
++  if (header->wait_list_flink != kXObjSignature) {
++    // Never initialised through this SDK, so there is no object to find: the
++    // structure is the guest's own, as it is before the first Ke* call on it.
++    return nullptr;
++  }
++  if (as_type == -1) {
++    as_type = header->type;
++  }
++  Type want = DispatchObjectType(as_type);
++  if (want == Type::Undefined) {
++    return nullptr;
++  }
++
++  // One lock over the handle read and the lookup, so the object found is the one
++  // the header named when it was read.
++  auto global_lock = rex::thread::global_critical_region::AcquireDirect();
++  auto object = kernel_state->object_table()->LookupObject<XObject>(header->wait_list_blink);
++  if (!object) {
++    ReportNativeObjectAnomaly("stashed handle names no object", native_ptr, as_type, nullptr);
++    return nullptr;
++  }
++  if (object->type() != want) {
++    ReportNativeObjectAnomaly("stashed handle names another type", native_ptr, as_type,
++                              object.get());
++    return nullptr;
++  }
++  return object;
++}
++
+ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state, void* native_ptr,
+                                              int32_t as_type) {
+   assert_not_null(native_ptr);
+@@ -379,72 +439,102 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state, void* na
+   // each time.
+   // We identify this by setting wait_list_flink to a magic value. When set,
+   // wait_list_blink will hold a handle to our object.
+-
++  //
++  // The stashed handle is only followed while it still names an object of the
++  // type the structure claims, which is what LookupNativeObject is for: a handle
++  // whose object has been removed - closed by the guest, or dropped with the
++  // object - leaves the magic value behind, and the object table reuses handle
++  // slots, so by the time the guest asks about that structure again the handle
++  // can name an unrelated object. Trusting it then reads a semaphore's or a
++  // thread's memory as an event's, which is a fault the guest cannot cause or
++  // describe. A structure in that state is treated exactly like one that was
++  // never initialised, and re-initialised below.
+   auto global_lock = rex::thread::global_critical_region::AcquireDirect();
+ 
+   auto header = reinterpret_cast<X_DISPATCH_HEADER*>(native_ptr);
+ 
++  if (auto initialized = LookupNativeObject(kernel_state, native_ptr, as_type)) {
++    return initialized;
++  }
++
+   if (as_type == -1) {
+     as_type = header->type;
+   }
+ 
+-  if (header->wait_list_flink == kXObjSignature) {
+-    // Already initialized.
+-    // TODO: assert if the type of the object != as_type
+-    uint32_t handle = header->wait_list_blink;
+-    auto object = kernel_state->object_table()->LookupObject<XObject>(handle);
++  // First use - or a stashed handle LookupNativeObject could not follow, which
++  // it has reported - so create new.
++  // https://www.nirsoft.net/kernel_struct/vista/KOBJECTS.html
++  XObject* object = nullptr;
++  switch (as_type) {
++    case 0:  // EventNotificationObject
++    case 1:  // EventSynchronizationObject
++    {
++      auto ev = new XEvent(kernel_state);
++      ev->InitializeNative(native_ptr, header);
++      object = ev;
++    } break;
++    case 2:  // MutantObject
++    {
++      auto mutant = new XMutant(kernel_state);
++      mutant->InitializeNative(native_ptr, header);
++      object = mutant;
++    } break;
++    case 5:  // SemaphoreObject
++    {
++      auto sem = new XSemaphore(kernel_state);
++      auto success = sem->InitializeNative(native_ptr, header);
++      // Can't report failure to the guest at late initialization:
++      assert_true(success);
++      object = sem;
++    } break;
++    case 3:   // ProcessObject
++    case 4:   // QueueObject
++    case 6:   // ThreadObject
++    case 7:   // GateObject
++    case 8:   // TimerNotificationObject
++    case 9:   // TimerSynchronizationObject
++    case 18:  // ApcObject
++    case 19:  // DpcObject
++    case 20:  // DeviceQueueObject
++    case 21:  // EventPairObject
++    case 22:  // InterruptObject
++    case 23:  // ProfileObject
++    case 24:  // ThreadedDpcObject
++    default:
++      assert_always();
++      return NULL;
++  }
+ 
+-    // TODO(benvanik): assert nothing has been changed in the struct.
+-    return object;
+-  } else {
+-    // First use, create new.
+-    // https://www.nirsoft.net/kernel_struct/vista/KOBJECTS.html
+-    XObject* object = nullptr;
+-    switch (as_type) {
+-      case 0:  // EventNotificationObject
+-      case 1:  // EventSynchronizationObject
+-      {
+-        auto ev = new XEvent(kernel_state);
+-        ev->InitializeNative(native_ptr, header);
+-        object = ev;
+-      } break;
+-      case 2:  // MutantObject
+-      {
+-        auto mutant = new XMutant(kernel_state);
+-        mutant->InitializeNative(native_ptr, header);
+-        object = mutant;
+-      } break;
+-      case 5:  // SemaphoreObject
+-      {
+-        auto sem = new XSemaphore(kernel_state);
+-        auto success = sem->InitializeNative(native_ptr, header);
+-        // Can't report failure to the guest at late initialization:
+-        assert_true(success);
+-        object = sem;
+-      } break;
+-      case 3:   // ProcessObject
+-      case 4:   // QueueObject
+-      case 6:   // ThreadObject
+-      case 7:   // GateObject
+-      case 8:   // TimerNotificationObject
+-      case 9:   // TimerSynchronizationObject
+-      case 18:  // ApcObject
+-      case 19:  // DpcObject
+-      case 20:  // DeviceQueueObject
+-      case 21:  // EventPairObject
+-      case 22:  // InterruptObject
+-      case 23:  // ProfileObject
+-      case 24:  // ThreadedDpcObject
+-      default:
+-        assert_always();
+-        return NULL;
+-    }
++  // Stash pointer in struct.
++  // FIXME: This assumes the object contains a dispatch header (some don't!)
++  StashHandle(header, object->handle());
+ 
+-    // Stash pointer in struct.
+-    // FIXME: This assumes the object contains a dispatch header (some don't!)
+-    StashHandle(header, object->handle());
++  return object_ref<XObject>(object);
++}
+ 
+-    return object_ref<XObject>(object);
++void XObject::ReportNativeObjectAnomaly(const char* what, const void* native_ptr, int32_t as_type,
++                                        const XObject* object) {
++  static std::atomic<int> reported{0};
++  static constexpr int kReportLimit = 16;
++  const int n = reported.fetch_add(1);
++  if (n >= kReportLimit) {
++    if (n == kReportLimit) {
++      REXLOG_WARN("object: further native-object anomalies this run are not logged ({} reported)",
++                  n);
++    }
++    return;
++  }
++  if (object) {
++    REXLOG_WARN(
++        "object: {} at {:08X}: the dispatch header names a {} (type byte {}), and the object the "
++        "stashed handle names is a {} (handle {:08X})",
++        what, reinterpret_cast<uintptr_t>(native_ptr), DispatchObjectType(as_type), as_type,
++        object->type(), object->handle());
++  } else {
++    REXLOG_WARN(
++        "object: {} at {:08X}: the dispatch header names a {} (type byte {}) (thread {:08X})", what,
++        reinterpret_cast<uintptr_t>(native_ptr), DispatchObjectType(as_type), as_type,
++        rex::thread::current_thread_id());
+   }
+ }
+ 
