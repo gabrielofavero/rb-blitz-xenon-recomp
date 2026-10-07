@@ -21,7 +21,10 @@
 //     purchased), and only when nothing else - config file, REX_* environment or
 //     command line - named a mask, so `license_mask = 0` restores the faithful path.
 //   * OnPostLoadXexImage - the SDK starts the guest unchanged; here the Ultimate and
-//     DLC layers run first, and each is a no-op without its payload/directory.
+//     DLC layers run first, and each is a no-op without its payload/directory. R9's
+//     shell-music layer runs last and only when its toggle is on and the DLC layer
+//     found a library: it mounts a few packages read-only and redirects the hook the
+//     main menu's music goes through, and with the toggle off it is inert.
 //   * OnPreLaunchModule - the SDK never finalizes the cvar registry, so a key in
 //     rb_blitz.toml that matches no cvar stays silent; here the registry is finalized
 //     last, which reports such a key and locks the kInitOnly flags.
@@ -63,6 +66,8 @@
 #include "hooks/menu_filter.h"
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
+#include "hooks/loading_cancel.h"
+#include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
@@ -211,6 +216,14 @@ class RbBlitzApp : public rex::ReXApp {
     // bar is given: the toggle is read here, before the guest starts, and the count is
     // read from the DLC layer when the bar's own hooks run (src/hooks/content_progress.cpp).
     rb_blitz::content_progress::Configure();
+    // After dlc::Configure, whose enumeration is the pool R9 draws from: with the
+    // toggle on, a few loaded DLC songs are mounted read-only and the main menu's
+    // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
+    // toggle off - or no library - nothing is mounted and the hook is inert.
+    rb_blitz::shell_music::Configure(runtime(), game_data_root());
+    // R11 reads its toggle and its timeout here, before the guest starts, for the same
+    // reason: the hooks it installs run on guest threads (src/hooks/loading_cancel.cpp).
+    rb_blitz::loading_cancel::Configure();
   }
 
   // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no

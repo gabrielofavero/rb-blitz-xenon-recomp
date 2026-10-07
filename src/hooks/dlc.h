@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <vector>
 
 namespace rex {
 class Runtime;
@@ -62,5 +63,12 @@ bool CacheServedThisBoot();
 // was not reached. The discovery screen's progress bar is given this as its total
 // (src/hooks/content_progress.cpp).
 std::size_t ContentItemCount();
+
+// The host paths of the flat library's packages, in the walk order the scan produced
+// them, as Configure() last left them. Empty with no library, before Configure(), or
+// when the content manager was not reached. R9 reads it to pick the DLC songs the main
+// menu plays instead of its own three tracks (src/hooks/shell_music.cpp); the list is
+// the one the boot already walked, so asking for it costs nothing.
+const std::vector<std::filesystem::path>& LibraryPackagePaths();
 
 }  // namespace rb_blitz::dlc

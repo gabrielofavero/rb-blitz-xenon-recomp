@@ -7,9 +7,10 @@ ships on, because the two questions it answers can no longer be answered on an i
 Central to reach, and R10 ships on, because its subject is the Ultimate mod's own screen and it does
 nothing without that mod installed. This page is the table the plan's contract 1 promises: what each
 toggle gates, what the faithful (off) behaviour is, and which prompt implements it — or, for the
-seven that are still planned, what will. R3, R5, R7 and R10 are implemented; R3, R5 and R10's
+remaining planned ones, what will. R3, R5, R7, R9 and R10 are implemented; R3, R5 and R10's
 evidence is [main-menu-flow.md](main-menu-flow.md), R7's is
-[src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) and [dlc.md](../dlc.md) §4.1.
+[src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) and [dlc.md](../dlc.md) §4.1, and R9's is
+[menu-music.md](menu-music.md).
 
 The cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
 boot log, not by this page.
@@ -45,6 +46,7 @@ before the Ultimate and DLC layers:
 [info] enhancements: enhancements_rename_mod_settings = on (default) - R10 rename the mod's settings row
 [info] enhancements: enhancements_controller_scheme = "" (R8 scheme; empty means unnamed)
 [info] enhancements: enhancements_hidden_menu_options = "splash_leaderboard,splash_achievements,splash_dlc" (R5 rows; the three offline-dead entries by default)
+[info] enhancements: enhancements_menu_dlc_song_count = 3 (R9 pool size; spread over the loaded DLC library)
 ```
 
 The value and the **source** are both stated (`default`, `config`, `environment`, `command line`,
@@ -63,8 +65,9 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `native_mouse` | R6 different input waves: the engine's own pointer path instead of the synthetic pad | the pad the guest actually reads ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp)) | I2 → later |
 | `dlc_cache` | R7 DLC cache: persist the flat DLC library's enumeration in the save folder and reuse it while a fingerprint proves the tree unchanged, and — because the host's walk of the library is the *smaller* half of what a large library costs a boot — drop the SDK's emulated per-package mount latency (`deferred_overlapped_delay_ms = 0`, patch 0011) for the run. The refresh is the main menu's last row, drawn as "Refresh Song Library" rather than the store label it ships with, and backed by `--refresh_dlc_cache`; the discovery screen says "Loading Song Cache" instead of "Discovering Downloadable Content" when the enumeration came out of the cache, and its progress bar is given the library's package count (the title is never told one). What the toggle cannot remove is the title's own enumeration, one item per presented frame ([dlc.md](../dlc.md) §4.3) | the library is walked and every package's header read once per boot, and every mount the title makes waits out the emulated 100 ms | [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2), [dlc.md](../dlc.md) §4.1, [main-menu-flow.md](main-menu-flow.md) § "the refresh row" |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
-| `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones | the songs the title puts there | C1 → later |
+| `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones: the menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - picked at random from the library (as many as `enhancements_menu_dlc_song_count`, 3 by default) and streamed read-only from the package it came from, so the menu becomes a jukebox over the DLC. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, chosen at random and looped | [menu-music.md](menu-music.md) ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp)) |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |
+| `loading_cancel` | R11 cancel a song load that never finishes: a load that has not reached the title's own "PRESS A TO BEGIN" prompt after `enhancements_loading_cancel_seconds` (60 by default) is offered that prompt early, asking for B, which leaves the load and returns to the song selection screen. **Not implemented:** the prompt's label takes the text and is not shown, because the label only appears with the state move the title's own completion runs, and this build has not managed to run that move on a load that is stuck (§3, way 1 - the faults it saw predate the hook bug §2.2 records). The timer, the text, the cancel itself (the title's own) and the "PRESS A TO BEGIN" that replaces the prompt when a load does finish are all verified | the title's own prompt, at the time the title reaches it, and no way out of a load that never ends | [loading-cancel.md](loading-cancel.md) ([src/hooks/loading_cancel.cpp](../../src/hooks/loading_cancel.cpp)) |
 
 **R3 and R10 are the toggles that ship on.** R10's row belongs to the Ultimate mod, so a run without
 that payload has neither the file nor the label and the toggle has nothing to do — the faithful path
@@ -88,8 +91,11 @@ fault that once made a V-Sync-off boot unsafe to suggest is fixed separately
 `enhancements_controller_scheme` is the one non-boolean cvar here: R8's parameter, not a toggle of
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to
 decide what a "named entry" is: the name the title gives the row (`splash_leaderboard`,
-`splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9 grows its key the
-same way when its prompt knows what a "DLC song" is. R10 needs no key: what it renames is the mod's
+`splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9's
+`enhancements_menu_dlc_song_count` is the same shape: how many DLC songs the menu's pool draws from,
+spread over the loaded library. R11's `enhancements_loading_cancel_seconds` is the same shape: how
+long a song load may run without prompting before the cancel prompt is offered (60 seconds). R10
+needs no key: what it renames is the mod's
 own row, and the two labels it moves between are the module's constants
 (`src/ui/menu_options.h`) rather than a user's list.
 

@@ -332,6 +332,46 @@ it as "Ultimate Settings" instead, the name the mod itself uses. Shown only when
 Ultimate payload is installed. Needs a restart.
 """
 
+# R9. The main menu's background music is the title's own three streamed tracks, chosen
+# at random and looped (the `shellmusic` block of config/synth.dtb, read by the engine's
+# ShellMusicPanel). With this on, each track the menu plays is one of the loaded DLC
+# songs instead, streamed read-only from the package it came from
+# (src/hooks/shell_music.cpp). The pool is the DLC this boot enumerated, so a run with
+# no library is unchanged.
+[[setting]]
+key     = "enhancements_menu_dlc_songs"
+tab     = "interface"
+group   = "Main menu"
+label   = "Play DLC songs in the menu"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+The main menu loops the same few tracks the game ships. With this on, the background
+music is your loaded DLC instead: a song is picked at random from the library, played,
+and when it ends another is picked, like a jukebox. The songs stream from the packages
+themselves - nothing is copied. Needs a restart, and a DLC library: with none, the menu
+is unchanged.
+"""
+
+[[setting]]
+key     = "enhancements_menu_dlc_song_count"
+tab     = "interface"
+group   = "Main menu"
+label   = "Menu DLC song pool size"
+kind    = "int"
+default = 3
+min     = 1
+max     = 64
+applies = "restart"
+argv    = "flag"
+tooltip = """
+How many DLC songs the setting above draws from, spread over the whole library (each is
+streamed from its own package, so a larger pool holds that many packages open). 3 by
+default. Only read while "Play DLC songs in the menu" is on. Needs a restart.
+"""
+
 # R3, and the interface tab's second group: what happens between the title screen
 # and the menu. With Rock Central gone the connect process cannot succeed, and the
 # title asks the player two questions before it shows the menu - first the
@@ -352,6 +392,50 @@ Starting a game asks two questions before it will show the menu: that Rock Centr
 cannot be reached, and whether to proceed in offline mode. With this on both answers
 are given for you, so a start goes straight to the menu in offline mode. Needs a
 restart.
+"""
+
+# R11. A song whose package is missing files leaves the title on its loading screen with no
+# prompt, and a load in that state never ends. With this on, a load that has not prompted after
+# the timeout below is offered the title's own prompt early, asking for B, which leaves the load
+# and returns to the song selection screen (src/hooks/loading_cancel.cpp). Off by default and
+# marked not implemented: the prompt's label takes the text but is not shown, which is what
+# docs/engine/loading-cancel.md records.
+[[setting]]
+key     = "enhancements_loading_cancel"
+tab     = "interface"
+group   = "Main menu"
+label   = "Cancel a stuck song load"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+A song that cannot finish loading - a DLC package missing its files, for instance - leaves the
+loading screen up with no prompt, and nothing on it says any button would leave. With this on,
+a load that has not prompted after the timeout below is offered the title's own prompt early,
+asking for B, which returns to the music library. Needs a restart.
+
+Not implemented yet: the prompt is written to the title's own label but is not shown, so a load
+that never ends still has to be quit out of. See docs/engine/loading-cancel.md.
+"""
+
+# R11's timeout: how long a load may run without reaching the title's own prompt before the
+# cancel prompt is offered.
+[[setting]]
+key     = "enhancements_loading_cancel_seconds"
+tab     = "interface"
+group   = "Main menu"
+label   = "Song load timeout (seconds)"
+kind    = "float"
+default = 60.0
+min     = 1.0
+max     = 600.0
+applies = "restart"
+argv    = "flag"
+tooltip = """
+How long a song may load without reaching "PRESS A TO BEGIN" before the cancel prompt is
+offered (1-600 seconds, 60 by default). Read only while "Cancel a stuck song load" is on.
+Needs a restart.
 """
 
 # ---------------------------------------------------------------------------

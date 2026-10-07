@@ -329,6 +329,24 @@ bool g_cache_enabled = false;
 bool g_cache_served = false;
 std::size_t g_content_count = 0;
 
+// The packages a later layer (R9) may draw a song from: the structured root's packages
+// and the flat library's, in that order. Kept from the scans so R9 does not walk the
+// tree again; the structured half is held separately because a library-only refresh
+// replaces just the other half. Written in Configure()/Refresh(), read once at boot by
+// src/hooks/shell_music.cpp.
+std::vector<std::filesystem::path> g_structured_paths;
+std::vector<std::filesystem::path> g_package_paths;
+
+void RebuildPackagePaths(const std::vector<fs::LibraryItem>& library) {
+  g_package_paths.clear();
+  g_package_paths.reserve(g_structured_paths.size() + library.size());
+  g_package_paths.insert(g_package_paths.end(), g_structured_paths.begin(),
+                         g_structured_paths.end());
+  for (const auto& item : library) {
+    g_package_paths.push_back(item.host_path);
+  }
+}
+
 }  // namespace
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
@@ -398,6 +416,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
                         cache_path, "this boot", &g_cache_served);
   g_content_count = library.items.size();
+  g_structured_paths.clear();
+  g_structured_paths.reserve(scan.packages.size());
+  for (const auto& package : scan.packages) {
+    g_structured_paths.push_back(package.host_path);
+  }
+  RebuildPackagePaths(library.items);
   if (g_cache_served) {
     REXLOG_INFO("dlc: the DLC enumeration was loaded from the cache this boot (R7); the "
                 "main menu says so (\"Loading Song Cache\")");
@@ -502,6 +526,8 @@ void Refresh(rex::Runtime* runtime, const std::filesystem::path& game_data_root)
         {item.host_path, item.file_name, item.title_id, rex::system::XContentType(item.content_type)});
   }
   content_manager->set_extra_content_library(std::move(items));
+  g_content_count = library.items.size();
+  RebuildPackagePaths(library.items);
   REXLOG_INFO("dlc: refreshed the running title's DLC library: {} package(s) in {}",
               library.items.size(), JoinLibraryRoots(library_roots));
 }
@@ -518,5 +544,7 @@ bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }
 bool CacheServedThisBoot() { return g_cache_served; }
 
 std::size_t ContentItemCount() { return g_content_count; }
+
+const std::vector<std::filesystem::path>& LibraryPackagePaths() { return g_package_paths; }
 
 }  // namespace rb_blitz::dlc
