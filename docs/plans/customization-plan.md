@@ -807,6 +807,14 @@ table, which `[functions]` cannot name.
 > the same discovery measures **379 s**. The title then writes its own 1.1 MB `songcache` at the end
 > of it, after which a boot mounts **no** package and reaches the main menu in **57.5 s** — which is
 > why the interrupted cold boot was the expensive one, and why both halves had to land together.
+>
+> **And the loop no cache can remove.** A warm boot's remaining wait is the title's own: 2,809
+> `XamAppEnumerateContentAggregate` calls, one per presented frame, **54.4 s** of a **78.8 s**
+> launch-to-menu against **104.7 s** with the toggle off, the host at ~3% of it ([dlc.md](../dlc.md)
+> §4.3). `--vsync=false` cuts that phase to **19.7 s** and leaves the title's song clock alone
+> (226 s against 225 s), but two V-Sync-off runs crashed in `rex::system::XEvent::Set`
+> (`rexruntime.dll + 0x2C49C8`, `event_` = -1) — so the finding is documented as a caution and
+> deliberately **not** wired into R7: the toggle neither sets `vsync` nor recommends it.
 
 #### D3 — Controller-scheme force-on-load design
 

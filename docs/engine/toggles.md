@@ -61,7 +61,7 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `icon_schemes` | R4 different icons: replaceable button glyphs and controller-layout art per scheme | the art the title ships | A1, A2 |
 | `hide_menu_options` | R5 hiding categories: remove named entries from the main menu's option list (the list the guest navigates, not only the drawing). Needs `enhancements_hidden_menu_options` to name them; the compiled default is the three rows that only ever worked online | every shipped entry is present | U1 ([main-menu-flow.md](main-menu-flow.md)) |
 | `native_mouse` | R6 different input waves: the engine's own pointer path instead of the synthetic pad | the pad the guest actually reads ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp)) | I2 → later |
-| `dlc_cache` | R7 DLC cache: persist the flat DLC library's enumeration in the save folder and reuse it while a fingerprint proves the tree unchanged, and — because the host's walk of the library is the *smaller* half of what a large library costs a boot — drop the SDK's emulated per-package mount latency (`deferred_overlapped_delay_ms = 0`, patch 0011) for the run. The refresh is the main menu's last row, backed by `--refresh_dlc_cache` | the library is walked and every package's header read once per boot, and every mount the title makes waits out the emulated 100 ms | [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2), [dlc.md](../dlc.md) §4.1, [main-menu-flow.md](main-menu-flow.md) § "the refresh row" |
+| `dlc_cache` | R7 DLC cache: persist the flat DLC library's enumeration in the save folder and reuse it while a fingerprint proves the tree unchanged, and — because the host's walk of the library is the *smaller* half of what a large library costs a boot — drop the SDK's emulated per-package mount latency (`deferred_overlapped_delay_ms = 0`, patch 0011) for the run. The refresh is the main menu's last row, backed by `--refresh_dlc_cache`. What the toggle cannot remove is the title's own enumeration, one item per presented frame ([dlc.md](../dlc.md) §4.3) | the library is walked and every package's header read once per boot, and every mount the title makes waits out the emulated 100 ms | [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2), [dlc.md](../dlc.md) §4.1, [main-menu-flow.md](main-menu-flow.md) § "the refresh row" |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones | the songs the title puts there | C1 → later |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |
@@ -76,6 +76,14 @@ questions have one answer each and asking them is a dead end. It edits a file of
 which is why the launcher can also ship it on, and turning it off is what passes
 `--enhancements_skip_offline_dialog=false` — the switch for the two questions, for anyone who wants
 to see them again.
+
+**R7 is also the honest boundary of a toggle.** It removes what the *host* pays for a large DLC
+library — the walk of the tree and the emulated per-package mount latency — and what remains of a
+warm boot is the title's own enumeration, which advances one item per presented frame and which no
+cache can shorten ([dlc.md](../dlc.md) §4.3). The one lever on that is the launcher's own *V-Sync*
+row (Graphics ▸ Window), deliberately left alone: it halves the phase, and two V-Sync-off runs have
+crashed in the SDK's KEVENT path, so R7 neither sets it nor recommends it (§4.3 records the numbers
+and the fault).
 
 `enhancements_controller_scheme` is the one non-boolean cvar here: R8's parameter, not a toggle of
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to

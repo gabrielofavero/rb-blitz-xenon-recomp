@@ -227,7 +227,8 @@ folder's dlc directory.
 # per-package mount latency for the run (deferred_overlapped_delay_ms = 0,
 # patches/rexglue-sdk/0011): on 1,402 packages the title's own discovery is 662 s with
 # the SDK's 100 ms and 379 s without it (docs/dlc.md §4.2). The refresh is the main
-# menu's last row, and --refresh_dlc_cache does the same at boot.
+# menu's last row, and --refresh_dlc_cache does the same at boot. What no cache removes
+# is the title's own enumeration, one item per presented frame (docs/dlc.md §4.3).
 [[setting]]
 key     = "enhancements_dlc_cache"
 tab     = "general"

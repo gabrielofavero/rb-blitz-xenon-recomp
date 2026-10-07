@@ -231,7 +231,64 @@ halves of R7 matter together: on a 1,402-package library the cold discovery was
 11 minutes and a boot that was interrupted never got its cache written, so every boot
 paid the cold price again. With the host walk cached and the mount latency gone the
 same first boot is ~6.3 minutes and the second is ~1 minute; with the title's cache
-warm, R7's remaining contribution is the 14.5 s of host walk per boot.
+warm, R7's remaining contribution is the 14.5 s of host walk per boot (and every other
+second of a warm boot is the title's own — §4.3).
+
+## 4.3 What a warm boot still pays, and the one lever that shortens it (R7)
+
+Measured 2026-10-06 back to back, same library, release build, warm `songcache` — so no
+package is mounted in any run below — each run a launch → start press → main menu
+walk driven through [scripts/drive_ui.ps1](../scripts/drive_ui.ps1), the probe that also
+produced §4.2's numbers (it polls the screen every 3 s, so each figure carries ±3 s):
+
+| Boot | launch → title screen | title screen → main menu | launch → main menu |
+| --- | --- | --- | --- |
+| `enhancements_dlc_cache=1` — R7's boot | 22.9 s | 54.4 s | **78.8 s** |
+| `enhancements_dlc_cache=0` — the same boot, walked again | 39.8 s | 63.5 s | **104.7 s** |
+
+Of that 25.9 s difference the walk itself is 14.5 s (§4.1); the rest is the walk's
+pressure on the title's own reads of its `songcache` and the ark, which is why the
+title screen alone arrives 16.9 s earlier.
+
+The 54.4 s in the middle of R7's own boot is not host I/O: it is 2,809
+`XamAppEnumerateContentAggregate` calls — 2 per package, one per **presented frame**.
+With V-Sync on they arrive every 16.67 ms (2,809 × 16.67 ms ≈ 47 s of the phase), and
+the host's own share is small — 5.4 µs per call on the app message the item arrives on,
+plus the XAM task the item schedules, ~1.6 s of the 47 s — so the wait is the title's
+frame, not our walk and not our call. No cache can shorten that, because the title
+decides how many items a frame is worth.
+
+The lever on it is therefore the launcher's own **Graphics ▸ Window ▸ V-Sync** row
+(`vsync`, re-read live by the GPU vsync worker), not something R7 adds or should add:
+with `--vsync=false` the same 2,809 calls arrive every **7.0 ms** and the phase takes
+**19.7 s**, against 47 s.
+
+Three measured facts, in the order they should weigh — and the last one decides it.
+
+- **Gameplay timing is not frame-paced.** [scripts/acceptance_song.ps1](../scripts/acceptance_song.ps1)
+  with `REX_VSYNC=false` played the same song for **226 s** against 225 s with V-Sync on,
+  with `Boot`, `SongList`, `Playing`, `Results` and `SongSeen` all true, no `[FATAL]` and a
+  clean shutdown — so the title's song clock is its audio clock and a 2.4× faster frame
+  rate does not move it. The loading loop and the song clock are two different clocks, and
+  only the loop reads the frame.
+- **The gain is real but host-dependent.** Repeated warm boots with `--vsync=false` came in
+  at 52.4, 52.9, 67.7 and 68.2 s launch-to-menu against 78.8 s with V-Sync on: the phase is
+  shorter every time, by how much is an hour-of-the-machine number
+  ([known-issues.md](known-issues.md), "frame pacing" limit 4).
+- **V-Sync-off runs have crashed, so don't wire it into R7.** Two runs on 2026-10-06 died
+  with an access violation at the *same instruction* — `rex::system::XEvent::Set`
+  (`mov rcx, [rcx + 0x68]` / `mov rax, [rcx]`, reading `event_` = `0xFFFFFFFFFFFFFFFF`, which
+  is a read of address -1) — reached from `xeKeSetEvent` on the title's own audio thread
+  (`%LOCALAPPDATA%\CrashDumps\rb_blitz.exe.*.dmp`, 20:42:47 and 22:15:08, both faulting at
+  `rexruntime.dll + 0x2C49C8`, and the DLL's bytes at that offset are identical to the
+  dumps'). Neither crash was in R7's path: no package was mounted, the guest was in the
+  enumeration and the host accounted for ~3% of it — the invalid native handle belongs to
+  the SDK's guest-KEVENT mapping (a released or never-initialized `event_`), and a faster
+  guest is what the crashing runs have in common. The rest of that day's V-Sync-on runs —
+  the acceptances and boot probes around them — were clean, and six further V-Sync-off runs
+  afterwards were too, so the fault is intermittent rather than deterministic. Until it is
+  understood, V-Sync stays the player's own row and no R7 surface — tooltip, doc or default
+  — says "turn V-Sync off to load DLC faster".
 
 **The refresh.** The main menu's last row
 ([main-menu-flow.md](engine/main-menu-flow.md) §7.1) asks the host to
