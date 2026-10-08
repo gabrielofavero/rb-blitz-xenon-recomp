@@ -288,6 +288,7 @@ class RbBlitzApp : public rex::ReXApp {
     if (!REXCVAR_GET(mouse_ui_nav)) {
       if (rex::ui::Window* window_handle = window()) {
         window_handle->SetCursorVisibility(rex::ui::Window::CursorVisibility::kHidden);
+        REXLOG_INFO("mouse: support is off, so the window cursor is hidden");
       }
     }
 
