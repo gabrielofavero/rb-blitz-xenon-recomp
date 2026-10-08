@@ -87,7 +87,6 @@ set(RBBLITZ_SOURCES
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
     src/hooks/dlc_refresh.cpp
-    src/hooks/loading_cancel.cpp
     src/hooks/menu_filter.cpp
     src/hooks/shell_music.cpp
     src/hooks/ultimate.cpp

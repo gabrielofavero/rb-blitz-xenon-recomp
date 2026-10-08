@@ -66,7 +66,6 @@
 #include "hooks/menu_filter.h"
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
-#include "hooks/loading_cancel.h"
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
@@ -221,9 +220,6 @@ class RbBlitzApp : public rex::ReXApp {
     // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
     // toggle off - or no library - nothing is mounted and the hook is inert.
     rb_blitz::shell_music::Configure(runtime(), game_data_root());
-    // R11 reads its toggle and its timeout here, before the guest starts, for the same
-    // reason: the hooks it installs run on guest threads (src/hooks/loading_cancel.cpp).
-    rb_blitz::loading_cancel::Configure();
   }
 
   // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no

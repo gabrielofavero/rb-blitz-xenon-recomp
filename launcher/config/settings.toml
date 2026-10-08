@@ -394,50 +394,6 @@ are given for you, so a start goes straight to the menu in offline mode. Needs a
 restart.
 """
 
-# R11. A song whose package is missing files leaves the title on its loading screen with no
-# prompt, and a load in that state never ends. With this on, a load that has not prompted after
-# the timeout below is offered the title's own prompt early, asking for B, which leaves the load
-# and returns to the song selection screen (src/hooks/loading_cancel.cpp). Off by default and
-# marked not implemented: the prompt's label takes the text but is not shown, which is what
-# docs/engine/loading-cancel.md records.
-[[setting]]
-key     = "enhancements_loading_cancel"
-tab     = "interface"
-group   = "Main menu"
-label   = "Cancel a stuck song load"
-kind    = "bool"
-default = false
-applies = "restart"
-argv    = "flag"
-tooltip = """
-A song that cannot finish loading - a DLC package missing its files, for instance - leaves the
-loading screen up with no prompt, and nothing on it says any button would leave. With this on,
-a load that has not prompted after the timeout below is offered the title's own prompt early,
-asking for B, which returns to the music library. Needs a restart.
-
-Not implemented yet: the prompt is written to the title's own label but is not shown, so a load
-that never ends still has to be quit out of. See docs/engine/loading-cancel.md.
-"""
-
-# R11's timeout: how long a load may run without reaching the title's own prompt before the
-# cancel prompt is offered.
-[[setting]]
-key     = "enhancements_loading_cancel_seconds"
-tab     = "interface"
-group   = "Main menu"
-label   = "Song load timeout (seconds)"
-kind    = "float"
-default = 60.0
-min     = 1.0
-max     = 600.0
-applies = "restart"
-argv    = "flag"
-tooltip = """
-How long a song may load without reaching "PRESS A TO BEGIN" before the cancel prompt is
-offered (1-600 seconds, 60 by default). Read only while "Cancel a stuck song load" is on.
-Needs a restart.
-"""
-
 # ---------------------------------------------------------------------------
 # Graphics - Display
 # ---------------------------------------------------------------------------

@@ -67,7 +67,6 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones: the menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - picked at random from the library (as many as `enhancements_menu_dlc_song_count`, 3 by default) and streamed read-only from the package it came from, so the menu becomes a jukebox over the DLC. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, chosen at random and looped | [menu-music.md](menu-music.md) ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp)) |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |
-| `loading_cancel` | R11 cancel a song load that never finishes: a load that has not reached the title's own "PRESS A TO BEGIN" prompt after `enhancements_loading_cancel_seconds` (60 by default) is offered that prompt early, asking for B, which leaves the load and returns to the song selection screen. **Not implemented:** the prompt's label takes the text and is not shown, because the label only appears with the state move the title's own completion runs, and this build has not managed to run that move on a load that is stuck (§3, way 1 - the faults it saw predate the hook bug §2.2 records). The timer, the text, the cancel itself (the title's own) and the "PRESS A TO BEGIN" that replaces the prompt when a load does finish are all verified | the title's own prompt, at the time the title reaches it, and no way out of a load that never ends | [loading-cancel.md](loading-cancel.md) ([src/hooks/loading_cancel.cpp](../../src/hooks/loading_cancel.cpp)) |
 
 **R3 and R10 are the toggles that ship on.** R10's row belongs to the Ultimate mod, so a run without
 that payload has neither the file nor the label and the toggle has nothing to do — the faithful path
@@ -93,9 +92,7 @@ its own. R5's `enhancements_hidden_menu_options` is the same shape and now exist
 decide what a "named entry" is: the name the title gives the row (`splash_leaderboard`,
 `splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9's
 `enhancements_menu_dlc_song_count` is the same shape: how many DLC songs the menu's pool draws from,
-spread over the loaded library. R11's `enhancements_loading_cancel_seconds` is the same shape: how
-long a song load may run without prompting before the cancel prompt is offered (60 seconds). R10
-needs no key: what it renames is the mod's
+spread over the loaded library. R10 needs no key: what it renames is the mod's
 own row, and the two labels it moves between are the module's constants
 (`src/ui/menu_options.h`) rather than a user's list.
 

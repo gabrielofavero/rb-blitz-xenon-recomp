@@ -137,31 +137,6 @@ REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
     .range(1, 64)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-// R11, in progress. The state it is for is real and reproducible: a song whose package is
-// missing files leaves the title on its loading screen with no prompt, and the title never
-// finishes the load. Everything the feature needs to *say* is in place and verified - the
-// timer, the title's own prompt label taking this build's text, and the title's own "PRESS A
-// TO BEGIN" replacing it when a load does finish - but the label does not appear without the
-// state move the title runs on completion, and calling that move on a load that failed faults
-// (docs/engine/loading-cancel.md §3). Until that is answered, this toggle gates a prompt that
-// is written and not seen, so it ships off and says so, the way the project's contract
-// requires of a toggle whose feature is not there yet.
-REXCVAR_DEFINE_BOOL(enhancements_loading_cancel, false, "Enhancements",
-                    "R11 cancel a stuck song load: if a song has not reached the title's "
-                    "\"PRESS A TO BEGIN\" prompt after enhancements_loading_cancel_seconds, "
-                    "offer that prompt early asking for B, which leaves the load and returns to "
-                    "the music library. Faithful: the title's own prompt, and no way out of a "
-                    "load that never ends. Not implemented: the prompt's label is written and "
-                    "not shown (docs/engine/loading-cancel.md).")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-REXCVAR_DEFINE_DOUBLE(enhancements_loading_cancel_seconds, 60.0, "Enhancements",
-                      "R11 how long a song load may run without reaching the title's own prompt "
-                      "before it is shown early under the cancel prompt (1-600 seconds). Read "
-                      "only while enhancements_loading_cancel is on.")
-    .range(1.0, 600.0)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
 namespace rb_blitz::enhancements {
 
 namespace {
@@ -188,9 +163,11 @@ struct ToggleRow {
   bool (*enabled)();
 };
 
-// One row per feature in docs/plans/customization-plan.md R1-R9. This table is
-// what the log walks, so a toggle that is not here is a toggle nobody sees.
-constexpr std::array<ToggleRow, 11> kToggles{{
+// One row per feature in docs/plans/customization-plan.md R1-R10. This table is
+// what the log walks, so a toggle that is not here is a toggle nobody sees. The size is
+// explicit, and it has to match the rows below: a short initializer list is not an error,
+// it leaves the last row - a null name and a null `enabled` - in the table.
+constexpr std::array<ToggleRow, 10> kToggles{{
     {"enhancements_expand_resolution", "R1 custom resolutions",
      [] { return REXCVAR_GET(enhancements_expand_resolution); }},
     {"enhancements_ui_scale", "R2 UI accessibility",
@@ -211,8 +188,6 @@ constexpr std::array<ToggleRow, 11> kToggles{{
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
      [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},
-    {"enhancements_loading_cancel", "R11 cancel a stuck song load",
-     [] { return REXCVAR_GET(enhancements_loading_cancel); }},
 }};
 
 }  // namespace
@@ -233,9 +208,6 @@ void LogToggles() {
   REXLOG_INFO("enhancements: {} = {} (R9 pool size; spread over the loaded DLC library)",
               "enhancements_menu_dlc_song_count",
               REXCVAR_GET(enhancements_menu_dlc_song_count));
-  REXLOG_INFO("enhancements: {} = {} (R11 timeout; a load that has not prompted by then)",
-              "enhancements_loading_cancel_seconds",
-              REXCVAR_GET(enhancements_loading_cancel_seconds));
 }
 
 }  // namespace rb_blitz::enhancements

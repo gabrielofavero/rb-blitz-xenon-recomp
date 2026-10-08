@@ -1,8 +1,12 @@
 # Cancelling a song load that never finishes (R11)
 
-*Status: implemented and measured up to one open question, off by default
-(`enhancements_loading_cancel`), and the toggle's own description says so. What is verified,
-what was measured, and what is still open are each below. §2.1 and §2.2 are the second look:
+*Status: **cancelled, and removed from the tree** (2026-10-07). R11's toggle, its timeout cvar,
+its launcher rows and `src/hooks/loading_cancel.cpp` are gone. §§1-4 are the history - what the
+title does, what was measured, the one question that was never closed, and the shape the removed
+module had - and are kept because the measurements are the value here. The two sections that
+matter for a future attempt are §5, the verified recipe for putting this build's own text on the
+loading screen, and §6, why the "catch the exception during the load and return to the music
+library" route this request ended on is not available. §2.1 and §2.2 are the second look at §2:
 the first is what a field-by-field read of the prompt label ruled out, the second is the fault
 this build was taking the game down with at the time, and what it turned out to be.*
 
@@ -95,24 +99,33 @@ narrows the gap without closing it:
 
 Three ways on, none taken yet:
 
-1. **Re-run the move now that the hook is clean.** "Run the title's own completion once, on the
-   UI thread, and let it show its own prompt" is the whole feature if it holds up, and the
-   earlier faults are now suspect: the §2.2 double evaluation is exactly the shape of "the DTA
-   reads a screen the previous evaluation advanced". This is the cheapest of the three: one
-   build, one stalled load, one log.
-2. **Find what actually draws the label.** Not a field on the label (§2.1), so it is an
-   ancestor or the draw list: the milo (`ui/loading/gen/loading.milo`) is where the object
-   graph and the state move that owns the prompt are, and reading it is the way to name the
-   object instead of guessing at one.
+1. **Re-run the move now that the hook is clean.** Tried, and it does not work: `sub_822C38F8`
+   is called with a prepared DTA value and a result slot that its one caller builds in its own
+   frame (at `0x822C47BC`, inside the screen's message handler), and a call made from this
+   build's tick without them faults - `Unhandled guest access violation: read of guest
+   0x00000000 on thread 0xF8000028`, with the title's own call of the same function a fraction of
+   a second earlier running to completion in the same boot. The pump reaches that code path with
+   a message object of its own class (`r5` in the handler's arguments, the same object for every
+   tick measured), and only the pump's own message gets there: the handler dispatches on the
+   message's class symbol against four cached symbols, and the completion is the fourth.
+2. **Write the message where the screen *does* draw.** Tried, and it does not work either: the
+   loading screen's own text (its rotating tip line, the control hints) is filled through
+   `UILabel::SetText` while a load runs, so those labels were written with the message - six of
+   them, on the first run - and the frame did not change. A frame captured with the game process
+   suspended inside the window (18:57:18.97 written, 18:57:21.25 the screen left) still shows the
+   tip the title had put there. So what that screen draws is not what `UILabel::SetText` is told,
+   and the object that is drawn is not among the labels the title fills that way.
 3. **Say it from the host instead.** The title's own B already leaves the load (measured, from
-   both states), so a message drawn by this build - the SDK's ImGui dialog path, the way
-   `src/diag/probe_overlay.cpp` is drawn - needs no guest UI work at all and cannot be hidden
-   by a screen state. It is a different look from the title's own prompt, which is why it is
-   not the default of the two options in the request.
+   both states), so a message drawn by this build needs no guest UI work at all and cannot be
+   hidden by a screen state - the ImGui dialog path the probe overlay uses. Measured once, and
+   rejected by hand: drawn at 86.3 % of the frame height as planned, its text came out 164 px
+   tall against the title's own 64 px (a 3876x2263 capture), so it reads as an overlay and not as
+   the title's prompt. Any host-drawn attempt has to match that geometry, and the SDK's font at
+   the right scale is the thing to measure first.
 
-## 4. What the code does today
+## 4. What the removed module did
 
-`src/hooks/loading_cancel.cpp`, behind `enhancements_loading_cancel`:
+`src/hooks/loading_cancel.cpp` (removed 2026-10-07), behind `enhancements_loading_cancel`:
 
 * the load's own tick (`sub_822C45A8`, called from `0x822C37E8`) says a load has started, and
   gives the screen object (`r4`) and the vtable it had, so a screen that is gone can be told
@@ -139,3 +152,119 @@ title's own. What is still missing is only §3: in the state where the load neve
 text is on a label the player cannot see, which is why the toggle is off and says so.
 
 With the toggle off (the default) the four hooks call the guest's own functions unchanged.
+
+## 5. How to put this build's own text on the loading screen
+
+This is the verified part of R11, and it is a *recipe* rather than a feature because of §5.1.
+
+The screen is `ui/loading/gen/loading.dtb` (scene `loading.milo`), entered as `loading_screen` by
+`song_select_screen`'s `on_select_msg` when it takes the offline path. It has two text lines:
+
+| object | what it is | where its text comes from |
+| --- | --- | --- |
+| `tip.lbl` | the rotating tip | **not** `UILabel::SetText`: the screen's own DTA does `{tip.lbl set_dynamic_controller_token $chosen_tip}` with one of the locale tokens `loading_tip_00` … `loading_tip_70` |
+| `loading.lbl` | the prompt | the locale token `loading_press_button` = `PRESS <alt1>A</alt1>TO BEGIN` |
+
+`<alt1>X</alt1>` inside a locale string is what draws the title's own button glyph, so the message
+is written the title's way rather than as literal text.
+
+**The recipe.** Patch the localized tip strings in the running game's memory **while the song list
+is up**, i.e. before the loading screen is entered, and let the screen be built afterwards:
+
+1. find the tip strings by content - the locale pool holds 81-82 copies of the 71 tips, and each
+   copy is found by its own opening text (the scratch tool the measurement used,
+   `out/observations/locale_tips.py`, pairs the tokens with their text out of
+   `ui/locale/eng/gen/locale_keep.dtb`; `out/` is gitignored, so it is not in the tree);
+2. overwrite each copy with the message, on the condition that the slot can hold it (§5.1);
+3. start the load. The screen builds its tip line from the patched string, so that line draws the
+   message in the title's own font, placement and markup, above the title's own
+   `PRESS (A) TO BEGIN`.
+
+Verified end to end: with the tips patched at the song list, OCR of the loaded screen reads
+`PRESS / TO CANCEL` on the tip line with the B glyph drawn, and `PRESS (A) TO BEGIN` below it
+(`out/drive-ui/vanilla-loaded.png`, 3840x2160; the downscaled view the request was answered with
+is `out/drive-ui/preview-cancel-full.jpg`).
+
+### 5.1 The four things that make this brittle
+
+| constraint | measurement |
+| --- | --- |
+| **The message has to fit the slot.** | The tips are 32-262 characters, so `"PRESS <alt1>B</alt1>TO CANCEL"` (29) fits every tip line. Guard each write against the slot's own terminator anyway - the pool packs strings against each other. |
+| **The prompt string is not a target.** | `PRESS <alt1>A</alt1>TO BEGIN` is 27 characters and the pool stores exactly one copy with no slack (it is packed against `Can't tell your track levels from your Blitz meter?`), so a 29-character message would overrun the neighbour. This is why the message goes on the tip line and not on the prompt line. |
+| **The address has to be the one the image was read from.** | Scanning one window and computing addresses from another writes ~8 MB past the strings. Measured: the game died with `Unhandled guest access violation: read of guest 0x00000038` on the song list, every run, until the two agreed. |
+| **The text is baked when the screen is entered.** | Patching those same 82 strings *while* the screen is up does not move the frame at all - measured with the screen waiting on its prompt, three captures over five seconds (the tips and `PRESS (A) TO BEGIN` unchanged). Only a patch made before the entry is drawn. |
+
+### 5.2 What the tip line actually reads is still unidentified
+
+That last row is the open question §3 never closed, and the second attempt narrowed it without
+closing it either. After patching every locale copy, the drawn tip still did not change, and it did
+not follow any of these either:
+
+* `UILabel::SetText` on the object the scene names `tip.lbl` - the write lands (the log names the
+  object) and the frame does not move;
+* a plain-text copy of any tip left anywhere in the guest heap window `0x40000000`-`0x45200000` -
+  the scratch scanner `out/observations/inspect_tip.py` finds none after the patching, while the
+  line is still drawn.
+
+One measurement that does explain the `SetText` result, and is worth knowing before trying again:
+**the scene names more than one object `tip.lbl`.** Two objects carry that name at `+0x20`, and only
+one of them is a label - head word `0x8203A95C`, the class the earlier session measured. The other
+(head `0x8241A058`) is a property record: its fields point at `set_dynamic_controller_token`,
+`your_cred` and `num_powerups`. A "find the first object with the name" search takes the property
+record, which is what the removed module did, so its `SetText` never touched the label at all.
+Whether the real label takes a `SetText` is therefore still unmeasured.
+
+### 5.3 Driving a load for a capture
+
+Two route facts the harness needs, both measured:
+
+* **With the Ultimate payload installed, a song start does not reach the loading screen.** Its
+  `song_select_screen` branches on the DTA flag `unlockall` (set with the payload) and goes to
+  `powerup_select_screen` first, whose `PLAY SONG` needs a *successful* `purchase_powerups` before
+  it will `goto_screen loading_screen`. Under synthetic input that button did not fire in three
+  sweeps of 16 candidates (A, Start, dpad and stick directions, X, Y, shoulders, stick press).
+  `--ultimate_mode=0` restores the offline path straight to the loading screen, and that is the
+  route every capture in §5 was taken on.
+* **The loading screen outlives the load.** For a bundled song the load is ~1.5 s, but the screen
+  then waits on its own prompt (`wait_for_button_press TRUE`), so the frame can be captured at
+  leisure instead of in a burst.
+
+## 6. The "try-catch the load" route is not available
+
+The request after the message was dropped: wrap the load, catch an exception in it, and return to
+the music library. The catching half is real; the returning half is not.
+
+**Catching a guest fault is supported.** Guest faults arrive at the SDK's vectored exception
+handler, and a module can put a callback in that chain with `arch::ExceptionHandler::Install`
+(`rexglue-sdk/src/core/exception_handler_win.cpp`; 8 slots, run in order). A callback that returns
+true has its RIP/EFLAGS and any integer/XMM registers it modified written back into the context and
+the fault resumes with `EXCEPTION_CONTINUE_EXECUTION` - that is how `MMIOHandler` recovers faults
+in mapped MMIO (`rexglue-sdk/src/system/mmio_handler.cpp`). When no callback claims it, the memory
+path logs `Unhandled guest access violation` (`rexglue-sdk/src/system/xmemory.cpp`) and the handler
+returns `EXCEPTION_CONTINUE_SEARCH`, which is what ends the process.
+
+**But claiming a fault is not recovering from it.** `EXCEPTION_CONTINUE_EXECUTION` re-runs the
+faulting instruction: a load that faulted on a bad pointer out of the package's own data faults
+again unless that pointer is repaired, and nothing at the fault site knows what it should be.
+
+**And there is nothing to unwind to.** The only unwind the runtime has is the guest's own
+`setjmp`/`longjmp`, bridged to a **host** `jmp_buf` held in a `thread_local` map keyed by the guest
+buffer's address (`rexglue-sdk/resources/templates/codegen/pch_h.inja`), where `ppc_longjmp` on a
+buffer that was never registered **aborts**. Guest code registers one at 21 call sites, and 0 of
+them run on any route this project can drive (measured, [history/bringup-log.md](../history/bringup-log.md)
+"Does anything actually longjmp?"). A hook cannot supply the missing frame either: the loading
+screen's tick (`sub_822C45A8`) returns every frame, so no frame of this build's stays on the stack
+for the length of a load.
+
+**Even a mechanical unwind would not land in the music library.** Which screen is up is the title's
+own DTA screen stack, and the load leaves it mid-transition - the machinery that would put the song
+list back is the same machinery that is stuck. Resuming in the menu loop with the loading screen
+still current is not a return to the library.
+
+**And the return is not the missing piece.** The title's own B already leaves a load and lands on
+the song selection screen, from the running state and from the prompt state both (frame diff 59 %
+and 72 %, then OCR of the song list - §2). What was missing was the screen saying so, which is the
+message - a display problem, not an exception one.
+
+Conclusion: not viable as a recovery mechanism, and unnecessary for the behaviour it was meant to
+provide. R11 was removed on 2026-10-07.
