@@ -13,6 +13,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -124,12 +125,27 @@ bool DrawBool(const settings::Setting& setting, std::size_t index, FocusModel& r
   return changed;
 }
 
+// A numeric row's upper bound, after any rule that narrows it to the machine. `max_from =
+// "cpu_cores"` is the one such rule today: a thread count above the processor count can only be
+// a mistake, and the count is a fact about this machine rather than about the schema, so it is
+// applied here rather than compiled in. The schema's own `max` stays the ceiling either way.
+int EffectiveIntMax(const settings::Setting& setting) {
+  int high = setting.has_range ? ParseIntOrZero(setting.max_text) : 0;
+  if (setting.max_from == "cpu_cores") {
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    high = std::min(high, static_cast<int>(cores));
+  }
+  return high;
+}
+
 bool DrawInt(const settings::Setting& setting, float value_width, std::size_t index,
              FocusModel& ring, NavAction action, ProfileSession& session,
              std::string_view current) {
   const int low = setting.has_range ? ParseIntOrZero(setting.min_text) : 0;
-  const int high = setting.has_range ? ParseIntOrZero(setting.max_text) : 0;
-  int value = ParseIntOrZero(current);
+  // Never below `low`: a machine with fewer cores than the row's floor must still be a valid
+  // slider range, not an inverted one.
+  const int high = std::max(low, EffectiveIntMax(setting));
+  int value = std::clamp(ParseIntOrZero(current), low, high);
   bool changed = false;
   // With the focus on the row, Enter or Space steps it up and Left/Right step it down and up - the
   // horizontal pair is how a slider is changed now that ImGui's own navigation is off (A1).

@@ -255,6 +255,13 @@ std::string DescribeLayout(const std::vector<TabLayout>& layout) {
             out += choices[index];
           }
         }
+        // A numeric row whose ceiling is a fact about the machine rather than a number in the
+        // schema: the dump says so, because "how high can this slider go?" is otherwise only
+        // answerable on the machine it is drawn on.
+        if (!setting.max_from.empty()) {
+          out += "  max_from: ";
+          out += setting.max_from;
+        }
         if (setting.tooltip.empty()) {
           out += "  MISSING-TOOLTIP";
         }

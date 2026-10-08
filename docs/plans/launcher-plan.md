@@ -197,16 +197,18 @@ by double-click* must too, falling back to defaults when nothing was ever config
 | 1 | command line `--flag=value` | the launcher always passes the **path** flags explicitly, so a launcher launch is deterministic and visible in the log |
 | 2 | `RBBLITZ_*` environment | SDK `ApplyEnvironment` |
 | 3 | `rb_blitz.toml` next to the exe | the game's own file, written by the F4 overlay; the user's in-game changes must win |
-| 4 | **`launcher.toml`** | applied by the game **as a config file** (`rex::cvar::LoadConfig(profile_path)`) at the top of `OnConfigurePaths`; equal-ranked with #3 but applied first, so #3 overrides it |
+| 4 | **`launcher.toml`** | the game applies the profile's `[settings]` table as a config source at the top of `OnConfigurePaths` (`src/launcher/profile_apply.cpp`, `rex::cvar::SetFlagFromConfig`, `Source::kConfig`); equal-ranked with #3 but applied first, so #3 overrides it. **Amended 2026-10-07 (built):** not `LoadConfig` on the profile path — a profile's rows are a `[settings]` table, which `LoadConfig` (a top-level walk) cannot read, so patch `0013` added a config-rank setter for a source the application supplies itself |
 | 5 | compiled defaults | — |
 
 Two details make it work, and both are [tree] facts:
 
 - `SetupEnvironment` reads `game_data_root`/`user_data_root`/`update_data_root`/`cache_root` **before**
   any config file is loaded ([rexglue-sdk/src/ui/rex_app.cpp:110-140](../../rexglue-sdk/src/ui/rex_app.cpp),
-  `LoadConfig` at `:157`). So after loading the profile, `OnConfigurePaths` must re-derive those four
-  paths from the (now profile-aware) cvars — there is no hook earlier than it that the project owns
-  (`rex_app.h:98-115` lists them all).
+  `LoadConfig` at `:157`). So after applying the profile, `OnConfigurePaths` must re-derive those paths
+  from the (now profile-aware) cvars — there is no hook earlier than it that the project owns
+  (`rex_app.h:98-115` lists them all). Built 2026-10-07 for the two a launcher row can name
+  (`user_data_root`, `cache_root`); `game_data_root` and `update_data_root` have no row, and the
+  command-line values the runtime already read are the same ones this re-reads.
 - Because the profile is loaded with `Source::kConfig` and `rb_blitz.toml` is loaded later at the same
   rank (`Outranks` is `>=`, [cvar.cpp:83](../../rexglue-sdk/src/core/cvar.cpp)), the game's own file
   wins automatically. No manual source juggling, and `GetFlagSource` is only needed if a log line wants
@@ -1215,7 +1217,7 @@ what is missing.
 | --- | --- | --- | --- |
 | R3 payload ships both exes | install folder inspection + `verify-payload` + installer tests, and now the installed launcher's own `--print-command` | D1, D5, E3 | built |
 | R4 launched by the launcher uses launcher settings | the rows a profile moved off their defaults are passed as argv (asserted on `--print-command`) and read back out of the boot log: `--user_data_root` is the log's `User data:`, `--dlc_root` is the `dlc: … in <folder>` line, the target is `--ultimate_mode`, and `[remap]` is the profile's own rebinding line | B5, B7, E3 | built — the installed build, four legs, 94 checks (`scripts/acceptance_launcher.ps1`) |
-| ~~R4 a double-click (no launcher) uses launcher settings~~ | **E3 measured that it does not**: D3's rank 4 — the profile applied as a config file — is not in the tree (a top-level key in a profile handed to `--launcher_profile` does not reach a cvar), so the launcher's rows reach the game only as argv | B5, E3 | **open** — §11's first finding |
+| R4 a double-click (no launcher) uses launcher settings | **E3 measured that it did not** — D3's rank 4 was absent — and it now does: the game applies the profile's `[settings]` rows at `Source::kConfig` before the SDK loads its own `rb_blitz.toml` (`src/launcher/profile_apply.cpp`, `rex::cvar::SetFlagFromConfig`, SDK patch `0013`), so the rows reach a game started on its own; a *top-level* profile key still reaches no cvar, because it is the `[settings]` table that is applied | B5, E3 | built (implementation) — §11's first finding is closed; the standalone leg is what E3 would add to assert it |
 | R4 defaults when never configured | boot with no profile: log shows compiled defaults | B5 | built |
 | R6 finish-page choice | three interactive installs + one silent | D3 | built — `ISCC` compiles it; the three installs and the silent one are the manual pass's (§6 wave 3), and `installer/README.md` carries the checklist |
 | R7 controller control | `--test-pad` + `--focus-log`: a pad arrives 1.2 s into a session, two Down presses move the ring a row each, a held D-pad repeats 6 times at 0.13 s and stops on release, a stick pushed past the deadzone changes tab while a centred one does nothing, the pad leaves (`pads count=1`) and returns (`count=2`) without disturbing anything, and `Start` launches the game (the process was running) after saving the profile first | A3 | built — a *hand* press on a real pad is the manual pass's (§6 wave 3). Two pads were open at once throughout (an XInput pad beside SDL's virtual joystick); the virtual one is what was pressed |
@@ -1223,7 +1225,7 @@ what is missing.
 | R7 no pad is not a broken launcher | `--no-gamepad` with a pad pressing five times: the trace shows no move at all, and the bar stays on key names | A3 | built |
 | R8 bottom-bar tooltip | captures of three different rows (the launch target, the save location, the resolution row) each showing that row's own tooltip wrapped to two lines, and the mapping block's own sentence on the block's rows; `--focus-log` names the row each time (`entry=3/9 row=user_data_root enter=Browse`) | A2, E2 | built — and now measured rather than read: `scripts/capture_launcher.ps1` diffs the bar's help strip, where a press that leaves a row moves 6.7-10.4% of it and the three rows of the launch target move 0% by design (the sentence is the row's) |
 | R9/R10 the ring, the tabs and the body, as captured | `scripts/capture_launcher.ps1`: six presses each move the ring on in `--focus-log` (read off the *end* of the trace, because the ring also adopts the row under the pointer when the window is maximized — one line no press made), every press moves the body crop (0.19-4.28%), a tab switch changes the body by 16.0-18.1%, going back returns it to 0%, and a session that pressed nothing moves 0% of both crops; the window title is asserted as well — the launcher's name and the release version, and no tab — from the OS and from `--dump-display` | E2 | built. The tab switch is read off the trace's `tab=` now, and the version off the title: the title stopped naming the tab and started naming the release |
-| R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist, and now for the installed build: E3's four legs read the licence, the DLC folder and the save folder back out of the log; the two General-tab path rows are §11's second finding |
+| R10/R12 settings actually take effect | game log lines; pacing rig for V-Sync claims | B2, E3 | built for the rows that exist, and now for the installed build: E3's four legs read the licence, the DLC folder and the save folder back out of the log; the two General-tab path rows now store into the `[settings]` rows the launch command reads, which closes §11's second finding |
 | R11 Ultimate detection/repair | four filesystem states + a real install through the helper | B1, B8, E3 | built; `tests/launcher_ultimate_state_tests.cpp`, and E3's `ultimate` leg is the installed helper adding the mod to a retail install from a folder, after the `retail` leg booted without it |
 | R13 keyboard always enabled | pad + keyboard both navigate the guest's menus in one run | C1, C2 | **open** |
 | ~~R13 per-device profiles survive~~ | **withdrawn with D17**: there are no per-device files to survive — one `[remap]` table keyed by control | — | removed |
@@ -1439,37 +1441,37 @@ For the running artifacts (answer with a boot, not an opinion):
    VendorID(0x0B05), ProductID(0x1B4C)` and `connection order 0`. The same log lists one pad, not two:
    the launcher's virtual joystick (`--test-pad`) is process-local, which is what that hook is for.
 
-**Two things E3 measured that the plan had wrong, and the decision they need** (both from
-`scripts/acceptance_launcher.ps1`'s run, and neither fixed by it — they are design, not evidence):
+**Two things E3 measured that the plan had wrong, now fixed** (both from
+`scripts/acceptance_launcher.ps1`'s run; the evidence stays, the open questions do not):
 
-6. **D3's rank 4 is not in the tree.** The table above says `launcher.toml` is applied by the game
-   *as a config file* (`rex::cvar::LoadConfig(profile_path)`) at the top of `OnConfigurePaths`. It is
-   not: `rex::cvar::LoadConfig` is called once, on `<exe folder>\<name>.toml`
-   (`rexglue-sdk/src/ui/rex_app.cpp:158`), and nothing in `src/` loads the profile. Measured
-   2026-10-05: a profile with a top-level `license_mask = 0`, handed to `--launcher_profile`, still
-   boots as `license_mask = 1 (default; the title is treated as purchased)`. What *does* work is rank
-   1 — the launcher passes every row it has moved off its default as `--<key>=<value>`, and E3's legs
-   read three of those back out of the boot log. So the launcher's own "Launch Game" is covered and a
-   double-click is not: the game started without the launcher (the Start-menu shortcut, or the exe
-   itself) sees `rb_blitz.toml` and the compiled defaults, and none of the launcher's rows. Decision
-   needed, and the options are not equivalent: implement rank 4 (apply the profile's `[settings]` at
-   `Source::kConfig` before the game's own file, which is what D3 describes and what R4's standalone
-   half needs), or accept it and drop rank 4 from D3 and from R4's row in §7. Until then R4's
-   standalone half is **open** and the standing limit in `docs/known-issues.md` is wrong about the
-   mechanism (its conclusion, "the game's file wins for a row the launcher does not pass", holds
-   either way).
-7. **The General tab's two path rows and the launch command read different stores.** `Save game
-   location` and `DLC location` are written by the panel into `[launch] user_data_dir` / `dlc_dir`
-   (`launcher/src/general_tab.cpp`, `ProfilePathValue`/`SetProfilePath`), which is also what
-   `--dump-general` reports; `BuildLaunchCommand` builds `--user_data_root` / `--dlc_root` from
-   `[settings] user_data_root` / `dlc_root` (`launcher/src/game_launch.cpp`, `RowValue`). Measured
-   2026-10-05 with a profile whose two halves disagree: `--dump-general` printed
-   `row dlc_root = (empty)` while the printed command line carried
-   `--dlc_root="D:\...\game\dlc"` — so a folder a user picks in the panel is shown by the panel and
-   never reaches the game. E3's legs therefore write the `[settings]` spelling the contract reads.
-   The fix is small and belongs with whoever owns the row's storage (B1/B4): one store, not two, and a
-   test that the panel's own value is what `--print-command` carries. It is not E3's to choose, so it
-   is recorded here rather than changed quietly.
+6. **D3's rank 4 was not in the tree — it is now.** The table above says `launcher.toml` is applied
+   by the game *as a config file* (`rex::cvar::LoadConfig(profile_path)`) at the top of
+   `OnConfigurePaths`. That was not true of the measured build: `rex::cvar::LoadConfig` is called
+   once, on `<exe folder>\<name>.toml` (`rexglue-sdk/src/ui/rex_app.cpp:158`), and nothing in `src/`
+   loaded the profile, so a game started without the launcher in front of it saw `rb_blitz.toml` and
+   the compiled defaults and none of the launcher's rows — measured 2026-10-05 with a profile whose
+   top-level `license_mask = 0`, handed to `--launcher_profile`, still booting as
+   `license_mask = 1 (default; the title is treated as purchased)`.
+   **Resolved 2026-10-07 by implementing rank 4 rather than dropping it.** The registry gained
+   `rex::cvar::SetFlagFromConfig` (patch `0013`), which applies a value at `Source::kConfig`, and the
+   game applies the profile's `[settings]` rows through it at the top of `OnConfigurePaths`
+   (`src/launcher/profile_apply.cpp`, called from `RbBlitzApp::OnConfigurePaths`). The order is D3's:
+   a command-line flag (rank 1) and the environment outrank it, and the game's own `rb_blitz.toml` is
+   loaded by the SDK *after* that hook, so at equal rank the game's file wins — the same rule the
+   precedence badge shows. The profile is still not read as a *top-level* config file: its rows live
+   under `[settings]`, and it is that table the game applies. R4's standalone half is closed.
+7. **The General tab's two path rows and the launch command read different stores — one store now.**
+   `Save game location` and `DLC location` used to be written by the panel into
+   `[launch] user_data_dir` / `dlc_dir`, which `--dump-general` reported, while `BuildLaunchCommand`
+   built `--user_data_root` / `--dlc_root` from `[settings] user_data_root` / `dlc_root`
+   (`launcher/src/game_launch.cpp`, `RowValue`). Measured 2026-10-05 with a profile whose two halves
+   disagreed: `--dump-general` printed `row dlc_root = (empty)` while the printed command line carried
+   `--dlc_root="D:\...\game\dlc"` — so a folder a user picked in the panel never reached the game.
+   **Resolved 2026-10-07:** the panel's path rows read and write the same `[settings]` rows the launch
+   command reads (`launcher/src/general_tab.cpp` and `general_report.cpp`, both on
+   `Profile::FindSetting`), so what the panel shows, what `--dump-general` prints and what
+   `--print-command` carries are one value. E3's legs still write the `[settings]` spelling, which is
+   also what the panel now writes.
 8. **The mouse row's log line is not evidence of the row.** `mouse_ui: the mouse navigates the menus`
    is printed when the driver is *installed*, which happens whatever the cvar says — the driver reads
    `mouse_ui_nav` per event (`MouseUiInputDriver::IsEnabled`). The prompt for E3 asked for the

@@ -128,11 +128,11 @@ REXCVAR_DEFINE_STRING(dlc_library_content_type, "", "Runtime",
 // walk and the merge stay on the calling thread and in walk order, so the answer -
 // items, names, counters, rejections - is exactly the same at any thread count
 // (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
-REXCVAR_DEFINE_UINT32(dlc_scan_threads, 0, "Runtime",
-                      "Threads used to read a DLC library's package headers: 0 (the "
-                      "default) uses the machine's core count, capped at 8; 1 reads "
-                      "them on the calling thread. The scan's result is identical at "
-                      "any thread count.")
+REXCVAR_DEFINE_UINT32(dlc_scan_threads, 1, "Runtime",
+                      "Threads used to read a DLC library's package headers: 1 (the "
+                      "default) reads them on the calling thread; 0 uses the machine's "
+                      "core count, capped at 8; any other value is that many workers. "
+                      "The scan's result is identical at any thread count.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 // R7's one-shot. With enhancements_dlc_cache on, a normal boot reads the persisted

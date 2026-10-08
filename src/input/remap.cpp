@@ -6,31 +6,25 @@
 
 #include "input/remap.h"
 
-#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include <SDL3/SDL.h>
 
 #include <rex/cvar.h>
-#include <rex/filesystem.h>
 #include <rex/input/input_system.h>
 #include <rex/logging.h>
 
 #include "launcher/profile.h"
-#include "launcher/profile_path.h"
+#include "launcher/profile_apply.h"
 #include "launcher/remap.h"
-
-REXCVAR_DEFINE_STRING(launcher_profile, "", "Runtime",
-                      "Path to the launcher's profile, when the launcher started this process; "
-                      "empty resolves the file the launcher itself would write");
 
 namespace rb_blitz::input {
 namespace {
 
-using rb_blitz::launcher::ProfileLoadResult;
 using rb_blitz::launcher::remap::Source;
 using rb_blitz::launcher::remap::SourceKind;
 
@@ -88,29 +82,6 @@ bool SourceDownThunk(void* context, const Source& source) {
   return static_cast<const RemapContext*>(context)->SourceDown(source);
 }
 
-// The profile the launcher would have written, resolved the way the launcher resolves it: an
-// explicit path, then the environment, then the settings-folder pointer, then the portable
-// marker and the app data folder. The order is not restated here - the launcher's own resolver
-// is what answers it.
-std::optional<rb_blitz::launcher::Profile> ReadLauncherProfile() {
-  rb_blitz::launcher::ProfilePathInputs inputs =
-      rb_blitz::launcher::ProfilePathInputsFromEnvironment(rex::filesystem::GetExecutableFolder());
-  inputs.command_line_value = REXCVAR_GET(launcher_profile);
-
-  const std::filesystem::path path = rb_blitz::launcher::ResolveProfilePath(inputs);
-  if (path.empty()) {
-    return std::nullopt;
-  }
-  ProfileLoadResult loaded = rb_blitz::launcher::LoadProfile(path);
-  if (!loaded.usable()) {
-    // A profile this build cannot read is not a reason to refuse to start: the pad is left as
-    // the SDK reports it, and the launcher is where the user is told about the file.
-    REXLOG_WARN("remap: ignoring {}, which does not parse: {}", path.string(), loaded.error);
-    return std::nullopt;
-  }
-  return std::move(loaded.profile);
-}
-
 }  // namespace
 
 void InstallPadRemap(rex::RuntimeConfig& config) {
@@ -119,8 +90,17 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     return;
   }
 
-  const std::optional<rb_blitz::launcher::Profile> profile = ReadLauncherProfile();
+  // The same file the launcher's own Launch Game hands over with --launcher_profile, read the
+  // same way the profile's `[settings]` rows are (launcher/profile_apply.h). A profile this build
+  // cannot read is not a reason to refuse to start: the pad is left as the SDK reports it, and the
+  // launcher is where the user is told about the file.
+  std::string unreadable;
+  const std::optional<rb_blitz::launcher::Profile> profile =
+      rb_blitz::launcher::ReadLauncherProfile(&unreadable);
   if (!profile) {
+    if (!unreadable.empty()) {
+      REXLOG_WARN("remap: ignoring the launcher profile, {}", unreadable);
+    }
     return;
   }
   // Held by the filter, which the input system copies: this frame's table is not what it reads

@@ -155,6 +155,12 @@ void TestOnlyDifferencesArePassed(const Scratch& scratch) {
   session.SetSetting("swap_post_effect", "fxaa", "none", ValueStyle::kBare);
   session.SetSetting("resolution_scale", "2", "1", ValueStyle::kBare);
   session.SetSetting("user_data_root", "D:\\saves here", "", ValueStyle::kBasic);
+  // The display row whose default is 720p: picking another preset has to reach the game, because
+  // the row is the only place the launcher can change the render resolution.
+  session.SetSetting("resolution", "1080p", "720p", ValueStyle::kBare);
+  // And the DLC library row the panel writes with a number of its own (the General tab's other
+  // editor beside the two path rows).
+  session.SetSetting("dlc_scan_threads", "4", "1", ValueStyle::kBare);
   // And one written back to its default, which must not appear at all.
   session.SetSetting("vsync", "true", "true", ValueStyle::kBare);
 
@@ -164,6 +170,8 @@ void TestOnlyDifferencesArePassed(const Scratch& scratch) {
   CHECK_CONTAINS(command.arguments, "--fullscreen=false");
   CHECK_CONTAINS(command.arguments, "--swap_post_effect=fxaa");
   CHECK_CONTAINS(command.arguments, "--resolution_scale=2");
+  CHECK_CONTAINS(command.arguments, "--resolution=1080p");
+  CHECK_CONTAINS(command.arguments, "--dlc_scan_threads=4");
   CHECK_NOT_CONTAINS(command.arguments, "--vsync");
 
   BeginCase("a path with a space in it is one quoted argument");

@@ -31,7 +31,14 @@
 #             CON/LIVE containers - a dumped song folder - read where it lies.
 #   min/max   int / float only, optional: the range the row's widget is bounded to, so
 #             the slider carries the cvar's real limits. Both or neither, and the
-#             default must sit inside it.
+#             default must sit inside it. `max` stays the schema's ceiling even when a
+#             `max_from` narrows it on the machine it runs on.
+#   max_from  int / float only, optional: `cpu_cores` narrows the widget's upper bound
+#             to this machine's logical processor count (never above `max`), because a
+#             row whose value is a thread count cannot usefully exceed what the machine
+#             has. The build cannot decide it - it is a fact about the running machine -
+#             so the launcher applies it at draw time. Such a row still declares a
+#             numeric `min`/`max`.
 #   visible   optional: a precondition the machine has to satisfy for the row to be shown
 #             at all. `multi_monitor` (a machine with one display has no monitor to
 #             choose between) and `ultimate_installed` (a row about the Ultimate
@@ -260,22 +267,30 @@ Downloadable Content". Refresh the cache from that main menu row, or pass
 # it - 5.6x measured with the pool on (16.1 ms/file to 2.9 ms/file) - and the result is
 # identical at any thread count, because the walk and the merge stay on one thread in
 # walk order (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
+#
+# The row's default is 1, the honest "one at a time" reading: a user who wants the pool
+# turns it up, and nothing silently opens a machine's worth of files on a first run. The
+# slider stops at this machine's logical processor count (`max_from = "cpu_cores"`, which
+# is why the row declares no meaningful `max` of its own beyond the schema's ceiling) - a
+# thread count above it can only be a mistake. The game keeps `0` as "use the machine's
+# core count, capped at 8" for a hand-edited `rb_blitz.toml` or `--dlc_scan_threads=0`.
 [[setting]]
-key     = "dlc_scan_threads"
-tab     = "general"
-group   = "Paths"
-label   = "DLC scan threads"
-kind    = "int"
-default = 0
-min     = 0
-max     = 32
-applies = "restart"
-argv    = "flag"
+key      = "dlc_scan_threads"
+tab      = "general"
+group    = "Paths"
+label    = "DLC scan threads"
+kind     = "int"
+default  = 1
+min      = 1
+max      = 32
+max_from = "cpu_cores"
+applies  = "restart"
+argv     = "flag"
 tooltip = """
-How many threads read a DLC library's package headers. 0, the default, uses the
-machine's core count (up to 8); 1 reads them one at a time. A cold library is several
-times sooner to read with the pool, and the scan's result is the same either way.
-Needs a restart.
+How many threads read a DLC library's package headers. 1 reads them one at a time; more
+overlaps the antivirus's first-open cost, which is what makes a cold library several
+times sooner to read. The slider stops at this machine's processor count, and the scan's
+result is the same at any value. Needs a restart.
 """
 
 # ---------------------------------------------------------------------------
@@ -643,16 +658,24 @@ tooltip = "Maximum buffered audio frames (4 to 64). Lower is lower latency."
 # the XInput path; it just is not a row (D13, amended).
 # ---------------------------------------------------------------------------
 
+# Off by default. The guest has no cursor of its own, so with the row off there is nothing
+# a pointer resting over the window could do - and the launcher and the game both hide it
+# rather than leave it floating over a menu it cannot drive (src/input/mouse_ui.cpp and
+# rb_blitz_app.h's cursor rule). A player who wants to drive the menus with the mouse turns
+# it on and gets the pointer back.
 [[setting]]
 key     = "mouse_ui_nav"
 tab     = "controller"
 group   = "Input"
 label   = "Mouse support"
 kind    = "bool"
-default = true
+default = false
 applies = "restart"
 argv    = "flag"
-tooltip = "Drive the title's menus with the mouse. Needs a restart."
+tooltip = """
+Drive the title's menus with the mouse. Off by default, and the pointer is hidden while
+it is off. Needs a restart.
+"""
 
 [[setting]]
 key     = "guide_button"

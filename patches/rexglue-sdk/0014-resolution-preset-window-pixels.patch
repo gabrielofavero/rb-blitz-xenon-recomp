@@ -1,0 +1,63 @@
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+index 2251429..24c73c8 100644
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -44,19 +44,40 @@ namespace rex::ui {
+ 
+ namespace {
+ 
++// The display scale the window is about to be created at. There is no window yet, so this is the
++// same source WindowSDL::GetLatestDpiImpl falls back to before one exists - the primary display's
++// content scale - which is what keeps the conversion below and the SizeToPhysical in OpenImpl
++// symmetric.
++float PendingWindowScale() {
++  const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
++  return scale > 0.0f ? scale : 1.0f;
++}
++
++// A guest video mode - `video_mode_width`/`_height`, and the resolution preset that sets both them
++// and the startup window - is a count of *pixels*: "1080p" is 1920 of them. What Window::Create
++// takes is a *logical* size, which OpenImpl turns into the physical size it asks SDL for with
++// SizeToPhysical. So a pixel count has to be divided by the display scale here, or the window ends
++// up scale times too large: on a 300% display "1080p" became a 5760x3240 window on a 3840x2160
++// screen, larger than the screen itself, and the picture read as zoomed in and cut at the edges.
++// At a scale of 1 this is the identity, so a 100%-scaled machine is unchanged.
++uint32_t PixelsToWindowLogical(int32_t pixels) {
++  const double logical = static_cast<double>(pixels) / static_cast<double>(PendingWindowScale());
++  return uint32_t(std::clamp<int64_t>(std::llround(logical), 1, 8192));
++}
++
+ uint32_t ResolveWindowWidth(uint32_t requested_width) {
+   if (REXCVAR_GET(window_width) > 0) {
+     return uint32_t(REXCVAR_GET(window_width));
+   }
+   if (!rex::cvar::HasNonDefaultValue("window_width")) {
+     if (rex::cvar::HasNonDefaultValue("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
+-      return uint32_t(std::clamp(REXCVAR_GET(video_mode_width), 1, 8192));
++      return PixelsToWindowLogical(REXCVAR_GET(video_mode_width));
+     }
+     int32_t preset_width = 0;
+     int32_t preset_height = 0;
+     if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+                                                                        preset_height)) {
+-      return uint32_t(std::clamp(preset_width, 1, 8192));
++      return PixelsToWindowLogical(preset_width);
+     }
+   }
+   return requested_width;
+@@ -68,13 +89,13 @@ uint32_t ResolveWindowHeight(uint32_t requested_height) {
+   }
+   if (!rex::cvar::HasNonDefaultValue("window_height")) {
+     if (rex::cvar::HasNonDefaultValue("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
+-      return uint32_t(std::clamp(REXCVAR_GET(video_mode_height), 1, 8192));
++      return PixelsToWindowLogical(REXCVAR_GET(video_mode_height));
+     }
+     int32_t preset_width = 0;
+     int32_t preset_height = 0;
+     if (rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(preset_width,
+                                                                        preset_height)) {
+-      return uint32_t(std::clamp(preset_height, 1, 8192));
++      return PixelsToWindowLogical(preset_height);
+     }
+   }
+   return requested_height;

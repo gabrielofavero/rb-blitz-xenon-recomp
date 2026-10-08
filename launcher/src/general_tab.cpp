@@ -18,6 +18,7 @@
 
 #include "path_validate.h"
 #include "row_ui.h"
+#include "settings_edit.h"
 
 namespace rb_blitz::launcher {
 namespace {
@@ -27,18 +28,15 @@ const ImVec4 kError{0.95f, 0.42f, 0.38f, 1.0f};
 
 constexpr const char* kInstallPopup = "Install Ultimate";
 
-// The profile field a path row owns. B4 generalises this; M1's General tab has exactly two
-// path rows and both are named here so nothing else has to guess.
+// A path row's value, out of the profile's one `[settings]` store. That is the store
+// `BuildLaunchCommand` reads when it writes `--user_data_root` / `--dlc_root`, so the folder a
+// user picks here is the folder the game is handed - there is no second place a path could be
+// recorded and then disagree with the launch command (launcher-plan.md §11 finding 7). A row the
+// profile does not carry is empty, which means the game's own default.
 const std::string& ProfilePathValue(const Profile& profile, std::string_view key) {
-  return key == "user_data_root" ? profile.user_data_dir : profile.dlc_dir;
-}
-
-void SetProfilePath(Profile* profile, std::string_view key, const std::string& value) {
-  if (key == "user_data_root") {
-    profile->user_data_dir = value;
-  } else {
-    profile->dlc_dir = value;
-  }
+  static const std::string kEmpty;
+  const ProfileSetting* stored = profile.FindSetting(key);
+  return stored == nullptr ? kEmpty : stored->value;
 }
 
 void SDLCALL FolderChosen(void* userdata, const char* const* filelist, int /*filter*/) {
@@ -114,7 +112,10 @@ void GeneralTab::ApplyChosenPath(ProfileSession& session) {
     return;
   }
 
-  SetProfilePath(&session.profile(), setting->key, path);
+  // The profile's one store, and the same one the launch command reads: a picked folder becomes
+  // an `[settings]` row, so `--dlc_root` / `--user_data_root` carries exactly what the panel
+  // shows. A path holds backslashes, so it is written as a quoted TOML string (StyleForKind).
+  session.SetSetting(setting->key, path, setting->default_text, StyleForKind(setting->kind));
   message_key_.clear();
   message_.clear();
   RowStateFor(setting->key).source.clear();
@@ -395,13 +396,13 @@ void GeneralTab::Draw(const TabLayout& tab, FocusModel& ring, ProfileSession& se
       if (is_path) {
         DrawPathValue(setting, columns.value_width, session, row_index, ring, rows_action);
       } else {
-        ImGui::BeginDisabled();
-        DrawReadOnlyValue(setting, columns.value_width,
-                          LauncherValueText(session, setting));
-        ImGui::EndDisabled();
+        // Every other kind is the schema's own editor, exactly as the shell's tabs draw it: a
+        // bool is a checkbox the user can tick, not a greyed one (B2). The General tab owns only
+        // the two path rows' *widgets* - it does not own which rows exist or how they are edited.
+        DrawEditableSetting(setting, columns.value_width, row_index, ring, rows_action, session);
       }
       DrawMessages(setting, session);
-      ++row_index;
+      row_index += FocusEntriesFor(setting);
     }
   }
 

@@ -26,8 +26,13 @@ const char* StateName(UltimateState state) {
   return "unknown";
 }
 
+// The profile's one `[settings]` store, which is also what the launch command reads: the report
+// and `--print-command` cannot disagree about where the game is pointed (launcher-plan.md §11
+// finding 7). An absent row is empty, i.e. the game's own default.
 const std::string& ProfilePathValue(const Profile& profile, std::string_view key) {
-  return key == "user_data_root" ? profile.user_data_dir : profile.dlc_dir;
+  static const std::string kEmpty;
+  const ProfileSetting* stored = profile.FindSetting(key);
+  return stored == nullptr ? kEmpty : stored->value;
 }
 
 }  // namespace

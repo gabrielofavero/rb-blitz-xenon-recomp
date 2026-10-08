@@ -121,7 +121,17 @@ void AdoptRingOnHover(std::size_t index, FocusModel& ring) {
 }
 
 ValueStyle StyleForKind(settings::Kind kind) {
-  return kind == settings::Kind::kString ? ValueStyle::kBasic : ValueStyle::kBare;
+  // A path is text too: written bare it would not be a TOML value at all, and a Windows path's
+  // backslashes are an escaping hazard, so it is quoted like a string. Everything else - a bool,
+  // a number, an enum word - is a bare token.
+  switch (kind) {
+    case settings::Kind::kString:
+    case settings::Kind::kPathDir:
+    case settings::Kind::kPathFile:
+      return ValueStyle::kBasic;
+    default:
+      return ValueStyle::kBare;
+  }
 }
 
 bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusModel& ring,

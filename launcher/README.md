@@ -336,9 +336,15 @@ mapping database happens to have for a hardware id that matches nothing.
 
 ## The General tab (B1)
 
-Three rows in two groups — the launch target, the save location and the DLC location — which is the
-whole of M1's General scope (§1.1, D4). *Verify installation* and the game-directory override are
-later (D4 says so); nothing here pretends otherwise.
+The launch target and the *Paths* group — the save location, the DLC location, and the two DLC
+library rows (*Cache DLC library scan*, *DLC scan threads*) — which is M1's General scope (§1.1,
+D4). *Verify installation* and the game-directory override are later (D4 says so); nothing here
+pretends otherwise.
+
+**Only the two path rows draw a widget of their own** — a typed field with a *Browse* button. Every
+other row in the tab is the shell's own editor for its `kind`, the same checkbox, slider or radio
+line the other tabs draw: the tab owns where a path is picked, not which controls exist. The two
+DLC library rows are ordinary schema rows in the *Paths* group, not decorations.
 
 **The launch target** is a stack of radios under the group heading, one per choice — *Rock Band
 Blitz*, *Rock Band Blitz (Trial)* and *Rock Band Blitz Ultimate* — each its own focus-ring row, so
@@ -615,8 +621,8 @@ The tables in it, and who reads them:
 | Table | Written by | Read by |
 | --- | --- | --- |
 | `[launcher]`, `[window]` | the launcher: the format's version, portable mode, the window size (A1) | the launcher only |
-| `[launch]` | the General tab: the target and the three path rows | the launcher (the game gets them on its command line, Contract 3) |
-| `[settings]` | the rows that are not `[launch]` paths, keyed by cvar | the launcher, and the game as its own config file |
+| `[launch]` | the launch target and the game-directory override | the launcher (the game gets the target on its command line, Contract 3) |
+| `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from | the launcher, and the game as its own config source (D3 rank 4, `src/launcher/profile_apply.cpp`) |
 | `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
 | `[nav]` | the launcher's own key bindings (A5) | the launcher only |
 | `[update]` | `declined_version`, the release the user answered *Not now* to (D19) | the launcher only |
@@ -724,13 +730,23 @@ directory, and then keeps the process handle so the button reads *Game is runnin
 down until the game exits — a second copy of the title writing one save folder is not something
 to discover by trying.
 
-**Before spawning, two things are checked** (`LaunchReadiness`), because the game reads the
-profile as a config file and `LoadConfig` treats a file it cannot open exactly like one that is
-not there: it starts on the compiled defaults and says so only in its own log. So the profile
-the game is about to read must be readable, and the folder holding it must be writable — a
-settings folder that is not writable is reported before the game starts, not silently after it.
-A profile that has never been written is not an error: there is nothing to read, and the
-defaults are the right answer.
+**Before spawning, two things are checked** (`LaunchReadiness`), because the game applies the
+profile's `[settings]` rows itself and treats a file it cannot open exactly like one that is not
+there: it starts on the compiled defaults and says so only in its own log. So the profile the
+game is about to read must be readable, and the folder holding it must be writable — a settings
+folder that is not writable is reported before the game starts, not silently after it. A profile
+that has never been written is not an error: there is nothing to read, and the defaults are the
+right answer.
+
+**The profile is a config source as well as an argv one** (D3's rank 4,
+`src/launcher/profile_apply.cpp`). The launcher's own *Launch Game* passes every moved row as
+`--<key>=<value>` (rank 1), so it alone would cover every launch made through this window — but R4
+also promises a game started on its own sees the launcher's settings, and a double-click with no
+launcher in front of it does not carry that argv. So the game applies the profile's `[settings]`
+rows at the config rank before the SDK loads its own `rb_blitz.toml`, in
+`RbBlitzApp::OnConfigurePaths`. The ranks then read as D3 describes: a command-line flag outranks
+the profile, the profile and the game's file are equal rank and the game's file is applied second,
+so it wins — the same rule the precedence badge shows.
 
 **The exact command line is always available.** With the *Copy command line* bar button gone — the
 bar is a place to finish a session, not a developer console — `FormatLaunchCommand`'s bytes are
@@ -960,6 +976,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | `choices` | `enum` only: the allowed values |
 | `choices_from` | `enum` only, optional: where the choices really come from when the *build* decides them. `gpu_backends` is the only rule there is — the backends CMake compiled in, passed to the embed step as `--backends=` — and such a row declares no `choices` of its own |
 | `min` / `max` | `int` / `float` only, optional: the range the row's slider is bounded to. Both or neither, and the default must sit inside it. They are the cvar's own `.range(...)` where it has one, so the slider cannot offer a value the runtime would clamp |
+| `max_from` | `int` / `float` only, optional: a rule that lowers `max` to a fact about the machine, never above it. `cpu_cores` is the only rule there is — the running machine's logical processor count, applied at draw time because the build cannot know it. *General → Paths → DLC scan threads* uses it, so the slider stops at the cores the machine has. Such a row still declares `min`/`max` |
 | `visible` | Optional: a rule the *machine* or the *install* has to satisfy for the row to exist at all. Two rules exist — `multi_monitor` (*Audio / Video → Window → Monitor* is hidden when one display is attached, because there is nothing to choose between) and `ultimate_installed` (*Interface → Main menu → Rename Mod Settings* is hidden when the Ultimate payload is not installed, because the row it configures belongs to the mod) |
 | `validate` | `path_dir` / `path_file` only: `exists`, `dlc_layout` (the structured DLC tree or a flat song library of loose containers) or `inside_game_root:forbid`, separated by `\|` |
 
@@ -1120,14 +1137,16 @@ trace's `rowindex=`, and the harness asserts the presses that crossed a row boun
 counting entries. `-SkipWindow` runs the two text layers alone, which needs no desktop.
 
 What the installed run measures about how settings travel is worth knowing when changing
-any of this: the launcher's rows reach the game as `--key=value` arguments
-(Contract 3, `src/game_launch.cpp`), and the game reads the profile itself only for
-`[remap]`. A profile is *not* loaded as a config file — a top-level key in it does not reach
-a cvar — so a game started without the launcher in front of it never sees those rows, and
-the acceptance legs assert the `[settings]` spelling the launch command reads. Both facts,
-and the two path rows whose General-tab store is `[launch]` while the launch command reads
-`[settings]`, are recorded in
-[the plan's open questions](../docs/plans/launcher-plan.md).
+any of this: a row reaches a game the launcher starts as a `--key=value` argument
+(Contract 3, `src/game_launch.cpp`), and the game applies the profile's `[settings]` rows
+itself (D3 rank 4) for the launches without that argv, while it reads the profile only for
+`[remap]` besides. A profile's *top-level* key still reaches no cvar — the game applies the
+`[settings]` table — and the acceptance legs assert the `[settings]` spelling the launch
+command reads, because that is what a launcher-launched row really travels as. The two
+findings E3 measured — a profile that was not applied at all, and the two path rows whose
+General-tab store (`[launch] user_data_dir` / `dlc_dir`) disagreed with what the launch
+command reads (`[settings] user_data_root` / `dlc_root`) — are both closed;
+[the plan's open questions](../docs/plans/launcher-plan.md) §11 records the resolution.
 
 ## How to add a row
 

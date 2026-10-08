@@ -141,7 +141,7 @@ many threads read it (§4.1).
 | `--dlc_root`, or `dlc_root` in `rb_blitz.toml` | `<game_data_root>/dlc` | root of the layout in §2; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library`, or `dlc_library` in `rb_blitz.toml` | *(empty)* | `;`-separated folders of §2.1; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
-| `--dlc_scan_threads` | `0` | threads that read a §2.1 library's package headers: `0` uses the machine's core count (capped at 8), `1` reads them on the calling thread (§4.1). The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
+| `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). The launcher's *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | off | R7: persist the library enumeration (§4.1) and reuse it while the tree it describes is unchanged, and drop the emulator's per-package mount latency for the run; changing it needs a relaunch |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's last row asks for the same thing in a running title (§4.1) |
 
@@ -197,8 +197,8 @@ the files (the cache, below) or to overlap the opens.
 independent of file size, opening several at once divides it: the production scan
 measured **5.6x faster per file cold** (16.1 ms/file on one thread against 2.9 ms/file
 on eight, on two disjoint never-touched trees), which is ~4 s for the library above
-instead of ~22 s. `dlc_scan_threads` names the count — `0` (the default) is the
-machine's core count capped at 8, `1` keeps the reads on the calling thread — and it
+instead of ~22 s. `dlc_scan_threads` names the count — `1` (the default) keeps the
+reads on the calling thread, `0` is the machine's core count capped at 8 — and it
 cannot change the answer: the walk and the merge stay on one thread and in walk order,
 so items, names, counters and rejections are identical at any count
 ([tests/dlc_library_tests.cpp](../tests/dlc_library_tests.cpp) pins that, and a warm

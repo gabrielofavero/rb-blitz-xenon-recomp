@@ -94,6 +94,7 @@ set(RBBLITZ_SOURCES
     src/input/remap.cpp
     src/input/mouse_ui.cpp
     src/launcher/profile.cpp
+    src/launcher/profile_apply.cpp
     src/launcher/profile_path.cpp
     src/launcher/remap.cpp
     src/ui/menu_options.cpp

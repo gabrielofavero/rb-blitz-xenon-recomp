@@ -12,7 +12,8 @@
 //   * a missing `tooltip` (the bottom bar has nothing to name for the focused row),
 //   * `applies = "live"` without an evidence comment (a "live" claim nothing supports),
 //   * a `group` that is not declared, an unknown `kind`/`tab`/`argv`, an `enum` without
-//     `choices` or whose default is not among them, a `path_*` row without `validate`.
+//     `choices` or whose default is not among them, a `path_*` row without `validate`,
+//     an unknown `choices_from`/`max_from` rule (or one on a kind it cannot apply to).
 //
 // The build fails here rather than shipping a blank tooltip. Run with --help for the
 // argument list.
@@ -456,6 +457,11 @@ struct SettingRow {
   bool has_range = false;
   std::string min_text;
   std::string max_text;
+  // Optional rule narrowing a numeric row's upper bound to a fact about the machine it runs on:
+  // "cpu_cores" is this machine's logical processor count, never above `max`. The build cannot
+  // answer it, so it stays a rule the launcher applies at draw time rather than a number compiled
+  // in. Empty for a row whose `max` is already the whole truth.
+  std::string max_from;
   bool argv_flag = true;
 };
 
@@ -857,6 +863,33 @@ std::unique_ptr<Schema> Build(const Document& document,
       row.max_text = max_value->text;
     }
 
+    // Optional runtime ceiling: a numeric row whose useful maximum is a fact about the machine
+    // rather than about the cvar. It narrows an existing `max` (`cpu_cores` can only stop a
+    // slider below the schema's ceiling, never raise it), so the row must already have a range.
+    if (const Value* from = entry.Find("max_from"); from != nullptr) {
+      if (from->is_array || from->text.empty()) {
+        Fail(Location(from->line) + "row `" + row.key + "` has an empty `max_from` rule");
+        continue;
+      }
+      if (row.kind != Kind::kInt && row.kind != Kind::kFloat) {
+        Fail(Location(from->line) + "row `" + row.key +
+             "` has `max_from` but its kind is not int or float");
+        continue;
+      }
+      if (!row.has_range) {
+        Fail(Location(from->line) + "row `" + row.key +
+             "` has `max_from` without `min`/`max`; a runtime ceiling needs the schema's ceiling "
+             "to narrow");
+        continue;
+      }
+      if (from->text != "cpu_cores") {
+        Fail(Location(from->line) + "row `" + row.key + "` has unknown max_from rule `" +
+             from->text + "`; expected cpu_cores");
+        continue;
+      }
+      row.max_from = from->text;
+    }
+
     // Optional visibility rule: a row that only makes sense in some environments says so, and a
     // rule this build does not know is refused rather than silently ignored.
     if (const Value* visible = entry.Find("visible"); visible != nullptr) {
@@ -1003,7 +1036,9 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "// One row. `choices` and `validate` are comma- and pipe-separated respectively\n"
       << "// (empty when the kind does not use them); `evidence` is the `live:` comment that\n"
       << "// backs `applies == Applies::kLive`; `has_range` carries the optional `min`/`max`\n"
-      << "// of a numeric row so its widget can be a slider over the real limits.\n"
+      << "// of a numeric row so its widget can be a slider over the real limits, and\n"
+      << "// `max_from` a rule (`cpu_cores`) that lowers that ceiling to a fact about the\n"
+      << "// machine the launcher is running on.\n"
       << "struct Setting {\n"
       << "  std::string_view key;\n"
       << "  Tab tab;\n"
@@ -1019,6 +1054,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "  bool has_range;\n"
       << "  std::string_view min_text;\n"
       << "  std::string_view max_text;\n"
+      << "  std::string_view max_from;\n"
       << "  std::string_view visible;\n"
       << "  bool argv_flag;\n"
       << "};\n"
@@ -1063,6 +1099,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
         << ", .has_range = " << (row.has_range ? "true" : "false")
         << ", .min_text = " << CppLiteral(row.min_text)
         << ", .max_text = " << CppLiteral(row.max_text)
+        << ", .max_from = " << CppLiteral(row.max_from)
         << ", .visible = " << CppLiteral(row.visible)
         << ", .argv_flag = " << (row.argv_flag ? "true" : "false") << "},\n";
   }

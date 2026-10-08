@@ -30,9 +30,11 @@
 #include <rex/ui/presenter.h>
 #include <rex/ui/window.h>
 
-REXCVAR_DEFINE_BOOL(mouse_ui_nav, true, "Input",
+REXCVAR_DEFINE_BOOL(mouse_ui_nav, false, "Input",
                     "Move the guest's menu selection by moving the mouse, and press A/B with the "
-                    "left/right button, without an ImGui overlay having the pointer");
+                    "left/right button, without an ImGui overlay having the pointer. Off by "
+                    "default; with it off the window's cursor is hidden, because the guest has no "
+                    "pointer for it to aim and nothing else in the window needs one");
 REXCVAR_DEFINE_BOOL(mouse_ui_hover, true, "Input",
                     "Make the pointer's row the guest's selected row: the pointer is positioned in "
                     "the guest's own pixels, the highlight is measured from the guest's frames, and "

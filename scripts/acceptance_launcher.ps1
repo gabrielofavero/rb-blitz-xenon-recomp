@@ -21,14 +21,12 @@
 #             Documents\rb_blitz is not what is being checked
 #
 # Every leg writes its own profile, so "the launcher's settings reach the game" is checked
-# rather than assumed. How they travel is worth stating, because it is argv and not a config
-# file: the launcher passes every managed row it has moved off its compiled default as
-# `--<key>=<value>` (Contract 3, launcher/src/game_launch.cpp), and the game reads the
-# profile itself only for `[remap]`. Measured 2026-10-05: a top-level `license_mask = 0` in a
-# profile handed to `--launcher_profile` does not change the licence the game boots with, so
-# there is no rank-4 "profile as a config file" step (docs/plans/launcher-plan.md section
-# 11). The rows this script asserts therefore have to be ones the contract passes - and the
-# ones it picks are readable back out of the boot log:
+# rather than assumed. How they travel is worth stating: from the launcher they are argv - the
+# launcher passes every managed row it has moved off its compiled default as
+# `--<key>=<value>` (Contract 3, launcher/src/game_launch.cpp) - and a game started without the
+# launcher applies the profile's `[settings]` rows itself at config rank (D3 rank 4,
+# src/launcher/profile_apply.cpp, added 2026-10-07). What this script asserts is the argv the
+# contract passes, and the boot log reads those back:
 #
 #   * `[launch] target`     -> --ultimate_mode / --license_mask, and the ultimate: and
 #                              content licence: lines
@@ -37,20 +35,20 @@
 #   * `[settings] user_data_root` -> --user_data_root, and the log's `User data:` line
 #   * `[remap]`             -> read out of the profile by the game itself, and the
 #                              `remap: N pad control(s) rebound` line
-#   * `[settings] mouse_ui_nav` -> --mouse_ui_nav=false. Asserted on the command line only:
+#   * `[settings] mouse_ui_nav` -> --mouse_ui_nav=true (the row is off by default, so "on" is
+#                              the moved direction). Asserted on the command line only:
 #                              the driver is installed unconditionally and reads the cvar per
 #                              event, so `mouse_ui: the mouse navigates the menus` is printed
 #                              whether the row is on or off, and asserting that line would be
 #                              asserting nothing (measured 2026-10-05).
 #
-# Two discrepancies this work measured are recorded rather than worked around, because
-# neither is the acceptance run's to change: the profile is not loaded as a config file (so a
-# game started by double-click, with no launcher in front of it, does not see the launcher's
-# rows at all), and the General tab's two path rows are stored in `[launch] user_data_dir` /
-# `dlc_dir` while the launch command reads `[settings] user_data_root` / `dlc_root` - so a
-# folder picked in the launcher is shown by `--dump-general` and not passed to the game. This
-# script asserts the spelling the contract reads, which is the one that works, and says so in
-# docs/plans/launcher-plan.md section 11 rather than quietly.
+# Two discrepancies this work once measured are now fixed rather than worked around, both on
+# 2026-10-07: the profile's `[settings]` rows are applied by the game itself when no launcher
+# is in front of it (rank 4), and the General tab's two path rows now store into
+# `[settings] user_data_root` / `dlc_root`, the same rows the launch command reads - so a
+# folder picked in the launcher is both shown by `--dump-general` and passed to the game. The
+# profiles this script writes keep the `[settings]` spelling, which is what the panel writes
+# too; docs/plans/launcher-plan.md section 11 records the measurements and the fixes.
 #
 # What it needs, and what it deliberately does not:
 #
@@ -201,10 +199,10 @@ if (Test-Path (Join-Path $gameDir "default.xex")) {
 # the dump's own dlc folder rather than the install's, which has none: DLC is the user's
 # content wherever they keep it, and pointing the row at it is what makes the packages line
 # evidence rather than an absence.
-function Write-Fixture([string]$Path, [string]$Target, [bool]$MouseRowOff, [string]$UserDataDir) {
-    # The mouse row's compiled default is on, so "off" is the non-default direction and the one
-    # the launch command has to carry.
-    $mouse = if ($MouseRowOff) { "false" } else { "true" }
+function Write-Fixture([string]$Path, [string]$Target, [bool]$MouseRowMoved, [string]$UserDataDir) {
+    # The mouse row's compiled default is off (2026-10-07), so "on" is the non-default
+    # direction and the one the launch command has to carry.
+    $mouse = if ($MouseRowMoved) { "true" } else { "false" }
     $settings = @("mouse_ui_nav = $mouse", "resolution_scale = 2", "dlc_root = '$dlcRoot'")
     if ($UserDataDir) { $settings += "user_data_root = '$UserDataDir'" }
     $text = @"
@@ -361,7 +359,7 @@ function Test-CommonBootLines([string]$Leg, [string]$Text) {
 }
 
 # The argv contract, asserted on the launcher's own text before anything is started.
-function Test-CommandContract([string]$Leg, [string[]]$Tokens, [string]$Target, [string]$UserDataRoot, [bool]$MouseRowOff) {
+function Test-CommandContract([string]$Leg, [string[]]$Tokens, [string]$Target, [string]$UserDataRoot, [bool]$MouseRowMoved) {
     Add-Check $Leg "the command starts the installed game" ($Tokens[0] -eq $gameExe) $Tokens[0]
     Add-Check $Leg "it names the install's game folder" `
         ($Tokens -contains "--game_data_root=$gameDir") "--game_data_root=$gameDir"
@@ -386,12 +384,12 @@ function Test-CommandContract([string]$Leg, [string[]]$Tokens, [string]$Target, 
     Add-Check $Leg "the DLC row travels as a flag" ($Tokens -contains "--dlc_root=$dlcRoot") "--dlc_root=$dlcRoot"
     # A row the user moved off its default travels as a flag, whatever its kind; a row left at
     # its default is *not* passed at all, which is what keeps the game's own file in charge of
-    # it (D3). The mouse row is the second case: it is on by default.
+    # it (D3). The mouse row is the second case: it is off by default.
     Add-Check $Leg "a changed number travels as a flag" ($Tokens -contains "--resolution_scale=2") ""
     $mouseFlags = @($Tokens | Where-Object { $_ -like "--mouse_ui_nav=*" -or $_ -eq "--no-mouse_ui_nav" })
-    if ($MouseRowOff) {
+    if ($MouseRowMoved) {
         Add-Check $Leg "a bool row moved off its default travels as a flag" `
-            ($mouseFlags -contains "--mouse_ui_nav=false") ($mouseFlags -join " ")
+            ($mouseFlags -contains "--mouse_ui_nav=true") ($mouseFlags -join " ")
     } else {
         Add-Check $Leg "a row left at its default is not passed" ($mouseFlags.Count -eq 0) ($mouseFlags -join " ")
     }

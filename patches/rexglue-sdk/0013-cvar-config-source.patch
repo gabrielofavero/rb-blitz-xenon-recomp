@@ -1,0 +1,35 @@
+diff --git a/include/rex/cvar.h b/include/rex/cvar.h
+index fe94186..fbeed23 100644
+--- a/include/rex/cvar.h
++++ b/include/rex/cvar.h
+@@ -196,6 +196,15 @@ bool SetFlagByName(std::string_view name, std::string_view value);
+ // skipped because a higher-priority source already won returns true.
+ bool SetFlagFromCommandLine(std::string_view name, std::string_view value);
+ 
++// Applies a value from a *configuration* source - the same rank LoadConfig writes at - so an
++// application can layer a file of its own under the game's own config: what is applied first
++// is outranked by a later config write, and a command-line flag or the environment outranks
++// both. Returns false only when the value was rejected (an unknown flag, or one whose
++// constraints refuse the value); a value skipped because a higher-priority source already won
++// returns true. The counterpart of LoadConfig for a config that is not a TOML table the
++// registry can walk key by key.
++bool SetFlagFromConfig(std::string_view name, std::string_view value);
++
+ std::string GetFlagByName(std::string_view name);
+ 
+ // Which source last wrote this flag. Returns Source::kDefault for unknown names.
+diff --git a/src/core/cvar.cpp b/src/core/cvar.cpp
+index 228728d..201b66c 100644
+--- a/src/core/cvar.cpp
++++ b/src/core/cvar.cpp
+@@ -347,6 +347,10 @@ bool SetFlagFromCommandLine(std::string_view name, std::string_view value) {
+   return SetFlagFromSource(name, value, Source::kCommandLine) != ApplyResult::kRejected;
+ }
+ 
++bool SetFlagFromConfig(std::string_view name, std::string_view value) {
++  return SetFlagFromSource(name, value, Source::kConfig) != ApplyResult::kRejected;
++}
++
+ bool InvokeCommand(std::string_view name, std::string_view args) {
+   std::function<void(std::string_view)> cb;
+   {

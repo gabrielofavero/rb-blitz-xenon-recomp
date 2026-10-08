@@ -41,8 +41,10 @@
 // so it works with whatever backend the user selected and needs no SDK patch.
 // It is a separate device: the merge in the SDK ORs buttons and takes the
 // larger thumb magnitude, so this never fights a real pad, and a real pad takes
-// over the moment it is deflected harder. Nothing here captures or hides the
-// cursor - the ImGui overlays need it.
+// over the moment it is deflected harder. Nothing here captures the cursor:
+// whether it is shown is the app's rule, not the driver's - RbBlitzApp hides it
+// when `mouse_ui_nav` is off, because then there is no guest pointer for it to
+// aim and nothing in the window is waiting for it (rb_blitz_app.h).
 
 #pragma once
 

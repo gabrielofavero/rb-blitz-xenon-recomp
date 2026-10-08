@@ -12,9 +12,12 @@
 //     "any" value, so the SDK's own load is untouched), and the mouse driver is
 //     appended to whatever input factory is configured. Both are additive; a configured
 //     plugin and a configured factory are honoured.
-//   * OnConfigurePaths - faithfully, every path is honoured as given; here a writable
-//     root that resolves inside the read-only game tree is dropped in favour of the
-//     platform user directory, so a launcher cannot make the game write into its own
+//   * OnConfigurePaths - faithfully, every path is honoured as given; here the launcher
+//     profile's `[settings]` rows are applied at the config rank first (D3 rank 4, so a
+//     game started without the launcher still sees the rows it saved, and the game's own
+//     rb_blitz.toml - loaded by the SDK after this hook - still outranks it), and a
+//     writable root that resolves inside the read-only game tree is dropped in favour of
+//     the platform user directory, so a launcher cannot make the game write into its own
 //     data. Any other directory is honoured as given.
 //   * ApplyContentLicense - the emulated console owns no licence, which sends the
 //     title down the trial path; here license_mask defaults to 1 (treated as
@@ -70,6 +73,7 @@
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
+#include "launcher/profile_apply.h"
 #include "util/sha256.h"
 
 // The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
@@ -77,6 +81,10 @@
 // decision: the GPU plugin can only run the backends it was compiled with, so the load below is
 // where the choice can be honoured or refused.
 REXCVAR_DECLARE(std::string, gpu_backend);
+
+// Defined in src/input/mouse_ui.cpp, beside the driver it switches on. Declared here because the
+// cursor rule below reads it while the driver is only one of the things it gates.
+REXCVAR_DECLARE(bool, mouse_ui_nav);
 
 class RbBlitzApp : public rex::ReXApp {
  public:
@@ -172,6 +180,28 @@ class RbBlitzApp : public rex::ReXApp {
   // other directory is honoured as given - see rb_blitz::fs::IsSameOrInside()
   // for why the check is not a std::filesystem::relative() call.
   void OnConfigurePaths(rex::PathConfig& paths) override {
+    // D3's rank 4, and the reason R4's standalone half works at all: the launcher's own rows,
+    // applied at the config rank. This hook runs before the SDK loads the game's own
+    // `<exe>.toml` (rex_app.cpp's SetupEnvironment), so the game's file still outranks the
+    // profile at equal rank, and the command line and the environment - applied before any of
+    // this - outrank both. Without it only a game started by the launcher's Launch Game button
+    // saw any of the launcher's settings, because that is the only thing that passes them as
+    // argv (docs/plans/launcher-plan.md §11 findings 6 and 7).
+    //
+    // The report is kept and logged in OnPostInitLogging, not here: logging is initialized a few
+    // lines after this hook returns, so a line written now would go nowhere.
+    profile_apply_ = rb_blitz::launcher::ApplyLauncherProfileSettings();
+
+    // The runtime derived these roots from the cvars *before* this hook ran, so a root a profile
+    // row just supplied is not in `paths` yet. Re-read the two a launcher row can name, exactly
+    // as the runtime reads them; an empty cvar leaves the runtime's own default in place.
+    if (!REXCVAR_GET(user_data_root).empty()) {
+      paths.user_data_root = REXCVAR_GET(user_data_root);
+    }
+    if (!REXCVAR_GET(cache_root).empty()) {
+      paths.cache_root = REXCVAR_GET(cache_root);
+    }
+
     auto redirect_if_inside_game_root = [&](std::filesystem::path& p) {
       if (rb_blitz::fs::IsSameOrInside(p, paths.game_data_root)) {
         p.clear();
@@ -233,6 +263,13 @@ class RbBlitzApp : public rex::ReXApp {
   // selections that the config, environment and command line have already fixed.
   void OnPreLaunchModule() override { rex::cvar::FinalizeInit(); }
 
+  // Logging is up from here, which is why the profile application made in OnConfigurePaths is
+  // reported now and not there: what the launcher's file contributed (and which of its rows this
+  // build refused) is exactly the evidence a "my launcher setting did not apply" report needs.
+  void OnPostInitLogging() override {
+    rb_blitz::launcher::LogProfileApplyReport(profile_apply_);
+  }
+
   // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor
   // registers it with the drawer and its destructor unregisters it, so this only
   // has to own it for as long as the app lives. Whether it draws is the
@@ -243,6 +280,17 @@ class RbBlitzApp : public rex::ReXApp {
   // handed over as a callback rather than a pointer - the same lazily-called shape
   // as the mouse driver's presenter lookup in OnPreSetup.
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+    // The cursor is a device too, and with mouse support off there is nothing in the window for
+    // it to aim: the guest has no pointer, and the driver that would translate one is inert. So
+    // it is hidden rather than left resting over a menu it cannot drive (the SDK's default is
+    // visible). This is the first frame the window exists, which is why the rule lives here and
+    // not in OnPreSetup - the driver is installed there, but there is no window yet.
+    if (!REXCVAR_GET(mouse_ui_nav)) {
+      if (rex::ui::Window* window_handle = window()) {
+        window_handle->SetCursorVisibility(rex::ui::Window::CursorVisibility::kHidden);
+      }
+    }
+
     probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
       rb_blitz::diag::WindowState state;
       const rex::ui::Window* w = window();
@@ -339,4 +387,7 @@ class RbBlitzApp : public rex::ReXApp {
   // Owned for the app's lifetime; it unregisters itself from the drawer when this
   // is destroyed, which happens before ~ReXApp() tears the drawer down.
   std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
+
+  // What the launcher's profile contributed at OnConfigurePaths, reported once logging exists.
+  rb_blitz::launcher::ProfileApplyReport profile_apply_;
 };

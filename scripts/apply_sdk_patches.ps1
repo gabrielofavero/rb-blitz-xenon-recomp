@@ -81,7 +81,12 @@ function Get-DiffSections {
             continue
         }
         if (-not $current) { continue }
-        if ($text.StartsWith('index ')) { continue }
+        # Only the hunk *bodies* are compared. The `index` line's abbreviation follows
+        # core.abbrev, the `---`/`+++` headers repeat when two patches touch one file, and a
+        # hunk's `@@ -a,b +c,d @@` numbers are relative to whatever was applied before it - so
+        # none of them is part of "the change this file carries".
+        if ($text.StartsWith('index ') -or $text.StartsWith('--- a/') -or
+            $text.StartsWith('+++ b/') -or $text.StartsWith('@@ ')) { continue }
         $buffer.Add($text.TrimEnd())
     }
     if ($current) { $sections[$current] = ($buffer -join "`n") }
@@ -170,10 +175,19 @@ if ($failed.Count -gt 0) {
     Write-Host "    git -C $SdkDir diff"
 }
 
+# A file's expected body is every patch's hunks for it in patch order: two patches may
+# legitimately touch one file (0009 and 0013 both edit src/core/cvar.cpp), and the file's own
+# `git diff` is those hunks one after another.
 $patchSections = @{}
 foreach ($patch in $patches) {
     $sections = Get-DiffSections -Lines @(Get-Content -LiteralPath $patch.FullName)
-    foreach ($key in $sections.Keys) { $patchSections[$key] = $sections[$key] }
+    foreach ($key in $sections.Keys) {
+        if ($patchSections.ContainsKey($key)) {
+            $patchSections[$key] = $patchSections[$key] + "`n" + $sections[$key]
+        } else {
+            $patchSections[$key] = $sections[$key]
+        }
+    }
 }
 
 $status = Invoke-Git @('-c', 'safe.directory=*', '-C', $sdkPath, 'status', '--porcelain')
