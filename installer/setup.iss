@@ -184,11 +184,11 @@ DiskSpaceMBLabel=The game data you provide is not counted here; the free space i
 
 [Tasks]
 ; Every shortcut is a task, so this page is the one place that decides what is
-; created. The Start menu pair is checked, as those two have always been created;
-; the launcher's desktop shortcut is checked (D9) and the game's desktop shortcut
-; stays unchecked, as it always has been. A silent install creates every checked
-; task, except the launcher's desktop shortcut, which only /LAUNCHERICON=1 asks
-; for (see README.md).
+; created. The declarations below are the state a silent install creates - it has
+; no page to ask on - and the wizard unchecks every task when it builds the page
+; (InitializeWizard), so the page starts from no answer. The launcher's desktop
+; shortcut is the one a silent install skips unless /LAUNCHERICON=1 asks for it
+; (see README.md).
 ;
 ; The updater has no shortcuts page and creates none: the install it is updating
 ; already has whatever the user asked for, and re-creating a shortcut the user has
@@ -368,12 +368,19 @@ const
 
 var
   MethodPage: TInputOptionWizardPage;
-  FolderPage: TInputDirWizardPage;
-  PackagePage: TInputFileWizardPage;
   UltimatePage: TInputOptionWizardPage;
-  UltimateZipPage: TInputFileWizardPage;
-  UltimateFolderPage: TInputDirWizardPage;
   StagePage: TOutputProgressWizardPage;
+
+  { The file and folder pickers sit on the option page that asks the question they
+    belong to: the radio says which kind of source it is, and the prompt line, the
+    edit and its Browse button appear under the radios. No answer costs a page of
+    its own, so the wizard stays one question per step. }
+  MethodPromptLabel: TNewStaticText;
+  MethodPathEdit: TNewEdit;
+  MethodBrowseButton: TNewButton;
+  UltimatePromptLabel: TNewStaticText;
+  UltimatePathEdit: TNewEdit;
+  UltimateBrowseButton: TNewButton;
 
   gTempDir: String;
   gAppDir: String;
@@ -505,10 +512,10 @@ begin
   Result := Trim(ExpandConstant('{param:LAUNCHERICON|}'));
 end;
 
-// D8: the finish page's three-way choice. The game is the interactive default; a
-// silent install does nothing unless /RUNATEND asks for one, as the old
-// skipifsilent [Run] entry did. The radios set gRunAtEnd; DeinitializeSetup runs
-// it after the wizard closes.
+// D8: the finish page's three-way choice. The launcher is the interactive default
+// - it is what the install was made for - and a silent install does nothing unless
+// /RUNATEND asks for one, as the old skipifsilent [Run] entry did. The radios set
+// gRunAtEnd; DeinitializeSetup runs it after the wizard closes.
 function ParamRunAtEnd: String;
 begin
   Result := Lowercase(Trim(ExpandConstant('{param:RUNATEND|}')));
@@ -533,7 +540,7 @@ begin
   else if WizardSilent then
     gRunAtEnd := RunAtEndNothing
   else
-    gRunAtEnd := RunAtEndGame;
+    gRunAtEnd := RunAtEndLauncher;
 end;
 
 function RunAtEndProblem: String;
@@ -568,8 +575,7 @@ end;
 procedure LayoutFinishChoices;
 var
   top, step, left, width: Integer;
-begin
-  left := WizardForm.FinishedLabel.Left;
+begin  left := WizardForm.FinishedLabel.Left;
   width := WizardForm.FinishedLabel.Width;
   step := ScaleY(21);
   top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(8);
@@ -590,6 +596,20 @@ begin
   EndNothingRadio.Top := top + step * 2;
   EndNothingRadio.Width := width;
   EndNothingRadio.Height := step;
+end;
+
+// Inno Setup leaves Back and Next touching and puts Next against Cancel. The row
+// reads evenly when all three carry the same gap, so they are re-placed here - on
+// every page change, because the wizard hides and shows Back as it goes and each
+// page is laid out again when it appears.
+procedure LayoutWizardButtons;
+var
+  gap, left: Integer;
+begin
+  gap := ScaleX(10);
+  left := WizardForm.CancelButton.Left - gap - WizardForm.NextButton.Width;
+  WizardForm.NextButton.Left := left;
+  WizardForm.BackButton.Left := left - gap - WizardForm.BackButton.Width;
 end;
 
 function ReadAllText(const path: String): String;
@@ -1058,6 +1078,113 @@ begin
   end;
 end;
 
+// --- the picker that shares its page with the choice ----------------------
+
+// The option list is drawn at the very left of the page, where the radios' own
+// marker sits against the page edge; it is indented so the marker has room. The
+// band that leaves under the list is where the picker for the chosen kind of
+// source goes, which is why the list is shortened here rather than sized by Inno.
+procedure PlacePicker(const Page: TInputOptionWizardPage; const Prompt: TNewStaticText;
+                      const PathEdit: TNewEdit; const Browse: TNewButton);
+var
+  list: TNewCheckListBox;
+begin
+  list := Page.CheckListBox;
+  list.Left := ScaleX(8);
+  list.Width := list.Width - ScaleX(8);
+  list.Height := list.Height - ScaleY(60);
+
+  // The prompt's own height is fixed here rather than measured: it is one line, and
+  // the edit below it is placed from it before any caption has been set.
+  Prompt.Parent := list.Parent;
+  Prompt.AutoSize := False;
+  Prompt.WordWrap := False;
+  Prompt.Left := list.Left;
+  Prompt.Top := list.Top + list.Height + ScaleY(12);
+  Prompt.Width := list.Width;
+  Prompt.Height := ScaleY(15);
+
+  PathEdit.Parent := list.Parent;
+  PathEdit.Left := list.Left;
+  PathEdit.Top := Prompt.Top + Prompt.Height + ScaleY(4);
+  PathEdit.Width := list.Width - ScaleX(100);
+  PathEdit.Height := ScaleY(23);
+
+  Browse.Parent := list.Parent;
+  Browse.Left := PathEdit.Left + PathEdit.Width + ScaleX(8);
+  Browse.Top := PathEdit.Top - ScaleY(2);
+  Browse.Width := ScaleX(92);
+  Browse.Height := ScaleY(27);
+end;
+
+procedure UpdateMethodPicker;
+var
+  method: Integer;
+begin
+  method := MethodPage.SelectedValueIndex;
+  MethodPromptLabel.Visible := method <> MethodInstalled;
+  MethodPathEdit.Visible := method <> MethodInstalled;
+  MethodBrowseButton.Visible := method <> MethodInstalled;
+  if method = MethodFolder then
+    MethodPromptLabel.Caption := 'Extracted game folder:'
+  else
+    MethodPromptLabel.Caption := 'Xbox 360 package:';
+end;
+
+procedure UpdateUltimatePicker;
+var
+  choice: Integer;
+begin
+  choice := UltimatePage.SelectedValueIndex;
+  UltimatePromptLabel.Visible := (choice = UltimateZip) or (choice = UltimateFolder);
+  UltimatePathEdit.Visible := (choice = UltimateZip) or (choice = UltimateFolder);
+  UltimateBrowseButton.Visible := (choice = UltimateZip) or (choice = UltimateFolder);
+  if choice = UltimateFolder then
+    UltimatePromptLabel.Caption := 'Ultimate folder:'
+  else
+    UltimatePromptLabel.Caption := 'Ultimate zip file:';
+end;
+
+procedure MethodChoiceChanged(Sender: TObject);
+begin
+  RefreshMethodPage;
+  UpdateMethodPicker;
+end;
+
+procedure UltimateChoiceChanged(Sender: TObject);
+begin
+  UpdateUltimatePicker;
+end;
+
+procedure MethodBrowseClick(Sender: TObject);
+var
+  path: String;
+begin
+  path := Trim(MethodPathEdit.Text);
+  if MethodPage.SelectedValueIndex = MethodFolder then
+  begin
+    if BrowseForFolder('Choose the folder that holds the extracted game files.', path, False) then
+      MethodPathEdit.Text := path;
+  end
+  else if GetOpenFileName('Choose the Xbox 360 package.', path, '', 'All files|*.*', '') then
+    MethodPathEdit.Text := path;
+end;
+
+procedure UltimateBrowseClick(Sender: TObject);
+var
+  path: String;
+begin
+  path := Trim(UltimatePathEdit.Text);
+  if UltimatePage.SelectedValueIndex = UltimateFolder then
+  begin
+    if BrowseForFolder('Choose the folder that holds the Ultimate release.', path, False) then
+      UltimatePathEdit.Text := path;
+  end
+  else if GetOpenFileName('Choose the Rock Band Blitz Ultimate zip file.', path, '',
+                          'Zip archives|*.zip|All files|*.*', '.zip') then
+    UltimatePathEdit.Text := path;
+end;
+
 // 0 package, 1 folder, 2 the data that is already installed.
 function ChosenGameMethod: Integer;
 var
@@ -1108,7 +1235,7 @@ begin
   if WizardSilent then
     Result := ParamGameFolder
   else
-    Result := Trim(FolderPage.Values[0]);
+    Result := Trim(MethodPathEdit.Text);
 end;
 
 function ChosenGamePackage: String;
@@ -1116,7 +1243,7 @@ begin
   if WizardSilent then
     Result := ParamGamePackage
   else
-    Result := Trim(PackagePage.Values[0]);
+    Result := Trim(MethodPathEdit.Text);
 end;
 
 // Fills in gUltimate*; returns an empty string when the choice is usable.
@@ -1129,6 +1256,12 @@ begin
   gUltimateActive := False;
   gUltimateArchive := '';
   gUltimateFolder := '';
+
+  // An update never reinstalls or removes the mod, and it has no page to ask on:
+  // its Ultimate pages are skipped, so the page's preselected answer must not be
+  // read as one the user gave.
+  if gUpdater then
+    Exit;
 
   if WizardSilent then
   begin
@@ -1156,12 +1289,12 @@ begin
     else if UltimatePage.SelectedValueIndex = UltimateZip then
     begin
       mode := 'zip';
-      gUltimateArchive := Trim(UltimateZipPage.Values[0]);
+      gUltimateArchive := Trim(UltimatePathEdit.Text);
     end
     else if UltimatePage.SelectedValueIndex = UltimateFolder then
     begin
       mode := 'folder';
-      gUltimateFolder := Trim(UltimateFolderPage.Values[0]);
+      gUltimateFolder := Trim(UltimatePathEdit.Text);
     end
     else
       mode := 'none';
@@ -1444,66 +1577,74 @@ begin
 
   MethodPage := CreateInputOptionPage(wpSelectDir,
     'Xbox 360 Game Files',
-    'Rock Band Blitz needs the files from your own Xbox 360 copy. Choose the way you want to provide them.',
+    'Rock Band Blitz needs the files from your own Xbox 360 copy. Choose the way you want to provide them, then give the location on this page.',
     '',
     True, False);
   MethodPage.Add('Use the Xbox 360 package (GOD/STFS file)');
-  MethodPage.Add('Use a game folder I have already extracted');
-  MethodPage.Add('Use the game data already installed in the install folder');
+  MethodPage.Add('Use an extracted game folder');
+  MethodPage.Add('Use the game data already in the install folder');
   MethodPage.SelectedValueIndex := MethodPackage;
 
-  // PackagePage is created after FolderPage, not after MethodPage: Inno Setup
-  // inserts a page directly behind the page it is given, so two pages sharing one
-  // parent come out in reverse - and the mod's page would land between the folder
-  // question and the folder it asks about.
-  FolderPage := CreateInputDirPage(MethodPage.ID,
-    'Game folder location',
-    '',
-    '',
-    False, '');
-  FolderPage.Add('Extracted game folder:');
-
-  PackagePage := CreateInputFilePage(FolderPage.ID,
-    'Xbox 360 package location',
-    '',
-    '');
-  PackagePage.Add('Xbox 360 package:', 'All files|*.*', '');
-
-  UltimatePage := CreateInputOptionPage(PackagePage.ID,
+  UltimatePage := CreateInputOptionPage(MethodPage.ID,
     'Rock Band Blitz Ultimate',
     'A community mod by ultimate-mods-rb that adds the songs and the modes of the console versions. Recommended: it complements this recompilation.',
     'Choose if you want to install it, and how.',
     True, False);
-  UltimatePage.Add('Download Rock Band Blitz Ultimate {#UltimateVersion} from its GitHub release');
-  UltimatePage.Add('Install from a zip file I have');
-  UltimatePage.Add('Install from a folder I have');
+  UltimatePage.Add('Download Rock Band Blitz Ultimate {#UltimateVersion} from GitHub');
+  UltimatePage.Add('Install from a zip file');
+  UltimatePage.Add('Install from a folder');
   UltimatePage.Add('Do not install the mod');
-  UltimatePage.SelectedValueIndex := UltimateNothing;
+  // The download is the answer this page is here to offer, so it is the one the
+  // page opens on - unless this build pinned no release to download, in which case
+  // the item is disabled and the choice falls back to not installing the mod.
+  UltimatePage.SelectedValueIndex := UltimatePinned;
   if '{#UltimateUrl}' = '' then
+  begin
     UltimatePage.CheckListBox.ItemEnabled[UltimatePinned] := False;
+    UltimatePage.SelectedValueIndex := UltimateNothing;
+  end;
 
-  UltimateZipPage := CreateInputFilePage(UltimatePage.ID,
-    'Ultimate zip location',
-    '',
-    '');
-  UltimateZipPage.Add('Ultimate zip file:', 'Zip archives|*.zip|All files|*.*', '.zip');
+  // The picker each option page owns: a prompt, an edit and a Browse button, placed
+  // under the radios by PlacePicker. The edit is what ChosenGameFolder,
+  // ChosenGamePackage and ResolveUltimateChoice read, so the wizard and a silent
+  // install answer the same question in the same place.
+  MethodPromptLabel := TNewStaticText.Create(WizardForm);
+  MethodPathEdit := TNewEdit.Create(WizardForm);
+  MethodPathEdit.OnChange := @MethodChoiceChanged;
+  MethodBrowseButton := TNewButton.Create(WizardForm);
+  MethodBrowseButton.Caption := 'Browse...';
+  MethodBrowseButton.OnClick := @MethodBrowseClick;
+  PlacePicker(MethodPage, MethodPromptLabel, MethodPathEdit, MethodBrowseButton);
 
-  UltimateFolderPage := CreateInputDirPage(UltimateZipPage.ID,
-    'Ultimate folder location',
-    '',
-    '',
-    False, '');
-  UltimateFolderPage.Add('Ultimate folder:');
+  UltimatePromptLabel := TNewStaticText.Create(WizardForm);
+  UltimatePathEdit := TNewEdit.Create(WizardForm);
+  UltimatePathEdit.OnChange := @UltimateChoiceChanged;
+  UltimateBrowseButton := TNewButton.Create(WizardForm);
+  UltimateBrowseButton.Caption := 'Browse...';
+  UltimateBrowseButton.OnClick := @UltimateBrowseClick;
+  PlacePicker(UltimatePage, UltimatePromptLabel, UltimatePathEdit, UltimateBrowseButton);
+
+  MethodPage.CheckListBox.OnClick := @MethodChoiceChanged;
+  UltimatePage.CheckListBox.OnClick := @UltimateChoiceChanged;
 
   StagePage := CreateOutputProgressPage('Installing',
     'The installer is building your game folder. This takes a few minutes for the game data.');
 
   RefreshMethodPage;
+  UpdateMethodPicker;
+  UpdateUltimatePicker;
 
-  // The wizard offers the launcher's desktop shortcut checked (D9), which is the
-  // default the task was declared with. A silent install is conservative: it
-  // creates no desktop shortcut unless /LAUNCHERICON=1 asks (README.md).
-  if WizardSilent and (ParamLauncherIcon <> '1') then
+  // Nothing is preselected on the Shortcuts page: it asks, so it starts from no
+  // answer rather than from a guess about what the user wants. A silent install
+  // has no page to ask on and still creates the two Start-menu shortcuts, and the
+  // launcher's desktop one when /LAUNCHERICON=1 asks for it (README.md), so the
+  // unchecked state is the wizard's alone.
+  if not WizardSilent then
+  begin
+    for index := 0 to WizardForm.TasksList.Items.Count - 1 do
+      WizardForm.TasksList.Checked[index] := False;
+  end
+  else if ParamLauncherIcon <> '1' then
   begin
     index := WizardForm.TasksList.Items.IndexOf(LauncherIconTask);
     if index >= 0 then
@@ -1540,17 +1681,15 @@ begin
   // neither reinstalled nor removed), and no summary - the answers are the
   // wizard's own, so there is nothing for the user to confirm.
   //
-  // The game-data pages are the exception: this release may need the user's files
+  // The game-data page is the exception: this release may need the user's files
   // again, and then they are the whole reason the update cannot simply run.
   if (PageID = wpWelcome) or (PageID = wpSelectDir) or (PageID = wpSelectTasks) or
-     (PageID = wpReady) or (PageID = UltimatePage.ID) or (PageID = UltimateZipPage.ID) or
-     (PageID = UltimateFolderPage.ID) then
+     (PageID = wpReady) or (PageID = UltimatePage.ID) then
   begin
     Result := True;
     Exit;
   end;
-  if (not UpdateNeedsGamePages) and ((PageID = MethodPage.ID) or (PageID = FolderPage.ID) or
-                                     (PageID = PackagePage.ID)) then
+  if (not UpdateNeedsGamePages) and (PageID = MethodPage.ID) then
   begin
     Result := True;
     Exit;
@@ -1558,21 +1697,9 @@ begin
 #endif
   if WizardSilent then
   begin
-    Result := (PageID = MethodPage.ID) or (PageID = FolderPage.ID) or (PageID = PackagePage.ID) or
-              (PageID = UltimatePage.ID) or (PageID = UltimateZipPage.ID) or
-              (PageID = UltimateFolderPage.ID);
+    Result := (PageID = MethodPage.ID) or (PageID = UltimatePage.ID);
     Exit;
   end;
-  if PageID = FolderPage.ID then
-    Result := (MethodPage.SelectedValueIndex <> MethodFolder) or
-              (not MethodPage.CheckListBox.ItemEnabled[MethodFolder])
-  else if PageID = PackagePage.ID then
-    Result := (MethodPage.SelectedValueIndex <> MethodPackage) or
-              (not MethodPage.CheckListBox.ItemEnabled[MethodPackage])
-  else if PageID = UltimateZipPage.ID then
-    Result := UltimatePage.SelectedValueIndex <> UltimateZip
-  else if PageID = UltimateFolderPage.ID then
-    Result := UltimatePage.SelectedValueIndex <> UltimateFolder;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -1589,94 +1716,99 @@ begin
     Exit;
   end;
 
-  if CurPageID = FolderPage.ID then
+  // The game files question and its location are the same page now, so both are
+  // settled here: the answer is checked against the machine before the wizard
+  // moves on, which is what the follow-on page used to do.
+  if CurPageID = MethodPage.ID then
   begin
-    if Trim(FolderPage.Values[0]) = '' then
+    RefreshMethodPage;
+    if MethodPage.SelectedValueIndex = MethodInstalled then
+      Exit;
+    if Trim(MethodPathEdit.Text) = '' then
     begin
-      SuppressibleMsgBox('Choose the folder that holds the extracted game files.',
-                         mbError, MB_OK, IDOK);
+      if MethodPage.SelectedValueIndex = MethodFolder then
+        SuppressibleMsgBox('Choose the folder that holds the extracted game files.',
+                           mbError, MB_OK, IDOK)
+      else
+        SuppressibleMsgBox('Choose the Xbox 360 package file.', mbError, MB_OK, IDOK);
       Result := False;
       Exit;
     end;
-    ProbeGameFolder(Trim(FolderPage.Values[0]));
-    if gFailureText <> '' then
+    if MethodPage.SelectedValueIndex = MethodFolder then
     begin
-      SuppressibleMsgBox('That folder cannot be used:' + kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
-                         'Pick the folder that holds default.xex and the gen folder, or a folder above it.',
-                         mbError, MB_OK, IDOK);
-      FolderPage.SubCaptionLabel.Caption := '';
-      Result := False;
-      Exit;
-    end;
-    FolderPage.SubCaptionLabel.Caption := 'Ready: ' + gGameSourceDescription;
-    FolderPage.SubCaptionLabel.Update;
-    Exit;
-  end;
-
-  if CurPageID = PackagePage.ID then
-  begin
-    if Trim(PackagePage.Values[0]) = '' then
-    begin
-      SuppressibleMsgBox('Choose the Xbox 360 package file.', mbError, MB_OK, IDOK);
-      Result := False;
-      Exit;
-    end;
-    ProbeGamePackage(Trim(PackagePage.Values[0]));
-    if gFailureText <> '' then
-    begin
-      SuppressibleMsgBox('That file cannot be used:' + kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
-                         'Check that it is the package holding Rock Band Blitz.',
-                         mbError, MB_OK, IDOK);
-      PackagePage.SubCaptionLabel.Caption := '';
-      Result := False;
-      Exit;
-    end;
-    PackagePage.SubCaptionLabel.Caption := 'Ready: ' + gGameSourceDescription;
-    PackagePage.SubCaptionLabel.Update;
-    Exit;
-  end;
-
-  if CurPageID = UltimateZipPage.ID then
-  begin
-    if not ProbeUltimateArchive(Trim(UltimateZipPage.Values[0])) then
-    begin
-      answer := SuppressibleMsgBox('That zip does not look like the Rock Band Blitz Ultimate release:' +
-                                   kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
-                                   'Install it anyway? The installer will refuse it if its files are wrong.',
-                                   mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO);
-      if answer <> IDYES then
+      ProbeGameFolder(Trim(MethodPathEdit.Text));
+      if gFailureText <> '' then
       begin
-        UltimateZipPage.SubCaptionLabel.Caption := '';
+        SuppressibleMsgBox('That folder cannot be used:' + kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
+                           'Pick the folder that holds default.xex and the gen folder, or a folder above it.',
+                           mbError, MB_OK, IDOK);
+        MethodPromptLabel.Caption := '';
         Result := False;
         Exit;
       end;
-      UltimateZipPage.SubCaptionLabel.Caption := 'Not verified: the archive does not look like the Ultimate release.';
     end
     else
-      UltimateZipPage.SubCaptionLabel.Caption := 'Looks right: ' + Trim(SummaryText(gProbeSummaryFile, 'description', 'the archive'));
-    UltimateZipPage.SubCaptionLabel.Update;
-    Exit;
-  end;
-
-  if CurPageID = UltimateFolderPage.ID then
-  begin
-    if not LooksLikeUltimateTree(Trim(UltimateFolderPage.Values[0])) then
     begin
-      answer := SuppressibleMsgBox('That folder does not look like the Rock Band Blitz Ultimate release:' +
-                                   kCrLf + kCrLf + 'it holds no ' + UltimateHeaderRel + '.' + kCrLf + kCrLf +
-                                   'Install it anyway? The installer will refuse it if its files are wrong.',
-                                   mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO);
-      if answer <> IDYES then
+      ProbeGamePackage(Trim(MethodPathEdit.Text));
+      if gFailureText <> '' then
       begin
-        UltimateFolderPage.SubCaptionLabel.Caption := '';
+        SuppressibleMsgBox('That file cannot be used:' + kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
+                           'Check that it is the package holding Rock Band Blitz.',
+                           mbError, MB_OK, IDOK);
+        MethodPromptLabel.Caption := '';
         Result := False;
         Exit;
       end;
-      UltimateFolderPage.SubCaptionLabel.Caption := 'Not verified: no ' + UltimateHeaderRel + ' found.';
+    end;
+    MethodPromptLabel.Caption := 'Ready: ' + gGameSourceDescription;
+    MethodPromptLabel.Update;
+    Exit;
+  end;
+
+  // The mod's question and its location share a page too; the zip and the folder
+  // are told apart by the radio that was chosen.
+  if CurPageID = UltimatePage.ID then
+  begin
+    if UltimatePage.SelectedValueIndex = UltimateZip then
+    begin
+      if not ProbeUltimateArchive(Trim(UltimatePathEdit.Text)) then
+      begin
+        answer := SuppressibleMsgBox('That zip does not look like the Rock Band Blitz Ultimate release:' +
+                                     kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
+                                     'Install it anyway? The installer will refuse it if its files are wrong.',
+                                     mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO);
+        if answer <> IDYES then
+        begin
+          UltimatePromptLabel.Caption := '';
+          Result := False;
+          Exit;
+        end;
+        UltimatePromptLabel.Caption := 'Not verified: the archive does not look like the Ultimate release.';
+      end
+      else
+        UltimatePromptLabel.Caption := 'Looks right: ' + Trim(SummaryText(gProbeSummaryFile, 'description', 'the archive'));
+      UltimatePromptLabel.Update;
     end
-    else
-      UltimateFolderPage.SubCaptionLabel.Caption := 'Looks right: ' + UltimateHeaderRel + ' is there.';
-    UltimateFolderPage.SubCaptionLabel.Update;
+    else if UltimatePage.SelectedValueIndex = UltimateFolder then
+    begin
+      if not LooksLikeUltimateTree(Trim(UltimatePathEdit.Text)) then
+      begin
+        answer := SuppressibleMsgBox('That folder does not look like the Rock Band Blitz Ultimate release:' +
+                                     kCrLf + kCrLf + 'it holds no ' + UltimateHeaderRel + '.' + kCrLf + kCrLf +
+                                     'Install it anyway? The installer will refuse it if its files are wrong.',
+                                     mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO);
+        if answer <> IDYES then
+        begin
+          UltimatePromptLabel.Caption := '';
+          Result := False;
+          Exit;
+        end;
+        UltimatePromptLabel.Caption := 'Not verified: no ' + UltimateHeaderRel + ' found.';
+      end
+      else
+        UltimatePromptLabel.Caption := 'Looks right: ' + UltimateHeaderRel + ' is there.';
+      UltimatePromptLabel.Update;
+    end;
     Exit;
   end;
 end;
@@ -2070,6 +2202,18 @@ end;
 // what to do - so the radios only appear on a successful interactive install.
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  LayoutWizardButtons;
+  // The game files page and the mod's page own their pickers: which one is shown,
+  // and what it is called, follows the radio that is selected, and the installed
+  // data item only stays offered while there is data to keep.
+  if CurPageID = MethodPage.ID then
+  begin
+    RefreshMethodPage;
+    UpdateMethodPicker;
+  end
+  else if CurPageID = UltimatePage.ID then
+    UpdateUltimatePicker;
+
   if CurPageID <> wpFinished then
     Exit;
   if gUpdater or gFailed or WizardSilent then

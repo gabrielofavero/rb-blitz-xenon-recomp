@@ -31,8 +31,8 @@ build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultima
 | --- | --- |
 | Welcome | What the installer needs (a copy of the game they own), what it refuses to do (no game files included or downloaded). |
 | Install folder | Any writable folder; the default is under the user's own profile, so no administrator rights are needed (`/ALLUSERS` still forces a machine-wide install). Skipped when an install is already registered, because Inno Setup then knows where the game is ([details below](#a-game-that-is-already-installed)). |
-| Xbox 360 Game Files | The package / an extracted game folder / keep the data that is already installed in the install folder. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. The folder or package page follows it, and asks for nothing but the location. |
-| Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release, use a zip, use a folder, or do not install it. |
+| Xbox 360 Game Files | The package / an extracted game folder / keep the data that is already installed in the install folder. The location is asked on this page, not on one of its own: choosing "package" or "folder" puts the prompt, the path box and its Browse button under the radios. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. |
+| Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release (selected by default), use a zip, use a folder, or do not install it. The zip or folder is asked for on this page too. |
 | Shortcuts | Which of the four shortcuts to create ([details below](#shortcuts)). |
 | Ready to install | The destination, the answers, and the commit this build is, for a last look before anything is written. |
 | Progress | One bar across four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
@@ -62,18 +62,19 @@ game beside itself.
 
 | Task | Where | Shortcut | Default |
 | --- | --- | --- | --- |
-| `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | checked |
-| `startmenulauncher` | Start menu | **Rock Band Blitz Launcher** — the settings launcher | checked |
-| `launchericon` | Desktop | **Rock Band Blitz Launcher** | checked in the wizard; in a silent install only with `/LAUNCHERICON=1` |
+| `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | unchecked in the wizard; created by a silent install |
+| `startmenulauncher` | Start menu | **Rock Band Blitz Launcher** — the settings launcher | unchecked in the wizard; created by a silent install |
+| `launchericon` | Desktop | **Rock Band Blitz Launcher** | unchecked in the wizard; a silent install creates it only with `/LAUNCHERICON=1` |
 | `desktopicon` | Desktop | **Rock Band Blitz** — the game | unchecked, as before |
 
 The names are deliberately different so a list can tell them apart, and the
 game's shortcut is never repointed at the launcher: the game has to stay runnable
 on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
-A silent install creates every checked task, which is the two Start-menu shortcuts
-(and the launcher's desktop one with `/LAUNCHERICON=1`), exactly as before the page
-existed; `/MERGETASKS=!startmenu,!startmenulauncher` (Inno Setup) takes any of them
-away.
+The wizard's page starts from no answer at all — nothing is ticked for the user —
+while a silent install has no page to ask on and still creates the two Start-menu
+shortcuts (and the launcher's desktop one with `/LAUNCHERICON=1`), exactly as
+before the page existed; `/MERGETASKS=!startmenu,!startmenulauncher` (Inno Setup)
+takes any of them away.
 
 ### A game that is already installed
 
@@ -93,7 +94,7 @@ anywhere, and `/DIR` overrides it either way.
 
 ### The finish page
 
-The last page asks what to do when the wizard closes, with the game preselected:
+The last page asks what to do when the wizard closes, with the launcher preselected:
 
 | Choice | What it starts |
 | --- | --- |
@@ -483,7 +484,7 @@ Setup's own switches.
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
 | `/LAUNCHERICON` | `1` | Silent installs only: also create the launcher's desktop shortcut. Omitted, nothing is added to the desktop. |
 | `/MERGETASKS` | `!startmenu,!startmenulauncher` (Inno Setup) | Takes individual shortcuts away from a silent install; every checked task is created without it. |
-| `/RUNATEND` | `game` (wizard default), `launcher`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. |
+| `/RUNATEND` | `launcher` (wizard default), `game`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. |
 | `/DIR` | folder | Install folder (Inno Setup). |
 | `/ALLUSERS`, `/CURRENTUSER` | — | Machine-wide instead of the default per-user install (Inno Setup). |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | — | Usual unattended switches (Inno Setup). |
