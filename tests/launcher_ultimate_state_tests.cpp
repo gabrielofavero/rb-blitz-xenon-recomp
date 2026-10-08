@@ -267,14 +267,27 @@ void TestPathRules(Scratch& scratch) {
   CHECK_TRUE(accepted.ok);
   CHECK_CONTAINS(accepted.note, "1 package found");
 
-  BeginCase("a misplaced folder in the DLC root is reported, not accepted");
+  BeginCase("a misplaced folder in the structured DLC root is reported, not accepted");
 
   const fs::path dlc_bad = scratch.Make("dlc-bad");
+  WriteText(dlc_bad / "4E4D07FF" / "00000002" / "package", "CON the rest of the container");
   WriteText(dlc_bad / "my downloads" / "readme.txt", "not content");
   const PathVerdict refused = ValidatePathValue("dlc_layout", dlc_bad, game_root);
   CHECK_FALSE(refused.ok);
   CHECK_CONTAINS(refused.reason, "my downloads");
   CHECK_CONTAINS(refused.reason, "8 upper-case hex digits");
+
+  BeginCase("a flat song library of loose containers is accepted, not refused");
+
+  // The runtime reads a folder that is not the <title_id>/<content_type>/<package> layout as
+  // a flat library (src/fs/dlc_library.h), so `dlc_layout` must accept a dumped song folder
+  // too rather than turn away the shape the runtime is built to read.
+  const fs::path songs = scratch.Make("yarg-songs");
+  WriteText(songs / "Some Song.con", "CON the rest of the container");
+  const PathVerdict flat =
+      ValidatePathValue("dlc_layout|inside_game_root:forbid", songs, game_root);
+  CHECK_TRUE(flat.ok);
+  CHECK_CONTAINS(flat.note, "flat song library");
 
   BeginCase("an empty or absent DLC folder is fine, and says so");
 

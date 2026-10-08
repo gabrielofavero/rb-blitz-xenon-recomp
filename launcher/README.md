@@ -41,7 +41,7 @@ drivable with the keyboard, the mouse or a controller.
 | `src/game_launch.{h,cpp}` | Contract 3's argv, and the process the launcher starts with it — no ImGui, no SDL (B7) |
 | `src/install_ultimate.{h,cpp}` | B8's action: runs `rb_blitz_setup_helper.exe install-ultimate` and reports its progress, with the manual route when it fails |
 | `src/ultimate_state.{h,cpp}` | D5's four payload states, the target fallback and where the game is — no ImGui, no SDL (B1) |
-| `src/path_validate.{h,cpp}` | The schema's `validate` rules, reusing `src/fs/path_policy.h` and `src/fs/dlc_layout.h` (B1) |
+| `src/path_validate.{h,cpp}` | The schema's `validate` rules, reusing `src/fs/path_policy.h`, `src/fs/dlc_layout.h` and `src/fs/dlc_library.h` (B1) |
 | `src/profile_session.{h,cpp}` | The write path: what a save would change, a reset, import/export, the settings location, and the precedence rule — no ImGui, no SDL (B4) |
 | `src/game_config.{h,cpp}` | A read-only reader for the game's own `rb_blitz.toml`, which outranks the profile (B4, D3) |
 | `src/profile_ui.{h,cpp}` | The profile block at the end of the General tab (B4) |
@@ -403,9 +403,11 @@ rules are the runtime's and not the tab's:
 - `inside_game_root:forbid` refuses a folder inside the game data, because the runtime
   redirects its writable roots to the platform user folder and the row would silently do
   something else (D4).
-- `dlc_layout` refuses a folder that is not `<title_id>/<content_type>/<package>`, using
-  `src/fs/dlc_layout.h`'s own wording. An absent or empty folder is fine and says so — an
-  empty DLC folder is the normal case.
+- `dlc_layout` accepts both roots the runtime mounts (D4's one rule, one implementation):
+  a structured `<title_id>/<content_type>/<package>` folder, refused with `src/fs/dlc_layout.h`'s
+  own wording when it is malformed, and a flat library of loose CON/LIVE containers — a dumped
+  song folder — which the runtime reads where it lies (`src/fs/dlc_library.h`). An absent or
+  empty folder is fine and says so — an empty DLC folder is the normal case.
 - A rule this build does not know is refused rather than waved through, so a schema that
   grows one fails loudly instead of silently accepting anything.
 
@@ -959,7 +961,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | `choices_from` | `enum` only, optional: where the choices really come from when the *build* decides them. `gpu_backends` is the only rule there is — the backends CMake compiled in, passed to the embed step as `--backends=` — and such a row declares no `choices` of its own |
 | `min` / `max` | `int` / `float` only, optional: the range the row's slider is bounded to. Both or neither, and the default must sit inside it. They are the cvar's own `.range(...)` where it has one, so the slider cannot offer a value the runtime would clamp |
 | `visible` | Optional: a rule the *machine* or the *install* has to satisfy for the row to exist at all. Two rules exist — `multi_monitor` (*Audio / Video → Window → Monitor* is hidden when one display is attached, because there is nothing to choose between) and `ultimate_installed` (*Interface → Main menu → Rename Mod Settings* is hidden when the Ultimate payload is not installed, because the row it configures belongs to the mod) |
-| `validate` | `path_dir` / `path_file` only: `exists`, `dlc_layout` or `inside_game_root:forbid`, separated by `\|` |
+| `validate` | `path_dir` / `path_file` only: `exists`, `dlc_layout` (the structured DLC tree or a flat song library of loose containers) or `inside_game_root:forbid`, separated by `\|` |
 
 `argv = "none"` exists for exactly one row: `launch.target` is not a cvar, and the
 launcher turns it into `--ultimate_mode` / `--license_mask` itself

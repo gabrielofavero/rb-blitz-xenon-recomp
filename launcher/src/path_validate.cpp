@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "fs/dlc_layout.h"
+#include "fs/dlc_library.h"
 #include "fs/path_policy.h"
 
 namespace rb_blitz::launcher {
@@ -29,6 +30,15 @@ std::string InsideGameRootReason(const fs::path& value, const fs::path& game_roo
   return reason;
 }
 
+// The DLC root the runtime accepts is one of two shapes, and src/hooks/dlc.cpp decides between
+// them the same way: a folder named like the <title_id>/<content_type>/<package> layout is
+// mounted as that structure, and anything else is read as a flat library
+// (src/fs/dlc_library.h) - thousands of loose CON/LIVE containers in no particular
+// arrangement, which is what a dumped song folder is (docs/dlc.md §2.1). A folder of loose
+// packages is therefore accepted here rather than refused: refusing it would turn away exactly
+// the layout the runtime is built to read. The library walk itself is not repeated - a cold one
+// is ~22 s on a large exFAT library (docs/dlc.md §4.1), far too long to run while the panel
+// draws, and nothing the walk finds can refuse a folder the runtime would take.
 PathVerdict CheckDlcLayout(const fs::path& value) {
   PathVerdict verdict;
   std::error_code ec;
@@ -37,6 +47,20 @@ PathVerdict CheckDlcLayout(const fs::path& value) {
     // row's tooltip already explains what the folder has to hold when it exists.
     verdict.note = "Not a folder yet; the game starts with whatever DLC is in the content "
                    "root until one is.";
+    return verdict;
+  }
+
+  if (!rb_blitz::fs::HasStructuredLayout(value)) {
+    // An empty folder reads the same either way, so it keeps the row's own wording; a folder
+    // with anything in it is the flat library the runtime reads where it lies.
+    std::error_code empty_ec;
+    if (fs::is_empty(value, empty_ec) && !empty_ec) {
+      verdict.note = "No DLC packages found under it yet.";
+      return verdict;
+    }
+    verdict.note = "Not the <title_id>/<content_type>/<package> layout, so the game reads it as "
+                   "a flat song library: the loose CON/LIVE packages under it are mounted where "
+                   "they lie.";
     return verdict;
   }
 

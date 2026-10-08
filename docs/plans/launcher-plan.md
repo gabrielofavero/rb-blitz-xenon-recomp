@@ -231,12 +231,18 @@ and *Install Ultimate…* are later (§1.1, B8).
 | Rock Band Blitz **Demo** | `--license_mask=0` | the XBLA trial path; the project's own note is that a licence-less boot takes the trial mode that does not keep scores ([src/rb_blitz_app.h](../../src/rb_blitz_app.h), `ApplyContentLicense`) |
 | Rock Band Blitz **Ultimate** | `--ultimate_mode=1` (auto) | payload at `<game root>\ultimate\gen\patch_xbox.hdr` is mounted and the mod's 12-byte edits are re-applied host-side ([src/hooks/ultimate.cpp:231-260](../../src/hooks/ultimate.cpp)) |
 | Save game location | `user_data_root` | default `Documents\Rock Band Blitz`; the title's own saves and `globaloptions` live there |
-| DLC location | `dlc_root` | `<title_id>/<content_type>/<package>`, mounted in place read-only ([docs/dlc.md](../dlc.md)) |
+| DLC location | `dlc_root` | `<title_id>/<content_type>/<package>`, mounted in place read-only; a folder that is *not* that layout is read as a flat song library of loose containers ([docs/dlc.md](../dlc.md)) |
 
 The launcher must refuse a save/DLC directory **inside** the game root, and say why: the runtime
 already redirects those to the platform user directory ([src/fs/path_policy.h](../../src/fs/path_policy.h),
 used by `OnConfigurePaths`), so a launcher that offers it would be offering a setting that silently does
 something else. Same rule, same wording, one implementation (B1).
+
+> **Amended 2026-10-07 (built).** `dlc_layout` accepts both DLC roots the runtime mounts
+> ([src/hooks/dlc.cpp](../../src/hooks/dlc.cpp)): the structured `<title_id>/<content_type>/<package>`
+> tree, and a flat library of loose CON/LIVE containers - a dumped song folder - read where it lies
+> ([src/fs/dlc_library.h](../../src/fs/dlc_library.h)). It was refusing the flat root, which turned away
+> the exact shape the runtime is built to read; the rule now decides the way the hook does.
 
 ### D5 — Ultimate: detection, and the friendlier answer to "disabled + tooltip"
 

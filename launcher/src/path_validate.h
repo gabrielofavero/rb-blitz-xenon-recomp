@@ -28,8 +28,11 @@ struct PathVerdict {
 // Applies the '|'-separated rules of a row's `validate` to `value`. The rules the table uses
 // today, and everything else is reported rather than ignored:
 //   exists                  the path has to be there
-//   dlc_layout              <title_id>/<content_type>/<package>, refused with
-//                           src/fs/dlc_layout.h's own wording
+//   dlc_layout              either root src/hooks/dlc.cpp mounts: the structured
+//                           <title_id>/<content_type>/<package> tree (refused with
+//                           src/fs/dlc_layout.h's own wording), or a flat library of loose
+//                           containers under it, which the runtime reads where it lies
+//                           (src/fs/dlc_library.h), so a dumped song folder is accepted
 //   inside_game_root:forbid refused when it sits inside the game root, with the reason
 //                           src/fs/path_policy.h exists for (the runtime would redirect it
 //                           to the platform user folder, so the row would silently do

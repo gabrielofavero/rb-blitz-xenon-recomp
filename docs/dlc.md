@@ -72,6 +72,12 @@ the same way:
 --dlc_library="D:\Games\YARG Songs"     # one or more folders, ';'-separated
 ```
 
+The launcher offers the same two shapes for its *DLC location* row: the
+`dlc_layout` rule accepts a structured `<title_id>/<content_type>/<package>` folder
+**and** a flat library of loose containers, because a folder that is not the layout
+is what the runtime above reads as a library
+([launcher/src/path_validate.cpp](../launcher/src/path_validate.cpp)).
+
 - Each container is read for **its own** title id and content type —
   `XContentMetadata::execution_info.title_id` and
   `XContentMetadata::content_type` — and placed under them, so nothing on disk is

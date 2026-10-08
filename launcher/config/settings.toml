@@ -25,7 +25,10 @@
 #             row the launcher translates itself (launch.target, D4)
 #   choices   enum only: the allowed values, e.g. ["sdl", "xinput"]
 #   validate  path_dir / path_file only: `exists`, `dlc_layout` or
-#             `inside_game_root:forbid`, separated by `|`
+#             `inside_game_root:forbid`, separated by `|`. `dlc_layout` accepts both DLC
+#             roots the runtime mounts (src/hooks/dlc.cpp): the structured
+#             <title_id>/<content_type>/<package> tree, and a flat library of loose
+#             CON/LIVE containers - a dumped song folder - read where it lies.
 #   min/max   int / float only, optional: the range the row's widget is bounded to, so
 #             the slider carries the cvar's real limits. Both or neither, and the
 #             default must sit inside it.
@@ -216,7 +219,8 @@ applies = "restart"
 argv    = "flag"
 validate = "dlc_layout|inside_game_root:forbid"
 tooltip = """
-DLC folder, laid out as <title_id>/<content_type>/<package>. Empty uses the game
+DLC folder: either laid out as <title_id>/<content_type>/<package>, or a flat song
+library of loose CON/LIVE packages, which is read where it lies. Empty uses the game
 folder's dlc directory.
 """
 
