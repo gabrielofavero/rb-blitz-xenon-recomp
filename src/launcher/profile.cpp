@@ -789,6 +789,23 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
     }
   }
 
+  // A path row used to be recorded in `[launch] user_data_dir` / `dlc_dir`, which the launch
+  // command never read - so a folder picked in the panel was stored where nothing looked for it
+  // (launcher-plan.md §11 finding 7). The panel now writes the `[settings]` key the launch
+  // command does read, and this carries a folder saved the old way across once, rather than
+  // making the user pick it again; the `[launch]` field is left exactly as it was found, because
+  // this module does not lose what it did not write. A profile that already names the `[settings]`
+  // key is untouched, so the migration cannot overwrite a newer choice. One consequence, and it
+  // is the wanted one: a profile written before the change is dirty on first load, and saving it
+  // writes the key the game now reads (that is the one case where a load-then-save is not
+  // byte-for-byte the file it read, which is why it is spelled out here).
+  if (profile.FindSetting("user_data_root") == nullptr && !profile.user_data_dir.empty()) {
+    profile.SetString("user_data_root", profile.user_data_dir);
+  }
+  if (profile.FindSetting("dlc_root") == nullptr && !profile.dlc_dir.empty()) {
+    profile.SetString("dlc_root", profile.dlc_dir);
+  }
+
   result.status = ProfileStatus::kOk;
   result.profile = std::move(profile);
   return result;

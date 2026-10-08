@@ -313,6 +313,59 @@ void TestRoundTrip() {
   CHECK_STR_EQ(ReadFile(path), source);
 }
 
+void TestLegacyPathMigration() {
+  BeginCase("a folder saved in [launch] user_data_dir / dlc_dir is carried to [settings]");
+  Scratch scratch;
+
+  // What the General tab used to write: the paths in [launch], where the launch command never
+  // looked for them (launcher-plan.md §11 finding 7). A profile like this must still show the
+  // user's folder and hand it to the game, so the loader moves it once.
+  const fs::path legacy = scratch.base / "legacy.toml";
+  WriteFile(legacy, MakeText({
+                          "[launch]",
+                          "target        = \"ultimate\"",
+                          "user_data_dir = 'D:\\Saves'",
+                          "dlc_dir       = 'D:\\Games\\YARG Songs'",
+                          "",
+                      }));
+  const ProfileLoadResult migrated = LoadProfile(legacy);
+  CHECK_TRUE(migrated.status == ProfileStatus::kOk);
+  const ProfileSetting* saves = migrated.profile.FindSetting("user_data_root");
+  const ProfileSetting* dlc = migrated.profile.FindSetting("dlc_root");
+  CHECK_TRUE(saves != nullptr);
+  CHECK_TRUE(dlc != nullptr);
+  if (saves != nullptr) {
+    CHECK_STR_EQ(saves->value, "D:\\Saves");
+    CHECK_TRUE(saves->style == ValueStyle::kBasic);
+  }
+  if (dlc != nullptr) {
+    CHECK_STR_EQ(dlc->value, "D:\\Games\\YARG Songs");
+  }
+
+  // A profile that already names the `[settings]` key keeps it: the migration must not overwrite
+  // a newer choice with a stale legacy value.
+  const fs::path both = scratch.base / "both.toml";
+  WriteFile(both, MakeText({
+                        "[launch]",
+                        "target        = \"ultimate\"",
+                        "user_data_dir = 'D:\\Legacy'",
+                        "dlc_dir       = ''",
+                        "",
+                        "[settings]",
+                        "user_data_root = 'E:\\Chosen'",
+                        "",
+                    }));
+  const ProfileLoadResult kept = LoadProfile(both);
+  CHECK_TRUE(kept.status == ProfileStatus::kOk);
+  const ProfileSetting* chosen = kept.profile.FindSetting("user_data_root");
+  CHECK_TRUE(chosen != nullptr);
+  if (chosen != nullptr) {
+    CHECK_STR_EQ(chosen->value, "E:\\Chosen");
+  }
+  // An empty legacy value is not a choice and must not invent a row.
+  CHECK_TRUE(kept.profile.FindSetting("dlc_root") == nullptr);
+}
+
 void TestZeroSettings() {
   BeginCase("a profile with zero settings saves without inventing a [settings] table");
   Scratch scratch;
@@ -600,6 +653,7 @@ int main() {
   TestMissingFile();
   TestDamagedFile();
   TestRoundTrip();
+  TestLegacyPathMigration();
   TestZeroSettings();
   TestEdits();
   TestMissingSectionAppendedLast();

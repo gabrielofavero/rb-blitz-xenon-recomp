@@ -622,7 +622,7 @@ The tables in it, and who reads them:
 | --- | --- | --- |
 | `[launcher]`, `[window]` | the launcher: the format's version, portable mode, the window size (A1) | the launcher only |
 | `[launch]` | the launch target and the game-directory override | the launcher (the game gets the target on its command line, Contract 3) |
-| `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from | the launcher, and the game as its own config source (D3 rank 4, `src/launcher/profile_apply.cpp`) |
+| `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from. A folder an older build saved in `[launch] user_data_dir` / `dlc_dir` is carried across to these keys once, on load, so a pick made before the change still reaches the game | the launcher, and the game as its own config source (D3 rank 4, `src/launcher/profile_apply.cpp`) |
 | `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
 | `[nav]` | the launcher's own key bindings (A5) | the launcher only |
 | `[update]` | `declined_version`, the release the user answered *Not now* to (D19) | the launcher only |
