@@ -24,6 +24,12 @@
 #   argv      flag | none. `flag` emits `--<key>=<value>`; `none` is a launcher-level
 #             row the launcher translates itself (launch.target, D4)
 #   choices   enum only: the allowed values, e.g. ["sdl", "xinput"]
+#   choice_labels
+#             enum only, optional: one label per choice, same count and order, drawn in
+#             place of the value. The value stays `choices` - what the profile stores and
+#             the game is passed - so a row can read "1440p" while its value is the cvar's
+#             own "2". Used only where the value does not read as itself, and never
+#             together with `choices_from`; `--dump-layout` prints both.
 #   validate  path_dir / path_file only: `exists`, `dlc_layout` or
 #             `inside_game_root:forbid`, separated by `|`. `dlc_layout` accepts both DLC
 #             roots the runtime mounts (src/hooks/dlc.cpp): the structured
@@ -70,10 +76,12 @@
 # Two more absences are deliberate, and are decisions rather than omissions:
 #   * `video_mode_refresh_rate` and the free-form `video_mode_width`/`video_mode_height`
 #     are not exposed. The guest refresh rate changes how the title paces itself, and the
-#     runtime's own preset list is the only set of resolutions known to be safe, so
-#     resolution is a curated enum and the refresh rate is left alone.
-#   * `window_width`/`window_height` are not exposed either: the resolution preset already
-#     sizes the startup window, and two controls for one window can only disagree.
+#     runtime's own preset list is the only set of resolutions known to be safe - so the
+#     guest video mode is left at its native 1280x720 and the Display row carries the
+#     render multiplier instead of a video-mode word (it is the row below).
+#   * `window_width`/`window_height` are not exposed either: the window's own size is
+#     remembered from the last time the user dragged it, and a row for it would be a
+#     second control for something a gesture already does.
 #
 # And one row whose choices are a decision too:
 #   * The renderer's *choices* are the backends this build compiled in, not a fixed list
@@ -417,22 +425,28 @@ restart.
 # Graphics - Display
 # ---------------------------------------------------------------------------
 
-# One curated list, not a free-form size: the tokens are exactly the resolution presets the
-# runtime's own parser accepts (rexglue-sdk/include/rex/graphics/video_mode_util.h), applied
-# to both the guest video mode and the startup window. The default is 720p because that is what
-# an unset `resolution` resolves to (video_mode_width/height default to 1280x720), so leaving
-# the row alone passes nothing and gets exactly the same picture.
+# The one display row, and it is the render multiplier rather than a video-mode word: setting the
+# guest's video mode never scaled the picture, only the window. What scales it is
+# `resolution_scale`, the multiple applied to the title's render targets, so the row carries that
+# cvar and names the resolution each step draws at (1x = native 720p, 2x = 1440p, 3x = 2160p/4K)
+# through `choice_labels`. 1080p is deliberately absent: it is 1.5x of 720p, the scale is a whole
+# number, and 2x (1440p) is the honest first step past it.
 [[setting]]
-key     = "resolution"
-tab     = "graphics"
-group   = "Display"
-label   = "Resolution"
-kind    = "enum"
-choices = ["720p", "1080p", "1440p", "4k"]
-default = "720p"
-applies = "restart"
-argv    = "flag"
-tooltip = "Render resolution: 720p, 1080p, 1440p or 4k. Needs a restart."
+key           = "resolution_scale"
+tab           = "graphics"
+group         = "Display"
+label         = "Render resolution"
+kind          = "enum"
+choices       = ["1", "2", "3", "4", "5", "6", "7"]
+choice_labels = ["720p", "1440p", "2160p (4K)", "2880p", "3600p", "4320p (8K)", "5040p"]
+default       = "1"
+applies       = "restart"
+argv          = "flag"
+tooltip = """
+The resolution the title really renders at: 1x is its native 720p, 2x is 1440p, 3x is 2160p
+(4K), and each step multiplies the render targets by that factor. Costs fill rate and memory.
+Needs a restart.
+"""
 
 # ---------------------------------------------------------------------------
 # Graphics - Window
@@ -539,19 +553,6 @@ tooltip = """
 Anisotropic filtering: -1 keeps the game's own value, 0 disables it, and 1 to 5 force 1x
 to 16x. Sharper at oblique angles, at more sampling cost.
 """
-
-[[setting]]
-key     = "resolution_scale"
-tab     = "graphics"
-group   = "Rendering"
-label   = "Render scale"
-kind    = "int"
-default = 1
-min     = 1
-max     = 8
-applies = "restart"
-argv    = "flag"
-tooltip = "Render at this multiple of the title's resolution (1 to 8). Costs fill rate."
 
 # ---------------------------------------------------------------------------
 # Graphics - Presentation

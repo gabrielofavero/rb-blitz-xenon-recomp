@@ -12,8 +12,10 @@
 //   * a missing `tooltip` (the bottom bar has nothing to name for the focused row),
 //   * `applies = "live"` without an evidence comment (a "live" claim nothing supports),
 //   * a `group` that is not declared, an unknown `kind`/`tab`/`argv`, an `enum` without
-//     `choices` or whose default is not among them, a `path_*` row without `validate`,
-//     an unknown `choices_from`/`max_from` rule (or one on a kind it cannot apply to).
+//     `choices` or whose default is not among them, a `choice_labels` list whose count does
+//     not match `choices` (or that is set where the choices come from the build), a `path_*`
+//     row without `validate`, an unknown `choices_from`/`max_from` rule (or one on a kind it
+//     cannot apply to).
 //
 // The build fails here rather than shipping a blank tooltip. Run with --help for the
 // argument list.
@@ -442,6 +444,12 @@ struct SettingRow {
   std::string default_text;
   std::string tooltip;
   std::string choices;   // comma-separated, empty unless kEnum
+  // Optional display labels, comma-separated, one per `choices` entry - the same count and order.
+  // A choice's value is what the profile stores and the game is passed, and this is what the row
+  // *reads*: the render resolution row shows "1440p" while its value stays the cvar's own "2".
+  // Empty for a row whose values already read. Never set together with `choices_from`, whose list
+  // is the build's and has no labels to line up with.
+  std::string choice_labels;
   std::string validate;  // pipe-separated rules, empty unless a path kind
   std::string evidence;  // the `live:` comment's tail, empty unless kLive
   // Optional preconditions the runtime environment has to satisfy for the row to be shown at
@@ -724,6 +732,7 @@ std::unique_ptr<Schema> Build(const Document& document,
     }
 
     const Value* choices = entry.Find("choices");
+    const Value* choice_labels = entry.Find("choice_labels");
     const Value* validate = entry.Find("validate");
     if (const Value* from = entry.Find("choices_from"); from != nullptr) {
       if (from->is_array || from->text.empty()) {
@@ -743,6 +752,12 @@ std::unique_ptr<Schema> Build(const Document& document,
           Fail(Location(line) + "enum row `" + row.key +
                "` has both `choices` and `choices_from`; the build's list is the only one it "
                "can have");
+          continue;
+        }
+        if (choice_labels != nullptr) {
+          Fail(Location(choice_labels->line) + "enum row `" + row.key +
+               "` has `choice_labels` but takes its choices from the build, so the labels have "
+               "nothing to line up with");
           continue;
         }
         if (backends.empty()) {
@@ -779,10 +794,42 @@ std::unique_ptr<Schema> Build(const Document& document,
                row.default_text + "`, which is not one of its choices");
           continue;
         }
+        if (choice_labels != nullptr) {
+          if (!choice_labels->is_array || choice_labels->list.empty()) {
+            Fail(Location(choice_labels->line) + "enum row `" + row.key +
+                 "` has an empty `choice_labels`");
+            continue;
+          }
+          if (choice_labels->list.size() != choices->list.size()) {
+            Fail(Location(choice_labels->line) + "enum row `" + row.key + "` has " +
+                 std::to_string(choices->list.size()) + " choices but " +
+                 std::to_string(choice_labels->list.size()) +
+                 " labels; a label is drawn for one choice and there is no alignment between the "
+                 "two otherwise");
+            continue;
+          }
+          bool labels_ok = true;
+          for (const std::string& label : choice_labels->list) {
+            if (label.empty()) {
+              Fail(Location(choice_labels->line) + "enum row `" + row.key +
+                   "` has an empty label; a label is what the row reads, so an empty one would "
+                   "draw a nameless choice");
+              labels_ok = false;
+              break;
+            }
+            if (!row.choice_labels.empty()) {
+              row.choice_labels += ",";
+            }
+            row.choice_labels += label;
+          }
+          if (!labels_ok) {
+            continue;
+          }
+        }
       }
-    } else if (choices != nullptr || !row.choices_from.empty()) {
+    } else if (choices != nullptr || choice_labels != nullptr || !row.choices_from.empty()) {
       Fail(Location(line) + "row `" + row.key +
-           "` has `choices`/`choices_from` but its kind is not enum");
+           "` has `choices`/`choices_from`/`choice_labels` but its kind is not enum");
       continue;
     }
 
@@ -1033,8 +1080,10 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "  std::string_view note;\n"
       << "};\n"
       << "\n"
-      << "// One row. `choices` and `validate` are comma- and pipe-separated respectively\n"
-      << "// (empty when the kind does not use them); `evidence` is the `live:` comment that\n"
+      << "// One row. `choices`, `choice_labels` and `validate` are comma- and pipe-separated\n"
+      << "// respectively (empty when the kind does not use them); `choice_labels` is drawn in\n"
+      << "// place of `choices` while the value stays `choices`, so an enum can read as words\n"
+      << "// and still store the token the game wants; `evidence` is the `live:` comment that\n"
       << "// backs `applies == Applies::kLive`; `has_range` carries the optional `min`/`max`\n"
       << "// of a numeric row so its widget can be a slider over the real limits, and\n"
       << "// `max_from` a rule (`cpu_cores`) that lowers that ceiling to a fact about the\n"
@@ -1049,6 +1098,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "  std::string_view default_text;\n"
       << "  std::string_view tooltip;\n"
       << "  std::string_view choices;\n"
+      << "  std::string_view choice_labels;\n"
       << "  std::string_view validate;\n"
       << "  std::string_view evidence;\n"
       << "  bool has_range;\n"
@@ -1094,6 +1144,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
         << ", .kind = " << KindConstant(row.kind) << ", .applies = " << AppliesConstant(row.applies)
         << ", .default_text = " << CppLiteral(row.default_text)
         << ", .tooltip = " << CppLiteral(row.tooltip) << ", .choices = " << CppLiteral(row.choices)
+        << ", .choice_labels = " << CppLiteral(row.choice_labels)
         << ", .validate = " << CppLiteral(row.validate)
         << ", .evidence = " << CppLiteral(row.evidence)
         << ", .has_range = " << (row.has_range ? "true" : "false")

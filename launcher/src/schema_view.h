@@ -79,6 +79,12 @@ const settings::Setting* FindSetting(std::string_view key);
 // kind that has none.
 std::vector<std::string_view> SettingChoices(const settings::Setting& setting);
 
+// An enum row's `choice_labels`, split the same way and in the same order as `SettingChoices`:
+// what each choice *reads* as, when that is not the token itself (empty when it is). The label
+// is drawn; the choice stays what the profile stores and the game is passed, so a row can read
+// "1440p" while its value is the cvar's own "2".
+std::vector<std::string_view> SettingChoiceLabels(const settings::Setting& setting);
+
 // How many entries a row takes in its tab's focus ring: one per choice for an enum, because
 // each choice is drawn as its own radio the ring can land on, and one for anything else.
 std::size_t FocusEntriesFor(const settings::Setting& setting);

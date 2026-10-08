@@ -285,7 +285,9 @@ device used. Three things about it are deliberate:
 `--dump-layout` prints the tabs, groups and rows the shell would draw, without opening a
 window — the headless half of A1's verification, and what says out loud if a row ever
 reaches the table without a tooltip. An enum row also prints its `choices`, which is the
-only way to ask a payload "does this build offer Vulkan?" without a screen.
+only way to ask a payload "does this build offer Vulkan?" without a screen, and a row whose
+choices carry `choice_labels` prints those too — so "which resolution is scale 3?" is
+answerable headlessly as well.
 `--dump-general` prints what the General tab would
 decide for a given game root and profile, `--dump-profile` prints B4's write path and the
 **precedence audit** — one line per row the game's own `rb_blitz.toml` decides, in the words
@@ -493,10 +495,13 @@ nothing at all when there is nothing to say. A row whose `applies` is `restart` 
 `present_letterbox`, the two safe areas, `audio_mute`) do not, and their tooltips name what
 makes the change land.
 
-The Display group is one row, **Resolution**, an `enum` over the presets the runtime's own
-parser accepts. It is deliberately not a free field: see "What is deliberately not here"
-below for why the free-form size, the guest video mode's dimensions and the guest refresh
-rate are all absent.
+The Display group is one row, **Render resolution**, an `enum` over the render multiplier
+`resolution_scale` (1 to 7), whose choices read as the resolution each step draws at — `1` is
+the title's native 720p, `2` is 1440p, `3` is 2160p (4K) — through the schema's
+`choice_labels`, while the value the profile stores and the game is passed stays the cvar's
+own integer. It is deliberately not a free field, and 1080p is deliberately absent: see "What
+is deliberately not here" below for why the free-form size, the guest video mode's
+dimensions, the guest refresh rate and a 1080p step are all absent.
 
 **Renderer.** `gpu_backend` is this *project's* cvar (`src/main.cpp`), not the SDK's, and
 `RbBlitzApp::SelectGpuBackend` is what acts on it: the SDK loads the GPU plugin with its own
@@ -953,9 +958,10 @@ A schema the tool refuses fails the build. It refuses, deliberately:
   construction ([D7](../docs/plans/launcher-plan.md));
 - **`applies = "live"` without an evidence comment** — a live claim nothing supports;
 - a **`group` that is not declared** for that tab, an unknown `tab`, `kind` or `argv`,
-  an `enum` without `choices` (or whose default is not one of them), a `path_*` row
-  without `validate`, and a `tab = "experimental"` (there is no such tab,
-  [D14](../docs/plans/launcher-plan.md));
+  an `enum` without `choices` (or whose default is not one of them), a **`choice_labels`
+  whose count does not match `choices`**, or one set on a row whose choices come from the
+  build, a `path_*` row without `validate`, and a `tab = "experimental"` (there is no such
+  tab, [D14](../docs/plans/launcher-plan.md));
 - **`min`/`max` on a non-numeric row, one of the two without the other, a `min >= max`, or a
   default outside the range** — the bounds are what the widget is built from, so a bad pair
   would be a slider that cannot show the row's own default.
@@ -974,6 +980,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 | `tooltip` | The user-facing sentence shown in the bottom bar. Never empty |
 | `argv` | `flag` emits `--<key>=<value>`; `none` is a launcher-level row the launcher translates itself |
 | `choices` | `enum` only: the allowed values |
+| `choice_labels` | `enum` only, optional: one label per `choices` value, in the same order, drawn in place of the value. The value stays `choices` — what the profile stores and the game is passed — so *Audio / Video → Display → Render resolution* reads "1440p" while its value is the cvar's own `2`. Not allowed together with `choices_from`; `--dump-layout` prints both lists |
 | `choices_from` | `enum` only, optional: where the choices really come from when the *build* decides them. `gpu_backends` is the only rule there is — the backends CMake compiled in, passed to the embed step as `--backends=` — and such a row declares no `choices` of its own |
 | `min` / `max` | `int` / `float` only, optional: the range the row's slider is bounded to. Both or neither, and the default must sit inside it. They are the cvar's own `.range(...)` where it has one, so the slider cannot offer a value the runtime would clamp |
 | `max_from` | `int` / `float` only, optional: a rule that lowers `max` to a fact about the machine, never above it. `cpu_cores` is the only rule there is — the running machine's logical processor count, applied at draw time because the build cannot know it. *General → Paths → DLC scan threads* uses it, so the slider stops at the cores the machine has. Such a row still declares `min`/`max` |
@@ -1186,18 +1193,20 @@ it and `--dump-layout` will still name it.
   by default) therefore shows one choice rather than a Vulkan entry that would be refused at
   boot. `gpu_plugin` is a different thing — it selects the GPU *emulation plugin*, not the
   renderer, and the game already sets it to `xenos` itself.
-- **A free resolution field.** Resolution is an `enum` over exactly the
-  presets the runtime's own parser accepts
-  (`rexglue-sdk/include/rex/graphics/video_mode_util.h`: 720p, 1080p, 1440p, 4k), because
-  those are the sizes known to be safe — the free-form `1280x720`-style value, the guest
-  video mode's own width/height, and a guest refresh rate are all absent on purpose.
+- **A resolution word for the guest video mode.** The Display row is the render *multiplier*
+  (`resolution_scale`), not the old `resolution` preset: setting the guest's video mode never
+  scaled the picture — only the window — so the row that said "1080p" while the game still
+  rendered at 720p was replaced by one whose choices are the resolution each step really
+  draws at. Its `choices` stay the cvar's integers and `choice_labels` is what the row reads.
+  1080p is absent because it is 1.5x of the native 720p and the scale is a whole number; the
+  free-form `1280x720`-style value, the guest video mode's own width/height, and a guest
+  refresh rate are still absent on purpose.
 - **A frame-rate field.** Unlocking the frame rate changes how the title paces itself and is a
   project non-goal, so nothing offers to change it — the same reason the guest refresh rate is
   not a row.
 - **A window-size row.** The window's own size is remembered from the last time the user
-  dragged it (A1), and the resolution preset sizes the game's startup surface
-  (`window_sdl.cpp`); a row for either would be a second control for something a gesture
-  already does.
+  dragged it (A1); a row for it would be a second control for something a gesture already
+  does.
 - **Master volume.** The SDK has no `audio_volume` cvar yet, so the Audio group has mute
   and buffer size and nothing else.
 - **An input-source row.** *Controller → Input*'s `input_backend` row is gone: the remap

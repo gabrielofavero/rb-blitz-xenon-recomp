@@ -15,6 +15,7 @@
 #include <system_error>
 
 #include "focus_ring.h"
+#include "schema_view.h"
 
 namespace rb_blitz::launcher {
 namespace {
@@ -168,6 +169,27 @@ bool DrawRowLabel(const settings::Setting& setting, std::size_t index, FocusMode
   }
   return clicked;
 }
+
+namespace {
+
+// What a row's value *reads* as: the choice's label when the row gives its choices one (the
+// render resolution reads "1440p" for a value of "2"), and the value itself otherwise. The value
+// is still what is stored and passed; this is only the word on screen.
+std::string SettingValueLabel(const settings::Setting& setting, std::string_view value) {
+  const std::vector<std::string_view> choices = SettingChoices(setting);
+  const std::vector<std::string_view> labels = SettingChoiceLabels(setting);
+  if (labels.size() == choices.size()) {
+    for (std::size_t i = 0; i < choices.size(); ++i) {
+      if (choices[i] == value) {
+        return std::string(labels[i]);
+      }
+    }
+  }
+  return std::string(value);
+}
+
+}  // namespace
+
 void DrawReadOnlyValue(const settings::Setting& setting, float value_width,
                        std::string_view value_text) {
   switch (setting.kind) {
@@ -189,9 +211,11 @@ void DrawReadOnlyValue(const settings::Setting& setting, float value_width,
       return;
     }
     case settings::Kind::kEnum: {
-      const std::string current(value_text);
+      // The combo shows the current value's *label* when the row gives its choices one, so the
+      // read-only drawing says "1440p" for a value of "2" - the same words the editor uses.
+      const std::string shown = SettingValueLabel(setting, value_text);
       ImGui::SetNextItemWidth(value_width);
-      if (ImGui::BeginCombo("##value", current.c_str())) {
+      if (ImGui::BeginCombo("##value", shown.c_str())) {
         ImGui::EndCombo();
       }
       return;
@@ -233,7 +257,10 @@ void DrawOverrideBadge(const settings::Setting& setting, ProfileSession& session
   }
 
   ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-  ImGui::TextWrapped("%s", OverrideNoteText(launcher_value, over.game_value).c_str());
+  ImGui::TextWrapped("%s",
+                     OverrideNoteText(SettingValueLabel(setting, launcher_value),
+                                      SettingValueLabel(setting, over.game_value))
+                         .c_str());
   ImGui::PopStyleColor();
   // The value the game will use, adopted into the launcher's own file. A badge that only
   // complained would leave the user to type it, and one that wrote the game's file would fight

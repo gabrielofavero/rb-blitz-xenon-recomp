@@ -487,6 +487,16 @@ of the table until it does (P0.2's rule).
 > size this decision allowed and the feedback rejected. `launcher/config/settings.toml` is the live
 > list and `--dump-layout` prints it, choices included — the plan is not.
 
+> **Amended 2026-10-08 (the render resolution).** The Display row is now the render **multiplier**
+> (`resolution_scale`), not the `resolution` preset, and the separate Render-scale row is gone. Setting
+> the guest's video mode never scaled the picture — only the window and the mode the title reports — so
+> an enum that read "1080p" while the game still rendered at 720p was a lie about what it did. The one
+> row that remains names the resolution each step really draws at (1x = the title's native 720p,
+> 2x = 1440p, 3x = 2160p/4K, …) through the schema's new `choice_labels`, while the value it stores and
+> passes stays the cvar's own integer. 1080p is not a step: it is 1.5x of 720p and the multiplier is
+> whole. The guest video mode is left at its native 1280x720; `video_mode_width`/`height` and
+> `resolution` remain cvars for [R1](../plans/customization-plan.md), just not rows.
+
 ### D13 — Controller tab, honestly split in two
 
 **Phase C-A — everything that exists today.** Input form (`input_backend`: sdl/xinput), the **mouse

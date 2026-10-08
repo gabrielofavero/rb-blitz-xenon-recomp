@@ -127,8 +127,9 @@ void TestCommandShape(const Scratch& scratch) {
   CHECK_NOT_CONTAINS(command.arguments, "--license_mask");
   CHECK_CONTAINS(command.arguments, "--launcher_profile=\"" + session.path().string() + "\"");
   // Nothing the user never touched is passed: the compiled defaults decide, and the game's own
-  // file outranks the launcher for those rows (D3).
-  CHECK_NOT_CONTAINS(command.arguments, "--resolution");
+  // file outranks the launcher for those rows (D3). The Display row is the render resolution,
+  // whose default is 1, so an untouched profile carries no `--resolution_scale` either.
+  CHECK_NOT_CONTAINS(command.arguments, "--resolution_scale");
   CHECK_NOT_CONTAINS(command.arguments, "--fullscreen");
   CHECK_NOT_CONTAINS(command.arguments, "--user_data_root");
   CHECK_NOT_CONTAINS(command.arguments, "--dlc_root");
@@ -153,11 +154,10 @@ void TestOnlyDifferencesArePassed(const Scratch& scratch) {
   // "none", an int with a default, and a path.
   session.SetSetting("fullscreen", "false", "true", ValueStyle::kBare);
   session.SetSetting("swap_post_effect", "fxaa", "none", ValueStyle::kBare);
+  // The display row, and the only place the launcher changes the render resolution: its value is
+  // the render multiplier (2 = 1440p), and it reaches the game as the cvar's own integer.
   session.SetSetting("resolution_scale", "2", "1", ValueStyle::kBare);
   session.SetSetting("user_data_root", "D:\\saves here", "", ValueStyle::kBasic);
-  // The display row whose default is 720p: picking another preset has to reach the game, because
-  // the row is the only place the launcher can change the render resolution.
-  session.SetSetting("resolution", "1080p", "720p", ValueStyle::kBare);
   // And the DLC library row the panel writes with a number of its own (the General tab's other
   // editor beside the two path rows).
   session.SetSetting("dlc_scan_threads", "4", "1", ValueStyle::kBare);
@@ -170,7 +170,6 @@ void TestOnlyDifferencesArePassed(const Scratch& scratch) {
   CHECK_CONTAINS(command.arguments, "--fullscreen=false");
   CHECK_CONTAINS(command.arguments, "--swap_post_effect=fxaa");
   CHECK_CONTAINS(command.arguments, "--resolution_scale=2");
-  CHECK_CONTAINS(command.arguments, "--resolution=1080p");
   CHECK_CONTAINS(command.arguments, "--dlc_scan_threads=4");
   CHECK_NOT_CONTAINS(command.arguments, "--vsync");
 

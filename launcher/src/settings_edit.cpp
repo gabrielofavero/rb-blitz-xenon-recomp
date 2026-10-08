@@ -215,9 +215,13 @@ bool DrawFloat(const settings::Setting& setting, float value_width, std::size_t 
 bool DrawEnum(const settings::Setting& setting, std::size_t index, FocusModel& ring,
               NavAction action, ProfileSession& session, std::string_view current) {
   const std::vector<std::string_view> choices = SettingChoices(setting);
+  // The label is what the radio reads; the choice is what is written. They are one list unless the
+  // row declares `choice_labels` (the render resolution row: "1440p" shown, "2" stored).
+  const std::vector<std::string_view> labels = SettingChoiceLabels(setting);
+  const bool has_labels = labels.size() == choices.size();
   bool changed = false;
   for (std::size_t i = 0; i < choices.size(); ++i) {
-    const std::string label(choices[i]);
+    const std::string label(has_labels ? labels[i] : choices[i]);
     if (i != 0) {
       ImGui::SameLine();
     }

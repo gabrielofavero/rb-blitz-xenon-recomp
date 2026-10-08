@@ -17,6 +17,24 @@ std::string_view OrPlaceholder(std::string_view text, std::string_view placehold
   return text.empty() ? placeholder : text;
 }
 
+// A comma-separated list as the schema spells it, in order, empty when the text is. `choices` and
+// `choice_labels` are split by this same rule, which is what keeps a label in step with the choice
+// it names - there is one place that decides what "element 3" means.
+std::vector<std::string_view> SplitCommaList(std::string_view text) {
+  std::vector<std::string_view> parts;
+  std::size_t start = 0;
+  while (start < text.size()) {
+    const std::size_t comma = text.find(',', start);
+    const std::size_t end = comma == std::string_view::npos ? text.size() : comma;
+    parts.push_back(text.substr(start, end - start));
+    if (comma == std::string_view::npos) {
+      break;
+    }
+    start = comma + 1;
+  }
+  return parts;
+}
+
 }  // namespace
 
 std::vector<settings::Tab> TabOrder() {
@@ -117,19 +135,11 @@ const settings::Setting* FindSetting(std::string_view key) {
 }
 
 std::vector<std::string_view> SettingChoices(const settings::Setting& setting) {
-  std::vector<std::string_view> choices;
-  const std::string_view text = setting.choices;
-  std::size_t start = 0;
-  while (start < text.size()) {
-    const std::size_t comma = text.find(',', start);
-    const std::size_t end = comma == std::string_view::npos ? text.size() : comma;
-    choices.push_back(text.substr(start, end - start));
-    if (comma == std::string_view::npos) {
-      break;
-    }
-    start = comma + 1;
-  }
-  return choices;
+  return SplitCommaList(setting.choices);
+}
+
+std::vector<std::string_view> SettingChoiceLabels(const settings::Setting& setting) {
+  return SplitCommaList(setting.choice_labels);
 }
 
 std::size_t FocusEntriesFor(const settings::Setting& setting) {
@@ -253,6 +263,18 @@ std::string DescribeLayout(const std::vector<TabLayout>& layout) {
               out += ", ";
             }
             out += choices[index];
+          }
+          // A row whose choices read as something other than their tokens: the dump names both,
+          // because "which resolution is scale 2?" should be answerable without a window.
+          const std::vector<std::string_view> labels = SettingChoiceLabels(setting);
+          if (!labels.empty()) {
+            out += "  labels: ";
+            for (std::size_t index = 0; index < labels.size(); ++index) {
+              if (index != 0) {
+                out += ", ";
+              }
+              out += labels[index];
+            }
           }
         }
         // A numeric row whose ceiling is a fact about the machine rather than a number in the
