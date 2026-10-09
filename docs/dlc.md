@@ -63,13 +63,13 @@ and its shape is pinned by [tests/dlc_layout_tests.cpp](../tests/dlc_layout_test
 
 A dumped song folder is not built like §2. It is thousands of loose `CON`/`LIVE`
 containers with no `title_id`/`content_type` levels at all, and it is often on a
-volume that cannot hold links (this machine's `D:\Games\YARG Songs` is exFAT), so it
+volume that cannot hold links (an exFAT drive, typically), so it
 cannot be indexed into §2's shape without copying it. `--dlc_library` reads such a
 folder where it lies instead, and a `--dlc_root` that is not the §2 layout is read
 the same way:
 
 ```text
---dlc_library="D:\Games\YARG Songs"     # one or more folders, ';'-separated
+--dlc_library="D:\Songs"               # one or more folders, ';'-separated
 ```
 
 The launcher offers the same two shapes for its *DLC location* row: the
@@ -157,7 +157,7 @@ content types its packages name; the third is what a misplaced file reports:
 ```text
 [info] dlc: 21 package(s) for title(s) 45410914, 5841122D in D:\…\game\dlc (read-only, mounted in place)
 [info] dlc: 1401 saved-game library package(s) presented as content type 00000002 so the title lists and plays them (dlc_library_content_type overrides this)
-[info] dlc: 1402 package(s), 0 not a container, in 1402 file(s) walked (45410829/00000002 x252, 45410869/00000002 x214, 45410914/00000002 x936) in D:\Games\YARG Songs by their own headers (read-only, mounted in place)
+[info] dlc: 1402 package(s), 0 not a container, in 1402 file(s) walked (45410829/00000002 x252, 45410869/00000002 x214, 45410914/00000002 x936) in D:\Songs by their own headers (read-only, mounted in place)
 [warn] dlc: ignoring rhythm/00000002/song.dat (not a content package: no CON/LIVE/PIRS magic)
 ```
 
@@ -177,8 +177,8 @@ that directory nor its write access.
 
 A §2.1 library is read by opening every regular file and reading the 868-byte STFS
 identity prefix out of each container
-(`ReadPackageIdentity`, [src/fs/dlc_library.h](../src/fs/dlc_library.h)). On this
-machine's `D:\Games\YARG Songs` (1,402 packages, 28.4 GB, exFAT) that open-and-read
+(`ReadPackageIdentity`, [src/fs/dlc_library.h](../src/fs/dlc_library.h)). On the
+library used here (1,402 packages, 28.4 GB, exFAT) that open-and-read
 takes ~0.7 s warm, every boot, before the guest even starts; a stat-only walk of the
 same tree takes ~0.18 s. R7 stores the scan's *result* so the second number, plus a
 comparison, is all a boot pays.
@@ -190,7 +190,7 @@ is ~2 ms for all 1,402 entries. A 500x gap on the same bytes is not the SSD, and
 charged *per file* rather than per byte: 2,170 never-touched FFmpeg sources of 10-100 KB
 each measured the same 16.7 ms cold against 0.035 ms warm. It is whatever inspects a
 file the antivirus has not seen yet — so a single-threaded cold walk of
-`D:\Games\YARG Songs` is **~22 s** (measured), and the only ways past it are to not open
+that library is **~22 s** (measured), and the only ways past it are to not open
 the files (the cache, below) or to overlap the opens.
 
 **The scan reads the headers on a pool.** Because the cost is serialized per file and
@@ -229,7 +229,7 @@ tests beside it.
 ## 4.2 The rest of the boot a large library costs (R7)
 
 The host's walk of the library is the smaller half of what a large library costs, and
-R7 answers for both halves. Measured 2026-10-06 on `D:\Games\YARG Songs` (1,402
+R7 answers for both halves. Measured 2026-10-06 on that library (1,402
 packages), release build, nothing cached:
 
 | Part of the boot | Cost | R7's answer |
@@ -390,9 +390,9 @@ packages the DLC layer registered, which is the number the title is about to rea
   `[FATAL]`, and the refresh row's press re-scanned the library and rewrote the cache
   (§4.2). With the toggle off, the delay is the SDK's own default and the enumeration is
   scanned as before, so the faithful boot is the one this project had before R7.
-- **Verified in game with a flat library (2026-10-05).** `D:\Games\YARG Songs` — 1402
-  containers, of which 1401 are `CON` saved-game packages (RB3 936, RB2 214, RB1 251)
-  and one a `LIVE` marketplace package — joined `game/dlc` as `--dlc_library`. The hook
+- **Verified in game with a flat library (2026-10-05).** A 1,402-container library —
+  1401 of them `CON` saved-game packages (RB3 936, RB2 214, RB1 251) and one a
+  `LIVE` marketplace package — joined `game/dlc` as `--dlc_library`. The hook
   reported 1402 library packages (`45410829/00000002 x252, 45410869/00000002 x214,
   45410914/00000002 x936`), the §2.1 adaptation reported 1401 of them presented as
   content type `00000002`, the guest's own enumerator returned all of them (`added 1403

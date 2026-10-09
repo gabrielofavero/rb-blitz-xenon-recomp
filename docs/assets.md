@@ -346,7 +346,7 @@ both useful and, for the parts that already work, free:
 
 ```powershell
 .\scripts\extract_assets.ps1 -Platform ps3 `
-    -GameRoot "C:\Games\Emulators\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"
+    -GameRoot "C:\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"
 ```
 
 | | 360 | PS3 |
@@ -516,7 +516,9 @@ Two facts read straight out of MiloLib that this document spent a long time gues
 
 `tools/milotex` is a small CLI over MiloLib (`list`, `export`, `import`) because MiloLib's
 GUI cannot be driven from a script and MiloUtil's `extract` only dumps raw asset bytes. It
-builds against a MiloEditor clone; see the project file for the path.
+is **not** shipped prebuilt — MiloEditor is not vendored — so you build it on demand from a
+clone you make yourself; [tools/milotex/README.md](../tools/milotex/README.md) has the
+command.
 
 ## Where the format knowledge comes from
 

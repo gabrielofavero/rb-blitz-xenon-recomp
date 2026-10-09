@@ -44,7 +44,7 @@ artwork on every run.
 powershell -ExecutionPolicy Bypass -NoProfile -File installer\tools\make_art.ps1
 
 .EXAMPLE
-powershell -ExecutionPolicy Bypass -NoProfile -File installer\tools\make_art.ps1 -SourceImage D:\art\rbblitz-cover.png -Force
+powershell -ExecutionPolicy Bypass -NoProfile -File installer\tools\make_art.ps1 -SourceImage C:\path\to\rbblitz-cover.png -Force
 #>
 [CmdletBinding()]
 param(

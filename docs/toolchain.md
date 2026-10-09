@@ -31,27 +31,30 @@ of 2026-09-28 was made with — three runs, `launch-to-results 3 / 3`, each a 31
 envelope — so the record starts out justified by evidence rather than aspirational
 ([history/bringup-log.md](history/bringup-log.md), "Clean-checkout smoke test").
 
-| Component | Version | Measured at | Why it is in the set |
+| Component | Version | Where it is found | Why it is in the set |
 | --- | --- | --- | --- |
 | ReXGlue SDK | commit `c94f5ebd…` (`nightly-20260826-f5337cdc-2-gc94f5eb`) | `rexglue-sdk/` submodule | It generates the recompiled code and is the runtime the host links against: its exports, its codegen, its kernel behaviour. A different commit is a different emulator. Pinned by the submodule gitlink, so a clone refuses another one before this check ever runs. |
-| clang / LLVM | `23.1.1` (minimum `20`) | `C:\Program Files\LLVM\bin\clang++.exe` | Builds the SDK from source, the recompiled partitions and the host code: C++23, the guest-SEH `-fasync-exceptions` flag, and the `-march=x86-64-v2` the presets pass. `20` is the floor the linux presets already name (`clang-20`). |
-| CMake | `4.4.3` (minimum `3.25`) | `C:\Program Files\CMake\bin\cmake.exe` | Owns the presets, the codegen integration in `generated/rexglue.cmake`, the object-library wiring and the fingerprint gate. `3.25` is the same floor `cmake_minimum_required` states. |
-| Ninja | `1.13.2` | `…\WinGet\Packages\Ninja-build.Ninja_…\ninja.exe` | The generator the presets use; the codegen stamp/depfile logic and the incremental build are Ninja's. |
-| MSVC toolset | `14.44.35207` | `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207` | Supplies the C++/UCRT headers and the import libraries clang links against. This is the half that fails as a missing `<windows.h>` rather than as a missing compiler, which is why the check reads it off the compiler's include roots instead of trusting `PATH`. The enclosing Visual Studio Build Tools install is product version 17.14.41. |
-| Windows SDK | `10.0.26100.0` | `C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0` | Win32/D3D12 headers and libraries; same failure mode as the toolset. |
+| clang / LLVM | `23.1.1` (minimum `18`) | `clang++` on `PATH` | Builds the SDK from source, the recompiled partitions and the host code: C++23, the guest-SEH `-fasync-exceptions` flag, and the `-march=x86-64-v2` the presets pass. `18` is the SDK's own floor — its `CMakeLists.txt` fails with *"ReXGlue requires Clang 18 or newer"* below it — so the record refuses nothing the SDK would accept. |
+| CMake | `4.4.3` (minimum `3.25`) | `cmake` on `PATH` | Owns the presets, the codegen integration in `generated/rexglue.cmake`, the object-library wiring and the fingerprint gate. `3.25` is the same floor `cmake_minimum_required` states. |
+| Ninja | `1.13.2` | `ninja` on `PATH` | The generator the presets use; the codegen stamp/depfile logic and the incremental build are Ninja's. |
+| MSVC toolset | `14.44.35207` | read off the compiler's include roots | Supplies the C++/UCRT headers and the import libraries clang links against. This is the half that fails as a missing `<windows.h>` rather than as a missing compiler, which is why the check reads it off the compiler's include roots instead of trusting `PATH`. Any Visual Studio 2022 Build Tools install with the C++ workload and a Windows SDK will do. |
+| Windows SDK | `10.0.26100.0` | read off the compiler's include roots | Win32/D3D12 headers and libraries; same failure mode as the toolset. |
 
-The paths are the ones this set was measured at, recorded so a reader can compare their
-own box. They are **reported, never required**: the same versions live somewhere else on
-another machine, and a path is not what breaks a build.
+Where each tool lives is deliberately **not** recorded in the file. That is a property of
+the machine a build runs on, not of the project, and a committed path is one developer's
+disk leaking into everyone else's checkout. The check prints the location it actually used
+on the machine it ran on, which is what a reader compares against their own box. A `path`
+key is still parsed if you want to keep one locally, but it is informational and never
+compared.
 
 ## What the check does
 
 ```
 toolchain  rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0  (config/toolchain.toml)
 ok        rexglue-sdk     c94f5eb           nightly-20260826-f5337cdc-2-gc94f5eb
-ok        clang           23.1.1            C:\Program Files\LLVM\bin\clang++.exe
-ok        CMake           4.4.3             C:\Program Files\CMake\bin\cmake.exe
-ok        Ninja           1.13.2            …\ninja.exe
+ok        clang           23.1.1            <the clang++ this machine resolved>
+ok        CMake           4.4.3             <the cmake this machine resolved>
+ok        Ninja           1.13.2            <the ninja this machine resolved>
 ok        MSVC toolset    14.44.35207       from the compiler's include roots
 ok        Windows SDK     10.0.26100.0      from the compiler's include roots
 ok         the frozen toolchain
@@ -135,8 +138,7 @@ Bumping a version is a decision, not a discovery, so it goes through the accepta
 
 1. install the new component and re-check what the machine reports:
    `rb_blitz_toolchain --check --project-dir .` prints the new values;
-2. update [config/toolchain.toml](../config/toolchain.toml) and the table above, with the
-   measured paths if they moved;
+2. update [config/toolchain.toml](../config/toolchain.toml) and the table above;
 3. run the acceptance route
    (`.\scripts\acceptance_song.ps1 -Runs 3`) and record it in
    [history/bringup-log.md](history/bringup-log.md);

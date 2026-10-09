@@ -459,13 +459,23 @@ $pathNeedles.Add("[A-Za-z]:[\\/]Program Files")
 $pathNeedles.Add("[A-Za-z]:[\\/]Program Files \(x86\)")
 $pathNeedles.Add("[\\/]out[\\/]build[\\/]")
 
-# The paths recorded in config/toolchain.toml: if the compiler's own path reaches a
-# shipped string, the record is what says which machine that was.
-$toolchainFile = Join-Path $repoRoot "config/toolchain.toml"
-if (Test-Path $toolchainFile) {
-    foreach ($m in [regex]::Matches((Get-Content -LiteralPath $toolchainFile -Raw), 'path\s*=\s*"([^"]+)"')) {
-        $value = $m.Groups[1].Value
-        if ($value -match '^[A-Za-z]:' -or $value -match '\\\\') { $pathNeedles.Add([regex]::Escape($value)) }
+# The tools the build actually used, read from the build tree's own cache: if a
+# compiler's or Ninja's path reaches a shipped string, that is the machine the path
+# leaked from. The cache is where that answer lives - config/toolchain.toml
+# deliberately records no paths, because where a tool lives is a property of the
+# machine and not of the project.
+$buildRoot = Join-Path $repoRoot "out\build"
+if (Test-Path $buildRoot) {
+    foreach ($cache in Get-ChildItem -Path $buildRoot -Filter CMakeCache.txt -Recurse -ErrorAction SilentlyContinue) {
+        $cacheText = Get-Content -LiteralPath $cache.FullName -Raw
+        $cachePattern = '(?m)^(?:CMAKE_CXX_COMPILER|CMAKE_C_COMPILER|CMAKE_MAKE_PROGRAM|CMAKE_COMMAND):[A-Z]+=(.+)$'
+        foreach ($m in [regex]::Matches($cacheText, $cachePattern)) {
+            $value = $m.Groups[1].Value.Trim()
+            if ($value -match '^[A-Za-z]:' -or $value -match '\\\\') {
+                $escaped = [regex]::Escape($value)
+                if (-not $pathNeedles.Contains($escaped)) { $pathNeedles.Add($escaped) }
+            }
+        }
     }
 }
 

@@ -35,7 +35,7 @@
 # Usage:
 #   .\scripts\acceptance_dlc.ps1
 #   .\scripts\acceptance_dlc.ps1 -ExpectedSong "KIDS IN THE STREET,SO FAR AWAY"
-#   .\scripts\acceptance_dlc.ps1 -DlcLibrary "D:\Games\YARG Songs" -ExpectedSong "HERE WITHOUT YOU"
+#   .\scripts\acceptance_dlc.ps1 -DlcLibrary "D:\Songs" -ExpectedSong "HERE WITHOUT YOU"
 #   .\scripts\acceptance_dlc.ps1 -SkipControl
 #
 # Writes out/m7-dlc/<leg>-*.png, a copy of each run's log and summary.json, prints
@@ -166,7 +166,7 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
     }
     # --dlc_library is passed only when a library was named, so a leg that is not
     # about one runs with the pre-library behaviour alone. Paths are quoted: a library
-    # usually has a space in it ("YARG Songs"), and Start-Process joins the array into
+    # usually has a space in it ("My Songs"), and Start-Process joins the array into
     # one command line without quoting on its own.
     $launchArgs = @("--game_data_root=""$GameRoot""", "--ultimate_mode=$UltimateMode",
         "--mnk_mode=1", "--no_mouse_ui_nav", "--user_data_root=""$legDir""",
@@ -180,7 +180,7 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
             # Screen-driven, the way scripts/acceptance_song.ps1 walks the same route: a
             # leg with a large library spends minutes discovering content before the
             # title screen is even interactive, and fixed waits desynchronised the route
-            # (measured: with D:\Games\YARG Songs the A presses landed before the
+            # (measured: with a large library the A presses landed before the
             # dialogs and the run ended on the Rock Central prompt).
             $null = Wait-ForScreen (Join-Path $capDir "$Name-title.png") "TO START" $BootTimeoutSec "${Name}: title screen"
             Invoke-Actions @("key:a")

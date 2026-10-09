@@ -298,7 +298,7 @@ exact command line *Launch Game* would run (B1/B4/B2/B7's verification):
 
 ```
 rb_blitz_launcher.exe --dump-layout=out\layout.txt      # or no =<path> for stdout
-rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\Games\rb_blitz" --launcher_profile=out\p.toml
+rb_blitz_launcher.exe --dump-general=out\general.txt --game_data_root="D:\dump" --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-profile=out\profile.txt --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-prefill=out\prefill.txt --launcher_profile=out\p.toml
 rb_blitz_launcher.exe --dump-display
@@ -439,9 +439,9 @@ payload was. `--game_data_root=<path>` still overrides everything, because a use
 folder has said where the game is and is not asking to be second-guessed.
 
 ```
-D:\Coding\decomps\360\rb-blitz-xenon-recomp> out\build\win-amd64-release\rb_blitz_launcher.exe --dump-general
-game root      : D:\Coding\decomps\360\rb-blitz-xenon-recomp\game (found)
-ultimate root  : D:\Coding\decomps\360\rb-blitz-xenon-recomp\game\ultimate
+PS <checkout>> out\build\win-amd64-release\rb_blitz_launcher.exe --dump-general
+game root      : <checkout>\game (found)
+ultimate root  : <checkout>\game\ultimate
 ultimate       : ready
 ```
 

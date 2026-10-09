@@ -23,8 +23,8 @@
 #   .\scripts\extract_assets.ps1 -Clean                   # wipe the tree first
 #   .\scripts\extract_assets.ps1 -SkipOverlay             # base archive only
 #   .\scripts\extract_assets.ps1 -Platform ps3 -GameRoot `
-#       "C:\Games\Emulators\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"      # -> assets\game\ps3\
-#   .\scripts\extract_assets.ps1 -GameRoot D:\rb_blitz -OutDir D:\rb_blitz_assets
+#       "C:\RPCS3\dev_hdd0\game\NPUB30749\USRDIR"      # -> assets\game\ps3\
+#   .\scripts\extract_assets.ps1 -GameRoot D:\dump -OutDir D:\dump_assets
 param(
     [string]$GameRoot = "game",
     [string]$OutDir,

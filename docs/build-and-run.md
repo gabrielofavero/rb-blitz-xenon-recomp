@@ -5,11 +5,9 @@ the log excerpt that blocker entries in [bringup-log.md](history/bringup-log.md)
 
 Everything below is PowerShell, run from the repository root unless noted.
 
-> **Current state (as of 2026-09-19):** the toolchain is installed on this machine
-> and the checkout has been rebuilt from source, so B-009's fix is no longer
-> "statically verified only" — it compiles, links, and a 40 s boot writes the §5
-> `guest XeKeys` lines. §0 and §2 are both already done; **§3 is the entry point**
-> for a normal source change, and §1 only needs revisiting on a fresh machine.
+> **Where to start:** §0 is once per checkout and §1 once per machine. On a checkout whose
+> toolchain and build tree are already in place, **§3 is the entry point** for a normal
+> source change; §2 is only for a build tree that has been moved or copied.
 
 ## 0. Prepare the SDK submodule (once per checkout)
 
@@ -18,8 +16,8 @@ Run both after a fresh clone, a `git submodule update`, or any checkout that
 rewrites `rexglue-sdk/` — not on every build:
 
 ```powershell
-# This machine's execution policy is Restricted, so -ExecutionPolicy Bypass is
-# required; a bare `.\scripts\...ps1` fails with UnauthorizedAccess.
+# Where the execution policy is Restricted, -ExecutionPolicy Bypass is required; a
+# bare `.\scripts\...ps1` fails with UnauthorizedAccess.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair_flat_symlinks.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.ps1
 ```
@@ -71,20 +69,14 @@ suppresses. Full rationale and manual equivalents:
 
 ## 1. Toolchain prerequisites
 
-**This section is satisfied on the machine this doc was written on.** When the doc
-was first written none of it was installed — no `C:\Program Files\LLVM`, no
-`C:\Program Files\CMake`, no `C:\ProgramData\chocolatey`, no `cl`, no `vswhere`
-(only `git`, `python` and `node` were on `PATH`) — so the install below was the
-first step and had to happen before §2 or §3 could run. It is now in place (LLVM
-23.1.1, CMake 4.4.3, Ninja 1.13.2, VS 2022 Build Tools 17.14.41 with the Windows
-10.0.26100.0 SDK). The recipe is kept for a fresh machine; it is a one-time cost,
-and every later rebuild is the incremental path in §3.
+Check these before the first build and install whatever is missing — it is a one-time
+cost, and every later rebuild is the incremental path in §3.
 
-Those exact versions are the **frozen set**
-([config/toolchain.toml](../config/toolchain.toml), [toolchain.md](toolchain.md)),
-and installing them is what §3's toolchain gate checks for. A newer version is
-reported rather than refused, so the install below can legitimately be a little
-ahead of the record.
+The versions in [config/toolchain.toml](../config/toolchain.toml) are the **frozen set**
+([toolchain.md](toolchain.md)): the toolchain the last recorded acceptance run was made
+with. That is a record, not a wall — a different version is reported and still builds, and
+only one below the record's `minimum` stops the build. So the installs below may be newer
+than the record, or older down to the minimum, without any other change.
 
 The build is a plain `Ninja` + `clang` build of the pinned SDK **from source**
 (`REXSDK_DIR` points at `rexglue-sdk/`, and `generated/rexglue.cmake` does an
@@ -181,22 +173,21 @@ mutually findable. If it instead reports a missing `libcmt.lib`, `ucrt.lib`,
 `kernel32.lib` or `windows.h`, the MSVC/Windows SDK half of step 2 is incomplete
 — that is the most common way this toolchain ends up broken.
 
-## 2. The existing build tree is stale — regenerate it
+## 2. Regenerate a stale build tree
 
-> **Already done on this machine (2026-09-19).** Both stale trees were wiped and
-> `out/build/win-amd64-release` has been regenerated from source, so the
-> `rb_blitz.exe` in it is current — do **not** re-run this section unless the
-> tree's own `CMakeCache.txt` again records a path other than the checkout below.
-> The check is `Select-String CMAKE_HOME_DIRECTORY out\build\win-amd64-release\CMakeCache.txt`.
+**A build tree is only valid where it was configured.** `CMakeCache.txt` records the
+absolute path the checkout had at configure time (`CMAKE_HOME_DIRECTORY`), plus the
+absolute paths of the compiler, Ninja and CMake it used, and `build.ninja` repeats them in
+its `-I` flags. That is why `out/` is gitignored and never shared: copy or move the
+checkout, or build it from another drive, and CMake refuses to reuse the cache. Check
+where a tree was configured with:
 
-`out/build/win-amd64-release` was produced when this checkout lived at
-`D:\Gabriel\Documentos\Coding\decomps\360\rb-blitz-xenon-recomp` (that path is
-gone; `CMakeCache.txt` still records it as `CMAKE_HOME_DIRECTORY`, `build.ninja`
-still has `-ID:/Gabriel/...` include paths, and the cache's compiler paths point
-at `C:\Program Files\LLVM\bin\clang++.exe`,
-`C:\ProgramData\chocolatey\bin\ninja.exe`, `C:\Program Files\CMake\bin\cmake.exe`).
-CMake refuses to reuse a cache whose home directory moved, so the tree has to be
-deleted and regenerated once. Do **not** try to build into it as-is.
+```powershell
+Select-String CMAKE_HOME_DIRECTORY out\build\win-amd64-release\CMakeCache.txt
+```
+
+If that path is not where the checkout is now, delete the tree and regenerate it — do
+**not** build into it as-is.
 
 `out\build\win-amd64-release\rb_blitz.toml` is *not* a build artifact and CMake
 never writes it: the runtime reads `<exe name>.toml` from its own directory (the
@@ -453,8 +444,8 @@ Start it **from the build directory** — that is where the exe looks for
 `rexruntime.dll`, the GPU plugin, its `.toml` and where it creates `logs\`:
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\build\win-amd64-release
-.\rb_blitz.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game
+cd out\build\win-amd64-release
+.\rb_blitz.exe --game_data_root=..\..\..\game
 ```
 
 `--game_data_root` may point at either supported content variant — the retail dump,
@@ -501,7 +492,6 @@ payload's own image (a valid XEX with a different digest) and three corrupt copi
 and reports the §3 gate's verdict on the same file as the contrast:
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\acceptance_wrong_data.ps1
 ```
 
@@ -534,7 +524,6 @@ For a repeatable run, the acceptance harness clears `logs\` and drives the windo
 itself (`-BootWaitSec` is how long it waits before closing):
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\acceptance_launches.ps1 -Runs 2 -BootWaitSec 40
 ```
 
@@ -561,7 +550,6 @@ screen names the expected song. Vanilla content by default
 (`--ultimate_mode=0`), so an installed Ultimate payload cannot change the result:
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\acceptance_song.ps1 -Runs 3              # row 3 = "These Days"
 .\scripts\acceptance_song.ps1 -Runs 1 -Replay      # ... then play it again
 ```
@@ -623,7 +611,6 @@ log as well as the files it leaves behind — creation, restart byte-identity, a
 missing root, a corrupt payload, a corrupt header:
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\acceptance_persistence.ps1                 # all five cases
 .\scripts\acceptance_persistence.ps1 -Only restart   # a single case
 ```
@@ -649,7 +636,7 @@ install folder with no `rb_blitz.toml`):
 .\scripts\acceptance_save.ps1                  # save/load round trip on its own
 .\scripts\acceptance_save.ps1 -Steps 3         # -15 ms instead of -10 ms
 .\scripts\acceptance_dlc.ps1                   # DLC visibility on its own
-.\scripts\acceptance_dlc.ps1 -SkipControl -DlcLibrary "D:\Games\YARG Songs" -ExpectedSong "LYCANTHROPE"
+.\scripts\acceptance_dlc.ps1 -SkipControl -DlcLibrary "D:\Songs" -ExpectedSong "LYCANTHROPE"
 ```
 
 * `acceptance_save.ps1` changes the **manual calibration** offset through the guest's
@@ -707,7 +694,7 @@ Like every other cvar they come from the command line or `rb_blitz.toml` (§2), 
 there is no runtime console, so changing one means a relaunch:
 
 ```powershell
-.\rb_blitz.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game --mouse_ui_hover_log=true
+.\rb_blitz.exe --game_data_root=..\..\..\game --mouse_ui_hover_log=true
 ```
 
 **Hover alignment is measured, not guessed.** The guest exposes no list model and no hit
@@ -787,9 +774,9 @@ build directory and needs the same `.toml` and DLLs, so start it the same way �
 build directory, pointing at the game root and at a profile of your own:
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\build\win-amd64-release
-.\rb_blitz_launcher.exe --game_data_root=d:\Coding\decomps\360\rb-blitz-xenon-recomp\game `
-    --launcher_profile=d:\Coding\decomps\360\rb-blitz-xenon-recomp\out\my-launcher.toml
+cd out\build\win-amd64-release
+.\rb_blitz_launcher.exe --game_data_root=..\..\..\game `
+    --launcher_profile=..\..\..\out\my-launcher.toml
 ```
 
 `--launcher_profile` is step 1 of the order the launcher and the game share, so naming one
@@ -844,7 +831,6 @@ with the pointer resting over a row the ring lands there before the first key is
 presses are therefore read off the *end* of the trace.
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\capture_launcher.ps1                 # headless + keyboard + pad + the three legs
 .\scripts\capture_launcher.ps1 -SkipWindow     # the headless assertions alone
 .\scripts\capture_launcher.ps1 -SkipScale      # everything but the four-scale leg (the slowest)
@@ -889,7 +875,6 @@ hash of the `default.xex` it ran), the DLC folder the profile named, and the pad
 that only the profile can supply.
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
 .\scripts\acceptance_launcher.ps1                  # install, then all four legs
 .\scripts\acceptance_launcher.ps1 -Only retail,demo  # one or two of them
 .\scripts\acceptance_launcher.ps1 -SkipInstall       # reuse the install already there

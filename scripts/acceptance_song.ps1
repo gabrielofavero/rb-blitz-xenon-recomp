@@ -367,7 +367,7 @@ function Invoke-Run([int]$Run) {
     # guest is still running; with the default (0) it is flushed at shutdown.
     # The DLC sources are passed only when named, so a run that is not about DLC
     # keeps the default root and the pre-library behaviour. Paths are quoted: a
-    # library folder usually has a space in it ("YARG Songs").
+    # library folder usually has a space in it ("My Songs").
     # The title's two dialogs are pinned on: this run's route was measured pressing
     # A at each of them, and the skip now ships on by default
     # (docs/engine/main-menu-flow.md, R3).

@@ -48,6 +48,13 @@
 # Python bytecode from the asset tooling (scripts/hmx_*.py).
 __pycache__/
 
+# .NET build output of the local asset tools (tools/milotex). The MiloEditor
+# checkout it compiles against lives under the gitignored out/_tools/, so the
+# binaries are machine-specific: milotex itself is rebuilt locally on demand,
+# see tools/milotex/README.md.
+/tools/milotex/bin/
+/tools/milotex/obj/
+
 # Editor and platform state.
 /.vs/
 /.vscode/

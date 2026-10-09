@@ -783,7 +783,7 @@ table, which `[functions]` cannot name.
 > before the library scan and writes it after, behind `enhancements_dlc_cache`, with
 > `--refresh_dlc_cache` forcing the re-scan. `ctest -R dlc_cache` covers the prompt's list, and the
 > design is recorded in [dlc.md](../dlc.md) §4.1 rather than a new `content-flow.md`, because S5 is
-> still open. Measured on `D:\Games\YARG Songs` (1,402 packages): a cold boot scanned and wrote the
+> still open. Measured on a 1,402-package library: a cold boot scanned and wrote the
 > cache in **14.5 s**, and the next boot's fingerprint hit in **7 ms**; a refresh re-scanned and
 > rewrote the file, and the toggle off left the file untouched.
 >
@@ -833,7 +833,7 @@ table, which `[functions]` cannot name.
 >
 > **What the scan itself costs, and the pool that answers for it (2026-10-07).** R7's cache removes
 > the library walk when the tree is unchanged, but the walk it removes is not disk work: measured on
-> `D:\Games\YARG Songs` and confirmed on never-touched trees, a *first* open of a file costs ~16 ms
+> that library and confirmed on never-touched trees, a *first* open of a file costs ~16 ms
 > while the same read warmed costs ~0.03 ms — a 500x gap charged per file rather than per byte, so
 > 2,170 untouched FFmpeg sources of 10-100 KB each measured the same 16.7 ms. A single-threaded cold
 > scan of the library is therefore **~22 s**, and every cache miss — a first boot, a refresh, or a

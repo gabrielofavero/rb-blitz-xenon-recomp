@@ -11,13 +11,17 @@
 #   * `version` - dotted numbers. `minimum` is the oldest still accepted and
 #     failing it is fatal; any other difference is reported and, unless the build
 #     asked for a strict toolchain, still builds.
-#   * `path` - recorded for the reader: the absolutely-resolved location this set
-#     was measured at. Reported, never required, because the same version lives
-#     elsewhere on another machine.
+# A `path` key is still understood - it is informational and never compared -
+# but none is recorded here. Where a tool lives is a property of the machine a
+# build runs on, not of this project, and a committed path would be one
+# developer's disk leaking into every other checkout. The check prints the
+# location it actually used, which is the machine you are on.
+#
 # Unknown sections and keys are ignored, so this file can grow ahead of the tool.
 #
-# Values are double-quoted with C escapes or single-quoted literals; paths use the
-# single-quoted form so a backslash stays a backslash.
+# Values are double-quoted with C escapes or single-quoted literals. Nothing here
+# needs the single-quoted form today; it stays available for a value that
+# legitimately holds backslashes.
 
 schema_version = 1
 
@@ -30,20 +34,21 @@ version = "0.10.0.0-dev.unknown"
 commit = "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518"
 
 [clang]
-# The linux presets name clang-20, so 20 is the oldest this project already
-# assumes; win-amd64 was measured and torn down with 23.
+# `minimum` is the floor the code needs, not the version the recorded run was
+# made with: the pinned SDK's own CMakeLists refuses anything below Clang 18
+# ("ReXGlue requires Clang 18 or newer"), so any Clang the SDK accepts builds
+# this project. `version` is what the acceptance run behind this record used;
+# anything newer is reported as `different` and still builds.
 version = "23.1.1"
-minimum = "20"
-path = 'C:\Program Files\LLVM\bin\clang++.exe'
+minimum = "18"
 
 [cmake]
+# The floor is the project's own `cmake_minimum_required`.
 version = "4.4.3"
 minimum = "3.25"
-path = 'C:\Program Files\CMake\bin\cmake.exe'
 
 [ninja]
 version = "1.13.2"
-path = 'C:\Users\gabri\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe'
 
 [msvc]
 # The MSVC toolchain clang takes its headers and libraries from. `version` here is
@@ -52,8 +57,6 @@ path = 'C:\Users\gabri\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja
 # without those headers the build fails on <windows.h> rather than on anything the
 # presets name.
 version = "14.44.35207"
-path = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207'
 
 [windows_sdk]
 version = "10.0.26100.0"
-path = 'C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0'

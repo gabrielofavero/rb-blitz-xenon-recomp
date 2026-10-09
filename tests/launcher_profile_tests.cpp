@@ -325,7 +325,7 @@ void TestLegacyPathMigration() {
                           "[launch]",
                           "target        = \"ultimate\"",
                           "user_data_dir = 'D:\\Saves'",
-                          "dlc_dir       = 'D:\\Games\\YARG Songs'",
+                          "dlc_dir       = 'D:\\Songs'",
                           "",
                       }));
   const ProfileLoadResult migrated = LoadProfile(legacy);
@@ -339,7 +339,7 @@ void TestLegacyPathMigration() {
     CHECK_TRUE(saves->style == ValueStyle::kBasic);
   }
   if (dlc != nullptr) {
-    CHECK_STR_EQ(dlc->value, "D:\\Games\\YARG Songs");
+    CHECK_STR_EQ(dlc->value, "D:\\Songs");
   }
 
   // A profile that already names the `[settings]` key keeps it: the migration must not overwrite

@@ -326,9 +326,9 @@ int main() {
   BeginCase("the cvar value splits on ';' and ignores empty entries");
   {
     const std::vector<std::string> parts =
-        SplitPathList(" ; D:\\Games\\YARG Songs ;D:\\Elsewhere; ");
+        SplitPathList(" ; D:\\Songs ;D:\\Elsewhere; ");
     CHECK_EQ(parts.size(), 2);
-    CHECK_TRUE(parts[0] == "D:\\Games\\YARG Songs");
+    CHECK_TRUE(parts[0] == "D:\\Songs");
     CHECK_TRUE(parts[1] == "D:\\Elsewhere");
     CHECK_EQ(SplitPathList("").size(), 0);
     CHECK_EQ(SplitPathList("   ").size(), 0);

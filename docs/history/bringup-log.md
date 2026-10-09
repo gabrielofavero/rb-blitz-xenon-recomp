@@ -144,7 +144,7 @@ Installed here, and recorded in the configured build tree's `CMakeCache.txt`:
 
 - clang/clang++ 19.1.7 (`C:\Program Files\LLVM\bin`), cmake 4.4.0
   (`C:\Program Files\CMake\bin`), ninja 1.13.2
-  (`C:\Users\gabri\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe`).
+  (`<WinGet>\Packages\Ninja-build.Ninja_<hash>\ninja.exe`).
 - NOTE: the original scaffold plan mentioned clang 22.1.8 / cmake 4.4.3 "not on
   PATH" — that is stale; the working toolchain is the one above.
 - NOTE (2026-09-19): none of the three is on the `PATH` of a plain shell here,
@@ -704,7 +704,7 @@ What the title does now, from the surviving run log and the writable root:
   `XamContentAggregateCreateEnumerator: added 0 items` for
   `game:\Content\0000000000000000` — no DLC in this dump, as expected.
 - **Storage.** The title creates and writes content into the writable root
-  (`C:\Users\gabri\Documents\rb_blitz` here):
+  (`<home>\Documents\rb_blitz` here):
   `B13EBABEBABEBABE\5841122D\00000001\{globaloptions,songcache}` plus 328-byte
   headers under `Headers\00000001\`. All of it is the SDK content path; no project
   code is involved.
@@ -2172,7 +2172,7 @@ The release-readiness goal is another authorized developer following
 in this log until now used this machine's long-lived tree - which carries a populated
 `generated/`, a working `CMakeCache.txt`, and the local `rb_blitz.toml` - so the goal
 had never actually been exercised. This pass did it: `git clone --recurse-submodules`
-of `main` at `576b493` into `D:\Coding\decomps\360\_smoke\rb-blitz-clean`, 24
+of `main` at `576b493` into `<smoke>\rb-blitz-clean`, 24
 submodules initialised, the dump copied to `<clone>/game` (1.1 GB, 31 files, so the
 fingerprint gate passes), and the documented route run from there.
 
@@ -2461,7 +2461,7 @@ between the two is the vanilla switch doing its job):
 ```text
 [info] [core] [t20316] boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260928_1827
 [info] [core] [t20316] toolchain: rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0 (frozen set)
-[warning] [core] [t20316] game data identity: MODIFIED - D:\Coding\decomps\360\rb-blitz-xenon-recomp\game\default.xex is 9023488 bytes, sha256 390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c
+[warning] [core] [t20316] game data identity: MODIFIED - <checkout>\game\default.xex is 9023488 bytes, sha256 390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c
 [warning] [core] [t20316]   expected: 9023488 bytes, sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb (config/game_fingerprints.toml, see docs/ultimate-compat.md)
 [info] [core] [t20316] ultimate: off, booting the retail game data
 ```
@@ -2505,7 +2505,7 @@ with no `[FATAL]`, no dialog, and no identity line. Two consequences worth keepi
 ### How it is captured
 
 ```powershell
-cd d:\Coding\decomps\360\rb-blitz-xenon-recomp
+cd <checkout>
 .\scripts\acceptance_wrong_data.ps1
 ```
 
@@ -2575,7 +2575,7 @@ rexruntime.dll    122 hits  the same checkout prefix, in the SDK's own strings
 rexgpu-xenos.dll  18 hits   ditto
 ```
 
-`D:/Coding/decomps/360/rb-blitz-xenon-recomp/...` is not a credential and not game data, but
+`<checkout>/...` is not a credential and not game data, but
 it is exactly what the item asks about, and it was in the product. The fix is the compiler's
 own mapping, and where it sits is the whole point of it:
 
@@ -3935,7 +3935,7 @@ All four changes are in [patch 0012](../../patches/rexglue-sdk/0012-stale-native
   dump signature above. **After:** 13 of 13 V-Sync-off boots (three loops, 4 + 6 + 3) log **zero**
   anomaly lines and zero `[FATAL]`, and reach the main menu in 49.3-76.6 s - which is also the
   confirmation that the lever is worth documenting: the same warm boot with V-Sync on measures 78.8 s.
-- `scripts/acceptance_song.ps1 -DlcLibrary "D:\Games\YARG Songs"` plays the same song the V-Sync-on
+- `scripts/acceptance_song.ps1 -DlcLibrary "D:\Songs"` plays the same song the V-Sync-on
   baseline plays (225 s) with `Boot`/`SongList`/`Playing`/`Results`/`SongSeen` true, no `[FATAL]` and a
   clean shutdown - measured with `REX_VSYNC=false` (before and after the fix) and with V-Sync on;
   `scripts/acceptance_save.ps1` passes its three legs (change, reload, revert), which is the path that

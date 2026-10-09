@@ -9,8 +9,8 @@
 // on disk (ContentManager::set_extra_content_library() in
 // rexglue-sdk/src/system/xam/content_manager.cpp, carried by patch 0006).
 //
-// That matters on this machine in particular: a library living on a volume without
-// hard links or symlinks (D:\Games\YARG Songs is on exFAT) cannot be indexed by
+// That matters in particular for a library on a volume without hard links or
+// symlinks (exFAT, typically): it cannot be indexed by
 // linking packages into a title_id/content_type tree, so the content manager has to
 // resolve the library in place. Nothing here copies or renames a package.
 //

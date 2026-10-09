@@ -4,7 +4,7 @@
 // R7: the persisted DLC enumeration. src/hooks/dlc.cpp reads a flat library
 // (src/fs/dlc_library.h) by opening every regular file and reading the STFS identity
 // header out of each container, and it does that on every boot. That is the cost this
-// header exists to skip: measured on this machine's `D:\Games\YARG Songs` (1,402
+// header exists to skip: measured on a large library (1,402
 // packages, 28.4 GB, exFAT), a recursive stat-only walk takes ~176 ms while the
 // scanner's open + 868-byte header read per package takes ~725 ms warm (and far more
 // cold), so a cache validated by a stat fingerprint removes the per-file open and

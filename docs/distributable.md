@@ -59,7 +59,7 @@ because the compiler is invoked with absolute paths, that path was the checkout'
 
 The samples were unambiguous - `…/rb-blitz-xenon-recomp/src/hooks/dlc.cpp`,
 `…/src/rb_blitz_app.h`, `…/generated/default/rb_blitz_pch.h` - and they named the
-developer's disk (`D:/Coding/decomps/360/…`) inside a product that is about to be handed to
+developer's disk (`D:/dev/…`) inside a product that is about to be handed to
 somebody else. It is not a credential and not game data; it is the third of the item's four
 questions, and it was a real answer: *yes, a machine-specific path reached the payload*.
 
@@ -74,7 +74,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 ```
 
-A log line that used to say `D:/Coding/decomps/360/rb-blitz-xenon-recomp/src/hooks/dlc.cpp`
+A log line that used to say `<checkout>/src/hooks/dlc.cpp`
 now says `./src/hooks/dlc.cpp`: still useful, no machine in it. The same flag makes the
 generated code and every object file independent of the tree's location, which is what a
 reproducible build needs anyway. MSVC is not covered by it - it needs `/pathmap` for debug
@@ -90,7 +90,7 @@ and the recorded dump's first 4 KiB to another, correct the two sizes and digest
 copy:
 
 ```powershell
-# a copy of the payload, then: append "D:\\Coding\\…\\rb-blitz-xenon-recomp\\src\\leaked.cpp"
+# a copy of the payload, then: append "D:\\dev\\rb-blitz-xenon-recomp\\src\\leaked.cpp"
 # to rexgpu-xenos.dll and the first 4096 bytes of game\default.xex to rexruntime.dll, and
 # update their size/sha256 in payload-manifest.toml.
 .\scripts\audit_distributable.ps1 -PayloadDir out\distributable-audit\negative-control\payload -SkipSetup

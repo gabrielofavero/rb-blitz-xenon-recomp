@@ -398,7 +398,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     // of it. The cache makes that walk instant, but the boot still mounts every package
     // once per enumeration pass, and each of those opens waits out the emulator's
     // emulated storage latency - a fixed 100 ms per deferred overlapped completion
-    // (rexglue-sdk/0011). Measured on D:\Games\YARG Songs (1402 packages): 2803 of them,
+    // (rexglue-sdk/0011). Measured on a 1402-package library: 2803 of them,
     // 280 s of the 667 s the "Discovering Downloadable Content" screen takes. Zero keeps
     // the completion asynchronous - it still runs on the dispatch thread, still sets the
     // overlapped, still queues the completion routine - and only drops the wait.

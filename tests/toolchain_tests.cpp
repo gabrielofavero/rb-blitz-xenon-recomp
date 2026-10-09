@@ -514,8 +514,9 @@ void TestRealPinFile(const fs::path& project_dir) {
     CHECK_TRUE(sdk->kind == Kind::kCommit);
   }
   if (clang != nullptr) {
-    // The minimums the project already assumes: the clang the linux presets name...
-    CHECK_STR_EQ(clang->minimum, "20");
+    // The minimums the project already assumes: the floor the pinned SDK's own
+    // CMakeLists enforces on Clang...
+    CHECK_STR_EQ(clang->minimum, "18");
   }
   if (cmake != nullptr) {
     // ... and CMake's own cmake_minimum_required.
