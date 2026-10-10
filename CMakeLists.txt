@@ -87,6 +87,7 @@ set(RBBLITZ_SOURCES
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
     src/hooks/dlc_refresh.cpp
+    src/hooks/local_save.cpp
     src/hooks/menu_filter.cpp
     src/hooks/shell_music.cpp
     src/hooks/ultimate.cpp
@@ -272,6 +273,10 @@ add_dependencies(rb_blitz_codegen rb_blitz_toolchain_gate)
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_local_save_tests tests/local_save_tests.cpp src/util/sha256.cpp)
+    target_include_directories(rb_blitz_local_save_tests PRIVATE src)
+    add_test(NAME local_save COMMAND rb_blitz_local_save_tests)
+
     add_executable(rb_blitz_crypto_keytable_tests
         tests/crypto_keytable_tests.cpp
     )

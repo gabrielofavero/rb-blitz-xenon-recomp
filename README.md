@@ -1,100 +1,55 @@
-# Rock Band Blitz — Xbox 360 static recompilation
+# Rock Band Blitz: Xbox 360 Static Recompilation
 
-This is a Rock Band Blitz static recompilation project, based on the Xbox 360 version of the game and using [rexglue](rexglue-sdk) as the recompiler. The goal here is to make a stable, easy to install and customize, Windows version of this game.
+This is a Rock Band Blitz static recompilation project, based on the Xbox 360 version of the game and using [rexglue](rexglue-sdk) as the recompiler. The goal here is to make a stable, easy-to-install and customizable multi-platform version of this game. The initial goal is Windows, but Linux, macOS and mobile are planned.
 
-Currently, the game boots, renders 2D and 3D elements correctly and is able to finish songs. Ultimate is compatible as well (optional).
+Currently, the game boots, renders 2D and 3D elements correctly and is able to finish songs. Ultimate is compatible as well and a few enhancements are in place.
 
-I'm now improving stability & performance, adding modularized tweaks and creating an installer and launcher. I want this port to feel PC native, so very long road ahead.
+I'm now improving stability & performance, adding modularized tweaks and creating an installer and settings UI. I want this port to feel PC native, so very long road ahead.
 
 ## Enhancements
 
-**Already here:** Compatibility with Ultimate was a must from the start and is already implemented. Mouse support is here, but glitchy at the moment and might take some time to fine-tune it.
+| Feature                                   | Type     | Status      | Notes                                                                                                                                                                                                                      |
+| ----------------------------------------- | -------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Simple DLC Directory                      | Built-in | Done        | You can put all your CON/LIVE DLCs in the same directory without needing to emulate the 360 folder structure                                                                                                               |
+| Hidden options and prompts                | Toggle   | In Progress | Online exclusive menu items (leaderboards, music store) and prompts (proceed to offline mode) are hidden. A few items left (Blitz Cred, Coins, Library headers)                                                            |
+| DLC Cache                                 | Toggle   | In Progress | The idea is for only the first load to search for all content. After that, a cache file will be saved to speed things up and you can refresh manually the library. Works partially, but long road ahead to make it stable. |
+| DLC background songs                      | Toggle   | In Progress | A random song is selected to play on the main menu instead of the default ones. Already works, but needs adjustments.                                                                                                      |
+| Mouse Support (UI)                        | Toggle   | To Do       | Non-native version made, but unreliable. I'll need to reimplement this to be native.                                                                                                                                       |
+| Non 16:9 resolutions                      | Toggle   | To Do       | Ultrawide support and preparation for portrait (mobile).                                                                                                                                                                  |
+| Quick Play Background song                | Toggle   | To Do       | When combined with "DLC background songs", you can quickly play the song playing on main menu.                                                                                                                             |
+| Multi logos                               | Toggle   | To Do       | Switch between Ultimate and default Rock Band Blitz logo                                                                                                                                                                   |
+| Load Timeout                              | Toggle   | To Do       | Go back to the music library if DLC loading fails. Complex feature, might not be possible.                                                                                                                                     |
+| Mouse Support (Controller)                | Toggle   | To Do       | Play with the mouse (Right click, left click and scroll)                                                                                                                                                                   |
+| Multi button UI                           | Toggle   | To Do       | Be able to import from the PS3 assets the controller UI + create custom packages                                                                                                                                           |
+| Uncap framerate                           | Toggle   | To Do       | No promises. Chances are the engine is not capable. (Spike needed)                                                                                                                                                        |
+| (Mobile) Portrait interface               | Built-in | To Do       | Rearrange UI elements for portrait                                                                                                                                                                                        |
+| (Mobile) Dynamic Orientation              | Built-in | To Do       | Adjust UI/Gameplay according to phone orientation. If not possible, toggle.                                                                                                                                                |
+| (Mobile) Touch controls (UI and gameplay) | Built-in | To Do       | My goal is for this not to be an overlay, but true "click on text -> call to action"                                                                                                                                      |
 
-**Future:** I plan to ship v1.0 with a simplified save/DLC system, custom resolutions and a working installer and launcher, so that anyone can run and customize the game without dev experience. Enhancements will be toggleable.
+Keep in mind that, as Ultimate is compatible (and recommended!), you get its features as well, such as power-ups in offline mode and gameplay adjustments. The full list is available in the [Rock Band Blitz Ultimate repository](https://github.com/ultimate-mods-rb/blitz-ultimate).
 
 ## How to Install
 
-Download the installer from the releases section. It's very early into the development lifecycle, so keep in mind things might look rough. There is no release up yet, and until there is, the build below produces the same setup exe.
+This is not released yet. I'll make a v1.0.0 once I'm satisfied with performance and stability (plus at least the most important enhancements). Once released, there will be an installer on the releases page that will allow you to quickly select your Xbox 360 copy and generate the game. First release is expected to be Windows only.
 
-You will need to provide the 360 package to install. It can be either packed or already extracted. Nothing from the game ships in this repo. Use a copy you are authorized to have.
+## How to Build
 
-## The launcher
-
-The installer also puts a settings launcher next to the game — `rb_blitz_launcher.exe`, in the install folder, with its own Start-menu shortcut (and a desktop one if you asked for it). It's a normal desktop window with three tabs, General, Audio / Video and Controller; you can drive it with the mouse, the keyboard or a controller, and the bottom bar names whatever row is focused and which buttons do what. *Launch Game* saves anything unsaved first and then starts the game with what you chose.
-
-Your settings live in one file, `%APPDATA%\rb_blitz\launcher.toml` — unless you used *Change settings location* on the General tab, in which case it's wherever you pointed that. Nothing has to be configured for the game to run: a first boot with no profile just uses the compiled defaults, and the launcher's own first run fills the General tab in from the installer's `install-manifest.toml`, so the game folder is already right. The uninstaller leaves that file alone.
-
-**You don't have to use the launcher.** The game's Start-menu entry is `rb_blitz.exe` with `--game_data_root`, and the exe runs on its own — double-click it and it boots with the `rb_blitz.toml` next to it (the file the in-game overlay's *Save to config* writes) and the compiled defaults. What that route does *not* get is the launcher's own settings: those reach the game as command-line flags, so only a launch through the launcher passes them. A start that fails says exactly what it would have run (the command line and the game's log folder) instead of leaving you to guess. The measurement behind that, and the decision it leaves open, are in [docs/plans/launcher-plan.md](docs/plans/launcher-plan.md) §11.
-
-Building it, testing it and re-measuring the whole thing (install, four boots, the logs) is in [docs/build-and-run.md](docs/build-and-run.md) §4 and [launcher/README.md](launcher/README.md).
-
-## How to Build (dev)
-
-Everything below assumes Windows and runs in PowerShell, from the repo root.
-
-**Prerequisites:** LLVM/Clang, CMake 3.25+, Ninja and the Visual Studio Build Tools *with* the Windows SDK, all of them resolvable from `PATH`. Clang alone is not enough, since without the MSVC/UCRT headers the build fails on `<windows.h>`, not on a missing compiler. [docs/build-and-run.md](docs/build-and-run.md) §1 has the `winget` commands and the two traps worth knowing about. The versions this project is built and accepted with are frozen in [config/toolchain.toml](config/toolchain.toml) and explained in [docs/toolchain.md](docs/toolchain.md); every build checks the machine against that record before it compiles anything.
-
-**Once per checkout**, the pinned rexglue submodule needs two idempotent repairs: upstream's symlinked files cannot be created on a stock Windows checkout, and the patch set carries the fixes the note highway needs.
+You can build for yourself to test how things are going (Windows + PowerShell, from the repo root). You need LLVM/Clang, CMake 3.25+, Ninja, the Visual Studio Build Tools *with* the Windows SDK on `PATH`, and the dump at `game/default.xex`.
 
 ```powershell
+# once per checkout
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair_flat_symlinks.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.ps1
-```
 
-**Build.** The dump goes at `game/default.xex`; the build fails closed, before translating anything, if it is not the image [config/game_fingerprints.toml](config/game_fingerprints.toml) describes:
-
-```powershell
+# the first build compiles the SDK and stops once after codegen; run it again to link
 cmake --preset win-amd64-release
 cmake --build --preset win-amd64-release
 ```
 
-The first configure+build compiles the SDK (SDL3, fmt, spdlog, mspack, the rexglue runtime) from source and takes tens of minutes. The very first build of a tree that has never run codegen stops once, right after generating the recompiled code, and says so: a build system cannot learn about sources that appear in the middle of it, so run the same two commands again and the second build links the executable. The other preset does not need that second pass — codegen has run by then. After that it is incremental and routinely under a minute: `cmake --build --preset win-amd64-release` after a source change, `--target rb_blitz` to skip unrelated targets, and `win-amd64-debug` / `win-amd64-relwithdebinfo` for the other configurations (the Debug preset builds, its host tests pass, and it runs the whole offline route; [docs/build-and-run.md](docs/build-and-run.md) §3). Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`, `rexgpu-xenos.dll`.
+Outputs land in `out\build\win-amd64-release\`, and `.\rb_blitz.exe` runs from there. `ctest --test-dir out\build\win-amd64-release --output-on-failure` runs the host tests, and `installer\build.ps1` builds the installer exe (WIP).
 
-**Run** it from the build directory (that is where the exe finds its DLLs, its `.toml` and `logs\`), with the game data path on the command line, since it can live anywhere outside the source tree:
+**Full walkthrough and everything I've worked out about the game: [`docs\`](docs/)** — start with [docs/build-and-run.md](docs/build-and-run.md).
 
-```powershell
-cd out\build\win-amd64-release
-.\rb_blitz.exe --game_data_root=..\..\..\game
-```
+## AI Usage
 
-Each launch writes a new `logs\rb_blitz_NNN.log`. Pointing `--game_data_root` at an Ultimate payload root is supported and only warns; pointing it at the wrong dump behaves the same way, so check the `game data identity:` line at the top of the log instead of assuming a clean boot means the right game.
-
-**Extract the assets.** The title's content is one ARK archive pair under `game\gen\`, plus the Ultimate payload's overlay pair. One command unpacks both into a gitignored `assets\game\360\` — byte-exact, with a JSON index per archive:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\extract_assets.ps1
-```
-
-The PlayStation 3 build is the same game in the same container, so the same script unpacks it too — `-Platform ps3 -GameRoot <the dump's USRDIR>` writes `assets\game\ps3\`, and every tool in `scripts\` reads that dump unchanged. [assets.md](docs/assets.md) has the resulting layout, the archive format, the two-platform comparison, and what is still obfuscated.
-
-**Tests** are SDK-free and game-data-free, about half a second:
-
-```powershell
-ctest --test-dir out\build\win-amd64-release --output-on-failure
-```
-
-**Build the installer.** After the Release build exists, one command does the whole setup exe (payload snapshot, embedded config, helper, helper tests, wizard image, ISCC):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File installer\build.ps1
-```
-
-Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, which embeds the payload and therefore installs with no network access. It needs [Inno Setup 6](https://jrsoftware.org/isdl.php) (ISCC); `-RefreshPayload`, `-SkipTests`, `-SkipArt` and `-SkipSetup` control the individual stages, and [installer/README.md](installer/README.md) covers the releases side of it.
-
-Everything I've worked out about the game lives in `docs\`: [known-issues.md](docs/known-issues.md) for the standing limits, [backlog.md](docs/backlog.md) for what's next, [toolchain.md](docs/toolchain.md) for the frozen build toolchain, [distributable.md](docs/distributable.md) for what the installer ships and the audit that refuses the rest, [dlc.md](docs/dlc.md) for where DLC packages go, [ultimate-compat.md](docs/ultimate-compat.md) for the Ultimate install, [rb3-references.md](docs/rb3-references.md) for the Rock Band 3 knowledge I borrow, [symbols.md](docs/symbols.md) for the guest addresses, [assets.md](docs/assets.md) for unpacking the title's archives, and [history/bringup-log.md](docs/history/bringup-log.md) for the whole chronological record.
-
-## How about AI usage?! I WON'T play this if it is one of those AI trash ports!! 😡😡
-
-Yes, this is a heavily AI assisted project. Like, heavily. The flow is: I use it for investigations, I decide the scope and architecture of the feature, AI implements and I do a code review and functional review. I follow the recomp/decomp community and know pretty well the public opinion about this.
-
-Being 100% clear, I am a solo software engineer doing this as a pet project on my spare time. It was either AI assist or nothing. You are absolutely free to not install the game if it is not on your moral code, nobody is forcing you to. And I welcome other people to make different versions! This is one of my favorite Rock Band games and it would be great to see more love out of it.
-
-What I can attest is that, to the best of my software engineer abilities, I will dedicate myself to delivering things that are well implemented and validated.
-
-## The future
-
-Being honest, a PC version was never my goal. RPCS3 is already great at emulating Blitz. But this is the first step for expansion.
-
-My goal is to make an iOS version and, as a final and probably unlikely step, a Quest 3 VR & MR port. iOS will come first as I think it will be great on touch and only after that I will mess with VR since it's a whole different beast. It's honestly very ambitious and I'm not sure I will carry through this, so let's see.
-
-My scope is only within Windows, iOS and Quest 3 because these are the platforms that I own and use. I do not want to make ports of things that I can't test to ensure they have quality. But of course, feel free to fork and work on other ports! License is [GPL-2.0-only](LICENSE), so knock your socks off.
+This is a heavily AI assisted project. Like, heavily. The flow is: I use it for investigations, I decide the scope and architecture of the feature, AI implements and I do a code review and functional review. I know it's not the best flow, but I am a solo software engineer doing this as a pet project in my spare time. What I can attest is that, to the best of my software engineer abilities, I will dedicate myself to delivering things that are well-implemented and validated.

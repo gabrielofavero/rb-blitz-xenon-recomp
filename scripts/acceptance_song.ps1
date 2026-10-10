@@ -57,6 +57,10 @@ param(
     # case); a run only passes if the results screen shows this title.
     [string]$SongName = "THESE DAYS",
     [string]$UltimateMode = "0",
+    # Writable root. Empty keeps the game's own default (Documents\Rock Band
+    # Blitz), which is what the acceptance criterion is measured against; a
+    # value isolates the run so a probe can hash the save files it leaves.
+    [string]$UserDataRoot = "",
     # Play the song a second time from the results screen, in the same process.
     [switch]$Replay,
     # Take a pause during the song and release it, asserting both from the
@@ -378,6 +382,7 @@ function Invoke-Run([int]$Run) {
     if ($DlcRoot) { $launchArgs += "--dlc_root=""$DlcRoot""" }
     if ($DlcLibrary) { $launchArgs += "--dlc_library=""$DlcLibrary""" }
     if ($DlcLibraryContentType) { $launchArgs += "--dlc_library_content_type=$DlcLibraryContentType" }
+    if ($UserDataRoot) { $launchArgs += "--user_data_root=""$UserDataRoot""" }
     $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
 
     try {

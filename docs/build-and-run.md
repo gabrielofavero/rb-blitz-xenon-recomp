@@ -625,6 +625,16 @@ as of 2026-09-20, before which they were silently discarded
 
 ### Saving and DLC under the alpha (`acceptance_save.ps1`, `acceptance_dlc.ps1`)
 
+Offline player persistence is enabled by default through `local_save=true`.
+Controller mapping, scores, stars, and star counters are checkpointed to
+`<user_data_root>/<XUID>/5841122D/local_save.bin`, using the guest's own save format
+inside a checked host envelope. Audio/video changes trigger the native
+`globaloptions` autosave. `--local_save=false` restores retail offline behavior;
+it does not delete either file. An invalid/unreadable local save is preserved and
+protected from overwrite for that session, with an error in the log.
+**The new hooks still need in-game restart validation**; see the manual checks in
+[save-persistence-findings.md](plans/save-persistence-findings.md).
+
 The two features the alpha is judged on have their own runs, and
 `acceptance_alpha.ps1` drives both against the dev tree *and* against the payload the
 installer ships (snapshotted by `installer/tools/make_payload.ps1`, run from a bare
@@ -643,10 +653,11 @@ install folder with no `rb_blitz.toml`):
   own menus (HELP & OPTIONS → Calibration → Calibrate Manually), quits, restarts and
   requires the value to read back, then reverts it and checks the revert too. The
   three legs share one isolated `--user_data_root`. Manual calibration is the setting
-  it uses because it is the one that commits: A on the page's CONTINUE rewrites
+  it uses because its native commit was measured: A on the page's CONTINUE rewrites
   `globaloptions` (a `[NtCreateFile] disp=0x5` plus a 1024-byte `[NtWriteFile]`, and
-  the file's hash changes), where the Audio/Video toggles and the controller scheme
-  change on screen but do not write the file ([docs/known-issues.md](known-issues.md)).
+  the file's hash changes). Before the local persistence hooks, Audio/Video toggles
+  and controller mapping only changed on screen; the new paths need separate
+  restart checks ([docs/known-issues.md](known-issues.md)).
   The value comes from OCR, so digits the OCR engine reads as letters ("0" → "O",
   "-10" → "-IO") are normalised before they are parsed.
 * `acceptance_dlc.ps1` requires the DLC root's packages to be enumerated by the guest

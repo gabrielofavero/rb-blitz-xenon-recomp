@@ -3,6 +3,80 @@
 Chronological record of the bring-up work and its blockers. Full diagnostic
 captures are kept under `out/` (gitignored); commit-safe summaries live here.
 
+## Offline player persistence (2026-10-10; implemented, then fixed and verified in-game)
+
+The previous investigation conflated the DLC metadata cache with player progress.
+Static tracing of the retail guest identifies `SaveData::Save` at `0x821CA2A0`
+and its caller at `0x8235BC08`: a `savedata/set` request under
+`remoteconfig/updatesavedata/`. Controller mapping, per-song scores and stars,
+and star counters go into that revision-11 server payload. They have no Xbox
+content write path in offline mode. The SDK's working `globaloptions` writes
+therefore could not establish player persistence.
+
+`src/hooks/local_save.cpp` now uses that native serializer and loader to checkpoint
+player changes locally, with `local_save=true` by default. A versioned, hashed
+envelope lives under the resolved user-data root at
+`<XUID>/5841122D/local_save.bin`. Native mutators mark progress dirty; the next
+guest save-manager poll writes it, skipping unchanged bytes. Startup restores
+the object after initialization. Failed replacement preserves the previous save;
+an invalid existing file is retained and protected from overwrite for the session.
+Disabling `local_save` restores the original guest behavior.
+
+Overscan and bass boost belong to `ConsoleSaveData`, alongside calibration:
+`0x821C99F8` sets the dirty byte at `this+44`. The hook queues the title's own
+autosave when its manager is idle after initial loading; `globaloptions` still
+uses the native content path and format.
+
+The Release build completed and 20 host tests passed, including the new payload
+validation, checksum, and write-replacement cases. **Restoring the checkpoint only at
+initialization turned out to be insufficient, and the in-game run found it.**
+
+### What the first in-game run measured (2026-10-10)
+
+The write side worked: `<user_data_root>/B13EBABEBABEBABE/5841122D/local_save.bin`
+appeared at `12:52:29`, a 48-byte envelope around a 40-byte revision-11 payload —
+score `1020013` = 211559, five stars for the same song, controller mapping 1 —
+and `globaloptions` was rewritten at `12:47:45`. A full restart loaded it
+(`local_save: loaded 40 bytes`, `12:56:57`) and still showed **nothing**: no stars on
+the song row, controller scheme back on default.
+
+The guest does not keep the object it was given. `sub_822CB0D0` tears the player's
+`SaveData` down (`sub_821CA3D8`: release the object at `+44`, then `sub_821CA358`)
+whenever it (re)loads the save from Rock Central, and offline the `save_data`
+response that would refill it never arrives. With the hook logging every call the
+timeline is exact: restore at `13:17:12` (`guest loader read 40 of 40`, mapping 1),
+teardown at `13:17:35` (`SaveData::Reset called from lr=0x821CA41C`) — i.e. the object
+was emptied the moment the title screen was confirmed. Worse, the next dirty
+`SaveLoadManager::Poll` then serialized that emptied object: in the session before,
+the 88-byte checkpoint holding the song's score and five stars was replaced by a
+72-byte one (24-byte payload) at `13:08:43`.
+
+### The fix, and what was *not* wrong
+
+`src/hooks/local_save.cpp` now also overrides `sub_821CA3D8` and re-applies the
+checkpoint straight after the guest's teardown, and `Checkpoint` refuses to replace a
+payload that carries scores or stars with one that carries neither (the decision is
+`Summarize` in `src/fs/local_save.h`, unit-tested). The stream pairing the first
+implementation guessed at is correct and was confirmed from the decrypted image
+rather than reasoned about: `SaveData::Load` reads big-endian values through
+`0x824614F8`, which byte-swaps only when `*(stream + 4) != 0`, so a `BufStream` over
+the file's own bytes (constructor flag 0) is right — the suspected stream-type or flag
+mismatch was a dead end. The payload layout was confirmed the same way:
+`revision | scoreCount + {songId, score}[] | lastStars | controller mapping |
+starCount + {songId, stars}[] | totalStars`, the count-prefixed star table being read
+by `sub_821CA588` into the container at `SaveData+60`.
+
+### Verification after the fix
+
+A full process restart now keeps the checkpoint: the log carries
+`restored 40 bytes at initialization` and `restored 40 bytes after the guest's
+SaveData teardown` (both `guest loader read 40 of 40`, mapping 1), and the five stars
+for *September* are visible in **YOUR SONGS** while unplayed rows still show empty
+stars. Release build and all 20 host tests pass, the new case covering the
+progress-vs-empty summary. Remaining hand checks (a second song, a replay with a
+lower score, the Ultimate target) and the evidence trail are in
+[save-persistence-findings.md](../plans/save-persistence-findings.md).
+
 ## Scaffold and generate (2026-09-07 to 2026-09-09)
 
 Status: complete (2026-09-09).

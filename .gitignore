@@ -15,6 +15,9 @@
 /compile_commands.json
 /CMakeUserPresets.json
 
+# clangd index cache (LLVM/Clang language server). Rebuilt locally on demand.
+/.cache/
+
 # Installer: everything it generates (embedded config, the payload snapshot it
 # ships, the helper build tree and the produced setup executable).
 /installer/out/
