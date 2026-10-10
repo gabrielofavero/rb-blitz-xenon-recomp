@@ -46,7 +46,7 @@ before the Ultimate and DLC layers:
 [info] enhancements: enhancements_rename_mod_settings = on (default) - R10 rename the mod's settings row
 [info] enhancements: enhancements_controller_scheme = "" (R8 scheme; empty means unnamed)
 [info] enhancements: enhancements_hidden_menu_options = "splash_leaderboard,splash_achievements,splash_dlc" (R5 rows; the three offline-dead entries by default)
-[info] enhancements: enhancements_menu_dlc_song_count = 3 (R9 pool size; spread over the loaded DLC library)
+[info] enhancements: enhancements_menu_dlc_song_count = 3 (R9 pool size; drawn at random from the loaded DLC library)
 ```
 
 The value and the **source** are both stated (`default`, `config`, `environment`, `command line`,
@@ -65,7 +65,7 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `native_mouse` | R6 different input waves: the engine's own pointer path instead of the synthetic pad | the pad the guest actually reads ([src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp)) | I2 → later |
 | `dlc_cache` | R7 DLC cache: persist the flat DLC library's enumeration in the save folder and reuse it while a fingerprint proves the tree unchanged, and — because the host's walk of the library is the *smaller* half of what a large library costs a boot — drop the SDK's emulated per-package mount latency (`deferred_overlapped_delay_ms = 0`, patch 0011) for the run. The refresh is the main menu's last row, drawn as "Refresh Song Library" rather than the store label it ships with, and backed by `--refresh_dlc_cache`; the discovery screen says "Loading Song Cache" instead of "Discovering Downloadable Content" when the enumeration came out of the cache, and its progress bar is given the library's package count (the title is never told one). What the toggle cannot remove is the title's own enumeration, one item per presented frame ([dlc.md](../dlc.md) §4.3) | the library is walked and every package's header read once per boot, and every mount the title makes waits out the emulated 100 ms | [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2), [dlc.md](../dlc.md) §4.1, [main-menu-flow.md](main-menu-flow.md) § "the refresh row" |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
-| `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones: the menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - picked at random from the library (as many as `enhancements_menu_dlc_song_count`, 3 by default) and streamed read-only from the package it came from, so the menu becomes a jukebox over the DLC. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, chosen at random and looped | [menu-music.md](menu-music.md) ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp)) |
+| `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones: the menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - a pool drawn at random from the whole library every boot (as many as `enhancements_menu_dlc_song_count`, 3 by default), streamed read-only from the package it came from and walked as a shuffled deck, so one song follows the last until the deck is exhausted and reshuffled. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, one chosen at random per menu visit and looped | [menu-music.md](menu-music.md) ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp)) |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the launcher hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu-flow.md) § "the label" |
 
 **R3 and R10 are the toggles that ship on.** R10's row belongs to the Ultimate mod, so a run without
@@ -91,8 +91,8 @@ fault that once made a V-Sync-off boot unsafe to suggest is fixed separately
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to
 decide what a "named entry" is: the name the title gives the row (`splash_leaderboard`,
 `splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9's
-`enhancements_menu_dlc_song_count` is the same shape: how many DLC songs the menu's pool draws from,
-spread over the loaded library. R10 needs no key: what it renames is the mod's
+`enhancements_menu_dlc_song_count` is the same shape: how many DLC songs the menu's pool draws
+from, at random from the loaded library, and walks as a shuffled deck. R10 needs no key: what it renames is the mod's
 own row, and the two labels it moves between are the module's constants
 (`src/ui/menu_options.h`) rather than a user's list.
 

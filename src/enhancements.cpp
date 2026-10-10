@@ -118,22 +118,24 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
                       "unnamed, and an unnamed scheme leaves the saved layout alone.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-// R9, implemented. The title loops three of its own streamed tracks in the main menu
-// (the `shellmusic` block of config/synth.dtb); with this on, every track the menu
-// plays is one of the loaded DLC songs instead, streamed read-only from the package it
-// came from (src/hooks/shell_music.cpp). The pool is the DLC this boot enumerated, so
-// without a library the toggle has nothing to draw from and the menu is unchanged.
+// R9, implemented. The title loops ONE of three of its own streamed tracks per menu visit
+// (the `shellmusic` block of config/synth.dtb, chosen at random and looped forever); with
+// this on, every track the menu plays is one of the loaded DLC songs instead, streamed
+// read-only from the package it came from (src/hooks/shell_music.cpp). The pool is drawn
+// at random from the DLC this boot enumerated, and every boot draws a new one, so without
+// a library the toggle has nothing to draw from and the menu is unchanged.
 REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, false, "Enhancements",
                     "R9 main-menu DLC songs: play the loaded DLC as the main menu's background "
-                    "music - one song at a time, picked at random from the library - instead of "
-                    "the three tracks the title loops. Needs a DLC library; without one the menu "
-                    "is unchanged. Faithful: the title's own three tracks.")
+                    "music instead of the three tracks the title loops - a pool drawn at random "
+                    "from the library every boot, handed one song after another as each one ends "
+                    "(the deck reshuffles when it runs out). Needs a DLC library; without one the "
+                    "menu is unchanged. Faithful: the title's own three tracks.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
-                     "R9 how many DLC songs the main menu's background pool draws from, spread "
-                     "over the loaded library (1-64). Read only while "
-                     "enhancements_menu_dlc_songs is on.")
+                     "R9 how many DLC songs the main menu's background pool draws from, drawn "
+                     "at random from the loaded library (1-64) and walked as a shuffled deck. "
+                     "Read only while enhancements_menu_dlc_songs is on.")
     .range(1, 64)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -205,7 +207,7 @@ void LogToggles() {
   REXLOG_INFO("enhancements: {} = \"{}\" (R5 rows; the three offline-dead entries by default)",
               "enhancements_hidden_menu_options",
               REXCVAR_GET(enhancements_hidden_menu_options));
-  REXLOG_INFO("enhancements: {} = {} (R9 pool size; spread over the loaded DLC library)",
+  REXLOG_INFO("enhancements: {} = {} (R9 pool size; drawn at random from the loaded DLC library)",
               "enhancements_menu_dlc_song_count",
               REXCVAR_GET(enhancements_menu_dlc_song_count));
 }

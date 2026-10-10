@@ -11,16 +11,31 @@
 //     `config/synth.dtb` in the ark, `(shellmusic (music (samples/shellmusic_1
 //     (gain 0.0)) (samples/shellmusic_2 ...) (samples/shellmusic_3 ...)))` - and
 //     holds those three entries as its whole pool.
-//   * when a track ends (0x822B7968) it picks one entry at random, formats
-//     `sprintf("sfx/shell/%s", entry)`, reads that entry's `gain`, makes a
-//     `ShellMusic` and calls `ShellMusic::Load(path, gain, loop, play_from_buffer)`
-//     (0x82757F50). `Load` streams the path; the three entries resolve to
+//   * when the panel is entered (0x822B7968) it picks one entry at random
+//     (0x822B7550, a `[0, size)` pick), formats `sprintf("sfx/shell/%s", entry)`,
+//     reads that entry's `gain`, makes a `ShellMusic` and calls
+//     `ShellMusic::Load(path, gain, loop=1, play_from_buffer=1)` (0x82757F50). `Load`
+//     streams the path; the three entries resolve to
 //     `sfx/shell/samples/shellmusic_1..3.mogg`, three stereo tracks in the ark.
+//   * the panel's per-frame poll (0x827586D8) then drives that stream, and the stream
+//     loops: the `loop` argument only scales a fade at the seam, it does not stop the
+//     loop. The title therefore plays ONE of its three tracks per menu visit and
+//     repeats it until the menu is left; nothing asks for a next track on its own.
 //
-// So "random song, then the next" is already the title's own behaviour - over three
-// shipped tracks. R9 widens the pool: the hook below replaces the path of every pool
-// entry with one of the DLC songs this boot loaded, which the title streams exactly
-// the same way.
+// R9 widens the pool and gives the menu a jukebox rotation of it:
+//
+//   * the pool is the DLC songs this boot mounted, sampled at random from the whole
+//     library and redrawn every boot (Configure() below), so the menu is different
+//     every time;
+//   * `ShellMusic::Load` is hooked, so every pooled track the panel asks for becomes
+//     one of those songs;
+//   * the poll is hooked too. The stream it drives carries its own play position
+//     (`Stream+0xA0`, in samples, advancing with the audio), and at the seam where the
+//     song repeats that position jumps **backwards**. A position that went backwards on
+//     the object R9 substituted into is therefore the end of one of its songs, and the
+//     moment R9 hands the same ShellMusic the next song of the shuffled pool. The pool
+//     is deliberately small: each mounted package is one open container, and the deck is
+//     reshuffled when it runs out.
 //
 // Where a DLC song comes from: the title opens its downloadable songs from a mounted
 // content device (`cntXXXXXXXX:\songs\<key>\<key>.<ext>`) and never from `sfx/shell/`,
@@ -37,11 +52,14 @@
 // or when none of the chosen packages can be mounted or holds a stream: nothing joins
 // the pool, so the hook has nothing to substitute and every read is the guest's own.
 //
-// Deviation: with R9 on and at least one package mounted, each pool entry's path is
-// replaced, at the load that carries it, with `<alias>:\songs\<song>\<song>` - a
-// different song of the same kind (a streamed .mogg), played with the same gain, loop
-// and FX the panel already chose. Every substitution is logged with the path the title
-// asked for and the one it is given instead.
+// Deviation: with R9 on and at least one package mounted, each pooled track is replaced,
+// at the load that carries it, with `<alias>:\songs\<song>\<song>` - a different song of
+// the same kind (a streamed .mogg), played with the same gain, loop and FX the panel
+// already chose. The poll hook watches that stream's own position and, at the seam where
+// the song would repeat, loads the next song of the pool onto the same ShellMusic, so the
+// menu walks its library instead of repeating one track. Every substitution and every
+// turn of the deck is logged with the path the title asked for and the one it is given
+// instead.
 
 #include "hooks/shell_music.h"
 
@@ -52,6 +70,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <random>
 #include <string>
 #include <system_error>
@@ -80,6 +99,7 @@ REXCVAR_DECLARE(bool, enhancements_menu_dlc_songs);
 REXCVAR_DECLARE(int32_t, enhancements_menu_dlc_song_count);
 
 REX_EXTERN(__imp__sub_82757F50);
+REX_EXTERN(__imp__sub_827586D8);
 
 namespace {
 
@@ -99,6 +119,16 @@ constexpr int kMaxSongs = 64;
 constexpr size_t kBufferCount = 8;
 constexpr size_t kBufferBytes = 512;
 
+// ShellMusic's own fields (its ctor is 0x82758208): the stream it plays, and - on that
+// stream - the sample position it has reached. The panel's poll loops the stream rather
+// than ending it, so a position that jumps backwards is the only signal that a track has
+// reached its end, and it is what R9 rotates on.
+constexpr uint32_t kStreamOffset = 44;
+constexpr uint32_t kPositionOffset = 0xA0;
+// A backwards jump smaller than this is a torn read of a counter the audio thread is
+// writing, not a seam: a seam restarts near zero and is minutes of samples away.
+constexpr uint32_t kRewindSlack = 44100;  // ~1 s at 44.1 kHz
+
 struct PoolEntry {
   std::string alias;   // the guest device name, without its trailing ':'
   std::string stream;  // `\songs\<song>\<song>`, without the extension Load appends
@@ -110,10 +140,38 @@ std::vector<PoolEntry> g_pool;
 std::mutex g_mutex;
 std::mt19937 g_rng{std::random_device{}()};
 constexpr size_t kNoIndex = static_cast<size_t>(-1);
+
+// The play order of the pool, walked to the end and then reshuffled. A deck rather than
+// a per-load pick: every mount gets heard before any repeats, and the song after the
+// last one is never the last one again.
+std::vector<size_t> g_deck;
+size_t g_deck_next = 0;
 size_t g_last_index = kNoIndex;
+
+// The ShellMusic the last substitution went to, and the Load arguments the panel passed
+// it - the poll hook replays them when it starts the next track. Zero outside R9.
+uint32_t g_music = 0;
+double g_gain = 0.0;
+uint64_t g_loop = 1;
+uint64_t g_play_from_buffer = 1;
+
+// The stream R9 is watching, and the last position read from it, so a jump backwards can
+// be told from the first sample of a track. Reset with every track R9 starts.
+uint32_t g_stream = 0;
+uint32_t g_pos = 0;
 
 std::vector<uint32_t> g_buffers;
 size_t g_buffer_next = 0;
+
+// The guest is big-endian, and its pointers are plain ints in its own image.
+uint32_t LoadBe32(uint8_t* base, uint32_t address) {
+  const uint8_t* p = rex::memory::GuestPtr<const uint8_t*>(base, address);
+  if (p == nullptr) {
+    return 0;
+  }
+  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) |
+         uint32_t(p[3]);
+}
 
 // The stream path a package holds, or empty. A package's song files sit in a folder
 // named after the song, beside the chart; `songs/<song>/<song>.mogg` is the shape the
@@ -172,22 +230,58 @@ std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_p
   return device;
 }
 
-// The next song to play: random among the pool, never the one just played, so a short
-// pool does not sound like a short pool. The caller holds g_mutex.
+// The next song to play: the next card of the shuffled deck, reshuffled when the deck
+// runs out so that the first song of a new deck is never the song that just played.
+// The caller holds g_mutex.
 std::string NextPathLocked() {
   if (g_pool.empty()) {
     return {};
   }
-  size_t index = 0;
-  if (g_pool.size() > 1) {
-    std::uniform_int_distribution<size_t> dist(0, g_pool.size() - 1);
-    index = dist(g_rng);
-    if (index == g_last_index) {
-      index = (index + 1) % g_pool.size();
+  if (g_deck_next >= g_deck.size()) {
+    g_deck.resize(g_pool.size());
+    std::iota(g_deck.begin(), g_deck.end(), size_t{0});
+    std::shuffle(g_deck.begin(), g_deck.end(), g_rng);
+    if (g_deck.size() > 1 && g_deck.front() == g_last_index) {
+      std::swap(g_deck.front(), g_deck[1]);
     }
+    g_deck_next = 0;
   }
+  const size_t index = g_deck[g_deck_next++];
   g_last_index = index;
   return g_pool[index].alias + ":" + g_pool[index].stream;
+}
+
+// Hand the ShellMusic the menu is already polling the next song of the deck. This is
+// the same call the panel's own pool loader makes - a `ShellMusic::Load` on a live
+// object - with `loop=0`, so the track ends and the poll hook below comes back here.
+// Runs on the guest thread, from inside that poll, and takes no locks while calling.
+void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
+  std::string path;
+  uint32_t buffer = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    path = NextPathLocked();
+    if (!g_buffers.empty()) {
+      buffer = g_buffers[g_buffer_next];
+      g_buffer_next = (g_buffer_next + 1) % g_buffers.size();
+    }
+  }
+  if (path.empty() || buffer == 0 || path.size() + 1 > kBufferBytes) {
+    return;
+  }
+  std::memcpy(rex::memory::GuestPtr<uint8_t*>(base, buffer), path.c_str(), path.size() + 1);
+
+  PPCContext call(parent);
+  call.r1.u32 -= 0x100;              // a scratch frame on the guest's own stack
+  call.r3.u32 = music;               // this
+  call.r4.u32 = buffer;              // filename
+  call.f1.f64 = g_gain;              // volume, the one the panel passed
+  call.r6.u64 = g_loop;              // the panel's own loop flag
+  call.r7.u64 = g_play_from_buffer;  // and its play-from-buffer flag
+  __imp__sub_82757F50(call, base);
+  g_stream = 0;  // the next poll baselines the new stream's position
+  g_pos = 0;
+  REXLOG_INFO("shell_music: the menu track ended; playing \"{}.mogg\" next (R9)", path);
 }
 
 // The path the title is about to stream is one of its own three pool entries; give it
@@ -219,6 +313,14 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   }
   std::memcpy(rex::memory::GuestPtr<uint8_t*>(base, buffer), path.c_str(), path.size() + 1);
   ctx.r4.u32 = buffer;
+  // Remember the object and the arguments the panel chose: the poll hook starts every
+  // later track of the rotation the same way, when the song it started comes round again.
+  g_music = ctx.r3.u32;
+  g_gain = ctx.f1.f64;
+  g_loop = ctx.r6.u64;
+  g_play_from_buffer = ctx.r7.u64;
+  g_stream = 0;
+  g_pos = 0;
   REXLOG_INFO("shell_music: the main menu asked for \"{}\"; playing \"{}.mogg\" instead (R9)",
               asked, path);
 }
@@ -259,12 +361,17 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   wanted = std::clamp(wanted, 1, kMaxSongs);
   const size_t total = packages.size();
   const size_t cap = std::min<size_t>(static_cast<size_t>(wanted), total);
-  // Spread the picks over the whole library: the first N packages of a dumped folder
-  // are neighbours, and a menu that only ever plays one album is not the feature.
-  const size_t stride = std::max<size_t>(1, total / cap);
 
-  for (size_t offset = 0; offset < total && g_pool.size() < cap; offset += stride) {
-    const std::filesystem::path& package = packages[offset];
+  // Draw the pool at random from the whole library, and redraw it every boot. The
+  // previous index stride picked the same packages in the same order on every run, so a
+  // menu over a fixed handful never changed; a shuffle of the library's indices, taken
+  // from the front, is a distinct sample and spread by construction.
+  std::vector<size_t> order(total);
+  std::iota(order.begin(), order.end(), size_t{0});
+  std::shuffle(order.begin(), order.end(), g_rng);
+
+  for (size_t i = 0; i < order.size() && g_pool.size() < cap; ++i) {
+    const std::filesystem::path& package = packages[order[i]];
     const std::string mount_path =
         fmt::format("\\Device\\BlitzMenuMusic\\{}\\", g_pool.size());
     std::error_code ec;
@@ -315,7 +422,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 
   REXLOG_INFO("shell_music: R9 plays the loaded DLC in the main menu: {} song(s) of {} package(s) "
-              "mounted read-only ({} requested)",
+              "drawn at random and mounted read-only ({} requested), walked as a shuffled deck",
               g_pool.size(), total, wanted);
   for (const PoolEntry& entry : g_pool) {
     REXLOG_INFO("shell_music:   {}:{}.mogg", entry.alias, entry.stream);
@@ -330,6 +437,47 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 extern "C" REX_FUNC(sub_82757F50) {
   SubstituteFilename(base, ctx);
   __imp__sub_82757F50(ctx, base);
+}
+
+// 0x827586D8 (ShellMusic::Poll): the panel calls it every frame while the menu is up, and
+// it drives the track. The stream it plays loops - the `loop` argument only scales a fade
+// at the seam, it does not end it - so the song repeats for as long as the menu is open.
+// The stream carries its own position (`Stream+0xA0`, in samples, advancing with the
+// audio), and at the seam that position restarts near zero. A position that went
+// backwards on the object R9 substituted into is therefore the end of one of R9's songs
+// and the cue to load the next one. Any other ShellMusic has a different `this` and is
+// left alone; a stream that is already gone - the panel stopped the music on its way out -
+// is ignored too, because a stream R9 never saw cannot have jumped.
+extern "C" REX_FUNC(sub_827586D8) {
+  const uint32_t music = ctx.r3.u32;
+  const bool watched = g_enabled && !g_pool.empty() && music != 0 && music == g_music;
+  uint32_t before = 0;
+  if (watched) {
+    before = LoadBe32(base, music + kStreamOffset);
+  }
+  __imp__sub_827586D8(ctx, base);
+  if (!watched) {
+    return;
+  }
+  const uint32_t stream = LoadBe32(base, music + kStreamOffset);
+  if (stream == 0) {
+    // The title's own end-of-track path tore the stream down instead of looping it.
+    if (before != 0) {
+      StartNextTrack(base, ctx, music);
+    }
+    return;
+  }
+  const uint32_t position = LoadBe32(base, stream + kPositionOffset);
+  if (stream != g_stream) {
+    g_stream = stream;
+    g_pos = position;
+    return;
+  }
+  if (position + kRewindSlack < g_pos) {
+    StartNextTrack(base, ctx, music);
+    return;
+  }
+  g_pos = position;
 }
 
 #endif  // _WIN32
