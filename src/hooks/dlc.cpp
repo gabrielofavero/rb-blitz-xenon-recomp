@@ -67,8 +67,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <mutex>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -83,6 +85,7 @@
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
 #include "fs/dlc_cache.h"
+#include "fs/refresh_state.h"
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 REXCVAR_DECLARE(bool, enhancements_dlc_cache);
@@ -228,9 +231,14 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
 // `cache_hit`, when given, is set only on the branch that answers out of the persisted
 // file - the boot path reports it so the menu can say the enumeration was loaded rather
 // than discovered (rb_blitz::dlc::CacheServedThisBoot()).
+//
+// `scan_threads` comes from the caller rather than being read here, so the boot path and
+// the in-game refresh cannot disagree about the thread count the way they cannot disagree
+// about the cache - and so neither reads the registry off the worker thread (docs/dlc.md).
 fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool force_refresh,
                                         const std::vector<std::filesystem::path>& roots,
                                         const uint32_t force_content_type,
+                                        const uint32_t scan_threads,
                                         const std::filesystem::path& cache_path,
                                         const char* when, bool* cache_hit = nullptr) {
   if (cache_hit != nullptr) {
@@ -269,9 +277,8 @@ fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool for
                 cache_path.string());
   }
 
-  // Read here rather than passed in, so the boot path and the in-game refresh cannot
+  // Captured rather than read here: the boot path and the in-game refresh cannot
   // disagree about the thread count the way they cannot disagree about the cache.
-  const uint32_t scan_threads = REXCVAR_GET(dlc_scan_threads);
   REXLOG_DEBUG("dlc: scanning {} library root(s) for package headers on {} thread(s)",
                roots.size(), scan_threads == 0 ? fs::DefaultDlcScanThreads() : scan_threads);
   fs::LibraryScanResult library = fs::ScanDlcLibraries(roots, force_content_type, scan_threads);
@@ -323,6 +330,16 @@ rex::Runtime* g_runtime = nullptr;
 std::filesystem::path g_game_data_root;
 bool g_cache_enabled = false;
 
+// Everything the refresh needs, resolved once in Configure() and read from there by both
+// paths. The refresh is triggered from a guest thread, and this project's rule is that a
+// guest thread never touches the cvar registry (the reason src/hooks/menu_filter.cpp and
+// src/hooks/content_progress.cpp capture their settings at boot), so nothing below reads a
+// cvar outside Configure().
+std::vector<std::filesystem::path> g_library_roots;
+uint32_t g_force_content_type = 0;
+uint32_t g_scan_threads = 1;
+std::filesystem::path g_cache_path;
+
 // R7's two answers about this boot, for the callers that draw the result: whether
 // the enumeration came out of the persisted cache, and how many packages the flat
 // library holds. Written in Configure(), read from guest threads afterwards.
@@ -345,6 +362,65 @@ void RebuildPackagePaths(const std::vector<fs::LibraryItem>& library) {
   for (const auto& item : library) {
     g_package_paths.push_back(item.host_path);
   }
+}
+
+// R7's in-game refresh. One runs at a time, on a worker thread, so the frame that asked
+// for it keeps drawing (the scan is ~31 s on a 1,402-package library - docs/dlc.md §4.2);
+// the result is handed to the content manager by PublishPendingRefresh() from a *guest*
+// thread, because extra_content_library_ is a plain vector with no lock of its own and a
+// worker writing it while the guest lists or resolves content would be a data race.
+//
+// `g_refresh_state` decides both rules (src/fs/refresh_state.h); the payload between the
+// two threads is `g_refresh_items`/`g_refresh_paths`/`g_refresh_count`, guarded by this
+// mutex, written by the worker and moved out by the guest thread that takes it.
+fs::RefreshState g_refresh_state;
+std::mutex g_refresh_payload_mutex;
+std::vector<rex::system::xam::ExtraContentItem> g_refresh_items;
+std::vector<std::filesystem::path> g_refresh_paths;
+std::size_t g_refresh_count = 0;
+
+// The worker, kept so a finished one can be joined before the next starts. Its destructor
+// detaches rather than joining, so a process that exits mid-scan cannot std::terminate on
+// a still-joinable thread - the scan is host I/O and has nothing to tear down.
+struct RefreshWorker {
+  std::thread thread;
+  ~RefreshWorker() {
+    if (thread.joinable()) {
+      thread.detach();
+    }
+  }
+};
+RefreshWorker g_refresh_worker;
+
+// The scan half of a refresh: reads the configuration Configure() captured, scans the
+// libraries and rewrites the cache. Pure host work - no guest state, no content manager,
+// no cvar registry - which is what makes it safe on a worker thread.
+struct RefreshScan {
+  std::vector<rex::system::xam::ExtraContentItem> items;
+  std::vector<std::filesystem::path> paths;  // what R9 draws its menu pool from
+};
+
+RefreshScan ScanLibraryForRefresh() {
+  // The explicit refresh never accepts the cache: the tree is read again and the cache
+  // rewritten, which is what the in-game row asks for.
+  const fs::LibraryScanResult library =
+      LoadOrScanLibrary(/*cache_enabled=*/true, /*force_refresh=*/true, g_library_roots,
+                        g_force_content_type, g_scan_threads, g_cache_path, "the refresh");
+
+  RefreshScan scan;
+  scan.items.reserve(library.items.size());
+  for (const auto& item : library.items) {
+    scan.items.push_back({item.host_path, item.file_name, item.title_id,
+                          rex::system::XContentType(item.content_type)});
+  }
+  // The same order RebuildPackagePaths() produces, built locally: the worker must not
+  // touch g_package_paths, which a guest thread reads.
+  scan.paths.reserve(g_structured_paths.size() + library.items.size());
+  scan.paths.insert(scan.paths.end(), g_structured_paths.begin(), g_structured_paths.end());
+  for (const auto& item : library.items) {
+    scan.paths.push_back(item.host_path);
+  }
+  return scan;
 }
 
 }  // namespace
@@ -412,9 +488,18 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 
   const std::filesystem::path cache_path = fs::DlcCachePath(runtime->cache_root());
+
+  // Captured for the in-game refresh, which runs from a guest thread and must not read
+  // the registry (see the comment on g_library_roots). The refresh therefore resolves the
+  // same roots, content type and thread count this boot did, and cannot disagree with it.
+  g_library_roots = library_roots;
+  g_force_content_type = force_content_type;
+  g_scan_threads = REXCVAR_GET(dlc_scan_threads);
+  g_cache_path = cache_path;
+
   const fs::LibraryScanResult library =
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
-                        cache_path, "this boot", &g_cache_served);
+                        g_scan_threads, cache_path, "this boot", &g_cache_served);
   g_content_count = library.items.size();
   g_structured_paths.clear();
   g_structured_paths.reserve(scan.packages.size());
@@ -492,51 +577,77 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 }
 
-void Refresh(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
-  if (runtime == nullptr) {
-    return;
-  }
-
-  std::error_code ec;
-  const std::filesystem::path root =
-      std::filesystem::absolute(fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
-  const bool is_directory = std::filesystem::is_directory(root, ec) && !ec;
-  const bool structured = is_directory && fs::HasStructuredLayout(root);
-  const std::vector<std::filesystem::path> library_roots =
-      DiscoverLibraryRoots(game_data_root, root, is_directory && !structured);
-
-  // The explicit refresh never accepts the cache: the tree is read again and the cache
-  // rewritten, which is what the in-game row asks for. It runs on the thread that asked,
-  // so the game itself is the loading screen while the scan is happening.
-  const fs::LibraryScanResult library = LoadOrScanLibrary(
-      /*cache_enabled=*/true, /*force_refresh=*/true, library_roots, ForceContentTypeFromCvar(),
-      fs::DlcCachePath(runtime->cache_root()), "the refresh");
-
-  rex::system::xam::ContentManager* content_manager = ContentManagerOf(runtime);
-  if (content_manager == nullptr) {
-    REXLOG_WARN("dlc: refresh found {} package(s) but there is no content manager to update",
-                library.items.size());
-    return;
-  }
-
+void PublishPendingRefresh() {
   std::vector<rex::system::xam::ExtraContentItem> items;
-  items.reserve(library.items.size());
-  for (const auto& item : library.items) {
-    items.push_back(
-        {item.host_path, item.file_name, item.title_id, rex::system::XContentType(item.content_type)});
+  std::vector<std::filesystem::path> paths;
+  std::size_t count = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_refresh_payload_mutex);
+    // Take() is the gate, not the check above it: two guest threads arriving together
+    // must publish one result once, and the payload behind it is only moved by the
+    // thread that won.
+    if (!g_refresh_state.Take()) {
+      return;
+    }
+    items = std::move(g_refresh_items);
+    paths = std::move(g_refresh_paths);
+    count = g_refresh_count;
+  }
+
+  rex::system::xam::ContentManager* content_manager = ContentManagerOf(g_runtime);
+  if (content_manager == nullptr) {
+    REXLOG_WARN("dlc: the refresh found {} package(s) but there is no content manager to "
+                "update",
+                count);
+    return;
   }
   content_manager->set_extra_content_library(std::move(items));
-  g_content_count = library.items.size();
-  RebuildPackagePaths(library.items);
-  REXLOG_INFO("dlc: refreshed the running title's DLC library: {} package(s) in {}",
-              library.items.size(), JoinLibraryRoots(library_roots));
+  g_content_count = count;
+  g_package_paths = std::move(paths);
+  REXLOG_INFO("dlc: refreshed the running title's DLC library: {} package(s) in {}", count,
+              JoinLibraryRoots(g_library_roots));
 }
 
 void RefreshConfigured() {
   if (!g_cache_enabled || g_runtime == nullptr) {
     return;
   }
-  Refresh(g_runtime, g_game_data_root);
+  if (g_library_roots.empty()) {
+    REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to "
+                "scan");
+    return;
+  }
+  // One at a time. A second ask while the scan is in flight is ignored rather than
+  // queued, so a trigger that fires more than once cannot start a second scan of the
+  // same tree (docs/plans/song-cache-plan.md §9.5).
+  if (!g_refresh_state.Begin()) {
+    REXLOG_INFO("dlc: a refresh is already running; this ask is ignored");
+    return;
+  }
+
+  // The previous worker finished before Begin() above succeeded, so this joins an idle
+  // thread rather than waiting for work.
+  if (g_refresh_worker.thread.joinable()) {
+    g_refresh_worker.thread.join();
+  }
+
+  REXLOG_INFO("dlc: refresh asked for; scanning {} library root(s) on a worker thread so the "
+              "frame keeps drawing",
+              g_library_roots.size());
+  g_refresh_worker.thread = std::thread([] {
+    RefreshScan scan = ScanLibraryForRefresh();
+    const std::size_t count = scan.items.size();
+    {
+      std::lock_guard<std::mutex> lock(g_refresh_payload_mutex);
+      g_refresh_items = std::move(scan.items);
+      g_refresh_paths = std::move(scan.paths);
+      g_refresh_count = count;
+    }
+    g_refresh_state.Finish();
+    REXLOG_INFO("dlc: the refresh finished ({} package(s)); the running title's library is "
+                "handed over on the next menu frame",
+                count);
+  });
 }
 
 bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }

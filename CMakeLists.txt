@@ -346,6 +346,15 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_dlc_cache_tests PRIVATE src)
     add_test(NAME dlc_cache COMMAND rb_blitz_dlc_cache_tests)
 
+    # The in-game refresh's two rules (src/fs/refresh_state.h): one refresh at a time, and
+    # a finished one published exactly once. SDK-free and thread-free like the DLC tests
+    # above; the caller owns the threads, so the state machine is what is testable.
+    add_executable(rb_blitz_refresh_state_tests
+        tests/refresh_state_tests.cpp
+    )
+    target_include_directories(rb_blitz_refresh_state_tests PRIVATE src)
+    add_test(NAME refresh_state COMMAND rb_blitz_refresh_state_tests)
+
     # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
     # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built
     # in the test itself - no boot, and no retail content (D14).

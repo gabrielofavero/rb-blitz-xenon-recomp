@@ -20,10 +20,12 @@
 //
 // Faithful behaviour is the toggle off: no row is edited (src/ui/menu_options.cpp) and
 // this file's hooks do no work at all, because RefreshArmed() is false - the flag is
-// read before any path is touched. Under the toggle, the sentinel path re-runs the
-// library scan on the thread that asked, which is the title's own frame: the game is the
-// loading screen, the cache is rewritten, and the content manager is handed the fresh
-// list so the next enumeration sees a package that was dropped in mid-session.
+// read before any path is touched. Under the toggle, the sentinel path starts the library
+// scan behind the frame, so the press returns at once instead of freezing for the ~31 s a
+// 1,402-package library takes to read (docs/plans/song-cache-plan.md §9.5): the cache is
+// rewritten on a worker, and the content manager is handed the fresh list on the next menu
+// frame, on the guest thread, so the next enumeration sees a package that was dropped in
+// mid-session.
 
 #include <algorithm>
 #include <cstdint>
@@ -129,8 +131,19 @@ void Forward(ImportFunc* slot, const char* symbol, PPCContext& ctx, uint8_t* bas
 // The object attributes argument is r5 for the two open/create calls and r3 for the
 // full-attributes query, matching the SDK's own entry signatures
 // (rexglue-sdk/src/kernel/xboxkrnl/xboxkrnl_io.cpp).
+//
+// Each hook publishes a finished refresh before anything else: ContentManager's
+// extra_content_library_ has no lock of its own, so the write has to come from a guest
+// thread, which is exactly the context Configure() writes it from at boot. The check is
+// one atomic compare-exchange, so a call that is not carrying a satisfied refresh pays
+// nothing for it. This is the *second* publish point rather than the only one: measured,
+// the main menu makes no file call at all once the row is pressed, so the reliable one is
+// the menu's own per-frame music poll (src/hooks/shell_music.cpp, PublishPendingRefresh's
+// header comment in dlc.h). These remain because a file call is what every other screen
+// makes.
 extern "C" REX_FUNC(__imp__NtCreateFile) {
   if (rb_blitz::dlc::RefreshArmed()) {
+    rb_blitz::dlc::PublishPendingRefresh();
     CheckSentinel(ObjectPath(base, ctx.r5.u32));
   }
   static ImportFunc original = nullptr;
@@ -139,6 +152,7 @@ extern "C" REX_FUNC(__imp__NtCreateFile) {
 
 extern "C" REX_FUNC(__imp__NtOpenFile) {
   if (rb_blitz::dlc::RefreshArmed()) {
+    rb_blitz::dlc::PublishPendingRefresh();
     CheckSentinel(ObjectPath(base, ctx.r5.u32));
   }
   static ImportFunc original = nullptr;
@@ -147,6 +161,7 @@ extern "C" REX_FUNC(__imp__NtOpenFile) {
 
 extern "C" REX_FUNC(__imp__NtQueryFullAttributesFile) {
   if (rb_blitz::dlc::RefreshArmed()) {
+    rb_blitz::dlc::PublishPendingRefresh();
     CheckSentinel(ObjectPath(base, ctx.r3.u32));
   }
   static ImportFunc original = nullptr;

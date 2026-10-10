@@ -64,11 +64,17 @@ bool g_configured = false;
 // read either continues it (and the edit runs on the whole file) or clears it. Per thread:
 // a file is read by one thread, and a shared slot would be a race the read hook has no
 // lock for.
+//
+// `head` is a host copy of the bytes read so far. It exists because the two halves of a
+// file that spans reads are usually **not** adjacent in guest memory (measured
+// 2026-10-10: the locale's second block landed in a buffer 192 KiB from the end of the
+// first), so the file is assembled here rather than by the guest.
 struct Pending {
-  uint8_t* buffer = nullptr;  // the guest buffer the previous read filled
-  size_t file_offset = 0;     // where in that buffer the candidate file starts
-  size_t length = 0;          // how many contiguous bytes the run holds so far
-  uint64_t offset = 0;        // the archive byte offset `buffer` was read from
+  uint8_t* buffer = nullptr;   // the guest buffer the previous read filled
+  size_t file_offset = 0;      // where in that buffer the candidate file starts
+  size_t length = 0;           // how many contiguous bytes the run holds so far
+  uint64_t offset = 0;         // the archive byte offset `buffer` was read from
+  std::vector<uint8_t> head;   // the candidate's bytes, `file_offset` to `length`
 };
 thread_local Pending g_pending;
 
@@ -298,6 +304,51 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
   return patched;
 }
 
+// The second half of a file that spans two reads has arrived: assemble the whole file in a
+// host buffer, let the edits run on it, and put the result back where the guest will still
+// read it - the block this read carries, and nowhere else.
+//
+// Why the bytes are joined here and not by the guest: the two blocks are usually NOT
+// adjacent in guest memory. Measured 2026-10-10, the English locale's second block landed
+// in a buffer 192 KiB away from the end of the first, so the rule this replaces - which
+// required the two guest buffers to be consecutive - dropped the locale on every boot, and
+// with it both of R7's relabels (docs/dlc.md §4.2). What identifies the continuation is the
+// *archive* offset, which the caller has already checked.
+//
+// Why the first block is not written back, even though it is known to still hold the file's
+// first bytes: **the guest has already copied them** out by the time the second read lands.
+// Patching it then produced a file whose first half was the old bytes and whose second half
+// was the new ones - a file with a four-byte hole where the label grew - and the title
+// dereferenced garbage and died (measured, same day: `Unhandled guest access violation:
+// read of guest 0x0000000A` immediately after the patch). It is also unsafe in principle:
+// the guest reuses read buffers, so that address may belong to something else by then. An
+// edit that reaches into the first half is therefore refused here, and said so, rather than
+// delivered as a file that cannot parse.
+void CompleteSplitFile(uint8_t* base, uint8_t* second, size_t second_length) {
+  const size_t head_size = g_pending.head.size();
+  std::vector<uint8_t> whole;
+  whole.reserve(head_size + second_length);
+  whole.insert(whole.end(), g_pending.head.begin(), g_pending.head.end());
+  whole.insert(whole.end(), second, second + second_length);
+
+  if (!PatchFile(base, whole.data(), whole.size())) {
+    LogRejectionOnce("a file spanning two reads", "no edit is for it");
+    return;
+  }
+
+  if (std::memcmp(whole.data(), g_pending.head.data(), head_size) != 0) {
+    REXLOG_WARN("menu_filter: an edit to a file spanning two reads (ark offset {}) reaches into "
+                "the first {} byte(s), which this read does not carry and the guest has already "
+                "copied; it was not delivered",
+                g_pending.offset + g_pending.file_offset, head_size);
+    return;
+  }
+  std::memcpy(second, whole.data() + head_size, second_length);
+  REXLOG_INFO("menu_filter: patched a file spanning two reads at ark offset {} ({} bytes before "
+              "the seam, {} after; the edit falls entirely after it)",
+              g_pending.offset + g_pending.file_offset, head_size, second_length);
+}
+
 void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
   if (!g_configured || !g_settings.Any()) {
     return;
@@ -328,19 +379,16 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
     }
   }
 
-  // A file larger than one 64 KiB block - the game's English locale is 76 KB - arrives
-  // as two reads, and the title puts the second block straight after the first in guest
-  // memory. So a candidate that did not parse in one read is remembered, and the read
-  // that continues the same guest buffer at the next archive offset completes it.
+  // A file larger than one read - the game's English locale is 76,726 bytes, just over the
+  // 64 KiB the title reads at a time - arrives as two reads. The first read's bytes are
+  // kept (host-side, in g_pending), and the read that resumes at the next archive offset
+  // completes the file. See CompleteSplitFile for why the archive offset, and not the
+  // guest address, is what is compared.
   if (g_pending.buffer != nullptr) {
-    const bool continues = have_offset && host == g_pending.buffer + g_pending.length &&
+    const bool continues = have_offset && !g_pending.head.empty() &&
                            offset == g_pending.offset + g_pending.length;
     if (continues) {
-      const size_t total = g_pending.length + length - g_pending.file_offset;
-      if (PatchFile(base, g_pending.buffer + g_pending.file_offset, total)) {
-        REXLOG_INFO("menu_filter: patched a file at byte {} of two {} byte {} reads ({} bytes)",
-                    g_pending.file_offset, g_pending.length, which, total);
-      }
+      CompleteSplitFile(base, host, length);
     }
     g_pending = Pending{};
   }
@@ -364,13 +412,14 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
     }
   }
 
-  // Remember only what no edit handled: a patched file needs no second look, and the
-  // one that spans reads is the candidate nearest the end of the block.
+  // Remember only what no edit handled, with a copy of its bytes: a patched file needs no
+  // second look, and the one that spans reads is the candidate nearest the end of the block.
   if (plain && have_offset && unfinished != kNoCandidate) {
     g_pending.buffer = host;
     g_pending.file_offset = unfinished;
     g_pending.length = length;
     g_pending.offset = offset;
+    g_pending.head.assign(host + unfinished, host + length);
   }
 }
 

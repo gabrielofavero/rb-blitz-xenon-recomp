@@ -330,15 +330,25 @@ cache is not an offline-dead row.
 constants): the row becomes `Refresh Song Library` — what it now does — and the status line becomes
 `Loading Song Cache` whenever the host answered this boot's enumeration out of the cache
 (`dlc: CacheServedThisBoot()`), because then there is no discovery to announce. The locale is the file
-§10's split-read rule exists for: its two 64 KiB blocks are read back to back into one guest buffer,
-and the read that completes the file is the one the edit runs on.
+§10's split-read rule exists for, and that rule had to be corrected twice before either label appeared
+the locale spans two 64 KiB reads, the second one lands in **a different guest buffer** (192 KiB
+from the end of the first), and the first one is already copied out by the time the second arrives —
+so the file is assembled host-side, identified by its *archive* offset, written back into the second
+block only, and its bytes are paid for out of the **last** `#ifdef HX_PS3` rather than the first, so
+both labels and their donor fall inside the block that can still be patched. Measured in game
+2026-10-10: the row draws `REFRESH SONG LIBRARY` and a cache-hit boot draws `Loading Song Cache`
+([dlc.md](../dlc.md) §4.2, [plans/song-cache-plan.md](../plans/song-cache-plan.md) §11).
 
 **The progress bar.** The same panel carries one — `progress_bar.grp` and `content_percent.lbl` in
 `ui/net/gen/server_connect.milo_xbox`, on both platforms — driven by a Flow that reads the panel's
 `current_content` and `total_content`. Nothing in the DTA sets them, so the engine's own object does
-(§9's `content_progress.cpp`); the one thing it cannot know is the total, which
-`enhancements_dlc_cache` now supplies from the DLC layer's package count. See
-[dlc.md](../dlc.md) §4.2.
+(§9's `content_progress.cpp`). Measured 2026-10-10: this build's engine calls `SetTotal` once, **after**
+the enumeration, with a total of **0**, and never calls `Increment` at all — so the Flow keeps seeing
+`-1` and hides the bar for the whole 46.7 s. With `enhancements_dlc_cache` on the host counts the
+items itself (the 2,807 XAM app messages the enumeration is made of, hooked through
+`XMsgStartIORequestEx`/`XMsgInProcessCall`/`XMsgSystemProcessCall`) and pushes them with the engine's
+own push, so the bar animates 0 → 100% over that 46.7 s. See
+[dlc.md](../dlc.md) §4.2 and [plans/song-cache-plan.md](../plans/song-cache-plan.md) §12.
 
 **What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
 plus its padding, an action that already carries the sentinel (a second pass), and any file that is
@@ -368,6 +378,8 @@ not a `.dtb` this module can re-serialize: each leaves the file exactly as it wa
 | the same pair driven by hand on the real title **[cited]** | on: one A, alive, menu OCR `BLITZ … LEADERBOARDS ACHIEVEMENTS HELP & OPTIONS ULTIMATE SETTINGS EXIT GAME`; off: one A, alive, the failed-connect dialog |
 | `tests/menu_options_tests.cpp` (the R3 cases) **[tree]** | over a synthetic panel fixture: the file is skipped, its length and its root count still add up, the eight constants are gone, the added statements are the handler's last two commands, the label-drawing command's own argument count is untouched, the payment can be exact (no filler), a file that cannot pay is refused with both sides of the arithmetic reported, and every refusal path |
 | `rb_blitz.exe --enhancements_dlc_cache=true`, the row pressed at the main menu **[cited]** | the retail file patched (`the downloadable-content row now refreshes the DLC cache (331 bytes of its action paid for the call)`), the press logged `dlc: refresh asked for from the main menu ("songcache:\rbbz_dlc_refresh")` → `refresh requested, re-scanning the libraries and rewriting …\dlc_library.cache` → `refreshed the running title's DLC library: 1402 package(s)`, ~15 s later the cache file's modification time had moved to the press and the game was still alive on the same screen |
+| the same press with the scan moved behind the frame, 2026-10-10 **[cited]** | `dlc: refresh asked for; scanning 1 library root(s) on a worker thread so the frame keeps drawing` on the guest thread → the scan on a worker → `the refresh finished (1402 package(s)); the running title's library is handed over on the next menu frame` → `refreshed the running title's DLC library: 1402 package(s)` **10 ms** later, on the guest thread. The press returned in **1 ms** and the menu kept drawing and taking input for the whole **30.2 s** scan (the highlight moved under a key pressed during it), where the build before it froze that frame for **31.0 s**; a second press 7 s in logged `dlc: a refresh is already running; this ask is ignored`; the same tree re-scanned in **77 ms** once warm. Reproduced with R9 off as well (publish 7 ms after the scan), so the publish point does not depend on R9 |
+| R7's two labels in the game's English locale, 2026-10-10 **[cited]** | `relabelled the downloadable-content row "Download Content" to "Refresh Song Library" (4 bytes taken from an unused macro name)` and `relabelled "Discovering Downloadable Content" to "Loading Song Cache" (-14 bytes …, the enumeration is coming from the cache (R7))`, then `patched a file spanning two reads at ark offset 315592934 (28442 bytes before the seam, 65536 after; the edit falls entirely after it)`; the main menu OCRs `… ULTIMATE SETTINGS EXIT GAME REFRESH SONG LIBRARY` (`out/drive-ui/p3d-20-menu.png`) and the connect panel OCRs `Loading Song Cache` (`p3d-10-discovery.png`). Before the fix, the same boot drew `DOWNLOAD CONTENT` and the split-read rule refused the file silently |
 
 ## 9. Where it lives
 
@@ -375,7 +387,7 @@ not a `.dtb` this module can re-serialize: each leaves the file exactly as it wa
 | --- | --- |
 | the edits (SDK-free, tested) | [src/ui/menu_options.h](../../src/ui/menu_options.h), [src/ui/menu_options.cpp](../../src/ui/menu_options.cpp) (`HideRows`, `RenameLabel`, `SkipOfflinePrompts`, `TapRefreshCache`) |
 | the read hook, the checksum row, the cvars' boot read | [src/hooks/menu_filter.h](../../src/hooks/menu_filter.h), [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp) |
-| the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`, `CacheServedThisBoot`, `ContentItemCount`) |
+| the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`, `PublishPendingRefresh`, `CacheServedThisBoot`, `ContentItemCount`), [src/fs/refresh_state.h](../../src/fs/refresh_state.h) (one at a time, published once) |
 | the discovery screen's progress bar (R7) | [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp), [src/hooks/content_progress.h](../../src/hooks/content_progress.h) |
 | the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
 | the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |

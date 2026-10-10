@@ -31,19 +31,35 @@ namespace rb_blitz::dlc {
 // returns, leaving the content root as the only DLC source.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
 
-// R7's in-game refresh: re-scan the configured DLC libraries, rewrite the enumeration
-// cache and hand the content manager the fresh list, so a package dropped in while the
-// title is running is enumerated from then on. Never reads the cache - that is the
-// point - and runs on the calling thread, so whatever asked for it is the progress
-// display. Safe to call before the guest exists; a missing content manager is logged
-// and nothing else happens.
-void Refresh(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
-
-// The same refresh, using the runtime and root Configure() was given. This is what the
-// in-game trigger calls: it runs from a filesystem hook that has no arguments, and it
-// does nothing unless the R7 toggle is on. Cheap to call - the toggle and the pointers
-// are read without touching any registry - so a hook may call it freely.
+// R7's in-game refresh, asked for by the main menu's last row. This is what the in-game
+// trigger calls: it runs from a filesystem hook that has no arguments, and it does
+// nothing unless the R7 toggle is on. Cheap to call - the toggle and the pointers are
+// read without touching any registry - so a hook may call it freely.
+//
+// It *starts* the refresh and returns. The scan reads every package in the library
+// (measured 31 s on a 1,402-package library, docs/plans/song-cache-plan.md §9.5), so it
+// runs on a worker thread and the frame that asked for it keeps drawing; the result is
+// handed to the content manager by PublishPendingRefresh() on a later guest thread.
+// Only one refresh runs at a time: a second ask while the scan is in flight is logged and
+// ignored, so a trigger that fires more than once cannot queue a second scan.
 void RefreshConfigured();
+
+// Hands the content manager a refresh a worker has finished, and does nothing at all when
+// there is none - so a hook may call it on every frame or every call. Called from a
+// *guest* thread on purpose: ContentManager's `extra_content_library_` is a plain
+// std::vector with no lock of its own, so writing it from the worker while the guest lists
+// or resolves content would be a data race. Configure() writes it from exactly this kind
+// of context at boot, and this is the same write at a different time.
+//
+// Two callers, both guest threads: the main menu's own per-frame music poll
+// (src/hooks/shell_music.cpp), which is the only hook that runs every frame while the menu
+// - the screen the refresh row lives on - is up; and the file-call hooks
+// (src/hooks/dlc_refresh.cpp). The measured shape (docs/dlc.md §4.2): the scan finishes on
+// the worker and the publish lands on the next frame, ~10 ms later; the file hooks alone
+// were not enough, because the main menu makes no file call at all. A refresh that
+// finishes while the menu is not drawing is published when it next is - the cache file is
+// rewritten either way, which is the half the next boot reads.
+void PublishPendingRefresh();
 
 // Whether an in-game refresh can happen at all: the R7 toggle is on and Configure() has
 // run. A hook checks this before it does any work - including reading the path a call

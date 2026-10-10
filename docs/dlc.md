@@ -291,6 +291,20 @@ plus the XAM task the item schedules, ~1.6 s of the 47 s — so the wait is the 
 frame, not our walk and not our call. No cache can shorten that, because the title
 decides how many items a frame is worth.
 
+**Asking for more items per call does not help, and that is measured rather than assumed**
+(2026-10-10). The aggregate enumerator is created with `items_per_enumerate = 1`
+(`rexglue-sdk/src/kernel/xam/xam_content_aggregate.cpp`), and the SDK publishes that number
+to the guest in `X_KENUMERATOR` — so the guest can be told to expect more. Built for **4**,
+the title does read it back (the message's field 5 carries `00000004` where the baseline
+boot carries `00000001`) and still hands over **512 bytes** as its reply buffer, in all
+2,807 calls, exactly as before. Two items cannot fit in 512 bytes even at the smallest item
+this message can carry (2 × 308 > 512), so a host that bounded its own write by the guest's
+buffer — the guard a spike added to `WriteItems` — would still hand over one item per call:
+the phase came in at **46.7 s and 2,807 calls**, identical to the baseline, with the
+enumerator offering four and reporting the true count. One item per call is therefore part
+of the protocol as this title uses it, and the host has no way to enlarge a buffer the guest
+owns. [song-cache-plan.md](plans/song-cache-plan.md) §13 has the spike and its measurement.
+
 The lever on it is therefore the launcher's own **Graphics ▸ Window ▸ V-Sync** row
 (`vsync`, re-read live by the GPU vsync worker), not something R7 adds or should add:
 with `--vsync=false` the same 2,809 calls arrive every **7.0 ms** and the phase takes
@@ -329,28 +343,73 @@ boot about to use it. Neither touches the title's own `songcache`, which is the 
 business — a package the scan has just discovered is a package the title has not read
 yet, so its own discovery reads it and extends its own cache.
 
+**The refresh runs behind the frame, one at a time (measured 2026-10-10).** Reading every
+container is the same per-file cost the cold boot pays, so an in-game refresh of the
+1,402-package library is **30.2-31.0 s** — and it used to run on the thread that asked,
+which is the frame, so the press froze the game for half a minute
+([plans/song-cache-plan.md](plans/song-cache-plan.md) §9.5). It now runs on a worker, and
+two rules bound it ([src/fs/refresh_state.h](../src/fs/refresh_state.h), pinned by
+[tests/refresh_state_tests.cpp](../tests/refresh_state_tests.cpp)): **one at a time** — a
+second press while the scan is in flight is logged and ignored, so a trigger that fires
+twice cannot queue a second scan — and **published exactly once**, because two guest
+threads can reach the publish point together. Measured on that boot: the press returned in
+**1 ms**, the menu kept drawing and taking input for the whole scan, and the same tree
+re-scanned in **77 ms** once it was warm.
+
+**Where the refreshed list lands, and why not on the worker.** The result is handed to the
+content manager from a *guest* thread, because ContentManager's
+`extra_content_library_` is a plain `std::vector` with **no lock of its own**: a worker
+writing it while the guest lists or resolves content would be a data race, and
+`Configure()` writes it from a guest thread at boot for exactly that reason. The reliable
+publish point is the main menu's own per-frame music poll
+([src/hooks/shell_music.cpp](../src/hooks/shell_music.cpp), `ShellMusic::Poll` — the hook
+R9 already installs), which runs every frame the menu is up **with R9 on or off**, because
+it is the title's own music. Measured: the publish lands on the first frame after the scan
+finishes, **~10 ms**, in both configurations. The file-call hooks publish too, but the main
+menu makes **no file call at all** once the row is pressed, so they are a second point and
+not the only one. A refresh that finishes while the menu is not drawing is published when
+it next is; the cache file is rewritten on the worker either way, and that is the half the
+next boot reads.
+
 **The row the player presses.** The row's action becomes
 `{do {file_exists "songcache:/rbbz_dlc_refresh"} "zzz…"}`: the title's own `file_exists`
 on a name no file has, padded back to the action it replaces. `songcache:` is the part
 that was measured: a name under the game-data mount (`d:/…`) is answered out of the ark
 the title already has mapped and never becomes a guest file call at all, while a device
 the title owns is asked through `NtCreateFile`/`NtQueryFullAttributesFile` — which is
-where [src/hooks/dlc_refresh.cpp](../src/hooks/dlc_refresh.cpp) hears it and re-runs the
-scan on the thread that asked. Measured end to end on 2026-10-06 with the library
+where [src/hooks/dlc_refresh.cpp](../src/hooks/dlc_refresh.cpp) hears it and starts the
+scan. Measured end to end on 2026-10-06 with the library
 above: the press logged `refresh asked for from the main menu
-("songcache:\rbbz_dlc_refresh")`, re-scanned 1,402 packages in ~15 s, and rewrote the
-cache file (its modification time moved from the previous boot to the press).
+("songcache:\rbbz_dlc_refresh")`, started the scan, and rewrote the
+cache file (its modification time moved from the previous boot to the press); ~15 s in
+that run, **30.2 s** on the same library on 2026-10-10, and no longer on the frame's
+time (the paragraph above).
 
 **What the row and the discovery screen say.** The row's action is what R7 rewrites, and
 its *text* is rewritten too. Both labels R7 changes live in the game's own English locale
 (`ui/locale/eng/gen/locale_keep.dtb`, 76,726 bytes), which is larger than one 64 KiB
 archive read — so for a long time the row kept the label the title ships for it,
 `DOWNLOAD CONTENT`, an online-store name for something that now refreshes a library.
+
+Making that edit land took two corrections, both measured 2026-10-10
+([plans/song-cache-plan.md](plans/song-cache-plan.md) §11). **(1) The continuation is an
+archive offset, not a guest address.** The rule used to require the second read to land
+immediately after the first *in guest memory*; the title reads its archive into a pool of
+buffers, and the locale's second block arrived in a buffer **192 KiB away** from the end of
+the first, so the file was refused on every boot. It is now identified by the archive offset,
+assembled in a host buffer, and written back into the block the second read carries — only
+that one, because the guest has already copied the first block out by then, and patching it
+produced a file half old and half new (the label's four new bytes became a four-byte hole)
+and a guest that dereferenced garbage. **(2) The bytes pay from the *last* `#ifdef HX_PS3`,
+not the first.** The locale carries 21 of them; the first sits at byte 130, in the block that
+cannot be patched, and the last at 75,628, in the block that can. Every one of them is
+equally unused, so which one gives the bytes up costs nothing — only *that* it has not
+already been read past.
+
 The read that *completes* the file is the one the edit runs on
-([src/hooks/menu_filter.cpp](../src/hooks/menu_filter.cpp) remembers the read that cut a
-`.dtb` short and patches the file when the next read continues it in guest memory); the
-two blocks of this locale are read back to back into one guest buffer, measured in the
-boot trace. R7 rewrites:
+([src/hooks/menu_filter.cpp](../src/hooks/menu_filter.cpp) keeps the read that cut a `.dtb`
+short and completes it when the next read resumes at the following archive offset). R7
+rewrites:
 
 | Entry | Ships as | R7 draws |
 | --- | --- | --- |
@@ -364,6 +423,13 @@ or shrinkage is paid for, or parked in, the name of an `#ifdef` the loader alrea
 and both retarget the title's content-database row for the file, so a patched locale is
 still the file the title knows.
 
+Both are **verified in game (2026-10-10, `out/drive-ui/p3d-*.png`)**: the main menu's last row
+reads `REFRESH SONG LIBRARY` — it had read `DOWNLOAD CONTENT` for as long as R7 has existed,
+and the boot log carries `relabelled the downloadable-content row "Download Content" to
+"Refresh Song Library"` followed by `patched a file spanning two reads at ark offset
+315592934` — and a boot whose enumeration came out of the cache draws `Loading Song Cache` on
+the discovery screen instead of `Discovering Downloadable Content`.
+
 **The progress bar.** The discovery screen also has a progress bar — on PS3 and on the
 360 build alike, it is the same asset: `ui/net/gen/server_connect.milo_xbox` carries
 `progress_bar.grp` and `content_percent.lbl`, and a Flow whose own comments read *"How
@@ -371,10 +437,19 @@ much content we've enumerated so far"* / *"How much content we need to enumerate
 we're not enumerating right now"*. Nothing in the DTA sets those two values, so the
 engine's own code does — through one small object,
 [src/hooks/content_progress.cpp](../src/hooks/content_progress.cpp) hooks
-`SetTotal`/`Increment`/`Complete`. What the engine cannot know is the *total*: the title
-enumerates its DLC one item per presented frame and is never told how many there are, so
-the Flow is handed -1 and hides the bar. With R7 on this build gives it the count of
-packages the DLC layer registered, which is the number the title is about to read.
+`SetTotal`/`Increment`/`Complete`. **Measured 2026-10-10
+([plans/song-cache-plan.md](plans/song-cache-plan.md) §9.4, §12):** this build's engine calls
+`SetTotal` exactly **once, after** the whole enumeration, with a total of **0** — which the
+Flow reads as "not enumerating" and hides the bar for — and `Increment` is **never called at
+all**, so the bar could not be drawn while the discovery ran no matter what total the host
+substituted at that call. With R7 on the host does the counting instead: the enumeration is
+2,807 XAM app messages (`XamAppEnumerateContentAggregate`, message 0x0002000E), the guest
+reaches that handler through imports it really has (`XMsgStartIORequestEx`,
+`XMsgInProcessCall`, `XMsgSystemProcessCall`), and the host counts them and pushes
+`current_content`/`total_content` into the panel with the engine's own push — no SDK source
+is touched. The bar then animates: measured, one item per presented frame, 0 → 100% in
+46.7 s, and the fill grew 242 → 786 → 1,514 cyan pixels across three captures
+(`out/drive-ui/p2-*.png`).
 
 ## 5. Limits
 

@@ -449,6 +449,18 @@ extern "C" REX_FUNC(sub_82757F50) {
 // left alone; a stream that is already gone - the panel stopped the music on its way out -
 // is ignored too, because a stream R9 never saw cannot have jumped.
 extern "C" REX_FUNC(sub_827586D8) {
+  // R7's refreshed DLC library is handed to the content manager here, and this is the
+  // only guest hook that runs every frame while the main menu is up - which is where the
+  // refresh row lives. The refresh scans on a worker and finishes on its own schedule
+  // (src/hooks/dlc.cpp), so the result waits until the next frame after it is ready; this
+  // is that frame. The publish is done from a guest thread on purpose: ContentManager's
+  // extra_content_library_ has no lock of its own, so Configure() writes it from exactly
+  // this kind of context at boot (src/hooks/dlc.h). One atomic compare-exchange when
+  // nothing is waiting, so a frame pays nothing for it. Not gated on R9: the title's own
+  // menu music runs through this same poll, so it fires with the toggle off too.
+  if (rb_blitz::dlc::RefreshArmed()) {
+    rb_blitz::dlc::PublishPendingRefresh();
+  }
   const uint32_t music = ctx.r3.u32;
   const bool watched = g_enabled && !g_pool.empty() && music != 0 && music == g_music;
   uint32_t before = 0;

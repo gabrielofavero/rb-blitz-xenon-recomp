@@ -282,17 +282,24 @@ bool IsText(const Node& node, const char* text) { return IsText(node, std::strin
 // branch, which is what makes it the one thing in a file that can give bytes up.
 constexpr char kSpareMacro[] = "HX_PS3";
 
-// The first node with this tag and this text, anywhere in the tree.
-Node* FindDirective(Node& node, uint32_t tag, std::string_view text) {
-  if (node.tag == tag && IsText(node, text)) {
-    return &node;
-  }
+// The last node with this tag and this text, anywhere in the tree.
+//
+// The *last* one on purpose. A locale file is larger than the 64 KiB the title reads at a
+// time, and the block the title has already copied out of its read buffer cannot be patched
+// (src/hooks/menu_filter.cpp, CompleteSplitFile - the reason is written there). So the
+// bytes the name gives up have to come from the same block the label does, and the last
+// occurrence is the one that is furthest into the file: in the 76,726-byte English locale
+// R7's two labels sit at 57,856 and 53,604 and the last `HX_PS3` is at 75,628, all three in
+// the second block. Every `#ifdef HX_PS3` in a file is equally unused, so which one pays
+// costs nothing - only *that* it cannot be one the title has already read past.
+Node* FindLastDirective(Node& node, uint32_t tag, std::string_view text) {
+  Node* found = (node.tag == tag && IsText(node, text)) ? &node : nullptr;
   for (Node& kid : node.kids) {
-    if (Node* found = FindDirective(kid, tag, text)) {
-      return found;
+    if (Node* deeper = FindLastDirective(kid, tag, text)) {
+      found = deeper;
     }
   }
-  return nullptr;
+  return found;
 }
 
 // A locale entry is an array of exactly two elements - the key it is filed under
@@ -912,10 +919,15 @@ Renamed RenameLabel(uint8_t* file, size_t available, std::string_view key,
 
   const int64_t delta = static_cast<int64_t>(to.size()) - static_cast<int64_t>(from.size());
   if (delta != 0) {
+    // Every root is searched, and the *last* match wins - the loop must not stop at the
+    // first root that has one, or "last" would only mean "last inside the first root node
+    // that carries the name" (which is how this shipped: the 76,726-byte English locale has
+    // 21 `#ifdef HX_PS3`, and the edit kept landing on the one at byte 130, in the block the
+    // title has already copied - see FindLastDirective).
     Node* spare = nullptr;
     for (Node& node : loaded.root) {
-      if ((spare = FindDirective(node, kIfdef, kSpareMacro)) != nullptr) {
-        break;
+      if (Node* found = FindLastDirective(node, kIfdef, kSpareMacro)) {
+        spare = found;
       }
     }
     if (spare == nullptr) {
