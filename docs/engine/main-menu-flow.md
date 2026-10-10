@@ -350,6 +350,16 @@ items itself (the 2,807 XAM app messages the enumeration is made of, hooked thro
 own push, so the bar animates 0 → 100% over that 46.7 s. See
 [dlc.md](../dlc.md) §4.2 and [plans/song-cache-plan.md](../plans/song-cache-plan.md) §12.
 
+**Why that 46.7 s is 46.7 s, and what shortens it.** The enumeration advances one item per
+*presented* frame, so the screen lasts as long as 2,807 of the title's frames do: 16.66 ms each at
+60 Hz (46.7 s), 5.68 ms each with the frame rate free (15.96 s). Measured 2026-10-10 with R7's
+`enhancements_dlc_uncap_enumeration` on: the host turns the SDK's own `vsync` down when the first item
+is counted and puts the player's value back when the enumeration ends — 1 ms after the last item, 104
+ms before the engine's own completion, so no menu frame is ever presented uncapped — and the same
+2,807-item walk finishes in **15.96 s**. The writes happen on a host thread, because a guest thread
+must not touch the cvar registry, and the option is off by default: the *V-Sync* row belongs to the
+player ([dlc.md](../dlc.md) §4.3, [plans/song-cache-plan.md](../plans/song-cache-plan.md) §14).
+
 **What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
 plus its padding, an action that already carries the sentinel (a second pass), and any file that is
 not a `.dtb` this module can re-serialize: each leaves the file exactly as it was and logs why.
@@ -379,6 +389,7 @@ not a `.dtb` this module can re-serialize: each leaves the file exactly as it wa
 | `tests/menu_options_tests.cpp` (the R3 cases) **[tree]** | over a synthetic panel fixture: the file is skipped, its length and its root count still add up, the eight constants are gone, the added statements are the handler's last two commands, the label-drawing command's own argument count is untouched, the payment can be exact (no filler), a file that cannot pay is refused with both sides of the arithmetic reported, and every refusal path |
 | `rb_blitz.exe --enhancements_dlc_cache=true`, the row pressed at the main menu **[cited]** | the retail file patched (`the downloadable-content row now refreshes the DLC cache (331 bytes of its action paid for the call)`), the press logged `dlc: refresh asked for from the main menu ("songcache:\rbbz_dlc_refresh")` → `refresh requested, re-scanning the libraries and rewriting …\dlc_library.cache` → `refreshed the running title's DLC library: 1402 package(s)`, ~15 s later the cache file's modification time had moved to the press and the game was still alive on the same screen |
 | the same press with the scan moved behind the frame, 2026-10-10 **[cited]** | `dlc: refresh asked for; scanning 1 library root(s) on a worker thread so the frame keeps drawing` on the guest thread → the scan on a worker → `the refresh finished (1402 package(s)); the running title's library is handed over on the next menu frame` → `refreshed the running title's DLC library: 1402 package(s)` **10 ms** later, on the guest thread. The press returned in **1 ms** and the menu kept drawing and taking input for the whole **30.2 s** scan (the highlight moved under a key pressed during it), where the build before it froze that frame for **31.0 s**; a second press 7 s in logged `dlc: a refresh is already running; this ask is ignored`; the same tree re-scanned in **77 ms** once warm. Reproduced with R9 off as well (publish 7 ms after the scan), so the publish point does not depend on R9 |
+| the discovery with R7's frame pacing on, 2026-10-10 **[cited]** | `content_progress: the title is enumerating one item per presented frame; the host lets the frame rate run free for the discovery (R7's frame pacing)` at 20:05:38.050 → `the frame rate is free for the discovery (vsync false, was true)` 7 ms later → 25/50/75/100% at 4.01/3.99/3.95/3.99 s apart → `the last item of the enumeration was counted` at 20:05:53.987 → `the frame rate is the player's own again (vsync = true)` 1 ms later. **2,807 calls over 15.96 s** (5.68 ms apart) against **2,807 over 46.7 s** with the player's V-Sync, i.e. the same walk at 3× the rate, with the restore 104 ms before the engine's own completion |
 | R7's two labels in the game's English locale, 2026-10-10 **[cited]** | `relabelled the downloadable-content row "Download Content" to "Refresh Song Library" (4 bytes taken from an unused macro name)` and `relabelled "Discovering Downloadable Content" to "Loading Song Cache" (-14 bytes …, the enumeration is coming from the cache (R7))`, then `patched a file spanning two reads at ark offset 315592934 (28442 bytes before the seam, 65536 after; the edit falls entirely after it)`; the main menu OCRs `… ULTIMATE SETTINGS EXIT GAME REFRESH SONG LIBRARY` (`out/drive-ui/p3d-20-menu.png`) and the connect panel OCRs `Loading Song Cache` (`p3d-10-discovery.png`). Before the fix, the same boot drew `DOWNLOAD CONTENT` and the split-read rule refused the file silently |
 
 ## 9. Where it lives

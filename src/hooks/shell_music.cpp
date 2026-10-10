@@ -91,6 +91,7 @@
 #include <rex/types.h>
 
 #include "hooks/dlc.h"
+#include "hooks/content_progress.h"
 
 #if defined(_WIN32)
 
@@ -461,6 +462,10 @@ extern "C" REX_FUNC(sub_827586D8) {
   if (rb_blitz::dlc::RefreshArmed()) {
     rb_blitz::dlc::PublishPendingRefresh();
   }
+  // R7's frame pacing for the discovery is settled from here too: this poll is proof the menu is
+  // up, and the discovery screen is not, which is the one end of the enumeration the counters
+  // inside it cannot see. One atomic load when nothing is in flight.
+  rb_blitz::content_progress::Tick();
   const uint32_t music = ctx.r3.u32;
   const bool watched = g_enabled && !g_pool.empty() && music != 0 && music == g_music;
   uint32_t before = 0;

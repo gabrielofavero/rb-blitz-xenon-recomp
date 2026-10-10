@@ -61,8 +61,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <string>
+#include <thread>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -78,6 +82,7 @@
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 REXCVAR_DECLARE(bool, enhancements_dlc_cache);
+REXCVAR_DECLARE(bool, enhancements_dlc_uncap_enumeration);
 
 // The engine's own object, recompiled: its constructor, the setter trio, and the push.
 REX_EXTERN(__imp__sub_82759308);
@@ -166,6 +171,114 @@ void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t tot
   __imp__sub_82759190(call, base);
 }
 
+// R7's frame pacing for the discovery (`enhancements_dlc_uncap_enumeration`).
+//
+// The title's enumeration advances one item per *presented* frame: 2,807 items over 46.7 s at
+// 60 Hz, 7.0 ms per item and 19.7 s with the frame rate free (measured, docs/dlc.md §4.3). The
+// value that decides the frame rate is the SDK's own `vsync` cvar - the launcher's Graphics ▸
+// Window row, which belongs to the player - so this asks for it to be turned down for exactly as
+// long as the enumeration lasts and puts the player's value back at the first of three signs that
+// it is over: the last item counted, the engine's own completion, or a menu frame with no item
+// counted for two seconds.
+//
+// Neither the read nor the write happens on the thread that counts items: this project's rule is
+// that a guest thread never touches the cvar registry (the rule `Configure()` obeys), so each
+// request goes to a short-lived host thread, the way the refresh's scan is moved off the guest
+// thread (src/hooks/dlc.cpp). A boot asks twice, 46.7 s apart, so a detached thread each is
+// cheaper than a worker that idles for the whole run.
+bool g_uncap_enabled = false;
+
+// kIdle -> kFreeing -> kFreed -> kRestoring -> kIdle, claimed by the guest thread and completed
+// by the host thread that does the write. One transition at a time is the whole synchronisation,
+// and a request that finds the machine in any other state is simply not wanted.
+enum class Pacing { kIdle, kFreeing, kFreed, kRestoring };
+
+std::atomic<Pacing> g_pacing{Pacing::kIdle};
+std::mutex g_pacing_mutex;
+std::string g_player_vsync;  // what to put back, under g_pacing_mutex, while kFreed
+std::atomic<int64_t> g_last_item_ms{0};
+
+// The idle bound for the third sign. Items arrive every 16.66 ms while the discovery runs (and
+// thousands of times a second on a fast machine), so two seconds of silence is an enumeration
+// that has ended - and the menu frame this is asked from is one only reached after it has.
+constexpr int64_t kEnumerationIdleMillis = 2000;
+
+int64_t NowMillis() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+// `vsync` is defined in rexruntime.dll's own GPU category, so it is read and written by name:
+// REXCVAR_GET would need a storage symbol this module does not define.
+bool PacingIsFree(const std::string& value) { return value == "false" || value == "0"; }
+
+// Host thread: turn the frame rate down, remembering the player's own value.
+void FreeFrameRate() {
+  const std::string before = rex::cvar::GetFlagByName("vsync");
+  if (PacingIsFree(before)) {
+    REXLOG_INFO("content_progress: the discovery is frame-paced and the frame rate is already "
+                "free (vsync = {}); the phase runs as it is",
+                before.empty() ? "unknown" : before);
+    g_pacing.store(Pacing::kIdle);
+    return;
+  }
+  if (before.empty() || !rex::cvar::SetFlagByName("vsync", "false")) {
+    REXLOG_WARN("content_progress: could not free the frame rate for the discovery (vsync = "
+                "{}); the phase runs at the player's own frame rate",
+                before.empty() ? "unknown" : before);
+    g_pacing.store(Pacing::kIdle);
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_pacing_mutex);
+    g_player_vsync = before;
+  }
+  g_pacing.store(Pacing::kFreed);
+  REXLOG_INFO("content_progress: the frame rate is free for the discovery (vsync false, was {}); "
+              "the player's own value goes back when the enumeration ends",
+              before);
+}
+
+// Host thread: put the player's value back.
+void RestoreFrameRate() {
+  std::string intended;
+  {
+    std::lock_guard<std::mutex> lock(g_pacing_mutex);
+    intended = g_player_vsync;
+  }
+  g_pacing.store(Pacing::kIdle);
+  if (intended.empty() || !rex::cvar::SetFlagByName("vsync", intended)) {
+    REXLOG_WARN("content_progress: the frame rate could not be put back to vsync = {}; it stays "
+                "free for this run",
+                intended.empty() ? "unknown" : intended);
+    return;
+  }
+  REXLOG_INFO("content_progress: the frame rate is the player's own again (vsync = {})", intended);
+}
+
+// The request side, always on the guest thread. Each is logged only when it is the one that won
+// the transition, so a boot says once why the frame rate moved and once why it went back.
+void RequestFrameRateFree(const char* why) {
+  Pacing idle = Pacing::kIdle;
+  if (!g_pacing.compare_exchange_strong(idle, Pacing::kFreeing)) {
+    return;
+  }
+  REXLOG_INFO("content_progress: {}; the host lets the frame rate run free for the discovery "
+              "(R7's frame pacing)",
+              why);
+  std::thread(FreeFrameRate).detach();
+}
+
+void RequestFrameRateRestore(const char* why) {
+  Pacing freed = Pacing::kFreed;
+  if (!g_pacing.compare_exchange_strong(freed, Pacing::kRestoring)) {
+    return;
+  }
+  REXLOG_INFO("content_progress: {}; the frame rate goes back to the player's own", why);
+  std::thread(RestoreFrameRate).detach();
+}
+
 // One item was enumerated. Count it, and push when a whole percent moves, so the panel is
 // written ~100 times over the screen rather than once per frame.
 void CountItem(PPCContext& ctx, uint8_t* base) {
@@ -180,15 +293,21 @@ void CountItem(PPCContext& ctx, uint8_t* base) {
   // comment), so the extras are clamped instead of allowed past 100%.
   const uint32_t total = static_cast<uint32_t>(items) * 2;
   const uint32_t counted = std::min(g_counted.fetch_add(1) + 1, total);
-  const int percent = static_cast<int>((static_cast<uint64_t>(counted) * 100) / total);
-  if (percent == g_pushed_percent.load(std::memory_order_relaxed)) {
-    return;
+  g_last_item_ms.store(NowMillis(), std::memory_order_relaxed);
+  if (counted == 1 && g_uncap_enabled) {
+    RequestFrameRateFree("the title is enumerating one item per presented frame");
   }
-  g_pushed_percent.store(percent, std::memory_order_relaxed);
-  PushProgress(ctx, base, counted, total);
-  if (percent == 0 || percent == 25 || percent == 50 || percent == 75 || percent == 100) {
-    REXLOG_INFO("content_progress: the discovery bar is at {} of {} item(s) ({}%)", counted,
-                total, percent);
+  const int percent = static_cast<int>((static_cast<uint64_t>(counted) * 100) / total);
+  if (percent != g_pushed_percent.load(std::memory_order_relaxed)) {
+    g_pushed_percent.store(percent, std::memory_order_relaxed);
+    PushProgress(ctx, base, counted, total);
+    if (percent == 0 || percent == 25 || percent == 50 || percent == 75 || percent == 100) {
+      REXLOG_INFO("content_progress: the discovery bar is at {} of {} item(s) ({}%)", counted,
+                  total, percent);
+    }
+  }
+  if (counted >= total) {
+    RequestFrameRateRestore("the last item of the enumeration was counted");
   }
 }
 
@@ -209,6 +328,7 @@ namespace rb_blitz::content_progress {
 
 void Configure() {
   g_enabled = REXCVAR_GET(enhancements_dlc_cache);
+  g_uncap_enabled = g_enabled && REXCVAR_GET(enhancements_dlc_uncap_enumeration);
   if (g_enabled) {
     REXLOG_INFO("content_progress: the discovery screen's progress bar is driven by the host "
                 "while the title enumerates (R7); set --enhancements_dlc_cache=false to leave "
@@ -217,6 +337,24 @@ void Configure() {
     REXLOG_INFO("content_progress: R7 off; the discovery screen's progress bar is the "
                 "title's own");
   }
+  if (g_uncap_enabled) {
+    REXLOG_INFO("content_progress: R7's frame pacing is on for the discovery: the frame rate "
+                "runs free while the title enumerates and the player's own value goes back when "
+                "it ends (--enhancements_dlc_uncap_enumeration=false leaves it alone)");
+  }
+}
+
+void Tick() {
+  if (g_pacing.load(std::memory_order_relaxed) != Pacing::kFreed) {
+    return;
+  }
+  const int64_t last = g_last_item_ms.load(std::memory_order_relaxed);
+  if (last == 0 || NowMillis() - last < kEnumerationIdleMillis) {
+    return;
+  }
+  RequestFrameRateRestore(
+      "a menu frame arrived with no content item counted for two seconds, so the discovery is "
+      "over");
 }
 
 }  // namespace rb_blitz::content_progress
@@ -286,6 +424,7 @@ extern "C" REX_FUNC(sub_827593C8) {
                 "bar is drawn full");
     g_counted.store(0, std::memory_order_relaxed);
     g_pushed_percent.store(-1, std::memory_order_relaxed);
+    RequestFrameRateRestore("the title's own completion ran");
   }
   __imp__sub_827593C8(ctx, base);
 }

@@ -61,6 +61,12 @@ param(
     # Blitz), which is what the acceptance criterion is measured against; a
     # value isolates the run so a probe can hash the save files it leaves.
     [string]$UserDataRoot = "",
+    # Extra runtime arguments, ';'-separated, so a run can ask for the R7 family the same way
+    # acceptance_dlc.ps1 does, e.g.
+    #   -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"
+    # Nothing enables R7 by itself, and every R7 feature is inert without it
+    # (song-cache-plan.md §14.9.1).
+    [string]$Extra = "",
     # Play the song a second time from the results screen, in the same process.
     [switch]$Replay,
     # Take a pause during the song and release it, asserting both from the
@@ -96,8 +102,18 @@ $stopMarker = "XMPSetPlaybackController\(00000000, 00000000\)"
 
 # Every helper that touches a .ps1 file has to go through a child PowerShell:
 # this machine's execution policy is Restricted (docs/build-and-run.md §0).
-function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
-    $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
+# The runtime resolves a *relative* DLC path against game_data_root (src/hooks/dlc.cpp), while this
+# script validates - and uses - it from its own directory, so a relative one would pass here and be
+# refused by the runtime with `ignoring <game>\<path> (cannot be read)`. Everything handed to the
+# game is therefore made absolute first (the same rule acceptance_dlc.ps1 applies).
+function Resolve-Absolute([string]$Path) {
+    if (-not $Path) { return $Path }
+    $resolved = Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue
+    if ($resolved) { return $resolved.Path }
+    return $Path
+}
+
+function Invoke-ChildScript([string]$Script, [hashtable]$Named) {    $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
     $out = & powershell @argv 2>&1
     if ($LASTEXITCODE -ne 0) { throw "$Script failed: $out" }
@@ -379,10 +395,11 @@ function Invoke-Run([int]$Run) {
                     "--enhancements_skip_offline_dialog=false",
                     "--mnk_mode=1", "--log_level=debug", "--log_flush_interval=1",
                     "--log_max_file_size_mb=100")
-    if ($DlcRoot) { $launchArgs += "--dlc_root=""$DlcRoot""" }
-    if ($DlcLibrary) { $launchArgs += "--dlc_library=""$DlcLibrary""" }
+    if ($DlcRoot) { $launchArgs += "--dlc_root=""$(Resolve-Absolute $DlcRoot)""" }
+    if ($DlcLibrary) { $launchArgs += "--dlc_library=""$(Resolve-Absolute $DlcLibrary)""" }
     if ($DlcLibraryContentType) { $launchArgs += "--dlc_library_content_type=$DlcLibraryContentType" }
     if ($UserDataRoot) { $launchArgs += "--user_data_root=""$UserDataRoot""" }
+    if ($Extra) { $launchArgs += @($Extra -split ";" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
     $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
 
     try {

@@ -107,6 +107,17 @@ REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, false, "Enhancements",
                     "title's own.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, false, "Enhancements",
+                    "R7 frame pacing for the discovery: the title enumerates one content item "
+                    "per presented frame, so while it enumerates the host turns the SDK's vsync "
+                    "off and puts the player's own value back when the enumeration ends. A "
+                    "1,402-package library is 46.7 s of frames at 60 Hz and 19.7 s with the "
+                    "frame rate free (docs/dlc.md §4.3). Off by default, because the V-Sync row "
+                    "belongs to the player and this changes it only for as long as the "
+                    "discovery lasts. Faithful: the frame rate is the player's own for the "
+                    "whole boot.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_BOOL(enhancements_force_controller_scheme, false, "Enhancements",
                     "R8 force a predefined controller scheme on load. Needs "
                     "enhancements_controller_scheme to name one. Faithful: the player's saved "

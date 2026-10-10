@@ -25,13 +25,15 @@ then defines **P0–P8**, each a self-contained prompt. §5 gives the order and 
 | **P4** | the refresh must never freeze the game (study + fix) | **DONE** — fixed and verified in-game, **§10** |
 | **P5** | measure the title's own enumeration (study) | **DONE** — folded into P0, **§9.3** |
 | **P6** | batch the enumerator (Issue 1's top lead) | **DONE — negative result, §13** — the guest's reply buffer is its own 512 B, so one item per call is the protocol; the spike was reverted and the SDK is still 0001–0014 |
-| **P7** | skip / fast-forward the panel (Issue 1, stretch) | **NOT STARTED** — §13.3 closes the batching alternative behind it and leaves the frame rate as the only measured lever |
-| **P8** | consolidate: tests, acceptance, docs sweep | **NOT STARTED** |
+| **P7** | skip / fast-forward the panel (Issue 1, stretch) | **DONE — option 1 shipped, option 2 refused, §14** — the discovery runs free for the phase: **46.7 s → 15.96 s** over the same 2,807-item walk, with the player's own V-Sync value written back before the menu appears. `acceptance_dlc.ps1` green (§14.9); `acceptance_song.ps1` **red on a stale expected-song constant** with no relation to this prompt (§14.10 — a P8 harness item) |
+| **P8** | consolidate: tests, acceptance, docs sweep | **NOT STARTED** — §14.8, §14.9.2 and §14.10 open three harness items for it: `acceptance_dlc.ps1`'s R3 flag (fixed in §14.8), the absence of any R7 switch in the acceptance scripts, and `acceptance_song.ps1`'s expected-song constant |
 
-**Do not re-run P0, P1, P2, P3, P4, P5 or P6.** Their results are §9, §10, §11, §12 and §13; their raw
-evidence is `out\_swap\p0\{boot1-info,boot2-debug-cachehit}.log` and `out\drive-ui\p0*.png` /
-`p4*.png` (all under `out/`, so gitignored — recreate with §8's commands if they are gone). P6's own
-boot is `out\build\win-amd64-release\logs\rb_blitz_003.log`, likewise under `out/`.
+**Do not re-run P0, P1, P2, P3, P4, P5, P6 or P7.** Their results are §9, §10, §11, §12, §13 and
+§14; their raw evidence is `out\_swap\p0\{boot1-info,boot2-debug-cachehit}.log` and
+`out\drive-ui\p0*.png` / `p4*.png` (all under `out/`, so gitignored — recreate with §8's commands if
+they are gone). P6's boot is `out\build\win-amd64-release\logs\rb_blitz_003.log` and P7's is
+`rb_blitz_004.log` **plus `rb_blitz_004.1.log`**: a `--log_level=debug` boot is ~5 MB and the log
+rotates at that size, so a boot's evidence can be split across `NNN` and `NNN.1` — grep both.
 Both P0 and P4 closed with **no regressions: build green, `ctest` 21/21** (20 before P4's new
 `refresh_state` test).
 
@@ -376,7 +378,7 @@ no machine paths in tracked files; build green and `ctest` green
 
 ---
 
-### P7 — Discovery: skip / fast-forward the panel *(Issue 1, act — stretch, higher risk)*
+### P7 — Discovery: skip / fast-forward the panel *(Issue 1, act — stretch, higher risk)* — **[DONE, §14 — option 1 shipped, option 2 refused]**
 
 > Depends on P5 (and on P6's outcome).
 >
@@ -484,8 +486,12 @@ P5/P6 are the biggest and most speculative (and may change what P2's bar is even
    (§9.6, P3).
 5. ~~Is the progress object even constructed on this path?~~ **Yes, but it is only used at the *end***
    — `SetTotal(0)` then `Complete`, and `Increment` is never called (§9.4).
-6. ~~Is `set_extra_content_library()` safe off the guest thread?~~ **Still open** — P4 must decide;
-   the synchronous 31 s scan is the measured harm today (§9.5).
+6. ~~Is `set_extra_content_library()` safe off the guest thread?~~ **Answered by P4** (§10.4): it is
+   still called from a *guest* thread — the menu's per-frame poll, where the guest is not enumerating —
+   so the worker that scans never touches the vector, and the SDK's missing lock on
+   `extra_content_library_` is recorded as a candidate for a future patch rather than a change made
+   here. The synchronous scan the question was raised about is gone: the press returns in **1 ms**
+   (§10.3).
 
 ---
 
@@ -650,7 +656,7 @@ Boot B, start press → main menu = **48.0 s**; boot A = **47.9 s** (identical w
 | **P4** | **Done — see §10.** The freeze was **31 s** (one scan, guest thread). Now: guard + worker + guest-thread publish. Budget ~22 ms/file for a full scan. |
 | **P5** | Done by P0 — 2,807 calls, 16.66 ms apart, one item per call, `buffer_size = 512`. |
 | **P6** | Spike must give the guest a buffer > 308 B (its 512 B buffer holds exactly one item today) **and** report the true written count; the `items_per_enumerate` the guest passes is not what sizes this message buffer. **Superseded by §13:** the guest's buffer is *its own* and cannot be enlarged from the host — it stays 512 even when four items are advertised — so this row is what P6 went and disproved. |
-| **P7** | Unchanged, and now the only proven lever (frames), so it is no longer purely a stretch. **Confirmed by §13.** |
+| **P7** | Unchanged, and now the only proven lever (frames), so it is no longer purely a stretch. **Confirmed by §13**, and shipped as option 1 in **§14**. |
 
 ---
 
@@ -970,3 +976,235 @@ patch set, and `xam_content_aggregate.cpp` is patch 0006's file, so a checkout t
 What is left there is a product decision — whether R7 may uncap the frame rate *for the discovery* and
 restore it after, given that “the row belongs to the player” — and, if the answer is no, P8's doc sweep
 saying so.
+
+---
+
+# 14. P7 — done (2026-10-10): the discovery's frame pacing
+
+**The phase was frame-paced, so the host's option is to stop holding the frame rate down for it:
+46.7 s → 15.96 s over the same 2,807-item walk, with the player's own V-Sync value written back
+before the menu can be drawn.** P7's option 1 shipped as `enhancements_dlc_uncap_enumeration`, off by
+default. Option 2 — the panel state fast-forward — was **not** shipped, and §14.5 is the reason: the
+hard requirement was proof, and there is none.
+
+## 14.1 What was built
+
+`src/hooks/content_progress.cpp` already knew the one thing nothing else did — that the discovery is
+running, because it counts its items (§12). So the frame rate is moved there and nowhere else:
+
+| Piece | Where |
+| --- | --- |
+| the option `enhancements_dlc_uncap_enumeration`, **off** by default | [src/enhancements.cpp](../../src/enhancements.cpp) |
+| the request (guest thread) and the read/write (host thread) | [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp) |
+| the third end-of-enumeration sign, one call per menu frame | [src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp) (`Tick()`) |
+
+Three details decided the shape:
+
+* **The value is the SDK's own `vsync` cvar** — the launcher's *Graphics ▸ Window ▸ V-Sync* row, which
+  [dlc.md](../dlc.md) §4.3 already said belongs to the player. It is read and written **by name**
+  (`rex::cvar::GetFlagByName` / `SetFlagByName`), because it is defined in `rexruntime.dll`'s GPU
+  category and this module defines no storage for it; the launcher's own row is `applies = "live"`
+  for the same reason.
+* **The write cannot happen on the thread that counts items.** This project's rule is that a guest
+  thread never touches the cvar registry (`content_progress.h`, `menu_filter.cpp`), so each request is
+  handed to a short-lived host thread — the same move P4 makes for the refresh's scan (§10). A boot
+  asks twice, 46.7 s apart, so a detached thread each is cheaper than a worker idling for the whole
+  run. A small `kIdle → kFreeing → kFreed → kRestoring` machine, claimed with a compare-exchange by
+  the guest thread and completed by the host thread, is the whole synchronisation: every ask happens
+  exactly once, and an ask the machine is not in the state for is simply not wanted.
+* **The restore is not left to one signal.** The first of three ends it: **the last item counted**,
+  **the engine's own completion** (`sub_827593C8`), or **a menu frame with no item counted for two
+  seconds** (`Tick()`, called from the shell-music poll — the frame that proves the menu is up and the
+  discovery screen is not). The first two are the measured order of a normal boot; the third is the
+  backstop for a discovery that is abandoned, and it costs one atomic load per menu frame.
+
+## 14.2 Measured (2026-10-10, R7 on, cache hit, 1,402 packages, `--log_level=debug`, driven past the
+title screen)
+
+```
+20:05:38.050  the title is enumerating one item per presented frame; the host lets the frame rate run free …
+20:05:38.057  the frame rate is free for the discovery (vsync false, was true)    <- 7 ms later, host thread
+20:05:42.061  25%     20:05:46.047  50%     20:05:50.001  75%     20:05:53.987  100%
+20:05:53.987  the last item of the enumeration was counted; the frame rate goes back to the player's own
+20:05:53.988  the frame rate is the player's own again (vsync = true)             <- 1 ms later
+20:05:54.025  the title announced a total of 0 item(s) to enumerate (1402 package(s) known)
+20:05:54.092  the title's content enumeration finished; the discovery bar is drawn full
+```
+
+| | the player's V-Sync | R7's frame pacing (§14) |
+| --- | --- | --- |
+| enumerate calls | 2,807 | **2,807** |
+| phase | 46.7 s (§9.3, re-measured §13) | **15.96 s** |
+| per call | 16.66 ms | **5.68 ms** |
+| each 25% | 11.68 s (§12) | **4.01 / 3.99 / 3.95 s** |
+
+The kick-off is **the first item of the enumeration**, so the whole 16 s runs free; the restore lands
+**104 ms before** the engine's own completion and before the menu can be drawn, so no menu frame is
+ever presented uncapped. The call count is the load-bearing number in that table: the walk is the same
+2,807 items, so nothing is skipped — the barrier that makes option 2 unsafe (§14.5) does not apply
+here, because the *title* still enumerates everything. It is the frame rate the host was holding down
+that changed.
+
+`Tick()`'s two-second backstop did not fire in this boot, which is the expected order: the last item
+and the engine's completion got there first (and are 1 ms apart).
+
+## 14.3 What P7 did not do
+
+* **No launcher row.** The option is set like R7's other knobs — `--enhancements_dlc_uncap_enumeration=true`,
+  `REX_ENHANCEMENTS_DLC_UNCAP_ENUMERATION=true`, or the `[enhancements]` table of a profile. A row is a
+  P8 candidate if the option earns one.
+* **No unit test** for the transition machine: it lives in `content_progress.cpp` because it needs the
+  cvar registry, so it is not the pure, SDK-free shape P4 extracted into `src/fs/refresh_state.h`. Its
+  evidence is the boot in §14.2.
+* Nothing else about the screen changed: the bar is still the host's (§12), and the label is unchanged
+  (§14.6).
+
+## 14.4 What this does to Issue 1
+
+| | warm boot, 1,402-package library |
+| --- | --- |
+| the host's walk of the library | 31.9 s → **0.04 s** (R7's cache, §9.2) |
+| the emulated per-package mount latency | removed with R7 on (patch 0011) |
+| the title's own enumeration | 46.7 s → **15.96 s** (R7's frame pacing, §14.2) |
+
+What is left is the title's own loop at the frame rate the player chose, and it cannot be skipped:
+§13 closed batching it and §14.5 closes fast-forwarding it.
+
+## 14.5 Option 2 — the panel state fast-forward — is not shipped
+
+Option 2 was to hook the panel's `update_state` (the handler R3 already edits) and move
+`StartEnumeratingContent → EndSongCache/OfflineMode` when the host cache answered. The prompt set a
+hard requirement: **prove the song list is still complete afterwards, or do not ship it.** Three
+things were checked, and together they stop it:
+
+* **The enumeration is the only interface the host can see, and it is what carries the library.**
+  Measured: the title pulls **one item per frame** for every package, twice (§13.4), and the items are
+  the `XCONTENT_AGGREGATE_DATA` the host fills. There is no separate host-visible “register this song”
+  call anywhere in the boot — the plan's §2 evidence and P0/P5/P6 found the enumerator, the message,
+  the progress object and nothing else. So a state skip has nothing to lean on: it would remove the
+  walk without putting anything in its place.
+* **So the proof the prompt asked for cannot be produced.** What would make it provable is a signal
+  that the song list is complete *independently* of the walk — the title's own `songcache` read, say,
+  or a registration entry point — and neither was ever observed. The honest reading of the measurement
+  is the pessimistic one the prompt names: a blind skip empties the list.
+* **There is also no second pass to skip.** §13.4 measured the phase as two walks **in parallel**
+  (2 × 1,404 calls for 1,402 packages, interleaved from the first millisecond), so “make the second one
+  cheaper” is not a shape this phase has.
+
+That leaves §14.2's result standing on its own: **3× cheaper for the same work, with no guest control
+flow touched** — which is exactly the order of safety P7's prompt laid out.
+
+## 14.6 The label still matches what happens
+
+The relabel (`Loading Song Cache` on a cache-hit boot, §11) was written when the phase was still 46.7 s
+of the same enumeration, and it stays true with the phase three times shorter: the screen is up while
+the cached library is loaded into the title, which is what the label says. It does not claim the
+enumeration is skipped — nothing here skips it — and the second label (`Discovering Downloadable
+Content`, the shipped string) is still the one drawn when the *host* did re-walk the library, which is
+the case it was written for.
+
+## 14.7 Tree state
+
+`ctest --test-dir out\build\win-amd64-release` **21/21**; `cmake --build --preset
+win-amd64-release` green; no SDK patch, no cvar outside `[enhancements]`, and `patches/README.md`
+unchanged. The acceptance legs were then run with the option's own setting in the environment
+(`REX_ENHANCEMENTS_DLC_UNCAP_ENUMERATION=true`), since the option has no launcher row (§14.3):
+`scripts\acceptance_dlc.ps1` (§14.8, §14.9) and `scripts\acceptance_song.ps1 -Runs 1` (§14.10). Both
+turned out to run the **default** configuration — no acceptance script enables R7, so the pacing was
+inert in them, which is why §14.9.1 and §14.9.2 read the legs' configurations out of their logs rather
+than describing them from the command line.
+
+## 14.8 The acceptance leg, and a stale flag it turned up
+
+The first run **failed, and not because of P7**: the script's route waits for the title's two offline
+dialogs (`ROCK CENTRAL`, then `OFFLINE MODE`) and presses A at each, but `enhancements_skip_offline_dialog`
+(R3) ships **on**, so the A press after the title screen lands on the main menu and the wait times out.
+The evidence is the timeout's own reading — `last: BLITZ PLAY HELP & OPTIONS EXIT GAME @BACK, A SELECT`,
+which is the main menu, i.e. the boot had already gone *past* the dialogs it was looking for. Four of the
+other route-driven legs already pin the flag for exactly this reason
+(`acceptance_song.ps1`, `acceptance_screens.ps1`, `acceptance_save.ps1`, `acceptance_persistence.ps1`);
+`acceptance_dlc.ps1` was the one that did not, so it was fixed there the same way, with the reason in a
+comment beside the other launch arguments. That is a harness fix, independent of this plan's code:
+nothing P7 added runs differently with R3 off, because the discovery happens before the title screen.
+
+With the flag pinned and the frame pacing on (`REX_ENHANCEMENTS_DLC_UNCAP_ENUMERATION=true`, since the
+option has no launcher row, §14.3), the leg was re-run; its verdict is in §14.9.
+
+## 14.9 The acceptance verdict
+
+### 14.9.1 The leg as the harness runs it — R7 **off**, so the uncap is inert
+
+`scripts\acceptance_dlc.ps1` **PASS, exit 0** (with the R3 flag pinned, §14.8):
+
+| leg | song list | the DLC song | packages | aggregate items | fatal |
+| --- | --- | --- | --- | --- | --- |
+| `dlc` (`--dlc_root game/dlc`) | yes | **yes** (`KIDS IN THE STREET`) | 21 | 1 | no |
+| `control` (a `dlc_root` that does not exist) | yes | **no** | 0 | 0 | no |
+
+The control leg is what makes the first one mean something: same executable, same route, same fresh
+`--user_data_root`, the DLC content the only difference — and the DLC song is **absent** there.
+
+**But that leg does not exercise P7, and the leg's own log is what says so.** The script builds its own
+argv and passes no R7 flag, so it runs the default configuration: `out/m7-dlc/dlc.log` has
+`enhancements: enhancements_dlc_cache = off (default) - R7 DLC cache` and
+`content_progress: R7 off; the discovery screen's progress bar is the title's own`, and the only
+`content_progress:` line in the whole leg is that second one. The frame pacing is gated on R7
+(§14.1), so it never armed. What the run does prove is worth keeping: with the toggle off, the new
+code changes nothing — the discovery there is the title's own, 21 packages and 5 enumerate calls.
+
+### 14.9.2 The configuration P7 actually changes, and what evidences it
+
+No acceptance script passes an R7 flag — checked in all four route-driven ones
+(`acceptance_dlc.ps1`, `acceptance_song.ps1`, `acceptance_screens.ps1`, `acceptance_launches.ps1`: zero
+mentions of `enhancements_dlc_cache`). So every leg they run is the default configuration, and every leg
+they run leaves the frame pacing inert (§14.9.1). The combination P7 changes — R7 on, a flat library big
+enough for the phase to matter, the pacing on — is therefore evidenced in pieces rather than by one
+acceptance leg:
+
+| what needs to hold | evidence |
+| --- | --- |
+| the pacing shortens the phase without changing the walk | §14.2: **2,807** calls either way, 46.7 s → 15.96 s on the same 1,402-package library, with R7 on |
+| the player's own frame rate comes back before the menu | §14.2: written back 1 ms after the last item, 104 ms before the engine's own completion |
+| the guest's song list still carries the DLC song on a boot that enumerated | §14.9.1's `dlc` leg: song list up, `KIDS IN THE STREET` found, and **absent** in its control leg |
+| an uncapped boot does not break playing a song | already measured before this plan, and a *stronger* deviation than this option: [dlc.md](../dlc.md) §4.3 records `scripts/acceptance_song.ps1` green with V-Sync off for the whole run (226 s against 225 s, `Boot`/`SongList`/`Playing`/`Results`/`SongSeen` all true, clean shutdown) |
+| the new code is inert when its toggle is off | §14.9.1: zero `content_progress:` pacing lines, and the leg's own R7 line says `off (default)` |
+
+What is **not** evidenced by a single leg is the whole combination at once: R7 on *and* the pacing on
+*and* the harness's song check in one boot. Making that possible needs the harness to gain an R7 switch
+(or an `-Extra` argument like `tour.ps1` has) — recorded here as the P8 item, because the honest
+alternative is a hand-built leg, not a claim.
+
+`scripts\acceptance_song.ps1 -Runs 1` was then run with the pacing on — §14.10.
+
+## 14.10 The song leg: red, and not because of P7
+
+`scripts\acceptance_song.ps1 -Runs 1` **FAILED (exit 1, `launch-to-results: 0 / 1`)** — and every part of
+that failure is independent of this prompt:
+
+| reading | value | what it says |
+| --- | --- | --- |
+| `enhancements_dlc_cache = off (default)` and `content_progress: R7 off; …` in `run01.log` | R7 off | the frame pacing is gated on R7, so **P7's code never ran** — no `the frame rate is free` line exists in the leg |
+| `Boot`, `SongList`, `Playing`, `Clean` | true | the title booted, listed songs, played one for 253 s and shut down clean |
+| `Fatal` | false | nothing crashed |
+| `Results`, `SongSeen` | **false** | the only failed checks, and both are the same check: the results screen's OCR does not contain `THESE DAYS` |
+| `ResultsText` | `… LYCANTHROPE 400 SOLO(S) O FINALE 400 … CONTINUE` | the results screen named the song that was actually selected |
+
+`out/m5-acceptance/run01-list.png` closes it: the list is `SORTED BY ARTIST`, and its fourth row —
+the one `-Song 3` presses — is **`+44 — Lycanthrope`**, not the `THESE DAYS` the script's constant names.
+So the route, the mount and the playback are fine; the harness's *expected song* is stale for this
+machine, exactly as the DLC script's own header warns ("the expected song is configuration, not a
+constant of the format: a different dump needs `-ExpectedSong`"). The leg walks the player's **live**
+profile (`-UserDataRoot` is empty by default), so the row order depends on the library the player has
+installed — where the DLC script deliberately uses a fresh `user_data_root` per leg for the same class of
+reason.
+
+That is a harness item, not a code one, and it is P8's:
+
+* pin the song the leg presses (or `-SongName` it explicitly), the way `-ExpectedSong` pins the DLC song;
+* and/or give the leg a fresh `-UserDataRoot`, so the list is the one the script measured rather than the
+  player's.
+
+Note also what this does **not** contradict: [dlc.md](../dlc.md) §4.3's recorded song acceptance (V-Sync
+off for the whole run, `Results` and `SongSeen` true) was measured on this machine earlier, i.e. before
+the profile's list moved under the constant. Nothing in this plan changes playback timing — the pacing
+option is restored before the menu (§14.2), and that earlier run is the stronger deviation of the two.

@@ -16,4 +16,9 @@ namespace rb_blitz::content_progress {
 // Logs what it will do.
 void Configure();
 
+// Called once per menu frame from the shell-music poll (src/hooks/shell_music.cpp). Settles
+// R7's frame pacing if the discovery is over: the menu frame is the one frame its end is not
+// guaranteed to be seen on. One atomic load when nothing is in flight.
+void Tick();
+
 }  // namespace rb_blitz::content_progress

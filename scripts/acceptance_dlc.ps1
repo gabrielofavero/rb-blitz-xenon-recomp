@@ -57,7 +57,15 @@ param(
     [int]$BootTimeoutSec = 180,
     [int]$ScreenTimeoutSec = 90,
     [int]$CloseWaitSec = 20,
-    [switch]$SkipControl
+    [switch]$SkipControl,
+    # Extra runtime arguments, ';'-separated, given to **both** legs so the only difference
+    # between a leg and its control stays the DLC content. This is how a leg asks for the R7
+    # family, e.g.
+    #   -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"
+    # No acceptance script turns R7 on by itself, and with it off every R7 feature - the
+    # cached walk, the bar, the frame pacing - is inert in the leg (song-cache-plan.md
+    # §14.9.1), so a leg that means to exercise one has to say so.
+    [string]$Extra = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,8 +92,21 @@ if ($expected.Count -eq 0) { throw "-ExpectedSong named no song" }
 
 # ---------------------------------------------------------------- helpers ---
 
-function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
-    $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
+# The runtime resolves a *relative* DLC path against game_data_root (src/hooks/dlc.cpp), while
+# this script validates it from its own directory - so a relative one passes the checks above and
+# is then refused by the runtime with `ignoring <game>\<path> (cannot be read)`. That is a leg
+# that silently loads nothing (measured 2026-10-10: a leg meant to exercise a 1,402-package
+# library enumerated one item and failed its song check). Every path handed to the game is
+# therefore made absolute first; a path that does not resolve is passed as given, so the runtime's
+# own refusal stays the thing that reports it.
+function Resolve-Absolute([string]$Path) {
+    if (-not $Path) { return $Path }
+    $resolved = Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue
+    if ($resolved) { return $resolved.Path }
+    return $Path
+}
+
+function Invoke-ChildScript([string]$Script, [hashtable]$Named) {    $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
     $out = & powershell @argv 2>&1
     if ($LASTEXITCODE -ne 0) { throw "$Script failed: $out" }
@@ -159,6 +180,7 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
     Get-ChildItem (Join-Path $logs "*.log") -ErrorAction SilentlyContinue | Remove-Item -Force
 
     $notes = New-Object System.Collections.ArrayList
+    if ($Extra) { $notes.Add("extra args: $Extra") | Out-Null }
     $row = [ordered]@{
         Leg = $Name; DlcRoot = $DlcRootPath; DlcLibrary = $DlcLibraryPath; SongList = $false
         DlcSong = $false; Packages = 0; AggregateItems = -1; Fatal = $false
@@ -168,11 +190,21 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
     # about one runs with the pre-library behaviour alone. Paths are quoted: a library
     # usually has a space in it ("My Songs"), and Start-Process joins the array into
     # one command line without quoting on its own.
+    # --enhancements_skip_offline_dialog=false: the route below walks the title's two offline
+    # dialogs - it waits for "ROCK CENTRAL" and "OFFLINE MODE" and presses A at each - and the
+    # skip ships **on** by default, so the route's shape is pinned here rather than left to the
+    # default (docs/engine/main-menu-flow.md, R3), the way acceptance_song.ps1 and
+    # acceptance_screens.ps1 already pin it. Without it the A press after the title screen lands
+    # on the main menu, the ROCK CENTRAL wait times out, and the leg fails while the boot itself
+    # was fine (measured 2026-10-10: the timeout's own last reading was
+    # "BLITZ PLAY HELP & OPTIONS EXIT GAME @BACK, A SELECT", i.e. the main menu).
     $launchArgs = @("--game_data_root=""$GameRoot""", "--ultimate_mode=$UltimateMode",
+        "--enhancements_skip_offline_dialog=false",
         "--mnk_mode=1", "--no_mouse_ui_nav", "--user_data_root=""$legDir""",
-        "--dlc_root=""$DlcRootPath""", "--log_level=debug", "--log_flush_interval=1",
+        "--dlc_root=""$(Resolve-Absolute $DlcRootPath)""", "--log_level=debug", "--log_flush_interval=1",
         "--log_max_file_size_mb=200")
-    if ($DlcLibraryPath) { $launchArgs += "--dlc_library=""$DlcLibraryPath""" }
+    if ($DlcLibraryPath) { $launchArgs += "--dlc_library=""$(Resolve-Absolute $DlcLibraryPath)""" }
+    if ($Extra) { $launchArgs += @($Extra -split ";" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
     $proc = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
     try {
         if (-not (Wait-ForWindow $proc $BootTimeoutSec)) { $notes.Add("no game window appeared") | Out-Null }

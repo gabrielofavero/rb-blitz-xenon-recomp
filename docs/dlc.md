@@ -305,10 +305,22 @@ enumerator offering four and reporting the true count. One item per call is ther
 of the protocol as this title uses it, and the host has no way to enlarge a buffer the guest
 owns. [song-cache-plan.md](plans/song-cache-plan.md) §13 has the spike and its measurement.
 
-The lever on it is therefore the launcher's own **Graphics ▸ Window ▸ V-Sync** row
-(`vsync`, re-read live by the GPU vsync worker), not something R7 adds or should add:
-with `--vsync=false` the same 2,809 calls arrive every **7.0 ms** and the phase takes
-**19.7 s**, against 47 s.
+The lever on it is therefore the frame rate — the launcher's own **Graphics ▸ Window ▸ V-Sync**
+row (`vsync`, re-read live by the GPU vsync worker): with `--vsync=false` the same 2,809 calls
+arrive every **7.0 ms** and the phase takes **19.7 s**, against 47 s.
+
+**R7 can pull that lever for the player, for exactly as long as the phase lasts** (2026-10-10,
+[song-cache-plan.md](plans/song-cache-plan.md) §14). `enhancements_dlc_uncap_enumeration` (off by
+default) turns `vsync` down when the discovery's first item is counted and puts the player's own value
+back at the first of three signs that the enumeration is over: the last item counted, the engine's own
+completion, or a menu frame with no item counted for two seconds. Measured on the same 1,402-package
+library, over the same 2,807-item walk: **46.7 s → 15.96 s** (5.68 ms per item), the value read as
+`true` and written back as `true` **1 ms** after the last item and 104 ms before the engine's own
+completion, so no menu frame is ever presented uncapped. Both the read and the write happen on a host
+thread — a guest thread must not touch the cvar registry — and the call count is unchanged at 2,807,
+so nothing is skipped: the *title* still enumerates everything. The V-Sync row is still the player's:
+nothing sets it at boot and nothing leaves it changed, which is why this is its own option rather than
+something R7 does by itself.
 
 Three measured facts, in the order they should weigh.
 
@@ -331,9 +343,10 @@ Three measured facts, in the order they should weigh.
   refuses a stashed handle that does not name an object of the type the dispatch header
   claims and no longer creates one in a dereference
   ([bringup-log.md](history/bringup-log.md) B-016). Since then 13 of 13 V-Sync-off boots are
-  clean, and the song acceptance passes with it both off and on. R7 still neither sets
-  `vsync` nor recommends it — the row belongs to the player — but this page no longer has a
-  reason to warn about it.
+  clean, and the song acceptance passes with it both off and on. R7 still does not set `vsync` at boot
+  and does not recommend a value — the row belongs to the player — and the one place the host moves it
+  is the phase-only option above, which puts the player's own value back before the menu is drawn — but
+  this page no longer has a reason to warn about it.
 
 **The refresh.** The main menu's last row
 ([main-menu-flow.md](engine/main-menu-flow.md) §7.1) asks the host to
