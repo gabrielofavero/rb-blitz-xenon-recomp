@@ -76,6 +76,7 @@
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "launcher/profile_apply.h"
+#include "settings/boot.h"
 #include "util/sha256.h"
 
 // The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
@@ -139,11 +140,13 @@ class RbBlitzApp : public rex::ReXApp {
   // and picks the backend the build does have. A wrong choice therefore degrades to the working
   // renderer instead of refusing to boot, and never silently: the log names what could not be
   // provided and what was used instead.
-  static void SelectGpuBackend(rex::RuntimeConfig& config) {
+  //
+  // Not static (it was, before P11a): a backend that really loaded is remembered in the app, so the
+  // settings store can report which renderer this boot is actually using.
+  void SelectGpuBackend(rex::RuntimeConfig& config) {
     if (config.graphics || config.gpu_plugin.empty()) {
       return;
-    }
-    const std::string backend = REXCVAR_GET(gpu_backend);
+    }    const std::string backend = REXCVAR_GET(gpu_backend);
     if (backend.empty() || backend == "any") {
       return;
     }
@@ -160,6 +163,11 @@ class RbBlitzApp : public rex::ReXApp {
       return;
     }
     config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin, backend);
+    // Remembered only when a backend was really named and loaded: the settings boot reports it as
+    // the active renderer, and an unnamed/"any" choice stays unnamed rather than being guessed at.
+    if (config.graphics) {
+      selected_backend_ = backend;
+    }
   }
 
   // True when the Vulkan loader is present and looks like a loader. Whether it has a usable
@@ -194,6 +202,17 @@ class RbBlitzApp : public rex::ReXApp {
     // lines after this hook returns, so a line written now would go nowhere.
     profile_apply_ = rb_blitz::launcher::ApplyLauncherProfileSettings();
 
+    // P11a: the native settings store. It runs *after* the legacy profile's rows (which it migrates
+    // and then outranks at equal rank) and *before* the SDK loads the game's own rb_blitz.toml
+    // (which is a later write at the same rank and therefore still beats it). Everything it
+    // decides - the identity, the path file, the migration, the target and licence, the rows the
+    // game reads at init - happens inside ConfigurePaths; what comes back is the two roots the path
+    // file selected, for the PathConfig below.
+    settings_boot_ = std::make_unique<rb_blitz::settings::boot::SettingsBoot>();
+    rb_blitz::settings::boot::SettingsBoot::SetCurrent(settings_boot_.get());
+    const rb_blitz::settings::boot::PathRoots boot_roots =
+        settings_boot_->ConfigurePaths(rex::filesystem::GetExecutableFolder());
+
     // The runtime derived these roots from the cvars *before* this hook ran, so a root a profile
     // row just supplied is not in `paths` yet. Re-read the two a launcher row can name, exactly
     // as the runtime reads them; an empty cvar leaves the runtime's own default in place.
@@ -213,6 +232,15 @@ class RbBlitzApp : public rex::ReXApp {
     redirect_if_inside_game_root(paths.user_data_root);
     redirect_if_inside_game_root(paths.cache_root);
     redirect_if_inside_game_root(paths.update_data_root);
+
+    // The path file's own roots (installer-written, hand-editable). They replace the legacy
+    // profile's path fields, which is why they are applied after the profile and after the cvar
+    // re-read above; an explicit environment/CLI value outranks them and was left alone in
+    // ConfigurePaths (it reports that in the boot log).
+    if (boot_roots.have_user_data_root) {
+      paths.user_data_root = boot_roots.user_data_root;
+      redirect_if_inside_game_root(paths.user_data_root);
+    }
 
     // Writable roots default outside the game tree (platform user dir). The runtime has already
     // filled user_data_root with GetUserFolder()/GetName() ("rb_blitz") before this hook, so when
@@ -253,6 +281,11 @@ class RbBlitzApp : public rex::ReXApp {
     // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
     // toggle off - or no library - nothing is mounted and the hook is inert.
     rb_blitz::shell_music::Configure(runtime(), game_data_root());
+    // P11a: the settings store's second half, and it has to run in this order: after
+    // ultimate::Configure (the provider's values are what the store reports for its rows) and
+    // *before* bridge::Configure, whose seeding goes through the channel's store - so the channel
+    // must already be pointed at the service.
+    settings_boot_->AfterLoadXexImage(selected_backend_);
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest
     // thread must not touch the cvar registry, which is why the read happens here.
@@ -268,13 +301,25 @@ class RbBlitzApp : public rex::ReXApp {
   // FinalizeInit is the SDK's own end-of-initialization point: it also stops any further
   // change to kInitOnly flags, which is correct here - those are device and logging
   // selections that the config, environment and command line have already fixed.
-  void OnPreLaunchModule() override { rex::cvar::FinalizeInit(); }
+  void OnPreLaunchModule() override {
+    // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
+    // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
+    // player cannot change has to say so rather than save a value that never takes effect.
+    if (settings_boot_) {
+      settings_boot_->FinishInit();
+    }
+    rex::cvar::FinalizeInit();
+  }
 
   // Logging is up from here, which is why the profile application made in OnConfigurePaths is
   // reported now and not there: what the launcher's file contributed (and which of its rows this
-  // build refused) is exactly the evidence a "my launcher setting did not apply" report needs.
+  // build refused) is exactly the evidence a "my launcher setting did not apply" report needs. The
+  // settings store's own boot lines follow it, for the same reason.
   void OnPostInitLogging() override {
     rb_blitz::launcher::LogProfileApplyReport(profile_apply_);
+    if (settings_boot_) {
+      settings_boot_->LogConfigured();
+    }
   }
 
   // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor
@@ -398,4 +443,14 @@ class RbBlitzApp : public rex::ReXApp {
 
   // What the launcher's profile contributed at OnConfigurePaths, reported once logging exists.
   rb_blitz::launcher::ProfileApplyReport profile_apply_;
+
+  // P11a: the native settings store and its boot wiring (src/settings/boot.h). Created in
+  // OnConfigurePaths - it needs the executable folder, which only exists from there on - and owned
+  // for the process lifetime because the guest channel, the menu-rows seam and the restart
+  // handshake all reach the same store.
+  std::unique_ptr<rb_blitz::settings::boot::SettingsBoot> settings_boot_;
+
+  // The backend this boot really loaded, when it named one (empty when the SDK chose). Reported by
+  // the settings store as the active renderer.
+  std::string selected_backend_;
 };

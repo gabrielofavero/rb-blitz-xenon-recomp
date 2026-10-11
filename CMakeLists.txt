@@ -105,9 +105,21 @@ set(RBBLITZ_SOURCES
     src/launcher/remap.cpp
     # P6's addition to the coordinator-owned list: the Ultimate provider adapter (the ark index
     # reader, the shape check over the payload's own definitions, the row bindings and the
-    # provider's settings file). SDK-free, and the only `src/settings/` translation unit the game
-    # links today - the store/service wiring is the coordinator's (P11).
+    # provider's settings file). SDK-free.
     src/settings/ultimate_adapter.cpp
+    # P11a's addition: the rest of the store, now that a boot consumes it. The service, the store,
+    # the path file and the migration (P3), the capability/policy pair (P4), the service-backed
+    # guest sink and the boot wiring itself. All SDK-free except src/settings/boot.cpp, which is the
+    # game's half (it reads and writes cvars).
+    src/settings/store.cpp
+    src/settings/paths.cpp
+    src/settings/migration.cpp
+    src/settings/service.cpp
+    src/settings/cvars.cpp
+    src/settings/capabilities.cpp
+    src/settings/graphics_policy.cpp
+    src/settings/bridge_sink.cpp
+    src/settings/boot.cpp
     # P9's two additions: the application-strategy seam (§5.5 - which committed rows apply to the
     # running game and which wait for the restart prompt) and the restart coordinator (§8 - the
     # exactly-once request, the rebuilt command line and the bootstrap's verified-identity wait).
@@ -623,6 +635,28 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_game_restart_tests PRIVATE src)
     add_test(NAME game_restart COMMAND rb_blitz_game_restart_tests)
+
+    # P11a: the guest channel's real store (src/settings/bridge_sink.h) - the same frames and ops
+    # P1's in-memory sink answers, with the native rows going through P3's service instead. SDK-free
+    # and run against a real service over a temporary directory, so a full
+    # edit -> set -> commit -> read-back -> ack cycle is checked against bytes on disk rather than a
+    # mock.
+    add_executable(rb_blitz_settings_bridge_service_tests
+        tests/settings_bridge_service_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/store.cpp
+        src/settings/paths.cpp
+        src/settings/migration.cpp
+        src/settings/cvars.cpp
+        src/settings/service.cpp
+        src/settings/bridge_sink.cpp
+        src/hooks/settings_bridge.cpp
+        src/launcher/profile.cpp
+        src/launcher/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_settings_bridge_service_tests PRIVATE src)
+    add_test(NAME settings_bridge_service COMMAND rb_blitz_settings_bridge_service_tests)
 
     # P10's menu-compatibility rules (src/settings/menu_compat.h). SDK-free: the hide matrix, the
     # fixed pool, the retired pool-size value and the rename's scope, plus the hide list's own seam

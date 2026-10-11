@@ -13,10 +13,22 @@
 
 #pragma once
 
+#include "hooks/settings_bridge.h"
+
 namespace rb_blitz::settings::bridge {
 
 // Reads settings_bridge / settings_bridge_forward_only and logs the result. Idempotent; safe to
 // call more than once, and safe not to call at all (the defaults are the faithful ones).
 void Configure();
+
+// P11a: point the channel at the boot's own store - the settings service
+// (src/settings/bridge_sink.h), whose rows are the same tokens, ops and one-bit answers the
+// in-memory stand-in carries, but whose values land in `settings.toml` through a real transaction.
+//
+// Both pointers are borrowed and must outlive the guest session; a null pair restores the
+// in-memory store, which is what a build with no service keeps using. Called from the boot's
+// OnPostLoadXexImage, before the guest can send a frame - the guest hooks themselves are installed
+// at link time and never change.
+void InstallSink(RequestSink* sink, SinkQueries* queries);
 
 }  // namespace rb_blitz::settings::bridge

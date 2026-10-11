@@ -434,14 +434,33 @@ const SchemaRow* FindRow(SettingId id) {
   return nullptr;
 }
 
+// P11a: the wire spelling, both forms. This used to live in the runtime applier (src/hooks/
+// hot_apply_runtime.cpp) because that was the only consumer; the boot's service-backed sink needs
+// the same vocabulary and is SDK-free, so the lookup belongs with the table it searches.
+SettingId IdForToken(std::string_view token) {
+  if (token.empty()) {
+    return SettingId::kUnknown;
+  }
+  for (const SchemaRow& row : Rows()) {
+    const Descriptor& descriptor = row.descriptor;
+    if (SettingIdToken(descriptor.id) == token) {
+      return descriptor.id;
+    }
+    if (std::string(CategoryToken(descriptor.category)) + "." +
+            std::string(SettingIdToken(descriptor.id)) ==
+        token) {
+      return descriptor.id;
+    }
+  }
+  return SettingId::kUnknown;
+}
+
 // P9: the strategy, without materializing a descriptor list. Same table, same answer - the point of
 // having one table is that the boot path and the UI cannot disagree.
 ApplicationStrategy StrategyOf(SettingId id) {
   const SchemaRow* row = FindRow(id);
   return row == nullptr ? ApplicationStrategy::kRestart : row->descriptor.strategy;
-}
-
-std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps) {
+}std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps) {
   std::vector<Descriptor> descriptors;
   descriptors.reserve(Rows().size());
   for (const SchemaRow& row : Rows()) {

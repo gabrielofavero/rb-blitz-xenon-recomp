@@ -201,6 +201,25 @@ class RequestSink {
   virtual Response Handle(const Request& request) = 0;
 };
 
+// The queries the *hook* half needs beside `Handle`: they are what the one-bit return channel is
+// built from (`file_exists` can answer one boolean), and they are deliberately separate from
+// `RequestSink` so a sink can be swapped in without the hooks knowing which store is behind it.
+// P11a: the boot installs a sink backed by the real settings Service; the defaults here are P1's
+// in-memory store, which is what a boot with no service - a test, or a workspace that has not
+// wired one - keeps using.
+class SinkQueries {
+ public:
+  virtual ~SinkQueries() = default;
+  // True when the setting currently holds the request's value: the menu's row-state probe.
+  virtual bool Matches(const Request& request) const = 0;
+  // True only for a request id this store applied with status kOk.
+  virtual bool Acknowledged(uint64_t request_id) const = 0;
+  // The committed value of one setting, if there is one.
+  virtual bool Get(std::string_view setting, WireValue* out) const = 0;
+  // The setting tokens the **last commit changed** (§5.4's no-op rule).
+  virtual const std::vector<std::string>& last_commit_changes() const = 0;
+};
+
 // Validates, de-duplicates and forwards. A request id seen before returns the first response
 // without reaching the sink again, so a guest that re-asks (a repeated frame, a redrawn panel)
 // cannot apply a change twice. Not thread-safe: the caller serialises, which is the guest/UI
@@ -212,6 +231,11 @@ class Dispatcher {
   explicit Dispatcher(RequestSink* sink) : sink_(sink) {}
 
   Response Dispatch(const Request& request);
+
+  // P11a: point the channel at another store. The dispatcher's idempotency window belongs to the
+  // *guest session*, not to a store, so it is kept: a re-asked request is still answered from the
+  // first response rather than reaching the new sink twice.
+  void SetSink(RequestSink* sink) { sink_ = sink; }
 
   // Forgets the idempotency window. Called when the guest session ends, not per request.
   void Reset();
@@ -253,20 +277,20 @@ class Dispatcher {
 // `in-game-settings-bridge-findings.md` §5 defers to the pass that traces the allocator. The
 // membership query is *not* a substitute for a data-carrying response channel: it cannot return a
 // snapshot, and it says so in the log when asked for one.
-class MemorySink : public RequestSink {
+class MemorySink : public RequestSink, public SinkQueries {
  public:
   // Applies a request to the store and records the outcome, which is what the ack answers with.
   Response Handle(const Request& request) override;
 
   // The read half. True when `request.setting` currently holds `request.value`. A kind that does
   // not match is false, not an error, so a state probe can never disturb the store.
-  bool Matches(const Request& request) const;
+  bool Matches(const Request& request) const override;
 
   // The acknowledgement half: true only for a request id this store applied with status kOk.
-  bool Acknowledged(uint64_t request_id) const;
+  bool Acknowledged(uint64_t request_id) const override;
 
   // The committed value of one setting, if it has been committed.
-  bool Get(const std::string_view setting, WireValue* out) const;
+  bool Get(const std::string_view setting, WireValue* out) const override;
 
   size_t committed_count() const { return committed_.size(); }
   size_t staged_count() const { return staged_.size(); }
@@ -276,7 +300,7 @@ class MemorySink : public RequestSink {
   // differs from what was already there. A commit that writes a value back unchanged (the
   // change-then-revert case §5.4 calls a no-op) reports nothing, which is what keeps a hot row
   // from being re-applied for a session that did not really alter it.
-  const std::vector<std::string>& last_commit_changes() const { return last_commit_changes_; }
+  const std::vector<std::string>& last_commit_changes() const override { return last_commit_changes_; }
 
   void Reset();
 

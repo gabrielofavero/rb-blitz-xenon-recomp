@@ -51,6 +51,7 @@
 
 #include "hooks/ultimate.h"
 #include "hooks/hot_apply_runtime.h"
+#include "settings/bridge_sink.h"
 #include "settings/hot_apply.h"
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
@@ -102,8 +103,15 @@ namespace {
 bool g_enabled = true;
 bool g_forward_only = false;
 
-MemorySink g_store;
-Dispatcher g_dispatcher(&g_store);
+// P11a: the channel's store is a seam. P1's in-memory sink is the default and is what a build with
+// no settings service keeps using; the boot installs the service-backed one (settings/bridge_sink.h)
+// once the store is up, before the guest can send a frame. The two pointers always name the same
+// object - `RequestSink` is what a request is handed to, `SinkQueries` is what the one-bit read and
+// ack answers are built from - so they are installed together.
+MemorySink g_memory;
+RequestSink* g_sink = &g_memory;
+SinkQueries* g_queries = &g_memory;
+Dispatcher g_dispatcher(&g_memory);
 
 // Rejection logs are rate-limited: a guest that asks about a malformed frame every frame must not
 // fill the log, and the first one is the one that matters.
@@ -280,12 +288,12 @@ bool QueryValue(const std::string_view path, bool* ours) {
   *ours = true;
   if (request.op == Op::kSnapshot) {
     // The read half: "does this setting currently hold this value?"
-    const bool match = g_store.Matches(request);
+    const bool match = g_queries->Matches(request);
     REXLOG_DEBUG("settings_bridge: read '{}' -> {}", request.setting, match ? "true" : "false");
     return match;
   }
   // Anything else is the acknowledgement: has this request id been applied durably?
-  const bool acknowledged = g_store.Acknowledged(request.request_id);
+  const bool acknowledged = g_queries->Acknowledged(request.request_id);
   REXLOG_DEBUG("settings_bridge: ack for request {} -> {}", request.request_id,
                acknowledged ? "true" : "false");
   return acknowledged;
@@ -314,26 +322,11 @@ using ModelValue = ::rb_blitz::settings::Value;
 using ModelValueKind = ::rb_blitz::settings::ValueKind;
 using ProviderBinding = ::rb_blitz::settings::ultimate_adapter::RowBinding;
 
-// The wire spelling of one of the provider's values: the same `b:1` / `t:<token>` a row writes.
-bool WireFromValue(const ModelValue& value, WireValue* out) {
-  switch (value.kind) {
-    case ModelValueKind::kBool:
-      *out = WireValue::Bool(value.boolean);
-      return true;
-    case ModelValueKind::kInt:
-      *out = WireValue::Int(value.integer);
-      return true;
-    case ModelValueKind::kEnum:
-    case ModelValueKind::kString:
-      if (value.text.empty()) {
-        return false;
-      }
-      *out = WireValue::Text(value.text);
-      return true;
-    default:
-      return false;
-  }
-}
+// The wire spelling of a value lives in settings/bridge_sink.h (one place, so the store and this
+// file cannot disagree about a kind); the provider half below needs its own reader because a
+// provider row's *kind* is the payload's, not this build's schema.
+using ::rb_blitz::settings::ModelValueFromWire;
+using ::rb_blitz::settings::WireFromModelValue;
 
 // The value a row's own token means, read back out of the store on a commit. The row's *kind* is
 // what decides how: the provider's `speedmod` is a slider whose tokens are percentages, its
@@ -396,7 +389,7 @@ void SeedProvider() {
       continue;
     }
     WireValue wire;
-    if (!WireFromValue(*value, &wire)) {
+    if (!WireFromModelValue(*value, &wire)) {
       continue;
     }
     Request seed;
@@ -450,7 +443,7 @@ void PersistProviderRows() {
   std::map<::rb_blitz::settings::SettingId, ModelValue> values;
   for (const ProviderBinding& binding : ::rb_blitz::settings::ultimate_adapter::RowBindings()) {
     WireValue wire;
-    if (!g_store.Get(binding.token, &wire)) {
+    if (!g_queries->Get(binding.token, &wire)) {
       continue;
     }
     ModelValue value;
@@ -492,41 +485,12 @@ void PersistProviderRows() {
 // registry itself: the applier (src/hooks/hot_apply_runtime.cpp) performs the write on a host
 // thread and waits for it, so "applied" means "written and read back".
 
-// A committed wire value as the model's own kind, with the row's declared `value_kind` as the
-// arbiter - the same rule the provider half uses, and the reason a wrong-kind value is refused
-// rather than coerced.
-bool ModelValueFromWire(const ::rb_blitz::settings::Descriptor& descriptor, const WireValue& wire,
-                        ModelValue* out) {
-  switch (descriptor.value_kind) {
-    case ModelValueKind::kBool:
-      if (wire.kind != ValueKind::kBool) {
-        return false;
-      }
-      out->kind = ModelValueKind::kBool;
-      out->boolean = wire.boolean;
-      return true;
-    case ModelValueKind::kInt:
-      if (wire.kind != ValueKind::kInt) {
-        return false;
-      }
-      out->kind = ModelValueKind::kInt;
-      out->integer = static_cast<int32_t>(wire.integer);
-      return true;
-    case ModelValueKind::kEnum:
-    case ModelValueKind::kString:
-      if (wire.kind != ValueKind::kText) {
-        return false;
-      }
-      out->kind = descriptor.value_kind;
-      out->text = wire.text;
-      return true;
-    default:
-      return false;  // the resolution, list and none kinds have no live applier today
-  }
-}
+// A committed wire value as the model's own kind: the shared reader in settings/bridge_sink.h, with
+// the row's declared `value_kind` as the arbiter, so a wrong-kind value is refused rather than
+// coerced. It is the same function the store's own set path uses.
 
 void ApplyHotRows() {
-  const std::vector<std::string>& tokens = g_store.last_commit_changes();
+  const std::vector<std::string>& tokens = g_queries->last_commit_changes();
   if (tokens.empty()) {
     return;
   }
@@ -540,7 +504,7 @@ void ApplyHotRows() {
     const ::rb_blitz::settings::schema::SchemaRow* row =
         ::rb_blitz::settings::schema::FindRow(id);
     WireValue wire;
-    if (row == nullptr || !g_store.Get(token, &wire)) {
+    if (row == nullptr || !g_queries->Get(token, &wire)) {
       continue;
     }
     ModelValue value;
@@ -657,9 +621,21 @@ void Configure() {
   SeedProvider();
   REXLOG_INFO("settings_bridge: typed guest channel {} (namespace '{}', forward-only {})",
               g_enabled ? "on" : "off", kNamespacePrefix, g_forward_only ? "on" : "off");
+  // P11a: name the store the channel is editing, so a boot says whether the menu's writes are
+  // going to settings.toml (the product path) or to the in-memory stand-in (a build with no
+  // settings service, which is what the tests and an unwired tree keep).
+  REXLOG_INFO("settings_bridge: store {}", g_sink == static_cast<RequestSink*>(&g_memory)
+                                              ? "in-memory (no settings service installed)"
+                                              : "the native settings service (settings.toml)");
   // P9: name the live set once, so a boot says what a commit can apply without a restart.
   REXLOG_INFO("settings_bridge: live applier: {}", ::rb_blitz::settings::HotApplierSummary());
   RunHotApplyDiagnostic();
+}
+
+void InstallSink(RequestSink* sink, SinkQueries* queries) {
+  g_sink = sink != nullptr ? sink : static_cast<RequestSink*>(&g_memory);
+  g_queries = queries != nullptr ? queries : static_cast<SinkQueries*>(&g_memory);
+  g_dispatcher.SetSink(g_sink);
 }
 
 }  // namespace rb_blitz::settings::bridge

@@ -42,6 +42,13 @@ const std::vector<SchemaRow>& Rows();
 // The row for an id, or nullptr for kUnknown / an id this build does not know.
 const SchemaRow* FindRow(SettingId id);
 
+// P11a: the inverse, and the vocabulary the guest channel actually carries. A row is named the way
+// the merged screen's own table names it - `<category>.<id>`, e.g. "graphics.vsync" - and the bare
+// id ("vsync") is accepted too, because that is what a diagnostic or a host-side caller has.
+// kUnknown for a token this build does not describe, so a stale path can never be applied to a row
+// that no longer exists.
+SettingId IdForToken(std::string_view token);
+
 // P9: the §5.5 application strategy for one id, from the same table BuildDescriptors
 // materializes. `kRestart` for an id this build does not know, because an unknown row is never
 // applied to the running game.

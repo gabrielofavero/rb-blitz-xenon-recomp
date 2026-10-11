@@ -120,21 +120,10 @@ CvarHotApplier& Instance() {
 HotApplier* RuntimeHotApplier() { return &Instance(); }
 
 SettingId IdForToken(std::string_view token) {
-  // The guest names a row the way the screen's own table does: `<category>.<id>`, e.g.
-  // "graphics.vsync". Both spellings are accepted, because the bare id is what a diagnostic or a
-  // host-side caller has.
-  for (const schema::SchemaRow& row : schema::Rows()) {
-    const Descriptor& descriptor = row.descriptor;
-    if (SettingIdToken(descriptor.id) == token) {
-      return descriptor.id;
-    }
-    if (std::string(CategoryToken(descriptor.category)) + "." +
-            std::string(SettingIdToken(descriptor.id)) ==
-        token) {
-      return descriptor.id;
-    }
-  }
-  return SettingId::kUnknown;
+  // The vocabulary now lives with the table it searches (P11a moved it to schema.cpp), because the
+  // boot's service-backed sink needs it and that module is SDK-free. This stays as the name the
+  // channel has always called.
+  return schema::IdForToken(token);
 }
 
 std::string_view HotRowToken(SettingId id) {
