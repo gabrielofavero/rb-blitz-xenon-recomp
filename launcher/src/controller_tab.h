@@ -46,10 +46,12 @@
 
 namespace rb_blitz::launcher {
 
-// The controls listed: every one a 360 pad has, which is also every target the grammar knows
-// (`remap::Targets()`). Spelled as a constant here so the ring size below is a compile-time
-// number rather than something the shell has to ask for at run time.
-inline constexpr std::size_t kControlRows = 17;
+// The controls listed: every target the grammar knows (`remap::Targets()`), which is every control
+// a 360 pad has except Guide - that one is a platform button, and the project never delivers it to
+// the guest. Spelled as a constant here so the ring size below is a compile-time number rather
+// than something the shell has to ask for at run time, and tied to the vocabulary by the
+// static_assert in controller_tab.cpp so the two cannot drift.
+inline constexpr std::size_t kControlRows = remap::kTargetCount;
 
 class ControllerTab {
  public:

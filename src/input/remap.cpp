@@ -92,34 +92,47 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
 
   // The same file the launcher's own Launch Game hands over with --launcher_profile, read the
   // same way the profile's `[settings]` rows are (launcher/profile_apply.h). A profile this build
-  // cannot read is not a reason to refuse to start: the pad is left as the SDK reports it, and the
-  // launcher is where the user is told about the file.
+  // cannot read - or a machine that has never run the launcher - is not a reason to refuse to
+  // start and not a reason to install no filter at all: `has_table` is false and the filter's
+  // whole job is then the Guide prohibition below. The launcher is where a user is told about a
+  // file that did not parse.
   std::string unreadable;
   const std::optional<rb_blitz::launcher::Profile> profile =
       rb_blitz::launcher::ReadLauncherProfile(&unreadable);
-  if (!profile) {
-    if (!unreadable.empty()) {
-      REXLOG_WARN("remap: ignoring the launcher profile, {}", unreadable);
-    }
-    return;
+  if (!profile && !unreadable.empty()) {
+    REXLOG_WARN("remap: ignoring the launcher profile, {}", unreadable);
   }
+
   // Held by the filter, which the input system copies: this frame's table is not what it reads
   // from.
   auto context = std::make_shared<RemapContext>();
-  context->table = rb_blitz::launcher::remap::Table::FromRows(profile->remap);
-  // The table always has work to do, even with no `[remap]` rows: every control without a row has
-  // the launcher's default binding - its own pad control plus a keyboard key - which is how a
-  // keyboard works without the profile being edited. `BoundCount` is how many the *user* rebound,
-  // which is what the log names.
-  if (context->table.BoundCount() > 0 && !context->table.AnySourceSet()) {
-    // A table of empty bindings is a pad that does nothing, which is a real thing to want and a
-    // terrible thing to hit by accident. It is honoured, and said out loud.
-    REXLOG_WARN(
-        "remap: the launcher profile binds {} control(s) to nothing, so no pad button will "
-        "reach the game",
-        context->table.BoundCount());
+  const bool has_table = profile.has_value();
+  std::size_t bound = 0;
+  if (profile) {
+    context->table = rb_blitz::launcher::remap::Table::FromRows(profile->remap);
+    // Guide is a platform button and is never delivered to the guest (contracts §2.3). A row a
+    // person wrote once is preserved by a save but never applied, so the only honest thing to do
+    // with it is to say so - "the button I bound does nothing" is otherwise indistinguishable
+    // from a bug in the remap.
+    if (!rb_blitz::launcher::remap::RefusedRowNames(profile->remap).empty()) {
+      REXLOG_WARN(
+          "remap: Guide is not remappable, so the profile's guide row is ignored (and Guide is "
+          "kept out of the pad state the guest sees)");
+    }
+    // The table always has work to do, even with no `[remap]` rows: every control without a row
+    // has the launcher's default binding - its own pad control plus a keyboard key - which is how
+    // a keyboard works without the profile being edited. `BoundCount` is how many the *user*
+    // rebound, which is what the log names.
+    if (context->table.BoundCount() > 0 && !context->table.AnySourceSet()) {
+      // A table of empty bindings is a pad that does nothing, which is a real thing to want and a
+      // terrible thing to hit by accident. It is honoured, and said out loud.
+      REXLOG_WARN(
+          "remap: the launcher profile binds {} control(s) to nothing, so no pad button will "
+          "reach the game",
+          context->table.BoundCount());
+    }
+    bound = context->table.BoundCount();
   }
-  const std::size_t bound = context->table.BoundCount();
 
   std::function<std::unique_ptr<rex::system::IInputSystem>(bool)> backend;
   if (config.input_factory) {
@@ -128,7 +141,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     backend = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
   }
 
-  config.input_factory = [backend = std::move(backend), context = std::move(context),
+  config.input_factory = [backend = std::move(backend), context = std::move(context), has_table,
                           bound](bool tool_mode) {
     std::unique_ptr<rex::system::IInputSystem> system = backend(tool_mode);
     if (tool_mode || !system) {
@@ -137,22 +150,36 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     // The same cast mouse_ui makes, and for the same reason: this is the one input system the
     // SDK and this project ship, and the filter is the seam the SDK grew for exactly this.
     static_cast<rex::input::InputSystem*>(system.get())
-        ->SetStateFilter([context](uint32_t /*user_index*/, rex::input::X_INPUT_STATE& state) {
+        ->SetStateFilter([context, has_table](uint32_t /*user_index*/,
+                                             rex::input::X_INPUT_STATE& state) {
           namespace remap = rb_blitz::launcher::remap;
           const remap::PadState pad{state.gamepad.buttons, state.gamepad.left_trigger,
                                     state.gamepad.right_trigger};
           remap::PadState out;
-          remap::Apply(context->table, pad, &SourceDownThunk, context.get(), &out);
+          if (has_table) {
+            remap::Apply(context->table, pad, &SourceDownThunk, context.get(), &out);
+          } else {
+            // No profile to read: the pad is left exactly as the SDK reports it, and the one
+            // thing that still happens is the prohibition. Guide therefore cannot reach the guest
+            // on this path either, rather than only on the paths that go through a profile.
+            out = remap::WithoutProhibitedButtons(pad);
+          }
           state.gamepad.buttons = out.buttons;
           // An unbound trigger keeps its analog travel: Apply copies the state it was handed
           // before it rewrites anything, so only a bound one is driven to an end.
           state.gamepad.left_trigger = out.left_trigger;
           state.gamepad.right_trigger = out.right_trigger;
         });
-    REXLOG_INFO(
-        "remap: {} user rebind(s) from the launcher profile; every other control answers to its "
-        "default pad button and keyboard key (--launcher_profile <path> names another file)",
-        bound);
+    if (has_table) {
+      REXLOG_INFO(
+          "remap: {} user rebind(s) from the launcher profile; every other control answers to its "
+          "default pad button and keyboard key (--launcher_profile <path> names another file)",
+          bound);
+    } else {
+      REXLOG_INFO(
+          "remap: no launcher profile to read, so the pad keeps the SDK's own reporting and Guide "
+          "is kept out of the state the guest sees");
+    }
     return system;
   };
 }

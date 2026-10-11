@@ -29,7 +29,7 @@
 ;   /DPayloadDir=<dir>    holds the recompiled build that gets embedded
 ;   /DDistDir=<dir>       receives the setup executable (and the updater)
 ;   /DArtDir=<dir>        optional side wizard image (default: the repository's
-;                         assets\ directory; see tools/make_art.ps1)
+;                         assets\installer\ directory; see tools/make_art.ps1)
 ; ---------------------------------------------------------------------------
 
 #define InstallerDirPath AddBackslash(SourcePath)
@@ -45,7 +45,7 @@
   #define DistDir AddBackslash(SourcePath) + "out\dist"
 #endif
 #ifndef ArtDir
-  #define ArtDir ProjectDirPath + "assets"
+  #define ArtDir ProjectDirPath + "assets\installer"
 #endif
 
 #define GeneratedDirPath AddBackslash(GeneratedDir)
@@ -101,9 +101,11 @@
 #define SetupVersionQuad AppVersion + ".0"
 
 ; D9 names the two Start-menu shortcuts so a list can tell them apart: the game
-; keeps AppShortName, the launcher appends " Launcher" (pins.iss defines
-; AppShortName, so this has to come after the include above).
-#define LauncherShortcutName AppShortName + " Launcher"
+; keeps AppShortName and the launcher's shortcut names the role it has in this
+; release, which is Controller Settings (parent plan §9.2). The executable keeps
+; its own name - rb_blitz_launcher.exe - because shortcuts that already exist
+; point at it and renaming the file would break them.
+#define LauncherShortcutName AppShortName + " Controller Settings"
 
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
@@ -122,6 +124,19 @@ VersionInfoCopyright={#AppPublisher}
 DefaultDirName={autopf}\{#AppDefaultDirName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
+; The install folder page is shown even when an install is already registered, and
+; it is where the three locations are asked for: the folder the game goes in, the
+; DLC library and the save folder (parent plan §9.1). Inno Setup's own default
+; ("auto") hides the page in exactly that case, which would leave a reinstall with
+; no way to see or change the two external folders. Inno Setup still prefills the
+; folder from the install it found - UsePreviousAppDir does that - so a reinstall
+; lands on the same one unless the user says otherwise.
+DisableDirPage=no
+; The Shortcuts page always starts from no answer: an install that already exists
+; must not silently re-create a shortcut the user has since deleted, and the
+; declared defaults below are unchecked for the same reason. An explicit
+; /TASKS or /MERGETASKS still decides.
+UsePreviousTasks=no
 ; No administrator rights are needed: the build, the game data and the mod all
 ; live under the user's own profile by default. An administrator can still force
 ; a machine-wide install with /ALLUSERS on the command line.
@@ -140,7 +155,7 @@ DisableWelcomePage=no
 #endif
 ShowLanguageDialog=no
 SetupLogging=yes
-SetupIconFile={#ProjectDirPath}assets\blitz.ico
+SetupIconFile={#ProjectDirPath}assets\icon\blitz.ico
 ; Add/Remove Programs names the program, not the build: this is the one place the
 ; name a user sees is the short one, because "{#AppName} {#AppVersion}" there reads
 ; like the game has a "(Xenon Recomp) version 0.1.0" edition. The GPL text no
@@ -164,7 +179,7 @@ WizardImageFile={#ArtDirPath}wizard-large-*.bmp
 ; The corner badge is the app's own icon art, so unlike the side image it is
 ; committed next to blitz.ico and needs no guard. It is stored at the largest size
 ; the badge area reaches (159x159 at 250% scaling), so it is only ever shrunk.
-WizardSmallImageFile={#ProjectDirPath}assets\blitz.png
+WizardSmallImageFile={#ProjectDirPath}assets\icon\blitz.png
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -184,19 +199,20 @@ DiskSpaceMBLabel=The game data you provide is not counted here; the free space i
 
 [Tasks]
 ; Every shortcut is a task, so this page is the one place that decides what is
-; created. The declarations below are the state a silent install creates - it has
-; no page to ask on - and the wizard unchecks every task when it builds the page
-; (InitializeWizard), so the page starts from no answer. The launcher's desktop
-; shortcut is the one a silent install skips unless /LAUNCHERICON=1 asks for it
-; (see README.md).
+; created - and nothing is created unless the user asks. The declarations below are
+; the state a silent install starts from too (it has no page to ask on), so a
+; silent install creates no shortcut at all: no previous selection is restored
+; (UsePreviousTasks=no), and /TASKS or /MERGETASKS is what opts one back in. The
+; Controller Settings desktop shortcut also keeps the older /LAUNCHERICON=1
+; spelling, which is what an existing script or shortcut builder would pass.
 ;
 ; The updater has no shortcuts page and creates none: the install it is updating
 ; already has whatever the user asked for, and re-creating a shortcut the user has
 ; since deleted is not an update's job.
 #ifndef UpdaterMode
-Name: "startmenu"; Description: "Create a &Start menu shortcut for the game"
-Name: "startmenulauncher"; Description: "Create a Start menu shortcut for the &launcher"
-Name: "launchericon"; Description: "Create a &desktop shortcut for the launcher"
+Name: "startmenu"; Description: "Create a &Start menu shortcut for the game"; Flags: unchecked
+Name: "startmenulauncher"; Description: "Create a Start menu shortcut for &Controller Settings"; Flags: unchecked
+Name: "launchericon"; Description: "Create a &desktop shortcut for Controller Settings"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 #endif
 
@@ -232,8 +248,8 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 [Icons]
 ; Four shortcuts, each behind the [Tasks] entry the Shortcuts page shows, with
 ; names a Start-menu list can tell apart. The game's keeps its --game_data_root
-; argument: it must stay runnable without the launcher (Contract 4). The
-; launcher's takes none; it finds the game beside itself.
+; argument: it must stay runnable without Controller Settings (Contract 4).
+; Controller Settings' takes none; it finds the game beside itself.
 #ifndef UpdaterMode
 Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: startmenu
 Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: startmenulauncher
@@ -252,8 +268,10 @@ Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeNam
 Type: files; Name: "{app}\{#HelperExeName}"
 Type: files; Name: "{app}\{#GameExeName}"
 ; The launcher travels in the payload (see tools/make_payload.ps1) and is deleted
-; with the rest of it. launcher.toml is deliberately not listed: it is the user's
-; own settings and survives an uninstall, like the game data (Contract 4).
+; with the rest of it. launcher.toml and paths.toml are deliberately not listed:
+; they are the user's own settings - and the two folders the user chose - and they
+; survive an uninstall, like the game data (Contract 4). The helper's own cleanup
+; keeps them for the same reason.
 Type: files; Name: "{app}\{#LauncherExeName}"
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\payload-manifest.toml"
@@ -285,15 +303,18 @@ const
   StagePollLimit = 30000;
   SilencePollLimit = 5000;
 
-  { Where each stage sits on the single progress bar, out of 1000. }
+  { Where each stage sits on the single progress bar, out of 1000. The two folder
+    choices are written last, after the install and its manifest are on disk. }
   PayloadStart = 0;
   PayloadEnd = 200;
   GameStart = 200;
   GameEnd = 700;
   UltimateStart = 700;
-  UltimateEnd = 900;
-  FinalizeStart = 900;
-  FinalizeEnd = 1000;
+  UltimateEnd = 880;
+  FinalizeStart = 880;
+  FinalizeEnd = 950;
+  PathsStart = 950;
+  PathsEnd = 1000;
 
   { Space planning. The helper measures the free space; these numbers decide how
     much room the install is allowed to want. }
@@ -328,11 +349,28 @@ const
   UltimateZipParam = 'ULTIMATEZIP';
   UltimateFolderParam = 'ULTIMATEFOLDER';
   LauncherIconParam = 'LAUNCHERICON';
+  ControllerIconParam = 'CONTROLLERICON';
   RunAtEndParam = 'RUNATEND';
+  { The two external folders (parent plan §9.1). Given, they answer for a silent
+    install the way the folder page does; not given, whatever the installation's own
+    paths.toml or the user's old launcher profile says is kept. Given *empty*, they
+    mean "the game's own folder", which is a different answer from "not given". }
+  DlcDirParam = 'DLCDIR';
+  SaveDirParam = 'SAVEDIR';
+
+  { The sentinel that a param expansion returns when the parameter was not given at
+    all. Inno Setup cannot tell "absent" from "present and empty" any other way, and
+    that difference is the whole of §9.1's omitted-versus-empty rule. No braces are
+    written here on purpose: a comment cannot contain one, because the closing brace
+    would end the comment. }
+  ParamAbsent = '@absent@';
 
   { D8: what the finish page can do. Strings rather than indexes, because the same
-    values are what /RUNATEND accepts on a silent install (README.md). }
+    values are what /RUNATEND accepts on a silent install (README.md). The
+    application a user sees is now Controller Settings; 'launcher' stays accepted
+    because it is the spelling older scripts and shortcut builders pass. }
   RunAtEndGame = 'game';
+  RunAtEndController = 'controller';
   RunAtEndLauncher = 'launcher';
   RunAtEndNothing = 'none';
 
@@ -382,6 +420,28 @@ var
   UltimatePathEdit: TNewEdit;
   UltimateBrowseButton: TNewButton;
 
+  { The two extra locations on the install folder page. They belong there rather than
+    on a page of their own because they are part of the same answer - where this
+    installation keeps its things - and both end up in paths.toml beside the game's
+    own executable (§9.1). }
+  DlcPromptLabel: TNewStaticText;
+  DlcPathEdit: TNewEdit;
+  DlcBrowseButton: TNewButton;
+  SavePromptLabel: TNewStaticText;
+  SavePathEdit: TNewEdit;
+  SaveBrowseButton: TNewButton;
+  LocationStatusLabel: TNewStaticText;
+  gPrefillingLocations: Boolean;
+  gDlcAnswered: Boolean;
+  gSaveAnswered: Boolean;
+  gLocationAnswerFound: Boolean;
+  { True once the folder page's two rows exist. Every touch of those controls checks
+    it, so a run that never builds the wizard (a silent install, where nothing on the
+    page can be answered or shown) reads its answers from the globals instead. }
+  gLocationsUi: Boolean;
+  gDlcValue: String;
+  gSaveValue: String;
+
   gTempDir: String;
   gAppDir: String;
   gStageSummaryFile: String;
@@ -430,7 +490,7 @@ var
   gUpdatePayloadSize: Int64;
 
   EndGameRadio: TNewRadioButton;
-  EndLauncherRadio: TNewRadioButton;
+  EndControllerRadio: TNewRadioButton;
   EndNothingRadio: TNewRadioButton;
 
 // --- small helpers --------------------------------------------------------
@@ -512,10 +572,39 @@ begin
   Result := Trim(ExpandConstant('{param:LAUNCHERICON|}'));
 end;
 
-// D8: the finish page's three-way choice. The launcher is the interactive default
-// - it is what the install was made for - and a silent install does nothing unless
-// /RUNATEND asks for one, as the old skipifsilent [Run] entry did. The radios set
-// gRunAtEnd; DeinitializeSetup runs it after the wizard closes.
+function ParamControllerIcon: String;
+begin
+  Result := Trim(ExpandConstant('{param:CONTROLLERICON|}'));
+end;
+
+// The two external folders (§9.1). `...Given` is what tells a silent install that
+// nobody answered - which keeps the installation's own paths.toml - from the answer
+// "the game's own folder", which is `/DLCDIR=` with no value.
+function ParamDlcDir: String;
+begin
+  Result := RemoveQuotes(Trim(ExpandConstant('{param:DLCDIR|}')));
+end;
+
+function ParamDlcDirGiven: Boolean;
+begin
+  Result := ExpandConstant('{param:DLCDIR|' + ParamAbsent + '}') <> ParamAbsent;
+end;
+
+function ParamSaveDir: String;
+begin
+  Result := RemoveQuotes(Trim(ExpandConstant('{param:SAVEDIR|}')));
+end;
+
+function ParamSaveDirGiven: Boolean;
+begin
+  Result := ExpandConstant('{param:SAVEDIR|' + ParamAbsent + '}') <> ParamAbsent;
+end;
+
+// D8: the finish page's three-way choice. The game is the interactive default - the
+// install exists to be played, and Controller Settings is one click away in the
+// Start menu - and a silent install does nothing unless /RUNATEND asks for one, as
+// the old skipifsilent [Run] entry did. The radios set gRunAtEnd; DeinitializeSetup
+// runs it after the wizard closes.
 function ParamRunAtEnd: String;
 begin
   Result := Lowercase(Trim(ExpandConstant('{param:RUNATEND|}')));
@@ -525,30 +614,34 @@ procedure ResolveRunAtEnd;
 var
   requested: String;
 begin
-  // An update ends where it started: the launcher is what asked the user, and
+  // An update ends where it started: Controller Settings is what asked the user, and
   // coming back to it - one release newer - is what the user agreed to. The three
   // finish-page radios are not shown for it either (CurPageChanged), so this is the
   // only thing that decides.
   if gUpdater then
   begin
-    gRunAtEnd := RunAtEndLauncher;
+    gRunAtEnd := RunAtEndController;
     Exit;
   end;
   requested := ParamRunAtEnd;
+  // 'launcher' is what this value was called before the application became
+  // Controller Settings; a script that still passes it gets what it asked for.
+  if requested = RunAtEndLauncher then
+    requested := RunAtEndController;
   if requested <> '' then
     gRunAtEnd := requested
   else if WizardSilent then
     gRunAtEnd := RunAtEndNothing
   else
-    gRunAtEnd := RunAtEndLauncher;
+    gRunAtEnd := RunAtEndGame;
 end;
 
 function RunAtEndProblem: String;
 begin
   Result := '';
-  if (gRunAtEnd <> RunAtEndGame) and (gRunAtEnd <> RunAtEndLauncher) and
+  if (gRunAtEnd <> RunAtEndGame) and (gRunAtEnd <> RunAtEndController) and
      (gRunAtEnd <> RunAtEndNothing) then
-    Result := RunAtEndParam + ' must be ' + RunAtEndGame + ', ' + RunAtEndLauncher + ' or ' +
+    Result := RunAtEndParam + ' must be ' + RunAtEndGame + ', ' + RunAtEndController + ' or ' +
               RunAtEndNothing + ', not ''' + gRunAtEnd + '''.';
 end;
 
@@ -557,9 +650,9 @@ begin
   gRunAtEnd := RunAtEndGame;
 end;
 
-procedure EndLauncherRadioClick(Sender: TObject);
+procedure EndControllerRadioClick(Sender: TObject);
 begin
-  gRunAtEnd := RunAtEndLauncher;
+  gRunAtEnd := RunAtEndController;
 end;
 
 procedure EndNothingRadioClick(Sender: TObject);
@@ -580,18 +673,18 @@ begin  left := WizardForm.FinishedLabel.Left;
   step := ScaleY(21);
   top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(8);
 
-  EndLauncherRadio.Caption := 'Open the launcher';
   EndGameRadio.Caption := 'Launch {#AppShortName}';
+  EndControllerRadio.Caption := 'Open Controller Settings';
   EndNothingRadio.Caption := 'Do nothing';
 
-  EndLauncherRadio.Left := left;
-  EndLauncherRadio.Top := top;
-  EndLauncherRadio.Width := width;
-  EndLauncherRadio.Height := step;
   EndGameRadio.Left := left;
-  EndGameRadio.Top := top + step;
+  EndGameRadio.Top := top;
   EndGameRadio.Width := width;
   EndGameRadio.Height := step;
+  EndControllerRadio.Left := left;
+  EndControllerRadio.Top := top + step;
+  EndControllerRadio.Width := width;
+  EndControllerRadio.Height := step;
   EndNothingRadio.Left := left;
   EndNothingRadio.Top := top + step * 2;
   EndNothingRadio.Width := width;
@@ -1185,6 +1278,323 @@ begin
     UltimatePathEdit.Text := path;
 end;
 
+// --- the two extra folders on the install folder page ---------------------
+//
+// The install folder page asks three questions, not one: the folder the game goes
+// in (Inno Setup's own row), the DLC library and the save folder. The last two end
+// up in paths.toml beside rb_blitz.exe, one file per installation, which is why
+// they are asked for here rather than on a page of their own (§9.1).
+
+// Inno Setup's directory page has one row and Inno places its own controls, so the
+// two rows are built here, under that row, and the page's free-space line - which is
+// a remark about the folder above rather than about the ones below - is moved to the
+// bottom. Every measurement goes through ScaleX/ScaleY, so the rows are the same
+// fraction of the page at 100% and at 300%.
+procedure LayoutLocationFields;
+var
+  labelWidth: Integer;
+begin
+  if not gLocationsUi then
+    Exit;
+  labelWidth := ScaleX(132);
+
+  DlcPromptLabel.Left := WizardForm.DirEdit.Left;
+  DlcPromptLabel.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(10);
+  DlcPromptLabel.Width := labelWidth;
+  DlcPromptLabel.Height := ScaleY(23);
+
+  DlcPathEdit.Left := DlcPromptLabel.Left + labelWidth + ScaleX(4);
+  DlcPathEdit.Top := DlcPromptLabel.Top;
+  DlcPathEdit.Width := WizardForm.DirEdit.Width - labelWidth - ScaleX(4) - ScaleX(8) -
+                       WizardForm.DirBrowseButton.Width;
+  DlcPathEdit.Height := ScaleY(23);
+
+  DlcBrowseButton.Left := DlcPathEdit.Left + DlcPathEdit.Width + ScaleX(8);
+  DlcBrowseButton.Top := DlcPathEdit.Top - ScaleY(1);
+  DlcBrowseButton.Width := WizardForm.DirBrowseButton.Width;
+  DlcBrowseButton.Height := WizardForm.DirBrowseButton.Height;
+
+  SavePromptLabel.Left := DlcPromptLabel.Left;
+  SavePromptLabel.Top := DlcPromptLabel.Top + ScaleY(27);
+  SavePromptLabel.Width := labelWidth;
+  SavePromptLabel.Height := ScaleY(23);
+
+  SavePathEdit.Left := DlcPathEdit.Left;
+  SavePathEdit.Top := SavePromptLabel.Top;
+  SavePathEdit.Width := DlcPathEdit.Width;
+  SavePathEdit.Height := ScaleY(23);
+
+  SaveBrowseButton.Left := DlcBrowseButton.Left;
+  SaveBrowseButton.Top := SavePathEdit.Top - ScaleY(1);
+  SaveBrowseButton.Width := DlcBrowseButton.Width;
+  SaveBrowseButton.Height := DlcBrowseButton.Height;
+
+  LocationStatusLabel.Left := WizardForm.DirEdit.Left;
+  LocationStatusLabel.Top := SavePathEdit.Top + SavePathEdit.Height + ScaleY(6);
+  LocationStatusLabel.Width := WizardForm.DirEdit.Width;
+  LocationStatusLabel.Height := ScaleY(15);
+
+  // What the DLC folder turned out to be, and where the saves will go, is more use
+  // than Inno Setup's own free-space sentence - which this release already replaces
+  // in [Messages] because it counts only the files Setup itself places. That line
+  // keeps the last position when there is room and is dropped when there is not:
+  // it is a remark, and the two answers above it are not.
+  WizardForm.DiskSpaceLabel.Top := LocationStatusLabel.Top + LocationStatusLabel.Height + ScaleY(8);
+  if WizardForm.DiskSpaceLabel.Top + WizardForm.DiskSpaceLabel.Height >
+     WizardForm.DiskSpaceLabel.Parent.Height - ScaleY(6) then
+    WizardForm.DiskSpaceLabel.Visible := False;
+end;
+
+// The two answers. The fields are what the user sees and can change, so they are
+// what an interactive install writes; a silent one has no page to change them on and
+// reads what the prefill resolved instead.
+function ChosenDlcDir: String;
+begin
+  if gLocationsUi and (not WizardSilent) then
+    Result := Trim(DlcPathEdit.Text)
+  else
+    Result := gDlcValue;
+end;
+
+function ChosenSaveDir: String;
+begin
+  if gLocationsUi and (not WizardSilent) then
+    Result := Trim(SavePathEdit.Text)
+  else
+    Result := gSaveValue;
+end;
+
+// Whether the installer is entitled to write the two folders at all. The folder page
+// always answers - even "the game's own folder" is an answer - while a silent
+// install that was asked nothing keeps what the installation already has, and an
+// update has no folder page at all (§9.1's omitted-versus-empty rule).
+function PathsAnswered: Boolean;
+begin
+  if gUpdater then
+    Result := False
+  else if not WizardSilent then
+    Result := True
+  else
+    Result := ParamDlcDirGiven or ParamSaveDirGiven or gLocationAnswerFound;
+end;
+
+// What the last validate-paths said, in one line for the page. Only called when the
+// probe succeeded, so every key is present.
+function LocationStatusText: String;
+var
+  layout, count: String;
+begin
+  if SummaryFlag(gProbeSummaryFile, 'dlc_default') then
+    Result := 'DLC: the game''s own folder'
+  else
+  begin
+    layout := SummaryText(gProbeSummaryFile, 'dlc_layout', '');
+    count := SummaryText(gProbeSummaryFile, 'dlc_packages', '0');
+    if layout = 'structured' then
+      Result := 'DLC: ' + count + ' package(s) in the title/content layout'
+    else if layout = 'flat' then
+      Result := 'DLC: ' + count + ' file(s), read as a library'
+    else if layout = 'empty' then
+      Result := 'DLC: empty, so the game starts with no songs'
+    else
+      Result := 'DLC: not there yet, so the game starts with no songs';
+  end;
+  if SummaryFlag(gProbeSummaryFile, 'save_default') then
+    Result := Result + ';  saves: the game''s own folder'
+  else
+    Result := Result + ';  saves: ' + SummaryText(gProbeSummaryFile, 'save_dir', '');
+  if SummaryText(gProbeSummaryFile, 'note_count', '0') <> '0' then
+    Result := Result + '  (' + SummaryText(gProbeSummaryFile, 'note_0', '') + ')';
+  if gLocationsUi then
+    LocationStatusLabel.Caption := Result;
+end;
+
+// Fills the two fields. The order is parent plan §9.1's: the unattended parameter,
+// the installation's own paths.toml, the launcher profile the game used to read, then
+// the default - which is an empty field, meaning "the game's own folder". A field the
+// user has already answered is never overwritten, so browsing for an install folder
+// does not undo a DLC folder they typed a moment ago.
+procedure PrefillLocations;
+var
+  args, dlc, save, dir: String;
+begin
+  if gDlcAnswered and gSaveAnswered then
+    Exit;
+
+  dlc := ParamDlcDir;
+  save := ParamSaveDir;
+  gLocationAnswerFound := ParamDlcDirGiven or ParamSaveDirGiven;
+
+  if (not ParamDlcDirGiven) or (not ParamSaveDirGiven) then
+  begin
+    dir := RemoveBackslashUnlessRoot(Trim(WizardDirValue));
+    if dir <> '' then
+    begin
+      args := 'read-paths --install-dir ' + QuoteArg(dir);
+      // The old launcher profile is only consulted when this install is not running
+      // elevated: an administrator's own profile is not the player's, and the file
+      // it names would be imported into the wrong person's install (§9.1).
+      if not IsAdminInstallMode then
+        args := args + ' --legacy-appdir ' + QuoteArg(dir);
+      if RunQuietProbe(args) then
+      begin
+        // A paths.toml this build can read answers for both fields, including when
+        // its answer is "the default" - which is why the legacy profile is only the
+        // fallback and not a second opinion.
+        if SummaryFlag(gProbeSummaryFile, 'file_valid') then
+        begin
+          if not ParamDlcDirGiven then
+            dlc := SummaryText(gProbeSummaryFile, 'dlc_root', '');
+          if not ParamSaveDirGiven then
+            save := SummaryText(gProbeSummaryFile, 'save_root', '');
+        end
+        else if SummaryFlag(gProbeSummaryFile, 'legacy_found') then
+        begin
+          if not ParamDlcDirGiven then
+            dlc := SummaryText(gProbeSummaryFile, 'legacy_dlc', '');
+          if not ParamSaveDirGiven then
+            save := SummaryText(gProbeSummaryFile, 'legacy_save', '');
+        end;
+      end;
+    end;
+  end;
+  if (dlc <> '') or (save <> '') then
+    gLocationAnswerFound := True;
+  gDlcValue := dlc;
+  gSaveValue := save;
+
+  if not gLocationsUi then
+    Exit;
+  gPrefillingLocations := True;
+  if not gDlcAnswered then
+    DlcPathEdit.Text := dlc;
+  if not gSaveAnswered then
+    SavePathEdit.Text := save;
+  gPrefillingLocations := False;
+end;
+
+// The helper's check, run on Next and again from PrepareToInstall, so a silent
+// install - which never sees the page - is checked the same way. Returns an empty
+// string when the answers can be used. `inspectOnly` is the check that runs while
+// the page is merely shown: it reports the same things without creating the save
+// folder or writing a probe into it, because showing a page must not change the
+// machine - and a path the user is halfway through typing must not leave a folder
+// behind when they correct it.
+function CheckLocations(const inspectOnly: Boolean): String;
+var
+  args, dir: String;
+begin
+  Result := '';
+  if gLocationsUi then
+    LocationStatusLabel.Caption := '';
+  dir := RemoveBackslashUnlessRoot(Trim(WizardDirValue));
+  if dir = '' then
+    Exit;
+
+  args := 'validate-paths --install-dir ' + QuoteArg(dir) +
+          ' --dlc-dir ' + QuoteArg(ChosenDlcDir) +
+          ' --save-dir ' + QuoteArg(ChosenSaveDir);
+  if inspectOnly then
+    args := args + ' --no-touch';
+  if not RunQuietProbe(args) then
+  begin
+    Result := HelperError(gProbeSummaryFile);
+    Exit;
+  end;
+  LocationStatusText;
+end;
+
+procedure DlcBrowseClick(Sender: TObject);
+var
+  path: String;
+begin
+  path := Trim(DlcPathEdit.Text);
+  if BrowseForFolder('Choose the folder that holds your Rock Band DLC.', path, False) then
+  begin
+    gDlcAnswered := True;
+    DlcPathEdit.Text := path;
+  end;
+end;
+
+procedure SaveBrowseClick(Sender: TObject);
+var
+  path: String;
+begin
+  path := Trim(SavePathEdit.Text);
+  if BrowseForFolder('Choose the folder the game should keep its saved games in.',
+                     path, True) then
+  begin
+    gSaveAnswered := True;
+    SavePathEdit.Text := path;
+  end;
+end;
+
+// A field the user typed in is theirs from then on: the prefill may still run for
+// the other one, and Next is what puts the answers in place.
+procedure LocationFieldChanged(Sender: TObject);
+begin
+  if gPrefillingLocations then
+    Exit;
+  if Sender = DlcPathEdit then
+    gDlcAnswered := True
+  else if Sender = SavePathEdit then
+    gSaveAnswered := True;
+  LocationStatusLabel.Caption := '';
+end;
+
+// --- the Shortcuts page starts from no answer -----------------------------
+
+// Inno Setup ticks whatever /TASKS named before this runs, so an explicit request is
+// honoured; everything else starts unchecked, which is also the declaration in
+// [Tasks] and what a silent install gets (§9.2). `!name` in /MERGETASKS means "do not
+// create it", which is the state this leaves it in anyway. The two desktop-icon
+// parameters are the older spelling of the same request.
+function TaskRequested(const name: String): Boolean;
+var
+  text, item: String;
+  separator: Integer;
+begin
+  Result := False;
+  text := Lowercase(ExpandConstant('{param:TASKS|}') + ',' +
+                    ExpandConstant('{param:MERGETASKS|}'));
+  while text <> '' do
+  begin
+    separator := Pos(',', text);
+    if separator > 0 then
+    begin
+      item := Copy(text, 1, separator - 1);
+      text := Copy(text, separator + 1, Length(text) - separator);
+    end
+    else
+    begin
+      item := text;
+      text := '';
+    end;
+    if Trim(item) = name then
+      Result := True;
+  end;
+  if (not Result) and (name = LauncherIconTask) then
+    Result := (ParamLauncherIcon = '1') or (ParamControllerIcon = '1');
+end;
+
+procedure ApplyTaskDefaults;
+var
+  names: array of String;
+  index, position: Integer;
+begin
+  SetLength(names, 4);
+  names[0] := 'startmenu';
+  names[1] := 'startmenulauncher';
+  names[2] := LauncherIconTask;
+  names[3] := 'desktopicon';
+  for index := 0 to 3 do
+  begin
+    position := WizardForm.TasksList.Items.IndexOf(names[index]);
+    if position >= 0 then
+      WizardForm.TasksList.Checked[position] := TaskRequested(names[index]);
+  end;
+end;
+
 // 0 package, 1 folder, 2 the data that is already installed.
 function ChosenGameMethod: Integer;
 var
@@ -1528,6 +1938,12 @@ begin
   gPayloadSize := PayloadSizeBytes;
   gUpdater := False;
   gUpdateTargetDir := '';
+  gLocationsUi := False;
+  gDlcAnswered := False;
+  gSaveAnswered := False;
+  gLocationAnswerFound := False;
+  gDlcValue := '';
+  gSaveValue := '';
   InitTempPaths;
 
 #ifdef UpdaterMode
@@ -1536,7 +1952,10 @@ begin
   // Both answers decide which pages exist for this run, so it is fetched before the
   // first one is shown.
   gUpdater := True;
-  gRunAtEnd := RunAtEndLauncher;
+  // The updater has no finish page: it came back to Controller Settings, so it
+  // returns there when it is done. ResolveRunAtEnd says the same thing - this is
+  // only the state before it runs.
+  gRunAtEnd := RunAtEndController;
   if not FetchUpdateManifest then
   begin
     Result := False;
@@ -1570,8 +1989,6 @@ begin
 end;
 
 procedure InitializeWizard;
-var
-  index: Integer;
 begin
   gAppDir := '';
 
@@ -1627,29 +2044,53 @@ begin
   MethodPage.CheckListBox.OnClick := @MethodChoiceChanged;
   UltimatePage.CheckListBox.OnClick := @UltimateChoiceChanged;
 
+  // The install folder page asks for three locations, so it grows two rows: the DLC
+  // library and the save folder. They are created here rather than on a page of their
+  // own because they belong to the same answer as the install folder - they are
+  // stored in paths.toml inside it - and Inno Setup's page keeps its own row first.
+  DlcPromptLabel := TNewStaticText.Create(WizardForm);
+  DlcPromptLabel.Parent := WizardForm.DirEdit.Parent;
+  DlcPromptLabel.Caption := 'DLC folder (optional):';
+  DlcPathEdit := TNewEdit.Create(WizardForm);
+  DlcPathEdit.Parent := WizardForm.DirEdit.Parent;
+  DlcPathEdit.OnChange := @LocationFieldChanged;
+  DlcBrowseButton := TNewButton.Create(WizardForm);
+  DlcBrowseButton.Parent := WizardForm.DirEdit.Parent;
+  DlcBrowseButton.Caption := 'Browse...';
+  DlcBrowseButton.OnClick := @DlcBrowseClick;
+
+  SavePromptLabel := TNewStaticText.Create(WizardForm);
+  SavePromptLabel.Parent := WizardForm.DirEdit.Parent;
+  SavePromptLabel.Caption := 'Saved games (optional):';
+  SavePathEdit := TNewEdit.Create(WizardForm);
+  SavePathEdit.Parent := WizardForm.DirEdit.Parent;
+  SavePathEdit.OnChange := @LocationFieldChanged;
+  SaveBrowseButton := TNewButton.Create(WizardForm);
+  SaveBrowseButton.Parent := WizardForm.DirEdit.Parent;
+  SaveBrowseButton.Caption := 'Browse...';
+  SaveBrowseButton.OnClick := @SaveBrowseClick;
+
+  LocationStatusLabel := TNewStaticText.Create(WizardForm);
+  LocationStatusLabel.Parent := WizardForm.DirEdit.Parent;
+  gLocationsUi := True;
+
   StagePage := CreateOutputProgressPage('Installing',
     'The installer is building your game folder. This takes a few minutes for the game data.');
 
   RefreshMethodPage;
   UpdateMethodPicker;
   UpdateUltimatePicker;
+  LayoutLocationFields;
+  // The page the folder starts on, and whatever paths.toml or the user's old launcher
+  // profile already say about the other two. A silent install has no page to change
+  // them on, so this is also what it will write.
+  PrefillLocations;
 
-  // Nothing is preselected on the Shortcuts page: it asks, so it starts from no
-  // answer rather than from a guess about what the user wants. A silent install
-  // has no page to ask on and still creates the two Start-menu shortcuts, and the
-  // launcher's desktop one when /LAUNCHERICON=1 asks for it (README.md), so the
-  // unchecked state is the wizard's alone.
-  if not WizardSilent then
-  begin
-    for index := 0 to WizardForm.TasksList.Items.Count - 1 do
-      WizardForm.TasksList.Checked[index] := False;
-  end
-  else if ParamLauncherIcon <> '1' then
-  begin
-    index := WizardForm.TasksList.Items.IndexOf(LauncherIconTask);
-    if index >= 0 then
-      WizardForm.TasksList.Checked[index] := False;
-  end;
+  // Nothing is preselected on the Shortcuts page unless the command line asked for
+  // it: the [Tasks] declarations are unchecked, UsePreviousTasks=no keeps an earlier
+  // install's answer from reappearing, and /TASKS or /MERGETASKS is what ticks one.
+  // A silent install has no page to ask on, so this is also what it creates.
+  ApplyTaskDefaults;
 
   // D8: the finish page's choice. The [Run] entry is gone; these three radios
   // replace it, and DeinitializeSetup runs whichever is selected. RunList is
@@ -1659,9 +2100,9 @@ begin
   EndGameRadio.Parent := WizardForm.FinishedPage;
   EndGameRadio.OnClick := @EndGameRadioClick;
 
-  EndLauncherRadio := TNewRadioButton.Create(WizardForm);
-  EndLauncherRadio.Parent := WizardForm.FinishedPage;
-  EndLauncherRadio.OnClick := @EndLauncherRadioClick;
+  EndControllerRadio := TNewRadioButton.Create(WizardForm);
+  EndControllerRadio.Parent := WizardForm.FinishedPage;
+  EndControllerRadio.OnClick := @EndControllerRadioClick;
 
   EndNothingRadio := TNewRadioButton.Create(WizardForm);
   EndNothingRadio.Parent := WizardForm.FinishedPage;
@@ -1705,14 +2146,29 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   answer: Integer;
+  problem: String;
 begin
   Result := True;
   if WizardSilent then
     Exit;
 
+  // The install folder page asks three questions, and the two new ones are checked
+  // the same way the game-files page checks its source: before the wizard moves on,
+  // so a folder the game could not use is refused on the page rather than after the
+  // install has spent minutes on it.
   if CurPageID = wpSelectDir then
   begin
     RefreshMethodPage;
+    PrefillLocations;
+    problem := CheckLocations(False);
+    if problem <> '' then
+    begin
+      SuppressibleMsgBox('The DLC folder or the save folder cannot be used:' + kCrLf + kCrLf +
+                         problem + kCrLf + kCrLf +
+                         'Pick another folder, or leave the box empty to use the game''s own.',
+                         mbError, MB_OK, IDOK);
+      Result := False;
+    end;
     Exit;
   end;
 
@@ -1874,6 +2330,18 @@ begin
     if gFailureText <> '' then
     begin
       Result := 'That package cannot be used: ' + gFailureText;
+      Exit;
+    end;
+  end;
+
+  // The folder page's two answers are checked once more here, because a silent
+  // install never saw that page and because the folder may have changed since it did.
+  if PathsAnswered then
+  begin
+    problem := CheckLocations(False);
+    if problem <> '' then
+    begin
+      Result := 'The DLC folder or the save folder cannot be used: ' + problem;
       Exit;
     end;
   end;
@@ -2066,6 +2534,13 @@ begin
   else
     args := args + ' --ultimate 0';
 
+  // The two folder answers are recorded in the manifest and the report as the user
+  // gave them. The file the game reads is written by the stage after this one, once
+  // the install and this record are on disk.
+  if PathsAnswered then
+    args := args + ' --dlc-dir ' + QuoteArg(ChosenDlcDir) +
+            ' --save-dir ' + QuoteArg(ChosenSaveDir);
+
   if not RunStage('Finishing up', 'Writing the install manifest and the report...', args,
                   FinalizeStart, FinalizeEnd) then
   begin
@@ -2073,6 +2548,24 @@ begin
     SuppressibleMsgBox('The install manifest could not be written:' + kCrLf + kCrLf + problem +
                        kCrLf + kCrLf + 'The game itself is installed; see ' + gLogFile + '.',
                        mbError, MB_OK, IDOK);
+  end;
+
+  // The two folders go into paths.toml only now, after the install and its manifest
+  // succeeded: cancelling or failing earlier must leave the previous configuration
+  // exactly as it was (§9.1). Nothing is written when nobody answered - a silent
+  // install that was asked nothing, or an update, which has no folder page - so a
+  // configuration the user already has is never replaced by an empty one.
+  if PathsAnswered then
+  begin
+    args := 'write-paths --dest ' + QuoteArg(gAppDir) +
+            ' --dlc-dir ' + QuoteArg(ChosenDlcDir) +
+            ' --save-dir ' + QuoteArg(ChosenSaveDir);
+    if not RunStage('Saving your folders',
+                    'Writing paths.toml, the file the game reads both locations from...', args,
+                    PathsStart, PathsEnd) then
+      SuppressibleMsgBox('Your folder choices could not be saved:' + kCrLf + kCrLf + gFailureText +
+                         kCrLf + kCrLf + 'The game is installed, but it will use its own folders ' +
+                         'until this is fixed. See ' + gLogFile + '.', mbError, MB_OK, IDOK);
   end;
 
   EndStages;
@@ -2176,6 +2669,22 @@ begin
   if '{#PayloadCommit}' <> '' then
     lines := lines + ' (commit ' + Copy('{#PayloadCommit}', 1, 12) + ')';
 
+  lines := lines + NewLine;
+  // The two locations the folder page asked for, so the last look before anything is
+  // written names them (§9.2). "The game's own folder" is what an empty answer means,
+  // and an update - which was asked nothing - says nothing.
+  if PathsAnswered then
+  begin
+    if ChosenDlcDir = '' then
+      lines := lines + Space + 'DLC: the game''s own folder' + NewLine
+    else
+      lines := lines + Space + 'DLC: ' + ChosenDlcDir + NewLine;
+    if ChosenSaveDir = '' then
+      lines := lines + Space + 'Saved games: the game''s own folder' + NewLine
+    else
+      lines := lines + Space + 'Saved games: ' + ChosenSaveDir + NewLine;
+  end;
+
   // Inno Setup's own Memo* strings carry no line break of their own at either
   // end, so every section boundary is written here: one break to close the last
   // line, one to leave the blank line that keeps the sections apart. Without them
@@ -2203,6 +2712,15 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   LayoutWizardButtons;
+  // The two rows this release adds to the install folder page are prefilled and
+  // checked every time the page appears: the install folder may have changed since
+  // it was last shown, and what paths.toml already says is a function of it.
+  if CurPageID = wpSelectDir then
+  begin
+    LayoutLocationFields;
+    PrefillLocations;
+    CheckLocations(True);
+  end;
   // The game files page and the mod's page own their pickers: which one is shown,
   // and what it is called, follows the radio that is selected, and the installed
   // data item only stays offered while there is data to keep.
@@ -2219,14 +2737,14 @@ begin
   if gUpdater or gFailed or WizardSilent then
   begin
     EndGameRadio.Visible := False;
-    EndLauncherRadio.Visible := False;
+    EndControllerRadio.Visible := False;
     EndNothingRadio.Visible := False;
     Exit;
   end;
   gFinishReached := True;
   LayoutFinishChoices;
   EndGameRadio.Checked := gRunAtEnd = RunAtEndGame;
-  EndLauncherRadio.Checked := gRunAtEnd = RunAtEndLauncher;
+  EndControllerRadio.Checked := gRunAtEnd = RunAtEndController;
   EndNothingRadio.Checked := gRunAtEnd = RunAtEndNothing;
 end;
 
@@ -2250,7 +2768,7 @@ begin
     exePath := ExpandConstant('{app}\{#GameExeName}');
     parameters := '--game_data_root=' + QuoteArg(ExpandConstant('{app}\{#GameDirName}'));
   end
-  else if gRunAtEnd = RunAtEndLauncher then
+  else if gRunAtEnd = RunAtEndController then
   begin
     exePath := ExpandConstant('{app}\{#LauncherExeName}');
     parameters := '';

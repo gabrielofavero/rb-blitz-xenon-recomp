@@ -1,14 +1,14 @@
-# In-game Advanced Settings and Controller Settings
+# In-game Help & Options and Controller Settings
 
-Status: investigated implementation plan; no feature implementation or new runtime validation in this planning pass.
+Status: P0–P5 have executed (§2.4 records their artifacts). This revision **re-scopes the product to one merged Help & Options screen** and re-plans P6 onward around it, adding **P5b** for the merge itself. No new runtime validation was performed in this planning pass.
 
-Research date: 2026-10-10. Baseline: `fd4b436`, **plus the staged song-cache work already in this checkout**. Source files take precedence over older plans. This document supersedes the launcher plan where the two disagree about settings ownership, launcher scope, resolution, or installer defaults.
+Research date: 2026-10-11 (scope change; the original investigation is dated 2026-10-10). Baseline for the executed packages: `1e40765` plus the staged song-cache work. Source files take precedence over older plans. This document supersedes the launcher plan where the two disagree about settings ownership, launcher scope, resolution, or installer defaults.
 
-Execution starting point: read sections 1–2, freeze the contracts in P0, then run P1 (native engine), P2 (render resolution), and P3 (storage) in parallel. Section 3 is the product specification; sections 4–9 define implementation contracts; section 10 assigns ownership; section 11 contains copy-ready prompts; section 12 defines completion.
+Execution starting point: read §1–§3 (the product specification), §5 (menu/bridge constraints, including the shared-list defect and the hot/restart policy), §10 (packages P5b–P12), and §11 (the live prompts; P0–P5's prompts are kept for reference only). Sections 4–9 define implementation contracts; §12 defines completion.
 
 ## 1. Outcome and confirmed requirements
 
-The game owns an **Advanced Settings** entry in its native main menu. It works with retail assets alone. An optional Ultimate adapter adds the Ultimate settings to the requested categories without copying, distributing, or editing Ultimate's source or installed archives.
+The retail **HELP & OPTIONS** screen — reached from both the main menu and the in-song pause menu — becomes the game's only settings surface. It keeps the retail rows that already live there (Controls, Calibration, Audio/Video) at the same list positions and grows four rows of our own: **General**, **Gameplay** and **Interface**, with the product's categories inside them. There is no separate Advanced Settings entry and no second settings path. It works with retail assets alone. An optional Ultimate adapter adds the Ultimate rows to their categories without copying, distributing, or editing Ultimate's source or installed archives.
 
 The former launcher becomes **Controller Settings**. The user confirmed this name and confirmed that **Resolution means actual rendered resolution**, including 1920x1080. Merely resizing the window, changing the reported Xbox video mode, or changing a label does not satisfy this requirement.
 
@@ -22,7 +22,7 @@ The user clarified the missing legends:
 
 These letters never appear in product labels. Do not implement a compound row as a web-style expanding form by assumption. Match the observed game interaction: show its enabled state, enter a choice submenu with A, and select Off/default or an enabled choice there. AA and Main Menu use this model, with details specified below.
 
-Version one saves changes and offers **A: Restart now / B: Close**. B dismisses the restart message, keeps the game running, and retains the saved changes for the next launch. Applying every setting live is explicitly outside this version's requirements.
+**Every row carries an application strategy** (§5.5). A row is `hot` when its value can be applied to the running game with a **measured** live effect, and `restart` when it cannot. The direction of travel is hot-first: the goal is that most rows apply the moment they are changed, and only what genuinely cannot goes through a restart. Version one keeps the existing **A: Restart now / B: Close** flow as the restart path, and uses it for the **Target** row as well: changing target persists the choice and offers a soft restart rather than leaving the running process on the old target. Applying an unproven row live is not allowed — a row with no evidence of a live effect stays `restart`. B dismisses the restart message, keeps the game running, and retains the saved changes for the next launch.
 
 ## 2. Important conclusions from investigation
 
@@ -101,13 +101,51 @@ In the inspected `file_exists` wrapper, `r3` is a result-storage pointer and `r4
 
 Generated partition numbers may change. Recover the owning file through `generated/default/codegen.partition.json`; never edit `generated/default/*.cpp` as the implementation.
 
-## 3. Exact menu and setting inventory
+### 2.4 What the executed packages landed (2026-10-11)
 
-The root main-menu label is **Advanced Settings**. Its children, in order, are General, Graphics, Interface, Gameplay. Remove empty Ultimate-only groups when Ultimate is absent. No settings screen depends on Guide.
+| Package | Artifact / evidence | Standing |
+| --- | --- | --- |
+| P0 | [in-game-settings-contracts.md](in-game-settings-contracts.md); baseline `1e40765`, clean tree | Contracts frozen |
+| P1 | [in-game-settings-bridge-findings.md](in-game-settings-bridge-findings.md), [in-game-settings-panel-api.md](in-game-settings-panel-api.md); `src/hooks/settings_bridge.*`, `src/ui/settings_screen.*` | Typed round trip **confirmed on the pad** (§12.3b); screen registration works; one defect open, below |
+| P2 | [in-game-settings-resolution-findings.md](in-game-settings-resolution-findings.md); SDK patch `0015` | 1080p reachable; Variant B is the product route |
+| P3 | [in-game-settings-storage.md](in-game-settings-storage.md); `src/settings/*` + tests | Storage/migration/service host-tested; boot wiring still coordinator-owned |
+| P4 | [in-game-settings-graphics-findings.md](in-game-settings-graphics-findings.md); `src/settings/{capabilities,graphics_policy}.*` | Capability and policy tested; one coordinator request still open (that doc's §7) |
+| P5 | `src/ui/settings_screen.*`, `tests/settings_screen_tests.cpp` | Built the **old** tree (Advanced Settings → General/Graphics/Interface/Gameplay); re-scoped by P5b |
+| **P5b** | [in-game-settings-merged-menu.md](in-game-settings-merged-menu.md); `src/ui/settings_screen.*` (rebuilt for the merge), 10,460 checks in ctest `settings_screen`, the payload generator in `out/_swap/p5b/make_payload.py` | **Executed for the main-menu entry.** One owned root screen with its own list resource (`settings_menu.milo`); five rows on a base install and six with the provider gate active; walk/clamp/scroll on an eight-row list; Back returns to the entry screen; the old Advanced Settings row, its screen and its locale entry are gone; installed retail records byte-identical after every boot. **One item open:** the in-song row cannot leave the pause list (measured, four arms) - see §3.1 of the handoff and §13 below |
+| **P6** | [in-game-settings-ultimate-adapter.md](in-game-settings-ultimate-adapter.md); `src/settings/ultimate_adapter.*`, the overlay's settings side (`src/fs/overlay_merge.h`, `payload_overlay.*`), the bridge's provider ends; 786 checks in ctest `ultimate_adapter` + `ultimate_adapter_payload` | **Executed.** The installed payload is inspected through its own ark index and its own definitions (6/6 required records, 8 panels, 21 persisted names, 16 defaults, 3 choice inventories) and shape-checked by name; its own file (`GAME:/ulti_settings.dta`) is redirected into user storage and **now actually writable** (measured before this pass: it existed nowhere, because the game mount is read-only); the provider's values are seeded into the store and the boot log records the guest's own open of the redirected record; every provider row carries `restart` with an empty evidence string. **Open:** the achievements action (§6.1), the combined payload's shadowed records, and `forceplot`/`which_skybox`'s screen tokens |
+| P7 | [in-game-settings-installer.md](in-game-settings-installer.md); `installer/src/paths.*`, three helper commands, the wizard's install-folder page | The three locations are one page and one `paths.toml` file; shortcuts unchecked, finish default = the game, Controller Settings terminology. 406 installer checks green, ISCC compiles, silent install/reinstall/refusal/uninstall run for real |
 
-Ultimate visibility uses three facts, not a directory boolean: payload installed, adapter compatible, and provider active in this boot. Without installation, omit U rows. When a compatible payload is installed but the current target is base, U rows may remain visible but disabled with a concise "Requires Ultimate target" explanation; they must never invoke unloaded objects. With an unrecognized payload, preserve the original mod menu as a compatibility fallback, show a concise integration-unavailable notice, and keep our native rows functional. Do not pretend a supported adapter exists.
+**The shared-list defect is fixed; one in-song constraint replaces it.** P5b's merged root drives its **own** list object: its panel names a project-owned scene record (`ui/options_menu/gen/settings_menu.milo_xbox`, the installed retail scene copied at boot under a name of ours), because two panels naming one file share one loaded dir and therefore one `options.lst`. `TestListOwnership` fails if any declaration ever names retail's scene again, and the owner's Back-from-credits symptom is gone (`shots-baseroot/11-back-menu.png`). What remains open is the **in-song entry**: retail's HELP & OPTIONS in a song is *not* a screen jump - `pause_panel` fills a second list in the same scene and the row switches focus to it - and every body that leaves the pause list instead faults the guest with `read of guest 0x00000024` (four arms in [in-game-settings-merged-menu.md](in-game-settings-merged-menu.md) §3, including one whose target screen hosted a *retail* panel, and a control that leaves the record pristine and runs clean). The shipped payload therefore leaves `ui/pause/gen/pause.dtb` alone and retail's in-song page still works, while the merge of that page's own list is the next experiment (§10.2).
+
+## 3. The merged Help & Options menu
+
+**One entry point.** The retail **HELP & OPTIONS** screen is reached from the main menu (`splash_options`) and from the in-song pause menu (`pause_options`); it becomes the single settings surface. The separate **Advanced Settings** main-menu row from the earlier scope is retired, and Ultimate's `mod_settings` row is routed into the merged screen on a working integration (kept as a fallback only for an unrecognized payload). Version one adds no second settings entry point.
+
+**Status of the two entries after P5b.** The main-menu entry reaches the merged root and is verified in a boot. The **in-song entry is still retail's own page**: retail's in-song Help & Options is not a screen jump but a focus switch to a second list inside the pause panel, and re-pointing that row at our screen faults the guest (`read of guest 0x00000024`, four arms — [in-game-settings-merged-menu.md](in-game-settings-merged-menu.md) §3). The shipped payload therefore leaves the pause record pristine; the merge of that inline list (its five symbols and its dispatch) is the next experiment, and the plan's §3 tree describes the in-song page as it will be once that lands.
+
+**Root rows, in order.** Six with Ultimate installed; `Gameplay` is omitted when it has no available rows, so a base-only install shows five.
+
+| # | Root row | Interaction | Contents |
+| --- | --- | --- | --- |
+| 0 | General | Submenu | Target, Downloadable Content, Achievements & Unlocks, How to Play, Credits |
+| 1 | Controls | Retail screen | Unchanged retail controller page |
+| 2 | Calibration | Retail wizard | Unchanged retail calibration |
+| 3 | Audio / Video | Submenu | Video group, Audio group |
+| 4 | Gameplay | Submenu (Ultimate rows only) | Precision/wiggles/camera/speed/DoF, Plots & Skyboxes, Gems |
+| 5 | Interface | Submenu | 4:3 Letterboxing, HUD, Hide Items |
+
+Two properties of that ordering are deliberate:
+
+- **The retail rows keep their positions.** Retail's list is `How to Play, Controls, Calibration, Audio/Video, Credits`; the merged list keeps `Controls`, `Calibration` and `Audio/Video` at indices 1, 2 and 3, so the route-driven acceptance scripts (`New-UiHelpRoute 1|2|3`) still land on the same screens. `General` takes the old `How to Play` slot and `Gameplay` takes the old `Credits` slot, so only the row-0 and row-4 needles change.
+- **Visibility is not a fixed row count.** Base = 5 rows, Ultimate = 6. Never ship a dead Ultimate row on a base install, and never leave an empty group behind as an unfocusable row.
+
+No settings screen depends on Guide.
+
+Ultimate visibility uses three facts, not a directory boolean: payload installed, adapter compatible, and provider active in this boot. Without installation, omit U rows. When a compatible payload is installed but the current target is base, U rows may remain visible but disabled with a concise "Requires Ultimate target" explanation; they must never invoke unloaded objects. With an unrecognized payload, preserve the original mod menu as a compatibility fallback, show a concise integration-unavailable notice, and keep our rows functional.
 
 ### 3.1 General
+
+Five rows — the same size as the retail help list that already renders here, so no new visible-slot assumption is needed at this level.
 
 | Row | Interaction | Ownership / implementation |
 | --- | --- | --- |
@@ -119,24 +157,41 @@ Ultimate visibility uses three facts, not a directory boolean: payload installed
 | Achievements & Unlocks | Submenu | Ultimate provider only. |
 | ↳ Unlock All | Boolean | Ultimate `unlockall`; existing row is a reboot-tagged boolean, **not** the earn-achievements command. Investigate actual consumers and supply persistence missing from the original saved-vars list. |
 | ↳ Unlock Online Only Achievements | Action | Invoke the existing accomplishment action once after a confirmation. It is not a stored boolean. Test with disposable save data. |
+| How to Play | Retail screen | Relocated from the retail root into General; the retail page itself is unchanged. |
+| Credits | Retail screen | Relocated from the retail root into General; the retail page itself is unchanged. |
 
 Target details:
 
+- **Target stays in the game.** Selecting a target persists the choice and then offers the §8 restart flow (A Restart now / B Close); the running process is never left silently on the old target. It stays `restart`-strategy (§5.5): `ultimate_mode`/`license_mask` are consumed before Ultimate configures, so it is not a hot-application candidate.
 - Preserve the stored vocabulary `common`, `demo`, `ultimate` through migration; labels need not expose those words.
 - A common target must set retail behavior even when Ultimate files exist. A return from Trial must reset the effective license to the purchased policy unless an explicit developer override wins.
 - On a fresh profile, retain today's automatic target outcome: Ultimate when a complete supported payload is available, otherwise base. A missing payload on first boot is not an invalid manual selection and should not produce a correction warning.
 - Existing documentation records Trial crashing before menu entry. Reproduce separately. Until repaired, show an unavailable Trial choice with a reason or omit it from runnable choices; do not silently ship a new route into that known failure. Restoring Trial is not a prerequisite for base and Ultimate settings, but its disposition must be recorded.
 - Ultimate installation remains an installer operation. Target selection does not download software or edit archives.
 
-### 3.2 Graphics
+### 3.2 Controls and Calibration
+
+Both are retail screens, reached from the merged root at the same list index they occupy today (1 and 2). Nothing about them changes: the controls page keeps its full controller inventory, and the calibration wizard keeps its shape. Their routing must survive the merge, because these are the two rows users reach most often and because `acceptance_save.ps1` drives **Help & Options → Calibration → Calibrate Manually** and asserts the offset round-trips (`docs/build-and-run.md`).
+
+### 3.3 Audio / Video
+
+The retail page keeps its root position (index 3) and gains the graphics rows inside a **Video** group. Retail's own rows on this page are console-backed through `ConsoleSaveData` (overscan, and the audio rows); do not reimplement them, and do not break their autosave path (`docs/history/bringup-log.md`, local-save work).
 
 | Row | Interaction | Mapping |
 | --- | --- | --- |
-| Resolution | Horizontal select | Full `WIDTHxHEIGHT` labels from primary-monitor modes intersected with modes the implemented render path supports. Exact render dimensions are required. See section 7. |
-| V-Sync | Boolean | `vsync`; retain 60 Hz guest timing policy. |
-| Renderer | Horizontal select | Built backends intersected with runtime usable backends. Stable values such as `d3d12`, `vulkan`; never persist list positions. |
-| Anti-aliasing | Boolean with submenu | None / Native (2x when proven for this backend/title) / FXAA / FXAA Extreme. Parent displays Off for None and On for another choice. |
-| A. Filtering | Horizontal select | Native, None, 1x, 2x, 4x, 8x, 16x, limited to backend/device capability. |
+| Video | Submenu | New group. |
+| ↳ Resolution | Horizontal select | Full `WIDTHxHEIGHT` labels from primary-monitor modes intersected with modes the implemented render path supports. Exact render dimensions are required. See §7. |
+| ↳ V-Sync | Boolean | `vsync`; retain 60 Hz guest timing policy. |
+| ↳ Renderer | Horizontal select | Built backends intersected with runtime usable backends. Stable values such as `d3d12`, `vulkan`; never persist list positions. **Not in the owner's tree** — see §3.7. |
+| ↳ Anti-aliasing | Boolean with submenu | None / Native (2x when proven for this backend/title) / FXAA / FXAA Extreme. Parent displays Off for None and On for another choice. |
+| ↳ A. Filtering | Horizontal select | Native, None, 1x, 2x, 4x, 8x, 16x, limited to backend/device capability. |
+| ↳ Overscan | Retail row | The owner's tree puts retail's Overscan here, where its framing belongs. Confirm the retail page still renders correctly with the row moved; if it does not, leave it on the Audio page and record the deviation. |
+| Audio | Submenu | The retail Audio/Video page's audio rows, unchanged in behaviour. |
+| ↳ Active Track Boost | Retail row | Console-backed; preserve the existing setter and its autosave. |
+| ↳ Sound Effects Volume | Retail row | Console-backed; preserve the existing setter and its autosave. |
+| ↳ Bass Boost | Retail row | Console-backed; already covered by the local-save persistence work. |
+
+The stored `[graphics]` table in `settings.toml` keeps its name and shape: the file layout is a storage contract, not a menu layout. Only the menu presentation moves this group under Audio/Video.
 
 AA is a single native enum, not two separately editable flags. Proposed translation, to be verified on both backends:
 
@@ -151,30 +206,9 @@ AA is a single native enum, not two separately editable flags. Proposed translat
 
 Filtering translation is established in SDK source: Native = -1, None = 0, 1x = 1, 2x = 2, 4x = 3, 8x = 4, 16x = 5. Apply only the eligible-texture semantics the renderer supports; a label of 16x must not be written as cvar value 16.
 
-### 3.3 Interface
-
-| Row | Interaction | Ownership / implementation |
-| --- | --- | --- |
-| 4:3 Letterboxing | Boolean | Ultimate `letterbox`. This is separate from the removed SDK Presentation category's `present_letterbox`. |
-| HUD | Submenu | Ultimate provider. Preserve all original HUD rows listed below. |
-| Hide Items | Submenu | Always present. |
-| ↳ Offline Mode Prompts | Boolean | `enhancements_skip_offline_dialog`; true means hide; default true. |
-| ↳ Main Menu | Boolean with submenu | Native hide master plus a complete per-row list. Replace the free-form CSV editor. |
-
-HUD inventory: Hide HUD (`hide_hud`), gold-star progress (`goldprogress`), song progress bar (`progressbar`), timer (`show_timer`), personal-best progress (`show_pb`), note streak (`show_steak`, **original spelling**), and input viewer (`input_viewer`). Use the provider's localized labels where available; do not reduce HUD to one toggle.
-
-Main Menu details:
-
-- List all actual rows by stable token and current localized name: `splash_start`, `splash_leaderboard`, `splash_achievements`, `splash_options`, `splash_upgrade` when applicable, `splash_dlc`, `splash_exit`, the new Advanced Settings entry, and compatible mod-added rows. Identify rows from the actual effective menu, including conditional availability, rather than hardcoding a list of only online options.
-- Old Ultimate `mod_settings` is replaced/routed to Advanced Settings on a supported integration; do not leave two settings entry points with conflicting ownership. Unsupported-mod fallback is an explicit exception.
-- Preserve current non-graphics defaults: hide master false; its default selected list contains the old offline rows. Turning the master on uses that list. The user's "leave as default the ones offline" is implemented as the default checked selection, not an unrequested change to the master default.
-- Show **Advanced Settings** in the list but keep it visible and non-hideable in version one, with a brief explanation. This is a deliberate recovery constraint on "list everything"; users must not remove their sole configuration entry. Ensure an OS close path remains usable if Exit Game is hidden.
-- Off disables filtering while preserving checked choices. On with an empty selected list hides nothing. Existing `HideRows` treats an empty CSV as the default list; add an explicit empty-selection representation so it cannot unexpectedly hide rows.
-- `splash_dlc` means Refresh Song Library while the cache feature is active. Default offline filtering must leave that useful action visible. An explicit user choice may hide it; give refresh an alternate native action under Downloadable Content if hidden. Do not create a second cache-refresh implementation.
-
 ### 3.4 Gameplay
 
-This category is Ultimate-only in the requested tree and disappears when it has no available rows.
+This group is Ultimate-only and disappears when it has no available rows — which is why the root is 5 rows on a base install and 6 with Ultimate. Note that this list has **eight** top-level rows (seven rows plus the Plots & Skyboxes submenu), so it is the list that most needs the visible-slot/scroll proof of §5.2 rather than an assumption about a "5-element cap".
 
 | Row | Interaction | Observed provider binding |
 | --- | --- | --- |
@@ -191,18 +225,56 @@ This category is Ultimate-only in the requested tree and disappears when it has 
 
 Do not infer that selecting "No skybox" means the forcing feature is off: the observed provider uses index 0 as default/off and another index to force no skybox. Likewise, disabling plots and selecting a forced plot need a defined precedence: keep the selected plot but make it inactive while Disable Plots is true; test actual provider behavior before adding a different rule.
 
-### 3.5 Retired interface and Controller Settings
+### 3.5 Interface
+
+| Row | Interaction | Ownership / implementation |
+| --- | --- | --- |
+| 4:3 Letterboxing | Boolean | Ultimate `letterbox`. This is separate from the removed SDK Presentation category's `present_letterbox`. |
+| HUD | Submenu | Ultimate provider. Preserve all original HUD rows listed below. |
+| Hide Items | Submenu | Always present. |
+| ↳ Offline Mode Prompts | Boolean | `enhancements_skip_offline_dialog`; true means hide; default true. |
+| ↳ Main Menu | Boolean with submenu | Native hide master plus a complete per-row list. Replace the free-form CSV editor. |
+
+HUD inventory: Hide HUD (`hide_hud`), gold-star progress (`goldprogress`), song progress bar (`progressbar`), timer (`show_timer`), personal-best progress (`show_pb`), note streak (`show_steak`, **original spelling**), and input viewer (`input_viewer`). Use the provider's localized labels where available; do not reduce HUD to one toggle.
+
+Main Menu details:
+
+- List all actual rows by stable token and current localized name: `splash_start`, `splash_leaderboard`, `splash_achievements`, `splash_options`, `splash_upgrade` when applicable, `splash_dlc`, `splash_exit`, and compatible mod-added rows. Identify rows from the actual effective menu, including conditional availability, rather than hardcoding a list of only online options. `splash_options` is the merged settings entry; hide the others, never it.
+- Old Ultimate `mod_settings` is routed into the merged screen on a supported integration; do not leave two settings entry points with conflicting ownership. Unsupported-mod fallback is an explicit exception.
+- Preserve current non-graphics defaults: hide master false; its default selected list contains the old offline rows. Turning the master on uses that list. The user's "leave as default the ones offline" is implemented as the default checked selection, not an unrequested change to the master default.
+- Show the merged settings entry (`splash_options`, the retail HELP & OPTIONS row, and the same screen from the in-song pause menu) as visible and non-hideable in version one, with a brief explanation. This is a deliberate recovery constraint on "list everything": users must not remove their sole configuration entry. Ensure an OS close path remains usable if Exit Game is hidden.
+- Off disables filtering while preserving checked choices. On with an empty selected list hides nothing. Existing `HideRows` treats an empty CSV as the default list; add an explicit empty-selection representation so it cannot unexpectedly hide rows.
+- `splash_dlc` means Refresh Song Library while the cache feature is active. Default offline filtering must leave that useful action visible. An explicit user choice may hide it; give refresh an alternate native action under Downloadable Content if hidden. Do not create a second cache-refresh implementation.
+
+### 3.6 Retired interface and Controller Settings
 
 | Old surface | New disposition |
 | --- | --- |
-| Rename Mod Settings | Remove row and normal-user toggle behavior. The integrated entry has one fixed label: Advanced Settings. Retire R10's competing rename on supported integration. |
+| Advanced Settings main-menu row | Retired. The merged Help & Options screen is the only entry point; P5's row, its locale entry, and the hide-list protection for it go with it. |
+| Ultimate `mod_settings` row | Routed to the merged screen on a supported integration; the original row is retained only on the unsupported-mod fallback path. Do not leave two settings entry points with conflicting ownership. |
+| Rename Mod Settings | Remove row and normal-user toggle behavior. The integrated entry has one fixed label — the retail help label, not a project-invented one. Retire R10's competing rename on supported integration. |
 | Menu DLC song pool size | Remove row; runtime constant 50, capped by successfully usable songs. Old profile values must not re-enable configurability. Verify package-handle lifetime and fallback on small/broken libraries. |
 | Separate native-MSAA control | Absorbed into the AA enum; no second user control. |
 | Presentation category | No new menu rows. Keep internal SDK knobs for diagnostics where needed; do not conflate them with Ultimate 4:3 Letterboxing. |
-| Audio category | No launcher/Advanced Settings rows. Existing game calibration/audio behavior remains functional. |
+| Launcher audio rows | No launcher rows; mute/buffer stay developer-only. The game's audio rows live under **Audio / Video → Audio** and are retail's own. |
 | Force monitor | No user UI. Use the primary display on ordinary boot; explicit developer flags may remain. Do not import an old forced-monitor profile value. |
 | Guide pass-through | Remove checkbox, remap target/source, capture, and project hotkey behavior. Ignore legacy Guide bindings with a migration diagnostic; enforce no Guide delivery even after remapping. |
 | Fullscreen row, absent from requested menu | Keep normal fullscreen default and existing window hotkeys; no extra menu category. Preserve a valid user's prior window preference if supported by the internal setting. |
+
+Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
+
+Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_launcher.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
+
+The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new launcher General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
+
+### 3.7 Placement decisions to confirm
+
+| Item | Why it is open | Default if unanswered |
+| --- | --- | --- |
+| **Renderer** row | The owner's tree lists Resolution, V-Sync, Anti-aliasing, A. Filtering and Overscan under Video and omits Renderer; the backend is chosen at startup and P4 publishes the capability. | Keep it in Video as a `restart` row; drop it from v1 if the tree is meant literally. |
+| **Overscan** placement | Retail draws it on the Audio/Video page; the tree moves it into Video. | Move it; record the deviation if the retail page cannot lose the row cleanly. |
+| **Visible-slot behaviour** | 5 is retail's *list size*, not a proven cap — the payload already appends a 6th row and the pause list draws 7–8, and Gameplay has 8 rows internally. | Prove it once in P5b (§5.2) rather than designing around an assumed limit. |
+| **Achievement action placement** | `Achievements & Unlocks` sits under General, but `unlockall` (provider-persisted) and the one-shot action next to it have different persistence rules. | Keep both in the same submenu; the persistence difference is internal. |
 
 Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
 
@@ -348,7 +420,7 @@ flowchart LR
     Hardware[Monitor CPU GPU probes] --> Boot
     Boot --> Service[Typed settings service]
     Service --> Bridge[Guest bridge]
-    Bridge --> Menu[Native Advanced Settings]
+    Bridge --> Menu[Merged Help and Options]
     Menu --> Bridge
     Bridge --> Service
     Service --> Preferences
@@ -368,7 +440,7 @@ Suggested new modules, with public names frozen before parallel implementation:
 | `src/settings/capabilities.*`, `reconcile.*` | Machine snapshot, backend/display eligibility, first-run policy, manual-invalid adjustment. Pure reconciliation separated from platform probes. |
 | `src/settings/service.*` | Boot/current/desired state, transactions, commit results, subscriptions, restart-required aggregation. |
 | `src/hooks/settings_bridge.*` | Guest ABI, object/array ownership, typed marshalling, bounded messages, guest-thread callbacks. |
-| `src/ui/advanced_settings.*` | Independently authored menu model, native navigation, labels, focus/back stack, confirmation/restart dialogs. |
+| `src/ui/settings_screen.*` | The merged menu: root rows, submenus, native navigation, labels, focus/back stack, confirmation/restart dialogs, and the binding to the project-owned list resource. |
 | `src/settings/ultimate_adapter.*` | Version/capability detection, calls to installed provider, save barrier, submenu return routing. |
 | `src/fs/settings_overlay.*` | Exact virtual authored resources and narrowly redirected mutable settings file; only if the spike chooses this route. |
 | `src/platform/game_restart.*` | Structured process launch context, wait-for-parent bootstrap, exactly-once restart request. |
@@ -383,9 +455,13 @@ The native-menu spike must prove all of the following before broad UI implementa
 
 1. Identify a safe guest point after data builtins and required UI types are initialized, before or when splash builds its list.
 2. Load one **authored** minimal definition through a recognized virtual resource or verified engine loader. The module must not be carved out of unused bytes in an Ultimate file or copied from its script functions.
-3. Insert one stable Advanced Settings token into the live main-menu provider and route its selection to the new screen; add its localization through a verified native lookup/provider path.
+3. Reach the merged screen from the live main menu (the retail row, or a row routed into it) and from the in-song pause menu; add its localization through a verified native lookup/provider path.
 4. Show one boolean, one horizontal choice, one nested submenu, and one compound row using only retail assets. Prove selection, back, focus restoration, scroll, and repeated enter/leave with a controller and keyboard.
 5. Verify a base-only boot with the Ultimate folder physically unavailable. `--ultimate_mode=0` with extracted Ultimate resources still accidentally mounted is not sufficient evidence.
+6. **Prove the merged root's list ownership.** The merged screen must not drive retail's `options.lst`. Measured: our panel and retail's `options_panel` load the same scene and therefore the same list object, so the two overwrite each other's rows and selection and Back lands on the retail list's last row (`credits`) — [in-game-settings-bridge-findings.md](in-game-settings-bridge-findings.md) §12.3b. The merged root therefore needs its **own list resource**: a project-owned list object assembled from retail list primitives, or an authored list. Retail's help list must stop being shared with it, and the two entry paths (main menu and in-song pause) must both arrive at the owned screen.
+7. **Prove the delivery site for a panel of ours.** The same authored panel **opens** when it is appended inside a retail record and crashes with `write of guest 0x00000200` when it lives in our own `[include]`d record (arms M vs A/B/G/H/I/J, same findings). Whatever P5b chooses must work for a panel that is ours, not only for a screen focusing a retail panel.
+
+Row-count evidence, so this is not designed around a guess: retail's help list is 5 rows (`How to Play, Controls, Calibration, Audio/Video, Credits`) and the Ultimate payload already appends `mod_settings` to it, i.e. **6** in a shape the mod ships; the in-song pause list draws **7–8**. So 5 is a retail list size, not a proven cap — but the visible-slot behaviour of the list resource is unmeasured and must be proven once (§3.7).
 
 Fallback decision order: object/script registration first; a narrowly scoped native loader interception for project-owned virtual files second. A small byte-neutral bootstrap edit is acceptable only if it has an independently proven budget in both supported splash variants and correct checksum handling. Do not shrink/delete unrelated menus to make room for the entire feature. Do not bypass all retail checksum checking. A host overlay is a diagnostic prototype, not completion of the requested layout.
 
@@ -422,17 +498,35 @@ Transport choice is an M0 gate:
 
 ### 5.4 Edit behavior
 
-Begin a session from effective values plus stored desired values. Horizontal A enters editing; directions adjust; A accepts the field; B restores that field's previous value. Backing out of a submenu restores focus and scroll to the parent row. Backing out of the Advanced Settings root commits the accepted changes, then shows one restart message if the desired state differs from the applied boot state.
+Begin a session from effective values plus stored desired values. Horizontal A enters editing; directions adjust; A accepts the field; B restores that field's previous value. Backing out of a submenu restores focus and scroll to the parent row. Backing out of the root commits the accepted changes.
 
-No changes means no disk write and no restart prompt. Change-then-revert also means no restart prompt. A save failure shows a native error with retry/back, leaves the old file intact, and must not restart. Returning later in the same process displays both the pending desired setting and a clear restart indication rather than pretending it is already applied.
+No changes means no disk write and no prompt. Change-then-revert also means no prompt. A save failure shows a native error with retry/back, leaves the old file intact, and must not restart. Returning later in the same process displays both the pending desired setting and a clear application indication rather than pretending it is already applied.
 
-For version one, all native rows are restart-scoped even when a cvar is tagged hot-reloadable. Existing Ultimate setters may already have visible live effects; preserve their established behavior where necessary, but do not promise universal live application. Restart acknowledgement and provider persistence still follow the shared contract.
+### 5.5 Application strategy: hot first, restart as the fallback
+
+Every descriptor carries an explicit application strategy, and the UI never claims more than it can deliver.
+
+| Strategy | Meaning | UI behaviour |
+| --- | --- | --- |
+| `hot` | The value can be applied to the running game with a **measured** live effect. | Commit applies it immediately; the row carries no pending state afterwards. |
+| `restart` | The value is persisted but only takes effect in a new process. | Commit saves it; leaving the root offers the §8 flow once. |
+
+Rules:
+
+- **Hot requires evidence.** A row becomes `hot` only when a live effect has been observed in a boot — a log line, a capture, or a game-state read — not because its cvar is tagged reloadable and not because a setter returned success. `Hide HUD` is today's evidence: the owner changed it on and off from the pad and the host log recorded `set` → `commit` → read-back ([in-game-settings-bridge-findings.md](in-game-settings-bridge-findings.md) §12.3b).
+- **Unproven rows stay `restart`.** `restart` is the default; the direction of travel is to move rows to `hot` as each is measured. This replaces the earlier "v1 is restart-only" rule without promising live application of anything untested.
+- **Render-path rows are structurally `restart`.** Resolution, renderer and anti-aliasing change render-target/backend state at initialization. Do not try to make them hot by re-initializing the renderer inside the menu; that is its own spike with its own gate.
+- **Target uses the restart flow deliberately.** It persists `ultimate_mode`/`license_mask`, which are consumed before Ultimate configures (§4.2), so it is not a hot candidate; its row action saves and offers the soft restart.
+- **A mixed session is normal.** One commit may apply hot rows live and leave restart rows pending; the prompt appears only if at least one restart row actually changed. P9's coordinator is unchanged by this: it still drains saves, spawns exactly one child, and waits for the parent to exit.
+- **Record the classification in the schema** so the UI, the acceptance matrix and the docs cannot drift. The per-row strategy table belongs with the descriptors, not in prose.
+
+Provider rows keep their established behaviour: where an Ultimate setter already has a visible live effect, preserve it and mark the row `hot` on that evidence; do not invent live behaviour for rows whose provider setter is only known to persist.
 
 ## 6. Ultimate adapter and persistence
 
 ### 6.1 Integration boundary
 
-Implement independent native categories and row definitions. The optional adapter discovers the installed mod's objects, checks their expected shape, reads their state, invokes their existing actions, and routes supported submenus into our navigation stack. It does not replace Ultimate with a vendored implementation.
+Implement independent native categories and row definitions. The optional adapter discovers the installed mod's objects, checks their expected shape, reads their state, invokes their existing actions, and routes supported submenus into our navigation stack. It does not replace Ultimate with a vendored implementation. In the merged tree the provider's rows land in three places: **Gameplay** (its gameplay rows, including the Plots & Skyboxes submenu), **Interface** (4:3 Letterboxing and the HUD submenu), and **General → Achievements & Unlocks** (`unlockall` and the one-shot accomplishment action).
 
 Allowed project outputs: original C++/authored menu definitions, documented observations, symbolic names, hashes, and compatibility logic. Do not commit decoded Ultimate scripts, copied helper bodies, MILOs, patched mod DTBs, ARKs, or a rebuilt Ultimate distribution. Installed input file hashes must remain unchanged after using settings. A hash mismatch is diagnostic evidence to inspect compatibility, not permission to modify the payload.
 
@@ -534,7 +628,7 @@ Use the working renderer's safe settings when measurement fails. Keep a last-kno
 
 ## 8. Restart design
 
-The visual prompt uses independently authored behavior on native retail error/confirmation resources, matching the game's style. It says changes are saved and require a restart, with **A Restart now** and **B Close** plus keyboard equivalents. A held confirm input must not trigger both save and restart twice.
+The visual prompt uses independently authored behavior on native retail error/confirmation resources, matching the game's style. It says changes are saved and require a restart, with **A Restart now** and **B Close** plus keyboard equivalents. A held confirm input must not trigger both save and restart twice. Only `restart`-strategy rows (§5.5) reach this flow — a session whose changes are all hot never prompts — and the **Target** row uses it too, so it must be correct for a target/license change and not only for graphics.
 
 State machine:
 
@@ -606,59 +700,63 @@ Do not estimate this as "move launcher settings into a menu." The native guest s
 
 | ID | Package | Dependencies | Scope | Completion evidence |
 | --- | --- | --- | --- | --- |
-| P0 | Baseline and contracts | This plan | Small | Current baseline recorded; interfaces, file ownership, and feature-gate policy frozen. |
-| P1 | Retail screen + bridge feasibility | P0 | Large investigation | Base-only screen, round-trip value, safe ABI, ownership trace, chosen loading/transport mechanism. |
-| P2 | Exact render-resolution feasibility | P0 | Extra-large investigation | Actual 1920x1080 rendering demonstrated, or precise blocking architecture findings; selected implementation route documented. |
-| P3 | Store, paths, migration, settings service | P0 | Large | SDK-free tests for durability, precedence, provenance, migration, conflicts; ready shared APIs. |
-| P4 | Graphics capabilities, exact modes, recommendations | P2 passed; P3 contracts | Extra-large | Production render path, runtime eligibility, first-run policy, hardware-change recovery, backend evidence. |
-| P5 | Full native Advanced Settings | P1 passed; P3; P4 snapshot contract | Large | All native rows, categories, focus/back/edit behavior, commit/restart message using mocks where needed then real service. |
-| P6 | Ultimate adapter and saved settings | P1 passed; P3; P5 navigation contract | Large | Reorganized U rows, provider save/readback, unlock-all persistence, inactive/absent/version handling. |
-| P7 | Installer paths and terminology | P3 path/migration APIs | Medium | Same-page locations, reinstall/silent/update cases, unchecked shortcuts, default Play action. |
+| P0 | Baseline and contracts | This plan | **Executed** | Contracts frozen in [in-game-settings-contracts.md](in-game-settings-contracts.md); baseline `1e40765`. |
+| P1 | Retail screen + bridge feasibility | P0 | **Executed** | Screen registration works and the typed round trip is confirmed on the pad; G1 closed except the shared-list defect, which P5b owns. |
+| P2 | Exact render-resolution feasibility | P0 | **Executed** | 1080p reachable, Variant B chosen. |
+| P3 | Store, paths, migration, settings service | P0 | **Executed** | Host tests green; boot wiring still coordinator-owned. |
+| P4 | Graphics capabilities, exact modes, recommendations | P2, P3 | **Executed**; one request open | Capability and policy tested; the Variant B midasm hook still needs one boot (§7 of the graphics findings). |
+| P5 | Full native menu (old tree) | P1, P3, P4 | **Executed**; re-scoped | `src/ui/settings_screen.*` builds the old Advanced Settings tree. Superseded for layout by P5b. |
+| **P5b** | **Merge into Help & Options** | P5 | Large | **Executed for the main-menu entry.** Its own list resource (`settings_menu.milo`), six root rows (five on base), the retail sub-screens routed from their new parents, Back correct from the main menu, the old entry points retired, an eight-row list proven to scroll. **Open:** the in-song entry cannot leave the pause list - the payload keeps retail's pause record, the in-song page stays retail's own, and the merge of that page's inline `options.lst` is the next experiment ([in-game-settings-merged-menu.md](in-game-settings-merged-menu.md) §3.1) |
+| P6 | Ultimate adapter and saved settings | P1; P3; P5b navigation contract | Large | **Executed** — [in-game-settings-ultimate-adapter.md](in-game-settings-ultimate-adapter.md). The payload's own ark index and definitions are read and shape-checked, its one mutable file is redirected into user storage and can now be written at all, the provider's values and choice inventories reach the store, and the row bindings carry a strategy with its evidence. Open: the achievements action, the combined payload, and two placeholder choice tokens |
+| P7 | Installer paths and terminology | P3 path/migration APIs | Medium | **Executed** — [in-game-settings-installer.md](in-game-settings-installer.md); same-page locations, reinstall/silent/update cases, unchecked shortcuts, default game action, one game-side follow-up (`settings::ResolvePathValue` decoding UTF-8) |
 | P8 | Controller Settings reduction and Guide removal | P3; native replacement gates before cutover | Medium | All prior non-Guide controls work; no Guide reaches guest; old shortcuts/profile compatible. |
-| P9 | Restart coordinator | P1 bridge contract; P3 save service; P6 completion contract | Large | One child, save barrier, parent-exit wait, direct target-correct restart, failure recovery. |
-| P10 | Existing menu/cache compatibility cleanup | P3; P5 menu descriptor contract | Medium | Complete hide list, explicit empty selection, refresh interaction, pool 50, obsolete toggles retired. |
-| P11 | Integration and default cutover | P4–P10 | Large | New path is default; old full launcher UI removed; consistent boot/settings/installer behavior. |
+| P9 | Hot apply and restart coordinator | P5b; P3 save service; P6 completion contract | Large | Per-row strategy recorded; proven hot rows apply live; one child, save barrier, parent-exit wait; Target prompt + soft restart; failure recovery. |
+| P10 | Merged menu compatibility cleanup | P3; P5b descriptor contract | Medium | Hide list covers every merged row including the protected root; explicit empty selection; refresh interaction; pool 50; obsolete toggles retired. |
+| P11 | Integration and default cutover | P5b–P10 | Large | New path is default; old full launcher UI removed; consistent boot/settings/installer behavior. |
 | P12 | Release acceptance and documentation | P11 | Medium–large | Evidence matrix complete, regression checks pass, distributions contain no copied content. |
 
 ### 10.2 Dependency graph and bounded concurrency
 
 ```mermaid
 flowchart TD
-    P0 --> P1
-    P0 --> P2
-    P0 --> P3
-    P2 --> P4
+    P0[P0 contracts done] --> P1[P1 screen + bridge done]
+    P0 --> P2[P2 resolution done]
+    P0 --> P3[P3 storage done]
+    P2 --> P4[P4 graphics done]
     P3 --> P4
-    P1 --> P5
+    P1 --> P5[P5 old tree done]
     P3 --> P5
-    P1 --> P6
+    P4 --> P5
+    P5 --> P5b[P5b merge into Help and Options]
+    P5b --> P6[P6 Ultimate adapter]
+    P5b --> P9[P9 hot apply and restart]
+    P5b --> P10[P10 merged menu compatibility]
+    P5b --> P11[P11 integrate and cut over]
     P3 --> P6
-    P3 --> P7
-    P3 --> P8
-    P1 --> P9
+    P3 --> P7[P7 installer]
+    P3 --> P8[P8 Controller Settings]
     P3 --> P9
-    P3 --> P10
-    P4 --> P11
-    P5 --> P11
+    P6 --> P9
     P6 --> P11
     P7 --> P11
     P8 --> P11
     P9 --> P11
     P10 --> P11
-    P11 --> P12
+    P11 --> P12[P12 acceptance]
 ```
 
-Some edges above are contract dependencies rather than a requirement to wait for all implementation. P5/P6/P9 may use frozen mock interfaces while their providers are developed, but no package passes integration using mocks. Actual execution is limited to **three workers plus one coordinator/reviewer**:
+Some edges above are contract dependencies rather than a requirement to wait for all implementation. P5b/P6/P9 may use frozen mock interfaces while their providers are developed, but no package passes integration using mocks. Actual execution is limited to **three workers plus one coordinator/reviewer**:
 
 | Wave | Worker A | Worker B | Worker C | Coordinator |
 | --- | --- | --- | --- | --- |
-| 0 | — | — | — | P0; record contracts and baseline. |
-| 1 | P1 guest screen/ABI | P2 exact-resolution spike | P3 storage/service | Review evidence, own build wiring, resolve contract changes. |
-| 2 | P5 native menu after P1 | P4 graphics after P2 | P7 installer after P3 | Integrate storage boot path; freeze provider/restart navigation interfaces. |
-| 3 | P6 Ultimate after native shell contract | Finish P4, then P9 restart | P10 menu/cache compatibility, then P8 Controller Settings | Integrate hooks in agreed order; run shared smoke checks. |
-| 4 | P12 base/menu matrix | P12 graphics/restart matrix | P12 installer/controller/Ultimate matrix | P11 cutover first, then final P12 evidence/release review. |
+| 0 (done) | — | — | — | P0: contracts and baseline recorded. |
+| 1 (done) | P1 guest screen/ABI | P2 exact-resolution spike | P3 storage/service | Reconciled contracts; wrote the findings docs. |
+| 2 (done) | P5 native menu (old tree) | P4 graphics, then recommendations | P7 installer after P3 | Kept the launcher gate; froze provider/restart navigation interfaces. |
+| 3 | **P5b: the merge** — owns the merged screen, its list resource and its routes (**done for the main-menu entry**; the in-song row is measured non-re-pointable and the merge of the pause panel's inline list is the follow-up) | P6 Ultimate adapter once P5b freezes the navigation contract | P7 finish, then P8 Controller Settings | Boot wiring, `config/functions.toml` hook, packaging, patch-record generation. |
+| 4 | P9 hot-apply + restart after P5b/P6 | P10 merged-menu compatibility | Remaining P8 work | Integrate hooks in the agreed order; run shared smoke checks. |
+| 5 | P12 base/menu/hot-apply matrix | P12 graphics/restart matrix | P12 installer/controller/Ultimate matrix | P11 cutover first, then final P12 evidence/release review. |
 
-If P2 finds that true 1080p requires substantial SDK work, the storage/installer/menu lanes can continue, but the user-requested feature remains incomplete until P4 passes. Do not resolve that delay by changing Resolution to an output-size selector or deleting the requested option. If P1 fails, retain the current UI while continuing independent storage/graphics investigation; do not ship an inaccessible settings system.
+If P4's Variant B hook turns out not to take effect, the storage/installer/menu lanes continue, but the resolution feature stays incomplete until the measured Variant A fallback or a whole-function override is chosen. Do not resolve that delay by changing Resolution to an output-size selector or deleting the requested option. If P5b cannot give the merged root its own list resource, do not ship a screen that shares `options.lst`: keep the retail help screen and put our rows behind one owned submenu until a list resource exists — a corrupt or inaccessible settings system is worse than a deeper tree.
 
 ### 10.3 Shared-file ownership and merge rules
 
@@ -666,10 +764,10 @@ If P2 finds that true 1080p requires substantial SDK work, the storage/installer
 | --- | --- |
 | Root `CMakeLists.txt`, `src/rb_blitz_app.h`, `src/main.cpp`, `config/functions.toml`, packaging integration | Coordinator. Workers provide exact proposed additions or a small integration patch. |
 | `src/settings/model.*`, `schema.*`, `store.*`, `migration.*`, `paths.*`, `service.*` | P3; API changes reviewed by coordinator and communicated before consumers change. |
-| `src/hooks/settings_bridge.*`, authored virtual resource bootstrap | P1, then P5 after explicit handoff. |
+| `src/hooks/settings_bridge.*`, authored virtual resource bootstrap | P1, then P5b after explicit handoff. |
 | Existing `Nt*` import hooks / dispatch ownership | Coordinator with P1 and P10 input; one strong definition per import. |
 | Graphics SDK modifications and `patches/rexglue-sdk` graphics entries | P2 then P4, sequentially. Other workers request SDK changes through coordinator. |
-| New native menu code and schema | P5. P6 uses provider extension points, not edits to P5's menu file in parallel. |
+| New native menu code, the merged root screen, and its list resource | P5b. P6 uses provider extension points, not edits to P5b's menu file in parallel. |
 | Ultimate adapter and exact-file routing | P6; coordinate VFS dispatch hooks centrally. |
 | `installer/setup.iss`, installer helper, pins/template labels, installer tests | P7. P9 must not repurpose installer helpers without agreement. |
 | `launcher/`, `src/input/remap.*`, controller parts of `src/launcher/` | P8 after P3 has finished migration/profile changes. |
@@ -686,6 +784,7 @@ Every handoff includes: owned files changed, contract version, behavior implemen
 | --- | --- |
 | G0 contracts | Stable IDs/types, config locations, migration mapping, value-source semantics, bridge requests, provider save acknowledgement, and ownership are recorded. |
 | G1 native feasibility | Base-only runtime opens the independent native screen; all four row kinds navigate; one edit round-trips without leaks/crashes; installed files unchanged. |
+| G1b merged root | The help screen is one owned screen: its own list resource, six root rows (five on base), Back reaches the correct entry screen from both the main menu and the in-song pause menu, no row dispatches through retail `options.lst`, and a list longer than five rows is proven to navigate. |
 | G2 graphics feasibility | Actual 1920x1080 render path proven with target/viewport/resolve evidence; selected route and remaining backend work are explicit. |
 | G3 persistence | Direct boot consumes the same target/settings as UI boot; atomic writes, malformed files, interrupted migration, and concurrent edits pass host tests and a real save/relaunch check. |
 | G4 integration | Both supported targets pass full menu/save/restart flow; installer and Controller Settings work without the old settings UI. |
@@ -694,6 +793,8 @@ Every handoff includes: owned files changed, contract version, behavior implemen
 ## 11. Copy-ready execution prompts
 
 Use the common prefix plus exactly one package prompt. Do not give an execution agent the whole feature as a single "implement this plan" task.
+
+**P0–P5 have executed**; their prompts are kept below for reference and must not be re-issued. The live prompts are **P5b** and **P6–P12**.
 
 ### Common prefix
 
@@ -721,7 +822,7 @@ deliver the evidence and narrowed next experiment; do not call a substitute UI
 or output-size change completion. Ask the coordinator for shared-file wiring.
 ```
 
-### P0 — Freeze contracts and baseline
+### P0 — Freeze contracts and baseline (executed)
 
 ```text
 Act as the integration owner. Record the current commit plus staged/unstaged
@@ -744,7 +845,7 @@ Hand out P1/P2/P3 only after their contracts are sufficient for independent work
 Done: G0 and a concrete integration/ownership record, not production cutover.
 ```
 
-### P1 — Prove a retail native screen and a typed bridge
+### P1 — Prove a retail native screen and a typed bridge (executed)
 
 ```text
 Own src/hooks/settings_bridge.* and a minimal original native menu prototype.
@@ -771,7 +872,7 @@ matching; do not create duplicate Nt* hook definitions. Document any resource
 formatting gap. Done: G1 with captures and traces; hand the bridge/shell to P5.
 ```
 
-### P2 — Prove exact 1080p rendering
+### P2 — Prove exact 1080p rendering (executed)
 
 ```text
 Own an isolated graphics investigation branch and build output. Read section 7,
@@ -796,7 +897,7 @@ SDK patch scope, and remaining risks. G2 needs real 1080p proof, not a promise.
 Hand the chosen route and specific unfinished backend work to P4.
 ```
 
-### P3 — Implement storage, migration, and the native settings service
+### P3 — Implement storage, migration, and the native settings service (executed)
 
 ```text
 Own src/settings/{model,schema,store,migration,paths,service} and associated tests.
@@ -823,7 +924,7 @@ wiring recommendations using the actual SDK ordering in section 4.2; coordinator
 owns rb_blitz_app.h and root CMake. Supply contracts ready for P4–P10.
 ```
 
-### P4 — Implement graphics eligibility, real modes, and first-run policy
+### P4 — Implement graphics eligibility, real modes, and first-run policy (executed; Variant B hook open)
 
 ```text
 Requires successful P2 and P3 contracts. Own capabilities/reconcile and the chosen
@@ -850,7 +951,7 @@ and selector choices to P5. Record untested hardware honestly; do not list unusa
 backends just because their DLL or Vulkan loader is present.
 ```
 
-### P5 — Build the complete native menu
+### P5 — Build the complete native menu (executed — old tree, re-scoped by P5b)
 
 ```text
 Requires P1's proven shell/bridge and P3 APIs; consume P4's frozen capability schema.
@@ -876,25 +977,67 @@ including long resolution lists and changed capabilities. Hand the provider rout
 interface to P6. Do not delete the full launcher until the coordinator approves G4.
 ```
 
+### P5b — Merge into Help & Options
+
+```text
+Own the merged root screen: src/ui/settings_screen.* and its list resource. Read
+plan section 3 (the exact tree and root order) and section 5.2 items 6-7, plus
+docs/plans/in-game-settings-bridge-findings.md section 12.3b (the shared-list/Back
+defect measured on the owner's own boot).
+
+Fix the measured defect rather than working around it: our panel and retail's
+options_panel load the same scene and drive the same list object (options.lst in
+options_menu.milo), so the two overwrite each other's rows and selection and Back
+lands on the retail list's last row. The merged root must have its OWN list
+resource; retail's options.lst must not be the merged root's list. Also verify the
+delivery site for a panel of ours: the same definition opens when appended inside a
+retail record and crashes with write of guest 0x00000200 when it lives in our own
+[include]d record.
+
+Build the six root rows in the order of section 3 and route the retail sub-screens
+(controls, calibration, how to play, credits) from their new parents without
+changing those screens. Retire P5's Advanced Settings main-menu row and its locale
+entry. Route Ultimate's mod_settings row into the merged screen on a supported
+integration and keep it only as the unsupported-payload fallback.
+
+Prove with a boot: both entries (main menu and in-song pause) reach the same owned
+screen; Back from the merged root and from every child returns to the correct
+screen; a list longer than five rows scrolls while keeping selection and focus
+correct; base-only (five rows, no Ultimate row) and Ultimate (six rows) both work;
+installed retail/Ultimate records are unchanged. Record which retail list primitive
+the owned resource is built from, or that it is authored, with the evidence.
+
+Done: G1b with captures and traces. Keep the development gate until the coordinator
+approves cutover; do not delete the launcher surface here. Hand the frozen
+navigation contract to P6 and the descriptor/row-identity seam to P10.
+```
+
 ### P6 — Integrate Ultimate without modifying its distribution
 
 ```text
 Own ultimate_adapter and exact settings-file routing. Read section 6 and inspect
 the user's installed payload read-only. Verify fingerprints and runtime object/row
-shapes; do not copy its script functions into the project. Use P1's verified ABI.
+shapes; do not copy its script functions into the project. Use P1's verified ABI
+and P5b's frozen navigation contract.
 
-Provide the complete U inventory in section 3, preserving HUD's eight fields,
-camera and speed choices, installed plot/skybox/gem choices, and one-shot achievement
-semantics. Route reused submenus back into the new parent and restore original
-focus/state. Suppress the old mod-settings main-menu entry only when the integration
-is working; retain it on unsupported-mod fallback. Test absent, inactive, partial,
-known-compatible, and unknown-shaped payload states.
+Place the U rows where section 3 puts them: Gameplay (gameplay rows plus the Plots
+and Skyboxes submenu), Interface (4:3 Letterboxing and the HUD submenu), and
+General -> Achievements & Unlocks. Preserve HUD's eight fields, camera and speed
+choices, installed plot/skybox/gem choices, and one-shot achievement semantics.
+Route reused submenus back into the new parent and restore original focus/state.
+Suppress the old mod-settings entry only when the integration is working; retain it
+on unsupported-mod fallback. Test absent, inactive, partial, known-compatible, and
+unknown-shaped payload states.
 
 Trace mod_settings_rw save/load through the real file path. Implement a narrow,
 durable redirect for ulti_settings.dta into user storage, legacy-file import,
 and an acknowledged provider save barrier; do not make GAME: writable. Preserve
 unexposed fields and controller_mapping. Investigate unlockall consumption and
 persist an explicit host override after provider initialization at the right time.
+
+Report each U row's application strategy with evidence (plan section 5.5): a row is
+hot only if a live effect was observed, otherwise it stays restart. Do not mark a
+row hot because its setter returned success.
 
 Test U edit -> leave -> file write -> restart -> same U value and gameplay behavior.
 Use disposable saves for achievement actions. Verify installed ARK/DTB/MILO hashes
@@ -952,18 +1095,27 @@ legacy profiles/shortcuts remain usable; the utility does not overwrite native
 settings or paths. Until G4, keep the reduced shell behind the development gate.
 ```
 
-### P9 — Save and restart the game
+### P9 — Apply hot rows, and restart for the rest
 
 ```text
-Requires the P1/P3/P6 save and request contracts. Own game_restart module and tests;
+Requires the P5b navigation contract, the P3 save service and the P6 completion
+contract. Own the application strategy seam and the game_restart module and tests;
 coordinate src/main.cpp/bootstrap/payload wiring with the integration owner.
-Read section 8 and SDK ReXApp::OnClosing: it calls std::_Exit. Never put required
-saving or child launch only in OnShutdown or destructors.
+Read section 5.5, section 8, and SDK ReXApp::OnClosing: it calls std::_Exit. Never
+put required saving or child launch only in OnShutdown or destructors.
 
-Implement exactly-once restart requests after native/provider/game saves drain.
-Handle active DLC refresh using its real lifecycle. Rebuild a structured launch
-context preserving root/profile/dev identity, excluding old generated setting flags
-and consumed one-shot arguments. Prove Windows quoting and Unicode handling.
+Record each row's strategy in the schema: hot, or restart. hot requires observed
+live-effect evidence; everything else is restart. Implement live application for
+the rows proven hot (Hide HUD is the current example) so a commit applies them
+without a prompt. Render-path rows (resolution, renderer, anti-aliasing) are
+structurally restart; do not re-initialize the renderer from the menu.
+
+Implement exactly-once restart requests after native/provider/game saves drain,
+and only when at least one restart-strategy row changed. Handle active DLC refresh
+using its real lifecycle. Rebuild a structured launch context preserving
+root/profile/dev identity, excluding old generated setting flags and consumed
+one-shot arguments, and carrying the newly persisted target. Prove Windows quoting
+and Unicode handling.
 
 Choose and implement a bootstrap that waits for the parent's verified process
 identity before any SDK/game initialization. Prefer an early self-executable mode
@@ -973,33 +1125,39 @@ prevent loops/duplicate children. B only dismisses the restart prompt and leaves
 saved pending settings for later.
 
 Done: tests plus process-level evidence for direct/installer/portable launches,
-target switch, failed save, failed spawn, slow parent exit, repeated A/held input,
+target switch (prompt -> save -> one child -> new target effective), all-hot commit
+with no prompt, failed save, failed spawn, slow parent exit, repeated A/held input,
 and close-later boot. Prove the second process reads the acknowledged revision
 and no simultaneous title instances write the same saves during handoff.
 ```
 
-### P10 — Reconcile menu hiding, refresh, and retired settings
+### P10 — Merged-menu compatibility, hide list, refresh, and retired settings
 
 ```text
 Own the existing menu_options/menu_filter/enhancements/shell_music seams after
 agreement with the coordinator. Preserve staged cache refresh and progress work.
-Use P5's menu descriptor IDs; enumerate all actual menu entries with localized
-names and conditional availability. Implement the hide master plus explicit
-selected-row set. Off retains choices; On with [] hides nothing. Keep Advanced
-Settings reachable. Default offline rows must not hide Refresh Song Library when
-splash_dlc has that job; provide the agreed alternate refresh action when explicitly
-hidden. Reuse the existing asynchronous request/publication path.
+Use P5b's menu descriptor IDs; enumerate all actual menu entries with localized
+names and conditional availability.
+
+Implement the hide master plus explicit selected-row set. Off retains choices; On
+with [] hides nothing. The protected entry is now the retail Help & Options row,
+not an Advanced Settings row: keep it reachable and non-hideable with a brief
+explanation, and make sure hiding a main-menu row cannot strand the merge's entry
+point or any child route. Default offline rows must not hide Refresh Song Library
+when splash_dlc has that job; provide the agreed alternate refresh action when
+explicitly hidden. Reuse the existing asynchronous request/publication path.
 
 Replace the menu-song count input with a fixed 50-song maximum selection, bounded
 by valid library contents. Check package handles, teardown, invalid/short libraries,
 and refresh while music plays. Retire the normal-user rename toggle without letting
-its old locale transform overwrite Advanced Settings. Remove old schema behavior
-for deleted categories without removing internal SDK diagnostics unnecessarily.
+its old locale transform overwrite the merged root's label. Remove old schema
+behavior for deleted categories (including P5's Advanced Settings row) without
+removing internal SDK diagnostics unnecessarily.
 
 Do not add competing strong Nt* definitions or bypass the existing checksum/split-
 read rules. Submit dispatch wiring to the coordinator. Done: host fixtures cover
-all/none/custom/conditional hide cases, both menu variants, protected settings row,
-and refresh interaction; runtime proves refresh still animates/responds and the
+all/none/custom/conditional hide cases, both menu variants, the protected merged
+root, and refresh interaction; runtime proves refresh still animates/responds and the
 50-song pool policy takes effect despite legacy saved values.
 ```
 
@@ -1008,19 +1166,26 @@ and refresh interaction; runtime proves refresh still animates/responds and the
 ```text
 Act as integration owner. Merge only completed packages on the preserved baseline.
 Own boot ordering, central import dispatch, root CMake, symbol registrations,
-schema generation, SDK patch application, and packaging. Reconcile final config
-roots after rb_blitz.toml, graphics before presentation, target before Ultimate,
-provider discovery after guest initialization, and cvar locking before launch.
+schema generation, SDK patch application, config/functions.toml (P4's midasm hook),
+and packaging. Reconcile final config roots after rb_blitz.toml, graphics before
+presentation, target before Ultimate, provider discovery after guest initialization,
+and cvar locking before launch.
+
+Own the merged screen's delivery: generate the patch record that carries project
+definitions by extending an installed retail record (the measured route for a panel
+of ours), and make sure the list resource the merged root uses is included and
+survives a base-only install with no Ultimate folder present.
 
 Run base-only and Ultimate flows before deleting the old launcher settings path.
 Verify direct game startup consumes target and preferences with no launcher flags;
-renderer fallback/current values match menu values; save failures never restart;
-all U settings persist where promised; no orphaned submenu/back routes remain.
-Check old audio/presentation/Guide/monitor/pool settings cannot reappear through
-blanket profile application. Ensure development SDK settings overlays are not
-advertised as a second product settings surface.
+renderer fallback/current values match menu values; hot rows really applied live and
+restart rows never claimed to; save failures never restart; all U settings persist
+where promised; no orphaned submenu/back routes remain. Check old audio/presentation/
+Guide/monitor/pool settings cannot reappear through blanket profile application.
+Ensure development SDK settings overlays are not advertised as a second product
+settings surface.
 
-Only after G4 make Advanced Settings and Controller Settings the defaults and remove
+Only after G4 make Help & Options and Controller Settings the defaults and remove
 the obsolete full launcher UI. Build clean patched SDK/game/controller/installer
 payloads, run focused regression tests once per relevant change, and hand a fixed
 candidate plus test identities to P12. Do not call this complete with open G2/P4
@@ -1034,11 +1199,17 @@ Use the fixed P11 candidate and section 12 matrix. Split independent test areas
 across separate config/save/install directories. Use existing observe_ui/drive_ui
 and launcher/installer harnesses where appropriate; add assertions for actual
 menu state, file contents, process identity, and renderer dimensions, not OCR alone.
-
 Run targeted host regressions, fresh/migrated/direct/portable boots, native editing,
 Ultimate absent/inactive/present, Unicode/reinstall/unattended installer paths,
 all supported renderer/AA modes, 1080p and hardware-change recovery, Guide filtering,
 and A-restart/B-close/failure paths. Use disposable progress for achievements.
+
+Add the merge-specific checks: both entries reach the same owned screen; Back is
+correct from the root and every child; a list longer than five rows navigates; no
+row dispatches through retail options.lst; the old Advanced Settings row is gone.
+Add the application-strategy checks: a hot row changes the running game with no
+prompt, a restart row never claims to have applied, a mixed session prompts once,
+and a target change prompts and soft-restarts into the new target.
 
 Record command, build identity, config identity, expected/actual result, and evidence
 path for each matrix item. Distinguish unavailable hardware from tested passes.
@@ -1061,7 +1232,9 @@ No items in this section are marked passed by this planning pass. These are exec
 | Durability | Inject permission/short-write/replace failures; old bytes survive; two writers merge disjoint keys or report same-key conflict; no-op leaves mtime unchanged; combined native/U commit recovery is truthful. |
 | Precedence | Direct launch and utility launch agree; CLI/environment/manual config override has correct effective source; saved target works in direct boot; common after demo resets license policy; removed legacy keys stay inert. |
 | Reconciliation | 4K→1080p, CPU 32→8→1/unknown, missing renderer, reduced AA/AF support, stale capability revision, automatic vs manual fields, display enumeration failure, unchanged manual value retained. |
-| Menu model | Empty hide selection means none; complete list and conditional rows; protected Advanced Settings entry; refresh alias versus offline defaults; pending/revert/no-op behavior. |
+| Merged root | One owned screen for both entries; its own list resource (no row dispatches through retail `options.lst`); correct Back from the root and from every child; six root rows with Ultimate and five without; a list longer than five rows navigates; the old Advanced Settings row is absent. |
+| Application strategy | Every descriptor is `hot` or `restart`; `hot` requires recorded live-effect evidence; a hot commit applies with no prompt; a restart commit prompts once; a mixed session prompts exactly once; Target prompts and soft-restarts. |
+| Menu model | Empty hide selection means none; complete list and conditional rows; the merged Help & Options entry is protected and reachable; refresh alias versus offline defaults; pending/revert/no-op behavior. |
 | Bridge | Unknown operation/setting, invalid enum/type, oversized string/list, out-of-range guest memory including wraparound, duplicate action/restart ID, stale transaction, malformed result, and unhandled request forwarding. |
 | Controller | Guide cannot be sourced or produced; defaults/remaps preserve all other digital buttons and analog triggers; no-profile and malformed-profile cases; safe-mode/nav recovery remains usable. |
 | Restart | Structured argv quoting/round-trip, one-shot flags, root/profile retention, acknowledged revision check, child handshake/failure, verified parent identity/timeout, duplicate input, and no initialization before parent exit. |
@@ -1092,7 +1265,9 @@ New SDK modifications must have reproducible entries in `patches/rexglue-sdk`, v
 
 | Scenario | Required evidence |
 | --- | --- |
-| Retail only, no Ultimate assets available | Advanced Settings renders; General/Graphics/Interface work; U rows/empty Gameplay absent; no mod resource lookups required. |
+| Retail only, no Ultimate assets available | The merged Help & Options renders; General/Controls/Calibration/Audio-Video/Interface work; Gameplay and other U rows absent, so five root rows; no mod resource lookups required. |
+| Merged root navigation | Both entries (main menu and in-song pause) reach the same screen; Back from the root returns to the entry screen it came from; every child returns to its parent; a list longer than five rows scrolls with correct selection and focus. |
+| Hot versus restart | A hot row (Hide HUD is the current evidence) applies to the running game with no prompt; a restart row (Resolution) saves and prompts once; a mixed session prompts once; Target prompts and soft-restarts into the new target. |
 | Supported Ultimate active | One integrated main-menu entry; requested category order; every U row including HUD children and achievements reachable; back/focus correct. |
 | Ultimate installed but base selected | Base behavior remains active; no calls to uninitialized provider; visible-disabled U policy behaves as documented. |
 | Missing/partial/incompatible Ultimate | Base/native settings remain usable; unsafe integration refused; original mod path retained where compatible fallback is possible; useful diagnostics. |
@@ -1113,13 +1288,14 @@ New SDK modifications must have reproducible entries in `patches/rexglue-sdk`, v
 | Portable and alternate profile | Same target/settings semantics without installed helper or registry; correct native settings sibling; no writes to unrelated user config. |
 | Integrity/distribution | Input retail and Ultimate files unchanged; payload contains only original code/resources and approved dependencies; decoded dumps/private captures stay out of git/package. |
 
-Extend `scripts/ui_states.ps1`, `scripts/observe_ui.ps1`, and `scripts/drive_ui.ps1` for named Advanced Settings states rather than scattering brittle menu-index sequences. The existing `acceptance_launcher.ps1` assumes settings are emitted as argv; change those expectations to file ownership plus direct-boot behavior. Reuse `acceptance_ultimate.ps1`, launch, song, and persistence harnesses with isolated roots and the new save evidence.
+Extend `scripts/ui_states.ps1`, `scripts/observe_ui.ps1`, and `scripts/drive_ui.ps1` for named merged-settings states rather than scattering brittle menu-index sequences. The existing `acceptance_launcher.ps1` assumes settings are emitted as argv; change those expectations to file ownership plus direct-boot behavior. Reuse `acceptance_ultimate.ps1`, launch, song, and persistence harnesses with isolated roots and the new save evidence.
 
 Capture at least one complete base and one Ultimate edit→save→restart→play-song route. For rendering, report active render dimensions and timings alongside captures. For persistence, report before/after configuration bytes/revisions and the effective boot log. For process behavior, report parent/child identities and ordering. OCR alone proves none of those three contracts.
 
 ### 12.3 Done means all of the following
 
-- The player launches the game directly, reaches Advanced Settings, edits every applicable requested setting, saves, and restarts or defers restart successfully.
+- The player launches the game directly, reaches Help & Options from both the main menu and the in-song pause menu, edits every applicable requested setting, sees hot rows apply live, saves the rest, and restarts or defers restart successfully.
+- A row's strategy is honest: a hot row changes the running game, a restart row never claims to have applied, and a Target change prompts and soft-restarts into the new target.
 - The same native menu works without Ultimate; supported Ultimate rows are reorganized and persistent without shipping or altering its distribution.
 - Resolution is the actual rendered size, including 1920x1080; the menu offers only monitor/render/backend-compatible choices. First-run recommendations and later invalid-manual-value adjustments are distinct and tested.
 - Controller Settings contains the complete non-Guide controller functionality. No ordinary setting, legacy remap, or utility input path delivers Guide to the guest.
@@ -1133,7 +1309,11 @@ These are deliberately bounded investigations, not questions the execution agent
 
 | Question | Current evidence | Owner / decision point |
 | --- | --- | --- |
-| Can a project-authored screen enter the retail object graph without a modified archive? | Script builtins and retail resources identified; runtime registration/lifetime not yet traced. | P1 / G1: choose object registration or a narrow loader intercept and prove it. |
+| Can a project-authored screen enter the retail object graph without a modified archive? | **Answered.** Definitions must ride **inside a retail record** (appending to `ui/options_menu/gen/options_menu.dtb` works; a record of our own reached by `[include]` parses but its panel faults) and each panel needs `{<panel> load}` in `ui/gen/ui.dtb`'s init. Proved in `out/_swap/p5b`: 29 appended roots, six rows drawn, the typed round trip confirmed on the pad. | P5b, done. |
+| Where does the merged root's list resource come from? | **Answered.** A project-owned scene record whose bytes are the installed retail `options_menu.milo_xbox` copied at boot beside the original, so the panel's `{file}` resolves to a different loaded dir and a different `options.lst` object. No retail bytes ship and no mod asset is copied. | P5b, done (`TestListOwnership`). |
+| Is there a hard five-row cap? | **No.** Retail's help list is 5 rows, the payload appends a 6th, and P5b walked an **eight-row** list in a boot: the window scrolls and the selection/focus stay correct (`shots-basescroll/09.png`, `12-last.png`). Five is a list *size*, not a cap. | P5b, done. |
+| Can the in-song HELP & OPTIONS row open our merged screen? | **No, not by re-pointing the row.** Retail's in-song page is the pause panel's *inline* second list, and every body that leaves the pause list faults (`read of guest 0x00000024`, four arms). The same payload with the pause record pristine runs the route clean. | P5b: merge into the inline `options.lst` (replace the five symbols it is filled with, add the cases) + pause-context child screens. The pause row stays retail's until then. |
+| Which rows are actually hot? | `Hide HUD` has an observed live effect (owner run, §12.3b); nothing else is measured. | P9: record per-row evidence; the default is `restart` until a live effect is observed. |
 | Can retail list resources reproduce Ultimate's visual layout without its custom MILO? | Retail pause panel exists; mod list resource does not. | P1 / G1: runtime resource configuration, spacing/help/arrow proof, independent resource construction if necessary. |
 | Which transport yields typed request/reply with safe ownership? | Static builtin callbacks and hidden result ABI identified; DLC sentinel proves only a narrower one-way signal. | P1 / G1: verify arrays/refcounts/result handling; freeze actual ABI contract. |
 | Can Blitz allocate native 1080p targets without invasive fractional scaling? | SDK scales are integer; video mode alone is insufficient. | P2 / G2: determine engine hook route or explicit backend project. No scope substitution. |

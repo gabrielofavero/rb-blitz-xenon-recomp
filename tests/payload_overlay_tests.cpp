@@ -271,6 +271,49 @@ void BackingDecisionsCardinality() {
   CHECK_EQ(static_cast<uint64_t>(WriteBackingFor(neither)), static_cast<uint64_t>(OverlayBacking::kNone));
 }
 
+void RedirectPathsMatchCaseAndSeparatorSpelling() {
+  BeginCase("RedirectPathsMatchCaseAndSeparatorSpelling");
+  const std::vector<std::string> redirects{"ulti_settings.dta"};
+  CHECK_TRUE(IsRedirectedPath(redirects, "ulti_settings.dta"));
+  CHECK_TRUE(IsRedirectedPath(redirects, "ULTI_SETTINGS.DTA"));
+  CHECK_TRUE(IsRedirectedPath(redirects, "ulti_settings.dta"));
+  // A path that merely contains the name, or a different record, is not redirected.
+  CHECK_FALSE(IsRedirectedPath(redirects, "gen/ulti_settings.dta"));
+  CHECK_FALSE(IsRedirectedPath(redirects, "ulti_settings.dta.bak"));
+  CHECK_FALSE(IsRedirectedPath({}, "ulti_settings.dta"));
+}
+
+void ASettingsRecordIsNotMergedWithTheGameRoot() {
+  BeginCase("ASettingsRecordIsNotMergedWithTheGameRoot");
+  // The redirected record answers from the settings side for BOTH directions, whatever the payload
+  // and the game root have under that name - that is what makes a write land in user storage
+  // instead of a read-only game root.
+  OverlayChild redirected;
+  redirected.name = "ulti_settings.dta";
+  redirected.in_settings = true;
+  redirected.in_payload = true;
+  redirected.in_base = true;
+  CHECK_EQ(static_cast<uint64_t>(ReadBackingFor(redirected)),
+           static_cast<uint64_t>(OverlayBacking::kSettings));
+  CHECK_EQ(static_cast<uint64_t>(WriteBackingFor(redirected)),
+           static_cast<uint64_t>(OverlayBacking::kSettings));
+  // Only the settings side: still the settings side.
+  OverlayChild alone;
+  alone.name = "ulti_settings.dta";
+  alone.in_settings = true;
+  CHECK_EQ(static_cast<uint64_t>(ReadBackingFor(alone)),
+           static_cast<uint64_t>(OverlayBacking::kSettings));
+  CHECK_EQ(static_cast<uint64_t>(WriteBackingFor(alone)),
+           static_cast<uint64_t>(OverlayBacking::kSettings));
+  // Without the settings flag the record is an ordinary one, so a payload copy still wins a read
+  // and only a game-root record is writable.
+  OverlayChild ordinary = PayloadChild("other.dta", false);
+  CHECK_EQ(static_cast<uint64_t>(ReadBackingFor(ordinary)),
+           static_cast<uint64_t>(OverlayBacking::kPayload));
+  CHECK_EQ(static_cast<uint64_t>(WriteBackingFor(ordinary)),
+           static_cast<uint64_t>(OverlayBacking::kNone));
+}
+
 }  // namespace
 
 int main() {
@@ -289,5 +332,7 @@ int main() {
   HiddenPathsMatchCaseAndSeparatorSpelling();
   NestedHiddenPathsAndTheirSubtreesStayOut();
   BackingDecisionsCardinality();
+  RedirectPathsMatchCaseAndSeparatorSpelling();
+  ASettingsRecordIsNotMergedWithTheGameRoot();
   return rb_blitz::test::Finish();
 }

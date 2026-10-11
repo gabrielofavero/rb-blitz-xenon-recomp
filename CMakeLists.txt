@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(WIN32)
-    # rb_blitz.rc compiles assets/blitz.ico into the executable. project() enables
+    # rb_blitz.rc compiles assets/icon/blitz.ico into the executable. project() enables
     # only CXX, so the resource compiler has to be turned on explicitly before the
     # .rc is handed to a target.
     enable_language(RC)
@@ -89,6 +89,8 @@ set(RBBLITZ_SOURCES
     src/hooks/dlc_refresh.cpp
     src/hooks/local_save.cpp
     src/hooks/menu_filter.cpp
+    src/hooks/settings_bridge.cpp
+    src/hooks/settings_bridge_hooks.cpp
     src/hooks/shell_music.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
@@ -98,18 +100,27 @@ set(RBBLITZ_SOURCES
     src/launcher/profile_apply.cpp
     src/launcher/profile_path.cpp
     src/launcher/remap.cpp
+    # P6's addition to the coordinator-owned list: the Ultimate provider adapter (the ark index
+    # reader, the shape check over the payload's own definitions, the row bindings and the
+    # provider's settings file). SDK-free, and the only `src/settings/` translation unit the game
+    # links today - the store/service wiring is the coordinator's (P11).
+    src/settings/ultimate_adapter.cpp
+    # The compiled-DTA parser, promoted out of the test-only targets: the provider adapter reads
+    # the payload's own definitions with it at boot (it was P1's authoring module, with no
+    # production consumer until P6). The cipher it shares with menu_options.cpp is already here.
+    src/ui/dtb_author.cpp
     src/ui/menu_options.cpp
 )
 
 if(WIN32)
-    # rb_blitz.rc carries the Windows resources (assets/blitz.ico) and the WIN32
+    # rb_blitz.rc carries the Windows resources (assets/icon/blitz.ico) and the WIN32
     # subsystem is already selected, so the icon applies to the GUI executable.
     #
     # The resource compiler does not report the files it inlines, so bind the
     # icon to the resource object by hand: without this, swapping the .ico
     # leaves the stale icon linked in until the .rc itself changes.
     set_source_files_properties(rb_blitz.rc PROPERTIES
-        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/blitz.ico")
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/blitz.ico")
     add_executable(rb_blitz WIN32 ${RBBLITZ_SOURCES} rb_blitz.rc)
 else()
     add_executable(rb_blitz ${RBBLITZ_SOURCES})
@@ -355,6 +366,44 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_refresh_state_tests PRIVATE src)
     add_test(NAME refresh_state COMMAND rb_blitz_refresh_state_tests)
 
+    # The typed guest<->host settings channel (src/hooks/settings_bridge.h, P1): exact namespace
+    # matching, bounded and checksummed frames, structured status and idempotent request ids.
+    # SDK-free like the tests above; the guest hook that carries the frames needs the SDK and a
+    # boot, and is deliberately not here.
+    add_executable(rb_blitz_settings_bridge_tests
+        tests/settings_bridge_tests.cpp
+        src/hooks/settings_bridge.cpp
+    )
+    target_include_directories(rb_blitz_settings_bridge_tests PRIVATE src)
+    add_test(NAME settings_bridge COMMAND rb_blitz_settings_bridge_tests)
+
+    # The authoring side of the compiled-DTA grammar (src/ui/dtb_author.h, P1): produce a
+    # definition of our own rather than edit one the title already has. SDK-free, and it reuses
+    # menu_options::EncodeFile, so the test links that module too. The real-file case is opt-in:
+    # pass a .dtb path as argv[1] to check the grammar against actual content; the CMake test
+    # runs without one, so no retail asset is ever needed.
+    add_executable(rb_blitz_dtb_author_tests
+        tests/dtb_author_tests.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_dtb_author_tests PRIVATE src)
+    add_test(NAME dtb_author COMMAND rb_blitz_dtb_author_tests)
+
+    # P1's native screen (src/ui/settings_screen.h): the authored Advanced Settings definition, the
+    # two edits that make the retail main menu reach it, and the request paths it writes - checked
+    # against the bridge's own text grammar, which is what a DTA script spells as a literal.
+    # SDK-free; the fixtures are synthetic retail shapes, so no retail content is needed.
+    add_executable(rb_blitz_settings_screen_tests
+        tests/settings_screen_tests.cpp
+        src/ui/settings_screen.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+        src/hooks/settings_bridge.cpp
+    )
+    target_include_directories(rb_blitz_settings_screen_tests PRIVATE src)
+    add_test(NAME settings_screen COMMAND rb_blitz_settings_screen_tests)
+
     # R9's pool and deck (src/hooks/menu_music_pool.h): that a merged pack's songs are all
     # pooled and sampled at random, and that no song is ever dealt twice in a row. The hook
     # that uses it (src/hooks/shell_music.cpp) needs the SDK and a boot; this half does not.
@@ -445,6 +494,93 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_launcher_update_tests PRIVATE launcher/src)
     add_test(NAME launcher_update COMMAND rb_blitz_launcher_update_tests)
+
+    # P3 (docs/plans/in-game-settings-contracts.md §5): the SDK-free settings store. The
+    # comment-preserving TOML editor, the typed document, atomic replace, and the conflict
+    # rule that never lets a second writer clobber a hand edit. No SDK, no boot.
+    add_executable(rb_blitz_settings_store_tests
+        tests/settings_store_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/store.cpp
+    )
+    target_include_directories(rb_blitz_settings_store_tests PRIVATE src)
+    add_test(NAME settings_store COMMAND rb_blitz_settings_store_tests)
+
+    # P3: the path file and the legacy migration. Compiled from src/ because the game reads
+    # the same files, and from src/launcher because the migration consumes the profile model.
+    add_executable(rb_blitz_settings_migration_tests
+        tests/settings_migration_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/store.cpp
+        src/settings/paths.cpp
+        src/settings/migration.cpp
+        src/launcher/profile.cpp
+        src/launcher/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_settings_migration_tests PRIVATE src)
+    add_test(NAME settings_migration COMMAND rb_blitz_settings_migration_tests)
+
+    # P3: the settings service. Requested/effective/pending, revisioned transactions, the
+    # durable commit, the provider save seam and the restart handshake. No SDK, no boot.
+    add_executable(rb_blitz_settings_service_tests
+        tests/settings_service_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/store.cpp
+        src/settings/paths.cpp
+        src/settings/migration.cpp
+        src/settings/cvars.cpp
+        src/settings/service.cpp
+        src/launcher/profile.cpp
+        src/launcher/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_settings_service_tests PRIVATE src)
+    add_test(NAME settings_service COMMAND rb_blitz_settings_service_tests)
+
+    # P4: graphics capabilities and the graphics policy. The same SDK-free settings modules the
+    # service test links (the policy implements the service's Reconciler interface), plus the
+    # two P4 files. No SDK, no boot, no GPU: the probe results are plain data.
+    add_executable(rb_blitz_settings_graphics_tests
+        tests/settings_graphics_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/store.cpp
+        src/settings/paths.cpp
+        src/settings/migration.cpp
+        src/settings/cvars.cpp
+        src/settings/service.cpp
+        src/settings/capabilities.cpp
+        src/settings/graphics_policy.cpp
+        src/launcher/profile.cpp
+        src/launcher/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_settings_graphics_tests PRIVATE src)
+    add_test(NAME settings_graphics COMMAND rb_blitz_settings_graphics_tests)
+
+    # P6: the Ultimate provider adapter (src/settings/ultimate_adapter.h). SDK-free: the ark
+    # index reader, the compiled-DTA shape check over the provider's own definitions, the frozen
+    # row bindings and the provider's settings-file reader/writer. Links the DTB parser for the
+    # shape check. Its real-installation leg is opt-in - pass the payload root as argv[1] -
+    # because the payload is local, gitignored content; the hermetic leg authors a fixture with
+    # the same builder.
+    add_executable(rb_blitz_ultimate_adapter_tests
+        tests/ultimate_adapter_tests.cpp
+        src/settings/ultimate_adapter.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_ultimate_adapter_tests PRIVATE src)
+    add_test(NAME ultimate_adapter COMMAND rb_blitz_ultimate_adapter_tests)
+    # The same binary, run against the installed payload, is the fidelity check for the fixture.
+    # Registered only when that payload is actually in the checkout: `game/` is local, gitignored
+    # content, so an unconfigured clone must not gain a test that cannot pass.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate/gen/patch_xbox.hdr")
+        add_test(NAME ultimate_adapter_payload
+                 COMMAND rb_blitz_ultimate_adapter_tests
+                         "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate")
+    endif()
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,

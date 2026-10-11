@@ -6,7 +6,9 @@
 #include "profile_session.h"
 
 #include <fstream>
+#include <map>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -65,6 +67,111 @@ bool IsPortablePath(const fs::path& path, const fs::path& executable_dir) {
     return false;
   }
   return path == executable_dir / kProfileFileName;
+}
+
+// --- P8's merge -----------------------------------------------------------
+//
+// The rule a save follows when the file changed while the window was open: the document on disk is
+// the base, and this session contributes only the keys it actually changed. Everything else is the
+// other writer's to decide, which is what makes "the game (or a hand edit) touched the file while
+// Controller Settings was up" end with both writers' work in the file instead of one of them
+// silently losing it.
+//
+// What counts as "changed" is a comparison against what this session *loaded* (`base`), not
+// against the defaults: a key the user never opened the editor on is not an edit, whether or not
+// its value happens to differ from the compiled default.
+
+// One table's rows, keyed by name with the first occurrence winning - the same row a lookup finds
+// (`Profile::FindSetting`), so the merge and the panel cannot disagree about which one is real.
+std::map<std::string, ProfileSetting> IndexRows(const std::vector<ProfileSetting>& rows) {
+  std::map<std::string, ProfileSetting> indexed;
+  for (const ProfileSetting& row : rows) {
+    indexed.emplace(row.key, row);
+  }
+  return indexed;
+}
+
+bool SameRow(const ProfileSetting& left, const ProfileSetting& right) {
+  return left.value == right.value && left.style == right.style;
+}
+
+// Writes `row` into `rows`: the first entry with that key is replaced in place - so the row keeps
+// its position, and with it any comment on the same line - and a key the document does not have is
+// appended at the end of the table.
+void SetRow(std::vector<ProfileSetting>* rows, const ProfileSetting& row) {
+  for (ProfileSetting& candidate : *rows) {
+    if (candidate.key == row.key) {
+      candidate = row;
+      return;
+    }
+  }
+  rows->push_back(row);
+}
+
+void RemoveRow(std::vector<ProfileSetting>* rows, std::string_view key) {
+  for (auto it = rows->begin(); it != rows->end();) {
+    it = it->key == key ? rows->erase(it) : it + 1;
+  }
+}
+
+// Applies the session's edits to one table: the keys it changed or added, then the keys it removed.
+// A key it never touched is left exactly as `target` has it.
+void MergeRows(const std::vector<ProfileSetting>& base_rows,
+               const std::vector<ProfileSetting>& model_rows,
+               std::vector<ProfileSetting>* target) {
+  const std::map<std::string, ProfileSetting> base = IndexRows(base_rows);
+  const std::map<std::string, ProfileSetting> model = IndexRows(model_rows);
+  for (const auto& [key, row] : model) {
+    const auto was = base.find(key);
+    if (was != base.end() && SameRow(was->second, row)) {
+      continue;  // not this session's edit
+    }
+    SetRow(target, row);
+  }
+  for (const auto& [key, row] : base) {
+    if (model.count(key) != 0) {
+      continue;  // still in the model: either untouched, or written above
+    }
+    RemoveRow(target, key);
+  }
+}
+
+// `fresh` supplies the document and every key this session did not touch; `base` is what the
+// session loaded and `model` is what it holds now, so the difference between those two is exactly
+// the work this window is responsible for.
+Profile MergeEdits(const Profile& fresh, const Profile& base, const Profile& model) {
+  Profile merged = fresh;
+  if (model.launcher_version != base.launcher_version) {
+    merged.launcher_version = model.launcher_version;
+  }
+  if (model.portable != base.portable) {
+    merged.portable = model.portable;
+  }
+  if (model.window_width != base.window_width) {
+    merged.window_width = model.window_width;
+  }
+  if (model.window_height != base.window_height) {
+    merged.window_height = model.window_height;
+  }
+  if (model.target != base.target) {
+    merged.target = model.target;
+  }
+  if (model.game_dir != base.game_dir) {
+    merged.game_dir = model.game_dir;
+  }
+  if (model.user_data_dir != base.user_data_dir) {
+    merged.user_data_dir = model.user_data_dir;
+  }
+  if (model.dlc_dir != base.dlc_dir) {
+    merged.dlc_dir = model.dlc_dir;
+  }
+  if (model.update_declined_version != base.update_declined_version) {
+    merged.update_declined_version = model.update_declined_version;
+  }
+  MergeRows(base.settings, model.settings, &merged.settings);
+  MergeRows(base.remap, model.remap, &merged.remap);
+  MergeRows(base.nav, model.nav, &merged.nav);
+  return merged;
 }
 
 }  // namespace
@@ -167,9 +274,16 @@ SaveOutcome ProfileSession::Save() {
     return outcome;
   }
 
+  // P8: the document on disk is the base, not this session's snapshot of it.
+  RebaseOntoDisk();
+
   // Asked before the write, because afterwards the answer is always "no difference".
   const bool would_change = Dirty();
+  // The bytes the write is about to leave behind, so the session's belief about the file can be
+  // updated with what it really wrote rather than with what it thought it would write.
+  std::string text;
   std::string error;
+  const bool composed = ComposeProfile(load_.profile, &text, &error);
   if (!SaveProfile(path_, load_.profile, &error)) {
     outcome.ok = false;
     outcome.wrote = false;  // nothing reached the file
@@ -180,6 +294,9 @@ SaveOutcome ProfileSession::Save() {
   // The file now says what the model says, which is what the exit-time geometry write starts
   // from.
   saved_ = load_.profile;
+  if (composed) {
+    NoteWritten(text);
+  }
   return outcome;
 }
 
@@ -191,15 +308,10 @@ SaveOutcome ProfileSession::SaveWindowGeometry(int width, int height) {
     // thing that writes to it. Nothing to do is not a failure.
     return outcome;
   }
-  bool changed = false;
-  if (width > 0 && width != saved_.window_width) {
-    saved_.window_width = width;
-    changed = true;
-  }
-  if (height > 0 && height != saved_.window_height) {
-    saved_.window_height = height;
-    changed = true;
-  }
+  // Whether there is anything to write is asked before the rebase and against the size the file
+  // last had, because a window the user never resized must not create a profile (A1's rule).
+  const bool changed = (width > 0 && width != saved_.window_width) ||
+                       (height > 0 && height != saved_.window_height);
   if (!changed) {
     // A launcher nobody resized leaves the file exactly as it is, created or not (A1's rule).
     return outcome;
@@ -215,9 +327,23 @@ SaveOutcome ProfileSession::SaveWindowGeometry(int width, int height) {
     return outcome;
   }
 
+  std::string text;
   std::string error;
+  // The same rule as Save, and it matters most here: this write starts on every window close, so
+  // it is the one most likely to land on a file somebody else has edited since the launcher opened.
+  RebaseOntoDisk();
+  // The new size is applied *after* the rebase, because the rebase replaces what this session
+  // believes the file holds - and the size the user just dragged the window to is the one thing
+  // this write exists to record.
+  if (width > 0) {
+    saved_.window_width = width;
+  }
+  if (height > 0) {
+    saved_.window_height = height;
+  }
   // What is written is the profile as the file last had it - `saved_` already carries the new
   // size - so an edit the user did not save cannot be written by the back door.
+  const bool composed = ComposeProfile(saved_, &text, &error);
   if (!SaveProfile(path_, saved_, &error)) {
     outcome.ok = false;
     outcome.error = error;
@@ -227,7 +353,48 @@ SaveOutcome ProfileSession::SaveWindowGeometry(int width, int height) {
   // The model keeps the size too, so the panel's own save cannot write the old one back.
   load_.profile.window_width = saved_.window_width;
   load_.profile.window_height = saved_.window_height;
+  if (composed) {
+    NoteWritten(text);
+  }
   return outcome;
+}
+
+void ProfileSession::RebaseOntoDisk() {
+  if (path_.empty()) {
+    return;
+  }
+  std::error_code code;
+  if (!fs::exists(path_, code) || code) {
+    return;  // nothing on disk to rebase onto: a save creates the file from the model
+  }
+  ProfileLoadResult fresh = LoadProfile(path_);
+  if (fresh.status != ProfileStatus::kOk) {
+    // A file this build cannot read is not one to merge with. It is left exactly as it is: the
+    // save is refused further up (CanSave) unless safe mode asked to replace it, and in that case
+    // the replacement is the whole model rather than a merge with a document nobody understood.
+    return;
+  }
+  if (fresh.profile.source_text == saved_.source_text) {
+    return;  // the file is the one this session believes it is: nothing changed under us
+  }
+  // The document changed under us. It becomes the base, and this session's edits are re-applied on
+  // top of it - so `saved_` (the file as last had it) is the fresh document, and the model holds
+  // the fresh document plus the keys this window changed.
+  //
+  // `saved_` is what the comparison above is against, and not the model, on purpose: an import
+  // (`ImportFrom`) adopts a document the disk has never held, and a session that had just imported
+  // one must not have its import mistaken for somebody else's edit and merged away.
+  load_.profile = MergeEdits(fresh.profile, saved_, load_.profile);
+  saved_ = std::move(fresh.profile);
+}
+
+void ProfileSession::NoteWritten(const std::string& written) {
+  // The file now holds exactly these bytes, so this is what the model is based on and what the
+  // next rebase compares the disk against. Without it a session would read its own output back as
+  // an edit by somebody else - harmless when nothing changed, but wrong the moment a second writer
+  // is involved.
+  load_.profile.source_text = written;
+  saved_.source_text = written;
 }
 
 SaveOutcome ProfileSession::SaveUpdateDeclined(const std::string& version) {
@@ -255,9 +422,14 @@ SaveOutcome ProfileSession::SaveUpdateDeclined(const std::string& version) {
   }
 
   // `saved_` is the profile as the file last had it, so a setting the user changed and did not
-  // save is not written by the back door (the same rule the geometry write follows).
+  // save is not written by the back door (the same rule the geometry write follows). The file is
+  // rebased first, for the same reason the geometry write is: an answer recorded here must not
+  // revert what another writer put in the document.
+  RebaseOntoDisk();
   saved_.update_declined_version = version;
+  std::string text;
   std::string error;
+  const bool composed = ComposeProfile(saved_, &text, &error);
   if (!SaveProfile(path_, saved_, &error)) {
     outcome.ok = false;
     outcome.error = error;
@@ -266,6 +438,9 @@ SaveOutcome ProfileSession::SaveUpdateDeclined(const std::string& version) {
   outcome.wrote = true;
   // The model keeps it too, so the panel's own save cannot write the old answer back.
   load_.profile.update_declined_version = version;
+  if (composed) {
+    NoteWritten(text);
+  }
   return outcome;
 }
 

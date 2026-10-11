@@ -386,11 +386,14 @@ deviation, `-DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON` accepts every one — and the wh
 subject is [toolchain.md](toolchain.md).
 
 `rb_blitz.exe` carries the Blitz icon. [rb_blitz.rc](../rb_blitz.rc) compiles
-[assets/blitz.ico](../assets/blitz.ico) into the executable, so the icon is a
+[assets/icon/blitz.ico](../assets/icon/blitz.ico) into the executable, so the icon is a
 build input like any other source: replacing the `.ico` and rebuilding is the
-whole edit, since nothing else references the file. One resource covers every
-surface, because SDL registers its window class with the first `RT_GROUP_ICON`
-in the executable — Explorer, title bar, taskbar and Alt-Tab all follow from it.
+whole edit, since nothing else references the file. The launcher ships the
+black-and-white alt icon instead — `assets/icon/blitz-mono.ico`, made from the colour
+art by [scripts/make_mono_icon.py](../scripts/make_mono_icon.py) — so a game window and
+a launcher window are told apart in the taskbar. One resource covers every
+surface of each exe, because SDL registers its window class with the first
+`RT_GROUP_ICON` in it: Explorer, title bar, taskbar and Alt-Tab all follow from it.
 
 ### Proving the new code actually linked
 

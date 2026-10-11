@@ -285,6 +285,86 @@ void TestSaveWithNothingChanged(Scratch& scratch) {
   CHECK_CONTAINS(nowhere_outcome.error, "nowhere to save");
 }
 
+// P8: the file is reread before it is written. The document on disk is the base, and this session
+// contributes only the keys it actually changed - so a change another writer made while the window
+// was open is merged rather than reverted to what this session saw when it opened. It is the rule
+// that makes "a hand edit (or an older launcher's write) lands while Controller Settings is up"
+// end with both writers' work in the file.
+void TestSaveMergesDiskChanges(Scratch& scratch) {
+  BeginCase("P8: a save merges into the document on disk, not the snapshot it loaded");
+
+  const fs::path install = scratch.Make("merge-install");
+  const fs::path app_data = scratch.Make("merge-appdata");
+  const fs::path profile_path = app_data / "rb_blitz" / kProfileFileName;
+  WriteText(profile_path, kHandEdited);
+
+  ProfileSession session = MakeSession(install, app_data, LoadProfile(profile_path));
+  // This window's edit: the controller row Controller Settings writes.
+  session.SetSetting("mouse_ui_nav", "true", "false", ValueStyle::kBare);
+  // And a row it changes to a value of its own, which is the one case where the session's value
+  // has to win over the disk's.
+  session.SetSetting("resolution_scale", "4", "1", ValueStyle::kBare);
+
+  // Something else writes the same file while the window is open: a key this session never touched
+  // changes value, a key nobody owns changes too, an owned key arrives that the session did not
+  // set, and a whole table is added.
+  std::string other = kHandEdited;
+  const std::string original_fullscreen = "fullscreen = false   # the user turned it off\n";
+  CHECK_TRUE(other.find(original_fullscreen) != std::string::npos);
+  other.replace(other.find(original_fullscreen), original_fullscreen.size(),
+                "fullscreen = true   # changed while the window was open\n"
+                "resolution_scale = 2   # the other writer's choice\n");
+  other += "\n[other_tool]\nanswer = 7\n";
+  WriteText(profile_path, other);
+
+  const SaveOutcome outcome = session.Save();
+  CHECK_TRUE(outcome.ok);
+  CHECK_TRUE(outcome.wrote);
+
+  const std::string saved = ReadText(profile_path);
+  // This session's own work is in the file: a row it set, and a row it changed.
+  CHECK_CONTAINS(saved, "mouse_ui_nav = true");
+  CHECK_NOT_CONTAINS(saved, "resolution_scale = 2");
+  CHECK_CONTAINS(saved, "resolution_scale = 4");
+  // The key it never touched keeps what the other writer made of it, rather than being reverted to
+  // the value this session loaded.
+  CHECK_CONTAINS(saved, "fullscreen = true   # changed while the window was open");
+  // And everything that is nobody's business but the document's: the comment, the unknown key, and
+  // the table the other writer added.
+  CHECK_CONTAINS(saved, "# my notes, which must survive");
+  CHECK_CONTAINS(saved, "a newer launcher wrote this");
+  CHECK_CONTAINS(saved, "[other_tool]");
+  CHECK_CONTAINS(saved, "answer = 7");
+
+  BeginCase("P8: the same rule for the two writes the launcher makes without being asked");
+
+  // The exit-time geometry write is the one that lands on a file somebody else may have edited in
+  // the meantime, because it happens on every window close.
+  std::string changed_again = ReadText(profile_path);
+  changed_again += "\n[third_tool]\nanswer = 9\n";
+  WriteText(profile_path, changed_again);
+  const SaveOutcome geometry = session.SaveWindowGeometry(1234, 567);
+  CHECK_TRUE(geometry.ok);
+  const std::string after_geometry = ReadText(profile_path);
+  CHECK_CONTAINS(after_geometry, "width = 1234");
+  CHECK_CONTAINS(after_geometry, "height = 567");
+  // The third writer's table survived the geometry write, and so did this session's own edits.
+  CHECK_CONTAINS(after_geometry, "[third_tool]");
+  CHECK_CONTAINS(after_geometry, "mouse_ui_nav = true");
+
+  BeginCase("P8: a session edit that removes a row is still made");
+
+  // Back to the compiled default: the row goes, which is the one edit that is a deletion.
+  session.SetSetting("resolution_scale", "1", "1", ValueStyle::kBare);
+  const SaveOutcome removed = session.Save();
+  CHECK_TRUE(removed.ok);
+  const std::string after_remove = ReadText(profile_path);
+  CHECK_NOT_CONTAINS(after_remove, "resolution_scale");
+  // And the keys this session never touched are still somebody else's.
+  CHECK_CONTAINS(after_remove, "fullscreen = true");
+  CHECK_CONTAINS(after_remove, "[third_tool]");
+}
+
 void TestSafeMode(Scratch& scratch) {
   BeginCase("A5: --safe-mode starts on the defaults, and replaces a file it could not read");
 
@@ -1031,6 +1111,7 @@ int main() {
   Scratch scratch;
   TestRoundTrip(scratch);
   TestSaveWithNothingChanged(scratch);
+  TestSaveMergesDiskChanges(scratch);
   TestSafeMode(scratch);
   TestWindowGeometry(scratch);
   TestUpdateDecline(scratch);

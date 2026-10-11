@@ -27,9 +27,9 @@
 /launcher/out/
 
 # Side wizard image made by installer/tools/make_art.ps1. The artwork is not ours
-# to license, so only the repository's own assets/blitz.ico and assets/blitz.png
-# are committed.
-/assets/wizard-*.bmp
+# to license, so only the repository's own art is committed: assets/icon/ holds the
+# app's own blitz.ico / blitz.png and the black-and-white alt pair.
+/assets/installer/wizard-*.bmp
 
 # ReXGlue translation output is reproducible from the manifest and pinned SDK.
 # Keep only the small SDK integration file emitted by `rexglue init`.

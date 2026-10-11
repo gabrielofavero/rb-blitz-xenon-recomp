@@ -20,10 +20,16 @@
 //     way anyway.
 //   * A target with no row in `[remap]` has the binding this module ships for it (`DefaultSources`):
 //     the pad's own control plus a keyboard key, so a keyboard is a complete stand-in for the
-//     pad without the profile having to say so. The two analog triggers and Guide have no default:
-//     a keyboard cannot stand in for a trigger's travel, and Guide belongs to the platform.
+//     pad without the profile having to say so. The two analog triggers have no default: a
+//     keyboard cannot stand in for a trigger's travel.
 //   * A target with a row binds to a comma-separated list, and an empty list means nothing presses
 //     it at all.
+//
+// Guide is not one of the controls at all (docs/plans/in-game-settings-contracts.md §2.3). It has
+// no target, no default, no row and no source: a name this module does not know is refused rather
+// than guessed at, so a `guide = pad:guide` row a person wrote once is preserved verbatim by a
+// save and simply never applied - and `Apply` clears the bit out of the state the guest is handed,
+// whatever set it. The platform's own Guide behaviour is not touched.
 //
 // SDK-free and SDL-free on purpose: the game and the launcher both compile this, and the tests
 // exercise the whole rewrite without a pad, a window or a profile on disk (the same rule
@@ -43,7 +49,8 @@
 namespace rb_blitz::launcher::remap {
 
 // One control a binding can target, in the order the launcher's panel lists them: the face
-// buttons, the shoulders and triggers, the system buttons, the sticks, then the d-pad.
+// buttons, the shoulders and triggers, the system buttons, the sticks, then the d-pad. Guide is
+// deliberately not here: it is a platform button, and the project never delivers it to the guest.
 enum class Target : uint8_t {
   kA,
   kB,
@@ -55,7 +62,6 @@ enum class Target : uint8_t {
   kRightTrigger,
   kBack,
   kStart,
-  kGuide,
   kLeftThumb,
   kRightThumb,
   kDpadUp,
@@ -63,6 +69,10 @@ enum class Target : uint8_t {
   kDpadLeft,
   kDpadRight,
 };
+
+// How many controls there are, as a constant: the panel sizes its focus ring from this at
+// compile time, and the tests assert that `Targets()` really has this many.
+inline constexpr std::size_t kTargetCount = 16;
 
 // Every target, in `Target`'s declaration order.
 const std::vector<Target>& Targets();
@@ -74,6 +84,16 @@ std::optional<Target> ParseTarget(std::string_view name);
 
 // The name a person reads on their pad: "A", "Left bumper", "D-pad up".
 std::string_view TargetLabel(Target target);
+
+// True for a `[remap]` row name this build refuses on purpose - Guide, and only Guide. A row with
+// this key is preserved verbatim by a save (it is not a name this build could write) but never
+// applied, and the Controller Settings screen names it so a user who bound Guide once is told it
+// is ignored rather than left to notice it does nothing. It is a separate question from "is this
+// a control?", because "guide" is a name a person wrote in a file, not a target.
+bool IsRefusedTargetName(std::string_view name);
+
+// The refused row names present in `rows`, in file order, which is the diagnostic above.
+std::vector<std::string> RefusedRowNames(const std::vector<ProfileSetting>& rows);
 
 // The bit `target` occupies in the guest's button field, or 0 for a trigger - which has no bit,
 // because the guest reads it as an analog value rather than a button.
@@ -87,6 +107,20 @@ struct PadState {
   uint8_t left_trigger = 0;
   uint8_t right_trigger = 0;
 };
+
+// The bit Guide occupies in the guest's button field (X_INPUT_GAMEPAD_GUIDE). No binding can name
+// it any more and the project never delivers it: the SDK's own `guide_button` and `keybind_guide`
+// cvars can still raise it, and this is the bit that is taken back out.
+inline constexpr uint16_t kGuideButtonBit = 0x0400;
+
+// The pad state with every bit the project refuses to deliver cleared. `Apply` does this itself,
+// so a caller that installs a table does not need it; a caller that installs no table at all - a
+// machine with no profile to read - uses it on its own, which is what makes the prohibition hold
+// on every input path rather than only on the ones that go through a binding.
+inline PadState WithoutProhibitedButtons(PadState state) {
+  state.buttons = static_cast<uint16_t>(state.buttons & ~kGuideButtonBit);
+  return state;
+}
 
 // The value above which the SDK treats a trigger as pressed for its own digital view of it
 // (`HID_SDL_TRIGG_THRES` in the SDK's SDL input driver, which compares the byte the same way).
@@ -125,8 +159,8 @@ struct Binding {
 // The binding a control has when the profile says nothing about it: the pad's own control plus a
 // keyboard key chosen to mirror the pad on a keyboard for this game (the left hand on the D-pad's
 // WASD, the right hand on the face buttons' IJKL diamond, and Q/E, Z/C, V/N and Backspace/Return
-// around them). Empty - nullptr - for the analog triggers and Guide, which are left to the pad.
-// The sources read `state` before any rewriting, so a default is the identity for a pad user.
+// around them). Empty - nullptr - for the analog triggers, which are left to the pad. The sources
+// read `state` before any rewriting, so a default is the identity for a pad user.
 const std::vector<Source>* DefaultSources(Target target);
 
 // The `[remap]` table of the profile.
@@ -146,8 +180,8 @@ class Table {
 
   // What actually presses `target`: the row the user bound, or the binding this module ships when
   // the profile says nothing. nullptr only for a control with no default and no row - the analog
-  // triggers and Guide - which keeps the pad's own reporting. This is the one the game applies and
-  // the panel shows, so a keyboard works without the profile having to be edited.
+  // triggers - which keeps the pad's own reporting. This is the one the game applies and the panel
+  // shows, so a keyboard works without the profile having to be edited.
   const std::vector<Source>* Effective(Target target) const;
 
   bool IsBound(Target target) const { return Bindings(target) != nullptr; }
@@ -179,6 +213,8 @@ using DownFn = bool (*)(void* context, const Source& source);
 // one - so a `pad:` source reads `state`, and every binding sees the same originals no matter
 // what another binding does. Writes the result into `*out`, which may be the same object as
 // `state` for in-place use.
+//
+// The result never carries a refused bit (`kGuideButtonBit`), whatever `state` held.
 void Apply(const Table& table, const PadState& state, DownFn down, void* context, PadState* out);
 
 }  // namespace rb_blitz::launcher::remap

@@ -76,6 +76,11 @@ struct OverlayChild {
   bool in_base = false;
   bool payload_is_dir = false;
   bool base_is_dir = false;
+  // The third side: the mutable settings file the provider writes. It is not merged with the
+  // other two - it *is* the record under that name, for reads and for writes - which is why it
+  // carries no payload/base flags of its own.
+  bool in_settings = false;
+  bool settings_is_dir = false;
 
   bool in_both() const { return in_payload && in_base; }
   // The payload copy wins when both sides have the name, so the effective kind is the
@@ -152,9 +157,12 @@ inline std::vector<OverlayChild> MergeOverlayChildren(
 // enumeration and any game root write are bound to, and this title never opens one
 // (every NtCreateFile in the boot traces is a non-directory open), so the game root
 // stays in charge of directories.
-enum class OverlayBacking { kNone, kPayload, kBase };
+enum class OverlayBacking { kNone, kPayload, kBase, kSettings };
 
 inline OverlayBacking ReadBackingFor(const OverlayChild& child) {
+  if (child.in_settings) {
+    return OverlayBacking::kSettings;
+  }
   if (!child.in_payload) {
     return child.in_base ? OverlayBacking::kBase : OverlayBacking::kNone;
   }
@@ -166,8 +174,13 @@ inline OverlayBacking ReadBackingFor(const OverlayChild& child) {
 
 // Writes only ever land in the game root: the payload directory is mounted read-only
 // on purpose, so the game cannot damage it and deleting the folder stays a complete
-// uninstall. A record the game root does not have is therefore not writable at all.
+// uninstall. A record the game root does not have is therefore not writable at all -
+// with one exception, the redirected settings file, whose whole point is that it has a
+// writable home of its own.
 inline OverlayBacking WriteBackingFor(const OverlayChild& child) {
+  if (child.in_settings) {
+    return OverlayBacking::kSettings;
+  }
   return child.in_base ? OverlayBacking::kBase : OverlayBacking::kNone;
 }
 
@@ -184,6 +197,15 @@ inline bool IsHiddenPath(const std::vector<std::string>& hidden,
     }
   }
   return false;
+}
+
+// Matches an overlay-relative path against the redirect list: the records that must not be
+// served by the payload or the game root at all, because the guest writes them and the game
+// mount is read-only by construction. Same comparison as the hide list - the two questions
+// are different, which is why this has a name of its own.
+inline bool IsRedirectedPath(const std::vector<std::string>& redirects,
+                             const std::string_view relative_path) {
+  return IsHiddenPath(redirects, relative_path);
 }
 
 // The payload records of the directory at `parent_path` that join the union. Dropping a

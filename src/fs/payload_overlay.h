@@ -51,6 +51,7 @@ struct OverlayStats {
   size_t shadowed = 0;      // files both sides have: the payload copy is the one read
   size_t merged_dirs = 0;   // directories both sides have: their children are unioned
   size_t hidden = 0;        // payload records kept out of the union by the hide list
+  size_t redirected = 0;    // records served from the writable settings root instead
 };
 
 class PayloadOverlayDevice;
@@ -63,9 +64,20 @@ class PayloadOverlayDevice final : public rex::filesystem::Device {
   // cvar inverted), so the union can never be more writable than the game root itself.
   // `hidden_paths` are overlay-relative paths whose payload copies must not join the
   // union, compared case-insensitively with either separator.
+  //
+  // `settings_root` is a **writable** directory of the player's own (the provider's settings
+  // file lives there) and `redirects` are the overlay-relative records it serves. A
+  // redirect is root-level only: the provider writes `<game root>/ulti_settings.dta`, and a
+  // nested redirect would need the union to own a directory it does not.
   PayloadOverlayDevice(std::string_view mount_path, const std::filesystem::path& payload_root,
                        const std::filesystem::path& base_root, bool base_read_only,
                        std::vector<std::string> hidden_paths);
+  // The settings side. **Call before Initialize()**: the union's root entry is built (and every
+  // directory merged) inside Initialize, and a settings side added afterwards would not be in the
+  // root's child list. Returns false (and leaves the previous state) when the directory cannot be
+  // mounted, so a player with no writable home still gets a working read-only union.
+  bool AddSettingsSide(const std::filesystem::path& settings_root,
+                       std::vector<std::string> redirects);
   ~PayloadOverlayDevice() override;
 
   bool Initialize() override;
@@ -85,9 +97,18 @@ class PayloadOverlayDevice final : public rex::filesystem::Device {
   const std::filesystem::path& payload_root() const { return payload_root_; }
   const std::filesystem::path& base_root() const { return base_root_; }
   const std::vector<std::string>& hidden() const { return hidden_; }
+  const std::vector<std::string>& redirects() const { return redirects_; }
   const OverlayStats& stats() const { return stats_; }
 
   bool IsHidden(std::string_view relative_path) const;
+  // True for a root-level record the settings side serves.
+  bool IsRedirected(std::string_view name) const;
+  // The settings-side entry for `name`, or null when the player has no such file yet. Null is the
+  // answer `file_exists` needs: a record that does not exist must not be reported as existing.
+  rex::filesystem::Entry* settings_entry(std::string_view name);
+  // Creates (and host-creates) the settings-side entry for `name`. Only Called from the overlay
+  // root's CreateEntryInternal, i.e. when the guest opens the record for write the first time.
+  rex::filesystem::Entry* CreateSettingsEntry(std::string_view name, uint32_t attributes);
 
  private:
   friend class PayloadOverlayEntry;
@@ -95,9 +116,11 @@ class PayloadOverlayDevice final : public rex::filesystem::Device {
   std::filesystem::path payload_root_;
   std::filesystem::path base_root_;
   std::vector<std::string> hidden_;
+  std::vector<std::string> redirects_;
   OverlayStats stats_;
   std::unique_ptr<rex::filesystem::HostPathDevice> payload_device_;
   std::unique_ptr<rex::filesystem::HostPathDevice> base_device_;
+  std::unique_ptr<rex::filesystem::HostPathDevice> settings_device_;
   std::unique_ptr<rex::filesystem::Entry> root_entry_;
 };
 
@@ -110,10 +133,11 @@ class PayloadOverlayEntry final : public rex::filesystem::Entry {
  public:
   PayloadOverlayEntry(PayloadOverlayDevice* device, rex::filesystem::Entry* parent,
                       std::string_view path, rex::filesystem::Entry* payload,
-                      rex::filesystem::Entry* base);
+                      rex::filesystem::Entry* base, rex::filesystem::Entry* settings = nullptr);
 
   rex::filesystem::Entry* payload() const { return payload_; }
   rex::filesystem::Entry* base() const { return base_; }
+  rex::filesystem::Entry* settings() const { return settings_; }
 
   X_STATUS Open(uint32_t desired_access, rex::filesystem::File** out_file) override;
   bool Truncate() override;
@@ -141,6 +165,7 @@ class PayloadOverlayEntry final : public rex::filesystem::Entry {
 
   rex::filesystem::Entry* payload_ = nullptr;
   rex::filesystem::Entry* base_ = nullptr;
+  rex::filesystem::Entry* settings_ = nullptr;
 };
 
 }  // namespace rb_blitz::fs

@@ -7,7 +7,8 @@
 //
 //   * BuildLaunchCommand is the contract, as a pure function. The argv is the profile's own
 //     values and nothing else - a row is passed only when it differs from the compiled default
-//     (D3 rank 1), which is the same rule the precedence badge is decided by. Pure text, so
+//     (D3 rank 1), which is the same rule the precedence badge is decided by - unless the caller
+//     asks for identity only, which is what Controller Settings' Play action does. Pure text, so
 //     the contract is a unit test and `--print-command` is the same code path as a real start.
 //   * GameProcess is the start itself, and the one thing after it that matters: whether the
 //     game is still running. The launcher refuses a second start while it is, because two
@@ -45,10 +46,25 @@ struct LaunchCommand {
 // The full command line, executable and tail, for printing.
 std::string FormatLaunchCommand(const LaunchCommand& command);
 
+// What the launcher hands the game beyond its own identity: where its data is, which target it
+// is, and which profile it should read. The two halves of the product differ in exactly one
+// thing, which is why it is a parameter rather than two builders that could drift.
+struct LaunchOptions {
+  // Emit `--<key>=<value>` for every managed row the profile has moved off its compiled default
+  // (D3 rank 1). The full launcher does, because passing a row is how a choice made in that
+  // window reaches a game it started.
+  //
+  // Controller Settings does not (P8): it edits controller state and nothing else, so its Play
+  // action passes the profile's identity - the game data root, the target, the profile path - and
+  // no setting at all. A graphics or general row passed from there would be a second source of
+  // truth for something the game's own files own (docs/plans/in-game-settings-plan.md §9.3).
+  bool settings_rows = true;
+};
+
 // `target` is the target the launcher will really use - D5's fallback already applied - and
 // `roots` is where the game's data was found. Nothing is started and nothing is written.
 LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots& roots,
-                                 LaunchTarget target);
+                                 LaunchTarget target, const LaunchOptions& options = {});
 
 // Where the game writes its own log. The runtime names the folder `<exe dir>\logs` and the files
 // `<app name>_NNN.log` (`rexglue-sdk/src/ui/rex_app.cpp`, `core/logging.cpp`), and the launcher

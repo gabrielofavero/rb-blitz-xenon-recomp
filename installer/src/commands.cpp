@@ -31,6 +31,8 @@
 #include "config.h"
 #include "download.h"
 #include "install.h"
+#include "launcher/profile_path.h"
+#include "paths.h"
 #include "stfs.h"
 #include "util.h"
 #include "util/game_fingerprint.h"
@@ -835,6 +837,140 @@ int CommandVerifyGame(const std::vector<std::string>& args) {
   return Succeed(&context, S("the game data in ", Display(game_root), " matches the supported dump"));
 }
 
+// --- the two folders the game reads from (parent plan §9.1) ----------------
+
+// The folder page's prefill, and nothing else: it reads `<install>/paths.toml` and,
+// when the wizard asked for it, the launcher profile the user already has. Both are
+// read-only, so a page the user cancels costs nothing. The wizard resolves the same
+// order the plan names - unattended parameter, this file, the legacy profile, the
+// default - by asking for the parts and choosing between them itself.
+int CommandReadPaths(const std::vector<std::string>& args) {
+  CommandContext context;
+  if (!Begin(args, Keys({"install-dir", "legacy-appdir"}), &context)) {
+    return kUsage;
+  }
+  const std::string install_dir = context.Get("install-dir");
+  if (install_dir.empty()) {
+    return Fail(&context, "read-paths needs --install-dir");
+  }
+
+  const fs::path app_dir = PathFromUtf8(install_dir);
+  const fs::path game_dir = GameRoot(app_dir);
+  const PathFileState file = ReadPathFile(app_dir, game_dir);
+  context.summary.Text("install_dir", Display(app_dir));
+  context.summary.Text("file", Display(file.file));
+  context.summary.Flag("has_file", file.has_file);
+  context.summary.Flag("file_valid", file.valid);
+  context.summary.Number("schema_version", static_cast<std::uint64_t>(file.schema_version));
+  context.summary.Text("dlc_root", file.dlc_raw);
+  context.summary.Text("save_root", file.save_raw);
+  context.summary.Text("dlc_effective", Display(file.dlc_dir));
+  context.summary.Text("save_effective", Display(file.save_dir));
+  if (!file.error.empty()) {
+    context.summary.Text("file_error", file.error);
+  }
+
+  // The legacy profile is only consulted when the wizard says which installation to
+  // resolve it beside. An install running elevated leaves this out on purpose: an
+  // administrator's own profile is not the player's (parent plan §9.1).
+  if (context.Has("legacy-appdir")) {
+    const fs::path exe_dir = PathFromUtf8(context.Get("legacy-appdir"));
+    const LegacyPaths legacy = ReadLegacyPaths(exe_dir, launcher::RoamingAppDataDir());
+    context.summary.Flag("legacy_checked", true);
+    context.summary.Text("legacy_profile", Display(legacy.profile));
+    context.summary.Flag("legacy_found", legacy.has_file);
+    context.summary.Text("legacy_dlc", legacy.dlc_dir);
+    context.summary.Text("legacy_save", legacy.save_dir);
+    if (!legacy.error.empty()) {
+      context.summary.Text("legacy_error", legacy.error);
+    }
+  }
+  return Succeed(&context, S("read the locations for ", Display(app_dir)));
+}
+
+// Checks the three answers before the install starts, on the folder page and again
+// from PrepareToInstall so a silent install - which never sees the page - is checked
+// the same way. Refusing here is the point: a save folder inside the read-only game
+// data tree would silently lose every save.
+int CommandValidatePaths(const std::vector<std::string>& args) {
+  CommandContext context;
+  if (!Begin(args, Keys({"install-dir", "dlc-dir", "save-dir", "no-touch"}), &context)) {
+    return kUsage;
+  }
+  const std::string install_dir = context.Get("install-dir");
+  if (install_dir.empty()) {
+    return Fail(&context, "validate-paths needs --install-dir");
+  }
+
+  const PathChoice dlc{context.Has("dlc-dir"), context.Get("dlc-dir")};
+  const PathChoice save{context.Has("save-dir"), context.Get("save-dir")};
+  // `--no-touch` is what the folder page uses: it reports exactly the same things
+  // but creates no folder and writes no probe, because merely showing a page must
+  // not change the machine. The check that runs when the user moves on creates and
+  // probes the save folder for real.
+  PathValidationOptions options;
+  options.create_save_folder = !context.Has("no-touch");
+  const PathReport report = ValidatePaths(PathFromUtf8(install_dir), dlc, save, options);
+
+  context.summary.Text("install_dir", Display(report.install_dir));
+  context.summary.Text("game_dir", Display(report.game_dir));
+  context.summary.Text("dlc_dir", Display(report.dlc_dir));
+  context.summary.Flag("dlc_default", report.dlc_default);
+  context.summary.Text("dlc_layout", report.dlc_layout);
+  context.summary.Number("dlc_packages", report.dlc_packages);
+  context.summary.Flag("dlc_packages_exact", report.dlc_packages_exact);
+  context.summary.Number("dlc_rejected", report.dlc_rejected);
+  context.summary.Flag("save_default", report.save_default);
+  context.summary.Text("save_dir", Display(report.save_dir));
+  context.summary.Flag("save_inside_game", report.save_inside_game);
+  context.summary.Flag("save_writable", report.save_writable);
+  context.summary.Flag("save_created", report.save_created);
+  context.summary.Number("note_count", report.notes.size());
+  for (std::size_t index = 0; index < report.notes.size(); ++index) {
+    context.summary.Text(S("note_", index), report.notes[index]);
+  }
+
+  if (!report.ok) {
+    return Fail(&context, report.error);
+  }
+  return Succeed(&context, S("DLC ", report.dlc_layout, " (", report.dlc_packages,
+                             " package(s)), saves on ",
+                             report.save_default ? std::string("the game's own folder")
+                                                  : Display(report.save_dir)));
+}
+
+// Commits the answers to `<install>/paths.toml`. Runs last, after the install and
+// its manifest have succeeded, so a cancelled or failed install leaves the previous
+// configuration exactly as it was.
+int CommandWritePaths(const std::vector<std::string>& args) {
+  CommandContext context;
+  if (!Begin(args, Keys({"dest", "dlc-dir", "save-dir"}), &context)) {
+    return kUsage;
+  }
+  const std::string dest = context.Get("dest");
+  if (dest.empty()) {
+    return Fail(&context, "write-paths needs --dest");
+  }
+
+  const PathChoice dlc{context.Has("dlc-dir"), context.Get("dlc-dir")};
+  const PathChoice save{context.Has("save-dir"), context.Get("save-dir")};
+  const PathWriteResult result = WritePathFile(PathFromUtf8(dest), dlc, save);
+
+  context.summary.Text("file", Display(result.file));
+  context.summary.Flag("written", result.written);
+  context.summary.Flag("changed", result.changed);
+  context.summary.Text("dlc_root", result.dlc_raw);
+  context.summary.Text("save_root", result.save_raw);
+  if (!result.error.empty()) {
+    return Fail(&context, result.error);
+  }
+  if (!dlc.present && !save.present) {
+    return Succeed(&context, "no folders were answered; the file was left as it is");
+  }
+  // The module logs what it did with the file; there is nothing to add here.
+  return Succeed(&context);
+}
+
 // --- finishing ------------------------------------------------------------
 
 // Rebuilds the whole picture from what is actually on disk rather than from what
@@ -845,7 +981,7 @@ int CommandFinalize(const std::vector<std::string>& args) {
   if (!Begin(args,
              Keys({"dest", "game-source", "payload-source", "payload-version", "ultimate",
                    "ultimate-source", "ultimate-version", "installer-version",
-                   "payload-commit"}),
+                   "payload-commit", "dlc-dir", "save-dir"}),
              &context)) {
     return kUsage;
   }
@@ -877,14 +1013,20 @@ int CommandFinalize(const std::vector<std::string>& args) {
   }
   install.game_source = context.Get("game-source", "imported game data");
 
+  // The folder answers, recorded in the manifest and the report (parent plan §9.2).
+  // `written the file` is not this command's job - write-paths runs after it - so
+  // what lands here is what the user chose, which is what a bug report needs.
+  install.paths_answered = context.Has("dlc-dir") || context.Has("save-dir");
+  install.dlc_choice = context.Get("dlc-dir");
+  install.save_choice = context.Get("save-dir");
+
   install.ultimate_installed = context.GetBool("ultimate", true) &&
                                DirectoryExists(install.game_dir / PathOf(kUltimateDirName));
   if (install.ultimate_installed) {
     const fs::path ultimate_root = install.game_dir / PathOf(kUltimateDirName);
     TreeTotals(ultimate_root, &install.ultimate.files, &install.ultimate.bytes);
     install.ultimate.version = context.Get("ultimate-version", pins.ultimate.version);
-    install.ultimate.source = context.Get("ultimate-source", S("folder ", Display(ultimate_root)));
-    Override(&install.ultimate.version, context.options, "ultimate-version");
+    install.ultimate.source = context.Get("ultimate-source", S("folder ", Display(ultimate_root)));    Override(&install.ultimate.version, context.options, "ultimate-version");
     Override(&install.ultimate.source, context.options, "ultimate-source");
 
     // The overlay is hashed here as well as when it was installed, so the
@@ -1008,10 +1150,21 @@ constexpr CommandSpec kCommands[] = {
      "source version files bytes verified warning_count location"},
     {"verify-game", CommandVerifyGame, "--dest <dir> [--details <file>]",
      "game_dir evidence"},
+    {"read-paths", CommandReadPaths, "--install-dir <dir> [--legacy-appdir <dir>]",
+     "install_dir file has_file file_valid schema_version dlc_root save_root dlc_effective "
+     "save_effective file_error legacy_checked legacy_profile legacy_found legacy_dlc "
+     "legacy_save legacy_error"},
+    {"validate-paths", CommandValidatePaths,
+     "--install-dir <dir> [--dlc-dir <dir>] [--save-dir <dir>] [--no-touch]",
+     "install_dir game_dir dlc_dir dlc_default dlc_layout dlc_packages dlc_packages_exact "
+     "dlc_rejected save_default save_dir save_inside_game save_writable save_created "
+     "note_count note_<n>"},
+    {"write-paths", CommandWritePaths, "--dest <dir> [--dlc-dir <dir>] [--save-dir <dir>]",
+     "file written changed dlc_root save_root"},
     {"finalize", CommandFinalize,
      "--dest <dir> [--game-source <text>] [--payload-source <text>] [--payload-version <v>] "
      "[--payload-commit <id>] [--ultimate 0|1] [--ultimate-source <text>] [--ultimate-version <v>] "
-     "[--installer-version <v>]",
+     "[--installer-version <v>] [--dlc-dir <dir>] [--save-dir <dir>]",
      "manifest report game_dir ultimate_installed"},
     {"uninstall-cleanup", CommandUninstallCleanup, "--dest <dir> [--keep-game-data]",
      "game_data_kept removed removed_items"},

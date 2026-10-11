@@ -92,7 +92,7 @@ std::string FormatLaunchCommand(const LaunchCommand& command) {
 }
 
 LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots& roots,
-                                 LaunchTarget target) {
+                                 LaunchTarget target, const LaunchOptions& options) {
   LaunchCommand command;
   command.executable = session.executable_dir() / kGameExecutableName;
   command.working_directory = session.executable_dir();
@@ -113,16 +113,22 @@ LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots&
   // which is also the order the tabs show them in, so the printed command reads like the UI.
   // A row the launcher does not manage is not passed at all: the game's own file decides it
   // (D3), and passing the whole registry would take that choice away.
-  for (const settings::Setting& setting : settings::kSettings) {
-    if (!setting.argv_flag) {
-      continue;  // a launcher-level row; its meaning is the block below
+  //
+  // Controller Settings skips this block entirely (P8): its Play action is the game's data, the
+  // target and the profile, and nothing else - the settings it owns are read by the game from the
+  // profile itself, at the controller allowlist (contracts §8), not from a command line.
+  if (options.settings_rows) {
+    for (const settings::Setting& setting : settings::kSettings) {
+      if (!setting.argv_flag) {
+        continue;  // a launcher-level row; its meaning is the block below
+      }
+      const std::string value = RowValue(session, setting);
+      if (value.empty() || value == setting.default_text) {
+        continue;  // never pass an empty flag, and never repeat a default
+      }
+      add("--" + std::string(setting.key) + "=" +
+          (ValueIsText(setting.kind) ? QuoteArgument(value) : value));
     }
-    const std::string value = RowValue(session, setting);
-    if (value.empty() || value == setting.default_text) {
-      continue;  // never pass an empty flag, and never repeat a default
-    }
-    add("--" + std::string(setting.key) + "=" +
-        (ValueIsText(setting.kind) ? QuoteArgument(value) : value));
   }
 
   // D4's three targets, which are what the game is *for*, rather than a value the user set.

@@ -1,0 +1,185 @@
+# Render-resolution instrumentation: swap-time totals (P2) and per-draw viewport/scissor (P4).
+#
+# P2 (docs/plans/in-game-settings-resolution-findings.md) added the swapdims/rtdims lines so
+# a log shows what the guest presented and what the host allocated for it. P4 extends the
+# same instrument with the per-draw host viewport and scissor, which is the evidence the
+# plan asks P4 for: a 1920x1080 capture shows the extents the render path really used, not
+# only the presented size.
+#
+# All of it is debug level and reports each *distinct* tuple exactly once per boot, so a
+# normal boot stays silent and a --log_level=debug boot stays readable. No cvar, no
+# behaviour change.
+
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+index 19874a53..c6284bbc 100644
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -791,6 +791,34 @@ void D3D12CommandProcessor::SetViewport(const D3D12_VIEWPORT& viewport) {
+     ff_viewport_ = viewport;
+     deferred_command_list_.RSSetViewport(ff_viewport_);
+     ff_viewport_update_needed_ = false;
++    // Exact-render-resolution investigation (P4): one line per *distinct* host viewport, at
++    // debug level only, so a capture shows the per-draw extents the render path really used
++    // rather than only the swap-time totals the swapdims line reports. A draw loop alternates
++    // between a handful of rectangles, so each tuple is reported exactly once per boot.
++    {
++      static float vp_seen[64][4];
++      static int vp_seen_count = 0;
++      const float vp_now[4] = {ff_viewport_.TopLeftX, ff_viewport_.TopLeftY, ff_viewport_.Width,
++                               ff_viewport_.Height};
++      bool vp_new = true;
++      for (int i = 0; i < vp_seen_count; ++i) {
++        if (vp_seen[i][0] == vp_now[0] && vp_seen[i][1] == vp_now[1] &&
++            vp_seen[i][2] == vp_now[2] && vp_seen[i][3] == vp_now[3]) {
++          vp_new = false;
++          break;
++        }
++      }
++      if (vp_new && vp_seen_count < 64) {
++        for (int k = 0; k < 4; ++k) {
++          vp_seen[vp_seen_count][k] = vp_now[k];
++        }
++        ++vp_seen_count;
++        REXLOG_DEBUG("viewport d3d12: x={} y={} w={} h={} draw_scale={}x{}", vp_now[0], vp_now[1],
++                     vp_now[2], vp_now[3],
++                     texture_cache_ != nullptr ? texture_cache_->draw_resolution_scale_x() : 0,
++                     texture_cache_ != nullptr ? texture_cache_->draw_resolution_scale_y() : 0);
++      }
++    }
+   }
+ }
+ 
+@@ -803,6 +831,30 @@ void D3D12CommandProcessor::SetScissorRect(const D3D12_RECT& scissor_rect) {
+     ff_scissor_ = scissor_rect;
+     deferred_command_list_.RSSetScissorRect(ff_scissor_);
+     ff_scissor_update_needed_ = false;
++    // Exact-render-resolution investigation (P4): the scissor the guest asked for, scaled by
++    // the same integer factor as the viewport. Each distinct rectangle once, debug level.
++    {
++      static int32_t sc_seen[64][4];
++      static int sc_seen_count = 0;
++      const int32_t sc_now[4] = {int32_t(ff_scissor_.left), int32_t(ff_scissor_.top),
++                                 int32_t(ff_scissor_.right), int32_t(ff_scissor_.bottom)};
++      bool sc_new = true;
++      for (int i = 0; i < sc_seen_count; ++i) {
++        if (sc_seen[i][0] == sc_now[0] && sc_seen[i][1] == sc_now[1] &&
++            sc_seen[i][2] == sc_now[2] && sc_seen[i][3] == sc_now[3]) {
++          sc_new = false;
++          break;
++        }
++      }
++      if (sc_new && sc_seen_count < 64) {
++        for (int k = 0; k < 4; ++k) {
++          sc_seen[sc_seen_count][k] = sc_now[k];
++        }
++        ++sc_seen_count;
++        REXLOG_DEBUG("scissor d3d12: l={} t={} r={} b={}", sc_now[0], sc_now[1], sc_now[2],
++                     sc_now[3]);
++      }
++    }
+   }
+ }
+ 
+@@ -1985,6 +2037,33 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbu
+   uint32_t display_width = std::max(uint32_t(1), uint32_t(video_mode.display_width));
+   uint32_t display_height = std::max(uint32_t(1), uint32_t(video_mode.display_height));
+ 
++  // Exact-render-resolution investigation: one line per distinct dimension tuple, so a log
++  // shows what the guest actually presents and what the host actually allocated for it.
++  // Debug level, and only when the tuple changes, so a normal boot stays silent.
++  {
++    static uint32_t swap_logged[10] = {};
++    const uint32_t swap_now[10] = {guest_output_width, guest_output_height, frontbuffer_width,
++                                   frontbuffer_height, frontbuffer_width_unscaled,
++                                   frontbuffer_height_unscaled, source_width_scaled,
++                                   source_height_scaled, display_width, display_height};
++    bool swap_changed = false;
++    for (int i = 0; i < 10; ++i) {
++      if (swap_now[i] != swap_logged[i]) {
++        swap_logged[i] = swap_now[i];
++        swap_changed = true;
++      }
++    }
++    if (swap_changed) {
++      REXLOG_DEBUG(
++          "swapdims d3d12: guest_output={}x{} packet={}x{} packet_unscaled={}x{} "
++          "resolve_dest_scaled={}x{} display={}x{} draw_scale={}x{} source_is_scaled={}",
++          swap_now[0], swap_now[1], swap_now[2], swap_now[3], swap_now[4], swap_now[5],
++          swap_now[6], swap_now[7], swap_now[8], swap_now[9],
++          texture_cache_->draw_resolution_scale_x(), texture_cache_->draw_resolution_scale_y(),
++          swap_source_scaled);
++    }
++  }
++
+   presenter->RefreshGuestOutput(
+       guest_output_width, guest_output_height, display_width, display_height,
+       [this, &swap_texture_srv_desc, frontbuffer_format, swap_texture_resource, guest_output_width,
+diff --git a/src/graphics/d3d12/render_target_cache.cpp b/src/graphics/d3d12/render_target_cache.cpp
+index dd321a5f..d8384936 100644
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -1573,6 +1573,27 @@ RenderTargetCache::RenderTarget* D3D12RenderTargetCache::CreateRenderTarget(Rend
+                  key.is_depth ? "depth" : "color", uint32_t(key.resource_format));
+     return nullptr;
+   }
++  // Exact-render-resolution investigation: one line per distinct host render-target extent,
++  // at debug level and only when the extent changes.
++  {
++    static uint32_t rt_logged[4] = {};
++    const uint32_t rt_now[4] = {uint32_t(resource_desc.Width), uint32_t(resource_desc.Height),
++                                uint32_t(resource_desc.Format), uint32_t(key.msaa_samples)};
++    bool rt_changed = false;
++    for (int i = 0; i < 4; ++i) {
++      if (rt_now[i] != rt_logged[i]) {
++        rt_logged[i] = rt_now[i];
++        rt_changed = true;
++      }
++    }
++    if (rt_changed) {
++      REXLOG_DEBUG(
++          "rtdims d3d12: host_extent={}x{} pitch_tiles_at_32bpp={} msaa_samples={} depth={} "
++          "fmt={} draw_scale={}x{}",
++          rt_now[0], rt_now[1], uint32_t(key.pitch_tiles_at_32bpp), rt_now[3],
++          int(key.is_depth), rt_now[2], draw_resolution_scale_x(), draw_resolution_scale_y());
++    }
++  }
+   if (key.msaa_samples == xenos::MsaaSamples::k2X && !msaa_2x_supported()) {
+     resource_desc.SampleDesc.Count = 4;
+   } else {
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index 001f36b9..e5fa8aea 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -2403,6 +2403,32 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
+       frontbuffer_height_unscaled, guest_output_width, guest_output_height,
+       static_cast<uint32_t>(frontbuffer_format));
+ 
++  // Exact-render-resolution investigation: one line per distinct dimension tuple, so a log
++  // shows what the guest actually presents and what the host actually allocated for it.
++  // Debug level, and only when the tuple changes, so a normal boot stays silent.
++  {
++    static uint32_t swap_logged[10] = {};
++    const uint32_t swap_now[10] = {guest_output_width, guest_output_height, frontbuffer_width,
++                                   frontbuffer_height, frontbuffer_width_unscaled,
++                                   frontbuffer_height_unscaled, frontbuffer_width_scaled,
++                                   frontbuffer_height_scaled, 0, 0};
++    bool swap_changed = false;
++    for (int i = 0; i < 10; ++i) {
++      if (swap_now[i] != swap_logged[i]) {
++        swap_logged[i] = swap_now[i];
++        swap_changed = true;
++      }
++    }
++    if (swap_changed) {
++      REXLOG_DEBUG(
++          "swapdims vulkan: guest_output={}x{} packet={}x{} packet_unscaled={}x{} "
++          "resolve_dest_scaled={}x{} draw_scale={}x{} source_is_scaled={}",
++          swap_now[0], swap_now[1], swap_now[2], swap_now[3], swap_now[4], swap_now[5],
++          swap_now[6], swap_now[7], texture_cache_->draw_resolution_scale_x(),
++          texture_cache_->draw_resolution_scale_y(), swap_source_scaled);
++    }
++  }
++
+   system::X_VIDEO_MODE video_mode;
+   kernel::xboxkrnl::VdQueryVideoMode(&video_mode);
+   uint32_t display_width = std::max(uint32_t(1), uint32_t(video_mode.display_width));

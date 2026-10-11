@@ -28,6 +28,10 @@ using rex::filesystem::kFileAttributeDirectory;
 // up in Entry::absolute_path() and Dump()).
 constexpr std::string_view kPayloadMount = "\\Device\\BlitzUltimate";
 constexpr std::string_view kBaseMount = "\\Device\\Harddisk0\\Partition1";
+// The settings side's mount name. It only labels entries (it shows up in Entry::absolute_path()
+// and Dump()); nothing resolves through it, because the redirect is a *record* of the union
+// rather than a device the guest can name.
+constexpr std::string_view kSettingsMount = "\\Device\\BlitzUserSettings";
 
 bool IsDirectory(const Entry* entry) {
   return entry != nullptr && (entry->attributes() & kFileAttributeDirectory) != 0;
@@ -49,6 +53,39 @@ PayloadOverlayDevice::PayloadOverlayDevice(std::string_view mount_path,
       base_device_(std::make_unique<rex::filesystem::HostPathDevice>(kBaseMount, base_root,
                                                                     base_read_only)) {}
 
+bool PayloadOverlayDevice::AddSettingsSide(const std::filesystem::path& settings_root,
+                                           std::vector<std::string> redirects) {
+  if (settings_root.empty() || redirects.empty()) {
+    return false;
+  }
+  // A redirect is a record of the union's root, because that is where the provider's own path
+  // lands (`<game root>/ulti_settings.dta`). A nested one is refused here rather than silently
+  // never matching: the union would have to own a directory it does not.
+  std::vector<std::string> root_level;
+  for (const std::string& redirect : redirects) {
+    if (FoldGuestPath(redirect).find('\\') != std::string::npos) {
+      REXLOG_WARN("ultimate: overlay cannot redirect {}, which is not a root-level record",
+                  redirect);
+      continue;
+    }
+    root_level.push_back(redirect);
+  }
+  if (root_level.empty()) {
+    return false;
+  }
+  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+      kSettingsMount, settings_root, /*read_only=*/false);
+  if (!device->Initialize()) {
+    REXLOG_ERROR("ultimate: cannot mount the settings directory {}", settings_root.string());
+    return false;
+  }
+  settings_device_ = std::move(device);
+  redirects_ = std::move(root_level);
+  REXLOG_INFO("ultimate: {} record(s) redirected to {}: {}", redirects_.size(),
+              settings_root.string(), redirects_.front());
+  return true;
+}
+
 PayloadOverlayDevice::~PayloadOverlayDevice() = default;
 
 bool PayloadOverlayDevice::Initialize() {
@@ -69,13 +106,22 @@ bool PayloadOverlayDevice::Initialize() {
   }
   root_entry_ = std::make_unique<PayloadOverlayEntry>(this, nullptr, "", payload_root, base_root);
   REXLOG_INFO("ultimate: overlay {} = {} + {} - {} payload-only record(s), {} game-root-only,"
-              " {} payload copies preferred, {} merged director(ies), {} hidden",
+              " {} payload copies preferred, {} merged director(ies), {} hidden{}",
               mount_path_, payload_root_.string(), base_root_.string(), stats_.payload_only,
-              stats_.base_only, stats_.shadowed, stats_.merged_dirs, stats_.hidden);
+              stats_.base_only, stats_.shadowed, stats_.merged_dirs, stats_.hidden,
+              redirects_.empty() ? ""
+                                 : ", " + std::to_string(stats_.redirected) + " redirected");
   return true;
 }
 
-bool PayloadOverlayDevice::is_read_only() const { return base_device_->is_read_only(); }
+bool PayloadOverlayDevice::is_read_only() const {
+  // The union is as writable as the game root - **except** that a redirected record has a home of
+  // its own, and Entry::CreateEntry()/VirtualFileSystem::OpenFile() ask this device (not the
+  // backing) whether a write may even be attempted. Reporting writable is therefore what lets the
+  // first save get as far as CreateEntryInternal; every write that is not a redirected record is
+  // still refused one level down, by the base device's own read-only flag.
+  return base_device_->is_read_only() && redirects_.empty();
+}
 
 void PayloadOverlayDevice::Dump(rex::string::StringBuffer* string_buffer) {
   auto global_lock = global_critical_region_.Acquire();
@@ -122,12 +168,46 @@ bool PayloadOverlayDevice::IsHidden(std::string_view relative_path) const {
   return IsHiddenPath(hidden_, relative_path);
 }
 
+bool PayloadOverlayDevice::IsRedirected(std::string_view name) const {
+  // The list is root-level by construction (AddSettingsSide refuses anything else), so a bare name
+  // is the whole comparison.
+  return IsRedirectedPath(redirects_, name);
+}
+
+rex::filesystem::Entry* PayloadOverlayDevice::settings_entry(std::string_view name) {
+  if (settings_device_ == nullptr) {
+    return nullptr;
+  }
+  return settings_device_->ResolvePath(name);
+}
+
+rex::filesystem::Entry* PayloadOverlayDevice::CreateSettingsEntry(std::string_view name,
+                                                                 uint32_t attributes) {
+  if (settings_device_ == nullptr) {
+    return nullptr;
+  }
+  rex::filesystem::Entry* root = settings_device_->ResolvePath("");
+  if (root == nullptr) {
+    return nullptr;
+  }
+  // The host file is created here, on the guest's first write. Nothing pre-creates it, so a
+  // player who never opens the provider's settings never grows an empty file.
+  rex::filesystem::Entry* created = root->CreateEntry(name, attributes);
+  if (created == nullptr) {
+    // An entry the host already has (a file written by an earlier boot) is not a failure.
+    created = settings_device_->ResolvePath(name);
+  }
+  return created;
+}
+
 PayloadOverlayEntry::PayloadOverlayEntry(PayloadOverlayDevice* device, Entry* parent,
-                                         std::string_view path, Entry* payload, Entry* base)
-    : Entry(device, parent, path), payload_(payload), base_(base) {
+                                         std::string_view path, Entry* payload, Entry* base,
+                                         Entry* settings)
+    : Entry(device, parent, path), payload_(payload), base_(base), settings_(settings) {
   // Metadata follows the payload copy, so a shadowed file reports the size and
-  // timestamps of the bytes that will actually be read.
-  const Entry* source = payload_ != nullptr ? payload_ : base_;
+  // timestamps of the bytes that will actually be read; a redirected record has only the
+  // settings side, and follows that.
+  const Entry* source = settings_ != nullptr ? settings_ : payload_ != nullptr ? payload_ : base_;
   attributes_ = source->attributes();
   size_ = source->size();
   allocation_size_ = source->allocation_size();
@@ -181,11 +261,35 @@ void PayloadOverlayEntry::MergeChildren() {
     }
     children_.push_back(std::make_unique<PayloadOverlayEntry>(device, this, relative, payload, base));
   }
+
+  // The redirected records. They are only ever at the root (the union has no directory of its
+  // own to put them in) and they are not merged with anything: whatever the payload or the game
+  // root has under one of these names is not what the guest sees. A record the player does not
+  // have yet is left out entirely - reporting a file that does not exist would make the
+  // provider's own `file_exists` lie about it - and arrives through CreateEntryInternal when the
+  // guest writes it for the first time.
+  if (parent_ == nullptr) {
+    for (const std::string& redirect : device->redirects()) {
+      Entry* settings = device->settings_entry(redirect);
+      if (settings == nullptr) {
+        continue;
+      }
+      ++device->stats_.redirected;
+      REXLOG_DEBUG("ultimate: overlay serves {} from the writable settings directory", redirect);
+      children_.push_back(
+          std::make_unique<PayloadOverlayEntry>(device, this, redirect, nullptr, nullptr, settings));
+    }
+  }
 }
 
 OverlayChild PayloadOverlayEntry::Describe() const {
   OverlayChild self;
   self.name = name_;
+  if (settings_ != nullptr) {
+    self.in_settings = true;
+    self.settings_is_dir = IsDirectory(settings_);
+    return self;
+  }
   self.in_payload = payload_ != nullptr;
   self.in_base = base_ != nullptr;
   self.payload_is_dir = IsDirectory(payload_);
@@ -195,6 +299,8 @@ OverlayChild PayloadOverlayEntry::Describe() const {
 
 Entry* PayloadOverlayEntry::HandleBacking() const {
   switch (ReadBackingFor(Describe())) {
+    case OverlayBacking::kSettings:
+      return settings_;
     case OverlayBacking::kPayload:
       return payload_;
     case OverlayBacking::kBase:
@@ -213,7 +319,16 @@ X_STATUS PayloadOverlayEntry::Open(uint32_t desired_access, File** out_file) {
   if (backing == nullptr) {
     return X_STATUS_NO_SUCH_FILE;
   }
-  return backing->Open(desired_access, out_file);
+  const X_STATUS result = backing->Open(desired_access, out_file);
+  // The redirected settings record is the one record whose *guest-side* open is worth a line: it is
+  // the only observable proof that a call the guest made on `GAME:/ulti_settings.dta` reached the
+  // player's own storage instead of the read-only game mount, and it happens a handful of times per
+  // boot (the provider checks for its file, then reads it).
+  if (settings_ != nullptr) {
+    REXLOG_INFO("ultimate: the guest opened {} for {:#x} -> {:#x}", absolute_path(),
+                desired_access, static_cast<uint32_t>(result));
+  }
+  return result;
 }
 
 bool PayloadOverlayEntry::Truncate() {
@@ -272,6 +387,18 @@ bool PayloadOverlayEntry::SetWriteTimestamp(uint64_t timestamp) {
 
 std::unique_ptr<Entry> PayloadOverlayEntry::CreateEntryInternal(std::string_view name,
                                                                uint32_t attributes) {
+  // A redirected record is created on the settings side, which is what makes the guest's first
+  // write of it succeed: the union's root is the parent Entry::CreateEntry() already approved.
+  if (auto* device = static_cast<PayloadOverlayDevice*>(device_);
+      parent_ == nullptr && device->IsRedirected(name)) {
+    Entry* created = device->CreateSettingsEntry(name, attributes);
+    if (created == nullptr) {
+      return nullptr;
+    }
+    REXLOG_INFO("ultimate: the guest created {}", created->absolute_path());
+    return std::make_unique<PayloadOverlayEntry>(device, this, std::string(name), nullptr, nullptr,
+                                                 created);
+  }
   // The base-side CreateEntry() is the entry point on purpose: the protected
   // CreateEntryInternal() of another entry type cannot be called from here.
   if (WriteBackingFor(Describe()) != OverlayBacking::kBase) {

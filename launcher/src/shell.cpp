@@ -99,29 +99,79 @@ float BottomBarHeight(const ImGuiStyle& style) {
 // fit, and the right stick drives the body's scrollbar rather than the bar.
 const char* const kNoHelpText = "\xe2\x80\x94";  // D7's explicit empty state: an em dash.
 
-// The bottom bar's own four controls, as the options of the ring's last row: Update, Close,
-// Save and Launch Game. They are options rather than rows because Left and Right walk them and
-// Up on the first row (or Down on the last) lands on them - the only way a controller reaches
-// Close without a mouse. `kBarOptions` is the row's width, which the ring is sized with.
+// The body's own heading on the reduced surface, drawn where the tab strip would be. Controller
+// Settings has one screen rather than tabs (P8), and a strip holding one button is a control that
+// does nothing - so the screen's name goes where the strip was, and the window still says what it
+// is. The window title carries the same words (main.cpp's WindowTitle).
+constexpr const char* kControllerSettingsHeading = "Controller Settings";
+
+// The bottom bar's own controls, as the options of the ring's last row: Update, Close, Save and
+// Play Game. They are options rather than rows because Left and Right walk them and Up on the
+// first row (or Down on the last) lands on them - the only way a controller reaches Close without
+// a mouse, which is exactly what a controller-shaped screen cannot do without.
 //
-// Update is deliberately kept in the row whether or not there is one to install (D19): the
-// button stays put and its hint says which state it is in, so nothing in the bar moves under a
-// user's hands when a check finishes. It is the leftmost of the four, where an action that
-// leaves the window (and comes back to it) reads before the Close it would otherwise sit on
-// top of.
-constexpr std::size_t kBarOptions = 4;
-constexpr std::size_t kBarUpdate = 0;
-constexpr std::size_t kBarClose = 1;
-constexpr std::size_t kBarSave = 2;
-constexpr std::size_t kBarLaunch = 3;
+// Which of them are on the bar for a given surface is the one thing the two surfaces disagree
+// about (P8). Controller Settings has no Update: installing a release, and installing Ultimate,
+// are the installer's and the updater's business, not a row on a controller screen
+// (docs/plans/in-game-settings-plan.md §3.6). Update stays leftmost where it is drawn, because an
+// action that leaves the window (and comes back to it) reads before the Close it would otherwise
+// sit on top of.
+const std::vector<BarOption>& BarOptionsFor(bool controller_settings_only) {
+  static const std::vector<BarOption> kFull = {BarOption::kUpdate, BarOption::kClose,
+                                              BarOption::kSave, BarOption::kPlay};
+  static const std::vector<BarOption> kControllerOnly = {BarOption::kClose, BarOption::kSave,
+                                                        BarOption::kPlay};
+  return controller_settings_only ? kControllerOnly : kFull;
+}
+
+const char* BarLabel(BarOption option, bool running) {
+  switch (option) {
+    case BarOption::kUpdate:
+      return "Update";
+    case BarOption::kClose:
+      return "Close";
+    case BarOption::kSave:
+      return "Save";
+    case BarOption::kPlay:
+      return running ? "Game is running" : "Play Game";
+  }
+  return "";
+}
+
 // One literal per line on purpose: adjacent literals in an array initializer read like a missing
-// comma (-Wstring-concatenation), and a table of sentences is exactly where that warning would
-// be a real one.
-const char* const kBarHelp[kBarOptions] = {
-    "Installs the newest release, using the updater this machine already has.",
-    "Leaves the launcher. Changes that are not saved are lost unless Save or Launch Game is used.",
-    "Writes the settings file, exactly as the Settings file block does.",
-    "Saves anything unsaved, then starts the game."};
+// comma (-Wstring-concatenation), and a table of sentences is exactly where that warning would be
+// a real one.
+std::string_view BarHelpText(BarOption option) {
+  switch (option) {
+    case BarOption::kUpdate:
+      return "Installs the newest release, using the updater this machine already has.";
+    case BarOption::kClose:
+      return "Leaves the launcher. Changes that are not saved are lost unless Save or Play Game "
+             "is used.";
+    case BarOption::kSave:
+      return "Writes the settings file, exactly as the Settings file block does.";
+    case BarOption::kPlay:
+      return "Saves anything unsaved, then starts the game.";
+  }
+  return {};
+}
+
+// The name a bar entry has in the focus trace. Named rather than numbered, because "which button
+// of the bar is that?" is the question the trace exists to answer - and indexed by the option
+// itself, so it cannot drift out of step with the bar the way a parallel array of names can.
+const char* BarTraceName(BarOption option) {
+  switch (option) {
+    case BarOption::kUpdate:
+      return "bar:update";
+    case BarOption::kClose:
+      return "bar:close";
+    case BarOption::kSave:
+      return "bar:save";
+    case BarOption::kPlay:
+      return "bar:play";
+  }
+  return "bar:";
+}
 
 }  // namespace
 
@@ -132,29 +182,43 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
       session_(std::move(session)),
       general_(roots_),
       controller_(pads_),
-      layout_(BuildLayout(environment)),
-      keyboard_(std::make_unique<KeyboardNavSource>(keys_)) {
+      layout_(shell_environment.controller_settings_only
+                  ? std::vector<TabLayout>{BuildTabLayout(settings::Tab::kController, environment)}
+                  : BuildLayout(environment)),
+      keyboard_(std::make_unique<KeyboardNavSource>(keys_)),
+      bar_(BarOptionsFor(shell_environment.controller_settings_only)),
+      controller_settings_only_(shell_environment.controller_settings_only) {
   if (shell_environment.gamepads) {
     gamepad_ = std::make_unique<GamepadNavSource>(pads_);
   }
   // D19: the check starts here, on its own thread, and nothing waits for it. What it finds is
   // read once per frame; a build with no release channel, or a machine with no network, simply
-  // never has anything to report.
-  update_check_.Start(shell_environment.update_manifest_url);
+  // never has anything to report. Controller Settings has no Update control and no prompt, so it
+  // starts no check at all.
+  update_check_.Start(controller_settings_only_ ? std::string() : shell_environment.update_manifest_url);
   // D5's target fallback lives in the General tab, which applies it to what it shows rather than
   // to the profile (B4): with a write path, mutating the stored target here would have made a
   // window resize record a choice the user never made.
   //
   // A ring is a list of rows, each with the number of options Left and Right can move between: an
   // enum is one row with one option per choice, the profile block one row of four buttons, a
-  // control's Assign/Reset one row of two, and the bottom bar a last row of Close/Save/Launch so it
+  // control's Assign/Reset one row of two, and the bottom bar a last row of Close/Save/Play so it
   // is reachable without a mouse (D6's "every tab with the keyboard only"). A row the environment
   // hides never reaches the layout, so the ring cannot land on one.
+  //
+  // Controller Settings has one tab in `layout_` and no General block: the reduced screen is one
+  // screen of controller rows, so the only block under the schema's rows is the mapping table.
   rings_.resize(layout_.size());
   for (std::size_t index = 0; index < layout_.size(); ++index) {
     std::vector<std::size_t> rows = SchemaRowOptions(layout_[index]);
     switch (layout_[index].tab) {
       case settings::Tab::kGeneral:
+        if (controller_settings_only_) {
+          // Not drawn on this surface at all: the settings-file block (Reset, Import, Export,
+          // Change settings location) belongs to the launcher the game is replacing, and its
+          // General tab is not part of Controller Settings.
+          break;
+        }
         // B4's block: Reset to defaults, Import, Export, Change settings location, side by side.
         rows.push_back(ProfilePanel::kRowCount);
         break;
@@ -172,7 +236,7 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
         // ring is exactly the rows the tab has.
         break;
     }
-    rows.push_back(kBarOptions);
+    rows.push_back(bar_.size());
     rings_[index].Reset(std::move(rows));
   }
 }
@@ -349,23 +413,30 @@ bool Shell::Frame() {
   // The tab strip is the model's, not ImGui's tab bar. Two reasons: the selection must change
   // on the frame the key is read, and the ring - which the pad drives as well (A3) - has to be
   // the only thing that moves it. ImGui's own tab bar would also answer Ctrl+Tab behind our back.
-  for (std::size_t index = 0; index < layout_.size(); ++index) {
-    if (index != 0) {
-      ImGui::SameLine();
+  //
+  // Controller Settings has no second tab, so there is no strip to draw: the screen's own name
+  // takes its place, and the ring's tab entry points at the one tab that exists.
+  if (layout_.size() > 1) {
+    for (std::size_t index = 0; index < layout_.size(); ++index) {
+      if (index != 0) {
+        ImGui::SameLine();
+      }
+      const bool selected = index == tab_;
+      if (selected) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      }
+      const std::string name = DisplayTabName(layout_[index].tab);
+      if (ImGui::Button(name.c_str())) {
+        tab_ = index;
+      }
+      if (selected) {
+        ImGui::PopStyleColor();
+      }
     }
-    const bool selected = index == tab_;
-    if (selected) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    }
-    const std::string name = DisplayTabName(layout_[index].tab);
-    if (ImGui::Button(name.c_str())) {
-      tab_ = index;
-    }
-    if (selected) {
-      ImGui::PopStyleColor();
-    }
+    ImGui::Separator();
+  } else {
+    ImGui::SeparatorText(kControllerSettingsHeading);
   }
-  ImGui::Separator();
 
   // The tab body is its own scrolling region above the bottom bar, so a tab taller than the
   // window scrolls its rows while the strip and the bar stay where the user can reach them.
@@ -477,10 +548,10 @@ bool Shell::DrawBottomBar() {
     ImGui::Dummy(ImVec2(0.0f, ImGui::GetFrameHeight()));
   }
 
-  // The bottom bar's own controls, and the last row of every tab's ring: Update, Close, Save and
-  // Launch Game. When the ring is on that row - reached by pressing Up on the first row or Down on
-  // the last - Left and Right choose between them and Activate presses one, which is how a
-  // controller or a keyboard reaches Close without a mouse.
+  // The bottom bar's own controls, and the last row of every tab's ring. When the ring is on that
+  // row - reached by pressing Up on the first row or Down on the last - Left and Right choose
+  // between them and Activate presses one, which is how a controller or a keyboard reaches Close
+  // without a mouse.
   const bool running = game_.Running();
   const bool bar_focused =
       tab_ < rings_.size() && !rings_[tab_].Empty() &&
@@ -494,53 +565,54 @@ bool Shell::DrawBottomBar() {
   // when a check finishes - a bar that grew a button a second after it opened would move
   // everything beside it. Disabled is that state for "nothing to install", for "still checking",
   // and while the game the launcher started is running: an update replaces the very files that
-  // game has open, so a button that cannot work does not offer itself.
+  // game has open, so a button that cannot work does not offer itself. Controller Settings has no
+  // Update button at all: what installs a release is the updater the installer left behind
+  // (plan §3.6), and the row is not drawn there.
   const bool update_ready = update_report_.status == UpdateStatus::kAvailable && !running;
-  const char* labels[kBarOptions] = {"Update", "Close", "Save",
-                                     running ? "Game is running" : "Launch Game"};
   float total = 0.0f;
-  for (const char* label : labels) {
-    total += ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
+  for (const BarOption option : bar_) {
+    total += ImGui::CalcTextSize(BarLabel(option, running)).x + style.FramePadding.x * 2.0f;
   }
-  total += style.ItemSpacing.x * static_cast<float>(kBarOptions - 1);
+  total += style.ItemSpacing.x * static_cast<float>(bar_.size() - 1);
 
-  // Right-aligned, in the order they read: the three that end a session, then the game. The x is
+  // Right-aligned, in the order they read: the ones that end a session, then the game. The x is
   // set explicitly rather than derived from the text, so a long status line cannot push them off
   // the edge.
   bool close = false;
   bool save = false;
   bool launch = false;
-  bool update = false;
+  std::optional<BarOption> activated;
   ImGui::SameLine();
   ImGui::SetCursorPosX(ImGui::GetWindowWidth() - style.WindowPadding.x - total);
-  for (std::size_t option = 0; option < kBarOptions; ++option) {
-    if (option != 0) {
+  for (std::size_t index = 0; index < bar_.size(); ++index) {
+    const BarOption option = bar_[index];
+    if (index != 0) {
       ImGui::SameLine();
     }
-    const bool focused = bar_focused && bar_option == option;
+    const bool focused = bar_focused && bar_option == index;
     // A second copy of the title writing the same save folder is not something to discover by
-    // trying, so Launch stays down until the game the launcher started has exited. Update is
-    // down unless a check has found something an updater can install.
-    const bool disabled = (option == kBarLaunch && running) ||
-                          (option == kBarUpdate && !update_ready);
+    // trying, so Play stays down until the game the launcher started has exited. Update is down
+    // unless a check has found something an updater can install.
+    const bool disabled = (option == BarOption::kPlay && running) ||
+                          (option == BarOption::kUpdate && !update_ready);
     if (disabled) {
       ImGui::BeginDisabled();
     }
     if (focused) {
       ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     }
-    const bool clicked = ImGui::Button(labels[option]);
+    const bool clicked = ImGui::Button(BarLabel(option, running));
     if (focused) {
       ImGui::PopStyleColor();
     }
     DrawFocusOutline(focused);
     // The pointer is a device like any other (D6): hovering a bar button adopts the ring there, so
     // the bar describes what the mouse is on.
-    AdoptRingOnHover(bar_start + option, rings_[tab_]);
+    AdoptRingOnHover(bar_start + index, rings_[tab_]);
     if (disabled) {
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered()) {
-        if (option == kBarLaunch) {
+        if (option == BarOption::kPlay) {
           // B7: the save happens first, and the button says so - a launch that silently wrote the
           // file would leave "which profile did it read?" unanswerable.
           ImGui::SetTooltip("Saves your changes, then starts the game.");
@@ -551,35 +623,40 @@ bool Shell::DrawBottomBar() {
         }
       }
     }
-    if (option == kBarUpdate) {
-      update = clicked;
-    } else if (option == kBarClose) {
-      close = clicked;
-    } else if (option == kBarSave) {
-      save = clicked;
-    } else {
-      launch = clicked;
+    if (clicked) {
+      activated = option;
     }
   }
-  // Activate on the focused bar option presses it, exactly as a click would.
-  if (bar_focused && action_ == NavAction::kActivate) {
-    if (bar_option == kBarUpdate && update_ready) {
-      update = true;
-    } else if (bar_option == kBarClose) {
-      close = true;
-    } else if (bar_option == kBarSave) {
-      save = true;
-    } else if (bar_option == kBarLaunch && !running) {
-      launch = true;
+  // Activate on the focused bar option presses it, exactly as a click would - and is refused
+  // exactly where the button is.
+  if (bar_focused && action_ == NavAction::kActivate && bar_option < bar_.size()) {
+    const BarOption option = bar_[bar_option];
+    const bool disabled = (option == BarOption::kPlay && running) ||
+                          (option == BarOption::kUpdate && !update_ready);
+    if (!disabled) {
+      activated = option;
     }
   }
-  if (update) {
-    // Pressing Update is a request to install what the check found: it opens the prompt, which is
-    // where the answer - and the game-files question - is given. A note left by a previous
-    // answer belongs to that answer, not to this question.
-    update_note_.clear();
-    update_prompt_requested_ = true;
-    update_asked_ = false;
+  if (activated.has_value()) {
+    switch (*activated) {
+      case BarOption::kUpdate:
+        // Pressing Update is a request to install what the check found: it opens the prompt, which
+        // is where the answer - and the game-files question - is given. A note left by a previous
+        // answer belongs to that answer, not to this question.
+        update_note_.clear();
+        update_prompt_requested_ = true;
+        update_asked_ = false;
+        break;
+      case BarOption::kClose:
+        close = true;
+        break;
+      case BarOption::kSave:
+        save = true;
+        break;
+      case BarOption::kPlay:
+        launch = true;
+        break;
+    }
   }
 
   // Under the buttons: the focused row's own help, which is where D7 puts it and where RPCS3 puts
@@ -644,9 +721,9 @@ Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
   // The bottom bar's own row is the last one of every tab's ring; its entries come after every
   // block the tab draws, so it is checked before the blocks below.
   const std::size_t bar_start = rings_[tab_].RowStart(rings_[tab_].RowCount() - 1);
-  if (entry >= bar_start) {
-    const std::size_t option = std::min(entry - bar_start, kBarOptions - 1);
-    return HelpEntry{kBarHelp[option], "Activate"};
+  if (entry >= bar_start && !bar_.empty()) {
+    const std::size_t option = std::min(entry - bar_start, bar_.size() - 1);
+    return HelpEntry{std::string(BarHelpText(bar_[option])), "Activate"};
   }
   // The schema's own rows first, in the order the ring was sized in: the walk and the draw agree
   // because they count entries the same way (schema_view's FocusEntriesFor), which is the only
@@ -693,11 +770,13 @@ std::string Shell::HintLine(const HelpEntry& help) const {
       !quit.empty()) {
     parts.push_back(quit + " Quit");
   }
-  parts.push_back(pad ? std::string(names.shoulder_left) + "/" + std::string(names.shoulder_right) +
-                            " Switch tab"
-                      : keyboard_key(NavAction::kNextTab) + " Switch tab");
+  if (layout_.size() > 1) {
+    parts.push_back(pad ? std::string(names.shoulder_left) + "/" + std::string(names.shoulder_right) +
+                              " Switch tab"
+                        : keyboard_key(NavAction::kNextTab) + " Switch tab");
+  }
   if (pad) {
-    parts.push_back(std::string(names.start) + " Launch");
+    parts.push_back(std::string(names.start) + " Play");
   }
   // B4's badge, when the focused row carries one: the button is mouse-only, and this is where a
   // keyboard user learns which key does the same thing (A5).
@@ -733,8 +812,18 @@ std::string Shell::HintLine(const HelpEntry& help) const {
 }
 
 LaunchCommand Shell::CurrentLaunchCommand() const {
-  const LaunchTarget target = FallbackTarget(session_.profile().target, general_.state());
-  return BuildLaunchCommand(session_, roots_, target);
+  // The payload state the target falls back on comes from the General tab's own probe - and, on
+  // Controller Settings, from the probe itself: that surface has no General tab to have run it, and
+  // "no tab drew this frame" must not read as "the payload is not installed" (P8).
+  const UltimateState ultimate =
+      controller_settings_only_ ? DetectUltimateState(roots_.game_root) : general_.state();
+  const LaunchTarget target = FallbackTarget(session_.profile().target, ultimate);
+  // P8: Controller Settings' Play action passes the profile's identity - the data root, the target,
+  // and the profile path - and no setting at all. The controller rows it owns reach the game from
+  // the profile itself, at the controller allowlist (contracts §8), not from a command line.
+  LaunchOptions options;
+  options.settings_rows = !controller_settings_only_;
+  return BuildLaunchCommand(session_, roots_, target, options);
 }
 
 void Shell::LaunchGame() {
@@ -833,6 +922,11 @@ void Shell::DrawLaunchModal(NavAction action) {
 }
 
 void Shell::RefreshUpdateReport() {
+  if (controller_settings_only_) {
+    // Controller Settings starts no check and draws no Update control (P8): there is nothing to
+    // poll, and nothing to ask the user about. Installing a release is the updater's job.
+    return;
+  }
   // What the check has answered, and what to make of it. `EvaluateUpdate` is pure, so the rule
   // "newer than the version running, and not already declined" is decided in one place that a
   // test can call - and it is re-decided every frame, which is what makes the profile's own
@@ -963,11 +1057,11 @@ void Shell::LogFocus() {  if (!log_.enabled()) {
   }
   if (tab_ < layout_.size()) {
     const std::size_t bar_start = rings_[tab_].RowStart(rings_[tab_].RowCount() - 1);
-    if (entry >= bar_start) {
-      // The bottom bar's own row, named after the button rather than numbered.
-      static const char* const kBarRowNames[kBarOptions] = {"bar:close", "bar:save", "bar:launch"};
+    if (entry >= bar_start && !bar_.empty()) {
+      // The bottom bar's own row, named after the button rather than numbered - and indexed by the
+      // option the surface really draws, so a reduced bar cannot name a button it does not have.
       text += " row=";
-      text += kBarRowNames[std::min(entry - bar_start, kBarOptions - 1)];
+      text += BarTraceName(bar_[std::min(entry - bar_start, bar_.size() - 1)]);
     } else if (const settings::Setting* setting = SettingForEntry(layout_[tab_], entry)) {
       text += " row=";
       text += setting->key;

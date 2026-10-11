@@ -18,8 +18,11 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <string>
 
 #include "hooks/ultimate_plan.h"
+#include "settings/ultimate_adapter.h"
 
 namespace rex {
 class Runtime;
@@ -38,6 +41,25 @@ bool PatchEnabled(uint32_t bit);
 // Call once from RbBlitzApp::OnPostLoadXexImage(): the VFS is up, the XEX is in
 // guest memory and the guest has not started yet. Without a payload this logs and
 // returns, leaving retail behaviour untouched.
+//
+// This is also where P6's provider adapter runs (the payload is inspected and shape-checked, and
+// the provider's own settings file is redirected into user storage as part of the overlay).
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+
+// --- P6: the provider adapter's half of this boot -------------------------------------------------
+//
+// `Provider()` is computed once, in Configure(), on the host thread; the guest hooks only read it.
+// It is empty when Configure() has not run, when there is no payload to inspect (including the
+// merged-payload install, which has no directory of its own to read and no overlay to redirect
+// through - see docs/plans/in-game-settings-ultimate-adapter.md), or when the cvar turned the mod
+// off.
+const settings::ultimate_adapter::ProviderRuntime& Provider();
+
+// Writes the provider's own pairs (`variable -> verbatim value text`, as
+// `settings::ultimate_adapter::EncodeProviderValues` spells them) into the provider's settings file
+// in user storage, durably. False + `error` when nothing was written. Does not touch the guest: the
+// provider's own loader reads the file on the next boot, which is why every provider row is a
+// `restart` row (plan §5.5).
+bool SaveProvider(const std::map<std::string, std::string>& updates, std::string* error);
 
 }  // namespace rb_blitz::ultimate

@@ -70,6 +70,7 @@
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
 #include "hooks/local_save.h"
+#include "hooks/settings_bridge_hooks.h"
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
@@ -252,6 +253,10 @@ class RbBlitzApp : public rex::ReXApp {
     // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
     // toggle off - or no library - nothing is mounted and the hook is inert.
     rb_blitz::shell_music::Configure(runtime(), game_data_root());
+    // The typed settings channel (P1): its two guest hooks are installed at link time, so this
+    // only reads their flags once on this host thread and logs what they are set to. A guest
+    // thread must not touch the cvar registry, which is why the read happens here.
+    rb_blitz::settings::bridge::Configure();
   }
 
   // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no

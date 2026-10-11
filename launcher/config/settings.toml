@@ -678,13 +678,7 @@ Drive the title's menus with the mouse. Off by default, and the pointer is hidde
 it is off. Needs a restart.
 """
 
-[[setting]]
-key     = "guide_button"
-tab     = "controller"
-group   = "Input"
-label   = "Guide button pass-through"
-kind    = "bool"
-default = false
-applies = "restart"
-argv    = "flag"
-tooltip = "Pass the guide button through to the guest instead of the host. Needs a restart."
+# `guide_button` is deliberately *not* a row any more (P8). Guide belongs to the platform, the
+# project never delivers it to the guest, and the runtime clears the bit out of the pad state on
+# every input path (docs/plans/in-game-settings-contracts.md §2.3; src/input/remap.cpp). A row
+# offering to pass it through would be a row that could not keep its promise.

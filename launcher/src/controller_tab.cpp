@@ -41,8 +41,6 @@ std::optional<remap::Target> TargetForPadButton(SDL_GamepadButton button) {
       return remap::Target::kY;
     case SDL_GAMEPAD_BUTTON_BACK:
       return remap::Target::kBack;
-    case SDL_GAMEPAD_BUTTON_GUIDE:
-      return remap::Target::kGuide;
     case SDL_GAMEPAD_BUTTON_START:
       return remap::Target::kStart;
     case SDL_GAMEPAD_BUTTON_LEFT_STICK:
@@ -62,12 +60,19 @@ std::optional<remap::Target> TargetForPadButton(SDL_GamepadButton button) {
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
       return remap::Target::kDpadRight;
     default:
-      // The extra buttons a modern pad has - paddles, the touchpad, misc - have no control of
-      // their own to capture into: the SDK folds them onto buttons that already exist, and a
-      // binding names a control rather than a physical key.
+      // Everything else has no control of its own to capture into, and that deliberately includes
+      // Guide: it is a platform button, no target names it any more, and the runtime keeps it out
+      // of the guest's pad state (docs/plans/in-game-settings-contracts.md §2.3). The extra
+      // buttons a modern pad has - paddles, the touchpad, misc - are the same case: the SDK folds
+      // them onto buttons that already exist, and a binding names a control rather than a key.
       return std::nullopt;
   }
 }
+
+// The vocabulary is the panel's list, so the two must agree about how many controls there are:
+// this is the panel's own count of the rows it draws.
+static_assert(kControlRows == remap::kTargetCount,
+              "the panel's control count must be the remap vocabulary's target count");
 
 // The mouse buttons the grammar names, with SDL's mask for each.
 struct MouseCapture {
@@ -135,8 +140,8 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
         "Reset removes your own row, which puts the control back to that default.\n"
         "Reset all does that for every control at once.\n"
         "\n"
-        "The triggers and Guide are left to the pad: a keyboard cannot stand in for a trigger's\n"
-        "travel, and Guide belongs to the platform.\n"
+        "The triggers are left to the pad: a keyboard cannot stand in for a trigger's travel.\n"
+        "Guide is not remappable - it belongs to the platform, and the game never receives it.\n"
         "\n"
         "Escape cancels a listen. Assignments are written by Save, on the bottom bar.");
   }
@@ -148,6 +153,21 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
   if (!status_.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
     ImGui::TextUnformatted(status_.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+  }
+
+  // A `[remap]` row this build refuses - Guide, and only Guide - is preserved by a save and never
+  // applied (docs/plans/in-game-settings-contracts.md §2.3). Saying so is the difference between
+  // "the button I bound does nothing" being a decision and being a bug report.
+  const std::vector<std::string> refused =
+      remap::RefusedRowNames(session.profile().remap);
+  if (!refused.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
+    ImGui::TextWrapped(
+        "Guide is not remappable: the '%s' row in your settings file is kept but ignored, and "
+        "Guide is never passed to the game.",
+        refused.front().c_str());
     ImGui::PopStyleColor();
     ImGui::Spacing();
   }

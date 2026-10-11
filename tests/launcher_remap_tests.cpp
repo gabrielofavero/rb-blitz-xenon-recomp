@@ -11,6 +11,8 @@
 //   3. a stock control passes through, a bound one is rewritten, and several sources for one
 //      control are a list rather than a priority
 //   4. every binding reads the pad as it was, so a swap is a swap and not a chain
+//   5. Guide is refused at both ends (P8): no target, no source, a preserved row, and a bit that
+//      never leaves the rewrite - docs/plans/in-game-settings-contracts.md §2.3
 //
 // No pad, no window, no SDL: the device side of the remap is the callback this file hands
 // `Apply` (src/input/remap.cpp), so everything the game would otherwise have to be running for
@@ -146,7 +148,7 @@ std::vector<ProfileSetting> Bindings(std::initializer_list<const char*> key_valu
 void TestVocabulary() {
   BeginCase("D16: every control has a name, a label, and one bit of its own");
 
-  CHECK_EQ(Targets().size(), 17);
+  CHECK_EQ(Targets().size(), static_cast<std::size_t>(kTargetCount));
   std::map<std::string, Target> seen;
   uint16_t union_of_bits = 0;
   for (const Target target : Targets()) {
@@ -170,13 +172,14 @@ void TestVocabulary() {
       union_of_bits = static_cast<uint16_t>(union_of_bits | TargetBit(target));
     }
   }
-  // The 15 digital controls and Guide fill the guest's button field except for one bit, 0x0800,
-  // which no 360 control occupies - so this is the field's whole shape, not a coincidence.
-  CHECK_EQ(union_of_bits, 0xF7FF);
+  // The 14 digital controls fill the guest's button field except for two bits: 0x0400, which is
+  // Guide and is never delivered (P8), and 0x0800, which no 360 control occupies - so this is the
+  // field's whole shape minus the one control the project refuses, not a coincidence.
+  CHECK_EQ(union_of_bits, 0xF3FF);
 
   BeginCase("D16: a control is a source as well as a target, with the same name");
 
-  for (const char* name : {"a", "left_shoulder", "left_trigger", "dpad_up", "guide"}) {
+  for (const char* name : {"a", "left_shoulder", "left_trigger", "dpad_up"}) {
     const auto source = ParseSource(std::string("pad:") + name);
     CHECK_TRUE(source.has_value());
     CHECK_TRUE(source->kind == SourceKind::kPad);
@@ -508,10 +511,9 @@ void TestDefaultsGiveTheKeyboardAPad() {
     CHECK_TRUE((*a)[0] == (Source{SourceKind::kPad, "a"}));
     CHECK_TRUE((*a)[1] == (Source{SourceKind::kKey, "K"}));
   }
-  // The analog triggers and Guide have no default and keep the pad's own reporting.
+  // The analog triggers have no default and keep the pad's own reporting.
   CHECK_TRUE(DefaultSources(Target::kLeftTrigger) == nullptr);
   CHECK_TRUE(DefaultSources(Target::kRightTrigger) == nullptr);
-  CHECK_TRUE(DefaultSources(Target::kGuide) == nullptr);
 
   // An empty table means the defaults; an explicit row still wins over one.
   const Table empty;
@@ -538,11 +540,62 @@ void TestDefaultsGiveTheKeyboardAPad() {
   CHECK_EQ(same.left_trigger, pad.left_trigger);
 }
 
+// P8's half of the vocabulary: Guide is refused at both ends. There is no target named "guide"
+// and no source `pad:guide`, so a row a person wrote when there was one is preserved verbatim by
+// a save and never applied - and the rewrite takes the bit out of the state the guest is handed,
+// whatever the SDK's own `guide_button` cvar put there.
+void TestGuideIsRefused() {
+  BeginCase("P8: Guide is neither a target nor a source, and its row is preserved, not applied");
+
+  CHECK_EQ(Targets().size(), static_cast<std::size_t>(kTargetCount));
+  CHECK_FALSE(ParseTarget("guide").has_value());
+  CHECK_FALSE(ParseSource("pad:guide").has_value());
+  CHECK_TRUE(IsRefusedTargetName("guide"));
+  CHECK_FALSE(IsRefusedTargetName("a"));
+  CHECK_FALSE(IsRefusedTargetName(""));
+
+  const std::vector<ProfileSetting> rows = Bindings({"guide=pad:guide", "a=pad:b"});
+  const Table table = Table::FromRows(rows);
+  // The refused row is not a binding: `a` is the only control with one.
+  CHECK_EQ(table.BoundCount(), 1u);
+  CHECK_TRUE(table.Bindings(Target::kA) != nullptr);
+  // It is named as *refused* rather than reported as a row this build simply does not know, which
+  // is what lets the panel say why the button does nothing instead of staying silent.
+  const std::vector<std::string> refused = RefusedRowNames(rows);
+  CHECK_EQ(refused.size(), 1u);
+  if (!refused.empty()) {
+    CHECK_STR_EQ(refused.front(), "guide");
+  }
+  // And a save writes it back: the binding, then the row it kept verbatim. Nothing is lost.
+  CHECK_EQ(table.ToRows().size(), 2u);
+
+  // The rewrite, with the Guide bit set on the way in - the SDK's `guide_button`/`keybind_guide`
+  // paths raise it before this filter ever sees the state.
+  FakeDevice idle;
+  PadState pad;
+  pad.buttons = static_cast<uint16_t>(kGuideButtonBit | TargetBit(Target::kB));
+  const PadState out = Run(table, pad, &idle);
+  CHECK_EQ(out.buttons & kGuideButtonBit, 0);
+  // The binding really ran (`a` follows `pad:b`), and the pad's own reporting for a control the
+  // profile says nothing about is untouched.
+  CHECK_TRUE((out.buttons & TargetBit(Target::kA)) != 0);
+  CHECK_TRUE((out.buttons & TargetBit(Target::kB)) != 0);
+
+  // The one helper a caller with no profile at all uses says the same thing, and takes nothing
+  // else away: what is left is the state minus the refused bit and nothing more.
+  const PadState stripped = WithoutProhibitedButtons(pad);
+  CHECK_EQ(stripped.buttons & kGuideButtonBit, 0);
+  CHECK_EQ(stripped.buttons, static_cast<uint16_t>(pad.buttons & ~kGuideButtonBit));
+  CHECK_EQ(stripped.left_trigger, pad.left_trigger);
+  CHECK_EQ(stripped.right_trigger, pad.right_trigger);
+}
+
 int main() {
   TestVocabulary();
   TestTableRoundTrip();
   TestRewrite();
   TestDefaultsGiveTheKeyboardAPad();
+  TestGuideIsRefused();
   TestProfileKeepsTheTable();
   return Finish();
 }

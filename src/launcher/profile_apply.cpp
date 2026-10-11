@@ -16,10 +16,21 @@
 #include <rex/logging.h>
 
 #include "launcher/profile_path.h"
+#include "settings/cvars.h"
 
 REXCVAR_DEFINE_STRING(launcher_profile, "", "Runtime",
                       "Path to the launcher's profile, when the launcher started this process; "
                       "empty resolves the file the launcher itself would write");
+
+// §8's narrowing, as a switch rather than as a hard cut, because *when* it is right is a fact about
+// the rest of the boot: the launcher profile is still where the DLC root and the save location come
+// from, so a build that narrowed before the game had its own settings file would lose both. It is
+// off until the coordinator's boot wiring gives the game that file (docs/plans/
+// in-game-settings-controller-settings.md); then it becomes the default, and a saved `[settings]`
+// table is inert preservation data.
+REXCVAR_DEFINE_BOOL(profile_controller_rows_only, false, "Compatibility",
+                    "Apply only the controller rows (mouse_ui_nav, input_backend) from the "
+                    "launcher profile, once the game keeps its own settings file");
 
 namespace rb_blitz::launcher {
 
@@ -54,7 +65,17 @@ ProfileApplyReport ApplyLauncherProfileSettings() {
   report.found = true;
   report.rows = profile->settings.size();
 
-  for (const ProfileSetting& setting : profile->settings) {
+  // §8: once the game keeps its own settings file, the launcher profile is a source of controller
+  // state and nothing else. The rows that are left out are not dropped from the file - the launcher
+  // still writes them, and a person's hand edits stay - they simply stop being applied.
+  const bool controller_only = REXCVAR_GET(profile_controller_rows_only);
+  const std::vector<ProfileSetting> rows =
+      controller_only ? settings::ControllerProfileRows(profile->settings) : profile->settings;
+  if (controller_only) {
+    report.rows_ignored = report.rows - rows.size();
+  }
+
+  for (const ProfileSetting& setting : rows) {
     if (rex::cvar::SetFlagFromConfig(setting.key, setting.value)) {
       ++report.applied;
     } else {
@@ -76,6 +97,12 @@ void LogProfileApplyReport(const ProfileApplyReport& report) {
   }
   for (const std::string& row : report.refused) {
     REXLOG_WARN("launcher: profile row {} was refused by this build", row);
+  }
+  if (report.rows_ignored != 0) {
+    REXLOG_INFO(
+        "launcher: {} retired setting(s) in the launcher profile are inert (the game keeps its own "
+        "settings file now)",
+        report.rows_ignored);
   }
   REXLOG_INFO("launcher: applied {} of {} setting(s) from the launcher profile", report.applied,
               report.rows);

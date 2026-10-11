@@ -2,10 +2,13 @@
 #
 # This is a separate CMake project on purpose: the installer is shipped as a
 # Windows executable, not as part of the emulator build, and it must build on a
-# machine that has no recompiled output and no game data. It therefore reuses
-# only two project-owned files from the emulator tree (src/util/sha256.cpp and
-# src/util/game_fingerprint.cpp), so the fingerprint rules the installer
-# enforces are literally the ones the runtime enforces.
+# machine that has no recompiled output and no game data. It therefore compiles a
+# handful of project-owned files from the emulator tree instead of reimplementing
+# them: src/util/sha256.cpp and src/util/game_fingerprint.cpp (so the fingerprint
+# rules the installer enforces are literally the ones the runtime enforces), and
+# src/settings + src/launcher (so the paths.toml the installer writes is read back
+# by exactly the code the game reads it with). Every one of those is SDK-free by
+# design; nothing else from the emulator tree is reachable from here.
 
 cmake_minimum_required(VERSION 3.25)
 
@@ -78,9 +81,33 @@ set(RBBLITZ_HELPER_SOURCES
     src/inflate.cpp
     src/install.cpp
     src/main.cpp
+    src/paths.cpp
     src/stfs.cpp
     src/util.cpp
     src/zip.cpp)
+
+# The game's own path file (settings/paths.h) and the launcher profile it falls back
+# to, compiled from the emulator tree rather than reimplemented, so the bytes the
+# installer writes are literally the bytes the game reads (parent plan §4.4: "a
+# shared SDK-free storage module for the game and installer where their ownership
+# overlaps"). All of these are SDK-free by design - they build with no rexglue, no
+# <windows.h> and no SDL - which is what makes the installer able to reuse them.
+set(RBBLITZ_SHARED_SETTINGS_SOURCES
+    "${RBBLITZ_ROOT}/src/settings/model.cpp"
+    "${RBBLITZ_ROOT}/src/settings/store.cpp"
+    "${RBBLITZ_ROOT}/src/settings/schema.cpp"
+    "${RBBLITZ_ROOT}/src/settings/paths.cpp"
+    "${RBBLITZ_ROOT}/src/launcher/profile.cpp"
+    "${RBBLITZ_ROOT}/src/launcher/profile_path.cpp")
+
+if(NOT MSVC)
+    # The game's own sources define _CRT_SECURE_NO_WARNINGS themselves, which the
+    # installer's own definition collides with, and clang 19 in C++20 mode reports one
+    # -Wunused-variable the game's build does not. Silencing both for those files is
+    # cheaper than carrying a fork of the game's storage module here.
+    set_source_files_properties(${RBBLITZ_SHARED_SETTINGS_SOURCES}
+        PROPERTIES COMPILE_OPTIONS "-Wno-unused-variable;-Wno-macro-redefined")
+endif()
 
 add_executable(rb_blitz_setup_helper ${RBBLITZ_HELPER_SOURCES})
 add_dependencies(rb_blitz_setup_helper rb_blitz_installer_config)
@@ -94,7 +121,8 @@ target_compile_features(rb_blitz_setup_helper PRIVATE cxx_std_20)
 # drift from what the runtime expects.
 target_sources(rb_blitz_setup_helper PRIVATE
     "${RBBLITZ_ROOT}/src/util/sha256.cpp"
-    "${RBBLITZ_ROOT}/src/util/game_fingerprint.cpp")
+    "${RBBLITZ_ROOT}/src/util/game_fingerprint.cpp"
+    ${RBBLITZ_SHARED_SETTINGS_SOURCES})
 
 target_link_libraries(rb_blitz_setup_helper PRIVATE winhttp)
 
@@ -139,6 +167,7 @@ if(BUILD_TESTING)
         src/download.cpp
         src/inflate.cpp
         src/install.cpp
+        src/paths.cpp
         src/stfs.cpp
         src/util.cpp
         src/zip.cpp)
@@ -154,7 +183,8 @@ if(BUILD_TESTING)
         RBBLITZ_ROOT_DIR="${RBBLITZ_ROOT}")
     target_sources(rb_blitz_installer_tests PRIVATE
         "${RBBLITZ_ROOT}/src/util/sha256.cpp"
-        "${RBBLITZ_ROOT}/src/util/game_fingerprint.cpp")
+        "${RBBLITZ_ROOT}/src/util/game_fingerprint.cpp"
+        ${RBBLITZ_SHARED_SETTINGS_SOURCES})
     target_link_libraries(rb_blitz_installer_tests PRIVATE winhttp)
 
     if(MSVC)

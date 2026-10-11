@@ -185,6 +185,47 @@ void TestOnlyDifferencesArePassed(const Scratch& scratch) {
   CHECK_NOT_CONTAINS(again.arguments, "--launch.target");
 }
 
+// P8: Controller Settings' Play action. The same builder, asked for identity only - so the game
+// is started with where its data is, which target it is and which profile to read, and no setting
+// at all. The contrast with the default options is the point: it is the *same* session, so the
+// only difference is the flag the caller asked for.
+void TestControllerSettingsPassesIdentityOnly(const Scratch& scratch) {
+  BeginCase("P8: Controller Settings starts the game with roots and profile identity, no settings");
+
+  ProfileSession session = scratch.Session();
+  // One row of several shapes, including the one Controller Settings itself owns: none of them
+  // travels. The controller rows reach the game from the profile, at the controller allowlist
+  // (contracts §8), not from a command line.
+  session.SetSetting("mouse_ui_nav", "true", "false", ValueStyle::kBare);
+  session.SetSetting("fullscreen", "false", "true", ValueStyle::kBare);
+  session.SetSetting("swap_post_effect", "fxaa", "none", ValueStyle::kBare);
+  session.SetSetting("resolution_scale", "2", "1", ValueStyle::kBare);
+  session.SetSetting("user_data_root", "D:\\saves here", "", ValueStyle::kBasic);
+
+  LaunchOptions identity_only;
+  identity_only.settings_rows = false;
+  const LaunchCommand command =
+      BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate, identity_only);
+  CHECK_TRUE(command.ok);
+  // Identity is still there: the data root, the target, and the profile the game reads.
+  CHECK_CONTAINS(command.arguments, "--game_data_root=\"" + scratch.game_root.string() + "\"");
+  CHECK_CONTAINS(command.arguments, "--ultimate_mode=1");
+  CHECK_CONTAINS(command.arguments, "--launcher_profile=\"" + session.path().string() + "\"");
+  // And not one setting row, whatever the profile holds.
+  CHECK_NOT_CONTAINS(command.arguments, "--mouse_ui_nav");
+  CHECK_NOT_CONTAINS(command.arguments, "--fullscreen");
+  CHECK_NOT_CONTAINS(command.arguments, "--swap_post_effect");
+  CHECK_NOT_CONTAINS(command.arguments, "--resolution_scale");
+  CHECK_NOT_CONTAINS(command.arguments, "--user_data_root");
+
+  // The same session through the full launcher's builder: the rows are there, which is what makes
+  // the difference the flag rather than the profile.
+  const LaunchCommand full = BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_CONTAINS(full.arguments, "--mouse_ui_nav=true");
+  CHECK_CONTAINS(full.arguments, "--fullscreen=false");
+  CHECK_CONTAINS(full.arguments, "--resolution_scale=2");
+}
+
 void TestMainMenuRows(const Scratch& scratch) {
   BeginCase("R5: the main menu's two rows travel as one bool and one quoted list");
 
@@ -341,6 +382,7 @@ int main() {
   const Scratch scratch;
   TestCommandShape(scratch);
   TestOnlyDifferencesArePassed(scratch);
+  TestControllerSettingsPassesIdentityOnly(scratch);
   TestMainMenuRows(scratch);
   TestRefusals(scratch);
   TestFailureDetail(scratch);

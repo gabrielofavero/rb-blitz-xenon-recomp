@@ -46,6 +46,7 @@ struct ProfileApplyReport {
   bool found = false;                // a profile was found and read
   std::size_t rows = 0;              // rows the profile carried
   std::size_t applied = 0;           // ...of those, the registry took
+  std::size_t rows_ignored = 0;      // ...and of those, the retired rows the allowlist left out
   std::vector<std::string> refused;  // "key = value" rows the build does not have, or refused
   std::string unreadable;            // the profile was there but this build could not read it
 };
@@ -56,6 +57,12 @@ struct ProfileApplyReport {
 // outranks the launcher at equal rank, and a command-line flag - applied before any of this -
 // outranks both. A row the registry does not know, or a value the flag refuses, is collected in
 // the report rather than being fatal.
+//
+// The rows applied are the profile's own, except under `profile_controller_rows_only` (P8, off by
+// default): then only the controller allowlist is (`settings::ControllerProfileRows`, contracts
+// §8) and everything else in the table is inert preservation data. That switch - not this function
+// - decides when the launcher stops being a source of game preferences; see
+// docs/plans/in-game-settings-controller-settings.md.
 ProfileApplyReport ApplyLauncherProfileSettings();
 
 // Writes the report as log lines. Call it once logging is initialized (OnPostInitLogging); before

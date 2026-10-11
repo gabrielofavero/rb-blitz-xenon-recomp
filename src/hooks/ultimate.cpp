@@ -91,6 +91,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -106,6 +107,7 @@
 #include <rex/system/xmemory.h>
 
 #include "fs/payload_overlay.h"
+#include "settings/ultimate_adapter.h"
 
 // Both overridden functions are recompiled as weak aliases of their __imp__ form,
 // so a strong definition here replaces every call site while __imp__<name> stays
@@ -200,8 +202,13 @@ void ApplyContentDevicePatch(rex::Runtime* runtime) {
 // write-through to the game root, so the game cannot damage the payload and dropping
 // the folder stays a complete uninstall. src/fs/payload_overlay.h explains why the
 // merge needs a device of its own.
+//
+// `settings_root` (a directory of the player's own) and `redirects` are P6's settings redirect:
+// the payload's one mutable file is served from there instead of the read-only game mount.
 void MountOverlay(rex::Runtime* runtime, const std::filesystem::path& payload_root,
-                  const std::filesystem::path& game_data_root) {
+                  const std::filesystem::path& game_data_root,
+                  const std::filesystem::path& settings_root,
+                  const std::vector<std::string>& redirects) {
   auto* file_system = runtime->file_system();
   if (file_system == nullptr) {
     REXLOG_WARN("ultimate: no virtual file system to merge {} into", payload_root.string());
@@ -229,6 +236,15 @@ void MountOverlay(rex::Runtime* runtime, const std::filesystem::path& payload_ro
       kOverlayMount, std::filesystem::absolute(payload_root, ec),
       std::filesystem::absolute(game_data_root, ec), base_read_only,
       std::vector<std::string>{std::string(kEntrypoint)});
+  // The settings side goes on **before** Initialize(): the union's root entry, and every
+  // directory it merges, is built there, and a side added afterwards would not be in the child
+  // list the guest's own file lookup walks. If it cannot be mounted the union is still usable -
+  // the provider's file then simply keeps the game mount's read-only answer.
+  if (!redirects.empty()) {
+    if (!overlay->AddSettingsSide(settings_root, redirects)) {
+      REXLOG_WARN("ultimate: the payload's own settings file stays on the read-only game mount");
+    }
+  }
   if (ec || !overlay->Initialize()) {
     REXLOG_ERROR("ultimate: cannot merge {} with {}", payload_root.string(),
                  game_data_root.string());
@@ -254,6 +270,15 @@ void MountOverlay(rex::Runtime* runtime, const std::filesystem::path& payload_ro
 
 bool PatchEnabled(uint32_t bit) { return HasPatch(g_patches, bit); }
 
+// P6: this boot's provider state, computed once in Configure() on the host thread.
+settings::ultimate_adapter::ProviderRuntime g_provider;
+
+const settings::ultimate_adapter::ProviderRuntime& Provider() { return g_provider; }
+
+bool SaveProvider(const std::map<std::string, std::string>& updates, std::string* error) {
+  return settings::ultimate_adapter::SaveProviderFile(g_provider.settings_path, updates, error);
+}
+
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   if (runtime == nullptr) return;
 
@@ -262,6 +287,23 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       ResolvePayloadRoot(REXCVAR_GET(ultimate_payload_root), game_data_root);
   const bool has_payload = HasPayload(payload_root);
   const bool merged = HasPayload(game_data_root);
+  // A separate payload directory is the only arrangement the adapter can inspect *and* the only
+  // one the overlay can redirect through: a payload copied into the game root has no directory of
+  // its own to read (its records live inside the game's own archive) and no overlay to serve the
+  // settings file. That arrangement is reported rather than guessed at.
+  const bool separate_payload = ShouldMountOverlay(has_payload, merged) && mode != Mode::kOff;
+
+  // The provider is inspected once, here, before anything else looks at it: the shape check is
+  // what decides whether the settings redirect is meaningful, and the redirect is part of the
+  // union that MountOverlay() builds a few lines below.
+  settings::ultimate_adapter::ConfigureProvider(&g_provider, payload_root,
+                                                runtime->user_data_root(), separate_payload);
+  if (g_provider.considered) {
+    REXLOG_INFO("ultimate: {}", g_provider.summary);
+    for (const std::string& problem : g_provider.shape.problems) {
+      REXLOG_WARN("ultimate: provider shape: {}", problem);
+    }
+  }
 
   switch (DecideOutcome(mode, has_payload, merged)) {
     case Outcome::kOff:
@@ -293,7 +335,16 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     ApplyContentDevicePatch(runtime);
   }
   if (ShouldMountOverlay(has_payload, merged)) {
-    MountOverlay(runtime, payload_root, game_data_root);
+    // The redirect is added when the payload's own macro names the settings file this build
+    // watches - a *separate* question from whether the whole payload is one we integrate with.
+    // On an unrecognized payload this still repairs the provider's own save, which is the plan's
+    // compatibility fallback (§6.1); elsewhere it is the file our rows read and write.
+    std::vector<std::string> redirects;
+    if (settings::ultimate_adapter::PayloadWritesSettingsFile(g_provider.shape) &&
+        !g_provider.user_root.empty()) {
+      redirects.emplace_back(settings::ultimate_adapter::kProviderRecord);
+    }
+    MountOverlay(runtime, payload_root, game_data_root, g_provider.user_root, redirects);
   }
 }
 

@@ -1304,6 +1304,25 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
   manifest.push_back(std::string{});
   AddManifestComponent(&manifest, "ultimate", summary.ultimate);
 
+  // The two locations the install folder page asked for (parent plan §9.2). The
+  // installer owns the *answers*; the file the game reads is paths.toml, written
+  // afterwards by `write-paths`, so an update that answered nothing writes no table.
+  if (summary.paths_answered) {
+    manifest.push_back("[paths]");
+    manifest.push_back(S("file = ", TomlString(Display(summary.install_dir / "paths.toml"))));
+    if (summary.dlc_choice.empty()) {
+      manifest.push_back("dlc_default = true");
+    } else {
+      manifest.push_back(S("dlc_root = ", TomlString(summary.dlc_choice)));
+    }
+    if (summary.save_choice.empty()) {
+      manifest.push_back("save_default = true");
+    } else {
+      manifest.push_back(S("save_root = ", TomlString(summary.save_choice)));
+    }
+    manifest.push_back(std::string{});
+  }
+
   const fs::path manifest_path = summary.install_dir / PathOf(kInstallManifestName);
   if (!WriteFileText(manifest_path, Join(manifest, "\n"), false, error)) {
     return false;
@@ -1345,6 +1364,18 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
     }
   }
   report.push_back(std::string{});
+  if (summary.paths_answered) {
+    report.push_back("Locations");
+    report.push_back("---------");
+    report.push_back(S("DLC        : ", summary.dlc_choice.empty()
+                                          ? std::string("the game's own DLC folder")
+                                          : summary.dlc_choice));
+    report.push_back(S("Saves      : ", summary.save_choice.empty()
+                                          ? std::string("the game's own save folder")
+                                          : summary.save_choice));
+    report.push_back(S("Stored in  : ", Display(summary.install_dir / "paths.toml")));
+    report.push_back(std::string{});
+  }
   if (summary.ultimate_installed) {
     AddComponentLines(&report, "Ultimate mod", summary.ultimate);
   } else {

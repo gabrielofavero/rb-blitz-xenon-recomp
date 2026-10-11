@@ -125,6 +125,11 @@ class ProfileSession {
   // Writes the profile. Unknown keys, comments and tables in the document it was loaded from
   // are patched around rather than rewritten - that is P0.3's module, and this only decides
   // whether to call it.
+  //
+  // The file is reread first (RebaseOntoDisk): what a save writes into is the document that is on
+  // disk *now*, not the snapshot this session loaded, so a change another writer made while the
+  // window was open is merged rather than overwritten. Only the keys this session changed are
+  // taken from the model; every other key keeps what the disk says.
   SaveOutcome Save();
 
   // The same document, to a file the user named. The session's own file is not touched.
@@ -202,6 +207,19 @@ class ProfileSession {
 
  private:
   void RefreshGameConfig() const;
+
+  // P8: the file on disk is the base every write goes into, not the snapshot this session loaded.
+  // Rereads it, and - when the document really did change under us - merges this session's own
+  // edits onto it, so a key the window never touched keeps what the other writer made of it rather
+  // than being reverted to what this session saw when it opened. A no-op when the file is gone,
+  // unchanged, or one this build cannot read (that last case is left for the caller's refusal,
+  // which never writes over a file it did not understand).
+  void RebaseOntoDisk();
+
+  // Records the bytes a successful write left in the file, so the session's belief about what the
+  // disk holds stays true: without it the next write would read this session's own output back as
+  // somebody else's edit.
+  void NoteWritten(const std::string& written);
 
   ProfilePathInputs inputs_;
   std::filesystem::path path_;

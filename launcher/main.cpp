@@ -54,10 +54,15 @@ namespace {
 #define RBBLITZ_LAUNCHER_VERSION "0.0.0"
 #endif
 
-const char* WindowTitle() {
-  static const std::string title =
+const char* WindowTitle(bool controller_settings_only) {
+  // The reduced surface is what the product is: Controller Settings, the one screen a player
+  // opens to change how their pad works. The full surface is the launcher as it stands until the
+  // coordinator approves cutover (G4/P11, contracts §9.3), so it keeps the name it has always had.
+  static const std::string controller_settings =
+      std::string("Rock Band Blitz Controller Settings (v") + RBBLITZ_LAUNCHER_VERSION + ")";
+  static const std::string launcher =
       std::string("Rock Band Blitz Launcher (v") + RBBLITZ_LAUNCHER_VERSION + ")";
-  return title.c_str();
+  return controller_settings_only ? controller_settings.c_str() : launcher.c_str();
 }
 
 // The profile's own defaults (src/launcher/profile.h), used when a stored size is missing or
@@ -90,10 +95,11 @@ std::string LoadUiFont();
 
 // A WIN32-subsystem executable has no console, so a bring-up failure would otherwise be
 // silent. Name the step that failed and let SDL say why.
-void Fatal(const char* step) {
+void Fatal(const char* step, bool controller_settings_only) {
   char message[512];
   std::snprintf(message, sizeof(message), "%s failed:\n%s", step, SDL_GetError());
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, WindowTitle(), message, nullptr);
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, WindowTitle(controller_settings_only), message,
+                           nullptr);
 }
 
 struct Options {
@@ -166,6 +172,12 @@ struct Options {
   // file itself is still read and still written, because a launcher that could not save would
   // leave a user who has just reset the keys unable to keep the fix.
   bool safe_mode = false;
+  // --controller-only (P8) is the development gate the reduced surface lives behind until the
+  // coordinator approves cutover: the launcher becomes Controller Settings - the one screen the
+  // product keeps - while the full surface stays the default for everything else. It is the
+  // launcher's own switch and reaches no further than this window: it decides which tabs exist,
+  // which controls the bar has, and whether a Play action passes settings on the command line.
+  bool controller_only = false;
   // --ui-scale=<factor> (A5) overrides the display's content scale, which is normally what the
   // window and the whole UI are sized by. It exists twice over: as the accessibility answer for a
   // display whose scale the user does not want to change, and as the only way a build machine can
@@ -216,6 +228,8 @@ Options ParseOptions(int argc, char** argv) {
       options.ui_scale_text = std::string(argument.substr(kUiScalePrefix.size()));
     } else if (argument == "--safe-mode") {
       options.safe_mode = true;
+    } else if (argument == "--controller-only") {
+      options.controller_only = true;
     } else if (argument.size() > kFocusLogPrefix.size() &&
                argument.substr(0, kFocusLogPrefix.size()) == kFocusLogPrefix) {
       options.focus_log_path = std::string(argument.substr(kFocusLogPrefix.size()));
@@ -284,11 +298,20 @@ int DumpLayout(const Options& options) {
   environment.ultimate_installed = rb_blitz::launcher::UltimateAvailable(
       rb_blitz::launcher::DetectUltimateState(roots.game_root));
 
-  const std::string text = rb_blitz::launcher::DescribeLayout(
-      rb_blitz::launcher::BuildLayout(environment));
+  // The surface the window would really open with (P8's gate), so the dump describes one launcher
+  // and not a mixture of two: four tabs, or Controller Settings' single screen.
+  const std::vector<rb_blitz::launcher::TabLayout> layout =
+      options.controller_only
+          ? std::vector<rb_blitz::launcher::TabLayout>{rb_blitz::launcher::BuildTabLayout(
+                rb_blitz::launcher::settings::Tab::kController, environment)}
+          : rb_blitz::launcher::BuildLayout(environment);
+
+  const std::string text = rb_blitz::launcher::DescribeLayout(layout);
   const bool complete = text.find("MISSING-TOOLTIP") == std::string::npos;
-  const std::string all =
-      text + (complete ? "every row carries a tooltip\n" : "a row is missing its tooltip\n");
+  std::string all = "surface : ";
+  all += options.controller_only ? "controller settings (one screen)\n" : "full launcher\n";
+  all += text;
+  all += complete ? "every row carries a tooltip\n" : "a row is missing its tooltip\n";
   return Emit(all, options.dump_layout_path, complete ? 0 : 1);
 }
 
@@ -400,10 +423,17 @@ int PrintCommand(const Options& options) {
   const rb_blitz::launcher::LaunchTarget target = rb_blitz::launcher::FallbackTarget(
       session.profile().target, rb_blitz::launcher::DetectUltimateState(roots.game_root));
 
+  // The same options the window would use, so what this prints is what a Play press would run:
+  // Controller Settings passes the profile's identity and no setting (P8), the full launcher
+  // passes every row it moved off its default.
+  rb_blitz::launcher::LaunchOptions launch_options;
+  launch_options.settings_rows = !options.controller_only;
   const rb_blitz::launcher::LaunchCommand command =
-      rb_blitz::launcher::BuildLaunchCommand(session, roots, target);
+      rb_blitz::launcher::BuildLaunchCommand(session, roots, target, launch_options);
 
   std::string text;
+  text += "surface     : ";
+  text += options.controller_only ? "controller settings (identity only)\n" : "full launcher\n";
   text += "working dir : " + command.working_directory.string() + "\n";
   text += "game exe    : ";
   text += command.ok ? "found\n" : "MISSING\n";
@@ -520,7 +550,7 @@ int DumpDisplay(const Options& options) {
           "\n";
   // The title the window is created with, so which release this is can be asserted on text
   // instead of on a picture of a title bar.
-  text += "window title   : " + std::string(WindowTitle()) + "\n";
+  text += "window title   : " + std::string(WindowTitle(options.controller_only)) + "\n";
   text += "font base size : " + std::to_string(static_cast<int>(kUiFontSize)) + "\n";
   text += "font face      : " + face + "\n";
 
@@ -681,12 +711,16 @@ int main(int argc, char** argv) {
   rb_blitz::launcher::ShellEnvironment shell_environment;
   shell_environment.gamepads = !options.no_gamepad;
   shell_environment.focus_log_path = options.focus_log_path;
+  // P8's development gate: the reduced surface, the one the product keeps.
+  shell_environment.controller_settings_only = options.controller_only;
   // D19: the release channel this build checks. It is compiled in from the same pins the
   // installer is built from, and empty for a build that has none - which then checks nothing.
   // --no-update-check empties it for one run, and the check is written so that "no channel" and
   // "checked and found nothing" look the same to the user.
   shell_environment.update_manifest_url =
-      options.no_update_check ? std::string() : rb_blitz::launcher::UpdateManifestUrl();
+      (options.no_update_check || options.controller_only)
+          ? std::string()
+          : rb_blitz::launcher::UpdateManifestUrl();
   rb_blitz::launcher::VirtualPad test_pad;
   if (!options.test_pad_script.empty() && !test_pad.Start(options.test_pad_script, nullptr)) {
     std::fprintf(stderr, "--test-pad: '%s' is not a script this build understands\n",
@@ -766,10 +800,10 @@ int main(int argc, char** argv) {
                                     to_units(kMinWindowHeight));
   FitToDisplay(&want_width, &want_height);
   SDL_Window* window =
-      SDL_CreateWindow(WindowTitle(), want_width, want_height,
+      SDL_CreateWindow(WindowTitle(options.controller_only), want_width, want_height,
                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window == nullptr) {
-    Fatal("SDL_CreateWindow");
+    Fatal("SDL_CreateWindow", options.controller_only);
     SDL_Quit();
     return 1;
   }
@@ -784,13 +818,13 @@ int main(int argc, char** argv) {
                               SDL_GPU_SHADERFORMAT_METALLIB,
                           /*debug_mode=*/false, /*name=*/nullptr);
   if (gpu_device == nullptr) {
-    Fatal("SDL_CreateGPUDevice");
+    Fatal("SDL_CreateGPUDevice", options.controller_only);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 1;
   }
   if (!SDL_ClaimWindowForGPUDevice(gpu_device, window)) {
-    Fatal("SDL_ClaimWindowForGPUDevice");
+    Fatal("SDL_ClaimWindowForGPUDevice", options.controller_only);
     SDL_DestroyGPUDevice(gpu_device);
     SDL_DestroyWindow(window);
     SDL_Quit();
@@ -865,7 +899,7 @@ int main(int argc, char** argv) {
   // title that changes on every switch is noise in the taskbar. A script that needs the tab reads
   // the focus trace instead. (The ImGui window's own id is still the bare name - shell.cpp's
   // kWindowId - because that one is an identity, not something anyone reads.)
-  SDL_SetWindowTitle(window, WindowTitle());
+  SDL_SetWindowTitle(window, WindowTitle(options.controller_only));
 
   // Where the pointer is on the *desktop*, which is what "the mouse moved" means for the ring that
   // follows the mouse (D6, row_ui.h). Measured once per frame and passed to the rows: what ImGui
@@ -922,7 +956,7 @@ int main(int argc, char** argv) {
 
     SDL_GPUCommandBuffer* command_buffer = SDL_AcquireGPUCommandBuffer(gpu_device);
     if (command_buffer == nullptr) {
-      Fatal("SDL_AcquireGPUCommandBuffer");
+      Fatal("SDL_AcquireGPUCommandBuffer", options.controller_only);
       break;
     }
     SDL_GPUTexture* swapchain_texture = nullptr;

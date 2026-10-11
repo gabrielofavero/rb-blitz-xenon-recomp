@@ -107,7 +107,7 @@ group instead of the withdrawn Experimental tab — and all of them are built, *
 | A precedent for "apply only where nothing else did" | `ApplyContentLicense()` reads `GetFlagSource("license_mask")` and writes only when it is `kDefault` ([src/rb_blitz_app.h](../../src/rb_blitz_app.h)) | same shape as the profile merge |
 | The mouse-navigation feature, currently unconditional | `InstallMouseUiNavigation` in `OnPreSetup` ([src/rb_blitz_app.h:36](../../src/rb_blitz_app.h)), device in [src/input/mouse_ui.h](../../src/input/mouse_ui.h), arithmetic in [src/input/ui_nav.h](../../src/input/ui_nav.h) | the Controller tab's mouse-support toggle is a *gate*, not a new feature |
 | A vendored UI stack already configured for this build | `imgui` OBJECT target ([rexglue-sdk/thirdparty/CMakeLists.txt:231-242](../../rexglue-sdk/thirdparty/CMakeLists.txt)), SDL3 static with `SDL_SHARED=OFF`/`SDL_STATIC=ON` (`:247-250`), PNG decode via stb_image ([rexglue-sdk/src/ui/image_decode.cpp:17](../../rexglue-sdk/src/ui/image_decode.cpp)) | the launcher needs no new third-party dependency (D1, D6) |
-| An art pipeline with a stated licensing posture | [installer/tools/make_art.ps1](../../installer/tools/make_art.ps1) (DPI ladder, centre-crop, "not ours, not committed"), `.gitignore` `/assets/wizard-*.bmp`, committed `assets/blitz.png` + `assets/blitz.ico` | R2's cover is generated, not committed (D11) |
+| An art pipeline with a stated licensing posture | [installer/tools/make_art.ps1](../../installer/tools/make_art.ps1) (DPI ladder, centre-crop, "not ours, not committed"), `.gitignore` `/assets/installer/wizard-*.bmp`, committed `assets/icon/` (`blitz.png` + `blitz.ico`, plus the launcher's `blitz-mono.ico`) | R2's cover is generated, not committed (D11) |
 | A capture/verify toolkit | `scripts/capture_window.ps1`, `scripts/frame_diff.ps1`, `scripts/drive_ui.ps1`, `scripts/acceptance_*.ps1`, and the launcher's own `scripts/capture_launcher.ps1` / `scripts/acceptance_launcher.ps1` | the launcher is verified the same way the game is (E2/E3, now built) |
 | A dependency-free test harness | `tests/check.h`, targets in [CMakeLists.txt:128-172](../../CMakeLists.txt) | launcher/profile/settings tests look exactly like the existing six |
 
@@ -441,8 +441,9 @@ override), the same DPI ladder idea, the same "not ours, gitignored, absence is 
 - The launcher picks the ladder step nearest its panel size rather than stretching one image, exactly
   as the wizard does.
 - An absent cover is a supported configuration: the launcher falls back to a flat panel with the app
-  badge (`assets/blitz.png`, committed) and the title text.
-- `assets/blitz.ico` is the launcher's exe icon, compiled in with the same `rb_blitz.rc` trick the game
+  badge (`assets/icon/blitz.png`, committed) and the title text.
+- `assets/icon/blitz-mono.ico` is the launcher's exe icon — the black-and-white alt icon, so a launcher
+  window is told apart from the game's — compiled in with the same `rb_blitz.rc` trick the game
   uses ([CMakeLists.txt:32-36](../../CMakeLists.txt) and its comment about binding the icon by hand).
 
 ### D12 — Graphics tab contents
@@ -601,7 +602,7 @@ Two rules keep "leave the unimplemented categories blank" honest:
 **Recommendation:** reuse it, but only ever **derived from the user's own game data, on their
 machine — never committed and never shipped.** The project already draws this line for the
 wizard: [installer/tools/make_art.ps1](../../installer/tools/make_art.ps1) renders from a source
-image that is not ours into `assets/wizard-*.bmp`, which `.gitignore` excludes, and absence is a
+image that is not ours into `assets/installer/wizard-*.bmp`, which `.gitignore` excludes, and absence is a
 supported configuration (D11, Contract 5). Every game-derived image the launcher ever shows —
 background, logo, button prompts, controller diagrams — inherits exactly that rule. Reusing the
 game's art is a *look*, not a payload.
@@ -614,7 +615,7 @@ Three routes, in the order they should be attempted. None is a new subsystem:
 2. **Generate it locally on the user's machine** at first run, into the launcher's own data
    directory: same posture as `make_art.ps1`, same "not ours, gitignored, absence supported"
    comment. Available today with a *capture* source (§10.3).
-3. **Draw the fallback.** Flat panel, the committed `assets/blitz.png` badge, the title text.
+3. **Draw the fallback.** Flat panel, the committed `assets/icon/blitz.png` badge, the title text.
    Already Contract 5's rule for the cover; §10.2 extends it to every slot.
 
 So the deliverable that is unblocked now is not an extractor: it is the **slot list** — what
@@ -982,7 +983,7 @@ Exe name `rb_blitz_launcher.exe`; payload role `payload-rb_blitz_launcher.exe`; 
 
 Source URL/override and the "absence is supported" rule come from `make_art.ps1`; the launcher consumes
 either the generated embedded header or, if it is missing, a flat panel. No art file is committed; the
-`assets/wizard-*.bmp` ignore rule is extended to whatever the launcher's build writes.
+`assets/installer/wizard-*.bmp` ignore rule is extended to whatever the launcher's build writes.
 
 ### 4.6 The helper-reuse contract (Contract 6)
 
@@ -1081,10 +1082,10 @@ Each block now says what is already in the tree, so a session does not rebuild i
 #### A4 — Cover art pipeline
 
 > **Goal.** Give the launcher the installer's cover image. Extend the art pipeline so a launcher build
-> produces either `assets/wizard-*.bmp`-style files or an embedding tool
+> produces either `assets/installer/wizard-*.bmp`-style files or an embedding tool
 > (`launcher/tools/embed_art.cpp` → generated header, same shape as `installer/tools/embed_config.cpp`),
 > pick the ladder step nearest the panel size instead of stretching, and draw the cover beside the tabs
-> with `assets/blitz.png` as the badge. Absence of the art must be a supported configuration: a flat
+> with `assets/icon/blitz.png` as the badge. Absence of the art must be a supported configuration: a flat
 > panel with the badge and the title, no error, no crash. Extend `.gitignore` for whatever the launcher
 > build writes, and state the licensing posture in `launcher/README.md` in the same words
 > `make_art.ps1` uses.
@@ -1319,8 +1320,8 @@ drop-in, and an empty launcher is still a working one.
 
 | Slot | Wanted | Absent → |
 | --- | --- | --- |
-| Window background | one 1920×1080 image, darkened | flat panel, `assets/blitz.png` badge, title text |
-| App badge / logo | the Blitz wordmark, transparent | `assets/blitz.png` (committed) |
+| Window background | one 1920×1080 image, darkened | flat panel, `assets/icon/blitz.png` badge, title text |
+| App badge / logo | the Blitz wordmark, transparent | `assets/icon/blitz.png` (committed) |
 | Tab icon strip (General/Graphics/Controller) | 3 small icons | text labels only |
 | Prompt icons (A, B, X, Y, LB, RB, D-pad, Start, Back) | 9 transparent sprites at 32–64 px | drawn shapes: a filled circle with the letter, a rounded rect for the shoulders |
 | Controller diagram | one image per pad family | the drawn shapes above, or nothing (the binding list already names the buttons) |
@@ -1394,7 +1395,7 @@ and one that needs it.
 - **Licensing is the whole reason for the rule, not a formality.** Shipping the installer or the
   launcher with retail art inside it would be redistributing the game's assets.
   Derived-on-the-user's-machine (routes 1 and 2) is the only acceptable form, and the `.gitignore`
-  rule that covers `assets/wizard-*.bmp` has to cover whatever the launcher's build writes too.
+  rule that covers `assets/installer/wizard-*.bmp` has to cover whatever the launcher's build writes too.
 - **A capture is not the game's art file.** It carries the HUD, the prompts, and whichever animation
   frame it was taken on; it is a fallback source, not a substrate for recolouring. Anything that has
   to *change* an asset — a theme, a colourway — needs route 1.

@@ -60,9 +60,10 @@ is removed from this file, not from the log.
   failed download as a warning rather than a build failure, so absence is the ordinary case. The
   launcher has no cover at all yet: the General tab is a flat panel with the badge and the title, and
   drawing a ladder beside the tabs is A4, which owes the same absence-is-supported rule for its own
-  art. Two images *are* committed and embedded — `assets/blitz.ico` (compiled into both exes by their
-  `.rc` files) and `assets/blitz.png` (the wizard badge) — and they are the app's own, which is what
-  keeps `tracked-tree`'s "no binary artefact" claim true; see
+  art. Four images *are* committed under `assets/icon/` — `blitz.ico` (compiled into the game's exe by
+  its `.rc`), `blitz-mono.ico` (the launcher's exe icon, the black-and-white alt), and the
+  `blitz.png` / `blitz-mono.png` badges (the colour one is the wizard's) — and they are the app's own,
+  which is what keeps `tracked-tree`'s "no binary artefact" claim true; see
   [distributable.md](distributable.md) for the packaging rows that cover the rest.
 - **The launcher and the game can be different builds, and only some of the seam is versioned**
   (launcher D2/C3, R-skew). Installed together they always match; the skew matters when one of the

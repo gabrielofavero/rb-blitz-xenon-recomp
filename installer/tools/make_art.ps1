@@ -5,7 +5,8 @@ Builds the optional Inno Setup side wizard image from the cover artwork.
 .DESCRIPTION
 The setup wizard can show a large image on the left of the welcome page. It is
 optional: setup.iss only uses it when it exists, and the artwork below is not
-ours, so it is not committed to the repository (assets/wizard-*.bmp is ignored).
+ours, so it is not committed to the repository
+(assets/installer/wizard-*.bmp is ignored).
 Running this script is therefore a deliberate, local act - and a failure here is
 not a build failure (build.ps1 continues with the setup executable, which simply
 has no side image).
@@ -21,7 +22,7 @@ The source is a 2:3 thumbnail; the wizard area is 164:314, which is taller and
 narrower. The image is therefore centre-cropped rather than distorted.
 
 The square badge in the corner of the header is not made here: it is the app's own
-art, already committed as assets/blitz.png.
+art, already committed as assets/icon/blitz.png.
 
 .PARAMETER Url
 Artwork to download. Defaults to the SteamGridDB thumbnail the project uses. The
@@ -32,8 +33,8 @@ the installer - it is never redistributed.
 Use this image file instead of downloading. Accepts .jpg, .png and .bmp.
 
 .PARAMETER OutDir
-Where to write the bitmaps. Defaults to the repository's assets directory, which
-is where setup.iss looks.
+Where to write the bitmaps. Defaults to the repository's assets/installer
+directory, which is where setup.iss looks.
 
 .PARAMETER Force
 Overwrite the images even if they are newer than the source. By default an
@@ -59,7 +60,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
-if (-not $OutDir) { $OutDir = Join-Path $repoRoot 'assets' }
+if (-not $OutDir) { $OutDir = Join-Path $repoRoot 'assets\installer' }
 
 # [Setup] WizardImageFile: the image area is 202x386 at 100% and grows with the
 # DPI setting. Ladder from the Inno Setup "WizardImageFile" documentation; these

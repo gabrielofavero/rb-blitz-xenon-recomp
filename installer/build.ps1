@@ -146,7 +146,7 @@ if (-not $SourceDir) { $SourceDir = Join-Path $repoRoot 'out\build\win-amd64-rel
 
 $generatedDir = Join-Path $installerDir 'out\generated'
 $distDir = Join-Path $installerDir 'out\dist'
-$artDir = Join-Path $repoRoot 'assets'
+$artDir = Join-Path $repoRoot 'assets\installer'
 $buildDir = Join-Path $installerDir "out\build\$Preset"
 $payloadManifest = Join-Path $PayloadDir 'payload-manifest.toml'
 $makePayload = Join-Path $installerDir 'tools\make_payload.ps1'

@@ -104,10 +104,11 @@ set(RBBLITZ_LAUNCHER_SOURCES
 
 if(WIN32)
     # Same icon mechanism as the game (root CMakeLists.txt): the .rc carries
-    # assets/blitz.ico, and the icon is bound to the resource object by hand because the
-    # resource compiler does not report the files it inlines.
+    # assets/icon/blitz-mono.ico, the black-and-white alt icon the launcher ships so its
+    # window is told apart from the game's, and the icon is bound to the resource object
+    # by hand because the resource compiler does not report the files it inlines.
     set_source_files_properties(rb_blitz_launcher.rc PROPERTIES
-        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/blitz.ico")
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/icon/blitz-mono.ico")
     add_executable(rb_blitz_launcher WIN32 ${RBBLITZ_LAUNCHER_SOURCES}
         rb_blitz_launcher.rc)
 else()

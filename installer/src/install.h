@@ -22,13 +22,15 @@
 // Layout of an installed {app} directory:
 //
 //   {app}/rb_blitz.exe                 payload, copied by Inno Setup [Files]
-//   {app}/rb_blitz_launcher.exe        payload, the settings launcher (D1)
+//   {app}/rb_blitz_launcher.exe        payload, Controller Settings (D1)
 //   {app}/payload-manifest.toml        payload, hashes of the files above
 //   {app}/game/default.xex             imported dump
 //   {app}/game/gen/main_xbox*.ark
 //   {app}/game/ultimate/gen/*.hdr      optional Ultimate overlay
 //   {app}/install-manifest.toml        written by FinalizeInstall
 //   {app}/install-report.txt           written by FinalizeInstall
+//   {app}/paths.toml                   the two folders the folder page asked for,
+//                                      written by `write-paths` after this
 //   {app}/.staging/                    transient, always removed on the way out
 
 #pragma once
@@ -220,6 +222,12 @@ struct InstallSummary {
   // Commit of the recompiled build (the [payload] commit pin); empty when the
   // build did not record one.
   std::string payload_commit;
+  // The two folders the install folder page asked for, as the user answered them:
+  // empty means "the game's own default". `paths_answered` separates that from an
+  // update, which has no folder page and so answers nothing at all.
+  bool paths_answered = false;
+  std::string dlc_choice;
+  std::string save_choice;
 };
 
 // Writes install-manifest.toml (machine-readable, for a future upgrade or

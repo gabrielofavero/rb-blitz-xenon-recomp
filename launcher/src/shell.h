@@ -55,7 +55,19 @@ struct ShellEnvironment {
   // installer/config/pins.toml - the same file the installer and the release manifest come
   // from - so a launcher cannot check a release the installer beside it would not install.
   std::string update_manifest_url;
+  // P8's development gate (docs/plans/in-game-settings-contracts.md §9.3). True puts the launcher
+  // into Controller Settings: one screen - the controller mapping table and the mouse row - with
+  // Save, Close and Play Game on the bar, and no other tab, no Update, and no Ultimate install
+  // (both of those are the installer's and the updater's business, plan §3.6). False is the full
+  // launcher, which stays the default surface until the coordinator approves cutover (G4/P11).
+  bool controller_settings_only = false;
 };
+
+// The bottom bar's own controls, in the order they read on each surface. Which of them are on the
+// bar is the one thing the two surfaces disagree about (P8): Controller Settings has no Update,
+// because installing a release - and installing Ultimate - is the installer's and the updater's
+// business, not a row on a controller screen (docs/plans/in-game-settings-plan.md §3.6).
+enum class BarOption : std::size_t { kUpdate, kClose, kSave, kPlay };
 
 class Shell {
  public:
@@ -209,6 +221,13 @@ class Shell {
   bool logged_pads_ = false;
   std::size_t logged_pad_count_ = 0;
   std::string logged_pad_name_;
+  // The bar's controls for this surface, left to right. Built once, because the ring's size and
+  // every walk that names a bar entry have to agree about it.
+  std::vector<BarOption> bar_;
+  // P8's gate: whether this Shell is the Controller Settings screen. It decides the window's
+  // heading, whether the tab strip exists, which block of rows follows the schema's, and that the
+  // Play action passes the profile's identity rather than a setting.
+  bool controller_settings_only_ = false;
 };
 
 }  // namespace rb_blitz::launcher

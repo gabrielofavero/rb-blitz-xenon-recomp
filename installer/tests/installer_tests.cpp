@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -26,6 +28,8 @@
 #include "config.h"
 #include "inflate.h"
 #include "install.h"
+#include "paths.h"
+#include "settings/paths.h"
 #include "stfs.h"
 #include "util.h"
 #include "zip.h"
@@ -72,6 +76,15 @@ std::string ReadFileOrEmpty(const fs::path& path) {
   std::string text;
   ReadFileText(path, &text, nullptr);
   return text;
+}
+
+// One `key=value` out of a helper summary, or the empty string.
+std::string Field(const std::string& text, std::string_view key) {
+  return ReadSummaryValue(text, key).value_or(std::string());
+}
+
+std::string Field(const fs::path& summary, std::string_view key) {
+  return Field(ReadFileOrEmpty(summary), key);
 }
 
 // The manifest's own string writer escapes backslashes and quotes (install.cpp's TomlString), so
@@ -1498,6 +1511,547 @@ static void TestCommandLine() {  BeginCase("a rejected command line still report
   CHECK_CONTAINS(unhandled_text, "error=unhandled failure");
 }
 
+// --- the two folders the game reads (P7) ------------------------------------
+//
+// The install folder page asks three questions instead of one, and two of them end
+// up in `paths.toml` - the file the game itself reads (src/settings/paths.h). What
+// is tested here is the policy around that file: what the page is told to prefill,
+// what the installer refuses, and what it commits and when. The file format is
+// pinned by its bytes as well, because it is a contract with a reader in another
+// program.
+
+namespace {
+
+// A scratch folder under the test root, emptied first.
+fs::path FreshDir(std::string_view name) {
+  const fs::path path = g_root / "locations" / fs::path(std::string(name));
+  RemovePath(path);
+  std::string error;
+  if (!EnsureDirectory(path, &error)) {
+    rb_blitz::test::Fail(__FILE__, __LINE__, "cannot create " + path.string() + ": " + error);
+  }
+  return path;
+}
+
+// Runs validate-paths and returns its summary text, passing only the answers the
+// caller actually gave - which is the whole point of PathChoice::present.
+std::string ValidateSummary(const fs::path& install, const fs::path& summary,
+                            const PathChoice& dlc, const PathChoice& save, int* code,
+                            bool inspect_only = false) {
+  std::vector<std::string> args{"validate-paths", "--install-dir", install.string(), "--summary",
+                                summary.string()};
+  if (dlc.present) {
+    args.push_back("--dlc-dir");
+    args.push_back(dlc.value);
+  }
+  if (save.present) {
+    args.push_back("--save-dir");
+    args.push_back(save.value);
+  }
+  if (inspect_only) {
+    args.push_back("--no-touch");
+  }
+  *code = RunCommand(args);
+  return ReadFileOrEmpty(summary);
+}
+
+// Widen/Narrow are UTF-8 in the helper, so a path spelled out in the test can be
+// handed to the helper's command line the way the wizard would. Normalized the way
+// the helper normalizes an answer - absolute and lexically normal - so a comparison
+// is about the path rather than about who spelled the separators.
+std::string Utf8(const fs::path& path) { return Narrow(path.lexically_normal().native()); }
+
+// The environment variable the game's own profile resolution reads. A machine
+// running these tests may have it set (someone testing the launcher), so it is
+// cleared for the cases that resolve a profile and put back afterwards.
+class ScopedEnv {
+ public:
+  ScopedEnv(const char* name, const char* value) : name_(name) {
+    if (const char* previous = std::getenv(name); previous != nullptr) {
+      previous_ = previous;
+      had_ = true;
+    }
+    _putenv_s(name, value);
+  }
+  ~ScopedEnv() { _putenv_s(name_.c_str(), had_ ? previous_.c_str() : ""); }
+
+ private:
+  std::string name_;
+  std::string previous_;
+  bool had_ = false;
+};
+
+}  // namespace
+
+static void TestLocations() {
+  const fs::path scratch = g_root / "locations";
+  const fs::path summary = scratch / "summary.txt";
+  RemovePath(scratch);
+  EnsureDirectory(scratch, nullptr);
+
+  // --- prefill ----------------------------------------------------------
+  BeginCase("read-paths falls back to the game's own DLC folder");
+
+  fs::path install = FreshDir("read/install");
+  EnsureDirectory(install / "game", nullptr);
+  CHECK_EQ(RunCommand({"read-paths", "--install-dir", install.string(), "--summary",
+                       summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "has_file"), "0");
+  CHECK_STR_EQ(Field(summary, "file_valid"), "0");
+  CHECK_STR_EQ(Field(summary, "dlc_effective"), Utf8(install / "game" / "dlc"));
+  // The save answer stays empty: the game's own folder is not the installer's to guess.
+  CHECK_STR_EQ(Field(summary, "save_effective"), "");
+
+  BeginCase("the file the installer writes is the file the game reads");
+
+  const fs::path dlc_chosen = scratch / "read/Rock Band DLC";
+  const fs::path save_chosen = scratch / "read/Saves de Gabriel";
+  CHECK_EQ(RunCommand({"write-paths", "--dest", install.string(), "--dlc-dir", Utf8(dlc_chosen),
+                       "--save-dir", Utf8(save_chosen), "--summary", summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "written"), "1");
+  CHECK_STR_EQ(Field(summary, "changed"), "1");
+
+  const std::string written = ReadFileOrEmpty(install / "paths.toml");
+  CHECK_CONTAINS(written, "schema_version = 1");
+  // A TOML *literal* string, so a Windows path needs no escaping (parent plan §4.1).
+  CHECK_CONTAINS(written, "dlc_root = '" + Utf8(dlc_chosen) + "'");
+  CHECK_CONTAINS(written, "user_data_root = '" + Utf8(save_chosen) + "'");
+  CHECK_FALSE(written.find("\\\\") != std::string::npos);
+
+  // Read back by the game's own reader, not by a second implementation here.
+  const rb_blitz::settings::PathFileResult reloaded =
+      rb_blitz::settings::LoadPathFile(install / "paths.toml");
+  CHECK_TRUE(reloaded.status == rb_blitz::settings::PathFileResult::Status::kOk);
+  CHECK_STR_EQ(reloaded.paths.dlc_root, Utf8(dlc_chosen));
+  CHECK_STR_EQ(reloaded.paths.user_data_root, Utf8(save_chosen));
+
+  CHECK_EQ(RunCommand({"read-paths", "--install-dir", install.string(), "--summary",
+                       summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "has_file"), "1");
+  CHECK_STR_EQ(Field(summary, "file_valid"), "1");
+  CHECK_STR_EQ(Field(summary, "schema_version"), "1");
+  CHECK_STR_EQ(Field(summary, "dlc_effective"), Utf8(dlc_chosen));
+  CHECK_STR_EQ(Field(summary, "save_effective"), Utf8(save_chosen));
+
+  BeginCase("a relative value in a hand-edited paths.toml resolves against the file");
+
+  WriteText(install / "paths.toml", "schema_version = 1\n\n[paths]\ndlc_root = 'DLC'\n");
+  CHECK_EQ(RunCommand({"read-paths", "--install-dir", install.string(), "--summary",
+                       summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "dlc_effective"), Utf8(install / "DLC"));
+  CHECK_STR_EQ(Field(summary, "save_effective"), "");
+
+  BeginCase("a paths.toml the game would refuse is reported, not reinterpreted");
+
+  WriteText(install / "paths.toml", "dlc_root = 'D:\\Nothing'\n");
+  CHECK_EQ(RunCommand({"read-paths", "--install-dir", install.string(), "--summary",
+                       summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "has_file"), "1");
+  CHECK_STR_EQ(Field(summary, "file_valid"), "0");
+  CHECK_FALSE(Field(summary, "file_error").empty());
+  // ...and the page then shows the default, which is what the game would use.
+  CHECK_STR_EQ(Field(summary, "dlc_effective"), Utf8(install / "game" / "dlc"));
+
+  // --- writing ----------------------------------------------------------
+  BeginCase("write-paths keeps the comments and the keys it does not own");
+
+  const fs::path kept = FreshDir("keep/install");
+  const fs::path kept_saves = scratch / "keep/Saves";
+  WriteText(kept / "paths.toml",
+            "# my own note\nschema_version = 1\n\n[paths]\ndlc_root = 'D:\\Old DLC'\n\n"
+            "[mine]\nhello = 1\n");
+  CHECK_EQ(RunCommand({"write-paths", "--dest", kept.string(), "--save-dir", Utf8(kept_saves),
+                       "--summary", summary.string()}),
+           kSuccessExitCode);
+  const std::string patched = ReadFileOrEmpty(kept / "paths.toml");
+  CHECK_CONTAINS(patched, "# my own note");
+  CHECK_CONTAINS(patched, "[mine]");
+  CHECK_CONTAINS(patched, "hello = 1");
+  // The DLC answer was not given, so the value the user had is the value that stays.
+  CHECK_CONTAINS(patched, "dlc_root = 'D:\\Old DLC'");
+  CHECK_CONTAINS(patched, "user_data_root = '" + Utf8(kept_saves) + "'");
+
+  BeginCase("identical answers do not write, and a failed write keeps the old bytes");
+
+  CHECK_EQ(RunCommand({"write-paths", "--dest", kept.string(), "--save-dir", Utf8(kept_saves),
+                       "--summary", summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "changed"), "0");
+  CHECK_STR_EQ(ReadFileOrEmpty(kept / "paths.toml"), patched);
+
+  // A read-only file makes that visible: nothing to write still succeeds, a change
+  // cannot land, and the file that was there survives.
+  std::error_code permission_code;
+  fs::permissions(kept / "paths.toml", fs::perms::owner_read, fs::perm_options::replace,
+                  permission_code);
+  CHECK_FALSE(permission_code);
+  CHECK_EQ(RunCommand({"write-paths", "--dest", kept.string(), "--save-dir", Utf8(kept_saves),
+                       "--summary", summary.string()}),
+           kSuccessExitCode);
+  CHECK_EQ(RunCommand({"write-paths", "--dest", kept.string(), "--save-dir",
+                       Utf8(scratch / "keep/Another"), "--summary", summary.string()}),
+           kFailedExitCode);
+  CHECK_STR_EQ(ReadFileOrEmpty(kept / "paths.toml"), patched);
+  fs::permissions(kept / "paths.toml", fs::perms::owner_all, fs::perm_options::replace,
+                  permission_code);
+
+  BeginCase("an empty answer is the default, and no answer is not an answer");
+
+  CHECK_EQ(RunCommand({"write-paths", "--dest", kept.string(), "--dlc-dir", "", "--summary",
+                       summary.string()}),
+           kSuccessExitCode);
+  const std::string reset = ReadFileOrEmpty(kept / "paths.toml");
+  // The key is dropped rather than written empty, so the game's own fallback applies.
+  CHECK_FALSE(reset.find("dlc_root") != std::string::npos);
+  CHECK_CONTAINS(reset, "user_data_root = '" + Utf8(kept_saves) + "'");
+  CHECK_STR_EQ(Field(summary, "dlc_root"), "");
+
+  // What an update does: no folder page, so the file it finds is the file it keeps.
+  const fs::path untouched = FreshDir("untouched/install");
+  CHECK_EQ(RunCommand({"write-paths", "--dest", untouched.string(), "--summary", summary.string()}),
+           kSuccessExitCode);
+  CHECK_STR_EQ(Field(summary, "written"), "0");
+  CHECK_FALSE(fs::exists(untouched / "paths.toml"));
+
+  BeginCase("a paths.toml this build cannot read is never overwritten");
+
+  const fs::path broken = FreshDir("broken/install");
+  WriteText(broken / "paths.toml", "schema_version = 99\n\n[paths]\ndlc_root = 'x'\n");
+  CHECK_EQ(RunCommand({"write-paths", "--dest", broken.string(), "--dlc-dir",
+                       Utf8(scratch / "broken/DLC"), "--summary", summary.string()}),
+           kFailedExitCode);
+  CHECK_CONTAINS(Field(summary, "error"), "left alone");
+  CHECK_STR_EQ(ReadFileOrEmpty(broken / "paths.toml"),
+               "schema_version = 99\n\n[paths]\ndlc_root = 'x'\n");
+
+  // --- validation -------------------------------------------------------
+  BeginCase("a save folder inside the read-only game data is refused");
+
+  int code = 0;
+  const fs::path app = FreshDir("validate/install");
+  EnsureDirectory(app / "game", nullptr);
+
+  std::string text = ValidateSummary(app, summary, PathChoice{false, {}},
+                                     PathChoice{true, Utf8(app / "game" / "saves")}, &code);
+  CHECK_EQ(code, kFailedExitCode);
+  CHECK_STR_EQ(Field(text, "save_inside_game"), "1");
+  CHECK_CONTAINS(Field(text, "error"), "game data folder");
+  // Refused before anything was created: the page must not leave a folder behind.
+  CHECK_FALSE(fs::exists(app / "game" / "saves"));
+
+  // The same folder spelled with a ".." segment, with the case changed, and as the
+  // game data folder itself: one rule, three spellings (src/fs/path_policy.h).
+  const char* equivalent[] = {"game/saves/../keep", "GAME/saves", "game", "game/saves/"};
+  for (const char* spelling : equivalent) {
+    text = ValidateSummary(app, summary, PathChoice{false, {}},
+                           PathChoice{true, Utf8(app / spelling)}, &code);
+    CHECK_EQ(code, kFailedExitCode);
+    CHECK_STR_EQ(Field(text, "save_inside_game"), "1");
+  }
+
+  BeginCase("a save folder of its own is accepted, created and probed");
+
+  text = ValidateSummary(app, summary, PathChoice{false, {}},
+                         PathChoice{true, Utf8(app / "saves")}, &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "save_writable"), "1");
+  CHECK_STR_EQ(Field(text, "save_created"), "1");
+  CHECK_TRUE(DirectoryExists(app / "saves"));
+  // The write probe is gone: nothing is left in a user's folder.
+  CHECK_FALSE(fs::exists(app / "saves" / ".rb-blitz-write-probe"));
+  CHECK_STR_EQ(Field(text, "save_default"), "0");
+
+  text = ValidateSummary(app, summary, PathChoice{false, {}},
+                         PathChoice{true, Utf8(app / "deep" / "a" / "b")}, &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_TRUE(DirectoryExists(app / "deep" / "a" / "b"));
+
+  BeginCase("the check that runs while the page is shown touches nothing");
+
+  // The same two answers, checked the way the page checks them: the save folder is
+  // not created and no probe is written, because merely showing a page must not
+  // change the machine.
+  const fs::path idle = scratch / "validate/idle-saves";
+  text = ValidateSummary(app, summary, PathChoice{false, {}}, PathChoice{true, Utf8(idle)}, &code,
+                         true);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "save_created"), "0");
+  CHECK_STR_EQ(Field(text, "save_writable"), "0");
+  CHECK_FALSE(fs::exists(idle));
+
+  // ...and it still refuses the one answer that cannot work, before anything is
+  // created for it either.
+  const fs::path idle_inside = app / "game" / "idle-saves";
+  text = ValidateSummary(app, summary, PathChoice{false, {}}, PathChoice{true, Utf8(idle_inside)},
+                         &code, true);
+  CHECK_EQ(code, kFailedExitCode);
+  CHECK_STR_EQ(Field(text, "save_inside_game"), "1");
+  CHECK_FALSE(fs::exists(idle_inside));
+
+  BeginCase("a save answer that is a file, or that cannot be created, fails loudly");
+  WriteText(app / "not-a-folder", "x");
+  text = ValidateSummary(app, summary, PathChoice{false, {}},
+                         PathChoice{true, Utf8(app / "not-a-folder")}, &code);
+  CHECK_EQ(code, kFailedExitCode);
+  CHECK_CONTAINS(Field(text, "error"), "is a file, not a folder");
+
+  text = ValidateSummary(app, summary, PathChoice{false, {}},
+                         PathChoice{true, Utf8(fs::path("not a real drive:") / "saves")}, &code);
+  CHECK_EQ(code, kFailedExitCode);
+  CHECK_FALSE(Field(text, "error").empty());
+
+  BeginCase("the DLC answer says what the folder is, without opening a package");
+
+  const fs::path structured = FreshDir("validate/structured");
+  EnsureDirectory(structured / "5841122D" / "00009000", nullptr);
+  WriteText(structured / "5841122D" / "00009000" / "65CC8CBB5AE04F1917CF420B5F6346F93109177", "x");
+  text = ValidateSummary(app, summary, PathChoice{true, Utf8(structured)}, PathChoice{false, {}},
+                         &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "dlc_layout"), "structured");
+  CHECK_STR_EQ(Field(text, "dlc_packages"), "1");
+  CHECK_STR_EQ(Field(text, "dlc_rejected"), "0");
+  CHECK_STR_EQ(Field(text, "dlc_default"), "0");
+
+  // A flat library: containers nested to any depth, no title level (src/fs/dlc_library.h).
+  const fs::path flat = FreshDir("validate/flat");
+  EnsureDirectory(flat / "Albums", nullptr);
+  WriteText(flat / "Albums" / "one.pkg", "x");
+  WriteText(flat / "two.pkg", "x");
+  text = ValidateSummary(app, summary, PathChoice{true, Utf8(flat)}, PathChoice{false, {}}, &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "dlc_layout"), "flat");
+  CHECK_STR_EQ(Field(text, "dlc_packages"), "2");
+  // Neither "Albums" nor "two.pkg" is a content-root level, which is what the game
+  // would report as rejected instead of enumerating nothing.
+  CHECK_STR_EQ(Field(text, "dlc_rejected"), "2");
+
+  // An empty or new folder is a legitimate answer - the game starts with an empty
+  // library - so it is reported, not refused.
+  const fs::path empty = FreshDir("validate/empty");
+  text = ValidateSummary(app, summary, PathChoice{true, Utf8(empty)}, PathChoice{false, {}}, &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "dlc_layout"), "empty");
+
+  const fs::path missing = scratch / "validate/not-there";
+  text = ValidateSummary(app, summary, PathChoice{true, Utf8(missing)}, PathChoice{false, {}},
+                         &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "dlc_layout"), "new");
+  CHECK_STR_EQ(Field(text, "note_count"), "1");
+
+  // The default answer adds no note at all: the folder page must not warn about a
+  // choice it made itself.
+  text = ValidateSummary(app, summary, PathChoice{true, ""}, PathChoice{true, ""}, &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "dlc_default"), "1");
+  CHECK_STR_EQ(Field(text, "dlc_dir"), Utf8(app / "game" / "dlc"));
+  CHECK_STR_EQ(Field(text, "note_count"), "0");
+  CHECK_STR_EQ(Field(text, "save_default"), "1");
+
+  text = ValidateSummary(app, summary, PathChoice{true, Utf8(app / "not-a-folder")},
+                         PathChoice{false, {}}, &code);
+  CHECK_EQ(code, kFailedExitCode);
+  CHECK_CONTAINS(Field(text, "error"), "is a file, not a folder");
+
+  BeginCase("a folder with spaces and non-ASCII letters is stored and read back");
+
+  const fs::path unicode_dlc = FreshDir("unicode/DLC — músicas");
+  const fs::path unicode_saves = scratch / "unicode/Saves do Gabriel";
+  WriteText(unicode_dlc / "uma música.pkg", "x");
+  text = ValidateSummary(app, summary, PathChoice{true, Utf8(unicode_dlc)},
+                         PathChoice{true, Utf8(unicode_saves)}, &code);
+  CHECK_EQ(code, kSuccessExitCode);
+  CHECK_STR_EQ(Field(text, "dlc_layout"), "flat");
+  CHECK_STR_EQ(Field(text, "save_created"), "1");
+
+  const fs::path unicode_install = FreshDir("unicode/install");
+  CHECK_EQ(RunCommand({"write-paths", "--dest", unicode_install.string(), "--dlc-dir",
+                       Utf8(unicode_dlc), "--save-dir", Utf8(unicode_saves), "--summary",
+                       summary.string()}),
+           kSuccessExitCode);
+  const rb_blitz::settings::PathFileResult unicode_file =
+      rb_blitz::settings::LoadPathFile(unicode_install / "paths.toml");
+  CHECK_TRUE(unicode_file.status == rb_blitz::settings::PathFileResult::Status::kOk);
+  // Byte-for-byte what went in: the file is UTF-8, as everything the helper writes is.
+  CHECK_STR_EQ(unicode_file.paths.dlc_root, Utf8(unicode_dlc));
+  CHECK_STR_EQ(unicode_file.paths.user_data_root, Utf8(unicode_saves));
+
+  // --- the legacy profile as a prefill source ---------------------------
+  BeginCase("the old launcher's folders are read, never written");
+
+  const ScopedEnv no_override("RBBLITZ_LAUNCHER_PROFILE", "");
+  const fs::path old_install = FreshDir("legacy/install");
+  const fs::path appdata = FreshDir("legacy/appdata");
+  EnsureDirectory(appdata / "rb_blitz", nullptr);
+
+  // The `[settings]` table first, the older `[launch]` values as the fallback - the
+  // same order the game's own migration imports them in (P3 §4.3).
+  WriteText(appdata / "rb_blitz" / "launcher.toml",
+            "schema_version = 1\n\n[launch]\ngame_dir = \"C:\\\\Games\"\n"
+            "user_data_dir = \"D:\\\\Old Saves\"\ndlc_dir = \"D:\\\\Old DLC\"\n\n"
+            "[settings]\nuser_data_root = \"D:\\\\New Saves\"\ndlc_root = \"D:\\\\New DLC\"\n");
+  LegacyPaths legacy = ReadLegacyPaths(old_install, appdata);
+  CHECK_TRUE(legacy.has_file);
+  CHECK_TRUE(legacy.usable);
+  CHECK_STR_EQ(legacy.save_dir, "D:\\New Saves");
+  CHECK_STR_EQ(legacy.dlc_dir, "D:\\New DLC");
+
+  WriteText(appdata / "rb_blitz" / "launcher.toml",
+            "schema_version = 1\n\n[launch]\nuser_data_dir = \"D:\\\\Old Saves\"\n"
+            "dlc_dir = \"D:\\\\Old DLC\"\n");
+  legacy = ReadLegacyPaths(old_install, appdata);
+  CHECK_STR_EQ(legacy.save_dir, "D:\\Old Saves");
+  CHECK_STR_EQ(legacy.dlc_dir, "D:\\Old DLC");
+
+  // The portable marker beside the executable wins over the user's own profile,
+  // because that is where the launcher itself looked.
+  WriteText(old_install / "rb_blitz_launcher.portable", "");
+  WriteText(old_install / "launcher.toml",
+            "schema_version = 1\n\n[settings]\nuser_data_root = \"E:\\\\Portable Saves\"\n");
+  legacy = ReadLegacyPaths(old_install, appdata);
+  CHECK_STR_EQ(legacy.save_dir, "E:\\Portable Saves");
+  CHECK_TRUE(legacy.dlc_dir.empty());
+
+  // A settings folder the user moved is named by the pointer in the default folder.
+  fs::remove(old_install / "rb_blitz_launcher.portable");
+  const fs::path moved = FreshDir("legacy/moved");
+  WriteText(moved / "launcher.toml",
+            "schema_version = 1\n\n[settings]\nuser_data_root = \"F:\\\\Moved Saves\"\n");
+  WriteText(appdata / "rb_blitz" / "settings_dir.txt", Utf8(moved) + "\n");
+  legacy = ReadLegacyPaths(old_install, appdata);
+  CHECK_STR_EQ(Utf8(legacy.profile), Utf8(moved / "launcher.toml"));
+  CHECK_STR_EQ(legacy.save_dir, "F:\\Moved Saves");
+
+  // An install that runs elevated passes no user folder, so nothing is read: an
+  // administrator's own profile is not the player's (parent plan §9.1).
+  legacy = ReadLegacyPaths(old_install, fs::path());
+  CHECK_FALSE(legacy.has_file);
+  CHECK_TRUE(legacy.profile.empty());
+  CHECK_TRUE(legacy.save_dir.empty());
+
+  // A profile this build cannot parse is reported and contributes nothing, rather
+  // than being guessed at.
+  WriteText(moved / "launcher.toml", "this is not a profile\n");
+  legacy = ReadLegacyPaths(old_install, appdata);
+  CHECK_TRUE(legacy.has_file);
+  CHECK_FALSE(legacy.usable);
+  CHECK_FALSE(legacy.error.empty());
+  CHECK_TRUE(legacy.save_dir.empty());
+
+  // --- the record -------------------------------------------------------
+  BeginCase("the manifest and the report record the folder answers");
+
+  const fs::path recorded = FreshDir("finalize/app");
+  InstallSummary install_summary;
+  install_summary.install_dir = recorded;
+  install_summary.game_dir = recorded / "game";
+  install_summary.game_source = "synthetic";
+  install_summary.installer_version = "9.9.9";
+  install_summary.paths_answered = true;
+  install_summary.dlc_choice = "D:\\Rock Band DLC";
+  install_summary.save_choice = "";
+  std::string error;
+  CHECK_TRUE(FinalizeInstall(install_summary, &error));
+  const std::string manifest = ReadFileOrEmpty(recorded / "install-manifest.toml");
+  CHECK_CONTAINS(manifest, "[paths]");
+  CHECK_CONTAINS(manifest, "dlc_root = " + EscapedTomlString("D:\\Rock Band DLC"));
+  // An empty answer is recorded as "the default", not as an empty path.
+  CHECK_CONTAINS(manifest, "save_default = true");
+  const std::string report = ReadFileOrEmpty(recorded / "install-report.txt");
+  CHECK_CONTAINS(report, "DLC        : D:\\Rock Band DLC");
+  CHECK_CONTAINS(report, "Saves      : the game's own save folder");
+
+  // An update answered nothing, so it claims nothing.
+  install_summary.paths_answered = false;
+  CHECK_TRUE(FinalizeInstall(install_summary, &error));
+  CHECK_FALSE(ReadFileOrEmpty(recorded / "install-manifest.toml").find("[paths]") !=
+              std::string::npos);
+
+  BeginCase("uninstalling keeps the folder choices");
+
+  const fs::path dead = FreshDir("uninstall/app");
+  EnsureDirectory(dead / "game", nullptr);
+  WriteText(dead / "paths.toml", "schema_version = 1\n\n[paths]\ndlc_root = 'D:\\DLC'\n");
+  WriteText(dead / "payload-manifest.toml", "schema_version = 1\n");
+  WriteText(dead / "install-manifest.toml", "schema_version = 1\n");
+  WriteText(dead / "install-report.txt", "x\n");
+  std::vector<std::string> removed;
+  CHECK_TRUE(UninstallCleanup(dead, true, &removed, &error));
+  // The user's own file, and the game data the user asked to keep, both survive.
+  CHECK_TRUE(FileExists(dead / "paths.toml"));
+  CHECK_TRUE(DirectoryExists(dead / "game"));
+  CHECK_FALSE(FileExists(dead / "payload-manifest.toml"));
+  CHECK_FALSE(FileExists(dead / "install-manifest.toml"));
+  CHECK_FALSE(FileExists(dead / "install-report.txt"));
+}
+
+// The wizard half cannot be run from here - it is Inno Setup, not C++, and the
+// suite has no GUI - so what is pinned is the shape of the script the promises in
+// the plan are made of: the shortcut defaults, the finish-page default, and the
+// helper calls the folder page has to make. A change that drops one of them fails
+// here rather than in front of a user.
+static void TestWizardScript() {
+  BeginCase("the wizard asks for fewer defaults than it used to");
+
+  const std::string script =
+      ReadFileOrEmpty(fs::path(RBBLITZ_ROOT_DIR) / "installer" / "setup.iss");
+  CHECK_FALSE(script.empty());
+
+  const std::size_t tasks = script.find("[Tasks]");
+  const std::size_t files = script.find("[Files]", tasks);
+  CHECK_TRUE(tasks != std::string::npos);
+  CHECK_TRUE(files != std::string::npos);
+  const std::string task_block = script.substr(tasks, files - tasks);
+
+  std::size_t declared = 0;
+  std::size_t line = 0;
+  while (line <= task_block.size()) {
+    const std::size_t end = task_block.find('\n', line);
+    const std::string text = task_block.substr(
+        line, end == std::string::npos ? std::string::npos : end - line);
+    if (text.compare(0, 6, "Name: ") == 0) {
+      ++declared;
+      CHECK_CONTAINS(text, "Flags: unchecked");
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    line = end + 1;
+  }
+  CHECK_EQ(declared, 4u);
+  // ...and an earlier install's selection is not quietly restored over that.
+  CHECK_CONTAINS(script, "UsePreviousTasks=no");
+  // A reinstall has to show the folder page: the locations are asked there.
+  CHECK_CONTAINS(script, "DisableDirPage=no");
+
+  BeginCase("the wizard defaults to the game and says Controller Settings");
+
+  CHECK_CONTAINS(script, "RunAtEndController = 'controller';");
+  CHECK_CONTAINS(script, "gRunAtEnd := RunAtEndGame;");
+  CHECK_CONTAINS(script, "Controller Settings");
+  CHECK_CONTAINS(script, "DLCDIR");
+  CHECK_CONTAINS(script, "SAVEDIR");
+
+  BeginCase("the folder page is the only place the two files are written");
+
+  // Read to prefill, validate on the page and again before installing, write once
+  // the install itself succeeded - in that order, and write-paths last.
+  CHECK_CONTAINS(script, "'read-paths --install-dir '");
+  CHECK_CONTAINS(script, "'validate-paths --install-dir '");
+  CHECK_CONTAINS(script, "'write-paths --dest '");
+  const std::size_t read = script.find("'read-paths --install-dir '");
+  const std::size_t validate = script.find("'validate-paths --install-dir '");
+  const std::size_t write = script.find("'write-paths --dest '");
+  CHECK_TRUE(read < validate);
+  CHECK_TRUE(validate < write);
+}
+
 int main() {
   g_root = fs::temp_directory_path() / "rbblitz-installer-tests";
   std::string error;
@@ -1519,6 +2073,8 @@ int main() {
   TestPayloadAndFinalize();
   TestUltimate();
   TestUpdateManifest();
+  TestLocations();
+  TestWizardScript();
   TestCommandLine();
 
   const int result = rb_blitz::test::Finish();

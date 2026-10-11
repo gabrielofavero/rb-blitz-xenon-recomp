@@ -22,7 +22,7 @@ struct TargetInfo {
   uint16_t bit;
 };
 
-constexpr std::array<TargetInfo, 17> kTargetInfo{{
+constexpr std::array<TargetInfo, kTargetCount> kTargetInfo{{
     {Target::kA, "a", "A", 0x1000},
     {Target::kB, "b", "B", 0x2000},
     {Target::kX, "x", "X", 0x4000},
@@ -35,7 +35,6 @@ constexpr std::array<TargetInfo, 17> kTargetInfo{{
     {Target::kRightTrigger, "right_trigger", "Right trigger", 0x0000},
     {Target::kBack, "back", "Back", 0x0020},
     {Target::kStart, "start", "Start", 0x0010},
-    {Target::kGuide, "guide", "Guide", 0x0400},
     {Target::kLeftThumb, "left_thumb", "Left stick", 0x0040},
     {Target::kRightThumb, "right_thumb", "Right stick", 0x0080},
     {Target::kDpadUp, "dpad_up", "D-pad up", 0x0001},
@@ -43,6 +42,15 @@ constexpr std::array<TargetInfo, 17> kTargetInfo{{
     {Target::kDpadLeft, "dpad_left", "D-pad left", 0x0004},
     {Target::kDpadRight, "dpad_right", "D-pad right", 0x0008},
 }};
+
+// The row names this build refuses outright, and the only ones (contracts §2.3). A `[remap]` row
+// with one of these keys is not a control, so it is preserved verbatim and never applied; naming
+// them is what lets the panel say *why* a preserved row does nothing, instead of reporting it as
+// a newer launcher's row it happens not to understand.
+constexpr std::string_view kRefusedTargetNames[] = {"guide"};
+
+static_assert(kTargetInfo.size() == kTargetCount,
+              "kTargetCount must match the target table: the panel sizes its ring from it");
 
 const TargetInfo* InfoFor(Target target) {
   for (const TargetInfo& info : kTargetInfo) {
@@ -217,6 +225,25 @@ std::string_view TargetLabel(Target target) {
   return info == nullptr ? std::string_view{} : std::string_view(info->label);
 }
 
+bool IsRefusedTargetName(std::string_view name) {
+  for (const std::string_view refused : kRefusedTargetNames) {
+    if (refused == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::string> RefusedRowNames(const std::vector<ProfileSetting>& rows) {
+  std::vector<std::string> refused;
+  for (const ProfileSetting& row : rows) {
+    if (IsRefusedTargetName(row.key)) {
+      refused.push_back(row.key);
+    }
+  }
+  return refused;
+}
+
 uint16_t TargetBit(Target target) {
   const TargetInfo* info = InfoFor(target);
   return info == nullptr ? 0 : info->bit;
@@ -231,8 +258,8 @@ const std::vector<Source>* DefaultSources(Target target) {
   // a compile-time-visible hole rather than a silent one. A control listed here answers to its own
   // pad control *and* a keyboard key; the pad source reads the state before any rewriting, so the
   // pad keeps working exactly as it did.
-  static const std::array<std::optional<std::vector<Source>>, 17> kDefaults = [] {
-    std::array<std::optional<std::vector<Source>>, 17> all;
+  static const std::array<std::optional<std::vector<Source>>, kTargetCount> kDefaults = [] {
+    std::array<std::optional<std::vector<Source>>, kTargetCount> all;
     const auto set = [&all](Target control, const char* key) {
       std::vector<Source> sources;
       sources.push_back(Source{SourceKind::kPad, std::string(TargetName(control))});
@@ -255,8 +282,7 @@ const std::vector<Source>* DefaultSources(Target target) {
     set(Target::kRightThumb, "N");
     set(Target::kBack, "Backspace");
     set(Target::kStart, "Return");
-    // The triggers and Guide are deliberately absent: a keyboard cannot stand in for a trigger's
-    // travel, and Guide belongs to the platform.
+    // The triggers are deliberately absent: a keyboard cannot stand in for a trigger's travel.
     return all;
   }();
   const auto& slot = kDefaults[static_cast<std::size_t>(target)];
@@ -359,8 +385,9 @@ bool Table::AnySourceSet() const {
 
 void Apply(const Table& table, const PadState& state, DownFn down, void* context, PadState* out) {
   // Every binding reads `state` and not `out`, so a pair of bindings that swap two controls
-  // both see the pad as it was and neither can feed the other.
-  *out = state;
+  // both see the pad as it was and neither can feed the other. The refused bits are taken out of
+  // the copy rather than out of the end, so no later write can put one back.
+  *out = WithoutProhibitedButtons(state);
   for (const Target target : Targets()) {
     const std::vector<Source>* sources = table.Effective(target);
     if (sources == nullptr) {

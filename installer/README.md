@@ -1,10 +1,11 @@
 # installer/ — the setup executable
 
 A standalone Windows installer that puts a ready-to-play Rock Band Blitz build on
-a machine that has never seen this repository. The user answers four questions
-(where to install, where the game data comes from, whether they want Rock Band
-Blitz Ultimate, which shortcuts to create) and gets a folder with a launchable
-`rb_blitz.exe` in it — no compiler, no CMake, no instructions to follow.
+a machine that has never seen this repository. The user answers where to install —
+including where the DLC library and the saved games live — where the game data comes
+from, whether they want Rock Band Blitz Ultimate, and which shortcuts to create, and
+gets a folder with a launchable `rb_blitz.exe` in it — no compiler, no CMake, no
+instructions to follow.
 
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
@@ -30,13 +31,13 @@ build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultima
 | Page | What happens |
 | --- | --- |
 | Welcome | What the installer needs (a copy of the game they own), what it refuses to do (no game files included or downloaded). |
-| Install folder | Any writable folder; the default is under the user's own profile, so no administrator rights are needed (`/ALLUSERS` still forces a machine-wide install). Skipped when an install is already registered, because Inno Setup then knows where the game is ([details below](#a-game-that-is-already-installed)). |
+| Install folder | Any writable folder; the default is under the user's own profile, so no administrator rights are needed (`/ALLUSERS` still forces a machine-wide install). The page also asks for the DLC library and the save folder, and is shown even when an install is already registered — a reinstall has to be able to see and change them ([details below](#the-dlc-library-and-the-saved-games)). |
 | Xbox 360 Game Files | The package / an extracted game folder / keep the data that is already installed in the install folder. The location is asked on this page, not on one of its own: choosing "package" or "folder" puts the prompt, the path box and its Browse button under the radios. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. |
 | Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release (selected by default), use a zip, use a folder, or do not install it. The zip or folder is asked for on this page too. |
 | Shortcuts | Which of the four shortcuts to create ([details below](#shortcuts)). |
 | Ready to install | The destination, the answers, and the commit this build is, for a last look before anything is written. |
 | Progress | One bar across four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
-| Finish | A three-way choice — open the launcher, launch the game, or do nothing ([details below](#the-finish-page)). |
+| Finish | A three-way choice — launch the game, open Controller Settings, or do nothing ([details below](#the-finish-page)). |
 
 The licence has no page: nothing in this wizard is agreed to, so the GPL-2.0 text
 is not shown on the way past. It ships with the sources, and the installer is
@@ -57,24 +58,28 @@ progress bar, and then it opens the launcher it came from.
 Four shortcuts, one per `[Tasks]` entry, so the wizard's Shortcuts page is the one
 place that decides what is created and in what form a silent install can change
 it. The game's shortcut keeps its `--game_data_root="{app}\game"` argument, so the
-game still launches standalone; the launcher's takes no arguments and finds the
+game still launches standalone; Controller Settings' takes no arguments and finds the
 game beside itself.
 
 | Task | Where | Shortcut | Default |
 | --- | --- | --- | --- |
-| `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | unchecked in the wizard; created by a silent install |
-| `startmenulauncher` | Start menu | **Rock Band Blitz Launcher** — the settings launcher | unchecked in the wizard; created by a silent install |
-| `launchericon` | Desktop | **Rock Band Blitz Launcher** | unchecked in the wizard; a silent install creates it only with `/LAUNCHERICON=1` |
-| `desktopicon` | Desktop | **Rock Band Blitz** — the game | unchecked, as before |
+| `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | unchecked, interactive and silent |
+| `startmenulauncher` | Start menu | **Rock Band Blitz Controller Settings** — the settings application | unchecked, interactive and silent |
+| `launchericon` | Desktop | **Rock Band Blitz Controller Settings** | unchecked; `/LAUNCHERICON=1` or `/CONTROLLERICON=1` asks for it |
+| `desktopicon` | Desktop | **Rock Band Blitz** — the game | unchecked |
 
 The names are deliberately different so a list can tell them apart, and the
-game's shortcut is never repointed at the launcher: the game has to stay runnable
-on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
-The wizard's page starts from no answer at all — nothing is ticked for the user —
-while a silent install has no page to ask on and still creates the two Start-menu
-shortcuts (and the launcher's desktop one with `/LAUNCHERICON=1`), exactly as
-before the page existed; `/MERGETASKS=!startmenu,!startmenulauncher` (Inno Setup)
-takes any of them away.
+game's shortcut is never repointed at Controller Settings: the game has to stay
+runnable on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
+Nothing is created unless the user asks: the wizard's page starts from no answer,
+the `[Tasks]` declarations carry `Flags: unchecked` so a silent install starts from
+no answer too, and `UsePreviousTasks=no` keeps an earlier install's choice from
+reappearing on a reinstall. `/TASKS=startmenu` (or `/MERGETASKS`) is what opts a
+shortcut back in, and it is the only thing that does.
+
+The executable keeps the filename `rb_blitz_launcher.exe`: shortcuts that already
+exist point at it, and its own window is what a user sees, which now says
+Controller Settings rather than "launcher".
 
 ### A game that is already installed
 
@@ -87,20 +92,25 @@ format is not part of what the installer records. Answering No ends setup before
 it changes anything, and a silent install does not ask — it has no page to ask on
 and no way to answer, so it installs.
 
-The install folder page is skipped in that case: Inno Setup keeps the previous
-folder, so an update lands on the game rather than beside it. It is the user's
-choice to change it — the page still exists for an install that is not registered
-anywhere, and `/DIR` overrides it either way.
+The install folder page is no longer skipped in that case. It is the page the two
+external folders are asked for, so a reinstall has to show it; Inno Setup's own
+`UsePreviousAppDir` still prefills the folder with the one the install was
+registered with, so an update lands on the game rather than beside it. `/DIR`
+overrides it either way.
 
 ### The finish page
 
-The last page asks what to do when the wizard closes, with the launcher preselected:
+The last page asks what to do when the wizard closes, with the game preselected:
 
 | Choice | What it starts |
 | --- | --- |
-| **Open the launcher** | `rb_blitz_launcher.exe`, which finds the game beside itself. |
-| **Launch Rock Band Blitz** | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads the launcher's profile on its own, so it still follows the target the install left behind. It is named once rather than "… Ultimate" when the mod is installed: the install folder is the same game either way. |
+| **Launch Rock Band Blitz** | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads the settings file on its own, so it still follows the target the install left behind. It is named once rather than "… Ultimate" when the mod is installed: the install folder is the same game either way. |
+| **Open Controller Settings** | `rb_blitz_launcher.exe`, which finds the game beside itself. |
 | **Do nothing** | Nothing; the wizard just closes. |
+
+The game is the interactive default: the install exists to be played, and Controller
+Settings has its own shortcut. An update is different — it came back to the
+application that asked, so it returns there when it is done.
 
 The old single `Launch Rock Band Blitz` checkbox is gone: Inno Setup's `[Run]`
 entries are checkboxes, not a choice, and only one of them could be the post-install
@@ -108,7 +118,7 @@ action. The wizard has no test harness, so this page is checked by hand rather t
 implied to be covered:
 
 1. Install with **Launch Rock Band Blitz** selected — the game starts.
-2. Install with **Open the launcher** selected — the launcher window opens.
+2. Install with **Open Controller Settings** selected — the utility window opens.
 3. Install with **Do nothing** selected — nothing starts.
 4. `/VERYSILENT` with no `/RUNATEND` — nothing starts; `/VERYSILENT /RUNATEND=game`
    — the game starts.
@@ -122,10 +132,13 @@ A copy of everything the helper did is left next to the game:
   `helper_version`, `payload_commit`, `directory`, `game_directory`, `windows_build`,
   `architecture`), a `[payload]` component table (version, source, file and byte counts,
   whether the fingerprints matched, the executables it laid down), a `[game_data]`
-  table (`source`, `directory`, `ultimate_installed`) and, when the mod was installed,
-  an `[ultimate]` table. The launcher's first-run prefill reads
+  table (`source`, `directory`, `ultimate_installed`), a `[paths]` table recording the
+  two folders the folder page asked for (`file`, and `dlc_root`/`save_root` — or
+  `dlc_default`/`save_default` when the answer was "the game's own"), and, when the mod
+  was installed, an `[ultimate]` table. The launcher's first-run prefill reads
   `[install] game_directory` and `[game_data] ultimate_installed` from it, and
-  `payload_commit` is the build a bug report names (`launcher-plan` D4).
+  `payload_commit` is the build a bug report names (`launcher-plan` D4). An update,
+  which has no folder page, writes no `[paths]` table: it answered nothing.
 * `install-report.txt` — the same, for a human, with the helper's log appended.
 
 ## Layout
@@ -135,10 +148,11 @@ A copy of everything the helper did is left next to the game:
 | `setup.iss` | The wizard: pages, sequencing, progress mapping, uninstall. Presentation only — it has no filesystem, HTTP or crypto support. |
 | `src/` | `rb_blitz_setup_helper.exe`: STFS extraction, zip inflate, WinHTTP download, SHA-256 verification, file placement, manifests. |
 | `src/commands.cpp` | The helper's command line: one command per stage, `--summary` / `--log` / `--progress` for each. |
+| `src/paths.cpp` | The two folders: reading `paths.toml` for the folder page's prefill, checking the answers, and committing them. The file format itself comes from the game (`src/settings/paths.cpp`, compiled in), so the installer cannot write a file the game reads differently. |
 | `config/pins.toml` | The only file that names the outside world: version, URLs, sizes, hashes. |
 | `config/ultimate_fingerprints.toml` | What the mod's files hash to, in the same schema as `../config/game_fingerprints.toml`. |
 | `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its launcher and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`). |
-| `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/`. |
+| `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/installer/`. |
 | `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest a launcher checks and an updater installs from. |
 | `build.ps1` | The release entry point: the launcher, the payload, the helper, the tests, the images, the updater, the setup executable, `update.toml`. |
 | `tests/installer_tests.cpp` | The helper's test suite (`ctest`), dependency-free and game-data-free. |
@@ -454,7 +468,7 @@ that is what the runtime reads.
 
 ## Wizard images
 
-`assets/`, at the repository root, holds the images Inno Setup shows next to
+`assets/icon/`, at the repository root, holds the images Inno Setup shows next to
 `blitz.ico`. That icon is the app's, compiled into `rb_blitz.exe` by `rb_blitz.rc`
 and used here as `SetupIconFile`; `blitz.png` is the app's own art too, committed
 and used unconditionally as `WizardSmallImageFile` for the badge in the top-right
@@ -462,7 +476,8 @@ corner of the header. It is stored at 159x159, the largest the badge area reache
 (at 250% scaling), so it is only ever shrunk.
 
 The large image on the left of the welcome and finish pages is the only optional
-one. It is generated by `tools/make_art.ps1` and is **not** committed: the artwork
+one. It is generated by `tools/make_art.ps1` into `assets/installer/` and is
+**not** committed: the artwork
 is not ours to license. Its absence is a supported configuration — `setup.iss`
 only applies the `WizardImageFile` directive when the files exist, and
 `build.ps1` treats a failed download as a warning, not a build failure. The script
@@ -479,12 +494,15 @@ Setup's own switches.
 | `/GAMEMETHOD` | `package` (default), `folder`, `installed` | Where the game data comes from. |
 | `/GAMEFOLDER` | folder | With `folder`: the extract root, or any folder above it. |
 | `/GAMEPACKAGE` | file | With `package`: the Xbox 360 container file. |
+| `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` (or the old launcher profile) is kept; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
+| `/SAVEDIR` | folder | Where the saves go. Same omitted/empty rule as `/DLCDIR`; empty means the game's own folder under the user's Documents. |
 | `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder` | Whether and how to install the mod. |
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
-| `/LAUNCHERICON` | `1` | Silent installs only: also create the launcher's desktop shortcut. Omitted, nothing is added to the desktop. |
-| `/MERGETASKS` | `!startmenu,!startmenulauncher` (Inno Setup) | Takes individual shortcuts away from a silent install; every checked task is created without it. |
-| `/RUNATEND` | `launcher` (wizard default), `game`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. |
+| `/CONTROLLERICON` | `1` | Also create Controller Settings' desktop shortcut. Its older spelling `/LAUNCHERICON=1` still works. |
+| `/TASKS` | `startmenu,startmenulauncher,launchericon,desktopicon` (Inno Setup) | Which shortcuts to create. Nothing is created without this: the declarations are unchecked and a silent install starts from no answer. |
+| `/MERGETASKS` | `startmenu` (Inno Setup) | The additive form of the same thing; `!name` takes one away, which is already the default. |
+| `/RUNATEND` | `game` (wizard default), `controller`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. `launcher` is accepted as the older spelling of `controller`. |
 | `/DIR` | folder | Install folder (Inno Setup). |
 | `/ALLUSERS`, `/CURRENTUSER` | — | Machine-wide instead of the default per-user install (Inno Setup). |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | — | Usual unattended switches (Inno Setup). |
@@ -495,6 +513,7 @@ Example — unattended install from a package, with the pinned mod, no dialog at
 RockBandBlitzSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
   /GAMEMETHOD=package /GAMEPACKAGE="<the extracted package folder>" ^
+  /DLCDIR="D:\Rock Band DLC" /SAVEDIR="D:\Rock Band Saves" ^
   /ULTIMATESOURCE=pin
 ```
 
@@ -519,6 +538,9 @@ commands are:
 | `import-game` | Extract the game data from a package, or copy it from a folder, then verify the fingerprints. |
 | `install-ultimate` | The mod, from the pin, a zip, a folder or a URL. |
 | `verify-game` | Independent check of the finished game folder. |
+| `read-paths` | Read an installation's `paths.toml` and the legacy launcher profile beside it, for the folder page's prefill. Read-only. |
+| `validate-paths` | Check the three locations before the install starts: refuse a save folder inside the read-only game data, say what a DLC folder is, create and probe the save folder. `--no-touch` reports the same things without creating anything, which is what the check that runs while the folder page is merely shown uses. |
+| `write-paths` | Commit the two folders to `paths.toml` — transactionally, keeping every other key, comment and hand edit in the file. |
 | `finalize` | Write `install-manifest.toml` and `install-report.txt`. |
 | `uninstall-cleanup` | Remove what the helper wrote, `--keep-game-data` to keep the import. |
 | `version` | Print the versions it was built with. |
@@ -556,8 +578,85 @@ several hundred megabytes the user may well want to keep, for example to reinsta
 later without the disc or the package again. A silent uninstall keeps it. The
 mod's `ultimate\` folder lives inside the game data and follows it. The launcher
 (`rb_blitz_launcher.exe`) travels in the payload and is removed with it;
-`launcher.toml`, the user's own settings, is deliberately left behind — like the
-game data, it is not the installer's to delete.
+`launcher.toml` and `paths.toml` — the user's own settings, and the two folders
+they chose — are deliberately left behind: like the game data, they are not the
+installer's to delete, and a reinstall finds them again.
+
+## The DLC library and the saved games
+
+The install folder page asks for three locations, and the last two are stored in
+`paths.toml`, which sits **beside the installed `rb_blitz.exe`** — one file per
+installation, so finding it never depends on the folder it selects. The game reads
+it at start-up; the format is the game's own (`src/settings/paths.h`), and the
+installer compiles that same code rather than reimplementing it, so what the
+wizard writes is byte for byte what the game reads:
+
+```toml
+schema_version = 1
+
+[paths]
+dlc_root = 'D:\Rock Band DLC'
+user_data_root = 'D:\Rock Band Saves'
+```
+
+The values are TOML literal strings, so a Windows path needs no escaping, and they
+are UTF-8 — a folder with an accented or non-ASCII name round trips through a
+silent install's `/DLCDIR` and `/SAVEDIR` unchanged.
+
+The page is prefilled in this order, and the first answer that exists wins:
+
+| Order | Source |
+| --- | --- |
+| 1 | `/DLCDIR` or `/SAVEDIR` on the command line — a silent install's answers |
+| 2 | the installation's own `paths.toml`, when it parses |
+| 3 | the legacy launcher profile (`%APPDATA%\rb_blitz\launcher.toml`, or beside a portable install), the file the old launcher wrote — its `[settings] user_data_root`/`dlc_root`, or the older `[launch] user_data_dir`/`dlc_dir` |
+| 4 | nothing, which means the game's own folders |
+
+The legacy profile is only consulted when the install is **not** running elevated:
+an all-users install started by an administrator must not import that
+administrator's own profile into the player's install.
+
+What the installer refuses and what it accepts:
+
+* It refuses a **save folder inside the read-only game data tree** (`{app}\game`,
+  however it is spelled — `..` segments, a trailing separator, a junction or a
+different case). The runtime mounts that tree read-only, so a save written there is
+invisible to the game and destroyed by an uninstall that removes the game data.
+* It accepts **any DLC folder that can work**: the structured `<title id>/<content
+  type>/<package>` layout, a flat library of containers nested to any depth, an
+  empty folder, or a folder that does not exist yet (the game then starts with an
+  empty library). The page says which it found and how many entries it holds; no
+  package is opened to do it — the folder page stays instant on a library of
+  thousands.
+* It **creates** the save folder when it does not exist and writes one probe file
+  into it, then removes the probe: a folder the game cannot write to is a save that
+  would be lost, so it is worth failing on the page rather than after the install.
+  The check that runs *while the page is shown* touches nothing — it only reports —
+  so a path on its way to being corrected leaves no folder behind; the folder is
+  created when the user moves on.
+* An answer of **empty** means the game's own folder and stores nothing, and is not
+the same thing as **no answer**: an update writes no folder keys at all.
+
+The file is committed **last**, after the payload, the game data and the install
+manifest have all succeeded, so cancelling or failing an install leaves the
+configuration that was already there exactly as it was.
+
+The wizard half has no test harness — it is Inno Setup, not C++ — so the three
+things the folder page does are checked by hand, and `tests/installer_tests.cpp`
+pins the script's shape (every task unchecked, `UsePreviousTasks=no`,
+`DisableDirPage=no`, the game as the finish default, and the three helper calls in
+order) so a change that drops one fails the suite:
+
+1. Fresh install with both folders given: `paths.toml` appears in the install
+   folder with both values, the DLC folder is described on the page, and the save
+   folder is created.
+2. Same dialog at 100%, 200% and 300% DPI: the two rows, their Browse buttons and
+   the status line all fit on the page, and the disk-space line moves below them.
+3. Reinstall over an existing install: the folder page comes up with the previous
+   install folder and both stored folders; changing only the DLC folder leaves the
+   save folder alone.
+4. A save folder typed as `<install folder>\game\saves`: the page refuses it and
+   nothing is written.
 
 ## Troubleshooting
 
