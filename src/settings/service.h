@@ -119,6 +119,11 @@ class Service {
   Source EffectiveSource(SettingId id) const;
   bool IsOverridden(SettingId id) const;
   const std::vector<Descriptor>& descriptors() const { return descriptors_; }
+  // P9: the rows the **last** Commit wrote, so the boot wiring can hand them to the
+  // application-strategy seam (settings/hot_apply.h) - the hot ones go live, the rest wait for
+  // the restart prompt. Empty before the first commit, and cleared by a commit with nothing to
+  // write. Commit clears its own `pending_`, so this is the only way to ask afterwards.
+  const std::map<SettingId, Value>& last_commit_changes() const { return last_commit_changes_; }
 
  private:
   void RefreshDescriptors();
@@ -145,6 +150,7 @@ class Service {
   uint64_t txn_seq_ = 0;
   uint64_t txn_ = 0;
   std::map<SettingId, Value> pending_;
+  std::map<SettingId, Value> last_commit_changes_;
   bool restart_requested_ = false;
   uint64_t restart_request_id_ = 0;
 };

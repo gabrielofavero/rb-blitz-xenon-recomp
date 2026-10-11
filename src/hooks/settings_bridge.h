@@ -272,12 +272,19 @@ class MemorySink : public RequestSink {
   size_t staged_count() const { return staged_.size(); }
   size_t handled_count() const { return handled_.size(); }
 
+  // P9: the setting tokens the **last commit changed** - staged values whose committed value
+  // differs from what was already there. A commit that writes a value back unchanged (the
+  // change-then-revert case §5.4 calls a no-op) reports nothing, which is what keeps a hot row
+  // from being re-applied for a session that did not really alter it.
+  const std::vector<std::string>& last_commit_changes() const { return last_commit_changes_; }
+
   void Reset();
 
  private:
   std::map<std::string, WireValue> committed_;
   std::map<std::string, WireValue> staged_;
   std::map<uint64_t, Status> handled_;
+  std::vector<std::string> last_commit_changes_;
 };
 
 // A deterministic sink for the tests and for P1's host-side round trip: it answers every op with

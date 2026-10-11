@@ -528,6 +528,47 @@ void TestMemorySinkReadWriteAck() {
   CHECK_FALSE(store.Acknowledged(7));
 }
 
+// P9: what a commit really changed. The live apply is driven by this list, so a value written back
+// unchanged must not be reported as a change - otherwise a hot row would be re-applied (and the
+// frame rate moved) by a session that altered nothing.
+void TestCommitChangesReporting() {
+  BeginCase("a commit reports the rows it really changed, and only those");
+
+  MemorySink store;
+  std::string error;
+  Request set;
+  Request commit;
+  CHECK_TRUE(ParseTextRequest("rbbz-settings/commit/-/-", &commit, &error));
+
+  // Committing with nothing staged changed nothing.
+  CHECK_TRUE(store.Handle(commit).status == Status::kOk);
+  CHECK_EQ(store.last_commit_changes().size(), 0u);
+
+  // Two rows staged: both are new, so both are changes.
+  CHECK_TRUE(ParseTextRequest("rbbz-settings/set/graphics.vsync/b:0", &set, &error));
+  CHECK_TRUE(store.Handle(set).status == Status::kOk);
+  CHECK_TRUE(ParseTextRequest("rbbz-settings/set/interface.hide_hud/b:1", &set, &error));
+  CHECK_TRUE(store.Handle(set).status == Status::kOk);
+  CHECK_TRUE(store.Handle(commit).status == Status::kOk);
+  CHECK_EQ(store.last_commit_changes().size(), 2u);
+
+  // The same value again is not a change: a re-commit of the current state reports nothing.
+  CHECK_TRUE(ParseTextRequest("rbbz-settings/set/graphics.vsync/b:0", &set, &error));
+  CHECK_TRUE(store.Handle(set).status == Status::kOk);
+  CHECK_TRUE(store.Handle(commit).status == Status::kOk);
+  CHECK_EQ(store.last_commit_changes().size(), 0u);
+
+  // Flipping it back is a change again, and only that row is reported.
+  CHECK_TRUE(ParseTextRequest("rbbz-settings/set/graphics.vsync/b:1", &set, &error));
+  CHECK_TRUE(store.Handle(set).status == Status::kOk);
+  CHECK_TRUE(store.Handle(commit).status == Status::kOk);
+  CHECK_EQ(store.last_commit_changes().size(), 1u);
+  CHECK_TRUE(store.last_commit_changes().front() == "graphics.vsync");
+
+  store.Reset();
+  CHECK_EQ(store.last_commit_changes().size(), 0u);
+}
+
 }  // namespace
 
 int main() {
@@ -542,5 +583,6 @@ int main() {
   TestTextRequestRefusals();
   TestTextRequestsAlwaysDispatch();
   TestMemorySinkReadWriteAck();
+  TestCommitChangesReporting();
   return Finish();
 }

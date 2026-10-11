@@ -168,14 +168,31 @@ void TestDurableEditReload() {
   const CommitResult committed = service.Commit(txn);
   CHECK_TRUE(committed.status == CommitStatus::kSaved);
   CHECK_EQ(committed.saved_revision, 1);
-  CHECK_TRUE(committed.restart_required);
+  // P9: V-Sync is the one row with measured live evidence, so a commit of it alone does not ask
+  // for a restart - the application seam applies it to the running game instead (§5.5).
+  CHECK_FALSE(committed.restart_required);
   CHECK_EQ(service.revision(), 1);
+  CHECK_EQ(service.last_commit_changes().size(), 1u);
+  CHECK_EQ(service.last_commit_changes().count(SettingId::kVsync), 1u);
 
   Service reloaded(paths);
   reloaded.Boot(nullptr, PathEntry{}, nullptr);
   reloaded.SetCapabilities(Capabilities());
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kVsync).boolean == false);
   CHECK_TRUE(reloaded.EffectiveSource(SettingId::kVsync) == Source::kSettingsFile);
+
+  BeginCase("service: a session with a restart row asks for the restart (P9)");
+  // The hot rule is per row, not per session: one restart-strategy row in the same edit is what
+  // makes the prompt appear, and the commit still reports exactly what it wrote.
+  const uint64_t mixed = service.BeginEdit(service.revision());
+  CHECK_TRUE(
+      service.Set(mixed, SettingId::kVsync, BoolV(false), service.capability_revision()).ok);
+  CHECK_TRUE(
+      service.Set(mixed, SettingId::kDlcMenuSongs, BoolV(true), service.capability_revision()).ok);
+  const CommitResult mixed_commit = service.Commit(mixed);
+  CHECK_TRUE(mixed_commit.status == CommitStatus::kSaved);
+  CHECK_TRUE(mixed_commit.restart_required);
+  CHECK_EQ(service.last_commit_changes().size(), 2u);
 
   BeginCase("service: a commit with nothing staged writes nothing");
   const uint64_t idle = reloaded.BeginEdit(reloaded.revision());

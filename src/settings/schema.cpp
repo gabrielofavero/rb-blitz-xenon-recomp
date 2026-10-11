@@ -98,6 +98,9 @@ SchemaRow ProviderRow(Descriptor descriptor, std::string group, std::string labe
              std::move(help));
 }
 
+// Defined below with the §5.5 table it materializes, and applied at the end of BuildTable().
+void ApplyStrategies(std::vector<SchemaRow>& rows);
+
 std::vector<SchemaRow> BuildTable() {
   std::vector<SchemaRow> rows;
 
@@ -269,7 +272,103 @@ std::vector<SchemaRow> BuildTable() {
                                   EnumValue("default"), "provider"),
                              "", "Gems", "Which note gems the provider draws."));
 
+  // §5.5: every row carries its application strategy, from the one table above.
+  ApplyStrategies(rows);
   return rows;
+}
+
+// ------------------------------------------------------------------------------------------------
+// §5.5's classification table: one entry per SettingId, in one place
+// ------------------------------------------------------------------------------------------------
+// This table is the source of truth; `Descriptor::strategy` is its materialization, so the UI, the
+// acceptance matrix and the docs read the same facts the service commits by. The provider
+// adapter's own row table carries a `Strategy` column too (it is the payload's inventory), and
+// tests/settings_hot_apply_tests.cpp asserts the two agree row by row, which is what keeps them
+// from drifting.
+//
+// **Nothing is `kHot` today, and that is a measurement rather than a policy:**
+//
+//   * Every Ultimate row is `restart` because P6 measured *when* the provider's values are read:
+//     the payload's own loader fills its DTA variables before the first frame of a boot, so
+//     writing its file cannot change this process (docs/plans/in-game-settings-ultimate-adapter.md
+//     §4). That includes Hide HUD, which the parent plan §5.5 named as its hot example before that
+//     measurement existed.
+//   * The render-path rows (resolution, renderer, anti-aliasing, filtering) are structurally
+//     restart: they change render-target and backend state at initialization, and re-initializing
+//     the renderer from inside a menu is its own spike (parent plan §5.5).
+//   * The remaining native rows are read at boot by the code that consumes them (the DLC scan, the
+//     main-menu transform, the offline prompts), so they need a new process until one of them is
+//     measured live.
+//
+// Two candidates have a live read in the code and no measurement yet - exactly the difference the
+// evidence column exists to record: `kVsync` (`vsync` is re-read by the GPU plugin's worker every
+// iteration) and `kDlcMenuSongs` (the menu music pool is built when the menu is entered). Both stay
+// `restart` until a boot observes the effect; the experiment for each is in the P9 handoff.
+struct StrategyEntry {
+  SettingId id;
+  ApplicationStrategy strategy;
+  const char* evidence;  // what was observed; empty for a `restart` row
+};
+
+constexpr StrategyEntry kStrategies[] = {
+    // General
+    {SettingId::kTarget, ApplicationStrategy::kRestart, ""},
+    {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
+    {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
+    {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
+    {SettingId::kUnlockAll, ApplicationStrategy::kRestart, ""},
+    {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
+    // Graphics
+    {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
+    // The one row with measured live evidence, and therefore the one `hot` row. The evidence is
+    // R7's frame-pacing measurement, not a guess about reloadability: with the guest running, the
+    // host flipped this exact cvar and the discovery rate moved from 16.66 ms per item to 5.68 ms
+    // (46.7 s -> 15.96 s for 2,807 items), with the log recording `vsync false, was true` 7 ms
+    // after the flip (docs/dlc.md, "Frame pacing for the discovery"; the mechanism is the GPU
+    // plugin's worker re-reading `vsync` every iteration).
+    {SettingId::kVsync, ApplicationStrategy::kHot,
+     "flipping the `vsync` cvar with the guest running moved the discovery rate from 16.66 ms per "
+     "item to 5.68 ms (46.7 s -> 15.96 s, docs/dlc.md), i.e. a live effect measured in a boot"},
+    {SettingId::kRenderer, ApplicationStrategy::kRestart, ""},
+    {SettingId::kAntiAliasing, ApplicationStrategy::kRestart, ""},
+    {SettingId::kFiltering, ApplicationStrategy::kRestart, ""},
+    // Interface
+    {SettingId::kLetterbox, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHideOfflinePrompts, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHideMainMenu, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHiddenMainMenu, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHideHud, ApplicationStrategy::kRestart, ""},
+    {SettingId::kGoldProgress, ApplicationStrategy::kRestart, ""},
+    {SettingId::kProgressBar, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowTimer, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowPb, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowSteak, ApplicationStrategy::kRestart, ""},
+    {SettingId::kInputViewer, ApplicationStrategy::kRestart, ""},
+    // Gameplay (Ultimate provider)
+    {SettingId::kPrecisionMode, ApplicationStrategy::kRestart, ""},
+    {SettingId::kDisableRandomWiggles, ApplicationStrategy::kRestart, ""},
+    {SettingId::kCameraAngle, ApplicationStrategy::kRestart, ""},
+    {SettingId::kGameSpeed, ApplicationStrategy::kRestart, ""},
+    {SettingId::kDisableDof, ApplicationStrategy::kRestart, ""},
+    {SettingId::kDisablePlots, ApplicationStrategy::kRestart, ""},
+    {SettingId::kForcePlot, ApplicationStrategy::kRestart, ""},
+    {SettingId::kForceSkybox, ApplicationStrategy::kRestart, ""},
+    {SettingId::kGems, ApplicationStrategy::kRestart, ""},
+};
+
+// Materializes the table into the rows. A row with no entry keeps the model's default
+// (`kRestart`, no evidence), which the test then reports as uncovered rather than allowing it to
+// look deliberate.
+void ApplyStrategies(std::vector<SchemaRow>& rows) {
+  for (SchemaRow& row : rows) {
+    for (const StrategyEntry& entry : kStrategies) {
+      if (entry.id == row.descriptor.id) {
+        row.descriptor.strategy = entry.strategy;
+        row.descriptor.strategy_evidence = entry.evidence;
+        break;
+      }
+    }
+  }
 }
 
 // P10's seam: the effective main-menu row tokens. Empty until a host installs them.
@@ -333,6 +432,13 @@ const SchemaRow* FindRow(SettingId id) {
     }
   }
   return nullptr;
+}
+
+// P9: the strategy, without materializing a descriptor list. Same table, same answer - the point of
+// having one table is that the boot path and the UI cannot disagree.
+ApplicationStrategy StrategyOf(SettingId id) {
+  const SchemaRow* row = FindRow(id);
+  return row == nullptr ? ApplicationStrategy::kRestart : row->descriptor.strategy;
 }
 
 std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps) {

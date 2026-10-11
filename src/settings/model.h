@@ -101,6 +101,19 @@ struct Choice {
   std::string label;  // localized (English fallback here)
 };
 
+// §5.5: how a *committed* value reaches the running game. P9 replaces the v1 constant
+// (`restart_scoped = true` for every row) with this per-row classification, so the UI, the
+// acceptance matrix and the docs read one table instead of three prose claims.
+//
+//   kHot      the value can be applied to the running process with a **measured** live effect.
+//   kRestart  it is persisted and takes effect in a new process. This is the default, and the
+//             honest answer for a row nothing has been measured for.
+//
+// `kHot` is never a design wish: a row carries it only with `strategy_evidence` non-empty and
+// naming what was observed (a log line, a capture, a game-state read). The direction of travel
+// is hot-first, and moving a row means measuring it.
+enum class ApplicationStrategy : uint8_t { kHot = 0, kRestart = 1 };
+
 struct Descriptor {
   SettingId id = SettingId::kUnknown;
   Category category = Category::kGeneral;
@@ -112,7 +125,13 @@ struct Descriptor {
   Value compiled_default;
   std::vector<Choice> choices;  // static choices; empty when choices_source is set
   std::string choices_source;   // "" | "renderers" | "resolutions" | "provider" | "menu_rows"
-  bool restart_scoped = true;   // v1: true for every row (parent plan §5.4)
+  // §5.5's per-row strategy, and the evidence that justifies it. `strategy_evidence` is what
+  // was OBSERVED for a `kHot` row and is deliberately empty for a `kRestart` row: an empty
+  // string is "nothing measured", which is not the same claim as "nothing can be measured".
+  ApplicationStrategy strategy = ApplicationStrategy::kRestart;
+  std::string strategy_evidence;
+  // Convenience for the callers that ask the yes/no question. The source of truth is `strategy`.
+  bool restart_scoped() const { return strategy == ApplicationStrategy::kRestart; }
   Availability availability = Availability::kVisible;
   std::string disabled_reason_key;                 // when kVisibleDisabled
   SettingId submenu_parent = SettingId::kUnknown;  // for kBooleanWithSubmenu -> the submenu row
@@ -263,6 +282,7 @@ bool IsAction(SettingId id);
 std::string_view CategoryToken(Category category);
 std::string_view ProviderToken(Provider provider);
 std::string_view WidgetToken(WidgetKind widget);
+std::string_view ApplicationStrategyToken(ApplicationStrategy strategy);
 std::string_view SourceToken(Source source);
 std::string_view OriginToken(Origin origin);
 std::string_view CommitStatusToken(CommitStatus status);

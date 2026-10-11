@@ -713,11 +713,17 @@ Response MemorySink::Handle(const Request& request) {
       response.message = "edit cancelled";
       break;
     case Op::kCommit: {
+      last_commit_changes_.clear();
       if (staged_.empty()) {
         response.message = "nothing to commit";
       }
       for (auto& entry : staged_) {
+        const auto before = committed_.find(entry.first);
+        const bool changed = before == committed_.end() || !SameValue(before->second, entry.second);
         committed_[entry.first] = entry.second;
+        if (changed) {
+          last_commit_changes_.push_back(entry.first);
+        }
       }
       staged_.clear();
       response.value = WireValue::Bool(true);
@@ -775,6 +781,7 @@ void MemorySink::Reset() {
   committed_.clear();
   staged_.clear();
   handled_.clear();
+  last_commit_changes_.clear();
 }
 
 Response StubSink::Handle(const Request& request) {

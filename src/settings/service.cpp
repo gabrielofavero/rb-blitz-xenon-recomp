@@ -258,7 +258,7 @@ Snapshot Service::GetSnapshot() const {
     }
     if (const auto boot = boot_effective_.find(descriptor.id); boot != boot_effective_.end()) {
       field.restart_required =
-          descriptor.restart_scoped && !ValueEquals(field.requested, boot->second);
+          descriptor.restart_scoped() && !ValueEquals(field.requested, boot->second);
     }
     snapshot.fields.push_back(std::move(field));
   }
@@ -350,10 +350,13 @@ CommitResult Service::Commit(uint64_t txn) {
       store_.MarkChanged(id, value, Origin::kManual);
     }
     const Descriptor* descriptor = DescriptorFor(id);
-    if (descriptor != nullptr && descriptor->restart_scoped) {
+    if (descriptor != nullptr && descriptor->restart_scoped()) {
       restart = true;
     }
   }
+  // P9: remember what this commit touched before `pending_` is cleared, so the caller can ask
+  // the application-strategy seam what applies live and what waits for a restart.
+  last_commit_changes_ = pending_;
 
   const bool native = store_.has_changes();
   const bool combined = native && !provider_rows.empty();

@@ -42,6 +42,11 @@ const std::vector<SchemaRow>& Rows();
 // The row for an id, or nullptr for kUnknown / an id this build does not know.
 const SchemaRow* FindRow(SettingId id);
 
+// P9: the §5.5 application strategy for one id, from the same table BuildDescriptors
+// materializes. `kRestart` for an id this build does not know, because an unknown row is never
+// applied to the running game.
+ApplicationStrategy StrategyOf(SettingId id);
+
 // A fresh descriptor list with capability/provider-dependent choices resolved and the
 // availability of provider rows set from `caps.provider`. The returned descriptors are a
 // by-value copy, never a reference into the static table.

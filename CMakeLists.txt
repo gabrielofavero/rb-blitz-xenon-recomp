@@ -91,6 +91,9 @@ set(RBBLITZ_SOURCES
     src/hooks/menu_filter.cpp
     src/hooks/settings_bridge.cpp
     src/hooks/settings_bridge_hooks.cpp
+    # P9's runtime half of the live apply: the one place that knows how a `hot` row reaches the
+    # running game (today `graphics.vsync` -> the SDK's own `vsync`, the call R7 already measured).
+    src/hooks/hot_apply_runtime.cpp
     src/hooks/shell_music.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
@@ -105,6 +108,15 @@ set(RBBLITZ_SOURCES
     # provider's settings file). SDK-free, and the only `src/settings/` translation unit the game
     # links today - the store/service wiring is the coordinator's (P11).
     src/settings/ultimate_adapter.cpp
+    # P9's two additions: the application-strategy seam (§5.5 - which committed rows apply to the
+    # running game and which wait for the restart prompt) and the restart coordinator (§8 - the
+    # exactly-once request, the rebuilt command line and the bootstrap's verified-identity wait).
+    # SDK-free. The seam reads the §5.5 table out of the schema, so the model and the schema come
+    # with it; the restart coordinator's caller is the boot wiring, which is the coordinator's.
+    src/settings/model.cpp
+    src/settings/schema.cpp
+    src/settings/hot_apply.cpp
+    src/platform/game_restart.cpp
     # The compiled-DTA parser, promoted out of the test-only targets: the provider adapter reads
     # the payload's own definitions with it at boot (it was P1's authoring module, with no
     # production consumer until P6). The cipher it shares with menu_options.cpp is already here.
@@ -581,6 +593,33 @@ if(BUILD_TESTING)
                  COMMAND rb_blitz_ultimate_adapter_tests
                          "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate")
     endif()
+
+    # P9's application-strategy seam (src/settings/hot_apply.h). SDK-free: it links the schema
+    # (the §5.5 table), the model, the seam itself, and the provider adapter - the last one so the
+    # test can assert the schema's strategy table and the provider's own row table agree instead of
+    # drifting apart.
+    add_executable(rb_blitz_settings_hot_apply_tests
+        tests/settings_hot_apply_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/hot_apply.cpp
+        src/settings/ultimate_adapter.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_settings_hot_apply_tests PRIVATE src)
+    add_test(NAME settings_hot_apply COMMAND rb_blitz_settings_hot_apply_tests)
+
+    # P9's restart coordinator (src/platform/game_restart.h). SDK-free and dependency-free: the
+    # token, the argument rebuild and the state machine are pure, and the process half runs for
+    # real - the test spawns *itself* as the child, so the wait-for-the-parent's-verified-identity
+    # behaviour is measured against live processes rather than mocked.
+    add_executable(rb_blitz_game_restart_tests
+        tests/game_restart_tests.cpp
+        src/platform/game_restart.cpp
+    )
+    target_include_directories(rb_blitz_game_restart_tests PRIVATE src)
+    add_test(NAME game_restart COMMAND rb_blitz_game_restart_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,

@@ -50,6 +50,9 @@
 #include <rex/types.h>
 
 #include "hooks/ultimate.h"
+#include "hooks/hot_apply_runtime.h"
+#include "settings/hot_apply.h"
+#include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
 
 // The two builtins the channel rides on and the node -> string helper the originals use. The
@@ -81,6 +84,15 @@ REXCVAR_DEFINE_BOOL(settings_bridge_provider_active, false, "Settings",
                     "the adapter's real readiness, which is why it is a diagnostic and not a "
                     "setting. Read at Configure() from `REX_SETTINGS_BRIDGE_PROVIDER_ACTIVE`, "
                     "because the cvar registry is not finalised that early.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_BOOL(settings_hot_apply_diagnostic, false, "Settings",
+                    "Diagnostic for P9's live apply: put a hot row through the real commit path "
+                    "once at boot (set + commit on the guest channel), so a boot log proves the "
+                    "row was applied to the running process rather than only saved. It writes "
+                    "the row's own cvar, so it changes this run - which is why it is a "
+                    "diagnostic and off by default. Read at Configure() from "
+                    "`REX_SETTINGS_HOT_APPLY_DIAGNOSTIC`.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace rb_blitz::settings::bridge {
@@ -229,6 +241,9 @@ bool ParseAnyRequest(const std::string_view path, Request* out, std::string* err
 // what a commit of a provider row does (see "the provider's two ends of the channel").
 void PersistProviderRows();
 
+// P9's live half, defined below with the rest of the application-strategy seam.
+void ApplyHotRows();
+
 void HandleRequest(const std::string_view path) {
   Request request;
   std::string error;
@@ -246,6 +261,9 @@ void HandleRequest(const std::string_view path) {
     // A committed session is written through to the provider's own file, because that file is what
     // the provider's own loader reads on the next boot. A replayed commit is not written again.
     PersistProviderRows();
+    // P9: and every row the commit changed whose strategy is `hot` is applied to the running
+    // process now; the rest keep their restart, which is what the menu's prompt covers.
+    ApplyHotRows();
   }
 }
 
@@ -458,6 +476,144 @@ void PersistProviderRows() {
   }
 }
 
+// ------------------------------------------------------------------------------------------------
+// P9: the live half of a commit
+// ------------------------------------------------------------------------------------------------
+// The commit above wrote the rows durably; this is what turns a *hot* one into a change the running
+// process already has. It is the only place in the project where the §5.5 strategy is acted on:
+//
+//   * the store reports what the commit really changed (`last_commit_changes`), so a value written
+//     back unchanged is not applied again;
+//   * the plan comes from the schema table, so the UI's claim and this behaviour cannot drift;
+//   * a `hot` row with no applier in this build goes back into the restart set, which is why a
+//     build the coordinator has not wired yet still behaves honestly.
+//
+// It runs on the guest thread the write hook already runs on, and it does not touch the cvar
+// registry itself: the applier (src/hooks/hot_apply_runtime.cpp) performs the write on a host
+// thread and waits for it, so "applied" means "written and read back".
+
+// A committed wire value as the model's own kind, with the row's declared `value_kind` as the
+// arbiter - the same rule the provider half uses, and the reason a wrong-kind value is refused
+// rather than coerced.
+bool ModelValueFromWire(const ::rb_blitz::settings::Descriptor& descriptor, const WireValue& wire,
+                        ModelValue* out) {
+  switch (descriptor.value_kind) {
+    case ModelValueKind::kBool:
+      if (wire.kind != ValueKind::kBool) {
+        return false;
+      }
+      out->kind = ModelValueKind::kBool;
+      out->boolean = wire.boolean;
+      return true;
+    case ModelValueKind::kInt:
+      if (wire.kind != ValueKind::kInt) {
+        return false;
+      }
+      out->kind = ModelValueKind::kInt;
+      out->integer = static_cast<int32_t>(wire.integer);
+      return true;
+    case ModelValueKind::kEnum:
+    case ModelValueKind::kString:
+      if (wire.kind != ValueKind::kText) {
+        return false;
+      }
+      out->kind = descriptor.value_kind;
+      out->text = wire.text;
+      return true;
+    default:
+      return false;  // the resolution, list and none kinds have no live applier today
+  }
+}
+
+void ApplyHotRows() {
+  const std::vector<std::string>& tokens = g_store.last_commit_changes();
+  if (tokens.empty()) {
+    return;
+  }
+  std::map<::rb_blitz::settings::SettingId, ModelValue> changed;
+  std::map<::rb_blitz::settings::SettingId, std::string> tokens_by_id;
+  for (const std::string& token : tokens) {
+    const ::rb_blitz::settings::SettingId id = ::rb_blitz::settings::IdForToken(token);
+    if (id == ::rb_blitz::settings::SettingId::kUnknown) {
+      continue;  // a provider row: its value lives in the provider's file, not in this build
+    }
+    const ::rb_blitz::settings::schema::SchemaRow* row =
+        ::rb_blitz::settings::schema::FindRow(id);
+    WireValue wire;
+    if (row == nullptr || !g_store.Get(token, &wire)) {
+      continue;
+    }
+    ModelValue value;
+    if (!ModelValueFromWire(row->descriptor, wire, &value)) {
+      REXLOG_WARN("settings_bridge: the committed value of '{}' is not the kind its row takes; it "
+                  "is not applied live and the row keeps its restart",
+                  token);
+      continue;
+    }
+    changed[id] = value;
+    tokens_by_id[id] = token;
+  }
+  if (changed.empty()) {
+    return;
+  }
+
+  const ::rb_blitz::settings::HotApplyPlan plan =
+      ::rb_blitz::settings::PlanHotApplyByStrategy(changed);
+  if (plan.live.empty()) {
+    REXLOG_DEBUG("settings_bridge: the commit changed {} row(s); every one of them needs a new "
+                 "process",
+                 plan.pending_restart.size());
+    return;
+  }
+
+  const std::vector<::rb_blitz::settings::HotApplyOutcome> outcomes =
+      ::rb_blitz::settings::ApplyHotPlan(plan, ::rb_blitz::settings::RuntimeHotApplier());
+  const std::vector<::rb_blitz::settings::SettingId> restart =
+      ::rb_blitz::settings::RestartSetAfterApply(plan, outcomes);
+  size_t applied = 0;
+  for (const ::rb_blitz::settings::HotApplyOutcome& outcome : outcomes) {
+    const auto found = tokens_by_id.find(outcome.id);
+    const std::string token =
+        found == tokens_by_id.end() ? std::string(SettingIdToken(outcome.id)) : found->second;
+    if (outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
+      ++applied;
+      REXLOG_INFO("settings_bridge: applied '{}' to the running game; the row carries no pending "
+                  "state",
+                  token);
+    } else {
+      REXLOG_WARN("settings_bridge: '{}' could not be applied live ({}); it needs a restart", token,
+                  outcome.error.empty()
+                      ? ::rb_blitz::settings::HotApplyStatusToken(outcome.status)
+                      : outcome.error.c_str());
+    }
+  }
+  REXLOG_INFO("settings_bridge: {} of {} changed row(s) applied live; {} row(s) still need a "
+              "restart",
+              applied, changed.size(), restart.size());
+}
+
+// The diagnostic, gated the way P5b's provider gate is: it puts a hot row through the *real*
+// channel (a set and a commit, exactly what the menu writes), so a boot log proves the live path
+// and not only the tests. It writes the row's own cvar and therefore changes this run, which is why
+// it is off by default and read from the environment.
+void RunHotApplyDiagnostic() {
+  const char* env = std::getenv("REX_SETTINGS_HOT_APPLY_DIAGNOSTIC");
+  if (env == nullptr || env[0] == '\0' || env[0] == '0') {
+    return;
+  }
+  Request set;
+  set.op = Op::kSet;
+  set.setting = "graphics.vsync";
+  set.value = WireValue::Bool(false);
+  g_dispatcher.Dispatch(set);
+  Request commit;
+  commit.op = Op::kCommit;
+  const Response response = g_dispatcher.Dispatch(commit);
+  REXLOG_INFO("settings_bridge: hot-apply diagnostic committed '{}' -> {}", set.setting,
+              StatusName(response.status));
+  ApplyHotRows();
+}
+
 }  // namespace
 
 // The two entry points the overridden builtins call, and the only names this file exports besides
@@ -501,6 +657,9 @@ void Configure() {
   SeedProvider();
   REXLOG_INFO("settings_bridge: typed guest channel {} (namespace '{}', forward-only {})",
               g_enabled ? "on" : "off", kNamespacePrefix, g_forward_only ? "on" : "off");
+  // P9: name the live set once, so a boot says what a commit can apply without a restart.
+  REXLOG_INFO("settings_bridge: live applier: {}", ::rb_blitz::settings::HotApplierSummary());
+  RunHotApplyDiagnostic();
 }
 
 }  // namespace rb_blitz::settings::bridge
