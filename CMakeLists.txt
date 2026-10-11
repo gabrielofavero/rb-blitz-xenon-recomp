@@ -355,6 +355,15 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_refresh_state_tests PRIVATE src)
     add_test(NAME refresh_state COMMAND rb_blitz_refresh_state_tests)
 
+    # R9's pool and deck (src/hooks/menu_music_pool.h): that a merged pack's songs are all
+    # pooled and sampled at random, and that no song is ever dealt twice in a row. The hook
+    # that uses it (src/hooks/shell_music.cpp) needs the SDK and a boot; this half does not.
+    add_executable(rb_blitz_menu_music_pool_tests
+        tests/menu_music_pool_tests.cpp
+    )
+    target_include_directories(rb_blitz_menu_music_pool_tests PRIVATE src)
+    add_test(NAME menu_music_pool COMMAND rb_blitz_menu_music_pool_tests)
+
     # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
     # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built
     # in the test itself - no boot, and no retail content (D14).

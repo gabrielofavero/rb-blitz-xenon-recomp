@@ -478,6 +478,24 @@ is touched. The bar then animates: measured, one item per presented frame, 0 →
   `[FATAL]`, and the refresh row's press re-scanned the library and rewrote the cache
   (§4.2). With the toggle off, the delay is the SDK's own default and the enumeration is
   scanned as before, so the faithful boot is the one this project had before R7.
+- **Verified in game: R7's frame pacing for the discovery (2026-10-10).** The title's own discovery
+  advances one item per *presented* frame, so `enhancements_dlc_uncap_enumeration` (off by default)
+  turns the SDK's own `vsync` down for as long as that enumeration lasts and puts the player's value
+  back at the last item. Measured on the same 1,402-package library and the same **2,807-item** walk:
+  **46.7 s → 15.96 s** (5.68 ms per item), with `the frame rate is free for the discovery (vsync false,
+  was true)` 7 ms after the first item and `the frame rate is the player's own again (vsync = true)`
+  1 ms after the last — 104 ms before the engine's own completion, so no menu frame is presented
+  uncapped. The call count is unchanged, i.e. nothing is skipped, which is the whole point: batching the
+  walk instead is closed by measurement ([plans/song-cache-plan.md](plans/song-cache-plan.md) §13), and
+  fast-forwarding it is closed by the absence of any proof that the song list survives
+  (§14.5). `scripts\acceptance_dlc.ps1 -DlcLibrary <flat library> -ExpectedSong "LYCANTHROPE"
+  -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"` then passed with the
+  pacing armed and restored inside the leg, the library's song on the guest's own list, and that song
+  absent from its control leg — the leg needs `-BootTimeoutSec 900 -ScreenTimeoutSec 900`, because a
+  fresh `user_data_root` is a cold `songcache` and that boot mounts the whole library before the list
+  appears. A **cold** boot is not the measurement of what the option buys: there the frame is busy
+  mounting (2,856 `Loading STFS header file` mounts) rather than waiting on the display, which is why
+  the warm boot above is the number to quote.
 - **Verified in game with a flat library (2026-10-05).** A 1,402-container library —
   1401 of them `CON` saved-game packages (RB3 936, RB2 214, RB1 251) and one a
   `LIVE` marketplace package — joined `game/dlc` as `--dlc_library`. The hook

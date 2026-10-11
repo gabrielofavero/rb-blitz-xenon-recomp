@@ -104,10 +104,13 @@ inside the ark, whose index pins its size, so the array cannot grow past three e
 `rb_blitz::shell_music::Configure()` runs from `OnPostLoadXexImage`, after `dlc::Configure()`:
 
 1. reads the R9 toggle and `enhancements_menu_dlc_song_count`;
-2. draws that many package paths **at random** from `rb_blitz::dlc::LibraryPackagePaths()` — the
-   structured root's packages and the flat library's — so the pool is different on every boot;
-3. mounts each read-only as a device of its own (`\Device\BlitzMenuMusic\<n>\`, reachable as
-   `menumusic<n>:`) and finds the `.mogg` the package holds;
+2. shuffles the package paths (`rb_blitz::dlc::LibraryPackagePaths()` — the structured root's packages
+   and the flat library's), walks them in that random order, and collects **every** `.mogg` each
+   mounted package holds — a package is one song or a merged pack of dozens — until there are enough
+   songs to fill the pool, mounting no more containers than that;
+3. mounts each walked package read-only as a device of its own (`\Device\BlitzMenuMusic\<n>\`,
+   reachable as `menumusic<n>:`) and samples the collected songs at random, so the pool is a different
+   handful every boot;
 4. hooks `ShellMusic::Load` (`0x82757F50`). When the title asks for one of its own
    `sfx/shell/...` pool entries, the path is replaced with `menumusic<n>:\songs\<song>\<song>` - a
    different song of exactly the same kind - and the original `Load` runs with it, unchanged
@@ -116,8 +119,9 @@ inside the ark, whose index pins its size, so the array cannot grow past three e
    (`Stream+0xA0`); at the seam, where the song restarts, the position jumps backwards - the one thing
    the guest offers as "this track ended" - and R9 loads the next song of the deck onto the same
    `ShellMusic`, so the menu walks its pool instead of repeating one track. The pool is a shuffled
-   deck: every mounted song is heard before any repeats, the deck reshuffles when it runs out, and the
-   first song of a new deck is never the one that just played.
+   deck: every song is heard before any repeats, the deck reshuffles when it runs out, and the first
+   song of a new deck is never the one that just played ([src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h),
+   tests/menu_music_pool_tests.cpp).
 
 Nothing is copied, extracted or written under `game/`, and with R9 off (or no library) nothing is
 mounted and the hook calls the guest unchanged.
@@ -135,6 +139,24 @@ different songs in a row, each handed over about a song-length apart
 (`14:34:14 rihannashutupanddrive` -> `14:37:55 ringoffire3` -> `14:41:34 funhouse`), with no menu
 re-entry between them.
 
+**Measured - the third thing, and what harvesting changed (2026-10-10).** One package is not always
+one song. The project's own DLC under `game/dlc/` is 20 one-file entitlement stubs - each
+`5841122D/00009000/*` holds only `asset_v2.bin` and `icon.png`, and is still skipped - plus a single
+**803 MB** container, `45410914/00000002/65CC8CBB5AE04F1917CF420B5F6346F93109177445`, which holds
+**25** songs (`songs/16candles/16candles.mogg`, `songs/always/always.mogg`, ...). The finder used to
+return the first `.mogg` in the first folder and stop, so that whole container entered the pool as one
+song - `songs\16candles\16candles` - and a boot over this library drew a pool of **one**: the menu
+opened on "A Little Less Sixteen Candles" every boot and repeated it forever, because a one-song deck
+has nothing else to deal. Harvesting every `.mogg` a package holds turns the same boot into
+`R9 plays the loaded DLC in the main menu: 25 song(s) drawn at random from 1 mounted package(s) of 21
+(50 requested), walked as a shuffled deck`, led by `songs\jungleboogie\jungleboogie` - all 25 songs
+come from the one container, in sample order, and the 20 stubs still contribute nothing. The rotation
+over that same container was then watched live: `menumusic0:\songs\spoonman2` -> (4:13)
+`menumusic0:\songs\jessiesgirl` -> (4:12) `menumusic0:\songs\bangyourhead`, three different songs with
+no repeat - the same-container hand-over a pool of one-song packages never exercised. A second boot of
+the same library opened elsewhere again (`songs\jungleboogie`), so the opening song is not pinned to the
+container's first entry any more.
+
 ## 5. Where it lives
 
 | Thing | Where |
@@ -144,5 +166,6 @@ re-entry between them.
 | The streamed player | `ShellMusic` `0x82758208` (ctor), `0x82757F50` (`Load`) |
 | The per-frame poll, and a track's end | `0x827586D8`; the stream's position, `Stream+0xA0` |
 | The feature | [src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp) |
+| The pool sample and the deck (host logic) | [src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h), `tests/menu_music_pool_tests.cpp` |
 | The toggles | [toggles.md](toggles.md) (R9) |
 | The library it draws from | [dlc.md](../dlc.md), `rb_blitz::dlc::LibraryPackagePaths()` |

@@ -133,19 +133,21 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
 // (the `shellmusic` block of config/synth.dtb, chosen at random and looped forever); with
 // this on, every track the menu plays is one of the loaded DLC songs instead, streamed
 // read-only from the package it came from (src/hooks/shell_music.cpp). The pool is drawn
-// at random from the DLC this boot enumerated, and every boot draws a new one, so without
-// a library the toggle has nothing to draw from and the menu is unchanged.
+// at random from every song the boot's DLC packages carry - every `.mogg` in a package,
+// not just the first, so a merged pack contributes all of its songs - and every boot draws
+// a new one, so without a library the toggle has nothing to draw from and the menu is
+// unchanged.
 REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, false, "Enhancements",
                     "R9 main-menu DLC songs: play the loaded DLC as the main menu's background "
                     "music instead of the three tracks the title loops - a pool drawn at random "
-                    "from the library every boot, handed one song after another as each one ends "
-                    "(the deck reshuffles when it runs out). Needs a DLC library; without one the "
-                    "menu is unchanged. Faithful: the title's own three tracks.")
+                    "from every song in the library every boot, handed one song after another as "
+                    "each one ends (the deck reshuffles when it runs out). Needs a DLC library; "
+                    "without one the menu is unchanged. Faithful: the title's own three tracks.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
-                     "R9 how many DLC songs the main menu's background pool draws from, drawn "
-                     "at random from the loaded library (1-64) and walked as a shuffled deck. "
+                     "R9 how many songs the main menu's background pool holds, drawn at random "
+                     "from every song in the loaded library (1-64) and walked as a shuffled deck. "
                      "Read only while enhancements_menu_dlc_songs is on.")
     .range(1, 64)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);

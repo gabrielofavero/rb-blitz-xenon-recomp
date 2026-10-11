@@ -24,9 +24,12 @@
 //
 // R9 widens the pool and gives the menu a jukebox rotation of it:
 //
-//   * the pool is the DLC songs this boot mounted, sampled at random from the whole
-//     library and redrawn every boot (Configure() below), so the menu is different
-//     every time;
+//   * the pool is the songs this boot found in the DLC it mounted - **every** `.mogg` a
+//     package holds, not just the first. A downloaded song is usually one package with one
+//     song, but a merged pack is one container holding a whole disc's worth of them, and
+//     taking only its first would pin the menu to whichever song sorted first, every boot.
+//     The songs are sampled at random from the whole library and the sample is redrawn
+//     every boot (Configure() below), so the menu is different every time;
 //   * `ShellMusic::Load` is hooked, so every pooled track the panel asks for becomes
 //     one of those songs;
 //   * the poll is hooked too. The stream it drives carries its own play position
@@ -34,15 +37,15 @@
 //     song repeats that position jumps **backwards**. A position that went backwards on
 //     the object R9 substituted into is therefore the end of one of its songs, and the
 //     moment R9 hands the same ShellMusic the next song of the shuffled pool. The pool
-//     is deliberately small: each mounted package is one open container, and the deck is
-//     reshuffled when it runs out.
+//     is deliberately small: the walk mounts only as many containers as it needs to fill
+//     it, and the deck is reshuffled when it runs out.
 //
 // Where a DLC song comes from: the title opens its downloadable songs from a mounted
 // content device (`cntXXXXXXXX:\songs\<key>\<key>.<ext>`) and never from `sfx/shell/`,
-// so a path in the synth config cannot name one. This layer therefore mounts a few of
-// the packages rb_blitz::dlc::Configure() enumerated itself, read-only, as devices of
-// its own (menumusic0:, menumusic1:, ...), and hands ShellMusic a path into one of
-// them. Nothing is copied, extracted or written under game/.
+// so a path in the synth config cannot name one. This layer therefore mounts the packages
+// rb_blitz::dlc::Configure() enumerated that carry songs, read-only, as devices of its own
+// (menumusic0:, menumusic1:, ...), and hands ShellMusic a path into one of them. Nothing is
+// copied, extracted or written under game/.
 //
 // Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and the deviation.
 //
@@ -62,6 +65,8 @@
 // instead.
 
 #include "hooks/shell_music.h"
+
+#include "hooks/menu_music_pool.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -104,14 +109,20 @@ REX_EXTERN(__imp__sub_827586D8);
 
 namespace {
 
+// The pool's bookkeeping lives in a header of its own so it can be tested without the SDK
+// (tests/menu_music_pool_tests.cpp): the sample and the deck are host logic, not hooks.
+// (BuildPool is called from the namespace below, which finds it itself.)
+using rb_blitz::shell_music::Deck;
+using rb_blitz::shell_music::PoolEntry;
+
 // The instance `ShellMusic::Load` is hooked at (0x82757F50), and the prefix the panel
 // builds every pool entry's path with (`sprintf("sfx/shell/%s", ...)`).
 constexpr char kShellMusicPrefix[] = "sfx/shell/";
 constexpr size_t kShellMusicPrefixSize = sizeof(kShellMusicPrefix) - 1;
 
-// The pool is a handful of songs, so the cap is about how many containers it is
-// reasonable to hold open at once, not about the menu: each mounted package is one
-// file handle and its own block-hash cache.
+// How many songs the pool holds at most - and, because one package can hold any number of
+// songs, how many containers it is reasonable to hold open at once: each mounted package is
+// one file handle and its own block-hash cache, and the walk mounts no more than this.
 constexpr int kMaxSongs = 64;
 
 // One guest string buffer per substitution, cycled. Several are kept because the
@@ -130,24 +141,16 @@ constexpr uint32_t kPositionOffset = 0xA0;
 // writing, not a seam: a seam restarts near zero and is minutes of samples away.
 constexpr uint32_t kRewindSlack = 44100;  // ~1 s at 44.1 kHz
 
-struct PoolEntry {
-  std::string alias;   // the guest device name, without its trailing ':'
-  std::string stream;  // `\songs\<song>\<song>`, without the extension Load appends
-};
-
 bool g_enabled = false;
 std::vector<PoolEntry> g_pool;
 
 std::mutex g_mutex;
 std::mt19937 g_rng{std::random_device{}()};
-constexpr size_t kNoIndex = static_cast<size_t>(-1);
 
 // The play order of the pool, walked to the end and then reshuffled. A deck rather than
-// a per-load pick: every mount gets heard before any repeats, and the song after the
-// last one is never the last one again.
-std::vector<size_t> g_deck;
-size_t g_deck_next = 0;
-size_t g_last_index = kNoIndex;
+// a per-load pick: every song gets heard before any repeats, and the song after the last
+// one is never the last one again (src/hooks/menu_music_pool.h).
+Deck g_deck{g_rng};
 
 // The ShellMusic the last substitution went to, and the Load arguments the panel passed
 // it - the poll hook replays them when it starts the next track. Zero outside R9.
@@ -174,41 +177,52 @@ uint32_t LoadBe32(uint8_t* base, uint32_t address) {
          uint32_t(p[3]);
 }
 
-// The stream path a package holds, or empty. A package's song files sit in a folder
-// named after the song, beside the chart; `songs/<song>/<song>.mogg` is the shape the
-// title opens them by, so the first `.mogg` in the first song folder is the one to
-// play. Anything else - an art-only package, a damaged container - yields nothing and
-// the package is skipped rather than guessed at.
-std::string FindSongStream(rex::filesystem::Device& device) {
+constexpr size_t kMoggSize = 5;  // ".mogg"
+
+// Walks a package's `\songs` subtree and appends every song it holds, as the path
+// `ShellMusic::Load` wants it (the `.mogg` is left off - the engine appends it). Both
+// shapes a package uses are covered: the usual `songs/<song>/<song>.mogg`, and a `.mogg`
+// sitting directly in `\songs`. The depth is bounded so a malformed tree cannot recurse
+// forever.
+void CollectSongStreams(rex::filesystem::Entry* node, const std::string& path, size_t depth,
+                        std::vector<std::string>& out) {
+  if (node == nullptr || depth > 4) {
+    return;
+  }
+  for (const std::unique_ptr<rex::filesystem::Entry>& child : node->children()) {
+    if (child == nullptr || child->name().empty()) {
+      continue;
+    }
+    const std::string child_path = path + "\\" + child->name();
+    if ((child->attributes() & rex::filesystem::kFileAttributeDirectory) != 0) {
+      CollectSongStreams(child.get(), child_path, depth + 1, out);
+      continue;
+    }
+    const std::string& name = child->name();
+    if (name.size() > kMoggSize &&
+        name.compare(name.size() - kMoggSize, kMoggSize, ".mogg") == 0) {
+      out.push_back(child_path.substr(0, child_path.size() - kMoggSize));
+    }
+  }
+}
+
+// Every song a package holds. A downloaded song is usually one package with one song, but a
+// merged pack is one container holding a whole disc's worth of them (the retail packs:
+// `songs/<song>/<song>.mogg` for each song, dozens to a package), so taking only the first -
+// which this used to do - pinned the menu to whichever song sorted first, every boot. An
+// art-only package (a stub whose whole table is an icon and an asset blob) yields nothing and
+// is skipped rather than guessed at.
+std::vector<std::string> FindSongStreams(rex::filesystem::Device& device) {
+  std::vector<std::string> streams;
   rex::filesystem::Entry* songs = device.ResolvePath("\\songs");
   if (songs == nullptr) {
     songs = device.ResolvePath("songs");
   }
   if (songs == nullptr) {
-    return {};
+    return streams;
   }
-  constexpr size_t kMoggSize = 5;  // ".mogg"
-  for (const std::unique_ptr<rex::filesystem::Entry>& folder : songs->children()) {
-    if (folder == nullptr || folder->name().empty()) {
-      continue;
-    }
-    const std::string root = "\\songs\\" + folder->name();
-    rex::filesystem::Entry* song = device.ResolvePath(root);
-    if (song == nullptr) {
-      continue;
-    }
-    for (const std::unique_ptr<rex::filesystem::Entry>& file : song->children()) {
-      if (file == nullptr) {
-        continue;
-      }
-      const std::string& name = file->name();
-      if (name.size() > kMoggSize &&
-          name.compare(name.size() - kMoggSize, kMoggSize, ".mogg") == 0) {
-        return root + "\\" + name.substr(0, name.size() - kMoggSize);
-      }
-    }
-  }
-  return {};
+  CollectSongStreams(songs, "\\songs", 0, streams);
+  return streams;
 }
 
 // The package as a read-only guest device: an STFS container mounted where it lies, or
@@ -235,27 +249,18 @@ std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_p
 // runs out so that the first song of a new deck is never the song that just played.
 // The caller holds g_mutex.
 std::string NextPathLocked() {
-  if (g_pool.empty()) {
+  const size_t index = g_deck.Next(g_pool.size());
+  if (index == rb_blitz::shell_music::kNoIndex) {
     return {};
   }
-  if (g_deck_next >= g_deck.size()) {
-    g_deck.resize(g_pool.size());
-    std::iota(g_deck.begin(), g_deck.end(), size_t{0});
-    std::shuffle(g_deck.begin(), g_deck.end(), g_rng);
-    if (g_deck.size() > 1 && g_deck.front() == g_last_index) {
-      std::swap(g_deck.front(), g_deck[1]);
-    }
-    g_deck_next = 0;
-  }
-  const size_t index = g_deck[g_deck_next++];
-  g_last_index = index;
   return g_pool[index].alias + ":" + g_pool[index].stream;
 }
 
-// Hand the ShellMusic the menu is already polling the next song of the deck. This is
-// the same call the panel's own pool loader makes - a `ShellMusic::Load` on a live
-// object - with `loop=0`, so the track ends and the poll hook below comes back here.
-// Runs on the guest thread, from inside that poll, and takes no locks while calling.
+// Hand the ShellMusic the menu is already polling the next song of the deck. This is the
+// same call the panel's own pool loader makes - a `ShellMusic::Load` on a live object - with
+// the volume, loop and play-from-buffer flags the panel chose for the pool entry it
+// substituted (the stream loops either way, so the poll hook below is what notices the song
+// ending). Runs on the guest thread, from inside that poll, and takes no locks while calling.
 void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
   std::string path;
   uint32_t buffer = 0;
@@ -358,23 +363,25 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
 
-  int wanted = REXCVAR_GET(enhancements_menu_dlc_song_count);
-  wanted = std::clamp(wanted, 1, kMaxSongs);
+  const int wanted = std::clamp(REXCVAR_GET(enhancements_menu_dlc_song_count), 1, kMaxSongs);
   const size_t total = packages.size();
-  const size_t cap = std::min<size_t>(static_cast<size_t>(wanted), total);
+  const size_t cap = static_cast<size_t>(wanted);
 
-  // Draw the pool at random from the whole library, and redraw it every boot. The
-  // previous index stride picked the same packages in the same order on every run, so a
-  // menu over a fixed handful never changed; a shuffle of the library's indices, taken
-  // from the front, is a distinct sample and spread by construction.
+  // Draw packages at random from the whole library, and collect every song each one holds.
+  // A package is one open container, so the walk stops as soon as there are enough songs to
+  // fill the pool and never mounts more than `cap` of them: a merged pack fills the pool from
+  // a single handle, while a library of one-song packages is mounted as many times as the
+  // pool is deep. The old index stride picked the same packages in the same order on every
+  // run; a shuffle of the library's indices is a distinct sample by construction.
   std::vector<size_t> order(total);
   std::iota(order.begin(), order.end(), size_t{0});
   std::shuffle(order.begin(), order.end(), g_rng);
 
-  for (size_t i = 0; i < order.size() && g_pool.size() < cap; ++i) {
+  std::vector<PoolEntry> candidates;
+  size_t mounts = 0;
+  for (size_t i = 0; i < order.size() && candidates.size() < cap && mounts < cap; ++i) {
     const std::filesystem::path& package = packages[order[i]];
-    const std::string mount_path =
-        fmt::format("\\Device\\BlitzMenuMusic\\{}\\", g_pool.size());
+    const std::string mount_path = fmt::format("\\Device\\BlitzMenuMusic\\{}\\", mounts);
     std::error_code ec;
     std::unique_ptr<rex::filesystem::Device> device = MountPackage(mount_path, package, ec);
     if (device == nullptr) {
@@ -382,12 +389,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                   ec ? ec.message() : "not a mountable package");
       continue;
     }
-    const std::string stream = FindSongStream(*device);
-    if (stream.empty()) {
+    std::vector<std::string> streams = FindSongStreams(*device);
+    if (streams.empty()) {
       REXLOG_WARN("shell_music: {} holds no streamable .mogg, skipping it", package.string());
       continue;
     }
-    const std::string alias = fmt::format("menumusic{}", g_pool.size());
+    const std::string alias = fmt::format("menumusic{}", mounts);
     if (!file_system->RegisterDevice(std::move(device))) {
       REXLOG_WARN("shell_music: cannot register the device for {}", package.string());
       continue;
@@ -396,8 +403,17 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       REXLOG_WARN("shell_music: cannot point {}: at {}", alias, mount_path);
       continue;
     }
-    g_pool.push_back({alias, stream});
+    ++mounts;
+    for (std::string& stream : streams) {
+      candidates.push_back({alias, std::move(stream)});
+    }
   }
+
+  // The pool is a random sample of those songs, redrawn every boot, with a song that two
+  // packages both carry kept once. Shuffling the collected songs rather than cutting them in
+  // walk order keeps one large pack from always opening with the same track
+  // (src/hooks/menu_music_pool.h).
+  g_pool = BuildPool(std::move(candidates), cap, g_rng);
 
   if (g_pool.empty()) {
     REXLOG_WARN("shell_music: no DLC song could be mounted; the main menu keeps the title's own "
@@ -422,9 +438,9 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
 
-  REXLOG_INFO("shell_music: R9 plays the loaded DLC in the main menu: {} song(s) of {} package(s) "
-              "drawn at random and mounted read-only ({} requested), walked as a shuffled deck",
-              g_pool.size(), total, wanted);
+  REXLOG_INFO("shell_music: R9 plays the loaded DLC in the main menu: {} song(s) drawn at random "
+              "from {} mounted package(s) of {} ({} requested), walked as a shuffled deck",
+              g_pool.size(), mounts, total, wanted);
   for (const PoolEntry& entry : g_pool) {
     REXLOG_INFO("shell_music:   {}:{}.mogg", entry.alias, entry.stream);
   }
