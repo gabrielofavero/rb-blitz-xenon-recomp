@@ -791,6 +791,37 @@ int main() {
     CHECK_EQ(BlockSize(*array), 0);
   }
 
+  BeginCase("P10: the inventory reports the effective menu, conditional rows included");
+  {
+    // What the Hide Items -> Main Menu list is built from: the rows the title will really load,
+    // in the order the menu draws them, with the ones behind a macro reported as conditional.
+    // Reading the fixture before any edit proves the walker sees the file as it ships.
+    const std::vector<uint8_t> file = FixtureFile(true);
+    const Inventory inventory = MenuInventory(file.data(), file.size());
+    CHECK_TRUE(inventory.parsed);
+    CHECK_EQ(inventory.file_size, file.size());
+    CHECK_EQ(inventory.rows.size(), 7u);
+    std::string tokens;
+    std::string conditional;
+    for (const InventoryRow& row : inventory.rows) {
+      tokens += (tokens.empty() ? "" : ",") + row.token;
+      if (row.conditional) {
+        conditional += (conditional.empty() ? "" : ",") + row.token;
+      }
+    }
+    CHECK_TRUE(tokens == "splash_start,splash_leaderboard,splash_achievements,splash_options,"
+                         "splash_upgrade,splash_dlc,splash_exit");
+    // `splash_achievements` and `splash_exit` are the two the fixture puts behind `#ifdef`.
+    CHECK_TRUE(conditional == "splash_achievements,splash_exit");
+
+    // A file that is not the menu's is refused with a reason rather than reported as empty.
+    std::vector<uint8_t> other(64, 0);
+    const Inventory none = MenuInventory(other.data(), other.size());
+    CHECK_FALSE(none.parsed);
+    CHECK_FALSE(none.reason.empty());
+    CHECK_TRUE(none.rows.empty());
+  }
+
   BeginCase("a row outside the block takes the block's content with it unless it is moved out");
   {
     // Hiding one row makes the conditional's macro undefined, which would drop

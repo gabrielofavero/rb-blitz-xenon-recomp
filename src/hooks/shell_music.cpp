@@ -97,6 +97,7 @@
 
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
+#include "settings/menu_compat.h"
 
 #if defined(_WIN32)
 
@@ -337,6 +338,16 @@ namespace rb_blitz::shell_music {
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   (void)game_data_root;
+  // P10: the pool is a fixed 50 songs (§3.5), capped by what this boot can mount. Both lines are
+  // said *before* the early returns, so a boot that never mounts a package still reports the fixed
+  // cap and that a retired `enhancements_menu_dlc_song_count` is ignored instead of obeyed.
+  const size_t cap = rb_blitz::settings::menu_compat::PoolCap(kMaxSongs);
+  REXLOG_INFO("shell_music: the menu's DLC pool holds up to {} song(s) (fixed, plan 3.5)", cap);
+  const std::string legacy_note = rb_blitz::settings::menu_compat::LegacyPoolCountNote(
+      REXCVAR_GET(enhancements_menu_dlc_song_count));
+  if (!legacy_note.empty()) {
+    REXLOG_WARN("shell_music: {}", legacy_note);
+  }
   g_enabled = REXCVAR_GET(enhancements_menu_dlc_songs);
   if (!g_enabled) {
     REXLOG_INFO("shell_music: R9 off; the main menu loops the title's own tracks");
@@ -363,9 +374,10 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
 
-  const int wanted = std::clamp(REXCVAR_GET(enhancements_menu_dlc_song_count), 1, kMaxSongs);
+  // P10: the pool is a fixed 50 songs (§3.5), capped by what this boot can actually mount. The
+  // retired `enhancements_menu_dlc_song_count` is read only to say it is ignored - a hand-edited
+  // config must not silently re-enable a size the product no longer offers.
   const size_t total = packages.size();
-  const size_t cap = static_cast<size_t>(wanted);
 
   // Draw packages at random from the whole library, and collect every song each one holds.
   // A package is one open container, so the walk stops as soon as there are enough songs to
@@ -439,8 +451,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 
   REXLOG_INFO("shell_music: R9 plays the loaded DLC in the main menu: {} song(s) drawn at random "
-              "from {} mounted package(s) of {} ({} requested), walked as a shuffled deck",
-              g_pool.size(), mounts, total, wanted);
+              "from {} mounted package(s) of {} (pool cap {})",
+              g_pool.size(), mounts, total, cap);
   for (const PoolEntry& entry : g_pool) {
     REXLOG_INFO("shell_music:   {}:{}.mogg", entry.alias, entry.stream);
   }

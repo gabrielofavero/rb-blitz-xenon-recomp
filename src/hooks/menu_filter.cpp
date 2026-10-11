@@ -22,6 +22,7 @@
 #include <rex/types.h>
 
 #include "hooks/dlc.h"
+#include "settings/menu_compat.h"
 #include "ui/menu_options.h"
 
 #if defined(_WIN32)
@@ -450,37 +451,46 @@ namespace rb_blitz::menu_filter {
 
 void Configure() {
   g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
-  g_settings.rows = menu_options::ParseRowNames(REXCVAR_GET(enhancements_hidden_menu_options));
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
   g_settings.skip_offline_prompts = REXCVAR_GET(enhancements_skip_offline_dialog);
   g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
-  if (g_settings.rows.empty()) {
-    g_settings.rows = menu_options::ParseRowNames(menu_options::kDefaultRows);
-    REXLOG_WARN("menu_filter: enhancements_hidden_menu_options is empty; hiding the compiled "
-                "default ({}) instead",
-                menu_options::kDefaultRows);
-  }
+
+  // P10: the hide decision is the §3.5 rule, not a branch - master off hides nothing, an empty
+  // selection is a *deliberate* empty (the old fallback re-hid the compiled defaults, which is the
+  // defect the plan names), and the protected merged entry is refused by name. The selection is
+  // "explicit" when it differs from the compiled default string: an absent setting keeps the
+  // defaults, anything the player (or a config) wrote - including nothing at all - is theirs.
+  const std::string configured_rows = REXCVAR_GET(enhancements_hidden_menu_options);
+  rb_blitz::settings::menu_compat::HideRequest request;
+  request.master = g_settings.hide_rows;
+  request.selection_explicit = configured_rows != menu_options::kDefaultRows;
+  request.selected = menu_options::ParseRowNames(configured_rows);
+  request.defaults = menu_options::ParseRowNames(menu_options::kDefaultRows);
+  request.refresh_row_owns_refresh = g_settings.tap_refresh_row;
+  const rb_blitz::settings::menu_compat::HideDecision decision =
+      rb_blitz::settings::menu_compat::DecideHiddenRows(request);
+  g_settings.rows = decision.hidden;
+  g_settings.hide_rows = g_settings.hide_rows && !decision.hidden.empty();
+
   if (g_settings.tap_refresh_row) {
-    // R7 gives the downloadable-content row a new job (TapRefreshCache), so it must stay in
-    // the list even though R5's compiled default hides it.
-    g_settings.rows.erase(
-        std::remove(g_settings.rows.begin(), g_settings.rows.end(), std::string("splash_dlc")),
-        g_settings.rows.end());
-    // The same toggle repaints the row and the discovery screen: the row's shipped label
-    // ("Download Content") is an online-store name for something that now refreshes a
-    // library, and the discovery screen's is a lie whenever the host cache answered.
+    // R7 gives the downloadable-content row a new job (TapRefreshCache), so it stays in the list
+    // (the decision above says so), and the same toggle repaints the row and the discovery screen:
+    // the row's shipped label ("Download Content") is an online-store name for something that now
+    // refreshes a library, and the discovery screen's is a lie whenever the host cache answered.
     g_settings.relabel_refresh_row = true;
     g_settings.relabel_cache_load = true;
-    REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache and is "
-                "drawn as \"{}\" (R7)",
+    REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache and is drawn "
+                "as \"{}\" (R7)",
                 menu_options::kDlcRowRefreshLabel);
   }
   g_configured = true;
-  if (g_settings.hide_rows) {
-    REXLOG_INFO("menu_filter: hiding {} row(s) from the main menu (R5): {}", g_settings.rows.size(),
-                Joined(g_settings.rows));
-  } else {
-    REXLOG_INFO("menu_filter: R5 off; the main menu lists every row the title ships");
+
+  REXLOG_INFO("menu_filter: R5 {}: {}", request.master ? "on" : "off", decision.note);
+  if (decision.alternate_refresh_needed) {
+    // Said once and plainly: the refresh lost its row, so the only in-menu way to run it is gone
+    // until the merged menu grows its own action (P10's follow-up, plan §3.5).
+    REXLOG_WARN("menu_filter: the downloadable-content row was hidden by an explicit selection; "
+                "the DLC library refresh has no main-menu row in this run");
   }
   if (g_settings.rename_settings_row) {
     REXLOG_INFO("menu_filter: relabelling the mod's \"{}\" row to \"{}\" (R10)",

@@ -116,6 +116,9 @@ set(RBBLITZ_SOURCES
     src/settings/model.cpp
     src/settings/schema.cpp
     src/settings/hot_apply.cpp
+    # P10's menu-compatibility rules (the hide matrix §3.5 states in words, the fixed 50-song
+    # pool, the rename's scope). SDK-free, and read by the menu hooks the mod already owns.
+    src/settings/menu_compat.cpp
     src/platform/game_restart.cpp
     # The compiled-DTA parser, promoted out of the test-only targets: the provider adapter reads
     # the payload's own definitions with it at boot (it was P1's authoring module, with no
@@ -620,6 +623,18 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_game_restart_tests PRIVATE src)
     add_test(NAME game_restart COMMAND rb_blitz_game_restart_tests)
+
+    # P10's menu-compatibility rules (src/settings/menu_compat.h). SDK-free: the hide matrix, the
+    # fixed pool, the retired pool-size value and the rename's scope, plus the hide list's own seam
+    # (the schema's menu-row choices, where an empty selection differs from no selection at all).
+    add_executable(rb_blitz_menu_compat_tests
+        tests/menu_compat_tests.cpp
+        src/settings/model.cpp
+        src/settings/schema.cpp
+        src/settings/menu_compat.cpp
+    )
+    target_include_directories(rb_blitz_menu_compat_tests PRIVATE src)
+    add_test(NAME menu_compat COMMAND rb_blitz_menu_compat_tests)
 endif()
 
 # The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,

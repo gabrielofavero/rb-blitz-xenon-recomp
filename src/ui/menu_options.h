@@ -125,6 +125,35 @@ std::vector<std::string> ParseRowNames(std::string_view text);
 // and the result must be exactly as long as the input.
 Outcome HideRows(uint8_t* file, size_t available, const std::vector<std::string>& names);
 
+// ------------------------------------------------------------------------------------------------
+// P10: the effective menu, as an inventory
+// ------------------------------------------------------------------------------------------------
+//
+// The Hide Items -> Main Menu row lists the menu's *actual* rows, so the list has to come from the
+// file the title will really load rather than from a hardcoded copy: a mod, or our own merged
+// payload, changes which rows exist, and a row that is not in the menu must not be offered as a
+// hideable choice (plan §3.5). This walker reads the option array of whatever splash record it is
+// given and reports the rows it holds, in the order the menu draws them.
+//
+// Two things it deliberately does not do: it does not resolve the locale (a row's *label* lives in
+// `ui/locale/*/gen/locale_keep.dtb`, a different record in a different read - the caller pairs
+// each token with its label, because the caller is what has both), and it does not drop the
+// conditional rows - it reports `conditional`, because "this row exists only when macro X is
+// defined" is exactly the availability the list has to show honestly.
+struct InventoryRow {
+  std::string token;         // the symbol the option array holds, e.g. "splash_options"
+  bool conditional = false;  // it sits inside an `#ifdef`/`#ifndef` block of that array
+};
+
+struct Inventory {
+  bool parsed = false;  // the file was a .dtb carrying a main-menu option list
+  size_t file_size = 0;
+  std::vector<InventoryRow> rows;
+  std::string reason;  // why nothing was read, when parsed is false
+};
+
+Inventory MenuInventory(const uint8_t* file, size_t available);
+
 // What one RenameLabel call did, in the same terms.
 struct Renamed {
   bool applied = false;   // the file was rewritten

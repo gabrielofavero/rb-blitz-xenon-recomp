@@ -820,6 +820,48 @@ Outcome HideRows(uint8_t* file, size_t available,
   return outcome;
 }
 
+Inventory MenuInventory(const uint8_t* file, size_t available) {
+  Inventory inventory;
+  Loaded loaded;
+  if (!LoadFile(file, available, &loaded, &inventory.reason)) {
+    return inventory;
+  }
+  inventory.file_size = loaded.file_size;
+
+  Node* array = nullptr;
+  for (Node& node : loaded.root) {
+    if ((array = FindOptionArray(node)) != nullptr) {
+      break;
+    }
+  }
+  if (array == nullptr) {
+    inventory.reason = "no main-menu option list in this file";
+    return inventory;
+  }
+
+  // A row is conditional when the element list opens a conditional before it and has not closed it
+  // by the time the row arrives. The depth is what makes `#else` transparent: both branches of a
+  // conditional are conditional.
+  int depth = 0;
+  for (const Node& kid : array->kids) {
+    if (kid.tag == kIfdef || kid.tag == kIfndef) {
+      ++depth;
+      continue;
+    }
+    if (kid.tag == kEndif) {
+      depth = depth > 0 ? depth - 1 : 0;
+      continue;
+    }
+    if (!IsRowName(kid.tag)) {
+      continue;  // `#else` and anything that is not a name: structure, not a row
+    }
+    inventory.rows.push_back(
+        InventoryRow{std::string(kid.text.begin(), kid.text.end()), depth > 0});
+  }
+  inventory.parsed = true;
+  return inventory;
+}
+
 Tapped TapRefreshCache(uint8_t* file, size_t available) {
   Tapped tapped;
   Loaded loaded;
