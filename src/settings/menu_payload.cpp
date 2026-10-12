@@ -76,22 +76,56 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   return true;
 }
 
+// Append `records` to the mounted patch archive, and return the header to write.
+//
+// **One part, always - this is the whole point of `mounted_part`.** Every archive this title
+// ships or reads declares exactly one part (`game/gen/main_xbox.hdr`: `gen/main_xbox_0.ark`;
+// `game/ultimate/gen/patch_xbox.hdr`: `gen/patch_xbox_0.ark`, measured 2026-10-12 with
+// `scripts/hmx_ark.py list`). Growing the ark by *adding* a second part - which is what this
+// function used to do - produced the title's only two-part ark, and an Ultimate boot that read the
+// generated part forever and never presented (docs/plans/in-game-settings-status-2026-10-12.md).
+// So when the mounted index has a single part, its bytes are carried into the new part unchanged
+// and our records are appended after them: the existing entries keep their offsets, the part list
+// keeps its one entry (same name, new size), and the guest sees the shape it has always seen.
+//
+// `part_path` receives the record path the caller must write `part` to. It is the mounted part's
+// own name in that case, which is also what makes the union prefer it: the settings overlay's
+// payload side then serves the extended ark where the base used to serve the provider's copy.
 std::vector<uint8_t> ExtendMenuArchive(ultimate_adapter::ArkIndex index, const MenuRecords& records,
-                                     std::vector<uint8_t>* part) {
+                                       const std::vector<uint8_t>& mounted_part,
+                                       std::string* part_path, std::vector<uint8_t>* part) {
   part->clear();
-  const uint64_t offset = std::accumulate(index.part_sizes.begin(), index.part_sizes.end(), uint64_t{});
+  // Extending in place is only well-defined for the single-part mounted archive; anything else
+  // falls back to appending a part of our own (the previous behaviour).
+  const bool extend_in_place = index.parts.size() == 1 &&
+                               mounted_part.size() == index.part_sizes.front();
+  if (extend_in_place) {
+    *part = mounted_part;
+  }
+  // The ark offset of the first byte our part owns: the whole mounted part when extending, and the
+  // whole mounted ark when a new part is appended.
+  const uint64_t ark_prefix =
+      std::accumulate(index.part_sizes.begin(), index.part_sizes.end(), uint64_t{});
+  const size_t preloaded = part->size();
   for (const auto& [path, bytes] : records) {
     part->resize((part->size() + 15) & ~size_t(15));
-    const ultimate_adapter::ArkEntry added{path, offset + part->size(), bytes.size(), 0};
+    const ultimate_adapter::ArkEntry added{path, ark_prefix + (part->size() - preloaded),
+                                          bytes.size(), 0};
     auto old = std::find_if(index.entries.begin(), index.entries.end(),
                            [&](const auto& entry) { return entry.path == path; });
     if (old == index.entries.end()) index.entries.push_back(added);
     else *old = added;
     part->insert(part->end(), bytes.begin(), bytes.end());
   }
-  index.parts.push_back("gen/settings_xbox_0.ark");
-  index.part_sizes.push_back(static_cast<uint32_t>(part->size()));
-  index.checksums.push_back(0);
+  if (extend_in_place) {
+    index.part_sizes.front() = static_cast<uint32_t>(part->size());
+    *part_path = index.parts.front();
+  } else {
+    index.parts.push_back("gen/settings_xbox_0.ark");
+    index.part_sizes.push_back(static_cast<uint32_t>(part->size()));
+    index.checksums.push_back(0);
+    *part_path = "gen/settings_xbox_0.ark";
+  }
   std::vector<uint8_t> body;
   U32(body, 6);
   if (index.extra.size() != 20) index.extra.assign(20, 0xFF);

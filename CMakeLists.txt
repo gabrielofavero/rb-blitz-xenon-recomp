@@ -436,6 +436,23 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_settings_screen_tests PRIVATE src)
     add_test(NAME settings_screen COMMAND rb_blitz_settings_screen_tests)
 
+    # The archive half of the generated Help & Options payload (src/settings/menu_payload.cpp):
+    # that extending the mounted patch archive keeps it a *one-part* archive, because the title has
+    # never read a two-part one and a boot that offered it one hung inside our own read hook
+    # (docs/plans/in-game-settings-status-2026-10-12.md). The assertions run through
+    # src/settings/ultimate_adapter.cpp's own v6 reader, so the fixture and the product cannot drift
+    # apart. SDK-free: the fixtures are an index and bytes, no retail content.
+    add_executable(rb_blitz_menu_payload_tests
+        tests/menu_payload_tests.cpp
+        src/settings/menu_payload.cpp
+        src/settings/ultimate_adapter.cpp
+        src/ui/settings_screen.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_menu_payload_tests PRIVATE src)
+    add_test(NAME menu_payload COMMAND rb_blitz_menu_payload_tests)
+
     # R9's pool and deck (src/hooks/menu_music_pool.h): that a merged pack's songs are all
     # pooled and sampled at random, and that no song is ever dealt twice in a row. The hook
     # that uses it (src/hooks/shell_music.cpp) needs the SDK and a boot; this half does not.

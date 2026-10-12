@@ -106,24 +106,9 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   };
   if (!Read(vfs, "gen/main_xbox.hdr", 0, 0, &bytes, &error) ||
       !ultimate_adapter::ReadArkIndex(bytes.data(), bytes.size(), &main, &error)) return fail();
-  // NOT INSTALLED when the game root already carries a patch archive.
-  //
-  // That is the Ultimate payload case, and it is refused rather than attempted: stacking this
-  // device on the provider's own overlay hung the boot outright - measured 2026-10-12, five
-  // consecutive Ultimate boots, the guest thread burning 70 s of CPU inside
-  // `menu_options::LooksLikeDtb` while the title re-read 64 KiB of the generated part file half a
-  // million times and never presented. Pointing the same boot at `RBBZ_SKIP_MENU_PAYLOAD` presented
-  // the menu in 47 s, so this install step is the cause, not a symptom. The base game (no payload
-  // overlay, this same code with an empty provider index) is unaffected and presents reliably.
-  // The provider's own records and the reachable game root stay exactly as the title expects, so an
-  // Ultimate install boots; the merged Help & Options screen is base-only until the cause is fixed.
-  // Evidence, the isolation matrix and the two leading hypotheses:
-  // docs/plans/in-game-settings-status-2026-10-12.md.
   if (vfs->ResolvePath("game:\\gen\\patch_xbox.hdr")) {
-    REXLOG_WARN("settings_menu: the game root already carries a patch archive, so the generated "
-                "menu records are NOT mounted (this is what hung the Ultimate boot); see "
-                "docs/plans/in-game-settings-status-2026-10-12.md");
-    return false;
+    if (!Read(vfs, "gen/patch_xbox.hdr", 0, 0, &bytes, &error) ||
+        !ultimate_adapter::ReadArkIndex(bytes.data(), bytes.size(), &patch, &error)) return fail();
   }
   MenuRecords originals;
   RecordReader read = [&](const std::string& path, Bytes* out, std::string* why) {
@@ -229,11 +214,24 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active())) return fail();
   Bytes part;
-  const Bytes header = ExtendMenuArchive(patch, records, &part);
-  // Only generated records live here. Installed game and provider files remain read-only.
+  std::string part_path;
+  // The mounted part's own bytes, so the extended archive can stay a *one-part* archive: the title
+  // only ever reads single-part archives, and a second part is what hung the Ultimate boot.
+  Bytes mounted_part;
+  if (!patch.parts.empty() && patch.parts.size() == patch.part_sizes.size()) {
+    for (const std::string& name : patch.parts) {
+      Bytes one;
+      if (!Read(vfs, name, 0, 0, &one, &error)) return fail();
+      mounted_part.insert(mounted_part.end(), one.begin(), one.end());
+    }
+  }
+  const Bytes header = ExtendMenuArchive(patch, records, mounted_part, &part_path, &part);
+  // Only generated records live in the cache root, and when a payload is installed the part also
+  // carries a byte-for-byte copy of the mounted part those records were appended to. Installed game
+  // and provider files on disk stay read-only either way: nothing here is ever written back.
   const auto root = runtime->cache_root() / "settings-menu" /
                     std::to_string(platform::ThisProcessId());
-  if (!WriteBytes(root / "gen/settings_xbox_0.ark", part, &error) ||
+  if (!WriteBytes(root / part_path, part, &error) ||
       !WriteBytes(root / "gen/patch_xbox.hdr", header, &error)) return fail();
   constexpr std::string_view mount = "\\Device\\BlitzSettingsMenu";
   auto* base = vfs->ResolvePath("game:\\");

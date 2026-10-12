@@ -3,14 +3,15 @@
 > **Two handovers, both current (2026-10-12):** [the implementation handover](in-game-settings-handover-2026-10-12.md)
 > has the changes, the Auto-resolution decision, and the runtime blockers;
 > **[the evening status](in-game-settings-status-2026-10-12.md) explains the black startup and what
-> this session changed** — the two failing ctests are fixed (35/35 green), the Ultimate boot hang is
-> diagnosed and guarded, and the remaining work is re-ordered by what blocks a release. Read that
-> one second and last.
+> this session changed** — the two failing ctests are fixed (36/36 green), the Ultimate boot hang is
+> fixed at its cause (the generated payload was making a two-part archive, which this title cannot
+> read), and the merged Help & Options screen now opens with the provider active. Read that one
+> second and last.
 >
 > Statements below that this session measured to be wrong: graphics recovery **is** wired (the
-> marker, the fallback and safe mode all ran); the menu payload is **refused** on an Ultimate
-> install rather than installed; and the Ultimate boot now presents.
-> The feature still has not passed final acceptance.
+> marker, the fallback and safe mode all ran); the Ultimate boot **does** present and **does**
+> carry the merged root; and the interactive matrix has still not been driven.
+> The feature has not passed final acceptance.
 
 **Updated 2026-10-12.** This status supersedes the older open-item ledger below in its previous
 revision and the dated “open” statements in the handoff documents. Those documents retain the
