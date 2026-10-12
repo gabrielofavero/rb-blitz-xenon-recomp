@@ -9,7 +9,15 @@ std::atomic<uint32_t> g_render_height{720};
 }
 
 void rb_blitz::settings::SetBootRenderHeight(uint32_t height) {
-  g_render_height.store(height == 1080 ? 1080 : 720, std::memory_order_relaxed);
+  // Keep the title's measured 540p allocation and let the Xenos backend scale
+  // render targets, viewports and resolves. This is rendering at the requested
+  // resolution, not resizing an already rendered frame. The 1080p guest allocation path
+  // corrupts title-screen assets before the menu is reached.
+  g_render_height.store(height == 540 ? 540 : 720, std::memory_order_relaxed);
+}
+
+uint32_t rb_blitz::settings::BootRenderHeight() {
+  return g_render_height.load(std::memory_order_relaxed);
 }
 
 void RenderHeightHook(PPCRegister& r11) {

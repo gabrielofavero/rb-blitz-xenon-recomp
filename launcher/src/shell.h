@@ -60,7 +60,7 @@ struct ShellEnvironment {
   // Save, Close and Play Game on the bar, and no other tab, no Update, and no Ultimate install
   // (both of those are the installer's and the updater's business, plan §3.6). False is the full
   // launcher, which stays the default surface until the coordinator approves cutover (G4/P11).
-  bool controller_settings_only = false;
+  bool controller_settings_only = true;
 };
 
 // The bottom bar's own controls, in the order they read on each surface. Which of them are on the

@@ -11,6 +11,7 @@
 #include <string>
 
 #include "settings/store.h"
+#include "fs/atomic_file.h"
 
 namespace rb_blitz::settings {
 
@@ -78,6 +79,8 @@ PathFileResult LoadPathFile(const fs::path& file) {
 }
 
 bool SavePathFile(const fs::path& file, const PathEntry& entry, std::string* error) {
+  rb_blitz::fs::FileLock lock;
+  if (!lock.Acquire(file, error)) return false;
   std::string text;
   bool existed = false;
   if (!ReadFileText(file, &text, &existed)) {

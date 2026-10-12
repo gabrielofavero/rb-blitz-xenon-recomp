@@ -22,6 +22,7 @@
 
 #include "settings/capabilities.h"
 #include "settings/graphics_policy.h"
+#include "settings/graphics_boot.h"
 #include "settings/schema.h"
 #include "settings/service.h"
 
@@ -481,6 +482,10 @@ void TestRendererChangeInsideEdit() {
 
 void TestGuestScreenPlan() {
   BeginCase("policy: a render size plans back to (guest size, draw scale) exactly");
+  const auto production = PlanGuestScreen(TitleRenderPath(), {1920, 1080});
+  CHECK_TRUE(production.supported);
+  CHECK_TRUE(IsSize(production.guest_size, 960, 540));
+  CHECK_EQ(production.draw_scale, 2);
 
   RenderPathLimits limits;
   limits.base_sizes = {{1280, 720}, {1920, 1080}};
@@ -535,7 +540,9 @@ void TestGuestScreenPlan() {
 void TestFirstRun() {
   BeginCase("policy: first-run recommendations come from measurement, or are conservative");
 
-  const GraphicsRecommendation on_1080 = RecommendGraphics(Machine(1920, 1080));
+  auto measured_1080 = Machine(1920, 1080);
+  measured_1080.verified_sustainable_resolution = {1920, 1080};
+  const GraphicsRecommendation on_1080 = RecommendGraphics(measured_1080);
   CHECK_TRUE(on_1080.applicable);
   CHECK_FALSE(on_1080.conservative);
   CHECK_TRUE(IsRes(on_1080.resolution, 1920, 1080));
@@ -544,7 +551,10 @@ void TestFirstRun() {
   CHECK_TRUE(IsToken(on_1080.filtering, "native"));      // never imposed on a first run
   CHECK_TRUE(on_1080.reason_key == "settings.graphics.recommended_measured");
 
-  const GraphicsRecommendation on_4k = RecommendGraphics(Machine(3840, 2160));
+  auto measured_4k = Machine(3840, 2160);
+  CHECK_TRUE(IsRes(RecommendGraphics(measured_4k).resolution, 1280, 720));
+  measured_4k.verified_sustainable_resolution = {3840, 2160};
+  const GraphicsRecommendation on_4k = RecommendGraphics(measured_4k);
   CHECK_TRUE(IsRes(on_4k.resolution, 3840, 2160));
 
   // Unknown hardware: the bounded conservative route, and it says so.
@@ -680,6 +690,65 @@ void TestServiceIntegration() {
 
 }  // namespace
 
+void TestGraphicsBootJournal() {
+  BeginCase("graphics startup recovers failed attempts, preserves intent, and excludes live processes");
+  const auto directory = std::filesystem::temp_directory_path() / "rb-blitz-graphics-boot-test";
+  std::filesystem::create_directories(directory);
+  const auto file = directory / "settings.toml";
+  std::error_code ec;
+  std::filesystem::remove(directory / "settings.toml.graphics-boot.toml", ec);
+  const GraphicsValues safe = {{SettingId::kRenderer, EnumV("d3d12")},
+      {SettingId::kResolution, ResolutionV(1280, 720)},
+      {SettingId::kAntiAliasing, EnumV("none")}, {SettingId::kFiltering, EnumV("native")}};
+  auto requested = safe;
+  requested[SettingId::kResolution] = ResolutionV(1920, 1080);
+  std::string error;
+  {
+    GraphicsBootState first;
+    CHECK_TRUE(first.Open(file, &error));
+    CHECK_TRUE(IsRes(first.Select(safe, safe, false).at(SettingId::kResolution), 1280, 720));
+    CHECK_TRUE(first.Begin(safe, &error));
+    GraphicsBootState concurrent;
+    CHECK_FALSE(concurrent.Open(file, &error));
+    CHECK_TRUE(first.Presented(&error));
+  }
+  {
+    GraphicsBootState failed;
+    CHECK_TRUE(failed.Open(file, &error));
+    CHECK_TRUE(IsRes(failed.Select(requested, safe, false).at(SettingId::kResolution), 1920, 1080));
+    CHECK_FALSE(failed.recovered());
+    CHECK_TRUE(failed.Begin(requested, &error));  // simulate process death before a menu frame
+  }
+  {
+    GraphicsBootState recovery;
+    CHECK_TRUE(recovery.Open(file, &error));
+    const auto effective = recovery.Select(requested, safe, false);
+    CHECK_TRUE(recovery.recovered());
+    CHECK_TRUE(IsRes(effective.at(SettingId::kResolution), 1280, 720));
+    CHECK_TRUE(recovery.Begin(effective, &error));
+    CHECK_TRUE(recovery.Presented(&error));
+  }
+  {
+    GraphicsBootState next;
+    CHECK_TRUE(next.Open(file, &error));
+    CHECK_TRUE(IsRes(next.Select(requested, safe, false).at(SettingId::kResolution), 1280, 720));
+    CHECK_TRUE(next.recovered());
+    requested[SettingId::kResolution] = ResolutionV(2560, 1440);
+    CHECK_TRUE(IsRes(next.Select(requested, safe, false).at(SettingId::kResolution), 2560, 1440));
+    CHECK_FALSE(next.recovered());
+    CHECK_TRUE(next.Begin(requested, &error));
+    CHECK_TRUE(next.Closed(&error)); // an intentional close during loading is not a GPU failure
+  }
+  {
+    GraphicsBootState clean;
+    CHECK_TRUE(clean.Open(file, &error));
+    CHECK_TRUE(IsRes(clean.Select(requested, safe, false).at(SettingId::kResolution), 2560, 1440));
+    CHECK_FALSE(clean.recovered());
+  }
+  CHECK_FALSE(std::filesystem::exists(file)); // requested preferences were never rewritten
+  std::filesystem::remove_all(directory, ec);
+}
+
 int main() {
   TestRenderPathSizes();
   TestSupportedResolutions();
@@ -694,6 +763,7 @@ int main() {
   TestGuestScreenPlan();
   TestFirstRun();
   TestRecovery();
+  TestGraphicsBootJournal();
   TestServiceIntegration();
   return Finish();
 }

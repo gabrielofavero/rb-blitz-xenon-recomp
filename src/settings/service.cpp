@@ -14,9 +14,11 @@
 
 #include <string>
 #include <utility>
+#include <charconv>
 
 #include "settings/cvars.h"
 #include "settings/schema.h"
+#include "fs/atomic_file.h"
 
 namespace rb_blitz::settings {
 
@@ -26,6 +28,71 @@ namespace {
 
 std::string ResolutionToken(const Value& value) {
   return std::to_string(value.width) + "x" + std::to_string(value.height);
+}
+
+std::string JournalValue(const Value& value) {
+  switch (value.kind) {
+    case ValueKind::kBool: return value.boolean ? "true" : "false";
+    case ValueKind::kInt: return std::to_string(value.integer);
+    case ValueKind::kResolution: return ResolutionToken(value);
+    default: return value.text;
+  }
+}
+
+void JournalSet(toml::Document& document, std::string_view section, SettingId id,
+                const Value& value) {
+  document.Set(section, std::to_string(static_cast<int>(id)),
+               value.kind == ValueKind::kStringList ? toml::RenderStringList(value.list)
+                                                   : toml::RenderBasic(JournalValue(value)));
+}
+
+bool JournalRead(const toml::Document& document, std::string_view section,
+                 const std::vector<Descriptor>& descriptors, std::map<SettingId, Value>* values) {
+  for (const auto& key : document.Keys(section)) {
+    int raw = -1;
+    const auto parsed = std::from_chars(key.data(), key.data() + key.size(), raw);
+    if (parsed.ec != std::errc{} || parsed.ptr != key.data() + key.size()) return false;
+    const Descriptor* descriptor = nullptr;
+    for (const auto& candidate : descriptors) {
+      if (static_cast<int>(candidate.id) == raw) descriptor = &candidate;
+    }
+    if (!descriptor || descriptor->value_kind == ValueKind::kAction) return false;
+    const auto item = document.Get(section, key);
+    Value value;
+    value.kind = descriptor->value_kind;
+    if (value.kind == ValueKind::kStringList) {
+      if (!item.list_ok) return false;
+      value.list = item.list;
+    } else {
+      if (!item.scalar) return false;
+      switch (value.kind) {
+        case ValueKind::kBool:
+          if (!toml::ParseBareBool(item.value, &value.boolean)) return false;
+          break;
+        case ValueKind::kInt: {
+          int64_t number = 0;
+          if (!toml::ParseBareInt(item.value, &number) || number < INT32_MIN || number > INT32_MAX)
+            return false;
+          value.integer = static_cast<int32_t>(number);
+          break;
+        }
+        case ValueKind::kResolution: {
+          const auto separator = item.value.find('x');
+          int64_t width = 0, height = 0;
+          if (separator == std::string::npos ||
+              !toml::ParseBareInt(item.value.substr(0, separator), &width) ||
+              !toml::ParseBareInt(item.value.substr(separator + 1), &height) ||
+              width <= 0 || height <= 0 || width > INT32_MAX || height > INT32_MAX) return false;
+          value.width = static_cast<int32_t>(width);
+          value.height = static_cast<int32_t>(height);
+          break;
+        }
+        default: value.text = item.value; break;
+      }
+    }
+    (*values)[descriptor->id] = std::move(value);
+  }
+  return true;
 }
 
 }  // namespace
@@ -99,7 +166,18 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
   return load_status_;
 }
 
-void Service::RefreshDescriptors() { descriptors_ = schema::BuildDescriptors(capabilities_); }
+void Service::RefreshDescriptors() {
+  descriptors_ = schema::BuildDescriptors(capabilities_);
+  for (auto& descriptor : descriptors_) {
+    const auto it = provider_choices_.find(descriptor.id);
+    if (it != provider_choices_.end()) descriptor.choices = it->second;
+  }
+}
+
+void Service::SetProviderChoices(std::map<SettingId, std::vector<Choice>> choices) {
+  provider_choices_ = std::move(choices);
+  RefreshDescriptors();
+}
 
 void Service::SetCapabilities(CapabilitySnapshot capabilities) {
   capabilities_ = std::move(capabilities);
@@ -123,6 +201,7 @@ void Service::SetProviderSink(ProviderSink* sink) {
   provider_ = sink;
   if (sink != nullptr) {
     SetProviderValues(sink->ReadValues());
+    RecoverCommit(&recovery_error_);
   }
 }
 
@@ -133,6 +212,12 @@ void Service::SetProviderValues(std::map<SettingId, Value> values) {
 void Service::SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources) {
   external_ = std::move(values);
   external_source_ = std::move(sources);
+}
+
+void Service::SetBootValues(std::map<SettingId, Value> values, std::string reason) {
+  boot_corrections_ = std::move(values);
+  boot_correction_reason_ = std::move(reason);
+  for (const auto& [id, value] : boot_corrections_) boot_effective_[id] = value;
 }
 
 void Service::SetMenuRows(std::vector<Choice> rows) {
@@ -187,6 +272,11 @@ Source Service::SourceFor(SettingId id, bool provider_row) const {
 
 Value Service::ReconcileEffective(const Descriptor& descriptor, const Value& requested,
                                   bool* corrected, std::string* correction_reason_key) const {
+  if (const auto it = boot_corrections_.find(descriptor.id); it != boot_corrections_.end()) {
+    if (corrected) *corrected = !ValueEquals(it->second, requested);
+    if (correction_reason_key) *correction_reason_key = boot_correction_reason_;
+    return it->second;
+  }
   const Reconciler* reconciler = reconciler_ != nullptr ? reconciler_ : &default_reconciler_;
   const Reconciliation result =
       reconciler->Reconcile(descriptor.id, descriptor, requested, capabilities_);
@@ -333,6 +423,8 @@ std::filesystem::path Service::JournalPath() const {
 
 CommitResult Service::Commit(uint64_t txn) {
   CommitResult result;
+  result.saved_revision = revision_;
+  last_commit_changes_.clear();
   if (txn == 0 || txn != txn_) {
     result.status = CommitStatus::kInvalid;
     result.errors.push_back("settings.stale_transaction");
@@ -340,17 +432,29 @@ CommitResult Service::Commit(uint64_t txn) {
   }
   if (pending_.empty()) {
     result.status = CommitStatus::kNoChanges;
+    txn_ = 0;
+    return result;
+  }
+
+  rb_blitz::fs::FileLock commit_lock;
+  std::string error;
+  if (!commit_lock.Acquire(JournalPath(), &error) || !RecoverCommit(&error)) {
+    result.status = CommitStatus::kIoError;
+    result.errors.push_back(error);
     return result;
   }
 
   std::map<SettingId, Value> provider_rows;
+  std::map<SettingId, Value> native_rows;
   bool restart = false;
   for (const auto& [id, value] : pending_) {
+    if (ValueEquals(RequestedValue(id), value)) continue;
     if (IsProviderFileRow(id)) {
       provider_rows[id] = value;
     } else {
-      store_.MarkChanged(id, value, Origin::kManual);
+      native_rows[id] = value;
     }
+    last_commit_changes_[id] = value;
     const Descriptor* descriptor = DescriptorFor(id);
     if (descriptor != nullptr && descriptor->restart_scoped()) {
       restart = true;
@@ -358,14 +462,25 @@ CommitResult Service::Commit(uint64_t txn) {
   }
   // P9: remember what this commit touched before `pending_` is cleared, so the caller can ask
   // the application-strategy seam what applies live and what waits for a restart.
-  last_commit_changes_ = pending_;
-
-  const bool native = store_.has_changes();
+  const bool native = !native_rows.empty();
   const bool combined = native && !provider_rows.empty();
   const std::filesystem::path journal = JournalPath();
+  if (!provider_rows.empty() &&
+      (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible)) {
+    result.status = CommitStatus::kPartial;
+    result.errors.push_back("settings.provider_unavailable");
+    return result;
+  }
   if (combined && !journal.empty()) {
-    std::string error;
-    if (!WriteFileAtomic(journal, "state=provider_pending\n", &error)) {
+    toml::Document recovery;
+    recovery.Set("", "schema_version", "1");
+    for (const auto& [id, value] : native_rows) {
+      JournalSet(recovery, "native", id, value);
+      const auto previous = store_.document().values.find(id);
+      if (previous != store_.document().values.end()) JournalSet(recovery, "base", id, previous->second);
+    }
+    for (const auto& [id, value] : provider_rows) JournalSet(recovery, "provider", id, value);
+    if (!WriteFileAtomic(journal, recovery.Render(), &error)) {
       result.status = CommitStatus::kIoError;
       result.errors.push_back(error);
       return result;
@@ -375,6 +490,7 @@ CommitResult Service::Commit(uint64_t txn) {
   bool wrote_native = false;
   bool provider_written = false;
   if (native) {
+    for (const auto& [id, value] : native_rows) store_.MarkChanged(id, value, Origin::kManual);
     const SaveOutcome outcome = store_.Save();
     switch (outcome.status) {
       case CommitStatus::kConflict:
@@ -397,6 +513,7 @@ CommitResult Service::Commit(uint64_t txn) {
         std::error_code ignored;
         std::filesystem::remove(journal, ignored);
       }
+      store_.Load();  // Restore requested state; pending edits remain available for retry.
       return result;
     }
   }
@@ -413,13 +530,13 @@ CommitResult Service::Commit(uint64_t txn) {
         if (!saved.error.empty()) {
           result.errors.push_back(saved.error);
         }
-      } else if (provider_values_.empty()) {
-        SetProviderValues(provider_->ReadValues());
+      } else {
+        for (const auto& [id, value] : provider_rows) provider_values_[id] = value;
       }
     }
   }
 
-  if (wrote_native || provider_written) {
+  if (result.status != CommitStatus::kPartial && (wrote_native || provider_written)) {
     ++revision_;  // only a durable commit advances the revision
   }
   if (result.status != CommitStatus::kPartial) {
@@ -428,14 +545,76 @@ CommitResult Service::Commit(uint64_t txn) {
       std::error_code ignored;
       std::filesystem::remove(journal, ignored);
     }
+    for (const auto& [id, value] : pending_) boot_corrections_.erase(id);
   }
 
   result.saved_revision = revision_;
-  result.restart_required = restart && (wrote_native || provider_written);
+  result.restart_required = result.status != CommitStatus::kPartial && restart && (wrote_native || provider_written);
   result.provider_written = provider_written;
-  pending_.clear();
-  txn_ = 0;
+  if (result.status != CommitStatus::kPartial) {
+    pending_.clear();
+    txn_ = 0;
+  }
   return result;
+}
+
+bool Service::RecoverCommit(std::string* error) {
+  std::string text;
+  bool exists = false;
+  if (!ReadFileText(JournalPath(), &text, &exists)) {
+    *error = "Cannot read settings commit journal";
+    return false;
+  }
+  if (!exists) { recovery_error_.clear(); return true; }
+  bool parsed = false;
+  const auto journal = toml::Document::Parse(text, &parsed, error);
+  std::map<SettingId, Value> native, base, provider;
+  if (!parsed || journal.Get("", "schema_version").value != "1" ||
+      !JournalRead(journal, "native", descriptors_, &native) ||
+      !JournalRead(journal, "base", descriptors_, &base) ||
+      !JournalRead(journal, "provider", descriptors_, &provider) || provider.empty() || native.empty()) {
+    *error = "Unrecognized settings commit journal; original files retained";
+    return false;
+  }
+  const auto disk = LoadSettingsDocument(paths_.settings_file);
+  if (!disk.usable()) { *error = disk.error; return false; }
+  bool committed = true, unchanged = true;
+  for (const auto& [id, value] : native) {
+    if (IsProviderFileRow(id)) { *error = "Invalid native journal row"; return false; }
+    const auto current = disk.document.values.find(id);
+    const auto previous = base.find(id);
+    committed &= current != disk.document.values.end() && ValueEquals(current->second, value);
+    unchanged &= previous == base.end() ? current == disk.document.values.end()
+        : current != disk.document.values.end() && ValueEquals(current->second, previous->second);
+  }
+  if (!committed && !unchanged) {
+    *error = "Settings changed since the interrupted save; recovery journal retained";
+    return false;
+  }
+  if (committed) {
+    if (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible) {
+      *error = "Settings recovery needs the compatible Ultimate provider";
+      return false;
+    }
+    for (const auto& [id, value] : provider) {
+      const auto* descriptor = DescriptorFor(id);
+      if (!IsProviderFileRow(id) || !descriptor ||
+          !default_reconciler_.Validate(id, *descriptor, value, capabilities_).ok) {
+        *error = "Interrupted provider settings are incompatible with this installation";
+        return false;
+      }
+    }
+    const auto saved = provider_->Save(provider);
+    if (!saved.durable) { *error = saved.error; return false; }
+    for (const auto& [id, value] : provider) provider_values_[id] = value;
+    store_.Load();
+    ++revision_;
+  }
+  std::error_code ec;
+  std::filesystem::remove(JournalPath(), ec);
+  if (ec) { *error = "Cannot finish settings recovery: " + ec.message(); return false; }
+  recovery_error_.clear();
+  return true;
 }
 
 void Service::Cancel(uint64_t txn) {
@@ -457,6 +636,12 @@ ActionResult Service::Invoke(SettingId action, uint64_t request_id) {
 
 RestartResult Service::RequestRestart(uint64_t saved_revision, uint64_t request_id) {
   RestartResult result;
+  std::error_code ec;
+  if (std::filesystem::exists(JournalPath(), ec) || ec) {
+    result.status = RestartStatus::kNotSaved;
+    result.error = "settings.partial_save";
+    return result;
+  }
   if (saved_revision != revision_) {
     result.status = RestartStatus::kStaleRevision;
     result.error = "settings.stale_revision";

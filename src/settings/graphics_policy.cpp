@@ -307,7 +307,8 @@ GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMod
 GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps) {
   GraphicsRecommendation recommendation;
   const std::string renderer = PolicyRenderer(caps, "");
-  const bool measured = !renderer.empty() && !caps.supported_resolutions.empty();
+  const bool measured = !renderer.empty() &&
+      IsSupportedResolution(caps, caps.verified_sustainable_resolution);
   recommendation.applicable = measured;
   recommendation.conservative = !measured;
   recommendation.renderer = MakeEnum(renderer.empty() ? "d3d12" : renderer);
@@ -321,7 +322,7 @@ GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps) {
     return recommendation;
   }
 
-  DisplayMode best = LargestSupportedFitting(caps);
+  DisplayMode best = caps.verified_sustainable_resolution;
   if (best.width <= 0) {
     best = SmallestSupported(caps);
   }

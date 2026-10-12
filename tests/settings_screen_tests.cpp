@@ -566,7 +566,15 @@ void TestRequestPathsParse() {
   CHECK_TRUE(has_op(Op::kSnapshot));
   CHECK_TRUE(has_op(Op::kSet));
   CHECK_TRUE(has_op(Op::kCommit));
-  CHECK_TRUE(has_op(Op::kInvoke));
+  // The confirmed achievement action executes the provider's guest API directly.
+  // It must not route to the host Invoke stub or shadow the Unlock All submenu.
+  CHECK_FALSE(has_op(Op::kInvoke));
+  std::vector<std::string> declared;
+  for (const auto& root : DefinitionRoots()) {
+    if (root.kids.size() < 3 || root.kids[0].text != "new") continue;
+    CHECK_TRUE(std::find(declared.begin(), declared.end(), root.kids[2].text) == declared.end());
+    declared.push_back(root.kids[2].text);
+  }
   CHECK_TRUE(std::find(paths.begin(), paths.end(), std::string(kProviderQuery)) != paths.end());
 
   // And every `rbbz-settings/` literal the definition actually spells is in that table, so the

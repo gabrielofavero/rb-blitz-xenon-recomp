@@ -136,7 +136,7 @@ bool ServiceSink::IsLocalToken(const std::string_view token) const {
   }
   // The provider's own rows: its file is their source of truth and P6's write-through persists
   // them, so the service must not also claim to own them.
-  return IsProviderFileRow(id);
+  return IsProviderFileRow(id) && (!service_ || !service_->has_provider_sink());
 }
 
 Value ServiceSink::CurrentValue(const SettingId id) const {

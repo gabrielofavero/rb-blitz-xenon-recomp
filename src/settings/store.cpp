@@ -30,6 +30,7 @@
 #endif
 
 #include "settings/schema.h"
+#include "fs/atomic_file.h"
 
 namespace rb_blitz::settings {
 
@@ -950,6 +951,13 @@ DocumentLoad LoadSettingsDocument(const fs::path& file) {
 
 SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& request) {
   SaveOutcome outcome;
+  rb_blitz::fs::FileLock lock;
+  std::string lock_error;
+  if (!lock.Acquire(file, &lock_error)) {
+    outcome.status = CommitStatus::kIoError;
+    outcome.errors.push_back(lock_error);
+    return outcome;
+  }
   std::string text;
   bool existed = false;
   if (!ReadFileText(file, &text, &existed)) {
@@ -1183,11 +1191,14 @@ SaveOutcome Store::Save() {
 bool ReadFileText(const fs::path& file, std::string* text, bool* existed) {
   std::error_code ec;
   *existed = fs::exists(file, ec);
-  if (ec || !*existed) {
+  if (ec) return false;
+  if (!*existed) {
     *existed = false;
     text->clear();
     return true;
   }
+  const auto size = fs::file_size(file, ec);
+  if (ec || size > 4 * 1024 * 1024) return false;
   std::ifstream stream(file, std::ios::binary);
   if (!stream) {
     text->clear();
@@ -1200,48 +1211,7 @@ bool ReadFileText(const fs::path& file, std::string* text, bool* existed) {
 }
 
 bool WriteFileAtomic(const fs::path& file, const std::string& text, std::string* error) {
-  std::error_code ec;
-  if (!file.parent_path().empty()) {
-    fs::create_directories(file.parent_path(), ec);
-  }
-  fs::path temp = file;
-  temp += ".tmp";
-
-  std::FILE* handle = std::fopen(temp.string().c_str(), "wb");
-  if (handle == nullptr) {
-    if (error != nullptr) {
-      *error = "cannot open " + temp.string() + " for writing";
-    }
-    return false;
-  }
-  const bool wrote =
-      text.empty() || std::fwrite(text.data(), 1, text.size(), handle) == text.size();
-  const bool flushed = std::fflush(handle) == 0;
-#if defined(_WIN32)
-  if (flushed) {
-    _commit(_fileno(handle));
-  }
-#endif
-  const bool closed = std::fclose(handle) == 0;
-  if (!wrote || !flushed || !closed) {
-    std::error_code ignored;
-    fs::remove(temp, ignored);
-    if (error != nullptr) {
-      *error = "cannot write " + temp.string();
-    }
-    return false;
-  }
-
-  fs::rename(temp, file, ec);
-  if (ec) {
-    std::error_code ignored;
-    fs::remove(temp, ignored);
-    if (error != nullptr) {
-      *error = "cannot replace " + file.string() + ": " + ec.message();
-    }
-    return false;
-  }
-  return true;
+  return rb_blitz::fs::WriteAtomic(file, text, error);
 }
 
 }  // namespace rb_blitz::settings

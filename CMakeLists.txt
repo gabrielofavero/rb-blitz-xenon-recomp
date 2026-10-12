@@ -124,6 +124,7 @@ set(RBBLITZ_SOURCES
     src/settings/graphics_policy.cpp
     src/settings/bridge_sink.cpp
     src/settings/boot.cpp
+    src/settings/graphics_boot.cpp
     # P9's two additions: the application-strategy seam (§5.5 - which committed rows apply to the
     # running game and which wait for the restart prompt) and the restart coordinator (§8 - the
     # exactly-once request, the rebuilt command line and the bootstrap's verified-identity wait).
@@ -575,6 +576,7 @@ if(BUILD_TESTING)
     # two P4 files. No SDK, no boot, no GPU: the probe results are plain data.
     add_executable(rb_blitz_settings_graphics_tests
         tests/settings_graphics_tests.cpp
+        src/settings/graphics_boot.cpp
         src/settings/model.cpp
         src/settings/schema.cpp
         src/settings/store.cpp

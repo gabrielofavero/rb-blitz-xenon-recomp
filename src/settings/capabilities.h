@@ -36,8 +36,8 @@ namespace rb_blitz::settings {
 //
 // P2 measured that the title chooses between a small set of guest screen sizes and the SDK
 // multiplies the result by an integer draw scale (kMaxDrawResolutionScaleAlongAxis, 1..7).
-// `base_sizes` is the guest sizes the implementation can actually ask the title for; 1920x1080
-// is present only when the guest-height route (Variant B of the P2 findings) is compiled in.
+// `base_sizes` is the guest sizes the implementation can actually ask the title for. The
+// measured 960x540 guest mode can be scaled to 1920x1080 without changing the title's allocation.
 // A base size the implementation cannot ask for must not be listed - that is what keeps an
 // unavailable 1080p out of the offer set instead of offering a size the render path cannot
 // reach.
@@ -49,6 +49,13 @@ struct RenderPathLimits {
   // Largest render dimension the project offers (the plan's §7.1 matrix tops out at 4K).
   DisplayMode offer_ceiling = {3840, 2160};
 };
+
+// Title modes actually implemented by the production hook.
+inline RenderPathLimits TitleRenderPath() {
+  RenderPathLimits limits;
+  limits.base_sizes = {{960, 540}, {1280, 720}};
+  return limits;
+}
 
 // Every exact render size the render path can produce: each base size x each scale, dropping
 // anything above the offer ceiling, deduplicated and sorted by area then width, largest

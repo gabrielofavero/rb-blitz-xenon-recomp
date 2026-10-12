@@ -90,9 +90,12 @@ class Service {
   const CapabilitySnapshot& capabilities() const { return capabilities_; }
   void SetReconciler(const Reconciler* reconciler);
   void SetProviderSink(ProviderSink* sink);
+  bool has_provider_sink() const { return provider_ != nullptr; }
+  void SetProviderChoices(std::map<SettingId, std::vector<Choice>> choices);
   void SetProviderValues(std::map<SettingId, Value> values);
   // Values an explicit developer config / environment / CLI won, with the source that won.
   void SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources);
+  void SetBootValues(std::map<SettingId, Value> values, std::string reason);
   void SetMenuRows(std::vector<Choice> rows);  // P10's Hide Main Menu seam
 
   Store& store() { return store_; }
@@ -131,15 +134,20 @@ class Service {
                            std::string* correction_reason_key) const;
   Source SourceFor(SettingId id, bool provider_row) const;
   std::filesystem::path JournalPath() const;
+  bool RecoverCommit(std::string* error);
 
   StorePaths paths_;
   Store store_;
   CapabilitySnapshot capabilities_;
   std::vector<Descriptor> descriptors_;
   std::map<SettingId, Value> provider_values_;
+  std::map<SettingId, std::vector<Choice>> provider_choices_;
+  std::string recovery_error_;
   std::map<SettingId, Value> external_;
   std::map<SettingId, Source> external_source_;
   std::map<SettingId, Value> boot_effective_;
+  std::map<SettingId, Value> boot_corrections_;
+  std::string boot_correction_reason_;
   DocumentStatus load_status_ = DocumentStatus::kMissing;
   Reconciler default_reconciler_;
   const Reconciler* reconciler_ = nullptr;

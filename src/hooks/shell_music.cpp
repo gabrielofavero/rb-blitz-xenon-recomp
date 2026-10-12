@@ -98,6 +98,7 @@
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
 #include "settings/menu_compat.h"
+#include "settings/boot.h"
 
 #if defined(_WIN32)
 
@@ -478,6 +479,7 @@ extern "C" REX_FUNC(sub_82757F50) {
 // left alone; a stream that is already gone - the panel stopped the music on its way out -
 // is ignored too, because a stream R9 never saw cannot have jumped.
 extern "C" REX_FUNC(sub_827586D8) {
+  if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current()) settings->MenuFrame();
   // R7's refreshed DLC library is handed to the content manager here, and this is the
   // only guest hook that runs every frame while the main menu is up - which is where the
   // refresh row lives. The refresh scans on a worker and finishes on its own schedule

@@ -57,6 +57,7 @@
 #include <rex/rex_app.h>
 #include <rex/system/flags.h>
 #include <rex/system/gpu_plugin.h>
+#include <rex/ui/presenter.h>
 #include <rex/system/interfaces/graphics.h>
 #include <rex/ui/window.h>
 #include <rex/version.h>
@@ -297,7 +298,19 @@ class RbBlitzApp : public rex::ReXApp {
     // *before* bridge::Configure, whose seeding goes through the channel's store - so the channel
     // must already be pointed at the service.
     settings_boot_->AfterLoadXexImage(selected_backend_);
+    // Publish overrides before authoring disabled menu rows, once all config sources exist.
     settings_boot_->FinishInit();
+    settings_boot_->SetPresentedProbe([this] {
+      auto* graphics = runtime()->graphics_system();
+      auto* presenter = graphics ? graphics->presenter() : nullptr;
+      rex::ui::RawImage frame;
+      if (!presenter || !presenter->CaptureGuestOutput(frame) || !frame.width || !frame.height)
+        return false;
+      // Reject a blank startup surface; alpha alone is not evidence of a guest frame.
+      for (size_t i = 0; i + 3 < frame.data.size(); i += 4)
+        if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) return true;
+      return false;
+    });
     if (auto* sink = settings_boot_->sink()) {
       sink->SetRestartHandler([this](uint64_t saved, uint64_t current, uint64_t id,
                                      const std::string& target, std::string* error) {
@@ -343,10 +356,12 @@ class RbBlitzApp : public rex::ReXApp {
     // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
     // player cannot change has to say so rather than save a value that never takes effect.
-    if (settings_boot_) {
-      settings_boot_->FinishInit();
-    }
     rex::cvar::FinalizeInit();
+  }
+
+  bool OnWindowCloseRequested() override {
+    if (settings_boot_) settings_boot_->Closing();
+    return true;
   }
 
   // Logging is up from here, which is why the profile application made in OnConfigurePaths is

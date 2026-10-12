@@ -421,7 +421,7 @@ std::vector<PanelSpec> AllPanels() {
                               ChooseRow("settings_target_common", "general.target", "common",
                                         "Rock Band Blitz"),
                               ChooseRow("settings_target_ultimate", "general.target", "ultimate",
-                                        "Rock Band Blitz Ultimate", true),
+                                        "Rock Band Blitz Ultimate"),
                               ChooseRow("settings_target_trial", "general.target", "demo",
                                         "Trial"),
                           }});
@@ -622,7 +622,7 @@ std::vector<PanelSpec> AllPanels() {
                          "settings_save_error_message"});
   Row achievements = InfoRow("settings_earn_achievements", "Unlock online achievements");
   achievements.kind = Kind::kAchievements;
-  out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen", "settings_general_screen",
+  out.push_back(PanelSpec{"settings_achievements_confirm_panel", "settings_achievements_confirm_screen", "settings_achievements_screen",
                          MenuPanels(), {close, achievements}, "../pause/settings_confirmation.milo",
                          "settings_achievements_message"});
 
@@ -645,7 +645,7 @@ std::vector<PanelSpec> AllPanels() {
     std::erase_if(panel.rows, [](Row& row) {
       if (row.setting == "general.unlock_online_achievements") {
         row.kind = Kind::kSubmenu;
-        row.screen = "settings_achievements_screen";
+        row.screen = "settings_achievements_confirm_screen";
       }
       const auto choices = g_configuration.choices.find(row.setting);
       if (choices != g_configuration.choices.end()) {

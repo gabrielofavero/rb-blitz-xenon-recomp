@@ -34,6 +34,7 @@
 #include <rex/system/xmemory.h>
 
 #include "diag/probe.h"
+#include "hooks/render_settings.h"
 
 REX_EXTERN(__imp__ByteGrinder_GetEncMethod);
 REX_EXTERN(__imp__ByteGrinder_HvDecrypt);
@@ -123,7 +124,7 @@ std::atomic<bool> g_swap_dumped{false};
 extern "C" REX_FUNC(sub_823F3698) {
   const uint32_t object = uint32_t(ctx.r3.u32);
   const bool override_on = REXCVAR_GET(probe_screen_1080p);
-  if (override_on) {
+  if (override_on || rb_blitz::settings::BootRenderHeight() == 540) {
     // Bit 0 of +796 is the flag this very function reads (0x823F3804) to pick 540 instead
     // of 720; forcing it at entry makes the title take its own half-resolution path rather
     // than being poked after the fact, so anything that path re-creates is re-created.

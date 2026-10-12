@@ -1,5 +1,10 @@
 # P5b — the merged Help & Options surface (handoff)
 
+> **Current-state correction (2026-10-12):** The in-song construction-order issue described below
+> was fixed by deferring this screen set until the pause panels are loaded. The merged root and its
+> child pages now open from the in-song pause menu, Back returns to pause, and Back from pause
+> resumes play. See [current remaining work](in-game-settings-remaining-work.md).
+
 Status: **executed for the main-menu entry**, with one measured engine constraint left open for the
 in-song entry (below). Evidence is a set of real boots against the pinned retail image, listed in
 §4. Nothing in this document is inferred: every "measured" line names the log and the capture that

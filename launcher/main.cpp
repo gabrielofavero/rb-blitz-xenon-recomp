@@ -177,7 +177,7 @@ struct Options {
   // product keeps - while the full surface stays the default for everything else. It is the
   // launcher's own switch and reaches no further than this window: it decides which tabs exist,
   // which controls the bar has, and whether a Play action passes settings on the command line.
-  bool controller_only = false;
+  bool controller_only = true;
   // --ui-scale=<factor> (A5) overrides the display's content scale, which is normally what the
   // window and the whole UI are sized by. It exists twice over: as the accessibility answer for a
   // display whose scale the user does not want to change, and as the only way a build machine can

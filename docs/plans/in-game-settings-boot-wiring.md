@@ -1,5 +1,11 @@
 # In-game settings P11a — the boot wiring (implementation record)
 
+> **Current-state correction (2026-10-12):** This handoff records the earlier P11a snapshot. The
+> graphics rows are now applied before presentation setup: renderer selection precedes GPU-plugin
+> loading, and plugin-owned flags plus the guest resolution/draw-scale plan are applied in
+> `OnPreSetup`. The current display query and measured 960×540 × 2 route are wired. See
+> [current remaining work](in-game-settings-remaining-work.md) for the live status.
+
 Status: **P11a executed** (2026-10-11). The game boots on the real settings store: the path file and
 the legacy migration run, the rows the game reads at init are applied at the config rank, the guest
 channel's edits go through P3's service into `settings.toml`, the provider's values reach the store,

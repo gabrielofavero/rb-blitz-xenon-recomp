@@ -16,6 +16,7 @@
 #include <system_error>
 
 #include "ui/dtb_author.h"
+#include "fs/atomic_file.h"
 
 namespace rb_blitz::settings::ultimate_adapter {
 namespace {
@@ -1661,6 +1662,8 @@ bool SaveProviderFile(const std::filesystem::path& path,
   if (updates.empty()) {
     return true;  // nothing to write, and nothing to create
   }
+  rb_blitz::fs::FileLock lock;
+  if (!lock.Acquire(path, error)) return false;
   ProviderFile file;
   std::vector<uint8_t> bytes;
   std::string read_error;
@@ -1675,44 +1678,17 @@ bool SaveProviderFile(const std::filesystem::path& path,
     }
   } else {
     // No file yet: the first save creates the shape the provider's own loader expects.
+    std::error_code status_error;
+    if (std::filesystem::exists(path, status_error) || status_error) {
+      if (error) *error = "cannot read existing provider settings; file left intact";
+      return false;
+    }
     file.parsed = true;
     file.version_marker = "0";
   }
 
   const std::string text = WriteProviderFile(file, updates);
-  std::error_code ec;
-  if (!path.parent_path().empty()) {
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) {
-      if (error != nullptr) *error = "cannot create " + path.parent_path().string() + ": " + ec.message();
-      return false;
-    }
-  }
-  // A flushed temporary sibling, then the platform's own replace: a half-written provider file
-  // would be a settings file the provider's own loader cannot read, and it is the only copy of
-  // the values this build does not model.
-  std::filesystem::path temporary = path;
-  temporary += ".tmp";
-  {
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) {
-      if (error != nullptr) *error = "cannot write " + temporary.string();
-      return false;
-    }
-    out.write(text.data(), std::streamsize(text.size()));
-    out.flush();
-    if (!out) {
-      if (error != nullptr) *error = "cannot write " + temporary.string();
-      return false;
-    }
-  }
-  std::filesystem::rename(temporary, path, ec);
-  if (ec) {
-    std::filesystem::remove(temporary, ec);
-    if (error != nullptr) *error = "cannot replace " + path.string();
-    return false;
-  }
-  return true;
+  return rb_blitz::fs::WriteAtomic(path, text, error);
 }
 
 }  // namespace rb_blitz::settings::ultimate_adapter

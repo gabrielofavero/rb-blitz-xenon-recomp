@@ -29,15 +29,17 @@
 //        read the applied cvars back and record any row an explicit source won, so a row the player
 //        cannot change says so instead of silently saving a value that never takes effect.
 //
-// The one honest limitation this module states in its own log lines rather than hiding: the
-// *display* probe and the exact-render route are P4's open items, so the capability snapshot is
-// built with no display enumeration and the resolution/anti-aliasing rows are recorded as not
-// applied yet instead of being written from an unverified guess.
+// The display probe uses the current Windows mode and the resolution route uses measured title
+// guest sizes with the backend's integer draw scale. Settings that affect graphics are applied in
+// OnPreSetup after the plugin registers its cvars and before presentation resources are created.
 
 #pragma once
 
 #include <cstdint>
+#include <atomic>
+#include <mutex>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -47,6 +49,7 @@
 #include "settings/capabilities.h"
 #include "settings/cvars.h"
 #include "settings/graphics_policy.h"
+#include "settings/graphics_boot.h"
 #include "settings/migration.h"
 #include "settings/model.h"
 #include "settings/paths.h"
@@ -99,6 +102,9 @@ class SettingsBoot {
 
   // --- 4. OnPreLaunchModule ---------------------------------------------------------------
   void FinishInit();
+  void SetPresentedProbe(std::function<bool()> probe) { presented_probe_ = std::move(probe); }
+  void MenuFrame();
+  void Closing();
 
   // The store. Null only when this machine has nowhere to keep settings (no profile path and no app
   // data folder), which leaves the guest channel on its in-memory stand-in.
@@ -154,12 +160,18 @@ class SettingsBoot {
   bool store_available_ = false;
   std::unique_ptr<Service> service_;
   std::unique_ptr<ServiceSink> sink_;
+  std::unique_ptr<ProviderSink> provider_sink_;
   GraphicsReconciler reconciler_;
   CapabilitySnapshot capability_snapshot_;
   std::vector<Applied> applied_;
   std::vector<Applied> deferred_writes_;
   RenderPathLimits render_limits_;
   GuestScreenPlan screen_plan_;
+  GraphicsBootState graphics_boot_;
+  std::function<bool()> presented_probe_;
+  unsigned menu_frames_ = 0;
+  std::atomic<bool> menu_presented_{false};
+  std::mutex graphics_marker_mutex_;
   // The rows staged locally, for diagnostics.
   std::map<SettingId, Source> overrides_;
   std::map<SettingId, Value> override_values_;

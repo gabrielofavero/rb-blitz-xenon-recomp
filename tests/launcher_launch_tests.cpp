@@ -209,7 +209,8 @@ void TestControllerSettingsPassesIdentityOnly(const Scratch& scratch) {
   CHECK_TRUE(command.ok);
   // Identity is still there: the data root, the target, and the profile the game reads.
   CHECK_CONTAINS(command.arguments, "--game_data_root=\"" + scratch.game_root.string() + "\"");
-  CHECK_CONTAINS(command.arguments, "--ultimate_mode=1");
+  CHECK_NOT_CONTAINS(command.arguments, "--ultimate_mode");
+  CHECK_NOT_CONTAINS(command.arguments, "--license_mask");
   CHECK_CONTAINS(command.arguments, "--launcher_profile=\"" + session.path().string() + "\"");
   // And not one setting row, whatever the profile holds.
   CHECK_NOT_CONTAINS(command.arguments, "--mouse_ui_nav");

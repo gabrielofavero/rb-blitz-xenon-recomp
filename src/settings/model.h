@@ -196,6 +196,9 @@ struct CapabilitySnapshot {
   std::vector<DisplayMode> display_modes;           // truthful, deduped; may be empty
   std::vector<RendererCapability> renderers;        // built/detected/usable/active
   std::vector<DisplayMode> supported_resolutions;   // exact render dims the render path supports
+  // Populated only by a measured performance profile for this device/backend.
+  // Display size or CPU count alone is never performance evidence.
+  DisplayMode verified_sustainable_resolution;
   rb_blitz::launcher::LaunchTarget active_target = rb_blitz::launcher::LaunchTarget::kCommon;
   ProviderState provider;
 };

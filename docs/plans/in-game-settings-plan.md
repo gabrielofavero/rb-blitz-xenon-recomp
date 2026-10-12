@@ -1,5 +1,14 @@
 # In-game Help & Options and Controller Settings
 
+## Current implementation note (2026-10-12)
+
+The dated package table and experiment notes below are historical snapshots. The current state and
+remaining acceptance work are in [in-game-settings-remaining-work.md](in-game-settings-remaining-work.md).
+In particular, saved settings load before guest processing: the store is read in `OnConfigurePaths`,
+and GPU-plugin settings plus the resolution plan are applied in `OnPreSetup`, before presentation
+and render resources initialize. 1080p uses the measured 960×540 guest mode at 2× draw scale. The
+experimental 1080p guest-height hook was rejected after it corrupted title-screen artwork.
+
 Status: P0–P5 have executed (§2.4 records their artifacts). This revision **re-scopes the product to one merged Help & Options screen** and re-plans P6 onward around it, adding **P5b** for the merge itself. No new runtime validation was performed in this planning pass.
 
 Research date: 2026-10-11 (scope change; the original investigation is dated 2026-10-10). Baseline for the executed packages: `1e40765` plus the staged song-cache work. Source files take precedence over older plans. This document supersedes the launcher plan where the two disagree about settings ownership, launcher scope, resolution, or installer defaults.

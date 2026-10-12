@@ -34,6 +34,10 @@
 #include "settings/cvars.h"
 #include "settings/schema.h"
 
+REXCVAR_DEFINE_BOOL(settings_safe_graphics, false, "Settings",
+                    "Start with safe graphics without deleting saved preferences.")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 namespace rb_blitz::settings::boot {
 namespace {
 
@@ -126,6 +130,42 @@ Source OverrideSourceFor(const rex::cvar::Source source) {
   }
 }
 
+class InstalledProviderSink final : public ProviderSink {
+ public:
+  InstalledProviderSink() : values_(::rb_blitz::ultimate::Provider().values) {}
+  ProviderReadiness Readiness() const override {
+    return ::rb_blitz::ultimate::Provider().Active() ? ProviderReadiness::kCompatible
+                                                    : ProviderReadiness::kInactiveTarget;
+  }
+  std::map<SettingId, Value> ReadValues() const override { return values_; }
+  ProviderSaveResult Save(const std::map<SettingId, Value>& values) override {
+    ProviderSaveResult result;
+    const auto& provider = ::rb_blitz::ultimate::Provider();
+    if (!provider.Active()) { result.error = "the Ultimate provider is not active"; return result; }
+    std::map<std::string, std::string> updates;
+    if (!ultimate_adapter::EncodeProviderValues(values, &updates, &result.error)) return result;
+    for (auto& [variable, encoded] : updates) {
+      const auto choices = provider.choices.find(variable);
+      if (choices == provider.choices.end()) continue;
+      const auto found = std::find(choices->second.begin(), choices->second.end(), encoded);
+      if (found == choices->second.end()) {
+        result.error = "value absent from installed provider choices: " + variable;
+        return result;
+      }
+      if (variable == "which_skybox") encoded = std::to_string(found - choices->second.begin());
+      else if (variable == "forceplot" && encoded == "off") encoded = "FALSE";
+    }
+    result.durable = ::rb_blitz::ultimate::SaveProvider(updates, &result.error);
+    if (result.durable) for (const auto& [id, value] : values) values_[id] = value;
+    return result;
+  }
+  ActionResult Invoke(SettingId, uint64_t) override {
+    return {false, "achievements require confirmation on the guest thread"};
+  }
+ private:
+  std::map<SettingId, Value> values_;
+};
+
 }  // namespace
 
 SettingsBoot::SettingsBoot() = default;
@@ -196,7 +236,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   const unsigned cpus = std::thread::hardware_concurrency();
   cap_inputs.logical_processors = cpus == 0 ? 1u : static_cast<uint32_t>(cpus);
   ProbeDisplay(cap_inputs);
-  render_limits_.base_sizes = {{1280, 720}, {1920, 1080}};
+  // The stable title modes are 960x540 and 1280x720. Larger output modes come
+  // from the backend's integer draw scale, not a larger guest EDRAM allocation.
+  render_limits_ = TitleRenderPath();
   cap_inputs.render_path = render_limits_;
   {
     RendererProbe probe;
@@ -217,6 +259,49 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   if (service_) {
     service_->SetReconciler(&reconciler_);
     service_->SetCapabilities(capability_snapshot_);
+    // An unmeasured GPU gets a conservative automatic choice. Never infer performance
+    // from desktop resolution. Existing manual choices remain untouched.
+    constexpr int kPolicyVersion = 2;
+    const auto recommendation = RecommendGraphics(capability_snapshot_);
+    const GraphicsValues recommendations = {
+        {SettingId::kRenderer, recommendation.renderer},
+        {SettingId::kResolution, recommendation.resolution},
+        {SettingId::kAntiAliasing, recommendation.anti_aliasing},
+        {SettingId::kFiltering, recommendation.filtering}};
+    auto& store = service_->store();
+    if (load_status_ == DocumentStatus::kOk || load_status_ == DocumentStatus::kMissing) {
+      for (const auto& [id, value] : recommendations) {
+        const auto& doc = store.document();
+        if (!doc.values.contains(id) ||
+            (doc.automatic_policy_version != kPolicyVersion && doc.origins.contains(id) &&
+             doc.origins.at(id) == Origin::kAutomatic))
+          store.MarkChanged(id, value, Origin::kAutomatic);
+      }
+      if (store.has_changes()) {
+        store.MarkPolicyVersion(kPolicyVersion);
+        const auto saved = store.Save();
+        if (!saved.errors.empty()) diagnostics_.push_back(saved.errors.front());
+      }
+    }
+    std::string error;
+    if (!graphics_boot_.Open(paths_.settings_file, &error) && !error.empty())
+      diagnostics_.push_back(error);
+    GraphicsValues requested;
+    for (const auto& [id, value] : recommendations) requested[id] = service_->EffectiveValue(id);
+    const auto fallback = RecoverGraphics(capability_snapshot_, requested.at(SettingId::kResolution),
+                                          requested.at(SettingId::kRenderer).text, true);
+    const GraphicsValues safe = {{SettingId::kRenderer, fallback.renderer},
+                                 {SettingId::kResolution, fallback.resolution},
+                                 {SettingId::kAntiAliasing, fallback.anti_aliasing},
+                                 {SettingId::kFiltering, fallback.filtering}};
+    const bool forced_safe = REXCVAR_GET(settings_safe_graphics);
+    auto selected = graphics_boot_.Select(requested, safe, forced_safe);
+    if (graphics_boot_.recovered() || forced_safe) {
+      for (auto& [id, value] : selected)
+        value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;
+      service_->SetBootValues(std::move(selected), "settings.graphics.recovered_from_failure");
+      diagnostics_.push_back("safe graphics selected; requested preferences are retained and editable");
+    }
   }
 
   // --- the path roots -----------------------------------------------------------------------
@@ -495,6 +580,40 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                 screen_plan_.guest_size.width, screen_plan_.guest_size.height,
                 screen_plan_.draw_scale);
   }
+  if (service_) {
+    GraphicsValues effective;
+    for (const auto id : {SettingId::kRenderer, SettingId::kResolution,
+                          SettingId::kAntiAliasing, SettingId::kFiltering})
+      effective[id] = service_->EffectiveValue(id);
+    std::string error;
+    if (graphics_boot_.active() && !graphics_boot_.Begin(effective, &error))
+      REXLOG_WARN("settings_boot: {}", error);
+  }
+}
+
+void SettingsBoot::MenuFrame() {
+  if (menu_presented_ || !graphics_boot_.active() || !presented_probe_) return;
+  // The shell poll proves the menu is active. Wait several frames, then verify an
+  // actual guest GPU image; process creation or a black host window isn't success.
+  if (++menu_frames_ % 30 != 0) return;
+  std::lock_guard lock(graphics_marker_mutex_);
+  if (menu_presented_) return;
+  if (!presented_probe_()) return;
+  std::string error;
+  if (graphics_boot_.Presented(&error)) {
+    menu_presented_ = true;
+    REXLOG_INFO("settings_boot: presented menu frame; graphics marked last-known-good");
+  } else {
+    menu_presented_ = true;
+    REXLOG_WARN("settings_boot: cannot mark graphics ready: {}", error);
+  }
+}
+
+void SettingsBoot::Closing() {
+  std::lock_guard lock(graphics_marker_mutex_);
+  menu_presented_ = true;
+  std::string error;
+  if (!graphics_boot_.Closed(&error)) REXLOG_WARN("settings_boot: {}", error);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -514,39 +633,16 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
     service_->SetCapabilities(capability_snapshot_);
     service_->SetProviderValues(provider.values);
   }
-  if (sink_) {
-    sink_->SetProviderSaver([](const std::map<std::string, bridge::WireValue>& changes,
-                               std::string* error) {
-      std::map<SettingId, Value> values;
-      for (const auto& [token, wire] : changes) {
-        const auto* row = schema::FindRow(schema::IdForToken(token));
-        Value value;
-        if (!row || !ModelValueFromWire(row->descriptor, wire, &value)) {
-          if (error) *error = "invalid provider setting: " + token;
-          return false;
-        }
-        values[row->descriptor.id] = std::move(value);
-      }
-      std::map<std::string, std::string> updates;
-      if (!ultimate_adapter::EncodeProviderValues(values, &updates, error)) return false;
-      const auto& provider = ::rb_blitz::ultimate::Provider();
-      if (!provider.Active()) {
-        if (error) *error = "the Ultimate provider is not active";
-        return false;
-      }
-      for (auto& [variable, encoded] : updates) {
-        const auto choices = provider.choices.find(variable);
-        if (choices == provider.choices.end()) continue;
-        const auto found = std::find(choices->second.begin(), choices->second.end(), encoded);
-        if (found == choices->second.end()) {
-          if (error) *error = "value absent from installed provider choices: " + variable;
-          return false;
-        }
-        if (variable == "which_skybox") encoded = std::to_string(found - choices->second.begin());
-        else if (variable == "forceplot" && encoded == "off") encoded = "FALSE";
-      }
-      return ::rb_blitz::ultimate::SaveProvider(updates, error);
-    });
+  if (service_ && provider.Active()) {
+    std::map<SettingId, std::vector<Choice>> choices;
+    for (const auto& binding : ultimate_adapter::RowBindings()) {
+      const auto found = provider.choices.find(std::string(binding.variable));
+      if (found != provider.choices.end())
+        for (const auto& token : found->second) choices[binding.id].push_back({token, token});
+    }
+    service_->SetProviderChoices(std::move(choices));
+    provider_sink_ = std::make_unique<InstalledProviderSink>();
+    service_->SetProviderSink(provider_sink_.get());
   }
   REXLOG_INFO("settings_boot: the provider is {} ({}); {} value(s) reach the store",
               provider.Active() ? "active" : "not active",

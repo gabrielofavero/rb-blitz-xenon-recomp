@@ -132,7 +132,7 @@ LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots&
   }
 
   // D4's three targets, which are what the game is *for*, rather than a value the user set.
-  switch (target) {
+  if (options.settings_rows) switch (target) {
     case LaunchTarget::kUltimate:
       add("--ultimate_mode=1");
       break;
