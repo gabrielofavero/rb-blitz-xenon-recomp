@@ -751,6 +751,11 @@ bool ParseValueFromItem(const Descriptor& descriptor, const toml::Item& item, Va
       return true;
     }
     case ValueKind::kResolution: {
+      if (item.scalar && item.value == "auto") {
+        out->kind = ValueKind::kResolution;
+        out->width = out->height = 0;
+        return true;
+      }
       if (!item.list_ok || item.list.size() != 2) {
         return false;
       }
@@ -811,6 +816,11 @@ bool PersistedValue(SettingId id, const Value& value, std::string* rendered, tom
       *style = toml::Style::kBasic;
       return true;
     case ValueKind::kResolution:
+      if (IsAutoResolution(value)) {
+        *rendered = "'auto'";
+        *style = toml::Style::kLiteral;
+        return true;
+      }
       if (value.width <= 0 || value.height <= 0) {
         return false;
       }

@@ -34,6 +34,24 @@ bool LargerFirst(const DisplayMode& lhs, const DisplayMode& rhs) {
 
 bool Positive(const DisplayMode& size) { return size.width > 0 && size.height > 0; }
 
+// An aspect in per-mille (1920x1080 -> 1777) so two sizes compare without floating point.
+int64_t AspectPerMille(const DisplayMode& size) {
+  if (!Positive(size)) {
+    return 0;
+  }
+  return int64_t(size.width) * 1000 / size.height;
+}
+
+// Same shape within 1%: real modes are not exact ratios (a 21:9 frame reports 2.370, and 1176x664 is
+// 16:9 in practice while 1920x1080 is not 16:9 in integers).
+bool SameAspect(int64_t lhs, int64_t rhs) {
+  if (lhs <= 0 || rhs <= 0) {
+    return lhs == rhs;
+  }
+  const int64_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
+  return difference * 100 <= rhs;
+}
+
 }  // namespace
 
 std::vector<DisplayMode> DiagnosticGuestBases() {
@@ -142,11 +160,29 @@ std::vector<DisplayMode> SupportedResolutions(const RenderPathLimits& limits,
   // the 16:9/4:3 catalogue: that is precisely the ultrawide case (2560x1080 on a 21:9 primary gets
   // planned as a forced 1280x540 guest frame at 2x). The two questions - "can the render path make
   // this size?" and "is this size in the catalogue?" - are answered by the same planner.
+  //
+  // Only the *primary display's own aspect family* is added, though. A 21:9 monitor also advertises
+  // 4:3 and PAL modes, and offering them would put sizes in the list whose only effect is the black
+  // bars this project is trying to remove (the presenter letterboxes a frame whose aspect is not the
+  // window's). A mode off that family is not a render size this project offers; 16:9 is the
+  // catalogue's job, so the family check only ever *adds* wide/native shapes.
+  const int64_t ceiling_aspect = AspectPerMille(ceiling);
   for (const DisplayMode& mode : NormalizeDisplayModes(display_modes)) {
     if (mode.width > limits.offer_ceiling.width || mode.height > limits.offer_ceiling.height) {
       continue;
     }
     if (!PlanGuestScreen(limits, mode).supported) {
+      continue;
+    }
+    const bool in_catalogue = [&] {
+      for (const DisplayMode& produced : producible) {
+        if (produced.width == mode.width && produced.height == mode.height) {
+          return true;
+        }
+      }
+      return false;
+    }();
+    if (!in_catalogue && !SameAspect(AspectPerMille(mode), ceiling_aspect)) {
       continue;
     }
     bool duplicate = false;

@@ -27,6 +27,7 @@ using rb_blitz::launcher::Profile;
 namespace {
 
 std::string ResolutionToken(const Value& value) {
+  if (IsAutoResolution(value)) return "auto";
   return std::to_string(value.width) + "x" + std::to_string(value.height);
 }
 
@@ -78,6 +79,7 @@ bool JournalRead(const toml::Document& document, std::string_view section,
           break;
         }
         case ValueKind::kResolution: {
+          if (item.value == "auto") break;
           const auto separator = item.value.find('x');
           int64_t width = 0, height = 0;
           if (separator == std::string::npos ||

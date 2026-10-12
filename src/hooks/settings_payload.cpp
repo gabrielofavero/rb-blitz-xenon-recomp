@@ -64,6 +64,27 @@ bool WriteBytes(const std::filesystem::path& path, const Bytes& bytes, std::stri
   return WriteFileAtomic(path, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()),
                          error);
 }
+
+// How a render size reads in the Resolution row. The token alone for 16:9 - the shape every monitor
+// in the catalogue shares - and the aspect spelled out for the sizes that are not, because that is
+// exactly what the owner has to be able to recognise: a 21:9 mode beside a pile of 16:9 numbers is
+// invisible without the caption, and a "more height than 16:9" mode is the same problem.
+std::string ResolutionChoiceLabel(const DisplayMode& size) {
+  const std::string token = DisplayModeToken(size);
+  if (size.height <= 0 || size.width <= 0) {
+    return token;
+  }
+  // 16:9 within 1%, in integers: real modes are not exact ratios (1176x664 is a 16:9 TV mode while
+  // 1920x1080 is not 16:9 in integers), so the caption marks what is *not* the shape every monitor in
+  // the catalogue shares - which is exactly the entry the owner has to be able to spot.
+  const int64_t lhs = int64_t(size.width) * 9;
+  const int64_t rhs = int64_t(size.height) * 16;
+  const int64_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
+  if (difference * 100 <= rhs) {
+    return token;
+  }
+  return token + (lhs > rhs ? " (wide)" : " (tall)");
+}
 }
 
 bool InstallMenuPayload(rex::Runtime* runtime) {
@@ -128,6 +149,26 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
       choices.clear();
       for (const auto& token : tokens)
         choices.emplace_back(token, schema::LabelForToken(*descriptor, token));
+    }
+    // The Resolution row lists what this machine and this render path can actually make, and the
+    // same planner the boot applies decides it - so the row cannot offer a size a boot would refuse.
+    // A display's own mode is in that list when the render path can produce it, which is how a 21:9
+    // primary gets its own 2560x1080 instead of only the 16:9 catalogue (docs/plans/
+    // ultrawide-findings.md §5). The schema's static list is the fallback for a boot whose
+    // capabilities never got compiled.
+    {
+      const auto& supported = boot->capabilities().supported_resolutions;
+      if (!supported.empty()) {
+        auto& choices = configuration.choices["graphics.resolution"];
+        choices.clear();
+        std::string listed;
+        for (const auto& size : supported) {
+          const std::string token = DisplayModeToken(size);
+          choices.emplace_back(token, ResolutionChoiceLabel(size));
+          listed += (listed.empty() ? "" : ", ") + ResolutionChoiceLabel(size);
+        }
+        REXLOG_INFO("settings_menu: Resolution offers {} size(s): {}", choices.size(), listed);
+      }
     }
     for (const auto& binding : ultimate_adapter::RowBindings()) {
       const auto found = provider.choices.find(std::string(binding.variable));

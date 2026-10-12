@@ -143,7 +143,7 @@ std::vector<SchemaRow> BuildTable() {
   {
     Descriptor d = Make(SettingId::kResolution, Category::kGraphics, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kResolution,
-                        ResolutionValue(1280, 720), "resolutions");
+                        ResolutionValue(0, 0), "resolutions");
     rows.push_back(Row(std::move(d), {"graphics", "resolution"}, "", "Resolution",
                        "The rendered resolution."));
   }
@@ -397,6 +397,7 @@ void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
       descriptor.choices.push_back(Choice{renderer.token, label});
     }
   } else if (source == "resolutions") {
+    descriptor.choices.push_back(Choice{"auto", "Auto"});
     for (const DisplayMode& mode : caps.supported_resolutions) {
       if (mode.width <= 0 || mode.height <= 0) {
         continue;
@@ -518,6 +519,10 @@ bool ParseTokenToValue(const Descriptor& descriptor, std::string_view token, Val
       return true;
     }
     case ValueKind::kResolution: {
+      if (token == "auto") {
+        *out = ResolutionValue(0, 0);
+        return true;
+      }
       const std::size_t x = token.find('x');
       if (x == std::string_view::npos || x == 0 || x + 1 >= token.size()) {
         return false;

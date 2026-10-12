@@ -84,6 +84,11 @@ struct Value {
   int32_t height = 0;
 };
 
+// Auto is intent, not a render size. The boot reconciler resolves it using the current display.
+inline bool IsAutoResolution(const Value& value) {
+  return value.kind == ValueKind::kResolution && value.width == 0 && value.height == 0;
+}
+
 enum class WidgetKind : uint8_t {
   kBoolean,
   kHorizontalSelect,

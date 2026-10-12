@@ -111,6 +111,8 @@ struct GraphicsRecommendation {
 // measured gets the bounded conservative route (720p, the only usable backend, no AA, native
 // filtering) and says so. Applied only when the rows have no manual provenance.
 GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps);
+// The user's boot rule: a manual size incompatible with the current display becomes Auto.
+Value ResolutionPreferenceForBoot(const CapabilitySnapshot& caps, const Value& requested);
 
 // --- last-known-good recovery --------------------------------------------------------------
 

@@ -259,9 +259,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   if (service_) {
     service_->SetReconciler(&reconciler_);
     service_->SetCapabilities(capability_snapshot_);
-    // An unmeasured GPU gets a conservative automatic choice. Never infer performance
-    // from desktop resolution. Existing manual choices remain untouched.
-    constexpr int kPolicyVersion = 2;
+    // Auto follows the current display on every boot, without running a benchmark.
+    constexpr int kPolicyVersion = 3;
     const auto recommendation = RecommendGraphics(capability_snapshot_);
     const GraphicsValues recommendations = {
         {SettingId::kRenderer, recommendation.renderer},
@@ -276,6 +275,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
             (doc.automatic_policy_version != kPolicyVersion && doc.origins.contains(id) &&
              doc.origins.at(id) == Origin::kAutomatic))
           store.MarkChanged(id, value, Origin::kAutomatic);
+      }
+      const auto resolution = service_->RequestedValue(SettingId::kResolution);
+      const auto compatible = ResolutionPreferenceForBoot(capability_snapshot_, resolution);
+      if (!ValueEquals(resolution, compatible)) {
+        store.MarkChanged(SettingId::kResolution, compatible, Origin::kAutomatic);
+        diagnostics_.push_back("saved resolution is incompatible with this display; switched to Auto");
       }
       if (store.has_changes()) {
         store.MarkPolicyVersion(kPolicyVersion);
@@ -649,10 +654,8 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
   REXLOG_INFO("settings_boot: the provider is {} ({}); {} value(s) reach the store",
               provider.Active() ? "active" : "not active",
               provider.summary.empty() ? "no payload" : provider.summary, provider.values.size());
-  // The provider's own rows are edited through the channel and persisted by its write-through (P6,
-  // src/hooks/settings_bridge_hooks.cpp), so the service is deliberately NOT given a provider sink:
-  // seeding the provider's values must not look like a change, and a boot must not rewrite the
-  // player's `ulti_settings.dta`. The achievements action stays unwired and says so (P6 §6.1).
+  // Provider edits share the service's transaction and recovery journal. Merely opening
+  // the menu never writes the provider file; achievements use the confirmed guest action.
 
   // --- the guest channel's store ---------------------------------------------------------
   // With a store, the menu's edits go through the service (settings.toml, transactions, a durable

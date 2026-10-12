@@ -96,6 +96,21 @@ REXCVAR_DEFINE_BOOL(probe_screen_1080p, false, "Diagnostics",
                     "before it computes its size, and report what it chose. Diagnostics only.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// The 540 height used to be reached by pressing the title's own half-resolution flag (bit 0 of +796),
+// which is the mode P2 measured and P11a shipped. That flag means more than "half resolution": with a
+// forced 1280-wide frame at 540 lines the shell draws two white blocks in the bottom corners
+// (measured 2026-10-12 - present only in the arms whose guest frame is 1280x540, absent at 960x540,
+// at 1680x720 and at 720p; `out/_swap/ultrawide/shots-uw-native/`, crops in `crops/`).
+//
+// Forcing the *height* alone - the RenderHeightHook at 0x823F382C sets r11 and the flag stays clear -
+// renders the same 2560x1080 frame with no blocks (measured the same day, `nosd.log`), so that is the
+// default now. The flag is still reachable for comparison.
+REXCVAR_DEFINE_BOOL(probe_halfres_flag, false, "Diagnostics",
+                    "Diagnostics: force the title's half-resolution flag when the guest height is "
+                    "540. Off (the default) forces only the height, which renders 1080p without the "
+                    "two corner blocks the flag's own SD path draws; on restores the P11a route.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 // 0x82078190 / 0x82078194 are an adjacent pair of aspect floats in the guest image's read-only
 // data: 4:3 and 16:9. The frame the title allocates is NOT the space it lays out in - a 1680x720
 // frame drew a UI disc 1.3125x wider than a 1280x720 frame with the same height, i.e. the title
@@ -199,7 +214,8 @@ extern "C" REX_FUNC(sub_823F3698) {
       REXLOG_WARN("probe/aspect: refusing '{}'", aspect_text);
     }
   }
-  if (override_on || rb_blitz::settings::BootRenderHeight() == 540) {
+  if (override_on || (rb_blitz::settings::BootRenderHeight() == 540 &&
+                      REXCVAR_GET(probe_halfres_flag))) {
     // Bit 0 of +796 is the flag this very function reads (0x823F3804) to pick 540 instead
     // of 720; forcing it at entry makes the title take its own half-resolution path rather
     // than being poked after the fact, so anything that path re-creates is re-created.

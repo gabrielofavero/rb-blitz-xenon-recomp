@@ -253,6 +253,51 @@ the supported retail image ever changes.
 
 ## 8. Reproduction
 
+### 8.1 Making an arm fast: skip the content discovery
+
+The title enumerates Xbox content **one item per presented frame**, so the developer's own library
+(1,402 packages = 2,804 items) is 47 s of frames at 720p and ~90 s at 2560x1080 - enough to swallow a
+driving route. Two launch flags make an arm hermetic and take the discovery down to seconds:
+
+```text
+--dlc_library=<empty dir>      # the flat library the mod presents to the title
+--dlc_root=<empty dir>         # the root paths.toml names; a CLI value outranks that file
+```
+
+Both matter. `--dlc_library` alone only *adds* a root (`dlc: scanning 2 library root(s)`), because the
+DLC root comes from `paths.toml` next to the executable; only overriding `--dlc_root` as well removes
+the 1,402 packages. `run.ps1` creates `_scratch/emptydlc` and passes both, and an in-song arm then
+reaches a playing song in about three minutes.
+
+### 8.2 The two corner blocks, and why they were there
+
+A 2560x1080 boot used to draw two ~120 px white blocks in the bottom corners of the window
+(x 0..128 and 2448..2560, y 960..1072 in the capture; crop `crops/corner-left.png`). They are **not**
+this project's debug markers - nothing in `src/` draws a rectangle, and the capture tool draws nothing
+either.
+
+Measured, one scan per arm (`out/_swap/ultrawide/find_white_blocks.ps1`):
+
+| Arm | Guest frame | Blocks |
+| --- | --- | --- |
+| `control` | 1280x720 | none |
+| `wide10` | 1680x720 | none |
+| `regress-1080` | 960x540 x2 | none |
+| `song-720b` | 1280x720 | none |
+| `uw-native`, `final-uw`, `song-uw2` | **1280x540 x2** | **two, at the bottom corners** |
+| `nosd` (height forced, flag clear) | **1280x540 x2** | **none** |
+
+The pair that separates the last two rows is `probe_halfres_flag`: every arm above reached 540 by
+pressing the title's own half-resolution flag (bit 0 of `+796`), which is what P2 measured and P11a
+shipped, and that flag's own SD path draws the blocks. Forcing the **height** alone - the
+`RenderHeightHook` sets `r11` and the flag stays clear - renders the same 2560x1080 frame with no
+blocks at all (`nosd.log`: `guest_output=2560x1080`, `resolve_dest_scaled=2560x1080`, layout aspect
+written). The height-only route is therefore the default now (`probe_halfres_flag` defaults to
+`false`; setting it true restores the P11a route for comparison), and every frame of the in-song
+ultrawide arm (`shots-song-uw3/`) scans clean.
+
+### 8.3 Arms
+
 ```powershell
 # The real product path at this machine's own ultrawide mode (no diagnostic flags):
 pwsh -File out\_swap\ultrawide\run.ps1 -Label uw-native -Request 2560x1080
@@ -283,5 +328,7 @@ measured-safe floor - which silently masked two arms before that was understood.
 | `out/_swap/ultrawide/wide10.log`, `shots-wide10/` | **the fix**: `0x8201E4CC`/`0x8201E4D0` at `1/aspect`, disc 44x42 |
 | `out/_swap/ultrawide/uw-native.log`, `shots-uw-native/` | **the product path**: 2560x1080 rendered and presented, no bars, planner-chosen 1280x540 x2 |
 | `out/_swap/ultrawide/run.ps1`, `measure.ps1`, `scan_aspect.py` | the harness, the measuring instrument, the constant hunt |
+| `out/_swap/ultrawide/find_white_blocks.ps1` | the corner-block scan (§8.2) |
+| `out/_swap/ultrawide/shots-song-uw3/`, `shots-song-720b/` | in-game at 2560x1080 vs 16:9: the 3D world expands on both sides and the HUD markers sit at the wide frame's own edges |
 | `config/functions.toml`, `src/hooks/render_settings.{h,cpp}` | the three levers and their measured evidence |
 | `src/settings/capabilities.{h,cpp}`, `src/settings/graphics_policy.cpp` | the aspect-aware planner and the offer-set rule |

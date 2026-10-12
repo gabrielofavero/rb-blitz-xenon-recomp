@@ -150,6 +150,7 @@ ValidationResult GraphicsReconciler::ValidateForRenderer(SettingId id, const Des
   }
   switch (id) {
     case SettingId::kResolution: {
+      if (IsAutoResolution(value)) return base;
       if (value.kind != ValueKind::kResolution) {
         return ValidationResult{false, std::string(kGraphicsUnsupportedResolution)};
       }
@@ -198,7 +199,9 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
           IsSupportedResolution(caps, DisplayMode{requested.width, requested.height})) {
         return result;  // a valid manual choice is never re-optimized
       }
-      const DisplayMode replacement = LargestSupportedFitting(caps);
+      // A failed display query is not a reason to select 4K blindly.
+      const DisplayMode replacement = caps.primary_display_size.width > 0
+          ? LargestSupportedFitting(caps) : DisplayMode{1280, 720};
       if (replacement.width <= 0) {
         // Nothing is supported at all (a render path with no producible size). Report the
         // failure; the service then falls back to the row's compiled default.
@@ -207,7 +210,7 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
         return result;
       }
       result.effective = MakeResolution(replacement.width, replacement.height);
-      result.corrected = true;
+      result.corrected = !IsAutoResolution(requested);
       // The two cases the UI explains differently: a size the display cannot show (4K on a
       // monitor that is now 1080p) versus a size the render path cannot make at all.
       const bool exceeds_display =
@@ -275,30 +278,11 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
 GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps) {
   GraphicsRecommendation recommendation;
   const std::string renderer = PolicyRenderer(caps, "");
-  const bool measured = !renderer.empty() &&
-      IsSupportedResolution(caps, caps.verified_sustainable_resolution);
-  recommendation.applicable = measured;
-  recommendation.conservative = !measured;
+  recommendation.applicable = true;
+  recommendation.conservative = renderer.empty();
   recommendation.renderer = MakeEnum(renderer.empty() ? "d3d12" : renderer);
-  if (!measured) {
-    // The bounded conservative route: the one combination that presented on every machine
-    // this project measured, and a reason the UI can show.
-    recommendation.reason_key = "settings.graphics.recommended_conservative";
-    recommendation.resolution = MakeResolution(1280, 720);
-    recommendation.anti_aliasing = MakeEnum("none");
-    recommendation.filtering = MakeEnum("native");
-    return recommendation;
-  }
-
-  DisplayMode best = caps.verified_sustainable_resolution;
-  if (best.width <= 0) {
-    best = SmallestSupported(caps);
-  }
-  if (best.width <= 0) {
-    best = DisplayMode{1280, 720};
-  }
-  recommendation.reason_key = "settings.graphics.recommended_measured";
-  recommendation.resolution = MakeResolution(best.width, best.height);
+  recommendation.reason_key = "settings.graphics.automatic_display";
+  recommendation.resolution = MakeResolution(0, 0);
 
   const RendererCapability* device = FindRenderer(caps, renderer);
   // The device's verified native AA when it has one; otherwise no AA rather than a post
@@ -310,6 +294,16 @@ GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps) {
   // the UI uses to bound what the user may *pick*, not a preference to impose.
   recommendation.filtering = MakeEnum("native");
   return recommendation;
+}
+
+Value ResolutionPreferenceForBoot(const CapabilitySnapshot& caps, const Value& requested) {
+  if (IsAutoResolution(requested)) return requested;
+  // Do not erase a choice merely because display enumeration failed.
+  if (caps.primary_display_size.width > 0 &&
+      (!IsSupportedResolution(caps, {requested.width, requested.height}) ||
+       requested.width > caps.primary_display_size.width ||
+       requested.height > caps.primary_display_size.height)) return MakeResolution(0, 0);
+  return requested;
 }
 
 bool GraphicsFallbackWarranted(const GraphicsBootMarker& marker) {

@@ -24,6 +24,7 @@ using bridge::WireValue;
 // settings model's; the wire's is always written `bridge::ValueKind::kX`.
 
 std::string ResolutionText(const Value& value) {
+  if (IsAutoResolution(value)) return "auto";
   return std::to_string(value.width) + "x" + std::to_string(value.height);
 }
 
@@ -144,7 +145,11 @@ Value ServiceSink::CurrentValue(const SettingId id) const {
   if (staged != staged_.end()) {
     return staged->second;
   }
-  return service_ != nullptr ? service_->EffectiveValue(id) : Value{};
+  if (!service_) return Value{};
+  // Keep Auto selected in the menu while boot uses its resolved pixel dimensions.
+  if (id == SettingId::kResolution && !service_->IsOverridden(id) &&
+      IsAutoResolution(service_->RequestedValue(id))) return service_->RequestedValue(id);
+  return service_->EffectiveValue(id);
 }
 
 bool ServiceSink::EnsureTransaction(bridge::Response* response) {
