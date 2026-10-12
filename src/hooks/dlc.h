@@ -43,6 +43,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 // Only one refresh runs at a time: a second ask while the scan is in flight is logged and
 // ignored, so a trigger that fires more than once cannot queue a second scan.
 void RefreshConfigured();
+// Serializes the restart barrier with refresh worker creation and waits for cache writes.
+void DrainRefreshForRestart();
 
 // Hands the content manager a refresh a worker has finished, and does nothing at all when
 // there is none - so a hook may call it on every frame or every call. Called from a

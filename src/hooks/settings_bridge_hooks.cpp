@@ -268,7 +268,7 @@ void HandleRequest(const std::string_view path) {
       g_dispatcher.last_outcome() == Dispatcher::Outcome::kForwarded) {
     // A committed session is written through to the provider's own file, because that file is what
     // the provider's own loader reads on the next boot. A replayed commit is not written again.
-    PersistProviderRows();
+    if (g_sink == static_cast<RequestSink*>(&g_memory)) PersistProviderRows();
     // P9: and every row the commit changed whose strategy is `hot` is applied to the running
     // process now; the rest keep their restart, which is what the menu's prompt covers.
     ApplyHotRows();
@@ -396,7 +396,11 @@ void SeedProvider() {
     seed.op = Op::kSet;
     seed.setting = std::string(binding.token);
     seed.value = wire;
-    g_dispatcher.Dispatch(seed);
+    if (auto* service = dynamic_cast<ServiceSink*>(g_sink)) {
+      service->SeedLocal(seed.setting, seed.value);
+    } else {
+      g_dispatcher.Dispatch(seed);
+    }
     ++seeded;
   }
   // The gate the merged root asks before it draws any provider row (plan §3): the adapter's real
@@ -406,7 +410,11 @@ void SeedProvider() {
     gate.op = Op::kSet;
     gate.setting = "provider.active";
     gate.value = WireValue::Bool(active);
-    g_dispatcher.Dispatch(gate);
+    if (auto* service = dynamic_cast<ServiceSink*>(g_sink)) {
+      service->SeedLocal(gate.setting, gate.value);
+    } else {
+      g_dispatcher.Dispatch(gate);
+    }
   }
   Request commit;
   commit.op = Op::kCommit;

@@ -449,6 +449,10 @@ ReadFunc ResolveOriginal(bool scatter) {
 
 namespace rb_blitz::menu_filter {
 
+void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after[20]) {
+  RetargetChecksumRow(base, before, after);
+}
+
 void Configure() {
   g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);

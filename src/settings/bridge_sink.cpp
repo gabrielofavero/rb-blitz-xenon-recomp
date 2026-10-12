@@ -7,6 +7,7 @@
 #include "settings/bridge_sink.h"
 
 #include <cstdio>
+#include <algorithm>
 #include <string>
 #include <utility>
 
@@ -68,7 +69,7 @@ bool ModelValueFromWire(const Descriptor& descriptor, const WireValue& wire, Val
       out->boolean = wire.boolean;
       return true;
     case ValueKind::kInt:
-      if (wire.kind != bridge::ValueKind::kInt) {
+      if (wire.kind != bridge::ValueKind::kInt || wire.integer < INT32_MIN || wire.integer > INT32_MAX) {
         return false;
       }
       out->kind = ValueKind::kInt;
@@ -180,6 +181,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kBeginEdit: {
+      edit_failed_ = false;
       if (service_ == nullptr) {
         status = Status::kUnsupported;
         response.message = "no settings service is installed";
@@ -197,6 +199,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       } else {
         staged_.clear();
         staged_local_.clear();
+        staged_base_.clear();
+        staged_token_.clear();
         response.message = "edit begun";
       }
       break;
@@ -228,7 +232,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
                                : "staged (kept by this build, not by settings.toml)";
         break;
       }
-      const SettingId id = schema::IdForToken(request.setting);
+      constexpr std::string_view member_prefix = "interface.hidden_main_menu.";
+      const bool member = request.setting.starts_with(member_prefix);
+      const SettingId id = member ? SettingId::kHiddenMainMenu : schema::IdForToken(request.setting);
       const schema::SchemaRow* row = schema::FindRow(id);
       if (row == nullptr) {
         status = Status::kInvalid;
@@ -241,7 +247,19 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         break;
       }
       Value value;
-      if (!ModelValueFromWire(row->descriptor, request.value, &value)) {
+      if (member && (request.value.kind != bridge::ValueKind::kBool ||
+                     request.setting.size() == member_prefix.size())) {
+        status = Status::kInvalid;
+        response.message = "a menu member needs a token and a boolean";
+        break;
+      }
+      if (member) {
+        value = CurrentValue(id);
+        value.kind = ValueKind::kList;
+        const std::string token = request.setting.substr(member_prefix.size());
+        std::erase(value.list, token);
+        if (request.value.boolean) value.list.push_back(token);
+      } else if (!ModelValueFromWire(row->descriptor, request.value, &value)) {
         status = Status::kInvalid;
         response.message = "the value is not the kind this row takes";
         break;
@@ -263,7 +281,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       // kept too, so the log line and the hot-apply lookup see the screen's own name
       // ("general.dlc_menu_songs") rather than a second spelling of it.
       staged_base_.insert({id, service_->EffectiveValue(id)});
-      staged_token_[id] = request.setting;
+      staged_token_[id] = member ? "interface.hidden_main_menu" : request.setting;
       staged_[id] = std::move(value);
       response.message = "staged";
       break;
@@ -289,8 +307,11 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kCancelEdit: {
+      edit_failed_ = false;
       staged_.clear();
       staged_local_.clear();
+      staged_base_.clear();
+      staged_token_.clear();
       if (service_ != nullptr && txn_ != 0) {
         service_->Cancel(txn_);
       }
@@ -300,15 +321,49 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
     }
     case bridge::Op::kCommit: {
       last_commit_changes_.clear();
+      if (edit_failed_) {
+        if (service_ && txn_) service_->Cancel(txn_);
+        txn_ = 0;
+        staged_.clear(); staged_base_.clear(); staged_token_.clear(); staged_local_.clear();
+        edit_failed_ = false;
+        commit_ok_ = false;
+        last_commit_durable_ = false;
+        last_commit_requires_restart_ = false;
+        status = Status::kInvalid;
+        response.message = "the edit was refused; nothing saved";
+        break;
+      }
       CommitResult result;
       if (service_ != nullptr && txn_ != 0) {
         result = service_->Commit(txn_);
       }
       txn_ = 0;
       last_commit_status_ = result.status;
-      saved_revision_ = result.saved_revision;
+      saved_revision_ = result.status == CommitStatus::kNoChanges && service_
+                            ? service_->revision() : result.saved_revision;
       last_commit_durable_ = result.status == CommitStatus::kSaved;
       last_commit_requires_restart_ = result.restart_required;
+      bool local_saved = true;
+      std::map<std::string, WireValue> provider_changes;
+      for (const auto& [token, value] : staged_local_) {
+        if (token == kProviderGateToken) continue;
+        const auto old = local_.find(token);
+        if (old == local_.end() || !WireValuesEqual(old->second, value))
+          provider_changes[token] = value;
+      }
+      if (provider_saver_ && !provider_changes.empty() &&
+          (result.status == CommitStatus::kSaved || result.status == CommitStatus::kNoChanges)) {
+        std::string error;
+        local_saved = provider_saver_(provider_changes, &error);
+        if (!local_saved) {
+          result.status = last_commit_durable_ ? CommitStatus::kPartial : CommitStatus::kIoError;
+          result.errors.push_back(error);
+        } else {
+          last_commit_durable_ = true;
+          last_commit_requires_restart_ = true;
+          saved_revision_ = service_ ? service_->revision() : 0;
+        }
+      }
       // What the service really wrote, filtered by P9's no-op rule: a row whose value did not move
       // is not reported, so a commit cannot re-apply a hot row for a session that changed nothing
       // (the test that matters is the change-then-revert case the plan §5.4 calls a no-op). Then the
@@ -317,7 +372,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       //
       // The session's own record is cleared only *after* it is read: `staged_base_` is the value
       // each row held before the edit, and it is what tells a real change from a write-back.
-      if (service_ != nullptr) {
+      if (service_ != nullptr && (result.status == CommitStatus::kSaved || result.status == CommitStatus::kPartial)) {
         for (const auto& entry : service_->last_commit_changes()) {
           const auto base = staged_base_.find(entry.first);
           if (base != staged_base_.end() && ValueEquals(base->second, entry.second)) {
@@ -333,6 +388,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       staged_base_.clear();
       staged_token_.clear();
       for (auto& entry : staged_local_) {
+        if (!local_saved || (result.status != CommitStatus::kSaved &&
+                             result.status != CommitStatus::kNoChanges)) continue;
         const auto before = local_.find(entry.first);
         const bool changed = before == local_.end() || !WireValuesEqual(before->second, entry.second);
         local_[entry.first] = entry.second;
@@ -383,6 +440,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         response.message = result.status == CommitStatus::kNoChanges ? "nothing to commit"
                                                                     : "committed";
       }
+      commit_ok_ = status == Status::kOk;
+      last_commit_status_ = result.status;
       break;
     }
     case bridge::Op::kInvoke: {
@@ -402,10 +461,24 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kRequestRestart:
+      if (!commit_ok_) {
+        status = Status::kInvalid;
+        response.message = "settings have not been saved";
+        break;
+      }
       // Recorded here, acted on by the boot: the child must be started while this process is still
       // alive and with its own identity in the handoff token (§8), which is not the sink's business.
       restart_requested_ = true;
       restart_request_id_ = request.request_id;
+      if (restart_handler_ && service_) {
+        restart_ok_ = restart_handler_(saved_revision_, service_->revision(), request.request_id,
+                                      service_->EffectiveValue(SettingId::kTarget).text,
+                                      &response.message);
+        if (!restart_ok_) {
+          status = Status::kIoError;
+          break;
+        }
+      }
       response.message = "restart requested";
       break;
     case bridge::Op::kUnknown:
@@ -414,6 +487,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
   }
 
+  if (request.op == bridge::Op::kSet && status != Status::kOk) edit_failed_ = true;
   response.status = status;
   // Only a request this sink actually applied is acknowledged, so a guest polling the ack cannot
   // mistake a rejection for a completed write. An id-less text request is never recorded.
@@ -424,6 +498,17 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
 }
 
 bool ServiceSink::Matches(const bridge::Request& request) const {
+  if (request.setting == "restart.ok") return WireValuesEqual(WireValue::Bool(restart_ok_), request.value);
+  if (request.setting == "commit.ok") return WireValuesEqual(WireValue::Bool(commit_ok_), request.value);
+  if (request.setting == "commit.restart_required")
+    return WireValuesEqual(WireValue::Bool(commit_ok_ && last_commit_requires_restart_), request.value);
+  constexpr std::string_view prefix = "interface.hidden_main_menu.";
+  if (request.setting.starts_with(prefix)) {
+    const Value value = CurrentValue(SettingId::kHiddenMainMenu);
+    const std::string token = request.setting.substr(prefix.size());
+    return WireValuesEqual(WireValue::Bool(std::find(value.list.begin(), value.list.end(), token) !=
+                                          value.list.end()), request.value);
+  }
   if (IsLocalToken(request.setting)) {
     const auto staged = staged_local_.find(request.setting);
     if (staged != staged_local_.end()) {
@@ -481,6 +566,10 @@ bool ServiceSink::GetLocal(const std::string_view token, WireValue* out) const {
 }
 
 void ServiceSink::Reset() {
+  if (service_ && txn_) service_->Cancel(txn_);
+  edit_failed_ = false;
+  commit_ok_ = true;
+  restart_ok_ = true;
   local_.clear();
   staged_local_.clear();
   staged_.clear();

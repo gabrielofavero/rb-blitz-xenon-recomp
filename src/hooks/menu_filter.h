@@ -37,6 +37,7 @@
 // their defaults are stated where they are defined (src/enhancements.cpp).
 
 #pragma once
+#include <cstdint>
 
 namespace rb_blitz::menu_filter {
 
@@ -46,5 +47,6 @@ namespace rb_blitz::menu_filter {
 // where the cvars are read: the read hook itself must not touch the registry per
 // read.
 void Configure();
+void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t after[20]);
 
 }  // namespace rb_blitz::menu_filter

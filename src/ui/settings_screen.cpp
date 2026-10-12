@@ -18,6 +18,7 @@ namespace rb_blitz::ui::screen {
 namespace {
 
 using dtb::Node;
+MenuConfiguration g_configuration;
 
 // Small builders, so the definitions below read as the DTA they are.
 Node Sym(const std::string_view name) { return Node::Symbol(name); }
@@ -30,9 +31,9 @@ Node Cmd(std::vector<Node> kids) { return Node::Command(std::move(kids)); }
 // it. Not `options_menu.milo`: that file is retail's `options_panel` scene, and naming it here is
 // what made two panels share one list object (see the header). Same directory as the retail scene,
 // because the retail scene's own references are relative (`neon_lights.milo`,
-// `../resource/lists/list_options_main.milo`).
+// `../resource/lists/list_options_main.milo`). One scene per context - `kSceneName` for the
+// main-menu pages, `kPauseSceneName` for the in-song ones, for the same reason.
 constexpr char kList[] = "options.lst";
-constexpr char kScene[] = "settings_menu.milo";
 
 // The two statements that fill a list and place its selection:
 // `{options.lst set_data {var rows}}` and `{options.lst set_selected 0}`, emitted as a *pair* and
@@ -145,9 +146,9 @@ Node ButtonTable(std::vector<Node> extras) {
 }
 
 // `{new UIPanel <name> {file <milo>} {focus <list>} {enter ...} {exit ...} ...}`
-Node Panel(const std::string_view name, std::vector<Node> members) {
+Node Panel(const std::string_view name, const std::string_view scene, std::vector<Node> members) {
   std::vector<Node> kids = {Sym("new"), Sym("UIPanel"), Sym(name),
-                            Arr({Sym("file"), Str(kScene)}), Arr({Sym("focus"), Sym(kList)})};
+                            Arr({Sym("file"), Str(scene)}), Arr({Sym("focus"), Sym(kList)})};
   for (Node& member : members) {
     kids.push_back(std::move(member));
   }
@@ -214,6 +215,11 @@ enum class Kind {
   kAction,       // one-shot action: invoke `setting`
   kInfo,         // a row that is present but deliberately does nothing (the protected entry)
   kRoute,        // a retail screen: set its `member` to the current screen, then enter it
+  kRestart,
+  kClose,
+  kCalibration,
+  kRefresh,
+  kAchievements,
 };
 
 struct Choice {
@@ -239,6 +245,8 @@ struct PanelSpec {
   std::string back;
   std::vector<std::string> panels;  // the shared retail panels this screen carries
   std::vector<Row> rows;
+  std::string scene = kSceneName;  // the dir the panel loads, per context (see `kPauseSceneName`)
+  std::string message;
 };
 
 Row BoolRow(const char* symbol, const char* setting, const char* label, bool provider_only = false) {
@@ -345,7 +353,20 @@ std::vector<std::string> MenuPanels() {
 }
 
 std::vector<std::string> PausePanels() {
-  return {"game_panel", "pause_panel", "background_night_panel"};
+  // Retail's own in-song panel set, read out of the shipped records: `av_options_pause_screen`
+  // carries `game_panel pause_panel background_night_panel`, and the two pages retail enters with a
+  // plain `{ui goto_screen ...}` (`controller_config_pause_screen`, `pause_credits_screen`) add
+  // `game_fade_out_panel`.
+  //
+  // Which of them a page of ours needs is the question P5b-r2 could not close: a screen of ours that
+  // names **any** of them faults the guest with `read of guest 0x00000024` while it is constructed -
+  // measured one panel at a time, and with the screen declared in the pause record instead - while
+  // retail's own in-song screens name them and open. So the set is retail's shape and is *not*
+  // usable by the in-song twins as they stand; see docs/plans/in-game-settings-merged-menu.md §3.2
+  // for the matrix and §3.3 for the next arm. (An earlier reading of one arm had
+  // `game_fade_out_panel` as the cure for that fault; the later arms show it is not the variable:
+  // the fault appears with it and without it.)
+  return {"game_panel", "pause_panel", "game_fade_out_panel", "background_night_panel"};
 }
 
 // The whole merged tree, in the plan's §3 order. Setting tokens are `<category>.<id>` on top of
@@ -492,7 +513,7 @@ std::vector<PanelSpec> AllPanels() {
                                                  "115", "115%", "120", "120%", "125", "125%",
                                                  "130", "130%", "135", "135%", "140", "140%",
                                                  "145", "145%", "150", "150%"}),
-                                        true),
+                                        true, "i:"),
                               BoolRow("settings_dof", "gameplay.disable_dof",
                                       "Disable Depth of Field", true),
                               SubmenuRow("settings_plots", "settings_plots_screen",
@@ -588,7 +609,128 @@ std::vector<PanelSpec> AllPanels() {
                                       "EXIT GAME"),
                           }});
 
+  // The confirmation scene is copied from the installation under our own name, as with the menu.
+  Row restart = InfoRow("settings_restart_now", "Restart now");
+  restart.kind = Kind::kRestart;
+  Row close = InfoRow("settings_close", "Close");
+  close.kind = Kind::kClose;
+  out.push_back(PanelSpec{"settings_restart_panel", "settings_restart_screen", kRootScreen,
+                         MenuPanels(), {close, restart}, "../pause/settings_confirmation.milo",
+                         "settings_restart_message"});
+  out.push_back(PanelSpec{"settings_save_error_panel", "settings_save_error_screen", kRootScreen,
+                         MenuPanels(), {close}, "../pause/settings_confirmation.milo",
+                         "settings_save_error_message"});
+  Row achievements = InfoRow("settings_earn_achievements", "Unlock online achievements");
+  achievements.kind = Kind::kAchievements;
+  out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen", "settings_general_screen",
+                         MenuPanels(), {close, achievements}, "../pause/settings_confirmation.milo",
+                         "settings_achievements_message"});
+
+  for (auto& panel : out) {
+    if (panel.name == "settings_dlc_panel") {
+      Row refresh = InfoRow("settings_refresh_dlc", "Refresh Downloadable Content");
+      refresh.kind = Kind::kRefresh;
+      panel.rows.push_back(std::move(refresh));
+    }
+    if (panel.name == "settings_main_menu_panel" && !g_configuration.menu_rows.empty()) {
+      panel.rows.resize(1);
+      size_t index = 0;
+      for (const auto& [token, label] : g_configuration.menu_rows) {
+        const std::string symbol = "settings_mm_live_" + std::to_string(index++);
+        panel.rows.push_back(token == "splash_options"
+            ? InfoRow(symbol.c_str(), label.c_str())
+            : BoolRow(symbol.c_str(), ("interface.hidden_main_menu." + token).c_str(), label.c_str()));
+      }
+    }
+    std::erase_if(panel.rows, [](Row& row) {
+      if (row.setting == "general.unlock_online_achievements") {
+        row.kind = Kind::kSubmenu;
+        row.screen = "settings_achievements_screen";
+      }
+      const auto choices = g_configuration.choices.find(row.setting);
+      if (choices != g_configuration.choices.end()) {
+        if (row.kind == Kind::kSelect) {
+          row.choices.clear();
+          for (const auto& [token, label] : choices->second) row.choices.push_back({token, label});
+          if (row.choices.empty()) { row.kind = Kind::kInfo; row.label += ": Unavailable"; }
+        } else if (row.kind == Kind::kChoose) {
+          return std::none_of(choices->second.begin(), choices->second.end(),
+                             [&](const auto& c) { return c.first == row.choices.front().token; });
+        }
+      }
+      const auto disabled = g_configuration.disabled.find(row.setting);
+      if (disabled != g_configuration.disabled.end()) {
+        row.kind = Kind::kInfo;
+        row.label += ": " + disabled->second;
+      }
+      return false;
+    });
+  }
   return out;
+}
+
+// ------------------------------------------------------------------------------------------------
+// The in-song context
+// ------------------------------------------------------------------------------------------------
+// Retail's own convention, read out of the shipped records rather than invented:
+//
+//   av_options_screen       {panels shell_music_panel menu_cache_panel background_night_panel av_options_panel}
+//   av_options_pause_screen {panels game_panel pause_panel background_night_panel av_options_panel}
+//   pause_credits_screen    {panels game_panel pause_panel game_fade_out_panel background_night_panel credits_panel}
+//   controller_config_pause_screen  {panels game_panel pause_panel game_fade_out_panel
+//                                            background_night_panel controller_config_panel}
+//
+// So an in-song page keeps the running game, the pause panel and the night background on screen,
+// and its back target is `game_screen`. One panel is *shared* between the two contexts when its
+// bodies never name a destination (`av_options_panel` leaves through
+// `{ui goto_screen {{ui current_screen} get back_screen}}`, which is context-free). Ours name
+// destinations, because a submenu has to, so each panel gets an in-song twin whose bodies point at
+// the in-song twins below it.
+//
+// `PauseScreen` / `PausePanel` are public (they are declared in the header) and defined with the
+// rest of the public surface below.
+
+// Where a row's destination lives in the in-song context. Ours have twins by construction; a retail
+// screen's twin is the one retail already ships, and the four that exist are named here.
+// `cal_welcome_screen` is deliberately absent: retail's own in-song calibration route goes through
+// `pause_confirm_quit_song_screen` and is driven by retail's own case, which the merge leaves alone.
+std::vector<PanelSpec> InSongPanels() {
+  std::vector<PanelSpec> out = AllPanels();
+  for (PanelSpec& panel : out) {
+    panel.name = PausePanel(panel.name);
+    panel.screen = PauseScreen(panel.screen);
+    panel.back = panel.back == "splash_screen" ? std::string("game_screen") : PauseScreen(panel.back);
+    panel.scene = panel.message.empty() ? kPauseSceneName : "../pause/settings_confirmation_pause.milo";
+    panel.panels = PausePanels();
+    for (Row& row : panel.rows) {
+      if (row.screen == "cal_welcome_screen") row.kind = Kind::kCalibration;
+      row.screen = InSongDestination(row.screen);
+    }
+  }
+  return out;
+}
+
+// The five symbols retail's `pause_panel`'s `{enter}` fills its inline list with, in retail's order.
+// The merge refuses a record that no longer holds exactly these, so a changed retail record is
+// reported rather than half-rewritten.
+std::vector<std::string> RetailPauseRows() {
+  return {"pause_tutorial", "pause_controls", "calibration", "audio_video_options", "credits"};
+}
+
+// `{do {options.lst set_data (a b c)} {options.lst set_selected 0}}` - the pair `FillStatements`
+// emits above, wrapped in one command so it can be an `if_else` branch (each branch is a single
+// command). The selection statement is not optional, and P5b-r2 measured that this is what the
+// inline pause list needs as much as our own panels do: a list keeps its *selected* symbol across a
+// `set_data`, so a fill that does not place the selection leaves the list dispatching a row that is
+// no longer in it - the press then matches no case in the panel's switch and the pause menu closes
+// instead of opening the row (measured: no case marker fired, no page entered).
+Node FillList(const std::vector<std::string>& rows) {
+  std::vector<Node> symbols;
+  for (const std::string& row : rows) {
+    symbols.push_back(Sym(row));
+  }
+  return Cmd({Sym("do"), Cmd({Sym(kListName), Sym("set_data"), Arr(std::move(symbols))}),
+              Cmd({Sym(kListName), Sym("set_selected"), Node::Int(0)})});
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -742,12 +884,21 @@ Node PopulateMenu(const PanelSpec& panel) {
 // `{<list>.lst set_data {var rows}}` is in FillStatements; this builds the whole `{do ...}`.
 
 // The `select_row` case for one row: what Confirm (or Start) does on it.
+Node CommitResult(const bool pause, Node success) {
+  const auto destination = [&](const char* name) { return pause ? PauseScreen(name) : std::string(name); };
+  return Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.ok", "b:1"))}),
+    Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.restart_required", "b:1"))}),
+         EnterScreen(destination("settings_restart_screen")), std::move(success)}),
+    EnterScreen(destination("settings_save_error_screen"))});
+}
+
+bool g_emitting_pause = false;
 Node RowCase(const Row& row, const std::string_view symbol) {
   switch (row.kind) {
     case Kind::kBool: {
       const bool is_on = symbol == std::string(row.symbol) + "_on";
       return Arr({Sym(symbol), Write(SetPath(row, is_on ? "b:0" : "b:1")),
-                  Write(Path("commit", "-", "-")), Cmd({Var("this"), Sym("populate_menu")})});
+                  Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
     case Kind::kSelect: {
       size_t index = 0;
@@ -759,20 +910,41 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       }
       const Choice& next = row.choices[(index + 1) % row.choices.size()];
       return Arr({Sym(symbol), Write(ChoiceSet(row, next)), Write(Path("commit", "-", "-")),
-                  Cmd({Var("this"), Sym("populate_menu")})});
+                  CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
     case Kind::kSubmenu:
     case Kind::kBoolSubmenu:
       return Arr({Sym(symbol), EnterScreen(row.screen)});
     case Kind::kChoose:
       return Arr({Sym(symbol), Write(ChoiceSet(row, row.choices.front())),
-                  Write(Path("commit", "-", "-")), Leave()});
+                  Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Leave())});
     case Kind::kAction:
       return Arr({Sym(symbol), Write(Path("invoke", row.setting, "-"))});
     case Kind::kInfo:
       return Arr({Sym(symbol), Cmd({Var("this"), Sym("populate_menu")})});
     case Kind::kRoute:
       return Arr({Sym(symbol), EnterRetail(row.screen, row.member)});
+    case Kind::kClose:
+      return Arr({Sym(symbol), Leave()});
+    case Kind::kRestart:
+      return Arr({Sym(symbol), Write(Path("restart", "-", "-")),
+          Cmd({Sym("if"), Cmd({Sym("!"), Cmd({Sym("file_exists"), Str(Path("snapshot", "restart.ok", "b:1"))})}),
+               Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym("settings_restart_error")})})});
+    case Kind::kCalibration:
+      return Arr({Sym(symbol), Cmd({Sym("pause_confirm_quit_song_screen"), Sym("set"),
+          Sym("next_screen"), Sym("cal_welcome_screen")}),
+          Cmd({Sym("options_screen"), Sym("set"), Sym("back_screen"), Sym("splash_screen")}),
+          Cmd({Sym("ui"), Sym("goto_screen"), Sym("pause_confirm_quit_song_screen")})});
+    case Kind::kRefresh:
+      return Arr({Sym(symbol), Cmd({Sym("file_exists"), Str("songcache:/rbbz_dlc_refresh")})});
+    case Kind::kAchievements:
+      // The installed provider's four named grants, executed by its own guest API. No host-built
+      // DataNodes or untraced allocator ABI. The session latch makes a repeated confirm harmless.
+      return Arr({Sym(symbol), Cmd({Sym("if"), Cmd({Sym("!"), Var("rbbz_achievements_granted")}),
+          Cmd({Sym("do"), Cmd({Sym("set"), Var("rbbz_achievements_granted"), Node::Int(1)}),
+            Cmd({Sym("foreach"), Var("acc"), Arr({Sym("acc_high_cred"), Sym("acc_higher_cred"),
+              Sym("acc_total_coins_spent"), Sym("acc_create_challenge")}),
+              Cmd({Sym("acc_mgr"), Sym("earn_accomplishment"), Var("acc")})})})}), Leave()});
   }
   return Arr({Sym(symbol)});
 }
@@ -812,7 +984,7 @@ std::vector<Node> DirectionCases(const PanelSpec& panel, const bool forward) {
       cases.push_back(Arr({Sym(row.symbol + "_" + SymbolToken(row.choices[i].token)),
                            Write(ChoiceSet(row, row.choices[target])),
                            Write(Path("commit", "-", "-")),
-                           Cmd({Var("this"), Sym("populate_menu")})}));
+                           CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))}));
     }
   }
   return cases;
@@ -898,6 +1070,11 @@ Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
 }
 
 Node PanelDefinition(const PanelSpec& panel) {
+  g_emitting_pause = panel.scene == kPauseSceneName ||
+                     panel.scene == "../pause/settings_confirmation_pause.milo";
+  Node enter = EnterExit();
+  if (!panel.message.empty())
+    enter.kids.push_back(Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(panel.message)}));
   std::vector<Node> extras;
   extras.push_back(Arr({Sym("kAction_Up"), Cmd({Var("this"), Sym("move_up")})}));
   extras.push_back(Arr({Sym("kAction_Down"), Cmd({Var("this"), Sym("move_down")})}));
@@ -916,13 +1093,13 @@ Node PanelDefinition(const PanelSpec& panel) {
     extras.push_back(Arr({Sym("kAction_Right"), Cmd(std::move(rkids))}));
   }
 
-  return Panel(panel.name,
+  return Panel(panel.name, panel.scene,
                {
                    PopulateMenu(panel),
                    // The panel's own navigation, and why it is not the engine's: see above.
                    MoveMember(panel, "move_up", false),
                    MoveMember(panel, "move_down", true),
-                   EnterExit(),
+                   std::move(enter),
                    GetFocusMember(),
                    Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})}),
                    Arr({Sym("on_select_msg"), Cmd({Sym("shell_sfx"), Sym("play_select")})}),
@@ -1031,6 +1208,8 @@ bool IsFirstScreenSet(const Node& node) {
 
 }  // namespace
 
+void ConfigureMenu(MenuConfiguration configuration) { g_configuration = std::move(configuration); }
+
 // Every request the surface can send or ask, derived from the same table the definition is built
 // from, so a row cannot exist without its path being known - and so the test that parses each path
 // with the bridge's grammar covers the whole surface rather than the one row someone remembered.
@@ -1043,6 +1222,9 @@ std::vector<std::string> RequestPaths() {
   };
   add(kProviderQuery);
   add(Path("commit", "-", "-"));
+  add(Path("restart", "-", "-"));
+  for (const auto* token : {"commit.ok", "commit.restart_required", "restart.ok"})
+    add(Path("snapshot", token, "b:1"));
   for (const PanelSpec& panel : AllPanels()) {
     for (const Row& row : panel.rows) {
       if (row.setting.empty()) {
@@ -1075,40 +1257,121 @@ std::vector<std::string> RequestPaths() {
   return out;
 }
 
+std::string PauseScreen(std::string_view screen) {
+  constexpr std::string_view kSuffix = "_screen";
+  if (screen.size() > kSuffix.size() &&
+      screen.substr(screen.size() - kSuffix.size()) == kSuffix) {
+    return std::string(screen.substr(0, screen.size() - kSuffix.size())) + "_pause_screen";
+  }
+  return std::string(screen);
+}
+
+std::string PausePanel(std::string_view panel) {
+  constexpr std::string_view kSuffix = "_panel";
+  if (panel.size() > kSuffix.size() && panel.substr(panel.size() - kSuffix.size()) == kSuffix) {
+    return std::string(panel.substr(0, panel.size() - kSuffix.size())) + "_pause_panel";
+  }
+  return std::string(panel);
+}
+
+std::string InSongDestination(std::string_view screen) {
+  if (screen.empty()) {
+    return {};
+  }
+  if (screen == "tutorials_screen") {
+    return "tutorials_pause_screen";
+  }
+  if (screen == "credits_screen") {
+    return "pause_credits_screen";
+  }
+  if (screen == "av_options_screen") {
+    return "av_options_pause_screen";
+  }
+  if (screen == "controller_config_screen") {
+    return "controller_config_pause_screen";
+  }
+  if (screen == "cal_welcome_screen") {
+    return std::string(screen);
+  }
+  return PauseScreen(screen);
+}
+
 std::vector<dtb::Node> DefinitionRoots() {
+  std::vector<dtb::Node> roots;
+  // Both contexts, main menu first: a page and then its in-song twin, so the pair sits together in
+  // the record a reader dumps.
+  for (const std::vector<PanelSpec>& context : {AllPanels(), InSongPanels()}) {
+    for (const PanelSpec& panel : context) {
+      roots.push_back(PanelDefinition(panel));
+      roots.push_back(ScreenDefinition(panel));
+    }
+  }
+  return roots;
+}
+
+std::vector<dtb::Node> EarlyDefinitionRoots() {
   std::vector<dtb::Node> roots;
   for (const PanelSpec& panel : AllPanels()) {
     roots.push_back(PanelDefinition(panel));
     roots.push_back(ScreenDefinition(panel));
   }
-  // The in-song context: the *same* root panel, hosted by a screen that keeps the running game and
-  // the pause panel on screen - retail's own `av_options_pause_screen` shape, and the reason a
-  // panel leaves through `{ui current_screen get back_screen}` rather than a named destination.
-  std::vector<std::string_view> pause_panels;
-  const std::vector<std::string> pause_names = PausePanels();
-  for (const std::string& name : pause_names) {
-    pause_panels.push_back(name);
+  for (const PanelSpec& panel : InSongPanels()) {
+    roots.push_back(PanelDefinition(panel));
   }
-  pause_panels.push_back(kRootPanel);
-  roots.push_back(Screen(kRootPauseScreen, pause_panels, kRootPanel, "game_screen"));
   return roots;
+}
+
+bool AddDeferredScreens(std::vector<dtb::Node>* nodes, std::string* reason) {
+  Hit anchor;
+  FindInRoots(nodes, IsFirstScreenSet, &anchor);
+  if (!anchor.found || anchor.parent == nullptr) {
+    if (reason) *reason = "no first_screen assignment after UI initialization";
+    return false;
+  }
+  std::vector<Node> screens;
+  for (const PanelSpec& panel : InSongPanels()) {
+    screens.push_back(ScreenDefinition(panel));
+  }
+  for (const auto& [variable, value] : g_configuration.boot_booleans)
+    screens.push_back(Cmd({Sym("set"), Var(variable), Node::Int(value ? 1 : 0)}));
+  anchor.parent->kids.insert(anchor.parent->kids.begin() + anchor.index,
+                             screens.begin(), screens.end());
+  return true;
 }
 
 std::vector<std::string> PanelNames() {
   std::vector<std::string> out;
-  for (const PanelSpec& panel : AllPanels()) {
-    out.push_back(panel.name);
+  for (const std::vector<PanelSpec>& context : {AllPanels(), InSongPanels()}) {
+    for (const PanelSpec& panel : context) {
+      out.push_back(panel.name);
+    }
   }
   return out;
 }
 
 std::vector<std::string> ScreenNames() {
   std::vector<std::string> out;
-  for (const PanelSpec& panel : AllPanels()) {
-    out.push_back(panel.screen);
+  for (const std::vector<PanelSpec>& context : {AllPanels(), InSongPanels()}) {
+    for (const PanelSpec& panel : context) {
+      out.push_back(panel.screen);
+    }
   }
-  out.push_back(kRootPauseScreen);
   return out;
+}
+
+std::vector<std::string> PauseRootRows(const bool provider_active) {
+  // The merged root's own order (plan §3), in the **in-song spellings**: retail's pause switch
+  // dispatches `pause_controls` (its in-song name for the Controls page; the main-menu page spells
+  // the same row `controls`), so reusing retail's case is what keeps that row working without a
+  // new body. `settings_gameplay` is dropped on a boot whose provider gate answers false - the same
+  // rule the root panel applies to itself, applied here to the list retail's pause panel fills.
+  std::vector<std::string> rows{"settings_general", "pause_controls", "calibration",
+                                "audio_video_options"};
+  if (provider_active) {
+    rows.push_back("settings_gameplay");
+  }
+  rows.push_back("settings_interface");
+  return rows;
 }
 
 std::vector<dtb::Node> MainMenuRouteBody() {
@@ -1117,19 +1380,21 @@ std::vector<dtb::Node> MainMenuRouteBody() {
 }
 
 std::vector<dtb::Node> PauseRouteBody() {
-  // Measured (this package): the in-song row is **not** a screen jump. Retail's in-song Help &
-  // Options hands the focus to the pause panel's own second list - `{this update_focus options.lst}`
-  // - whose contents `pause_panel`'s `{enter}` has already set (`{options.lst set_data
-  // (pause_tutorial pause_controls calibration audio_video_options credits)}`). Three different
-  // bodies that *leave* the pause list were tried and all three fault the guest with `read of guest
-  // 0x00000024` on the pad's Confirm: `{transition_to settings_pause_screen}` (retail's own primitive
-  // from that panel), `{ui goto_screen settings_pause_screen}`, and retail's focus switch followed by
-  // the jump in the same frame. A fourth arm that hosted a *retail* panel in that screen still
-  // faulted, while the whole payload with this record left pristine runs the in-song route clean - so
-  // the fault is this edit, not our panel or our screen. The in-song merge therefore lands where
-  // retail's own in-song options page lands: in `options.lst` itself (replace the five symbols it is
-  // filled with, add the cases for the rows we add to it). Until that lands this body stays retail's,
-  // because an in-song settings row that crashes the game is worse than a retail in-song page.
+  // Retail's own in-song behaviour, and the measured reason it is the one that ships: the pause
+  // menu's HELP & OPTIONS row *switches the focus* to the pause panel's inline `options.lst`
+  // (`{this update_focus options.lst}`). Four bodies that leave the pause list instead were tried
+  // and all four fault the guest with `read of guest 0x00000024` on the pad's Confirm:
+  // `{transition_to settings_pause_screen}` (retail's own primitive from that panel),
+  // `{ui goto_screen settings_pause_screen}`, the focus switch followed by the jump in the same
+  // frame, and the same with a retail panel in the destination screen. A control boot with this
+  // record left pristine runs the in-song route clean, so the fault is the *row*, not our panel or
+  // our screen.
+  //
+  // What that measurement does **not** say - and what P5b-r2 measured separately - is that the
+  // switch those five rows are dispatched in cannot jump: retail's own `pause_controls` and `credits`
+  // cases in that same switch jump to in-song screens and work. So the merge lives where retail's
+  // own in-song options page lives: in `options.lst`'s contents (`MergePauseListRows`) and in the
+  // cases that dispatch them (`AddPauseSwitchCase`). This row stays retail's statement.
   return {Cmd({Var("this"), Sym("update_focus"), Sym(kList)})};
 }
 
@@ -1164,6 +1429,99 @@ bool RerouteRow(std::vector<dtb::Node>* nodes, const std::string_view row,
 // entry the old row needed is gone too - a payload generated from the retail records has no trace
 // of `advanced_settings`, which is what retiring it means here.
 
+std::vector<dtb::Node> InSongRowBody(const std::string_view screen) {
+  return {EnterScreen(InSongDestination(screen))};
+}
+
+bool MergePauseListRows(std::vector<dtb::Node>* nodes, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr) {
+    return refuse("nothing to edit");
+  }
+  Hit hit;
+  FindInRoots(
+      nodes,
+      [](const Node& node) {
+        return node.tag == dtb::kCommand && node.kids.size() == 3 &&
+               IsSymbol(node.kids[0], kListName) && IsSymbol(node.kids[1], "set_data");
+      },
+      &hit);
+  if (!hit.found || hit.parent == nullptr || !IsBlock(*hit.parent)) {
+    return refuse("no {options.lst set_data ...} statement to merge into");
+  }
+  const Node& statement = hit.parent->kids[hit.index];
+  const Node& array = statement.kids[2];
+  const std::vector<std::string> retail = RetailPauseRows();
+  if (array.tag != dtb::kArray || array.kids.size() != retail.size()) {
+    return refuse("the inline list is no longer filled with retail's five rows");
+  }
+  for (size_t i = 0; i < retail.size(); ++i) {
+    if (!IsSymbol(array.kids[i], retail[i])) {
+      return refuse("the inline list is no longer filled with retail's five rows");
+    }
+  }
+  // The fill becomes a pair, chosen by the provider gate: the six-row list where an Ultimate payload
+  // is active, the five-row one where it is not. `if_else` rather than two statements, because only
+  // one of them may run.
+  const Node gate =
+      Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(kProviderQuery)}), FillList(PauseRootRows(true)),
+           FillList(PauseRootRows(false))});
+  hit.parent->kids[hit.index] = gate;
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
+bool AddPauseSwitchCase(std::vector<dtb::Node>* nodes, const std::string_view row,
+                        const std::vector<dtb::Node>& body, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr || row.empty() || body.empty()) {
+    return refuse("nothing to add");
+  }
+  // The switch that dispatches the inline list: the one carrying retail's own `pause_controls` case.
+  // That symbol is a row of `options.lst` only, so it identifies the table without depending on the
+  // switch's position in the file.
+  Hit hit;
+  FindInRoots(
+      nodes,
+      [](const Node& node) {
+        if (node.tag != dtb::kCommand || node.kids.size() < 2 ||
+            !IsSymbol(node.kids[0], "switch")) {
+          return false;
+        }
+        for (size_t i = 1; i < node.kids.size(); ++i) {
+          if (IsRowCase(node.kids[i]) && IsSymbol(node.kids[i].kids[0], "pause_controls")) {
+            return true;
+          }
+        }
+        return false;
+      },
+      &hit);
+  if (!hit.found || hit.parent == nullptr) {
+    return refuse("no {switch ...} dispatching the pause panel's inline list");
+  }
+  Node& table = hit.parent->kids[hit.index];
+  // A switch takes its first matching case, so a second case for the same row would be dead code
+  // that looks alive in a dump. Refuse instead.
+  for (const Node& child : table.kids) {
+    if (IsRowCase(child) && IsSymbol(child.kids[0], row)) {
+      return refuse("the switch already dispatches that row; use RerouteRow to replace it");
+    }
+  }
+  std::vector<Node> kase = {Sym(row)};
+  for (const Node& statement : body) {
+    kase.push_back(statement);
+  }
+  table.kids.push_back(Arr(std::move(kase)));
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
 bool AddLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
                     const std::string_view text, std::string* reason) {
   auto refuse = [reason](const char* why) {
@@ -1190,6 +1548,10 @@ bool AddLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
 // retail row symbol whose text the installed locale already carries, so nothing is added for it.
 std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
+  out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
+  out.emplace_back("settings_save_error_message", "Settings could not be saved. Check that the settings folder is writable, then try again.");
+  out.emplace_back("settings_restart_error", "The game could not restart. Your settings are saved. Close this message and restart manually.");
+  out.emplace_back("settings_achievements_message", "Unlock the four online achievements? This cannot be undone.");
   auto add = [&out](const std::string& key, const std::string& text) {
     for (const auto& item : out) {
       if (item.first == key) {

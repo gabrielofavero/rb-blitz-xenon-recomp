@@ -158,7 +158,7 @@ Value Service::RequestedValue(SettingId id) const {
       it != store_.document().values.end()) {
     return it->second;
   }
-  if (IsProviderFileRow(id)) {
+  if (descriptor->provider == Provider::kUltimate) {
     if (const auto it = provider_values_.find(id); it != provider_values_.end()) {
       return it->second;
     }
@@ -171,7 +171,9 @@ Source Service::SourceFor(SettingId id, bool provider_row) const {
     return external_source_.at(id);
   }
   if (store_.document().values.count(id) != 0) {
-    return Source::kSettingsFile;
+    const auto origin = store_.document().origins.find(id);
+    return origin != store_.document().origins.end() && origin->second == Origin::kAutomatic
+               ? Source::kRecommendedFirstRun : Source::kSettingsFile;
   }
   if (provider_row) {
     return Source::kProvider;

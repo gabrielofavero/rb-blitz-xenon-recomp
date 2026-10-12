@@ -45,6 +45,7 @@
 #include "ui/settings_screen.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -118,10 +119,31 @@ std::vector<dtb::Node> PauseFixture() {
       Arr({Sym("pause_options"), Cmd({Var("this"), Sym("update_focus"), Sym("options.lst")})});
   const Node back_case = Arr(
       {Sym("pause_options_back"), Cmd({Var("this"), Sym("update_focus"), Sym("pause.lst")})});
-  const Node table = Cmd({Sym("switch"), value, resume_case, options_case, back_case});
+  // Retail's own cases for the rows of the inline list. `pause_controls` is the anchor the merge
+  // uses to find that table (it is a row of `options.lst` and of nothing else).
+  const Node tutorial_case =
+      Arr({Sym("pause_tutorial"), Cmd({Sym("ui"), Sym("goto_screen"), Sym("tutorials_pause_screen")})});
+  const Node controls_case = Arr(
+      {Sym("pause_controls"), Cmd({Sym("ui"), Sym("goto_screen"), Sym("controller_config_pause_screen")})});
+  const Node credits_case =
+      Arr({Sym("credits"), Cmd({Sym("ui"), Sym("goto_screen"), Sym("pause_credits_screen")})});
+  const Node audio_video_case =
+      Arr({Sym("audio_video_options"), Cmd({Sym("transition_to"), Sym("av_options_pause_screen")})});
+  const Node table =
+      Cmd({Sym("switch"), value, resume_case, options_case, back_case, tutorial_case, controls_case,
+           audio_video_case, credits_case});
+  // `{enter {do {this populate_menu} {options.lst set_data (retail's five)} {this update_focus
+  // {get_focus}}}}` - retail's own enter, transcribed from the shipped pause record.
+  const Node fill = Cmd({Sym("options.lst"), Sym("set_data"),
+                         Arr({Sym("pause_tutorial"), Sym("pause_controls"), Sym("calibration"),
+                              Sym("audio_video_options"), Sym("credits")})});
+  const Node enter = Arr({Sym("enter"), Cmd({Sym("do"), Cmd({Var("this"), Sym("populate_menu")}),
+                                             fill,
+                                             Cmd({Var("this"), Sym("update_focus"),
+                                                  dtb::Node::Property({Sym("get_focus")})})})});
   return {
       Cmd({Sym("new"), Sym("UIPanel"), Sym("pause_panel"), Arr({Sym("file"), Str("pause.milo")}),
-           Arr({Sym("focus"), Sym("pause.lst")}), Arr({Sym("SELECT_MSG"), table})}),
+           Arr({Sym("focus"), Sym("pause.lst")}), enter, Arr({Sym("SELECT_MSG"), table})}),
   };
 }
 
@@ -160,6 +182,57 @@ bool HasText(const dtb::Node& root, const std::string& name) {
   std::vector<std::string> texts;
   CollectText(root, &texts);
   return std::find(texts.begin(), texts.end(), name) != texts.end();
+}
+
+// True when some leaf *ends with* `suffix`. The context twin's name is a suffix of a longer leaf, so
+// an exact-match walk cannot see it.
+bool HasTextSuffix(const dtb::Node& root, const std::string& suffix) {
+  std::vector<std::string> texts;
+  CollectText(root, &texts);
+  for (const std::string& text : texts) {
+    if (text.size() >= suffix.size() &&
+        text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Every array node under a file, in document order.
+void CollectArrays(const std::vector<dtb::Node>& nodes, std::vector<const dtb::Node*>* out) {
+  for (const dtb::Node& root : nodes) {
+    std::vector<const dtb::Node*> stack{&root};
+    while (!stack.empty()) {
+      const dtb::Node* node = stack.back();
+      stack.pop_back();
+      if (node->tag == dtb::kArray) {
+        out->push_back(node);
+      }
+      for (const dtb::Node& kid : node->kids) {
+        stack.push_back(&kid);
+      }
+    }
+  }
+}
+
+// Every word inside the `[<row> <body...>]` case that dispatches `row`, so a test can assert what a
+// *case* does without the rest of the record's vocabulary getting in the way.
+std::vector<std::string> CaseWords(const std::vector<dtb::Node>& nodes, const std::string& row) {
+  std::vector<std::string> out;
+  std::vector<const dtb::Node*> found;
+  CollectArrays(nodes, &found);
+  for (const dtb::Node* node : found) {
+    if (node->kids.size() < 2 || node->kids[0].tag != dtb::kSymbol ||
+        node->kids[0].text != row) {
+      continue;
+    }
+    if (node->kids[1].tag != dtb::kArray && node->kids[1].tag != dtb::kCommand &&
+        node->kids[1].tag != dtb::kProperty) {
+      continue;  // a row *list* holds bare symbols, not statements
+    }
+    CollectText(*node, &out);
+  }
+  return out;
 }
 
 // Every `{<receiver> <method> <args...>}` call node under a tree - the method being the second
@@ -291,9 +364,11 @@ void TestDefinitionRoundTrip() {
   BeginCase("the authored definition compiles, parses back and recompiles identically");
 
   const std::vector<dtb::Node> authored = DefinitionRoots();
-  // Fourteen panels, their fourteen screens, and the in-song root screen that hosts the same root
-  // panel as the main-menu one.
-  CHECK_EQ(authored.size(), 29u);
+  // Fourteen panels and fourteen screens per context - the main-menu one and the in-song one - so
+  // 2 * 14 * 2 roots. The two contexts are a pair of declarations each, not one shared tree: a panel
+  // whose bodies name a destination (a submenu must) cannot be hosted by two contexts, because the
+  // destination differs between them (P5b-r2).
+  CHECK_EQ(authored.size(), 68u);
 
   std::string error;
   const std::vector<dtb::Node> parsed = Reparse(authored, &error);
@@ -313,13 +388,20 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 14u);
+  CHECK_EQ(panels.size(), 34u);  // fourteen pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 15u);
+  CHECK_EQ(screens.size(), 34u);
   CHECK_TRUE(screens.front() == kRootScreen);
-  CHECK_TRUE(screens.back() == kRootPauseScreen);
+  // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
+  // (i + 14)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
+  // to send it to - and it is also the reason the pair sits adjacent in the record.
+  CHECK_EQ(screens.size(), panels.size());
+  for (size_t i = 0; i + panels.size() / 2 < screens.size(); ++i) {
+    CHECK_TRUE(PauseScreen(screens[i]) == screens[i + panels.size() / 2]);
+    CHECK_TRUE(PausePanel(panels[i]) == panels[i + panels.size() / 2]);
+  }
 
   // The root's rows, in the plan's §3 order. Retail's help list is How to Play, Controls,
   // Calibration, Audio/Video, Credits; the merge keeps Controls / Calibration / Audio-Video at
@@ -355,28 +437,45 @@ void TestListOwnership() {
   // retail's `options_panel` loads - and the engine's per-path dir loader therefore handed both
   // panels the *same* `options.lst` object, so they overwrote each other's rows and selection and
   // Back landed on the retail list's last row (bridge findings §12.3b). Every panel of the merged
-  // surface has to name the project-owned scene instead.
+  // surface has to name a project-owned scene instead.
+  //
+  // And *each context* has to name a different one. The engine caches a loaded dir by path, so two
+  // distinct panels naming one scene are handed one dir and one list object; retail avoids the
+  // question by hosting a single panel object in both contexts, which ours cannot do because a row
+  // body names its destination and the destinations differ (measured: entering an in-song page whose
+  // panel named the main-menu scene faulted the guest with `read of guest 0x00000024`, before the
+  // panel's own `{enter}` ran - bridge findings §12.4).
+  size_t main_menu = 0;
+  size_t in_song = 0;
   for (const dtb::Node& root : DefinitionRoots()) {
     const std::vector<std::string> words = Words(root);
     if (std::find(words.begin(), words.end(), "UIPanel") == words.end()) {
       continue;  // a screen, not a panel
     }
-    CHECK_TRUE(HasText(root, kSceneName));
     CHECK_TRUE(HasText(root, kListName));
     CHECK_FALSE(HasText(root, "options_menu.milo"));
+    const bool pause = HasText(root, kPauseSceneName) || HasText(root, "../pause/settings_confirmation_pause.milo");
+    CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
+    (pause ? in_song : main_menu) += 1;
   }
+  CHECK_EQ(main_menu, 17);
+  CHECK_EQ(in_song, 17);
 
-  // The copy has to live **beside** the retail scene, because that scene refers to its neighbours
+  // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
   // resolve against the scene's own directory.
   const std::string scene = kSceneRecord;
   const std::string source = kSceneSourceRecord;
   CHECK_TRUE(scene.substr(0, scene.rfind('/')) == source.substr(0, source.rfind('/')));
   CHECK_TRUE(scene != source);
+  const std::string pause_scene = kPauseSceneRecord;
+  CHECK_TRUE(pause_scene.substr(0, pause_scene.rfind('/')) ==
+             source.substr(0, source.rfind('/')));
+  CHECK_TRUE(pause_scene != scene);
 }
 
 void TestScreenBackTargets() {
-  BeginCase("each screen declares a back target and the root is hosted by two contexts");
+  BeginCase("each screen declares a back target and every page is hosted in both contexts");
 
   const std::vector<dtb::Node> roots = DefinitionRoots();
   for (const dtb::Node& root : roots) {
@@ -387,15 +486,36 @@ void TestScreenBackTargets() {
     CHECK_TRUE(HasText(root, "back_screen"));
   }
 
-  // The in-song root screen keeps the running game and the pause panel on screen - retail's own
-  // `av_options_pause_screen` shape - and returns to `game_screen`. That is also why a panel of
-  // ours leaves through `{ui current_screen get back_screen}` rather than naming a destination.
-  const dtb::Node& pause = roots.back();
-  CHECK_TRUE(HasText(pause, kRootPauseScreen));
-  CHECK_TRUE(HasText(pause, kRootPanel));
-  CHECK_TRUE(HasText(pause, "game_panel"));
-  CHECK_TRUE(HasText(pause, "pause_panel"));
-  CHECK_TRUE(HasText(pause, "game_screen"));
+  // Every in-song screen keeps the running game and the pause panel on screen - retail's own
+  // `av_options_pause_screen` / `pause_credits_screen` shape. That is not cosmetic: the in-song
+  // state machine reads a list on the pause panel, so a page that dropped it would leave that
+  // machine with nothing to read. Only the *root's* twin returns to `game_screen`; a child's Back is
+  // pointed at whoever sent it (`EnterScreen`), which is why its declaration's own back target is
+  // the parent's twin.
+  int in_song = 0;
+  int root_twins = 0;
+  for (const dtb::Node& root : roots) {
+    const std::vector<std::string> words = Words(root);
+    if (std::find(words.begin(), words.end(), "UIScreen") == words.end()) {
+      continue;
+    }
+    if (!HasTextSuffix(root, "_pause_screen")) {
+      continue;
+    }
+    ++in_song;
+    CHECK_TRUE(HasText(root, "game_panel"));
+    CHECK_TRUE(HasText(root, "pause_panel"));
+    CHECK_TRUE(HasText(root, "background_night_panel"));
+    // `{new UIScreen <name> ...}` - the name is the third child, so the root's twin is exact and a
+    // screen that merely *names* it (as a back target) is not mistaken for it.
+    if (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol &&
+        root.kids[2].text == kRootPauseScreen) {
+      ++root_twins;
+      CHECK_TRUE(HasText(root, "game_screen"));
+    }
+  }
+  CHECK_EQ(in_song, 17);  // one per page, the root included
+  CHECK_EQ(root_twins, 1);
 }
 
 void TestRequestPathsParse() {
@@ -420,7 +540,7 @@ void TestRequestPathsParse() {
       continue;
     }
     // A commit carries no setting and no value; every other request addresses one.
-    if (request.op == Op::kCommit) {
+    if (request.op == Op::kCommit || request.op == Op::kRequestRestart) {
       CHECK_TRUE(request.setting.empty());
       CHECK_TRUE(request.value.kind == ValueKind::kNone);
     } else {
@@ -551,14 +671,193 @@ void TestPauseReroute() {
   // list. Measured: every body that leaves the pause list instead - `{transition_to ...}`, on the
   // panel's own primitive, and `{ui goto_screen ...}`, the main menu's - faults the guest with
   // `read of guest 0x00000024` on Confirm, and so does retail's switch plus the jump in one frame.
-  CHECK_TRUE(std::find(words.begin(), words.end(), "options.lst") != words.end());
-  CHECK_TRUE(std::find(words.begin(), words.end(), "update_focus") != words.end());
-  CHECK_TRUE(std::find(words.begin(), words.end(), "goto_screen") == words.end());
-  CHECK_TRUE(std::find(words.begin(), words.end(), "transition_to") == words.end());
-  CHECK_TRUE(std::find(words.begin(), words.end(), kRootPauseScreen) == words.end());
+  // The switch's *other* cases do jump (retail's own `pause_controls` / `credits` rows), which is
+  // what the merge uses; this row is the one that must not.
+  const std::vector<std::string> body = CaseWords(nodes, kPauseMenuRow);
+  CHECK_TRUE(std::find(body.begin(), body.end(), "options.lst") != body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), "update_focus") != body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), "goto_screen") == body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), "transition_to") == body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), kRootPauseScreen) == body.end());
   // The panel's own Back row for the inline list is untouched, which is what makes the retail in-song
   // page still usable while the merge of that list's contents is pending.
   CHECK_TRUE(std::find(words.begin(), words.end(), "pause_options_back") != words.end());
+
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+}
+
+void TestInSongContext() {
+  BeginCase("every page has an in-song twin, and the in-song list is the merged root's own rows");
+
+  // The name mapping is the whole mechanism: a page reached from inside a song is a different screen
+  // (same panel *definition*, in-song name) because its bodies must point at the in-song twins below
+  // it. Retail does the same thing by hand (`av_options_pause_screen`, `pause_credits_screen`).
+  CHECK_TRUE(PauseScreen("settings_general_screen") == "settings_general_pause_screen");
+  CHECK_TRUE(PauseScreen("settings_screen") == kRootPauseScreen);
+  CHECK_TRUE(PausePanel("settings_panel") == "settings_pause_panel");
+  CHECK_TRUE(PausePanel("settings_general_panel") == "settings_general_pause_panel");
+
+  // Retail's own in-song twins are named by retail, not by the suffix rule.
+  CHECK_TRUE(InSongDestination("controller_config_screen") == "controller_config_pause_screen");
+  CHECK_TRUE(InSongDestination("av_options_screen") == "av_options_pause_screen");
+  CHECK_TRUE(InSongDestination("credits_screen") == "pause_credits_screen");
+  CHECK_TRUE(InSongDestination("tutorials_screen") == "tutorials_pause_screen");
+
+  // The in-song rows: the *same* symbols the main-menu root uses, except the Controls row, which
+  // retail's pause switch spells `pause_controls` (requesting that spelling is what reuses retail's
+  // own case instead of adding a second body for the same page).
+  const std::vector<std::string> six = PauseRootRows(true);
+  const std::vector<std::string> five = PauseRootRows(false);
+  CHECK_EQ(six.size(), 6u);
+  CHECK_EQ(five.size(), 5u);
+  CHECK_TRUE(six[0] == "settings_general");
+  CHECK_TRUE(six[1] == "pause_controls");
+  CHECK_TRUE(six[2] == "calibration");
+  CHECK_TRUE(six[3] == "audio_video_options");
+  CHECK_TRUE(six[4] == "settings_gameplay");
+  CHECK_TRUE(six[5] == "settings_interface");
+  // A base install must not be offered a dead row: only the provider row moves.
+  CHECK_TRUE(std::find(five.begin(), five.end(), "settings_gameplay") == five.end());
+  CHECK_TRUE(five[4] == "settings_interface");
+
+  // A row of ours in song jumps to its twin and points that twin's Back at whoever sent us.
+  const dtb::Node body = Cmd({InSongRowBody("settings_general_screen")});
+  CHECK_TRUE(HasText(body, "settings_general_pause_screen"));
+  CHECK_FALSE(HasText(body, "settings_general_screen"));  // never the main-menu screen
+  CHECK_TRUE(HasText(body, "back_screen"));
+  CHECK_TRUE(HasText(body, "current_screen"));
+
+  // Two invariants that together say the in-song context is closed: every main-menu screen has a
+  // twin to land on, and no in-song panel names a main-menu destination (which is what would send a
+  // page in a song back out to the main-menu tree).
+  const std::vector<std::string> screens = ScreenNames();
+  std::vector<std::string> menu_screens;
+  for (const std::string& screen : screens) {
+    if (screen.find("_pause_screen") != std::string::npos) {
+      continue;
+    }
+    menu_screens.push_back(screen);
+    CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screen)) != screens.end());
+  }
+  CHECK_EQ(menu_screens.size(), 17u);
+  int in_song_panels = 0;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    const std::vector<std::string> words = Words(root);
+    if (std::find(words.begin(), words.end(), "UIPanel") == words.end() ||
+        !HasTextSuffix(root, "_pause_panel")) {
+      continue;
+    }
+    ++in_song_panels;
+    for (const std::string& screen : menu_screens) {
+      CHECK_FALSE(HasText(root, screen));
+    }
+  }
+  CHECK_EQ(in_song_panels, 17);
+
+  // The two contexts' panel sets are retail's own, and the difference between them is
+  // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
+  // plain `{ui goto_screen ...}` (`controller_config_pause_screen`, `pause_credits_screen`) all
+  // declare `game_fade_out_panel`, and the one in-song page without it is entered with
+  // `{transition_to ...}` (`av_options_pause_screen`). A screen of ours without the fade panel,
+  // reached by a plain goto from the pause menu's inline list, faults the guest with
+  // `read of guest 0x00000024` during the switch (P5b-r2, `out/_swap/p5b/r2long.log`), and the same
+  // screen with it enters cleanly. The main-menu twin must *not* carry it: that is the main-menu set.
+  bool seen_in_song_screen = false;
+  bool seen_menu_screen = false;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    if (!HasText(root, "UIScreen")) {
+      continue;
+    }
+    const bool in_song = HasText(root, "settings_general_pause_screen");
+    const bool menu = HasText(root, "settings_general_screen");
+    if (!in_song && !menu) {
+      continue;
+    }
+    if (in_song) {
+      seen_in_song_screen = true;
+      CHECK_TRUE(HasText(root, "game_panel"));
+      CHECK_TRUE(HasText(root, "pause_panel"));
+      CHECK_TRUE(HasText(root, "game_fade_out_panel"));
+      CHECK_TRUE(HasText(root, "background_night_panel"));
+    } else {
+      seen_menu_screen = true;
+      CHECK_FALSE(HasText(root, "game_fade_out_panel"));
+      CHECK_FALSE(HasText(root, "pause_panel"));
+    }
+  }
+  CHECK_TRUE(seen_in_song_screen);
+  CHECK_TRUE(seen_menu_screen);
+}
+
+void TestPauseMergeEdits() {
+  BeginCase("the in-song list is merged, and only a record that still holds retail's five is");
+
+  // A record without the fill (or without the switch) is refused rather than half-rewritten: the
+  // shipped pause record is retail's, and a merge that guessed would break the one in-song page that
+  // currently works.
+  {
+    std::vector<dtb::Node> bare = {Cmd({Sym("new"), Sym("UIPanel"), Sym("pause_panel"),
+                                        Arr({Sym("file"), Str("pause.milo")})})};
+    std::string reason;
+    CHECK_FALSE(MergePauseListRows(&bare, &reason));
+    CHECK_TRUE(!reason.empty());
+    CHECK_FALSE(AddPauseSwitchCase(&bare, "settings_general", MainMenuRouteBody(), &reason));
+    CHECK_TRUE(!reason.empty());
+  }
+
+  std::vector<dtb::Node> nodes = PauseFixture();
+  std::string reason;
+
+  // The fill becomes a gate-aware pair: the six-row list where the provider is active, the five-row
+  // one where it is not.
+  CHECK_TRUE(MergePauseListRows(&nodes, &reason));
+  CHECK_TRUE(reason.empty());
+  const std::vector<std::string> words = Words(nodes[0]);
+  CHECK_TRUE(std::find(words.begin(), words.end(), "if_else") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "file_exists") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), kProviderQuery) != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "settings_general") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "settings_interface") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "settings_gameplay") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "pause_controls") != words.end());
+  // Retail's five are still named (both branches carry the ones that survive), and the rows retail
+  // had but the merge folds into General are gone from the *list*.
+  CHECK_TRUE(std::find(words.begin(), words.end(), "pause_tutorial") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "credits") != words.end());
+
+  // Running it twice refuses: the record no longer holds retail's five-symbol fill, which is the
+  // guard that keeps a second pass from eating the first one's work.
+  CHECK_FALSE(MergePauseListRows(&nodes, &reason));
+  CHECK_TRUE(!reason.empty());
+
+  // The cases our three rows need. Each is appended to the switch that already dispatches retail's
+  // rows, so it runs in the pause panel's own context - the context retail's `pause_controls` and
+  // `credits` cases jump from, which is the one that works.
+  const char* rows[] = {"settings_general", "settings_gameplay", "settings_interface"};
+  const char* screens[] = {"settings_general_screen", "settings_gameplay_screen",
+                           "settings_interface_screen"};
+  for (size_t i = 0; i < 3; ++i) {
+    CHECK_TRUE(AddPauseSwitchCase(&nodes, rows[i], InSongRowBody(screens[i]), &reason));
+    CHECK_TRUE(reason.empty());
+  }
+  // A second case for the same row would be dead code a dump cannot tell from a live one, so it is
+  // refused instead.
+  CHECK_FALSE(AddPauseSwitchCase(&nodes, "settings_general", InSongRowBody("settings_general_screen"),
+                                 &reason));
+  CHECK_TRUE(!reason.empty());
+  // Re-pointing a row retail already dispatches is RerouteRow's job, and that is how the Audio/Video
+  // row moves from retail's page to the merged one.
+  CHECK_TRUE(RerouteRow(&nodes, "audio_video_options",
+                        InSongRowBody("settings_av_screen"), &reason));
+
+  const std::vector<std::string> after = Words(nodes[0]);
+  for (const char* screen : screens) {
+    // A row of ours lands on the twin, never on the main-menu screen of the same page.
+    CHECK_TRUE(std::find(after.begin(), after.end(), PauseScreen(screen)) != after.end());
+    CHECK_FALSE(std::find(after.begin(), after.end(), screen) != after.end());
+  }
+  CHECK_TRUE(std::find(after.begin(), after.end(), "settings_av_pause_screen") != after.end());
 
   std::string error;
   CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
@@ -707,7 +1006,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 14);                   // the fourteen panels
+  CHECK_EQ(fills, 34);                   // the fourteen panels, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -720,6 +1019,142 @@ void TestEveryFillPlacesTheSelection() {
       CHECK_TRUE(call->kids[2].tag == dtb::kInt);
     }
   }
+}
+
+// `{new UIScreen <name> {panels <panel>...} {focus <panel>} {back_screen <screen>}}` - the three
+// facts a screen declares, read positionally rather than by searching the root for text, so a screen
+// that merely *names* a symbol is never mistaken for the declaration that owns it.
+struct ScreenFacts {
+  std::string name;
+  std::vector<std::string> panels;
+  std::string focus;
+  std::string back;
+};
+
+bool ReadScreenFacts(const dtb::Node& root, ScreenFacts* out) {
+  if (root.tag != dtb::kCommand || root.kids.size() < 3 || root.kids[0].tag != dtb::kSymbol ||
+      root.kids[0].text != "new" || root.kids[1].text != "UIScreen") {
+    return false;
+  }
+  out->name = root.kids[2].text;
+  for (size_t i = 3; i < root.kids.size(); ++i) {
+    const dtb::Node& member = root.kids[i];
+    if (member.tag != dtb::kArray || member.kids.size() < 2 || member.kids[0].tag != dtb::kSymbol) {
+      continue;
+    }
+    if (member.kids[0].text == "panels") {
+      out->panels.clear();
+      for (size_t k = 1; k < member.kids.size(); ++k) {
+        out->panels.push_back(member.kids[k].text);
+      }
+    } else if (member.kids[0].text == "focus") {
+      out->focus = member.kids[1].text;
+    } else if (member.kids[0].text == "back_screen") {
+      out->back = member.kids[1].text;
+    }
+  }
+  return true;
+}
+
+// Every `{ui goto_screen <name>}` in an authored tree. The context-free form retail's own shared
+// panels use - `{ui goto_screen {{ui current_screen} get back_screen}}` - carries a command in that
+// position rather than a symbol, so it is deliberately not collected: it resolves at run time.
+void CollectScreenTargets(const dtb::Node& node, std::vector<std::string>* out) {
+  if (node.tag == dtb::kCommand && node.kids.size() >= 3 && node.kids[0].tag == dtb::kSymbol &&
+      node.kids[0].text == "ui" && node.kids[1].text == "goto_screen" &&
+      node.kids[2].tag == dtb::kSymbol) {
+    out->push_back(node.kids[2].text);
+  }
+  for (const dtb::Node& kid : node.kids) {
+    CollectScreenTargets(kid, out);
+  }
+}
+
+void TestEveryDestinationExists() {
+  BeginCase("every panel and destination an authored tree names is one this payload provides");
+
+  // What the *installed* records own: retail's own pages (including the four in-song twins a merged
+  // row can be sent to, and the screens the pause state machine drives) and the retail panels our
+  // screens share with it. Nothing here is ours, so a name outside both lists is a name no
+  // declaration provides - which is the shape of a screen or panel that dereferences as null.
+  const std::vector<std::string> retail_screens = {
+      "game_screen",
+      "splash_screen",
+      "options_screen",
+      "credits_screen",
+      "tutorials_screen",
+      "av_options_screen",
+      "controller_config_screen",
+      "cal_welcome_screen",
+      "pause_credits_screen",
+      "tutorials_pause_screen",
+      "av_options_pause_screen",
+      "controller_config_pause_screen",
+      "pause_confirm_quit_song_screen",
+      "confirm_exit_game_screen"};
+  const std::vector<std::string> retail_panels = {"game_panel",
+                                                  "pause_panel",
+                                                  "game_fade_out_panel",
+                                                  "background_night_panel",
+                                                  "shell_music_panel",
+                                                  "menu_cache_panel",
+                                                  "options_panel",
+                                                  "av_options_panel",
+                                                  "controller_config_panel",
+                                                  "credits_panel"};
+
+  auto known = [](const std::vector<std::string>& names, const std::string& name) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+  };
+  const std::vector<std::string> our_screens = ScreenNames();
+  const std::vector<std::string> our_panels = PanelNames();
+  auto screen_known = [&](const std::string& name) {
+    return known(our_screens, name) || known(retail_screens, name);
+  };
+  auto panel_known = [&](const std::string& name) {
+    return known(our_panels, name) || known(retail_panels, name);
+  };
+
+  int screens = 0;
+  int targets = 0;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    ScreenFacts facts;
+    if (ReadScreenFacts(root, &facts)) {
+      ++screens;
+      // A screen's focus is one of the panels it hosts, and every panel it hosts has a declaration.
+      if (!known(facts.panels, facts.focus)) {
+        std::printf("         %s focuses %s, which it does not host\n", facts.name.c_str(),
+                    facts.focus.c_str());
+        CHECK_TRUE(false);
+      }
+      for (const std::string& panel : facts.panels) {
+        if (!panel_known(panel)) {
+          std::printf("         %s hosts unknown panel %s\n", facts.name.c_str(), panel.c_str());
+          CHECK_TRUE(false);
+        }
+      }
+      if (!screen_known(facts.back)) {
+        std::printf("         %s returns to unknown screen %s\n", facts.name.c_str(),
+                    facts.back.c_str());
+        CHECK_TRUE(false);
+      }
+      continue;
+    }
+    std::vector<std::string> gotos;
+    CollectScreenTargets(root, &gotos);
+    for (const std::string& target : gotos) {
+      ++targets;
+      if (!screen_known(target)) {
+        std::printf("         a row body jumps to unknown screen %s\n", target.c_str());
+        CHECK_TRUE(false);
+      }
+    }
+  }
+  CHECK_EQ(screens, 34);
+  // Every row that enters a screen of ours contributes one `{ui goto_screen <name>}`; the count is
+  // reported rather than guessed at, because a change of row kind moves it.
+  std::printf("         %d screen(s), %d goto_screen target(s), all known\n", screens, targets);
+  CHECK_TRUE(targets > 20);
 }
 
 void TestButtonTableIsOneSwitch() {
@@ -764,7 +1199,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 14);  // the fourteen panels
+  CHECK_EQ(tables, 34);  // the fourteen panels, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -800,7 +1235,7 @@ void TestButtonTableIsOneSwitch() {
     const size_t extra = all.size() - 1u - static_cast<size_t>(in_moves);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 14);  // one row table per panel
+  CHECK_EQ(row_tables, 34);  // one row table per panel, in both contexts
 }
 
 void TestLabels() {
@@ -905,6 +1340,76 @@ bool ReadFile(const char* path, std::vector<uint8_t>* bytes) {
 // answered the questions they were built to ask, and nothing in the merged surface serves them.
 // The evidence they produced lives in docs/plans/in-game-settings-bridge-findings.md §12.
 
+// TEMPORARY INSTRUMENT (P5b-r2 diagnosis, removed once the fault is located): a guest-side print.
+// The bridge answers a `snapshot` read by logging one line per query, so a statement this harmless -
+// `{if_else {file_exists rbbz-settings/snapshot/<marker>/b:1} 0 0}` - reaches the host's log without
+// touching the UI, the store, or any variable of the guest's. Set `RBBZ_PAUSE_PROBE=1` to arm the
+// emit with markers around each step of the in-song row body and of the in-song panel's `{enter}`.
+dtb::Node ProbeMark(const char* marker) {
+  const std::string path = std::string("rbbz-settings/snapshot/") + marker + "/b:1";
+  return Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(path.c_str())}), dtb::Node::Int(0),
+              dtb::Node::Int(0)});
+}
+
+bool IsBlockNode(const dtb::Node& node) {
+  return node.tag == dtb::kArray || node.tag == dtb::kCommand || node.tag == dtb::kProperty;
+}
+
+// TEMPORARY INSTRUMENT (P5b-r2, probe 6): a screen that differs from one of ours in exactly one
+// dimension - the panel set, or which panel (and therefore scene) it hosts - so a single boot that
+// enters both answers which dimension the `read of guest 0x00000024` lives in.
+dtb::Node ProbeScreen(const char* name, const std::vector<const char*>& panels, const char* focus,
+                      const char* back) {
+  std::vector<dtb::Node> list = {Sym("panels")};
+  for (const char* panel : panels) {
+    list.push_back(Sym(panel));
+  }
+  return Cmd({Sym("new"), Sym("UIScreen"), Sym(name), Arr(std::move(list)),
+              Arr({Sym("focus"), Sym(focus)}), Arr({Sym("back_screen"), Sym(back)})});
+}
+
+// `<panel>`'s `{enter ...}` array, wherever it sits in the tree - the block a screen entry runs.
+dtb::Node* FindEnterBlock(dtb::Node* node, const char* panel) {
+  if (node->tag == dtb::kCommand && node->kids.size() > 2 && node->kids[0].tag == dtb::kSymbol &&
+      node->kids[0].text == "new" && node->kids[2].text == panel) {
+    for (dtb::Node& kid : node->kids) {
+      if (kid.tag == dtb::kArray && !kid.kids.empty() && kid.kids[0].tag == dtb::kSymbol &&
+          kid.kids[0].text == "enter") {
+        return &kid;
+      }
+    }
+  }
+  for (dtb::Node& kid : node->kids) {
+    if (!IsBlockNode(kid)) continue;
+    if (dtb::Node* hit = FindEnterBlock(&kid, panel)) return hit;
+  }
+  return nullptr;
+}
+
+// TEMPORARY INSTRUMENT (P5b-r2, `RBBZ_PAUSE_DEFS=1`): ride the surface's two contexts in the two
+// retail records that belong to them - the main-menu pairs in the menu record, the in-song twins in
+// the pause record - instead of appending all of them to the menu record. The probe exists because a
+// screen's `{panels ...}` list looks like it resolves only the names its declaring record's context
+// can see: from the menu record, `background_night_panel` / `shell_music_panel` / `menu_cache_panel`
+// resolve and the in-song panels fault the guest with `read of guest 0x00000024`, while retail's own
+// in-song screens - declared in their own in-song records - name those very panels and work.
+bool SplitDefinitions() {
+  const char* value = std::getenv("RBBZ_PAUSE_DEFS");
+  return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
+// `DefinitionRoots()` is the main-menu pairs first and the in-song twins after them, so the split is
+// a half. Both halves are asserted by `TestEveryDestinationExists` and `TestInSongContext`.
+std::vector<dtb::Node> MenuRootsOnly() {
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  return std::vector<dtb::Node>(roots.begin(), roots.begin() + roots.size() / 2);
+}
+
+std::vector<dtb::Node> InSongRootsOnly() {
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  return std::vector<dtb::Node>(roots.begin() + roots.size() / 2, roots.end());
+}
+
 // Appends the definition's roots to a **retail** record. This is the measured delivery site
 // (docs/plans/in-game-settings-bridge-findings.md §12.3): the same panel declarations open when
 // they ride inside a retail record and crash the guest with `write of guest 0x00000200` when they
@@ -920,8 +1425,59 @@ int EmitAppend(const char* in_path, const char* out_path) {
     return 1;
   }
   const size_t before = nodes.size();
-  for (const dtb::Node& root : DefinitionRoots()) {
+  const std::vector<dtb::Node> appended = SplitDefinitions() ? MenuRootsOnly() : EarlyDefinitionRoots();
+  for (const dtb::Node& root : appended) {
     nodes.push_back(root);
+  }
+  if (std::getenv("RBBZ_PAUSE_PROBE") != nullptr &&
+      std::strcmp(std::getenv("RBBZ_PAUSE_PROBE"), "6") == 0) {
+    // Variant A: our in-song root panel - so its scene is the in-song copy - hosted by the
+    // **main-menu** panel set, which arm 2 measured to enter in song.
+    nodes.push_back(ProbeScreen("probe_menuset_screen",
+                                {"background_night_panel", "shell_music_panel", "menu_cache_panel",
+                                 "settings_pause_panel"},
+                                "settings_pause_panel", "game_screen"));
+    // Variant B: our **main-menu** root panel - the scene that already works in song - hosted by the
+    // in-song panel set.
+    nodes.push_back(ProbeScreen("probe_samescene_screen",
+                                {"game_panel", "pause_panel", "game_fade_out_panel",
+                                 "background_night_panel", "settings_panel"},
+                                "settings_panel", "game_screen"));
+    std::printf("emit-append: PROBE6 armed (two variant screens appended)\n");
+  }
+  if (std::getenv("RBBZ_PAUSE_PROBE") != nullptr &&
+      std::strcmp(std::getenv("RBBZ_PAUSE_PROBE"), "7") == 0) {
+    // Probe 7, one panel at a time. `ui/gen/ui.dtb`'s own init loads `game_fade_out_panel`,
+    // `pause_panel` and `background_night_panel` at boot - and **not** `game_panel`, which arrives
+    // with `game.dtb` when a song starts. Each variant drops exactly one of them from the in-song
+    // panel set, so one boot that survives names the panel our screen cannot host.
+    nodes.push_back(ProbeScreen("probe_nogame_screen",
+                                {"pause_panel", "game_fade_out_panel", "background_night_panel",
+                                 "settings_pause_panel"},
+                                "settings_pause_panel", "game_screen"));
+    nodes.push_back(ProbeScreen("probe_nopause_screen",
+                                {"game_panel", "game_fade_out_panel", "background_night_panel",
+                                 "settings_pause_panel"},
+                                "settings_pause_panel", "game_screen"));
+    std::printf("emit-append: PROBE7 armed (two panel-set variants appended)\n");
+  }
+  if (std::getenv("RBBZ_PAUSE_PROBE") != nullptr) {
+    // TEMPORARY INSTRUMENT (see `ProbeMark`): mark every step of the in-song panel's own `{enter}`
+    // body, so a boot that dies on the way to it says whether the screen's construction reached our
+    // panel at all, whether `{this populate_menu}` ran, and whether `{shell_sfx set_interceptor}`
+    // did.
+    dtb::Node* enter = nullptr;
+    for (size_t i = before; i < nodes.size() && enter == nullptr; ++i) {
+      enter = FindEnterBlock(&nodes[i], "settings_general_pause_panel");
+    }
+    if (enter == nullptr || enter->kids.size() != 3) {
+      std::printf("emit-append: cannot instrument the in-song enter block\n");
+      return 1;
+    }
+    std::vector<dtb::Node> marked = {ProbeMark("e1"), enter->kids[1], ProbeMark("e2"),
+                                     enter->kids[2], ProbeMark("e3")};
+    enter->kids = std::move(marked);
+    std::printf("emit-append: PROBE armed (markers e1-e3 in the in-song enter block)\n");
   }
   const std::vector<uint8_t> file = dtb::Compile(nodes, header);
   if (!WriteFile(out_path, file)) return 1;
@@ -951,6 +1507,10 @@ int EmitUi(const char* in_path, const char* out_path) {
     return 1;
   }
   size_t added = 0;
+  if (!AddDeferredScreens(&nodes, &error)) {
+    std::printf("emit-ui: %s\n", error.c_str());
+    return 1;
+  }
   for (const std::string& panel : PanelNames()) {
     std::string why;
     if (AddPanelLoad(&nodes, panel, &why)) {
@@ -980,8 +1540,112 @@ int EmitReroute(const char* command, const char* in_path, const char* out_path) 
     return 1;
   }
   const bool pause = std::strcmp(command, "emit-pause") == 0;
-  const bool ok = pause ? RerouteRow(&nodes, kPauseMenuRow, PauseRouteBody(), &error)
-                        : RerouteRow(&nodes, kMainMenuRow, MainMenuRouteBody(), &error);
+  bool ok = false;
+  const char* probe_env = std::getenv("RBBZ_PAUSE_PROBE");
+  if (pause && SplitDefinitions()) {
+    // The in-song twins ride in the record the in-song context loads (`RBBZ_PAUSE_DEFS=1`).
+    const std::vector<dtb::Node> song = InSongRootsOnly();
+    for (const dtb::Node& root : song) {
+      nodes.push_back(root);
+    }
+    std::printf("emit-pause: appended %zu in-song root(s) to the pause record\n", song.size());
+  }
+  if (pause && probe_env != nullptr && std::strcmp(probe_env, "7") == 0) {
+    // Probe 7: row 1 enters the variant that drops `game_panel`, row 5 the one that drops
+    // `pause_panel`. The dispatch is the shipped merge, so only the destination differs.
+    ok = RerouteRow(&nodes, kPauseMenuRow, PauseRouteBody(), &error) &&
+         MergePauseListRows(&nodes, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_general",
+                            {Cmd({Sym("ui"), Sym("goto_screen"), Sym("probe_nogame_screen")})},
+                            &error) &&
+         AddPauseSwitchCase(&nodes, "settings_interface",
+                            {Cmd({Sym("ui"), Sym("goto_screen"), Sym("probe_nopause_screen")})},
+                            &error);
+    std::printf("emit-pause: PROBE7 armed (row 1 -> no game_panel, row 5 -> no pause_panel)\n");
+  } else if (pause && probe_env != nullptr && std::strcmp(probe_env, "6") == 0) {
+    // Probe 6, the twin laboratory. Retail's own row gesture is kept - the merge and the cases, which
+    // is the same dispatch the shipped design uses - so only the destination differs. Row 1 of the
+    // merged list enters **variant B** (`settings_panel`, the panel whose scene already works in
+    // song, hosted by the in-song panel set) and row 5 enters **variant A** (our in-song panel
+    // hosted by the main-menu panel set), the shape a laboratory boot already drew correctly.
+    ok = RerouteRow(&nodes, kPauseMenuRow, PauseRouteBody(), &error) &&
+         MergePauseListRows(&nodes, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_general",
+                            {Cmd({Sym("ui"), Sym("goto_screen"), Sym("probe_samescene_screen")})},
+                            &error) &&
+         AddPauseSwitchCase(&nodes, "settings_interface",
+                            {Cmd({Sym("ui"), Sym("goto_screen"), Sym("probe_menuset_screen")})},
+                            &error);
+    std::printf("emit-pause: PROBE6 armed (row 1 -> same-scene variant, row 5 -> menuset variant)\n");
+  } else if (pause && probe_env != nullptr && std::strcmp(probe_env, "5") == 0) {
+    // Arm 5, and the one P5b-r2 exists for: **re-point the pause menu's own Help & Options row at our
+    // in-song root screen** - the design P5b tried first and abandoned, because every arm that jumped
+    // faulted the guest with `read of guest 0x00000024`. That fault is now explained and fixed: the
+    // in-song screens were missing `game_fade_out_panel` (see `PausePanels`), which is what a screen
+    // entered with a plain `{ui goto_screen}` needs in song. With the panel there, this is one edit
+    // instead of a list merge plus three switch cases, and it does not depend on the inline list's
+    // dispatch at all.
+    ok = RerouteRow(&nodes, kPauseMenuRow, InSongRowBody(kRootScreen), &error);
+    std::printf("emit-pause: PROBE5 armed (the pause row jumps straight to our in-song root)\n");
+  } else if (pause && probe_env != nullptr && std::strcmp(probe_env, "4") == 0) {
+    // Arm 4, the decisive one: the case body's *shape* is held constant (a marker, a jump, a marker)
+    // and only the destination changes. Row 1 jumps to a **retail** in-song page
+    // (`controller_config_pause_screen` - the screen retail's own `pause_controls` row opens, so it is
+    // known to work in song), row 5 jumps to one of ours. `q1` but not `q2` means the jump never
+    // returned; both mean the case ran and the jump was taken; neither means the inline list is not
+    // dispatching to this switch at all - which is a different problem from the destination's shape.
+    std::vector<dtb::Node> retail_page = {ProbeMark("q1"),
+                                          Cmd({Sym("ui"), Sym("goto_screen"),
+                                               Sym("controller_config_pause_screen")}),
+                                          ProbeMark("q2")};
+    std::vector<dtb::Node> our_page = {ProbeMark("s1"),
+                                       Cmd({Sym("ui"), Sym("goto_screen"),
+                                            Sym("settings_interface_pause_screen")}),
+                                       ProbeMark("s2")};
+    ok = RerouteRow(&nodes, kPauseMenuRow, PauseRouteBody(), &error) &&
+         MergePauseListRows(&nodes, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_general", retail_page, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_interface", our_page, &error);
+    std::printf("emit-pause: PROBE4 armed (markers q1-q2 on a retail page, s1-s2 on ours)\n");
+  } else if (pause && probe_env != nullptr) {
+    // Arm 3. Arm 2 measured our **main-menu** screen to enter fine from the in-song pause case
+    // (`p4b` logged with a plain `{ui goto_screen settings_general_screen}`), so the panel is
+    // innocent in-song and the broken half is the `_pause_screen` twin's *definition* - or the
+    // `set back_screen` statement that ran before the jump in arm 1. This arm jumps to the twin with
+    // no statement before it: a logged `p4b` means the twin is enterable and the `set` was the fault,
+    // a missing `p4b` means the twin's own `{panels ...}` / `{back_screen}` is.
+    std::vector<dtb::Node> route = {ProbeMark("p4a"),
+                                    Cmd({Sym("ui"), Sym("goto_screen"),
+                                         Sym("settings_general_pause_screen")}),
+                                    ProbeMark("p4b")};
+    std::vector<dtb::Node> plain = {ProbeMark("p5a"),
+                                    Cmd({Sym("ui"), Sym("goto_screen"), Sym("av_options_pause_screen")}),
+                                    ProbeMark("p5b")};
+    ok = RerouteRow(&nodes, kPauseMenuRow, PauseRouteBody(), &error) &&
+         MergePauseListRows(&nodes, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_general", {ProbeMark("p1-reached")}, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_gameplay",
+                            InSongRowBody("settings_gameplay_screen"), &error) &&
+         AddPauseSwitchCase(&nodes, "settings_interface", plain, &error) &&
+         RerouteRow(&nodes, "audio_video_options", route, &error);
+    std::printf("emit-pause: PROBE3 armed (markers p1, p4a-b, p5a-b)\n");
+  } else if (pause) {
+    // The in-song merge (P5b-r2), in the order the record's own structure implies: the list's
+    // contents, the cases our rows need, and the Audio/Video row re-pointed at the merged page's
+    // in-song twin. `pause_options` itself is left as retail's own statement, which is why routing
+    // it with `PauseRouteBody()` is a no-op rather than an edit.
+    ok = RerouteRow(&nodes, kPauseMenuRow, PauseRouteBody(), &error) &&
+         MergePauseListRows(&nodes, &error) &&
+         AddPauseSwitchCase(&nodes, "settings_general",
+                            InSongRowBody("settings_general_screen"), &error) &&
+         AddPauseSwitchCase(&nodes, "settings_gameplay",
+                            InSongRowBody("settings_gameplay_screen"), &error) &&
+         AddPauseSwitchCase(&nodes, "settings_interface",
+                            InSongRowBody("settings_interface_screen"), &error) &&
+         RerouteRow(&nodes, "audio_video_options", InSongRowBody("settings_av_screen"), &error);
+  } else {
+    ok = RerouteRow(&nodes, kMainMenuRow, MainMenuRouteBody(), &error);
+  }
   if (!ok) {
     std::printf("%s refused: %s\n", command, error.c_str());
     return 1;
@@ -1022,6 +1686,103 @@ int EmitLocale(const char* in_path, const char* out_path) {
   return 0;
 }
 
+// ------------------------------------------------------------------------------------------------
+// Reading a definition back as text (P5b-r2 diagnosis, host side)
+// ------------------------------------------------------------------------------------------------
+// The two contexts' pages differ only in four statements (the panel set, the focus, the back target
+// and the row bodies), so the question "what does our twin declare that the main-menu page does not"
+// is answerable without a boot - if the definition can be read. `Node::Symbol` keeps the name it was
+// given (only `Compile` hashes it), so the authored trees print as readable source.
+void PrintNode(const dtb::Node& node, std::string* out) {
+  switch (node.tag) {
+    case dtb::kCommand:
+    case dtb::kArray:
+    case dtb::kProperty: {
+      const char open = node.tag == dtb::kCommand ? '{' : (node.tag == dtb::kArray ? '(' : '[');
+      const char close = node.tag == dtb::kCommand ? '}' : (node.tag == dtb::kArray ? ')' : ']');
+      *out += open;
+      for (size_t i = 0; i < node.kids.size(); ++i) {
+        if (i != 0) *out += ' ';
+        PrintNode(node.kids[i], out);
+      }
+      *out += close;
+      return;
+    }
+    case dtb::kString:
+      *out += '"';
+      *out += node.text;
+      *out += '"';
+      return;
+    case dtb::kVar:
+      *out += '$';
+      *out += node.text;
+      return;
+    case dtb::kInt:
+      *out += std::to_string(node.scalar);
+      return;
+    default:
+      *out += node.text.empty() ? ("#" + std::to_string(node.tag)) : node.text;
+      return;
+  }
+}
+
+// Every root whose name holds `needle`, printed one top-level member per line so two contexts can be
+// diffed by eye. `{new UIPanel <name> ...}` / `{new UIScreen <name> ...}` - the name is the third
+// child, which is why this reads positionally instead of searching for text.
+int DumpDef(const char* needle) {
+  size_t printed = 0;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 || root.kids[0].text != "new" ||
+        root.kids[2].text.find(needle) == std::string::npos) {
+      continue;
+    }
+    ++printed;
+    std::string head;
+    for (size_t i = 0; i < 3; ++i) {
+      if (i != 0) head += ' ';
+      PrintNode(root.kids[i], &head);
+    }
+    std::printf("%s\n", head.c_str());
+    for (size_t i = 3; i < root.kids.size(); ++i) {
+      std::string member;
+      PrintNode(root.kids[i], &member);
+      std::printf("  %s\n", member.c_str());
+    }
+    std::printf("\n");
+  }
+  std::printf("dump-def: %zu root(s) matching \"%s\"\n", printed, needle);
+  return printed == 0 ? 1 : 0;
+}
+
+// The same reading, on a **retail** record: `Parse` decrypts the stream and hands back the nodes, so
+// an installed record is as readable as an authored one. One line per root, optionally only the
+// roots whose text holds `needle` - which is how "who declares this panel, and in which record" is
+// answerable without a boot or a byte search (the compiled stream is encrypted, so names are not
+// greppable in the file itself).
+int DumpRecord(const char* in_path, const char* needle) {
+  std::vector<uint8_t> bytes;
+  if (!ReadFile(in_path, &bytes)) return 1;
+  std::vector<dtb::Node> nodes;
+  dtb::RootHeader header;
+  std::string error;
+  if (!dtb::Parse(bytes.data(), bytes.size(), &nodes, &header, &error)) {
+    std::printf("cannot parse %s: %s\n", in_path, error.c_str());
+    return 1;
+  }
+  size_t printed = 0;
+  for (const dtb::Node& root : nodes) {
+    std::string text;
+    PrintNode(root, &text);
+    if (needle != nullptr && text.find(needle) == std::string::npos) {
+      continue;
+    }
+    ++printed;
+    std::printf("%s\n", text.c_str());
+  }
+  std::printf("dump-record: %s (%zu root(s), %zu printed)\n", in_path, nodes.size(), printed);
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1041,6 +1802,12 @@ int main(int argc, char** argv) {
   if (argc >= 4 && std::strcmp(argv[1], "emit-locale") == 0) {
     return EmitLocale(argv[2], argv[3]);
   }
+  if (argc >= 3 && std::strcmp(argv[1], "dump-def") == 0) {
+    return DumpDef(argv[2]);
+  }
+  if (argc >= 3 && std::strcmp(argv[1], "dump-record") == 0) {
+    return DumpRecord(argv[2], argc >= 4 ? argv[3] : nullptr);
+  }
 
   TestDefinitionRoundTrip();
   TestMergedRootShape();
@@ -1050,10 +1817,13 @@ int main(int argc, char** argv) {
   TestPanelLoadEdit();
   TestSplashReroute();
   TestPauseReroute();
+  TestInSongContext();
+  TestPauseMergeEdits();
   TestRerouteRefusesWithoutTheCase();
   TestDoTakesStatementsDirectly();
   TestLocaleEntry();
   TestEveryFillPlacesTheSelection();
+  TestEveryDestinationExists();
   TestButtonTableIsOneSwitch();
   TestLabels();
   return Finish();

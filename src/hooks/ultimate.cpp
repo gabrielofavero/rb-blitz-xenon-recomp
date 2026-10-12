@@ -270,6 +270,8 @@ void MountOverlay(rex::Runtime* runtime, const std::filesystem::path& payload_ro
 
 bool PatchEnabled(uint32_t bit) { return HasPatch(g_patches, bit); }
 
+void EnableSettingsArchive(rex::Runtime* runtime) { ApplyContentDevicePatch(runtime); }
+
 // P6: this boot's provider state, computed once in Configure() on the host thread.
 settings::ultimate_adapter::ProviderRuntime g_provider;
 

@@ -100,6 +100,63 @@ correct, and reachable - while the merge of it is the next experiment.
 3. Only then re-point `pause_options` itself, if the merge is to keep the retail pause list's row
    count. Until step 1 lands, the row stays retail's.
 
+### 3.2 What the in-song page can be, measured (P5b-r2)
+
+P5b-r2 implemented §3.1 (the list merge, the appended cases, the in-song twins) and then measured it
+in ten boots. The dispatch half works; the *page* half is where the fault lives, and it is not where
+the four arms above guessed. Every arm below used the same staged route
+(`out/_swap/p5b/run.ps1 -Route p11a-v|p11a-5|p11a-lab*`) and a shot at every step, so "the press did
+nothing" and "the page did not appear" can be told apart.
+
+| Arm | What the row was pointed at | Live? | Log | On screen |
+| --- | --- | --- | --- | --- |
+| v2 (probe 4) | retail's `controller_config_pause_screen`, plain jump | yes, 0 faults | `q1`, `q2` | CONTROLLER PRESETS |
+| v6 (probe 4) | our `settings_interface_pause_screen` twin, plain jump | **fault `read of guest 0x00000024`** | `s1`, no `s2` | - (its panel never entered: no reads) |
+| v3 | our `settings_general_pause_screen` twin, `EnterScreen` | **fault 0x24** | - | - |
+| v7 (probe 5) | our `settings_pause_screen` root twin | **fault 0x24** | - | - |
+| lab1 (probe 6) | variant A: our **in-song** panel, **menu** panel set | entry fine; **fault `read of guest 0x00000000` on B** | `provider.active` | **HELP & OPTIONS + our five rows, in song** |
+| lab2 (probe 6) | variant B: our **menu** panel, **in-song** panel set | **fault 0x24** | - | - |
+| lab3 (probe 7) | in-song set **minus `game_panel`** | **fault 0x24** | - | - |
+| split1 | the twin, declared in the **pause record** instead | **fault 0x24** | - | - |
+
+Stated as narrowly as the evidence allows:
+
+* **A screen of ours cannot list the in-song panels** (`pause_panel`, `game_fade_out_panel`, and the
+  `game_panel` that group shares with `game_screen`). Any such screen faults the guest with
+  `read of guest 0x00000024` *while it is constructed* - before its own panel's `{enter}` runs, which
+  is why no bridge read from that panel is ever logged, while variant A's panel reads its gate at
+  once. Retail's own in-song screens (`controller_config_pause_screen`, `av_options_pause_screen`,
+  `pause_credits_screen`) list the same panels and open fine, so the limitation is ours. It is not
+  the scene copy (variant A hosts our in-song panel), not the panel's scene, not the declaring record
+  (`split1` rode the twins in `ui/pause/gen/pause.dtb` and still faulted), and not the
+  `{do {<twin> set back_screen {ui current_screen}} ...}` statement (`v6` is a plain jump). What the
+  matrix does say is "the screen lists one of our panels *and* an in-song panel"; what it does not yet
+  say is which of the two, or why.
+* **The forward half of the goal is reached.** Variant A - our in-song root panel, the *menu* panel
+  set - draws the merged root inside a song, entered by pressing retail's own HELP & OPTIONS row, with
+  the game still behind it (`lab1`, `shots-lab1/06-variant-a.png`). That is the first time the merged
+  page has been on screen during a song.
+* **Back is not.** With the in-song panels unhostable, the game screen's panels are torn down when our
+  page replaces it, so `B` - which retail's in-song pages answer with `{ui goto_screen game_screen}` -
+  faults (`read of guest 0x00000000`). Keeping the pause state alive across the page is exactly what
+  hosting those panels is for, and it is why retail's pages do it.
+
+The shipped payload therefore still leaves `ui/pause/gen/pause.dtb` alone: `make_payload.py` writes it
+only under `--pause`, and the in-song HELP & OPTIONS keeps working exactly as retail ships it.
+
+### 3.3 The next experiment, in order
+
+1. **Narrow the panel-set limitation.** The cheapest split left is one variant with *retail's*
+   `controller_config_panel` in the same list as the in-song panels: that decides between "a screen
+   listing one of *our* panels cannot host an in-song panel" and something about the transition
+   itself. `RBBZ_PAUSE_PROBE=7` is the arm to extend - it already emits per-panel variants, and
+   `dump-def` / `dump-record` read any definition back as text (see §5).
+2. **Then Back.** If the in-song panels can be hosted, retail's own shape is available and Back is
+   `game_screen`, as retail has it. If they cannot, the two candidates are `{ui pop_screen}` (leaving
+   the game screen alive underneath instead of replacing it) and Cancel on our page calling the
+   resume retail's own `pause_panel` calls (`{game_screen resume}`).
+3. Only then re-point `pause_options` in the shipped payload.
+
 ## 4. Evidence
 
 All boots: `rb_blitz.exe --game_data_root=<install> --ultimate_mode=2
@@ -161,11 +218,20 @@ matching the state suffix retail's own pages use; say the word if you would rath
 ```powershell
 # The module and its checks (SDK-free).
 cmake --build out/build/win-amd64-release --target rb_blitz_settings_screen_tests
-.\out\build\win-amd64-release\rb_blitz_settings_screen_tests.exe        # 10,460 checks, exit 0
+.\out\build\win-amd64-release\rb_blitz_settings_screen_tests.exe        # 13,285 checks, exit 0
 ctest --test-dir out/build/win-amd64-release -R settings_screen
+
+# Reading a definition (or a retail record) back as text. `Compile` encrypts the stream, so the
+# compiled files are not greppable; these decrypt and print, which is how the in-song arms were read.
+.\out\build\win-amd64-release\rb_blitz_settings_screen_tests.exe dump-def settings_general
+.\out\build\win-amd64-release\rb_blitz_settings_screen_tests.exe dump-record out\_swap\p5b\retail_cc.dtb
+.\out\build\win-amd64-release\rb_blitz_settings_screen_tests.exe dump-record out\_swap\p5b\retail_ui.dtb init
 
 # The payload (regenerated from the installed records; nothing retail is stored).
 python out\_swap\p5b\make_payload.py payload
+
+# The payload that carries the in-song merge as well - an experiment, never shipped.
+python out\_swap\p5b\make_payload.py payload-r2 --pause
 
 # The boots. One at a time: the harness refuses to start while rb_blitz is running.
 pwsh -File out\_swap\p5b\run.ps1 -Label baseroot  -Route baseroot  -Seconds 300
@@ -190,4 +256,8 @@ its decoded retail/Ultimate material is research, not a deliverable.
   already lists every actual row by stable token and keeps HELP & OPTIONS present and inert.
 * **P11** owns packaging: the payload generator here is the *shape* required (generate the patch
   record from the installed records at boot), including the owned scene copy.
-* Nobody should re-point `pause_options` until §3.1 step 1 lands.
+* Nobody should re-point `pause_options` until §3.3 step 3; §3.2 is what the row's own arms
+  measured, and it is why the payload generator still leaves the pause record pristine by default.
+* The **whole plan's** remaining work - every package, every open item, in one numbered list - is
+  [in-game-settings-remaining-work.md](in-game-settings-remaining-work.md). The in-song entry is item
+  13 there and is the only open item that blocks gate G1b.

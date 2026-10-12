@@ -99,6 +99,9 @@ struct ArkEntry {
 
 struct ArkIndex {
   uint32_t version = 0;
+  std::vector<uint8_t> extra;
+  std::vector<uint32_t> part_sizes;
+  std::vector<uint32_t> checksums;
   std::vector<std::string> parts;  // the ark part names the header lists
   std::vector<ArkEntry> entries;
 

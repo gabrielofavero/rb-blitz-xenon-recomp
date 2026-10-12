@@ -548,6 +548,7 @@ bool ReadArkIndex(const uint8_t* bytes, size_t size, ArkIndex* out, std::string*
       if (error != nullptr) *error = "header ends inside the v6 key block";
       return false;
     }
+    index.extra.assign(ignored, ignored + 20);
   }
 
   uint32_t ark_count = 0;
@@ -564,6 +565,7 @@ bool ReadArkIndex(const uint8_t* bytes, size_t size, ArkIndex* out, std::string*
       return false;
     }
   }
+  index.part_sizes = part_sizes;
   // The path list is introduced by the part count a second time, and the checksum block by it a
   // third: three counts that must agree, which is what makes a truncated header detectable here
   // rather than as a bogus entry list.
@@ -585,10 +587,13 @@ bool ReadArkIndex(const uint8_t* bytes, size_t size, ArkIndex* out, std::string*
     return false;
   }
   {
-    const uint8_t* ignored = nullptr;
-    if (!reader.Take(size_t(checksum_count) * 4, &ignored)) {
-      if (error != nullptr) *error = "header ends inside the checksum block";
-      return false;
+    for (uint32_t i = 0; i < checksum_count; ++i) {
+      uint32_t checksum = 0;
+      if (!reader.U32(&checksum)) {
+        if (error != nullptr) *error = "header ends inside the checksum block";
+        return false;
+      }
+      index.checksums.push_back(checksum);
     }
   }
 
@@ -600,7 +605,8 @@ bool ReadArkIndex(const uint8_t* bytes, size_t size, ArkIndex* out, std::string*
     return false;
   }
   uint32_t offset_count = 0;
-  if (!read_count(&offset_count, "the string offset count")) {
+  if (!reader.U32(&offset_count) || offset_count > (1u << 20) || offset_count > size / 4) {
+    if (error != nullptr) *error = "invalid string offset count";
     return false;
   }
   std::vector<uint32_t> offsets(offset_count, 0);
@@ -1599,6 +1605,17 @@ void ConfigureProvider(ProviderRuntime* runtime, const std::filesystem::path& pa
   }
   for (const auto& [id, value] : DefaultsFromShape(runtime->shape)) {
     runtime->values.emplace(id, value);
+  }
+  // The skybox writer stores a position; the menu and service expose stable provider tokens.
+  if (auto found = runtime->values.find(SettingId::kForceSkybox); found != runtime->values.end()) {
+    const auto choices = runtime->choices.find("which_skybox");
+    int32_t index = 0;
+    if (choices != runtime->choices.end() && ParseIntText(found->second.text, &index) &&
+        index >= 0 && static_cast<size_t>(index) < choices->second.size())
+      found->second.text = choices->second[index];
+  }
+  if (auto found = runtime->values.find(SettingId::kForcePlot); found != runtime->values.end()) {
+    if (found->second.text == "FALSE" || found->second.text == "0") found->second.text = "off";
   }
   // A row the provider neither persists nor defaults is *absent*, and the adapter says so rather
   // than inventing a value: the provider's own variable is simply unset, and the caller's compiled

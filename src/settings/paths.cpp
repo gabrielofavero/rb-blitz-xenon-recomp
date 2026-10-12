@@ -119,7 +119,7 @@ fs::path ResolvePathValue(const std::string& value, const fs::path& file, const 
   if (value.empty()) {
     return fallback;
   }
-  fs::path path = fs::path(value);
+  fs::path path = fs::path(std::u8string(value.begin(), value.end()));
   if (path.is_relative() && !file.empty()) {
     path = file.parent_path() / path;
   }

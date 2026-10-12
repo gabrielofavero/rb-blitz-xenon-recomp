@@ -53,6 +53,17 @@ PayloadOverlayDevice::PayloadOverlayDevice(std::string_view mount_path,
       base_device_(std::make_unique<rex::filesystem::HostPathDevice>(kBaseMount, base_root,
                                                                     base_read_only)) {}
 
+PayloadOverlayDevice::PayloadOverlayDevice(std::string_view mount_path,
+                                           const std::filesystem::path& payload_root,
+                                           Entry* mounted_base)
+    : Device(mount_path), payload_root_(payload_root),
+      payload_device_(std::make_unique<rex::filesystem::HostPathDevice>(
+          kPayloadMount, payload_root, /*read_only=*/true)), mounted_base_(mounted_base) {}
+
+rex::filesystem::Device* PayloadOverlayDevice::BaseDevice() const {
+  return mounted_base_ ? mounted_base_->device() : base_device_.get();
+}
+
 bool PayloadOverlayDevice::AddSettingsSide(const std::filesystem::path& settings_root,
                                            std::vector<std::string> redirects) {
   if (settings_root.empty() || redirects.empty()) {
@@ -93,12 +104,12 @@ bool PayloadOverlayDevice::Initialize() {
     REXLOG_ERROR("ultimate: overlay cannot mount the payload at {}", payload_root_.string());
     return false;
   }
-  if (!base_device_->Initialize()) {
+  if (!mounted_base_ && (!base_device_ || !base_device_->Initialize())) {
     REXLOG_ERROR("ultimate: overlay cannot mount the game root at {}", base_root_.string());
     return false;
   }
   Entry* payload_root = payload_device_->ResolvePath("");
-  Entry* base_root = base_device_->ResolvePath("");
+  Entry* base_root = mounted_base_ ? mounted_base_ : base_device_->ResolvePath("");
   if (payload_root == nullptr || base_root == nullptr) {
     REXLOG_ERROR("ultimate: overlay cannot reach the root of {} or {}",
                  payload_root_.string(), base_root_.string());
@@ -120,7 +131,7 @@ bool PayloadOverlayDevice::is_read_only() const {
   // backing) whether a write may even be attempted. Reporting writable is therefore what lets the
   // first save get as far as CreateEntryInternal; every write that is not a redirected record is
   // still refused one level down, by the base device's own read-only flag.
-  return base_device_->is_read_only() && redirects_.empty();
+  return BaseDevice()->is_read_only() && redirects_.empty();
 }
 
 void PayloadOverlayDevice::Dump(rex::string::StringBuffer* string_buffer) {
@@ -140,28 +151,28 @@ Entry* PayloadOverlayDevice::ResolvePath(std::string_view path) {
   return root_entry_->ResolvePath(path);
 }
 
-const std::string& PayloadOverlayDevice::name() const { return base_device_->name(); }
+const std::string& PayloadOverlayDevice::name() const { return BaseDevice()->name(); }
 
-uint32_t PayloadOverlayDevice::attributes() const { return base_device_->attributes(); }
+uint32_t PayloadOverlayDevice::attributes() const { return BaseDevice()->attributes(); }
 
 uint32_t PayloadOverlayDevice::component_name_max_length() const {
-  return base_device_->component_name_max_length();
+  return BaseDevice()->component_name_max_length();
 }
 
 uint32_t PayloadOverlayDevice::total_allocation_units() const {
-  return base_device_->total_allocation_units();
+  return BaseDevice()->total_allocation_units();
 }
 
 uint32_t PayloadOverlayDevice::available_allocation_units() const {
-  return base_device_->available_allocation_units();
+  return BaseDevice()->available_allocation_units();
 }
 
 uint32_t PayloadOverlayDevice::sectors_per_allocation_unit() const {
-  return base_device_->sectors_per_allocation_unit();
+  return BaseDevice()->sectors_per_allocation_unit();
 }
 
 uint32_t PayloadOverlayDevice::bytes_per_sector() const {
-  return base_device_->bytes_per_sector();
+  return BaseDevice()->bytes_per_sector();
 }
 
 bool PayloadOverlayDevice::IsHidden(std::string_view relative_path) const {

@@ -164,6 +164,7 @@ std::unique_ptr<ChildLauncher> CreateChildLauncher();
 // facts for an arbitrary pid (so a coordinator can build a token, and so a test can prove the
 // mismatch case). `0`/false when the platform cannot answer.
 uint32_t ThisProcessId();
+std::vector<std::string> CommandLineArguments();
 uint64_t ThisProcessCreatedTicks();
 bool ProcessCreatedTicks(uint32_t pid, uint64_t* out);
 

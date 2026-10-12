@@ -71,12 +71,14 @@
 #include "hooks/content_progress.h"
 #include "hooks/local_save.h"
 #include "hooks/settings_bridge_hooks.h"
+#include "hooks/settings_payload.h"
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "launcher/profile_apply.h"
 #include "settings/boot.h"
+#include "platform/game_restart.h"
 #include "util/sha256.h"
 
 // The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
@@ -108,6 +110,14 @@ class RbBlitzApp : public rex::ReXApp {
       config.gpu_plugin = "xenos";
     }
     SelectGpuBackend(config);
+    // Load the default plugin here too: its cvars must exist before presentation and runtime
+    // setup consume them. Loading creates the graphics object; SetupPresentation follows later.
+    if (!config.graphics && !config.gpu_plugin.empty()) {
+      config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
+    }
+    if (config.graphics && settings_boot_) {
+      settings_boot_->BeforeGraphicsSetup(selected_backend_);
+    }
     ApplyContentLicense();
     // The runtime reads input_factory the moment this hook returns, and the
     // input system is built from it, so this is the point where an extra input
@@ -238,7 +248,8 @@ class RbBlitzApp : public rex::ReXApp {
     // re-read above; an explicit environment/CLI value outranks them and was left alone in
     // ConfigurePaths (it reports that in the boot log).
     if (boot_roots.have_user_data_root) {
-      paths.user_data_root = boot_roots.user_data_root;
+      paths.user_data_root = std::filesystem::path(std::u8string(boot_roots.user_data_root.begin(),
+                                                              boot_roots.user_data_root.end()));
       redirect_if_inside_game_root(paths.user_data_root);
     }
 
@@ -286,6 +297,33 @@ class RbBlitzApp : public rex::ReXApp {
     // *before* bridge::Configure, whose seeding goes through the channel's store - so the channel
     // must already be pointed at the service.
     settings_boot_->AfterLoadXexImage(selected_backend_);
+    settings_boot_->FinishInit();
+    if (auto* sink = settings_boot_->sink()) {
+      sink->SetRestartHandler([this](uint64_t saved, uint64_t current, uint64_t id,
+                                     const std::string& target, std::string* error) {
+        rb_blitz::platform::LaunchContext context;
+        context.executable = rex::filesystem::GetExecutablePath();
+        context.game_data_root = game_data_root();
+        context.working_directory = std::filesystem::current_path();
+        context.launcher_profile = settings_boot_->paths().legacy_profile;
+        context.target = target;
+        context.developer_arguments = rb_blitz::platform::CommandLineArguments();
+        if (!context.developer_arguments.empty()) context.developer_arguments.erase(context.developer_arguments.begin());
+        rb_blitz::dlc::DrainRefreshForRestart();
+        bool ready = false;
+        const bool dispatched = app_context().CallInUIThreadSynchronous([&] {
+          restart_coordinator_.ResetAfterFailure();
+          const auto outcome = restart_coordinator_.Request(saved, current, id, context);
+          *error = outcome.error;
+          ready = restart_coordinator_.CloseRequested();
+          if (ready) REXLOG_INFO("settings_restart: replacement child is waiting for parent exit");
+          else REXLOG_ERROR("settings_restart: {}", *error);
+        });
+        if (!dispatched || !ready) return false;
+        return app_context().CallInUIThreadDeferred([this] { window()->RequestClose(); });
+      });
+    }
+    rb_blitz::settings::InstallMenuPayload(runtime());
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest
     // thread must not touch the cvar registry, which is why the read happens here.
@@ -453,4 +491,7 @@ class RbBlitzApp : public rex::ReXApp {
   // The backend this boot really loaded, when it named one (empty when the SDK chose). Reported by
   // the settings store as the active renderer.
   std::string selected_backend_;
+  std::unique_ptr<rb_blitz::platform::ChildLauncher> restart_launcher_ =
+      rb_blitz::platform::CreateChildLauncher();
+  rb_blitz::platform::RestartCoordinator restart_coordinator_{restart_launcher_.get()};
 };

@@ -391,6 +391,8 @@ struct RefreshWorker {
   }
 };
 RefreshWorker g_refresh_worker;
+std::mutex g_refresh_worker_mutex;
+bool g_restarting = false;
 
 // The scan half of a refresh: reads the configuration Configure() captured, scans the
 // libraries and rewrites the cache. Pure host work - no guest state, no content manager,
@@ -609,6 +611,8 @@ void PublishPendingRefresh() {
 }
 
 void RefreshConfigured() {
+  std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
+  if (g_restarting) return;
   if (!g_cache_enabled || g_runtime == nullptr) {
     return;
   }
@@ -648,6 +652,12 @@ void RefreshConfigured() {
                 "handed over on the next menu frame",
                 count);
   });
+}
+
+void DrainRefreshForRestart() {
+  std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
+  g_restarting = true;
+  if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
 }
 
 bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }

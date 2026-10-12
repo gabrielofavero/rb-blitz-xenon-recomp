@@ -91,6 +91,10 @@ set(RBBLITZ_SOURCES
     src/hooks/menu_filter.cpp
     src/hooks/settings_bridge.cpp
     src/hooks/settings_bridge_hooks.cpp
+    src/hooks/render_settings.cpp
+    src/hooks/settings_payload.cpp
+    src/settings/menu_payload.cpp
+    src/ui/settings_screen.cpp
     # P9's runtime half of the live apply: the one place that knows how a `hot` row reaches the
     # running game (today `graphics.vsync` -> the SDK's own `vsync`, the call R7 already measured).
     src/hooks/hot_apply_runtime.cpp

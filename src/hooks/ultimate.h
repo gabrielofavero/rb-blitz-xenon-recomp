@@ -45,6 +45,8 @@ bool PatchEnabled(uint32_t bit);
 // This is also where P6's provider adapter runs (the payload is inspected and shape-checked, and
 // the provider's own settings file is redirected into user storage as part of the overlay).
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+// Make the title's patch archive reachable without enabling any Ultimate gameplay patches.
+void EnableSettingsArchive(rex::Runtime* runtime);
 
 // --- P6: the provider adapter's half of this boot -------------------------------------------------
 //

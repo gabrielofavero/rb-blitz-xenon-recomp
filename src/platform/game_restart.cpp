@@ -285,9 +285,12 @@ bool IsRetiredArgument(std::string_view argument) {
 std::vector<std::string> BuildChildArguments(const LaunchContext& context,
                                              const HandoffToken& token) {
   std::vector<std::string> arguments;
+  const auto utf8 = [](const std::filesystem::path& path) {
+    const auto bytes = path.u8string();
+    return std::string(bytes.begin(), bytes.end());
+  };
   if (!context.game_data_root.empty()) {
-    arguments.push_back("--game_data_root=" +
-                        QuoteArgument(context.game_data_root.string()));
+    arguments.push_back("--game_data_root=" + utf8(context.game_data_root));
   }
   // The target is what the boot is *for*, so it is passed explicitly rather than left to the file
   // alone: the file is what the menu wrote, and passing it removes any window in which an older
@@ -296,23 +299,16 @@ std::vector<std::string> BuildChildArguments(const LaunchContext& context,
   if (!TargetFromToken(context.target, &target)) {
     target = LaunchTarget::kCommon;
   }
-  switch (target) {
-    case LaunchTarget::kUltimate:
-      arguments.push_back("--ultimate_mode=1");
-      break;
-    case LaunchTarget::kDemo:
-      arguments.push_back("--ultimate_mode=0");
-      arguments.push_back("--license_mask=0");
-      break;
-    case LaunchTarget::kCommon:
-      arguments.push_back("--ultimate_mode=0");
-      break;
-  }
+  // The saved file is the target's source. Passing a generated setting as a CLI flag would
+  // make it an external override on every subsequent boot, disabling the Target row.
   if (!context.launcher_profile.empty()) {
-    arguments.push_back("--launcher_profile=" +
-                        QuoteArgument(context.launcher_profile.string()));
+    arguments.push_back("--launcher_profile=" + utf8(context.launcher_profile));
   }
-  for (const std::string& argument : context.developer_arguments) {
+  for (size_t i = 0; i < context.developer_arguments.size(); ++i) {
+    const std::string& argument = context.developer_arguments[i];
+    // Identity switches are rebuilt once. CLI11 rejects duplicate string options.
+    if (argument == "--game_data_root" || argument == "--launcher_profile") { ++i; continue; }
+    if (argument.starts_with("--game_data_root=") || argument.starts_with("--launcher_profile=")) continue;
     if (IsRetiredArgument(argument)) {
       continue;
     }
@@ -324,10 +320,11 @@ std::vector<std::string> BuildChildArguments(const LaunchContext& context,
 
 std::string BuildCommandLine(const std::filesystem::path& executable,
                              const std::vector<std::string>& arguments) {
-  std::string out = QuoteArgument(executable.string());
+  const auto bytes = executable.u8string();
+  std::string out = QuoteArgument(std::string(bytes.begin(), bytes.end()));
   for (const std::string& argument : arguments) {
     out += ' ';
-    out += argument;
+    out += QuoteArgument(argument);
   }
   return out;
 }
@@ -407,12 +404,12 @@ class WindowsChildLauncher : public ChildLauncher {
       *error = "there is no executable to start";
       return false;
     }
-    const std::wstring wide_executable = ToWide(executable.string());
+    const std::wstring wide_executable = executable.wstring();
     // CreateProcessW may write into the command-line buffer, so it must be a mutable copy and it
     // must outlive the call. A child is started with no shell, so a path with spaces, an ampersand
     // or a quote is passed exactly as this build quoted it.
     std::wstring command_line = ToWide(BuildCommandLine(executable, arguments));
-    std::wstring wide_working_directory = ToWide(working_directory.string());
+    std::wstring wide_working_directory = working_directory.wstring();
 
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);

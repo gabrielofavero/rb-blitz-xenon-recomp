@@ -72,6 +72,10 @@ class PayloadOverlayDevice final : public rex::filesystem::Device {
   PayloadOverlayDevice(std::string_view mount_path, const std::filesystem::path& payload_root,
                        const std::filesystem::path& base_root, bool base_read_only,
                        std::vector<std::string> hidden_paths);
+  // Layer generated records over the already-mounted game/provider view. The borrowed
+  // entry and its device must outlive this device (the VFS owns both for the whole boot).
+  PayloadOverlayDevice(std::string_view mount_path, const std::filesystem::path& payload_root,
+                       rex::filesystem::Entry* mounted_base);
   // The settings side. **Call before Initialize()**: the union's root entry is built (and every
   // directory merged) inside Initialize, and a settings side added afterwards would not be in the
   // root's child list. Returns false (and leaves the previous state) when the directory cannot be
@@ -120,6 +124,8 @@ class PayloadOverlayDevice final : public rex::filesystem::Device {
   OverlayStats stats_;
   std::unique_ptr<rex::filesystem::HostPathDevice> payload_device_;
   std::unique_ptr<rex::filesystem::HostPathDevice> base_device_;
+  rex::filesystem::Entry* mounted_base_ = nullptr;
+  rex::filesystem::Device* BaseDevice() const;
   std::unique_ptr<rex::filesystem::HostPathDevice> settings_device_;
   std::unique_ptr<rex::filesystem::Entry> root_entry_;
 };

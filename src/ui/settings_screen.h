@@ -73,6 +73,8 @@
 #pragma once
 
 #include <string>
+#include <map>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -80,6 +82,16 @@
 #include "ui/dtb_author.h"
 
 namespace rb_blitz::ui::screen {
+
+// Frozen before generating the installed menu. Values come from the boot service and provider.
+struct MenuConfiguration {
+  std::map<std::string, std::vector<std::pair<std::string, std::string>>> choices;
+  std::map<std::string, std::string> disabled;
+  std::vector<std::pair<std::string, std::string>> menu_rows;
+  // Native overrides applied after the installed provider's initialization.
+  std::map<std::string, bool> boot_booleans;
+};
+void ConfigureMenu(MenuConfiguration configuration);
 
 // ------------------------------------------------------------------------------------------------
 // The names a saved payload, a request path or a locale key contains. Frozen.
@@ -91,6 +103,17 @@ namespace rb_blitz::ui::screen {
 inline constexpr char kSceneName[] = "settings_menu.milo";
 inline constexpr char kSceneRecord[] = "ui/options_menu/gen/settings_menu.milo_xbox";
 inline constexpr char kSceneSourceRecord[] = "ui/options_menu/gen/options_menu.milo_xbox";
+
+// The in-song context's **own** scene, and why it is a second copy rather than the one above. A
+// panel's `{file}` names the dir the engine loads for it, and the engine caches that dir *by path*
+// (bridge findings §12.3b): two distinct panels naming one scene are handed the same loaded dir, and
+// with it the same `options.lst` object. Retail never has two panel declarations name one file - its
+// in-song twins *share* the one panel object (`av_options_panel` is hosted by both
+// `av_options_screen` and `av_options_pause_screen`) - and ours cannot share, because a panel's row
+// bodies name their destinations and the two contexts' destinations differ. So each context gets its
+// own scene, its own dir, and its own list object.
+inline constexpr char kPauseSceneName[] = "settings_menu_pause.milo";
+inline constexpr char kPauseSceneRecord[] = "ui/options_menu/gen/settings_menu_pause.milo_xbox";
 
 // The installed retail record our definitions are **appended to**, and the reason: the measured
 // delivery site. The same panel declarations open when they ride inside a retail record and crash
@@ -122,15 +145,79 @@ inline constexpr char kProviderQuery[] = "rbbz-settings/snapshot/provider.active
 // ------------------------------------------------------------------------------------------------
 
 // Every root of the merged surface: one `{new UIPanel ...}` and one `{new UIScreen ...}` per
-// screen, in declaration order. Served as part of `kDefinitionRecord` (appended to the installed
-// retail record by the delivery step).
+// screen, in declaration order - and, after each main-menu pair, its in-song twin (see
+// `PauseScreen`). Served as part of `kDefinitionRecord` (appended to the installed retail record by
+// the delivery step).
 std::vector<dtb::Node> DefinitionRoots();
 
-// The panel names, in declaration order. The root is first.
+// UIScreen resolves its panel symbols when constructed. The options record is included
+// before game.dta/pause.dta, so in-song screens must be created in ui.dtb's init after
+// init.dta has finished, while their resource-owning panels remain in the options record.
+std::vector<dtb::Node> EarlyDefinitionRoots();
+bool AddDeferredScreens(std::vector<dtb::Node>* nodes, std::string* reason);
+
+// The panel names, in declaration order. The root is first, and every panel appears twice: once for
+// the main-menu context, once for the in-song one.
 std::vector<std::string> PanelNames();
 
-// The screen names, in declaration order. The two root contexts are first.
+// The screen names, in declaration order. The two contexts of each screen are adjacent.
 std::vector<std::string> ScreenNames();
+
+// ------------------------------------------------------------------------------------------------
+// The in-song context (P5b-r2)
+// ------------------------------------------------------------------------------------------------
+// A page reached from inside a song is not the same screen as the one reached from the main menu:
+// retail pairs every one of them (`av_options_screen` / `av_options_pause_screen`,
+// `credits_screen` / `pause_credits_screen`) and the difference is the panel set - the running game
+// and the pause panel stay on screen - plus the back target (`game_screen`). Ours follows the same
+// convention.
+//
+// **Measured status (P5b-r2, ten boots - docs/plans/in-game-settings-merged-menu.md §3.2).** The
+// dispatch works: retail's own HELP & OPTIONS row, given the merged list and our appended cases,
+// reaches our page and stops there with the case markers logged. The **in-song panel set is what a
+// screen of ours cannot have**: a screen listing `pause_panel` / `game_fade_out_panel` / `game_panel`
+// faults the guest with `read of guest 0x00000024` while it is constructed, whichever of our panels
+// it also hosts, whichever record declares it, and with or without any single one of those panels -
+// while retail's own in-song screens list the same panels and open. The *menu* panel set is fine
+// even in song, and that shape (`lab1`) draws the merged root inside a song, which is the first half
+// of the feature; Back is the second, and it fails for the same reason (the game screen's panels are
+// gone by then). Until §3.3 narrows the limitation, the in-song twins are an **experiment**: the
+// shipped payload leaves `ui/pause/gen/pause.dtb` alone and retail's own in-song page keeps working.
+std::string PauseScreen(std::string_view screen);
+std::string PausePanel(std::string_view panel);
+
+// Where a row's destination lives in a song. Our own screens get a `_pause_screen` twin; a retail
+// screen's twin is the one retail already ships, and the four that exist are named here -
+// `controller_config_pause_screen`, `av_options_pause_screen`, `pause_credits_screen`,
+// `tutorials_pause_screen`. `cal_welcome_screen` is deliberately unchanged: retail's own in-song
+// calibration route goes through `pause_confirm_quit_song_screen` and stays retail's own case.
+std::string InSongDestination(std::string_view screen);
+
+// The rows the pause panel's own in-song Help & Options page is filled with, in the merged root's
+// order. The **same six symbols** the main-menu root uses (`settings_general`, `controls`,
+// `calibration`, `audio_video_options`, `settings_gameplay`, `settings_interface`), so one symbol
+// set feeds one label table in two contexts - and `provider_active` false drops `settings_gameplay`,
+// because a base install must never be offered a dead row (plan §3).
+std::vector<std::string> PauseRootRows(bool provider_active);
+
+// Rewrites the array `pause_panel`'s `{enter}` hands to its inline `options.lst`, so the in-song
+// page lists the merged root's rows instead of retail's five. The statement becomes gate-aware:
+// the six-row list when the provider gate answers, the five-row one when it does not.
+//
+// Refuses (leaving `nodes` untouched) unless the record still holds retail's own five-symbol fill,
+// so a changed retail record is reported rather than mangled.
+bool MergePauseListRows(std::vector<dtb::Node>* nodes, std::string* reason);
+
+// Appends `<row> <body...>` to the `{switch {get_focus selected_sym} ...}` that dispatches the
+// pause panel's inline list - the switch retail's own `pause_controls` / `credits` cases live in.
+// A switch takes its first matching case, so appending can never shadow a retail row; a row that
+// must *replace* retail's behaviour is `RerouteRow`.
+bool AddPauseSwitchCase(std::vector<dtb::Node>* nodes, std::string_view row,
+                        const std::vector<dtb::Node>& body, std::string* reason);
+
+// The body an in-song row of ours gets: point the destination's `back_screen` at whoever sent us,
+// then go - the same statement the main-menu rows use, on the target's in-song twin.
+std::vector<dtb::Node> InSongRowBody(std::string_view screen);
 
 // ------------------------------------------------------------------------------------------------
 // The edits to shipped records
@@ -142,9 +229,11 @@ std::vector<dtb::Node> MainMenuRouteBody();
 
 // The body a re-pointed pause row gets. **It is retail's own statement**, deliberately: retail's
 // in-song Help & Options does not open a screen, it hands the focus to the pause panel's inline
-// `options.lst`, and every body that leaves the pause list instead faults the guest
-// (`read of guest 0x00000024`, measured - see the definition in settings_screen.cpp). The in-song
-// merge belongs in that list's own contents and dispatch, not in this row.
+// `options.lst`. Four different bodies that *leave* the pause list instead were measured to fault
+// the guest (`read of guest 0x00000024`) - including the focus switch followed by the jump in one
+// frame - while retail's own switch, reached from that list, jumps to an in-song screen happily
+// (`pause_controls`, `credits`). The in-song merge therefore lives in that list's *contents* and its
+// *cases* (`MergePauseListRows` / `AddPauseSwitchCase`), not in this row.
 std::vector<dtb::Node> PauseRouteBody();
 
 // Replaces the body of the `[<row> <body...>]` case that dispatches `row`, keeping the row symbol.

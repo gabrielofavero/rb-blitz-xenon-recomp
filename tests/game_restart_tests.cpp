@@ -385,10 +385,11 @@ void QuotingFollowsTheWindowsRule() {
   CHECK_TRUE(QuoteArgument("M\u00fasica") == "\"M\u00fasica\"");
 
   const std::string line = BuildCommandLine("C:\\Program Files\\rb_blitz.exe",
-                                            {"--game_data_root=\"D:\\Games\\Blitz\"",
-                                             "--ultimate_mode=1"});
-  CHECK_TRUE(line == "\"C:\\Program Files\\rb_blitz.exe\" --game_data_root=\"D:\\Games\\Blitz\" "
-                     "--ultimate_mode=1");
+                                            {"--game_data_root=D:\\Games\\Blitz",
+                                             "--log_file=D:\\My Logs\\boot.log"});
+  CHECK_TRUE(line == "\"C:\\Program Files\\rb_blitz.exe\" \"--game_data_root=D:\\Games\\Blitz\" "
+                     "\"--log_file=D:\\My Logs\\boot.log\"");
+
 }
 
 void ChildArgumentsAreAnAllowlist() {
@@ -410,56 +411,26 @@ void ChildArgumentsAreAnAllowlist() {
                                  std::string(kHandoffSwitch) + "v1.1.2.3.common"};
 
   const std::vector<std::string> arguments = BuildChildArguments(context, token);
-  // Order is the documented one: data root, target, profile, surviving developer arguments,
-  // handoff last. Three of the four developer arguments do not survive (the transient cache
-  // refresh "this once", the previous handoff, which the boot that received it consumed).
-  CHECK_EQ(arguments.size(), 5);
-  CHECK_TRUE(arguments[0] == "--game_data_root=\"D:\\Games\\Blitz\"");
-  CHECK_TRUE(arguments[1] == "--ultimate_mode=1");
-  CHECK_TRUE(arguments[2] ==
-             "--launcher_profile=\"C:\\Users\\me\\AppData\\blitz\\launcher.toml\"");
-  CHECK_TRUE(arguments[3] == "--log_level=debug");  // an explicit developer argument survives
-  CHECK_TRUE(IsHandoffSwitch(arguments[4]));
-  CHECK_TRUE(arguments[4].find(EncodeHandoff(token)) != std::string::npos);
-
-  // The transient and one-shot arguments are gone: not the cache refresh, not the previous
-  // handoff (which belongs to the process that consumed it).
-  for (const std::string& argument : arguments) {
-    CHECK_FALSE(argument.find("refresh_dlc_cache") != std::string::npos);
+  CHECK_EQ(arguments.size(), 4);
+  CHECK_TRUE(arguments[0] == "--game_data_root=D:\\Games\\Blitz");
+  CHECK_TRUE(arguments[1] == "--launcher_profile=C:\\Users\\me\\AppData\\blitz\\launcher.toml");
+  CHECK_TRUE(arguments[2] == "--log_level=debug");
+  CHECK_TRUE(IsHandoffSwitch(arguments[3]));
+  for (const auto& argument : arguments) {
+    CHECK_TRUE(argument.find("refresh_dlc_cache") == std::string::npos);
+    CHECK_TRUE(argument.find("ultimate_mode") == std::string::npos);
+    CHECK_TRUE(argument.find("license_mask") == std::string::npos);
   }
-  CHECK_EQ(arguments.size(), 5);
+  // SDK string flags refuse duplicates. Old identity must never be replayed alongside the new.
+  context.developer_arguments = {"--game_data_root=old", "--launcher_profile", "old.toml",
+                                 "--log_file=D:\\My Logs\\boot.log", "--resolution_scale=2"};
+  const auto rebuilt = BuildChildArguments(context, token);
+  CHECK_EQ(rebuilt.size(), 5);
+  CHECK_TRUE(rebuilt[2] == "--log_file=D:\\My Logs\\boot.log");
+  CHECK_TRUE(rebuilt[3] == "--resolution_scale=2");
   CHECK_TRUE(IsRetiredArgument("--refresh_dlc_cache"));
-  CHECK_TRUE(IsRetiredArgument(std::string(kHandoffSwitch) + "v1.1.2.3.common"));
-  CHECK_TRUE(IsRetiredArgument(kBootstrapSwitch));
-  // A persistent enhancement toggle is *not* one-shot: an explicit developer choice survives.
-  CHECK_FALSE(IsRetiredArgument("--enhancements_dlc_uncap_enumeration=true"));
-  CHECK_FALSE(IsRetiredArgument("--log_level=debug"));
+  CHECK_FALSE(IsRetiredArgument("--resolution_scale=2"));
 
-  // The target vocabulary: each target's own flags, and a target word this build does not know
-  // falls back to the base target rather than inventing a flag.
-  struct Case {
-    const char* target;
-    size_t count;
-    const char* first;
-  };
-  const Case cases[] = {{"common", 2, "--ultimate_mode=0"},
-                        {"demo", 3, "--ultimate_mode=0"},
-                        {"ultimate", 2, "--ultimate_mode=1"},
-                        {"platinum", 2, "--ultimate_mode=0"}};
-  for (const Case& item : cases) {
-    LaunchContext one;
-    one.executable = "rb_blitz.exe";
-    one.target = item.target;
-    const std::vector<std::string> built = BuildChildArguments(one, token);
-    CHECK_EQ(built.size(), item.count);
-    CHECK_TRUE(built.front() == item.first);
-    CHECK_TRUE(IsHandoffSwitch(built.back()));
-  }
-  LaunchContext demo;
-  demo.executable = "rb_blitz.exe";
-  demo.target = "demo";
-  const std::vector<std::string> demo_arguments = BuildChildArguments(demo, token);
-  CHECK_TRUE(demo_arguments[1] == "--license_mask=0");
 }
 
 void ArgumentRetirement() {
@@ -505,7 +476,7 @@ void CoordinatorIsExactlyOnce() {
   CHECK_EQ(launcher.spawns, 1);
   CHECK_TRUE(launcher.last_executable == context.executable);
   CHECK_TRUE(launcher.last_arguments.back().find(kHandoffSwitch) != std::string::npos);
-  CHECK_TRUE(coordinator.command_line().find("--ultimate_mode=1") != std::string::npos);
+  CHECK_TRUE(coordinator.command_line().find(".ultimate") != std::string::npos);
   CHECK_EQ(coordinator.token().nonce, 9u);
   CHECK_TRUE(coordinator.token().target == "ultimate");
 

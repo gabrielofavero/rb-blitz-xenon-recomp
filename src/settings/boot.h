@@ -89,6 +89,9 @@ class SettingsBoot {
   // --- 2. OnPostInitLogging ---------------------------------------------------------------
   void LogConfigured() const;
 
+  // OnPreSetup, after the plugin registers its flags and before SetupPresentation/Runtime::Setup.
+  void BeforeGraphicsSetup(const std::string& active_renderer);
+
   // --- 3. OnPostLoadXexImage (after ultimate::Configure) ----------------------------------
   // `active_renderer` is the backend token this boot selected ("d3d12" / "vulkan" / empty when
   // nothing was named), which is what the capability snapshot reports as active.
@@ -155,6 +158,8 @@ class SettingsBoot {
   CapabilitySnapshot capability_snapshot_;
   std::vector<Applied> applied_;
   std::vector<Applied> deferred_writes_;
+  RenderPathLimits render_limits_;
+  GuestScreenPlan screen_plan_;
   // The rows staged locally, for diagnostics.
   std::map<SettingId, Source> overrides_;
   std::map<SettingId, Value> override_values_;

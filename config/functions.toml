@@ -102,3 +102,11 @@ name = "XeKeys_SetKey"
 [functions."0x827272B0"]
 name = "XeKeys_AesCbc"
 # Guest wrapper over the __imp__XeKeysAesCbc import (+0xE0 id bias).
+
+# The engine computes its width and render targets from this height. Apply the
+# boot resolution before that computation, never after the buffers are created.
+[[midasm_hook]]
+address = 0x823F382C
+name = "RenderHeightHook"
+registers = ["r11"]
+after_instruction = true

@@ -42,6 +42,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -110,6 +111,12 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   size_t handled_count() const { return handled_.size(); }
 
   void Reset();
+  using ProviderSaver = std::function<bool(const std::map<std::string, bridge::WireValue>&,
+                                           std::string*)>;
+  void SetProviderSaver(ProviderSaver saver) { provider_saver_ = std::move(saver); }
+  using RestartHandler = std::function<bool(uint64_t, uint64_t, uint64_t,
+                                            const std::string&, std::string*)>;
+  void SetRestartHandler(RestartHandler handler) { restart_handler_ = std::move(handler); }
 
  private:
   // True when the token's value is kept here rather than in the service (see the file header).
@@ -141,6 +148,11 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   uint64_t saved_revision_ = 0;
   bool last_commit_requires_restart_ = false;
   CommitStatus last_commit_status_ = CommitStatus::kNoChanges;
+  ProviderSaver provider_saver_;
+  bool edit_failed_ = false;
+  bool commit_ok_ = true;
+  bool restart_ok_ = true;
+  RestartHandler restart_handler_;
 };
 
 }  // namespace rb_blitz::settings

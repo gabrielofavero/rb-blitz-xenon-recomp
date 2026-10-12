@@ -11,11 +11,22 @@
 #include <thread>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
 
 #include "hooks/settings_bridge_hooks.h"
+#include "hooks/render_settings.h"
 #include "hooks/ultimate.h"
 #include "launcher/profile.h"
 #include "launcher/profile_apply.h"
@@ -50,6 +61,29 @@ constexpr int32_t kShippedFilteringCeiling = 3;
 constexpr char kShippedRenderer[] = "d3d12";
 
 std::string BoolText(const bool value) { return value ? "true" : "false"; }
+std::string PathText(const std::filesystem::path& path) {
+  const auto text = path.u8string();
+  return {text.begin(), text.end()};
+}
+
+// This query is independent of the game's window and the DLC library. It performs no
+// benchmark or device creation, so saved preferences can be applied on the fast boot path.
+void ProbeDisplay(CapabilityInputs& inputs) {
+#ifdef _WIN32
+  DEVMODEW mode{};
+  mode.dmSize = sizeof(mode);
+  if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode)) {
+    inputs.display_enumeration_available = true;
+    inputs.primary_display_id = "primary";
+    inputs.primary_display_size = {static_cast<int32_t>(mode.dmPelsWidth),
+                                   static_cast<int32_t>(mode.dmPelsHeight)};
+    for (DWORD i = 0; EnumDisplaySettingsW(nullptr, i, &mode); ++i) {
+      inputs.display_modes.push_back({static_cast<int32_t>(mode.dmPelsWidth),
+                                      static_cast<int32_t>(mode.dmPelsHeight)});
+    }
+  }
+#endif
+}
 
 // The migration status as a word, for the log. P3 names the states; this is only their spelling.
 const char* MigrationName(const MigrationStatus status) {
@@ -161,8 +195,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   CapabilityInputs cap_inputs;
   const unsigned cpus = std::thread::hardware_concurrency();
   cap_inputs.logical_processors = cpus == 0 ? 1u : static_cast<uint32_t>(cpus);
-  cap_inputs.display_enumeration_available = false;
-  cap_inputs.render_path = RenderPathLimits{};  // guest 1280x720 x {1, 2, 3} = 720p/1440p/2160p
+  ProbeDisplay(cap_inputs);
+  render_limits_.base_sizes = {{1280, 720}, {1920, 1080}};
+  cap_inputs.render_path = render_limits_;
   {
     RendererProbe probe;
     probe.token = kShippedRenderer;
@@ -180,8 +215,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   cap_inputs.revision = 1;
   capability_snapshot_ = BuildCapabilitySnapshot(cap_inputs);
   if (service_) {
-    service_->SetCapabilities(capability_snapshot_);
     service_->SetReconciler(&reconciler_);
+    service_->SetCapabilities(capability_snapshot_);
   }
 
   // --- the path roots -----------------------------------------------------------------------
@@ -190,24 +225,23 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // still outranks them. An explicit environment/CLI value outranks both and is left alone.
   PathRoots roots;
   if (!path_file_.paths.dlc_root.empty()) {
-    roots.have_dlc_root = true;
-    roots.dlc_root = path_file_.paths.dlc_root;
+    roots.dlc_root = PathText(ResolvePathValue(path_file_.paths.dlc_root, paths_.paths_file, {}));
     if (ExplicitlyOwned("dlc_root", SettingId::kUnknown)) {
       diagnostics_.push_back(
           "dlc_root is set by an explicit source; the path file's value was not applied");
-    } else if (!WriteCvar("dlc_root", path_file_.paths.dlc_root, SettingId::kUnknown)) {
-      diagnostics_.push_back("dlc_root could not be written");
+    } else {
+      roots.have_dlc_root = WriteCvar("dlc_root", roots.dlc_root, SettingId::kUnknown);
     }
   }
   if (!path_file_.paths.user_data_root.empty()) {
-    roots.have_user_data_root = true;
-    roots.user_data_root = path_file_.paths.user_data_root;
+    roots.user_data_root =
+        PathText(ResolvePathValue(path_file_.paths.user_data_root, paths_.paths_file, {}));
     if (ExplicitlyOwned("user_data_root", SettingId::kUnknown)) {
       diagnostics_.push_back(
           "user_data_root is set by an explicit source; the path file's value was not applied");
-    } else if (!WriteCvar("user_data_root", path_file_.paths.user_data_root,
-                          SettingId::kUnknown)) {
-      diagnostics_.push_back("user_data_root could not be written");
+    } else {
+      roots.have_user_data_root =
+          WriteCvar("user_data_root", roots.user_data_root, SettingId::kUnknown);
     }
   }
 
@@ -229,7 +263,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     for (const SettingId id :
          {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kDlcScanThreads,
           SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
-          SettingId::kHiddenMainMenu, SettingId::kVsync, SettingId::kFiltering}) {
+          SettingId::kHiddenMainMenu, SettingId::kVsync, SettingId::kFiltering,
+          SettingId::kResolution, SettingId::kAntiAliasing}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }
@@ -270,10 +305,7 @@ void SettingsBoot::ApplyRow(const SettingId id, const bool defer_unregistered) {
       return;
     }
     case SettingId::kAntiAliasing: {
-      // Not applied, and said out loud: the AA enum's two mechanisms are known (P2/P4) but the
-      // *sample semantics* of the native path have never been verified on this device, so writing
-      // the pair from an unproved mapping is the one thing §7.1 forbids. The row's own values are
-      // stored; the choice work is P4's.
+      ApplyCvars(AntiAliasingToCvars(value.text), id, defer_unregistered);
       return;
     }
     case SettingId::kFiltering: {
@@ -285,10 +317,11 @@ void SettingsBoot::ApplyRow(const SettingId id, const bool defer_unregistered) {
       return;
     }
     case SettingId::kResolution: {
-      // Not applied, and said out loud: the exact-render route is P4's Variant B guest-height hook
-      // (config/functions.toml), which is not compiled in yet, and the plugin's own
-      // `resolution_scale` cannot be set from a config-rank write (P2: config is applied before the
-      // plugin registers its cvars). The row's value is stored for the boot that has the hook.
+      screen_plan_ = PlanGuestScreen(render_limits_, {value.width, value.height});
+      if (screen_plan_.supported) {
+        ApplyCvars({{"resolution_scale", std::to_string(screen_plan_.draw_scale)}}, id,
+                   defer_unregistered);
+      }
       return;
     }
     case SettingId::kTarget:
@@ -326,6 +359,14 @@ void SettingsBoot::ApplyRow(const SettingId id, const bool defer_unregistered) {
 
 void SettingsBoot::ApplyCvars(const std::vector<CvarAssignment>& assignments, const SettingId id,
                               const bool defer_unregistered) {
+  // Compound settings are atomic with respect to explicit overrides (target/license and AA).
+  bool overridden = false;
+  for (const auto& [name, value] : assignments) {
+    overridden = ExplicitlyOwned(name, id) || overridden;
+  }
+  if (overridden) {
+    return;
+  }
   for (const auto& [name, value] : assignments) {
     if (ExplicitlyOwned(name, id)) {
       diagnostics_.push_back(name + " is set by an explicit source; the stored row was not applied");
@@ -416,9 +457,44 @@ void SettingsBoot::LogConfigured() const {
                 "registered them",
                 deferred_writes_.size());
   }
-  REXLOG_INFO("settings_boot: the display probe and the exact-render route are not wired yet, so "
-              "the Resolution and Anti-Aliasing rows are stored but not applied (P4's open items); "
-              "the renderer offer is the single backend this project ships");
+  REXLOG_INFO("settings_boot: display {}x{}, {} exact render sizes; graphics preferences will be "
+              "applied before presentation and render resources are initialized",
+              capability_snapshot_.primary_display_size.width,
+              capability_snapshot_.primary_display_size.height,
+              capability_snapshot_.supported_resolutions.size());
+}
+
+void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
+  active_renderer_ = active_renderer.empty() || active_renderer == "any"
+                         ? kShippedRenderer : active_renderer;
+  // Plugin flags now contain the developer config, environment and CLI values replayed at
+  // registration. Even a config-rank value here outranks our earlier stored preference.
+  for (const Applied& deferred : deferred_writes_) {
+    const auto source = rex::cvar::GetFlagSource(deferred.cvar);
+    if (source != rex::cvar::Source::kDefault) {
+      overrides_[deferred.id] = OverrideSourceFor(source);
+    }
+  }
+  for (const Applied& deferred : deferred_writes_) {
+    if (overrides_.contains(deferred.id)) {
+      REXLOG_INFO("settings_boot: {} is explicitly configured; stored preference skipped",
+                  deferred.cvar);
+      continue;
+    }
+    if (WriteCvar(deferred.cvar, deferred.expected, deferred.id)) {
+      REXLOG_INFO("settings_boot: {} = {} (before graphics setup)", deferred.cvar,
+                  deferred.expected);
+    } else {
+      REXLOG_WARN("settings_boot: could not apply {} before graphics setup", deferred.cvar);
+    }
+  }
+  deferred_writes_.clear();
+  if (screen_plan_.supported && !overrides_.contains(SettingId::kResolution)) {
+    SetBootRenderHeight(screen_plan_.guest_size.height);
+    REXLOG_INFO("settings_boot: guest render base {}x{}, draw scale {} (before graphics setup)",
+                screen_plan_.guest_size.width, screen_plan_.guest_size.height,
+                screen_plan_.draw_scale);
+  }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -431,7 +507,46 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
   // --- the provider reaches the service -----------------------------------------------------
   const auto& provider = ::rb_blitz::ultimate::Provider();
   if (service_) {
+    capability_snapshot_.provider.installed = provider.payload_present;
+    capability_snapshot_.provider.compatible = provider.Active();
+    capability_snapshot_.provider.active = provider.Active();
+    ++capability_snapshot_.revision;
+    service_->SetCapabilities(capability_snapshot_);
     service_->SetProviderValues(provider.values);
+  }
+  if (sink_) {
+    sink_->SetProviderSaver([](const std::map<std::string, bridge::WireValue>& changes,
+                               std::string* error) {
+      std::map<SettingId, Value> values;
+      for (const auto& [token, wire] : changes) {
+        const auto* row = schema::FindRow(schema::IdForToken(token));
+        Value value;
+        if (!row || !ModelValueFromWire(row->descriptor, wire, &value)) {
+          if (error) *error = "invalid provider setting: " + token;
+          return false;
+        }
+        values[row->descriptor.id] = std::move(value);
+      }
+      std::map<std::string, std::string> updates;
+      if (!ultimate_adapter::EncodeProviderValues(values, &updates, error)) return false;
+      const auto& provider = ::rb_blitz::ultimate::Provider();
+      if (!provider.Active()) {
+        if (error) *error = "the Ultimate provider is not active";
+        return false;
+      }
+      for (auto& [variable, encoded] : updates) {
+        const auto choices = provider.choices.find(variable);
+        if (choices == provider.choices.end()) continue;
+        const auto found = std::find(choices->second.begin(), choices->second.end(), encoded);
+        if (found == choices->second.end()) {
+          if (error) *error = "value absent from installed provider choices: " + variable;
+          return false;
+        }
+        if (variable == "which_skybox") encoded = std::to_string(found - choices->second.begin());
+        else if (variable == "forceplot" && encoded == "off") encoded = "FALSE";
+      }
+      return ::rb_blitz::ultimate::SaveProvider(updates, error);
+    });
   }
   REXLOG_INFO("settings_boot: the provider is {} ({}); {} value(s) reach the store",
               provider.Active() ? "active" : "not active",
@@ -440,22 +555,6 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
   // src/hooks/settings_bridge_hooks.cpp), so the service is deliberately NOT given a provider sink:
   // seeding the provider's values must not look like a change, and a boot must not rewrite the
   // player's `ulti_settings.dta`. The achievements action stays unwired and says so (P6 §6.1).
-
-  // --- the plugin's cvars, now that its plugin has registered them ----------------------
-  for (const Applied& deferred : deferred_writes_) {
-    if (ExplicitlyOwned(deferred.cvar, SettingId::kUnknown)) {
-      continue;
-    }
-    if (rex::cvar::SetFlagFromConfig(deferred.cvar, deferred.expected)) {
-      REXLOG_INFO("settings_boot: {} = {} (applied once the GPU plugin registered it)",
-                  deferred.cvar, deferred.expected);
-      applied_.push_back(deferred);
-    } else {
-      REXLOG_WARN("settings_boot: {} = {} could not be applied even after the plugin loaded",
-                  deferred.cvar, deferred.expected);
-    }
-  }
-  deferred_writes_.clear();
 
   // --- the guest channel's store ---------------------------------------------------------
   // With a store, the menu's edits go through the service (settings.toml, transactions, a durable

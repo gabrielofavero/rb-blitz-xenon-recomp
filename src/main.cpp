@@ -64,11 +64,7 @@ REX_DEFINE_APP(rb_blitz, RbBlitzApp::Create)
 // creation time), so a reused pid is refused rather than waited on - that is P9's tested contract,
 // not this file's.
 
-namespace {
-
-constexpr int kBootstrapRefusedExitCode = 2;
-
-std::vector<std::string> CommandLineArguments() {
+std::vector<std::string> rb_blitz::platform::CommandLineArguments() {
   int count = 0;
   wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
   std::vector<std::string> out;
@@ -80,8 +76,9 @@ std::vector<std::string> CommandLineArguments() {
     const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, nullptr, 0, nullptr, nullptr);
     std::string text;
     if (bytes > 1) {
-      text.resize(static_cast<size_t>(bytes) - 1);
+      text.resize(static_cast<size_t>(bytes));
       WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, text.data(), bytes, nullptr, nullptr);
+      text.pop_back();
     }
     out.push_back(std::move(text));
   }
@@ -89,9 +86,13 @@ std::vector<std::string> CommandLineArguments() {
   return out;
 }
 
+namespace {
+
+constexpr int kBootstrapRefusedExitCode = 2;
+
 struct RestartBootstrap {
   RestartBootstrap() {
-    std::vector<std::string> arguments = CommandLineArguments();
+    std::vector<std::string> arguments = rb_blitz::platform::CommandLineArguments();
     std::vector<const char*> argv;
     argv.reserve(arguments.size());
     for (const std::string& argument : arguments) {
@@ -99,14 +100,12 @@ struct RestartBootstrap {
     }
     const rb_blitz::platform::BootstrapResult result = rb_blitz::platform::RunBootstrap(
         static_cast<int>(argv.size()), argv.data(), /*waiter=*/nullptr);
-    if (result.action == rb_blitz::platform::BootstrapAction::kNone) {
-      return;  // an ordinary launch: nothing to wait for
-    }
     if (!result.error.empty()) {
       // The parent is still alive, or its identity could not be confirmed. Starting the title now
       // would be the second instance §8 forbids.
       ExitProcess(kBootstrapRefusedExitCode);
     }
+    if (result.action == rb_blitz::platform::BootstrapAction::kNone) return;
     // The parent is gone: this process is the game, and it boots normally from here.
   }
 };
