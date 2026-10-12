@@ -423,13 +423,6 @@ void SeedProvider() {
               active ? "active" : "not active", seeded, provider.summary.empty() ? "no payload"
                                                                                 : provider.summary,
               StatusName(response.status));
-  if (active && !forced) {
-    // Said once, plainly: the achievements row is a one-shot *guest* action (the provider's own
-    // accomplishment call on the guest thread), and this pass does not make it. Answering
-    // "action taken" without calling it would be a lie the menu cannot see.
-    REXLOG_WARN("settings_bridge: the achievements action is not wired yet; invoking it answers "
-                "without calling the provider");
-  }
   for (const auto& [variable, choices] : provider.choices) {
     std::string joined;
     for (const std::string& choice : choices) {
@@ -542,6 +535,8 @@ void ApplyHotRows() {
       ::rb_blitz::settings::ApplyHotPlan(plan, ::rb_blitz::settings::RuntimeHotApplier());
   const std::vector<::rb_blitz::settings::SettingId> restart =
       ::rb_blitz::settings::RestartSetAfterApply(plan, outcomes);
+  if (!restart.empty())
+    if (auto* service = dynamic_cast<ServiceSink*>(g_sink)) service->RequireRestartAfterApply();
   size_t applied = 0;
   for (const ::rb_blitz::settings::HotApplyOutcome& outcome : outcomes) {
     const auto found = tokens_by_id.find(outcome.id);

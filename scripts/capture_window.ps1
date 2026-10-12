@@ -19,6 +19,22 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class Win32 {
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr p);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder text, int n);
+    public static IntPtr GameWindow(int pid) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((h, p) => {
+            uint owner; GetWindowThreadProcessId(h, out owner);
+            if (owner == pid) {
+                var name = new System.Text.StringBuilder(128); GetClassName(h, name, 128);
+                if (name.ToString() == "SDL_app") { found = h; return false; }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -43,7 +59,8 @@ try { [Win32]::SetProcessDpiAwareness(2) | Out-Null } catch { [Win32]::SetProces
 $proc = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $proc) { Write-Error "$ProcessName not running"; exit 1 }
 
-$h = $proc.MainWindowHandle
+$h = [Win32]::GameWindow($proc.Id)
+if ($h -eq [IntPtr]::Zero) { $h = $proc.MainWindowHandle }
 if ($h -eq [IntPtr]::Zero) { Write-Error "no main window"; exit 1 }
 
 [Win32]::ShowWindow($h, 9) | Out-Null      # SW_RESTORE

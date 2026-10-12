@@ -207,7 +207,7 @@ void TestBuildSnapshot() {
   const RendererCapability* d3d12 = FindRenderer(caps, "d3d12");
   CHECK_TRUE(d3d12 != nullptr && d3d12->usable && d3d12->active);
   CHECK_TRUE(ActiveRenderer(caps) == d3d12);
-  CHECK_TRUE(SizesToString(caps.supported_resolutions) == "1920x1080,1280x720");
+  CHECK_TRUE(SizesToString(caps.supported_resolutions) == "1920x1080,1280x720,960x540");
   CHECK_TRUE(IsSupportedResolution(caps, {1920, 1080}));
   CHECK_FALSE(IsSupportedResolution(caps, {2560, 1440}));
 
@@ -516,7 +516,7 @@ void TestGuestScreenPlan() {
 
   // A size the render path cannot produce is not planned; the caller must not apply it.
   CHECK_FALSE(PlanGuestScreen(limits, {1600, 900}).supported);
-  CHECK_FALSE(PlanGuestScreen(limits, {2880, 1620}).supported);
+  CHECK_TRUE(PlanGuestScreen(limits, {2880, 1620}).supported);  // 960x540 at 3x
 
   // Every offered size plans back to exactly itself - the two directions agree.
   for (const DisplayMode& size : RenderPathSizes(limits)) {
@@ -531,40 +531,51 @@ void TestGuestScreenPlan() {
   RenderPathLimits variant_a_only;
   variant_a_only.base_sizes = {{1280, 720}};
   variant_a_only.scales = {1, 2};
-  CHECK_FALSE(PlanGuestScreen(variant_a_only, {1920, 1080}).supported);
+  CHECK_TRUE(PlanGuestScreen(variant_a_only, {1920, 1080}).supported);  // bounded 540p layout
   CHECK_TRUE(PlanGuestScreen(variant_a_only, {2560, 1440}).supported);
 }
 
 // --- first run and recovery -----------------------------------------------------------------
 
 void TestFirstRun() {
-  BeginCase("policy: first-run recommendations come from measurement, or are conservative");
+  BeginCase("policy: Auto follows the display at boot, without a benchmark");
 
   auto measured_1080 = Machine(1920, 1080);
   measured_1080.verified_sustainable_resolution = {1920, 1080};
   const GraphicsRecommendation on_1080 = RecommendGraphics(measured_1080);
   CHECK_TRUE(on_1080.applicable);
   CHECK_FALSE(on_1080.conservative);
-  CHECK_TRUE(IsRes(on_1080.resolution, 1920, 1080));
+  CHECK_TRUE(IsAutoResolution(on_1080.resolution));
   CHECK_TRUE(IsToken(on_1080.renderer, "d3d12"));
   CHECK_TRUE(IsToken(on_1080.anti_aliasing, "native"));  // the device verified it
   CHECK_TRUE(IsToken(on_1080.filtering, "native"));      // never imposed on a first run
-  CHECK_TRUE(on_1080.reason_key == "settings.graphics.recommended_measured");
+  CHECK_TRUE(on_1080.reason_key == "settings.graphics.automatic_display");
 
   auto measured_4k = Machine(3840, 2160);
-  CHECK_TRUE(IsRes(RecommendGraphics(measured_4k).resolution, 1280, 720));
+  CHECK_TRUE(IsAutoResolution(RecommendGraphics(measured_4k).resolution));
   measured_4k.verified_sustainable_resolution = {3840, 2160};
   const GraphicsRecommendation on_4k = RecommendGraphics(measured_4k);
-  CHECK_TRUE(IsRes(on_4k.resolution, 3840, 2160));
+  CHECK_TRUE(IsAutoResolution(on_4k.resolution));
+  GraphicsReconciler policy;
+  const auto* row = schema::FindRow(SettingId::kResolution);
+  CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, row->descriptor,
+      on_1080.resolution, measured_1080).effective, 1920, 1080));
+  CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, row->descriptor,
+      on_4k.resolution, measured_4k).effective, 3840, 2160));
+  CHECK_TRUE(IsAutoResolution(ResolutionPreferenceForBoot(measured_1080, ResolutionV(3840, 2160))));
+  CHECK_TRUE(IsRes(ResolutionPreferenceForBoot(measured_4k, ResolutionV(1920, 1080)), 1920, 1080));
+  CHECK_TRUE(IsRes(ResolutionPreferenceForBoot(CapabilitySnapshot{}, ResolutionV(3840, 2160)), 3840, 2160));
 
   // Unknown hardware: the bounded conservative route, and it says so.
   const GraphicsRecommendation unknown = RecommendGraphics(CapabilitySnapshot{});
-  CHECK_FALSE(unknown.applicable);
+  CHECK_TRUE(unknown.applicable);
   CHECK_TRUE(unknown.conservative);
-  CHECK_TRUE(IsRes(unknown.resolution, 1280, 720));
+  CHECK_TRUE(IsAutoResolution(unknown.resolution));
+  CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, row->descriptor,
+      unknown.resolution, CapabilitySnapshot{}).effective, 1280, 720));
   CHECK_TRUE(IsToken(unknown.anti_aliasing, "none"));
   CHECK_TRUE(IsToken(unknown.filtering, "native"));
-  CHECK_TRUE(unknown.reason_key == "settings.graphics.recommended_conservative");
+  CHECK_TRUE(unknown.reason_key == "settings.graphics.automatic_display");
 
   // A backend with no verified label gets no AA, not a guessed one.
   CapabilityInputs unverified;
@@ -658,7 +669,7 @@ void TestServiceIntegration() {
   const Snapshot snapshot = service.GetSnapshot();
   const Descriptor* resolution = Find(snapshot.descriptors, SettingId::kResolution);
   CHECK_TRUE(resolution != nullptr);
-  CHECK_EQ(resolution->choices.size(), 2u);  // 1920x1080 and 1280x720 only
+  CHECK_EQ(resolution->choices.size(), 3u);  // Auto plus 1920x1080 and 1280x720
 
   // An unsupported size cannot be selected, and neither can a filtering step the device
   // never proved - both are refused at Set, not silently accepted and clamped later.

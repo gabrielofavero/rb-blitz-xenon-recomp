@@ -65,6 +65,13 @@ bool WriteBytes(const std::filesystem::path& path, const Bytes& bytes, std::stri
                          error);
 }
 
+void CollectLocale(const ui::dtb::Node& node, std::map<std::string, std::string>* labels) {
+  if (node.kids.size() >= 2 && node.kids[0].tag == ui::dtb::kSymbol &&
+      node.kids[1].tag == ui::dtb::kString)
+    (*labels)[node.kids[0].text] = node.kids[1].text;
+  for (const auto& child : node.kids) CollectLocale(child, labels);
+}
+
 // How a render size reads in the Resolution row. The token alone for 16:9 - the shape every monitor
 // in the catalogue shares - and the aspect spelled out for the sizes that are not, because that is
 // exactly what the owner has to be able to recognise: a 21:9 mode beside a pile of 16:9 numbers is
@@ -119,11 +126,24 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     }
   }
   if (locale_set.empty()) { error = "no installed UI locale"; return fail(); }
+  std::map<std::string, std::string> menu_labels;
+  auto locale = std::find_if(locale_set.begin(), locale_set.end(),
+      [](const std::string& path) { return path.find("/eng/") != std::string::npos; });
+  if (locale == locale_set.end()) locale = locale_set.begin();
+  if (read(*locale, &bytes, &error)) {
+    std::vector<ui::dtb::Node> roots;
+    ui::dtb::RootHeader header;
+    if (ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &error))
+      for (const auto& root : roots) CollectLocale(root, &menu_labels);
+  }
+  menu_labels["splash_options"] = "Advanced Settings";
+  menu_labels["splash_dlc"] = "Refresh Song Library";
   if (read("ui/splash/gen/splash.dtb", &bytes, &error)) {
     const auto inventory = menu_options::MenuInventory(bytes.data(), bytes.size());
     if (auto* boot = boot::SettingsBoot::Current(); inventory.parsed && boot) {
       std::vector<Choice> rows;
-      for (const auto& row : inventory.rows) rows.push_back({row.token, row.token});
+      for (const auto& row : inventory.rows)
+        rows.push_back({row.token, menu_labels.contains(row.token) ? menu_labels.at(row.token) : row.token});
       boot->SetMenuRows(std::move(rows));
     }
   }
@@ -161,6 +181,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
       if (!supported.empty()) {
         auto& choices = configuration.choices["graphics.resolution"];
         choices.clear();
+        choices.emplace_back("auto", "Auto");
         std::string listed;
         for (const auto& size : supported) {
           const std::string token = DisplayModeToken(size);
@@ -185,13 +206,13 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     if (provider.Active() && boot->service()->store().document().values.contains(SettingId::kUnlockAll))
       configuration.boot_booleans["unlockall"] = boot->service()->EffectiveValue(SettingId::kUnlockAll).boolean;
     for (const auto& row : schema::MenuRows()) {
-      if (row.token != "mod_settings" && row.token != "advanced_settings")
-        configuration.menu_rows.emplace_back(row.token, row.label);
+      configuration.menu_rows.emplace_back(row.token, row.label);
     }
     ui::screen::ConfigureMenu(std::move(configuration));
   }
   MenuRecords records;
-  if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error)) return fail();
+  if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
+                        ultimate::Provider().Active())) return fail();
   Bytes part;
   const Bytes header = ExtendMenuArchive(patch, records, &part);
   // Only generated records live here. Installed game and provider files remain read-only.

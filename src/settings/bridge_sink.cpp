@@ -342,7 +342,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       if (service_ != nullptr && txn_ != 0) {
         result = service_->Commit(txn_);
       }
-      txn_ = 0;
+      if (result.status == CommitStatus::kSaved || result.status == CommitStatus::kNoChanges) txn_ = 0;
       last_commit_status_ = result.status;
       saved_revision_ = result.status == CommitStatus::kNoChanges && service_
                             ? service_->revision() : result.saved_revision;
@@ -389,9 +389,11 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
                                              : std::string(SettingIdToken(entry.first)));
         }
       }
-      staged_.clear();
-      staged_base_.clear();
-      staged_token_.clear();
+      if (result.status == CommitStatus::kSaved || result.status == CommitStatus::kNoChanges) {
+        staged_.clear();
+        staged_base_.clear();
+        staged_token_.clear();
+      }
       for (auto& entry : staged_local_) {
         if (!local_saved || (result.status != CommitStatus::kSaved &&
                              result.status != CommitStatus::kNoChanges)) continue;
@@ -402,7 +404,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
           last_commit_changes_.push_back(entry.first);
         }
       }
-      staged_local_.clear();
+      if (result.status == CommitStatus::kSaved || result.status == CommitStatus::kNoChanges)
+        staged_local_.clear();
       switch (result.status) {
         case CommitStatus::kSaved:
         case CommitStatus::kNoChanges:

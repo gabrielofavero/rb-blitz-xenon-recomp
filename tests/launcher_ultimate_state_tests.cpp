@@ -215,7 +215,9 @@ void TestGameRootDetection(Scratch& scratch) {
 
   BeginCase("nothing to find is reported, not guessed at");
 
-  const fs::path bare = scratch.Make("bare");
+  // Keep the empty fixture beyond the detector's bounded parent walk even when TEMP
+  // is inside a development checkout containing a real game directory.
+  const fs::path bare = scratch.Make("bare/a/b/c/d/e/f/g/h/i/j/k/l/m");
   const GameRoots nothing = DetectGameRoots(bare, {});
   CHECK_FALSE(nothing.game_root_found);
   CHECK_STR_EQ(nothing.game_root.filename().string(), "game");

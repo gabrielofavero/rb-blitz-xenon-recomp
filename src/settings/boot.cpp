@@ -579,6 +579,20 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     }
   }
   deferred_writes_.clear();
+  if (REXCVAR_GET(settings_safe_graphics)) {
+    for (const auto& [name, value] : std::map<std::string, std::string>{
+        {"resolution_scale", "1"}, {"native_2x_msaa", "false"},
+        {"swap_post_effect", "none"}, {"anisotropic_override", "-1"}})
+      rex::cvar::SetFlagByName(name, value);
+    screen_plan_ = PlanGuestScreen(render_limits_, {1280, 720});
+    overrides_.erase(SettingId::kResolution);
+    if (service_) {
+      auto safe = RecoverGraphics(capability_snapshot_, service_->RequestedValue(SettingId::kResolution), "d3d12", true);
+      service_->SetBootValues({{SettingId::kResolution, safe.resolution}, {SettingId::kRenderer, safe.renderer},
+          {SettingId::kAntiAliasing, safe.anti_aliasing}, {SettingId::kFiltering, safe.filtering}},
+          "settings.graphics.safe_mode");
+    }
+  }
   if (screen_plan_.supported && !overrides_.contains(SettingId::kResolution)) {
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
@@ -675,6 +689,7 @@ void SettingsBoot::FinishInit() {
   // won (contracts §4.2): it can mean a higher-priority value was left in place, and a *later* write
   // at the same rank - the game's own rb_blitz.toml - beats this one. A row the player cannot change
   // has to say so instead of saving a value that never takes effect.
+  if (!service_) return;
   size_t verified = 0;
   for (Applied& row : applied_) {
     const std::string actual = rex::cvar::GetFlagByName(row.cvar);
@@ -693,7 +708,71 @@ void SettingsBoot::FinishInit() {
                 "is reported as overridden and editing it would not take effect",
                 row.cvar, row.expected, actual);
   }
-  if (!overrides_.empty() && service_) {
+  // Include explicit flags for rows with no saved preference, and decode compound
+  // settings as a group rather than parsing a backend integer as a UI token.
+  for (const auto& descriptor : service_->descriptors()) {
+    const auto id = descriptor.id;
+    std::vector<std::string> names;
+    if (id == SettingId::kTarget) names = {"ultimate_mode", "license_mask"};
+    else if (id == SettingId::kResolution) names = {"resolution_scale"};
+    else if (id == SettingId::kAntiAliasing) names = {"native_2x_msaa", "swap_post_effect"};
+    else if (id == SettingId::kFiltering) names = {"anisotropic_override"};
+    else if (!CvarForSetting(id).empty()) names.emplace_back(CvarForSetting(id));
+    for (const auto& name : names) {
+      const auto source = rex::cvar::GetFlagSource(name);
+      if (source == rex::cvar::Source::kDefault) continue;
+      const auto actual = rex::cvar::GetFlagByName(name);
+      const bool ours = !HigherRank(source) && std::any_of(applied_.begin(), applied_.end(),
+          [&](const Applied& row) { return row.cvar == name && row.expected == actual; });
+      if (!ours) {
+        const auto candidate = OverrideSourceFor(source);
+        if (!overrides_.contains(id) || SourceRank(candidate) > SourceRank(overrides_[id]))
+          overrides_[id] = candidate;
+      }
+    }
+    if (!overrides_.contains(id) || names.empty()) continue;
+    Value value = service_->EffectiveValue(id);
+    const auto flag = [](const char* name) { return rex::cvar::GetFlagByName(name); };
+    if (id == SettingId::kTarget) {
+      value.text = flag("ultimate_mode") == "1" ? "ultimate" :
+          flag("license_mask") == "0" ? "demo" : "common";
+    } else if (id == SettingId::kResolution) {
+      int64_t scale = 1;
+      toml::ParseBareInt(flag("resolution_scale"), &scale);
+      scale = std::clamp<int64_t>(scale, 1, 7);
+      value.width = static_cast<int32_t>(1280 * scale);
+      value.height = static_cast<int32_t>(720 * scale);
+    } else if (id == SettingId::kAntiAliasing) {
+      const auto post = flag("swap_post_effect");
+      value.text = post == "fxaa" || post == "fxaa_extreme" ? post :
+          flag("native_2x_msaa") == "true" ? "native" : "none";
+    } else if (id == SettingId::kFiltering) {
+      const auto actual = flag("anisotropic_override");
+      for (const auto token : {"native", "none", "1x", "2x", "4x", "8x", "16x"}) {
+        int32_t encoded;
+        if (FilteringToCvarValue(token, &encoded) && actual == std::to_string(encoded)) value.text = token;
+      }
+    } else if (value.kind == ValueKind::kList) {
+      value.list.clear();
+      const std::string csv = rex::cvar::GetFlagByName(names.front());
+      for (size_t start = 0; start < csv.size();) {
+        const size_t end = csv.find(',', start);
+        value.list.push_back(csv.substr(start, end == std::string::npos ? end : end - start));
+        if (end == std::string::npos) break;
+        start = end + 1;
+      }
+    } else {
+      schema::ParseTokenToValue(descriptor, rex::cvar::GetFlagByName(names.front()), &value);
+    }
+    override_values_[id] = std::move(value);
+  }
+  service_->SetOverrides(override_values_, overrides_);
+  if (REXCVAR_GET(settings_safe_graphics)) {
+    for (const auto id : {SettingId::kResolution, SettingId::kRenderer,
+                          SettingId::kAntiAliasing, SettingId::kFiltering}) {
+      overrides_.erase(id);
+      override_values_.erase(id);
+    }
     service_->SetOverrides(override_values_, overrides_);
   }
   REXLOG_INFO("settings_boot: {} of {} applied value(s) stood; {} row(s) are owned by an explicit "

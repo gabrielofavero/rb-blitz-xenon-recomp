@@ -104,6 +104,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_durable() const { return last_commit_durable_; }
   uint64_t saved_revision() const { return saved_revision_; }
   bool last_commit_requires_restart() const { return last_commit_requires_restart_; }
+  void RequireRestartAfterApply() { last_commit_requires_restart_ = true; }
   // "kSaved" / "kNoChanges" / ... for the log line.
   std::string_view last_commit_status() const { return CommitStatusToken(last_commit_status_); }
 

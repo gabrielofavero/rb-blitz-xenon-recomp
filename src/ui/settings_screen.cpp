@@ -48,7 +48,7 @@ constexpr char kList[] = "options.lst";
 // list is decided at run time from bridge queries (see PopulateMenu).
 std::vector<Node> FillStatements() {
   return {Cmd({Sym(kList), Sym("set_data"), Var("rows")}),
-          Cmd({Sym(kList), Sym("set_selected"), Node::Int(0)})};
+          Cmd({Sym(kList), Sym("set_selected"), Var("rbbz_settings_index")})};
 }
 
 // `{write_file "<path>" 0}` - the request channel's write side. The data argument is unused by the
@@ -119,7 +119,11 @@ std::vector<Node> ButtonCases() {
   return {
       Arr({Sym("kAction_Confirm"), Cmd({Var("this"), Sym("select_row")})}),
       Arr({Sym("kAction_Start"), Cmd({Var("this"), Sym("select_row")})}),
-      Arr({Sym("kAction_Cancel"), Cmd({Sym("shell_sfx"), Sym("play_back")}), Leave()}),
+      Arr({Sym("kAction_Cancel"), Cmd({Sym("shell_sfx"), Sym("play_back")}),
+        Cmd({Sym("if_else"), Var("rbbz_settings_editing"),
+          Cmd({Sym("do"), Write(Path("cancel", "-", "-")),
+            Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(0)}),
+            Cmd({Var("this"), Sym("populate_menu")})}), Leave()})}),
   };
 }
 
@@ -185,7 +189,10 @@ Node GetFocusMember() {
 // highlight pinned to row 0 through every press). Retail's own `options_panel` - the panel this one
 // is modelled on - declares `{focus options.lst}` and does *not* call `update_focus` on enter.
 Node EnterExit() {
-  return Arr({Sym("enter"), Cmd({Var("this"), Sym("populate_menu")}),
+  return Arr({Sym("enter"),
+              Cmd({Sym("set"), Var("rbbz_settings_index"), Node::Int(0)}),
+              Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(0)}),
+              Cmd({Var("this"), Sym("populate_menu")}),
               Cmd({Sym("shell_sfx"), Sym("set_interceptor"), Var("this")})});
 }
 
@@ -901,16 +908,12 @@ Node RowCase(const Row& row, const std::string_view symbol) {
                   Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
     case Kind::kSelect: {
-      size_t index = 0;
-      for (size_t i = 0; i < row.choices.size(); ++i) {
-        if (symbol == std::string(row.symbol) + "_" + SymbolToken(row.choices[i].token)) {
-          index = i;
-          break;
-        }
-      }
-      const Choice& next = row.choices[(index + 1) % row.choices.size()];
-      return Arr({Sym(symbol), Write(ChoiceSet(row, next)), Write(Path("commit", "-", "-")),
-                  CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+      return Arr({Sym(symbol), Cmd({Sym("if_else"), Var("rbbz_settings_editing"),
+        Cmd({Sym("do"), Write(Path("commit", "-", "-")),
+          Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(0)}),
+          CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))}),
+        Cmd({Sym("do"), Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(1)}),
+          Cmd({Sym("shell_sfx"), Sym("play_select")})})})});
     }
     case Kind::kSubmenu:
     case Kind::kBoolSubmenu:
@@ -983,8 +986,7 @@ std::vector<Node> DirectionCases(const PanelSpec& panel, const bool forward) {
                   : (i + row.choices.size() - 1) % row.choices.size();
       cases.push_back(Arr({Sym(row.symbol + "_" + SymbolToken(row.choices[i].token)),
                            Write(ChoiceSet(row, row.choices[target])),
-                           Write(Path("commit", "-", "-")),
-                           CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))}));
+                           Cmd({Var("this"), Sym("populate_menu")})}));
     }
   }
   return cases;
@@ -1032,7 +1034,9 @@ std::vector<Cell> Cells(const PanelSpec& panel, const bool provider_active) {
 
 // `{<list>.lst set_selected <index>}`
 Node SelectIndex(const size_t index) {
-  return Cmd({Sym(kList), Sym("set_selected"), Node::Int(static_cast<int>(index))});
+  return Cmd({Sym("do"),
+    Cmd({Sym("set"), Var("rbbz_settings_index"), Node::Int(static_cast<int>(index))}),
+    Cmd({Sym(kList), Sym("set_selected"), Var("rbbz_settings_index")})});
 }
 
 Node DirectionTable(const std::vector<Cell>& cells, const bool forward) {
@@ -1066,7 +1070,7 @@ Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
     body = Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(kProviderQuery)}),
                DirectionTable(Cells(panel, true), forward), std::move(body)});
   }
-  return Arr({Sym(name), std::move(body)});
+  return Arr({Sym(name), Cmd({Sym("if"), Cmd({Sym("!"), Var("rbbz_settings_editing")}), std::move(body)})});
 }
 
 Node PanelDefinition(const PanelSpec& panel) {
@@ -1084,13 +1088,13 @@ Node PanelDefinition(const PanelSpec& panel) {
     for (Node& item : left) {
       kids.push_back(std::move(item));
     }
-    extras.push_back(Arr({Sym("kAction_Left"), Cmd(std::move(kids))}));
+    extras.push_back(Arr({Sym("kAction_Left"), Cmd({Sym("if"), Var("rbbz_settings_editing"), Cmd(std::move(kids))})}));
     std::vector<Node> right = DirectionCases(panel, true);
     std::vector<Node> rkids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
     for (Node& item : right) {
       rkids.push_back(std::move(item));
     }
-    extras.push_back(Arr({Sym("kAction_Right"), Cmd(std::move(rkids))}));
+    extras.push_back(Arr({Sym("kAction_Right"), Cmd({Sym("if"), Var("rbbz_settings_editing"), Cmd(std::move(rkids))})}));
   }
 
   return Panel(panel.name, panel.scene,

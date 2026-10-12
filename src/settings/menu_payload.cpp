@@ -17,7 +17,7 @@ void U64(std::vector<uint8_t>& out, uint64_t n) {
 }
 
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
-                      MenuRecords* records, std::string* error) {
+                      MenuRecords* records, std::string* error, bool merge_provider) {
   namespace screen = ui::screen;
   MenuRecords built;
   auto edit = [&](const std::string& path, auto transform) {
@@ -41,6 +41,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         }
         return true;
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
+        if (merge_provider) {
+          // A compatible provider's old entry now reaches the merged settings root.
+          // Unknown providers retain their original route as the compatibility fallback.
+          std::string ignored;
+          screen::RerouteRow(&roots, "mod_settings", screen::MainMenuRouteBody(), &ignored);
+        }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
         return screen::RerouteRow(&roots, screen::kPauseMenuRow,

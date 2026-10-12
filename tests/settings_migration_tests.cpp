@@ -180,10 +180,10 @@ void TestMigrateDefault() {
   CHECK_TRUE(result.status == MigrationStatus::kMigrated);
   CHECK_TRUE(result.wrote_settings);
   CHECK_TRUE(result.stats.target_imported);
-  // Two rows differ from the *new* compiled defaults: the target, and the legacy default
-  // anisotropic_override of 3 (4x) — the game ran with 4x before, so migration keeps it.
-  CHECK_EQ(result.stats.imported, 2);
-  CHECK_EQ(result.stats.translated, 1);
+  // Keep the old target, 4x filtering and explicitly stored 720p resolution. New profiles
+  // default to Auto, but migration must preserve a legacy resolution choice.
+  CHECK_EQ(result.stats.imported, 3);
+  CHECK_EQ(result.stats.translated, 2);
   CHECK_EQ(result.stats.dropped, 4);      // rename + pool count + fullscreen + monitor
   CHECK_EQ(result.stats.preserved, 1);    // input_backend
   CHECK_TRUE(!result.backup.empty());

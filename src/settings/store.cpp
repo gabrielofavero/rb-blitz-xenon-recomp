@@ -762,7 +762,8 @@ bool ParseValueFromItem(const Descriptor& descriptor, const toml::Item& item, Va
       int64_t width = 0;
       int64_t height = 0;
       if (!toml::ParseBareInt(item.list[0], &width) ||
-          !toml::ParseBareInt(item.list[1], &height)) {
+          !toml::ParseBareInt(item.list[1], &height) || width <= 0 || height <= 0 ||
+          width > INT32_MAX || height > INT32_MAX) {
         return false;
       }
       out->kind = ValueKind::kResolution;

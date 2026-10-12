@@ -540,7 +540,7 @@ void TestRequestPathsParse() {
       continue;
     }
     // A commit carries no setting and no value; every other request addresses one.
-    if (request.op == Op::kCommit || request.op == Op::kRequestRestart) {
+    if (request.op == Op::kCommit || request.op == Op::kRequestRestart || request.op == Op::kCancelEdit) {
       CHECK_TRUE(request.setting.empty());
       CHECK_TRUE(request.value.kind == ValueKind::kNone);
     } else {
@@ -995,9 +995,9 @@ void TestEveryFillPlacesTheSelection() {
       const bool placed = i + 1 < statements.size() &&
                           IsCall(*statements[i + 1], "set_selected") &&
                           statements[i + 1]->kids.size() == 3u &&
-                          statements[i + 1]->kids[2].tag == dtb::kInt &&
-                          statements[i + 1]->kids[2].scalar == 0u;
-      CHECK_TRUE(placed);  // the fill is followed by `set_selected 0`
+                          statements[i + 1]->kids[2].tag == dtb::kVar &&
+                          statements[i + 1]->kids[2].text == "rbbz_settings_index";
+      CHECK_TRUE(placed);  // edits preserve the focused row when its label changes
     }
 
     std::vector<const dtb::Node*> calls;
@@ -1024,7 +1024,7 @@ void TestEveryFillPlacesTheSelection() {
     for (const dtb::Node* call : calls) {
       CHECK_EQ(call->kids.size(), 3u);
       CHECK_TRUE(call->kids[0].text == "options.lst");
-      CHECK_TRUE(call->kids[2].tag == dtb::kInt);
+      CHECK_TRUE(call->kids[2].tag == dtb::kVar);
     }
   }
 }

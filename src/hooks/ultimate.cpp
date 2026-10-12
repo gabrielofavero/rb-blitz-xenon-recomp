@@ -294,12 +294,13 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // its own to read (its records live inside the game's own archive) and no overlay to serve the
   // settings file. That arrangement is reported rather than guessed at.
   const bool separate_payload = ShouldMountOverlay(has_payload, merged) && mode != Mode::kOff;
+  const auto provider_root = separate_payload ? payload_root : game_data_root;
 
   // The provider is inspected once, here, before anything else looks at it: the shape check is
   // what decides whether the settings redirect is meaningful, and the redirect is part of the
   // union that MountOverlay() builds a few lines below.
-  settings::ultimate_adapter::ConfigureProvider(&g_provider, payload_root,
-                                                runtime->user_data_root(), separate_payload);
+  settings::ultimate_adapter::ConfigureProvider(&g_provider, provider_root,
+      runtime->user_data_root(), mode != Mode::kOff && (separate_payload || merged));
   if (g_provider.considered) {
     REXLOG_INFO("ultimate: {}", g_provider.summary);
     for (const std::string& problem : g_provider.shape.problems) {
@@ -336,7 +337,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   if (PatchEnabled(kPatchContentDevice)) {
     ApplyContentDevicePatch(runtime);
   }
-  if (ShouldMountOverlay(has_payload, merged)) {
+  if (ShouldMountOverlay(has_payload, merged) || merged) {
     // The redirect is added when the payload's own macro names the settings file this build
     // watches - a *separate* question from whether the whole payload is one we integrate with.
     // On an unrecognized payload this still repairs the provider's own save, which is the plan's
@@ -346,7 +347,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
         !g_provider.user_root.empty()) {
       redirects.emplace_back(settings::ultimate_adapter::kProviderRecord);
     }
-    MountOverlay(runtime, payload_root, game_data_root, g_provider.user_root, redirects);
+    MountOverlay(runtime, provider_root, game_data_root, g_provider.user_root, redirects);
   }
 }
 

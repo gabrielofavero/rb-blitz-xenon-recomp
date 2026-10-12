@@ -110,7 +110,9 @@ class RbBlitzApp : public rex::ReXApp {
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
-    SelectGpuBackend(config);
+      if (rex::cvar::GetFlagByName("settings_safe_graphics") == "true")
+        rex::cvar::SetFlagByName("gpu_backend", "d3d12");
+      SelectGpuBackend(config);
     // Load the default plugin here too: its cvars must exist before presentation and runtime
     // setup consume them. Loading creates the graphics object; SetupPresentation follows later.
     if (!config.graphics && !config.gpu_plugin.empty()) {

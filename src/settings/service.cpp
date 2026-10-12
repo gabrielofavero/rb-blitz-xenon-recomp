@@ -204,7 +204,8 @@ void Service::SetProviderSink(ProviderSink* sink) {
   provider_ = sink;
   if (sink != nullptr) {
     SetProviderValues(sink->ReadValues());
-    RecoverCommit(&recovery_error_);
+    rb_blitz::fs::FileLock lock;
+    if (lock.Acquire(JournalPath(), &recovery_error_)) RecoverCommit(&recovery_error_);
   }
 }
 
@@ -441,6 +442,7 @@ CommitResult Service::Commit(uint64_t txn) {
 
   rb_blitz::fs::FileLock commit_lock;
   std::string error;
+  const auto previous_revision = revision_;
   if (!commit_lock.Acquire(JournalPath(), &error) || !RecoverCommit(&error)) {
     result.status = CommitStatus::kIoError;
     result.errors.push_back(error);
@@ -449,7 +451,7 @@ CommitResult Service::Commit(uint64_t txn) {
 
   std::map<SettingId, Value> provider_rows;
   std::map<SettingId, Value> native_rows;
-  bool restart = false;
+  bool restart = revision_ != previous_revision;
   for (const auto& [id, value] : pending_) {
     if (ValueEquals(RequestedValue(id), value)) continue;
     if (IsProviderFileRow(id)) {
@@ -491,7 +493,7 @@ CommitResult Service::Commit(uint64_t txn) {
   }
 
   bool wrote_native = false;
-  bool provider_written = false;
+  bool provider_written = revision_ != previous_revision;
   if (native) {
     for (const auto& [id, value] : native_rows) store_.MarkChanged(id, value, Origin::kManual);
     const SaveOutcome outcome = store_.Save();
@@ -539,7 +541,8 @@ CommitResult Service::Commit(uint64_t txn) {
     }
   }
 
-  if (result.status != CommitStatus::kPartial && (wrote_native || provider_written)) {
+  if (result.status != CommitStatus::kPartial && (wrote_native || provider_written) &&
+      revision_ == previous_revision) {
     ++revision_;  // only a durable commit advances the revision
   }
   if (result.status != CommitStatus::kPartial) {

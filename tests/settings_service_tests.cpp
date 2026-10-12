@@ -192,7 +192,7 @@ void TestDurableEditReload() {
   const CommitResult mixed_commit = service.Commit(mixed);
   CHECK_TRUE(mixed_commit.status == CommitStatus::kSaved);
   CHECK_TRUE(mixed_commit.restart_required);
-  CHECK_EQ(service.last_commit_changes().size(), 2u);
+  CHECK_EQ(service.last_commit_changes().size(), 1u);  // unchanged VSync isn't written again
 
   BeginCase("service: a commit with nothing staged writes nothing");
   const uint64_t idle = reloaded.BeginEdit(reloaded.revision());
@@ -397,6 +397,59 @@ void TestCombinedCommitAndRestart() {
   CHECK_TRUE(service.RequestRestart(service.revision(), 2).status == RestartStatus::kAlreadyRequested);
 }
 
+void TestInterruptedCommitRecovery() {
+  BeginCase("combined save: partial failure blocks restart and is recoverable after process exit");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  fs::path journal = paths.settings_file;
+  journal += ".commit-journal";
+  {
+    Service service(paths);
+    service.Boot(nullptr, {}, nullptr);
+    service.SetCapabilities(Capabilities());
+    FakeProvider provider;
+    provider.durable = false;
+    service.SetProviderSink(&provider);
+    const auto txn = service.BeginEdit(0);
+    CHECK_TRUE(service.Set(txn, SettingId::kVsync, BoolV(false), 1).ok);
+    CHECK_TRUE(service.Set(txn, SettingId::kHideHud, BoolV(true), 1).ok);
+    const auto result = service.Commit(txn);
+    CHECK_TRUE(result.status == CommitStatus::kPartial);
+    CHECK_EQ(service.revision(), 0u);
+    CHECK_FALSE(result.restart_required);
+    CHECK_TRUE(fs::exists(journal));
+    CHECK_FALSE(LoadSettingsDocument(paths.settings_file).document.values.at(SettingId::kVsync).boolean);
+    CHECK_TRUE(service.RequestRestart(0, 1).status == RestartStatus::kNotSaved);
+  }
+  {
+    Service service(paths);
+    service.Boot(nullptr, {}, nullptr);
+    service.SetCapabilities(Capabilities());
+    FakeProvider provider;
+    service.SetProviderSink(&provider);
+    CHECK_EQ(provider.saves, 1);
+    CHECK_TRUE(service.RequestedValue(SettingId::kHideHud).boolean);
+    CHECK_FALSE(fs::exists(journal));
+    CHECK_EQ(service.revision(), 1u);
+    const auto no_op = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(no_op, SettingId::kHideHud, BoolV(true), 1).ok);
+    CHECK_TRUE(service.Commit(no_op).status == CommitStatus::kNoChanges);
+    CHECK_EQ(provider.saves, 1);
+  }
+
+  BeginCase("Auto survives a durable save and reload as intent, without fixing a pixel size");
+  Service service(paths);
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn, SettingId::kResolution, ResolutionV(1920, 1080), 1).ok);
+  CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
+  const auto automatic = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(automatic, SettingId::kResolution, ResolutionV(0, 0), 1).ok);
+  CHECK_TRUE(service.Commit(automatic).status == CommitStatus::kSaved);
+  CHECK_TRUE(IsAutoResolution(LoadSettingsDocument(paths.settings_file).document.values.at(SettingId::kResolution)));
+}
+
 void TestCvarVocabulary() {
   BeginCase("cvars: the controller allowlist excludes Guide");
   CHECK_TRUE(IsControllerCvar("mouse_ui_nav"));
@@ -478,6 +531,7 @@ int main() {
   TestBootCorrection();
   TestProviderSeam();
   TestCombinedCommitAndRestart();
+  TestInterruptedCommitRecovery();
   TestCvarVocabulary();
   return Finish();
 }

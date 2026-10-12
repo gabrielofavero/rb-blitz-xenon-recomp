@@ -31,6 +31,22 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class RbDriveWin32 {
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr p);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder text, int n);
+    public static IntPtr GameWindow(int pid) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((h, p) => {
+            uint owner; GetWindowThreadProcessId(h, out owner);
+            if (owner == pid) {
+                var name = new System.Text.StringBuilder(128); GetClassName(h, name, 128);
+                if (name.ToString() == "SDL_app") { found = h; return false; }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -118,7 +134,8 @@ $scMap = @{
 function Get-GameWindow {
     $proc = Get-Process rb_blitz -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $proc) { throw "rb_blitz is not running" }
-    $h = $proc.MainWindowHandle
+    # Windows may identify an IME/input-indicator overlay as MainWindowHandle.
+    $h = [RbDriveWin32]::GameWindow($proc.Id)
     if ($h -eq [IntPtr]::Zero) { throw "rb_blitz has no main window" }
     return $h
 }
