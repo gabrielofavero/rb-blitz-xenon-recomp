@@ -1227,6 +1227,8 @@ std::vector<std::string> RequestPaths() {
   add(kProviderQuery);
   add(Path("commit", "-", "-"));
   add(Path("restart", "-", "-"));
+  // The one-shot edit cancel: B while a horizontal selector is being staged.
+  add(Path("cancel", "-", "-"));
   for (const auto* token : {"commit.ok", "commit.restart_required", "restart.ok"})
     add(Path("snapshot", token, "b:1"));
   for (const PanelSpec& panel : AllPanels()) {

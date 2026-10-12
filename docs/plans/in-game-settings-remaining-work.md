@@ -1,5 +1,17 @@
 # In-game settings — current status and remaining work
 
+> **Two handovers, both current (2026-10-12):** [the implementation handover](in-game-settings-handover-2026-10-12.md)
+> has the changes, the Auto-resolution decision, and the runtime blockers;
+> **[the evening status](in-game-settings-status-2026-10-12.md) explains the black startup and what
+> this session changed** — the two failing ctests are fixed (35/35 green), the Ultimate boot hang is
+> diagnosed and guarded, and the remaining work is re-ordered by what blocks a release. Read that
+> one second and last.
+>
+> Statements below that this session measured to be wrong: graphics recovery **is** wired (the
+> marker, the fallback and safe mode all ran); the menu payload is **refused** on an Ultimate
+> install rather than installed; and the Ultimate boot now presents.
+> The feature still has not passed final acceptance.
+
 **Updated 2026-10-12.** This status supersedes the older open-item ledger below in its previous
 revision and the dated “open” statements in the handoff documents. Those documents retain the
 research history; use this file for the current implementation state.

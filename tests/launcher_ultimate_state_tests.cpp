@@ -85,7 +85,10 @@ struct Scratch {
   }
 
   fs::path Make(std::string_view name) const {
-    const fs::path dir = base / name;
+    // A nested fixture is spelled with '/' separators, which stay literal in `string()`; the
+    // detector hands its answer back through `lexically_normal()`, so normalize here too or the
+    // two spellings of one path compare unequal.
+    const fs::path dir = (base / name).lexically_normal();
     std::error_code ec;
     fs::create_directories(dir, ec);
     return dir;

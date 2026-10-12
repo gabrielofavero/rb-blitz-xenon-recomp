@@ -350,12 +350,32 @@ void CompleteSplitFile(uint8_t* base, uint8_t* second, size_t second_length) {
               g_pending.offset + g_pending.file_offset, head_size, second_length);
 }
 
-void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
+// The three arguments the scan needs, read out of the guest context **before** the original call.
+//
+// `ctx` is guest register state and r8/r9/r10 are caller-saved in the PowerPC ABI, so nothing
+// guarantees they still hold the caller's arguments once the original host function has run.
+// Reading them afterwards works only by luck, and the scan's cost is quadratic in `length` - a
+// stale `0xFFFFFFFF` there is a four-billion-iteration loop on a guest thread, which reads from
+// outside as a hung boot. (Measured 2026-10-12, while chasing exactly such a hang in Ultimate mode:
+// the scan really is where the CPU goes when a boot stalls. That boot's reads were a legitimate
+// 64 KiB each, so the capture below is hardening for a real hazard, not the fix for that hang -
+// see docs/plans/in-game-settings-status-2026-10-12.md.)
+struct ReadArgs {
+  uint32_t length = 0;
+  uint32_t buffer = 0;
+  uint32_t offset_ptr = 0;
+};
+
+ReadArgs Capture(const PPCContext& ctx) {
+  return ReadArgs{ctx.r9.u32, ctx.r8.u32, ctx.r10.u32};
+}
+
+void HandleRead(const char* which, PPCContext& ctx, uint8_t* base, const ReadArgs& args) {
   if (!g_configured || !g_settings.Any()) {
     return;
   }
-  const uint32_t length = ctx.r9.u32;
-  const uint32_t buffer = ctx.r8.u32;
+  const uint32_t length = args.length;
+  const uint32_t buffer = args.buffer;
   if (buffer == 0 || length < 32) {
     return;
   }
@@ -370,8 +390,8 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base) {
   const bool plain = std::strcmp(which, "plain") == 0;
   bool have_offset = false;
   uint64_t offset = 0;
-  if (plain && ctx.r10.u32 != 0) {
-    if (const uint8_t* at = rex::memory::GuestPtr<const uint8_t*>(base, ctx.r10.u32)) {
+  if (plain && args.offset_ptr != 0) {
+    if (const uint8_t* at = rex::memory::GuestPtr<const uint8_t*>(base, args.offset_ptr)) {
       offset = 0;
       for (int i = 0; i < 8; ++i) {
         offset = (offset << 8) | at[i];
@@ -513,17 +533,19 @@ void Configure() {
 }  // namespace rb_blitz::menu_filter
 
 extern "C" REX_FUNC(__imp__NtReadFile) {
+  const ReadArgs args = Capture(ctx);
   if (auto original = ResolveOriginal(/*scatter=*/false)) {
     original(ctx, base);
   }
-  HandleRead("plain", ctx, base);
+  HandleRead("plain", ctx, base, args);
 }
 
 extern "C" REX_FUNC(__imp__NtReadFileScatter) {
+  const ReadArgs args = Capture(ctx);
   if (auto original = ResolveOriginal(/*scatter=*/true)) {
     original(ctx, base);
   }
-  HandleRead("scatter", ctx, base);
+  HandleRead("scatter", ctx, base, args);
 }
 
 #endif  // _WIN32

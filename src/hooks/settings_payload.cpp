@@ -106,9 +106,24 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   };
   if (!Read(vfs, "gen/main_xbox.hdr", 0, 0, &bytes, &error) ||
       !ultimate_adapter::ReadArkIndex(bytes.data(), bytes.size(), &main, &error)) return fail();
+  // NOT INSTALLED when the game root already carries a patch archive.
+  //
+  // That is the Ultimate payload case, and it is refused rather than attempted: stacking this
+  // device on the provider's own overlay hung the boot outright - measured 2026-10-12, five
+  // consecutive Ultimate boots, the guest thread burning 70 s of CPU inside
+  // `menu_options::LooksLikeDtb` while the title re-read 64 KiB of the generated part file half a
+  // million times and never presented. Pointing the same boot at `RBBZ_SKIP_MENU_PAYLOAD` presented
+  // the menu in 47 s, so this install step is the cause, not a symptom. The base game (no payload
+  // overlay, this same code with an empty provider index) is unaffected and presents reliably.
+  // The provider's own records and the reachable game root stay exactly as the title expects, so an
+  // Ultimate install boots; the merged Help & Options screen is base-only until the cause is fixed.
+  // Evidence, the isolation matrix and the two leading hypotheses:
+  // docs/plans/in-game-settings-status-2026-10-12.md.
   if (vfs->ResolvePath("game:\\gen\\patch_xbox.hdr")) {
-    if (!Read(vfs, "gen/patch_xbox.hdr", 0, 0, &bytes, &error) ||
-        !ultimate_adapter::ReadArkIndex(bytes.data(), bytes.size(), &patch, &error)) return fail();
+    REXLOG_WARN("settings_menu: the game root already carries a patch archive, so the generated "
+                "menu records are NOT mounted (this is what hung the Ultimate boot); see "
+                "docs/plans/in-game-settings-status-2026-10-12.md");
+    return false;
   }
   MenuRecords originals;
   RecordReader read = [&](const std::string& path, Bytes* out, std::string* why) {
