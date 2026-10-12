@@ -575,7 +575,9 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   }
   deferred_writes_.clear();
   if (screen_plan_.supported && !overrides_.contains(SettingId::kResolution)) {
-    SetBootRenderHeight(screen_plan_.guest_size.height);
+    // Both halves of the guest size, because the title derives its width from its height and
+    // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
+    SetBootRenderFrame(screen_plan_.guest_size.width, screen_plan_.guest_size.height);
     REXLOG_INFO("settings_boot: guest render base {}x{}, draw scale {} (before graphics setup)",
                 screen_plan_.guest_size.width, screen_plan_.guest_size.height,
                 screen_plan_.draw_scale);

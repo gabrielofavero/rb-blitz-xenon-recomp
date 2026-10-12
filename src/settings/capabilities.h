@@ -41,6 +41,12 @@ namespace rb_blitz::settings {
 // A base size the implementation cannot ask for must not be listed - that is what keeps an
 // unavailable 1080p out of the offer set instead of offering a size the render path cannot
 // reach.
+//
+// The title derives its width from its height (`height * 16 / 9`, or `* 4 / 3` for a 4:3
+// display), so a guest size whose aspect is neither is reachable only through the frame-width
+// hook (src/hooks/render_settings.cpp). A base size in this list is laid out at *exactly*
+// these dimensions - the width hook makes the title's own arithmetic irrelevant - which is what
+// lets one list describe 16:9, 4:3, 16:10 and ultrawide guest sizes alike.
 struct RenderPathLimits {
   std::vector<DisplayMode> base_sizes = {{1280, 720}};
   // Draw scales the render path offers. The SDK's ceiling is 7; the project offers the
@@ -48,12 +54,39 @@ struct RenderPathLimits {
   std::vector<int32_t> scales = {1, 2, 3};
   // Largest render dimension the project offers (the plan's §7.1 matrix tops out at 4K).
   DisplayMode offer_ceiling = {3840, 2160};
+  // --- the window a *forced* guest size has to stay inside (measured 2026-10-12) ---
+  //
+  // A request whose aspect no base size has is realised by forcing the guest's width beside a
+  // height the title does lay out at: 720 is the shipping size and 540 the title's own
+  // half-resolution one, both measured rendering their exact size with the UI following. A height
+  // the title never lays out at is what corrupts its title-screen artwork (1080 was measured), so
+  // the height is the bounded axis. The width is bounded by the frame's EDRAM pitch: 21 tiles
+  // (1680 px) was measured working at scale 1.
+  uint32_t min_guest_height = 540;
+  uint32_t max_guest_height = 720;
+  uint32_t min_guest_width = 640;
+  uint32_t max_guest_width = 2048;
+  // Aspects the layout is not proven at are refused rather than guessed at: 1.0:1 up to 3.2:1
+  // covers 16:10, 16:9, 21:9 and 32:10 without reaching the shapes nothing has measured.
+  uint32_t min_aspect_x1000 = 1000;
+  uint32_t max_aspect_x1000 = 3200;
 };
 
-// Title modes actually implemented by the production hook.
+// Spike instrument (docs/plans/ultrawide-findings.md): `RBBLITZ_PROBE_GUEST_BASES=1704x720,1280x540`
+// adds guest bases to the render path for one boot, so a non-16:9 render size can be measured
+// through the real apply path - the planner, the reconciler and the boot's own write - instead
+// of through a value poked into the guest. Never set in production; unparsable entries are
+// ignored, so an accidental value cannot make a boot unbootable.
+std::vector<DisplayMode> DiagnosticGuestBases();
+
+// Title modes actually implemented by the production hook: the two the title ships with, plus
+// whatever one boot's diagnostic instrument asks for.
 inline RenderPathLimits TitleRenderPath() {
   RenderPathLimits limits;
   limits.base_sizes = {{960, 540}, {1280, 720}};
+  for (const DisplayMode& size : DiagnosticGuestBases()) {
+    limits.base_sizes.push_back(size);
+  }
   return limits;
 }
 
@@ -61,6 +94,22 @@ inline RenderPathLimits TitleRenderPath() {
 // anything above the offer ceiling, deduplicated and sorted by area then width, largest
 // first. Deterministic, so the UI order is stable across boots.
 std::vector<DisplayMode> RenderPathSizes(const RenderPathLimits& limits);
+
+// --- the render path's guest-size plan -----------------------------------------------------
+//
+// The inverse of RenderPathSizes: which guest size must the title be asked to lay out at, and what
+// draw scale makes that the requested render size? An exact base x scale match is the title's own
+// sizes; anything else is a *forced* guest size (the frame-width hook) bounded by the window the
+// layout was measured in. `supported == false` must not be applied.
+struct GuestScreenPlan {
+  bool supported = false;
+  DisplayMode guest_size;
+  int32_t draw_scale = 1;
+};
+
+// The plan for an exact render size. It lives here rather than with graphics_policy because the
+// offer set and the boot have to answer "can this size be rendered?" with the same rule.
+GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMode& requested);
 
 // --- what the host probed -----------------------------------------------------------------
 //

@@ -272,38 +272,6 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
   }
 }
 
-GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMode& requested) {
-  GuestScreenPlan plan;
-  if (requested.width <= 0 || requested.height <= 0) {
-    return plan;
-  }
-  // Largest guest size first, then largest scale first: the request is realised by the
-  // clearest layout that divides it exactly.
-  std::vector<DisplayMode> bases = limits.base_sizes;
-  std::stable_sort(bases.begin(), bases.end(), [](const DisplayMode& lhs, const DisplayMode& rhs) {
-    return int64_t(lhs.width) * lhs.height > int64_t(rhs.width) * rhs.height;
-  });
-  std::vector<int32_t> scales = limits.scales;
-  std::stable_sort(scales.begin(), scales.end(), std::greater<int32_t>());
-  for (const DisplayMode& base : bases) {
-    if (base.width <= 0 || base.height <= 0) {
-      continue;
-    }
-    for (const int32_t scale : scales) {
-      if (scale < 1) {
-        continue;
-      }
-      if (base.width * scale == requested.width && base.height * scale == requested.height) {
-        plan.supported = true;
-        plan.guest_size = base;
-        plan.draw_scale = scale;
-        return plan;
-      }
-    }
-  }
-  return plan;
-}
-
 GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps) {
   GraphicsRecommendation recommendation;
   const std::string renderer = PolicyRenderer(caps, "");

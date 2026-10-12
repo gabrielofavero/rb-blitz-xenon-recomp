@@ -73,21 +73,8 @@ std::string PolicyRenderer(const CapabilitySnapshot& caps, std::string_view want
 
 // --- the render path's guest-size plan -----------------------------------------------------
 //
-// P2's finding: the title chooses a guest screen size and the SDK multiplies the result by an
-// integer draw scale, so a requested *render* size is realised as (guest base size, draw
-// scale). This is the inverse of RenderPathSizes, and it is the whole of the render path's
-// decision: given the resolution row's effective value, which guest size must the title be
-// asked to lay out at, and what scale makes it the requested render size?
-struct GuestScreenPlan {
-  bool supported = false;
-  DisplayMode guest_size;  // the size the title must be asked for
-  int32_t draw_scale = 1;  // the SDK's integer multiplier (the GPU plugin's draw scale)
-};
-
-// The plan for an exact render size. The largest guest size that divides the request by an
-// offered scale wins (the clearest UI and HUD layout), so 3840x2160 plans as 1080p x 2 rather
-// than as 720p x 3. An unsupported size reports supported=false and must not be applied.
-GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMode& requested);
+// The plan itself (GuestScreenPlan, PlanGuestScreen) lives in settings/capabilities.h, because the
+// offer set and the boot must answer "can this size be rendered?" with one rule.
 
 // --- the reconciler -----------------------------------------------------------------------
 

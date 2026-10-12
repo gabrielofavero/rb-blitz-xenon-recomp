@@ -110,3 +110,13 @@ address = 0x823F382C
 name = "RenderHeightHook"
 registers = ["r11"]
 after_instruction = true
+
+# The very next thing the function does is derive the width from that height: `divw r7,height*16,9`
+# (0x823F3870, or `*4/3` at 0x823F385C for a 4:3 display) and store it at +64 (0x823F3878). This
+# hook runs *before* that store with both copies of the width - r7 for the field, r29 for the
+# two-rect table the function builds right after - so a width that is not 16:9 of the height is
+# possible, which is the whole of ultrawide support. See src/hooks/render_settings.cpp.
+[[midasm_hook]]
+address = 0x823F3878
+name = "RenderFrameWidthHook"
+registers = ["r7", "r29"]

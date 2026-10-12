@@ -27,6 +27,15 @@
 // indirection the project's hooks already carry everywhere.
 
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -87,6 +96,21 @@ REXCVAR_DEFINE_BOOL(probe_screen_1080p, false, "Diagnostics",
                     "before it computes its size, and report what it chose. Diagnostics only.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// 0x82078190 / 0x82078194 are an adjacent pair of aspect floats in the guest image's read-only
+// data: 4:3 and 16:9. The frame the title allocates is NOT the space it lays out in - a 1680x720
+// frame drew a UI disc 1.3125x wider than a 1280x720 frame with the same height, i.e. the title
+// mapped a 16:9-shaped layout onto the wider frame and stretched everything. That is what this
+// cvar tests: write the widescreen slot to a non-16:9 aspect for one boot and see whether the
+// projection (and therefore the whole layout) follows it. Off by default; an instrument, not a
+// feature (docs/plans/ultrawide-findings.md).
+REXCVAR_DEFINE_STRING(probe_aspect, "", "Diagnostics",
+                      "Diagnostics: decimal aspect ratio to write over the guest's 16:9 constant "
+                      "(0x82078194) before the title builds its screen, e.g. 2.3703704. Empty "
+                      "leaves the title's own constant alone.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+inline constexpr uint32_t kAspect16By9Address = 0x82078194;
+
 // 0x8251D580 is the title's present: it builds the swap packet and calls VdSwap with
 // the front-buffer size. Its r31 is the engine object, and `*(object + 11024) + 8` is
 // the Direct3D 9 object the swap reads its size from - so dumping both once is how the
@@ -96,6 +120,28 @@ REX_EXTERN(__imp__sub_8251D580);
 REXCVAR_DEFINE_BOOL(probe_dump_guest_swap, false, "Diagnostics",
                     "P2 spike: dump the guest present object and its Direct3D 9 pointer once, to "
                     "locate the title's real back-buffer size. Diagnostics only.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+// The layout-space hunt. A 1680x720 frame draws the title's UI 1.3125x wider than a 1280x720
+// frame with the same height, and the image contains exactly one `height*16/9` computation (the
+// one the frame width comes from), so the space the UI is laid out in is *stored state*, not
+// arithmetic: something holds 1280x720 and is read as the screen size while the frame is wider.
+//
+// This finds that state mechanically - scan the guest's writable image for a {1280, 720} pair,
+// then write the real frame width over the 1280 on every presented frame - because a value that is
+// re-derived per frame would otherwise be overwritten before the screenshot is taken. Diagnostics
+// only: it writes to fields nobody has proved the meaning of.
+REXCVAR_DEFINE_BOOL(probe_screen_fields, false, "Diagnostics",
+                    "Diagnostics: find guest fields holding the 1280x720 layout size and overwrite "
+                    "the width with the frame width each frame. Diagnostics only.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+// Restricts the poke above to the candidate addresses named here ("0x82078CC8,0x8210DBF8"), or to
+// all of them when empty. One address per arm is what turns "something in that list fixed it" into
+// "this field is the layout aspect".
+REXCVAR_DEFINE_STRING(probe_screen_fields_filter, "", "Diagnostics",
+                      "Diagnostics: comma-separated guest addresses the screen-field poke may "
+                      "write; empty means every candidate.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
@@ -124,6 +170,35 @@ std::atomic<bool> g_swap_dumped{false};
 extern "C" REX_FUNC(sub_823F3698) {
   const uint32_t object = uint32_t(ctx.r3.u32);
   const bool override_on = REXCVAR_GET(probe_screen_1080p);
+  // The layout-space experiment: the title lays its UI and its 3D world out in a 16:9-shaped
+  // space even when the frame it allocates is wider, so the frame alone is a stretch. Writing the
+  // engine's own aspect float says whether that float is the source.
+  const std::string aspect_text = REXCVAR_GET(probe_aspect);
+  if (!aspect_text.empty()) {
+    const float aspect = std::strtof(aspect_text.c_str(), nullptr);
+    uint8_t* constant = rex::memory::GuestPtr<uint8_t*>(base, kAspect16By9Address);
+    if (aspect > 0.0f && aspect < 16.0f && constant != nullptr) {
+      const uint32_t before = LoadBe32(constant);
+      uint32_t bits = 0;
+      std::memcpy(&bits, &aspect, sizeof(bits));
+      // The image's read-only data really is read-only: the first attempt to write this float was
+      // refused as a guest access violation. Our own process owns the page, so the experiment opens
+      // it for the write and closes it again - the product version of this needs the same, done
+      // once at boot, or a code-level hook on whatever reads it.
+      DWORD previous = 0;
+      const bool writable =
+          ::VirtualProtect(constant, sizeof(uint32_t), PAGE_READWRITE, &previous) != 0;
+      if (writable) {
+        StoreBe32(constant, bits);
+        DWORD ignored = 0;
+        ::VirtualProtect(constant, sizeof(uint32_t), previous, &ignored);
+      }
+      REXLOG_INFO("probe/aspect: 0x{:08X} {:#010X} -> {} ({:#010X} before, writable {})",
+                  kAspect16By9Address, bits, aspect, before, writable);
+    } else {
+      REXLOG_WARN("probe/aspect: refusing '{}'", aspect_text);
+    }
+  }
   if (override_on || rb_blitz::settings::BootRenderHeight() == 540) {
     // Bit 0 of +796 is the flag this very function reads (0x823F3804) to pick 540 instead
     // of 720; forcing it at entry makes the title take its own half-resolution path rather
@@ -134,6 +209,10 @@ extern "C" REX_FUNC(sub_823F3698) {
     }
   }
   __imp__sub_823F3698(ctx, base);
+  // The frame's size is chosen here, so the space the title lays its UI out in has to be told about
+  // it here too - a wider frame is otherwise stretched into the 16:9 layout space (P9-style product
+  // seam in src/hooks/render_settings.cpp; this hook is only the guest-side call site).
+  rb_blitz::settings::WriteGuestLayoutAspect(base);
   if (object == 0) {
     return;
   }
@@ -166,10 +245,95 @@ void DumpGuest(const char* tag, uint8_t* base, uint32_t address, uint32_t dwords
   }
 }
 
+// The layout-space hunt: the frame is wide but the UI is laid out in a 1280x720-shaped space, and
+// the image contains exactly one `height*16/9` computation, so the space must be *stored* - either
+// as a size (1280x720, int or float) or as an aspect (16/9, or its 9/16 inverse). This scans the
+// guest's image for every one of those shapes once, then keeps the interesting ones at the values
+// the frame actually has, on every presented frame (a value re-derived per frame would otherwise
+// revert before the screenshot). Only meaningful with a frame wider than 16:9.
+void PokeLayoutFields(uint8_t* base) {
+  struct Site {
+    uint32_t address;
+    uint32_t value;  // what to keep writing there
+    const char* kind;
+  };
+  constexpr uint32_t kScanStart = 0x82000000;  // the whole loaded image
+  constexpr uint32_t kScanEnd = 0x829A0000;
+  static std::vector<Site> sites;
+  static bool scanned = false;
+  const uint32_t width = rb_blitz::settings::BootRenderWidth();
+  const uint32_t height = rb_blitz::settings::BootRenderHeight();
+  if (!scanned) {
+    scanned = true;
+    uint8_t* region = rex::memory::GuestPtr<uint8_t*>(base, kScanStart);
+    if (region == nullptr) {
+      REXLOG_WARN("probe/layout: 0x{:08X} is not mapped; no scan", kScanStart);
+      return;
+    }
+    auto bits_of = [](float value) {
+      uint32_t bits = 0;
+      std::memcpy(&bits, &value, sizeof(bits));
+      return bits;
+    };
+    const float aspect = float(width) / float(height == 0 ? 720 : height);
+    for (uint32_t offset = 0; offset + 8 <= kScanEnd - kScanStart; offset += 4) {
+      const uint32_t first = LoadBe32(region + offset);
+      const uint32_t second = LoadBe32(region + offset + 4);
+      const uint32_t address = kScanStart + offset;
+      if (first == 1280 && second == 720) {
+        sites.push_back({address, width, "int size pair"});
+      } else if (first == bits_of(1280.0f) && second == bits_of(720.0f)) {
+        sites.push_back({address, bits_of(float(width)), "float size pair"});
+      } else if (first == bits_of(1.7777778f)) {
+        sites.push_back({address, bits_of(aspect), "aspect float"});
+      } else if (first == bits_of(0.5625f)) {
+        sites.push_back({address, bits_of(1.0f / aspect), "inverse aspect float"});
+      }
+      if (sites.size() >= 96) {
+        break;
+      }
+    }
+    std::string list;
+    for (const Site& site : sites) {
+      list += fmt::format(" {}(0x{:08X})", site.kind, site.address);
+    }
+    REXLOG_INFO("probe/layout: {} candidate field(s):{}", sites.size(), list);
+  }
+  if (width == 0 || sites.empty()) {
+    return;
+  }
+  std::string wanted = REXCVAR_GET(probe_screen_fields_filter);
+  for (const Site& site : sites) {
+    if (!wanted.empty()) {
+      const std::string address = fmt::format("0x{:08X}", site.address);
+      if (wanted.find(address) == std::string::npos) {
+        continue;
+      }
+    }
+    uint8_t* p = rex::memory::GuestPtr<uint8_t*>(base, site.address);
+    if (p == nullptr) {
+      continue;
+    }
+    DWORD previous = 0;
+    if (::VirtualProtect(p, sizeof(uint32_t), PAGE_READWRITE, &previous)) {
+      StoreBe32(p, site.value);
+      DWORD ignored = 0;
+      ::VirtualProtect(p, sizeof(uint32_t), previous, &ignored);
+    }
+  }
+}
+
 extern "C" REX_FUNC(sub_8251D580) {
   const bool dump = REXCVAR_GET(probe_dump_guest_swap) && !g_swap_dumped.exchange(true);
+  const bool poke = REXCVAR_GET(probe_screen_fields);
   const uint32_t object = uint32_t(ctx.r3.u32);
   __imp__sub_8251D580(ctx, base);
+  // Belt and braces: the screen constructor runs before the boot has necessarily published the
+  // requested size, and this hook runs every frame, so the layout aspect is applied here as well.
+  rb_blitz::settings::WriteGuestLayoutAspect(base);
+  if (poke) {
+    PokeLayoutFields(base);
+  }
   if (!dump || object == 0) {
     return;
   }

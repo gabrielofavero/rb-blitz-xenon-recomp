@@ -42,8 +42,8 @@ std::string JournalValue(const Value& value) {
 void JournalSet(toml::Document& document, std::string_view section, SettingId id,
                 const Value& value) {
   document.Set(section, std::to_string(static_cast<int>(id)),
-               value.kind == ValueKind::kStringList ? toml::RenderStringList(value.list)
-                                                   : toml::RenderBasic(JournalValue(value)));
+               value.kind == ValueKind::kList ? toml::RenderStringList(value.list)
+                                              : toml::RenderBasic(JournalValue(value)));
 }
 
 bool JournalRead(const toml::Document& document, std::string_view section,
@@ -56,11 +56,12 @@ bool JournalRead(const toml::Document& document, std::string_view section,
     for (const auto& candidate : descriptors) {
       if (static_cast<int>(candidate.id) == raw) descriptor = &candidate;
     }
-    if (!descriptor || descriptor->value_kind == ValueKind::kAction) return false;
+    // An action row carries no value at all, so it is not something the journal can hold.
+    if (!descriptor || descriptor->widget == WidgetKind::kAction) return false;
     const auto item = document.Get(section, key);
     Value value;
     value.kind = descriptor->value_kind;
-    if (value.kind == ValueKind::kStringList) {
+    if (value.kind == ValueKind::kList) {
       if (!item.list_ok) return false;
       value.list = item.list;
     } else {

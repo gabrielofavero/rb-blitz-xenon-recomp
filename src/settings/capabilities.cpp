@@ -8,6 +8,7 @@
 #include "settings/capabilities.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <string_view>
 
 namespace rb_blitz::settings {
@@ -34,6 +35,35 @@ bool LargerFirst(const DisplayMode& lhs, const DisplayMode& rhs) {
 bool Positive(const DisplayMode& size) { return size.width > 0 && size.height > 0; }
 
 }  // namespace
+
+std::vector<DisplayMode> DiagnosticGuestBases() {
+  std::vector<DisplayMode> sizes;
+  const char* raw = std::getenv("RBBLITZ_PROBE_GUEST_BASES");
+  if (raw == nullptr) {
+    return sizes;
+  }
+  std::string_view text(raw);
+  size_t start = 0;
+  while (start <= text.size()) {
+    const size_t comma = text.find(',', start);
+    const std::string_view item =
+        text.substr(start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
+    const size_t cross = item.find('x');
+    if (cross != std::string_view::npos) {
+      const DisplayMode size{std::atoi(std::string(item.substr(0, cross)).c_str()),
+                             std::atoi(std::string(item.substr(cross + 1)).c_str())};
+      // A degenerate entry is dropped rather than carried into the planner.
+      if (Positive(size)) {
+        sizes.push_back(size);
+      }
+    }
+    if (comma == std::string_view::npos) {
+      break;
+    }
+    start = comma + 1;
+  }
+  return sizes;
+}
 
 std::vector<DisplayMode> NormalizeDisplayModes(std::vector<DisplayMode> modes) {
   std::vector<DisplayMode> out;
@@ -101,22 +131,100 @@ std::vector<DisplayMode> SupportedResolutions(const RenderPathLimits& limits,
       ceiling = modes.front();
     }
   }
-  if (!Positive(ceiling)) {
-    return producible;
-  }
 
   std::vector<DisplayMode> out;
   for (const DisplayMode& size : producible) {
-    if (size.width <= ceiling.width && size.height <= ceiling.height) {
+    if (ceiling.width <= 0 || (size.width <= ceiling.width && size.height <= ceiling.height)) {
       out.push_back(size);
     }
   }
+  // A display's own mode is offered when the render path can produce it, even though it is not in
+  // the 16:9/4:3 catalogue: that is precisely the ultrawide case (2560x1080 on a 21:9 primary gets
+  // planned as a forced 1280x540 guest frame at 2x). The two questions - "can the render path make
+  // this size?" and "is this size in the catalogue?" - are answered by the same planner.
+  for (const DisplayMode& mode : NormalizeDisplayModes(display_modes)) {
+    if (mode.width > limits.offer_ceiling.width || mode.height > limits.offer_ceiling.height) {
+      continue;
+    }
+    if (!PlanGuestScreen(limits, mode).supported) {
+      continue;
+    }
+    bool duplicate = false;
+    for (const DisplayMode& kept : out) {
+      if (kept.width == mode.width && kept.height == mode.height) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) {
+      out.push_back(mode);
+    }
+  }
+  out = NormalizeDisplayModes(std::move(out));
   if (out.empty()) {
     // Never offer an empty list: the smallest producible size is the floor (it fits the
     // smallest display the title itself supports).
     out.push_back(producible.back());
   }
   return out;
+}
+
+GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMode& requested) {
+  GuestScreenPlan plan;
+  if (requested.width <= 0 || requested.height <= 0) {
+    return plan;
+  }
+  // The title's own sizes first, largest guest size then largest scale: a request those can reach
+  // exactly keeps the title's own layout, which is the behaviour every shipped 16:9 size has.
+  std::vector<DisplayMode> bases = limits.base_sizes;
+  std::stable_sort(bases.begin(), bases.end(), [](const DisplayMode& lhs, const DisplayMode& rhs) {
+    return int64_t(lhs.width) * lhs.height > int64_t(rhs.width) * rhs.height;
+  });
+  std::vector<int32_t> scales = limits.scales;
+  std::stable_sort(scales.begin(), scales.end(), std::greater<int32_t>());
+  for (const DisplayMode& base : bases) {
+    if (base.width <= 0 || base.height <= 0) {
+      continue;
+    }
+    for (const int32_t scale : scales) {
+      if (scale < 1) {
+        continue;
+      }
+      if (base.width * scale == requested.width && base.height * scale == requested.height) {
+        plan.supported = true;
+        plan.guest_size = base;
+        plan.draw_scale = scale;
+        return plan;
+      }
+    }
+  }
+
+  // Otherwise the guest's width is *forced* beside a height the title does lay out at. Both
+  // dimensions have to divide exactly by the scale, because the render target is the frame times
+  // that one integer multiplier - a frame that only approximates the target is the output-size
+  // substitute the project forbids (docs/plans/ultrawide-findings.md). Measured 2026-10-12:
+  // 1680x720 as guest 1680x720 x1 and 2560x1080 as 1280x540 x2 both render exactly their size.
+  for (const int32_t scale : scales) {
+    if (scale < 1 || requested.width % scale != 0 || requested.height % scale != 0) {
+      continue;
+    }
+    const DisplayMode guest{requested.width / scale, requested.height / scale};
+    if (guest.width < static_cast<int32_t>(limits.min_guest_width) ||
+        guest.width > static_cast<int32_t>(limits.max_guest_width) ||
+        guest.height < static_cast<int32_t>(limits.min_guest_height) ||
+        guest.height > static_cast<int32_t>(limits.max_guest_height)) {
+      continue;
+    }
+    const int64_t aspect_x1000 = int64_t(guest.width) * 1000 / guest.height;
+    if (aspect_x1000 < limits.min_aspect_x1000 || aspect_x1000 > limits.max_aspect_x1000) {
+      continue;
+    }
+    plan.supported = true;
+    plan.guest_size = guest;
+    plan.draw_scale = scale;
+    return plan;
+  }
+  return plan;
 }
 
 CapabilitySnapshot BuildCapabilitySnapshot(const CapabilityInputs& inputs) {
