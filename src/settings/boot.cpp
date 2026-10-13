@@ -26,6 +26,7 @@
 #include <rex/logging.h>
 
 #include "hooks/settings_bridge_hooks.h"
+#include "hooks/hud_layout.h"
 #include "hooks/render_settings.h"
 #include "hooks/ultimate.h"
 #include "launcher/profile.h"
@@ -600,6 +601,12 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     REXLOG_INFO("settings_boot: guest render base {}x{}, draw scale {} (before graphics setup)",
                 screen_plan_.guest_size.width, screen_plan_.guest_size.height,
                 screen_plan_.draw_scale);
+    // The HUD half of the same decision (src/hooks/hud_layout.h): how far every off-centre
+    // HUD element moves to keep the pixel distance it has to its nearest edge. Exactly 0 for
+    // a 16:9 base, so this line is the check that a 16:9 boot is untouched, and 320 px is the
+    // number the 2560x1080 in-song capture is measured against.
+    REXLOG_INFO("settings_boot: HUD re-anchor shift {:.4f} layout units, {:.1f} px",
+                BootHudShiftUnits(), BootHudShiftPixels());
   }
   if (service_) {
     GraphicsValues effective;

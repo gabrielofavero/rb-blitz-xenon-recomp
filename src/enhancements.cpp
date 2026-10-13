@@ -88,11 +88,8 @@ REXCVAR_DEFINE_BOOL(enhancements_rename_mod_settings, true, "Enhancements",
                     "mod's own label, \"Mod Settings\".")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_native_mouse, false, "Enhancements",
-                    "R6 different input waves: use the engine's own pointer path for the mouse "
-                    "instead of the synthetic pad in src/input/mouse_ui.cpp. Faithful: the pad the "
-                    "guest actually reads. Not implemented.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+// R6 uses the existing launcher Input setting as its sole switch.
+REXCVAR_DECLARE(bool, mouse_ui_nav);
 
 REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, false, "Enhancements",
                     "R7 DLC cache: persist the flat DLC library's enumeration in the save "
@@ -193,8 +190,8 @@ constexpr std::array<ToggleRow, 10> kToggles{{
      [] { return REXCVAR_GET(enhancements_icon_schemes); }},
     {"enhancements_hide_menu_options", "R5 hide menu options",
      [] { return REXCVAR_GET(enhancements_hide_menu_options); }},
-    {"enhancements_native_mouse", "R6 native mouse",
-     [] { return REXCVAR_GET(enhancements_native_mouse); }},
+    {"mouse_ui_nav", "R6 native mouse",
+     [] { return REXCVAR_GET(mouse_ui_nav); }},
     {"enhancements_dlc_cache", "R7 DLC cache",
      [] { return REXCVAR_GET(enhancements_dlc_cache); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",

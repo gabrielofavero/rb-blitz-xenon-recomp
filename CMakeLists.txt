@@ -87,6 +87,7 @@ set(RBBLITZ_SOURCES
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
     src/hooks/dlc_refresh.cpp
+    src/hooks/hud_layout.cpp
     src/hooks/local_save.cpp
     src/hooks/menu_filter.cpp
     src/hooks/settings_bridge.cpp
@@ -103,6 +104,7 @@ set(RBBLITZ_SOURCES
     src/fs/payload_overlay.cpp
     src/input/remap.cpp
     src/input/mouse_ui.cpp
+    src/input/native_menu.cpp
     src/launcher/profile.cpp
     src/launcher/profile_apply.cpp
     src/launcher/profile_path.cpp
@@ -332,6 +334,14 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_payload_overlay_tests PRIVATE src)
     add_test(NAME payload_overlay COMMAND rb_blitz_payload_overlay_tests)
 
+    # The HUD re-anchor rule (src/hooks/hud_layout.h). Header-only: the policy is arithmetic
+    # and has no boot frame, no guest and no SDK in it, which is the point of the seam.
+    add_executable(rb_blitz_hud_layout_tests
+        tests/hud_layout_tests.cpp
+    )
+    target_include_directories(rb_blitz_hud_layout_tests PRIVATE src)
+    add_test(NAME hud_layout COMMAND rb_blitz_hud_layout_tests)
+
     add_executable(rb_blitz_path_policy_tests
         tests/path_policy_tests.cpp
     )
@@ -352,11 +362,11 @@ if(BUILD_TESTING)
     add_test(NAME fingerprint
              COMMAND rb_blitz_fingerprint_tests ${RBBLITZ_FINGERPRINT_TEST_ARGS})
 
-    add_executable(rb_blitz_ui_nav_tests
-        tests/ui_nav_tests.cpp
+    add_executable(rb_blitz_native_mouse_tests
+        tests/native_mouse_tests.cpp
     )
-    target_include_directories(rb_blitz_ui_nav_tests PRIVATE src)
-    add_test(NAME ui_nav COMMAND rb_blitz_ui_nav_tests)
+    target_include_directories(rb_blitz_native_mouse_tests PRIVATE src)
+    add_test(NAME native_mouse COMMAND rb_blitz_native_mouse_tests)
 
     add_executable(rb_blitz_probe_trace_tests
         tests/probe_trace_tests.cpp

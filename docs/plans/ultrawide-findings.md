@@ -318,7 +318,125 @@ clears `settings.toml.graphics-boot.toml`, because an arm killed before the menu
 graphics attempt behind and the next boot then deliberately (and correctly) falls back to the
 measured-safe floor - which silently masked two arms before that was understood.
 
-## 9. Evidence index
+## 9. The HUD: where the elements go when the frame is not 16:9
+
+### 9.1 The rule (owner's, 2026-10-12)
+
+> * a truly centred element (the top-middle meter) stays where it is, whatever the frame;
+> * every other element keeps the pixel distance it has to its **nearest** horizontal edge.
+
+That needs no per-element table, because the layout space turns the two halves of the rule into
+one statement. The HUD is laid out in the same space §3 describes - x in [-aspect, +aspect],
+y in [-1, +1], one unit being half the frame **height** in pixels on both axes, which is why a UI
+disc stays round - so an element authored at `x` sits `aspect - |x|` units from its nearest edge,
+and widening the frame by `delta = aspect' - 16/9` moves that edge out by exactly `delta`. Keeping
+the distance therefore means moving the element out by `delta` too:
+
+```
+x' = x + sign(x) * delta    so   |x'| = |x| + delta
+                             and  distance' = (aspect + delta) - (|x| + delta) = aspect - |x|
+```
+
+Every off-centre element shifts by the **same** amount, so the composition translates outward
+instead of spreading - the owner's "all non edge elements follow the same logic". In pixels the
+shift is `delta * height / 2`, i.e. the extra width halved: **2560x1080 -> 0.5926 units -> 320
+px**, so the multiplier goes 320 px further left and score/stars 320 px further right.
+
+Why this shape matters: at 16:9 `delta` is exactly 0, so "no changes at 16:9" is arithmetic
+rather than a special case the hook has to remember.
+
+### 9.2 The hook point is NOT found yet - and here is what it is not
+
+The rule was the easy half; *where to apply it* is the open piece. Ruled out, so nobody repeats
+the search:
+
+| Hypothesis | How it was tested | Result |
+| --- | --- | --- |
+| a DTA instantiates or positions the elements | all 145 retail DTB records scanned for the element names | only the type registries (`track_objects.dtb :: star_board`, `ui_objects.dtb :: blitz_meter`) and the Ultimate scripts mention them |
+| the element scene carries its own position | `score.milo_xbox` (2661 B, one chunk) parsed for object transforms | its four transforms are identity with `T = (0,0,0)`: the scene is authored at the origin |
+| the HUD parent scene places them | all 19 chunks of `hud.milo_xbox` scanned for non-zero translations | only art-space values (14, ±5, 15, -4.72, -3.66, -0.5); no ±1.78-scale screen anchors anywhere |
+| the element names are greppable in the guest image | `out/_swap/ultrawide/scan_strings.py` over the decrypted image | 0 hits - the names live in milos/DTBs, so the placement code cannot be found by name either |
+
+So the placement is engine code and the missing piece is its address. Two routes, in order:
+(a) find the reader of the screen object's `+64` layout width and hook the function that computes
+screen-space element positions (the recompiler emits a `lis`/`addi` pair for any constant such a
+function reads, and the consumer comes with it); (b) instrument the scene/dir loader to log the
+element objects and their transforms at runtime, then offset them where they are built. A 16:9
+in-song capture is the cheapest input to (a): the element's pixel offset, `/540`, is its layout
+`x`, and that constant is what a guest-memory scan turns into the address.
+
+#### 9.2.1 The capture pair, and what it does and does not prove
+
+`out/_swap/ultrawide/shots-hud169/` and `shots-hud219/` are the same song moment in both frames
+(`-InSong`, so the whole route is identical; `run.ps1 -Label hud169 -Request 1920x1080` and
+`-Label hud219 -Request 2560x1080 -Bases 1280x540`). Measured with `measure.ps1` and
+`ladder_probe.py`:
+
+| Arm | Presented | Content box in the window | The left HUD block |
+| --- | --- | --- | --- |
+| 1920x1080 | guest 960x540 x2 | `320,0 1920x1080` (pillarboxed) | content x 250-330, y 393-670 |
+| 2560x1080 | guest 1280x540 x2 | `0,0 2560x1080` | content x 620-660, y 393-670 |
+
+Same y to the pixel, x moved ~+320 - the extra half-width. **The honest reading: this pair proves
+the *composition* defect the owner reported and gives the exact number a fix must undo, but it
+cannot by itself separate "a screen-space element with a constant position" from "the world": a
+wider frame shows more world at the same pixel density, so *both* slide +320 px inside the content
+box. What distinguishes them is that the world *should* slide and the HUD should not. The fix
+therefore has to move the HUD's own geometry, and the 16:9 arm is the reference its content x has
+to come back to (250-330, i.e. 0.75 of the half-width - see 9.2.2).
+
+#### 9.2.2 Two new leads from this pass
+
+* **The engine's own screen API is scriptable, and `game.dtb` shows it being used.**
+  `assets/game/360/ui/gen/game.dtb` declares `GamePanel` with
+  `(unload {if {== {rnd aspect} kRegularAspect} {rnd set_aspect kLetterboxAspect}})` and
+  `GameScreen` reaching the HUD through `{{$this get_game} get_hud_dir}`. The DTA symbol table at
+guest `0x8201F7D8`-`0x8201F80C` names `screen_height`, `screen_width`, `aspect`, `set_aspect`
+  (`out/_swap/ultrawide/strings_at.py`). So the title itself has a notion of `aspect`, a way to
+  *change* it, and a handle on the HUD dir - all from a record we already know how to author and
+  deliver (`src/ui/dtb_author.*`, the payload overlay). This is a second route to the same goal,
+  and it needs no missing hook.
+* **The HUD's positions look like fractions of a fixed 16:9 half-width.** The left block's origin
+  measures `-1.33` layout units, which is `0.75 x 16/9` - and `0.75` sits immediately beside the
+  `9/16` pair this pass already writes (`0x8201E4C8 = 0.75`, `0x8201E4CC/D0 = 0.5625`,
+  `0x8201E4D4 = 0.6`). That is consistent with a HUD that lays itself out against a *stored* 16:9
+  half-width rather than the frame's, and it explains why the defect is a constant pixel offset
+  instead of a proportional spread. It also matches the owner's description exactly ("no longer on
+  far left", 75% of the half-width). It is a hint, not a proof: `0x821178B8 = -1.3339` (the only
+  `-1.3333`-shaped constant in the code region) turned out to sit in a table of `-1.98/-1.998`
+  values, i.e. coincidental, so the constants are still not located.
+
+### 9.3 The policy seam (done, tested)
+
+`src/hooks/hud_layout.h` is the rule as pure arithmetic - `HudShiftUnits`, `HudShiftPixels`,
+`ShiftHudX`, `HudReferenceAspect`, plus `BootHudShiftUnits/Pixels` (defined in the `.cpp`, the
+only file that needs the boot frame). The boot logs
+`settings_boot: HUD re-anchor shift 0.5926 layout units, 320.0 px` next to the guest render base,
+so a run states the number a capture is measured against. `tests/hud_layout_tests.cpp` (ctest
+`hud_layout`, 240 checks) pins the three properties that matter: every 16:9 size is *exactly*
+zero, the distance to the nearest edge is preserved across a table of aspects and positions, and a
+centred element never moves.
+
+Two things the test caught, both worth keeping:
+
+* **The narrow direction folds.** A frame narrower than an element's authored distance cannot
+  honour it (0.9 out has 0.8778 to keep; a 0.5625-wide portrait frame has no such distance), and
+  the naive `x + sign(x) * delta` would carry the element across the centre line to the other
+  side. `ShiftHudX` stops it at the centre instead - the formula's own limit, so the map stays
+  continuous and nothing leaves the frame.
+* **`HudShiftPixels` must be derived from `HudShiftUnits`, not recomputed.** `720 * (16/9)` is
+  1279.9999999999998, so the "extra width halved" form leaves a 1e-13 residue on a 16:9 frame that
+  is supposed to be untouched.
+
+### 9.4 Not started
+
+* the **black bars on menu** option (default off): the rule is the one in the owner's ask - menu
+  frames keep the 16/9 constants, gameplay frames get `1/aspect`;
+* **portrait/mobile**, which needs *resize* as well as move. The per-element table this rule made
+  unnecessary (anchor + scale per element) is exactly what that phase needs;
+* a driven check that selecting a Resolution in the menu persists and boots into it.
+
+## 10. Evidence index
 
 | Path | What it proves |
 | --- | --- |
@@ -332,3 +450,11 @@ measured-safe floor - which silently masked two arms before that was understood.
 | `out/_swap/ultrawide/shots-song-uw3/`, `shots-song-720b/` | in-game at 2560x1080 vs 16:9: the 3D world expands on both sides and the HUD markers sit at the wide frame's own edges |
 | `config/functions.toml`, `src/hooks/render_settings.{h,cpp}` | the three levers and their measured evidence |
 | `src/settings/capabilities.{h,cpp}`, `src/settings/graphics_policy.cpp` | the aspect-aware planner and the offer-set rule |
+| `src/hooks/hud_layout.h`, `tests/hud_layout_tests.cpp` | the HUD re-anchor rule (§9.1) and its 240 checks |
+| `out/_swap/ultrawide/scan_xfm.py` | the milo transform scanner that ruled out the scene files (§9.2) |
+| `out/_swap/ultrawide/scan_strings.py` | the guest-image string scan (0 hits for the HUD names) |
+| `out/_swap/ultrawide/shots-hud169/`, `shots-hud219/`, `hud169.log`, `hud219.log` | the gameplay capture pair, same song moment in 16:9 and 21:9 (9.2.1) |
+| `out/_swap/ultrawide/hud_probe.py`, `ladder_probe.py` | the white-HUD region/column probes behind the table in 9.2.1 |
+| `out/_swap/ultrawide/find_screen_refs.py` | the functions that address the screen object (`0x8298ACA8`), recovered from the `lis` + signed displacement pairs |
+| `out/_swap/ultrawide/strings_at.py`, `scan_image_floats.py` | the DTA symbol windows (`screen_width`/`aspect`/`set_aspect`) and the constant hunt in the decrypted image |
+| `assets/game/360/ui/gen/game.dtb` | the engine's own `{rnd aspect}` / `{rnd set_aspect}` / `{get_hud_dir}` usage (9.2.2) |

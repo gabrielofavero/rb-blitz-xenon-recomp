@@ -88,9 +88,6 @@
 // where the choice can be honoured or refused.
 REXCVAR_DECLARE(std::string, gpu_backend);
 
-// Defined in src/input/mouse_ui.cpp, beside the driver it switches on. Declared here because the
-// cursor rule below reads it while the driver is only one of the things it gates.
-REXCVAR_DECLARE(bool, mouse_ui_nav);
 
 class RbBlitzApp : public rex::ReXApp {
  public:
@@ -126,15 +123,7 @@ class RbBlitzApp : public rex::ReXApp {
     // input system is built from it, so this is the point where an extra input
     // device can still be added. See src/input/mouse_ui.h.
     //
-    // The presenter is the only handle on the guest's own frames, and it does
-    // not exist yet here, so it is handed over as a lazy lookup instead of a
-    // pointer. Runtime::graphics_system() is the public route to it;
-    // Window::presenter() is protected.
-    rb_blitz::input::InstallMouseUiNavigation(config, [this] {
-      rex::Runtime* runtime = this->runtime();
-      rex::system::IGraphicsSystem* graphics = runtime ? runtime->graphics_system() : nullptr;
-      return graphics ? graphics->presenter() : nullptr;
-    });
+    rb_blitz::input::InstallMouseUiNavigation(config);
     // The launcher's `[remap]` table, applied to the pad state the guest asks for. Its own
     // wrapper of input_factory, so both it and the mouse compose with whichever backend was
     // selected. See src/input/remap.h.
@@ -385,19 +374,9 @@ class RbBlitzApp : public rex::ReXApp {
   //
   // The one thing the dialog cannot reach is the window (it lives here), so it is
   // handed over as a callback rather than a pointer - the same lazily-called shape
-  // as the mouse driver's presenter lookup in OnPreSetup.
+  // as the menu cursor's window lookup.
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
-    // The cursor is a device too, and with mouse support off there is nothing in the window for
-    // it to aim: the guest has no pointer, and the driver that would translate one is inert. So
-    // it is hidden rather than left resting over a menu it cannot drive (the SDK's default is
-    // visible). This is the first frame the window exists, which is why the rule lives here and
-    // not in OnPreSetup - the driver is installed there, but there is no window yet.
-    if (!REXCVAR_GET(mouse_ui_nav)) {
-      if (rex::ui::Window* window_handle = window()) {
-        window_handle->SetCursorVisibility(rex::ui::Window::CursorVisibility::kHidden);
-        REXLOG_INFO("mouse: support is off, so the window cursor is hidden");
-      }
-    }
+    mouse_cursor_ = rb_blitz::input::CreateMouseMenuCursor(drawer, [this] { return window(); });
 
     probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
       rb_blitz::diag::WindowState state;
@@ -495,6 +474,7 @@ class RbBlitzApp : public rex::ReXApp {
   // Owned for the app's lifetime; it unregisters itself from the drawer when this
   // is destroyed, which happens before ~ReXApp() tears the drawer down.
   std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
+  std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
 
   // What the launcher's profile contributed at OnConfigurePaths, reported once logging exists.
   rb_blitz::launcher::ProfileApplyReport profile_apply_;

@@ -45,6 +45,11 @@
 *.trace
 *.pix3
 
+# Disposable scratch for the harnesses and asset probes (`out/_swap/*/run.ps1` builds an
+# empty DLC root here; scripts/hmx_milo.py dumps decompressed milo chunks here). A dumped
+# chunk is retail content byte for byte, so nothing in this directory is ever committed.
+/_scratch/
+
 # Local-only runtime configuration.
 /config/user.toml
 

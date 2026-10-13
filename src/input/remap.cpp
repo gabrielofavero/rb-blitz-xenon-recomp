@@ -5,6 +5,7 @@
 // binding means; this file is only the device side of it.
 
 #include "input/remap.h"
+#include "input/native_menu.h"
 
 #include <functional>
 #include <memory>
@@ -67,6 +68,7 @@ struct RemapContext {
         return keys[scancode];
       }
       case SourceKind::kMouse:
+        if (MouseSupportEnabled()) return false;
         for (const MouseButton& button : kMouseButtons) {
           if (source.name == button.name) {
             return (SDL_GetMouseState(nullptr, nullptr) & button.mask) != 0;
@@ -150,7 +152,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     // The same cast mouse_ui makes, and for the same reason: this is the one input system the
     // SDK and this project ship, and the filter is the seam the SDK grew for exactly this.
     static_cast<rex::input::InputSystem*>(system.get())
-        ->SetStateFilter([context, has_table](uint32_t /*user_index*/,
+        ->SetStateFilter([context, has_table](uint32_t user_index,
                                              rex::input::X_INPUT_STATE& state) {
           namespace remap = rb_blitz::launcher::remap;
           const remap::PadState pad{state.gamepad.buttons, state.gamepad.left_trigger,
@@ -169,6 +171,13 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // before it rewrites anything, so only a bound one is driven to an end.
           state.gamepad.left_trigger = out.left_trigger;
           state.gamepad.right_trigger = out.right_trigger;
+          // Fixed menu actions bypass user pad remaps. The synthetic driver keeps
+          // a controller slot connected, but contributes no buttons before this filter.
+          if (user_index == 0) {
+            const auto mouse = MenuMousePadState();
+            state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x3000);
+            if (mouse & 3) state.gamepad.thumb_ly = mouse & 1 ? 32767 : -32767;
+          }
         });
     if (has_table) {
       REXLOG_INFO(

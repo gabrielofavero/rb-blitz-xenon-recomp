@@ -17,6 +17,10 @@
 #   refocus             minimize then restore the window (forces an SDL
 #                       focus-lost/focus-gained pair; the MnK driver only
 #                       accepts keys while it believes it has focus)
+#   mouse:<x>:<y>      move to normalized game-client coordinates (0..1)
+#   click:left|right   click at the current pointer position
+#   wheel:<detents>    scroll (positive up, negative down)
+#   cursor:visible|hidden  assert the native cursor visibility
 param(
     [Parameter(Mandatory = $true)][string[]]$Actions,
     [string]$BuildDir = "out/build/win-amd64-release",
@@ -53,6 +57,14 @@ public class RbDriveWin32 {
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
+    public struct Point { public int x, y; }
+    public struct Rect { public int left, top, right, bottom; }
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect rect);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point point);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, int data, IntPtr extra);
+    public struct CursorInfo { public int size, flags; public IntPtr cursor; public Point point; }
+    [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CursorInfo info);
 }
 "@
 }
@@ -210,6 +222,37 @@ foreach ($action in $Actions) {
             Focus-GameWindow | Out-Null
             Send-Key (Resolve-Vk $parts[1]) ([double]$parts[2])
             Write-Host "held $($parts[1]) for $($parts[2])s"
+        }
+        "mouse" {
+            $h = Focus-GameWindow
+            $rect = New-Object RbDriveWin32+Rect
+            [RbDriveWin32]::GetClientRect($h, [ref]$rect) | Out-Null
+            $point = New-Object RbDriveWin32+Point
+            $point.x = [int](([double]$parts[1]) * $rect.right)
+            $point.y = [int](([double]$parts[2]) * $rect.bottom)
+            [RbDriveWin32]::ClientToScreen($h, [ref]$point) | Out-Null
+            [RbDriveWin32]::SetCursorPos($point.x, $point.y) | Out-Null
+        }
+        "click" {
+            Focus-GameWindow | Out-Null
+            if ($parts[1] -eq "left") { $down = 2; $up = 4 }
+            elseif ($parts[1] -eq "right") { $down = 8; $up = 16 }
+            else { throw "unknown mouse button: $($parts[1])" }
+            [RbDriveWin32]::mouse_event($down, 0, 0, 0, [IntPtr]::Zero)
+            Start-Sleep -Milliseconds 50
+            [RbDriveWin32]::mouse_event($up, 0, 0, 0, [IntPtr]::Zero)
+        }
+        "wheel" {
+            Focus-GameWindow | Out-Null
+            [RbDriveWin32]::mouse_event(0x800, 0, 0, ([int]$parts[1] * 120), [IntPtr]::Zero)
+        }
+        "cursor" {
+            $info = New-Object RbDriveWin32+CursorInfo
+            $info.size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+            if (-not [RbDriveWin32]::GetCursorInfo([ref]$info)) { throw "GetCursorInfo failed" }
+            $visible = ($info.flags -band 1) -ne 0
+            if ($visible -ne ($parts[1] -eq "visible")) { throw "cursor visibility mismatch: $visible" }
+            Write-Host "cursor $($parts[1]) verified"
         }
         default { throw "unknown action: $action" }
     }

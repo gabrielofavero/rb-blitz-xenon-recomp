@@ -659,23 +659,20 @@ tooltip = "Maximum buffered audio frames (4 to 64). Lower is lower latency."
 # the XInput path; it just is not a row (D13, amended).
 # ---------------------------------------------------------------------------
 
-# Off by default. The guest has no cursor of its own, so with the row off there is nothing
-# a pointer resting over the window could do - and the launcher and the game both hide it
-# rather than leave it floating over a menu it cannot drive (src/input/mouse_ui.cpp and
-# rb_blitz_app.h's cursor rule). A player who wants to drive the menus with the mouse turns
-# it on and gets the pointer back.
+# R6: native menu selection; mouse input is disabled while a song is playing.
 [[setting]]
 key     = "mouse_ui_nav"
 tab     = "controller"
 group   = "Input"
 label   = "Mouse support"
 kind    = "bool"
-default = false
+default = true
 applies = "restart"
 argv    = "flag"
 tooltip = """
-Drive the title's menus with the mouse. Off by default, and the pointer is hidden while
-it is off. Needs a restart.
+Point at menu items to select them directly. Left click selects (A), right click goes
+back (B), and the wheel navigates up/down. Hidden and inactive during songs; returns
+when paused. Needs a restart.
 """
 
 # `guide_button` is deliberately *not* a row any more (P8). Guide belongs to the platform, the
