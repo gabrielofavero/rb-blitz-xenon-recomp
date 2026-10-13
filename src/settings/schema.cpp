@@ -115,7 +115,7 @@ std::vector<SchemaRow> BuildTable() {
                        "Which game the launch runs."));
   }
   rows.push_back(Row(Make(SettingId::kCacheDlcLibrary, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "cache_dlc_library"}, "dlc", "Cache DLC Library",
                      "Reuse a cached DLC library scan on the next launch."));
   {

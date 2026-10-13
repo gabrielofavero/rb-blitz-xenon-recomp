@@ -75,6 +75,13 @@ Value Bool(bool value) {
   return out;
 }
 
+Value Enum(std::string token) {
+  Value out;
+  out.kind = rb_blitz::settings::ValueKind::kEnum;
+  out.text = std::move(token);
+  return out;
+}
+
 // The rows the parent plan's §3 names as the ones people will ask about by name, so a future
 // session cannot quietly promote one of them without the evidence column changing too. `kVsync` is
 // deliberately NOT here: it is the one row with measured live evidence (R7's frame pacing,
@@ -265,6 +272,58 @@ void ApplyReportsWhatHappened() {
              "no applier");
 }
 
+void PendingRestartIsValueBased() {
+  test::BeginCase("pending: the prompt follows the values, not the session's history");
+
+  CapabilitySnapshot caps;
+  const std::vector<Descriptor> descriptors =
+      rb_blitz::settings::schema::BuildDescriptors(caps);
+
+  // What the boot is running, and what the store says now.
+  std::map<SettingId, Value> boot;
+  boot[SettingId::kHideHud] = Bool(false);
+  boot[SettingId::kVsync] = Bool(true);
+  boot[SettingId::kTarget] = Enum("common");
+  std::map<SettingId, Value> now = boot;
+
+  // Nothing changed: no prompt.
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
+
+  // A restart row changed: one restart owed.
+  now[SettingId::kHideHud] = Bool(true);
+  std::vector<SettingId> pending =
+      rb_blitz::settings::PendingRestartRows(boot, now, descriptors);
+  CHECK_EQ(pending.size(), 1u);
+  if (pending.size() == 1) CHECK_TRUE(pending[0] == SettingId::kHideHud);
+
+  // The same value put back the way the boot had it: nothing is owed any more. This is the case the
+  // sticky "a restart-scoped change happened" bit could not tell apart from the one above.
+  now[SettingId::kHideHud] = Bool(false);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
+
+  // A hot row (V-Sync, this build's one) never asks for a restart, however often it moves.
+  now[SettingId::kVsync] = Bool(false);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
+  now[SettingId::kVsync] = Bool(true);
+
+  // ...unless a live pass failed on it: then it is owed one while its value differs.
+  now[SettingId::kVsync] = Bool(false);
+  pending = rb_blitz::settings::PendingRestartRows(boot, now, descriptors,
+                                                   {SettingId::kVsync});
+  CHECK_EQ(pending.size(), 1u);
+  if (pending.size() == 1) CHECK_TRUE(pending[0] == SettingId::kVsync);
+  // And again: reverting clears even a failed live apply.
+  now[SettingId::kVsync] = Bool(true);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors, {SettingId::kVsync})
+               .size(),
+           0u);
+
+  // A row the boot never saw cannot be compared, so it is not a pending restart.
+  std::map<SettingId, Value> unseen;
+  unseen[SettingId::kShowSteak] = Bool(true);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, unseen, descriptors).size(), 0u);
+}
+
 void PlanByStrategyMatchesTheDescriptorPlan() {
   test::BeginCase("plan: the schema-driven split agrees with the descriptor-driven one");
 
@@ -321,6 +380,7 @@ int main() {
   PlanSplitsByStrategy();
   PlanByStrategyMatchesTheDescriptorPlan();
   ApplyReportsWhatHappened();
+  PendingRestartIsValueBased();
   StrategyTokensAreFrozen();
   return test::Finish();
 }

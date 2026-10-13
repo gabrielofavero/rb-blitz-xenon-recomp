@@ -135,6 +135,17 @@ class SettingsBoot {
   const std::vector<Applied>& applied() const { return applied_; }
   const std::map<SettingId, Source>& overrides() const { return overrides_; }
 
+  // The restart prompt's real question (owner requirement, 2026-10-13): does anything the player
+  // saved still differ from what this process is running, in a way only a new process can fix?
+  // Answered by value against the snapshot taken when the boot finished, so changing a value and
+  // changing it back leaves Help & Options without a prompt - the sticky "a restart-scoped change
+  // happened" bit alone cannot tell those apart.
+  bool RestartPending() const;
+  // The rows a live apply pass could not apply (`RestartSetAfterApply`): a `kHot` row with no
+  // applier or a refused write. They are owed a restart while their value still differs from the
+  // running one. Called by the guest channel's commit path.
+  void NoteRestartRows(const std::vector<SettingId>& rows);
+
   // The process-wide instance, for the hooks that need the store (the menu-rows seam). Owned by the
   // app; null before it is set.
   static SettingsBoot* Current();
@@ -175,6 +186,11 @@ class SettingsBoot {
   // The rows staged locally, for diagnostics.
   std::map<SettingId, Source> overrides_;
   std::map<SettingId, Value> override_values_;
+  // What every row's effective value was when this boot finished (FinishInit): the "what the game
+  // is running" side of `RestartPending()`.
+  std::map<SettingId, Value> boot_values_;
+  // Rows a live apply pass could not apply this session (see `NoteRestartRows`).
+  std::vector<SettingId> restart_rows_noted_;
   std::string active_renderer_;
   std::vector<std::string> diagnostics_;  // lines to write once logging exists
 };

@@ -91,28 +91,34 @@ REXCVAR_DEFINE_BOOL(enhancements_rename_mod_settings, true, "Enhancements",
 // R6 uses the existing launcher Input setting as its sole switch.
 REXCVAR_DECLARE(bool, mouse_ui_nav);
 
-REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, false, "Enhancements",
+REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, true, "Enhancements",
                     "R7 DLC cache: persist the flat DLC library's enumeration in the save "
                     "folder and read it back when a fingerprint proves the tree unchanged, so "
                     "a boot does not open every package and read its header again; the "
                     "discovery screen's progress bar is given the library's package count, the "
                     "main menu row that refreshes the library is drawn as \"Refresh Song "
                     "Library\", and a boot answered out of the cache says \"Loading Song "
-                    "Cache\". Off by default. The refresh is --refresh_dlc_cache. Faithful: "
+                    "Cache\". **On by default** (owner directive, 2026-10-13: \"it should be as "
+                    "fast as we can\"): measured on a 1,402-package library the walk is the "
+                    "difference between minutes with a host-side progress bar and a boot that "
+                    "reads no header it can avoid. The cache validates the tree before it is "
+                    "used, so a changed library falls back to the scan. The refresh is "
+                    "--refresh_dlc_cache. Set it false in rb_blitz.toml for the faithful boot: "
                     "the library is scanned once per boot, the row keeps its shipped label, "
                     "the discovery screen says what it ships with, and the bar is the "
                     "title's own.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, false, "Enhancements",
+REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, true, "Enhancements",
                     "R7 frame pacing for the discovery: the title enumerates one content item "
                     "per presented frame, so while it enumerates the host turns the SDK's vsync "
                     "off and puts the player's own value back when the enumeration ends. A "
                     "1,402-package library is 46.7 s of frames at 60 Hz and 19.7 s with the "
-                    "frame rate free (docs/dlc.md §4.3). Off by default, because the V-Sync row "
-                    "belongs to the player and this changes it only for as long as the "
-                    "discovery lasts. Faithful: the frame rate is the player's own for the "
-                    "whole boot.")
+                    "frame rate free (docs/dlc.md §4.3). **On by default** (owner directive, "
+                    "2026-10-13: \"it should be as fast as we can\"): the wait is on the "
+                    "discovery screen, where the frame rate has nothing to show, and the "
+                    "player's own V-Sync value is restored the moment the enumeration ends. "
+                    "Set it false in rb_blitz.toml for the faithful pacing.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_force_controller_scheme, false, "Enhancements",

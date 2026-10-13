@@ -471,18 +471,24 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // to hide a package. --refresh_dlc_cache forces that scan-and-write path.
   const bool cache_enabled = REXCVAR_GET(enhancements_dlc_cache);
   g_cache_enabled = cache_enabled;
+  // The emulated mount latency is **off on every boot** (owner directive, 2026-10-13: "it should be
+  // as fast as we can"). It costs 100 ms per deferred overlapped completion and a large library
+  // completes thousands of them: measured on a 1,402-package library, 2,803 completions, which is
+  // 280 s of the 667 s the "Discovering Downloadable Content" screen takes *before* the host's own
+  // walk is even counted. The completion still runs on the dispatch thread, still sets the
+  // overlapped, still queues the completion routine - only the wait goes, exactly as R7's version
+  // of this write did. The cvar keeps the faithful 100 ms for a caller who wants it
+  // (rb_blitz.toml: `deferred_overlapped_delay_ms = 100`).
+  REXCVAR_SET(deferred_overlapped_delay_ms, 0);
+  REXLOG_INFO("dlc: the emulated mount latency is off this boot (deferred_overlapped_delay_ms = 0; "
+              "the faithful 100 ms is one line in rb_blitz.toml away)");
   if (cache_enabled) {
     // R7 answers for the whole wait a large library costs, not just for the host's walk
-    // of it. The cache makes that walk instant, but the boot still mounts every package
-    // once per enumeration pass, and each of those opens waits out the emulator's
-    // emulated storage latency - a fixed 100 ms per deferred overlapped completion
-    // (rexglue-sdk/0011). Measured on a 1402-package library: 2803 of them,
-    // 280 s of the 667 s the "Discovering Downloadable Content" screen takes. Zero keeps
-    // the completion asynchronous - it still runs on the dispatch thread, still sets the
-    // overlapped, still queues the completion routine - and only drops the wait.
-    REXCVAR_SET(deferred_overlapped_delay_ms, 0);
-    REXLOG_INFO("dlc: the emulated mount latency the title waits out per package is off "
-                "this boot (deferred_overlapped_delay_ms = 0, R7)");
+    // of it: the cache makes that walk instant, and `deferred_overlapped_delay_ms` is
+    // already 0 above for every boot, so what is left is the title's own one-item-per-frame
+    // pacing of the enumeration.
+    REXLOG_INFO("dlc: R7 on - the library scan is cached, so this boot reads no container header "
+                "it can avoid");
   }
   const bool refresh_requested = REXCVAR_GET(refresh_dlc_cache);
   if (refresh_requested && !cache_enabled) {

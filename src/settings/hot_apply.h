@@ -100,4 +100,20 @@ std::vector<HotApplyOutcome> ApplyHotPlan(const HotApplyPlan& plan, HotApplier* 
 std::vector<SettingId> RestartSetAfterApply(const HotApplyPlan& plan,
                                             const std::vector<HotApplyOutcome>& outcomes);
 
+// The rows a restart is still owed for, **by value**: what the running process has (`boot_values`,
+// captured when the boot finished) against what the store says now (`current_values`). A row whose
+// saved value is back to the running one is not pending any more, which is what makes "change it,
+// then change it back" leave Help & Options without a prompt - the sticky "a restart-scoped change
+// happened" bit cannot tell those two sessions apart.
+//
+// `forced` holds the rows an earlier live pass found it could not apply (a `kHot` row whose write
+// failed, or one this build has no applier for): those are owed a restart even though their
+// strategy says `hot`, and they keep it only while their value really differs from the running one.
+// Rows present in only one of the two maps are ignored - a row the boot never saw cannot be
+// compared.
+std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& boot_values,
+                                          const std::map<SettingId, Value>& current_values,
+                                          const std::vector<Descriptor>& descriptors,
+                                          const std::vector<SettingId>& forced = {});
+
 }  // namespace rb_blitz::settings

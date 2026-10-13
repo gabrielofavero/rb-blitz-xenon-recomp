@@ -271,6 +271,33 @@ void TestCancelAndRestart() {
   CHECK_TRUE(h.sink.restart_requested());
 }
 
+void TestRestartPendingFollowsTheQuery() {
+  BeginCase("restart.pending answers the boot's value-based query when one is installed");
+  Harness h;
+
+  // Without a query the sink's sticky bit is the answer, which is what a sink-only build (and the
+  // tests above) see: nothing changed yet, so nothing is pending.
+  CHECK_TRUE(!h.sink.restart_pending());
+  CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(false)));
+
+  // A restart-scoped commit sets the sticky bit.
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.restart_pending());
+  CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(true)));
+
+  // With the boot's query installed, that answer wins: the query is the sharper question (does what
+  // the store says still differ from what the process runs), so a boot that says "nothing differs"
+  // shows no prompt even though a restart-scoped commit happened.
+  bool query_answer = false;
+  h.sink.SetRestartPendingQuery([&query_answer] { return query_answer; });
+  CHECK_TRUE(!h.sink.restart_pending());
+  CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(false)));
+  query_answer = true;
+  CHECK_TRUE(h.sink.restart_pending());
+  CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(true)));
+}
+
 void TestWireModelConversions() {
   BeginCase("the wire and model value kinds meet in exactly one place");
   const schema::SchemaRow* bool_row = schema::FindRow(SettingId::kVsync);
@@ -309,6 +336,7 @@ int main() {
   TestProviderRowsStayOutOfTheSettingsFile();
   TestProviderGateAndUnknownTokens();
   TestCancelAndRestart();
+  TestRestartPendingFollowsTheQuery();
   TestWireModelConversions();
   return Finish();
 }

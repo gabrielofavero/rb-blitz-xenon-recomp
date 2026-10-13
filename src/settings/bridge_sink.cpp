@@ -512,7 +512,7 @@ bool ServiceSink::Matches(const bridge::Request& request) const {
   if (request.setting == "restart.ok") return WireValuesEqual(WireValue::Bool(restart_ok_), request.value);
   if (request.setting == "commit.ok") return WireValuesEqual(WireValue::Bool(commit_ok_), request.value);
   if (request.setting == "restart.pending")
-    return WireValuesEqual(WireValue::Bool(restart_pending_), request.value);
+    return WireValuesEqual(WireValue::Bool(restart_pending()), request.value);
   if (request.setting == "commit.restart_required")
     return WireValuesEqual(WireValue::Bool(commit_ok_ && last_commit_requires_restart_), request.value);
   constexpr std::string_view prefix = "interface.hidden_main_menu.";

@@ -51,6 +51,7 @@
 
 #include "hooks/ultimate.h"
 #include "hooks/hot_apply_runtime.h"
+#include "settings/boot.h"
 #include "settings/bridge_sink.h"
 #include "settings/hot_apply.h"
 #include "settings/schema.h"
@@ -535,8 +536,15 @@ void ApplyHotRows() {
       ::rb_blitz::settings::ApplyHotPlan(plan, ::rb_blitz::settings::RuntimeHotApplier());
   const std::vector<::rb_blitz::settings::SettingId> restart =
       ::rb_blitz::settings::RestartSetAfterApply(plan, outcomes);
-  if (!restart.empty())
+  if (!restart.empty()) {
+    // The boot owns the restart prompt's answer now: it compares the store against what this
+    // process is running, so a row that failed to apply live is only owed a restart while its value
+    // still differs - and it is owed one even when the commit itself reported none.
+    if (auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current()) {
+      boot->NoteRestartRows(restart);
+    }
     if (auto* service = dynamic_cast<ServiceSink*>(g_sink)) service->RequireRestartAfterApply();
+  }
   size_t applied = 0;
   for (const ::rb_blitz::settings::HotApplyOutcome& outcome : outcomes) {
     const auto found = tokens_by_id.find(outcome.id);

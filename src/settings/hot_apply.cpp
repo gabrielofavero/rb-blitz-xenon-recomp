@@ -103,4 +103,38 @@ std::vector<SettingId> RestartSetAfterApply(const HotApplyPlan& plan,
   return pending;
 }
 
+std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& boot_values,
+                                          const std::map<SettingId, Value>& current_values,
+                                          const std::vector<Descriptor>& descriptors,
+                                          const std::vector<SettingId>& forced) {
+  // What really differs from what this process is running. A row the boot never saw (a descriptor
+  // added by a capability change, say) cannot be compared and is skipped rather than guessed at.
+  std::map<SettingId, Value> changed;
+  for (const auto& [id, current] : current_values) {
+    const auto boot = boot_values.find(id);
+    if (boot == boot_values.end()) {
+      continue;
+    }
+    if (!ValueEquals(current, boot->second)) {
+      changed[id] = current;
+    }
+  }
+  if (changed.empty()) {
+    return {};
+  }
+  const HotApplyPlan plan = PlanHotApply(changed, descriptors);
+  std::vector<SettingId> pending = plan.pending_restart;
+  // A row the live pass already failed on keeps its restart, but only while its value is still the
+  // one the running process does not have: reverting it is the whole point of this function.
+  for (const SettingId id : forced) {
+    if (!changed.contains(id)) {
+      continue;
+    }
+    if (std::find(pending.begin(), pending.end(), id) == pending.end()) {
+      pending.push_back(id);
+    }
+  }
+  return pending;
+}
+
 }  // namespace rb_blitz::settings

@@ -108,7 +108,13 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   // The merged root's restart prompt (owner decision, 2026-10-13): true once this session has
   // committed a change that needs a restart, and it stays true - the prompt is asked when the
   // player leaves Help & Options, not when the value changes.
-  bool restart_pending() const { return restart_pending_; }
+  //
+  // When the boot installs a query (`SetRestartPendingQuery`), that is the answer instead: it asks
+  // the sharper question - does what the player saved still differ from what this process runs - so
+  // a value changed and changed back does not prompt, and a hot row whose live write failed does.
+  bool restart_pending() const {
+    return restart_pending_query_ ? restart_pending_query_() : restart_pending_;
+  }
   // "kSaved" / "kNoChanges" / ... for the log line.
   std::string_view last_commit_status() const { return CommitStatusToken(last_commit_status_); }
 
@@ -122,6 +128,13 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   using RestartHandler = std::function<bool(uint64_t, uint64_t, uint64_t,
                                             const std::string&, std::string*)>;
   void SetRestartHandler(RestartHandler handler) { restart_handler_ = std::move(handler); }
+  // The boot's value-based answer for `restart.pending` (see `restart_pending()`). Installed once,
+  // after the boot has its baseline; without it the sticky bit above is the fallback, which is what
+  // the sink-only tests exercise.
+  using RestartPendingQuery = std::function<bool()>;
+  void SetRestartPendingQuery(RestartPendingQuery query) {
+    restart_pending_query_ = std::move(query);
+  }
 
  private:
   // True when the token's value is kept here rather than in the service (see the file header).
@@ -159,6 +172,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool commit_ok_ = true;
   bool restart_ok_ = true;
   RestartHandler restart_handler_;
+  RestartPendingQuery restart_pending_query_;
 };
 
 }  // namespace rb_blitz::settings

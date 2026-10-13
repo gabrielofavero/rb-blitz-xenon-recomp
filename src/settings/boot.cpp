@@ -34,6 +34,7 @@
 #include "launcher/profile_apply.h"
 #include "launcher/profile_path.h"
 #include "settings/cvars.h"
+#include "settings/hot_apply.h"
 #include "settings/schema.h"
 
 REXCVAR_DEFINE_BOOL(settings_safe_graphics, false, "Settings",
@@ -743,6 +744,11 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
   // than pointing at a store that could never write.
   if (sink_) {
     ::rb_blitz::settings::bridge::InstallSink(sink_.get(), sink_.get());
+    // The restart prompt asks *this* rather than the sink's sticky "a restart-scoped change was
+    // committed" bit: the two differ for a value changed and changed back (no prompt), and for a
+    // hot row whose live write failed (prompt, and the sticky bit alone would miss it when the
+    // commit itself reported no restart).
+    sink_->SetRestartPendingQuery([this] { return RestartPending(); });
   }
 }
 
@@ -848,6 +854,12 @@ void SettingsBoot::FinishInit() {
     }
     service_->SetOverrides(override_values_, overrides_);
   }
+  // The restart prompt's baseline: what every row's effective value is *now*, with the process
+  // running it. A later `RestartPending()` compares the store against this, so a value the player
+  // put back the way it was is not a pending restart.
+  for (const auto& descriptor : service_->descriptors()) {
+    boot_values_[descriptor.id] = service_->EffectiveValue(descriptor.id);
+  }
   REXLOG_INFO("settings_boot: {} of {} applied value(s) stood; {} row(s) are owned by an explicit "
               "source",
               verified, applied_.size(), overrides_.size());
@@ -861,6 +873,32 @@ void SettingsBoot::SetMenuRows(std::vector<Choice> rows) {
   if (service_) {
     service_->SetMenuRows(std::move(rows));
   }
+}
+
+void SettingsBoot::NoteRestartRows(const std::vector<SettingId>& rows) {
+  for (const SettingId id : rows) {
+    if (std::find(restart_rows_noted_.begin(), restart_rows_noted_.end(), id) ==
+        restart_rows_noted_.end()) {
+      restart_rows_noted_.push_back(id);
+    }
+  }
+}
+
+bool SettingsBoot::RestartPending() const {
+  if (!service_ || boot_values_.empty()) {
+    return false;
+  }
+  // Rows an explicit source owns are not editable, so they can never be the reason for a prompt.
+  std::map<SettingId, Value> current;
+  for (const auto& descriptor : service_->descriptors()) {
+    if (overrides_.contains(descriptor.id) || !boot_values_.contains(descriptor.id)) {
+      continue;
+    }
+    current[descriptor.id] = service_->EffectiveValue(descriptor.id);
+  }
+  return !PendingRestartRows(boot_values_, current, service_->descriptors(),
+                             restart_rows_noted_)
+              .empty();
 }
 
 }  // namespace rb_blitz::settings::boot

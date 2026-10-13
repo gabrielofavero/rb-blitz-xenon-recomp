@@ -158,6 +158,30 @@ paths/target/profile/controller flow"):
   exercised per leg rather than claimed by a file from an earlier run; the Ultimate leg's licence
   line therefore reads `(configured)`, not `(default; the title is treated as purchased)`.
 
+### Boot speed and one frozen picture (owner report, 2026-10-13, later)
+
+The owner reported a freeze on the title's own *“Loading Rock Band Blitz audio/video settings…”*
+screen and asked for the boot to be as fast as it can be. Both were measured:
+
+* **The freeze is a GPU command-processor packet desync, seen once**: the log ends with
+  `ExecutePacketType3 overflow …` / `**** PRIMARY RINGBUFFER: Failed to execute packet.`, after
+  which no frame is presented and the picture stays on that screen. The session it happened in had
+  the audit harness pressing keys through the boot and then the start while the content discovery
+  was still running, and the title re-entered the A/V load three times (13–24 s apart, each visible
+  only as the R3-patched record being re-read). Five boots afterwards, two of them replaying the
+  same early-input route, completed — so it is recorded as a **rare desync**, not a settings bug
+  ([known-issues.md](../../known-issues.md) has the signature and what to capture next time).
+* **The wait was the DLC discovery, not the A/V load.** Measured on the owner's 1,402-package
+  library: the A/V load itself is ~2 s (on an empty library the menu is up 2 s after the start
+  press). The discovery cost ~6 minutes because of three defaults — the SDK's 100 ms emulated
+  mount latency per completion (~280 s), a full host walk of every container on every boot, and the
+  title's one-item-per-frame enumeration (46.7 s at 60 Hz). All three are now on the fast side by
+  default: `enhancements_dlc_cache` **on**, `deferred_overlapped_delay_ms` **0 every boot**
+  (src/hooks/dlc.cpp), `enhancements_dlc_uncap_enumeration` **on**. Measured after: the cache is
+  written on the first boot and read back on the next, the walk is ~0.3 s, and the enumeration runs
+  **39 s for 2,804 items** with the frame rate free (`vsync false, was true` … restored at the last
+  item). The only lever left on that screen is the render cost of the discovery itself.
+
 ## Remaining acceptance work
 
 1. **Run the final acceptance matrix when requested.** The unit and integration suites are
