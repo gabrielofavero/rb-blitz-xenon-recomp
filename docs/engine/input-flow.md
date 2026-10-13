@@ -2,7 +2,8 @@
 
 `mouse_ui_nav=true` enables the menu cursor (default on; the launcher's Controller →
 Mouse support setting). Hover selects a native list row directly. Left click emits
-A, right click emits B, and wheel detents emit up/down. During `game_screen`, only
+A, right click emits B, and wheel detents emit up/down (left/right for horizontal
+powerup lists). During `game_screen`, only
 the focused `pause_panel` accepts mouse input. Transitions, focus loss and gameplay
 discard pending events, partial wheel detents and button pulses.
 
@@ -22,10 +23,14 @@ The addresses below refer to the supported retail executable. Hooks live in
 | `824E5020` | UIListDir::Draw; scopes geometry to the focused list being rendered |
 | `824E07A8` | UIListWidget::CalcXfm; identifies the row whose transform is being composed |
 | `824E9A90` | UIListLabelElement::Draw; exposes the final row transform and text rectangle |
-| `821E14A8` | Transform a local text corner to world coordinates |
+| `824BFEF0` | UIListMeshElement::Draw; captures icon-only powerup rows |
+| `823F0118` | RndMesh::OnSync; retains local mesh bounds before upload releases vertices |
+| `824E0900` | UIListWidget::DrawMesh; captures the native highlight cell |
+| `821E14A8` | Transform a local corner to world coordinates |
 | `821FF4A0` | RndCam::WorldToScreen; project through the actual rendering camera |
 | `824E3008` | UIListState::Selected; read the logical selected row |
 | `824C1938` | UIList::SetSelected; select the hovered logical row directly |
+| `824C1DE8` | UIList::ScrollStart; notify scripts so powerup descriptions follow selection |
 | `824C1F08` | UIList::ScrollComplete; update providers and notify the panel |
 
 UIManager stores its current screen at +44 and transition state at +16. The screen's
@@ -41,6 +46,19 @@ alone gives incorrect menu hit regions. Capture reads the normal draw path and
 performs isolated projection calls; it does not render extra frames or infer rows
 from pixel colors. RndCam::sCurrent is at `8284A108`.
 
+Mesh bounds are captured from CPU vertices (96-byte stride) or packed Milo vertices
+(36-byte stride), before static meshes discard that data. Geometry-owner and GPU
+resource identity guard the bounded cache. Icon and highlight bounds use the mesh's
+current world transform, then the rendering camera. This avoids the uninitialized
+box returned by retail CalcBox after CPU vertices have been discarded. The highlight
+extends short labels to the full native button width; disabled artist headings still
+participate in hit testing and cannot select neighboring songs.
+
+Hover preserves UIListState's first visible row (+48, list +224), then sends both
+scroll and scroll-complete notifications. It neither recenters the viewport nor
+steps through intervening choices. Powerup submenus retain native A/B semantics:
+click a category to open it, click a choice to equip it, or right-click to go back.
+
 Window coordinates are mapped back through the presenter's aspect, letterbox and
 overscan rectangle. Only geometry from the immediately preceding guest frame and
 the same focused list can select a row. Hover never emits directional input.
@@ -52,7 +70,10 @@ guest thread owns geometry and native UI calls. A synchronized queue bridges the
 window thread to UIManager::Poll. Moves coalesce without crossing click events.
 Click selection happens before the A pulse. Each pulse lasts two guest frames and
 has a full released frame; repeated XInput polls cannot shorten it. Wheel bursts
-preserve individual detents and fractional deltas accumulate.
+preserve individual detents and fractional deltas accumulate. While the native viewport
+is animating (state +48 differs from +52), the next wheel detent stays queued;
+button release still runs immediately. This prevents fast bursts losing steps at
+the visible edge of a song or powerup list.
 
 The synthetic mouse device establishes controller connectivity. Fixed mouse actions
 are merged after user controller remapping, for player one only. Raw mouse remap

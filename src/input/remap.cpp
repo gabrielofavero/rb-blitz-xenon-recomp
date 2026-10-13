@@ -177,6 +177,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             const auto mouse = MenuMousePadState();
             state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x3000);
             if (mouse & 3) state.gamepad.thumb_ly = mouse & 1 ? 32767 : -32767;
+            if (mouse & 12) state.gamepad.thumb_lx = mouse & 4 ? -32767 : 32767;
           }
         });
     if (has_table) {

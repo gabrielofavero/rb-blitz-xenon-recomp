@@ -45,7 +45,7 @@ class MousePad final : public rex::input::InputDriver {
                                       rex::input::X_INPUT_CAPABILITIES* out) override {
     if (id != kDevice) return X_ERROR_DEVICE_NOT_CONNECTED;
     if (out) { *out = {}; out->type = 1; out->sub_type = 1;
-      out->gamepad.buttons = 0x3000; out->gamepad.thumb_ly = 32767; }
+      out->gamepad.buttons = 0x3000; out->gamepad.thumb_lx = 32767; out->gamepad.thumb_ly = 32767; }
     return X_ERROR_SUCCESS;
   }
   rex::X_RESULT SetDeviceVibration(rex::input::DeviceId id,

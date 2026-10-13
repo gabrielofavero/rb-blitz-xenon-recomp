@@ -25,6 +25,25 @@ int main() {
   CHECK_EQ(HitMenuRow({.9f,.8f}, bounds, rows), -1);
   CHECK_EQ(HitMenuRow({NAN,.8f}, bounds, rows), -1);
 
+  BeginCase("icon-only powerup cells support direct selection without text");
+  std::vector<MenuRow> icons{
+      {{.15f,.30f}, 0, true, MenuBounds{.08f,.17f,.23f,.43f}},
+      {{.30f,.30f}, 1, true, MenuBounds{.23f,.17f,.38f,.43f}},
+      {{.45f,.30f}, 2, true, MenuBounds{.37f,.17f,.53f,.43f}},
+      {{.60f,.30f}, 3, true, MenuBounds{.52f,.17f,.67f,.43f}}};
+  for (int i = 0; i < 4; ++i)
+    CHECK_EQ(HitMenuRow(icons[i].center, {.08f,.17f,.67f,.43f}, icons), i);
+  CHECK_EQ(HitMenuRow({.60f,.6f}, {0,0,1,1}, icons), -1);
+
+  BeginCase("library rows include their full width but artist headings remain inert");
+  std::vector<MenuRow> library{
+      {{.34f,.31f}, 4, true, MenuBounds{.09f,.287f,.59f,.339f}},
+      {{.34f,.376f}, 5, false, MenuBounds{.09f,.35f,.59f,.402f}},
+      {{.34f,.439f}, 6, true, MenuBounds{.09f,.413f,.59f,.465f}}};
+  CHECK_EQ(HitMenuRow({.55f,.439f}, {0,0,1,1}, library), 6);
+  CHECK_EQ(HitMenuRow({.55f,.376f}, {0,0,1,1}, library), -1);
+  CHECK_EQ(HitMenuRow({.55f,.407f}, {0,0,1,1}, library), -1);
+
   BeginCase("move coalescing preserves click ordering and never synthesizes directions");
   MenuMouseQueue q;
   q.Context(1, 2, true);
@@ -54,6 +73,23 @@ int main() {
   CHECK_FALSE(q.NextFrame());
   q.Wheel(60); q.Wheel(-120);
   CHECK_TRUE(q.NextFrame()->action == MouseAction::kDown);
+
+  BeginCase("scroll animations retain wheel detents without retaining button pulses");
+  q.Wheel(-240);
+  CHECK_TRUE(q.NextFrame()->action == MouseAction::kDown);
+  q.Pulse(MouseAction::kDown);
+  CHECK_FALSE(q.NextFrame(false));
+  CHECK_FALSE(q.NextFrame(false)); CHECK_EQ(q.pulse(), 0);
+  CHECK_FALSE(q.NextFrame(false));
+  CHECK_TRUE(q.NextFrame(true)->action == MouseAction::kDown);
+  q.Push(MouseAction::kMove, {.5f,.5f});
+  CHECK_TRUE(q.NextFrame(false)->action == MouseAction::kMove);
+
+  BeginCase("horizontal powerup wheel pulses release before the next direction");
+  q.Pulse(MouseAction::kRight); CHECK_EQ(q.pulse(), 8);
+  CHECK_FALSE(q.NextFrame()); CHECK_FALSE(q.NextFrame()); CHECK_EQ(q.pulse(), 0);
+  q.Pulse(MouseAction::kLeft); CHECK_EQ(q.pulse(), 4);
+  q.Reset();
 
   BeginCase("gameplay, focus loss and transitions discard pulses and pending input");
   for (int boundary = 0; boundary < 3; ++boundary) {

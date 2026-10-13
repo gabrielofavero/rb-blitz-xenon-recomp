@@ -67,7 +67,7 @@ inline int HitMenuRow(MenuPoint p, const MenuBounds& bounds,
   return closest && closest->enabled ? closest->index : -1;
 }
 
-enum class MouseAction { kMove, kAccept, kBack, kUp, kDown };
+enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
 // Guest-frame pulses, independent of how many times XInput is polled per frame.
@@ -94,18 +94,21 @@ class MenuMouseQueue {
     while (wheel_ >= 120) { Push(MouseAction::kUp); wheel_ -= 120; }
     while (wheel_ <= -120) { Push(MouseAction::kDown); wheel_ += 120; }
   }
-  std::optional<MenuMouseEvent> NextFrame() {
+  std::optional<MenuMouseEvent> NextFrame(bool can_scroll = true) {
     if (!enabled_) return {};
     if (frames_ > 0) { --frames_; return {}; }
     if (pulse_) { pulse_ = 0; return {}; } // one complete release frame
     if (events_.empty()) return {};
+    const auto action = events_.front().action;
+    if (!can_scroll && (action == MouseAction::kUp || action == MouseAction::kDown)) return {};
     auto event = events_.front(); events_.pop_front();
     return event;
   }
   void Pulse(MouseAction action) {
     pulse_ = action == MouseAction::kAccept ? 0x1000 :
              action == MouseAction::kBack ? 0x2000 :
-             action == MouseAction::kUp ? 1 : action == MouseAction::kDown ? 2 : 0;
+             action == MouseAction::kUp ? 1 : action == MouseAction::kDown ? 2 :
+             action == MouseAction::kLeft ? 4 : action == MouseAction::kRight ? 8 : 0;
     frames_ = pulse_ ? 1 : 0; // two guest frames down, then one frame released
   }
   uint16_t pulse() const { return enabled_ ? pulse_ : 0; }
