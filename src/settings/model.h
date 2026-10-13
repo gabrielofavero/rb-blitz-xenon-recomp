@@ -47,6 +47,7 @@ enum class SettingId : uint16_t {
   kRenderer = 22,
   kAntiAliasing = 23,
   kFiltering = 24,
+  kDisplay = 25,  // windowed / borderless / full screen (owner decision, 2026-10-13)
   // Interface
   kLetterbox = 40,
   kHideOfflinePrompts = 41,

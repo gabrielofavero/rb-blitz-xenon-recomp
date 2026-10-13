@@ -433,6 +433,7 @@ offers the user-supplied zip and folder.
 | `rb_blitz_launcher.exe` | The launcher (D1), built beside the game in the same build tree. |
 | `rexruntime.dll`, `rexgpu-xenos.dll` | Runtime DLLs the executable loads. |
 | `msvcp140.dll`, `msvcp140_atomic_wait.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | The Visual C++ runtime the binaries import. |
+| `vulkan-1.dll` | The Khronos Vulkan loader — only when the build offers Vulkan (see below). It is *opened at run time*, never imported, so nothing else would reveal its absence. |
 
 Nothing else is quoted from the build tree — in particular `rb_blitz.toml` is a
 developer profile rather than a shipped file, and the `*d.dll` / `*.pdb` files
@@ -441,6 +442,28 @@ imports from the binaries it copies, so a build that starts needing another DLL
 fails while the snapshot is made instead of on the user's machine. The snapshot is
 written as `payload-manifest.toml`, in the same fingerprint format the helper reads
 back, and the helper hashes every file it placed before it reports success.
+
+The script also prints the payload's **renderer backends** (`payload renderer backends: d3d12,
+vulkan`), read from the build tree's `CMakeCache.txt`, and warns when Vulkan is missing: the SDK's
+own Windows default for `REXGLUE_USE_VULKAN` is OFF, so a hand-configured tree ships a
+`rexgpu-xenos.dll` with one backend and both *Renderer* rows (the launcher's and the game's) then
+offer one choice, which has already been mistaken for a bug once. The Windows presets configure it
+ON ([build-and-run.md](../docs/build-and-run.md)), and the game additionally probes the loader
+before offering the backend (`src/settings/boot.cpp`).
+
+**The payload carries the Vulkan loader.** `vulkan-1.dll` is opened at run time by the SDK with
+`LoadLibrary` and never imported by anything, so a machine with a GPU driver but no loader — a
+stripped Windows install, a VM with a passthrough adapter — would otherwise be offered Vulkan and
+fail inside presentation setup, after the backend is committed. When the build offers Vulkan the
+script therefore ships a copy: `-VulkanLoaderDir <dir>` pins the source, otherwise it looks at
+`$env:VULKAN_SDK\Bin`, then `C:\VulkanSDK\*\Bin` (LunarG SDK, newest first), then
+`$env:WINDIR\System32`. The copy wins at load time because Windows searches the application
+directory before System32, so the install is self-contained; it is the Khronos loader (Apache-2.0),
+the same file the GPU vendors' runtimes install, and it is *not* a driver — a machine without a
+Vulkan-capable GPU still cannot use the backend, and the game says so and falls back. Not finding a
+loader is fatal to the payload build (`install the Vulkan runtime, or pass -VulkanLoaderDir`);
+`-AllowMissingVulkanLoader` ships anyway and warns, which is the shape for a machine whose users
+all have drivers.
 
 ## Rock Band Blitz Ultimate
 

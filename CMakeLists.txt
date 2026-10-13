@@ -176,6 +176,23 @@ endif()
 
 rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 
+# Which graphics backends the GPU plugin was compiled with, in the order the in-game *Renderer*
+# row should offer them. The same two variables decide what `rexgpu-xenos.dll` contains (the SDK
+# reads them itself) and what the launcher offers (`--backends=` in launcher/CMakeLists.txt), so
+# passing them on as one string keeps the three in step: the row can never offer a backend the
+# plugin does not have, and it never hides one it does. The boot reads this in
+# src/settings/boot.cpp (every backend gets a capability probe of its own).
+set(RBBLITZ_BACKENDS "")
+if(REXGLUE_USE_D3D12)
+    list(APPEND RBBLITZ_BACKENDS d3d12)
+endif()
+if(REXGLUE_USE_VULKAN)
+    list(APPEND RBBLITZ_BACKENDS vulkan)
+endif()
+string(REPLACE ";" "," RBBLITZ_BACKENDS_ARG "${RBBLITZ_BACKENDS}")
+target_compile_definitions(rb_blitz PRIVATE "RBBLITZ_BACKENDS=\"${RBBLITZ_BACKENDS_ARG}\"")
+message(STATUS "rb_blitz: renderer row will offer ${RBBLITZ_BACKENDS_ARG}")
+
 # Game fingerprint gate
 #
 # config/game_fingerprints.toml records the sizes and SHA-256 digests of the

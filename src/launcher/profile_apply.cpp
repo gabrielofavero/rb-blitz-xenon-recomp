@@ -22,15 +22,17 @@ REXCVAR_DEFINE_STRING(launcher_profile, "", "Runtime",
                       "Path to the launcher's profile, when the launcher started this process; "
                       "empty resolves the file the launcher itself would write");
 
-// §8's narrowing, as a switch rather than as a hard cut, because *when* it is right is a fact about
-// the rest of the boot: the launcher profile is still where the DLC root and the save location come
-// from, so a build that narrowed before the game had its own settings file would lose both. It is
-// off until the coordinator's boot wiring gives the game that file (docs/plans/
-// in-game-settings-controller-settings.md); then it becomes the default, and a saved `[settings]`
-// table is inert preservation data.
-REXCVAR_DEFINE_BOOL(profile_controller_rows_only, false, "Compatibility",
-                    "Apply only the controller rows (mouse_ui_nav, input_backend) from the "
-                    "launcher profile, once the game keeps its own settings file");
+// §8's narrowing, now the default (P11b cutover, owner decision 2026-10-13): the game keeps its
+// own settings file, its Help & Options edits it, and the launcher profile's other `[settings]`
+// rows are inert preservation data. The two facts that used to hold this back are gone - the
+// store exists (P11a) and the installer/paths.toml own the DLC and save locations (P7) - so a
+// profile row other than the controller rows and the launcher-only host rows is no longer applied.
+// A build that needs the old behaviour can set this off again from the command line.
+REXCVAR_DEFINE_BOOL(profile_controller_rows_only, true, "Compatibility",
+                    "Apply only the controller rows (mouse_ui_nav, input_backend) and the "
+                    "launcher-only host rows (monitor, safe areas, dither, overscan cutoff, audio) "
+                    "from the launcher profile; every other row is preserved in the file and not "
+                    "applied");
 
 namespace rb_blitz::launcher {
 
@@ -66,12 +68,13 @@ ProfileApplyReport ApplyLauncherProfileSettings() {
   report.rows = profile->settings.size();
 
   // §8: once the game keeps its own settings file, the launcher profile is a source of controller
-  // state and nothing else. The rows that are left out are not dropped from the file - the launcher
-  // still writes them, and a person's hand edits stay - they simply stop being applied.
-  const bool controller_only = REXCVAR_GET(profile_controller_rows_only);
+  // state and of the host rows no in-game surface can edit, and nothing else. The rows that are
+  // left out are not dropped from the file - the launcher still writes them, and a person's hand
+  // edits stay - they simply stop being applied.
+  const bool narrowed = REXCVAR_GET(profile_controller_rows_only);
   const std::vector<ProfileSetting> rows =
-      controller_only ? settings::ControllerProfileRows(profile->settings) : profile->settings;
-  if (controller_only) {
+      narrowed ? settings::ProfileRowsTheGameApplies(profile->settings) : profile->settings;
+  if (narrowed) {
     report.rows_ignored = report.rows - rows.size();
   }
 

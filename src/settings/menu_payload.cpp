@@ -42,10 +42,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return true;
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
         if (merge_provider) {
-          // A compatible provider's old entry now reaches the merged settings root.
-          // Unknown providers retain their original route as the compatibility fallback.
+          // A compatible provider's own settings entry is *removed*: its pages are all reachable
+          // from Help & Options now, so keeping a second button to the same things is one button
+          // too many (owner decision, 2026-10-13). A payload that never had the row refuses, and
+          // that refusal is deliberately not fatal - there is nothing to remove.
           std::string ignored;
-          screen::RerouteRow(&roots, "mod_settings", screen::MainMenuRouteBody(), &ignored);
+          screen::RemoveRow(&roots, screen::kProviderMenuRow, &ignored);
         }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
@@ -55,6 +57,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
+      // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
+      // does not carry them, or carries a translation, is left alone by the same call.
+      for (const auto& entry : screen::LocaleOverrides()) {
+        std::string why;
+        screen::ReplaceLocaleEntry(&roots, entry.key, entry.from, entry.to, &why);
+      }
       for (const auto& [key, text] : screen::Labels()) {
         std::string why;
         if (!screen::AddLocaleEntry(&roots, key, text, &why) &&

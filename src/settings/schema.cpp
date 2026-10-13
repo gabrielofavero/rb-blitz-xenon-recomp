@@ -110,7 +110,7 @@ std::vector<SchemaRow> BuildTable() {
                         WidgetKind::kSubmenu, ValueKind::kEnum, EnumValue("common"));
     d.choices = Choices({{"common", "Rock Band Blitz"},
                          {"ultimate", "Rock Band Blitz Ultimate"},
-                         {"demo", "Trial"}});
+                         {"demo", "Rock Band Blitz Demo"}});
     rows.push_back(Row(std::move(d), {"general", "target"}, "", "Target",
                        "Which game the launch runs."));
   }
@@ -125,10 +125,17 @@ std::vector<SchemaRow> BuildTable() {
     rows.push_back(Row(std::move(d), {"general", "dlc_scan_threads"}, "dlc", "DLC Scan Threads",
                        "How many threads scan the DLC library."));
   }
-  rows.push_back(Row(Make(SettingId::kDlcMenuSongs, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
-                     {"general", "dlc_menu_songs"}, "dlc", "DLC Menu Songs",
-                     "Include installed DLC songs in the menu music pool."));
+  // `general.dlc_menu_songs` is **retired** (owner decision, 2026-10-13): the menu music pool
+  // always takes every DLC song the library yields, so there is no row to toggle. The descriptor
+  // stays so old files and bridge tokens still resolve, but it is marked hidden - the merged
+  // surface does not draw it, and nothing reads its value any more.
+  {
+    Descriptor d = Make(SettingId::kDlcMenuSongs, Category::kGeneral, Provider::kNative,
+                        WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false));
+    d.availability = Availability::kHidden;
+    rows.push_back(Row(std::move(d), {"general", "dlc_menu_songs"}, "dlc", "DLC Menu Songs",
+                       "Retired: the menu music pool is always on."));
+  }
   rows.push_back(ProviderRow(Make(SettingId::kUnlockAll, Category::kGeneral, Provider::kUltimate,
                                   WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                              "achievements", "Unlock All",
@@ -150,6 +157,17 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kVsync, Category::kGraphics, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"graphics", "vsync"}, "", "V-Sync", "Synchronize presentation to the display."));
+  {
+    // The window mode (owner decision, 2026-10-13): three states over two SDK cvars - `windowed`
+    // and `borderless` share `fullscreen = false`, and `borderless` adds the undecorated window.
+    Descriptor d = Make(SettingId::kDisplay, Category::kGraphics, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("fullscreen"));
+    d.choices = Choices({{"windowed", "Windowed"},
+                         {"borderless", "Borderless"},
+                         {"fullscreen", "Full Screen"}});
+    rows.push_back(Row(std::move(d), {"graphics", "display"}, "", "Display",
+                       "How the game's window is drawn."));
+  }
   {
     Descriptor d = Make(SettingId::kRenderer, Category::kGraphics, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("d3d12"),
@@ -315,6 +333,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kTarget, ApplicationStrategy::kRestart, ""},
     {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
+    // Retired and hidden, but every row carries an entry so the table stays complete.
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
     {SettingId::kUnlockAll, ApplicationStrategy::kRestart, ""},
     {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
@@ -330,6 +349,9 @@ constexpr StrategyEntry kStrategies[] = {
      "flipping the `vsync` cvar with the guest running moved the discovery rate from 16.66 ms per "
      "item to 5.68 ms (46.7 s -> 15.96 s, docs/dlc.md), i.e. a live effect measured in a boot"},
     {SettingId::kRenderer, ApplicationStrategy::kRestart, ""},
+    // The window mode is read once, when the window is created: a new process, like the rest of the
+    // render path it belongs to.
+    {SettingId::kDisplay, ApplicationStrategy::kRestart, ""},
     {SettingId::kAntiAliasing, ApplicationStrategy::kRestart, ""},
     {SettingId::kFiltering, ApplicationStrategy::kRestart, ""},
     // Interface

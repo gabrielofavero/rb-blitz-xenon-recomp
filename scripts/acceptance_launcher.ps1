@@ -21,26 +21,29 @@
 #             Documents\rb_blitz is not what is being checked
 #
 # Every leg writes its own profile, so "the launcher's settings reach the game" is checked
-# rather than assumed. How they travel is worth stating: from the launcher they are argv - the
-# launcher passes every managed row it has moved off its compiled default as
-# `--<key>=<value>` (Contract 3, launcher/src/game_launch.cpp) - and a game started without the
-# launcher applies the profile's `[settings]` rows itself at config rank (D3 rank 4,
-# src/launcher/profile_apply.cpp, added 2026-10-07). What this script asserts is the argv the
-# contract passes, and the boot log reads those back:
+# rather than assumed. How they travel changed with the P11b cutover (2026-10-13): the launcher
+# still passes the rows *it* owns - the two paths, the monitor/present/audio rows and the
+# controller rows - as `--<key>=<value>`, but the rows the game's own Help & Options owns (DLC,
+# graphics, interface) are never passed, because a command-line copy would outrank the game's
+# settings file and freeze those rows. The target is in that second group: each leg's profile
+# carries `[launch] target`, the game's first boot migrates it into its own settings.toml, and
+# that store (not an argument) decides which game runs - which is why every leg gets its own
+# --user_data_root, so one leg's migration cannot stand for the next leg's.
 #
-#   * `[launch] target`     -> --ultimate_mode / --license_mask, and the ultimate: and
-#                              content licence: lines
+# What this script asserts is the argv the contract passes plus the boot log the game writes:
+#
+#   * `[launch] target`     -> no command-line flag; the boot's `ultimate: ...` and
+#                              `content licence: ...` lines show the target the game chose,
+#                              migrated from the profile on a fresh user root
 #   * `[settings] dlc_root` -> --dlc_root, and the `dlc: N package(s) ... in <folder>` line,
 #                              which names the folder the profile asked for
 #   * `[settings] user_data_root` -> --user_data_root, and the log's `User data:` line
 #   * `[remap]`             -> read out of the profile by the game itself, and the
 #                              `remap: N pad control(s) rebound` line
-#   * `[settings] mouse_ui_nav` -> --mouse_ui_nav=true (the row is off by default, so "on" is
-#                              the moved direction). Asserted on the command line only:
+#   * `[settings] mouse_ui_nav` -> --mouse_ui_nav=false if that controller row is moved off its
+#                              (now on-by-default) value. Asserted on the command line only:
 #                              the driver is installed unconditionally and reads the cvar per
-#                              event, so `mouse_ui: the mouse navigates the menus` is printed
-#                              whether the row is on or off, and asserting that line would be
-#                              asserting nothing (measured 2026-10-05).
+#                              event, so its log line is printed whether the row is on or off.
 #
 # Two discrepancies this work once measured are now fixed rather than worked around, both on
 # 2026-10-07: the profile's `[settings]` rows are applied by the game itself when no launcher
@@ -200,10 +203,10 @@ if (Test-Path (Join-Path $gameDir "default.xex")) {
 # content wherever they keep it, and pointing the row at it is what makes the packages line
 # evidence rather than an absence.
 function Write-Fixture([string]$Path, [string]$Target, [bool]$MouseRowMoved, [string]$UserDataDir) {
-    # The mouse row's compiled default is off (2026-10-07), so "on" is the non-default
-    # direction and the one the launch command has to carry.
-    $mouse = if ($MouseRowMoved) { "true" } else { "false" }
-    $settings = @("mouse_ui_nav = $mouse", "resolution_scale = 2", "dlc_root = '$dlcRoot'")
+    # The mouse row's compiled default is on, so "off" is the non-default direction and the one
+    # the launch command has to carry.
+    $mouse = if ($MouseRowMoved) { "false" } else { "true" }
+    $settings = @("mouse_ui_nav = $mouse", "dlc_root = '$dlcRoot'")
     if ($UserDataDir) { $settings += "user_data_root = '$UserDataDir'" }
     $text = @"
 schema_version = 1
@@ -229,6 +232,11 @@ $($settings -join "`n")
 a = "pad:b"
 "@
     Set-Content -LiteralPath $Path -Value $text -NoNewline -Encoding ascii
+    # The game keeps its settings beside the profile it was handed (`<stem>.game-settings.toml`),
+    # and the P11b cutover migrates `[launch] target` there on the leg's first boot. A file left
+    # by an earlier run would claim the migration was already done, so each leg starts fresh.
+    $sidecar = Join-Path (Split-Path -Parent $Path) ([System.IO.Path]::GetFileNameWithoutExtension($Path) + '.game-settings.toml')
+    if (Test-Path -LiteralPath $sidecar) { Remove-Item -LiteralPath $sidecar -Force }
     return $Path
 }
 
@@ -358,7 +366,9 @@ function Test-CommonBootLines([string]$Leg, [string]$Text) {
         (Get-FirstLogLine $Text "remap: ")
 }
 
-# The argv contract, asserted on the launcher's own text before anything is started.
+# The argv contract, asserted on the launcher's own text before anything is started. The target
+# is deliberately absent: the game migrates it out of the profile on the leg's fresh user root
+# (P11b cutover), which is what the boot-log checks below read back.
 function Test-CommandContract([string]$Leg, [string[]]$Tokens, [string]$Target, [string]$UserDataRoot, [bool]$MouseRowMoved) {
     Add-Check $Leg "the command starts the installed game" ($Tokens[0] -eq $gameExe) $Tokens[0]
     Add-Check $Leg "it names the install's game folder" `
@@ -366,30 +376,26 @@ function Test-CommandContract([string]$Leg, [string[]]$Tokens, [string]$Target, 
     Add-Check $Leg "it names the profile the launcher was given" `
         (@($Tokens | Where-Object { $_ -like "--launcher_profile=*" }).Count -eq 1) `
         (@($Tokens | Where-Object { $_ -like "--launcher_profile=*" }) -join " ")
-    $wantedMode = if ($Target -eq "ultimate") { "--ultimate_mode=1" } else { "--ultimate_mode=0" }
-    Add-Check $Leg "the target decides --ultimate_mode" ($Tokens -contains $wantedMode) $wantedMode
-    if ($Target -eq "demo") {
-        Add-Check $Leg "the trial target passes --license_mask=0" ($Tokens -contains "--license_mask=0") ""
-    } else {
-        Add-Check $Leg "no licence mask for a purchased target" `
-            (@($Tokens | Where-Object { $_ -like "--license_mask*" }).Count -eq 0) ""
-    }
+    Add-Check $Leg "the target never travels as a flag" `
+        ((@($Tokens | Where-Object { $_ -like "--ultimate_mode*" }).Count -eq 0) -and
+         (@($Tokens | Where-Object { $_ -like "--license_mask*" }).Count -eq 0)) `
+        "target $Target reaches the game through the profile migration"
     if ($UserDataRoot) {
-        Add-Check $Leg "the save override is passed as its own argument" `
+        Add-Check $Leg "the save root is passed as its own argument" `
             ($Tokens -contains "--user_data_root=$UserDataRoot") "--user_data_root=$UserDataRoot"
     } else {
         Add-Check $Leg "no save override when the profile names none" `
             (@($Tokens | Where-Object { $_ -like "--user_data_root*" }).Count -eq 0) ""
     }
     Add-Check $Leg "the DLC row travels as a flag" ($Tokens -contains "--dlc_root=$dlcRoot") "--dlc_root=$dlcRoot"
-    # A row the user moved off its default travels as a flag, whatever its kind; a row left at
-    # its default is *not* passed at all, which is what keeps the game's own file in charge of
-    # it (D3). The mouse row is the second case: it is off by default.
-    Add-Check $Leg "a changed number travels as a flag" ($Tokens -contains "--resolution_scale=2") ""
+    # Game-owned rows never travel (P11b cutover): a command-line copy would outrank the game's
+    # own settings file and freeze the in-game row.
+    Add-Check $Leg "a game-owned row does not travel" `
+        (@($Tokens | Where-Object { $_ -like "--resolution_scale*" }).Count -eq 0) "resolution_scale"
     $mouseFlags = @($Tokens | Where-Object { $_ -like "--mouse_ui_nav=*" -or $_ -eq "--no-mouse_ui_nav" })
     if ($MouseRowMoved) {
-        Add-Check $Leg "a bool row moved off its default travels as a flag" `
-            ($mouseFlags -contains "--mouse_ui_nav=true") ($mouseFlags -join " ")
+        Add-Check $Leg "a controller row moved off its default travels as a flag" `
+            ($mouseFlags -contains "--mouse_ui_nav=false") ($mouseFlags -join " ")
     } else {
         Add-Check $Leg "a row left at its default is not passed" ($mouseFlags.Count -eq 0) ($mouseFlags -join " ")
     }
@@ -494,8 +500,10 @@ if ((New-Leg "ultimate" $Only) -and $modInstalled) {
         Add-Check "ultimate" "the retail route is not also taken" `
             (-not $text.Contains("ultimate: off, booting the retail game data")) ""
         Add-Check "ultimate" "no dirty-disc abort" (-not $text.Contains("XamShowDirtyDiscErrorUI")) ""
+        # The target reaches the game through the profile migration now (P11b cutover), not a
+        # command-line flag, so the licence reads "configured" rather than "default".
         Add-Check "ultimate" "the title is treated as purchased" `
-            ($text -match "content licence: license_mask = 1 \(default; the title is treated as purchased\)") ""
+            ($text -match "content licence: license_mask = 1 \(configured\)") (Get-FirstLogLine $text "content licence:")
         Test-CommonBootLines "ultimate" $text
         $results.Add($leg.Result) | Out-Null
     }

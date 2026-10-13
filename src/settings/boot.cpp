@@ -24,6 +24,7 @@
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/logging.h>
+#include <rex/platform/dynlib.h>
 
 #include "hooks/settings_bridge_hooks.h"
 #include "hooks/hud_layout.h"
@@ -58,12 +59,43 @@ SettingsBoot* g_current = nullptr;
 // safer than offering a step nothing has.
 constexpr int32_t kShippedFilteringCeiling = 3;
 
-// The backend this project ships and has run. The GPU plugin exposes no list of the backends it was
-// compiled with (`rex::system::LoadGpuPlugin` takes a name and returns a system), so the boot reports
-// the one it can describe honestly and says so in the log. A full built/detected/usable probe is
-// P4's open item; until then a one-choice Renderer row is the honest presentation (§7.2: a single
-// available choice remains understandable).
-constexpr char kShippedRenderer[] = "d3d12";
+// The backends the GPU plugin was compiled with, from the build's own switch: CMakeLists.txt passes
+// the same `REXGLUE_USE_D3D12`/`REXGLUE_USE_VULKAN` values the plugin is built from and the
+// launcher's Renderer row reads (`--backends=`), so the three cannot disagree about what the plugin
+// contains. A target that compiles this file without that definition (a unit-test build) reports the
+// backend this project has always shipped.
+#if !defined(RBBLITZ_BACKENDS)
+#define RBBLITZ_BACKENDS "d3d12"
+#endif
+
+std::vector<std::string_view> ShippedBackends() {
+  std::vector<std::string_view> out;
+  const std::string_view list = RBBLITZ_BACKENDS;
+  for (std::size_t start = 0; start < list.size();) {
+    const std::size_t comma = list.find(',', start);
+    const std::string_view token =
+        comma == std::string_view::npos ? list.substr(start) : list.substr(start, comma - start);
+    if (!token.empty()) out.push_back(token);
+    if (comma == std::string_view::npos) break;
+    start = comma + 1;
+  }
+  return out;
+}
+
+// The backend an unnamed/"any" choice lands on, and the one the boot names when nobody named one:
+// this project has always run D3D12, so it stays the default even now that Vulkan is offered.
+constexpr char kFallbackBackend[] = "d3d12";
+
+// True when the Vulkan loader is present and looks like a loader - the same check
+// `RbBlitzApp::SelectGpuBackend` makes before committing to the backend. The SDK opens the loader
+// at run time rather than linking it, so "the plugin was built with Vulkan" and "this machine can
+// run Vulkan" are different facts: with no loader, a Vulkan boot builds a Vulkan system and only
+// fails inside presentation setup, where there is nothing left to fall back to.
+bool VulkanLoaderIsUsable() {
+  rex::platform::DynamicLibrary loader;
+  if (!loader.Load(rex::platform::lib_names::kVulkanLoader)) return false;
+  return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
+}
 
 std::string BoolText(const bool value) { return value ? "true" : "false"; }
 std::string PathText(const std::filesystem::path& path) {
@@ -230,9 +262,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   }
 
   // --- capabilities -------------------------------------------------------------------------
-  // What the boot can answer honestly today, and what it cannot: the display probe (P4's open item)
-  // and a compiled-backend list (the plugin exposes none). Both are reported as absent rather than
-  // guessed, which is what keeps the Resolution row from offering a size nothing can render.
+  // What the boot can answer honestly today, and what it cannot: the display probe answers with the
+  // primary mode, and each backend the build compiled gets a probe of its own. "Usable" is a real
+  // check where this machine can answer one - the Vulkan loader, which the SDK opens at run time -
+  // and the honest constant elsewhere (D3D12 is the path every measured boot of this project took;
+  // there is nothing to detect before the plugin loads). A compiled backend this machine cannot run
+  // is reported as such rather than offered, which is what keeps the Renderer row honest.
   CapabilityInputs cap_inputs;
   const unsigned cpus = std::thread::hardware_concurrency();
   cap_inputs.logical_processors = cpus == 0 ? 1u : static_cast<uint32_t>(cpus);
@@ -241,18 +276,29 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // from the backend's integer draw scale, not a larger guest EDRAM allocation.
   render_limits_ = TitleRenderPath();
   cap_inputs.render_path = render_limits_;
-  {
+  for (const std::string_view token : ShippedBackends()) {
     RendererProbe probe;
-    probe.token = kShippedRenderer;
+    probe.token = std::string(token);
     probe.built = true;
     probe.detected = true;
     probe.usable = true;
-    probe.active = true;
+    // The backend a boot with no stored choice lands on. Named in the snapshot so the graphics
+    // policy has a stable default; which backend a *loaded* plugin really initialised is reported
+    // by the app (`active_renderer_`) and is P4's device-probe item, not this table's.
+    probe.active = token == kFallbackBackend;
     // Empty: the title's native MSAA sample semantics have not been verified on this device, and an
     // unproved label must not ship (§7.1), so `native` is simply not offered.
     probe.native_aa_label.clear();
     probe.filtering_ceiling = kShippedFilteringCeiling;
-    probe.note = "not probed: the one backend this project ships and has run";
+    if (token == "vulkan") {
+      const bool loader = VulkanLoaderIsUsable();
+      probe.detected = loader;
+      probe.usable = loader;
+      probe.note = loader ? "not probed: a backend this project ships and has run"
+                          : "the Vulkan loader (vulkan-1.dll) is not present here";
+    } else {
+      probe.note = "not probed: a backend this project ships and has run";
+    }
     cap_inputs.renderers.push_back(std::move(probe));
   }
   cap_inputs.revision = 1;
@@ -353,9 +399,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // is reported rather than swallowed.
     for (const SettingId id :
          {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kDlcScanThreads,
-          SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
+          SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
           SettingId::kHiddenMainMenu, SettingId::kVsync, SettingId::kFiltering,
-          SettingId::kResolution, SettingId::kAntiAliasing}) {
+          SettingId::kResolution, SettingId::kAntiAliasing, SettingId::kDisplay}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }
@@ -405,6 +451,18 @@ void SettingsBoot::ApplyRow(const SettingId id, const bool defer_unregistered) {
         return;
       }
       ApplyCvars({{"anisotropic_override", std::to_string(cvar_value)}}, id, defer_unregistered);
+      return;
+    }
+    case SettingId::kDisplay: {
+      // Two cvars, one row: the window mode is not one SDK flag. An empty assignment set (a token
+      // this build does not know) is reported instead of guessed at.
+      const auto assignments = DisplayToCvars(value.text);
+      if (assignments.empty()) {
+        REXLOG_WARN("settings_boot: '{}' is not a window mode this build knows; the row was not "
+                    "applied", value.text);
+        return;
+      }
+      ApplyCvars(assignments, id, defer_unregistered);
       return;
     }
     case SettingId::kResolution: {
@@ -557,7 +615,7 @@ void SettingsBoot::LogConfigured() const {
 
 void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   active_renderer_ = active_renderer.empty() || active_renderer == "any"
-                         ? kShippedRenderer : active_renderer;
+                         ? kFallbackBackend : active_renderer;
   // Plugin flags now contain the developer config, environment and CLI values replayed at
   // registration. Even a config-rank value here outranks our earlier stored preference.
   for (const Applied& deferred : deferred_writes_) {
@@ -588,7 +646,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     screen_plan_ = PlanGuestScreen(render_limits_, {1280, 720});
     overrides_.erase(SettingId::kResolution);
     if (service_) {
-      auto safe = RecoverGraphics(capability_snapshot_, service_->RequestedValue(SettingId::kResolution), "d3d12", true);
+      auto safe = RecoverGraphics(capability_snapshot_, service_->RequestedValue(SettingId::kResolution),
+                                  kFallbackBackend, true);
       service_->SetBootValues({{SettingId::kResolution, safe.resolution}, {SettingId::kRenderer, safe.renderer},
           {SettingId::kAntiAliasing, safe.anti_aliasing}, {SettingId::kFiltering, safe.filtering}},
           "settings.graphics.safe_mode");
@@ -649,7 +708,7 @@ void SettingsBoot::Closing() {
 // ------------------------------------------------------------------------------------------------
 
 void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
-  active_renderer_ = active_renderer.empty() ? kShippedRenderer : active_renderer;
+  active_renderer_ = active_renderer.empty() ? kFallbackBackend : active_renderer;
 
   // --- the provider reaches the service -----------------------------------------------------
   const auto& provider = ::rb_blitz::ultimate::Provider();
@@ -724,6 +783,7 @@ void SettingsBoot::FinishInit() {
     else if (id == SettingId::kResolution) names = {"resolution_scale"};
     else if (id == SettingId::kAntiAliasing) names = {"native_2x_msaa", "swap_post_effect"};
     else if (id == SettingId::kFiltering) names = {"anisotropic_override"};
+    else if (id == SettingId::kDisplay) names = {"fullscreen", "borderless"};
     else if (!CvarForSetting(id).empty()) names.emplace_back(CvarForSetting(id));
     for (const auto& name : names) {
       const auto source = rex::cvar::GetFlagSource(name);
@@ -759,6 +819,12 @@ void SettingsBoot::FinishInit() {
         int32_t encoded;
         if (FilteringToCvarValue(token, &encoded) && actual == std::to_string(encoded)) value.text = token;
       }
+    } else if (id == SettingId::kDisplay) {
+      // Decode the pair back into one token: fullscreen wins when it is set, else borderless, else
+      // the plain window.
+      value.text = flag("fullscreen") == "true"    ? "fullscreen"
+                   : flag("borderless") == "true" ? "borderless"
+                                                  : "windowed";
     } else if (value.kind == ValueKind::kList) {
       value.list.clear();
       const std::string csv = rex::cvar::GetFlagByName(names.front());

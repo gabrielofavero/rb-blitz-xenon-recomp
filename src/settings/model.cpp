@@ -36,6 +36,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "anti_aliasing";
     case SettingId::kFiltering:
       return "filtering";
+    case SettingId::kDisplay:
+      return "display";
     case SettingId::kLetterbox:
       return "letterbox";
     case SettingId::kHideOfflinePrompts:

@@ -58,9 +58,11 @@ param(
     [string] $CrtDir,
     [string] $Version,
     [string] $ZipPath,
+    [string] $VulkanLoaderDir,
     [switch] $Zip,
     [switch] $Clean,
-    [switch] $SkipDependencyCheck
+    [switch] $SkipDependencyCheck,
+    [switch] $AllowMissingVulkanLoader
 )
 
 Set-StrictMode -Version Latest
@@ -117,6 +119,47 @@ function Get-PeImports {
     return $imports
 }
 
+# The graphics backends the build tree was configured with. The SDK's own Windows default for
+# Vulkan is OFF, so this is the difference between a payload that can offer a second renderer and
+# one whose Renderer rows (the launcher's and the game's) have a single choice.
+function Get-PayloadBackends {
+    param([string] $BuildDir)
+    $backends = @()
+    $cache = Join-Path $BuildDir 'CMakeCache.txt'
+    if (-not (Test-Path -LiteralPath $cache)) { return $backends }
+    foreach ($line in Get-Content -LiteralPath $cache) {
+        if ($line -match '^REXGLUE_USE_D3D12:BOOL=ON') { $backends += 'd3d12' }
+        if ($line -match '^REXGLUE_USE_VULKAN:BOOL=ON') { $backends += 'vulkan' }
+    }
+    return $backends
+}
+
+# The Khronos Vulkan loader the payload ships. The SDK opens it with LoadLibrary (it is never an
+# import), so nothing else in the snapshot would reveal its absence, and a machine with a GPU but
+# no loader would offer Vulkan and then fail inside presentation setup. Its own home is the GPU
+# driver, but the payload carries a copy so the install is self-contained; the file is the Khronos
+# loader (Apache-2.0), which is why a LunarG SDK copy - the official redistributable - is preferred
+# over the one a driver dropped in System32. `-VulkanLoaderDir` pins the source; the payload's copy
+# wins at load time because Windows searches the application directory before System32.
+function Get-VulkanLoaderDir {
+    param([string] $Explicit)
+    if ($Explicit) {
+        if (Test-Path -LiteralPath (Join-Path $Explicit 'vulkan-1.dll')) { return $Explicit }
+        throw "-VulkanLoaderDir was given but $Explicit\vulkan-1.dll does not exist."
+    }
+    if ($env:VULKAN_SDK) {
+        $candidate = Join-Path $env:VULKAN_SDK 'Bin'
+        if (Test-Path -LiteralPath (Join-Path $candidate 'vulkan-1.dll')) { return $candidate }
+    }
+    $sdkDirs = Get-ChildItem -Path 'C:\VulkanSDK\*\Bin' -Directory -ErrorAction SilentlyContinue
+    foreach ($dir in ($sdkDirs | Sort-Object -Property FullName -Descending)) {
+        if (Test-Path -LiteralPath (Join-Path $dir.FullName 'vulkan-1.dll')) { return $dir.FullName }
+    }
+    $systemDir = Join-Path $env:WINDIR 'System32'
+    if (Test-Path -LiteralPath (Join-Path $systemDir 'vulkan-1.dll')) { return $systemDir }
+    return ''
+}
+
 if (-not (Test-Path -LiteralPath $SourceDir)) {
     throw "build tree not found: $SourceDir. Build it first (see docs/build-and-run.md)."
 }
@@ -132,6 +175,7 @@ if (-not $CrtDir -or -not (Test-Path -LiteralPath $CrtDir)) {
 # import (checked below); the rest of Machine.VC143.CRT is for other languages
 # and for WinRT/ConcRT, which nothing here uses. The launcher is the second
 # executable of the game's build tree (D1) and sits beside rb_blitz.exe in it.
+$payloadBackends = Get-PayloadBackends -BuildDir $SourceDir
 $wanted = [ordered]@{
     'rb_blitz.exe'             = $SourceDir
     'rb_blitz_launcher.exe'    = $LauncherDir
@@ -141,6 +185,22 @@ $wanted = [ordered]@{
     'msvcp140_atomic_wait.dll' = $CrtDir
     'vcruntime140.dll'         = $CrtDir
     'vcruntime140_1.dll'       = $CrtDir
+}
+
+$vulkanLoaderDir = ''
+if ($payloadBackends -contains 'vulkan') {
+    $vulkanLoaderDir = Get-VulkanLoaderDir -Explicit $VulkanLoaderDir
+    if ($vulkanLoaderDir) {
+        $wanted['vulkan-1.dll'] = $vulkanLoaderDir
+    } elseif (-not $AllowMissingVulkanLoader) {
+        throw ("the build offers Vulkan ($SourceDir was configured with REXGLUE_USE_VULKAN=ON), but no " +
+               "vulkan-1.dll was found to ship: none at `$env:VULKAN_SDK\Bin, under C:\VulkanSDK\*\Bin, or in " +
+               "`$env:WINDIR\System32. Install the Vulkan runtime (GPU driver or the LunarG SDK), pass " +
+               '-VulkanLoaderDir, or pass -AllowMissingVulkanLoader to ship a payload that offers ' +
+               'Vulkan only where the machine already has a loader.')
+    } else {
+        Write-Warning 'no vulkan-1.dll found; this payload offers Vulkan only where the machine has a loader'
+    }
 }
 
 $missing = @()
@@ -231,6 +291,18 @@ $total = ($entries | Measure-Object -Property Size -Sum).Sum
 Write-Host ("payload snapshot: {0} files, {1:N1} MiB -> {2}" -f $entries.Count, ($total / 1MB), $PayloadDir)
 foreach ($item in $entries) {
     Write-Host ("  {0,-26} {1,12:N0} bytes  {2}" -f $item.Name, $item.Size, $item.Sha256.Substring(0, 16))
+}
+
+# Which graphics backends the shipped plugin contains, from the build tree that produced it: the
+# same pair of switches launcher/CMakeLists.txt and CMakeLists.txt read. The loader was handled
+# above (it is fatal to be missing when the build offers Vulkan, unless the caller opted out).
+if ($payloadBackends.Count -gt 0) {
+    Write-Host ("payload renderer backends: {0}" -f ($payloadBackends -join ', '))
+    if ($payloadBackends -notcontains 'vulkan') {
+        Write-Warning 'this payload cannot offer Vulkan; configure with -DREXGLUE_USE_VULKAN=ON (the Windows presets do)'
+    }
+} else {
+    Write-Warning "no CMakeCache.txt in $SourceDir, so the payload's renderer backends were not read"
 }
 
 if ($Zip) {

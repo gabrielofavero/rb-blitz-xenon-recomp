@@ -105,6 +105,10 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   uint64_t saved_revision() const { return saved_revision_; }
   bool last_commit_requires_restart() const { return last_commit_requires_restart_; }
   void RequireRestartAfterApply() { last_commit_requires_restart_ = true; }
+  // The merged root's restart prompt (owner decision, 2026-10-13): true once this session has
+  // committed a change that needs a restart, and it stays true - the prompt is asked when the
+  // player leaves Help & Options, not when the value changes.
+  bool restart_pending() const { return restart_pending_; }
   // "kSaved" / "kNoChanges" / ... for the log line.
   std::string_view last_commit_status() const { return CommitStatusToken(last_commit_status_); }
 
@@ -148,6 +152,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_durable_ = false;
   uint64_t saved_revision_ = 0;
   bool last_commit_requires_restart_ = false;
+  bool restart_pending_ = false;
   CommitStatus last_commit_status_ = CommitStatus::kNoChanges;
   ProviderSaver provider_saver_;
   bool edit_failed_ = false;

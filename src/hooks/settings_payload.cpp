@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <set>
+#include <rex/cvar.h>
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/filesystem/file.h>
@@ -136,8 +137,12 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     if (ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &error))
       for (const auto& root : roots) CollectLocale(root, &menu_labels);
   }
-  menu_labels["splash_options"] = "Advanced Settings";
-  menu_labels["splash_dlc"] = "Refresh Song Library";
+  menu_labels["splash_options"] = "HELP & OPTIONS";
+  // With R7 on, the downloadable-content row performs the library refresh and is drawn as such
+  // (`menu_filter`'s own relabel); the hide-list label mirrors what the menu really says.
+  if (rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true") {
+    menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
+  }
   if (read("ui/splash/gen/splash.dtb", &bytes, &error)) {
     const auto inventory = menu_options::MenuInventory(bytes.data(), bytes.size());
     if (auto* boot = boot::SettingsBoot::Current(); inventory.parsed && boot) {
@@ -191,6 +196,18 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
         REXLOG_INFO("settings_menu: Resolution offers {} size(s): {}", choices.size(), listed);
       }
     }
+    // The renderer row is the one choice a player can be misled by: what it offers is decided by the
+    // build's backends (RBBLITZ_BACKENDS) plus the machine's Vulkan loader, so a single-choice row is
+    // either a one-backend build or a machine with no loader - both worth saying out loud, in the
+    // same words the launcher prints for the payload (`payload renderer backends:`).
+    if (const auto renderers = configuration.choices.find("graphics.renderer");
+        renderers != configuration.choices.end() && !renderers->second.empty()) {
+      std::string listed;
+      for (const auto& choice : renderers->second) {
+        listed += (listed.empty() ? "" : ", ") + choice.second;
+      }
+      REXLOG_INFO("settings_menu: Renderer offers {}: {}", renderers->second.size(), listed);
+    }
     for (const auto& binding : ultimate_adapter::RowBindings()) {
       const auto found = provider.choices.find(std::string(binding.variable));
       if (found != provider.choices.end()) {
@@ -199,10 +216,13 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
         for (const auto& token : found->second) choices.emplace_back(token, token);
       }
     }
-    // Trial still faults in the retail boot and is not a usable target in this build.
+    // The demo (trial) target is offered by name: the recorded trial-boot fault is a separate
+    // matter and no longer a reason to omit the choice (owner decision, 2026-10-13). Trial still
+    // routes through the same translation as always - `--license_mask=0` and no Ultimate mode.
     configuration.choices["general.target"] = {{"common", "Rock Band Blitz"}};
     if (provider.payload_present)
       configuration.choices["general.target"].emplace_back("ultimate", "Rock Band Blitz Ultimate");
+    configuration.choices["general.target"].emplace_back("demo", "Rock Band Blitz Demo");
     if (provider.Active() && boot->service()->store().document().values.contains(SettingId::kUnlockAll))
       configuration.boot_booleans["unlockall"] = boot->service()->EffectiveValue(SettingId::kUnlockAll).boolean;
     for (const auto& row : schema::MenuRows()) {

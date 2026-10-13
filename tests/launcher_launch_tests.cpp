@@ -112,7 +112,7 @@ struct Scratch {
 };
 
 void TestCommandShape(const Scratch& scratch) {
-  BeginCase("Contract 3: the roots, the target and the profile path are always there");
+  BeginCase("Contract 3: the roots and the profile path are always there; the target never is");
 
   ProfileSession session = scratch.Session();
   const LaunchCommand command =
@@ -122,56 +122,57 @@ void TestCommandShape(const Scratch& scratch) {
   CHECK_STR_EQ(command.executable.filename().string(), kGameExecutableName);
   CHECK_STR_EQ(command.working_directory.string(), scratch.install.string());
   CHECK_CONTAINS(command.arguments, "--game_data_root=\"" + scratch.game_root.string() + "\"");
-  // Ultimate is auto mode; common is off, and demo is off *plus* no licence.
-  CHECK_CONTAINS(command.arguments, "--ultimate_mode=1");
+  // The target is the game's own setting now (Help & Options > General > Target, P11b cutover),
+  // so the launcher never forces it: a command-line copy would outrank the game's settings file
+  // and make that row read-only.
+  CHECK_NOT_CONTAINS(command.arguments, "--ultimate_mode");
   CHECK_NOT_CONTAINS(command.arguments, "--license_mask");
   CHECK_CONTAINS(command.arguments, "--launcher_profile=\"" + session.path().string() + "\"");
   // Nothing the user never touched is passed: the compiled defaults decide, and the game's own
-  // file outranks the launcher for those rows (D3). The Display row is the render resolution,
-  // whose default is 1, so an untouched profile carries no `--resolution_scale` either.
+  // file is where a choice lives.
   CHECK_NOT_CONTAINS(command.arguments, "--resolution_scale");
   CHECK_NOT_CONTAINS(command.arguments, "--fullscreen");
   CHECK_NOT_CONTAINS(command.arguments, "--user_data_root");
   CHECK_NOT_CONTAINS(command.arguments, "--dlc_root");
   CHECK_NOT_CONTAINS(command.arguments, "--gpu_backend");
 
-  BeginCase("the demo target is the trial, and the retail target turns Ultimate off");
+  BeginCase("the target is not a launcher argument any more, whichever target is asked for");
 
   const LaunchCommand demo = BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kDemo);
-  CHECK_CONTAINS(demo.arguments, "--ultimate_mode=0");
-  CHECK_CONTAINS(demo.arguments, "--license_mask=0");
+  CHECK_NOT_CONTAINS(demo.arguments, "--ultimate_mode");
+  CHECK_NOT_CONTAINS(demo.arguments, "--license_mask");
 
   const LaunchCommand common = BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kCommon);
-  CHECK_CONTAINS(common.arguments, "--ultimate_mode=0");
+  CHECK_NOT_CONTAINS(common.arguments, "--ultimate_mode");
   CHECK_NOT_CONTAINS(common.arguments, "--license_mask");
 }
 
 void TestOnlyDifferencesArePassed(const Scratch& scratch) {
-  BeginCase("a row is passed only where the profile moved it off the compiled default");
+  BeginCase("a row is passed only where the profile moved it, and only when the launcher owns it");
 
   ProfileSession session = scratch.Session();
-  // One of each interesting shape: a bool whose default is true, an enum whose default is
-  // "none", an int with a default, and a path.
+  // A path (still the launcher's: there is no in-game row for the save folder yet) and one
+  // controller row (which the game also reads out of the profile at the allowlist). The mouse
+  // row ships on, so its non-default direction is off.
+  session.SetSetting("user_data_root", "D:\\saves here", "", ValueStyle::kBasic);
+  session.SetSetting("mouse_ui_nav", "false", "true", ValueStyle::kBare);
+  // And the rows the game owns now: whatever the profile holds, none of them travels (P11b
+  // cutover - a passed value would outrank the game's own settings file).
   session.SetSetting("fullscreen", "false", "true", ValueStyle::kBare);
   session.SetSetting("swap_post_effect", "fxaa", "none", ValueStyle::kBare);
-  // The display row, and the only place the launcher changes the render resolution: its value is
-  // the render multiplier (2 = 1440p), and it reaches the game as the cvar's own integer.
   session.SetSetting("resolution_scale", "2", "1", ValueStyle::kBare);
-  session.SetSetting("user_data_root", "D:\\saves here", "", ValueStyle::kBasic);
-  // And the DLC library row the panel writes with a number of its own (the General tab's other
-  // editor beside the two path rows).
   session.SetSetting("dlc_scan_threads", "4", "1", ValueStyle::kBare);
-  // And one written back to its default, which must not appear at all.
-  session.SetSetting("vsync", "true", "true", ValueStyle::kBare);
+  session.SetSetting("vsync", "false", "true", ValueStyle::kBare);
 
   const LaunchCommand command =
       BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
   CHECK_TRUE(command.ok);
-  CHECK_CONTAINS(command.arguments, "--fullscreen=false");
-  CHECK_CONTAINS(command.arguments, "--swap_post_effect=fxaa");
-  CHECK_CONTAINS(command.arguments, "--resolution_scale=2");
-  CHECK_CONTAINS(command.arguments, "--dlc_scan_threads=4");
+  CHECK_NOT_CONTAINS(command.arguments, "--fullscreen");
+  CHECK_NOT_CONTAINS(command.arguments, "--swap_post_effect");
+  CHECK_NOT_CONTAINS(command.arguments, "--resolution_scale");
+  CHECK_NOT_CONTAINS(command.arguments, "--dlc_scan_threads");
   CHECK_NOT_CONTAINS(command.arguments, "--vsync");
+  CHECK_CONTAINS(command.arguments, "--mouse_ui_nav=false");
 
   BeginCase("a path with a space in it is one quoted argument");
 
@@ -196,7 +197,7 @@ void TestControllerSettingsPassesIdentityOnly(const Scratch& scratch) {
   // One row of several shapes, including the one Controller Settings itself owns: none of them
   // travels. The controller rows reach the game from the profile, at the controller allowlist
   // (contracts §8), not from a command line.
-  session.SetSetting("mouse_ui_nav", "true", "false", ValueStyle::kBare);
+  session.SetSetting("mouse_ui_nav", "false", "true", ValueStyle::kBare);
   session.SetSetting("fullscreen", "false", "true", ValueStyle::kBare);
   session.SetSetting("swap_post_effect", "fxaa", "none", ValueStyle::kBare);
   session.SetSetting("resolution_scale", "2", "1", ValueStyle::kBare);
@@ -219,66 +220,46 @@ void TestControllerSettingsPassesIdentityOnly(const Scratch& scratch) {
   CHECK_NOT_CONTAINS(command.arguments, "--resolution_scale");
   CHECK_NOT_CONTAINS(command.arguments, "--user_data_root");
 
-  // The same session through the full launcher's builder: the rows are there, which is what makes
-  // the difference the flag rather than the profile.
+  // The same session through the full launcher's builder: the rows the launcher still owns are
+  // there (the controller row), and the game-owned ones are not - which is what makes the
+  // difference the flag the caller asked for, not the profile.
   const LaunchCommand full = BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
-  CHECK_CONTAINS(full.arguments, "--mouse_ui_nav=true");
-  CHECK_CONTAINS(full.arguments, "--fullscreen=false");
-  CHECK_CONTAINS(full.arguments, "--resolution_scale=2");
+  CHECK_CONTAINS(full.arguments, "--mouse_ui_nav=false");
+  CHECK_NOT_CONTAINS(full.arguments, "--fullscreen");
+  CHECK_NOT_CONTAINS(full.arguments, "--resolution_scale");
 }
 
 void TestMainMenuRows(const Scratch& scratch) {
-  BeginCase("R5: the main menu's two rows travel as one bool and one quoted list");
+  BeginCase("rows the game owns are never passed, whatever the profile holds (P11b cutover)");
 
+  // These four were the launcher's most opinionated rows (R5's hide list, R10's rename, R3's
+  // offline skip). Each is an in-game setting now - or retired - so no value of them travels:
+  // a command-line copy would outrank the game's own settings file and freeze the in-game row.
   ProfileSession session = scratch.Session();
-  // Both defaults are off/compiled, so an untouched profile passes neither: the game's own
-  // defaults decide, which is what keeps the faithful path faithful.
-  const LaunchCommand untouched =
-      BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
-  CHECK_NOT_CONTAINS(untouched.arguments, "--enhancements_hide_menu_options");
-  CHECK_NOT_CONTAINS(untouched.arguments, "--enhancements_hidden_menu_options");
-
-  // The bool's compiled default is false, so turning it on has to be passed; the row list is a
-  // string, so the value travels quoted (a comma is not a shell separator, but the row's own
-  // spaces would be).
   session.SetSetting("enhancements_hide_menu_options", "true", "false", ValueStyle::kBare);
   session.SetSetting("enhancements_hidden_menu_options", "splash_leaderboard, splash_dlc",
                      "splash_leaderboard,splash_achievements,splash_dlc", ValueStyle::kBasic);
+  session.SetSetting("enhancements_rename_mod_settings", "false", "true", ValueStyle::kBare);
+  session.SetSetting("enhancements_skip_offline_dialog", "false", "true", ValueStyle::kBare);
+  session.SetSetting("enhancements_menu_dlc_songs", "true", "false", ValueStyle::kBare);
+  session.SetSetting("dlc_scan_threads", "4", "1", ValueStyle::kBare);
+
   const LaunchCommand command =
       BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
   CHECK_TRUE(command.ok);
-  CHECK_CONTAINS(command.arguments, "--enhancements_hide_menu_options=true");
-  CHECK_CONTAINS(command.arguments,
-                 "--enhancements_hidden_menu_options=\"splash_leaderboard, splash_dlc\"");
+  CHECK_NOT_CONTAINS(command.arguments, "--enhancements_hide_menu_options");
+  CHECK_NOT_CONTAINS(command.arguments, "--enhancements_hidden_menu_options");
+  CHECK_NOT_CONTAINS(command.arguments, "--enhancements_rename_mod_settings");
+  CHECK_NOT_CONTAINS(command.arguments, "--enhancements_skip_offline_dialog");
+  CHECK_NOT_CONTAINS(command.arguments, "--enhancements_menu_dlc_songs");
+  CHECK_NOT_CONTAINS(command.arguments, "--dlc_scan_threads");
 
-  BeginCase("R10: the one row whose default is on is passed when it is turned off");
-
-  // The rename row ships on, so the interesting direction is off: a profile that has not moved
-  // it passes nothing and the game draws "Ultimate Settings", and unchecking it is what has to
-  // reach the game.
-  ProfileSession rename = scratch.Session();
-  const LaunchCommand on_by_default =
-      BuildLaunchCommand(rename, scratch.Roots(), LaunchTarget::kUltimate);
-  CHECK_NOT_CONTAINS(on_by_default.arguments, "--enhancements_rename_mod_settings");
-
-  rename.SetSetting("enhancements_rename_mod_settings", "false", "true", ValueStyle::kBare);
-  const LaunchCommand off = BuildLaunchCommand(rename, scratch.Roots(), LaunchTarget::kUltimate);
-  CHECK_TRUE(off.ok);
-  CHECK_CONTAINS(off.arguments, "--enhancements_rename_mod_settings=false");
-
-  BeginCase("R3: the offline-skip row ships on too, and turning it off is what has to travel");
-
-  // Same shape as R10: the row's default is the game's compiled default, so an untouched
-  // profile passes nothing and the game skips the prompts by itself.
-  ProfileSession skip = scratch.Session();
-  const LaunchCommand skip_default =
-      BuildLaunchCommand(skip, scratch.Roots(), LaunchTarget::kUltimate);
-  CHECK_NOT_CONTAINS(skip_default.arguments, "--enhancements_skip_offline_dialog");
-
-  skip.SetSetting("enhancements_skip_offline_dialog", "false", "true", ValueStyle::kBare);
-  const LaunchCommand skip_off = BuildLaunchCommand(skip, scratch.Roots(), LaunchTarget::kUltimate);
-  CHECK_TRUE(skip_off.ok);
-  CHECK_CONTAINS(skip_off.arguments, "--enhancements_skip_offline_dialog=false");
+  // The paths still travel: they are the launcher's own rows until the game grows one, and the
+  // acceptance scripts check them end to end.
+  session.SetSetting("dlc_root", "D:\\DLC", "", ValueStyle::kBasic);
+  const LaunchCommand paths =
+      BuildLaunchCommand(session, scratch.Roots(), LaunchTarget::kUltimate);
+  CHECK_CONTAINS(paths.arguments, "--dlc_root=\"D:\\DLC\"");
 }
 
 void TestRefusals(const Scratch& scratch) {

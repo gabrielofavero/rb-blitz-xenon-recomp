@@ -450,6 +450,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       }
       commit_ok_ = status == Status::kOk;
       last_commit_status_ = result.status;
+      // Sticky for the session (owner decision, 2026-10-13): a durable commit that needs a
+      // restart sets the prompt's state once, and it stays set until the process restarts.
+      if (commit_ok_ && last_commit_requires_restart_) restart_pending_ = true;
       break;
     }
     case bridge::Op::kInvoke: {
@@ -508,6 +511,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
 bool ServiceSink::Matches(const bridge::Request& request) const {
   if (request.setting == "restart.ok") return WireValuesEqual(WireValue::Bool(restart_ok_), request.value);
   if (request.setting == "commit.ok") return WireValuesEqual(WireValue::Bool(commit_ok_), request.value);
+  if (request.setting == "restart.pending")
+    return WireValuesEqual(WireValue::Bool(restart_pending_), request.value);
   if (request.setting == "commit.restart_required")
     return WireValuesEqual(WireValue::Bool(commit_ok_ && last_commit_requires_restart_), request.value);
   constexpr std::string_view prefix = "interface.hidden_main_menu.";
@@ -591,6 +596,7 @@ void ServiceSink::Reset() {
   last_commit_durable_ = false;
   saved_revision_ = 0;
   last_commit_requires_restart_ = false;
+  restart_pending_ = false;
   last_commit_status_ = CommitStatus::kNoChanges;
 }
 

@@ -1,0 +1,53 @@
+diff --git a/include/rex/ui/flags.h b/include/rex/ui/flags.h
+index fa2ef60..637b223 100644
+--- a/include/rex/ui/flags.h
++++ b/include/rex/ui/flags.h
+@@ -29,6 +29,7 @@ REXCVAR_DECLARE(bool, host_present_from_non_ui_thread);
+ REXCVAR_DECLARE(int32_t, window_width);
+ REXCVAR_DECLARE(int32_t, window_height);
+ REXCVAR_DECLARE(bool, fullscreen);
++REXCVAR_DECLARE(bool, borderless);
+ REXCVAR_DECLARE(int32_t, monitor);
+ REXCVAR_DECLARE(std::string, video_driver);
+ 
+diff --git a/src/ui/window.cpp b/src/ui/window.cpp
+index b4e045f..a405dfc 100644
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -36,6 +36,13 @@ REXCVAR_DEFINE_INT32(window_height, 0, "UI/Window",
+ // in sync whenever this cvar is changed at runtime.
+ REXCVAR_DEFINE_BOOL(fullscreen, true, "UI/Window", "Start the window in fullscreen mode");
+ 
++// The third window mode (ReXGlue modification, 2026-10-13): an undecorated window sized to the
++// display, without entering SDL's fullscreen state - which is a different mechanism from
++// `fullscreen` above (that one is desktop fullscreen). Read once, when the window is opened.
++REXCVAR_DEFINE_BOOL(borderless, false, "UI/Window",
++                    "Draw the window without decorations, sized to the display")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++
+ REXCVAR_DEFINE_INT32(monitor, 0, "UI/Window",
+                      "Monitor index to display on (0 = default, 1 = primary, 2 = "
+                      "second monitor, etc.)")
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+index 24c73c8..234d256 100644
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -194,6 +194,18 @@ bool WindowSDL::OpenImpl() {
+   if (IsFullscreen()) {
+     // Borderless desktop fullscreen (a NULL display mode is SDL3's default).
+     SDL_SetWindowFullscreen(sdl_window_, true);
++  } else if (REXCVAR_GET(borderless)) {
++    // ReXGlue addition (2026-10-13): the Display row's Borderless mode - an undecorated window
++    // covering the display's own bounds, without entering SDL's fullscreen state (so the window
++    // stays an ordinary window that alt-tab and other windows treat as one).
++    SDL_SetWindowBordered(sdl_window_, false);
++    if (SDL_DisplayID display = SDL_GetDisplayForWindow(sdl_window_)) {
++      SDL_Rect bounds{};
++      if (SDL_GetDisplayBounds(display, &bounds)) {
++        SDL_SetWindowPosition(sdl_window_, bounds.x, bounds.y);
++        SDL_SetWindowSize(sdl_window_, bounds.w, bounds.h);
++      }
++    }
+   }
+ #if REX_PLATFORM_MAC
+   CFPreferencesSetAppValue(CFSTR("ApplePressAndHoldEnabled"), kCFBooleanFalse,

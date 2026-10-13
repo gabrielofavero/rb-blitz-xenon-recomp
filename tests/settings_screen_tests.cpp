@@ -44,6 +44,7 @@
 #include "ui/dtb_author.h"
 #include "ui/settings_screen.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -267,6 +268,35 @@ std::vector<std::string> Words(const dtb::Node& node) {
   return out;
 }
 
+// Every word inside the `[<case> ...]` array of one specific switch table - unlike CaseWords,
+// which merges every array in a tree that happens to start with the row symbol (a row table and
+// its direction tables share their case symbols).
+std::vector<std::string> SwitchCaseWords(const dtb::Node& table, const std::string& row) {
+  std::vector<std::string> out;
+  for (const dtb::Node& kid : table.kids) {
+    if (kid.tag == dtb::kArray && !kid.kids.empty() && kid.kids[0].tag == dtb::kSymbol &&
+        kid.kids[0].text == row) {
+      CollectText(kid, &out);
+    }
+  }
+  return out;
+}
+
+// The `{switch <var action> ...}` table of a panel definition (nullptr on a screen or a table-less
+// panel). Matches every context: the main-menu page and its in-song twin.
+dtb::Node* FindButtonTable(dtb::Node* root) {
+  if (root->tag == dtb::kCommand && root->kids.size() >= 3 && root->kids[0].tag == dtb::kSymbol &&
+      root->kids[0].text == "switch" && root->kids[1].tag == dtb::kVar &&
+      root->kids[1].text == "action") {
+    return root;
+  }
+  for (dtb::Node& kid : root->kids) {
+    if (kid.tag != dtb::kArray && kid.tag != dtb::kCommand && kid.tag != dtb::kProperty) continue;
+    if (dtb::Node* hit = FindButtonTable(&kid)) return hit;
+  }
+  return nullptr;
+}
+
 // Every `{switch {<list> selected_sym} ...}` command - the row table.
 void CollectRowTables(const dtb::Node& node, std::vector<const dtb::Node*>* out) {
   if (node.tag == dtb::kCommand && node.kids.size() >= 2 && node.kids[0].tag == dtb::kSymbol &&
@@ -364,11 +394,11 @@ void TestDefinitionRoundTrip() {
   BeginCase("the authored definition compiles, parses back and recompiles identically");
 
   const std::vector<dtb::Node> authored = DefinitionRoots();
-  // Fourteen panels and fourteen screens per context - the main-menu one and the in-song one - so
-  // 2 * 14 * 2 roots. The two contexts are a pair of declarations each, not one shared tree: a panel
+  // Twenty panels and twenty screens per context - the main-menu one and the in-song one - so
+  // 2 * 20 * 2 roots. The two contexts are a pair of declarations each, not one shared tree: a panel
   // whose bodies name a destination (a submenu must) cannot be hosted by two contexts, because the
   // destination differs between them (P5b-r2).
-  CHECK_EQ(authored.size(), 68u);
+  CHECK_EQ(authored.size(), 80u);
 
   std::string error;
   const std::vector<dtb::Node> parsed = Reparse(authored, &error);
@@ -388,14 +418,14 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 34u);  // fourteen pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 40u);  // twenty pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 34u);
+  CHECK_EQ(screens.size(), 40u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
-  // (i + 14)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
+  // (i + 20)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
   // to send it to - and it is also the reason the pair sits adjacent in the record.
   CHECK_EQ(screens.size(), panels.size());
   for (size_t i = 0; i + panels.size() / 2 < screens.size(); ++i) {
@@ -458,8 +488,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 17);
-  CHECK_EQ(in_song, 17);
+  CHECK_EQ(main_menu, 20);
+  CHECK_EQ(in_song, 20);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -514,7 +544,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 17);  // one per page, the root included
+  CHECK_EQ(in_song, 20);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -748,7 +778,7 @@ void TestInSongContext() {
     menu_screens.push_back(screen);
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screen)) != screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 17u);
+  CHECK_EQ(menu_screens.size(), 20u);
   int in_song_panels = 0;
   for (const dtb::Node& root : DefinitionRoots()) {
     const std::vector<std::string> words = Words(root);
@@ -761,7 +791,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 17);
+  CHECK_EQ(in_song_panels, 20);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1014,7 +1044,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 34);                   // the fourteen panels, in both contexts
+  CHECK_EQ(fills, 40);                   // the twenty panels, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1158,7 +1188,7 @@ void TestEveryDestinationExists() {
       }
     }
   }
-  CHECK_EQ(screens, 34);
+  CHECK_EQ(screens, 40);
   // Every row that enters a screen of ours contributes one `{ui goto_screen <name>}`; the count is
   // reported rather than guessed at, because a change of row kind moves it.
   std::printf("         %d screen(s), %d goto_screen target(s), all known\n", screens, targets);
@@ -1207,7 +1237,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 34);  // the fourteen panels, in both contexts
+  CHECK_EQ(tables, 40);  // the twenty panels, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1243,7 +1273,225 @@ void TestButtonTableIsOneSwitch() {
     const size_t extra = all.size() - 1u - static_cast<size_t>(in_moves);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 34);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 40);  // one row table per panel, in both contexts
+}
+
+void TestSelectAdvancesAndWraps() {
+  BeginCase("a select row advances on Confirm and wraps at the last choice");
+
+  // Owner decision, 2026-10-13: A on a horizontal selector steps to the next option and wraps at
+  // the end, instead of staging the row and waiting for a second press. The Display row is a
+  // three-choice select, so both the step and the wrap are visible in one page per context.
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  int pages = 0;
+  for (const dtb::Node& root : roots) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 ||
+        root.kids[2].text != "settings_display_panel" &&
+            root.kids[2].text != "settings_display_pause_panel") {
+      continue;
+    }
+    ++pages;
+    std::vector<const dtb::Node*> members;
+    CollectMembers(root, "select_row", &members);
+    CHECK_EQ(members.size(), 1u);
+    if (members.empty()) continue;
+    std::vector<const dtb::Node*> tables;
+    CollectRowTables(*members.front(), &tables);
+    CHECK_EQ(tables.size(), 1u);
+    if (tables.empty()) continue;
+    const dtb::Node& table = *tables.front();
+
+    const char* step[] = {
+        "settings_display_windowed", "settings_display_borderless",
+        "settings_display_fullscreen",
+    };
+    const char* next[] = {
+        "rbbz-settings/set/graphics.display/t:borderless",
+        "rbbz-settings/set/graphics.display/t:fullscreen",
+        "rbbz-settings/set/graphics.display/t:windowed",  // wrap
+    };
+    for (size_t i = 0; i < 3; ++i) {
+      const std::vector<std::string> words = SwitchCaseWords(table, step[i]);
+      CHECK_TRUE(!words.empty());
+      CHECK_TRUE(std::find(words.begin(), words.end(), next[i]) != words.end());
+      CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/commit/-/-") != words.end());
+      // The staged-edit machine this replaces is gone.
+      CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz_settings_editing") == words.end());
+      CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/cancel/-/-") == words.end());
+    }
+
+    // The arrows make the same one-step change, and commit it the same way.
+    dtb::Node& mutable_root = const_cast<dtb::Node&>(root);
+    dtb::Node* buttons = FindButtonTable(&mutable_root);
+    CHECK_TRUE(buttons != nullptr);
+    if (buttons != nullptr) {
+      for (const char* key : {"kAction_Left", "kAction_Right"}) {
+        const std::vector<std::string> words = SwitchCaseWords(*buttons, key);
+        CHECK_TRUE(!words.empty());
+        CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/set/graphics.display/") != words.end() ||
+                   std::any_of(words.begin(), words.end(), [](const std::string& w) {
+                     return w.rfind("rbbz-settings/set/graphics.display/", 0) == 0;
+                   }));
+        CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/commit/-/-") != words.end());
+      }
+    }
+  }
+  CHECK_EQ(pages, 2);  // both contexts
+}
+
+void TestRestartPromptOnlyOnLeave() {
+  BeginCase("the restart prompt is the merged root's Cancel, not each commit");
+
+  // Owner decision, 2026-10-13: changing a row commits it silently; the prompt is asked once, when
+  // the player leaves Help & Options. So the root panels' Cancel asks `restart.pending`, every
+  // other panel just leaves, and no row case mentions the per-commit `restart_required` any more.
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  int panels = 0;
+  int root_cancels = 0;
+  int other_cancels = 0;
+  for (const dtb::Node& root : roots) {
+    std::vector<const dtb::Node*> members;
+    CollectMembers(root, "select_row", &members);
+    if (members.empty()) continue;  // a screen, not a panel
+    ++panels;
+    const bool is_root = root.kids[2].text == kRootPanel || root.kids[2].text == "settings_pause_panel";
+    dtb::Node& mutable_root = const_cast<dtb::Node&>(root);
+    dtb::Node* buttons = FindButtonTable(&mutable_root);
+    CHECK_TRUE(buttons != nullptr);
+    if (buttons != nullptr) {
+      const std::vector<std::string> cancel = SwitchCaseWords(*buttons, "kAction_Cancel");
+      CHECK_TRUE(!cancel.empty());
+      const bool asks =
+          std::find(cancel.begin(), cancel.end(), "rbbz-settings/snapshot/restart.pending/b:1") !=
+          cancel.end();
+      CHECK_EQ(asks, is_root);
+      CHECK_TRUE(std::find(cancel.begin(), cancel.end(), "shell_sfx") != cancel.end());
+      (is_root ? root_cancels : other_cancels) += 1;
+    }
+
+    // Nothing anywhere in the panel still reads the per-commit flag.
+    CHECK_FALSE(HasText(root, "commit.restart_required"));
+    CHECK_FALSE(HasText(root, "rbbz-settings/cancel/-/-"));
+  }
+  CHECK_EQ(panels, 40);
+  CHECK_EQ(root_cancels, 2);
+  CHECK_EQ(other_cancels, 38);
+}
+
+void TestInvertedBoolRow() {
+  BeginCase("an inverted boolean reads On for a false setting and writes the flip");
+
+  // `Depth of Field: On` is the provider's `disable_dof == false` (owner decision, 2026-10-13).
+  // The symbol pair keeps its usual meaning, so the *query* and the *write* are the flipped ones.
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  int pages = 0;
+  for (const dtb::Node& root : roots) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 ||
+        root.kids[2].text != "settings_graphics_panel" &&
+            root.kids[2].text != "settings_graphics_pause_panel") {
+      continue;
+    }
+    ++pages;
+    std::vector<const dtb::Node*> menus;
+    CollectMembers(root, "populate_menu", &menus);
+    CHECK_EQ(menus.size(), 1u);
+    if (!menus.empty()) {
+      const std::vector<std::string> words = Words(*menus.front());
+      const auto has = [&words](const char* text) {
+        return std::find(words.begin(), words.end(), text) != words.end();
+      };
+      CHECK_TRUE(has("rbbz-settings/snapshot/gameplay.disable_dof/b:0"));
+      CHECK_FALSE(has("rbbz-settings/snapshot/gameplay.disable_dof/b:1"));
+    }
+    std::vector<const dtb::Node*> members;
+    CollectMembers(root, "select_row", &members);
+    if (members.empty()) continue;
+    std::vector<const dtb::Node*> tables;
+    CollectRowTables(*members.front(), &tables);
+    if (tables.empty()) continue;
+    const std::vector<std::string> on = SwitchCaseWords(*tables.front(), "settings_dof_on");
+    const std::vector<std::string> off = SwitchCaseWords(*tables.front(), "settings_dof_off");
+    CHECK_TRUE(std::find(on.begin(), on.end(), "rbbz-settings/set/gameplay.disable_dof/b:1") !=
+               on.end());
+    CHECK_TRUE(std::find(off.begin(), off.end(), "rbbz-settings/set/gameplay.disable_dof/b:0") !=
+               off.end());
+  }
+  CHECK_EQ(pages, 2);
+}
+
+// Adds the provider's row to a splash fixture: the case into the row switch, the symbol into the
+// literal option array. Recursive, because the array command sits inside the `{do ...}` of `enter`.
+void AddProviderRowToFixture(dtb::Node* node, bool* case_added, bool* row_added) {
+  if (node->tag == dtb::kCommand && node->kids.size() >= 2 && node->kids[0].tag == dtb::kSymbol) {
+    if (node->kids[0].text == "switch") {
+      node->kids.push_back(Arr({Sym(kProviderMenuRow),
+                                Cmd({Sym("ui"), Sym("goto_screen"), Sym("mod_settings_screen")})}));
+      *case_added = true;
+    } else if (node->kids[0].text == "array" && node->kids[1].tag == dtb::kArray) {
+      node->kids[1].kids.push_back(Sym(kProviderMenuRow));
+      *row_added = true;
+    }
+  }
+  for (dtb::Node& kid : node->kids) {
+    AddProviderRowToFixture(&kid, case_added, row_added);
+  }
+}
+
+void TestProviderRowRemoval() {
+  BeginCase("the provider's own menu row is removed from its case table and option list");
+
+  // The fixture's switch and option array, given the row a provider's splash record carries.
+  std::vector<dtb::Node> nodes = SplashFixture();
+  bool case_added = false;
+  bool row_added = false;
+  AddProviderRowToFixture(&nodes[0], &case_added, &row_added);
+  CHECK_TRUE(case_added);
+  CHECK_TRUE(row_added);
+
+  std::string reason;
+  CHECK_TRUE(RemoveRow(&nodes, kProviderMenuRow, &reason));
+  CHECK_TRUE(reason.empty());
+  CHECK_FALSE(HasText(nodes[0], kProviderMenuRow));
+  // The rows that were not removed are untouched.
+  CHECK_TRUE(HasText(nodes[0], "splash_options"));
+  CHECK_TRUE(HasText(nodes[0], "splash_exit"));
+
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+
+  // A second removal refuses: there is nothing left to remove.
+  CHECK_FALSE(RemoveRow(&nodes, kProviderMenuRow, &reason));
+  CHECK_TRUE(!reason.empty());
+  CHECK_FALSE(RemoveRow(&nodes, "no_such_row", &reason));
+}
+
+void TestLocaleOverrides() {
+  BeginCase("retail's AV-page strings are restyled, and a translated locale is left alone");
+
+  const std::vector<LocaleOverride> overrides = LocaleOverrides();
+  CHECK_EQ(overrides.size(), 4u);
+
+  std::vector<dtb::Node> nodes = {Arr({Sym("av_overscan"), Str("Overscan | %s")}),
+                                  Arr({Sym("enabled_token"), Str("ENABLED")}),
+                                  Arr({Sym("other"), Str("Keep")})};
+  std::string why;
+  for (const LocaleOverride& entry : overrides) {
+    CHECK_TRUE(ReplaceLocaleEntry(&nodes, entry.key, entry.from, entry.to, &why));
+  }
+  CHECK_TRUE(nodes[0].kids[1].text == "Overscan: %s");
+  CHECK_TRUE(nodes[1].kids[1].text == "On");
+  CHECK_TRUE(nodes[2].kids[1].text == "Keep");
+
+  // Idempotent, and a key the locale does not carry is a skip.
+  CHECK_TRUE(ReplaceLocaleEntry(&nodes, "av_overscan", "Overscan | %s", "Overscan: %s", &why));
+  CHECK_TRUE(nodes[0].kids[1].text == "Overscan: %s");
+  CHECK_TRUE(ReplaceLocaleEntry(&nodes, "av_bass_boost", "Bass Boost | %s", "Bass Boost: %s", &why));
+  CHECK_EQ(nodes.size(), 3u);
+
+  // A locale that carries a *different* label for the key (a translation) is untouched.
+  std::vector<dtb::Node> translated = {Arr({Sym("av_overscan"), Str("Translated")})};
+  CHECK_TRUE(ReplaceLocaleEntry(&translated, "av_overscan", "Overscan | %s", "Overscan: %s", &why));
+  CHECK_TRUE(translated[0].kids[1].text == "Translated");
 }
 
 void TestLabels() {
@@ -1287,6 +1535,24 @@ void TestLabels() {
     CHECK_TRUE(HasLowercase(label.second));
   }
   CHECK_TRUE(checked > 60);
+
+  // The boolean state suffix is the lowercase "On"/"Off" spelling (owner decision, 2026-10-13),
+  // not the main menu's capitals - checked on the row the owner named as well as in general.
+  for (const auto& label : labels) {
+    CHECK_TRUE(label.second.rfind(": ON") == std::string::npos);
+    CHECK_TRUE(label.second.rfind(": OFF") == std::string::npos);
+  }
+  bool dof_on = false;
+  for (const auto& label : labels) {
+    if (label.first == "settings_dof_on") {
+      dof_on = true;
+      CHECK_TRUE(label.second == "Depth of Field: On");
+    }
+    if (label.first == "settings_dof_off") {
+      CHECK_TRUE(label.second == "Depth of Field: Off");
+    }
+  }
+  CHECK_TRUE(dof_on);
 
   // No orphan label: everything the table produces is drawn by some row.
   for (const auto& label : labels) {
@@ -1678,6 +1944,10 @@ int EmitLocale(const char* in_path, const char* out_path) {
     return 1;
   }
   size_t added = 0;
+  for (const LocaleOverride& entry : LocaleOverrides()) {
+    std::string why;
+    ReplaceLocaleEntry(&nodes, entry.key, entry.from, entry.to, &why);
+  }
   for (const auto& label : Labels()) {
     std::string why;
     if (AddLocaleEntry(&nodes, label.first, label.second, &why)) {
@@ -1833,6 +2103,11 @@ int main(int argc, char** argv) {
   TestEveryFillPlacesTheSelection();
   TestEveryDestinationExists();
   TestButtonTableIsOneSwitch();
+  TestSelectAdvancesAndWraps();
+  TestRestartPromptOnlyOnLeave();
+  TestInvertedBoolRow();
+  TestProviderRowRemoval();
+  TestLocaleOverrides();
   TestLabels();
   return Finish();
 }

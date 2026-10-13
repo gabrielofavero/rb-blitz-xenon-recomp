@@ -46,18 +46,21 @@ struct LaunchCommand {
 // The full command line, executable and tail, for printing.
 std::string FormatLaunchCommand(const LaunchCommand& command);
 
-// What the launcher hands the game beyond its own identity: where its data is, which target it
-// is, and which profile it should read. The two halves of the product differ in exactly one
-// thing, which is why it is a parameter rather than two builders that could drift.
+// What the launcher hands the game beyond its own identity: where its data is, and which profile
+// it should read. The two halves of the product differ in exactly one thing, which is why it is a
+// parameter rather than two builders that could drift.
 struct LaunchOptions {
   // Emit `--<key>=<value>` for every managed row the profile has moved off its compiled default
-  // (D3 rank 1). The full launcher does, because passing a row is how a choice made in that
-  // window reaches a game it started.
+  // that the game does not own itself (D3 rank 1). The full launcher does, because passing a row
+  // is how a choice made in that window reaches a game it started - for the rows the launcher
+  // still owns. The game-owned rows (kGameOwnedRows in game_launch.cpp: DLC, graphics and
+  // interface settings the in-game Help & Options edits) are never passed, and neither is the
+  // target: the game keeps those in its own settings file, and a command-line copy would outrank
+  // it (P11b cutover, 2026-10-13).
   //
-  // Controller Settings does not (P8): it edits controller state and nothing else, so its Play
-  // action passes the profile's identity - the game data root, the target, the profile path - and
-  // no setting at all. A graphics or general row passed from there would be a second source of
-  // truth for something the game's own files own (docs/plans/in-game-settings-plan.md §9.3).
+  // Controller Settings does not pass any setting (P8): it edits controller state and nothing
+  // else, so its Play action passes the profile's identity - the game data root and the profile
+  // path - and no setting at all.
   bool settings_rows = true;
 };
 

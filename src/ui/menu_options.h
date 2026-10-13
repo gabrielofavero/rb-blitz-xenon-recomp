@@ -78,10 +78,11 @@ inline constexpr char kUltimateSettingsLabel[] = "Ultimate Settings";
 // The main menu's downloadable-content row is the row R7 gives the refresh job to
 // (`TapRefreshCache`). It ships as "Download Content", which is an online-store label
 // and says nothing about refreshing a library, so with R7 on it is redrawn as the
-// refresh it now performs.
+// refresh it now performs (owner decision, 2026-10-13: the row is the *only* refresh
+// entry - the settings page's old duplicate is gone).
 inline constexpr char kDlcRowKey[] = "splash_dlc";
 inline constexpr char kDlcRowLabel[] = "Download Content";
-inline constexpr char kDlcRowRefreshLabel[] = "Refresh Song Library";
+inline constexpr char kDlcRowRefreshLabel[] = "Refresh Music Library";
 
 // The connect panel's own status line for the content enumeration
 // (`server_connect.dtb` maps `kServerConnectPanel_EnumeratingContent` to this token).

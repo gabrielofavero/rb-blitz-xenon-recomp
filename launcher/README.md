@@ -525,8 +525,12 @@ Its groups today are *Startup* and *Main menu*:
 
 What the three edits are, why each has to keep a file's length, and the runs that prove them are in
 [main-menu-flow.md](../docs/engine/main-menu-flow.md) (§7 is the offline prompts, R3). The rows are the
-project's own cvars, not the runtime's, so the tab passes them like any other row that is not on its
-compiled default.
+project's own cvars, not the runtime's — but they are **game-owned** rows since the P11b cutover
+(owner decision 2026-10-13): the tab still writes them to the profile, and the game no longer reads
+them from there or from the command line, because the same rows are in the in-game Help & Options
+tree (its Interface pages) and that is the surface which owns them now. Their remaining job here is
+preservation — the values a user set are kept, not dropped — until this tab is retired with
+[§ Controller Settings (P8)](#controller-settings-p8).
 
 *Startup* is the group for what happens before the menu is drawn, which is why the offline-prompt row
 sits there rather than beside the menu rows it saves the player from: the edit is to the panel the
@@ -586,7 +590,11 @@ The row's choices are **what the build compiled in**, which is why they come fro
 than from the `.toml` (`choices_from = "gpu_backends"`, and `--backends=d3d12,vulkan` on the
 embed step). A D3D12-only payload offers one renderer, because offering Vulkan would be
 offering a renderer that cannot run. `--dump-layout` prints every enum's choices, so which
-renderers a payload offers is answered without opening a window.
+renderers a payload offers is answered without opening a window. **Both backends are on in every
+Windows preset** (`REXGLUE_USE_VULKAN=ON`, 2026-10-13): the SDK's Windows default is OFF, so a tree
+configured by hand offers D3D12 alone. The game's in-game *Renderer* row offers the same list,
+from its own copy of the same two switches, minus Vulkan on a machine whose driver brought no
+`vulkan-1.dll` — the loader is opened at run time and probed before the choice is offered.
 
 This tree now compiles **both** backends (`REXGLUE_USE_D3D12=ON` and `REXGLUE_USE_VULKAN=ON`),
 which is what turned the row into a real choice:
@@ -686,8 +694,8 @@ The tables in it, and who reads them:
 | Table | Written by | Read by |
 | --- | --- | --- |
 | `[launcher]`, `[window]` | the launcher: the format's version, portable mode, the window size (A1) | the launcher only |
-| `[launch]` | the launch target and the game-directory override | the launcher (the game gets the target on its command line, Contract 3) |
-| `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from. A folder an older build saved in `[launch] user_data_dir` / `dlc_dir` is carried across to these keys once, on load, so a pick made before the change still reaches the game | the launcher, and the game as its own config source (D3 rank 4, `src/launcher/profile_apply.cpp`) |
+| `[launch]` | the launch target and the game-directory override | the launcher, and the **game's first boot** — the target is imported into the game's own settings there (P11b cutover, Contract 3) |
+| `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from. A folder an older build saved in `[launch] user_data_dir` / `dlc_dir` is carried across to these keys once, on load, so a pick made before the change still reaches the game | the launcher, and the game — the controller rows as its own config source (D3 rank 4, `src/launcher/profile_apply.cpp`); the rest are preservation data the game no longer reads |
 | `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
 | `[nav]` | the launcher's own key bindings (A5) | the launcher only |
 | `[update]` | `declined_version`, the release the user answered *Not now* to (D19) | the launcher only |
@@ -732,7 +740,9 @@ a line saying so, in the words `OverrideNoteText` produces, with a *Copy the eff
 button that adopts the game's value into the launcher's own file. The game's file is never
 written: it belongs to the game and to the F4 overlay's *Save to config* (D2). With a pad or a
 keyboard the row can be set to match by hand instead; the button itself is mouse-only, because a
-second focusable target per row is a focus-model change and belongs with A5.
+second focusable target per row is a focus-model change and belongs with A5. A row the **game
+owns** is a third case and the strongest one: it is not passed and not applied from the profile at
+all (P11b, above), so its value here decides nothing — the in-game Help & Options tree does.
 
 **The settings location** is a folder the user chooses, and the button that changes it sits
 beside Export. It is not a setting inside the profile, because where the profile *is* cannot be
@@ -764,11 +774,24 @@ rb_blitz.exe
   --game_data_root="<game root>"
   [--user_data_root="<save folder>"]              # only where the profile overrides it
   [--dlc_root="<dlc folder>"]                     # likewise
-  --ultimate_mode=0|1                             # the stored target, D5's fallback applied
-  [--license_mask=0]                              # the demo target only
   --launcher_profile="<resolved profile path>"
-  + every managed row whose value differs from its compiled default
+  + every row the game does not own that the profile moved off its compiled default
 ```
+
+**The game owns its own rows now** (P11b cutover, owner decision 2026-10-13). The Help & Options
+menu inside the game edits the same settings and writes its own file, so the launcher stopped
+putting them on the command line: a flag is rank 1 and would have pinned the in-game row to
+"Externally configured" for good. `kGameOwnedRows` in `src/game_launch.{h,cpp}` lists the sixteen
+keys — `enhancements_dlc_cache`, `dlc_scan_threads`, the three Interface rows,
+`enhancements_menu_dlc_songs`/`_song_count`, `enhancements_rename_mod_settings`, and the graphics
+rows from `resolution_scale` and `fullscreen` through `vsync`, `gpu_backend`, `swap_post_effect`,
+`native_2x_msaa`, `anisotropic_override` and `present_letterbox` — and they are skipped when the
+command line is built. The **target** is not a flag pair either: `--ultimate_mode`/`--license_mask`
+are gone, and the profile's `[launch] target` is imported into the game's own settings on the first
+boot (migration; and only when it differs from the compiled default `common`), which is what keeps
+the in-game Target row editable. The rows are still written to the profile by the tabs below — they
+are preservation data the game no longer reads ([§ Controller Settings](#controller-settings-p8) is
+where those tabs end up).
 
 The command line is built by `BuildLaunchCommand` (`src/game_launch.{h,cpp}`), which is pure
 string work — no process, no window — and `--print-command` prints exactly what it produces.
@@ -781,6 +804,9 @@ Three rules come from the contract and are worth stating where they are implemen
 - **A row is passed only where the profile moved it off its compiled default.** The whole
   registry is never passed: for every other row the game's own `rb_blitz.toml` outranks the
   profile (D3), and passing a value the user never chose would take that away.
+- **A row the game owns is not passed at all**, however far the profile moved it. Those rows are
+  the in-game Help & Options tree's, and a command-line value would make them read as externally
+  configured there (P11b, above).
 - **A value that is text is quoted**, and every path is quoted, with the Windows rule for
   backslashes before a quote. A folder with a space in it is one argument.
 - **The executable is the first token of the command line**, even though `CreateProcessW` also
@@ -804,14 +830,19 @@ that has never been written is not an error: there is nothing to read, and the d
 right answer.
 
 **The profile is a config source as well as an argv one** (D3's rank 4,
-`src/launcher/profile_apply.cpp`). The launcher's own *Launch Game* passes every moved row as
-`--<key>=<value>` (rank 1), so it alone would cover every launch made through this window — but R4
-also promises a game started on its own sees the launcher's settings, and a double-click with no
-launcher in front of it does not carry that argv. So the game applies the profile's `[settings]`
-rows at the config rank before the SDK loads its own `rb_blitz.toml`, in
-`RbBlitzApp::OnConfigurePaths`. The ranks then read as D3 describes: a command-line flag outranks
-the profile, the profile and the game's file are equal rank and the game's file is applied second,
-so it wins — the same rule the precedence badge shows.
+`src/launcher/profile_apply.cpp`). The launcher's own *Launch Game* passes every moved row the game
+does not own as `--<key>=<value>` (rank 1), so it alone would cover every launch made through this
+window — but R4 also promises a game started on its own sees the launcher's settings, and a
+double-click with no launcher in front of it does not carry that argv. So the game applies the
+profile's `[settings]` rows at the config rank before the SDK loads its own `rb_blitz.toml`, in
+`RbBlitzApp::OnConfigurePaths`. That reading is **narrowed** since the P11b cutover
+(`profile_controller_rows_only` defaults **true**): the game applies the controller rows
+(`mouse_ui_nav`, `input_backend`) and the **launcher-only host rows** - the monitor pick, the safe
+areas, dither, the overscan cutoff and the audio rows, none of which have an in-game row - and logs
+the launcher's other rows as inert preservation data rather than applying them. The game's own
+`settings.toml`, which Help & Options edits, is the surface that owns those. The ranks then read as
+D3 describes: a command-line flag outranks the profile, the profile and the game's file are equal
+rank and the game's file is applied second, so it wins — the same rule the precedence badge shows.
 
 **The exact command line is always available.** With the *Copy command line* bar button gone — the
 bar is a place to finish a session, not a developer console — `FormatLaunchCommand`'s bytes are

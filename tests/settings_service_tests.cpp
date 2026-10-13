@@ -188,7 +188,7 @@ void TestDurableEditReload() {
   CHECK_TRUE(
       service.Set(mixed, SettingId::kVsync, BoolV(false), service.capability_revision()).ok);
   CHECK_TRUE(
-      service.Set(mixed, SettingId::kDlcMenuSongs, BoolV(true), service.capability_revision()).ok);
+      service.Set(mixed, SettingId::kCacheDlcLibrary, BoolV(true), service.capability_revision()).ok);
   const CommitResult mixed_commit = service.Commit(mixed);
   CHECK_TRUE(mixed_commit.status == CommitStatus::kSaved);
   CHECK_TRUE(mixed_commit.restart_required);
@@ -487,6 +487,49 @@ void TestCvarVocabulary() {
     CHECK_EQ(ControllerProfileRows({}).size(), 0u);
     const std::vector<rb_blitz::launcher::ProfileSetting> retired(rows + 2, rows + 4);
     CHECK_EQ(ControllerProfileRows(retired).size(), 0u);
+  }
+
+  BeginCase("cvars: the profile rows the game applies keep the host rows too");
+  {
+    // P11b's cutover narrows the applied set to what the in-game tree cannot own: the controller
+    // rows and the launcher-only host rows. A row the game has a settings row for is *not* applied
+    // (that is what keeps the in-game copy editable), and neither is the retired Guide pair.
+    rb_blitz::launcher::ProfileSetting rows[9];
+    rows[0].key = "mouse_ui_nav";
+    rows[0].value = "false";
+    rows[1].key = "audio_mute";
+    rows[1].value = "true";
+    rows[2].key = "monitor";
+    rows[2].value = "2";
+    rows[3].key = "present_safe_area_x";
+    rows[3].value = "0.9";
+    rows[4].key = "vsync";
+    rows[4].value = "false";  // the game's own row now
+    rows[5].key = "enhancements_dlc_cache";
+    rows[5].value = "true";  // likewise
+    rows[6].key = "present_letterbox";
+    rows[6].value = "false";  // the Interface page's row, not this cvar
+    rows[7].key = "user_data_root";
+    rows[7].value = "D:\\Saves";  // a path row: installer/paths.toml, not the profile
+    rows[8].key = "guide_button";
+    rows[8].value = "true";
+
+    const std::vector<rb_blitz::launcher::ProfileSetting> all(std::begin(rows), std::end(rows));
+    const std::vector<rb_blitz::launcher::ProfileSetting> kept =
+        ProfileRowsTheGameApplies(all);
+    CHECK_EQ(kept.size(), 4u);
+    if (kept.size() == 4) {
+      CHECK_TRUE(kept[0].key == "mouse_ui_nav");
+      CHECK_TRUE(kept[1].key == "audio_mute");
+      CHECK_TRUE(kept[2].key == "monitor");
+      CHECK_TRUE(kept[3].key == "present_safe_area_x" && kept[3].value == "0.9");
+    }
+    CHECK_TRUE(IsLauncherOnlyCvar("present_dither"));
+    CHECK_TRUE(IsLauncherOnlyCvar("present_allow_overscan_cutoff"));
+    CHECK_TRUE(IsLauncherOnlyCvar("audio_maxqframes"));
+    CHECK_FALSE(IsLauncherOnlyCvar("mouse_ui_nav"));
+    CHECK_FALSE(IsLauncherOnlyCvar("vsync"));
+    CHECK_EQ(ProfileRowsTheGameApplies({}).size(), 0u);
   }
 
   BeginCase("cvars: the AA enum maps to the backend's two mechanisms");

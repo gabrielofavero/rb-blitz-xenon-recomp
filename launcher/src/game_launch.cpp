@@ -80,6 +80,43 @@ std::wstring ToWide(std::string_view text) {
 }
 #endif
 
+// Rows the launcher no longer hands to the game (cutover, owner decision 2026-10-13). Each one is
+// backed by a row of the game's own in-game settings now (`src/settings/schema.cpp`): the game
+// keeps them in its settings file, Help & Options edits them, and a command-line copy of the same
+// value would outrank that file and turn the in-game rows read-only - which is exactly the state
+// this list ends. The three retired rows (`enhancements_menu_dlc_songs`, `..._song_count`,
+// `enhancements_rename_mod_settings`) are listed for the same reason: their features are fixed
+// behaviour now (always-on / removed), so a passed value is noise the game would have to ignore.
+//
+// `present_letterbox` is the one key here whose in-game counterpart is not the same variable: the
+// Interface page's Letterbox row edits the *guest's* own `letterbox` setting in the payload
+// (ultimate_adapter.cpp), while this host cvar is what the SDK's mouse mapping reads. It is left at
+// its default for an ordinary boot and stays settable through the game's own `rb_blitz.toml` (F4's
+// *Save to config* writes it), which is why it is not passed any more either.
+//
+// What still travels: the two paths (a folder the launcher's General tab picks has no in-game row
+// yet), the monitor/safe-area/dither/audio rows (fixed developer rows with no in-game equivalent
+// either), and the controller rows - which the game also reads out of the profile itself.
+constexpr std::string_view kGameOwnedRows[] = {
+    "enhancements_dlc_cache",           "dlc_scan_threads",
+    "enhancements_hide_menu_options",   "enhancements_hidden_menu_options",
+    "enhancements_skip_offline_dialog", "enhancements_menu_dlc_songs",
+    "enhancements_menu_dlc_song_count", "enhancements_rename_mod_settings",
+    "resolution_scale",                 "fullscreen",
+    "vsync",                            "gpu_backend",
+    "swap_post_effect",                 "native_2x_msaa",
+    "anisotropic_override",             "present_letterbox",
+};
+
+bool GameOwnsRow(const std::string_view key) {
+  for (const std::string_view owned : kGameOwnedRows) {
+    if (key == owned) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 std::string FormatLaunchCommand(const LaunchCommand& command) {
@@ -122,6 +159,9 @@ LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots&
       if (!setting.argv_flag) {
         continue;  // a launcher-level row; its meaning is the block below
       }
+      if (GameOwnsRow(setting.key)) {
+        continue;  // the game's own settings file owns this row now (P11b cutover)
+      }
       const std::string value = RowValue(session, setting);
       if (value.empty() || value == setting.default_text) {
         continue;  // never pass an empty flag, and never repeat a default
@@ -131,20 +171,13 @@ LaunchCommand BuildLaunchCommand(const ProfileSession& session, const GameRoots&
     }
   }
 
-  // D4's three targets, which are what the game is *for*, rather than a value the user set.
-  if (options.settings_rows) switch (target) {
-    case LaunchTarget::kUltimate:
-      add("--ultimate_mode=1");
-      break;
-    case LaunchTarget::kCommon:
-      add("--ultimate_mode=0");
-      break;
-    case LaunchTarget::kDemo:
-      // The XBLA trial: no licence, which is the path that takes the trial mode.
-      add("--ultimate_mode=0");
-      add("--license_mask=0");
-      break;
-  }
+  // The target is **not** passed any more (P11b cutover, 2026-10-13). It used to travel as
+  // `--ultimate_mode` / `--license_mask`, chosen by the launcher's dropdown; the game keeps its
+  // own target in its settings file now (Help & Options > General > Target), and a command-line
+  // copy would outrank that file and make the in-game row read-only. A fresh install still takes
+  // the launcher's choice, once: the game's first boot migrates `[launch] target` out of the
+  // profile it is handed below.
+  (void)target;
 
   // So the game reads the same file the launcher just wrote (D3).
   if (!session.path().empty()) {

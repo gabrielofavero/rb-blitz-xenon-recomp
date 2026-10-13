@@ -508,14 +508,19 @@ Add-Check "headless" "the stored target is the fixture's" `
     ($general.Text -match "target\s+: $Target \(stored $Target\)") $Target
 
 $command = Invoke-Dump "print-command"
-$expectedMode = if ($Target -eq "ultimate") { "1" } else { "0" }
+# P11b cutover (2026-10-13): the target is the game's own setting now, so the printed command is
+# the game root and the profile path - and never the target flags. The dump still prints the
+# stored target above, which is what the game's first boot migrates from that profile.
 Add-Check "headless" "the printed command line is the launch contract" `
     ($command.Text -match [regex]::Escape("--game_data_root=`"$GameRoot`"") -and
-     $command.Text -match "--ultimate_mode=$expectedMode" -and
      $command.Text -match [regex]::Escape("--launcher_profile=`"$ProfilePath`"")) `
     (($command.Text -split "`n" | Where-Object { $_ -match "command\s+:" }) -join " ").Trim()
+Add-Check "headless" "the target never travels on the command line" `
+    (-not ($command.Text -match "--ultimate_mode") -and -not ($command.Text -match "--license_mask")) `
+    ($Target)
 if ($Target -eq "demo") {
-    Add-Check "headless" "the demo target passes the licence mask" ($command.Text -match "--license_mask=0") ""
+    Add-Check "headless" "the demo target reaches the game through the profile, not a flag" `
+        ($command.Text -match [regex]::Escape("--launcher_profile=`"$ProfilePath`"")) ""
 }
 
 if ($SkipWindow) {

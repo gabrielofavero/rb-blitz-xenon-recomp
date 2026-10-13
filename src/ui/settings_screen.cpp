@@ -110,20 +110,30 @@ Node EnterRetail(const std::string_view screen, const std::string_view member) {
 // `pad_num` - are not in scope for this panel. The row table is therefore reached through a method
 // of our own (`select_row`), which needs no message variables at all.
 //
+// **Cancel is where the restart prompt lives** (owner decision, 2026-10-13). Every row of this
+// surface commits durably the moment it is pressed, and a commit that needs a restart is *not*
+// interrupted: only leaving the merged root asks `snapshot/restart.pending` and opens the restart
+// confirmation when it answers true. Deeper pages just go back - the prompt belongs to the act of
+// leaving Help & Options, not to each value that happens to need one.
+//
 // They are returned as a *list of case arrays*, not as a whole `{switch action ...}`, because that
 // distinction is a real bug: a helper returning a complete switch gets spliced in as a child of the
 // panel's own switch, which nests one switch inside another and leaves its cases **never
 // evaluated** - measured, that shape made Start and Cancel do nothing at all while the switch above
 // them still looked right in a dump.
-std::vector<Node> ButtonCases() {
+std::vector<Node> ButtonCases(const bool root, const bool pause) {
+  Node cancel = Leave();
+  if (root) {
+    const std::string restart = pause ? PauseScreen("settings_restart_screen")
+                                      : std::string("settings_restart_screen");
+    cancel = Cmd({Sym("if_else"),
+                  Cmd({Sym("file_exists"), Str(Path("snapshot", "restart.pending", "b:1"))}),
+                  EnterScreen(restart), Leave()});
+  }
   return {
       Arr({Sym("kAction_Confirm"), Cmd({Var("this"), Sym("select_row")})}),
       Arr({Sym("kAction_Start"), Cmd({Var("this"), Sym("select_row")})}),
-      Arr({Sym("kAction_Cancel"), Cmd({Sym("shell_sfx"), Sym("play_back")}),
-        Cmd({Sym("if_else"), Var("rbbz_settings_editing"),
-          Cmd({Sym("do"), Write(Path("cancel", "-", "-")),
-            Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(0)}),
-            Cmd({Var("this"), Sym("populate_menu")})}), Leave()})}),
+      Arr({Sym("kAction_Cancel"), Cmd({Sym("shell_sfx"), Sym("play_back")}), std::move(cancel)}),
   };
 }
 
@@ -138,12 +148,12 @@ std::vector<Node> ButtonCases() {
 // `{switch action <extras...> <shared cases...>}` - the panel's button table. Extra cases come
 // first because a switch takes the first matching case, so a panel's own `kAction_Left` /
 // `kAction_Right` handling wins over the shared table.
-Node ButtonTable(std::vector<Node> extras) {
+Node ButtonTable(std::vector<Node> extras, const bool root, const bool pause) {
   std::vector<Node> kids = {Sym("switch"), Var("action")};
   for (Node& item : extras) {
     kids.push_back(std::move(item));
   }
-  for (Node& item : ButtonCases()) {
+  for (Node& item : ButtonCases(root, pause)) {
     kids.push_back(std::move(item));
   }
   return Cmd(std::move(kids));
@@ -191,7 +201,6 @@ Node GetFocusMember() {
 Node EnterExit() {
   return Arr({Sym("enter"),
               Cmd({Sym("set"), Var("rbbz_settings_index"), Node::Int(0)}),
-              Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(0)}),
               Cmd({Var("this"), Sym("populate_menu")}),
               Cmd({Sym("shell_sfx"), Sym("set_interceptor"), Var("this")})});
 }
@@ -225,7 +234,6 @@ enum class Kind {
   kRestart,
   kClose,
   kCalibration,
-  kRefresh,
   kAchievements,
 };
 
@@ -243,6 +251,10 @@ struct Row {
   std::string label;
   std::string prefix = "t:";  // the wire spelling of a value: `t:` token, `i:` integer
   bool provider_only = false;
+  // A boolean whose *setting* is the negative of what its label says: `Depth of Field: On` is the
+  // provider's `disable_dof == false`. The symbol pair keeps its usual meaning (`_on` = the label
+  // reads On), so the query and the write flip - see PopulateMenu and RowCase.
+  bool inverted = false;
   std::vector<Choice> choices;
 };
 
@@ -263,6 +275,15 @@ Row BoolRow(const char* symbol, const char* setting, const char* label, bool pro
   row.setting = setting;
   row.label = label;
   row.provider_only = provider_only;
+  return row;
+}
+
+// The same row, drawn with the opposite sense: `label` says what "On" means, and the setting it
+// writes is the negative of that (the provider's `disable_dof`).
+Row InvertedBoolRow(const char* symbol, const char* setting, const char* label,
+                    bool provider_only = false) {
+  Row row = BoolRow(symbol, setting, label, provider_only);
+  row.inverted = true;
   return row;
 }
 
@@ -422,6 +443,9 @@ std::vector<PanelSpec> AllPanels() {
 
   // 1a. Target: choose one, commit, leave. `ultimate_mode`/`license_mask` are consumed before
   // Ultimate configures, so the row is restart-scoped (plan §5.5) and the restart prompt is P9's.
+  // The demo (trial) choice is offered by name; the plan's own note - that the trial boot used to
+  // fault before the menu - is what the row's presence now records, because the owner asked for the
+  // choice to be pickable rather than omitted.
   out.push_back(PanelSpec{"settings_target_panel", "settings_target_screen", "settings_general_screen",
                           MenuPanels(),
                           {
@@ -429,8 +453,8 @@ std::vector<PanelSpec> AllPanels() {
                                         "Rock Band Blitz"),
                               ChooseRow("settings_target_ultimate", "general.target", "ultimate",
                                         "Rock Band Blitz Ultimate"),
-                              ChooseRow("settings_target_trial", "general.target", "demo",
-                                        "Trial"),
+                              ChooseRow("settings_target_demo", "general.target", "demo",
+                                        "Rock Band Blitz Demo"),
                           }});
 
   // 1b. Downloadable Content.
@@ -443,8 +467,6 @@ std::vector<PanelSpec> AllPanels() {
                                         "DLC Scan Threads",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
-                              BoolRow("settings_dlc_songs", "general.dlc_menu_songs",
-                                      "DLC Menu Songs"),
                           }});
 
   // 1c. Achievements & Unlocks (provider only).
@@ -468,18 +490,40 @@ std::vector<PanelSpec> AllPanels() {
                                        "Audio"),
                           }});
 
-  // 3a. Video. Retail's own Overscan row stays on the retail page it is drawn on (plan §3.3's
-  // fallback), so it is deliberately not duplicated here.
+  // 3a. Video: three entries - the two groups and the backend. Retail's own Overscan row stays on
+  // the retail page it is drawn on (plan §3.3's fallback), so it is deliberately not duplicated
+  // here; the display name is the row's own group, which is why it appears at both levels.
   out.push_back(PanelSpec{"settings_video_panel", "settings_video_screen", "settings_av_screen",
                           MenuPanels(),
                           {
+                              SubmenuRow("settings_display_menu", "settings_display_screen",
+                                         "Display"),
+                              SubmenuRow("settings_graphics_menu", "settings_graphics_screen",
+                                         "Graphics"),
+                              SelectRow("settings_renderer", "graphics.renderer", "Renderer",
+                                        Choices({"d3d12", "D3D12", "vulkan", "Vulkan"})),
+                          }});
+
+  // 3a-i. Display: the window mode, the render size and V-Sync.
+  out.push_back(PanelSpec{"settings_display_panel", "settings_display_screen",
+                          "settings_video_screen", MenuPanels(),
+                          {
+                              SelectRow("settings_display", "graphics.display", "Display",
+                                        Choices({"windowed", "Windowed", "borderless",
+                                                 "Borderless", "fullscreen", "Full Screen"})),
                               SelectRow("settings_resolution", "graphics.resolution", "Resolution",
                                         Choices({"1280x720", "1280x720", "1920x1080", "1920x1080",
                                                  "2560x1440", "2560x1440", "3840x2160",
                                                  "3840x2160"})),
                               BoolRow("settings_vsync", "graphics.vsync", "V-Sync"),
-                              SelectRow("settings_renderer", "graphics.renderer", "Renderer",
-                                        Choices({"d3d12", "D3D12", "vulkan", "Vulkan"})),
+                          }});
+
+  // 3a-ii. Graphics: the render-path rows, with Depth of Field moved here from Gameplay and drawn
+  // in the positive sense (`Depth of Field: On`), because that is what the provider variable
+  // means when it is off.
+  out.push_back(PanelSpec{"settings_graphics_panel", "settings_graphics_screen",
+                          "settings_video_screen", MenuPanels(),
+                          {
                               BoolSubmenuRow("settings_aa", "graphics.anti_aliasing",
                                              "settings_aa_screen", "Anti-Aliasing"),
                               SelectRow("settings_filtering", "graphics.filtering",
@@ -487,10 +531,12 @@ std::vector<PanelSpec> AllPanels() {
                                         Choices({"native", "Native", "none", "None", "1x", "1x",
                                                  "2x", "2x", "4x", "4x", "8x", "8x", "16x",
                                                  "16x"})),
+                              InvertedBoolRow("settings_dof", "gameplay.disable_dof",
+                                              "Depth of Field", true),
                           }});
 
   // 3b. Anti-aliasing: the compound row's choice list, "None" included (the Force-Skybox model).
-  out.push_back(PanelSpec{"settings_aa_panel", "settings_aa_screen", "settings_video_screen",
+  out.push_back(PanelSpec{"settings_aa_panel", "settings_aa_screen", "settings_graphics_screen",
                           MenuPanels(),
                           {
                               ChooseRow("settings_aa_none", "graphics.anti_aliasing", "none",
@@ -503,14 +549,12 @@ std::vector<PanelSpec> AllPanels() {
                                         "fxaa_extreme", "FXAA Extreme"),
                           }});
 
-  // 4. Gameplay (provider only; the root row that appears with it is what makes the root six).
+  // 4. Gameplay (provider only; the root row that appears with it is what makes the root six):
+  // four entries, with the track/gem rows moved into a submenu of their own so the page stays a
+  // page rather than a list of everything the provider can do.
   out.push_back(PanelSpec{"settings_gameplay_panel", "settings_gameplay_screen", kRootScreen,
                           MenuPanels(),
                           {
-                              BoolRow("settings_precision", "gameplay.precision_mode",
-                                      "Precision Mode", true),
-                              BoolRow("settings_wiggles", "gameplay.disable_random_wiggles",
-                                      "Disable Random Track Wiggles", true),
                               SelectRow("settings_camera", "gameplay.camera_angle", "Camera Angle",
                                         Choices({"default", "Default", "high", "High", "low",
                                                  "Low"}),
@@ -521,10 +565,20 @@ std::vector<PanelSpec> AllPanels() {
                                                  "130", "130%", "135", "135%", "140", "140%",
                                                  "145", "145%", "150", "150%"}),
                                         true, "i:"),
-                              BoolRow("settings_dof", "gameplay.disable_dof",
-                                      "Disable Depth of Field", true),
+                              SubmenuRow("settings_tracks_menu", "settings_tracks_screen",
+                                         "Tracks & Gems", true),
                               SubmenuRow("settings_plots", "settings_plots_screen",
                                          "Plots & Skyboxes", true),
+                          }});
+
+  // 4a. Tracks & Gems: the note-shape rows the provider owns.
+  out.push_back(PanelSpec{"settings_tracks_panel", "settings_tracks_screen",
+                          "settings_gameplay_screen", MenuPanels(),
+                          {
+                              BoolRow("settings_precision", "gameplay.precision_mode",
+                                      "Precision Mode", true),
+                              BoolRow("settings_wiggles", "gameplay.disable_random_wiggles",
+                                      "Disable Random Track Wiggles", true),
                               SelectRow("settings_gems", "gameplay.gems", "Gems",
                                         Choices({"default", "Default", "freq", "Freq", "amp2003",
                                                  "Amp 2003", "amp2016", "Amp 2016", "monkey",
@@ -533,7 +587,7 @@ std::vector<PanelSpec> AllPanels() {
                                         true),
                           }});
 
-  // 4a. Plots & Skyboxes. `which_skybox` index 0 is the provider's default/off, and its "no
+  // 4b. Plots & Skyboxes. `which_skybox` index 0 is the provider's default/off, and its "no
   // skybox" is a separate index - which is why the row is a select over tokens and never a
   // boolean (plan §3.4).
   out.push_back(PanelSpec{"settings_plots_panel", "settings_plots_screen",
@@ -634,11 +688,6 @@ std::vector<PanelSpec> AllPanels() {
                          "settings_achievements_message"});
 
   for (auto& panel : out) {
-    if (panel.name == "settings_dlc_panel") {
-      Row refresh = InfoRow("settings_refresh_dlc", "Refresh Downloadable Content");
-      refresh.kind = Kind::kRefresh;
-      panel.rows.push_back(std::move(refresh));
-    }
     if (panel.name == "settings_main_menu_panel" && !g_configuration.menu_rows.empty()) {
       panel.rows.resize(1);
       size_t index = 0;
@@ -859,7 +908,11 @@ Node PopulateMenu(const PanelSpec& panel) {
     if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu) {
       const std::string on = row.symbol + "_on";
       const std::string off = row.symbol + "_off";
-      body.push_back(Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(QueryPath(row))}),
+      // The pair keeps its usual meaning (`_on` = the row reads On); an inverted row's setting is
+      // false when it reads On, so the query it is matched against is the `b:0` one.
+      const std::string query =
+          row.inverted ? Path("snapshot", row.setting, "b:0") : QueryPath(row);
+      body.push_back(Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(query)}),
                           Drop(off), Drop(on)}));
     } else if (row.kind == Kind::kSelect) {
       for (size_t i = 1; i < row.choices.size(); ++i) {
@@ -891,12 +944,26 @@ Node PopulateMenu(const PanelSpec& panel) {
 // `{<list>.lst set_data {var rows}}` is in FillStatements; this builds the whole `{do ...}`.
 
 // The `select_row` case for one row: what Confirm (or Start) does on it.
+//
+// A commit that needs a restart does **not** open the restart screen here (owner decision,
+// 2026-10-13): the change is already durable, and the prompt is asked once, when the player leaves
+// the merged root (see `ButtonCases`). A commit that *failed* still reports itself, because a
+// setting that did not save must not look saved.
 Node CommitResult(const bool pause, Node success) {
   const auto destination = [&](const char* name) { return pause ? PauseScreen(name) : std::string(name); };
   return Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.ok", "b:1"))}),
-    Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.restart_required", "b:1"))}),
-         EnterScreen(destination("settings_restart_screen")), std::move(success)}),
-    EnterScreen(destination("settings_save_error_screen"))});
+              std::move(success), EnterScreen(destination("settings_save_error_screen"))});
+}
+
+// The index of the choice a select row's symbol stands for. A select contributes one symbol per
+// choice (`<row>_<token>`), so the symbol is the whole identity a press carries back to us.
+size_t ChoiceIndexForSymbol(const Row& row, const std::string_view symbol) {
+  for (size_t i = 0; i < row.choices.size(); ++i) {
+    if (symbol == row.symbol + "_" + SymbolToken(row.choices[i].token)) {
+      return i;
+    }
+  }
+  return 0;
 }
 
 bool g_emitting_pause = false;
@@ -904,16 +971,20 @@ Node RowCase(const Row& row, const std::string_view symbol) {
   switch (row.kind) {
     case Kind::kBool: {
       const bool is_on = symbol == std::string(row.symbol) + "_on";
-      return Arr({Sym(symbol), Write(SetPath(row, is_on ? "b:0" : "b:1")),
+      // A normal row writes the opposite of what it showed; an inverted one (`Depth of Field`)
+      // shows `On` while its setting is *false*, so it writes the opposite of that.
+      const bool write_on_value = is_on != row.inverted;
+      return Arr({Sym(symbol), Write(SetPath(row, write_on_value ? "b:0" : "b:1")),
                   Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
     case Kind::kSelect: {
-      return Arr({Sym(symbol), Cmd({Sym("if_else"), Var("rbbz_settings_editing"),
-        Cmd({Sym("do"), Write(Path("commit", "-", "-")),
-          Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(0)}),
-          CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))}),
-        Cmd({Sym("do"), Cmd({Sym("set"), Var("rbbz_settings_editing"), Node::Int(1)}),
-          Cmd({Sym("shell_sfx"), Sym("play_select")})})})});
+      // Confirm advances to the **next** choice and wraps at the last one: a horizontal selector
+      // steps with A, which is the interaction the owner asked for after using the staged version.
+      const size_t index = ChoiceIndexForSymbol(row, symbol);
+      const size_t next = (index + 1) % row.choices.size();
+      return Arr({Sym(symbol), Write(ChoiceSet(row, row.choices[next])),
+                  Write(Path("commit", "-", "-")),
+                  CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
     case Kind::kSubmenu:
     case Kind::kBoolSubmenu:
@@ -938,8 +1009,6 @@ Node RowCase(const Row& row, const std::string_view symbol) {
           Sym("next_screen"), Sym("cal_welcome_screen")}),
           Cmd({Sym("options_screen"), Sym("set"), Sym("back_screen"), Sym("splash_screen")}),
           Cmd({Sym("ui"), Sym("goto_screen"), Sym("pause_confirm_quit_song_screen")})});
-    case Kind::kRefresh:
-      return Arr({Sym(symbol), Cmd({Sym("file_exists"), Str("songcache:/rbbz_dlc_refresh")})});
     case Kind::kAchievements:
       // The installed provider's four named grants, executed by its own guest API. No host-built
       // DataNodes or untraced allocator ABI. The session latch makes a repeated confirm harmless.
@@ -973,7 +1042,9 @@ Node SelectRowCases(const PanelSpec& panel) {
 }
 
 // Left/Right on a select row walk its choices, and nowhere else: a nested switch on the selected
-// symbol keeps the arrows from doing anything on a row that has no direction.
+// symbol keeps the arrows from doing anything on a row that has no direction. Like Confirm, each
+// press commits: the arrow is the other way to make the same one-step change, so it must be as
+// durable as A is.
 std::vector<Node> DirectionCases(const PanelSpec& panel, const bool forward) {
   std::vector<Node> cases;
   for (const Row& row : panel.rows) {
@@ -986,7 +1057,9 @@ std::vector<Node> DirectionCases(const PanelSpec& panel, const bool forward) {
                   : (i + row.choices.size() - 1) % row.choices.size();
       cases.push_back(Arr({Sym(row.symbol + "_" + SymbolToken(row.choices[i].token)),
                            Write(ChoiceSet(row, row.choices[target])),
-                           Cmd({Var("this"), Sym("populate_menu")})}));
+                           Write(Path("commit", "-", "-")),
+                           CommitResult(g_emitting_pause,
+                                        Cmd({Var("this"), Sym("populate_menu")}))}));
     }
   }
   return cases;
@@ -1088,15 +1161,17 @@ Node PanelDefinition(const PanelSpec& panel) {
     for (Node& item : left) {
       kids.push_back(std::move(item));
     }
-    extras.push_back(Arr({Sym("kAction_Left"), Cmd({Sym("if"), Var("rbbz_settings_editing"), Cmd(std::move(kids))})}));
+    extras.push_back(Arr({Sym("kAction_Left"), Cmd(std::move(kids))}));
     std::vector<Node> right = DirectionCases(panel, true);
     std::vector<Node> rkids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
     for (Node& item : right) {
       rkids.push_back(std::move(item));
     }
-    extras.push_back(Arr({Sym("kAction_Right"), Cmd({Sym("if"), Var("rbbz_settings_editing"), Cmd(std::move(rkids))})}));
+    extras.push_back(Arr({Sym("kAction_Right"), Cmd(std::move(rkids))}));
   }
 
+  const bool pause = g_emitting_pause;  // captured before the table is built
+  const bool root = panel.screen == kRootScreen || panel.screen == kRootPauseScreen;
   return Panel(panel.name, panel.scene,
                {
                    PopulateMenu(panel),
@@ -1108,7 +1183,7 @@ Node PanelDefinition(const PanelSpec& panel) {
                    Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})}),
                    Arr({Sym("on_select_msg"), Cmd({Sym("shell_sfx"), Sym("play_select")})}),
                    SelectRowCases(panel),
-                   Arr({Sym("BUTTON_DOWN_MSG"), ButtonTable(std::move(extras))}),
+                   Arr({Sym("BUTTON_DOWN_MSG"), ButtonTable(std::move(extras), root, pause)}),
                });
 }
 
@@ -1227,9 +1302,9 @@ std::vector<std::string> RequestPaths() {
   add(kProviderQuery);
   add(Path("commit", "-", "-"));
   add(Path("restart", "-", "-"));
-  // The one-shot edit cancel: B while a horizontal selector is being staged.
-  add(Path("cancel", "-", "-"));
-  for (const auto* token : {"commit.ok", "commit.restart_required", "restart.ok"})
+  // The restart prompt's state: true once this session has committed a change that needs one. Asked
+  // by the merged root's Cancel, which is the only place the prompt belongs.
+  for (const auto* token : {"commit.ok", "restart.pending", "restart.ok"})
     add(Path("snapshot", token, "b:1"));
   for (const PanelSpec& panel : AllPanels()) {
     for (const Row& row : panel.rows) {
@@ -1240,6 +1315,7 @@ std::vector<std::string> RequestPaths() {
         case Kind::kBool:
         case Kind::kBoolSubmenu:
           add(QueryPath(row));
+          if (row.inverted) add(Path("snapshot", row.setting, "b:0"));
           add(SetPath(row, "b:1"));
           add(SetPath(row, "b:0"));
           break;
@@ -1429,6 +1505,68 @@ bool RerouteRow(std::vector<dtb::Node>* nodes, const std::string_view row,
   return true;
 }
 
+// The main menu's option array: an array holding both the first and the last retail row symbol.
+// Transcribed from `menu_options::FindOptionArray` (which owns the same idea for the live edit); it
+// is repeated rather than shared because this module must not depend on that one's file logic.
+bool IsMenuOptionArray(const Node& node) {
+  if (node.tag != dtb::kArray) {
+    return false;
+  }
+  bool first = false;
+  bool last = false;
+  for (const Node& kid : node.kids) {
+    first = first || (kid.tag == dtb::kSymbol && kid.text == "splash_start");
+    last = last || (kid.tag == dtb::kSymbol && kid.text == "splash_exit");
+  }
+  return first && last;
+}
+
+// Erases `row` from every menu option array under `node`. True when something was removed.
+bool RemoveFromOptionArrays(Node* node, const std::string_view row) {
+  bool removed = false;
+  if (node == nullptr) {
+    return false;
+  }
+  if (IsMenuOptionArray(*node)) {
+    const auto before = node->kids.size();
+    std::erase_if(node->kids, [&](const Node& kid) {
+      return kid.tag == dtb::kSymbol && kid.text == row;
+    });
+    removed = removed || node->kids.size() != before;
+  }
+  for (Node& kid : node->kids) {
+    removed = RemoveFromOptionArrays(&kid, row) || removed;
+  }
+  return removed;
+}
+
+bool RemoveRow(std::vector<dtb::Node>* nodes, const std::string_view row, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr || row.empty()) {
+    return refuse("nothing to remove");
+  }
+  bool removed = false;
+  Hit hit;
+  FindInRoots(
+      nodes, [&](const Node& node) { return IsRowCase(node) && IsSymbol(node.kids[0], row); },
+      &hit);
+  if (hit.found && hit.parent != nullptr && IsSwitchCommand(*hit.parent)) {
+    hit.parent->kids.erase(hit.parent->kids.begin() + static_cast<ptrdiff_t>(hit.index));
+    removed = true;
+  }
+  for (Node& root : *nodes) {
+    removed = RemoveFromOptionArrays(&root, row) || removed;
+  }
+  if (!removed) {
+    return refuse("the row is in neither a case table nor a menu option list");
+  }
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
 // The P1 prototype's two edits (`AddPanelLoad` into ui/gen/ui.dtb, `AddMainMenuRow` into the splash
 // option array) are gone with the Advanced Settings row they served. The merge does not add a row:
 // it re-points the retail `splash_options` / `pause_options` rows (RerouteRow above), so the locale
@@ -1550,6 +1688,57 @@ bool AddLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
   return true;
 }
 
+// The retail entries the merged surface rewrites. All four are drawn by retail's own AV page
+// (`ui/av_options/gen/av_options.dtb`): its two checkboxes are `[av_overscan {if_else overscan
+// enabled_token disabled_token}]` and the locale formats them as `Overscan | ENABLED` /
+// `Bass Boost | DISABLED`. The merged surface's own booleans read `<label>: On`, so both halves of
+// each string change - the format's `|` becomes `:`, and the state word loses its capitals.
+std::vector<LocaleOverride> LocaleOverrides() {
+  return {
+      {"av_overscan", "Overscan | %s", "Overscan: %s"},
+      {"av_bass_boost", "Bass Boost | %s", "Bass Boost: %s"},
+      {"enabled_token", "ENABLED", "On"},
+      {"disabled_token", "DISABLED", "Off"},
+  };
+}
+
+bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
+                        const std::string_view from, const std::string_view to,
+                        std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr || key.empty() || from.empty() || to.empty()) {
+    return refuse("nothing to replace");
+  }
+  for (Node& root : *nodes) {
+    if (root.tag != dtb::kArray || root.kids.size() < 2) {
+      continue;
+    }
+    if (!IsSymbol(root.kids[0], key) || root.kids[1].tag != dtb::kString) {
+      continue;
+    }
+    if (root.kids[1].text == to) {
+      // Already rewritten - an idempotent second pass, not an error.
+      if (reason != nullptr) reason->clear();
+      return true;
+    }
+    if (root.kids[1].text != from) {
+      // A locale that carries a different label for the key (a translation, or a title whose
+      // string changed) is left exactly as it ships.
+      if (reason != nullptr) *reason = "the entry carries a different label";
+      return true;
+    }
+    root.kids[1].text = to;
+    if (reason != nullptr) reason->clear();
+    return true;
+  }
+  // The key is absent here (a locale that does not carry it): nothing to do.
+  if (reason != nullptr) *reason = "the locale has no such entry";
+  return true;
+}
+
 // Every locale entry the surface adds, again derived from the table. A row with an empty label is a
 // retail row symbol whose text the installed locale already carries, so nothing is added for it.
 std::vector<std::pair<std::string, std::string>> Labels() {
@@ -1572,8 +1761,10 @@ std::vector<std::pair<std::string, std::string>> Labels() {
         continue;
       }
       if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu) {
-        add(row.symbol + "_on", row.label + ": ON");
-        add(row.symbol + "_off", row.label + ": OFF");
+        // "On"/"Off", not the main menu's capitals: every state suffix of this surface reads the
+        // way its row label does (owner decision, 2026-10-13).
+        add(row.symbol + "_on", row.label + ": On");
+        add(row.symbol + "_off", row.label + ": Off");
       } else if (row.kind == Kind::kSelect) {
         for (const Choice& choice : row.choices) {
           add(row.symbol + "_" + SymbolToken(choice.token), row.label + ": " + choice.label);

@@ -77,14 +77,25 @@ bool FilteringToCvarValue(std::string_view token, int32_t* out) {
   return true;
 }
 
+std::vector<CvarAssignment> DisplayToCvars(std::string_view token) {
+  if (token == "windowed") {
+    return {{"fullscreen", "false"}, {"borderless", "false"}};
+  }
+  if (token == "borderless") {
+    return {{"fullscreen", "false"}, {"borderless", "true"}};
+  }
+  if (token == "fullscreen") {
+    return {{"fullscreen", "true"}, {"borderless", "false"}};
+  }
+  return {};
+}
+
 std::string_view CvarForSetting(SettingId id) {
   switch (id) {
     case SettingId::kCacheDlcLibrary:
       return "enhancements_dlc_cache";
     case SettingId::kDlcScanThreads:
       return "dlc_scan_threads";
-    case SettingId::kDlcMenuSongs:
-      return "enhancements_menu_dlc_songs";
     case SettingId::kHideOfflinePrompts:
       return "enhancements_skip_offline_dialog";
     case SettingId::kHideMainMenu:

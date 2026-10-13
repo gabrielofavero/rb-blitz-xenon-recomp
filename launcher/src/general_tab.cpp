@@ -156,7 +156,7 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
                            effective == LaunchTarget::kCommon)) {
       profile.target = LaunchTarget::kCommon;
     }
-    if (DrawFocusableRadio("Rock Band Blitz (Trial)", first_row + 1, ring, action,
+    if (DrawFocusableRadio("Rock Band Blitz Demo", first_row + 1, ring, action,
                            effective == LaunchTarget::kDemo)) {
       profile.target = LaunchTarget::kDemo;
     }
@@ -197,7 +197,7 @@ void GeneralTab::DrawTargetRows(ProfileSession& session, std::size_t first_row, 
                          effective == LaunchTarget::kCommon)) {
     profile.target = LaunchTarget::kCommon;
   }
-  if (DrawFocusableRadio("Rock Band Blitz (Trial)", first_row + 1, ring, action,
+  if (DrawFocusableRadio("Rock Band Blitz Demo", first_row + 1, ring, action,
                          effective == LaunchTarget::kDemo)) {
     profile.target = LaunchTarget::kDemo;
   }

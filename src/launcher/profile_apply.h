@@ -58,11 +58,13 @@ struct ProfileApplyReport {
 // outranks both. A row the registry does not know, or a value the flag refuses, is collected in
 // the report rather than being fatal.
 //
-// The rows applied are the profile's own, except under `profile_controller_rows_only` (P8, off by
-// default): then only the controller allowlist is (`settings::ControllerProfileRows`, contracts
-// §8) and everything else in the table is inert preservation data. That switch - not this function
-// - decides when the launcher stops being a source of game preferences; see
-// docs/plans/in-game-settings-controller-settings.md.
+// The rows applied are the profile's own, except under `profile_controller_rows_only` (P11b, on by
+// default): then only the controller rows and the launcher-only host rows are
+// (`settings::ProfileRowsTheGameApplies`, contracts §8) and everything else in the table is inert
+// preservation data. A row with an in-game settings row of its own must not be in that set: it is
+// the store's, and applying the profile's copy would make the in-game row read as externally
+// configured. That switch - not this function - decides when the launcher stops being a source of
+// game preferences; see docs/plans/in-game-settings-controller-settings.md.
 ProfileApplyReport ApplyLauncherProfileSettings();
 
 // Writes the report as log lines. Call it once logging is initialized (OnPostInitLogging); before

@@ -44,7 +44,7 @@ on the one backend this build contains (D3D12; Vulkan is not compiled here, §9)
 | SDK patch | `patches/rexglue-sdk/0015-render-resolution-instrumentation.patch` **extended** (P2's swap/RT totals + P4's per-draw viewport/scissor); it is the only patch that touches those three files |
 | Tests | **28/28 pass** (`ctest --test-dir out/build/win-amd64-release --output-on-failure`, 11.3 s) |
 | SDK audit | `scripts/apply_sdk_patches.ps1 -Check` → exit 0, `38 patched, 0 UNEXPECTED, 0 untracked` |
-| This machine | 4 logical processors; primary display **2560x1080**; **D3D12 built, Vulkan not built** (`REXGLUE_USE_D3D12=ON`, `REXGLUE_USE_VULKAN=OFF` in the build cache) |
+| This machine | 4 logical processors; primary display **2560x1080**; **D3D12 built, Vulkan not built** (`REXGLUE_USE_D3D12=ON`, `REXGLUE_USE_VULKAN=OFF` in the build cache) — **amended 2026-10-13:** the Windows presets now configure `REXGLUE_USE_VULKAN=ON`, so this is the state the measurements below were taken in, not the tree today |
 
 ```powershell
 # Repository root

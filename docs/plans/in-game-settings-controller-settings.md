@@ -129,11 +129,21 @@ and setup text are P7's, and this pass did not touch `installer/`.
 
 ### 3.5 Play
 
-`LaunchOptions{settings_rows}` is the seam. The full surface passes every managed row it moved off its
-default (`--user_data_root`, `--fullscreen`, `--mouse_ui_nav`, …) as it always has; Controller Settings
-passes `--game_data_root`, the target flags and `--launcher_profile`, and nothing else. What the screen
-edits still reaches the game, because `[remap]` and the controller cvars are read from the profile by
-the runtime itself (contracts §8) - not from a command line. See §4.4 for the printed proof.
+`LaunchOptions{settings_rows}` is the seam. The full surface passes every row it moved off its default
+and the game does not own (`--user_data_root`, `--mouse_ui_nav`, …); Controller Settings passes
+`--game_data_root` and `--launcher_profile`, and nothing else. What the screen edits still reaches the
+game, because `[remap]` and the controller cvars are read from the profile by the runtime itself
+(contracts §8) - not from a command line. See §4.4 for the printed proof.
+
+**Updated by the P11b cutover (2026-10-13)**, which this section predates: the full surface no longer
+passes the rows the in-game Help & Options tree owns (`kGameOwnedRows` in
+`launcher/src/game_launch.{h,cpp}`), and the **target flags are gone from both surfaces** - the
+profile's `[launch] target` is imported into the game's own settings on the first boot instead, so the
+in-game Target row stays editable. Controller Settings' identity-only command line is unchanged by
+that. The game-side reading of the profile is narrowed to the controller rows and the launcher-only
+host rows (`settings::ProfileRowsTheGameApplies`); the rest of the table is preservation data. The
+status of the cutover is in
+[in-game-settings-remaining-work.md](in-game-settings-remaining-work.md).
 
 ## 4. Evidence
 

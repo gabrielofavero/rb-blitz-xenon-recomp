@@ -48,6 +48,35 @@ inline bool IsControllerCvar(std::string_view name) {
 // of it that is still ours, and everything else in the table is inert preservation data - a record
 // of what the old launcher wrote, kept so a person's file is not rewritten, applied to nothing.
 //
+// One exception, added with the P11b cutover (2026-10-13): a handful of launcher rows are *host*
+// rows with no in-game settings row at all - the monitor pick, the two safe areas, dither, the
+// overscan cutoff and the two audio rows. Help & Options cannot express them, the store has no
+// descriptor for them, and the launcher's tabs remain their only editor, so the profile stays their
+// carrier for a boot nobody launched through the launcher (R4's promise). A row the in-game tree
+// owns is *not* in this list, however similar its name looks: `present_letterbox` (the SDK's mouse
+// mapping) and the Interface page's Letterbox row (the payload's own variable) are two settings.
+inline constexpr std::string_view kLauncherOnlyCvarAllowlist[] = {
+    "monitor",
+    "present_safe_area_x",
+    "present_safe_area_y",
+    "present_allow_overscan_cutoff",
+    "present_dither",
+    "audio_mute",
+    "audio_maxqframes",
+};
+inline constexpr std::size_t kLauncherOnlyCvarAllowlistCount =
+    sizeof(kLauncherOnlyCvarAllowlist) / sizeof(kLauncherOnlyCvarAllowlist[0]);
+
+// True when `name` is one of the host rows above - a row no in-game surface can edit.
+inline bool IsLauncherOnlyCvar(std::string_view name) {
+  for (std::string_view candidate : kLauncherOnlyCvarAllowlist) {
+    if (candidate == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Pure, so the rule is a test rather than a claim: P8 implements it, and the coordinator switches
 // it on with the boot wiring that gives the game its own file (a machine that narrowed before that
 // would lose the DLC root and the save location, which come from this table today).
@@ -56,6 +85,20 @@ inline std::vector<rb_blitz::launcher::ProfileSetting> ControllerProfileRows(
   std::vector<rb_blitz::launcher::ProfileSetting> kept;
   for (const rb_blitz::launcher::ProfileSetting& row : rows) {
     if (IsControllerCvar(row.key)) {
+      kept.push_back(row);
+    }
+  }
+  return kept;
+}
+
+// What the game still applies from the legacy profile: the controller rows (still ours) and the
+// launcher-only host rows (never the game's to own). Everything else in the table belongs to the
+// game's own settings file now.
+inline std::vector<rb_blitz::launcher::ProfileSetting> ProfileRowsTheGameApplies(
+    const std::vector<rb_blitz::launcher::ProfileSetting>& rows) {
+  std::vector<rb_blitz::launcher::ProfileSetting> kept;
+  for (const rb_blitz::launcher::ProfileSetting& row : rows) {
+    if (IsControllerCvar(row.key) || IsLauncherOnlyCvar(row.key)) {
       kept.push_back(row);
     }
   }
@@ -84,6 +127,12 @@ std::vector<CvarAssignment> AntiAliasingToCvars(std::string_view token);
 // Native = -1, None = 0, 1x = 1, 2x = 2, 4x = 3, 8x = 4, 16x = 5. A "16x" label is never
 // written as value 16.
 bool FilteringToCvarValue(std::string_view token, int32_t* out);
+
+// The window mode's translation to the two SDK window flags (owner decision, 2026-10-13).
+// `windowed` and `borderless` both leave fullscreen mode; `borderless` additionally draws the
+// window undecorated, sized to the display. An unknown token yields no assignments and the caller
+// reports the row as unapplicable rather than guessing.
+std::vector<CvarAssignment> DisplayToCvars(std::string_view token);
 
 // The cvar a native row ultimately drives, or "" for a row the game consumes directly
 // (target, resolution) or a provider-owned row. AA and filtering have their own functions

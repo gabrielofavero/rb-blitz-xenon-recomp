@@ -132,14 +132,14 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
 // read-only from the package it came from (src/hooks/shell_music.cpp). The pool is drawn
 // at random from every song the boot's DLC packages carry - every `.mogg` in a package,
 // not just the first, so a merged pack contributes all of its songs - and every boot draws
-// a new one, so without a library the toggle has nothing to draw from and the menu is
-// unchanged.
+// a new one, so without a library there is nothing to draw from and the menu is unchanged.
+//
+// RETIRED (owner decision, 2026-10-13): the pool is always on, so this cvar no longer
+// decides anything. It stays defined only so an old profile value is preserved and a boot
+// can say it is ignored.
 REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, false, "Enhancements",
-                    "R9 main-menu DLC songs: play the loaded DLC as the main menu's background "
-                    "music instead of the three tracks the title loops - a pool drawn at random "
-                    "from every song in the library every boot, handed one song after another as "
-                    "each one ends (the deck reshuffles when it runs out). Needs a DLC library; "
-                    "without one the menu is unchanged. Faithful: the title's own three tracks.")
+                    "R9 main-menu DLC songs (retired; the DLC pool is always on): the cvar is "
+                    "preserved for old profiles and is not read as a gate any more.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
@@ -196,7 +196,7 @@ constexpr std::array<ToggleRow, 10> kToggles{{
      [] { return REXCVAR_GET(enhancements_dlc_cache); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
-    {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs",
+    {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (retired; always on)",
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
      [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},

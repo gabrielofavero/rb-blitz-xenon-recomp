@@ -349,10 +349,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   if (!legacy_note.empty()) {
     REXLOG_WARN("shell_music: {}", legacy_note);
   }
-  g_enabled = REXCVAR_GET(enhancements_menu_dlc_songs);
-  if (!g_enabled) {
-    REXLOG_INFO("shell_music: R9 off; the main menu loops the title's own tracks");
-    return;
+  // The DLC pool is **always on** (owner decision, 2026-10-13): "DLC Menu Songs" is retired as a
+  // setting, so every DLC song the library yields belongs in the menu rotation. The legacy cvar is
+  // still read, only so a boot says out loud that its value no longer decides anything.
+  g_enabled = true;
+  if (!REXCVAR_GET(enhancements_menu_dlc_songs)) {
+    REXLOG_INFO("shell_music: enhancements_menu_dlc_songs is retired; the DLC pool is always on");
   }
   if (runtime == nullptr) {
     REXLOG_WARN("shell_music: R9 is on but there is no runtime to mount DLC with");

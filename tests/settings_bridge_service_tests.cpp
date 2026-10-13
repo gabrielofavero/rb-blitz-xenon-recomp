@@ -109,31 +109,31 @@ struct Harness {
 void TestTextFormEditsTheRealStore() {
   BeginCase("the text form a DTA script writes reaches settings.toml");
   Harness h;
-  CHECK_TRUE(h.Send("rbbz-settings/set/general.dlc_menu_songs/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:1").status == Status::kOk);
   const Response commit = h.Send("rbbz-settings/commit/-/-");
   CHECK_TRUE(commit.status == Status::kOk);
   CHECK_TRUE(h.sink.last_commit_durable());
   CHECK_TRUE(h.sink.saved_revision() != 0);
 
   // The read half is the membership probe: exactly what a row draws its own state from.
-  CHECK_TRUE(h.Holds("general.dlc_menu_songs", WireValue::Bool(true)));
-  CHECK_TRUE(!h.Holds("general.dlc_menu_songs", WireValue::Bool(false)));
+  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(true)));
+  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(false)));
 
   // The change is reported once, by its token, for the application-strategy seam.
   CHECK_TRUE(h.sink.last_commit_changes().size() == 1);
-  CHECK_TRUE(h.sink.last_commit_changes().at(0) == "general.dlc_menu_songs");
+  CHECK_TRUE(h.sink.last_commit_changes().at(0) == "general.cache_dlc_library");
 
   // ...and it is on disk, under the row's storage key with its provenance.
   const std::string text = ReadText(h.paths.settings_file);
-  CHECK_TRUE(text.find("dlc_menu_songs") != std::string::npos);
-  CHECK_TRUE(text.find("'general.dlc_menu_songs'") != std::string::npos);
+  CHECK_TRUE(text.find("cache_dlc_library") != std::string::npos);
+  CHECK_TRUE(text.find("'general.cache_dlc_library'") != std::string::npos);
 
   // A second service over the same file boots into the same value: the write really landed.
   Service again(h.paths);
   MigrationResult migration;
   again.Boot(nullptr, PathEntry{}, &migration, true);
-  CHECK_TRUE(again.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
-  CHECK_TRUE(again.EffectiveSource(SettingId::kDlcMenuSongs) == Source::kSettingsFile);
+  CHECK_TRUE(again.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
+  CHECK_TRUE(again.EffectiveSource(SettingId::kCacheDlcLibrary) == Source::kSettingsFile);
 }
 
 void TestFramedFormCarriesTheRequestId() {
@@ -257,10 +257,10 @@ void TestProviderGateAndUnknownTokens() {
 void TestCancelAndRestart() {
   BeginCase("cancelling restores the field, and the restart request is recorded");
   Harness h;
-  CHECK_TRUE(h.Send("rbbz-settings/set/general.dlc_menu_songs/b:1").status == Status::kOk);
-  CHECK_TRUE(h.Holds("general.dlc_menu_songs", WireValue::Bool(true)));
-  CHECK_TRUE(h.Send("rbbz-settings/cancel-field/general.dlc_menu_songs/-").status == Status::kOk);
-  CHECK_TRUE(!h.Holds("general.dlc_menu_songs", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/cancel-field/general.cache_dlc_library/-").status == Status::kOk);
+  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(true)));
   CHECK_TRUE(h.Send("rbbz-settings/cancel/-/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   CHECK_TRUE(h.sink.last_commit_changes().empty());

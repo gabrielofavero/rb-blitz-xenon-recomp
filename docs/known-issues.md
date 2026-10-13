@@ -119,13 +119,16 @@ is removed from this file, not from the log.
   `launcher/out/generated/settings_table.h` is a fixed source-tree path (`launcher/CMakeLists.txt`,
   P0.2), so a tree configured with different backends overwrites the other's copy and the *last*
   build to regenerate decides what *every* binary offers — measured on 2026-10-05: the Release tree
-  offers `Renderer = d3d12, vulkan`, and a Debug build (which has `REXGLUE_USE_VULKAN=OFF`)
+  offers `Renderer = d3d12, vulkan`, and a Debug build (which had `REXGLUE_USE_VULKAN=OFF`)
   regenerating the shared file leaves the Release binary offering `d3d12` alone until it is rebuilt.
   The build does not notice, because the custom command's inputs did not change. Workaround: build the
   tree whose backends you want last, or re-run it by hand —
   `rb_blitz_embed_settings.exe --settings launcher/config/settings.toml --header launcher/out/generated/settings_table.h --backends=d3d12,vulkan`
   — and check with `--dump-layout`, which prints each enum row's choices. Making the header
-  per-build-directory is a change to P0.2's contract, not a bug fix.
+  per-build-directory is a change to P0.2's contract, not a bug fix. **Mitigated 2026-10-13:** every
+  Windows preset now sets `REXGLUE_USE_VULKAN=ON` (it is in `windows-base`), so the two trees offer
+  the same `d3d12, vulkan` list and overwriting the shared header changes nothing; the mechanism is
+  still there for any future flag that differs between trees.
 
 - **The Renderer row is the build's; what actually renders is the machine's** (launcher D18, B2/B3).
   The row's choices come from CMake (`choices_from = "gpu_backends"`), so the launcher can only offer

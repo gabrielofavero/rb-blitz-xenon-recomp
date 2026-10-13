@@ -136,6 +136,11 @@ inline constexpr char kMainMenuRow[] = "splash_options";
 inline constexpr char kPauseMenuRow[] = "pause_options";
 inline constexpr char kRetiredRow[] = "advanced_settings";
 
+// The installed Ultimate payload's own settings entry, which the merged surface **removes**: every
+// page it opened is reachable from Help & Options now, so a second button for the same thing is one
+// too many (owner decision, 2026-10-13).
+inline constexpr char kProviderMenuRow[] = "mod_settings";
+
 // The visibility query for provider-only rows (plan §3: Ultimate rows are absent on a base
 // install). A membership query, like every other read on this channel.
 inline constexpr char kProviderQuery[] = "rbbz-settings/snapshot/provider.active/b:1";
@@ -243,6 +248,12 @@ std::vector<dtb::Node> PauseRouteBody();
 bool RerouteRow(std::vector<dtb::Node>* nodes, std::string_view row,
                 const std::vector<dtb::Node>& body, std::string* reason);
 
+// Removes `row` from a main-menu record entirely: its `[<row> ...]` case and its element in the
+// option array. Used for the provider's own settings entry (`kProviderMenuRow`). Refuses, leaving
+// `nodes` untouched, when neither is present - an older payload that never had the row is a
+// refusal the caller may ignore, while a half-removed row is not a shape to ship.
+bool RemoveRow(std::vector<dtb::Node>* nodes, std::string_view row, std::string* reason);
+
 // Inserts `{<panel> load}` into the retail `ui/gen/ui.dtb`'s `{init ...}` block, so the merged
 // root's panel is created - and its `{file}`/`{focus}` members processed - the way retail creates
 // `options_panel` and its siblings, before the first screen is shown. Idempotent, and refuses
@@ -257,6 +268,26 @@ bool AddPanelLoad(std::vector<dtb::Node>* nodes, std::string_view panel_name, st
 // Rows that reuse a retail row symbol (`controls`, `calibration`, `audio_video_options`,
 // `tutorial`, `credits`) are *not* here: their labels come from the installed locale unchanged.
 std::vector<std::pair<std::string, std::string>> Labels();
+
+// Retail locale entries the merged surface **rewrites**, as (key, from, to). The retail AV page
+// draws its two checkboxes as `Overscan | ENABLED` / `Bass Boost | DISABLED` - a `|` separator and
+// all-caps state - while every boolean of the merged surface reads `<label>: On`. These four
+// entries are what that page draws, so rewriting them makes the retail rows match the rows beside
+// them. Applied to the payload's locale record (which has no byte budget), not through the
+// byte-neutral read-hook path, because all four sit in the file's first read block.
+struct LocaleOverride {
+  std::string key;
+  std::string from;
+  std::string to;
+};
+std::vector<LocaleOverride> LocaleOverrides();
+
+// Rewrites the label of the locale entry filed under `key` from `from` to `to`. A locale that
+// does not carry the entry, or carries a different label (a translated locale), is left alone -
+// that is a skip, not a refusal, because the payload edits every installed locale. Returns false
+// only for unusable input.
+bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, std::string_view key, std::string_view from,
+                        std::string_view to, std::string* reason);
 
 // Every request path the definition writes or asks, in a stable order. The test parses each one
 // with the bridge's own text grammar, so a grammar change breaks a test rather than a boot.
