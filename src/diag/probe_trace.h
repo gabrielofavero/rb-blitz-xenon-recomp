@@ -6,7 +6,7 @@
 // one.
 //
 // Kept free of any SDK dependency for the same reason src/fs/path_policy.h and
-// src/input/ui_nav.h are: the interesting part is arithmetic over a ring (what
+// src/input/native_menu.h are: the interesting part is arithmetic over a ring (what
 // is retained, what is counted as dropped, in what order a snapshot comes back),
 // and tests/probe_trace_tests.cpp has to cover it without booting the game
 // (docs/rb3-references.md §7.3, and the split-the-decision rule in

@@ -48,6 +48,7 @@ struct MenuRow {
   MenuPoint center;
   int index = -1;
   bool enabled = false;
+  std::optional<MenuBounds> bounds;
 };
 
 // Coordinates are normalized through the camera that actually drew the list.
@@ -58,6 +59,7 @@ inline int HitMenuRow(MenuPoint p, const MenuBounds& bounds,
   float distance = std::numeric_limits<float>::infinity();
   const MenuRow* closest = nullptr;
   for (const auto& row : rows) {
+    if (row.bounds && !row.bounds->Contains(p)) continue;
     float dx = p.x - row.center.x, dy = p.y - row.center.y;
     float d = dx * dx + dy * dy;
     if (d < distance) { distance = d; closest = &row; }

@@ -4,6 +4,7 @@
 #include <rex/hook.h>
 #include <rex/cvar.h>
 #include <bit>
+#include <cstring>
 #include <mutex>
 #include <string>
 
@@ -15,7 +16,10 @@ REX_EXTERN(__imp__sub_824E5020); // UIListDir::Draw
 REX_EXTERN(sub_824B1980);       // UIManager::FocusComponent
 REX_EXTERN(sub_824C1938);       // UIList::SetSelected
 REX_EXTERN(sub_824C1F08);       // UIList::ScrollComplete
-REX_EXTERN(sub_824C7220);       // UIList::CalcBoundingBox
+REX_EXTERN(__imp__sub_824E07A8); // UIListWidget::CalcXfm
+REX_EXTERN(__imp__sub_824E9A90); // UIListLabelElement::Draw
+REX_EXTERN(__imp__sub_824E0900); // UIListWidget::DrawMesh
+REX_EXTERN(sub_821E1D60);       // CalcBox(RndMesh*, Box&)
 REX_EXTERN(sub_821E14A8);       // Multiply(Vector3, Transform)
 REX_EXTERN(sub_821FF4A0);       // RndCam::WorldToScreen
 REX_EXTERN(sub_824E3008);       // UIListState::Selected (logical index)
@@ -37,7 +41,9 @@ std::string ObjectName(uint8_t* base, uint32_t object) {
   return std::string(text, strnlen(text, 96));
 }
 uint32_t ObjectBase(uint8_t* base, uint32_t object) {
-  return object ? object + 4 + U32(base, U32(base, object + 4) + 4) : 0;
+  if (!object) return 0;
+  const auto table = U32(base, object + 4);
+  return table ? object + 4 + U32(base, table + 4) : 0;
 }
 std::mutex mutex;
 MenuMouseQueue queue;
@@ -146,70 +152,126 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   if (queue.enabled() && screen == current_screen && focus == current_focus) queue.Pulse(event->action);
 }
 
-void CaptureGeometry(PPCContext& ctx, uint8_t* base) {
-  if (!MouseSupportEnabled() || ctx.r9.u32 != 0) return;
-  const uint32_t list = ctx.r5.u32 - 176;
-  if (U32(base, list + 8) != 1) return; // UIComponent::kFocused
-  const uint32_t camera = U32(base, 0x8284A108); // RndCam::sCurrent
+struct DrawCapture {
+  Geometry result;
+  uint32_t first = 0, end = 0, row = 0;
+  int selected = -1;
+  std::optional<MenuBounds> highlight;
+};
+thread_local DrawCapture* drawing = nullptr;
+
+void CaptureHighlight(PPCContext& ctx, uint8_t* base, uint32_t mesh) {
+  if (!drawing) return;
+  const auto camera = U32(base, 0x8284A108);
   if (!camera) return;
-  const uint32_t draw = ctx.r4.u32, transform = ctx.r7.u32;
-  const uint32_t first = U32(base, draw + 56), end = U32(base, draw + 60);
-  if (end < first || (end - first) % 44 || end - first > 44 * 256) return;
-  Geometry next; next.list = list; next.frame = frame_number;
-  next.bounds = {1e10f, 1e10f, -1e10f, -1e10f};
   GuestCall call(ctx); auto& c = call.frame.ctx;
-  const uint32_t vector = call.scratch + 32, projected = call.scratch + 48;
-  auto project = [&](uint32_t world) {
-    c.r3.u32 = camera; c.r4.u32 = world; c.r5.u32 = projected;
-    sub_821FF4A0(c, base);
-    return MenuPoint{F32(base, projected), F32(base, projected + 4)};
-  };
-  c.r3.u32 = list; c.r4.u32 = call.scratch;
-  sub_824C7220(c, base);
+  const auto box = call.scratch, vector = box + 32, projected = box + 48;
+  c.r3.u32 = mesh; c.r4.u32 = box;
+  sub_821E1D60(c, base);
+  MenuBounds b{1e10f, 1e10f, -1e10f, -1e10f};
   for (unsigned corner = 0; corner < 8; ++corner) {
     for (unsigned axis = 0; axis < 3; ++axis)
-      Float(base, vector + axis * 4, F32(base, call.scratch + axis * 4 + ((corner & (1 << axis)) ? 16 : 0)));
-    auto p = project(vector);
-    if (!std::isfinite(p.x) || !std::isfinite(p.y)) return;
-    next.bounds.left = std::min(next.bounds.left, p.x); next.bounds.right = std::max(next.bounds.right, p.x);
-    next.bounds.top = std::min(next.bounds.top, p.y); next.bounds.bottom = std::max(next.bounds.bottom, p.y);
+      Float(base, vector + axis * 4, F32(base, box + axis * 4 + ((corner & (1 << axis)) ? 16 : 0)));
+    c.r3.u32 = camera; c.r4.u32 = vector; c.r5.u32 = projected;
+    sub_821FF4A0(c, base);
+    const auto x = F32(base, projected), y = F32(base, projected + 4);
+    if (!std::isfinite(x) || !std::isfinite(y)) return;
+    b.left = std::min(b.left, x); b.right = std::max(b.right, x);
+    b.top = std::min(b.top, y); b.bottom = std::max(b.bottom, y);
   }
-  for (uint32_t row = first; row < end; row += 44) {
-    if (!base[row] || F32(base, row + 20) < .5f) continue;
-    c.r3.u32 = row + 4; c.r4.u32 = transform; c.r5.u32 = vector;
+  drawing->highlight = b;
+}
+
+void CaptureLabel(PPCContext& ctx, uint8_t* base) {
+  if (!drawing || !drawing->row || ctx.r7.u32) return;
+  const auto row = drawing->row;
+  const auto label = U32(base, ctx.r3.u32 + 8);
+  const auto camera = U32(base, 0x8284A108);
+  if (!label || !camera || F32(base, row + 20) < .5f) return;
+  // Retail UILabel stores its current text rectangle at +144. The stock
+  // UIList bounding-box path omits the final slot transform; the rendering
+  // path provides that exact transform in r4, including provider adjustments.
+  const float x = F32(base, label + 144), z = F32(base, label + 148);
+  const float width = F32(base, label + 152), height = F32(base, label + 156);
+  if (!(width > 0) || height == 0) return;
+  GuestCall call(ctx); auto& c = call.frame.ctx;
+  const auto local = call.scratch, world = local + 16, projected = local + 32;
+  MenuBounds bounds{1e10f, 1e10f, -1e10f, -1e10f};
+  for (unsigned corner = 0; corner < 4; ++corner) {
+    Float(base, local, x + (corner & 1 ? width : 0));
+    Float(base, local + 4, 0);
+    Float(base, local + 8, z + (corner & 2 ? height : 0));
+    c.r3.u32 = local; c.r4.u32 = ctx.r4.u32; c.r5.u32 = world;
     sub_821E14A8(c, base);
-    auto p = project(vector);
-    if (!std::isfinite(p.x) || !std::isfinite(p.y)) continue;
-    if (REXCVAR_GET(mouse_native_trace) && geometry.list != list)
-      REXLOG_INFO("native_mouse: origin row={} point={},{} world={},{},{}", U32(base, row + 36), p.x, p.y, F32(base, vector), F32(base, vector+4), F32(base, vector+8));
-    next.rows.push_back({p, int(U32(base, row + 36)), U32(base, row + 24) != 2});
+    c.r3.u32 = camera; c.r4.u32 = world; c.r5.u32 = projected;
+    sub_821FF4A0(c, base);
+    const auto px = F32(base, projected), py = F32(base, projected + 4);
+    if (!std::isfinite(px) || !std::isfinite(py)) return;
+    bounds.left = std::min(bounds.left, px); bounds.right = std::max(bounds.right, px);
+    bounds.top = std::min(bounds.top, py); bounds.bottom = std::max(bounds.bottom, py);
   }
-  if (next.rows.empty()) return;
-  // CalcBoundingBox includes the list origin and its layout-space widget bounds,
-  // which do not follow each rendered row's translation. Use it only across the
-  // list; along the list, hit cells come from the actual drawn row positions.
-  float min_x = 1e10f, min_y = 1e10f, max_x = -1e10f, max_y = -1e10f;
-  for (const auto& row : next.rows) {
-    min_x = std::min(min_x, row.center.x); max_x = std::max(max_x, row.center.x);
-    min_y = std::min(min_y, row.center.y); max_y = std::max(max_y, row.center.y);
-  }
-  const bool horizontal = max_x - min_x > max_y - min_y;
-  const float extent = horizontal ? max_x - min_x : max_y - min_y;
-  const float half_cell = next.rows.size() > 1 ? extent / (next.rows.size() - 1) * .5f : .025f;
-  if (horizontal) {
-    next.bounds.left = min_x - half_cell; next.bounds.right = max_x + half_cell;
-    for (auto& row : next.rows) row.center.y = (next.bounds.top + next.bounds.bottom) * .5f;
+  auto& result = drawing->result;
+  const int index = U32(base, row + 36);
+  auto it = std::find_if(result.rows.begin(), result.rows.end(), [index](const MenuRow& r) { return r.index == index; });
+  if (it == result.rows.end()) {
+    result.rows.push_back({{}, index, U32(base, row + 24) != 2 && U32(base, row + 28) != 2, bounds});
   } else {
-    next.bounds.top = min_y - half_cell; next.bounds.bottom = max_y + half_cell;
-    for (auto& row : next.rows) row.center.x = (next.bounds.left + next.bounds.right) * .5f;
+    bounds.left = std::min(bounds.left, it->bounds->left); bounds.right = std::max(bounds.right, it->bounds->right);
+    bounds.top = std::min(bounds.top, it->bounds->top); bounds.bottom = std::max(bounds.bottom, it->bounds->bottom);
+    it->bounds = bounds;
   }
-  if (REXCVAR_GET(mouse_native_trace) && geometry.list != list) {
-    REXLOG_INFO("native_mouse: geometry list={:08X} focus={:08X} bounds={},{},{},{}", list, current_focus,
-        next.bounds.left, next.bounds.top, next.bounds.right, next.bounds.bottom);
-    for (const auto& row : next.rows)
-      REXLOG_INFO("native_mouse: row={} center={},{} enabled={}", row.index, row.center.x, row.center.y, row.enabled);
+}
+void DrawList(PPCContext& ctx, uint8_t* base) {
+  const uint32_t list = ctx.r5.u32 - 176;
+  if (!MouseSupportEnabled() || ctx.r9.u32 || list != current_focus || !menu_available) {
+    __imp__sub_824E5020(ctx, base); return;
   }
-  geometry = std::move(next);
+  DrawCapture capture;
+  capture.result.list = list; capture.result.frame = frame_number;
+  capture.first = U32(base, ctx.r4.u32 + 56); capture.end = U32(base, ctx.r4.u32 + 60);
+  const auto display = U32(base, ctx.r4.u32 + 48);
+  for (auto row = capture.first; row < capture.end; row += 44)
+    if (U32(base, row + 32) == display) capture.selected = U32(base, row + 36);
+  auto previous = drawing; drawing = &capture;
+  __imp__sub_824E5020(ctx, base);
+  drawing = previous;
+  auto& result = capture.result;
+  // The native highlight supplies the full button width, even when its text is
+  // short. Translate its cell along the row axis; no screen-specific pitches.
+  const auto selected = std::find_if(result.rows.begin(), result.rows.end(), [&](const MenuRow& r) { return r.index == capture.selected; });
+  if (capture.highlight && selected != result.rows.end()) {
+    float min_x = 1e10f, max_x = -1e10f, min_y = 1e10f, max_y = -1e10f;
+    for (const auto& row : result.rows) {
+      const auto& b = *row.bounds;
+      min_x = std::min(min_x, (b.left+b.right)*.5f); max_x = std::max(max_x, (b.left+b.right)*.5f);
+      min_y = std::min(min_y, (b.top+b.bottom)*.5f); max_y = std::max(max_y, (b.top+b.bottom)*.5f);
+    }
+    const bool horizontal = max_x - min_x > max_y - min_y;
+    const auto origin = *selected->bounds;
+    for (auto& row : result.rows) {
+      auto& b = *row.bounds;
+      auto cell = *capture.highlight;
+      if (horizontal) {
+        const auto offset = (b.left + b.right - origin.left - origin.right) * .5f;
+        cell.left += offset; cell.right += offset;
+      } else {
+        const auto offset = (b.top + b.bottom - origin.top - origin.bottom) * .5f;
+        cell.top += offset; cell.bottom += offset;
+      }
+      b.left = std::min(b.left, cell.left); b.right = std::max(b.right, cell.right);
+      b.top = std::min(b.top, cell.top); b.bottom = std::max(b.bottom, cell.bottom);
+    }
+  }
+  result.bounds = {1e10f, 1e10f, -1e10f, -1e10f};
+  for (auto& row : result.rows) {
+    const auto& b = *row.bounds;
+    row.center = {(b.left + b.right) * .5f, (b.top + b.bottom) * .5f};
+    result.bounds.left = std::min(result.bounds.left, b.left); result.bounds.right = std::max(result.bounds.right, b.right);
+    result.bounds.top = std::min(result.bounds.top, b.top); result.bounds.bottom = std::max(result.bounds.bottom, b.bottom);
+    if (REXCVAR_GET(mouse_native_trace) && geometry.list != list)
+      REXLOG_INFO("native_mouse: row={} bounds={},{},{},{} enabled={}", row.index, b.left,b.top,b.right,b.bottom,row.enabled);
+  }
+  geometry = std::move(result);
 }
 } // namespace rb_blitz::input
 
@@ -220,6 +282,24 @@ REX_HOOK_RAW(sub_824B2958) {
   rb_blitz::input::Context(ctx, base, manager);
 }
 REX_HOOK_RAW(sub_824E5020) {
-  rb_blitz::input::CaptureGeometry(ctx, base);
-  __imp__sub_824E5020(ctx, base);
+  rb_blitz::input::DrawList(ctx, base);
+}
+REX_HOOK_RAW(sub_824E07A8) {
+  using namespace rb_blitz::input;
+  if (drawing) {
+    const auto row = ctx.r5.u32 - 4;
+    drawing->row = row >= drawing->first && row < drawing->end && (row - drawing->first) % 44 == 0 ? row : 0;
+  }
+  __imp__sub_824E07A8(ctx, base);
+}
+REX_HOOK_RAW(sub_824E9A90) {
+  rb_blitz::input::CaptureLabel(ctx, base);
+  __imp__sub_824E9A90(ctx, base);
+}
+REX_HOOK_RAW(sub_824E0900) {
+  using namespace rb_blitz::input;
+  const auto mesh = ctx.r4.u32;
+  const bool highlight = drawing && !ctx.r8.u32 && U32(base, U32(base, ctx.r3.u32) + 100) == 0x824E9098;
+  __imp__sub_824E0900(ctx, base);
+  if (highlight) CaptureHighlight(ctx, base, mesh);
 }

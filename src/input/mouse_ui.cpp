@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <imgui.h>
+#include <SDL3/SDL.h>
 #include <rex/cvar.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
@@ -87,7 +88,13 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     MouseMenuFocus(window_->HasFocus() && !io.WantCaptureMouse);
     const auto visibility = (MouseMenuAvailable() || (MouseSupportEnabled() && io.WantCaptureMouse)) ? rex::ui::Window::CursorVisibility::kVisible
                                                 : rex::ui::Window::CursorVisibility::kHidden;
-    if (window_->GetCursorVisibility() != visibility) window_->SetCursorVisibility(visibility);
+    auto* window = window_;
+    window->app_context().CallInUIThread([window, visibility] {
+      window->SetCursorVisibility(visibility);
+      // SDL owns a process-wide cursor; keep it synchronized after startup too.
+      if (visibility == rex::ui::Window::CursorVisibility::kVisible) SDL_ShowCursor();
+      else SDL_HideCursor();
+    });
   }
   std::optional<MenuPoint> Point(const rex::ui::MouseEvent& e) const {
     if (!window_) return {};

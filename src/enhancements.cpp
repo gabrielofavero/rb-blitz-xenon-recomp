@@ -205,7 +205,7 @@ constexpr std::array<ToggleRow, 10> kToggles{{
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3 and R10 "
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6 and R10 "
               "(docs/engine/toggles.md)",
               kToggles.size());
   for (const ToggleRow& row : kToggles) {

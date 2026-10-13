@@ -2,17 +2,19 @@
 
 The contract for the customization features in
 [plans/customization-plan.md](../plans/customization-plan.md) (R1–R9, plus R10 below, which a
-follow-up request added). **Every toggle is off by default, with two deliberate exceptions:** R3
+follow-up request added). **Every toggle is off by default, with three deliberate exceptions:** R3
 ships on, because the two questions it answers can no longer be answered on an install with no Rock
 Central to reach, and R10 ships on, because its subject is the Ultimate mod's own screen and it does
-nothing without that mod installed. This page is the table the plan's contract 1 promises: what each
+nothing without that mod installed. R6 ships on for native menu mouse support. This page is the table the plan's contract 1 promises: what each
 toggle gates, what the faithful (off) behaviour is, and which prompt implements it — or, for the
-remaining planned ones, what will. R3, R5, R7, R9 and R10 are implemented; R3, R5 and R10's
+remaining planned ones, what will. R3, R5, R6, R7, R9 and R10 are implemented; R3, R5 and R10's
 evidence is [main-menu-flow.md](main-menu-flow.md), R7's is
 [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) and [dlc.md](../dlc.md) §4.1, and R9's is
 [menu-music.md](menu-music.md).
 
-The cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
+R6 uses `mouse_ui_nav`, outside the `[enhancements]` table; the old `enhancements_native_mouse` placeholder was removed.
+
+The other cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
 boot log, not by this page.
 
 ## How to set one
@@ -39,7 +41,7 @@ implementing prompt that can apply its toggle live relaxes that lifecycle and up
 before the Ultimate and DLC layers:
 
 ```text
-[info] enhancements: 10 toggle(s), off by default except R3 and R10 (docs/engine/toggles.md)
+[info] enhancements: 10 toggle(s), off by default except R3, R6 and R10 (docs/engine/toggles.md)
 [info] enhancements: enhancements_expand_resolution = off (default) - R1 custom resolutions
 ...
 [info] enhancements: enhancements_skip_offline_dialog = on (default) - R3 skip the offline prompts
