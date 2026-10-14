@@ -28,6 +28,10 @@ struct HotRow {
 
 constexpr HotRow kHotRows[] = {
     {SettingId::kVsync, "graphics.vsync", "vsync"},
+    // The caption overlay's switch (owner request, 2026-10-14). Its cvar is defined by the game
+    // itself (src/ui/help_overlay.cpp) and read on every draw, so the write takes effect on the
+    // next frame; the row is `kHot` in the schema for that measured reason.
+    {SettingId::kSettingsLabels, "interface.settings_labels", "settings_help_overlay"},
 };
 
 constexpr char kCvarError[] = "the applier has no cvar for this row";

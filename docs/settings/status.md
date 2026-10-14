@@ -35,9 +35,14 @@ Part 1 wherever they disagree.
 - **Boot speed (2026-10-13)**: the wait is the DLC discovery, not the A/V load; the defaults now cache
   the library, zero `deferred_overlapped_delay_ms` and free the frame rate, so the walk is ~0.3 s and
   2,804 items enumerate in 39 s (was ~6 minutes).
-- **Newest feature: row descriptions** — the highlighted row's canonical symbol is published over the
-  settings channel, retail/in-song pages are resolved by a host observer, and a host overlay draws
-  the caption (`settings_help_overlay`, default on). **Not yet seen by a human** on a running screen.
+- **Row descriptions (the help captions)** — the highlighted row's canonical symbol is published over the
+  settings channel, retail/in-song pages are resolved by a host observer, and a host overlay draws the
+  caption. Since **2026-10-14** (P4 of the installed-game review) the caption is a system sans at a
+  display-proportional size on a much lighter panel, sits above the A/B prompts rather than in their
+  strip, is **absent** on the calibration wizard and on every informational/confirmation page, and has
+  its own row — **Interface → Settings Labels**, default On — which applies **live**, with no restart
+  prompt. Seen by eye on a running screen on that date: 1280x720 and this machine's 21:9 primary
+  (2560x1080 render, 2354x993 client).
 - **Verifiably broken/open: the in-song entry** — a screen of ours cannot list the in-song panels
   (`pause_panel`, `game_fade_out_panel`, `game_panel`); any such screen faults the guest with
   `read of guest 0x00000024`, and Back fails on the same limitation. It is item 13 below and the only
@@ -243,11 +248,11 @@ Items 4 and 10 are only honest if the in-game rows own their settings, so on the
 
 #### Row descriptions — a caption for the highlighted row (owner request, 2026-10-13, latest)
 
-While a row is highlighted, a one-or-two-line description appears at the bottom of the screen (white
-text in a translucent black box) for **every** row — merged, Ultimate and the adopted retail pages
-alike. It is an event, not a guess: the generated DTA publishes the highlighted row's canonical symbol
-over the settings channel (`rbbz-settings/help/<symbol>/-`, the new one-way `help` op; `help/-/-` when
-the page is left), so the caption cannot lag the highlight.
+While a row is highlighted, a one-or-two-line description appears near the bottom of the screen for
+**every** row — merged, Ultimate and the adopted retail pages alike. It is an event, not a guess: the
+generated DTA publishes the highlighted row's canonical symbol over the settings channel
+(`rbbz-settings/help/<symbol>/-`, the new one-way `help` op; `help/-/-` when the page is left), so the
+caption cannot lag the highlight.
 
 * **Our pages**: the text lives beside the row definition (~70 descriptions in
   [settings_screen.cpp](../../src/ui/settings_screen.cpp), as `screen::HelpTextFor`), authored into the
@@ -262,6 +267,79 @@ the page is left), so the caption cannot lag the highlight.
 
 Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks**, both exit 0.
 **Not yet seen by a human**: the caption still has to be driven on a running screen.
+
+##### P4 of the installed-game review: appearance, the caption-free pages, and the switch (2026-10-14)
+
+The owner's report (R3/R4/R7 of
+[2026-10-14-installed-game-fix-prompts.md](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md))
+was that the caption read as small, technical and boxed; that it competed with the calibration wizard
+and with the restart/save-error/confirmation messages; and that the achievement action's wording was
+wrong. All three are now measured in a boot rather than asserted.
+
+**What the caption is now** (`src/ui/help_overlay.cpp`):
+
+| | Before | Now | Why |
+| --- | --- | --- | --- |
+| Typeface | the drawer's own ProggyTiny at 10 px | a system sans — `segoeui.ttf`, then `tahoma.ttf`, then `arial.ttf` under `%WINDIR%\Fonts` — with the SDK's font as the fallback | the caption is player-facing text, not a debug readout |
+| Size | fixed 10 px | **2.8% of the display height**, floored at 16 px and capped at the 40 px the atlas bakes | a proportion keeps the caption's size relative to the game's own UI at 720p, 1080p, ultrawide and at every DPI scale |
+| Panel | `SetNextWindowBgAlpha(0.72)` | `0.32`, with rounding and padding derived from the drawn size | it is a subtitle, not a slab the size of a paragraph |
+| Position | bottom margin `max(24, 6% of height)` — inside the A/B prompt strip | bottom margin `max(56, 13.5% of height)` | clear of the A/B prompts, still below the menu rows |
+| Wrapping | 72% of the display, min 320 px | unchanged | long captions wrap the same way; only the type grew |
+
+The face is added to the drawer's own atlas in the app's new `OnConfigureFonts` override, because that
+is the only moment an `ImFontAtlas` may still be added to. The atlas is baked at 40 px and the caption
+is drawn **smaller**; that is deliberate, not arbitrary: this build's ImGui backend is a **legacy** one
+(no `ImGuiBackendFlags_RendererHasTextures`), so `ImFontAtlasBuildLegacyPreloadAllGlyphRanges` bakes
+every font at its `LegacySize` and a different requested size is *scaled from the nearest bake* —
+baking large and drawing small is what keeps the text crisp, and drawing larger than the bake would
+soften it. Boot evidence: `help_overlay: caption font 'segoeui.ttf' baked at 40 px`, in every run of
+`out/_swap/p4/`.
+
+**The caption-free pages.** A page whose definition carries a message token — the restart
+confirmation, the save-error report and the achievements confirmation, each in both contexts, six in
+all — now publishes the *hide* on entry and on every move instead of a row's description, and its
+presses announce nothing. That covers the stale-caption case the prompt names: entering the
+confirmation from the root's Cancel used to leave the departed row's description on screen over the
+message. Calibration is the other exclusion: `cal_welcome_screen` was dropped from
+`help_topics.cpp`'s resolver **and** from `KnowsScreen`, so the observer's transition rule clears the
+caption on the way in rather than describing the wizard. Ordinary pages are unaffected, and the tests
+assert both halves — the six suppressed pages are counted, and no other page lost its caption.
+
+**Interface → Settings Labels** (`interface.settings_labels`, default **On**). New stable id
+`SettingId::kSettingsLabels = 51` (nothing renumbered); schema row on the Interface page; storage
+`[interface] settings_labels`; the boot writes it into `settings_help_overlay` at the config rank
+(`CvarForSetting`), and the P9 live applier writes the same cvar on commit. It is the surface's
+**second `hot` row** — the overlay re-reads its cvar every draw — so the effect is immediate and no
+restart prompt appears. Measured in `out/_swap/p4/labels-off/`:
+
+| Observation | Value |
+| --- | --- |
+| The row and the caption, before | `shots/02-interface-labels.png`: **Settings Labels: On** highlighted, caption drawn |
+| The press | `labels-off.log`: `hot_apply: settings_help_overlay = false (was true), applied to the running game` and `settings_bridge: applied 'interface.settings_labels' to the running game; the row carries no pending state` |
+| The effect | `shots/03-labels-off.png`: **Settings Labels: Off** and **no caption**, in the same screen |
+| No restart | the log has **no** `request_restart` line; the route leaves the root and reaches the main menu (`shots/04-back-root.png`, `05-main-menu.png`) |
+| Durable | `settings.toml` gains `[interface] settings_labels = false` + `'interface.settings_labels' = 'manual'` |
+| Survives the relaunch | a **second** run of the same route on the same root draws **no** caption at the root (`shots-2/01-root.png`), and turning the row back on restores it live (`shots-2/03-labels-off.png`, `hot_apply: settings_help_overlay = true (was false)`) |
+
+**The wording (R7).** The action row and its confirmation button both read exactly
+**Unlock Online Achievements** now (`src/ui/settings_screen.cpp`, `src/settings/schema.cpp`); the old
+`Unlock Online Only Achievements` was 31 characters, over the 28-character line budget, so its row
+was drawn without its value. `[tree]` the action id, its bridge token (`invoke
+general.unlock_online_achievements`) and the grant itself are unchanged. Boot evidence:
+`out/_swap/p4/achievements/shots/02-unlock-online.png` (Ultimate target) shows the page with
+**Unlock All: On** and **Unlock Online Achievements** beside their captions. The retired wording is
+still the title's own locale string (`os_online_acc`), which `menu_options` handles and which this
+change deliberately does not rewrite.
+
+**Honest limits.** No in-song (pause) capture was taken, so the caption-free behaviour of the
+confirmation pages' *pause* twins is pinned by the tests (their definitions are generated and
+asserted) rather than seen. No 1920x1080 shot; the two resolutions captured are 1280x720 and the
+21:9 primary's 2560x1080 (2354x993 client). The fallback path — no system sans readable — was not
+exercised on this machine (all three candidates exist); it is a `REXLOG_WARN` plus the SDK's font at
+the same derived size, pinned by inspection rather than by a run. The save-error confirmation is
+generated but was not driven (producing a real write failure on demand is its own experiment). The
+reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
+
 
 #### How the test tree stands after the Vulkan preset change (measured 2026-10-13, later)
 

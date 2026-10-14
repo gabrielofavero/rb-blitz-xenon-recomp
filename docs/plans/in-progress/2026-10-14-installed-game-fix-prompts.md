@@ -1,7 +1,8 @@
 # Installed-game review: researched implementation prompts
 
-**2026-10-14 — research complete. P1, P2 and P3 are implemented and verified (their status is below);
-P4–P6 are not started.** This file moved from `plans/todo/` to `plans/in-progress/` when P1 landed.
+**2026-10-14 — research complete. P1, P2, P3 and P4 are implemented and verified (their status is
+below); P5 and P6 are not started.** This file moved from `plans/todo/` to `plans/in-progress/` when
+P1 landed.
 
 This handoff groups the owner's installed-game test report into six contexts. Preliminary research
 covered the current working tree, local CMake configuration, existing tests, historical findings,
@@ -531,6 +532,66 @@ long labels, both toggle states, calibration, restart/error dialogs, and pause
 variants. Show the A/B controls unobscured and the exact new achievement label.
 Record the final font, size/scale, opacity and layout values with screenshots.
 ```
+
+#### P4 — done (2026-10-14)
+
+**What changed**, in the three parts the prompt asked for. The full record, with the tables of
+values and the per-observation evidence, is [status.md](../../settings/status.md) § "Row
+descriptions" (the P4 subsection); this is the summary.
+
+1. **The caption's appearance.** The overlay inherited the drawer's own face — ProggyTiny at 10 px,
+   which is why it read as small and technical — so a **system sans** (`segoeui.ttf` → `tahoma.ttf` →
+   `arial.ttf` under `%WINDIR%\Fonts`, the SDK's font as the fallback) joins the atlas in a new
+   `RbBlitzApp::OnConfigureFonts` override, is drawn at **2.8% of the display height** (floor 16 px,
+   ceiling the 40 px the atlas bakes), sits at a bottom margin of `max(56, 13.5% of height)` — the
+   A/B prompt strip is the last tenth of the screen, so the caption is clear of it — and shows on a
+   panel whose background alpha dropped from **0.72 to 0.32**. The bake-large/draw-small choice is
+   forced, not stylistic: this build's ImGui backend is a *legacy* one (no
+   `ImGuiBackendFlags_RendererHasTextures`), so glyphs are preloaded at each font's `LegacySize` and
+   any other requested size is scaled from the nearest bake.
+2. **The caption-free pages.** A page whose definition carries a message token is the
+   informational/confirmation set, and it is exactly three panels — the restart confirmation, the
+   save-error report and the achievements confirmation — each with an in-song twin. All six now
+   publish the *hide* on entry and on every move instead of a row's description, which also fixes the
+   stale caption the prompt names (entering the confirmation from the root's Cancel used to leave the
+   departed row's text over the message). Calibration is the other exclusion: `cal_welcome_screen`
+   left both `CaptionFor` and `KnowsScreen`, so the observer's transition rule clears the caption on
+   the way in. Ordinary pages are untouched, and both halves are asserted (six suppressed pages
+   counted; no other page lost its caption).
+3. **Interface → Settings Labels** and the **wording**. New stable id `SettingId::kSettingsLabels = 51`
+   (nothing renumbered), schema row, storage `[interface] settings_labels`, boot write of
+   `settings_help_overlay` at the config rank, and a **live applier** — the surface's second `hot`
+   row, because the overlay re-reads that cvar on every draw. The action row and its confirmation
+   button now both read exactly **Unlock Online Achievements** (26 characters, inside the row line's
+   28-character budget; the old 31-character label was drawn without its value).
+
+**Evidence** (`out/_swap/p4/`, 2026-10-14; harness `out\_swap\p4\run.ps1 -Label captions|labels-off|achievements`):
+
+| Observation | Value |
+| --- | --- |
+| The face | every run logs `help_overlay: caption font 'segoeui.ttf' baked at 40 px` |
+| A caption on an ordinary page, 720p | `captions/shots/03-dlc.png`: *"Remember the content list so later boots skip the long library scan."* above the A/B prompts, A/B unobscured |
+| The restart confirmation | `captions/shots/06-restart-prompt.png`: the message and **Close / Restart now** with **no** caption |
+| Calibration | `captions/shots/08-calibration.png`: the wizard's own instructions, **no** caption |
+| The row, before | `labels-off/shots/02-interface-labels.png` (2560x1080 → 2354x993 client): **Settings Labels: On** highlighted with its caption |
+| The live apply | `labels-off.log`: `hot_apply: settings_help_overlay = false (was true), applied to the running game`; `settings_bridge: applied 'interface.settings_labels' to the running game; the row carries no pending state` |
+| The effect, same screen | `labels-off/shots/03-labels-off.png`: **Settings Labels: Off** and no caption |
+| No restart prompt | **no** `request_restart` line; the route leaves the root and reaches the main menu |
+| Durable + survives relaunch | `settings.toml` gains `[interface] settings_labels = false`; a second run of the same route shows **no** caption at the root (`shots-2/01-root.png`) and restores it live when the row is turned back on |
+| The wording | `achievements/shots/02-unlock-online.png` (Ultimate target): **Unlock Online Achievements** beside its caption |
+| Host tests | **38/38** (`out/build/rename-tests`); `settings_screen` **28,612 checks** with 3 new cases (the caption-free pages, the Settings Labels row, the wording), and `settings_hot_apply` **266 checks** with its hot-set expectation moved from one row to two |
+
+**Honest limits.** No in-song/pause capture, so the confirmation pages' pause twins are pinned by
+their generated definitions rather than seen; no 1920x1080 shot (the two captured are 1280x720 and
+21:9 2560x1080); the no-system-font fallback was not exercised (all three candidates exist here); the
+save-error confirmation is generated and asserted but was not driven, because producing a real write
+failure on demand is its own experiment.
+
+**Where the project's checks stand.** `ctest --test-dir out\build\rename-tests` is **38/38**; the
+release tree still cannot build a test at all (`REXGLUE_USE_VULKAN=ON` ⇒ the SDK's glslang guard
+writes `BUILD_TESTING=OFF`), so the runtime half was measured by booting the release build — and
+configuring that tree again is necessary after the test build, because the two share
+`rexglue-sdk/out/win-amd64`.
 
 ### P5 — Menu music transitions and strict repetition prevention
 

@@ -127,11 +127,12 @@ std::string CaptionFor(const Observation& observation) {
     return {};
   }
 
-  // Calibration's welcome screen is a mode picker fed by a code provider, so its row order is not
-  // readable from the records and it gets one screen-level caption instead of a guessed order.
-  if (observation.screen == "cal_welcome_screen") {
-    return "Calibration lines up what you hear with what you see. Choose a mode.";
-  }
+  // Calibration gets **no** caption at all (owner request, 2026-10-14). Its own screens draw the
+  // wizard's instructions and its own A/B prompts, and an extra overlay competes with them; the
+  // caption the player needs - the root row that opens the wizard - is published by the generated
+  // table before entering, and `EnterRetail` hides it on the way in. So `cal_welcome_screen` is
+  // deliberately absent from this function *and* from `KnowsScreen`, which is what makes the
+  // observer's transition rule clear the caption rather than describe the screen.
 
   // The controller mapping screen is a horizontal picker, not a list: one caption for the screen.
   if (observation.screen == "controller_config_screen" ||
@@ -145,8 +146,8 @@ std::string CaptionFor(const Observation& observation) {
 bool KnowsScreen(const std::string_view screen) {
   return screen == "game_screen" || screen == "av_options_screen" ||
          screen == "av_options_pause_screen" || screen == "tutorials_screen" ||
-         screen == "tutorials_pause_screen" || screen == "cal_welcome_screen" ||
-         screen == "controller_config_screen" || screen == "controller_config_pause_screen";
+         screen == "tutorials_pause_screen" || screen == "controller_config_screen" ||
+         screen == "controller_config_pause_screen";
 }
 
 bool IsGuestScreen(const std::string_view screen) {

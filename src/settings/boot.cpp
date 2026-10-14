@@ -500,7 +500,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
          {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kDlcScanThreads,
           SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
           SettingId::kHiddenMainMenu, SettingId::kVsync, SettingId::kFiltering,
-          SettingId::kResolution, SettingId::kAntiAliasing, SettingId::kDisplay}) {
+          SettingId::kResolution, SettingId::kAntiAliasing, SettingId::kDisplay,
+          SettingId::kSettingsLabels}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }

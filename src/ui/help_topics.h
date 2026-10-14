@@ -2,8 +2,8 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The caption table for the pages the merged Help & Options surface **routes into**: the retail
-// screens it re-points its own rows at (`av_options`, `tutorials`, `cal_welcome`,
-// `controller_config`) and the in-song pause panel's own inline list.
+// screens it re-points its own rows at (`av_options`, `tutorials`, `controller_config`) and the
+// in-song pause panel's own inline list.
 //
 // Why there are two tables (owner request, 2026-10-13). Every row of the *generated* surface
 // carries its text in src/ui/settings_screen.cpp, because that module owns the row table and the
@@ -17,13 +17,14 @@
 //     record fills its list with - `av_options`' `checkbox.lst` is `set_data (av_overscan
 //     av_active_track_volume av_sound_volume av_bass_boost)`, `tutorials`' `options.lst` is the
 //     two-element `tutorial_list`, and the in-song pause list is the merged root's own rows;
-//   * a page that is not a row list at all gets one **screen-level** caption (calibration's
-//     welcome screen explains the flow; the controller mapping is a horizontal picker).
+//   * a page that is not a row list at all gets one **screen-level** caption (the controller
+//     mapping is a horizontal picker).
 //
-// What is deliberately absent, so nobody re-derives it: `cal_welcome`'s mode list comes from a
-// *code* provider (`calibration_modes_provider`), so its row order is not readable from the
-// records and it gets the screen-level caption instead of a guessed order; `credits` is not a
-// setting and gets none.
+// What is deliberately absent, so nobody re-derives it: the **calibration wizard** gets no caption
+// (owner request, 2026-10-14) - its own screens draw their instructions and A/B prompts, and it
+// would otherwise be described from a row order that a *code* provider fills and the records do not
+// carry; the root row that opens it is captioned before entering, which is the help that matters.
+// `credits` is not a setting and gets none either.
 //
 // SDK-free: the resolution rules are pure and pinned by tests without a boot, the same reason
 // src/hooks/settings_bridge.* and src/ui/settings_screen.* are separate from their hooks.
@@ -55,6 +56,8 @@ std::string CaptionFor(const Observation& observation);
 
 // True when the screen is one this table describes. The observer may only clear a caption it
 // published when it left one of these *and* the destination is not a guest screen (see below).
+// Calibration is not one of them: the wizard is deliberately caption-free (owner request,
+// 2026-10-14), so leaving a described page for it clears the caption.
 bool KnowsScreen(std::string_view screen);
 
 // True when the guest's own generated panels publish captions for that screen (every screen in

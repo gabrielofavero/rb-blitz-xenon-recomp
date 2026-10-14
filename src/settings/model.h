@@ -61,6 +61,7 @@ enum class SettingId : uint16_t {
   kShowPb = 48,
   kShowSteak = 49,
   kInputViewer = 50,  // provider rows, original spelling
+  kSettingsLabels = 51,  // the help caption's own on/off (owner request, 2026-10-14)
   // Gameplay (Ultimate provider)
   kPrecisionMode = 60,
   kDisableRandomWiggles = 61,

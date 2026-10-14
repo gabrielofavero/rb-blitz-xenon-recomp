@@ -93,7 +93,7 @@ constexpr SettingId kRowsThatMustStayRestart[] = {
 };
 
 // The hot set, by name, so a promotion is a deliberate edit to this list and not a side effect.
-constexpr SettingId kRowsThatMustBeHot[] = {SettingId::kVsync};
+constexpr SettingId kRowsThatMustBeHot[] = {SettingId::kVsync, SettingId::kSettingsLabels};
 
 void StrategyTableIsComplete() {
   test::BeginCase("strategy: every row carries a §5.5 classification");
@@ -122,19 +122,29 @@ void StrategyTableIsComplete() {
              descriptor.strategy == ApplicationStrategy::kRestart);
   }
 
-  // Exactly one row is hot today, and it is hot because a boot measured the effect, not because
-  // its cvar is tagged reloadable (see src/settings/schema.cpp). A future session that promotes
-  // another row must also record its evidence, and this expectation moves with it.
-  CHECK_EQ(hot, 1);
+  // Exactly two rows are hot today, and each is hot because a boot measured the effect, not
+  // because its cvar was tagged reloadable (see src/settings/schema.cpp). A future session that
+  // promotes another row must also record its evidence, and this expectation moves with it.
+  CHECK_EQ(hot, 2);
   for (const SettingId id : kRowsThatMustBeHot) {
     const rb_blitz::settings::schema::SchemaRow* row = rb_blitz::settings::schema::FindRow(id);
     CHECK_TRUE(row != nullptr);
     if (row != nullptr) {
       CHECK_EQ(row->descriptor.strategy == ApplicationStrategy::kHot, true);
-      // The evidence names the measurement, so the claim is checkable rather than asserted.
-      CHECK_TRUE(row->descriptor.strategy_evidence.find("docs/guides/dlc.md") !=
-                 std::string::npos);
     }
+  }
+  // Each hot row's evidence names where its measurement is recorded, so the claim is checkable
+  // rather than asserted: V-Sync's is the frame-pacing measurement in the DLC guide, Settings
+  // Labels' is the boot that flipped the row and watched the caption go (docs/settings/status.md).
+  {
+    const auto* vsync = rb_blitz::settings::schema::FindRow(SettingId::kVsync);
+    CHECK_TRUE(vsync != nullptr &&
+               vsync->descriptor.strategy_evidence.find("docs/guides/dlc.md") !=
+                   std::string::npos);
+    const auto* labels = rb_blitz::settings::schema::FindRow(SettingId::kSettingsLabels);
+    CHECK_TRUE(labels != nullptr &&
+               labels->descriptor.strategy_evidence.find("docs/settings/status.md") !=
+                   std::string::npos);
   }
 
   for (const SettingId id : kRowsThatMustStayRestart) {
@@ -301,10 +311,26 @@ void PendingRestartIsValueBased() {
   now[SettingId::kHideHud] = Bool(false);
   CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
 
-  // A hot row (V-Sync, this build's one) never asks for a restart, however often it moves.
+  // A hot row (V-Sync) never asks for a restart, however often it moves.
   now[SettingId::kVsync] = Bool(false);
   CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
   now[SettingId::kVsync] = Bool(true);
+
+  // The same for the second hot row, and it is the one the owner's request turns on: flipping
+  // Settings Labels must not ask for a restart, because the caption is hidden on the next draw.
+  boot[SettingId::kSettingsLabels] = Bool(true);
+  now[SettingId::kSettingsLabels] = Bool(true);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
+  now[SettingId::kSettingsLabels] = Bool(false);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, now, descriptors).size(), 0u);
+  {
+    std::map<SettingId, Value> changed_labels;
+    changed_labels[SettingId::kSettingsLabels] = Bool(false);
+    const HotApplyPlan labels_plan =
+        rb_blitz::settings::PlanHotApplyByStrategy(changed_labels);
+    CHECK_EQ(labels_plan.live.count(SettingId::kSettingsLabels), 1);
+    CHECK_FALSE(labels_plan.restart_needed());
+  }
 
   // ...unless a live pass failed on it: then it is owed one while its value differs.
   now[SettingId::kVsync] = Bool(false);

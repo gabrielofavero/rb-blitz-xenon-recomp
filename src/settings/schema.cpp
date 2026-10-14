@@ -148,7 +148,7 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(ProviderRow(Make(SettingId::kUnlockOnlineAchievements, Category::kGeneral,
                                   Provider::kUltimate, WidgetKind::kAction, ValueKind::kNone,
                                   NoneValue()),
-                             "achievements", "Unlock Online Only Achievements",
+                             "achievements", "Unlock Online Achievements",
                              "Grant the online-only achievements once."));
 
   // --- Graphics ------------------------------------------------------------
@@ -237,6 +237,14 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "hide_offline_prompts"}, "hide_items", "Offline Mode Prompts",
                      "Hide the offline-mode prompts."));
+  // `interface.settings_labels` is the caption overlay's own switch (owner request, 2026-10-14):
+  // it is the *one* row with a measured live effect (docs/settings/status.md), because the overlay
+  // reads the `settings_help_overlay` cvar on every draw, so the `§5.5` strategy table below marks
+  // it `kHot` and the runtime applier writes that cvar.
+  rows.push_back(Row(Make(SettingId::kSettingsLabels, Category::kInterface, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"interface", "settings_labels"}, "", "Settings Labels",
+                     "Show a description of the highlighted row at the bottom of the screen."));
   {
     Descriptor d = Make(SettingId::kHideMainMenu, Category::kInterface, Provider::kNative,
                         WidgetKind::kBooleanWithSubmenu, ValueKind::kBool, BoolValue(false));
@@ -309,7 +317,13 @@ std::vector<SchemaRow> BuildTable() {
 // tests/settings_hot_apply_tests.cpp asserts the two agree row by row, which is what keeps them
 // from drifting.
 //
-// **Nothing is `kHot` today, and that is a measurement rather than a policy:**
+// **`kHot` is a measurement, not a preference.** Two rows carry it, both because a boot observed
+// the live effect and the evidence column names it:
+//
+//   * `kVsync` - the GPU plugin's worker re-reads `vsync` every iteration.
+//   * `kSettingsLabels` - the caption overlay re-reads `settings_help_overlay` every draw.
+//
+// Everything else is `restart`, and that is a measurement rather than a policy:
 //
 //   * Every Ultimate row is `restart` because P6 measured *when* the provider's values are read:
 //     the payload's own loader fills its DTA variables before the first frame of a boot, so
@@ -321,12 +335,8 @@ std::vector<SchemaRow> BuildTable() {
 //     the renderer from inside a menu is its own spike (parent plan §5.5).
 //   * The remaining native rows are read at boot by the code that consumes them (the DLC scan, the
 //     main-menu transform, the offline prompts), so they need a new process until one of them is
-//     measured live.
-//
-// Two candidates have a live read in the code and no measurement yet - exactly the difference the
-// evidence column exists to record: `kVsync` (`vsync` is re-read by the GPU plugin's worker every
-// iteration) and `kDlcMenuSongs` (the menu music pool is built when the menu is entered). Both stay
-// `restart` until a boot observes the effect; the experiment for each is in the P9 handoff.
+//     measured live - `kDlcMenuSongs` is the standing candidate (the menu music pool is built when
+//     the menu is entered), and the experiment for it is in the P9 handoff.
 struct StrategyEntry {
   SettingId id;
   ApplicationStrategy strategy;
@@ -374,6 +384,15 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kShowPb, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowSteak, ApplicationStrategy::kRestart, ""},
     {SettingId::kInputViewer, ApplicationStrategy::kRestart, ""},
+    // The second hot row, and the same shape as `kVsync`: the caption overlay re-reads its cvar in
+    // `HelpOverlayDialog::OnDraw` (src/ui/help_overlay.cpp) on every frame, so a write to it takes
+    // effect on the next draw without a new process. Measured in a boot: the row is flipped in
+    // Help & Options and the caption disappears on the next draw, with the log recording
+    // `hot_apply: settings_help_overlay = false (was true), applied to the running game`
+    // (docs/settings/status.md, the Settings Labels evidence).
+    {SettingId::kSettingsLabels, ApplicationStrategy::kHot,
+     "the overlay re-reads `settings_help_overlay` every draw, so flipping the row in Help & Options "
+     "hid the caption on the next frame (docs/settings/status.md, Settings Labels)"},
     // Gameplay (Ultimate provider)
     {SettingId::kPrecisionMode, ApplicationStrategy::kRestart, ""},
     {SettingId::kDisableRandomWiggles, ApplicationStrategy::kRestart, ""},

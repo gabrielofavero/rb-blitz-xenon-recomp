@@ -27,6 +27,8 @@
 #include <string>
 #include <string_view>
 
+struct ImFontAtlas;  // imgui; only the font hook below needs the type
+
 namespace rex::ui {
 class ImGuiDrawer;
 class ImGuiDialog;
@@ -37,6 +39,14 @@ namespace rb_blitz::ui::help {
 // Creates the overlay and registers it as the settings bridge's caption sink. Owned by the app
 // (src/rb_blitz_app.h) for as long as it lives; destroying it unregisters the sink.
 std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlay(rex::ui::ImGuiDrawer* drawer);
+
+// Loads the caption's own typeface into the drawer's atlas and remembers it for the overlay's draws
+// (owner request, 2026-10-14). Called once, from `RbBlitzApp::OnConfigureFonts` - the only moment
+// an `ImFontAtlas` may still be added to - and never refuses: a machine whose system fonts cannot
+// be read keeps the SDK's own face, drawn at the same derived size, which is a legible fallback
+// rather than no caption at all. What it chose, and why, is logged, because "the caption got
+// bigger" is otherwise a claim with no evidence.
+void ConfigureCaptionFont(ImFontAtlas* atlas);
 
 // The thread-safe publish the caption sources call. Empty text hides the caption; text equal to
 // the current caption is a no-op, so publishing every frame cannot churn the UI thread.

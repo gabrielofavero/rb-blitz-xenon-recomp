@@ -873,7 +873,7 @@ unknown token is refused rather than accepted.
 
 | # | Hook | What happens | Why there |
 | --- | --- | --- | --- |
-| 1 | `OnConfigurePaths` | identity → `paths.toml` → legacy profile → migrate → load `settings.toml`; then the capability snapshot, then target/licence, renderer, the DLC and Interface rows and the two path roots, at the config rank | Runs after the legacy profile's rows (which it migrates then outranks at equal rank) and *before* the SDK loads the game's own `rb_blitz.toml` — a later write at the same rank, so it still beats it (§4.2) |
+| 1 | `OnConfigurePaths` | identity → `paths.toml` → legacy profile → migrate → load `settings.toml`; then the capability snapshot, then target/licence, renderer, the DLC and Interface rows (including `interface.settings_labels`, which the caption overlay reads on every draw) and the two path roots, at the config rank | Runs after the legacy profile's rows (which it migrates then outranks at equal rank) and *before* the SDK loads the game's own `rb_blitz.toml` — a later write at the same rank, so it still beats it (§4.2) |
 | 2 | `OnPostInitLogging` | the store's boot lines: file + status, the migration, rows applied, rows an explicit source owns, the two open items | First point where a line goes anywhere (same reason Controller Settings' profile report lives here) |
 | 3 | `OnPostLoadXexImage` (after `ultimate::Configure`, before `bridge::Configure`) | provider values reach the service; the GPU plugin's own cvars are written now that it registered them; the channel is pointed at the service | Provider state is known only after `ultimate::Configure`; the plugin's cvars (`vsync`, `anisotropic_override`, `native_2x_msaa`, `swap_post_effect`, `resolution_scale`) do not exist at step 1; and `bridge::Configure` *seeds* through the channel, so the store must be installed already |
 | 4 | `OnPreLaunchModule` (before `FinalizeInit`) | read every applied cvar back; a row whose value did not stand is recorded as overridden | `SetFlagFromConfig` returning true does not prove the value won (§4.2): a later same-rank write — `rb_blitz.toml` — beats it, and a row the player cannot change must say so |
@@ -1306,7 +1306,7 @@ for the rest: save first, spawn exactly one child that waits for this process to
 It is **not** the authored restart prompt (§6.1) and **not** the boot wiring that calls the coordinator
 (`src/main.cpp`'s bootstrap entry, §6.2) — both named, with the shape they need, in §6.
 
-### 2. The strategy table, and why exactly one row is hot
+### 2. The strategy table, and why only two rows are hot
 
 `src/settings/schema.cpp` carries a single table (`kStrategies`), materialized into `Descriptor::strategy`
 by `BuildDescriptors` and read without a descriptor list by `schema::StrategyOf`. Tests assert the table is
@@ -1317,9 +1317,10 @@ complete, that a `hot` row always carries evidence, that a `restart` row never d
 | Row | Strategy | Why |
 | --- | --- | --- |
 | `graphics.vsync` (`kVsync`) | **hot** | **Measured**: with the guest running, the host flipped this exact cvar and the discovery rate moved from 16.66 ms per item to 5.68 ms (46.7 s → 15.96 s for 2,807 items), the log recording `vsync false, was true` 7 ms after the flip — [dlc.md](../guides/dlc.md) §"Frame pacing for the discovery". The mechanism is the GPU plugin's worker re-reading `vsync` every iteration. |
+| `interface.settings_labels` (`kSettingsLabels`) | **hot** | **Measured 2026-10-14**: the caption overlay re-reads `settings_help_overlay` in `HelpOverlayDialog::OnDraw` on every frame, so flipping the row in Help & Options hid the caption on the next draw — `hot_apply: settings_help_overlay = false (was true), applied to the running game` and `settings_bridge: applied 'interface.settings_labels' to the running game; the row carries no pending state`, with no `request_restart` in the log — [status.md](status.md) §"Row descriptions". |
 | everything else | restart | Nothing has a measured live effect. Notably `interface.hide_hud` — the parent plan §5.5 named Hide HUD as its hot example **before** P6 measured when the provider reads its values (the payload's loader fills its DTA variables before the first frame), so the honest answer for it is `restart`. The render-path rows are structurally restart (§5.5); the remaining native rows are read at boot by their consumer. |
 
-Two candidates have a live read in the code and **no measurement yet**, staying `restart` until one exists:
+One candidate has a live read in the code and **no measurement yet**, staying `restart` until one exists:
 
 * `general.dlc_menu_songs` (`enhancements_menu_dlc_songs`): `src/hooks/shell_music.cpp` reads the toggle
   when the menu is entered, so a live write should change the *next* menu entry's pool. Experiment: boot
@@ -1347,14 +1348,16 @@ prompt decision — not the descriptors — because a session can contain a hot 
 
 ### 4. The runtime applier, and the thread rule
 
-`src/hooks/hot_apply_runtime.cpp` knows exactly one row today:
+`src/hooks/hot_apply_runtime.cpp` knows exactly two rows:
 
 ```text
-graphics.vsync -> rex::cvar::SetFlagByName("vsync", "true"|"false")
+graphics.vsync             -> rex::cvar::SetFlagByName("vsync", "true"|"false")
+interface.settings_labels  -> rex::cvar::SetFlagByName("settings_help_overlay", "true"|"false")
 ```
 
-* **By name**, because `vsync` is defined in `rexruntime.dll`'s GPU category and this project defines no
-  storage symbol for it (the same reason R7 reads it by name).
+* **By name**, because `vsync` is defined in `rexruntime.dll`'s GPU category and `settings_help_overlay` is
+  defined by the game's own overlay module (`src/ui/help_overlay.cpp`); this project defines no storage
+  symbol for either (the same reason R7 reads `vsync` by name).
 * **On a host thread.** The commit that triggers an apply arrives on the *guest* thread — it is the guest's
   own `write_file` — and a guest thread must not touch the cvar registry
   ([song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §7). `Apply` runs the write on a short-lived thread and

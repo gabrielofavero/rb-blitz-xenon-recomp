@@ -35,6 +35,9 @@
 //     here the probe overlay joins them, so there is still one ImGui context and one
 //     renderer. It draws only while probe_overlay is on; with the cvar off it changes
 //     nothing (diagnostics, see src/diag/probe.h).
+//   * OnConfigureFonts - the SDK registers its own font and adds nothing else; here the
+//     caption overlay's system sans joins the same atlas (player-facing text next to the
+//     SDK's 10 px debug face), with the SDK's font as the fallback when none can be read.
 //   * LogBootIdentity - diagnostics only; it changes no guest behaviour.
 //
 //   Every early return above is either the faithful path or a refusal to deviate
@@ -365,6 +368,14 @@ class RbBlitzApp : public rex::ReXApp {
     if (settings_boot_) {
       settings_boot_->LogConfigured();
     }
+  }
+
+  // The help captions' typeface (owner request, 2026-10-14). The SDK registers its own font
+  // (ProggyTiny at 10 px) and then calls this; here a system sans joins the atlas for the caption
+  // overlay, which is player-facing text rather than a debug readout. This is the only moment an
+  // atlas may still be added to, which is why the load lives here and not in the overlay.
+  void OnConfigureFonts(ImFontAtlas* atlas) override {
+    rb_blitz::ui::help::ConfigureCaptionFont(atlas);
   }
 
   // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor

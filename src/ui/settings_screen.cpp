@@ -558,7 +558,7 @@ std::vector<PanelSpec> AllPanels() {
                                       true),
                               ActionRow("settings_unlock_online",
                                         "general.unlock_online_achievements",
-                                        "Unlock Online Only Achievements",
+                                        "Unlock Online Achievements",
                                         "Grant the achievements that normally need online play.", true),
                           }});
 
@@ -724,6 +724,14 @@ std::vector<PanelSpec> AllPanels() {
                                          "Choose which heads-up displays appear during play.", true),
                               SubmenuRow("settings_hide_items", "settings_hide_items_screen",
                                          "Hide Items", "Hide entries on the main menu."),
+                              // The caption overlay's own switch (owner request, 2026-10-14). It is
+                              // a direct row rather than a submenu: On/Off is the whole choice, and
+                              // the page is four rows with it (the six-row budget is not in play).
+                              // It is the surface's second `hot` row - flipping it hides or shows the
+                              // caption on the next frame, with no restart prompt.
+                              BoolRow("settings_labels", "interface.settings_labels",
+                                      "Settings Labels",
+                                      "Show a description of the highlighted row at the bottom of the screen."),
                           }});
 
   // 5a. HUD: the provider's seven fields, original spellings preserved (`show_steak`).
@@ -806,7 +814,7 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_save_error_panel", "settings_save_error_screen", kRootScreen,
                          MenuPanels(), {close}, "../pause/settings_confirmation.milo",
                          "settings_save_error_message"});
-  Row achievements = InfoRow("settings_earn_achievements", "Unlock online achievements",
+  Row achievements = InfoRow("settings_earn_achievements", "Unlock Online Achievements",
                              "Grant the online-only achievements. This cannot be undone.");
   achievements.kind = Kind::kAchievements;
   out.push_back(PanelSpec{"settings_achievements_confirm_panel", "settings_achievements_confirm_screen", "settings_achievements_screen",
@@ -1260,7 +1268,7 @@ Node SelectIndex(const size_t index) {
     Cmd({Sym(kList), Sym("set_selected"), Var("rbbz_settings_index")})});
 }
 
-Node DirectionTable(const std::vector<Cell>& cells, const bool forward) {
+Node DirectionTable(const std::vector<Cell>& cells, const bool forward, const bool suppress_help) {
   std::vector<Node> kids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
   for (size_t i = 0; i < cells.size(); ++i) {
     // Clamp at both ends rather than wrap: a wrap needs the user to notice they have left the
@@ -1272,7 +1280,10 @@ Node DirectionTable(const std::vector<Cell>& cells, const bool forward) {
     // The move also publishes the caption of the row being moved *to*. The target row's canonical
     // symbol is a compile-time fact of this table - no guest query is needed - and the write rides
     // behind the selection so the caption can never name a row the highlight is not on.
-    const std::string target_symbol = cells[target].row->symbol;
+    //
+    // A suppressed page (a confirmation: see `SuppressesHelp`) publishes the *hide* instead, so the
+    // move announces nothing while still placing the selection.
+    const std::string target_symbol = suppress_help ? std::string() : cells[target].row->symbol;
     for (const std::string& symbol : cells[i].symbols) {
       kids.push_back(Arr({Sym(symbol), Cmd({Sym("do"), SelectIndex(target),
                                             HelpWrite(target_symbol)})}));
@@ -1281,11 +1292,25 @@ Node DirectionTable(const std::vector<Cell>& cells, const bool forward) {
   return Cmd(std::move(kids));
 }
 
+// True when a page carries no explanatory caption at all.
+//
+// The rule is the panel's own message token, and it is exactly the informational/confirmation
+// surfaces (owner request, 2026-10-14): a panel with a `pause.lbl set_token_fmt <token>` body is
+// the restart confirmation, the save-error report, or the achievements confirmation - each of which
+// draws a *real* message and a handful of buttons, and each of which would otherwise show a stale
+// row description over its own text. The three panels that carry a message are the whole set; no
+// ordinary page does, so no ordinary page loses its caption.
+bool SuppressesHelp(const PanelSpec& panel) { return !panel.message.empty(); }
+
 // The caption an entry publishes: the row the highlight is about to sit on, which is the first
 // *visible* row of the page - and which rows are visible depends on the provider gate, because a
 // page may begin with provider-only rows (Interface does). The two gate worlds each get their
-// write; where they agree (most pages) a single statement is emitted instead.
+// write; where they agree (most pages) a single statement is emitted instead. A suppressed page
+// publishes the hide in both worlds.
 Node EnterHelpWrite(const PanelSpec& panel) {
+  if (SuppressesHelp(panel)) {
+    return HelpWrite("");
+  }
   const std::vector<Cell> base = Cells(panel, false);
   const std::vector<Cell> all = Cells(panel, true);
   const std::string symbol = base.empty() ? "" : base.front().row->symbol;
@@ -1299,6 +1324,7 @@ Node EnterHelpWrite(const PanelSpec& panel) {
 
 // `{move_down {if_else <gate> <six-row table> <five-row table>}}`
 Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
+  const bool suppress_help = SuppressesHelp(panel);
   const bool has_provider_row = [&panel] {
     for (const Row& row : panel.rows) {
       if (row.provider_only) {
@@ -1307,10 +1333,10 @@ Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
     }
     return false;
   }();
-  Node body = DirectionTable(Cells(panel, false), forward);
+  Node body = DirectionTable(Cells(panel, false), forward, suppress_help);
   if (has_provider_row) {
     body = Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(kProviderQuery)}),
-               DirectionTable(Cells(panel, true), forward), std::move(body)});
+               DirectionTable(Cells(panel, true), forward, suppress_help), std::move(body)});
   }
   return Arr({Sym(name), Cmd({Sym("if"), Cmd({Sym("!"), Var("rbbz_settings_editing")}), std::move(body)})});
 }

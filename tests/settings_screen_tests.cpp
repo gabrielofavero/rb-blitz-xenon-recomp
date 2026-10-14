@@ -2327,14 +2327,27 @@ void TestHelpEventsInTheDefinition() {
     }
     ++panels;
 
+    // The confirmation/error pages carry no caption at all (owner request, 2026-10-14): their
+    // `enter` publishes the *hide* and their moves announce nothing, because their own message and
+    // buttons are the only thing the player should be reading. Their names are the discriminator
+    // here so the assertions below can tell the two kinds of page apart.
+    const std::string panel_name =
+        (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
+    const bool suppressed = panel_name.rfind("settings_restart", 0) == 0 ||
+                            panel_name.rfind("settings_save_error", 0) == 0 ||
+                            panel_name.rfind("settings_achievements_confirm", 0) == 0;
+
     // Enter: the first visible row's caption, emitted as an `enter` statement so a commit that
     // re-runs `populate_menu` cannot drag the overlay back to row 0 (the mirror has shown that
     // bug class is real). A page whose first row set depends on the provider gate writes both
-    // gate worlds; the test accepts 1 or 2 writes and requires at least one.
+    // gate worlds - the one that has a visible row, and (for a page that is entirely
+    // provider-only) the empty one, which is the hide - so the test accepts 1 or 2 writes and
+    // requires exactly one of them to name a row.
     std::vector<const dtb::Node*> enter_members;
     CollectMembers(root, "enter", &enter_members);
     CHECK_EQ(enter_members.size(), 1u);
-    int written = 0;
+    int written = 0;  // any caption event
+    int named = 0;    // one that names a row rather than hiding the caption
     for (const dtb::Node* member : enter_members) {
       std::vector<std::string> texts;
       CollectText(*member, &texts);
@@ -2344,10 +2357,26 @@ void TestHelpEventsInTheDefinition() {
           continue;
         }
         ++written;
-        CHECK_TRUE(symbol == "-" || !HelpTextFor(symbol).empty());
+        if (suppressed) {
+          // A confirmation page enters with the hide and nothing else.
+          CHECK_TRUE(symbol == "-");
+        } else if (symbol == "-") {
+          // The gate world with no visible row: an empty page has no first row to describe.
+        } else {
+          ++named;
+          CHECK_TRUE(!HelpTextFor(symbol).empty());
+        }
       }
     }
     CHECK_TRUE(written >= 1 && written <= 2);
+    // Exactly one *visible* row is described, so at least one write names a row - and a page whose
+    // first visible row depends on the provider gate emits one name per gate world (two writes,
+    // one `if_else`, two names). A suppressed page names none.
+    if (suppressed) {
+      CHECK_EQ(named, 0);
+    } else {
+      CHECK_TRUE(named >= 1);
+    }
     if (written > 0) {
       ++enters;
     }
@@ -2382,8 +2411,14 @@ void TestHelpEventsInTheDefinition() {
                 continue;
               }
               ++writes;
-              CHECK_TRUE(symbol != "-");  // a move always names a row
-              CHECK_TRUE(!HelpTextFor(symbol).empty());
+              // A suppressed page announces nothing; an ordinary page names the row the
+              // highlight just reached, so the overlay can never describe the wrong row.
+              if (suppressed) {
+                CHECK_TRUE(symbol == "-");
+              } else {
+                CHECK_TRUE(symbol != "-");
+                CHECK_TRUE(!HelpTextFor(symbol).empty());
+              }
             }
             CHECK_EQ(writes, 1);
           }
@@ -2463,7 +2498,11 @@ void TestHelpTopicsResolve() {
   CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 1, false}) ==
              TextForSymbol("tutorialsong3"));
   CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 2, false}).empty());
-  CHECK_TRUE(!CaptionFor({"cal_welcome_screen", "", -1, false}).empty());
+  // Calibration is deliberately caption-free (owner request, 2026-10-14): its own screens draw the
+  // wizard's instructions and prompts, so neither the resolver nor the observer's transition rule
+  // may describe it. The root row that opens it still carries its caption.
+  CHECK_TRUE(CaptionFor({"cal_welcome_screen", "", -1, false}).empty());
+  CHECK_TRUE(!HelpTextFor("calibration").empty());
   CHECK_TRUE(!CaptionFor({"controller_config_screen", "", -1, false}).empty());
   CHECK_TRUE(!CaptionFor({"controller_config_pause_screen", "", -1, false}).empty());
 
@@ -2472,6 +2511,7 @@ void TestHelpTopicsResolve() {
   CHECK_TRUE(KnowsScreen("game_screen"));
   CHECK_TRUE(KnowsScreen("av_options_screen"));
   CHECK_TRUE(KnowsScreen("tutorials_pause_screen"));
+  CHECK_FALSE(KnowsScreen("cal_welcome_screen"));
   CHECK_FALSE(KnowsScreen(kRootScreen));
   CHECK_FALSE(KnowsScreen("splash_screen"));
   CHECK_TRUE(IsGuestScreen(kRootScreen));
@@ -2480,6 +2520,166 @@ void TestHelpTopicsResolve() {
   CHECK_FALSE(IsGuestScreen("av_options_screen"));
   CHECK_FALSE(IsGuestScreen("splash_screen"));
   CHECK_FALSE(IsGuestScreen(""));
+}
+
+// The informational/confirmation pages: the restart prompt, the save-error report and the
+// achievements confirmation, each with an in-song twin. They are the pages whose whole purpose is
+// the message they draw, so they carry **no** caption at all (owner request, 2026-10-14) - and the
+// count here is deliberate, because "a page stopped publishing captions by accident" is exactly
+// what this pins.
+void TestConfirmationPagesAreCaptionFree() {
+  BeginCase("the restart/save-error/confirmation pages draw no caption in either context");
+
+  const char* kSuppressed[] = {"settings_restart_panel",     "settings_restart_pause_panel",
+                               "settings_save_error_panel",  "settings_save_error_pause_panel",
+                               "settings_achievements_confirm_panel",
+                               "settings_achievements_confirm_pause_panel"};
+  const auto is_suppressed = [&kSuppressed](const std::string& name) {
+    for (const char* candidate : kSuppressed) {
+      if (name == candidate) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  int suppressed_seen = 0;
+  int panels = 0;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 || root.kids[0].text != "new" ||
+        root.kids[2].tag != dtb::kSymbol) {
+      continue;
+    }
+    const std::string name = root.kids[2].text;
+    const bool suppressed = is_suppressed(name);
+
+    // Every caption event on a suppressed page must be the *hide*: an `enter` that publishes the
+    // first row, or a move that names a row, would put a description over the message.
+    std::vector<std::string> texts;
+    CollectText(root, &texts);
+    int hides = 0;
+    for (const std::string& text : texts) {
+      std::string symbol;
+      if (!IsHelpPath(text, &symbol)) {
+        continue;
+      }
+      if (suppressed) {
+        CHECK_TRUE(symbol == "-");
+        ++hides;
+      }
+    }
+
+    // The `enter` statement is where a page announces its first row: on a suppressed page it is
+    // the hide, and on an ordinary page it names a row (the page's own caption coverage is the
+    // sibling test's job).
+    std::vector<const dtb::Node*> enter_members;
+    CollectMembers(root, "enter", &enter_members);
+    if (enter_members.size() != 1u) {
+      continue;  // a screen, not a panel
+    }
+    ++panels;
+    std::vector<std::string> enter_texts;
+    CollectText(*enter_members.front(), &enter_texts);
+    int enter_named = 0;
+    int enter_hides = 0;
+    for (const std::string& text : enter_texts) {
+      std::string symbol;
+      if (!IsHelpPath(text, &symbol)) {
+        continue;
+      }
+      if (symbol == "-") {
+        ++enter_hides;
+      } else {
+        ++enter_named;
+      }
+    }
+    if (suppressed) {
+      ++suppressed_seen;
+      CHECK_TRUE(enter_hides >= 1);
+      CHECK_EQ(enter_named, 0);
+      CHECK_TRUE(hides >= 1);
+    } else {
+      // No ordinary page may have slipped into the suppressed set by losing its caption: every
+      // one of them describes a first visible row (one name, or one per provider-gate world).
+      CHECK_TRUE(enter_named >= 1);
+    }
+  }
+
+  CHECK_EQ(panels, 40);         // the whole surface, in both contexts
+  CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
+}
+
+// Interface -> Settings Labels (owner request, 2026-10-14): a direct On/Off row on the Interface
+// page, defaulting to On, with its two locale spellings. The *schema*, *store*, *cvar* and *live
+// apply* halves are pinned by their own suites (`settings_hot_apply`, `settings_service`); this is
+// the row half, which lives in this table.
+void TestSettingsLabelsRow() {
+  BeginCase("Interface carries the Settings Labels row, with On/Off labels");
+
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  const auto has = [&roots](const char* symbol) {
+    for (const dtb::Node& root : roots) {
+      if (HasSymbol(root, symbol)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  CHECK_TRUE(has("settings_labels_on"));
+  CHECK_TRUE(has("settings_labels_off"));
+  // It is a boolean row, not a submenu: the two spellings above are the whole row.
+  CHECK_FALSE(has("settings_labels_screen"));
+
+  const std::vector<std::pair<std::string, std::string>> labels = Labels();
+  const auto label_for = [&labels](const std::string& key) {
+    for (const auto& item : labels) {
+      if (item.first == key) {
+        return item.second;
+      }
+    }
+    return std::string();
+  };
+  CHECK_TRUE(label_for("settings_labels_on") == "Settings Labels: On");
+  CHECK_TRUE(label_for("settings_labels_off") == "Settings Labels: Off");
+
+  // The caption the row itself shows explains what the switch does; it must exist like every other
+  // row's.
+  CHECK_TRUE(!HelpTextFor("settings_labels").empty());
+
+  // The row rides the ordinary boolean request paths (one query, two writes), so the boot's own
+  // store applies it exactly like `Cache DLC Library`.
+  const std::vector<std::string> paths = RequestPaths();
+  const auto has_path = [&paths](const char* path) {
+    return std::find(paths.begin(), paths.end(), path) != paths.end();
+  };
+  CHECK_TRUE(has_path("rbbz-settings/snapshot/interface.settings_labels/b:1"));
+  CHECK_TRUE(has_path("rbbz-settings/set/interface.settings_labels/b:1"));
+  CHECK_TRUE(has_path("rbbz-settings/set/interface.settings_labels/b:0"));
+}
+
+// R7: the visible action wording is exactly "Unlock Online Achievements" - the achievement grant the
+// owner asked to see renamed. Both surfaces that name it are ours: the action row on the
+// Achievements & Unlocks page, and the confirmation button the row opens.
+void TestAchievementActionWording() {
+  BeginCase("the achievement action reads exactly 'Unlock Online Achievements'");
+
+  const std::vector<std::pair<std::string, std::string>> labels = Labels();
+  const auto label_for = [&labels](const std::string& key) {
+    for (const auto& item : labels) {
+      if (item.first == key) {
+        return item.second;
+      }
+    }
+    return std::string();
+  };
+  CHECK_TRUE(label_for("settings_unlock_online") == "Unlock Online Achievements");
+  CHECK_TRUE(label_for("settings_earn_achievements") == "Unlock Online Achievements");
+
+  // The row's own caption still says what the grant does, and no surface spells the old wording.
+  CHECK_TRUE(!HelpTextFor("settings_unlock_online").empty());
+  for (const auto& item : labels) {
+    CHECK_TRUE(item.second.find("Unlock Online Only") == std::string::npos);
+  }
 }
 
 // A backend row lists what this build and this machine can run: the payload fills
@@ -2590,5 +2790,8 @@ int main(int argc, char** argv) {
   TestHelpTextsCoverEveryRow();
   TestHelpEventsInTheDefinition();
   TestHelpTopicsResolve();
+  TestConfirmationPagesAreCaptionFree();
+  TestSettingsLabelsRow();
+  TestAchievementActionWording();
   return Finish();
 }
