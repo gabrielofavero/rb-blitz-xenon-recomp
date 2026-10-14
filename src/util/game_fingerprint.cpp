@@ -443,7 +443,7 @@ bool EmitExpectedHeader(const GameFingerprint& fingerprint, std::string_view sou
          << " -- do not edit.\n"
          << "//\n"
          << "// Expected values for the supported game dump, used by the boot identity\n"
-         << "// line in src/rb_blitz_app.h. Regenerate by building (docs/build-and-run.md).\n"
+         << "// line in src/rb_blitz_app.h. Regenerate by building (docs/guides/build-and-run.md).\n"
          << "\n"
          << "#pragma once\n"
          << "\n"

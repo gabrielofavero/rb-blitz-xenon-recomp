@@ -3,7 +3,7 @@
 # in one machine's build tree, and something checks it. That something is
 # tools/toolchain_check.cpp, built as rb_blitz_toolchain and run by the build
 # before codegen, so a build states the toolchain it is about to use instead of
-# leaving it in the build tree's CMakeCache.txt. docs/toolchain.md is the prose
+# leaving it in the build tree's CMakeCache.txt. docs/guides/toolchain.md is the prose
 # half of this file.
 #
 # What is compared:
@@ -53,7 +53,7 @@ version = "1.13.2"
 [msvc]
 # The MSVC toolchain clang takes its headers and libraries from. `version` here is
 # the toolset directory under VC\Tools\MSVC (not the Visual Studio product
-# version, which docs/toolchain.md records separately). This is not cosmetic -
+# version, which docs/guides/toolchain.md records separately). This is not cosmetic -
 # without those headers the build fails on <windows.h> rather than on anything the
 # presets name.
 version = "14.44.35207"

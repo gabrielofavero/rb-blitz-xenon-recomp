@@ -3,7 +3,7 @@
 //
 // Host tests for src/util/sha256.{h,cpp} and src/util/game_fingerprint.{h,cpp} -
 // the two pieces behind the build gate and the boot identity line that consume
-// config/game_fingerprints.toml. No SDK, no GPU, no game boot: docs/rb3-references.md
+// config/game_fingerprints.toml. No SDK, no GPU, no game boot: docs/reference/rb3-references.md
 // §7.3 asks for exactly this, and the whole point of the fingerprint check is that
 // it can run before anything else does.
 //

@@ -8,7 +8,7 @@
 #     entry, and the generated body is unchanged.
 #
 # The naming rule, the evidence and the confidence for every name below are in
-# docs/symbols.md "Named symbols".
+# docs/reference/symbols.md "Named symbols".
 
 # ---------------------------------------------------------------------------
 # Forced entry points - three left, all absolute tail-branch targets.
@@ -39,7 +39,7 @@
 # on 2026-09-29: patch 0005's gap fill now registers the runs inside a code region that
 # no function's extent claims, and it then finds every one of the 21, with
 # 0x827EC038 - the last one, a 24-byte comparator whose address exists nowhere in the
-# image - among them (docs/known-issues.md B-006, docs/history/bringup-log.md,
+# image - among them (docs/reference/known-issues.md B-006, docs/history/bringup-log.md,
 # "B-006: the last forced entry goes away").
 #
 # These three cannot all go the same way, measured. With this file emptied to a comment,
@@ -74,7 +74,7 @@ name = "Thunk_8243C458"
 # ---------------------------------------------------------------------------
 #
 # Proved by hand from the recompiled image, the run log and the engine sources
-# (docs/symbols.md "Audio (MOGG) decryption path",
+# (docs/reference/symbols.md "Audio (MOGG) decryption path",
 # docs/history/bringup-log.md B-009 and its follow-up). Every address below is
 # already a function; the entry exists only to attach the name, so the body is
 # the one codegen already generated.

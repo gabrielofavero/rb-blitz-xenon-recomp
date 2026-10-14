@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The game's own settings file, read and never written (docs/plans/launcher-plan.md D3;
+// The game's own settings file, read and never written (docs/plans/finished/2026-09-27-launcher-plan.md D3;
 // prompt B4).
 //
 // D3 puts `rb_blitz.toml` at rank 3 and the launcher's profile at rank 4: equal-ranked, the

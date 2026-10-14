@@ -76,7 +76,7 @@ if (-not (Test-Path (Join-Path $GameRoot "default.xex"))) { throw "no default.xe
 # ---------------------------------------------------------------- helpers ---
 
 # Every helper that touches a .ps1 file has to go through a child PowerShell:
-# this machine's execution policy is Restricted (docs/build-and-run.md §0).
+# this machine's execution policy is Restricted (docs/guides/build-and-run.md §0).
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
@@ -385,7 +385,7 @@ Get-ChildItem (Join-Path $logs "*.log") -ErrorAction SilentlyContinue | Remove-I
 # --enhancements_skip_offline_dialog=false: this run's routes were measured walking
 # the title's two dialogs (Wait-ForMenu accepts three times), and the skip ships on
 # by default, so the route's shape is pinned here rather than left to the default
-# (docs/engine/main-menu-flow.md, R3).
+# (docs/engine/main-menu.md (part 1, the option list), R3).
 $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru `
     -ArgumentList "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
                   "--enhancements_skip_offline_dialog=false", `

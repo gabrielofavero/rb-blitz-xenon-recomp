@@ -4,7 +4,7 @@
 // R9: change the main menu's background songs for loaded DLC ones.
 //
 // What the title does by itself (recovered from the image; see
-// docs/engine/menu-music.md for the addresses and the evidence):
+// docs/engine/main-menu.md (part 2, the background music) for the addresses and the evidence):
 //
 //   * the main menu's background music is `ShellMusicPanel`, Blitz's rename of the
 //     RB3 engine's MetaMusic. It reads the `shellmusic` block of the synth config -
@@ -47,7 +47,7 @@
 // (menumusic0:, menumusic1:, ...), and hands ShellMusic a path into one of them. Nothing is
 // copied, extracted or written under game/.
 //
-// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and the deviation.
+// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and the deviation.
 //
 // Faithful behaviour: with R9 off - its default - Configure() mounts nothing and the
 // hook is inert, so the boot is the one this project had before R9 existed: the menu

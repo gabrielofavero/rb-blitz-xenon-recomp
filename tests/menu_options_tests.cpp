@@ -1290,7 +1290,7 @@ int main() {
       CHECK_TRUE(HasText(*row, "file_exists"));
       // The mount prefix is part of the path the host sees, so it is part of what the
       // module writes; a bare name is answered inside the engine and never reaches a
-      // file call (docs/engine/main-menu-flow.md §7.1).
+      // file call (docs/engine/main-menu.md (part 1, the option list) §7.1).
       CHECK_TRUE(HasText(*row, "songcache:/rbbz_dlc_refresh"));
       CHECK_EQ(CountText(*row, std::string(tapped.padding, 'z')), 1);
       CHECK_EQ(CountText(*row, std::string(400, 'x')), 0);

@@ -114,7 +114,7 @@ REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, true, "Enhancements",
                     "per presented frame, so while it enumerates the host turns the SDK's vsync "
                     "off and puts the player's own value back when the enumeration ends. A "
                     "1,402-package library is 46.7 s of frames at 60 Hz and 19.7 s with the "
-                    "frame rate free (docs/dlc.md §4.3). **On by default** (owner directive, "
+                    "frame rate free (docs/guides/dlc.md §4.3). **On by default** (owner directive, "
                     "2026-10-13: \"it should be as fast as we can\"): the wait is on the "
                     "discovery screen, where the frame rate has nothing to show, and the "
                     "player's own V-Sync value is restored the moment the enumeration ends. "
@@ -181,7 +181,7 @@ struct ToggleRow {
   bool (*enabled)();
 };
 
-// One row per feature in docs/plans/customization-plan.md R1-R10. This table is
+// One row per feature in docs/plans/finished/2026-10-03-customization-plan.md R1-R10. This table is
 // what the log walks, so a toggle that is not here is a toggle nobody sees. The size is
 // explicit, and it has to match the rows below: a short initializer list is not an error,
 // it leaves the last row - a null name and a null `enabled` - in the table.

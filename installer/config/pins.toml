@@ -7,7 +7,7 @@
 # never disagree about what they are installing.
 #
 # Keep this file content-free: identifiers, versions, URLs, sizes and hashes
-# only. See ../README.md and ../../docs/backlog.md for the
+# only. See ../README.md and ../../docs/reference/backlog.md for the
 # distribution rules the release has to satisfy.
 
 schema_version = 1
@@ -54,7 +54,7 @@ commit = "latest"
 
 [update]
 # How a launcher finds out that a newer release exists, and how it installs it
-# (docs/plans/launcher-plan.md D19, installer/README.md section "Updating").
+# (docs/plans/finished/2026-09-27-launcher-plan.md D19, installer/README.md section "Updating").
 #
 # `manifest_url` is where the launcher looks on every start. tools/embed_config.cpp
 # compiles it into the launcher and also generates the file it points at
@@ -87,7 +87,7 @@ requires_game_data = false
 #
 # Schema-compatibility pin: the runtime in this repository looks for
 # ultimate/gen/patch_xbox.hdr and ultimate/gen/patch_xbox_0.ark under the game
-# data root (see ../../src/hooks/ultimate.cpp and ../../docs/ultimate-compat.md).
+# data root (see ../../src/hooks/ultimate.cpp and ../../docs/guides/ultimate-compat.md).
 # This is the release those two files are known to come from; the fingerprint
 # file next to this one records what they hash to.
 version = "2.11"
@@ -99,6 +99,6 @@ release_url = "https://github.com/ultimate-mods-rb/blitz-ultimate/releases/tag/2
 # Subtree of the release archive that belongs in <game root>\ultimate, and the
 # console the runtime emulates. The archive also carries a default.xex; it is
 # deliberately not installed, because the runtime reproduces that delta itself
-# from the user's own default.xex (docs/ultimate-compat.md).
+# from the user's own default.xex (docs/guides/ultimate-compat.md).
 archive_prefix = "Xbox"
 destination_dir = "ultimate"

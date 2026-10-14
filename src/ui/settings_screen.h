@@ -41,7 +41,7 @@
 // list object* retail's own `options_panel` drives, because a panel's `{file X.milo}` goes through
 // the engine's per-path dir loader and two panels naming the same file share one loaded dir. The
 // two then overwrote each other's rows and selected symbol, and Back landed on `credits`, the
-// retail list's last row (docs/plans/in-game-settings-bridge-findings.md §12.3b).
+// retail list's last row (docs/settings/architecture.md (part 1, the bridge) §12.3b).
 //
 // So our panel does **not** use `options_menu.milo`. It uses a **project-owned scene record**,
 // `ui/options_menu/gen/settings_menu.milo_xbox`, whose bytes are the installed retail scene copied
@@ -176,7 +176,7 @@ std::vector<std::string> ScreenNames();
 // and the pause panel stay on screen - plus the back target (`game_screen`). Ours follows the same
 // convention.
 //
-// **Measured status (P5b-r2, ten boots - docs/plans/in-game-settings-merged-menu.md §3.2).** The
+// **Measured status (P5b-r2, ten boots - docs/settings/menu.md (part 1, the merged menu) §3.2).** The
 // dispatch works: retail's own HELP & OPTIONS row, given the merged list and our appended cases,
 // reaches our page and stops there with the case markers logged. The **in-song panel set is what a
 // screen of ours cannot have**: a screen listing `pause_panel` / `game_fade_out_panel` / `game_panel`

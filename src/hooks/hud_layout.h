@@ -7,7 +7,7 @@
 namespace rb_blitz::settings {
 // Where a HUD element goes when the frame is not 16:9.
 //
-// The owner's rule (2026-10-12, verbatim in docs/plans/ultrawide-findings.md §9):
+// The owner's rule (2026-10-12, verbatim in docs/settings/graphics.md (part 3, custom resolutions) §9):
 //
 //   * a truly centred element stays where it is, whatever the frame;
 //   * every other element keeps the pixel distance it has to its *nearest* horizontal edge.
@@ -48,7 +48,7 @@ namespace rb_blitz::settings {
 //      stops it at the centre instead: the formula's own limit, so the map stays continuous
 //      and no element ever leaves the frame. That is honest, but it is not a portrait layout,
 //      which is why portrait's real answer is the resize lever and per-element moves the owner
-//      already named (docs/plans/ultrawide-findings.md §9.4) - this rule covers the horizontal
+//      already named (docs/settings/graphics.md (part 3, custom resolutions) §9.4) - this rule covers the horizontal
 //      half of it and says how far it goes.
 
 // 16:9 as the reference, derived the same way the title derives it (`height * 16 / 9`), so the

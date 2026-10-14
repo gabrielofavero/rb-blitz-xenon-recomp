@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Starting the game (docs/plans/launcher-plan.md §4.3, Contract 3; prompt B7).
+// Starting the game (docs/plans/finished/2026-09-27-launcher-plan.md §4.3, Contract 3; prompt B7).
 //
 // Two halves, and only the second one knows about the operating system:
 //

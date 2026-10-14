@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Unit tests for the launch contract (docs/plans/launcher-plan.md §4.3, Contract 3; prompt
+// Unit tests for the launch contract (docs/plans/finished/2026-09-27-launcher-plan.md §4.3, Contract 3; prompt
 // B7): the argv the launcher hands the game, and the two rules that make it safe to print -
 // a row is passed only when it differs from the compiled default, and a value that is text is
 // quoted.

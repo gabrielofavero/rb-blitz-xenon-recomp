@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The typed guest<->host channel for in-game settings (P1 of
-// docs/plans/in-game-settings-plan.md; contracts in docs/plans/in-game-settings-contracts.md).
+// docs/settings/plan.md; contracts in docs/settings/contracts.md).
 //
 // Why this file exists on its own and is SDK-free: the *frames* the channel carries are host
 // logic - namespace matching, bounds, checksums, idempotency, structured status - and none of
@@ -17,7 +17,7 @@
 // The guest reaches the host through the **title's own script builtins**, which are ordinary
 // recompiled functions and therefore hookable exactly like the Ultimate and shell-music hooks
 // (src/hooks/ultimate.cpp, src/hooks/shell_music.cpp). Two facts were measured on the pinned
-// retail image (docs/plans/in-game-settings-bridge-findings.md records the evidence):
+// retail image (docs/settings/architecture.md (part 1, the bridge) records the evidence):
 //
 //   * the builtin name table is a NUL-separated block in the image at 0x82080DD0:
 //     `file_exists`, `write_string_to_file`, `write_file`, `read_file`, `run`, `--`, `++`,

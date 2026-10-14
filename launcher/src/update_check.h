@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's update check (docs/plans/launcher-plan.md D19): the release manifest, the
+// The launcher's update check (docs/plans/finished/2026-09-27-launcher-plan.md D19): the release manifest, the
 // version comparison, and the two decisions the launcher makes from them - is there an
 // update, and should the user be asked about it.
 //

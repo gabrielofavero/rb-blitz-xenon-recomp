@@ -7,7 +7,7 @@
 // Two callers, one parser (tools/toolchain_check.cpp):
 //   * `--check`, run by the build before codegen, compares the toolchain the
 //     build is about to use against the frozen record and reports every component
-//     (docs/toolchain.md). A component below its recorded minimum, or the SDK on
+//     (docs/guides/toolchain.md). A component below its recorded minimum, or the SDK on
 //     a different commit, stops the build; anything else is reported and builds,
 //     unless the build asked for a strict toolchain.
 //   * `--emit-header`, which turns what the check found into the stamp

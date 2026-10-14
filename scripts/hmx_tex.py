@@ -45,7 +45,7 @@ and is byte-exact: export a DDS, edit it in a DXT-aware editor, import it back.
 This covers the archive's own texture entries. It does *not* reach the art of the
 menus, buttons and layout screens - that belongs to `ui/**/*.milo_xbox` scenes,
 which scripts/hmx_milo.py reads (their pixels are still unlocated; see
-``docs/assets.md``, "Texture swapping").
+``docs/guides/assets.md``, "Texture swapping").
 """
 import argparse
 import os

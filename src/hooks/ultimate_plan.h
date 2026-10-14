@@ -7,9 +7,9 @@
 // holds the retail bytes. Deliberately free of SDK headers and of runtime state, for
 // the same reason src/hooks/crypto_keytable.h is - it is host path arithmetic and a
 // byte comparison, and tests/ultimate_plan_tests.cpp has to cover it without booting
-// the game (docs/rb3-references.md §7.3). src/hooks/ultimate.cpp is the only
+// the game (docs/reference/rb3-references.md §7.3). src/hooks/ultimate.cpp is the only
 // production consumer and holds the guest addresses, the evidence and the hooks;
-// docs/ultimate-compat.md has the payload's side.
+// docs/guides/ultimate-compat.md has the payload's side.
 
 #pragma once
 
@@ -23,7 +23,7 @@ namespace rb_blitz::ultimate {
 
 // One bit per edit the mod makes to default.xex, so a single edit can be isolated
 // from the command line (--ultimate_patches). The guest addresses are documented in
-// docs/ultimate-compat.md.
+// docs/guides/ultimate-compat.md.
 enum Patch : uint32_t {
   // 0x8205DD74: the 8-byte content device string "UPDATE:\0" -> "D:\0...".
   kPatchContentDevice = 1u << 0,

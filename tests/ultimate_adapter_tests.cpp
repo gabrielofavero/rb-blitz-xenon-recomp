@@ -6,7 +6,7 @@
 //   * **the hermetic half** authors a provider-shaped definition with the project's own DTB
 //     builder and mutates it, so every rule the shape check enforces is exercised without the
 //     payload, a boot or a window. The fixture mirrors the *measured* declarations in
-//     `out/in-game-settings-research/mod_settings.txt` (`docs/plans/in-game-settings-plan.md`
+//     `out/in-game-settings-research/mod_settings.txt` (`docs/settings/plan.md`
 //     §2.2 records their hashes);
 //   * **the real-installation half** runs the same checks against `game/ultimate` when its path is
 //     given on the command line, which is what makes the fixture's fidelity a checked claim

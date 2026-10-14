@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Turning the settings schema into the shell's row list (docs/plans/launcher-plan.md A1).
+// Turning the settings schema into the shell's row list (docs/plans/finished/2026-09-27-launcher-plan.md A1).
 //
 // The generated table (launcher/out/generated/settings_table.h, P0.2) is the only source
 // of tabs, groups and rows. This module reads it and produces a flat, ordered shape the

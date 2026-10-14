@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's own keys (docs/plans/launcher-plan.md A5, D6).
+// The launcher's own keys (docs/plans/finished/2026-09-27-launcher-plan.md A5, D6).
 //
 // D6 gave the launcher a keyboard and A3 gave it a pad; this is what decides which key does what.
 // The keys are **fixed** now: the table below ships with the launcher and nothing reads a profile's

@@ -20,7 +20,7 @@ endif()
 # below the checkout path is embedded in all three payload binaries - measured
 # before adding it: 8 hits in rb_blitz.exe, 122 in rexruntime.dll and 18 in
 # rexgpu-xenos.dll, every one of them this repository's own absolute path
-# (docs/distributable.md). Mapping the source and build trees to relative names
+# (docs/guides/distributable.md). Mapping the source and build trees to relative names
 # keeps the file name useful in a log and drops the developer's disk out of it.
 #
 # It has to be set before generated/rexglue.cmake, which add_subdirectory()s the
@@ -209,10 +209,10 @@ message(STATUS "rb_blitz: renderer row will offer ${RBBLITZ_BACKENDS_ARG}")
 # one. Two consumers, one parser: this gate, and the boot identity line in
 # src/rb_blitz_app.h that logs which revision the running build was made for.
 # The gate checks the codegen input only; the 360 MB archive rows are audited on
-# demand with `rb_blitz_fingerprint --all` (docs/build-and-run.md).
+# demand with `rb_blitz_fingerprint --all` (docs/guides/build-and-run.md).
 #
 # A deliberately modified content root (Rock Band Blitz Ultimate, see
-# docs/ultimate-compat.md) is a supported configuration, so it can be allowed:
+# docs/guides/ultimate-compat.md) is a supported configuration, so it can be allowed:
 # codegen still runs on whatever local default.xex is present, but the mismatch is
 # then reported instead of fatal.
 option(RBBLITZ_ALLOW_MODIFIED_GAME_DATA
@@ -274,7 +274,7 @@ add_dependencies(rb_blitz_codegen rb_blitz_fingerprint_gate)
 # SDK and SDK pin this project is built with, and this gate compares the machine
 # against it before codegen - the same shape as the game-data gate above, and for
 # the same reason: the knowledge of "what works here" used to live in this build
-# tree's CMakeCache.txt, which no other machine has. docs/toolchain.md is the prose
+# tree's CMakeCache.txt, which no other machine has. docs/guides/toolchain.md is the prose
 # half; src/util/toolchain_pin.h is the parser and the comparison, covered by
 # tests/toolchain_tests.cpp.
 #
@@ -337,7 +337,7 @@ add_dependencies(rb_blitz_codegen rb_blitz_toolchain_gate)
 
 # Host unit tests. Dependency-free (tests/check.h) because the SDK vendors catch2
 # as an uninitialised submodule, and SDK-free so they run without booting the game
-# - see docs/build-and-run.md. `cmake --build <build dir>; ctest` runs them.
+# - see docs/guides/build-and-run.md. `cmake --build <build dir>; ctest` runs them.
 include(CTest)
 
 if(BUILD_TESTING)
@@ -475,7 +475,7 @@ if(BUILD_TESTING)
     # The archive half of the generated Help & Options payload (src/settings/menu_payload.cpp):
     # that extending the mounted patch archive keeps it a *one-part* archive, because the title has
     # never read a two-part one and a boot that offered it one hung inside our own read hook
-    # (docs/plans/in-game-settings-status-2026-10-12.md). The assertions run through
+    # (docs/settings/status.md (part 2, the black startup)). The assertions run through
     # src/settings/ultimate_adapter.cpp's own v6 reader, so the fixture and the product cannot drift
     # apart. SDK-free: the fixtures are an index and bytes, no retail content.
     add_executable(rb_blitz_menu_payload_tests
@@ -580,7 +580,7 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_launcher_update_tests PRIVATE launcher/src)
     add_test(NAME launcher_update COMMAND rb_blitz_launcher_update_tests)
 
-    # P3 (docs/plans/in-game-settings-contracts.md §5): the SDK-free settings store. The
+    # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict
     # rule that never lets a second writer clobber a hand edit. No SDK, no boot.
     add_executable(rb_blitz_settings_store_tests
@@ -730,7 +730,7 @@ if(BUILD_TESTING)
     add_test(NAME menu_compat COMMAND rb_blitz_menu_compat_tests)
 endif()
 
-# The launcher (docs/plans/launcher-plan.md D1): a second executable in this build tree,
+# The launcher (docs/plans/finished/2026-09-27-launcher-plan.md D1): a second executable in this build tree,
 # next to rb_blitz.exe, so a release always ships both. It carries its own settings
 # schema, which is compiled and validated at build time.
 add_subdirectory(launcher)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Unit tests for the launcher's write path (docs/plans/launcher-plan.md D2, D3; prompt B4):
+// Unit tests for the launcher's write path (docs/plans/finished/2026-09-27-launcher-plan.md D2, D3; prompt B4):
 // the four things B4 has to be able to show, plus the rules they are built on.
 //
 //   1. a profile with unknown keys and comments round-trips

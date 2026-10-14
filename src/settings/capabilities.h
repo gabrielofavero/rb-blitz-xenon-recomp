@@ -72,7 +72,7 @@ struct RenderPathLimits {
   uint32_t max_aspect_x1000 = 3200;
 };
 
-// Spike instrument (docs/plans/ultrawide-findings.md): `RBBLITZ_PROBE_GUEST_BASES=1704x720,1280x540`
+// Spike instrument (docs/settings/graphics.md (part 3, custom resolutions)): `RBBLITZ_PROBE_GUEST_BASES=1704x720,1280x540`
 // adds guest bases to the render path for one boot, so a non-16:9 render size can be measured
 // through the real apply path - the planner, the reconciler and the boot's own write - instead
 // of through a value poked into the guest. Never set in production; unparsable entries are

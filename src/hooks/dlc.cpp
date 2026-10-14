@@ -14,7 +14,7 @@
 // packages, not as extracted directories - and no write path ever resolves into this
 // directory. 45410914 is Rock Band 3's title id, which Blitz lists as an alternate
 // title id (XEX optional header 0x000407FF: 45410829, 45410869, 45410914) so RB3 DLC
-// enumerates for Blitz; 5841122D is Blitz itself. See docs/dlc.md.
+// enumerates for Blitz; 5841122D is Blitz itself. See docs/guides/dlc.md.
 //
 // A dumped song folder is not built that way: it is thousands of loose CON/LIVE
 // containers in no particular arrangement, and it cannot be restructured on a volume
@@ -26,7 +26,7 @@
 // ContentManager::set_extra_content_library()). Nothing is copied or renamed: the
 // library is resolved where it lies.
 //
-// Two adaptations, both measured rather than assumed (docs/dlc.md §2.1):
+// Two adaptations, both measured rather than assumed (docs/guides/dlc.md §2.1):
 //   * a saved-game package (00000001) - what a custom-song folder is made of - is
 //     presented as marketplace content (00000002), because the title reads its
 //     downloadable songs out of the marketplace enumeration and does not list a saved
@@ -38,7 +38,7 @@
 //     start it. The fallback lives in ContentManager::OpenContent(), beside the
 //     `.header` read it stands in for.
 //
-// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and the reason for the
+// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and the reason for the
 // deviation.
 //
 // Faithful behaviour: the guest enumerates downloadable content through the emulated
@@ -234,7 +234,7 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
 //
 // `scan_threads` comes from the caller rather than being read here, so the boot path and
 // the in-game refresh cannot disagree about the thread count the way they cannot disagree
-// about the cache - and so neither reads the registry off the worker thread (docs/dlc.md).
+// about the cache - and so neither reads the registry off the worker thread (docs/guides/dlc.md).
 fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool force_refresh,
                                         const std::vector<std::filesystem::path>& roots,
                                         const uint32_t force_content_type,
@@ -365,7 +365,7 @@ void RebuildPackagePaths(const std::vector<fs::LibraryItem>& library) {
 }
 
 // R7's in-game refresh. One runs at a time, on a worker thread, so the frame that asked
-// for it keeps drawing (the scan is ~31 s on a 1,402-package library - docs/dlc.md §4.2);
+// for it keeps drawing (the scan is ~31 s on a 1,402-package library - docs/guides/dlc.md §4.2);
 // the result is handed to the content manager by PublishPendingRefresh() from a *guest*
 // thread, because extra_content_library_ is a plain vector with no lock of its own and a
 // worker writing it while the guest lists or resolves content would be a data race.
@@ -629,7 +629,7 @@ void RefreshConfigured() {
   }
   // One at a time. A second ask while the scan is in flight is ignored rather than
   // queued, so a trigger that fires more than once cannot start a second scan of the
-  // same tree (docs/plans/song-cache-plan.md §9.5).
+  // same tree (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5).
   if (!g_refresh_state.Begin()) {
     REXLOG_INFO("dlc: a refresh is already running; this ask is ignored");
     return;

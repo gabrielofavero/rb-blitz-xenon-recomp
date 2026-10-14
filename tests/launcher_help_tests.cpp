@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// What the bottom bar says about the row under the focus ring (docs/plans/launcher-plan.md A2,
+// What the bottom bar says about the row under the focus ring (docs/plans/finished/2026-09-27-launcher-plan.md A2,
 // D7): the walk from a ring entry to the row it belongs to, the verb Enter performs on that row,
 // and the tooltip as the bar re-wraps it. Dependency-free - the bar itself is ImGui's, but
 // everything it decides is a question about the schema, which is what this file checks.

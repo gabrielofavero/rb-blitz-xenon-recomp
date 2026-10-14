@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Rock Band Blitz Ultimate payload overlay (docs/ultimate-compat.md)
+// Rock Band Blitz Ultimate payload overlay (docs/guides/ultimate-compat.md)
 //
 // The mod ships its content as files next to the game's own (game/ultimate/gen/...)
 // and expects the title to read them *out of the same directory* as the base content:

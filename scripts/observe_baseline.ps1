@@ -1,6 +1,6 @@
 # Build the observation baseline set, and measure the same-build noise floor for
 # every state in scripts/ui_states.ps1. This is the customization plan's E1
-# (docs/plans/customization-plan.md): the reference every later visual claim is
+# (docs/plans/finished/2026-10-03-customization-plan.md): the reference every later visual claim is
 # measured against, and the answer to "how much does this state differ between two
 # runs of the same build?" without which no screenshot diff means anything.
 #

@@ -4,7 +4,7 @@
 // Minimal assertion helpers for host-side unit tests. Deliberately
 // dependency-free: the SDK vendors catch2 as a submodule we do not initialise,
 // and these tests must be buildable from a bare checkout of src/ plus tests/.
-// docs/rb3-references.md §7.3 asks for exactly this - host code tested without
+// docs/reference/rb3-references.md §7.3 asks for exactly this - host code tested without
 // booting the game.
 
 #pragma once

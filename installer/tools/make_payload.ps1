@@ -161,7 +161,7 @@ function Get-VulkanLoaderDir {
 }
 
 if (-not (Test-Path -LiteralPath $SourceDir)) {
-    throw "build tree not found: $SourceDir. Build it first (see docs/build-and-run.md)."
+    throw "build tree not found: $SourceDir. Build it first (see docs/guides/build-and-run.md)."
 }
 if (-not $Version) { $Version = Get-PinsVersion (Join-Path $installerDir 'config\pins.toml') }
 if (-not $Version) { $Version = 'unknown' }

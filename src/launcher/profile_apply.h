@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's profile as a *source of cvars* for the game (docs/plans/launcher-plan.md D3,
+// The launcher's profile as a *source of cvars* for the game (docs/plans/finished/2026-09-27-launcher-plan.md D3,
 // rank 4). The launcher's own "Launch Game" passes every row it moved off its default as
 // `--<key>=<value>` (rank 1, launcher/src/game_launch.cpp), so those runs need nothing here.
 // This module is for the other half of R4: the game started on its own - the Start-menu shortcut,
@@ -64,7 +64,7 @@ struct ProfileApplyReport {
 // preservation data. A row with an in-game settings row of its own must not be in that set: it is
 // the store's, and applying the profile's copy would make the in-game row read as externally
 // configured. That switch - not this function - decides when the launcher stops being a source of
-// game preferences; see docs/plans/in-game-settings-controller-settings.md.
+// game preferences; see docs/settings/menu.md (part 3, Controller Settings).
 ProfileApplyReport ApplyLauncherProfileSettings();
 
 // Writes the report as log lines. Call it once logging is initialized (OnPostInitLogging); before

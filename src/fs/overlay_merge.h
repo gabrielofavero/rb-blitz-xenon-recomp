@@ -7,7 +7,7 @@
 //
 // Kept free of any SDK dependency for the same reason src/hooks/crypto_keytable.h
 // is: tests/payload_overlay_tests.cpp has to cover these rules on the host, without
-// booting the game (docs/rb3-references.md §7.3).
+// booting the game (docs/reference/rb3-references.md §7.3).
 
 #pragma once
 

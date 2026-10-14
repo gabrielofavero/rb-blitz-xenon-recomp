@@ -25,7 +25,7 @@
 //
 // Kept free of any SDK dependency for the same reason src/fs/dlc_library.h is: it is
 // host path arithmetic, file IO and a fingerprint, and tests/dlc_cache_tests.cpp has
-// to cover it without booting the game. See docs/dlc.md.
+// to cover it without booting the game. See docs/guides/dlc.md.
 
 #pragma once
 

@@ -5,8 +5,8 @@
 // the game's own lifecycle.
 //
 // P3 built the store, the path file and the service as a host-tested lane and left the five
-// insertion points named in docs/plans/in-game-settings-storage.md §6 to the coordinator; P9 left
-// the guest channel's sink (`docs/plans/in-game-settings-hot-apply-restart.md` §6.3) and the
+// insertion points named in docs/settings/architecture.md (part 3, storage) §6 to the coordinator; P9 left
+// the guest channel's sink (`docs/settings/architecture.md (part 6, hot apply and restart)` §6.3) and the
 // restart bootstrap to the same place. This module is that wiring, and it is deliberately *only*
 // wiring: every decision it makes is a call into a module that is already tested without a boot
 // (settings/service.h, settings/bridge_sink.h, settings/capabilities.h, settings/graphics_policy.h,

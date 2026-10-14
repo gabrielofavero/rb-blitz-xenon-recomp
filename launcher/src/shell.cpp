@@ -113,7 +113,7 @@ constexpr const char* kControllerSettingsHeading = "Controller Settings";
 // Which of them are on the bar for a given surface is the one thing the two surfaces disagree
 // about (P8). Controller Settings has no Update: installing a release, and installing Ultimate,
 // are the installer's and the updater's business, not a row on a controller screen
-// (docs/plans/in-game-settings-plan.md §3.6). Update stays leftmost where it is drawn, because an
+// (docs/settings/plan.md §3.6). Update stays leftmost where it is drawn, because an
 // action that leaves the window (and comes back to it) reads before the Close it would otherwise
 // sit on top of.
 const std::vector<BarOption>& BarOptionsFor(bool controller_settings_only) {

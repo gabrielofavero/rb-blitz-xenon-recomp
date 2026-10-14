@@ -4,7 +4,7 @@
 // P11a — the guest channel's real store: P3's `Service` behind P1's `RequestSink`.
 //
 // P1 built the transport with an in-memory stand-in (`MemorySink`) because P3's store did not exist
-// yet, and P9's live-apply note (docs/plans/in-game-settings-hot-apply-restart.md §6.3) named the
+// yet, and P9's live-apply note (docs/settings/architecture.md (part 6, hot apply and restart) §6.3) named the
 // step this file performs: "when the coordinator wires the real service, the same three calls move
 // onto Service::last_commit_changes() (P9 added it) and the seam is unchanged". So this is not a
 // second channel - it is the same frames, the same ops and the same one-bit answers, with the menu

@@ -1,6 +1,6 @@
 # Capture the launcher's own UI and assert what a picture can prove about it.
 #
-# E2 of docs/plans/launcher-plan.md. The game's harness sends keys to rb_blitz and reads
+# E2 of docs/plans/finished/2026-09-27-launcher-plan.md. The game's harness sends keys to rb_blitz and reads
 # the guest's screens (scripts/drive_ui.ps1, scripts/observe_ui.ps1); this one sends the
 # same kind of keys to rb_blitz_launcher and reads *its* pixels, because the launcher is
 # an ordinary Windows window with an ordinary focus model and the claims worth proving
@@ -153,7 +153,7 @@ function Add-Check([string]$Leg, [string]$Check, [bool]$Ok, [string]$Detail = ""
 }
 
 function Invoke-Child([string]$Script, [hashtable]$Named) {
-    # This machine's execution policy is Restricted (docs/build-and-run.md section 0), so
+    # This machine's execution policy is Restricted (docs/guides/build-and-run.md section 0), so
     # every sibling script goes through a child PowerShell - the same shape
     # scripts/observe_ui.ps1 uses. A boolean value names a switch, which is passed as the
     # bare flag: "-ClientArea true" would be read as a positional argument.

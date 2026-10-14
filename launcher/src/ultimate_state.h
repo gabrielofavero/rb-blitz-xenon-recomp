@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The General tab's two facts (docs/plans/launcher-plan.md D4, D5; prompt B1): where the
+// The General tab's two facts (docs/plans/finished/2026-09-27-launcher-plan.md D4, D5; prompt B1): where the
 // game's data is, and whether the Ultimate payload can be mounted.
 //
 // Dependency-free on purpose - no ImGui, no SDL, no SDK - so D5's four states can be tested

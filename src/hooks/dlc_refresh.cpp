@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// R7's in-game trigger. The main menu is compiled data (docs/engine/main-menu-flow.md),
+// R7's in-game trigger. The main menu is compiled data (docs/engine/main-menu.md (part 1, the option list)),
 // so a "Refresh DLC Cache" row cannot call host code directly. What it *can* do is ask
 // the title a question the host serves: the row is edited (src/ui/menu_options.cpp) to
 // call the title's own `file_exists` on a name no file has, `rbbz_dlc_refresh`, and this
@@ -22,7 +22,7 @@
 // this file's hooks do no work at all, because RefreshArmed() is false - the flag is
 // read before any path is touched. Under the toggle, the sentinel path starts the library
 // scan behind the frame, so the press returns at once instead of freezing for the ~31 s a
-// 1,402-package library takes to read (docs/plans/song-cache-plan.md §9.5): the cache is
+// 1,402-package library takes to read (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5): the cache is
 // rewritten on a worker, and the content manager is handed the fresh list on the next menu
 // frame, on the guest thread, so the next enumeration sees a package that was dropped in
 // mid-session.

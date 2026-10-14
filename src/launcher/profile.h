@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher profile (docs/plans/launcher-plan.md §4.2, D2): the one file that carries
+// The launcher profile (docs/plans/finished/2026-09-27-launcher-plan.md §4.2, D2): the one file that carries
 // what the launcher saves, read by the game itself so a launcher launch and a
 // double-click see the same settings (D3).
 //

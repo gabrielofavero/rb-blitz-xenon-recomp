@@ -77,7 +77,7 @@ $changed = -5 * $Steps
 # ---------------------------------------------------------------- helpers ---
 
 # Anything that runs another .ps1 goes through a child PowerShell: this machine's
-# execution policy is Restricted (docs/build-and-run.md §0).
+# execution policy is Restricted (docs/guides/build-and-run.md §0).
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
@@ -244,7 +244,7 @@ function New-Process([string]$UserRoot) {
     # The route below walks the title's two dialogs (three accepts to the menu), and
     # the offline skip ships on by default, so the shape this run was measured with
     # is pinned here instead of left to the default
-    # (docs/engine/main-menu-flow.md, R3).
+    # (docs/engine/main-menu.md (part 1, the option list), R3).
     $argv = @(
         "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", "--mnk_mode=1",
         "--enhancements_skip_offline_dialog=false",

@@ -308,7 +308,7 @@ std::vector<SchemaRow> BuildTable() {
 //
 //   * Every Ultimate row is `restart` because P6 measured *when* the provider's values are read:
 //     the payload's own loader fills its DTA variables before the first frame of a boot, so
-//     writing its file cannot change this process (docs/plans/in-game-settings-ultimate-adapter.md
+//     writing its file cannot change this process (docs/settings/architecture.md (part 5, the Ultimate adapter)
 //     §4). That includes Hide HUD, which the parent plan §5.5 named as its hot example before that
 //     measurement existed.
 //   * The render-path rows (resolution, renderer, anti-aliasing, filtering) are structurally
@@ -343,11 +343,11 @@ constexpr StrategyEntry kStrategies[] = {
     // R7's frame-pacing measurement, not a guess about reloadability: with the guest running, the
     // host flipped this exact cvar and the discovery rate moved from 16.66 ms per item to 5.68 ms
     // (46.7 s -> 15.96 s for 2,807 items), with the log recording `vsync false, was true` 7 ms
-    // after the flip (docs/dlc.md, "Frame pacing for the discovery"; the mechanism is the GPU
+    // after the flip (docs/guides/dlc.md, "Frame pacing for the discovery"; the mechanism is the GPU
     // plugin's worker re-reading `vsync` every iteration).
     {SettingId::kVsync, ApplicationStrategy::kHot,
      "flipping the `vsync` cvar with the guest running moved the discovery rate from 16.66 ms per "
-     "item to 5.68 ms (46.7 s -> 15.96 s, docs/dlc.md), i.e. a live effect measured in a boot"},
+     "item to 5.68 ms (46.7 s -> 15.96 s, docs/guides/dlc.md), i.e. a live effect measured in a boot"},
     {SettingId::kRenderer, ApplicationStrategy::kRestart, ""},
     // The window mode is read once, when the window is created: a new process, like the rest of the
     // render path it belongs to.

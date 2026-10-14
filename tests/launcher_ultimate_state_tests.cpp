@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Unit tests for the General tab's decidable half (docs/plans/launcher-plan.md D4, D5; prompt
+// Unit tests for the General tab's decidable half (docs/plans/finished/2026-09-27-launcher-plan.md D4, D5; prompt
 // B1): D5's four Ultimate states from directory fixtures, the launch-target fallback, where
 // the game is detected, and the schema's `validate` rules.
 //

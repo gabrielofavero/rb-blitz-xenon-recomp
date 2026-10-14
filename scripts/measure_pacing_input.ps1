@@ -342,7 +342,7 @@ $exeArgs = @(
     "--game_data_root=$GameRoot",
     "--ultimate_mode=0",
     # The route below was measured pressing A at each of the title's two dialogs,
-    # and the skip now ships on by default (docs/engine/main-menu-flow.md, R3).
+    # and the skip now ships on by default (docs/engine/main-menu.md (part 1, the option list), R3).
     "--enhancements_skip_offline_dialog=false",
     "--vsync=$vsyncValue",
     "--log_level=$LogLevel",

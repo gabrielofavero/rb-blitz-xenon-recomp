@@ -6,7 +6,7 @@
 //
 // This is what a "named path" means in src/diag/probe.h - a handful of guest
 // functions that are already named with recorded evidence
-// (docs/symbols.md "Audio (MOGG) decryption path") and that the guest reaches in
+// (docs/reference/symbols.md "Audio (MOGG) decryption path") and that the guest reaches in
 // a known order when it opens a music stream:
 //
 //     ByteGrinder_GetEncMethod  -> which key table entry this stream's version uses
@@ -17,7 +17,7 @@
 // Why these four and not the menu: a probe point can only be placed on a
 // function we have already identified, and the menu's functions have no names
 // yet - finding them is the flow-mapping work the probe exists to serve
-// (docs/plans/customization-plan.md S2). These four are the only guest path this
+// (docs/plans/finished/2026-10-03-customization-plan.md S2). These four are the only guest path this
 // project has proved end to end, so they are the demonstration that the
 // instrument works, and adding the next point is one line.
 //
@@ -74,8 +74,8 @@ REX_HOOK_RAW(VorbisReader_CheckHmxHeader) {
 }
 
 // ---------------------------------------------------------------------------
-// P2 spike: the exact-render-resolution experiment (docs/plans/in-game-settings-
-// resolution-findings.md).
+// P2 spike: the exact-render-resolution experiment (docs/settings/graphics.md,
+// part 1, resolution).
 //
 // 0x823F3698 is where the title decides its own screen size: it stores a height in
 // the object's +68 (720, or 540 for the half-resolution mode) and derives the width
@@ -117,7 +117,7 @@ REXCVAR_DEFINE_BOOL(probe_halfres_flag, false, "Diagnostics",
 // mapped a 16:9-shaped layout onto the wider frame and stretched everything. That is what this
 // cvar tests: write the widescreen slot to a non-16:9 aspect for one boot and see whether the
 // projection (and therefore the whole layout) follows it. Off by default; an instrument, not a
-// feature (docs/plans/ultrawide-findings.md).
+// feature (docs/settings/graphics.md (part 3, custom resolutions)).
 REXCVAR_DEFINE_STRING(probe_aspect, "", "Diagnostics",
                       "Diagnostics: decimal aspect ratio to write over the guest's 16:9 constant "
                       "(0x82078194) before the title builds its screen, e.g. 2.3703704. Empty "

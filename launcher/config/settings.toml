@@ -1,4 +1,4 @@
-# The launcher's settings schema - Contract 1 of docs/plans/launcher-plan.md (§4.1).
+# The launcher's settings schema - Contract 1 of docs/plans/finished/2026-09-27-launcher-plan.md (§4.1).
 #
 # One [[setting]] per row the launcher shows, and one [[group]] per category. The
 # build compiles this file into out/generated/settings_table.h (tools/embed_settings.cpp),
@@ -242,12 +242,12 @@ folder's dlc directory.
 # R7. A flat DLC library is read by opening every container and reading its identity
 # header, every boot (src/fs/dlc_library.h). With this on the enumeration is persisted
 # beside the saves and reused while a fingerprint proves the tree unchanged
-# (src/fs/dlc_cache.h, docs/dlc.md §4.1). The toggle also drops the emulator's
+# (src/fs/dlc_cache.h, docs/guides/dlc.md §4.1). The toggle also drops the emulator's
 # per-package mount latency for the run (deferred_overlapped_delay_ms = 0,
 # patches/rexglue-sdk/0011): on 1,402 packages the title's own discovery is 662 s with
-# the SDK's 100 ms and 379 s without it (docs/dlc.md §4.2). The refresh is the main
+# the SDK's 100 ms and 379 s without it (docs/guides/dlc.md §4.2). The refresh is the main
 # menu's last row, and --refresh_dlc_cache does the same at boot. What no cache removes
-# is the title's own enumeration, one item per presented frame (docs/dlc.md §4.3).
+# is the title's own enumeration, one item per presented frame (docs/guides/dlc.md §4.3).
 [[setting]]
 key     = "enhancements_dlc_cache"
 tab     = "general"
@@ -271,7 +271,7 @@ Downloadable Content". Refresh the cache from that main menu row, or pass
 
 # A cold library read is not disk-bound: the per-file cost of a *first* open is the
 # antivirus's on-open scan, measured at ~16 ms per file against ~0.03 ms once the file
-# has been seen, on an NVMe SSD (docs/dlc.md §4.1). Opening several at once overlaps
+# has been seen, on an NVMe SSD (docs/guides/dlc.md §4.1). Opening several at once overlaps
 # it - 5.6x measured with the pool on (16.1 ms/file to 2.9 ms/file) - and the result is
 # identical at any thread count, because the walk and the merge stay on one thread in
 # walk order (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
@@ -677,5 +677,5 @@ when paused. Needs a restart.
 
 # `guide_button` is deliberately *not* a row any more (P8). Guide belongs to the platform, the
 # project never delivers it to the guest, and the runtime clears the bit out of the pad state on
-# every input path (docs/plans/in-game-settings-contracts.md §2.3; src/input/remap.cpp). A row
+# every input path (docs/settings/contracts.md §2.3; src/input/remap.cpp). A row
 # offering to pass it through would be a row that could not keep its promise.

@@ -60,7 +60,7 @@ inline constexpr std::string_view kLauncherExeName = "rb_blitz_launcher.exe";
 inline constexpr std::string_view kHelperExeName = "rb_blitz_setup_helper.exe";
 
 // The programs the recompiled payload is expected to carry: the game and its
-// launcher (docs/plans/launcher-plan.md R3, Contract 4). Verification itself
+// launcher (docs/plans/finished/2026-09-27-launcher-plan.md R3, Contract 4). Verification itself
 // stays manifest-driven - the launcher hashes like every other [[files]] entry -
 // but recording the names here lets the install manifest and the report say
 // which executables the folder received.

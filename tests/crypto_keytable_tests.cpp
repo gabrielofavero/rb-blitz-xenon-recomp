@@ -3,13 +3,13 @@
 //
 // Unit tests for the B-009 MOGG key path (src/hooks/crypto_keytable.h). No SDK,
 // no game image, no boot: the logic under test is pure host code, so this runs in
-// milliseconds. It is the oldest of the project's host test targets (docs/backlog.md
+// milliseconds. It is the oldest of the project's host test targets (docs/reference/backlog.md
 // §1); what the two import hooks decide - where a key comes from, and which key an
 // AES-CBC call runs under - is covered here too, so only the kernel calls themselves
 // still need a boot.
 //
 // The plaintext keyset itself is intentionally not copied here - it would be a
-// second vendored copy of external key material (docs/rb3-references.md §9), and
+// second vendored copy of external key material (docs/reference/rb3-references.md §9), and
 // no in-repo source can independently confirm those bytes. What is pinned instead
 // is the structure the bug depended on: four distinct entries, the guest's
 // version -> entry mapping, and the fact that installing by key id would select a

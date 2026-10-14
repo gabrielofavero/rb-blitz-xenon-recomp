@@ -2,9 +2,9 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The probe: the runtime instrument that makes the guest's own state visible
-// without a debugger. See docs/engine/probe.md for the operator's view (what
+// without a debugger. See docs/engine/diagnostics.md (part 1, the probe) for the operator's view (what
 // each cvar does, how to read a trace, how to add a point) and
-// docs/plans/customization-plan.md P2 for why it exists - it is the instrument
+// docs/plans/finished/2026-10-03-customization-plan.md P2 for why it exists - it is the instrument
 // the flow maps S2-S7 are measured with.
 //
 // Two halves, deliberately separate:

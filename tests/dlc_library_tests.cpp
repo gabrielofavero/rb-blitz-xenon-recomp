@@ -9,7 +9,7 @@
 //
 // The fixtures are real files with a real STFS prefix, because the parser reads fixed
 // offsets out of it - a name-only fixture would prove nothing about the offsets that
-// docs/dlc.md and the SDK's StfsHeader fix.
+// docs/guides/dlc.md and the SDK's StfsHeader fix.
 
 #include "check.h"
 

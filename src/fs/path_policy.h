@@ -5,7 +5,7 @@
 // directory the launcher asked for sit inside the read-only game root? Kept free of
 // any SDK dependency for the same reason src/fs/overlay_merge.h is - it is pure host
 // path arithmetic, and tests/path_policy_tests.cpp has to cover it without booting
-// the game (docs/rb3-references.md §7.3).
+// the game (docs/reference/rb3-references.md §7.3).
 
 #pragma once
 

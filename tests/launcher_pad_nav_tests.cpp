@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The pad's own rules (docs/plans/launcher-plan.md A3, D6): the deadzone, the binding table, the
+// The pad's own rules (docs/plans/finished/2026-09-27-launcher-plan.md A3, D6): the deadzone, the binding table, the
 // repeat timing, and what the bar is told to call a pad's buttons. No SDL and no window - which is
 // why pad_nav.cpp exists separately from the SDL glue in pad_source.cpp.
 

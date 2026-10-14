@@ -85,7 +85,7 @@ Value Enum(std::string token) {
 // The rows the parent plan's §3 names as the ones people will ask about by name, so a future
 // session cannot quietly promote one of them without the evidence column changing too. `kVsync` is
 // deliberately NOT here: it is the one row with measured live evidence (R7's frame pacing,
-// docs/dlc.md), and its promotion is asserted below.
+// docs/guides/dlc.md), and its promotion is asserted below.
 constexpr SettingId kRowsThatMustStayRestart[] = {
     SettingId::kTarget,     SettingId::kHideHud,     SettingId::kCacheDlcLibrary,
     SettingId::kResolution, SettingId::kRenderer,   SettingId::kAntiAliasing,
@@ -132,7 +132,7 @@ void StrategyTableIsComplete() {
     if (row != nullptr) {
       CHECK_EQ(row->descriptor.strategy == ApplicationStrategy::kHot, true);
       // The evidence names the measurement, so the claim is checkable rather than asserted.
-      CHECK_TRUE(row->descriptor.strategy_evidence.find("docs/dlc.md") !=
+      CHECK_TRUE(row->descriptor.strategy_evidence.find("docs/guides/dlc.md") !=
                  std::string::npos);
     }
   }

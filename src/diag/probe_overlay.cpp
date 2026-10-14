@@ -7,7 +7,7 @@
 // Everything shown here is either a cvar (the guest's requested video mode, the
 // present path) or an event from the ring. Nothing is inferred: where a value is
 // not reachable through a public interface - the presenter's own paint rectangle
-// is the standing example, docs/engine/probe.md records it - the overlay says so
+// is the standing example, docs/engine/diagnostics.md (part 1, the probe) records it - the overlay says so
 // instead of guessing, because a probe that reports a plausible number is worse
 // than one that reports none.
 
@@ -96,7 +96,7 @@ void ProbeOverlayDialog::OnDraw(ImGuiIO& io) {
     Row("dither", "%s", CvarBool("present_dither") ? "on" : "off");
     Row("overscan cutoff", "%s", CvarBool("present_allow_overscan_cutoff") ? "on" : "off");
     // The presenter's own paint rectangle is not on any public SDK interface, so
-    // it is named as unavailable rather than derived here (docs/engine/probe.md).
+    // it is named as unavailable rather than derived here (docs/engine/diagnostics.md (part 1, the probe)).
     Row("paint rect", "%s", "(not exposed by the SDK)");
   }
 

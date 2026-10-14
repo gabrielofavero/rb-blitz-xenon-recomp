@@ -9,13 +9,13 @@ usage:
   python decrypt_xex.py --diff <left.bin> <right.bin> [--image-base 0x82000000]
 
 The retail key is never stored here: it is read from the pinned SDK source, the
-same file the runtime uses (docs/rb3-references.md §9 asks for one copy of key
+same file the runtime uses (docs/reference/rb3-references.md §9 asks for one copy of key
 material, not two), or passed in with --key.
 
 The decrypted images are what make a content variant reviewable: decrypt the
 dumped default.xex and the variant's default.xex, diff them, and every code and
 data edit is a byte range with a guest address. That is how the Rock Band Blitz
-Ultimate delta was established (docs/ultimate-compat.md): 12 bytes in 3 places,
+Ultimate delta was established (docs/guides/ultimate-compat.md): 12 bytes in 3 places,
 which is why this project reproduces the edits in src/hooks/ultimate.cpp instead
 of treating the variant's executable as a second compilation input.
 """

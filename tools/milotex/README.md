@@ -37,7 +37,7 @@ pieces to that.
 
 The build writes `tools\milotex\bin\Release\net8.0\milotex.exe`. `-c Debug` puts it
 under `Debug\` instead; the `.gitignore` covers both. Nothing in `scripts/` calls it — it
-is driven by hand for the texture work described in [docs/assets.md](../../docs/assets.md).
+is driven by hand for the texture work described in [docs/guides/assets.md](../../docs/guides/assets.md).
 
 ## Why it is not committed prebuilt
 

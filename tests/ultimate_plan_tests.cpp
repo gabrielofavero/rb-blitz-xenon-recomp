@@ -12,7 +12,7 @@
 // 0 touches nothing even with a payload on disk, auto mode patches only when there is
 // something to patch for, and the content-device data patch runs only from the exact
 // retail bytes - so an image that already carries the mod's edit, or one with a
-// different layout, is left alone (docs/ultimate-compat.md, src/hooks/ultimate.cpp).
+// different layout, is left alone (docs/guides/ultimate-compat.md, src/hooks/ultimate.cpp).
 
 #include "check.h"
 

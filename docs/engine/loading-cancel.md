@@ -1,9 +1,9 @@
 # Cancelling a song load that never finishes (R11)
 
-> **New study (2026-10-13):** [Song Load Guard](../plans/load-guard-findings.md) examines
+> **New study (2026-10-13):** [Song Load Guard](../plans/todo/2026-10-13-load-guard-findings.md) examines
 > automatic 30s/60s cancellation, return to the **main menu**, and a native error popup using
 > the current settings/UI infrastructure. It distinguishes cooperative timeouts from fatal
-> exception recovery and includes [implementation prompts](../plans/load-guard-prompts.md).
+> exception recovery and includes [implementation prompts](../plans/todo/2026-10-13-load-guard-prompts.md).
 > No new runtime recovery was implemented or measured in that study. The R11 results and
 > corrected reproducer below remain historical evidence.
 

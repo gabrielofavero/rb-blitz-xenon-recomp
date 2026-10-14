@@ -23,7 +23,7 @@
 //   sub_827593C8(this)         done: current = total, then push
 //   sub_82759190(this)         push: panel.current_content = this+8, panel.total_content = this+12
 //
-// **Why the bar was hidden, measured 2026-10-10** (docs/plans/song-cache-plan.md §9.4):
+// **Why the bar was hidden, measured 2026-10-10** (docs/plans/finished/2026-10-10-song-cache-plan.md §9.4):
 // this build's engine calls `SetTotal` exactly **once, after** the whole enumeration, with a
 // total of **0** - which the Flow reads as "not enumerating", so it hides the bar - and
 // `Increment` is **never called at all**. For the 46.8 s the discovery screen is up,
@@ -43,7 +43,7 @@
 // (2 x 1,402 + 3 = 2,807 calls for 1,402 packages). The extras are clamped, so the bar is
 // monotonic to 100% across the screen.
 //
-// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and the deviation.
+// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and the deviation.
 //
 // Faithful behaviour: with the toggle off (its default) each hook calls the guest's own
 // function unchanged and touches no guest state, so the boot is the boot this project had
@@ -174,7 +174,7 @@ void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t tot
 // R7's frame pacing for the discovery (`enhancements_dlc_uncap_enumeration`).
 //
 // The title's enumeration advances one item per *presented* frame: 2,807 items over 46.7 s at
-// 60 Hz, 7.0 ms per item and 19.7 s with the frame rate free (measured, docs/dlc.md §4.3). The
+// 60 Hz, 7.0 ms per item and 19.7 s with the frame rate free (measured, docs/guides/dlc.md §4.3). The
 // value that decides the frame rate is the SDK's own `vsync` cvar - the launcher's Graphics ▸
 // Window row, which belongs to the player - so this asks for it to be turned down for exactly as
 // long as the enumeration lasts and puts the player's value back at the first of three signs that
@@ -395,7 +395,7 @@ extern "C" REX_FUNC(sub_827593A8) {
 }
 
 // 0x827593B8 (Increment): one more item enumerated. This build's engine never calls it
-// (measured - docs/plans/song-cache-plan.md §9.4), which is why the host counts the items
+// (measured - docs/plans/finished/2026-10-10-song-cache-plan.md §9.4), which is why the host counts the items
 // itself; left hooked so the faithful path stays the engine's own function and so a build
 // that does call it still gets a total.
 extern "C" REX_FUNC(sub_827593B8) {

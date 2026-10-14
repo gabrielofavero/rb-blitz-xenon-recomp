@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Unit tests for src/ui/dtb_author.{h,cpp} - producing a compiled-DTA definition of our own
-// (P1 of docs/plans/in-game-settings-plan.md).
+// (P1 of docs/settings/plan.md).
 //
 // Two things are pinned here:
 //   * the grammar is self-consistent - what Compile writes, Parse reads back as the same tree, and
@@ -14,7 +14,7 @@
 // The synthetic fixture deliberately mirrors the shape measured in a retail panel
 // (ui/pause/gen/pause.dtb): a `{new UIPanel <name> {file <milo>} {focus <list>.lst} {enter {...}}}`
 // declaration, which is what an authored screen definition has to look like. See
-// docs/plans/in-game-settings-panel-api.md.
+// docs/settings/architecture.md (part 2, the panel/list API).
 //
 // SDK-free: no rex::, no window, no boot.
 
@@ -177,7 +177,7 @@ int TestRealFile(const char* path) {
   return 0;
 }
 
-// Authoring helpers for the P1-b reachability probe (docs/plans/in-game-settings-panel-api.md §8).
+// Authoring helpers for the P1-b reachability probe (docs/settings/architecture.md (part 2, the panel/list API) §8).
 // They turn the verified encoder into files a boot can be pointed at, which is what the round trip
 // above cannot do on its own. They write only what the caller names, and only ever *read* an input.
 int EmitPanel(const char* out_path) {

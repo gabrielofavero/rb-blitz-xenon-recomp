@@ -9,8 +9,8 @@
 // src/input/native_menu.h are: the interesting part is arithmetic over a ring (what
 // is retained, what is counted as dropped, in what order a snapshot comes back),
 // and tests/probe_trace_tests.cpp has to cover it without booting the game
-// (docs/rb3-references.md §7.3, and the split-the-decision rule in
-// docs/plans/customization-plan.md contract 4).
+// (docs/reference/rb3-references.md §7.3, and the split-the-decision rule in
+// docs/plans/finished/2026-10-03-customization-plan.md contract 4).
 //
 // Why a ring and not a log. A trace is written from guest threads, and the
 // interesting window is one screen transition - thousands of events over a

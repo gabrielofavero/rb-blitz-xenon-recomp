@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // P4's graphics policy. See graphics_policy.h for the two rules and the reason keys;
-// docs/plans/in-game-settings-graphics-findings.md records the measurements and the honest
+// docs/settings/graphics.md (part 2, graphics policy) records the measurements and the honest
 // unknowns (in particular: only D3D12 is built on this machine).
 
 #include "settings/graphics_policy.h"

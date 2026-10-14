@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3 — the frozen, SDK-free settings model (docs/plans/in-game-settings-contracts.md §5).
+// P3 — the frozen, SDK-free settings model (docs/settings/contracts.md §5).
 //
 // This header materializes the G0 contract verbatim: the stable identifiers, the typed
 // value, the descriptor, the requested/effective/pending field state, the capability

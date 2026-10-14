@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Where the launcher profile lives (docs/plans/launcher-plan.md D2). This module is the
+// Where the launcher profile lives (docs/plans/finished/2026-09-27-launcher-plan.md D2). This module is the
 // single answer to that question: rb_blitz_launcher.exe writes the file it resolves and
 // rb_blitz.exe reads the file it resolves, so the two cannot disagree.
 //

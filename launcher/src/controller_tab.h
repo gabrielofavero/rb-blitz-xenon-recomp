@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The button-mapping block on the Controller tab (docs/plans/launcher-plan.md D16).
+// The button-mapping block on the Controller tab (docs/plans/finished/2026-09-27-launcher-plan.md D16).
 //
 // Every control a 360 pad has is listed whether or not it is bound, because the list is the
 // answer to "what can I rebind?" - a list that only showed the differences would leave the user

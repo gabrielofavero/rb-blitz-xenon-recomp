@@ -158,7 +158,7 @@ std::vector<Node> ButtonCases(const bool root, const bool pause) {
 // `{select_row {switch {options.lst selected_sym} <cases>}}` - the single row table, reached from
 // the button table above. It replaces the retail `SELECT_MSG` route for this surface: a probe in a
 // panel's own button table reported every press as a button action and never once as `SELECT_MSG`
-// (docs/plans/in-game-settings-bridge-findings.md §12.2), so driving the rows from the message the
+// (docs/settings/architecture.md (part 1, the bridge) §12.2), so driving the rows from the message the
 // engine demonstrably sends is the honest design. `on_select_msg` is still defined, because the
 // *selection change* message is a different one and the retail panels use it for the move sound.
 
@@ -424,7 +424,7 @@ std::vector<std::string> PausePanels() {
   // names **any** of them faults the guest with `read of guest 0x00000024` while it is constructed -
   // measured one panel at a time, and with the screen declared in the pause record instead - while
   // retail's own in-song screens name them and open. So the set is retail's shape and is *not*
-  // usable by the in-song twins as they stand; see docs/plans/in-game-settings-merged-menu.md §3.2
+  // usable by the in-song twins as they stand; see docs/settings/menu.md (part 1, the merged menu) §3.2
   // for the matrix and §3.3 for the next arm. (An earlier reading of one arm had
   // `game_fade_out_panel` as the cure for that fault; the later arms show it is not the variable:
   // the fault appears with it and without it.)
@@ -432,7 +432,7 @@ std::vector<std::string> PausePanels() {
 }
 
 // The whole merged tree, in the plan's §3 order. Setting tokens are `<category>.<id>` on top of
-// docs/plans/in-game-settings-contracts.md §5.1's stable ids.
+// docs/settings/contracts.md §5.1's stable ids.
 //
 // Two seams are handed over rather than faked, and are marked at the row:
 //   * a row whose choices come from the *machine* (`RESOLUTION`, `RENDERER`, `A. FILTERING`,

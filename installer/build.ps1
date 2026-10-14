@@ -316,7 +316,7 @@ if ($SkipLauncher) {
 } else {
     if (-not (Test-Path -LiteralPath $SourceDir)) {
         throw ("no recompiled build tree to build the launcher in: $SourceDir does not exist. Build " +
-               'the emulator first (see docs/build-and-run.md), pass -LauncherTarget for a launcher ' +
+               'the emulator first (see docs/guides/build-and-run.md), pass -LauncherTarget for a launcher ' +
                'built elsewhere, or pass -PayloadUrl to download the build at install time instead.')
     }
     $launcherArgs = @('--build', $SourceDir, '--target', 'rb_blitz_launcher')

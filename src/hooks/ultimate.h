@@ -8,7 +8,7 @@
 // plus a default.xex that differs from the retail one in 12 bytes. This layer
 // reproduces those bytes host-side and maps the payload into the guest-visible
 // tree, so the payload can be dropped next to the retail game data instead of
-// replacing it. See docs/ultimate-compat.md for the evidence.
+// replacing it. See docs/guides/ultimate-compat.md for the evidence.
 //
 // The decidable half - the patch bits, the mode/payload decision, the payload's
 // spelling and the content-device slot classification - is in hooks/ultimate_plan.h,
@@ -53,7 +53,7 @@ void EnableSettingsArchive(rex::Runtime* runtime);
 // `Provider()` is computed once, in Configure(), on the host thread; the guest hooks only read it.
 // It is empty when Configure() has not run, when there is no payload to inspect (including the
 // merged-payload install, which has no directory of its own to read and no overlay to redirect
-// through - see docs/plans/in-game-settings-ultimate-adapter.md), or when the cvar turned the mod
+// through - see docs/settings/architecture.md (part 5, the Ultimate adapter)), or when the cvar turned the mod
 // off.
 const settings::ultimate_adapter::ProviderRuntime& Provider();
 

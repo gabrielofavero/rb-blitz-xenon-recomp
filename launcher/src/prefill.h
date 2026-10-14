@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The first run's prefill (docs/plans/launcher-plan.md D4, §4.2; prompt D4).
+// The first run's prefill (docs/plans/finished/2026-09-27-launcher-plan.md D4, §4.2; prompt D4).
 //
 // A fresh launcher has no profile. Rather than making the user retype what the installer
 // already wrote down, the first run reads `install-manifest.toml` beside the launcher and

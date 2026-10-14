@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The General tab (docs/plans/launcher-plan.md D4, D5; prompts B1, B8).
+// The General tab (docs/plans/finished/2026-09-27-launcher-plan.md D4, D5; prompts B1, B8).
 //
 // It draws the three rows §1.1 gives M1 - the launch target with the payload availability the
 // files say, and the save and DLC locations - and edits them in the session's profile, which

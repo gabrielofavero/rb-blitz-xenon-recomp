@@ -41,7 +41,7 @@
 // only the patch pair. The virtual file system resolves a file by resolving its
 // directory first (VirtualFileSystem::OpenFile), so nothing per file - a device alias
 // or a symbolic link - can merge the two; src/fs/payload_overlay.h is the union device
-// that does, and docs/ultimate-compat.md has the evidence for every step.
+// that does, and docs/guides/ultimate-compat.md has the evidence for every step.
 //
 // The payload's own default.xex is not used: this binary is recompiled from the retail
 // image and reproduces the mod's three edits in it, and the overlay hides that file so
@@ -49,7 +49,7 @@
 //
 // The Ultimate install; see docs/history/bringup-log.md B-012.
 //
-// Hook hygiene (docs/rb3-references.md §8): the faithful behaviour, and every deviation
+// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and every deviation
 // from it including each early return.
 //
 // Faithful behaviour. Vanilla Blitz is the default and is untouched: with no

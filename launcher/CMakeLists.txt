@@ -1,4 +1,4 @@
-# The launcher (docs/plans/launcher-plan.md). This directory holds the launcher's own
+# The launcher (docs/plans/finished/2026-09-27-launcher-plan.md). This directory holds the launcher's own
 # sources, tools and configuration, and the rb_blitz_launcher executable itself.
 #
 # The settings schema is the first thing here the build needs. launcher/config/

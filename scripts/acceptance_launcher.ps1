@@ -1,6 +1,6 @@
 # Launcher acceptance: the installed launcher, end to end.
 #
-# E3 of docs/plans/launcher-plan.md. Everything else about the launcher is checked against
+# E3 of docs/plans/finished/2026-09-27-launcher-plan.md. Everything else about the launcher is checked against
 # the build tree - the unit tests in a host process, the headless reports in the build
 # folder, the captures in scripts/capture_launcher.ps1. This script checks the thing a user
 # actually gets: a silent install into a scratch folder, the launcher that install put
@@ -51,7 +51,7 @@
 # `[settings] user_data_root` / `dlc_root`, the same rows the launch command reads - so a
 # folder picked in the launcher is both shown by `--dump-general` and passed to the game. The
 # profiles this script writes keep the `[settings]` spelling, which is what the panel writes
-# too; docs/plans/launcher-plan.md section 11 records the measurements and the fixes.
+# too; docs/plans/finished/2026-09-27-launcher-plan.md section 11 records the measurements and the fixes.
 #
 # What it needs, and what it deliberately does not:
 #
@@ -59,7 +59,7 @@
 #     (the tree's own game\ folder, read-only) and, for the ultimate leg, the mod's folder;
 #   * no controller, no clicks, no OCR and no capture. The game does need a GPU to boot, so
 #     this is not headless the way the unit tests are; it is unattended, which is a different
-#     thing. The controller path stays manual (docs/plans/launcher-plan.md section 6.2).
+#     thing. The controller path stays manual (docs/plans/finished/2026-09-27-launcher-plan.md section 6.2).
 #
 # Usage:
 #   .\scripts\acceptance_launcher.ps1                      # install, then all four legs

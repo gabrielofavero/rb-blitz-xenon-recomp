@@ -10,7 +10,7 @@
 #     which revision the running executable was actually booted against and
 #     returns. Nothing there aborts, because pointing a built binary at another
 #     game/ tree is a supported way to run: an Ultimate payload staged at
-#     game/ultimate is one (docs/ultimate-compat.md), a second dump is another.
+#     game/ultimate is one (docs/guides/ultimate-compat.md), a second dump is another.
 #
 # This script captures that second half from the real boot, for the outcomes it
 # has, and takes the build half's verdict on the same file as the contrast that
@@ -41,14 +41,14 @@
 # shapes that reach a different check each: the block table past the end of the
 # data (truncated), the header size past the end of the file (short), and a file
 # too small to map (empty). A refused image ends with the pre-existing
-# 0xC0000374 in the SDK's post-Setup teardown - see docs/known-issues.md - so the
+# 0xC0000374 in the SDK's post-Setup teardown - see docs/reference/known-issues.md - so the
 # exit code is recorded, not asserted beyond being non-zero.
 #
 # The payload image defaults to <GameRoot>\ultimate\default.xex, so that case runs
 # only where the community mod is staged and is reported as skipped elsewhere.
 # Every case runs vanilla (--ultimate_mode=0): the identity line is what is being
 # captured here, and the payload overlay mounting has its own acceptance run
-# (docs/ultimate-compat.md section 7).
+# (docs/guides/ultimate-compat.md section 7).
 #
 # Usage:
 #   .\scripts\acceptance_wrong_data.ps1
@@ -166,7 +166,7 @@ Write-Host ""
 # ---------------------------------------------------------------- helpers ---
 
 # Every helper that touches a .ps1 file has to go through a child PowerShell:
-# this machine's execution policy is Restricted (docs/build-and-run.md section 0).
+# this machine's execution policy is Restricted (docs/guides/build-and-run.md section 0).
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }

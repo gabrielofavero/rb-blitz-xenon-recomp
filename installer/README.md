@@ -22,9 +22,9 @@ The game data is always the user's own: an Xbox 360 package or a game folder the
 already extracted. The Rock Band Blitz Ultimate mod is a third-party fan project,
 so it is downloaded from its own GitHub release while the installer runs, or
 supplied by the user — never mirrored, re-hosted or bundled. The distribution
-rules are in [`../docs/distributable.md`](../docs/distributable.md) — what ships, and
+rules are in [`../docs/guides/distributable.md`](../docs/guides/distributable.md) — what ships, and
 the audit that refuses a payload with game data, a credential, a symbol table or the
-build machine's path in it — and [`../docs/ultimate-compat.md`](../docs/ultimate-compat.md).
+build machine's path in it — and [`../docs/guides/ultimate-compat.md`](../docs/guides/ultimate-compat.md).
 
 ## What the user walks through
 
@@ -70,7 +70,7 @@ game beside itself.
 
 The names are deliberately different so a list can tell them apart, and the
 game's shortcut is never repointed at Controller Settings: the game has to stay
-runnable on its own (D9, [`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md)).
+runnable on its own (D9, [`../docs/plans/finished/2026-09-27-launcher-plan.md`](../docs/plans/finished/2026-09-27-launcher-plan.md)).
 Nothing is created unless the user asks: the wizard's page starts from no answer,
 the `[Tasks]` declarations carry `Flags: unchecked` so a silent install starts from
 no answer too, and `UsePreviousTasks=no` keeps an earlier install's choice from
@@ -283,7 +283,7 @@ powershell -ExecutionPolicy Bypass -File scripts\audit_distributable.ps1
 
 It reads the payload allow-list, the game and mod fingerprints, the frozen
 toolchain paths and `git ls-files`, and it is the check that found the build
-machine's `__FILE__` path inside the first payload - [distributable.md](../docs/distributable.md)
+machine's `__FILE__` path inside the first payload - [distributable.md](../docs/guides/distributable.md)
 has the finding, the fix and the two deliberate failures that prove the check can
 fail.
 
@@ -448,7 +448,7 @@ vulkan`), read from the build tree's `CMakeCache.txt`, and warns when Vulkan is 
 own Windows default for `REXGLUE_USE_VULKAN` is OFF, so a hand-configured tree ships a
 `rexgpu-xenos.dll` with one backend and both *Renderer* rows (the launcher's and the game's) then
 offer one choice, which has already been mistaken for a bug once. The Windows presets configure it
-ON ([build-and-run.md](../docs/build-and-run.md)), and the game additionally probes the loader
+ON ([build-and-run.md](../docs/guides/build-and-run.md)), and the game additionally probes the loader
 before offering the backend (`src/settings/boot.cpp`).
 
 **The payload carries the Vulkan loader.** `vulkan-1.dll` is opened at run time by the SDK with
@@ -469,7 +469,7 @@ all have drivers.
 
 An optional community mod. It is *not* needed to play: the runtime reproduces the
 mod's three edits host-side, and an installed payload works by drag-and-drop
-(`docs/ultimate-compat.md`). The installer offers three ways to get it, and none
+(`docs/guides/ultimate-compat.md`). The installer offers three ways to get it, and none
 of them involve us distributing it:
 
 | `ULTIMATESOURCE` | What happens |

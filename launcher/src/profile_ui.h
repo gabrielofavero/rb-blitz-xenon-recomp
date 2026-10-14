@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The profile block on the General tab (docs/plans/launcher-plan.md D2, prompt B4).
+// The profile block on the General tab (docs/plans/finished/2026-09-27-launcher-plan.md D2, prompt B4).
 //
 // It is the visible half of the write path: a *Reset to defaults* that names exactly what it will
 // remove before it removes it, *Import*/*Export*, and *Change settings location*, which moves the

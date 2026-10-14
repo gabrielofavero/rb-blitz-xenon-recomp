@@ -20,7 +20,7 @@
 // reads are the whole cost of a cold scan (~17 ms per package on this machine's
 // library, against ~2 ms for the walk itself), so a scan reads them on a small pool;
 // the walk and the merge stay on the calling thread, in walk order, so the answer does
-// not depend on how many threads read it. See docs/dlc.md §2.1 and §4.1.
+// not depend on how many threads read it. See docs/guides/dlc.md §2.1 and §4.1.
 
 #pragma once
 
@@ -272,7 +272,7 @@ inline std::vector<std::string> SplitPathList(const std::string_view value) {
   return parts;
 }
 
-// Eight hex digits, the way the SDK and docs/dlc.md spell a content type. Used to
+// Eight hex digits, the way the SDK and docs/guides/dlc.md spell a content type. Used to
 // read --dlc_library_content_type.
 inline bool ParseHex32(const std::string_view text, uint32_t* value) {
   if (text.empty() || text.size() > 8) {
@@ -308,7 +308,7 @@ inline constexpr uint32_t kMarketplaceContentType = 0x00000002;
 // mounts every package, and adds none of it to its song list, while the same packages
 // presented as marketplace content list and play. So a saved-game package is presented
 // as marketplace content, and a `forced` non-zero value replaces the answer for the
-// whole library (including for a package that is not saved-game). See docs/dlc.md §2.1.
+// whole library (including for a package that is not saved-game). See docs/guides/dlc.md §2.1.
 constexpr uint32_t LibraryContentType(uint32_t own_content_type, uint32_t forced) {
   if (forced != 0) {
     return forced;

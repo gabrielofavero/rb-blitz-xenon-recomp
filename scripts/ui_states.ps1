@@ -9,12 +9,12 @@
 #     it is entered - so a route is "clamp to the first row, tap down N, accept",
 #     and the first row of the main menu is PLAY (A on it opens the song list);
 #   * the needles are the strings those screens actually draw, as read by
-#     Windows OCR on this build (docs/engine/observing.md says how to add one);
+#     Windows OCR on this build (docs/engine/diagnostics.md (part 2, the observer) says how to add one);
 #   * the settle times are deliberately longer than the route's own waits: the
 #     frame is only comparable once the screen has stopped animating, and the
 #     noise floor between two runs of the same build falls from 3.5-5.9 % just
 #     after a screen is entered to ~0.14 % once it has settled
-#     (docs/backlog.md, "Measure the noise floor").
+#     (docs/reference/backlog.md, "Measure the noise floor").
 #
 # A state with an empty needle is a state whose text has not been pinned down
 # yet; the harness still captures it (and says the expectation is unknown) rather
@@ -121,7 +121,7 @@ $script:UiStates["main-menu"] = @{
     # capture OCR'd as this menu differed by 17.71 % of the frame.
     #
     # The needle is the stock row list, so it is a run with R5 off and R7 off. R5
-    # removes the row, and R7 redraws it as "REFRESH SONG LIBRARY" (docs/dlc.md
+    # removes the row, and R7 redraws it as "REFRESH SONG LIBRARY" (docs/guides/dlc.md
     # §4.2); both are off by default, and a run with either on is checked by the
     # toggle's own acceptance instead of this route.
     Settled = $false

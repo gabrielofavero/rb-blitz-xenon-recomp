@@ -9,7 +9,7 @@
 #         gen\patch_ps3.hdr    + _0.ark             (the title update)
 #
 # The archive format is identical - same version 6 layout, same header cipher,
-# same texture envelopes (docs/assets.md#ps3) - so both are unpacked by the same
+# same texture envelopes (docs/guides/assets.md#ps3) - so both are unpacked by the same
 # scripts/hmx_ark.py. This script picks the pair and then unpacks the base
 # archive followed by the overlay over it in place, so the result is the file
 # tree the title reads with its update installed. A per-archive index is written

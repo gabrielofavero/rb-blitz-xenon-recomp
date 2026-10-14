@@ -71,7 +71,7 @@ constexpr const char* kDefaultProjectDir = ".";
 #endif
 
 // Where to look when the builder did not say. Kept in sync with the defaults in
-// docs/toolchain.md.
+// docs/guides/toolchain.md.
 constexpr const char* kPinFile = "config/toolchain.toml";
 constexpr const char* kSdkDir = "rexglue-sdk";
 
@@ -95,7 +95,7 @@ void PrintUsage() {
                "                         [--emit-header <file>] [--quiet]\n"
                "\n"
                "Compares the local toolchain with config/toolchain.toml, the record of the\n"
-               "toolchain this project is frozen to (docs/toolchain.md).\n"
+               "toolchain this project is frozen to (docs/guides/toolchain.md).\n"
                "\n"
                "  --project-dir <dir>      repository root the defaults below are relative to\n"
                "  --pin <file>             frozen record (default <project-dir>/"
@@ -219,7 +219,7 @@ std::string FirstMatch(const std::string& text, const std::regex& pattern, int g
 
 // Asks the compiler about itself and files the three answers it gives in one run:
 // its version, the MSVC toolset whose headers it will include, and the Windows SDK
-// version those headers come from. This is the check docs/build-and-run.md §1
+// version those headers come from. This is the check docs/guides/build-and-run.md §1
 // describes for a hand-written toolchain check, with the parsing done for you.
 void ProbeCompiler(const fs::path& cxx, Reported* compiler, Reported* msvc, Reported* windows_sdk) {
   const fs::path probe = fs::temp_directory_path() / "rb_blitz_toolchain_probe.cpp";
@@ -351,12 +351,12 @@ int Report(const std::vector<ComponentCheck>& checks, const Pin& pin, const fs::
   if (fatal && !options.allow_other_toolchain) {
     std::cout << "This is not the frozen toolchain, and the deviation is one that stops the build"
               << (options.strict ? " (strict was asked for)" : "")
-              << ". Fix the toolchain (docs/toolchain.md), or build with "
+              << ". Fix the toolchain (docs/guides/toolchain.md), or build with "
                  "-DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON to report and continue.\n";
     return kExitToolchain;
   }
   if (!deviating.empty() || !unmeasured.empty()) {
-    std::cout << "Not the frozen toolchain; building anyway. docs/toolchain.md records what it "
+    std::cout << "Not the frozen toolchain; building anyway. docs/guides/toolchain.md records what it "
                  "is, and -DRBBLITZ_STRICT_TOOLCHAIN=ON makes this fatal.\n";
   } else if (!options.quiet) {
     std::cout << "ok         the frozen toolchain\n";

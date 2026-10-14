@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's tab shell (docs/plans/launcher-plan.md A1, B1, B4, A2, A3).
+// The launcher's tab shell (docs/plans/finished/2026-09-27-launcher-plan.md A1, B1, B4, A2, A3).
 //
 // The shell owns the layout (built from the schema table), one focus ring per tab, the two
 // NavSources and the session - the profile plus its write path (B4). It draws one frame at a time
@@ -55,7 +55,7 @@ struct ShellEnvironment {
   // installer/config/pins.toml - the same file the installer and the release manifest come
   // from - so a launcher cannot check a release the installer beside it would not install.
   std::string update_manifest_url;
-  // P8's development gate (docs/plans/in-game-settings-contracts.md §9.3). True puts the launcher
+  // P8's development gate (docs/settings/contracts.md §9.3). True puts the launcher
   // into Controller Settings: one screen - the controller mapping table and the mouse row - with
   // Save, Close and Play Game on the bar, and no other tab, no Update, and no Ultimate install
   // (both of those are the installer's and the updater's business, plan §3.6). False is the full
@@ -66,7 +66,7 @@ struct ShellEnvironment {
 // The bottom bar's own controls, in the order they read on each surface. Which of them are on the
 // bar is the one thing the two surfaces disagree about (P8): Controller Settings has no Update,
 // because installing a release - and installing Ultimate - is the installer's and the updater's
-// business, not a row on a controller screen (docs/plans/in-game-settings-plan.md §3.6).
+// business, not a row on a controller screen (docs/settings/plan.md §3.6).
 enum class BarOption : std::size_t { kUpdate, kClose, kSave, kPlay };
 
 class Shell {

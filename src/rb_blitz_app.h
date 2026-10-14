@@ -3,7 +3,7 @@
 //
 // Customize your app by overriding virtual hooks from rex::ReXApp.
 //
-// Hook hygiene (docs/rb3-references.md §8): this is the one file whose hooks are
+// Hook hygiene (docs/reference/rb3-references.md §8): this is the one file whose hooks are
 // rex::ReXApp's, so each override below states what the SDK does by itself and why
 // this app differs. In short:
 //   * OnPreSetup - the SDK runs its configured backends and input devices; here the
@@ -199,7 +199,7 @@ class RbBlitzApp : public rex::ReXApp {
     // profile at equal rank, and the command line and the environment - applied before any of
     // this - outrank both. Without it only a game started by the launcher's Launch Game button
     // saw any of the launcher's settings, because that is the only thing that passes them as
-    // argv (docs/plans/launcher-plan.md §11 findings 6 and 7).
+    // argv (docs/plans/finished/2026-09-27-launcher-plan.md §11 findings 6 and 7).
     //
     // The report is kept and logged in OnPostInitLogging, not here: logging is initialized a few
     // lines after this hook returns, so a line written now would go nowhere.
@@ -451,7 +451,7 @@ class RbBlitzApp : public rex::ReXApp {
     // this binary, with the frozen set named in the same line when it is one. It is
     // the build's half of what the game data identity below is the runtime's half
     // of: a log states the provenance of both sides before any other evidence in it
-    // is read (docs/toolchain.md).
+    // is read (docs/guides/toolchain.md).
     REXLOG_INFO("toolchain: {}", RBBLITZ_TOOLCHAIN_STAMP);
 
     const std::filesystem::path entrypoint =
@@ -476,7 +476,7 @@ class RbBlitzApp : public rex::ReXApp {
     REXLOG_WARN("game data identity: MODIFIED - {} is {} bytes, sha256 {}",
                 entrypoint.string(), size, digest);
     REXLOG_WARN("  expected: {} bytes, sha256 {} (config/game_fingerprints.toml, see"
-                " docs/ultimate-compat.md)",
+                " docs/guides/ultimate-compat.md)",
                 rb_blitz::fingerprint::vanilla::kEntrypointSize,
                 rb_blitz::fingerprint::vanilla::kEntrypointSha256);
   }

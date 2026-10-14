@@ -19,7 +19,7 @@
 //
 // Guide is a separate question from a binding, and this is the path that answers it: the SDK's own
 // `guide_button` and `keybind_guide` cvars can raise the guest's Guide bit, and the project never
-// delivers it (docs/plans/in-game-settings-contracts.md §2.3). The filter is therefore installed
+// delivers it (docs/settings/contracts.md §2.3). The filter is therefore installed
 // whether or not a profile was readable, and the state it hands the guest has that bit cleared on
 // every input path - profile, no profile, malformed profile, or an explicit legacy cvar.
 //

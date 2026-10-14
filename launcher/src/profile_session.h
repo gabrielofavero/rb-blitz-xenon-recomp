@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's write path (docs/plans/launcher-plan.md D2, D3; prompt B4).
+// The launcher's write path (docs/plans/finished/2026-09-27-launcher-plan.md D2, D3; prompt B4).
 //
 // P0.3's profile module is the format: it patches the keys it owns into the document it was
 // given and leaves everything else byte for byte as it was. This is the session on top of it -

@@ -25,7 +25,7 @@
 #
 # Vanilla by default: the acceptance criterion covers the vanilla content
 # variant, so --ultimate_mode=0 is passed even when a Rock Band Blitz Ultimate
-# payload is installed next to the game root (docs/ultimate-compat.md).
+# payload is installed next to the game root (docs/guides/ultimate-compat.md).
 #
 # Usage:
 #   .\scripts\acceptance_song.ps1                       # 3 runs, "These Days"
@@ -42,11 +42,11 @@ param(
     [string]$OutDir = "out/m5-acceptance",
     [string]$GameRoot,
     # DLC sources, passed through to the game. Empty means the default
-    # <GameRoot>/dlc (docs/dlc.md §2) and no library. A flat library adds its songs
+    # <GameRoot>/dlc (docs/guides/dlc.md §2) and no library. A flat library adds its songs
     # to the same artist-sorted list, so -Song counts them too.
     [string]$DlcRoot,
     [string]$DlcLibrary = "",
-    # Present the library under this 8-hex-digit content type (docs/dlc.md §2.1);
+    # Present the library under this 8-hex-digit content type (docs/guides/dlc.md §2.1);
     # empty keeps each package's own.
     [string]$DlcLibraryContentType = "",
     # 1-based row in the artist-sorted song list. Row 1 is the "Random Song"
@@ -101,7 +101,7 @@ $stopMarker = "XMPSetPlaybackController\(00000000, 00000000\)"
 # ---------------------------------------------------------------- helpers ---
 
 # Every helper that touches a .ps1 file has to go through a child PowerShell:
-# this machine's execution policy is Restricted (docs/build-and-run.md §0).
+# this machine's execution policy is Restricted (docs/guides/build-and-run.md §0).
 # The runtime resolves a *relative* DLC path against game_data_root (src/hooks/dlc.cpp), while this
 # script validates - and uses - it from its own directory, so a relative one would pass here and be
 # refused by the runtime with `ignoring <game>\<path> (cannot be read)`. Everything handed to the
@@ -390,7 +390,7 @@ function Invoke-Run([int]$Run) {
     # library folder usually has a space in it ("My Songs").
     # The title's two dialogs are pinned on: this run's route was measured pressing
     # A at each of them, and the skip now ships on by default
-    # (docs/engine/main-menu-flow.md, R3).
+    # (docs/engine/main-menu.md (part 1, the option list), R3).
     $launchArgs = @("--game_data_root=""$GameRoot""", "--ultimate_mode=$UltimateMode",
                     "--enhancements_skip_offline_dialog=false",
                     "--mnk_mode=1", "--log_level=debug", "--log_flush_interval=1",

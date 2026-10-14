@@ -8,11 +8,11 @@
 //   * `graphics.vsync` writes the SDK's own `vsync` cvar **by name**, because it is defined in
 //     `rexruntime.dll`'s GPU category and this project defines no storage symbol for it. The same
 //     call R7's frame pacing already makes, and the reason the row is `hot` at all: with the guest
-//     running, that write moved the discovery from 16.66 ms per item to 5.68 ms (docs/dlc.md).
+//     running, that write moved the discovery from 16.66 ms per item to 5.68 ms (docs/guides/dlc.md).
 //
 // Two constraints from the project, both structural rather than stylistic:
 //
-//   * **a guest thread must not touch the cvar registry** (docs/plans/song-cache-plan.md §7). The
+//   * **a guest thread must not touch the cvar registry** (docs/plans/finished/2026-10-10-song-cache-plan.md §7). The
 //     commit that triggers an apply arrives on the guest thread (it is the guest's own
 //     `write_file`), so the write itself happens on a short-lived host thread and this function
 //     waits for it: the caller must be able to say "applied" only when the write really happened.

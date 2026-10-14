@@ -18,7 +18,7 @@ I'm now improving stability & performance, adding modularized tweaks and creatin
 | Non 16:9 resolutions                      | Toggle   | To Do       | Ultrawide support and preparation for portrait (mobile).                                                                                                                                                                  |
 | Quick Play Background song                | Toggle   | To Do       | When combined with "DLC background songs", you can quickly play the song playing on main menu.                                                                                                                             |
 | Multi logos                               | Toggle   | To Do       | Switch between Ultimate and default Rock Band Blitz logo                                                                                                                                                                   |
-| Load Guard                                | Toggle   | Research    | Proposed Off / 30s / 60s song-load timeout: return to the main menu with a popup. Cooperative cancellation needs runtime proof; arbitrary crash recovery is unsupported. [Findings and implementation prompts](docs/plans/load-guard-findings.md). |
+| Load Guard                                | Toggle   | Research    | Proposed Off / 30s / 60s song-load timeout: return to the main menu with a popup. Cooperative cancellation needs runtime proof; arbitrary crash recovery is unsupported. [Findings and implementation prompts](docs/plans/todo/2026-10-13-load-guard-findings.md). |
 | Mouse Support (Controller)                | Toggle   | Implemented | Native menu hover, left/right click, and wheel navigation; hidden and inactive during gameplay                                                                                                                                                                   |
 | Multi button UI                           | Toggle   | To Do       | Be able to import from the PS3 assets the controller UI + create custom packages                                                                                                                                           |
 | Uncap framerate                           | Toggle   | To Do       | No promises. Chances are the engine is not capable. (Spike needed)                                                                                                                                                        |
@@ -48,7 +48,8 @@ cmake --build --preset win-amd64-release
 
 Outputs land in `out\build\win-amd64-release\`, and `.\rb_blitz.exe` runs from there. `ctest --test-dir out\build\win-amd64-release --output-on-failure` runs the host tests, and `installer\build.ps1` builds the installer exe (WIP).
 
-**Full walkthrough and everything I've worked out about the game: [`docs\`](docs/)** — start with [docs/build-and-run.md](docs/build-and-run.md).
+**Full walkthrough and everything I've worked out about the game: [`docs\`](docs)** — see
+[`docs/README.md`](docs/README.md) for the index, and start with [docs/guides/build-and-run.md](docs/guides/build-and-run.md).
 
 ## AI Usage
 

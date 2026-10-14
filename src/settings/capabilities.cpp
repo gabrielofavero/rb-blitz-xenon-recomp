@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The pure half of P4's capability probe. See capabilities.h for the three "do not lie"
-// rules this file enforces and docs/plans/in-game-settings-graphics-findings.md for the
+// rules this file enforces and docs/settings/graphics.md (part 2, graphics policy) for the
 // measurements behind the render-path limits.
 
 #include "settings/capabilities.h"
@@ -238,7 +238,7 @@ GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMod
   // Otherwise the guest's width is *forced* beside a height the title does lay out at. Both
   // dimensions have to divide exactly by the scale, because the render target is the frame times
   // that one integer multiplier - a frame that only approximates the target is the output-size
-  // substitute the project forbids (docs/plans/ultrawide-findings.md). Measured 2026-10-12:
+  // substitute the project forbids (docs/settings/graphics.md (part 3, custom resolutions)). Measured 2026-10-12:
   // 1680x720 as guest 1680x720 x1 and 2560x1080 as 1280x540 x2 both render exactly their size.
   for (const int32_t scale : scales) {
     if (scale < 1 || requested.width % scale != 0 || requested.height % scale != 0) {

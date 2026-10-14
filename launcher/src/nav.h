@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's focus model and its one input seam (docs/plans/launcher-plan.md A1, D6).
+// The launcher's focus model and its one input seam (docs/plans/finished/2026-09-27-launcher-plan.md A1, D6).
 //
 // The model is deliberately smaller than a widget toolkit: a flat, ordered list of rows
 // per tab and one focused index. Keys, the mouse and the pad all become the same NavAction

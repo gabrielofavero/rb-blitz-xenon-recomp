@@ -1,8 +1,8 @@
 # Observe one named UI state: drive to it, capture it, read it, and say what
-# changed. See docs/engine/observing.md for the operator's view.
+# changed. See docs/engine/diagnostics.md (part 2, the observer) for the operator's view.
 #
 # This is the harness the customization plan's S2-S7 and E1 measure with
-# (docs/plans/customization-plan.md, contracts 3 and 5). It joins the scripts
+# (docs/plans/finished/2026-10-03-customization-plan.md, contracts 3 and 5). It joins the scripts
 # that already exist rather than re-implementing any of them:
 #
 #   scripts/drive_ui.ps1      sends the keys (the MnK pad, one row per tap)
@@ -23,7 +23,7 @@
 #   * **A pixel diff is only evidence against a same-build baseline.** Without
 #     -BaselineDir there is nothing to compare, and -Compare with no baseline
 #     file for the state reports `no-baseline` and does NOT fail the run - a
-#     measurement with nothing to measure against is not a pass (docs/backlog.md,
+#     measurement with nothing to measure against is not a pass (docs/reference/backlog.md,
 #     "Measure the noise floor before believing any screenshot diff").
 #   * **The comparison is against the state's settled frame.** The route's own
 #     waits are not enough: a screen is only comparable once it has stopped
@@ -99,7 +99,7 @@ $skipOfflineFlag = if ($SkipOfflinePrompts -eq "0") { "false" } else { "true" }
 . (Join-Path $PSScriptRoot "ui_states.ps1")
 
 function Invoke-Child([string]$Script, [hashtable]$Named) {
-    # This machine's execution policy is Restricted (docs/build-and-run.md §0), so
+    # This machine's execution policy is Restricted (docs/guides/build-and-run.md §0), so
     # every sibling script goes through a child PowerShell - the same reason and the
     # same shape as scripts/acceptance_screens.ps1.
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))

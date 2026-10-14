@@ -9,7 +9,7 @@
 # records what it finds, warns when it does not match, and installs anyway; the
 # thing that actually decides whether the overlay works is its shape
 # (ultimate/gen/patch_xbox.hdr + ultimate/gen/patch_xbox_0.ark), which is what
-# the runtime reads. See ../../docs/ultimate-compat.md.
+# the runtime reads. See ../../docs/guides/ultimate-compat.md.
 
 schema_version = 1
 

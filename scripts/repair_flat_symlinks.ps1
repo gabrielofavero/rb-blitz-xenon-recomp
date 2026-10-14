@@ -33,7 +33,7 @@
 
     Re-run after `git submodule update`, a fresh clone, or any checkout that
     rewrites the SDK tree. Background: docs/history/bringup-log.md B-001,
-    docs/known-issues.md.
+    docs/reference/known-issues.md.
 
 .EXAMPLE
     .\scripts\repair_flat_symlinks.ps1

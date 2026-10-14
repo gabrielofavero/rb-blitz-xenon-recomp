@@ -12,7 +12,7 @@
 //      control are a list rather than a priority
 //   4. every binding reads the pad as it was, so a swap is a swap and not a chain
 //   5. Guide is refused at both ends (P8): no target, no source, a preserved row, and a bit that
-//      never leaves the rewrite - docs/plans/in-game-settings-contracts.md §2.3
+//      never leaves the rewrite - docs/settings/contracts.md §2.3
 //
 // No pad, no window, no SDL: the device side of the remap is the callback this file hands
 // `Apply` (src/input/remap.cpp), so everything the game would otherwise have to be running for

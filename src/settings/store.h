@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3 — native settings persistence (docs/plans/in-game-settings-contracts.md §4.1/§4.4/§5.4).
+// P3 — native settings persistence (docs/settings/contracts.md §4.1/§4.4/§5.4).
 //
 // Two layers live here:
 //

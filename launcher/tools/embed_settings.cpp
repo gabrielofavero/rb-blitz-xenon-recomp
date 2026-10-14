@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Compiles launcher/config/settings.toml (Contract 1 in docs/plans/launcher-plan.md
+// Compiles launcher/config/settings.toml (Contract 1 in docs/plans/finished/2026-09-27-launcher-plan.md
 // §4.1) into launcher/out/generated/settings_table.h - the table the launcher builds
 // its widgets, its tooltips and the game's command line from.
 //
@@ -1049,7 +1049,7 @@ std::string EmitHeader(const Schema& schema, std::string_view source_name) {
       << "//\n"
       << "// Every row the launcher shows, its tooltip and its command-line destination, so a\n"
       << "// row cannot exist in the UI without a tooltip or be saved without being launchable\n"
-      << "// (docs/plans/launcher-plan.md §4.1). The `default_text` field is the compiled\n"
+      << "// (docs/plans/finished/2026-09-27-launcher-plan.md §4.1). The `default_text` field is the compiled\n"
       << "// default as written; a consumer reads it according to `kind`.\n"
       << "\n"
       << "#pragma once\n"

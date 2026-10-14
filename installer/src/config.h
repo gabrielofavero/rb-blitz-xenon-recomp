@@ -75,7 +75,7 @@ struct PinsPayload {
 };
 
 // How a launcher learns that a newer release exists, and where the updater that
-// installs one lives (docs/plans/launcher-plan.md D19).
+// installs one lives (docs/plans/finished/2026-09-27-launcher-plan.md D19).
 struct PinsUpdate {
   // Where the launcher asks. Empty means this build has no release channel and no
   // launcher compiled from it checks anything.

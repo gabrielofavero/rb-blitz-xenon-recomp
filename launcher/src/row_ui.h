@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The pieces every tab's rows are made of (docs/plans/launcher-plan.md A1, B1).
+// The pieces every tab's rows are made of (docs/plans/finished/2026-09-27-launcher-plan.md A1, B1).
 //
 // A1's shell draws a read-only value per `kind`; B1's General tab draws its own editors for
 // three of its rows. Both need the same label, the same focus behaviour and the same column

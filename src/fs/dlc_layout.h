@@ -11,12 +11,12 @@
 //   <dlc_root>/<title_id>/<content_type>/<package>
 //
 // with the names spelled the way the SDK spells them when it builds the search path
-// (docs/dlc.md). It also holds the decision src/hooks/dlc.cpp makes about that root -
+// (docs/guides/dlc.md). It also holds the decision src/hooks/dlc.cpp makes about that root -
 // register it, or leave the SDK's own content root as the only source - because that
 // decision is a function of the directory and the scan, not of the runtime. Kept free
 // of any SDK dependency for the same reason src/fs/path_policy.h is - it is host path
 // arithmetic and directory reading, and tests/dlc_layout_tests.cpp has to cover it
-// without booting the game (docs/rb3-references.md §7.3).
+// without booting the game (docs/reference/rb3-references.md §7.3).
 
 #pragma once
 

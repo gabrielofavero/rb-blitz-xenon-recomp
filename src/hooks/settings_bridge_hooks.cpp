@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The guest half of the typed settings channel (P1 of docs/plans/in-game-settings-plan.md).
+// The guest half of the typed settings channel (P1 of docs/settings/plan.md).
 // src/hooks/settings_bridge.h holds the transport decision and the frame rules; this file is the
 // two overridden guest builtins that carry it, plus the boot line that reports them.
 //
@@ -11,7 +11,7 @@
 // src/hooks/shell_music.cpp. It adds **no** `Nt*` definition, so the read/query hooks owned by
 // src/hooks/menu_filter.cpp and src/hooks/dlc_refresh.cpp keep their single strong definitions.
 //
-// Measured addresses and ABI (docs/plans/in-game-settings-bridge-findings.md §2, from the pinned
+// Measured addresses and ABI (docs/settings/architecture.md (part 1, the bridge) §2, from the pinned
 // retail image and the recompiled bodies):
 //
 //   0x8241DFB0  file_exists(path)     -> writes {bool, type 0} into the caller's 8-byte result
@@ -32,7 +32,7 @@
 // forward, so the no-op forwarded hook can be compared against the answering one in one boot.
 //
 // The cvar registry is read once, in Configure(), on a host thread: a guest thread must not touch
-// it (project rule, docs/plans/song-cache-plan.md §7). The hooks only read the cached flags.
+// it (project rule, docs/plans/finished/2026-10-10-song-cache-plan.md §7). The hooks only read the cached flags.
 
 #include "hooks/settings_bridge.h"
 

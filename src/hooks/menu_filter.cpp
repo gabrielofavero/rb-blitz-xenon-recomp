@@ -3,7 +3,7 @@
 //
 // See src/hooks/menu_filter.h for what this does and what it owes the title's
 // content checksum. The edit itself and its evidence are in
-// src/ui/menu_options.{h,cpp} and docs/engine/main-menu-flow.md.
+// src/ui/menu_options.{h,cpp} and docs/engine/main-menu.md (part 1, the option list).
 
 #include "hooks/menu_filter.h"
 
@@ -313,7 +313,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
 // adjacent in guest memory. Measured 2026-10-10, the English locale's second block landed
 // in a buffer 192 KiB away from the end of the first, so the rule this replaces - which
 // required the two guest buffers to be consecutive - dropped the locale on every boot, and
-// with it both of R7's relabels (docs/dlc.md §4.2). What identifies the continuation is the
+// with it both of R7's relabels (docs/guides/dlc.md §4.2). What identifies the continuation is the
 // *archive* offset, which the caller has already checked.
 //
 // Why the first block is not written back, even though it is known to still hold the file's
@@ -359,7 +359,7 @@ void CompleteSplitFile(uint8_t* base, uint8_t* second, size_t second_length) {
 // outside as a hung boot. (Measured 2026-10-12, while chasing exactly such a hang in Ultimate mode:
 // the scan really is where the CPU goes when a boot stalls. That boot's reads were a legitimate
 // 64 KiB each, so the capture below is hardening for a real hazard, not the fix for that hang -
-// see docs/plans/in-game-settings-status-2026-10-12.md.)
+// see docs/settings/status.md (part 2, the black startup).)
 struct ReadArgs {
   uint32_t length = 0;
   uint32_t buffer = 0;

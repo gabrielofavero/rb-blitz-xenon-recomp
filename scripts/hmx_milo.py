@@ -30,7 +30,7 @@ dimensions, row bytes, reserved bytes, then the mip chain) - matches nothing in 
 10.4 MB ``splash.milo_xbox`` decompresses to, and neither does any descriptor that
 just puts a power-of-two width and height next to matching row bytes. Blitz is a
 later engine than the RB3 decompilation whose format this was modelled on, so its
-inline texture record is still unknown; see docs/assets.md, "Texture swapping", and
+inline texture record is still unknown; see docs/guides/assets.md, "Texture swapping", and
 the backlog entry for what a next attempt should start from. The scene's textures
 also carry builder-side source paths (``img/list_neon_outer.png``), so the record may
 be a file reference plus a cached copy rather than an RB3-shaped bitmap.
@@ -160,7 +160,7 @@ class Milo:
         reskin which file it is replacing (`img/xbox_0.png`,
         `../image/icons_buttons_xbox_nomip.bmp`), and the dimensions are what the
         pixel data has to match. Where that data sits is still open - see
-        docs/assets.md, "Where the art actually lives".
+        docs/guides/assets.md, "Where the art actually lives".
         """
         stream = self.stream()
         records = []

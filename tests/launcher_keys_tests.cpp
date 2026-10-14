@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The launcher's own keys (docs/plans/launcher-plan.md A5, D6): the chord grammar, the defaults
+// The launcher's own keys (docs/plans/finished/2026-09-27-launcher-plan.md A5, D6): the chord grammar, the defaults
 // that are the behaviour A1 hardcoded, the two rules that cannot be read off the file (a chord
 // before a bare key, a move repeating and a decision not), the `[nav]` round trip, and the focus
 // ring's scaling. No SDL, no ImGui, no window: nav_bindings.cpp and focus_ring.h are the two places

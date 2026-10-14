@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The pad's half of the input seam (docs/plans/launcher-plan.md A3, D6).
+// The pad's half of the input seam (docs/plans/finished/2026-09-27-launcher-plan.md A3, D6).
 //
 // A pad is a device the focus ring never hears about: what it produces is the same NavAction the
 // keyboard produces (nav.h), and everything downstream - the ring, the tab strip, the row

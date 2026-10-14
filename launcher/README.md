@@ -3,16 +3,16 @@
 The launcher is the second executable of this build tree: a small SDL3 + ImGui window
 that owns the installed game's settings and starts `rb_blitz.exe` with them. The design,
 the decisions and the order the work happens in are in
-[`../docs/plans/launcher-plan.md`](../docs/plans/launcher-plan.md); this file is about
+[`../docs/plans/finished/2026-09-27-launcher-plan.md`](../docs/plans/finished/2026-09-27-launcher-plan.md); this file is about
 what is in this directory *today* and how to change it.
 
 Today this directory holds the **launcher executable** with its **three-tab shell**
-([A1](../docs/plans/launcher-plan.md)), its **settings schema**, and the profile module that
+([A1](../docs/plans/finished/2026-09-27-launcher-plan.md)), its **settings schema**, and the profile module that
 both executables compile — plus **Controller Settings**, the one screen the product keeps
 ([P8](#controller-settings-p8)), which is built and drivable behind `--controller-only` while the
 full surface stays the default. The General tab is real (B1): it detects the Ultimate payload, edits
 the launch target and the two locations and says why a value was refused — and when the payload
-is missing, the Ultimate entry becomes the *Install Ultimate* action ([B8](../docs/plans/launcher-plan.md)),
+is missing, the Ultimate entry becomes the *Install Ultimate* action ([B8](../docs/plans/finished/2026-09-27-launcher-plan.md)),
 which drives the installer's own helper. Saving, the precedence badge, import/export and the
 settings location are real too (B4), the Audio / Video tab's rows are editable (B2), and the
 Controller tab's button-mapping block rebinds the pad for real (D16) — the launcher writes
@@ -64,10 +64,10 @@ product of the `.toml`, which is the single source of the rows.
 The product this executable is heading for is **Controller Settings**: one screen that owns how a
 pad is bound, and nothing else. It is built and drivable today, behind a development gate, because
 the *default* surface is still the full launcher until the coordinator approves the cutover
-(`../docs/plans/in-game-settings-contracts.md` §9.3), and everything the launcher used to edit -
+(`../docs/settings/contracts.md` §9.3), and everything the launcher used to edit -
 graphics, audio, the launch target, the paths - is becoming the game's own **Help & Options** screen
-(`../docs/plans/in-game-settings-plan.md` §3). The handoff record is
-`../docs/plans/in-game-settings-controller-settings.md`.
+(`../docs/settings/plan.md` §3). The handoff record is
+`../docs/settings/menu.md (part 3, Controller Settings)`.
 
 ```powershell
 # Controller Settings: one screen, no other tab, and a bar of Close / Save / Play Game.
@@ -120,7 +120,7 @@ answer) do the same.
 ## The window, and why SDL_GPU
 
 `rb_blitz_launcher.exe` draws with **SDL_GPU**, through `imgui_impl_sdlgpu3`. That is
-[D1](../docs/plans/launcher-plan.md)'s preference, and the reasons are in this tree:
+[D1](../docs/plans/finished/2026-09-27-launcher-plan.md)'s preference, and the reasons are in this tree:
 
 - `SDL_RENDER` is compiled out of the vendored SDL3 on purpose
   (`rexglue-sdk/thirdparty/CMakeLists.txt`), so `imgui_impl_sdlrenderer3` is not an
@@ -524,7 +524,7 @@ Its groups today are *Startup* and *Main menu*:
 | *Rename Mod Settings* (`enhancements_rename_mod_settings`) | draws the Ultimate mod's own screen as "Ultimate Settings"; ships **on**, and its row declares `visible = "ultimate_installed"`, so it is not shown at all where the payload is missing — a row about the mod's own screen has nothing to say there, and the runtime's own `DetectUltimateState` answers that question rather than a second guess at the file layout |
 
 What the three edits are, why each has to keep a file's length, and the runs that prove them are in
-[main-menu-flow.md](../docs/engine/main-menu-flow.md) (§7 is the offline prompts, R3). The rows are the
+[main-menu-flow.md](../docs/engine/main-menu.md) (§7 is the offline prompts, R3). The rows are the
 project's own cvars, not the runtime's — but they are **game-owned** rows since the P11b cutover
 (owner decision 2026-10-13): the tab still writes them to the profile, and the game no longer reads
 them from there or from the command line, because the same rows are in the in-game Help & Options
@@ -658,7 +658,7 @@ rb_blitz_launcher.exe --dump-prefill=out\prefill.txt --launcher_profile=out\p.to
 ## The profile — `launcher.toml`
 
 The profile is the file the launcher saves and the **game** reads, so a launcher launch and
-a double-click see the same settings ([D3](../docs/plans/launcher-plan.md)). It is why the
+a double-click see the same settings ([D3](../docs/plans/finished/2026-09-27-launcher-plan.md)). It is why the
 module lives under `src/` rather than here: `rb_blitz.exe` compiles it too.
 
 D2's order for the file's own path, first match wins:
@@ -1048,13 +1048,13 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 
 - a **duplicate `key`** — two rows would fight over one profile entry and one flag;
 - a **missing or empty `tooltip`** — the bottom bar names the focused row's tooltip by
-  construction ([D7](../docs/plans/launcher-plan.md));
+  construction ([D7](../docs/plans/finished/2026-09-27-launcher-plan.md));
 - **`applies = "live"` without an evidence comment** — a live claim nothing supports;
 - a **`group` that is not declared** for that tab, an unknown `tab`, `kind` or `argv`,
   an `enum` without `choices` (or whose default is not one of them), a **`choice_labels`
   whose count does not match `choices`**, or one set on a row whose choices come from the
   build, a `path_*` row without `validate`, and a `tab = "experimental"` (there is no such
-  tab, [D14](../docs/plans/launcher-plan.md));
+  tab, [D14](../docs/plans/finished/2026-09-27-launcher-plan.md));
 - **`min`/`max` on a non-numeric row, one of the two without the other, a `min >= max`, or a
   default outside the range** — the bounds are what the widget is built from, so a bad pair
   would be a slider that cannot show the row's own default.
@@ -1082,7 +1082,7 @@ A schema the tool refuses fails the build. It refuses, deliberately:
 
 `argv = "none"` exists for exactly one row: `launch.target` is not a cvar, and the
 launcher turns it into `--ultimate_mode` / `--license_mask` itself
-([D4](../docs/plans/launcher-plan.md)). The tool refuses `argv = "flag"` on a key that
+([D4](../docs/plans/finished/2026-09-27-launcher-plan.md)). The tool refuses `argv = "flag"` on a key that
 is not a cvar name, because passing `--launch.target=ultimate` to the game would be an
 unknown key at boot.
 
@@ -1104,11 +1104,11 @@ note   = "Per-button remapping is not available in this build."
 ```
 
 That is how an unbuilt category is recorded without drawing a disabled widget that looks
-like a setting ([D14](../docs/plans/launcher-plan.md)). A group that *has* rows must not be
+like a setting ([D14](../docs/plans/finished/2026-09-27-launcher-plan.md)). A group that *has* rows must not be
 `unavailable`; the tool refuses that combination. The five groups declared this way today are
 the General tab's *Ultimate (advanced)*, the Audio / Video tab's *Developer*, and the Controller
 tab's *Devices*, *Keyboard* and *Manual* — the work
-[§1.1](../docs/plans/launcher-plan.md) defers past M1.
+[§1.1](../docs/plans/finished/2026-09-27-launcher-plan.md) defers past M1.
 
 **The tabs do not draw them.** A group with nothing in it is left out of its tab entirely — the
 name and the note included — so the window is spent on rows that do something. Both stay in the
@@ -1121,7 +1121,7 @@ that is not there.
 
 `applies` is the row's real answer to "does changing this need a restart?", and it is
 evidence-backed, because a cvar's lifecycle tag is not a promise that a value applies
-live ([D12](../docs/plans/launcher-plan.md)). A `live` row carries a comment naming what
+live ([D12](../docs/plans/finished/2026-09-27-launcher-plan.md)). A `live` row carries a comment naming what
 makes the change land — a registered change callback, or the code that re-reads the value
 on every use:
 
@@ -1205,7 +1205,7 @@ Four ways, in the order of what they cost:
 
 - **The unit tests**, named after the module they cover — `ctest -R launcher`. The seven
   targets, what each one pins and where the host harness lives are in
-  [build-and-run.md §3](../docs/build-and-run.md); the pattern is the same as the game's:
+  [build-and-run.md §3](../docs/guides/build-and-run.md); the pattern is the same as the game's:
   no window, no SDL, no game image.
 - **The headless reports.** `--dump-layout`, `--dump-display`, `--dump-profile`,
   `--dump-general`, `--dump-prefill`, `--dump-update` and `--print-command` each write what the
@@ -1226,7 +1226,7 @@ Four ways, in the order of what they cost:
   after the install's helper adds the mod, the demo trial, and a save folder overridden into
   `out/`. It is the only one of the four that checks the *installed* artefacts and the game
   they boot (what each leg asserts is in
-  [build-and-run.md §4](../docs/build-and-run.md)).
+  [build-and-run.md §4](../docs/guides/build-and-run.md)).
 
 The capture harness is also where the ring's shape is visible. Up and Down walk the *rows*, and
 Left and Right walk a row's *options*: a row that offers a choice is one row with one option per
@@ -1246,14 +1246,14 @@ command reads, because that is what a launcher-launched row really travels as. T
 findings E3 measured — a profile that was not applied at all, and the two path rows whose
 General-tab store (`[launch] user_data_dir` / `dlc_dir`) disagreed with what the launch
 command reads (`[settings] user_data_root` / `dlc_root`) — are both closed;
-[the plan's open questions](../docs/plans/launcher-plan.md) §11 records the resolution.
+[the plan's open questions](../docs/plans/finished/2026-09-27-launcher-plan.md) §11 records the resolution.
 
 ## How to add a row
 
 1. Check the setting really exists — a cvar in the SDK or in `src/`. A row for a feature
    that does not exist (master volume) or is compiled out (`present_effect` and the
    CAS/FSR parameters behind `REXGLUE_ENABLE_FIDELITYFX=OFF`) does not belong in the
-   table: no row is added to fill a category ([D14](../docs/plans/launcher-plan.md)).
+   table: no row is added to fill a category ([D14](../docs/plans/finished/2026-09-27-launcher-plan.md)).
 2. Read the setting's own change callback or its use site and decide `applies` from it,
    not from the lifecycle tag. If the cvar declares a `.range(...)`, put it in `min`/`max`
    so the row's slider is bounded by the runtime's own limits.
@@ -1278,7 +1278,7 @@ it and `--dump-layout` will still name it.
 - **Compiled-out rows.** `present_effect` and the CAS/FSR parameters exist only behind
   `REXGLUE_ENABLE_FIDELITYFX`, which is `OFF` in this build (`present_effect` itself
   collapses to `bilinear`). Hiding them is the rule in
-  [D12](../docs/plans/launcher-plan.md): a build flag is not something a user can act on
+  [D12](../docs/plans/finished/2026-09-27-launcher-plan.md): a build flag is not something a user can act on
   from the launcher.
 - **The renderer, as a hand-written list.** The Renderer row exists, but its choices are not
   written anywhere by hand: `choices_from = "gpu_backends"` takes them from CMake, so the

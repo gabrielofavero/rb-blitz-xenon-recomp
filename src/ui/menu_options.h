@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The main menu's option list, edited as data (docs/engine/main-menu-flow.md).
+// The main menu's option list, edited as data (docs/engine/main-menu.md (part 1, the option list)).
 //
 // The list is a compiled DTA file - `ui/splash/gen/splash.dtb` - and the title
 // compiles it again at load, so the *shape* of an edit is what the title accepts
 // or refuses. The shape this module writes is the one the title is known to
 // accept, and it is byte-neutral on purpose: the ark index describes every
 // entry's offset and size, so a lost or gained byte invalidates the whole
-// archive a patched file is read out of. See docs/assets.md "dtb".
+// archive a patched file is read out of. See docs/guides/assets.md "dtb".
 //
 // What the file looks like (the whole grammar this module needs):
 //
@@ -211,7 +211,7 @@ struct Skipped {
 // arguments of a `set` call. The money it spends is the file's own state constants -
 // names no file in the game refers to and no string in the image carries, so
 // removing them changes nothing that can be observed. See
-// docs/engine/main-menu-flow.md for how each of those claims was established.
+// docs/engine/main-menu.md (part 1, the option list) for how each of those claims was established.
 //
 // Refuses the file unless it is the panel's, every constant it pays with is there,
 // the result is exactly as long as the input, and any leftover from the payment can

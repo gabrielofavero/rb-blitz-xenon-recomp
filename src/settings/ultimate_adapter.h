@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // P6 — the Rock Band Blitz Ultimate **provider adapter**
-// (docs/plans/in-game-settings-plan.md §3 for where its rows go, §6 for the integration
+// (docs/settings/plan.md §3 for where its rows go, §6 for the integration
 // boundary, §5.5 for the per-row application strategy).
 //
 // The adapter is the only place that knows what the installed mod *looks like*. It does four
@@ -15,7 +15,7 @@
 //      archive and verify the objects, panels, rows, row kinds, persisted variable list and
 //      compiled defaults this integration depends on. This is the plan's second compatibility
 //      level, and it is the one that has to carry the weight: the mod's `default.xex` is
-//      byte-identical in every release (docs/ultimate-compat.md §3), so *the release is not
+//      byte-identical in every release (docs/guides/ultimate-compat.md §3), so *the release is not
 //      identifiable from the executable* and a version comparison would prove nothing.
 //   3. **Bind the rows** (`RowBindings`): the frozen row identity P5b handed over — the
 //      screen's stable `<category>.<id>` token, the provider's own variable name, the widget

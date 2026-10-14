@@ -101,7 +101,7 @@ $expected = @($settingsRel, $songcacheRel, $settingsHeaderRel, $songcacheHeaderR
 # ------------------------------------------------------------------ helpers ---
 
 # Anything that runs another .ps1 goes through a child PowerShell: this machine's
-# execution policy is Restricted (docs/build-and-run.md §0).
+# execution policy is Restricted (docs/guides/build-and-run.md §0).
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
@@ -195,7 +195,7 @@ function Start-RbBlitz {
     # The skip the title's two dialogs now ship with is pinned off for the same
     # reason the input is named: the route below accepts three times to reach the
     # menu, which is the shape it was measured with
-    # (docs/engine/main-menu-flow.md, R3).
+    # (docs/engine/main-menu.md (part 1, the option list), R3).
     return Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList `
         "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
         "--enhancements_skip_offline_dialog=false", `

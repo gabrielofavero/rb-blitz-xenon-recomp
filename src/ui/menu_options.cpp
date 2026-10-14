@@ -3,7 +3,7 @@
 //
 // See src/ui/menu_options.h for what this is and why the edit is shaped this
 // way. The evidence for the grammar, the conditional behaviour and the edits
-// the title accepts is in docs/engine/main-menu-flow.md.
+// the title accepts is in docs/engine/main-menu.md (part 1, the option list).
 
 #include "ui/menu_options.h"
 
@@ -17,7 +17,7 @@ namespace {
 // --- the file's own obfuscation -------------------------------------------
 
 // Park-Miller with Schrage's division, spelled the way the title spells it
-// (scripts/hmx_ark.py, docs/assets.md "dtb").
+// (scripts/hmx_ark.py, docs/guides/assets.md "dtb").
 constexpr int32_t kLcgMod = 0x7FFFFFFF;
 constexpr int32_t kLcgDiv = 0x1F31D;  // 2147483647 / 16807
 constexpr int32_t kLcgMul = 0x41A7;   // 16807
@@ -485,7 +485,7 @@ constexpr char kVarThis[] = "this";
 
 // What pays for them. These are state constants that no file in the game refers to
 // and no string in the image carries, so a file without them compiles and runs the
-// same; the evidence is docs/engine/main-menu-flow.md. They name transient steps of
+// same; the evidence is docs/engine/main-menu.md (part 1, the option list). They name transient steps of
 // the connect process, which the file's own handler never labels, and their lengths
 // are exactly what the two transitions cost. The edit refuses to write anything
 // when the arithmetic does not balance, so a file that ever spells one of these

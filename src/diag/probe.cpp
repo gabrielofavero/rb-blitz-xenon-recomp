@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The probe's cvars, its one ring buffer and the recording path. See
-// src/diag/probe.h for the interface and docs/engine/probe.md for how to use it.
+// src/diag/probe.h for the interface and docs/engine/diagnostics.md (part 1, the probe) for how to use it.
 //
 // No SDK patch and no second renderer: the trace is fed from ordinary hooks, and
 // the overlay is an ordinary ImGuiDialog (src/diag/probe_overlay.cpp).

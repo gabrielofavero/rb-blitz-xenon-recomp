@@ -7,7 +7,7 @@ namespace rb_blitz::settings {
 // The guest's own screen size, set by the host before the guest starts.
 //
 // Two facts measured on the pinned retail image decide the shape of this seam
-// (docs/plans/in-game-settings-resolution-findings.md, docs/plans/ultrawide-findings.md):
+// (docs/settings/graphics.md (part 1, resolution), docs/settings/graphics.md (part 3, custom resolutions)):
 //
 //   * `sub_823F3698` chooses the height itself - 720, or 540 when bit 0 of its own +796 is
 //     set - and then *derives* the width from that height, as `height * 16 / 9` or

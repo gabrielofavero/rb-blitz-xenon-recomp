@@ -8,7 +8,7 @@
 //
 // The concrete bug each case stands for:
 //   * "one at a time" - without it a trigger that fires twice starts two 31-second scans
-//     of the same tree (docs/plans/song-cache-plan.md §9.5).
+//     of the same tree (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5).
 //   * "published exactly once" - two guest threads reaching the publish point together
 //     must not both hand the content manager a freshly moved-from vector.
 

@@ -3,7 +3,7 @@
 //
 // Unit tests for src/ui/settings_screen.{h,cpp} - P5b's **merged Help & Options** surface: the
 // whole authored tree, the two retail rows it re-points, the labels it needs and the requests it
-// sends (docs/plans/in-game-settings-plan.md §3 and §5.2, and the P5b package prompt).
+// sends (docs/settings/plan.md §3 and §5.2, and the P5b package prompt).
 //
 // What is pinned here, none of which needs a boot:
 //
@@ -1617,7 +1617,7 @@ bool ReadFile(const char* path, std::vector<uint8_t>* bytes) {
 // The P1-c bisection's experiment fixtures (`BareRoots`, `ScreenShareRoots`, `OtherSceneRoots`,
 // `ActionProbeRoots`, `BareFileRoots`, `RetailRowsRoots`, `ScreenRetailRoots`) are gone: P5
 // answered the questions they were built to ask, and nothing in the merged surface serves them.
-// The evidence they produced lives in docs/plans/in-game-settings-bridge-findings.md §12.
+// The evidence they produced lives in docs/settings/architecture.md (part 1, the bridge) §12.
 
 // TEMPORARY INSTRUMENT (P5b-r2 diagnosis, removed once the fault is located): a guest-side print.
 // The bridge answers a `snapshot` read by logging one line per query, so a statement this harmless -
@@ -1690,7 +1690,7 @@ std::vector<dtb::Node> InSongRootsOnly() {
 }
 
 // Appends the definition's roots to a **retail** record. This is the measured delivery site
-// (docs/plans/in-game-settings-bridge-findings.md §12.3): the same panel declarations open when
+// (docs/settings/architecture.md (part 1, the bridge) §12.3): the same panel declarations open when
 // they ride inside a retail record and crash the guest with `write of guest 0x00000200` when they
 // live in a record of our own reached by `[include]`.
 int EmitAppend(const char* in_path, const char* out_path) {

@@ -12,7 +12,7 @@
 // (rexglue-sdk/src/core/cvar.cpp), so `[enhancements] skip_offline_dialog =
 // true` sets the cvar `enhancements_skip_offline_dialog`. docs/engine/toggles.md
 // is the table, with each toggle's faithful behaviour and the plan prompt that
-// will implement it (docs/plans/customization-plan.md, R1-R9).
+// will implement it (docs/plans/finished/2026-10-03-customization-plan.md, R1-R9).
 
 #pragma once
 

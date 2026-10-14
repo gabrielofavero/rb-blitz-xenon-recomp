@@ -75,7 +75,7 @@ for *September* are visible in **YOUR SONGS** while unplayed rows still show emp
 stars. Release build and all 20 host tests pass, the new case covering the
 progress-vs-empty summary. Remaining hand checks (a second song, a replay with a
 lower score, the Ultimate target) and the evidence trail are in
-[save-persistence-findings.md](../plans/save-persistence-findings.md).
+[save-persistence-findings.md](../plans/finished/2026-10-09-save-persistence-findings.md).
 
 ## Scaffold and generate (2026-09-07 to 2026-09-09)
 
@@ -90,8 +90,8 @@ Status: complete (2026-09-09).
 - [x] `rb_blitz_codegen` target now builds and runs clean: 0 analysis errors,
       215 files emitted into `generated/default`.
 - [x] Resolved the 3 unresolved tail branches via `config/functions.toml`
-      (see `docs/symbols.md`).
-- [x] Inventory written to `config/functions.toml` + `docs/symbols.md`.
+      (see `docs/reference/symbols.md`).
+- [x] Inventory written to `config/functions.toml` + `docs/reference/symbols.md`.
 - [x] Guest DLL loading ruled out for now: `XexLoadImage` is imported/called
       but no additional modules are present in `game/`.
 
@@ -151,7 +151,7 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
   from its link target (idempotent, SHA-256 check inside) and marks the 16 paths
   `--skip-worktree` so the unrepresentable type change stops showing up as dirt.
   Re-run after any clone, `submodule update`, or checkout that rewrites the SDK
-  tree. See [known-issues.md](../known-issues.md) and
+  tree. See [known-issues.md](../reference/known-issues.md) and
   [../patches/README.md](../../patches/README.md).
 
 ### B-002: `rexcore/memory.cpp` SSSE3 intrinsic error (clang/MSVC)
@@ -560,7 +560,7 @@ three rows marked open above were closed on 2026-09-20 — see "Close-out: menus
   `+0x0` for 12/13, `+0x10` for 14, `+0x20` for 15, `+0x30` for 16 — guest
   `GetEncMethod` at `0x823DE070`), no `STUB` lines for either import, **music
   audible**, and sound effects unaffected. Build, run, log-capture and
-  failure-signature detail: [docs/build-and-run.md](../build-and-run.md). The hook
+  failure-signature detail: [docs/guides/build-and-run.md](../guides/build-and-run.md). The hook
   also logs a one-time
   `guest XeKeys: decrypted a … container header` line if a whole `MOGG`/`OggS`
   header ever travels through AES (a bonus, not expected: this call always carries
@@ -655,7 +655,7 @@ byte-identical to `libmspack/mspack/cabd.c`, and no edit was persisted.
 
 Newly documented alongside the scripts: [../patches/README.md](../../patches/README.md)
 (patch set, script usage, the symlink quirk and its build impact) and §0 of
-[build-and-run.md](../build-and-run.md) (the one-time preparation step). One
+[build-and-run.md](../guides/build-and-run.md) (the one-time preparation step). One
 environment note for future runs on this checkout: the PowerShell execution policy
 is `Restricted`, so scripts have to be launched as
 `powershell -NoProfile -ExecutionPolicy Bypass -File …`; the bare
@@ -759,7 +759,7 @@ errors, and the conversion probe read back `0.5`/`0.75`/`0.496` from the staged
 words. The user then confirmed the note highway and 3D background render
 correctly.
 
-**Accepted limitations** (also recorded in [known-issues.md](../known-issues.md)):
+**Accepted limitations** (also recorded in [known-issues.md](../reference/known-issues.md)):
 the staged copy must fit a single 2 MiB upload page (the largest conversion seen
 so far is 256 KB, so the headroom is 8×); integer `num_format = 1` textures
 remain unsupported; the CPU mirror can be stale for GPU-written data, for which
@@ -771,7 +771,7 @@ What the title does now, from the surviving run log and the writable root:
 
 - **Offline route.** "A" at the title attempts a Rock Central sign-in; the dialog
   is dismissible (B) and the title offers its offline path into the menus. No
-  service is faked — see "Accepted" in [known-issues.md](../known-issues.md).
+  service is faked — see "Accepted" in [known-issues.md](../reference/known-issues.md).
 - **Menus and content.** Main menu, song list and HUD render, and bundled songs are
   enumerated from the game-data root with no online dependency:
   `XamContentCreateEnumerator: added 2 items` (`songcache`, `globaloptions`) and
@@ -1021,17 +1021,17 @@ mod's three code edits are reproduced project-side instead, and that whole job
 landed 2026-09-20 — **B-012** below.
 
 This is the same relationship the RB3 recomp has with RB3DX, which is why the
-patch-group catalogue in [`rb3-references.md`](../rb3-references.md) §5–§6 is still
+patch-group catalogue in [`rb3-references.md`](../reference/rb3-references.md) §5–§6 is still
 the right thing to mine. (RB3DX is a Rock Band 3 project; it is not the mod this
 port supports.)
 
 **What changed in the docs.** New policy home
-[`ultimate-compat.md`](../ultimate-compat.md) — decision table, payload facts, why the
+[`ultimate-compat.md`](../guides/ultimate-compat.md) — decision table, payload facts, why the
 executable is not swappable, why the payload cannot be merged per file, the union
 rules, install/uninstall, hazards and the acceptance criteria. Propagated to
 [`README.md`](../../README.md) (goal, baseline, and what "working" means),
-[`backlog.md`](../backlog.md) (the deferred backlog), [`known-issues.md`](../known-issues.md),
-[`build-and-run.md`](../build-and-run.md), and [`rb3-references.md`](../rb3-references.md)
+[`backlog.md`](../reference/backlog.md) (the deferred backlog), [`known-issues.md`](../reference/known-issues.md),
+[`build-and-run.md`](../guides/build-and-run.md), and [`rb3-references.md`](../reference/rb3-references.md)
 §0 and §10.
 
 **Consequences recorded now, not later.**
@@ -1135,7 +1135,7 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 **Still open.** This is one test target over one header. The acceptance half of the
 issue is unaffected: the menus and songs phases still have no scripted run, because
 `scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
-results. The narrower wording is now in [known-issues.md](../known-issues.md).
+results. The narrower wording is now in [known-issues.md](../reference/known-issues.md).
 (Correction, 2026-09-20: both have one now — `scripts/acceptance_song.ps1` drives
 menus → song → results and `scripts/acceptance_persistence.ps1` covers storage; the
 host suite is four targets rather than one.)
@@ -1257,7 +1257,7 @@ second build and no pristine dump put at risk.
   [`tests/payload_overlay_tests.cpp`](../../tests/payload_overlay_tests.cpp) and
   [`scripts/decrypt_xex.py`](../../scripts/decrypt_xex.py).
 - Policy, the full evidence tables, hazards and acceptance criteria:
-  [`ultimate-compat.md`](../ultimate-compat.md).
+  [`ultimate-compat.md`](../guides/ultimate-compat.md).
 
 **The mod is 12 bytes.** `scripts/decrypt_xex.py` mirrors the SDK's
 `XexModule::ReadImage` (retail key, CBC IV = 0 chained across BASIC blocks), so
@@ -1429,8 +1429,8 @@ phase.
 
 These are the interesting findings, not the plumbing. Three of them are also
 documented where a reader would look for them
-([docs/build-and-run.md](../build-and-run.md) §4,
-[docs/known-issues.md](../known-issues.md)).
+([docs/guides/build-and-run.md](../guides/build-and-run.md) §4,
+[docs/reference/known-issues.md](../reference/known-issues.md)).
 
 1. **A background process cannot screenshot the game window reliably.** The first
    version captured whatever happened to be foreground — a VS Code screenshot in
@@ -1633,7 +1633,7 @@ not as a result.
 ### Honest limits of this measurement
 
 Four of them, and the first three are now a row in
-[docs/known-issues.md](../known-issues.md):
+[docs/reference/known-issues.md](../reference/known-issues.md):
 
 - **Every accepted run has one long stall** (~1174.9 ms `VdSwap` with vsync on,
   ~254 ms with vsync off) that is reported but not asserted on. An earlier
@@ -1963,7 +1963,7 @@ recommends.
 
 - **No committed scripted route for the mouse.** The harness was a session
   artifact and is gone, so mouse navigation sits in the same category as pad input
-  ([known-issues.md](../known-issues.md)): verified, but re-verifiable only by
+  ([known-issues.md](../reference/known-issues.md)): verified, but re-verifiable only by
   standing another injection harness back up. The recipe is the section above.
 - **The overlay and focus gates are reasoned, not exercised.** That travel is
   dropped while an overlay owns the pointer, and that a held button is released on
@@ -2261,7 +2261,7 @@ route (or made it misreport) on a cloned one.
 - **`repair_flat_symlinks.ps1` exited 1 on the first run.** It works the 26 mode-120000
   entries a *fully initialised* `--recurse-submodules` clone has (this machine's
   long-lived tree has 16, because it has MoltenVK unchecked - which is why
-  [build-and-run.md](../build-and-run.md) §0 quoted 16, and why that number moved with
+  [build-and-run.md](../guides/build-and-run.md) §0 quoted 16, and why that number moved with
   this pass); 18 of them are the libmspack/o1heap links the build needs and are repaired
   by copying the link target's content over the stub. The other eight are not build
   inputs: one links to a *directory* (MoltenVK's `MoltenVK/include/MoltenVK` ->
@@ -2289,7 +2289,7 @@ route (or made it misreport) on a cloned one.
   configure has to run again, and `CMakeLists.txt` now says exactly that, from a check
   that runs right after codegen and only in a configuration that predates the generated
   sources (that build stops at `[10/14]`, before compiling anything, with the two
-  commands to run). README and [build-and-run.md](../build-and-run.md) §2, under "The first build on a tree that has never run codegen", document the
+  commands to run). README and [build-and-run.md](../guides/build-and-run.md) §2, under "The first build on a tree that has never run codegen", document the
   second pass. The second configure+build is incremental and produced a working
   executable; the other preset needs no second pass, because codegen has run by then.
 
@@ -2377,7 +2377,7 @@ build and after it: unchanged.
   entry at the end of this log is the run.)
 - **RelWithDebInfo was not built.** The item names Debug and Release.
 - **Ultimate is untouched** - it needs an installed payload
-  ([ultimate-compat.md](../ultimate-compat.md) §7, §10).
+  ([ultimate-compat.md](../guides/ultimate-compat.md) §7, §10).
 - **The clone's game data is a copy of this machine's dump**, not a second dump, and
   `--game_data_root` was the copy throughout.
 - **Machine-local step that the clone needed:** this scratch volume is exFAT and records
@@ -2417,7 +2417,7 @@ and on its first day that statement is backed by a run that already exists.
 - [tools/toolchain_check.cpp](../../tools/toolchain_check.cpp) - the probe and the
   report, built as `rb_blitz_toolchain`; `--check` is the build gate, `--emit-header`
   writes the stamp a binary logs at boot.
-- [docs/toolchain.md](../toolchain.md) - the prose half: what is frozen, why each
+- [docs/guides/toolchain.md](../guides/toolchain.md) - the prose half: what is frozen, why each
   component is in the set, what each verdict does to a build, what is deliberately not
   covered, and how to change the record.
 
@@ -2510,7 +2510,7 @@ and a modified copy does not load, so `OnPostLoadXexImage` never runs". That is 
 kind of modified copy and false of the kind that matters: a *truncated* image is one the
 loader cannot get through, while a valid image whose content differs loads exactly like the
 recorded one. The payload's own `default.xex` — the same 9,023,488 bytes, sha256
-`390e0ae0…`, 12 bytes of code different ([ultimate-compat.md](../ultimate-compat.md) §3) —
+`390e0ae0…`, 12 bytes of code different ([ultimate-compat.md](../guides/ultimate-compat.md) §3) —
 is the realistic instance of the second kind, and it is what a root holds when the mod's
 files were copied *over* the dump rather than staged at `game/ultimate`, a layout the same
 doc names as supported. So the MODIFIED path does have a live capture, and this is it.
@@ -2536,7 +2536,7 @@ between the two is the vanilla switch doing its job):
 [info] [core] [t20316] boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260928_1827
 [info] [core] [t20316] toolchain: rexglue-sdk c94f5eb, clang 23.1.1, CMake 4.4.3, Ninja 1.13.2, MSVC toolset 14.44.35207, Windows SDK 10.0.26100.0 (frozen set)
 [warning] [core] [t20316] game data identity: MODIFIED - <checkout>\game\default.xex is 9023488 bytes, sha256 390e0ae089e775a899c166c6125d0daf5f6b905ab53ce54e7638d5fb5679928c
-[warning] [core] [t20316]   expected: 9023488 bytes, sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb (config/game_fingerprints.toml, see docs/ultimate-compat.md)
+[warning] [core] [t20316]   expected: 9023488 bytes, sha256 e2195d6241d423197df31a84666a8d658cb7999521332f40c69f99f5d36e84bb (config/game_fingerprints.toml, see docs/guides/ultimate-compat.md)
 [info] [core] [t20316] ultimate: off, booting the retail game data
 ```
 
@@ -2570,7 +2570,7 @@ with no `[FATAL]`, no dialog, and no identity line. Two consequences worth keepi
   image the process cannot read never gets as far as the check. It stays covered by
   `tests/fingerprint_tests.cpp`, and the acceptance script asserts the branch never fires.
 - a corrupt dump is diagnosed by the build gate or not at all. That is **B-014** in
-  [known-issues.md](../known-issues.md), left open with its two options — pre-validate the
+  [known-issues.md](../reference/known-issues.md), left open with its two options — pre-validate the
   XEX header in the `patches/rexglue-sdk/` lane so the failure is a sentence, or accept that
   this is the loader's failure — rather than fixed inside a capture task. *(Both options were
   weighed on 2026-09-29 and the first was taken: patch 0008, "How a corrupt `default.xex`
@@ -2735,7 +2735,7 @@ all.
 - **Any toolchain other than clang.** `-ffile-prefix-map` is clang's and GCC's; an MSVC build
   is audited, not fixed.
 - **Legal questions.** Redistribution is decided by the borrowing rules in
-  [rb3-references.md](../rb3-references.md) §9 and its provenance table, not by a string scan.
+  [rb3-references.md](../reference/rb3-references.md) §9 and its provenance table, not by a string scan.
   The audit's claim is narrower: nothing *unintended* is in the payload.
 
 ## The Debug preset's assert policy (2026-09-29)
@@ -3058,7 +3058,7 @@ upload page.
 
 The 2026-09-19 fix (B-010, above) converted the guest's 32-bit non-floating-point
 textures to IEEE float on the CPU and left two limits in
-[known-issues.md](../known-issues.md): an integer texture failed to create, and the
+[known-issues.md](../reference/known-issues.md): an integer texture failed to create, and the
 converted texture plus its mips had to fit a single
 `GraphicsUploadBufferPool::kDefaultPageSize` page (2 MiB; the largest conversion was
 256 KB). This section closes both and says what is still assumed rather than measured.
@@ -3139,7 +3139,7 @@ learned to serve the request:
 | the growth path, measured with a forced configuration (the staging pool constructed with a 64 KiB page and primed with a 4,096-byte request; both removed afterwards, tree rebuilt) | `upload page allocating: 65536 bytes` for the priming page, then `upload page size grown to 524288 bytes for a 524288 byte request` + `upload page allocating: 524288 bytes`; all 8 conversion requests landed at **offset 0 of a fresh buffer**, not at the priming page's offset 4,096 - which is where a fit check against the grown `page_size_` instead of the page's own size would have put a 524,288-byte write inside a 65,536-byte buffer |
 | the growth run's data and route | the same read-back values line for line, and the same pass (315 s, `THESE DAYS`) |
 | `scripts/apply_sdk_patches.ps1 -Check` | 8 patches, all applied; **24** patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
-| the plugin-only build | measured: a build that only recompiles `rexgpu-xenos.dll` leaves the copy beside `rb_blitz.exe` stale, because that copy is a `POST_BUILD` of the executable's link - recorded in [build-and-run.md](../build-and-run.md) §3, and the forced-growth run copied the DLL by hand |
+| the plugin-only build | measured: a build that only recompiles `rexgpu-xenos.dll` leaves the copy beside `rb_blitz.exe` stale, because that copy is a `POST_BUILD` of the executable's link - recorded in [build-and-run.md](../guides/build-and-run.md) §3, and the forced-growth run copied the DLL by hand |
 
 Two conditions of these measurements. The machine was **not idle**: another session on
 this host launches the game for its own checks, and its 22-second boots landed inside
@@ -3167,12 +3167,12 @@ that log (`[probe]`: 0).
   D3D12 (and the Vulkan texture cache would need its own staging design, since
   `VkBuffer`/`VkImageView` binding differs).
 - **The CPU mirror can still be stale for GPU-written data**, which is the limit
-  [known-issues.md](../known-issues.md) keeps for B-010; `d3d12_readback_resolve` is
+  [known-issues.md](../reference/known-issues.md) keeps for B-010; `d3d12_readback_resolve` is
   still the escape hatch, and this work does not change what the mirror holds.
 ## The guest's longjmp/setjmp, and the bridge they now have (2026-09-30)
 
 The first item of the backlog's known-issues section, since closed and removed, and the
-one open row of [rb3-references.md](../rb3-references.md) §8:
+one open row of [rb3-references.md](../reference/rb3-references.md) §8:
 `longjmp_address`/`setjmp_address` were unset, so the guest's own `longjmp`/`setjmp` had
 no host bridge. band3's numbers (`0x82BBB620` / `0x82BBBA50`) are another image's and do
 not transfer, so the pair had to be found in Blitz's.
@@ -3196,7 +3196,7 @@ The identification does not rest on that pattern alone. The two listings are eac
 other's inverse offset for offset; one guest function (`0x826D9868`) calls both on
 the same buffer, `&r31+16`, and branches on `setjmp`'s result; neither address is
 taken in data or built in a register, so all 21 calls are the direct branches in
-[symbols.md](../symbols.md) "Setjmp / longjmp"; and `0x82772510` is a PDATA entry
+[symbols.md](../reference/symbols.md) "Setjmp / longjmp"; and `0x82772510` is a PDATA entry
 point, which is where its size comes from.
 
 One side finding belongs to B-006's class: **`setjmp` has no PDATA entry of its
@@ -3270,7 +3270,7 @@ observed run has entered one.
 - The disassembly this rests on was scratch and is not kept (deleted after the tree
   was re-generated; `out/setjmp/` now holds only the two acceptance runs' screens
   and logs); how to rebuild it is two lines up, and the addresses and the reading
-  are in [symbols.md](../symbols.md), which is what a future session should work
+  are in [symbols.md](../reference/symbols.md), which is what a future session should work
   from.
 
 ## Hook hygiene: the faithful behaviour of every hook (2026-10-01)
@@ -3279,7 +3279,7 @@ The first item of the backlog's known-issues section, since closed and removed. 
 known-issues entry said
 *"Hooks carry no 'why is this disabled' record - a hook that early-returns is a bug unless
 it is documented as a deliberate deviation"*, and it came from
-[rb3-references.md](../rb3-references.md) §7.3, where the RB3 port's dominant bug class was
+[rb3-references.md](../reference/rb3-references.md) §7.3, where the RB3 port's dominant bug class was
 "faithful behaviour switched off" (`gDeforms = 0`). §8 had the scope in its own words:
 *"each hook file gets a header comment stating the faithful behaviour and the reason for
 deviating"*. Status: complete.
@@ -3312,7 +3312,7 @@ that refuses to deviate further), `src/hooks/dlc.cpp` (the faithful content root
 added one) and `src/rb_blitz_app.h` (the `rex::ReXApp` hooks). The input device, the VFS
 overlay and the SDK patches already stated the same thing and were not touched.
 
-The entry also closes the known-issues row and the [rb3-references.md](../rb3-references.md)
+The entry also closes the known-issues row and the [rb3-references.md](../reference/rb3-references.md)
 §8 gap. A disproof would edit this section.
 
 ### Verification (2026-10-01, Release `out/build/win-amd64-release`)
@@ -3326,8 +3326,8 @@ The entry also closes the known-issues row and the [rb3-references.md](../rb3-re
 
 ## An eighth host test target: the Ultimate layer's decidable half (2026-10-01)
 
-The [known-issues row](../known-issues.md) on host coverage names the same gap from both
-sides: [tests/](../tests) covers the pure host code, and every hook that touches the SDK
+The [known-issues row](../reference/known-issues.md) on host coverage names the same gap from both
+sides: [tests/](../../tests) covers the pure host code, and every hook that touches the SDK
 is still verified by hand. The Ultimate layer is the first of those to give up half its
 body to a test. Its cvars and its guest addresses stay where they were, but what they
 *decide* now lives in [src/hooks/ultimate_plan.h](../../src/hooks/ultimate_plan.h), free of
@@ -3597,7 +3597,7 @@ one band:
 
 ## Close-out: the fixes implied by the open known-issues (2026-10-01)
 
-The backlog's known-issues section — removed from [backlog.md](../backlog.md) when it
+The backlog's known-issues section — removed from [backlog.md](../reference/backlog.md) when it
 completed — is closed here; its four items are done and their chronology is above and
 below in this file.
 
@@ -3622,13 +3622,13 @@ below in this file.
   mapping exists (`CaptureGuestOutput` and the measured highlight), and the one shape a
   single difference could not read, a marker at least as tall as its row, is now measured
   across two presses ("Mouse navigation, fourth pass", above). The limits that remain are
-  recorded in [known-issues.md](../known-issues.md): a screen with no moving marker at all,
+  recorded in [known-issues.md](../reference/known-issues.md): a screen with no moving marker at all,
   a move under the detector's colour threshold, no guest cursor, and the overlay/foreground
   gates that are reasoned rather than exercised.
 
 ## The naming campaign opens: nine symbols (2026-10-03)
 
-S1 of [customization-plan.md](../plans/customization-plan.md) and backlog §1's first item.
+S1 of [customization-plan.md](../plans/finished/2026-10-03-customization-plan.md) and backlog §1's first item.
 Before this, `config/functions.toml` forced three entry points and named none, so the
 generated tree was 37,851 anonymous `sub_XXXXXXXX` symbols.
 
@@ -3641,13 +3641,13 @@ generated tree was 37,851 anonymous `sub_XXXXXXXX` symbols.
   `Thunk_8243C458`) and the six proved functions of the MOGG decryption path
   (`ByteGrinder_GetEncMethod`, `ByteGrinder_HvDecrypt`, `VorbisReader_SetupCypher`,
   `VorbisReader_CheckHmxHeader`, `XeKeys_SetKey`, `XeKeys_AesCbc`).
-- **Evidence.** The MOGG names are the ones already recorded in [symbols.md](../symbols.md)
+- **Evidence.** The MOGG names are the ones already recorded in [symbols.md](../reference/symbols.md)
   "Audio (MOGG) decryption path" and above under B-009. The thunks were classified from
   their generated bodies: a 4-byte growable-array reserve (`sub_82354D00`), an input/pad
   setter gated on `XamInputGetCapabilities` (`sub_82380088` → `sub_827266F0`), and a
   12-byte-element container insert with an assertion string at `0x82085618`
   (`sub_8243C458`). The per-address rule, evidence and confidence are the "Named symbols"
-  table in [symbols.md](../symbols.md).
+  table in [symbols.md](../reference/symbols.md).
 - **Verification.** The six name-only entries carry no `size`/`end`, so codegen redisovers
   the natural boundary exactly as for a PDATA entry; every named body in `generated/default/`
   was diffed before and after and is byte-identical apart from the symbol and the renamed
@@ -3655,11 +3655,11 @@ generated tree was 37,851 anonymous `sub_XXXXXXXX` symbols.
   `XeKeys_*` and `SetupCypher`). `cmake --build --preset win-amd64-release` clean (codegen
   `Validate` clean, 23 files rewritten), `ctest` 8/8.
 - **What is left.** The wider anonymous set; `config/functions.toml` and
-  [symbols.md](../symbols.md) grow together, one proved batch at a time.
+  [symbols.md](../reference/symbols.md) grow together, one proved batch at a time.
 
 ## `d3d12_readback_resolve` moves to the runtime profile (2026-10-03)
 
-Backlog §1's second item and [rb3-references.md](../rb3-references.md) §8. In this 0.10 SDK
+Backlog §1's second item and [rb3-references.md](../reference/rb3-references.md) §8. In this 0.10 SDK
 `d3d12_readback_resolve` is a **cvar**, not a project-manifest key:
 `REXCVAR_DEFINE_BOOL(d3d12_readback_resolve, false, "GPU/D3D12", …)` in
 `rexglue-sdk/src/graphics/d3d12/command_processor.cpp`, and `true` selects the
@@ -3667,13 +3667,13 @@ readback-resolve path in `GetReadbackResolveMode` — the B-010 escape hatch for
 mirror. band3 keeps the equivalent setting in its manifest; the correct home here is the
 runtime profile the app reads, `out/build/<preset>/rb_blitz.toml`.
 
-- **The manifest does not carry it** ([rb_blitz_manifest.toml](../rb_blitz_manifest.toml)) and
+- **The manifest does not carry it** ([rb_blitz_manifest.toml](../../rb_blitz_manifest.toml)) and
   never did, so there was nothing to remove; the build-tree-local profile now sets
   `d3d12_readback_resolve = true` beside `mnk_mode`.
 - **Why the local file, and how a fresh checkout gets it.** The runtime reads
   `<exe name>.toml` from its own directory, and `rb_blitz.toml` is gitignored
-  ([build-and-run.md](../build-and-run.md) §2). The recreate block there now carries the key,
-  so the decision survives a wiped `out\`; [rb3-references.md](../rb3-references.md) §8 is
+  ([build-and-run.md](../guides/build-and-run.md) §2). The recreate block there now carries the key,
+  so the decision survives a wiped `out\`; [rb3-references.md](../reference/rb3-references.md) §8 is
   closed.
 - **Verified by source, not by a boot — and the reason matters.** A boot with the key present
   is clean (no `[FATAL]`, the crypto path runs, 21 DLC packages mount), but it cannot *prove*
@@ -3736,11 +3736,11 @@ changes; `[NtCreateFile] disp=0x5` + a 1024-byte `[NtWriteFile]`), the value rea
 a restart with the file byte-identical, and the revert reads back 0. The Audio/Video toggles
 and the controller scheme change on screen but never write the file - measured across left
 stick, D-pad, A, START, B, X, Y, a 30 s wait and a main-menu round trip - which is recorded
-in [known-issues.md](../known-issues.md).
+in [known-issues.md](../reference/known-issues.md).
 
 ## A config key that matches no cvar is reported (2026-10-04)
 
-The limit [known-issues.md](../known-issues.md) recorded the day before, when
+The limit [known-issues.md](../reference/known-issues.md) recorded the day before, when
 `d3d12_readback_resolve` moved into the gitignored profile: a key that matched no cvar was
 dropped in silence, so a profile edit could not be verified by looking for a warning.
 
@@ -3773,7 +3773,7 @@ dropped in silence, so a profile edit could not be verified by looking for a war
 
 ## Enhancement toggles, so a planned feature cannot look like a working one (2026-10-04)
 
-[plans/customization-plan.md](../plans/customization-plan.md) is a prompt plan for nine UI /
+[plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md) is a prompt plan for nine UI /
 resolution / save / DLC features, and every one of them starts off by default - so the first thing it
 needs is a way to say "this toggle exists and is off", because "the toggle did nothing" and "the
 toggle was never on" are otherwise the same log line.
@@ -3798,7 +3798,7 @@ screenshot. [src/diag/probe.h](../../src/diag/probe.h) adds a bounded ring of tr
 points placed inside hooks (`RBBLITZ_PROBE(address, tag)` records the address, tag, thread, guest
 return address and `r3..r10`), an ImGui overlay showing the guest's requested video mode, window and
 present path, and a trace file rewritten twice a second for scripted runs.
-[engine/probe.md](../engine/probe.md) is the operator's view.
+[engine/probe.md](../engine/diagnostics.md) is the operator's view.
 
 - **One ImGui context, deliberately.** The overlay is an SDK `ImGuiDialog` added through
   `ReXApp::OnCreateDialogs` - the same mechanism as the SDK's own F3 debug overlay, console and
@@ -3825,7 +3825,7 @@ present path, and a trace file rewritten twice a second for scripted runs.
 
 `scripts/observe_ui.ps1` drives the game to a named screen, captures it, reads it and says what
 changed - the instrument the customization plan's S2-S7 and E1 measure with. `scripts/ui_states.ps1`
-is the one table of state names, routes and needles; `docs/engine/observing.md` is the operator's
+is the one table of state names, routes and needles; `docs/engine/diagnostics.md (part 2, the observer)` is the operator's
 view.
 
 - **It joins, it does not re-implement.** `drive_ui.ps1` sends the keys, `capture_window.ps1` refuses
@@ -3835,7 +3835,7 @@ view.
   "clamp, tap down N, accept" a safe route.
 - **A diff is only read against a same-build baseline, and never without one.** `-Compare` with no
   baseline reports `no-baseline` and does not fail the run: there is nothing to measure against, and
-  saying so is the point (docs/backlog.md, "Measure the noise floor").
+  saying so is the point (docs/reference/backlog.md, "Measure the noise floor").
 - **The first real pair corrected the plan's own verification.** The plan asked for a diff "below the
   settled noise floor". Two same-build runs of the title screen differ by **0.046 %** in one pair and
   **1.978 %** in another: the aurora behind the title animates, so what varies is the distance between
@@ -3916,7 +3916,7 @@ baseline metadata now records the scale, the capture size and the OCR verdict.
   open list; naming the tutorial's owner is S2's.
 ### B-016: a use-after-free behind `KeSetEvent`, and the two halves of it (2026-10-07)
 
-Found while measuring what a V-Sync-off boot buys R7 ([dlc.md](../dlc.md) §4.3): a boot with
+Found while measuring what a V-Sync-off boot buys R7 ([dlc.md](../guides/dlc.md) §4.3): a boot with
 `--vsync=false` was the only configuration that ever died, and it died inside the SDK.
 
 #### The fault

@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The pad as a device: which pads are open, what they are called, and what they are asking for
-// (docs/plans/launcher-plan.md A3, D6; the rules themselves live in pad_nav.h).
+// (docs/plans/finished/2026-09-27-launcher-plan.md A3, D6; the rules themselves live in pad_nav.h).
 //
 // SDL3 is the only input library here, and it is already linked and initialised (D1, main.cpp's
 // SDL_INIT_GAMEPAD): the game itself reads a pad through SDL and the same mapping database, so a

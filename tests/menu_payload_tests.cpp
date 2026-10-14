@@ -10,7 +10,7 @@
 // part (measured 2026-10-12 with `scripts/hmx_ark.py list`: `main_xbox.hdr` -> one part,
 // `patch_xbox.hdr` -> one part). Extending the mounted patch by *adding* a second part - which is
 // what this code used to do - produced an Ultimate boot that re-read the generated part forever and
-// never presented (docs/plans/in-game-settings-status-2026-10-12.md). So: one part in, one part
+// never presented (docs/settings/status.md (part 2, the black startup)). So: one part in, one part
 // out, every record inside the part it belongs to, and the mounted bytes carried verbatim.
 
 #include "check.h"

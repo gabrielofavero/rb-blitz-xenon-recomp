@@ -62,7 +62,7 @@ std::optional<remap::Target> TargetForPadButton(SDL_GamepadButton button) {
     default:
       // Everything else has no control of its own to capture into, and that deliberately includes
       // Guide: it is a platform button, no target names it any more, and the runtime keeps it out
-      // of the guest's pad state (docs/plans/in-game-settings-contracts.md §2.3). The extra
+      // of the guest's pad state (docs/settings/contracts.md §2.3). The extra
       // buttons a modern pad has - paddles, the touchpad, misc - are the same case: the SDK folds
       // them onto buttons that already exist, and a binding names a control rather than a key.
       return std::nullopt;
@@ -158,7 +158,7 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
   }
 
   // A `[remap]` row this build refuses - Guide, and only Guide - is preserved by a save and never
-  // applied (docs/plans/in-game-settings-contracts.md §2.3). Saying so is the difference between
+  // applied (docs/settings/contracts.md §2.3). Saying so is the difference between
   // "the button I bound does nothing" being a decision and being a bug report.
   const std::vector<std::string> refused =
       remap::RefusedRowNames(session.profile().remap);

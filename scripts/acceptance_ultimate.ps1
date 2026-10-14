@@ -2,7 +2,7 @@
 # installed Rock Band Blitz Ultimate payload, reaches the menu and plays a named
 # song -- and the vanilla route still passes unchanged.
 #
-# This is acceptance criterion 1 of docs/ultimate-compat.md section 10 with
+# This is acceptance criterion 1 of docs/guides/ultimate-compat.md section 10 with
 # evidence instead of an observation: the route itself is driven by
 # scripts/acceptance_song.ps1 (the proven launch-to-results driver), and this
 # script adds the two halves the payload needs:
@@ -18,7 +18,7 @@
 #
 # Both legs also refuse the dirty-disc abort: with the disk-error latch patch
 # off, the payload's ark is not in the retail checksum database and the boot
-# ends on XamShowDirtyDiscErrorUI with a black screen (docs/ultimate-compat.md
+# ends on XamShowDirtyDiscErrorUI with a black screen (docs/guides/ultimate-compat.md
 # section 7), so its presence in a leg's log is a failure even if the route
 # somehow continued.
 #
@@ -37,7 +37,7 @@ param(
     [int]$Song = 3,
     [string]$SongName = "THESE DAYS",
     # The mod's payload directory. Empty means <GameRoot>\ultimate, which is
-    # where docs/ultimate-compat.md section 8 installs it.
+    # where docs/guides/ultimate-compat.md section 8 installs it.
     [string]$PayloadRoot,
     [switch]$SkipVanilla
 )
@@ -54,7 +54,7 @@ New-Item -ItemType Directory -Force -Path $capDir | Out-Null
 if (-not (Test-Path $exe)) { throw "not found: $exe" }
 if (-not (Test-Path (Join-Path $GameRoot "default.xex"))) { throw "no default.xex under $GameRoot" }
 # A payload is present when the game can find the patch header; the pair has to
-# be complete or the game reads it as a damaged disc (docs/ultimate-compat.md
+# be complete or the game reads it as a damaged disc (docs/guides/ultimate-compat.md
 # section 2).
 $header = Join-Path $PayloadRoot "gen/patch_xbox.hdr"
 $archive = Join-Path $PayloadRoot "gen/patch_xbox_0.ark"
@@ -64,7 +64,7 @@ if (-not (Test-Path $archive)) { throw "incomplete Ultimate payload at $PayloadR
 # ------------------------------------------------------------- the two legs ---
 
 # Every helper that touches a .ps1 file has to go through a child PowerShell:
-# this machine's execution policy is Restricted (docs/build-and-run.md section 0).
+# this machine's execution policy is Restricted (docs/guides/build-and-run.md section 0).
 function Invoke-SongLeg([string]$Leg, [string]$Mode) {
     $legDir = Join-Path $OutDir $Leg
     $argv = @(

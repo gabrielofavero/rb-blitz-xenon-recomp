@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The editable half of a settings row (docs/plans/launcher-plan.md D12, prompt B2).
+// The editable half of a settings row (docs/plans/finished/2026-09-27-launcher-plan.md D12, prompt B2).
 //
 // A1 drew every row read-only and greyed; this is what turns the schema into widgets the user
 // can actually change, writing each one straight into the session's profile (B4's writer, then

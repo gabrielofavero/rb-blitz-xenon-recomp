@@ -34,10 +34,10 @@ std::string InsideGameRootReason(const fs::path& value, const fs::path& game_roo
 // them the same way: a folder named like the <title_id>/<content_type>/<package> layout is
 // mounted as that structure, and anything else is read as a flat library
 // (src/fs/dlc_library.h) - thousands of loose CON/LIVE containers in no particular
-// arrangement, which is what a dumped song folder is (docs/dlc.md §2.1). A folder of loose
+// arrangement, which is what a dumped song folder is (docs/guides/dlc.md §2.1). A folder of loose
 // packages is therefore accepted here rather than refused: refusing it would turn away exactly
 // the layout the runtime is built to read. The library walk itself is not repeated - a cold one
-// is ~22 s on a large exFAT library (docs/dlc.md §4.1), far too long to run while the panel
+// is ~22 s on a large exFAT library (docs/guides/dlc.md §4.1), far too long to run while the panel
 // draws, and nothing the walk finds can refuse a folder the runtime would take.
 PathVerdict CheckDlcLayout(const fs::path& value) {
   PathVerdict verdict;

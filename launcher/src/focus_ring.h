@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The focus ring's own geometry (docs/plans/launcher-plan.md A5; §10.2's "1 px outline").
+// The focus ring's own geometry (docs/plans/finished/2026-09-27-launcher-plan.md A5; §10.2's "1 px outline").
 //
 // A1 showed the ring by giving the focused row the colour the selected tab uses, which was the one
 // drawing primitive it needed. That is a colour alone, and a colour alone is not a signal: a user

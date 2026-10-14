@@ -14,7 +14,7 @@
     file-name order.
 
     Re-run after `git submodule update`, a fresh clone, or any checkout that
-    rewrites the SDK tree. See patches/README.md and docs/build-and-run.md.
+    rewrites the SDK tree. See patches/README.md and docs/guides/build-and-run.md.
 
     The script also audits the SDK working tree. `.gitmodules` sets
     `submodule.rexglue-sdk.ignore = dirty` so that the applied patches stop

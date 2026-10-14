@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // DLC content root registration. See src/hooks/dlc.cpp for what the guest does with
-// it and docs/dlc.md for where packages go.
+// it and docs/guides/dlc.md for where packages go.
 
 #pragma once
 
@@ -37,7 +37,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 // read without touching any registry - so a hook may call it freely.
 //
 // It *starts* the refresh and returns. The scan reads every package in the library
-// (measured 31 s on a 1,402-package library, docs/plans/song-cache-plan.md §9.5), so it
+// (measured 31 s on a 1,402-package library, docs/plans/finished/2026-10-10-song-cache-plan.md §9.5), so it
 // runs on a worker thread and the frame that asked for it keeps drawing; the result is
 // handed to the content manager by PublishPendingRefresh() on a later guest thread.
 // Only one refresh runs at a time: a second ask while the scan is in flight is logged and
@@ -56,7 +56,7 @@ void DrainRefreshForRestart();
 // Two callers, both guest threads: the main menu's own per-frame music poll
 // (src/hooks/shell_music.cpp), which is the only hook that runs every frame while the menu
 // - the screen the refresh row lives on - is up; and the file-call hooks
-// (src/hooks/dlc_refresh.cpp). The measured shape (docs/dlc.md §4.2): the scan finishes on
+// (src/hooks/dlc_refresh.cpp). The measured shape (docs/guides/dlc.md §4.2): the scan finishes on
 // the worker and the publish lands on the next frame, ~10 ms later; the file hooks alone
 // were not enough, because the main menu makes no file call at all. A refresh that
 // finishes while the menu is not drawing is published when it next is - the cache file is

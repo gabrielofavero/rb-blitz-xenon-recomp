@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Host tests for src/hooks/hud_layout.h - the rule that says where a HUD element goes when
-// the frame is not 16:9 (docs/plans/ultrawide-findings.md §9). Header-only on purpose: the
+// the frame is not 16:9 (docs/settings/graphics.md (part 3, custom resolutions) §9). Header-only on purpose: the
 // policy is arithmetic, so it is tested without the SDK, without a guest and without a
 // frame, the same way the fingerprint and DLC-layout tests are.
 //
@@ -84,7 +84,7 @@ int main() {
   BeginCase("the shift is the extra width, halved");
   {
     // 2560x1080 is the arm that was validated end to end; 1680x720 is the apect the stretch
-    // was first measured at (docs/plans/ultrawide-findings.md §3).
+    // was first measured at (docs/settings/graphics.md (part 3, custom resolutions) §3).
     CHECK_CLOSE(HudShiftUnits(2560, 1080), 0.5925925925925926, 1e-15);
     CHECK_CLOSE(HudShiftPixels(2560, 1080), 320.0, 1e-12);
     CHECK_CLOSE(HudShiftPixels(1680, 720), 200.0, 1e-12);

@@ -28,7 +28,7 @@
 #   4 credentials   no private key, provider token, JWT or `Authorization:` header in the
 #                   payload, the helper or a setup executable; and exactly one copy of the
 #                   console's own XEX key in the tree, the SDK's, which is the public
-#                   constant every Xenia-derived runtime carries (docs/rb3-references.md
+#                   constant every Xenia-derived runtime carries (docs/reference/rb3-references.md
 #                   section 9). Word-level hits ("password" inside a C++ identifier) are
 #                   listed as notes, not failures.
 #   5 symbol data   no payload binary carries a symbol table or a .debug section, and no
@@ -370,7 +370,7 @@ if ($scanTargets.Count -eq 0) {
 
     # Key material: the project keeps exactly one copy - the SDK's own XEX key, the
     # constant the emulated console uses to read the user's own dump, which is public in
-    # every Xenia-derived runtime (docs/rb3-references.md section 9) - and
+    # every Xenia-derived runtime (docs/reference/rb3-references.md section 9) - and
     # decrypt_xex.py reads it from there instead of carrying a second one.
     $sdkKeyFile = Join-Path $repoRoot "rexglue-sdk/src/system/xex_module.cpp"
     if (Test-Path $sdkKeyFile) {
@@ -404,7 +404,7 @@ if ($scanTargets.Count -eq 0) {
 if ($payloadFiles.Count -eq 0) {
     Add-Check "symbols" "skip" "no payload to check" "" @()
 } elseif (-not (Test-Path $llvmReadobj)) {
-    Add-Check "symbols" "fail" "llvm-readobj not found (LLVM is part of the frozen toolchain, docs/toolchain.md)" "" @()
+    Add-Check "symbols" "fail" "llvm-readobj not found (LLVM is part of the frozen toolchain, docs/guides/toolchain.md)" "" @()
 } else {
     $rows = New-Object System.Collections.Generic.List[string]
     $problems = New-Object System.Collections.Generic.List[string]

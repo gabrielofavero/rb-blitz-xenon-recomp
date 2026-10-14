@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The schema's `validate` field, enforced (docs/plans/launcher-plan.md Contract 1, B1).
+// The schema's `validate` field, enforced (docs/plans/finished/2026-09-27-launcher-plan.md Contract 1, B1).
 //
 // A path row carries the rules its value must satisfy, so the tab does not have to know what
 // "a DLC folder" or "not inside the game root" mean: this module does, and it is the same

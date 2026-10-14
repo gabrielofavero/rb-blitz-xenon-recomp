@@ -6,7 +6,7 @@
 // It is an ordinary SDK dialog, added through ReXApp::OnCreateDialogs - the same
 // mechanism the SDK's own F3 debug overlay, console and settings dialogs use -
 // so there is exactly one ImGui context and one renderer in the process
-// (docs/plans/customization-plan.md P2's "don't"). The dialog itself reads every
+// (docs/plans/finished/2026-10-03-customization-plan.md P2's "don't"). The dialog itself reads every
 // cvar it shows; the one thing it cannot reach is the window, which lives on the
 // application, so the application supplies it as a callback.
 

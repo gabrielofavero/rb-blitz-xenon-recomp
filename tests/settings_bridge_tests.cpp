@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Unit tests for src/hooks/settings_bridge.{h,cpp} - the typed guest<->host settings channel
-// (P1 of docs/plans/in-game-settings-plan.md).
+// (P1 of docs/settings/plan.md).
 //
 // What is testable here is exactly the part that must not be discovered by booting: the
 // namespace is matched and not merely contained, a frame is bounded and checksummed before any

@@ -614,7 +614,7 @@ int main(int argc, char** argv) {
   EmitIsppString(ispp, "UltimateReleaseUrl", ultimate->String("release_url"));
   EmitIsppString(ispp, "UltimateDestinationDir", ultimate->String("destination_dir"));
   ispp << "\n";
-  ispp << "// The update channel (docs/plans/launcher-plan.md D19): where a launcher\n";
+  ispp << "// The update channel (docs/plans/finished/2026-09-27-launcher-plan.md D19): where a launcher\n";
   ispp << "// looks, the folder under the user's local application data the updater is\n";
   ispp << "// placed in, and whether this release needs the user's game files again.\n";
   EmitIsppString(ispp, "UpdateManifestUrl", update->String("manifest_url"));

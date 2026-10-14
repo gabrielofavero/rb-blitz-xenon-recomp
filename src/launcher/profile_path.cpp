@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Profile path resolution (see profile_path.h and docs/plans/launcher-plan.md D2). The
+// Profile path resolution (see profile_path.h and docs/plans/finished/2026-09-27-launcher-plan.md D2). The
 // two process-environment reads are deliberately in one place, so a test can supply the
 // same inputs directly instead of mutating the environment.
 //

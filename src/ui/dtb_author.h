@@ -2,8 +2,8 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Authoring side of the compiled-DTA (.dtb) grammar (P1 of
-// docs/plans/in-game-settings-plan.md; the format is documented in src/ui/menu_options.h and
-// docs/assets.md "dtb").
+// docs/settings/plan.md; the format is documented in src/ui/menu_options.h and
+// docs/guides/assets.md "dtb").
 //
 // Why this exists: src/ui/menu_options.cpp *edits* files the title already has - byte-neutrally,
 // because the ark index fixes every entry's size. P1's screen step needs the other direction:

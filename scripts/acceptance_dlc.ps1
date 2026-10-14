@@ -1,10 +1,10 @@
 # DLC acceptance: downloaded content is mounted and its songs appear in the
 # game's own song-selection screen.
 #
-# docs/dlc.md §5 left this open: the layout and the patch set are pinned host-side
+# docs/guides/dlc.md §5 left this open: the layout and the patch set are pinned host-side
 # (tests/dlc_layout_tests.cpp, patches/rexglue-sdk/0006-...), but "the guest's own
 # song list is the only thing that proves the enumeration and the mount". This is
-# that proof, and it runs the two halves docs/dlc.md §5 names:
+# that proof, and it runs the two halves docs/guides/dlc.md §5 names:
 #
 #   * `dlc: N package(s) for title(s) ... (read-only, mounted in place)` - the host
 #     hook found and registered the packages; a flat library reports the same shape
@@ -21,7 +21,7 @@
 # caches its song list into `songcache` and a reused root could serve a cached DLC
 # song to the control leg.
 #
-# -DlcLibrary adds the flat library half of docs/dlc.md §2.1 to the positive leg
+# -DlcLibrary adds the flat library half of docs/guides/dlc.md §2.1 to the positive leg
 # (`--dlc_library`), with the control leg pointed at a library path that does not
 # exist as well, so the same two legs prove either source.
 #
@@ -45,11 +45,11 @@ param(
     [string]$OutDir = "out/m7-dlc",
     [string]$GameRoot,
     # Root of the <title_id>/<content_type>/<package> layout. Empty means the
-    # default, <GameRoot>/dlc (docs/dlc.md §2).
+    # default, <GameRoot>/dlc (docs/guides/dlc.md §2).
     [string]$DlcRoot,
     # A ';'-separated flat DLC library: folders of STFS packages in any arrangement,
     # each mounted under the title id and content type its own header names
-    # (docs/dlc.md §2.1). Empty means no library, which is the pre-library behaviour.
+    # (docs/guides/dlc.md §2.1). Empty means no library, which is the pre-library behaviour.
     [string]$DlcLibrary = "",
     # One or more song titles, comma-separated, that only the DLC package carries.
     [string]$ExpectedSong = "KIDS IN THE STREET",
@@ -193,7 +193,7 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
     # --enhancements_skip_offline_dialog=false: the route below walks the title's two offline
     # dialogs - it waits for "ROCK CENTRAL" and "OFFLINE MODE" and presses A at each - and the
     # skip ships **on** by default, so the route's shape is pinned here rather than left to the
-    # default (docs/engine/main-menu-flow.md, R3), the way acceptance_song.ps1 and
+    # default (docs/engine/main-menu.md (part 1, the option list), R3), the way acceptance_song.ps1 and
     # acceptance_screens.ps1 already pin it. Without it the A press after the title screen lands
     # on the main menu, the ROCK CENTRAL wait times out, and the leg fails while the boot itself
     # was fine (measured 2026-10-10: the timeout's own last reading was
@@ -272,7 +272,7 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
 
 # ------------------------------------------------------------------- main ---
 
-# The positive leg expects the packages docs/dlc.md §2 describes. The count is not
+# The positive leg expects the packages docs/guides/dlc.md §2 describes. The count is not
 # hard-coded: it is whatever the hook reports, as long as it is at least one, and
 # the guest's enumerator agrees it got something.
 $dlc = Invoke-Leg "dlc" $DlcRoot $DlcLibrary 1 1 2147483647
@@ -282,7 +282,7 @@ $dlcPass = $dlc.SongList -and $dlc.DlcSong -and ($dlc.Packages -ge 1) -and
 $controlPass = $true
 $control = $null
 if (-not $SkipControl) {
-    # Paths that do not exist: the hook refuses both sources (docs/dlc.md §3) and
+    # Paths that do not exist: the hook refuses both sources (docs/guides/dlc.md §3) and
     # the guest's enumerator must come back empty, with the DLC song not on the list.
     # A library only joins the control leg when the positive leg had one, so a run
     # without -DlcLibrary keeps the original control shape.

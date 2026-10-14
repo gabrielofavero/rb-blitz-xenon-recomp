@@ -25,7 +25,7 @@
 //   * A target with a row binds to a comma-separated list, and an empty list means nothing presses
 //     it at all.
 //
-// Guide is not one of the controls at all (docs/plans/in-game-settings-contracts.md §2.3). It has
+// Guide is not one of the controls at all (docs/settings/contracts.md §2.3). It has
 // no target, no default, no row and no source: a name this module does not know is refused rather
 // than guessed at, so a `guide = pad:guide` row a person wrote once is preserved verbatim by a
 // save and simply never applied - and `Apply` clears the bit out of the state the guest is handed,

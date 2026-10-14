@@ -3,7 +3,7 @@
 //
 // R9: the main menu's background music, drawn from the loaded DLC instead of the
 // three tracks the title ships. See src/hooks/shell_music.cpp for the flow and
-// docs/engine/menu-music.md for the evidence.
+// docs/engine/main-menu.md (part 2, the background music) for the evidence.
 
 #pragma once
 

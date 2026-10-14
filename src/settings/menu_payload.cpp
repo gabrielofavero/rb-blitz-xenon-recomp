@@ -91,7 +91,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
 // `game/ultimate/gen/patch_xbox.hdr`: `gen/patch_xbox_0.ark`, measured 2026-10-12 with
 // `scripts/hmx_ark.py list`). Growing the ark by *adding* a second part - which is what this
 // function used to do - produced the title's only two-part ark, and an Ultimate boot that read the
-// generated part forever and never presented (docs/plans/in-game-settings-status-2026-10-12.md).
+// generated part forever and never presented (docs/settings/status.md (part 2, the black startup)).
 // So when the mounted index has a single part, its bytes are carried into the new part unchanged
 // and our records are appended after them: the existing entries keep their offsets, the part list
 // keeps its one entry (same name, new size), and the guest sees the shape it has always seen.

@@ -1,4 +1,4 @@
-// rb_blitz launcher - entry point (docs/plans/launcher-plan.md, prompts P0.4 and A1).
+// rb_blitz launcher - entry point (docs/plans/finished/2026-09-27-launcher-plan.md, prompts P0.4 and A1).
 //
 // P0.4 answered "does the SDL3 + ImGui stack work in this build tree". A1 replaced the
 // placeholder with the tab shell (launcher/src/shell.h): three tabs from the settings
