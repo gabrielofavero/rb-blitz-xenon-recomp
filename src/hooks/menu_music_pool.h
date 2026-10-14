@@ -65,6 +65,42 @@ inline std::vector<PoolEntry> BuildPool(std::vector<PoolEntry> candidates, size_
   return pool;
 }
 
+// ------------------------------------------------------------------------------------------------
+// The "Play Current Song" probe channel (owner feature, 2026-10-14)
+// ------------------------------------------------------------------------------------------------
+// The main menu's Play Current Song row has to learn *which* pooled song the menu is playing, and
+// the only value a DTA script can read back from the host is a boolean (`file_exists`, the builtin
+// the settings channel already rides on - see src/hooks/settings_bridge_hooks.cpp). So the row asks
+// one question per pool index and the host answers true for exactly one of them. The paths are
+// parsed here, without the SDK, so the protocol is a test rather than a claim.
+// The namespace the channel lives in, and the probe prefix inside it. The whole namespace is ours:
+// a name in it is a name no content file can have, so the builtin hook answers every one of them -
+// including a malformed probe, which is answered "false" rather than forwarded, because a
+// forwarded bare name is a name the title's own file layer may answer out of data it already has
+// (the lesson R7's refresh sentinel taught, docs/engine/main-menu.md part 1 §7.1).
+inline constexpr std::string_view kPlayNamespace = "rbbz-play/";
+inline constexpr std::string_view kPlayProbePrefix = "rbbz-play/current/";
+
+// The pool index a probe path names, or -1 when the path is not one of ours. A probe is
+// `<prefix><decimal index>`; anything else in the namespace is not a question we can answer.
+inline int PlayProbeIndex(std::string_view path) {
+  if (!path.starts_with(kPlayProbePrefix)) {
+    return -1;
+  }
+  const std::string_view digits = path.substr(kPlayProbePrefix.size());
+  if (digits.empty() || digits.size() > 6) {
+    return -1;
+  }
+  int value = 0;
+  for (const char c : digits) {
+    if (c < '0' || c > '9') {
+      return -1;
+    }
+    value = value * 10 + (c - '0');
+  }
+  return value;
+}
+
 // The play order of the pool: a shuffled deck, dealt to the end and then reshuffled. A
 // per-load pick can hand the same song back twice in a row; a deck cannot, and the first
 // card of a new deck is never the card that just played, so no song ever follows itself.

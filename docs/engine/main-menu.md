@@ -17,10 +17,15 @@ in place, never repacked:
   device path, which the host hears — R7, off by default.
 - **The background music** is `ShellMusicPanel`, fed by the ark's `config/synth.dtb` `shellmusic`
   block (three of the title's own tracks). DLC songs cannot be a pool entry, so R9 hooks the pool
-  loader and the per-frame poll instead — off by default.
+  loader and the per-frame poll instead — **on by default since 2026-10-14**, when the feature got a
+  visible setting again ("DLC Menu Songs", Help & Options → Downloadable Content) and its cvar became
+  that row's carrier.
+- **The Play Current Song row** (2026-10-14) is a row this project *adds* to the option array,
+  directly after PLAY, plus a case whose body names the menu's own background song — so it needs the
+  pool above, and it exists only while that pool does (§7.2).
 
 All five are byte-neutral or read-time edits delivered at the read that carries the file, except R9's
-hooks, which are host-side.
+hooks and the Play Current Song row's probe channel, which are host-side.
 
 ## Sources
 
@@ -367,6 +372,71 @@ cvar registry), and the option is off by default: the *V-Sync* row belongs to th
 **What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
 plus its padding, an action that already carries the sentinel (a second pass), and any file that is
 not a `.dtb` this module can re-serialize: each leaves the file exactly as it was and logs why.
+
+### 7.2 The Play Current Song row (2026-10-14)
+
+**The feature.** The main menu's **second** entry starts whichever song the menu is playing as its
+background music (R9, part 2): with Ultimate installed it lands on `powerup_select_screen` — the
+screen the game's own flow uses with `unlockall`, where the player picks power-ups and presses PLAY
+SONG — and on the offline base target it goes straight to the loading screen, exactly as the song
+list's own Confirm does. On by default (`general.play_current_song`, "Play Current Song" on Help &
+Options → Downloadable Content), and *built only by a boot that has a pool*: with the DLC music off,
+or a library that yielded no song, the settings row reads unavailable and the menu entry is absent —
+a row that exists must work. **The landing is the intent, not a measurement:** what the press was
+measured to do is reach the host and stop at the song manager's own answer (§"The song manager decides").
+
+**The two halves.**
+
+1. **The record edit** ([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp),
+   `AddPlayCurrentSongRow`): `splash_play_current` is inserted directly after `splash_start` in the
+   option array (the array holding both `splash_start` and `splash_exit`, §1), and a case is appended
+   to the `{switch {start.lst selected_sym} ...}` table that dispatches it. The localised text is a
+   locale entry of its own (`AddLocaleEntry`, §6's shape), added only on the boot that builds the
+   row. Nothing is byte-neutral here: our payload record is a new record in the patch ark, so it may
+   grow (§ "Content resolution" in [architecture.md](../settings/architecture.md)).
+2. **The body** is made of statements shipped records already make, which is what keeps it honest:
+   `{song_mgr get_song_id_from_short_name <name>}` → `{song_mgr data <id>}` →
+   `{loading_screen set_song <data>}` + the content mount are `quick_start_song`
+   (`ui/pause/gen/pause_to_new_game.dtb`), and the branch that follows is the song list's own
+   `song_chosen` (`ui/song_select/gen/song_select.dtb`, on `song_select_screen`).
+
+**Which song is playing is the host's fact.** A DTA script cannot be handed a string, and the only
+answer a host can give through the channel this project already owns is a boolean (`file_exists`,
+[src/hooks/settings_bridge_hooks.cpp](../../src/hooks/settings_bridge_hooks.cpp)). So the payload
+**bakes the boot's pool** into the body — one probe per pool entry, `rbbz-play/current/<index>` — and
+the host answers true for exactly the index the menu is playing
+([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), `AnswerPlayQuery`; the path parser is
+[src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h)). The song key baked with each probe
+is the package's own folder name (`SongName`: the last component of `\songs\<key>\<key>.mogg`), which
+is the spelling the body then asks `song_mgr` for. A press therefore costs one file question per pool
+entry, the whole `rbbz-play/` namespace is answered by the host (never forwarded — a forwarded bare
+name is a name the title's own file layer may answer out of data it already has, the lesson §7.1's
+sentinel taught), and a press with no track playing yet (the pool is built, but no track has been
+handed to the panel) writes no name and does nothing.
+
+**The song manager decides whether the press goes on (measured 2026-10-14).** All of the body runs —
+every statement, `song_chosen` included, read off a staged trace through the probe channel — and
+`{song_mgr get_song_id_from_short_name <the pool's own key>}` then answers **0**, while
+`{song_mgr num_songs}` is non-zero: the manager's library does not carry the name at main-menu time,
+and `song_mgr data 0` hands the loading screen a null song, which the title dereferences a second later
+(`Unhandled guest access violation: read of guest 0x00000004`). Asking first
+(`{content_mgr refresh_synchronously}`, the loading screen's own first step) and visiting your own song
+list before the press change neither reading. The body therefore **guards on the id**: a press whose
+name the library does not carry does nothing instead of faulting. The one-step-further control is the
+title's own list — starting or previewing a *DLC* song from it mounts the package, runs the same AES
+path, and faults the same way, so that fault is not this row's; both are
+[known-issues.md](../reference/known-issues.md) `Open`, with the arms in
+[play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) §Evidence.
+
+**Evidence [boot] 2026-10-14** — see [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)
+§ Evidence for the arm, its log lines and the captures; the boot lines to look for are
+`settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`
+and `shell_music: Play Current Song: the menu is playing pool i of N ("<key>")`.
+
+**Evidence [boot] 2026-10-14** — see [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)
+§ Evidence for the arm, its log lines and the captures; the boot lines to look for are
+`settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`
+and `shell_music: Play Current Song: the menu is playing pool i of N ("<key>")`.
 
 ### 8. Evidence
 

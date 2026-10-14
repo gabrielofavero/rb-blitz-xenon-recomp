@@ -22,6 +22,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "dlc_scan_threads";
     case SettingId::kDlcMenuSongs:
       return "dlc_menu_songs";
+    case SettingId::kPlayCurrentSong:
+      return "play_current_song";
     case SettingId::kUnlockAll:
       return "unlock_all";
     case SettingId::kUnlockOnlineAchievements:

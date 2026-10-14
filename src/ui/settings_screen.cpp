@@ -270,8 +270,8 @@ struct Row {
   // The one to two line caption the help overlay shows while this row is highlighted (owner
   // request, 2026-10-13). Every row carries one; the factories below take it as a required
   // argument so a row cannot be added without it, and tests/settings_screen_tests.cpp fails a row
-  // whose text is empty. 1-2 lines is a layout contract: the overlay wraps at a fixed width, so
-  // the table's texts stay under `kMaxHelpColumns` characters.
+  // whose text is empty. 1-2 lines is a layout contract: the overlay wraps at its own width, so
+  // the table's texts stay under `kMaxHelpTextChars` (settings_screen.h) characters.
   std::string description;
   std::string prefix = "t:";  // the wire spelling of a value: `t:` token, `i:` integer
   bool provider_only = false;
@@ -513,6 +513,17 @@ std::vector<PanelSpec> AllPanels() {
                                         "How many threads scan your packages. More threads scan faster.",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
+                              // R9's own row, revived (owner request, 2026-10-14) - and the row the
+                              // Play Current Song entry is wired to: with this off there is no
+                              // background DLC song to start, so the row below reads unavailable and
+                              // the main-menu entry is not built at all (see
+                              // src/hooks/settings_payload.cpp).
+                              BoolRow("settings_dlc_menu_songs", "general.dlc_menu_songs",
+                                      "DLC Menu Songs",
+                                      "Play songs from your DLC library as the main menu's background music."),
+                              BoolRow("settings_play_current", "general.play_current_song",
+                                      "Play Current Song",
+                                      "Add a main menu entry that starts the song playing in the background."),
                           }});
 
   // 1c. Achievements & Unlocks (provider only).
@@ -1732,10 +1743,11 @@ bool RemoveRow(std::vector<dtb::Node>* nodes, const std::string_view row, std::s
 }
 
 // The P1 prototype's two edits (`AddPanelLoad` into ui/gen/ui.dtb, `AddMainMenuRow` into the splash
-// option array) are gone with the Advanced Settings row they served. The merge does not add a row:
-// it re-points the retail `splash_options` / `pause_options` rows (RerouteRow above), so the locale
-// entry the old row needed is gone too - a payload generated from the retail records has no trace
-// of `advanced_settings`, which is what retiring it means here.
+// option array) are gone with the Advanced Settings row they served: the merge re-points the retail
+// `splash_options` / `pause_options` rows (RerouteRow above) instead, so a payload generated from the
+// retail records has no trace of `advanced_settings`. The one row this package *adds* is the Play
+// Current Song entry (`AddPlayCurrentSongRow`), which is a feature of the menu rather than a way in
+// to the settings surface.
 
 std::vector<dtb::Node> InSongRowBody(const std::string_view screen) {
   return {EnterScreen(InSongDestination(screen))};
@@ -1829,6 +1841,191 @@ bool AddPauseSwitchCase(std::vector<dtb::Node>* nodes, const std::string_view ro
   if (reason != nullptr) reason->clear();
   return true;
 }
+
+// The same operation on the main menu's switch, found by the case every splash record dispatches:
+// `splash_start`. Appended, never inserted before a retail case (a switch takes its first match),
+// and refused when the row already has a case.
+bool AddMainMenuSwitchCase(std::vector<dtb::Node>* nodes, const std::string_view row,
+                           const std::vector<dtb::Node>& body, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr || row.empty() || body.empty()) {
+    return refuse("nothing to add");
+  }
+  Hit hit;
+  FindInRoots(
+      nodes,
+      [](const Node& node) {
+        if (node.tag != dtb::kCommand || node.kids.size() < 2 ||
+            !IsSymbol(node.kids[0], "switch")) {
+          return false;
+        }
+        for (size_t i = 1; i < node.kids.size(); ++i) {
+          if (IsRowCase(node.kids[i]) && IsSymbol(node.kids[i].kids[0], "splash_start")) {
+            return true;
+          }
+        }
+        return false;
+      },
+      &hit);
+  if (!hit.found || hit.parent == nullptr) {
+    return refuse("no {switch ...} dispatching the main menu's option list");
+  }
+  Node& table = hit.parent->kids[hit.index];
+  for (const Node& child : table.kids) {
+    if (IsRowCase(child) && IsSymbol(child.kids[0], row)) {
+      return refuse("the switch already dispatches that row; use RerouteRow to replace it");
+    }
+  }
+  std::vector<Node> kase = {Sym(row)};
+  for (const Node& statement : body) {
+    kase.push_back(statement);
+  }
+  table.kids.push_back(Arr(std::move(kase)));
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
+// Inserts a symbol into the main menu's option array, directly after `after_row`. The array is the
+// one `IsMenuOptionArray` recognises (it holds both `splash_start` and `splash_exit`), which is the
+// same identification the live edit uses (`menu_options::FindOptionArray`); the insertion is refused
+// when the row is already an element, so a second pass cannot duplicate it.
+bool InsertMenuRow(std::vector<dtb::Node>* nodes, const std::string_view after_row,
+                   const std::string_view row, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr || after_row.empty() || row.empty()) {
+    return refuse("nothing to insert");
+  }
+  Hit hit;
+  FindInRoots(nodes, [](const Node& node) { return IsMenuOptionArray(node); }, &hit);
+  if (!hit.found || hit.parent == nullptr) {
+    return refuse("no main menu option array to insert into");
+  }
+  Node& array = hit.parent->kids[hit.index];
+  size_t anchor = array.kids.size();
+  for (size_t i = 0; i < array.kids.size(); ++i) {
+    if (IsSymbol(array.kids[i], row)) {
+      return refuse("the option array already carries that row");
+    }
+    if (IsSymbol(array.kids[i], after_row)) {
+      anchor = i;
+    }
+  }
+  if (anchor == array.kids.size()) {
+    return refuse("the option array does not carry the row to insert after");
+  }
+  array.kids.insert(array.kids.begin() + static_cast<ptrdiff_t>(anchor) + 1, Sym(row));
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
+// ------------------------------------------------------------------------------------------------
+// The "Play Current Song" entry (owner feature, 2026-10-14)
+// ------------------------------------------------------------------------------------------------
+// The main menu's second row starts whichever song the menu is playing. None of the DTA below is
+// invented: each statement is one a shipped record already makes. In short:
+//
+//   * the song is resolved from its short name, mounted, and handed to the loading screen exactly as
+//     `quick_start_song` (ui/pause/gen/pause_to_new_game.dtb) does it:
+//     `{song_mgr get_song_id_from_short_name <name>}` -> `{song_mgr data <id>}` ->
+//     `{loading_screen set_song <data>}` + the content mount;
+//   * the branch that follows is the song list's own `song_chosen` (ui/song_select/gen/song_select.dtb,
+//     on `song_select_screen`): with the Ultimate payload's `unlockall` set it goes to
+//     `powerup_select_screen` - where the player picks power-ups and presses PLAY SONG - and on the
+//     offline base target it equips the fake power-ups, sets Expert and goes straight to
+//     `loading_screen` with `wait_for_button_press`. Reusing that method is what makes both targets
+//     do what the game does rather than what we guess it does.
+//
+// Which song is playing is the one thing the script cannot know: the host does, and the only answer
+// a host can give a DTA script is a boolean (`file_exists`). So the record bakes this boot's pool -
+// one probe per index, holding the package's own folder name as the song key - and the host answers
+// true for exactly one of them (src/hooks/shell_music.cpp, AnswerPlayQuery). A press therefore costs
+// one file question per pool entry, and the host never has to read guest state.
+//
+// `rbbz_play_song` doubles as the "found" flag: the probes write the name, and the guard below is
+// what keeps a press whose music never started (the pool was built, but no track has been handed to
+// the panel yet) from resolving an empty name.
+//
+// **What the body deliberately does *not* do: select the row in the song list.** The song list's
+// provider is populated by that screen's own `enter`, so at main-menu time there is no list to
+// select in; the panel's `set_current_song` would be the way to state it, but its argument shape is
+// not established (the shipped callers pass it the provider's own metadata object from inside
+// `update_current_song`, and the native side was not read), and a wrong-shaped store there would
+// break the song list later rather than this press. The panel keeps its own current-song state; what
+// this row guarantees is that the *right song plays*.
+namespace {
+constexpr char kPlaySongVar[] = "rbbz_play_song";
+constexpr char kPlayIdVar[] = "rbbz_play_id";
+constexpr char kPlayDataVar[] = "rbbz_play_data";
+
+Node SetVar(const std::string_view name, Node value) {
+  return Cmd({Sym("set"), Var(name), std::move(value)});
+}
+
+std::vector<Node> PlayCurrentSongBody(const std::vector<std::string>& songs) {
+  std::vector<Node> statements;
+  statements.push_back(SetVar(kPlaySongVar, Str("")));
+  for (size_t i = 0; i < songs.size(); ++i) {
+    statements.push_back(Cmd(
+        {Sym("if"),
+         Cmd({Sym("file_exists"), Str(std::string(kPlayProbePrefix) + std::to_string(i))}),
+         SetVar(kPlaySongVar, Str(songs[i]))}));
+  }
+  // The song manager's own answer decides whether the press goes on: `get_song_id_from_short_name`
+  // returns 0 for a name its library does not carry, and `song_mgr data 0` then hands the loading
+  // screen a null song - which the title dereferences a second later (`Unhandled guest access
+  // violation: read of guest 0x00000004`, measured 2026-10-14). A press whose name the library does
+  // not know therefore does nothing rather than faults.
+  statements.push_back(Cmd(
+      {Sym("if"), Cmd({Sym("!="), Var(kPlaySongVar), Str("")}),
+       Cmd({Sym("do"),
+            SetVar(kPlayIdVar,
+                   Cmd({Sym("song_mgr"), Sym("get_song_id_from_short_name"), Var(kPlaySongVar)})),
+            Cmd({Sym("if"), Cmd({Sym("!="), Var(kPlayIdVar), Node::Int(0)}),
+                 Cmd({Sym("do"),
+                      SetVar(kPlayDataVar, Cmd({Sym("song_mgr"), Sym("data"), Var(kPlayIdVar)})),
+                      // Song first, then the mount, then the branch - the same three steps, in the
+                      // same order, as the song list's own Confirm
+                      // (`ui/song_select/gen/song_select.dtb`).
+                      Cmd({Sym("loading_screen"), Sym("set_song"), Var(kPlayDataVar)}),
+                      Cmd({Sym("song_select_panel"), Sym("mount_current_content"),
+                           Var(kPlayIdVar)}),
+                      Cmd({Sym("song_select_screen"), Sym("song_chosen"),
+                           Cmd({Sym("user_mgr"), Sym("get_participating_user")})})})})})}));
+  return statements;
+}
+}  // namespace
+
+bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr) {
+    return refuse("nothing to edit");
+  }
+  if (!g_configuration.play_current_song) {
+    return refuse("the Play Current Song setting is off");
+  }
+  if (g_configuration.menu_music_songs.empty()) {
+    return refuse("the boot has no DLC menu-music song to play");
+  }
+  // The row first - a refusal there leaves the record untouched - and then the case that
+  // dispatches it. A caller that treats any refusal as fatal (settings/menu_payload.cpp does)
+  // therefore never ships a row without its case.
+  if (!InsertMenuRow(nodes, "splash_start", kPlayCurrentRow, reason)) {
+    return false;
+  }
+  return AddMainMenuSwitchCase(nodes, kPlayCurrentRow,
+                               PlayCurrentSongBody(g_configuration.menu_music_songs), reason);
+}
+
+const MenuConfiguration& CurrentMenuConfiguration() { return g_configuration; }
 
 bool AddLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
                     const std::string_view text, std::string* reason) {
@@ -1937,6 +2134,13 @@ std::vector<std::pair<std::string, std::string>> Labels() {
         add(row.symbol, row.label);
       }
     }
+  }
+  // The Play Current Song entry is not a row of this surface, so its label is not derived from the
+  // table above: the main menu draws the text of the symbol `kPlayCurrentRow`, which is a locale key
+  // of its own. Added only on the boot that builds the row, so a payload without the feature carries
+  // no string for a row no menu has.
+  if (g_configuration.play_current_song && !g_configuration.menu_music_songs.empty()) {
+    add(kPlayCurrentRow, kPlayCurrentLabel);
   }
   return out;
 }

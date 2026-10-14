@@ -125,17 +125,22 @@ std::vector<SchemaRow> BuildTable() {
     rows.push_back(Row(std::move(d), {"general", "dlc_scan_threads"}, "dlc", "DLC Scan Threads",
                        "How many threads scan the DLC library."));
   }
-  // `general.dlc_menu_songs` is **retired** (owner decision, 2026-10-13): the menu music pool
-  // always takes every DLC song the library yields, so there is no row to toggle. The descriptor
-  // stays so old files and bridge tokens still resolve, but it is marked hidden - the merged
-  // surface does not draw it, and nothing reads its value any more.
-  {
-    Descriptor d = Make(SettingId::kDlcMenuSongs, Category::kGeneral, Provider::kNative,
-                        WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false));
-    d.availability = Availability::kHidden;
-    rows.push_back(Row(std::move(d), {"general", "dlc_menu_songs"}, "dlc", "DLC Menu Songs",
-                       "Retired: the menu music pool is always on."));
-  }
+  // `general.dlc_menu_songs` controls R9 - the menu's DLC background music - and is a visible row
+  // again (owner request, 2026-10-14): it was retired to "always on" on 2026-10-13, and reviving it
+  // as an ordinary boolean whose compiled default is *on* keeps every existing boot's behaviour while
+  // giving the feature a control. `src/hooks/shell_music.cpp` is its only consumer, and it reads the
+  // store before it mounts anything.
+  rows.push_back(Row(Make(SettingId::kDlcMenuSongs, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "dlc_menu_songs"}, "dlc", "DLC Menu Songs",
+                     "Play songs from your DLC library as the main menu's background music."));
+  // `general.play_current_song`: the main menu's second entry exists only while this row is on and
+  // the menu really has a DLC track playing (owner feature, 2026-10-14). It is consumed at boot, so
+  // it is a restart row like the rest of the menu-shaping ones.
+  rows.push_back(Row(Make(SettingId::kPlayCurrentSong, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "play_current_song"}, "dlc", "Play Current Song",
+                     "Add an entry that starts the song the main menu is playing."));
   rows.push_back(ProviderRow(Make(SettingId::kUnlockAll, Category::kGeneral, Provider::kUltimate,
                                   WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                              "achievements", "Unlock All",
@@ -333,8 +338,11 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kTarget, ApplicationStrategy::kRestart, ""},
     {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
-    // Retired and hidden, but every row carries an entry so the table stays complete.
+    // Read while the menu's music pool is built (src/hooks/shell_music.cpp, at
+    // OnPostLoadXexImage), so a new process is what a change needs.
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
+    // Consumed by the boot that builds the menu payload, for the same reason.
+    {SettingId::kPlayCurrentSong, ApplicationStrategy::kRestart, ""},
     {SettingId::kUnlockAll, ApplicationStrategy::kRestart, ""},
     {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics

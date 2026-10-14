@@ -180,12 +180,13 @@ void TestMigrateDefault() {
   CHECK_TRUE(result.status == MigrationStatus::kMigrated);
   CHECK_TRUE(result.wrote_settings);
   CHECK_TRUE(result.stats.target_imported);
-  // Keep the old target, 4x filtering, explicitly stored 720p resolution and the profile's
-  // *Cache DLC Library* choice. That last one is the row whose compiled default became `true` when
-  // the in-game row took the setting over from Controller Settings flag (P11b), so a profile that stores
-  // `false` differs from the default and is imported like any other choice - which is the point:
-  // the player's choice survives the migration.
-  CHECK_EQ(result.stats.imported, 4);
+  // Keep the old target, 4x filtering, explicitly stored 720p resolution, the profile's *Cache DLC
+  // Library* choice and its *DLC Menu Songs* choice. Those last two are the rows whose compiled
+  // default became `true` when an in-game row took them over from Controller Settings (P11b for the
+  // cache; the 2026-10-14 revival for the menu music), so a profile that stores `false` differs from
+  // the default and is imported like any other choice - which is the point: the player's choice
+  // survives the migration, and a profile that says nothing gets the `true` default.
+  CHECK_EQ(result.stats.imported, 5);
   CHECK_EQ(result.stats.translated, 2);
   CHECK_EQ(result.stats.dropped, 4);      // rename + pool count + fullscreen + monitor
   CHECK_EQ(result.stats.preserved, 1);    // input_backend
@@ -193,6 +194,10 @@ void TestMigrateDefault() {
   CHECK_STR_EQ(ReadFile(result.backup), ReadFile(paths.legacy_profile));
   const DocumentLoad loaded = LoadSettingsDocument(paths.settings_file);
   CHECK_TRUE(loaded.document.values.at(SettingId::kTarget).text == "ultimate");
+  CHECK_TRUE(loaded.document.values.at(SettingId::kDlcMenuSongs).boolean == false);
+  // No legacy key names the new row, so nothing is written for it: its compiled default (`true`)
+  // is what the next boot reads.
+  CHECK_TRUE(loaded.document.values.count(SettingId::kPlayCurrentSong) == 0);
   CHECK_TRUE(loaded.document.origins.at(SettingId::kTarget) == Origin::kManual);
   CHECK_TRUE(loaded.document.migration_imported);
   // Everything already at its compiled default is deliberately not written.

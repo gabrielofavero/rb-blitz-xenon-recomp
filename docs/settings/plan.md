@@ -169,7 +169,8 @@ Five rows — the same size as the retail help list that already renders here, s
 | Downloadable Content | Submenu | Always present. |
 | ↳ Cache DLC Library | Boolean | `enhancements_dlc_cache`; current default false. Preserve refresh functionality. |
 | ↳ DLC scan threads | Horizontal select | `dlc_scan_threads`; default 1; choices 1 through `min(32, max(1, usable_logical_processors))`. Match the existing UI concept of logical processors, not physical-core count. |
-| ↳ DLC menu songs | Boolean | `enhancements_menu_dlc_songs`; current default false; sample pool fixed to 50, bounded by valid available songs. |
+| ↳ DLC menu songs | Boolean | `enhancements_menu_dlc_songs`; **shipped 2026-10-14 as a visible row**, default **true** (`general.dlc_menu_songs`), carrier of the in-game *DLC Menu Songs* row; the sample pool is fixed to 50, bounded by valid available songs ([play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) D1). |
+| ↳ Play current song | Boolean | `general.play_current_song`; **shipped 2026-10-14**, default **true**; adds the main menu's second entry, which starts the menu's own background song. Gated on the row above: with that off, or a library that yielded no song, this row reads unavailable and the menu entry is absent ([main-menu.md](../engine/main-menu.md) §7.2). |
 | Achievements & Unlocks | Submenu | Ultimate provider only. |
 | ↳ Unlock All | Boolean | Ultimate `unlockall`; existing row is a reboot-tagged boolean, **not** the earn-achievements command. Investigate actual consumers and supply persistence missing from the original saved-vars list. |
 | ↳ Unlock Online Only Achievements | Action | Invoke the existing accomplishment action once after a confirmation. It is not a stored boolean. Test with disposable save data. |

@@ -8,6 +8,9 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace rex {
 class Runtime;
@@ -26,5 +29,38 @@ namespace rb_blitz::shell_music {
 // untouched. With the toggle off - its default - it logs and returns, and the hook is
 // inert, so a boot without R9 is the boot this project had before the hook existed.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+
+// --- the "Play Current Song" row's view of this layer (owner feature, 2026-10-14) --------------
+// The main menu's second entry starts whichever song the menu is playing, so it needs the facts
+// below at two moments: the payload builder bakes the pool - and the probes that name it - into the
+// menu record at boot, and the probe channel (`AnswerPlayQuery`) answers, once per press, which one
+// is playing.
+//
+// `MenuMusicEnabled` is the setting's own value (the revived `general.dlc_menu_songs` row, read
+// from the settings store in Configure()), and `HasPool` is whether that setting produced a pool.
+// They differ exactly when the setting is on and nothing could be mounted (no library, or no
+// package holds a stream) - the state the settings screen reports as unavailable, and the reason
+// the Play Current Song row is absent from a menu whose background music is the title's own.
+
+// Whether the "DLC Menu Songs" setting asked for the DLC pool this boot.
+bool MenuMusicEnabled();
+
+// True when this boot really has a pool (the setting on *and* at least one song mounted).
+bool HasPool();
+
+// The pool's songs, in pool order, as the song key the title's own song manager knows them by
+// (`SongName`: the last component of the stream path, e.g. `16candles`). Empty with no pool.
+std::vector<std::string> PoolSongNames();
+
+// The pool index of the track the menu is playing right now, or -1 before one has been chosen (and
+// with no pool).
+int CurrentPoolIndex();
+
+// The host's answer for one `rbbz-play/<...>` query path - what the menu's Play Current Song row
+// asks through `file_exists`:
+//   `rbbz-play/current/<i>` - true when pool index `i` is the track playing now.
+// Returns false (and leaves `*answer` alone) for a path this layer does not own, so the caller
+// keeps forwarding it to the original.
+bool AnswerPlayQuery(std::string_view path, bool* answer);
 
 }  // namespace rb_blitz::shell_music

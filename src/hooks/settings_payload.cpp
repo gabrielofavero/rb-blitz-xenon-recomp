@@ -11,6 +11,7 @@
 
 #include "fs/payload_overlay.h"
 #include "hooks/menu_filter.h"
+#include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "settings/boot.h"
 #include "settings/menu_payload.h"
@@ -143,12 +144,43 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   if (rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true") {
     menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
   }
+
+  // The menu-music state, settled before anything that lists the menu's rows (owner feature,
+  // 2026-10-14). `shell_music::Configure` has already run - it is called earlier in
+  // OnPostLoadXexImage - so these three answers are final for this boot:
+  //   * the setting itself ("DLC Menu Songs"), which decides whether a pool was built at all;
+  //   * whether that pool really holds a song (the state the settings screen reports as
+  //     unavailable, and the reason the new menu entry is absent when it is false);
+  //   * the pool's song keys, which the menu record bakes as the probes that name the song playing.
+  const bool menu_music_on = rb_blitz::shell_music::MenuMusicEnabled();
+  const bool menu_music_pool = rb_blitz::shell_music::HasPool();
+  const std::vector<std::string> menu_music_songs = rb_blitz::shell_music::PoolSongNames();
+  bool play_current_setting = true;
+  if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
+    play_current_setting =
+        boot->service()->EffectiveValue(SettingId::kPlayCurrentSong).boolean;
+  }
+  const bool play_current_row = play_current_setting && menu_music_pool;
+  REXLOG_INFO("settings_menu: \"DLC Menu Songs\" is {}; {} menu-music song(s); the Play Current "
+              "Song entry is {}",
+              menu_music_on ? "on" : "off", menu_music_songs.size(),
+              play_current_row ? "built as the menu's second row"
+                               : (play_current_setting ? "not built (no DLC song is playing)"
+                                                       : "off (its setting is off)"));
+
   if (read("ui/splash/gen/splash.dtb", &bytes, &error)) {
     const auto inventory = menu_options::MenuInventory(bytes.data(), bytes.size());
     if (auto* boot = boot::SettingsBoot::Current(); inventory.parsed && boot) {
       std::vector<Choice> rows;
-      for (const auto& row : inventory.rows)
+      for (const auto& row : inventory.rows) {
         rows.push_back({row.token, menu_labels.contains(row.token) ? menu_labels.at(row.token) : row.token});
+        // The row this payload adds is not in the installed menu, so the inventory cannot carry it:
+        // it is inserted here, right after PLAY, both so the Hide Items mirror lists it where the
+        // menu draws it and so the hide selection's own choices agree with the menu it mirrors.
+        if (play_current_row && row.token == "splash_start") {
+          rows.push_back({ui::screen::kPlayCurrentRow, ui::screen::kPlayCurrentLabel});
+        }
+      }
       boot->SetMenuRows(std::move(rows));
     }
   }
@@ -225,6 +257,18 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     configuration.choices["general.target"].emplace_back("demo", "Rock Band Blitz Demo");
     if (provider.Active() && boot->service()->store().document().values.contains(SettingId::kUnlockAll))
       configuration.boot_booleans["unlockall"] = boot->service()->EffectiveValue(SettingId::kUnlockAll).boolean;
+    // The two DLC rows the owner asked for (2026-10-14): R9's own setting is visible again, and the
+    // Play Current Song row is wired to it - and to the pool, because a menu whose background music
+    // is the title's own has no song to start. Both states are said on the row itself (the settings
+    // screen draws a disabled row as `<label>: <reason>`), so nothing here is a silent no-op.
+    if (!menu_music_on) {
+      configuration.disabled["general.play_current_song"] = "Needs DLC Menu Songs";
+    } else if (!menu_music_pool) {
+      configuration.disabled["general.dlc_menu_songs"] = "No DLC songs found";
+      configuration.disabled["general.play_current_song"] = "No DLC songs found";
+    }
+    configuration.play_current_song = play_current_row;
+    configuration.menu_music_songs = menu_music_songs;
     for (const auto& row : schema::MenuRows()) {
       configuration.menu_rows.emplace_back(row.token, row.label);
     }

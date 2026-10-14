@@ -140,18 +140,20 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
 // not just the first, so a merged pack contributes all of its songs - and every boot draws
 // a new one, so without a library there is nothing to draw from and the menu is unchanged.
 //
-// RETIRED (owner decision, 2026-10-13): the pool is always on, so this cvar no longer
-// decides anything. It stays defined only so an old profile value is preserved and a boot
-// can say it is ignored.
-REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, false, "Enhancements",
-                    "R9 main-menu DLC songs (retired; the DLC pool is always on): the cvar is "
-                    "preserved for old profiles and is not read as a gate any more.")
+// REVIVED (owner request, 2026-10-14): the feature has a visible row again - "DLC Menu Songs" on
+// the merged Help & Options surface's Downloadable Content page (`general.dlc_menu_songs`), which
+// this cvar is the carrier for (`CvarForSetting`), applied by the boot at the config rank. Its
+// compiled default here must equal the row's (`true`): a row nobody has chosen is *not* written, so
+// on a fresh install what a boot reads is this cvar's own default.
+REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
+                    "R9 main-menu DLC songs: play the loaded DLC as the main menu's background "
+                    "music. The in-game \"DLC Menu Songs\" row is the control; this is the cvar it "
+                    "is written to, so an explicit flag or environment value still outranks it.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
-                     "R9 how many songs the main menu's background pool holds, drawn at random "
-                     "from every song in the loaded library (1-64) and walked as a shuffled deck. "
-                     "Read only while enhancements_menu_dlc_songs is on.")
+                     "R9's retired pool-size row: the menu's pool is a fixed 50 songs, capped by "
+                     "what the boot can mount, so this legacy value is ignored (a boot says so).")
     .range(1, 64)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -202,7 +204,7 @@ constexpr std::array<ToggleRow, 10> kToggles{{
      [] { return REXCVAR_GET(enhancements_dlc_cache); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
-    {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (retired; always on)",
+    {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (the in-game DLC Menu Songs row)",
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
      [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},

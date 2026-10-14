@@ -30,9 +30,10 @@ customization added mid-session may need a reload before it appears).
 | Skill | Path | Use when |
 | --- | --- | --- |
 | `documentation` | `.github/skills/documentation/SKILL.md` | writing, moving, renaming, merging, retiring or reviewing anything under `docs/`; updating docs as part of a code change |
+| `in-game-settings` | `.github/skills/in-game-settings/SKILL.md` | adding, editing, moving or reorganising a row or a page of the merged Help & Options surface; choosing a row's kind; laying out a page (the six-visible-rows budget) or a row's text |
 
 Skills are on-demand: the description decides whether the body is loaded, so its trigger words matter.
-Slash form: `/documentation`.
+Slash form: `/documentation`, `/in-game-settings`.
 
 ## Adding an agent or a skill
 

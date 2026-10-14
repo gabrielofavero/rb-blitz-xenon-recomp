@@ -50,6 +50,7 @@
 #include <rex/types.h>
 
 #include "hooks/ultimate.h"
+#include "hooks/shell_music.h"
 #include "hooks/hot_apply_runtime.h"
 #include "settings/boot.h"
 #include "settings/bridge_sink.h"
@@ -615,10 +616,19 @@ void RunHotApplyDiagnostic() {
 // hook forwards only when this returns false.
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
+  const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  // The "Play Current Song" probes (owner feature, 2026-10-14) ride the same builtin but are not part
+  // of the settings channel: they are the main menu's only way to ask the host which pooled DLC song
+  // is playing, so they are answered even on a boot that turns the settings channel off or makes it
+  // forward-only. The whole `rbbz-play/` namespace is ours (src/hooks/menu_music_pool.h).
+  bool play_answer = false;
+  if (::rb_blitz::shell_music::AnswerPlayQuery(path, &play_answer)) {
+    WriteResultCell(base, ctx.r3.u32, play_answer ? 1u : 0u);
+    return true;
+  }
   if (!g_enabled || g_forward_only) {
     return false;
   }
-  const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
   if (!IsNamespacedPath(path)) {
     return false;
   }

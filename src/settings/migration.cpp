@@ -325,6 +325,11 @@ MigrationResult Migrate(const Profile& legacy, Store& store, const PathEntry& ex
         Import(store, SettingId::kDlcScanThreads, IntValue(static_cast<int32_t>(value)), &result);
       }
     } else if (key == "enhancements_menu_dlc_songs") {
+      // R9's row, revived as a real setting on 2026-10-14 with a compiled default of *on*. The
+      // compiled default only decides a boot whose file says nothing; a legacy profile that carries
+      // the key keeps its value, exactly like `enhancements_dlc_cache` above - the player's old
+      // choice survives even when it now differs from the new default (tests/settings_migration_tests.cpp
+      // pins that, and the in-game "DLC Menu Songs" row is what changes it afterwards).
       bool value = false;
       if (ParseLegacyBool(setting, &value)) {
         Import(store, SettingId::kDlcMenuSongs, BoolValue(value), &result);

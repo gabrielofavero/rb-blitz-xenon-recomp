@@ -121,11 +121,14 @@ game-side and Controller Settings-side consequences listed after them:
    ([general_tab.cpp](../../controller-settings/src/general_tab.cpp)).
 5. **The DLC page and the refresh action.** *Cache DLC Library* reads `On`/`Off` instead of the
    "Externally configured" marker it used to show — Controller Settings' `--enhancements_dlc_cache` row
-   outranked it, which made it read-only, and the cutover below removed that flag; *DLC Menu Songs*
-   is **retired** — the menu music pool always takes what the library yields, so there is no row
-   (`SettingId::kDlcMenuSongs` is kept as `Availability::kHidden` so old files and bridge tokens
-   still resolve, and R9 is always on); and *Refresh Downloadable Content* left the settings tree to
-   become **Refresh Music Library** on the main menu.
+   outranked it, which made it read-only, and the cutover below removed that flag; *Refresh
+   Downloadable Content* left the settings tree to become **Refresh Music Library** on the main menu.
+   **Superseded 2026-10-14:** *DLC Menu Songs* was retired here (the pool always took what the library
+   yielded) and is a **visible row again** — `general.dlc_menu_songs`, on by default, carrying
+   `enhancements_menu_dlc_songs` (the owner asked for the R9 toggle in-game, and the *Play Current
+   Song* row beside it is gated on it); the *pool size* row (`enhancements_menu_dlc_song_count`) stays
+   retired and its description says it is ignored. See
+   [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) D1.
 6. **Boolean rows read On / Off, not the locale's ENABLED / DISABLED.** The payload overrides the two
    locale tokens the retail checkboxes use (`LocaleOverrides()`), per language, without touching any
    other string.
@@ -432,7 +435,9 @@ Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks
    *Refresh Music Library* row now (owner decision), not a settings row, so "hiding `splash_dlc` still
    leaves the settings-side refresh reachable" is no longer a question — action and row are the same
    row. What still needs a populated-library look is that the row refreshes the library after the
-   *DLC Menu Songs* retirement.
+   *DLC Menu Songs* retirement — **superseded 2026-10-14**: the row is no longer retired (§5), so the
+   look is owed on a boot whose DLC page shows both rows
+   ([play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)).
 
 ### Boot ownership
 

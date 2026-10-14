@@ -102,6 +102,11 @@ See [`engine/README.md`](engine/README.md) for the per-document summary.
 | [`settings/menu.md`](settings/menu.md) | The surfaces: the merged Help & Options screen, menu compatibility (hide list, pool, rename), Controller Settings, and the installer's folder pages. |
 | [`settings/graphics.md`](settings/graphics.md) | Resolution and graphics: what the title can actually render, the capability/policy rules, and what a non-16:9 frame costs. |
 
+The layout rules for a settings row or page — which control a setting gets, the six-visible-rows page
+budget, and the row-text budget — are a skill:
+[`.github/skills/in-game-settings/SKILL.md`](../.github/skills/in-game-settings/SKILL.md) (also
+`/in-game-settings`).
+
 ### Plans
 
 | Document | Status |
@@ -111,6 +116,7 @@ See [`engine/README.md`](engine/README.md) for the per-document summary.
 | [`plans/finished/2026-10-09-save-persistence-findings.md`](plans/finished/2026-10-09-save-persistence-findings.md) | Why offline saves did not persist, the fix, and the evidence. |
 | [`plans/finished/2026-10-10-song-cache-plan.md`](plans/finished/2026-10-10-song-cache-plan.md) | The three song-cache issues, all prompts done, with the measurements. |
 | [`plans/finished/2026-10-14-controller-settings-rename.md`](plans/finished/2026-10-14-controller-settings-rename.md) | The launcher → Controller Settings rename: the decisions, the compatibility names that were kept, and the three collisions the pass created. |
+| [`plans/in-progress/2026-10-14-play-current-song.md`](plans/in-progress/2026-10-14-play-current-song.md) | The main menu's *Play Current Song* entry (and the revived *DLC Menu Songs* row): shipped row and setting, press measured to the title's own song manager, landing unverified. |
 | [`plans/todo/2026-10-10-shader-cache-findings.md`](plans/todo/2026-10-10-shader-cache-findings.md) | First-play stalls: what is established, and the proposed preparation/distribution work. |
 | [`plans/todo/2026-10-13-load-guard-findings.md`](plans/todo/2026-10-13-load-guard-findings.md) | Song Load Guard feasibility, with [`load-guard-prompts.md`](plans/todo/2026-10-13-load-guard-prompts.md) for implementation. |
 | [`plans/todo/2026-10-13-rhythmverse-store-plan.md`](plans/todo/2026-10-13-rhythmverse-store-plan.md) | Wiring the RhythmVerse customs catalogue into the retail store: research complete, no code yet. |

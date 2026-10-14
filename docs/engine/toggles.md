@@ -2,10 +2,14 @@
 
 The contract for the customization features in
 [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md) (R1–R9, plus R10 below, which a
-follow-up request added). **Every toggle is off by default, with three deliberate exceptions:** R3
+follow-up request added). **Every toggle is off by default, with four deliberate exceptions:** R3
 ships on, because the two questions it answers can no longer be answered on an install with no Rock
-Central to reach, and R10 ships on, because its subject is the Ultimate mod's own screen and it does
-nothing without that mod installed. R6 ships on for native menu mouse support. This page is the table the plan's contract 1 promises: what each
+Central to reach, R10 ships on, because its subject is the Ultimate mod's own screen and it does
+nothing without that mod installed, R6 ships on for native menu mouse support, and **R9 ships on
+since 2026-10-14** — the menu's DLC background music became an in-game setting on that date
+(`general.dlc_menu_songs`, "DLC Menu Songs" on Help & Options → Downloadable Content), and both its
+row default and this cvar's default are `true`, so a boot that has chosen nothing keeps today's
+behaviour. This page is the table the plan's contract 1 promises: what each
 toggle gates, what the faithful (off) behaviour is, and which prompt implements it — or, for the
 remaining planned ones, what will. R3, R5, R6, R7, R9 and R10 are implemented; R3, R5 and R10's
 evidence is [main-menu-flow.md](main-menu.md), R7's is
@@ -41,13 +45,14 @@ implementing prompt that can apply its toggle live relaxes that lifecycle and up
 before the Ultimate and DLC layers:
 
 ```text
-[info] enhancements: 10 toggle(s), off by default except R3, R6 and R10 (docs/engine/toggles.md)
+[info] enhancements: 10 toggle(s), off by default except R3, R6, R9 and R10 (docs/engine/toggles.md)
 [info] enhancements: enhancements_expand_resolution = off (default) - R1 custom resolutions
 ...
 [info] enhancements: enhancements_skip_offline_dialog = on (default) - R3 skip the offline prompts
 [info] enhancements: enhancements_rename_mod_settings = on (default) - R10 rename the mod's settings row
 [info] enhancements: enhancements_controller_scheme = "" (R8 scheme; empty means unnamed)
 [info] enhancements: enhancements_hidden_menu_options = "splash_leaderboard,splash_achievements,splash_dlc" (R5 rows; the three offline-dead entries by default)
+[info] enhancements: enhancements_menu_dlc_songs = on (default) - R9 main-menu DLC songs (the in-game DLC Menu Songs row)
 [info] enhancements: enhancements_menu_dlc_song_count = 3 (R9 pool size; drawn at random from the loaded DLC library)
 ```
 
@@ -68,14 +73,18 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `dlc_cache` | R7 DLC cache: persist the flat DLC library's enumeration in the save folder and reuse it while a fingerprint proves the tree unchanged, and — because the host's walk of the library is the *smaller* half of what a large library costs a boot — drop the SDK's emulated per-package mount latency (`deferred_overlapped_delay_ms = 0`, patch 0011) for the run. The refresh is the main menu's last row, drawn as "Refresh Song Library" rather than the store label it ships with, and backed by `--refresh_dlc_cache`; the refresh itself scans behind the frame (one at a time, on a worker, published on the next menu frame), so the press no longer freezes the game ([dlc.md](../guides/dlc.md) §4.2). The discovery screen says "Loading Song Cache" instead of "Discovering Downloadable Content" when the enumeration came out of the cache, and its progress bar is driven by the host for the whole of the enumeration — the title's own engine only announces a total *after* it finishes, so the bar used to stay hidden ([dlc.md](../guides/dlc.md) §4.2). What the toggle cannot remove is the title's own enumeration, one item per presented frame, which its sibling option `dlc_uncap_enumeration` shortens without skipping any of it ([dlc.md](../guides/dlc.md) §4.3, [song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §14) | the library is walked and every package's header read once per boot, every mount the title makes waits out the emulated 100 ms, and pressing the refresh row freezes the frame for the whole scan | [src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) (D2), [src/fs/refresh_state.h](../../src/fs/refresh_state.h) (the refresh's one-at-a-time and publish-once rules), [dlc.md](../guides/dlc.md) §4.1, [main-menu-flow.md](main-menu.md) § "the refresh row" |
 | `dlc_uncap_enumeration` | R7 frame pacing for the discovery: the title enumerates one content item per *presented* frame, so while it enumerates, the host turns the SDK's own `vsync` off and puts the player's value back at the first of three signs that the enumeration is over — the last item counted, the engine's own completion, or a menu frame with no item counted for two seconds. Measured on a 1,402-package library: **46.7 s → 15.96 s** over the same 2,807-item walk, the value read back as `true` and written back as `true` 1 ms after the last item ([dlc.md](../guides/dlc.md) §4.3, [song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §14) | the frame rate is exactly the one the player set, for the whole boot | [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp) (the state machine and the two host-thread writes), [src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp) (`Tick()`, the menu-frame backstop), [src/enhancements.cpp](../../src/enhancements.cpp) |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
-| `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones: the menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - a pool of songs drawn at random from the whole library every boot, where a mounted package contributes **every** `.mogg` it holds rather than only its first (a merged pack is one container with a disc's worth of songs in it, and taking only the first pinned the menu to the same track every boot). As many as `enhancements_menu_dlc_song_count` (3 by default), streamed read-only from the package it came from and walked as a shuffled deck, so one song follows the last until the deck is exhausted and reshuffled. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, one chosen at random per menu visit and looped | [menu-music.md](main-menu.md) ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp)) |
+| `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones — **the carrier of an in-game setting since 2026-10-14**: the visible row is Help & Options → Downloadable Content → "DLC Menu Songs" (`general.dlc_menu_songs`), and the boot writes that row into this cvar at the config rank ([src/settings/cvars.cpp](../../src/settings/cvars.cpp), [src/settings/boot.cpp](../../src/settings/boot.cpp)), so a flag or environment value still outranks it. The menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - a pool of at most **50** songs drawn at random from the whole library every boot, where a mounted package contributes **every** `.mogg` it holds rather than only its first (a merged pack is one container with a disc's worth of songs in it, and taking only the first pinned the menu to the same track every boot; the old `enhancements_menu_dlc_song_count` size row is retired and ignored). Streamed read-only from the package it came from and walked as a shuffled deck, so one song follows the last until the deck is exhausted and reshuffled. The follow-up feature **Play Current Song** (2026-10-14) rides the same switch: with it on and a pool, the main menu gains a second entry that starts the song the menu is playing - the power-up screen with Ultimate, the loading screen on the offline base target ([main-menu.md](main-menu.md) part 1 §7.2) - and with the switch off the entry is not built and its settings row reads unavailable. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, one chosen at random per menu visit and looped | [menu-music.md](main-menu.md) part 2 ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp)) |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; Controller Settings hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu.md) § "the label" |
 
-**R3 and R10 are the toggles that ship on.** R10's row belongs to the Ultimate mod, so a run without
+**R3, R6, R9 and R10 are the toggles that ship on.** R10's row belongs to the Ultimate mod, so a run without
 that payload has neither the file nor the label and the toggle has nothing to do — the faithful path
 and the feature are the same boot. Its switch in Controller Settings is shown only where the mod is
 installed (`visible = "ultimate_installed"`), and turning it off is what passes
-`--enhancements_rename_mod_settings=false`. R3 is on because the failure it handles is not a
+`--enhancements_rename_mod_settings=false`. R9 ships on because its feature is no longer a hidden
+toggle but a setting with a row of its own: the menu's DLC music has been on since 2026-10-13, the
+row was added on 2026-10-14 with both defaults `true`, and the honest control is that row (Help &
+Options → Downloadable Content); the cvar stays as its carrier so a command line or environment value
+can still outrank it. R3 is on because the failure it handles is not a
 preference: with no Rock Central to reach, the title's connect attempt can only fail, so the two
 questions have one answer each and asking them is a dead end. It edits a file of the title's own,
 which is why Controller Settings can also ship it on, and turning it off is what passes
@@ -98,9 +107,10 @@ boot unsafe to suggest is fixed separately ([bringup-log.md](../history/bringup-
 its own. R5's `enhancements_hidden_menu_options` is the same shape and now exists, because U1 had to
 decide what a "named entry" is: the name the title gives the row (`splash_leaderboard`,
 `splash_achievements`, `splash_dlc`), which is what the menu's own file carries. R9's
-`enhancements_menu_dlc_song_count` is the same shape: how many songs the menu's pool holds,
-drawn at random from every `.mogg` the loaded library's packages carry, and walked as a shuffled
-deck. R10 needs no key: what it renames is the mod's
+owned `enhancements_menu_dlc_song_count` **is retired** (2026-10-13): the pool is a fixed 50 songs,
+capped by what a boot can mount, and the cvar is read only so a boot can say the legacy value is
+ignored ([src/settings/menu_compat.h](../../src/settings/menu_compat.h)).
+R10 needs no key: what it renames is the mod's
 own row, and the two labels it moves between are the module's constants
 (`src/ui/menu_options.h`) rather than a user's list.
 

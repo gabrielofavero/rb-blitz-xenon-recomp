@@ -401,7 +401,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // is reported rather than swallowed.
     for (const SettingId id :
          {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kDlcScanThreads,
-          SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
+          SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
           SettingId::kHiddenMainMenu, SettingId::kVsync, SettingId::kFiltering,
           SettingId::kResolution, SettingId::kAntiAliasing, SettingId::kDisplay}) {
       ApplyRow(id, /*defer_unregistered=*/true);

@@ -102,7 +102,9 @@
 
 #if defined(_WIN32)
 
-// Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
+// Defined by src/enhancements.cpp, which owns the `[enhancements]` table. Both are read here: the
+// first is the carrier of the in-game "DLC Menu Songs" row (the boot writes the row into it at the
+// config rank), and the second is the retired pool-size row, read only to say it is ignored.
 REXCVAR_DECLARE(bool, enhancements_menu_dlc_songs);
 REXCVAR_DECLARE(int32_t, enhancements_menu_dlc_song_count);
 
@@ -145,6 +147,19 @@ constexpr uint32_t kRewindSlack = 44100;  // ~1 s at 44.1 kHz
 
 bool g_enabled = false;
 std::vector<PoolEntry> g_pool;
+
+// The setting's own value, as read in Configure(): true when `general.dlc_menu_songs` (the revived
+// "DLC Menu Songs" row) asked for the pool this boot. `g_enabled` is the stricter fact - the
+// setting *and* a pool that could actually be mounted - and the two differ exactly when the
+// setting is on with nothing to play (no library, or no mountable song). The settings screen reads
+// both to say which of the two states a boot is in.
+bool g_menu_music_enabled = false;
+
+// The pool index of the track the menu is playing right now (-1 before one has been chosen, and
+// with no pool). Set wherever a track is picked for the deck, so both ways a track starts - the
+// panel's own load and R9's rotation - move it. The "Play Current Song" probe channel answers from
+// it; never read outside g_mutex.
+int g_current_index = -1;
 
 std::mutex g_mutex;
 std::mt19937 g_rng{std::random_device{}()};
@@ -249,12 +264,15 @@ std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_p
 
 // The next song to play: the next card of the shuffled deck, reshuffled when the deck
 // runs out so that the first song of a new deck is never the song that just played.
+// Also records which card this is, because that index is what "Play Current Song" asks for.
 // The caller holds g_mutex.
 std::string NextPathLocked() {
   const size_t index = g_deck.Next(g_pool.size());
   if (index == rb_blitz::shell_music::kNoIndex) {
+    g_current_index = -1;
     return {};
   }
+  g_current_index = static_cast<int>(index);
   return g_pool[index].alias + ":" + g_pool[index].stream;
 }
 
@@ -349,12 +367,29 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   if (!legacy_note.empty()) {
     REXLOG_WARN("shell_music: {}", legacy_note);
   }
-  // The DLC pool is **always on** (owner decision, 2026-10-13): "DLC Menu Songs" is retired as a
-  // setting, so every DLC song the library yields belongs in the menu rotation. The legacy cvar is
-  // still read, only so a boot says out loud that its value no longer decides anything.
-  g_enabled = true;
-  if (!REXCVAR_GET(enhancements_menu_dlc_songs)) {
-    REXLOG_INFO("shell_music: enhancements_menu_dlc_songs is retired; the DLC pool is always on");
+  // The main menu's DLC pool is a **setting** again (owner request, 2026-10-14): "DLC Menu Songs"
+  // - `general.dlc_menu_songs`, drawn on the merged surface's Downloadable Content page - is its one
+  // control. The store row is written into `enhancements_menu_dlc_songs` by the boot at the config
+  // rank (SettingsBoot::ConfigurePaths), which has already run by the time this hook does, and this
+  // reads that cvar - so a command-line flag or an environment value still outranks the row, exactly
+  // like every other enhancement row. Both defaults are `true`, which is the behaviour R9 has had
+  // since 2026-10-13, so reviving the row changes no existing boot.
+  //
+  // The read happens once, on this host thread; no guest thread ever touches the cvar registry.
+  g_menu_music_enabled = REXCVAR_GET(enhancements_menu_dlc_songs);
+  // The index only means something for this boot's pool, and this is the one place the pool is
+  // built: a fresh boot has no current track until the panel picks one.
+  g_current_index = -1;
+  g_enabled = g_menu_music_enabled;
+  REXLOG_INFO("shell_music: \"DLC Menu Songs\" is {} (enhancements_menu_dlc_songs = {}); {}",
+              g_menu_music_enabled ? "on" : "off",
+              REXCVAR_GET(enhancements_menu_dlc_songs) ? "true" : "false",
+              g_menu_music_enabled ? "building the DLC pool" : "the menu keeps the title's tracks");
+  if (!g_menu_music_enabled) {
+    // The off state is the whole feature: nothing is mounted, the loader and poll hooks stay inert,
+    // and the boot is the one the title ships. `g_enabled` is already false, so a poll that arrives
+    // anyway watches nothing.
+    return;
   }
   if (runtime == nullptr) {
     REXLOG_WARN("shell_music: R9 is on but there is no runtime to mount DLC with");
@@ -434,6 +469,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     REXLOG_WARN("shell_music: no DLC song could be mounted; the main menu keeps the title's own "
                 "tracks");
     g_enabled = false;
+    g_current_index = -1;
     return;
   }
 
@@ -450,6 +486,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                 "tracks");
     g_pool.clear();
     g_enabled = false;
+    g_current_index = -1;
     return;
   }
 
@@ -459,6 +496,51 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   for (const PoolEntry& entry : g_pool) {
     REXLOG_INFO("shell_music:   {}:{}.mogg", entry.alias, entry.stream);
   }
+}
+
+bool MenuMusicEnabled() { return g_menu_music_enabled; }
+
+bool HasPool() {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_enabled && !g_pool.empty();
+}
+
+std::vector<std::string> PoolSongNames() {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  std::vector<std::string> names;
+  names.reserve(g_pool.size());
+  for (const PoolEntry& entry : g_pool) {
+    names.emplace_back(rb_blitz::shell_music::SongName(entry.stream));
+  }
+  return names;
+}
+
+int CurrentPoolIndex() {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_current_index;
+}
+
+bool AnswerPlayQuery(const std::string_view path, bool* answer) {
+  if (!path.starts_with(rb_blitz::shell_music::kPlayNamespace)) {
+    return false;
+  }
+  const int index = rb_blitz::shell_music::PlayProbeIndex(path);
+  const int current = CurrentPoolIndex();
+  const bool hit = index >= 0 && index == current;
+  // The probe channel is the only thing the menu's Play Current Song row says to the host, so the
+  // one line that matters is written here: which song was asked for, and whether it is the one
+  // playing. A malformed probe in our namespace is answered false and never forwarded.
+  if (hit) {
+    const std::vector<std::string> names = PoolSongNames();
+    REXLOG_INFO("shell_music: Play Current Song: the menu is playing pool {} of {} (\"{}\")",
+                index, names.size(),
+                index < static_cast<int>(names.size()) ? names[static_cast<size_t>(index)]
+                                                       : std::string("?"));
+  }
+  if (answer != nullptr) {
+    *answer = hit;
+  }
+  return true;
 }
 
 }  // namespace rb_blitz::shell_music

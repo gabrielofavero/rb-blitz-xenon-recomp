@@ -49,6 +49,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           std::string ignored;
           screen::RemoveRow(&roots, screen::kProviderMenuRow, &ignored);
         }
+        // The Play Current Song entry (owner feature, 2026-10-14), when the boot configured it:
+        // the row right after PLAY, and the case that starts the song the menu is playing. A boot
+        // with no pool refuses, and that refusal is *not* fatal - a menu without the row is exactly
+        // what "no DLC song is playing" means. (No log here: this file is also compiled into the
+        // SDK-free menu_payload test; settings_payload.cpp reports the configuration it passed in.)
+        if (screen::CurrentMenuConfiguration().play_current_song) {
+          std::string why;
+          screen::AddPlayCurrentSongRow(&roots, &why);
+        }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
         return screen::RerouteRow(&roots, screen::kPauseMenuRow,

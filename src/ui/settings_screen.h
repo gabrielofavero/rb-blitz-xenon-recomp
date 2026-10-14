@@ -89,6 +89,13 @@ struct MenuConfiguration {
   std::vector<std::pair<std::string, std::string>> menu_rows;
   // Native overrides applied after the installed provider's initialization.
   std::map<std::string, bool> boot_booleans;
+  // The "Play Current Song" entry (owner feature, 2026-10-14). `play_current_song` is the setting;
+  // `menu_music_songs` is the boot's menu-music pool, as the song keys the package folders name
+  // (src/hooks/shell_music.cpp). The row is built only when both say yes: the setting off means the
+  // player did not ask for it, and an empty pool means there is no DLC song to start - the two
+  // states the settings screen reports as unavailable on its own row.
+  bool play_current_song = false;
+  std::vector<std::string> menu_music_songs;
 };
 void ConfigureMenu(MenuConfiguration configuration);
 
@@ -134,6 +141,14 @@ inline constexpr char kRootPauseScreen[] = "settings_pause_screen";
 inline constexpr char kMainMenuRow[] = "splash_options";
 inline constexpr char kPauseMenuRow[] = "pause_options";
 inline constexpr char kRetiredRow[] = "advanced_settings";
+
+// The main menu's "Play Current Song" entry (owner feature, 2026-10-14): added right after
+// `splash_start`, so it is the second of the option array, and dispatched by a case of its own.
+inline constexpr char kPlayCurrentRow[] = "splash_play_current";
+inline constexpr char kPlayCurrentLabel[] = "Play Current Song";
+// The probe namespace the row asks the host through (`file_exists`):
+// `rbbz-play/current/<pool index>`, parsed by src/hooks/menu_music_pool.h.
+inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
 
 // The installed Ultimate payload's own settings entry, which the merged surface **removes**: every
 // page it opened is reachable from Help & Options now, so a second button for the same thing is one
@@ -252,6 +267,17 @@ bool RerouteRow(std::vector<dtb::Node>* nodes, std::string_view row,
 // `nodes` untouched, when neither is present - an older payload that never had the row is a
 // refusal the caller may ignore, while a half-removed row is not a shape to ship.
 bool RemoveRow(std::vector<dtb::Node>* nodes, std::string_view row, std::string* reason);
+
+// Adds the "Play Current Song" entry to a splash record: `kPlayCurrentRow` right after
+// `splash_start` in the option array (so it is the menu's second row) plus the case that
+// dispatches it. The body is built from `configuration().menu_music_songs` and the host answers its
+// probes (see the .cpp for the shipped statements it is assembled from). Refuses, leaving `nodes`
+// untouched, when the record has no option array bearing `splash_start`, when the row is already
+// there (a second pass), or when the pool is empty - the caller decides what an empty pool means.
+bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason);
+
+// The current menu configuration, for the authoring functions that read it (the play row's pool).
+const MenuConfiguration& CurrentMenuConfiguration();
 
 // Inserts `{<panel> load}` into the retail `ui/gen/ui.dtb`'s `{init ...}` block, so the merged
 // root's panel is created - and its `{file}`/`{focus}` members processed - the way retail creates

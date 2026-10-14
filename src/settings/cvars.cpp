@@ -94,6 +94,11 @@ std::string_view CvarForSetting(SettingId id) {
   switch (id) {
     case SettingId::kCacheDlcLibrary:
       return "enhancements_dlc_cache";
+    case SettingId::kDlcMenuSongs:
+      // R9's row, whose consumer reads the cvar (src/hooks/shell_music.cpp): the boot applies the
+      // row here at the config rank, so an explicit flag or environment value outranks it exactly
+      // like every other enhancement row.
+      return "enhancements_menu_dlc_songs";
     case SettingId::kDlcScanThreads:
       return "dlc_scan_threads";
     case SettingId::kHideOfflinePrompts:

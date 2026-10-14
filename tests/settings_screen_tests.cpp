@@ -700,6 +700,114 @@ void TestSplashReroute() {
   CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
 }
 
+// The main menu's option array, found the way the authoring edit finds it: an array holding the
+// first and the last retail row symbol.
+const dtb::Node* FindOptionArray(const dtb::Node& node) {
+  if (node.tag == dtb::kArray && node.kids.size() >= 2 && node.kids[0].tag == dtb::kSymbol &&
+      node.kids[0].text == "splash_start" && node.kids.back().text == "splash_exit") {
+    return &node;
+  }
+  for (const dtb::Node& kid : node.kids) {
+    if (const dtb::Node* hit = FindOptionArray(kid)) {
+      return hit;
+    }
+  }
+  return nullptr;
+}
+
+void TestPlayCurrentSongRow() {
+  BeginCase("the Play Current Song entry lands second, carries the probes the host answers, and "
+            "needs a configured boot");
+
+  // A boot that did not configure the feature builds no row: the edit refuses, and the record is
+  // untouched - which is exactly what "the setting is off" and "no DLC song is playing" mean.
+  std::vector<dtb::Node> none = SplashFixture();
+  std::string reason;
+  CHECK_FALSE(AddPlayCurrentSongRow(&none, &reason));
+  CHECK_TRUE(!reason.empty());
+  CHECK_TRUE(!HasSymbol(none[0], kPlayCurrentRow));
+
+  // The boot configuration: the setting on with a two-song pool (the pool is what the payload
+  // bakes, so the builder cannot be called without one).
+  MenuConfiguration configuration;
+  configuration.play_current_song = true;
+  configuration.menu_music_songs = {"16candles", "lycanthrope"};
+  ConfigureMenu(configuration);
+
+  std::vector<dtb::Node> nodes = SplashFixture();
+  CHECK_TRUE(AddPlayCurrentSongRow(&nodes, &reason));
+  CHECK_TRUE(reason.empty());
+
+  // The option array: our symbol directly after `splash_start` - the menu's second entry - with every
+  // retail row still present and in its retail order.
+  const dtb::Node* array = FindOptionArray(nodes[0]);
+  CHECK_TRUE(array != nullptr);
+  if (array != nullptr) {
+    CHECK_EQ(array->kids.size(), 8u);
+    CHECK_TRUE(array->kids[0].text == "splash_start");
+    CHECK_TRUE(array->kids[1].text == kPlayCurrentRow);
+    CHECK_TRUE(array->kids[2].text == "splash_leaderboard");
+    CHECK_TRUE(array->kids.back().text == "splash_exit");
+  }
+
+  // The case that dispatches it: one probe per pool entry (the host answers exactly one true), the
+  // resolution chain `quick_start_song` uses, the mount, and then the song list's own `song_chosen`
+  // - which is where the two targets differ (power-up screen with Ultimate, the loading screen on
+  // the offline base target).
+  const std::vector<std::string> body = CaseWords(nodes, kPlayCurrentRow);
+  for (const char* word : {"16candles", "lycanthrope", "file_exists",
+                           "get_song_id_from_short_name", "set_song", "mount_current_content",
+                           "song_chosen"}) {
+    CHECK_TRUE(std::find(body.begin(), body.end(), word) != body.end());
+  }
+  // One probe per pool entry, named by its index in the pool order the payload baked.
+  CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "0") !=
+             body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "1") !=
+             body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "2") ==
+             body.end());  // one probe per song, not one per pool cap
+  // The row must not navigate itself: which screen a chosen song opens is the game's own decision.
+  CHECK_TRUE(std::find(body.begin(), body.end(), "goto_screen") == body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), kRootScreen) == body.end());
+
+  // The label exists exactly while the row does (the menu draws the symbol's locale text).
+  bool labelled = false;
+  for (const auto& label : Labels()) {
+    if (label.first == kPlayCurrentRow) {
+      labelled = true;
+      CHECK_TRUE(label.second == kPlayCurrentLabel);
+    }
+  }
+  CHECK_TRUE(labelled);
+
+  // A second pass refuses (the array already carries the row), and the record still compiles and
+  // reparses - the property that makes it safe to serve.
+  std::string again;
+  CHECK_FALSE(AddPlayCurrentSongRow(&nodes, &again));
+  CHECK_TRUE(!again.empty());
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+
+  // The two rows this feature adds to the Downloadable Content page owe the line budget measured for
+  // this surface (a drawn line is `<label>: <value>`; over 28 characters the value is not drawn).
+  for (const auto& label : Labels()) {
+    if (label.first == "settings_dlc_menu_songs_on" ||
+        label.first == "settings_play_current_on") {
+      CHECK_TRUE(label.second.size() <= 28u);
+    }
+  }
+  CHECK_TRUE(std::string(kPlayCurrentLabel).size() <= 22u);
+
+  // Back to the shipped configuration: the tests after this one must see the surface without the
+  // feature (the configuration is process-wide, and a leftover would leak into their label and
+  // orphan checks).
+  ConfigureMenu(MenuConfiguration{});
+  for (const auto& label : Labels()) {
+    CHECK_TRUE(label.first != kPlayCurrentRow);
+  }
+}
+
 void TestPauseReroute() {
   BeginCase("the in-song pause row keeps retail's own focus switch, and the record is left alone");
 
@@ -2329,6 +2437,7 @@ int main(int argc, char** argv) {
   TestRequestPathsParse();
   TestPanelLoadEdit();
   TestSplashReroute();
+  TestPlayCurrentSongRow();
   TestPauseReroute();
   TestInSongContext();
   TestPauseMergeEdits();

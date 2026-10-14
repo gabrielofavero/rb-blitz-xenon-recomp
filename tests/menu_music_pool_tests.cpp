@@ -56,6 +56,30 @@ void TestSongName() {
   CHECK_TRUE(SongName("") == "");
 }
 
+void TestPlayProbePaths() {
+  BeginCase("the Play Current Song probes name one pool index, and only their namespace is ours");
+  // The record the payload bakes asks one question per pool entry; the host answers true for the
+  // track that is playing. The parser is what keeps "a path in our namespace" from meaning "a path
+  // that happens to start with something".
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/0"), 0);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/7"), 7);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/49"), 49);
+  // Not a probe: another namespace, a bare prefix, a trailing separator, a sign, a non-digit, and
+  // an index long enough to be a mistake rather than a pool entry.
+  CHECK_EQ(PlayProbeIndex("rbbz-settings/current/0"), -1);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/"), -1);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/0/"), -1);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/-1"), -1);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/x"), -1);
+  CHECK_EQ(PlayProbeIndex("rbbz-play/current/1234567"), -1);
+  CHECK_EQ(PlayProbeIndex(""), -1);
+  CHECK_EQ(PlayProbeIndex("rbbz-play"), -1);
+  // The whole namespace is ours (the builtin hook answers it rather than forwarding), and the probe
+  // prefix really is inside it.
+  CHECK_TRUE(kPlayNamespace.starts_with("rbbz-play"));
+  CHECK_TRUE(kPlayProbePrefix.starts_with(kPlayNamespace));
+}
+
 void TestPoolDedupesTheSameSong() {
   BeginCase("pool counts a song two packages carry once");
   std::vector<PoolEntry> input = {
@@ -172,6 +196,7 @@ void TestDeckReshuffles() {
 
 int main() {
   TestSongName();
+  TestPlayProbePaths();
   TestPoolDedupesTheSameSong();
   TestPoolCapsAndStaysASubset();
   TestPoolKeepsWhatItHas();
