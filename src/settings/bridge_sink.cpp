@@ -479,7 +479,21 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       // read as a broken row.
       response.message = "caption event (no settings change)";
       break;
-    case bridge::Op::kRequestRestart:
+    case bridge::Op::kRequestRestart: {
+      // The confirmation screen decides what to draw from `snapshot/restart.ok` alone (the merged
+      // screen's `Kind::kRestart` case): it writes `restart/-/-` and, when that bit is false, prints
+      // its "could not restart" token into the panel's own message surface. So the bit has to be the
+      // answer to *this* press - cleared first, and set only by a request that really reached the
+      // coordinator. Measured defect (2026-10-14): a refusal taken before the handler ran left the
+      // bit at its initial `true`, so "Restart now" did nothing **and said nothing**.
+      restart_ok_ = false;
+      if (service_ == nullptr || restart_handler_ == nullptr) {
+        // No boot-provided handler means nothing can start a child. Refusing by name is the honest
+        // answer, and it is the same bit the screen reads.
+        status = Status::kUnsupported;
+        response.message = "this build has no way to restart the game";
+        break;
+      }
       if (!commit_ok_) {
         status = Status::kInvalid;
         response.message = "settings have not been saved";
@@ -489,17 +503,16 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       // alive and with its own identity in the handoff token (§8), which is not the sink's business.
       restart_requested_ = true;
       restart_request_id_ = request.request_id;
-      if (restart_handler_ && service_) {
-        restart_ok_ = restart_handler_(saved_revision_, service_->revision(), request.request_id,
-                                      service_->EffectiveValue(SettingId::kTarget).text,
-                                      &response.message);
-        if (!restart_ok_) {
-          status = Status::kIoError;
-          break;
-        }
+      restart_ok_ = restart_handler_(saved_revision_, service_->revision(), request.request_id,
+                                    service_->EffectiveValue(SettingId::kTarget).text,
+                                    &response.message);
+      if (!restart_ok_) {
+        status = Status::kIoError;
+        break;
       }
       response.message = "restart requested";
       break;
+    }
     case bridge::Op::kUnknown:
       status = Status::kUnknownOp;
       response.message = "unknown operation";

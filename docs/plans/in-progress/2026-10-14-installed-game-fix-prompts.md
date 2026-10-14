@@ -1,7 +1,7 @@
 # Installed-game review: researched implementation prompts
 
-**2026-10-14 — research complete. P1 and P2 are implemented and verified (their status is below);
-P3–P6 are not started.** This file moved from `plans/todo/` to `plans/in-progress/` when P1 landed.
+**2026-10-14 — research complete. P1, P2 and P3 are implemented and verified (their status is below);
+P4–P6 are not started.** This file moved from `plans/todo/` to `plans/in-progress/` when P1 landed.
 
 This handoff groups the owner's installed-game test report into six contexts. Preliminary research
 covered the current working tree, local CMake configuration, existing tests, historical findings,
@@ -399,6 +399,75 @@ Ultimate edits, lock contention, access denied, interrupted/partial saves, child
 launch failure and refresh in flight. Run the installed reproducer repeatedly
 with keyboard/controller/mouse; prove subsequent edits and restart still work.
 Deliver the root cause and before/after traces, not merely a hidden warning.
+```
+
+#### P3 — done (2026-10-14)
+
+**What was wrong.** Two defects in one flow, both reproduced in a driven boot rather than inferred.
+The owner's "saving/writing message" is the restart confirmation's own text — *"Settings saved.
+Restart the game to apply these changes."*, settings_screen.cpp's `settings_restart_message`.
+
+1. **The confirmation could not be dismissed, so Help & Options could not be left.** Its Cancel
+   pressed B, the root opened the confirmation, and B put the player back on the **root** — so the
+   next leave asked the same question. Cause: the branch used the generic `EnterScreen`, whose
+   `{<screen> set back_screen {ui current_screen}}` points a destination at the screen it is leaving.
+   The prompt belongs to the *act* of leaving, so the confirmation now inherits the target the root
+   was about to use (`RestartPrompt` in `src/ui/settings_screen.cpp`). Measured on the route the
+   owner described: `07-leave-root.png` (the confirmation) → `08-after-close.png` (**the merged root
+   again**) → `09-close-then-back.png` (**the confirmation again**); after the change
+   `08-after-close.png` is the **main menu**, and the log carries no restart request at all.
+2. **A restart refused before the boot's handler ran said nothing.** The confirmation draws its
+   "could not restart" text only when `snapshot/restart.ok` is false, and `ServiceSink` refused on
+   `!commit_ok_` (or with no handler) **before** touching that bit — so "Restart now" was a silent
+   no-op. Every answer now resolves the bit (`src/settings/bridge_sink.cpp`), a missing handler is an
+   explicit `kUnsupported`, and the message is actionable: *"The game could not restart. Close this
+   message and start the game again to apply your saved changes."*
+
+**Found while measuring, and fixed.** `fs::FileLock`'s failure text was *"cannot lock settings file
+(another writer or access denied)"* — it could not tell a transient competing writer (retry) from a
+path the player may not write (stop and report), which is exactly the distinction a save-failure
+report needs. Both it and `WriteAtomic` now name the operation, the path and the OS reason through
+`fs::OsErrorText` (stable phrase + numeric code): `cannot replace <dir>\settings.toml: access denied
+(win32 error 5); the previous file is unchanged`, `cannot lock <dir>\settings.toml.lock: sharing
+violation: another writer holds the file (win32 error 32)`. The boot also logs the directory writes
+land in and the profile that chose it (`settings_boot: writes land in '<dir>'; profile
+'<dir>\launcher.toml'`). The store test was *also* wrong: its "an unwritable destination keeps its
+bytes" case had a base naming a key the file does not hold, so it exercised a **conflict** (which
+writes nothing and reports no I/O error) and never reached the write at all.
+
+**Evidence** (`out/_swap/p3/`, 2026-10-14, D3D12, windowed, disposable roots, `common` target —
+the harness is `out/_swap/p3/run.ps1 -Label X -PromptAction none|close|restart`):
+
+| Observation | Value |
+| --- | --- |
+| The message, verbatim | `repro3-close/shots/07-leave-root.png`: **"SETTINGS SAVED. RESTART THE GAME TO APPLY THESE CHANGES."** with rows **Close** / **Restart now** and the overlay caption "Close this message." |
+| The trap, before | `repro3-close/shots/08-after-close.png` = the merged **HELP & OPTIONS** root (General selected); `09-close-then-back.png` = the **confirmation again**; the route's later A+D-pad landed on "Restart now" and restarted the game (`16:07:55 request_restart`) — the only way out of the menu |
+| The fix | `after-close/shots/07-leave-root.png` = the confirmation; `08-after-close.png` = the **main menu** (PLAY … EXIT GAME); `after-close.log` has **no** `request_restart` line |
+| Restart now still works | `after-restart.log`: `set 'general.cache_dlc_library' -> ok`, `commit -> ok (committed)`, `request_restart '-' -> ok (restart requested)`; `settings_restart: replacement child is waiting for parent exit` 16:38:52.834 → `Title terminated; hard-exiting process.` 16:38:53.035 → a **new boot** at 16:38:53.433 (one child, ~0.6 s, same root) |
+| Navigation starts no write | `after-close.log`: the entire route (title → main menu → merged root → General → Downloadable Content → back ×3) produces exactly one `set` and one `commit` — the deliberate A on *Cache DLC Library*. No other request, so plain navigation and the caption channel write nothing |
+| Resolved paths | `settings_boot: writes land in '<root>'; profile '<root>\launcher.toml'` |
+| Host tests | **38/38** (`out/build/rename-tests`, the Vulkan-off tree that can build them). New: `settings_screen` pins that the confirmation inherits the leave target and that nothing points it at the root; `settings_bridge_service` pins that a refusal (unsupported / handler refused) clears `restart.ok`, that a retry after a failure works and follows the *last* answer; `settings_store` pins the two lock messages apart and a genuine read-only destination |
+
+**Honest limits.** Only the **main-menu** context was driven; the in-song twin uses the same
+`RestartPrompt` path but no boot has been taken from a song. A *genuine* refusal (a child that cannot
+be started) is not reproducible on demand — it would mean breaking the exe — so it is pinned by the
+host tests and by the code path, not by a boot. The `!commit_ok_` refusal is conservative: the prompt
+itself only appears for values that are durably stored, so a failed *later* attempt blocks a restart
+until the next successful commit (previously it blocked it silently; now it says so). A restart while
+a DLC refresh is in flight joins that worker before the handshake (`DrainRefreshForRestart`), a wait
+bounded by the scan rather than by a timeout — deliberate, since the alternative is a dying process
+handing its library over. `Config: unknown cvar 'restart-handoff'` on the child's boot is P11a's
+documented shape (`src/main.cpp`: the one-shot switch stays on the process's own command line), not a
+regression. The commit itself is still synchronous on the guest thread, so a slow write would stall
+frames; the reads are local `MoveFileExW` replacements and no boot has shown a stall (measured: 22 ms
+between `set` and `commit`'s log line), and the query contract is therefore truthful by construction.
+
+**Reproducing it** (from `<checkout>`):
+
+```powershell
+cmake --preset win-amd64-release ; cmake --build --preset win-amd64-release
+pwsh -File out\_swap\p3\run.ps1 -Label after-close   -PromptAction close     # dismiss the confirmation
+pwsh -File out\_swap\p3\run.ps1 -Label after-restart -PromptAction restart   # Restart now: one child
 ```
 
 ### P4 — Help-caption appearance, visibility setting, and achievement wording

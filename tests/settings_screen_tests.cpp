@@ -1491,6 +1491,84 @@ void TestRestartPromptOnlyOnLeave() {
   CHECK_EQ(other_cancels, 38);
 }
 
+// A `{<receiver> set <member> <value>}` call, with the value node kept so a test can say what the
+// assignment *is* rather than only that the member is mentioned somewhere.
+struct SetCall {
+  std::string receiver;
+  std::string member;
+  const dtb::Node* value = nullptr;
+};
+
+void CollectSetCalls(const dtb::Node& node, std::vector<SetCall>* out) {
+  if (IsCall(node, "set") && node.kids.size() >= 4 && node.kids[0].tag == dtb::kSymbol &&
+      node.kids[2].tag == dtb::kSymbol) {
+    out->push_back(SetCall{node.kids[0].text, node.kids[2].text, &node.kids[3]});
+  }
+  for (const dtb::Node& kid : node.kids) {
+    CollectSetCalls(kid, out);
+  }
+}
+
+void TestRestartPromptLeavesTheSurface() {
+  BeginCase("dismissing the restart confirmation completes the leave it interrupted");
+
+  // The reproduced defect (2026-10-14, `out/_swap/p3/repro3-close/`): the confirmation was entered
+  // with the generic `EnterScreen`, whose `{<screen> set back_screen {ui current_screen}}` pointed
+  // the confirmation back at the *merged root*. Its Close therefore landed on the root again, the
+  // next Cancel asked `restart.pending` again, and Help & Options could not be left at all - the
+  // owner's "navigation becomes stuck around a saving message". The prompt belongs to the act of
+  // leaving, so the confirmation has to inherit the target the root was about to use.
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  int root_panels = 0;
+  int inherited = 0;
+  for (const dtb::Node& root : roots) {
+    std::vector<const dtb::Node*> members;
+    CollectMembers(root, "select_row", &members);
+    if (members.empty()) continue;  // a screen, not a panel
+    const std::string panel_name = root.kids[2].text;
+    const bool is_root = panel_name == kRootPanel || panel_name == "settings_pause_panel";
+    if (!is_root) continue;
+    ++root_panels;
+
+    // Whichever confirmation this context uses - the root panel's own scene twin decides the name.
+    const bool pause = HasText(root, kPauseSceneName);
+    const std::string confirm = pause ? PauseScreen("settings_restart_screen")
+                                      : std::string("settings_restart_screen");
+    const std::string root_screen = pause ? kRootPauseScreen : kRootScreen;
+
+    std::vector<SetCall> sets;
+    CollectSetCalls(root, &sets);
+    bool found = false;
+    for (const SetCall& call : sets) {
+      if (call.receiver != confirm || call.member != "back_screen" || call.value == nullptr) continue;
+      // The value has to be `{{ui current_screen} get back_screen}`, i.e. the *root's* own leave
+      // target, not a symbol naming the root.
+      const std::vector<std::string> words = Words(*call.value);
+      const bool reads_current_screen =
+          call.value->tag == dtb::kCommand && !call.value->kids.empty() &&
+          call.value->kids[0].tag == dtb::kCommand && !call.value->kids[0].kids.empty() &&
+          call.value->kids[0].kids[0].tag == dtb::kSymbol &&
+          call.value->kids[0].kids[0].text == "ui" &&
+          call.value->kids[0].kids.size() > 1 && call.value->kids[0].kids[1].tag == dtb::kSymbol &&
+          call.value->kids[0].kids[1].text == "current_screen";
+      CHECK_TRUE(reads_current_screen);
+      CHECK_TRUE(std::find(words.begin(), words.end(), "back_screen") != words.end());
+      found = true;
+    }
+    if (found) ++inherited;
+
+    // And the defect's own signature is gone: nothing anywhere points a restart confirmation at the
+    // merged root.
+    for (const SetCall& call : sets) {
+      if (call.receiver.rfind("settings_restart", 0) != 0 || call.member != "back_screen") continue;
+      const std::vector<std::string> words = Words(*call.value);
+      CHECK_FALSE(std::find(words.begin(), words.end(), root_screen) != words.end());
+    }
+  }
+  CHECK_EQ(root_panels, 2);  // the main-menu root and its in-song twin
+  CHECK_EQ(inherited, 2);
+}
+
 void TestInvertedBoolRow() {
   BeginCase("an inverted boolean reads On for a false setting and writes the flip");
 
@@ -2503,6 +2581,7 @@ int main(int argc, char** argv) {
   TestButtonTableIsOneSwitch();
   TestSelectAdvancesAndWraps();
   TestRestartPromptOnlyOnLeave();
+  TestRestartPromptLeavesTheSurface();
   TestInvertedBoolRow();
   TestProviderRowRemoval();
   TestRendererRowVisibility();

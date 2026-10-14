@@ -795,6 +795,11 @@ void SettingsBoot::LogConfigured() const {
                                                                        : "malformed; ignored",
               service_ ? service_->descriptors().size() : 0,
               service_ ? service_->revision() : 0);
+  // The two identities a "my settings did not save" report needs, and which the two lines above do
+  // not carry: the directory every write lands in, and the profile that chose it. The failure itself
+  // names the OS reason (fs::OsErrorText), so a log then holds both halves of P3/D5's evidence.
+  REXLOG_INFO("settings_boot: writes land in '{}'; profile '{}'",
+              paths_.settings_file.parent_path().string(), paths_.legacy_profile.string());
   if (migration_.status != MigrationStatus::kNoLegacy) {
     REXLOG_INFO("settings_boot: migration {} - {} row(s) imported, {} translated, {} carried "
                 "over, {} reported",

@@ -279,6 +279,11 @@ void TestCancelAndRestart() {
   CHECK_TRUE(!fs::exists(h.paths.settings_file));  // a cancelled session writes nothing
 
   CHECK_TRUE(!h.sink.restart_requested());
+  // Starting the child is the boot's job (§8), so the sink only records the request and reports what
+  // the boot's handler did with it. With **no** handler the request is refused and reported instead
+  // of recorded into nothing (`TestRestartRefusalsAreVisible` pins that), so this leg installs one.
+  h.sink.SetRestartHandler(
+      [](uint64_t, uint64_t, uint64_t, const std::string&, std::string*) { return true; });
   CHECK_TRUE(h.Send("rbbz-settings/restart/-/-").status == Status::kOk);
   CHECK_TRUE(h.sink.restart_requested());
 }
@@ -312,6 +317,46 @@ void TestRestartPendingFollowsTheQuery() {
   query_answer = true;
   CHECK_TRUE(h.sink.restart_pending());
   CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(true)));
+}
+
+void TestRestartRefusalsAreVisible() {
+  BeginCase("every refused restart resolves restart.ok, so the confirmation screen can speak");
+  Harness h;
+
+  // The confirmation's row writes `restart/-/-` and then asks `snapshot/restart.ok/b:1`; the screen's
+  // own "the game could not restart" token is printed only when that bit is false. So a refusal has
+  // to clear it. Measured defect (2026-10-14, the owner's "Restart now can do nothing"): a refusal
+  // taken before the boot's handler ran left the bit at its initial `true`, so the press was a
+  // silent no-op. Nothing attempted yet, so the bit still reads true.
+  CHECK_TRUE(h.Holds("restart.ok", WireValue::Bool(true)));
+  const Response unsupported = h.Send("rbbz-settings/restart/-/-");
+  CHECK_TRUE(unsupported.status == Status::kUnsupported);
+  CHECK_TRUE(h.Holds("restart.ok", WireValue::Bool(false)));
+  CHECK_TRUE(!h.sink.restart_requested());  // refused before anything was recorded
+
+  // A handler that refuses (a spawn that failed, say) is answered the same way: the bit is false and
+  // the handler's own reason reaches the caller.
+  h.sink.SetRestartHandler([](uint64_t, uint64_t, uint64_t, const std::string&, std::string* error) {
+    *error = "the child could not be started";
+    return false;
+  });
+  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+                    (before ? "0" : "1"))
+                 .status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  const Response refused = h.Send("rbbz-settings/restart/-/-");
+  CHECK_TRUE(refused.status == Status::kIoError);
+  CHECK_TRUE(refused.message == "the child could not be started");
+  CHECK_TRUE(h.Holds("restart.ok", WireValue::Bool(false)));
+  CHECK_TRUE(h.sink.restart_requested());  // the request was recorded; the child is what failed
+
+  // A retry after a failure must work, and the bit follows the *last* answer - which is what makes
+  // the screen show the prompt again instead of a stale failure.
+  h.sink.SetRestartHandler([](uint64_t saved, uint64_t current, uint64_t, const std::string&,
+                              std::string*) { return saved != 0 && saved == current; });
+  CHECK_TRUE(h.Send("rbbz-settings/restart/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Holds("restart.ok", WireValue::Bool(true)));
 }
 
 void TestWireModelConversions() {
@@ -353,6 +398,7 @@ int main() {
   TestProviderGateAndUnknownTokens();
   TestCancelAndRestart();
   TestRestartPendingFollowsTheQuery();
+  TestRestartRefusalsAreVisible();
   TestWireModelConversions();
   return Finish();
 }

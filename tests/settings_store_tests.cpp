@@ -10,6 +10,7 @@
 
 #include "check.h"
 
+#include "fs/atomic_file.h"
 #include "settings/store.h"
 
 #include <cstdint>
@@ -37,6 +38,20 @@ void CheckString(const char* file, int line, const std::string& actual, const st
 
 #define CHECK_STR_EQ(actual, expected) \
   CheckString(__FILE__, __LINE__, (actual), (expected), #actual, #expected)
+
+void CheckContains(const char* file, int line, const std::string& haystack,
+                   const std::string& needle, const char* haystack_expr, const char* needle_expr) {
+  ++g_checks;
+  if (haystack.find(needle) != std::string::npos) {
+    return;
+  }
+  Fail(file, line, std::string(haystack_expr) + " does not contain " + needle_expr +
+                      "\n         actual   " + haystack + "\n         expected to contain " +
+                      needle);
+}
+
+#define CHECK_CONTAINS(haystack, needle) \
+  CheckContains(__FILE__, __LINE__, (haystack), (needle), #haystack, #needle)
 
 std::string ReadFile(const fs::path& path) {
   std::ifstream stream(path, std::ios::binary);
@@ -246,17 +261,75 @@ void TestFailedWritePreservesBytes() {
   CHECK_TRUE(static_cast<int>(refused.status) == static_cast<int>(CommitStatus::kInvalid));
   CHECK_STR_EQ(ReadFile(broken), "this is not toml\n");
 
-  BeginCase("save: an unwritable destination keeps its bytes");
+  BeginCase("save: an unwritable destination keeps its bytes, and the failure names the reason");
   std::error_code code;
   fs::permissions(file, fs::perms::owner_read, fs::perm_options::replace, code);
+  // The base has to agree with what the file holds or this is a *conflict* - which writes nothing and
+  // reports no I/O error at all, so the write path this case means to fail would never be reached.
+  // (The earlier shape of this test did exactly that: its base named a key the file does not have.)
   SaveRequest write;
-  write.base[SettingId::kVsync] = BoolV(true);
-  write.changed[SettingId::kVsync] = BoolV(false);
+  write.base[SettingId::kTarget] = EnumV("common");
+  write.changed[SettingId::kTarget] = EnumV("ultimate");
   const SaveOutcome failed = SaveSettingsDocument(file, write);
   CHECK_FALSE(failed.wrote);
-  CHECK_TRUE(static_cast<int>(failed.status) != static_cast<int>(CommitStatus::kSaved));
+  CHECK_EQ(static_cast<int>(failed.status), static_cast<int>(CommitStatus::kIoError));
+  // The failure names the operation, the path and the OS's reason, and says the previous file is
+  // still there (P3/D5: never a generic "saving" state). This is the text the channel logs and the
+  // menu's own error screen stands on.
+  CHECK_TRUE(!failed.errors.empty());
+  if (!failed.errors.empty()) {
+    CHECK_CONTAINS(failed.errors.front(), file.filename().string());
+    CHECK_CONTAINS(failed.errors.front(), "cannot ");
+    CHECK_CONTAINS(failed.errors.front(), "unchanged");
+  }
   fs::permissions(file, fs::perms::owner_all, fs::perm_options::replace, code);
   CHECK_STR_EQ(ReadFile(file), original);
+}
+
+void TestLockErrorsSayWhichFailure() {
+  Scratch scratch;
+  const fs::path file = scratch.base / "settings.toml";
+  WriteFile(file, Sample());  // a regular file, so `<file>/nested` can never exist
+
+  BeginCase("lock: a held lock and an unusable path are told apart, by name and by code");
+
+  // The text this replaced was "cannot lock settings file (another writer or access denied)", which
+  // cannot tell a transient competing writer (retry, or report a retryable conflict) from a path the
+  // player may not write (stop, and say where). Both messages now name the lock path, the OS reason
+  // and the numeric code, so a log line or a regression test can tell them apart.
+  std::string contended;
+  {
+    rb_blitz::fs::FileLock held;
+    std::string first_error;
+    CHECK_TRUE(held.Acquire(file, &first_error, /*wait=*/true));
+    CHECK_TRUE(first_error.empty());  // nothing is written on success
+
+    rb_blitz::fs::FileLock second;
+    CHECK_FALSE(second.Acquire(file, &contended, /*wait=*/false));
+  }
+  CHECK_CONTAINS(contended, "settings.toml.lock");  // the sidecar the lock is taken on
+  CHECK_CONTAINS(contended, "cannot lock");
+  CHECK_CONTAINS(contended, "error");  // the numeric code is always there
+
+  // A path that cannot hold the sidecar at all: `<a regular file>/nested.lock` has no directory.
+  const fs::path unusable = file / "nested";
+  rb_blitz::fs::FileLock third;
+  std::string missing;
+  CHECK_FALSE(third.Acquire(unusable, &missing, /*wait=*/false));
+  CHECK_CONTAINS(missing, "nested.lock");
+  CHECK_TRUE(missing != contended);
+
+#ifdef _WIN32
+  // The two reasons, in the words the log will carry.
+  CHECK_CONTAINS(contended, "another writer");
+  CHECK_TRUE(contended.find("does not exist") == std::string::npos);
+  CHECK_CONTAINS(missing, "does not exist");
+  CHECK_TRUE(missing.find("another writer") == std::string::npos);
+#endif
+
+  // A released lock is a file, not a latch on this process: it can be taken again.
+  rb_blitz::fs::FileLock again;
+  CHECK_TRUE(again.Acquire(file, nullptr, /*wait=*/true));
 }
 
 void TestStoreFacade() {
@@ -298,6 +371,7 @@ int main() {
   TestLoadDocument();
   TestSaveMergeAndConflict();
   TestFailedWritePreservesBytes();
+  TestLockErrorsSayWhichFailure();
   TestStoreFacade();
   return Finish();
 }

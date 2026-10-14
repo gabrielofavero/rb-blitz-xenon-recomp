@@ -58,11 +58,19 @@ Part 1 wherever they disagree.
   measured: a first run with **nothing stored** reaches 2560x1080 on this machine's 21:9 primary with
   a 2354x993 client and no `WS_THICKFRAME`. The game window is deliberately one size; the Controller
   Settings utility is untouched. See [graphics.md](graphics.md) part 3 §11.
+- **The restart confirmation can be left now (P3 of the installed-game review, 2026-10-14)**: its own
+  Cancel returned to the **merged root it was leaving**, so Help & Options could not be left at all —
+  every leave re-opened the confirmation — and a restart refused before the boot's handler ran left
+  `restart.ok` true, so *Restart now* was a silent no-op. The confirmation now inherits the leave
+  target the root was about to use, every answer resolves that bit, and a failed save/lock names the
+  path and the OS reason instead of "another writer or access denied". Driven before and after in
+  `out/_swap/p3/` (`repro3-close` vs `after-close`, `after-restart`); the host suite is still 38/38.
 - **Verifiably fixed**: the 2026-10-12 black startup (the generated payload made the patch archive
   two-part, which this title never reads — Part 2) and graphics recovery (the marker, fallback and
   safe mode all ran; older statements, including item 11 below, are wrong).
 - **The next three things to do**: (a) drive the merged menu once after the punch list (A
-  advance/wrap, the restart prompt on leaving, On/Off in every language, Borderless); (b) the in-song
+  advance/wrap, On/Off in every language, Borderless) — the restart prompt's leave path is measured
+  now (the P3 bullet above), its in-song twin is not; (b) the in-song
   entry (item 13) — merge into the pause panel's inline list and build the pause-context child
   screens; (c) make a preset that can build a test again, so 38/38 is reproducible from the presets.
 
@@ -394,16 +402,25 @@ prompt, because the updater is administrative too. The narrowing of the legacy-p
 
 #### P9 — hot apply and restart coordinator
 
-32. **The authored restart prompt does not exist** (§8's native error/confirmation resources, "A
-    Restart now / B Close"). The seam it will call is already there (the guest writes
-    `rbbz-settings/restart/-/-`), and the commit's restart set decides whether it appears.
-    *`architecture.md` §6.1; `architecture.md` §6*.
-33. **The Target row's soft restart is not offered** — the row commits and leaves. *`architecture.md`
-    §6.1; `plan.md` §3.1* — blocked by item 32.
-34. **`src/main.cpp` never calls `platform::RunBootstrap`, and nothing calls
-    `RestartCoordinator::Request`.** Two exact insertions (an early bootstrap mode before
-    `REX_DEFINE_APP`; the request after the save barrier on the UI thread) with the code shown in the
-    doc. *`architecture.md` §6.2; `architecture.md` §6* — coordinator.
+32. ~~**The authored restart prompt does not exist**~~ — **built, and repaired 2026-10-14 (P3 of the
+    installed-game review)**: `settings_restart_screen` exists, the merged root's Cancel asks
+    `snapshot/restart.pending` to open it, and its *Restart now* row is `Kind::kRestart`. P3 fixed the
+    two defects in the first version: the confirmation's Cancel returned to the **root it was leaving**
+    (so Help & Options could not be left — reproduced in `out/_swap/p3/repro3-close/`, fixed in
+    `after-close/`) and a refused restart left `restart.ok` true, which made the row silently inert.
+    *`installed-game-fix-prompts.md` P3; `architecture.md` §6.1*. **Still open: only the main-menu
+    context has been driven** — the in-song twin uses the same path but no boot has been taken from a
+    song, and a *genuine* refusal (a child that cannot be started) is pinned by host tests rather than
+    by a run.
+33. **The Target row's soft restart is offered by leaving, not by the row** — the row commits and
+    leaves; the prompt then appears when Help & Options is left, which is now a path the player can
+    complete (item 32) — so item 32 unblocked this one in the practical sense, and the row still does
+    not prompt by itself. *`installed-game-fix-prompts.md` P3; `plan.md` §3.1*.
+34. ~~**`src/main.cpp` never calls `platform::RunBootstrap`, and nothing calls
+    `RestartCoordinator::Request`.**~~ — **both wired** (P11a): `RestartBootstrap` runs before
+    `wWinMain`, and the boot's restart handler drains the DLC refresh, requests the child on the UI
+    thread and defers the close. Verified driven 2026-10-14 (`out/_swap/p3/after-restart/`): one child,
+    the parent exits 0.2 s later, a new boot 0.4 s after that. *`architecture.md` §6.2*.
 35. **The live apply still runs against P1's `MemorySink`**; it must move onto
     `Service::last_commit_changes()` now that the real store is wired. *`architecture.md` §6.3*.
 36. **Coordinator limits to state honestly:** the parent/child handshake proves only that the spawn

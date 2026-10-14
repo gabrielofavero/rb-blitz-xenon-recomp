@@ -122,6 +122,25 @@ Node EnterRetail(const std::string_view screen, const std::string_view member) {
               Cmd({Sym("ui"), Sym("goto_screen"), Sym(screen)})});
 }
 
+// Entering the restart confirmation: it inherits **the leave target the root was about to use**, not
+// the root itself.
+//
+// This is a reproduced defect, not a style choice (2026-10-14). `EnterScreen` points a destination
+// back at `{ui current_screen}`, so the confirmation's Close returned to the *merged root* - and the
+// confirmation is only ever reached from the root's Cancel, so every later Cancel asked the question
+// again and Help & Options could not be left at all. Measured on the installed-build route:
+// `07-leave-root.png` shows the confirmation, `08-after-close.png` shows the merged root again,
+// `09-close-then-back.png` shows the confirmation again. The prompt belongs to the *act of leaving*,
+// so dismissing it (A on Close or B) has to finish that leave - `splash_screen` from the main menu,
+// the pause screen from a song. `Kind::kRestart` ("Restart now") closes the process instead.
+Node RestartPrompt(const std::string_view screen) {
+  return Cmd({Sym("do"),
+              Cmd({Sym(screen), Sym("set"), Sym("back_screen"),
+                   Cmd({Cmd({Sym("ui"), Sym("current_screen")}), Sym("get"),
+                        Sym("back_screen")})}),
+              Cmd({Sym("ui"), Sym("goto_screen"), Sym(screen)})});
+}
+
 // The cases every panel of this screen contributes to its `BUTTON_DOWN_MSG` switch.
 //
 // **How a press reaches a row, measured rather than transcribed.** An action-reporting table in a
@@ -150,7 +169,7 @@ std::vector<Node> ButtonCases(const bool root, const bool pause) {
                                       : std::string("settings_restart_screen");
     cancel = Cmd({Sym("if_else"),
                   Cmd({Sym("file_exists"), Str(Path("snapshot", "restart.pending", "b:1"))}),
-                  EnterScreen(restart), Leave()});
+                  RestartPrompt(restart), Leave()});
   }
   return {
       Arr({Sym("kAction_Confirm"), Cmd({Var("this"), Sym("select_row")})}),
@@ -2122,7 +2141,7 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
   out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
   out.emplace_back("settings_save_error_message", "Settings could not be saved. Check that the settings folder is writable, then try again.");
-  out.emplace_back("settings_restart_error", "The game could not restart. Your settings are saved. Close this message and restart manually.");
+  out.emplace_back("settings_restart_error", "The game could not restart. Close this message and start the game again to apply your saved changes.");
   out.emplace_back("settings_achievements_message", "Unlock the four online achievements? This cannot be undone.");
   auto add = [&out](const std::string& key, const std::string& text) {
     for (const auto& item : out) {
