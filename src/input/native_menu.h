@@ -128,4 +128,14 @@ void MouseMenuFocus(bool focused);
 void QueueMenuMouse(MouseAction action, MenuPoint point);
 void QueueMenuWheel(int delta);
 uint16_t MenuMousePadState();
+
+// The UIManager frame state the help caption observer (src/hooks/help_observer.cpp) reads, as the
+// last frame's Context() stored it. `FocusedListDrawn()` is the list the previous frame's draw
+// identified as the focused component (0 when none) - the only shape the observer may read a
+// selection from, because a slider has no list state at list+176. Recorded regardless of the
+// mouse preference, because the captions must not depend on an input setting.
+uint32_t CurrentScreen();
+uint32_t CurrentFocus();
+uint32_t FocusedListDrawn();
+bool MenuAvailable();
 } // namespace rb_blitz::input

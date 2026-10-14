@@ -180,9 +180,12 @@ void TestMigrateDefault() {
   CHECK_TRUE(result.status == MigrationStatus::kMigrated);
   CHECK_TRUE(result.wrote_settings);
   CHECK_TRUE(result.stats.target_imported);
-  // Keep the old target, 4x filtering and explicitly stored 720p resolution. New profiles
-  // default to Auto, but migration must preserve a legacy resolution choice.
-  CHECK_EQ(result.stats.imported, 3);
+  // Keep the old target, 4x filtering, explicitly stored 720p resolution and the profile's
+  // *Cache DLC Library* choice. That last one is the row whose compiled default became `true` when
+  // the in-game row took the setting over from the launcher flag (P11b), so a profile that stores
+  // `false` differs from the default and is imported like any other choice - which is the point:
+  // the player's choice survives the migration.
+  CHECK_EQ(result.stats.imported, 4);
   CHECK_EQ(result.stats.translated, 2);
   CHECK_EQ(result.stats.dropped, 4);      // rename + pool count + fullscreen + monitor
   CHECK_EQ(result.stats.preserved, 1);    // input_backend

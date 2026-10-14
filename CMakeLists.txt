@@ -144,6 +144,12 @@ set(RBBLITZ_SOURCES
     # production consumer until P6). The cipher it shares with menu_options.cpp is already here.
     src/ui/dtb_author.cpp
     src/ui/menu_options.cpp
+    # The help captions (owner request, 2026-10-13): the retail-page text resolver the observer
+    # reads (SDK-free) and the two halves that feed it - the per-frame guest-UI observer, and the
+    # ImGui overlay the captions are drawn on.
+    src/ui/help_topics.cpp
+    src/ui/help_overlay.cpp
+    src/hooks/help_observer.cpp
 )
 
 if(WIN32)
@@ -459,6 +465,9 @@ if(BUILD_TESTING)
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
         src/hooks/settings_bridge.cpp
+        # The help captions' retail-page resolver: its table is half of the surface's caption
+        # coverage (the other half lives in settings_screen.cpp), so it is tested beside it.
+        src/ui/help_topics.cpp
     )
     target_include_directories(rb_blitz_settings_screen_tests PRIVATE src)
     add_test(NAME settings_screen COMMAND rb_blitz_settings_screen_tests)

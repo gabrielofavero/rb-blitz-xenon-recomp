@@ -471,6 +471,14 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       }
       break;
     }
+    case bridge::Op::kHelp:
+      // A caption event is not an edit. In the running game the write channel hands it to the
+      // overlay before the dispatcher is reached (settings_bridge_hooks.cpp `HandleRequest`), so
+      // one that gets this far is a request this sink has nothing to do with - a non-edit tool or a
+      // test driving the dispatcher directly. Answered, not refused, so a caption event can never
+      // read as a broken row.
+      response.message = "caption event (no settings change)";
+      break;
     case bridge::Op::kRequestRestart:
       if (!commit_ok_) {
         status = Status::kInvalid;

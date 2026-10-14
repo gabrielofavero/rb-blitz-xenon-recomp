@@ -83,6 +83,12 @@ enum class Op : uint16_t {
   kCancelEdit = 6,      // drop the whole transaction
   kInvoke = 7,          // one-shot action (e.g. the achievements action)
   kRequestRestart = 8,  // save-barrier restart request
+  // One-way caption event, owner request 2026-10-13: the highlighted row changed, so the help
+  // overlay should describe `setting` (a stable row symbol), or clear when it is empty. It is
+  // emitted by the generated DTA on every selection move and never queried, so it carries no
+  // value, expects no response and deliberately never reaches the settings store: the hook half
+  // routes it to the registered HelpSink and answers the guest's write like any other.
+  kHelp = 9,
 };
 
 // The status of a response. Values are wire-stable.
@@ -160,10 +166,14 @@ bool IsNamespacedPath(std::string_view path);
 // Grammar of the text form (all segments ASCII, no spaces):
 //
 //   path    = "rbbz-settings/" op [ "/" setting [ "/" value ] ]
-//   op      = begin | cancel | cancel-field | set | commit | snapshot | invoke | restart
+//   op      = begin | cancel | cancel-field | set | commit | snapshot | invoke | restart | help
 //   setting = "-" (none) | [A-Za-z0-9_.-]{1,64}
 //   value   = "-" (none) | "b:0" | "b:1" | "i:" <int64> | "t:" <token> | "l:" <token,token,...>
 //   token   = [A-Za-z0-9_.:+-]{1,64}
+//
+// The help op is the one direction-only request: `rbbz-settings/help/<row-symbol>/-` is the
+// highlighted row, `rbbz-settings/help/-/-` is "no row" (hide). It is answered like every other
+// write (`write_file` has no result to build) and is never the subject of a query.
 //
 // A malformed text path in our namespace is *refused*, not forwarded: a name in this namespace is
 // a name no content file can have, so the original could only have answered "not found" anyway.
@@ -200,6 +210,31 @@ class RequestSink {
   virtual ~RequestSink() = default;
   virtual Response Handle(const Request& request) = 0;
 };
+
+// The caption channel's receiving end (kHelp): the help overlay registers one when it exists, and
+// the hook half routes a `help` request to it *before* the store, because a caption event is not
+// an edit. SDK-free on purpose: the DTA->sink path is testable without a window or a boot, and a
+// build with no overlay (tests, or a headless boot) simply has no sink registered.
+class HelpSink {
+ public:
+  virtual ~HelpSink() = default;
+  // The stable symbol of the highlighted row, or empty for "the surface was left" (hide).
+  virtual void Show(std::string_view symbol) = 0;
+};
+
+// The registered sink, or nullptr. The overlay registers itself when its dialog is created, on the
+// UI thread, before the first guest frame can send a help request; the hook reads it on the guest
+// thread, so registration happens-before any request by construction (the dialog is created before
+// the guest thread starts).
+void SetHelpSink(HelpSink* sink);
+HelpSink* GetHelpSink();
+
+// The provider gate the merged menu draws by (`provider.active`, i.e. "an Ultimate payload is
+// installed"). Cached when the channel seeds at Configure() so a guest-thread caller - the help
+// observer, which needs it to know whether the in-song pause list has five or six rows - can ask
+// it without touching the store or the cvar registry. False until Configure() has run.
+void SetProviderGateActive(bool active);
+bool ProviderGateActive();
 
 // The queries the *hook* half needs beside `Handle`: they are what the one-bit return channel is
 // built from (`file_exists` can answer one boolean), and they are deliberately separate from

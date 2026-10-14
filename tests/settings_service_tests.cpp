@@ -187,8 +187,12 @@ void TestDurableEditReload() {
   const uint64_t mixed = service.BeginEdit(service.revision());
   CHECK_TRUE(
       service.Set(mixed, SettingId::kVsync, BoolV(false), service.capability_revision()).ok);
-  CHECK_TRUE(
-      service.Set(mixed, SettingId::kCacheDlcLibrary, BoolV(true), service.capability_revision()).ok);
+  // Stage *the other* value of the restart row: its compiled default is `true` (it took the setting
+  // over from the launcher flag, P11b) and a commit that writes the value a row already holds is
+  // `kNoChanges` - so staging `true` here would leave the session with nothing to save.
+  const bool cache_now = service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  CHECK_TRUE(service.Set(mixed, SettingId::kCacheDlcLibrary, BoolV(!cache_now),
+                         service.capability_revision()).ok);
   const CommitResult mixed_commit = service.Commit(mixed);
   CHECK_TRUE(mixed_commit.status == CommitStatus::kSaved);
   CHECK_TRUE(mixed_commit.restart_required);

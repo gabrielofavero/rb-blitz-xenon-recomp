@@ -42,6 +42,7 @@
 
 #include "hooks/settings_bridge.h"
 #include "ui/dtb_author.h"
+#include "ui/help_topics.h"
 #include "ui/settings_screen.h"
 
 #include <algorithm>
@@ -569,10 +570,14 @@ void TestRequestPathsParse() {
       std::printf("         %s refused: %s\n", path.c_str(), error.c_str());
       continue;
     }
-    // A commit carries no setting and no value; every other request addresses one.
-    if (request.op == Op::kCommit || request.op == Op::kRequestRestart || request.op == Op::kCancelEdit) {
-      CHECK_TRUE(request.setting.empty());
+    // A commit carries no setting and no value; every other request addresses one - except the
+    // caption event, whose setting is empty precisely when it says "no row" (the hide).
+    if (request.op == Op::kCommit || request.op == Op::kRequestRestart ||
+        request.op == Op::kCancelEdit || request.op == Op::kHelp) {
       CHECK_TRUE(request.value.kind == ValueKind::kNone);
+      if (request.op != Op::kHelp) {
+        CHECK_TRUE(request.setting.empty());
+      }
     } else {
       CHECK_TRUE(!request.setting.empty());
     }
@@ -2061,6 +2066,236 @@ int DumpRecord(const char* in_path, const char* needle) {
   return 0;
 }
 
+// -------------------------------------------------------------------------------------------------
+// The help captions (owner request, 2026-10-13): every row carries a short description, the
+// definition publishes the highlighted row's symbol through the settings channel on entry and on
+// every move (and the hide on every way out), and the retail/screen table resolves the pages whose
+// DTA is not ours.
+// -------------------------------------------------------------------------------------------------
+
+void TestHelpTextsCoverEveryRow() {
+  BeginCase("every row of the surface carries a caption, and every caption fits the overlay");
+
+  const std::vector<std::string> symbols = HelpSymbols();
+  CHECK_TRUE(symbols.size() > 60u);
+  std::vector<std::string> seen;
+  for (const std::string& symbol : symbols) {
+    CHECK_TRUE(std::find(seen.begin(), seen.end(), symbol) == seen.end());
+    seen.push_back(symbol);
+    const std::string text = HelpTextFor(symbol);
+    CHECK_TRUE(!text.empty());
+    if (text.empty()) {
+      std::printf("         row %s has no caption\n", symbol.c_str());
+      continue;
+    }
+    // The overlay wraps at a fixed width; "short, 1-2 lines" is a table contract, so it is
+    // enforced here rather than discovered on screen.
+    CHECK_TRUE(text.size() <= kMaxHelpTextChars);
+    CHECK_TRUE(text.find('\n') == std::string::npos);
+    CHECK_TRUE(text.back() == '.');
+    for (const char c : text) {
+      CHECK_TRUE(static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) < 0x7F);
+    }
+  }
+
+  // An unknown symbol has no text - the overlay treats empty as "nothing to show", so a row that
+  // somehow never got one degrades to no caption rather than a wrong one.
+  CHECK_TRUE(HelpTextFor("no_such_row").empty());
+  CHECK_TRUE(HelpTextFor("").empty());
+
+  // Spot checks that a caption is the one authored for the row, including two retail rows the
+  // merge adopts (their text is still ours; the locale only owns their labels) and a provider row.
+  CHECK_TRUE(HelpTextFor("controls").find("controller") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("calibration").find("audio") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_gameplay").find("Ultimate") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_vsync").find("tearing") != std::string::npos);
+}
+
+// True when `text` is a caption event path, and the symbol it names ("-" for the hide).
+bool IsHelpPath(const std::string& text, std::string* symbol) {
+  constexpr char kPrefix[] = "rbbz-settings/help/";
+  if (text.rfind(kPrefix, 0) != 0) {
+    return false;
+  }
+  const std::string rest = text.substr(sizeof(kPrefix) - 1);
+  const size_t slash = rest.find('/');
+  if (symbol != nullptr) {
+    *symbol = slash == std::string::npos ? std::string() : rest.substr(0, slash);
+  }
+  return true;
+}
+
+void TestHelpEventsInTheDefinition() {
+  BeginCase("the definition publishes a caption on entry and every move, and the hide on leave");
+
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  int panels = 0;
+  int enters = 0;
+  int moves = 0;
+  int clears = 0;
+  for (const dtb::Node& root : roots) {
+    std::vector<const dtb::Node*> rows;
+    CollectMembers(root, "select_row", &rows);
+    if (rows.empty()) {
+      continue;  // a screen, not a panel
+    }
+    ++panels;
+
+    // Enter: the first visible row's caption, emitted as an `enter` statement so a commit that
+    // re-runs `populate_menu` cannot drag the overlay back to row 0 (the mirror has shown that
+    // bug class is real). A page whose first row set depends on the provider gate writes both
+    // gate worlds; the test accepts 1 or 2 writes and requires at least one.
+    std::vector<const dtb::Node*> enter_members;
+    CollectMembers(root, "enter", &enter_members);
+    CHECK_EQ(enter_members.size(), 1u);
+    int written = 0;
+    for (const dtb::Node* member : enter_members) {
+      std::vector<std::string> texts;
+      CollectText(*member, &texts);
+      for (const std::string& text : texts) {
+        std::string symbol;
+        if (!IsHelpPath(text, &symbol)) {
+          continue;
+        }
+        ++written;
+        CHECK_TRUE(symbol == "-" || !HelpTextFor(symbol).empty());
+      }
+    }
+    CHECK_TRUE(written >= 1 && written <= 2);
+    if (written > 0) {
+      ++enters;
+    }
+
+    // Move tables: every case that moves the selection also publishes the caption of the row it
+    // moves to, in the same statement - so the overlay names the row the highlight just reached.
+    for (const char* name : {"move_up", "move_down"}) {
+      std::vector<const dtb::Node*> move_members;
+      CollectMembers(root, name, &move_members);
+      CHECK_EQ(move_members.size(), 1u);
+      for (const dtb::Node* member : move_members) {
+        std::vector<const dtb::Node*> tables;
+        CollectRowTables(*member, &tables);
+        for (const dtb::Node* table : tables) {
+          for (size_t i = 2; i < table->kids.size(); ++i) {
+            const dtb::Node& kase = table->kids[i];
+            if (kase.tag != dtb::kArray) {
+              continue;
+            }
+            std::vector<const dtb::Node*> placements;
+            FindCalls(kase, "set_selected", &placements);
+            if (placements.empty()) {
+              continue;  // clamped at an end: the selection does not move, so nothing is said
+            }
+            ++moves;
+            int writes = 0;
+            std::vector<std::string> texts;
+            CollectText(kase, &texts);
+            for (const std::string& text : texts) {
+              std::string symbol;
+              if (!IsHelpPath(text, &symbol)) {
+                continue;
+              }
+              ++writes;
+              CHECK_TRUE(symbol != "-");  // a move always names a row
+              CHECK_TRUE(!HelpTextFor(symbol).empty());
+            }
+            CHECK_EQ(writes, 1);
+          }
+        }
+      }
+    }
+
+    // Ways out (Cancel, Close, a one-shot choice) publish the hide before they navigate.
+    std::vector<std::string> texts;
+    CollectText(root, &texts);
+    for (const std::string& text : texts) {
+      std::string symbol;
+      if (IsHelpPath(text, &symbol) && symbol == "-") {
+        ++clears;
+      }
+    }
+  }
+  CHECK_EQ(panels, 40);      // twenty pages, in both contexts
+  CHECK_EQ(enters, panels);  // every page tells the overlay where the highlight starts
+  CHECK_TRUE(moves > 100);   // the unclamped direction cases, across the surface
+  CHECK_TRUE(clears >= panels);
+}
+
+void TestHelpTopicsResolve() {
+  BeginCase("the retail pages and the in-song pause list resolve to captions");
+
+  using help::CaptionFor;
+  using help::IsGuestScreen;
+  using help::KnowsScreen;
+  using help::TextForSymbol;
+
+  // The retail rows this table owns are short, distinct and grounded in the retail labels.
+  for (const char* symbol : {"av_overscan", "av_active_track_volume", "av_sound_volume",
+                             "av_bass_boost", "tutorialsong", "tutorialsong3"}) {
+    const std::string text = TextForSymbol(symbol);
+    CHECK_TRUE(!text.empty());
+    CHECK_TRUE(text.size() <= kMaxHelpTextChars);
+  }
+  CHECK_TRUE(TextForSymbol("no_such_row").empty());
+
+  // The in-song pause list is the merged root's own rows, five or six by the provider gate.
+  const std::vector<std::string> six = PauseRootRows(true);
+  const std::vector<std::string> five = PauseRootRows(false);
+  CHECK_EQ(six.size(), 6u);
+  CHECK_EQ(five.size(), 5u);
+  for (size_t i = 0; i < six.size(); ++i) {
+    CHECK_TRUE(CaptionFor({"game_screen", "options.lst", static_cast<int>(i), true}) ==
+               HelpTextFor(six[i]));
+  }
+  for (size_t i = 0; i < five.size(); ++i) {
+    CHECK_TRUE(CaptionFor({"game_screen", "options.lst", static_cast<int>(i), false}) ==
+               HelpTextFor(five[i]));
+  }
+  CHECK_TRUE(CaptionFor({"game_screen", "options.lst", 5, false}).empty());  // five-row world
+  CHECK_TRUE(CaptionFor({"game_screen", "pause.lst", 0, true}).empty());   // not a settings list
+  CHECK_TRUE(CaptionFor({"game_screen", "", -1, true}).empty());           // nothing focused
+
+  // The retail audio page: its four checkbox rows, in the order the record fills the list, plus
+  // the two sliders the volume rows open.
+  const char* av_rows[] = {"av_overscan", "av_active_track_volume", "av_sound_volume",
+                           "av_bass_boost"};
+  for (int i = 0; i < 4; ++i) {
+    CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", i, true}) ==
+               TextForSymbol(av_rows[i]));
+    CHECK_TRUE(CaptionFor({"av_options_pause_screen", "checkbox.lst", i, true}) ==
+               TextForSymbol(av_rows[i]));
+  }
+  CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", 4, false}).empty());
+  CHECK_TRUE(CaptionFor({"av_options_screen", "track_sound_slider.sld", -1, false}) ==
+             TextForSymbol("av_active_track_volume"));
+  CHECK_TRUE(CaptionFor({"av_options_screen", "sound_effects_slider.sld", -1, false}) ==
+             TextForSymbol("av_sound_volume"));
+
+  // How to Play's two rows, and the two pages that are pickers rather than lists.
+  CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 0, false}) ==
+             TextForSymbol("tutorialsong"));
+  CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 1, false}) ==
+             TextForSymbol("tutorialsong3"));
+  CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 2, false}).empty());
+  CHECK_TRUE(!CaptionFor({"cal_welcome_screen", "", -1, false}).empty());
+  CHECK_TRUE(!CaptionFor({"controller_config_screen", "", -1, false}).empty());
+  CHECK_TRUE(!CaptionFor({"controller_config_pause_screen", "", -1, false}).empty());
+
+  // Ownership: the observer manages only its own screens, and the guest's screens are off limits
+  // to its clear (the guest's entry event has already published the destination's caption).
+  CHECK_TRUE(KnowsScreen("game_screen"));
+  CHECK_TRUE(KnowsScreen("av_options_screen"));
+  CHECK_TRUE(KnowsScreen("tutorials_pause_screen"));
+  CHECK_FALSE(KnowsScreen(kRootScreen));
+  CHECK_FALSE(KnowsScreen("splash_screen"));
+  CHECK_TRUE(IsGuestScreen(kRootScreen));
+  CHECK_TRUE(IsGuestScreen("settings_hud_pause_screen"));
+  CHECK_TRUE(IsGuestScreen("settings_restart_screen"));
+  CHECK_FALSE(IsGuestScreen("av_options_screen"));
+  CHECK_FALSE(IsGuestScreen("splash_screen"));
+  CHECK_FALSE(IsGuestScreen(""));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2109,5 +2344,8 @@ int main(int argc, char** argv) {
   TestProviderRowRemoval();
   TestLocaleOverrides();
   TestLabels();
+  TestHelpTextsCoverEveryRow();
+  TestHelpEventsInTheDefinition();
+  TestHelpTopicsResolve();
   return Finish();
 }

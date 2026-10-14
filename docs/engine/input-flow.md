@@ -88,3 +88,35 @@ applied on the window thread through SDL.
 move/click ordering, wheel bursts, fractional detents, pulse lifetime and boundary
 resets. `scripts/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
 `wheel:detents` and `cursor:visible/hidden` actions for live acceptance checks.
+
+
+### Live acceptance, 2026-10-13
+
+Windows Release build, windowed 1280x720, Ultimate enabled, isolated
+`out/mouse-native/user2` profile and the local `game/dlc` library. Verified with
+real pointer moves, button clicks and wheel events through `scripts/drive_ui.ps1`:
+
+- Hover selects all four powerup categories. Clicking opens the native submenu;
+  hovering updates its description and clicking equips the choice. Note and
+  overdrive selections were carried into the song loading screen.
+- From Super Guitar, two rapid downward detents reach Super Keys, including both
+  viewport animations. Six upward detents return to No Power-Up Selected. This
+  specifically reproduces the previously dropped second detent.
+- Song rows accept hover across the full bar, including the ratings area. Artist
+  headings do not move selection. Hovering another visible song preserves the
+  viewport, and wheel bursts scroll the library.
+- Left click starts the selected song and dismisses the loading prompt. During
+  gameplay the OS cursor is hidden; both buttons and wheel leave the game running
+  with no mouse control input. Keyboard Start pauses; the cursor becomes visible
+  and hover directly selects pause-menu rows. Left-click Resume and right-click
+  Back were also exercised.
+
+Latest run: `out/mouse-native/acceptance-final.log`, with captures
+`track-wheel-preserved.png`, `track-wheel-start.png`, `final-library-row.png`,
+`final-library-header.png`, `final-game.png` and `final-pause.png` in that directory.
+These local validation artifacts are ignored by Git. The test instance was left
+paused after the checks.
+
+The native mouse executable passes 152 assertions. CTest passes all seven relevant
+suites: `native_mouse`, `launcher_remap`, `launcher_launch`, `launcher_nav`,
+`settings_service`, `settings_store` and `settings_migration`.

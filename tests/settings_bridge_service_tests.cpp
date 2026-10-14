@@ -109,15 +109,21 @@ struct Harness {
 void TestTextFormEditsTheRealStore() {
   BeginCase("the text form a DTA script writes reaches settings.toml");
   Harness h;
-  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:1").status == Status::kOk);
+  // Stage *the other* value of the row: its compiled default is `true` (it took the setting over
+  // from the launcher flag, P11b) and a commit that writes the value a row already holds is
+  // `kNoChanges`, so writing `b:1` here would test nothing.
+  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+                    (before ? "0" : "1"))
+                 .status == Status::kOk);
   const Response commit = h.Send("rbbz-settings/commit/-/-");
   CHECK_TRUE(commit.status == Status::kOk);
   CHECK_TRUE(h.sink.last_commit_durable());
   CHECK_TRUE(h.sink.saved_revision() != 0);
 
   // The read half is the membership probe: exactly what a row draws its own state from.
-  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(true)));
-  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(false)));
+  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(!before)));
+  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(before)));
 
   // The change is reported once, by its token, for the application-strategy seam.
   CHECK_TRUE(h.sink.last_commit_changes().size() == 1);
@@ -132,7 +138,7 @@ void TestTextFormEditsTheRealStore() {
   Service again(h.paths);
   MigrationResult migration;
   again.Boot(nullptr, PathEntry{}, &migration, true);
-  CHECK_TRUE(again.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
+  CHECK_TRUE(again.EffectiveValue(SettingId::kCacheDlcLibrary).boolean == !before);
   CHECK_TRUE(again.EffectiveSource(SettingId::kCacheDlcLibrary) == Source::kSettingsFile);
 }
 
@@ -257,10 +263,16 @@ void TestProviderGateAndUnknownTokens() {
 void TestCancelAndRestart() {
   BeginCase("cancelling restores the field, and the restart request is recorded");
   Harness h;
-  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:1").status == Status::kOk);
-  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(true)));
+  // Stage the row's *other* value: `b:1` is its compiled default and a commit of an unchanged row
+  // is `kNoChanges` (see `TestTextFormEditsTheRealStore`), so the field has to move for the cancel
+  // to have something to restore.
+  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+                    (before ? "0" : "1"))
+                 .status == Status::kOk);
+  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(!before)));
   CHECK_TRUE(h.Send("rbbz-settings/cancel-field/general.cache_dlc_library/-").status == Status::kOk);
-  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(true)));
+  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(!before)));
   CHECK_TRUE(h.Send("rbbz-settings/cancel/-/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   CHECK_TRUE(h.sink.last_commit_changes().empty());
@@ -280,8 +292,12 @@ void TestRestartPendingFollowsTheQuery() {
   CHECK_TRUE(!h.sink.restart_pending());
   CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(false)));
 
-  // A restart-scoped commit sets the sticky bit.
-  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:1").status == Status::kOk);
+  // A restart-scoped commit sets the sticky bit. The row has to actually move for the commit to
+  // save anything (see `TestTextFormEditsTheRealStore`), so stage its other value.
+  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+                    (before ? "0" : "1"))
+                 .status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   CHECK_TRUE(h.sink.restart_pending());
   CHECK_TRUE(h.Holds("restart.pending", WireValue::Bool(true)));

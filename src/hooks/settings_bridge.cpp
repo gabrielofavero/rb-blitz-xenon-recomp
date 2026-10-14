@@ -256,6 +256,21 @@ bool IsNamespacedPath(std::string_view path) {
   return path.size() > kPrefix.size() && path.substr(0, kPrefix.size()) == kPrefix;
 }
 
+namespace {
+// The registered caption sink. One pointer, written once on the UI thread before the guest thread
+// exists (the overlay dialog is created there) and read on the guest thread by the hook half -
+// the same registration shape as SettingsBoot::SetCurrent().
+HelpSink* g_help_sink = nullptr;
+// The provider gate, set once by the boot's seeding (settings_bridge_hooks.cpp, host thread).
+bool g_provider_gate_active = false;
+}  // namespace
+
+void SetHelpSink(HelpSink* sink) { g_help_sink = sink; }
+HelpSink* GetHelpSink() { return g_help_sink; }
+
+void SetProviderGateActive(const bool active) { g_provider_gate_active = active; }
+bool ProviderGateActive() { return g_provider_gate_active; }
+
 const char* OpToken(const Op op) {
   switch (op) {
     case Op::kSnapshot: return "snapshot";
@@ -266,6 +281,7 @@ const char* OpToken(const Op op) {
     case Op::kCancelEdit: return "cancel";
     case Op::kInvoke: return "invoke";
     case Op::kRequestRestart: return "restart";
+    case Op::kHelp: return "help";
     case Op::kUnknown: return "";
   }
   return "";
@@ -273,7 +289,7 @@ const char* OpToken(const Op op) {
 
 Op OpFromToken(const std::string_view token) {
   for (const Op op : {Op::kSnapshot, Op::kBeginEdit, Op::kSet, Op::kCancelField, Op::kCommit,
-                      Op::kCancelEdit, Op::kInvoke, Op::kRequestRestart}) {
+                      Op::kCancelEdit, Op::kInvoke, Op::kRequestRestart, Op::kHelp}) {
     if (token == OpToken(op)) {
       return op;
     }
@@ -735,6 +751,13 @@ Response MemorySink::Handle(const Request& request) {
       break;
     case Op::kRequestRestart:
       response.message = "restart requested";
+      break;
+    case Op::kHelp:
+      // A caption event is one-way and the hook half routes it before the dispatcher, so reaching
+      // here means a caller dispatched it by hand; answer rather than silently treating it as an
+      // edit.
+      status = Status::kUnsupported;
+      response.message = "a caption event is not a store request";
       break;
     case Op::kUnknown:
       status = Status::kUnknownOp;

@@ -74,7 +74,6 @@
 
 #include <string>
 #include <map>
-#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -292,6 +291,27 @@ bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, std::string_view key, std
 // Every request path the definition writes or asks, in a stable order. The test parses each one
 // with the bridge's own text grammar, so a grammar change breaks a test rather than a boot.
 std::vector<std::string> RequestPaths();
+
+// ------------------------------------------------------------------------------------------------
+// The help captions (owner request, 2026-10-13)
+// ------------------------------------------------------------------------------------------------
+// Every row of the surface carries a one- or two-line description. While a row is highlighted, the
+// generated DTA publishes its **canonical** symbol through the settings channel
+// (`rbbz-settings/help/<symbol>/-`; `help/-/-` when the surface is left - see `HelpWrite` in the
+// .cpp), and the host's help overlay draws the description below the game as a subtitle. These are
+// the host-side half: the lookup the overlay performs, and the enumeration the tests walk.
+
+// The longest text the table may carry. The overlay wraps at its own width; the bound is the
+// "short, 1-2 lines" contract from the request, enforced by tests/settings_screen_tests.cpp.
+inline constexpr size_t kMaxHelpTextChars = 128;
+
+// The description registered for a row's canonical symbol, or empty when there is none (the
+// overlay treats empty as "nothing to show", which is also what an unknown symbol gets).
+std::string HelpTextFor(std::string_view symbol);
+
+// Every canonical row symbol of the surface, de-duplicated, in declaration order. A row cannot be
+// reachable without being in here, and the test proves each has text by looking it up.
+std::vector<std::string> HelpSymbols();
 
 // Appends `<key>` -> `<text>` to a locale definition, the shape every locale file in this title
 // uses (an array of exactly two elements). Refuses when the key already exists, so a shadow copy

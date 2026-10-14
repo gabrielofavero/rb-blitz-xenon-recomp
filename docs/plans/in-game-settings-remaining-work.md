@@ -182,11 +182,77 @@ screen and asked for the boot to be as fast as it can be. Both were measured:
   **39 s for 2,804 items** with the frame rate free (`vsync false, was true` … restored at the last
   item). The only lever left on that screen is the render cost of the discovery itself.
 
+### Row descriptions — a caption for the highlighted row (owner request, 2026-10-13, latest)
+
+The owner asked that every setting explain itself: while a row is highlighted, a short description
+(one or two lines) appears at the bottom of the screen like a subtitle — white text in a translucent
+black box — for **every** row of the surface, the merged and Ultimate rows and the retail pages the
+merge adopts alike.
+
+It is an event, not an approximation of the highlight. The generated DTA publishes the highlighted
+row's **canonical symbol** through the settings channel (`rbbz-settings/help/<symbol>/-`, the new
+one-way `help` op; `help/-/-` when the page is left) and the host draws whatever that symbol resolves
+to. The moving tables write on every move, the page's `{enter}` writes its first visible row, and
+every way out writes the hide — so the caption cannot lag the highlight.
+
+* **Our pages**: the text lives beside the row definition (one description per row, ~70, in
+  [settings_screen.cpp](../../src/ui/settings_screen.cpp), exposed as `screen::HelpTextFor`), and
+  the writes are authored into the same generated tree the rows are (`HelpWrite` /
+  `EnterHelpWrite`).
+* **The retail pages and the in-song pause list**: no DTA of ours runs there, so
+  [help_observer.cpp](../../src/hooks/help_observer.cpp) reads the frame's screen and focused list —
+  state the existing UIManager hook ([native_menu.cpp](../../src/input/native_menu.cpp)) already
+  publishes — once per frame and resolves it against
+  [help_topics.cpp](../../src/ui/help_topics.cpp): the retail AV rows, How to Play's two rows, the
+  calibration picker and the controller-preset page. Ownership is explicit (the observer clears only
+  a caption it published), so the guest's own entry event is never erased.
+* **The overlay**: [help_overlay.cpp](../../src/ui/help_overlay.cpp), an ordinary SDK `ImGuiDialog`
+  (the achievement toast's mechanism), bottom-centre, wrapped at 72% of the display size, with
+  `settings_help_overlay` (default on) re-read every frame. Nothing is taken from retail's subtitle
+  system: it is a host overlay, which is why it is exact rather than a pixel guess.
+
+Evidence: the `settings_screen` suite is **26,518 checks** and the `settings_bridge` suite **343
+checks**, both exit 0, in the Vulkan-off Debug tree the note below describes. The three new cases
+cover every row's text, the definition's entry/move/hide writes, and the retail/in-song resolution,
+and the bridge suite parses both text forms of the `help` op. **Not yet seen by a human**: the
+caption on a running screen still has to be driven (the harness in `out/_swap/settings-audit` is the
+place).
+
+### How the test tree stands after the Vulkan preset change (measured 2026-10-13, later)
+
+Two findings from running the suite for the captions, both worth acting on:
+
+* **No Windows preset can build a test right now.** `REXGLUE_USE_VULKAN=ON` (added to `windows-base`
+  the same day) makes the SDK's glslang guard —
+  `set(BUILD_TESTING OFF CACHE BOOL "" FORCE)` in
+  [rexglue-sdk/thirdparty/CMakeLists.txt](../../rexglue-sdk/thirdparty/CMakeLists.txt), inside the
+  Vulkan block — write `BUILD_TESTING=OFF` into the cache, and the SDK is configured
+  ([CMakeLists.txt](../../CMakeLists.txt) line 36) *before* `include(CTest)` (line 341). That is why
+  the release tree's `BUILD_TESTING` is OFF, and it means the **37/37 figure cannot be reproduced
+  from the presets** until either the SDK guard is scoped to glslang or the project restores its own
+  request after the SDK is configured. A Vulkan-off tree configured with `-DBUILD_TESTING=ON` builds
+  every test target and runs **37/37**.
+* **Three settings tests were stale about `general.cache_dlc_library`, and they are fixed**
+  (2026-10-13, later the same day). The row defaults to **true**
+  ([schema.cpp](../../src/settings/schema.cpp)) and a commit that writes the value a row already
+  holds is `kNoChanges` ([service.cpp](../../src/settings/service.cpp) line 549), while
+  `settings_service`, `settings_migration` and `settings_bridge_service` all staged, imported or
+  wrote that row as if the old default still held. They now stage the row's *other* value; the
+  migration case expects one more import and its comment names the P11b default flip as the reason.
+  `settings_bridge_service` used to index the empty change list (`.at(0)`) and **abort** - the modal
+  *Debug Error … abort() has been called* a direct run showed - and now passes with 91 checks. The
+  abort and the three failures were pre-existing: two of the targets compile no file of the caption
+  change, and the third reproduced the abort with the caption change stashed.
+* **One flake.** `game_restart`'s `process: the child really waits for the parent to exit` case
+  asserts `elapsed_ms >= 900` from a real child process; it measured 0 once while a build was running
+  in parallel and passed 185/185 twice on an idle machine.
+
 ## Remaining acceptance work
 
-1. **Run the final acceptance matrix when requested.** The unit and integration suites are
-   **37/37 green** as of 2026-10-13 (release preset), including the rewritten UI expectations of the
-   punch list above. What has not happened is the *interactive* pass over the new surface: no one
+1. **Run the final acceptance matrix when requested.** The suites are **37/37 green** as of
+   2026-10-13 (later) in the Vulkan-off Debug tree the note above describes — the caption cases and
+   the three repaired settings tests included. They cannot be measured from the presets as they
+   stand (see that note). What has not happened is the *interactive* pass over the new surface: no one
    has driven the merged menu since the punch list landed, so items 2 (A advancing and wrapping),
    3 (the restart prompt only on leaving), 6/7 (On/Off and `: On` in every language) and 10
    (Borderless) are asserted by tests and by the payload's own records, not yet by a person looking

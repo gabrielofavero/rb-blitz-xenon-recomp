@@ -3,6 +3,7 @@
 #include "input/native_menu.h"
 #include <rex/hook.h>
 #include <rex/cvar.h>
+#include "hooks/help_observer.h"
 #include <bit>
 #include <cstring>
 #include <mutex>
@@ -54,6 +55,9 @@ MenuMouseQueue queue;
 bool window_focused = false;
 bool menu_available = false;
 uint32_t current_screen = 0, current_focus = 0;
+// The focused list the previous frame's draw identified (see DrawList). Read by the help caption
+// observer; 0 when no list has been drawn as the focused component yet.
+uint32_t focused_list_drawn = 0;
 
 struct Geometry {
   uint32_t list = 0, frame = 0;
@@ -144,6 +148,23 @@ void QueueMenuWheel(int delta) {
 uint16_t MenuMousePadState() {
   std::lock_guard lock(mutex);
   return MouseSupportEnabled() ? queue.pulse() : 0;
+}
+
+uint32_t CurrentScreen() {
+  std::lock_guard lock(mutex);
+  return current_screen;
+}
+uint32_t CurrentFocus() {
+  std::lock_guard lock(mutex);
+  return current_focus;
+}
+uint32_t FocusedListDrawn() {
+  std::lock_guard lock(mutex);
+  return focused_list_drawn;
+}
+bool MenuAvailable() {
+  std::lock_guard lock(mutex);
+  return menu_available;
 }
 
 void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
@@ -290,6 +311,14 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
 }
 void DrawList(PPCContext& ctx, uint8_t* base) {
   const uint32_t list = ctx.r5.u32 - 176;
+  // Record the focused list's identity for the help caption observer (src/hooks/help_observer.cpp)
+  // before the mouse-specific early-outs: this is the only place a list is *positively* identified
+  // as the focused component by the engine itself, and the observer must not depend on the mouse
+  // navigation being enabled.
+  if (!ctx.r9.u32 && list != 0 && list == current_focus && menu_available) {
+    std::lock_guard lock(mutex);
+    focused_list_drawn = list;
+  }
   if (!MouseSupportEnabled() || ctx.r9.u32 || list != current_focus || !menu_available) {
     __imp__sub_824E5020(ctx, base); return;
   }
@@ -355,6 +384,14 @@ REX_HOOK_RAW(sub_824B2958) {
   rb_blitz::input::PollMouse(ctx, base, manager);
   __imp__sub_824B2958(ctx, base);
   rb_blitz::input::Context(ctx, base, manager);
+  // The help captions' observer (owner request, 2026-10-13): the frame's input has been
+  // dispatched by now, so a selection that moved this frame is already visible and the observer
+  // can publish its row's description - or retire a caption when the surface was left.
+  rb_blitz::hooks::HelpObserverTick(ctx, base,
+                                    {rb_blitz::input::CurrentScreen(),
+                                     rb_blitz::input::CurrentFocus(),
+                                     rb_blitz::input::FocusedListDrawn(),
+                                     rb_blitz::input::MenuAvailable()});
 }
 REX_HOOK_RAW(sub_824E5020) {
   rb_blitz::input::DrawList(ctx, base);

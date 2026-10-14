@@ -224,6 +224,7 @@ const char* OpName(const Op op) {
     case Op::kCancelEdit: return "cancel_edit";
     case Op::kInvoke: return "invoke";
     case Op::kRequestRestart: return "request_restart";
+    case Op::kHelp: return "help";
   }
   return "?";
 }
@@ -258,6 +259,17 @@ void HandleRequest(const std::string_view path) {
   std::string error;
   if (!ParseAnyRequest(path, &request, &error)) {
     LogRejection("malformed", path, error);
+    return;
+  }
+  // The caption event (owner request 2026-10-13) is the one request that is not an edit: it is
+  // delivered to whatever is drawing the help overlay and never reaches the store, so it is routed
+  // here, before the dispatcher, and answered like any other write by the caller (there is no
+  // result to build). No sink means no overlay in this build; the request is still consumed.
+  if (request.op == Op::kHelp) {
+    if (HelpSink* sink = GetHelpSink()) {
+      sink->Show(request.setting);
+    }
+    REXLOG_DEBUG("settings_bridge: help '{}'", request.setting.empty() ? "-" : request.setting);
     return;
   }
   const Response response = g_dispatcher.Dispatch(request);
@@ -382,6 +394,9 @@ void SeedProvider() {
   const ::rb_blitz::settings::ultimate_adapter::ProviderRuntime& provider =
       ::rb_blitz::ultimate::Provider();
   const bool active = forced || provider.Active();
+  // The gate is also cached for guest-thread callers (the help observer reads it every menu
+  // frame); this is the one place it is set, on a host thread.
+  SetProviderGateActive(active);
 
   int seeded = 0;
   for (const ProviderBinding& binding : ::rb_blitz::settings::ultimate_adapter::RowBindings()) {

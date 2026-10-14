@@ -80,6 +80,7 @@
 #include "launcher/profile_apply.h"
 #include "settings/boot.h"
 #include "platform/game_restart.h"
+#include "ui/help_overlay.h"
 #include "util/sha256.h"
 
 // The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
@@ -378,6 +379,15 @@ class RbBlitzApp : public rex::ReXApp {
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
     mouse_cursor_ = rb_blitz::input::CreateMouseMenuCursor(drawer, [this] { return window(); });
 
+    // The help captions (owner request, 2026-10-13): a subtitle at the bottom of the screen that
+    // describes the highlighted settings row. It is fed by the guest's own caption events (the
+    // generated DTA writes `rbbz-settings/help/<symbol>/-`, routed through the settings bridge)
+    // and by the retail-page observer (src/hooks/help_observer.cpp); both resolve against the
+    // tables in src/ui/settings_screen.cpp and src/ui/help_topics.h. Creating it registers the
+    // bridge's caption sink; whether it draws is the `settings_help_overlay` cvar's decision,
+    // re-read every frame, which is what makes the toggle live.
+    help_overlay_ = rb_blitz::ui::help::CreateOverlay(drawer);
+
     probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
       rb_blitz::diag::WindowState state;
       const rex::ui::Window* w = window();
@@ -475,6 +485,9 @@ class RbBlitzApp : public rex::ReXApp {
   // is destroyed, which happens before ~ReXApp() tears the drawer down.
   std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
   std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
+  // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
+  // bridge's caption sink, because the sink object lives beside the dialog.
+  std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
 
   // What the launcher's profile contributed at OnConfigurePaths, reported once logging exists.
   rb_blitz::launcher::ProfileApplyReport profile_apply_;

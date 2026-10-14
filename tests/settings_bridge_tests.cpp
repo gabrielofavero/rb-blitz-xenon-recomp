@@ -336,6 +336,10 @@ void TestTextRequestGrammar() {
       {"rbbz-settings/cancel/-/-", Op::kCancelEdit, "", ValueKind::kNone},
       {"rbbz-settings/cancel-field/interface.hide_hud/-", Op::kCancelField,
        "interface.hide_hud", ValueKind::kNone},
+      // The caption event (owner request, 2026-10-13): the highlighted row's canonical symbol, and
+      // `-` when the settings surface was left. One-way; the store is never asked about it.
+      {"rbbz-settings/help/settings_vsync/-", Op::kHelp, "settings_vsync", ValueKind::kNone},
+      {"rbbz-settings/help/-/-", Op::kHelp, "", ValueKind::kNone},
       // A path with no trailing segments at all is the minimal legal form.
       {"rbbz-settings/invoke", Op::kInvoke, "", ValueKind::kNone},
   };
@@ -376,8 +380,10 @@ void TestTextRequestGrammar() {
   // The op vocabulary is shared with the binary form's names.
   CHECK_TRUE(OpFromToken("set") == Op::kSet);
   CHECK_TRUE(OpFromToken("commit") == Op::kCommit);
+  CHECK_TRUE(OpFromToken("help") == Op::kHelp);
   CHECK_TRUE(OpFromToken("nonsense") == Op::kUnknown);
   CHECK_TRUE(std::string(OpToken(Op::kSnapshot)) == "snapshot");
+  CHECK_TRUE(std::string(OpToken(Op::kHelp)) == "help");
 }
 
 void TestTextRequestRefusals() {

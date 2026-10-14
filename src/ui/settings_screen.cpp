@@ -70,14 +70,29 @@ std::string Path(const std::string_view op, const std::string_view setting,
   return out;
 }
 
+// `{write_file "rbbz-settings/help/<symbol>/-" 0}` - the caption event (owner request,
+// 2026-10-13). It rides the settings channel's write side exactly like a set/commit, but carries no
+// value and expects no answer: the host routes it to the help overlay, which shows the description
+// registered for `symbol`. `-` means "no row" and hides the caption - what every leave emits.
+// The symbol is the row's *canonical* name (`settings_vsync`), never one of its `_on`/`_off`/
+// choice spellings, because the caption describes the row and not its current value.
+Node HelpWrite(const std::string_view symbol) {
+  return Write(Path("help", symbol.empty() ? "-" : symbol, "-"));
+}
+
 // `{ui goto_screen {{ui current_screen} get back_screen}}` - how a panel hosted by more than one
 // screen leaves: it asks the *current screen object* where back is rather than naming a
 // destination. Transcribed from the shipped ui/av_options/gen/av_options.dtb, whose
 // `av_options_panel` is hosted by both `av_options_screen` and `av_options_pause_screen` and leaves
 // through exactly this statement.
 Node Leave() {
-  return Cmd({Sym("ui"), Sym("goto_screen"),
-              Cmd({Cmd({Sym("ui"), Sym("current_screen")}), Sym("get"), Sym("back_screen")})});
+  return Cmd({Sym("do"),
+              // Leaving the page retires its caption first; whatever the destination draws next
+              // (its own entry event, or the retail observer's table) then takes over.
+              HelpWrite(""),
+              Cmd({Sym("ui"), Sym("goto_screen"),
+                   Cmd({Cmd({Sym("ui"), Sym("current_screen")}), Sym("get"),
+                        Sym("back_screen")})})});
 }
 
 // Entering a screen of ours: point it back at whoever sent us, then go. The return target is set
@@ -95,6 +110,9 @@ Node EnterScreen(const std::string_view screen) {
 // av_options), `cancel_screen` for `cal_welcome_screen`.
 Node EnterRetail(const std::string_view screen, const std::string_view member) {
   return Cmd({Sym("do"),
+              // Our row's caption ends here; a retail page either has a table of its own (the
+              // screen observer publishes it when the screen becomes current) or shows nothing.
+              HelpWrite(""),
               Cmd({Sym(screen), Sym("set"), Sym(member),
                    Cmd({Sym("ui"), Sym("current_screen")})}),
               Cmd({Sym("ui"), Sym("goto_screen"), Sym(screen)})});
@@ -249,6 +267,12 @@ struct Row {
   std::string screen;
   std::string member;
   std::string label;
+  // The one to two line caption the help overlay shows while this row is highlighted (owner
+  // request, 2026-10-13). Every row carries one; the factories below take it as a required
+  // argument so a row cannot be added without it, and tests/settings_screen_tests.cpp fails a row
+  // whose text is empty. 1-2 lines is a layout contract: the overlay wraps at a fixed width, so
+  // the table's texts stay under `kMaxHelpColumns` characters.
+  std::string description;
   std::string prefix = "t:";  // the wire spelling of a value: `t:` token, `i:` integer
   bool provider_only = false;
   // A boolean whose *setting* is the negative of what its label says: `Depth of Field: On` is the
@@ -268,12 +292,14 @@ struct PanelSpec {
   std::string message;
 };
 
-Row BoolRow(const char* symbol, const char* setting, const char* label, bool provider_only = false) {
+Row BoolRow(const char* symbol, const char* setting, const char* label, const char* description,
+            bool provider_only = false) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kBool;
   row.setting = setting;
   row.label = label;
+  row.description = description;
   row.provider_only = provider_only;
   return row;
 }
@@ -281,86 +307,94 @@ Row BoolRow(const char* symbol, const char* setting, const char* label, bool pro
 // The same row, drawn with the opposite sense: `label` says what "On" means, and the setting it
 // writes is the negative of that (the provider's `disable_dof`).
 Row InvertedBoolRow(const char* symbol, const char* setting, const char* label,
-                    bool provider_only = false) {
-  Row row = BoolRow(symbol, setting, label, provider_only);
+                    const char* description, bool provider_only = false) {
+  Row row = BoolRow(symbol, setting, label, description, provider_only);
   row.inverted = true;
   return row;
 }
 
-Row SelectRow(const char* symbol, const char* setting, const char* label,
+Row SelectRow(const char* symbol, const char* setting, const char* label, const char* description,
               std::vector<Choice> choices, bool provider_only = false, const char* prefix = "t:") {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kSelect;
   row.setting = setting;
   row.label = label;
+  row.description = description;
   row.prefix = prefix;
   row.provider_only = provider_only;
   row.choices = std::move(choices);
   return row;
 }
 
-Row SubmenuRow(const char* symbol, const char* screen, const char* label,
+Row SubmenuRow(const char* symbol, const char* screen, const char* label, const char* description,
                bool provider_only = false) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kSubmenu;
   row.screen = screen;
   row.label = label;
+  row.description = description;
   row.provider_only = provider_only;
   return row;
 }
 
 Row BoolSubmenuRow(const char* symbol, const char* setting, const char* screen, const char* label,
-                   bool provider_only = false) {
+                   const char* description, bool provider_only = false) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kBoolSubmenu;
   row.setting = setting;
   row.screen = screen;
   row.label = label;
+  row.description = description;
   row.provider_only = provider_only;
   return row;
 }
 
 Row ChooseRow(const char* symbol, const char* setting, const char* token, const char* label,
-              bool provider_only = false) {
+              const char* description, bool provider_only = false) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kChoose;
   row.setting = setting;
   row.label = label;
+  row.description = description;
   row.provider_only = provider_only;
   row.choices = {Choice{token, label}};
   return row;
 }
 
-Row ActionRow(const char* symbol, const char* setting, const char* label,
+Row ActionRow(const char* symbol, const char* setting, const char* label, const char* description,
               bool provider_only = false) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kAction;
   row.setting = setting;
   row.label = label;
+  row.description = description;
   row.provider_only = provider_only;
   return row;
 }
 
-Row InfoRow(const char* symbol, const char* label) {
+Row InfoRow(const char* symbol, const char* label, const char* description) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kInfo;
   row.label = label;
+  row.description = description;
   return row;
 }
 
-Row RouteRow(const char* symbol, const char* screen, const char* member, const char* label) {
+Row RouteRow(const char* symbol, const char* screen, const char* member, const char* label,
+             const char* description) {
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kRoute;
   row.screen = screen;
   row.member = member;
   row.label = label;
+  row.description = description;
   return row;
 }
 
@@ -418,27 +452,36 @@ std::vector<PanelSpec> AllPanels() {
   // 0. The merged root: six rows, the retail three at their retail positions.
   out.push_back(PanelSpec{kRootPanel, kRootScreen, "splash_screen", MenuPanels(),
                           {
-                              SubmenuRow("settings_general", "settings_general_screen", "General"),
-                              RouteRow("controls", "controller_config_screen", "back_screen", ""),
-                              RouteRow("calibration", "cal_welcome_screen", "cancel_screen", ""),
-                              SubmenuRow("audio_video_options", "settings_av_screen", ""),
+                              SubmenuRow("settings_general", "settings_general_screen", "General",
+                                         "Target, downloadable content, achievements, and the game's own pages."),
+                              RouteRow("controls", "controller_config_screen", "back_screen", "",
+                                       "Choose the controller mapping used during play."),
+                              RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
+                                       "Line up the audio and video so notes hit in time with the music."),
+                              SubmenuRow("audio_video_options", "settings_av_screen", "",
+                                         "Video, graphics, and audio settings."),
                               SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay",
-                                         true),
+                                         "Gameplay changes provided by the Ultimate mod.", true),
                               SubmenuRow("settings_interface", "settings_interface_screen",
-                                         "Interface"),
+                                         "Interface", "HUD, letterboxing, and hidden main-menu entries."),
                           }});
 
   // 1. General: the four rows the plan puts here, plus the two retail screens it adopts.
   out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen,
                           MenuPanels(),
                           {
-                              SubmenuRow("settings_target", "settings_target_screen", "Target"),
+                              SubmenuRow("settings_target", "settings_target_screen", "Target",
+                                         "Choose which edition starts: Rock Band Blitz, Ultimate, or the Demo."),
                               SubmenuRow("settings_dlc", "settings_dlc_screen",
-                                         "Downloadable Content"),
+                                         "Downloadable Content",
+                                         "Scanning and caching options for your downloadable-content library."),
                               SubmenuRow("settings_achievements", "settings_achievements_screen",
-                                         "Achievements & Unlocks", true),
-                              RouteRow("tutorial", "tutorials_screen", "back_screen", ""),
-                              RouteRow("credits", "credits_screen", "back_screen", ""),
+                                         "Achievements & Unlocks",
+                                         "Unlock the game's content and its online-only achievements.", true),
+                              RouteRow("tutorial", "tutorials_screen", "back_screen", "",
+                                       "Watch the game's how-to-play tutorials."),
+                              RouteRow("credits", "credits_screen", "back_screen", "",
+                                       "View the game's credits."),
                           }});
 
   // 1a. Target: choose one, commit, leave. `ultimate_mode`/`license_mask` are consumed before
@@ -450,11 +493,12 @@ std::vector<PanelSpec> AllPanels() {
                           MenuPanels(),
                           {
                               ChooseRow("settings_target_common", "general.target", "common",
-                                        "Rock Band Blitz"),
+                                        "Rock Band Blitz", "Start the base Rock Band Blitz."),
                               ChooseRow("settings_target_ultimate", "general.target", "ultimate",
-                                        "Rock Band Blitz Ultimate"),
+                                        "Rock Band Blitz Ultimate",
+                                        "Start Rock Band Blitz with the Ultimate mod's features."),
                               ChooseRow("settings_target_demo", "general.target", "demo",
-                                        "Rock Band Blitz Demo"),
+                                        "Rock Band Blitz Demo", "Start the Rock Band Blitz demo."),
                           }});
 
   // 1b. Downloadable Content.
@@ -462,9 +506,11 @@ std::vector<PanelSpec> AllPanels() {
                           MenuPanels(),
                           {
                               BoolRow("settings_dlc_cache", "general.cache_dlc_library",
-                                      "Cache DLC Library"),
+                                      "Cache DLC Library",
+                                      "Remember the content list so later boots skip the long library scan."),
                               SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
                                         "DLC Scan Threads",
+                                        "How many threads scan your packages. More threads scan faster.",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
                           }});
@@ -474,10 +520,12 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_general_screen", MenuPanels(),
                           {
                               BoolRow("settings_unlock_all", "general.unlock_all", "Unlock All",
+                                      "Unlock everything, including songs, plots, and power-ups.",
                                       true),
                               ActionRow("settings_unlock_online",
                                         "general.unlock_online_achievements",
-                                        "Unlock Online Only Achievements", true),
+                                        "Unlock Online Only Achievements",
+                                        "Grant the achievements that normally need online play.", true),
                           }});
 
   // 3. Audio / Video: the Video group is ours, the Audio group is retail's own page (its rows are
@@ -485,9 +533,10 @@ std::vector<PanelSpec> AllPanels() {
   // honest - `av_options_screen` is the page that owns them).
   out.push_back(PanelSpec{"settings_av_panel", "settings_av_screen", kRootScreen, MenuPanels(),
                           {
-                              SubmenuRow("settings_video", "settings_video_screen", "Video"),
+                              SubmenuRow("settings_video", "settings_video_screen", "Video",
+                                         "Display, resolution, graphics, and renderer options."),
                               RouteRow("settings_audio", "av_options_screen", "back_screen",
-                                       "Audio"),
+                                       "Audio", "Volume options plus overscan and bass boost."),
                           }});
 
   // 3a. Video: three entries - the two groups and the backend. Retail's own Overscan row stays on
@@ -497,10 +546,12 @@ std::vector<PanelSpec> AllPanels() {
                           MenuPanels(),
                           {
                               SubmenuRow("settings_display_menu", "settings_display_screen",
-                                         "Display"),
+                                         "Display", "Window mode, render size, and V-Sync."),
                               SubmenuRow("settings_graphics_menu", "settings_graphics_screen",
-                                         "Graphics"),
+                                         "Graphics",
+                                         "Rendering quality: anti-aliasing, filtering, and depth of field."),
                               SelectRow("settings_renderer", "graphics.renderer", "Renderer",
+                                        "Which graphics backend renders the game. Restart to apply.",
                                         Choices({"d3d12", "D3D12", "vulkan", "Vulkan"})),
                           }});
 
@@ -509,13 +560,16 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_video_screen", MenuPanels(),
                           {
                               SelectRow("settings_display", "graphics.display", "Display",
+                                        "Run the game windowed, borderless, or full screen.",
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
                               SelectRow("settings_resolution", "graphics.resolution", "Resolution",
+                                        "The size the game renders and presents at.",
                                         Choices({"1280x720", "1280x720", "1920x1080", "1920x1080",
                                                  "2560x1440", "2560x1440", "3840x2160",
                                                  "3840x2160"})),
-                              BoolRow("settings_vsync", "graphics.vsync", "V-Sync"),
+                              BoolRow("settings_vsync", "graphics.vsync", "V-Sync",
+                                      "Match the frame rate to your display to remove screen tearing."),
                           }});
 
   // 3a-ii. Graphics: the render-path rows, with Depth of Field moved here from Gameplay and drawn
@@ -525,14 +579,18 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_video_screen", MenuPanels(),
                           {
                               BoolSubmenuRow("settings_aa", "graphics.anti_aliasing",
-                                             "settings_aa_screen", "Anti-Aliasing"),
+                                             "settings_aa_screen", "Anti-Aliasing",
+                                             "Smooth jagged edges at a quality or performance cost."),
                               SelectRow("settings_filtering", "graphics.filtering",
                                         "Anisotropic Filtering",
+                                        "Sharpen textures seen at an angle. Higher values cost more performance.",
                                         Choices({"native", "Native", "none", "None", "1x", "1x",
                                                  "2x", "2x", "4x", "4x", "8x", "8x", "16x",
                                                  "16x"})),
                               InvertedBoolRow("settings_dof", "gameplay.disable_dof",
-                                              "Depth of Field", true),
+                                              "Depth of Field",
+                                              "Blur distant scenery for a cinematic look. Turn off for a cleaner image.",
+                                              true),
                           }});
 
   // 3b. Anti-aliasing: the compound row's choice list, "None" included (the Force-Skybox model).
@@ -540,13 +598,15 @@ std::vector<PanelSpec> AllPanels() {
                           MenuPanels(),
                           {
                               ChooseRow("settings_aa_none", "graphics.anti_aliasing", "none",
-                                        "None"),
+                                        "None", "No anti-aliasing: fastest, with visible jagged edges."),
                               ChooseRow("settings_aa_native", "graphics.anti_aliasing", "native",
-                                        "Native (2x)"),
+                                        "Native (2x)",
+                                        "The game's built-in 2x multisampling: a good quality-speed balance."),
                               ChooseRow("settings_aa_fxaa", "graphics.anti_aliasing", "fxaa",
-                                        "FXAA"),
+                                        "FXAA", "Fast post-process smoothing that can soften fine details."),
                               ChooseRow("settings_aa_fxaa_extreme", "graphics.anti_aliasing",
-                                        "fxaa_extreme", "FXAA Extreme"),
+                                        "fxaa_extreme", "FXAA Extreme",
+                                        "A stronger FXAA pass: less jagged, a little softer."),
                           }});
 
   // 4. Gameplay (provider only; the root row that appears with it is what makes the root six):
@@ -556,19 +616,23 @@ std::vector<PanelSpec> AllPanels() {
                           MenuPanels(),
                           {
                               SelectRow("settings_camera", "gameplay.camera_angle", "Camera Angle",
+                                        "How high the camera sits while you play.",
                                         Choices({"default", "Default", "high", "High", "low",
                                                  "Low"}),
                                         true),
                               SelectRow("settings_speed", "gameplay.game_speed", "Game Speed",
+                                        "Play the song faster than its normal speed.",
                                         Choices({"100", "100%", "105", "105%", "110", "110%",
                                                  "115", "115%", "120", "120%", "125", "125%",
                                                  "130", "130%", "135", "135%", "140", "140%",
                                                  "145", "145%", "150", "150%"}),
                                         true, "i:"),
                               SubmenuRow("settings_tracks_menu", "settings_tracks_screen",
-                                         "Tracks & Gems", true),
+                                         "Tracks & Gems",
+                                         "Note, gem, and track appearance options.", true),
                               SubmenuRow("settings_plots", "settings_plots_screen",
-                                         "Plots & Skyboxes", true),
+                                         "Plots & Skyboxes",
+                                         "Choose what scenery plays behind the track.", true),
                           }});
 
   // 4a. Tracks & Gems: the note-shape rows the provider owns.
@@ -576,10 +640,15 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_gameplay_screen", MenuPanels(),
                           {
                               BoolRow("settings_precision", "gameplay.precision_mode",
-                                      "Precision Mode", true),
+                                      "Precision Mode",
+                                      "An alternate note style that shows hit timing more precisely.",
+                                      true),
                               BoolRow("settings_wiggles", "gameplay.disable_random_wiggles",
-                                      "Disable Random Track Wiggles", true),
+                                      "Disable Random Track Wiggles",
+                                      "Turn off the random wobble that jitters the track and notes.",
+                                      true),
                               SelectRow("settings_gems", "gameplay.gems", "Gems",
+                                        "Which gem and note style is drawn.",
                                         Choices({"default", "Default", "freq", "Freq", "amp2003",
                                                  "Amp 2003", "amp2016", "Amp 2016", "monkey",
                                                  "Monkey", "ulti", "Ulti", "x", "X", "bolt",
@@ -594,13 +663,16 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_gameplay_screen", MenuPanels(),
                           {
                               BoolRow("settings_disable_plots", "gameplay.disable_plots",
-                                      "Disable Plots", true),
+                                      "Disable Plots",
+                                      "Play the tracks without any scenery behind them.", true),
                               SelectRow("settings_force_plot", "gameplay.forceplot", "Force Plot",
+                                        "Force a scenery plot instead of letting the song choose.",
                                         Choices({"off", "Off", "plot_a", "Plot A", "plot_b",
                                                  "Plot B"}),
                                         true),
                               SelectRow("settings_force_skybox", "gameplay.which_skybox",
                                         "Force Skybox",
+                                        "Force a sky, or remove it entirely.",
                                         Choices({"default", "Default", "none", "No Skybox",
                                                  "custom", "Custom"}),
                                         true),
@@ -611,28 +683,36 @@ std::vector<PanelSpec> AllPanels() {
                           MenuPanels(),
                           {
                               BoolRow("settings_letterbox", "interface.letterbox",
-                                      "4:3 Letterboxing", true),
-                              SubmenuRow("settings_hud", "settings_hud_screen", "HUD", true),
+                                      "4:3 Letterboxing",
+                                      "Add black bars when a 4:3 picture is shown on a widescreen display.",
+                                      true),
+                              SubmenuRow("settings_hud", "settings_hud_screen", "HUD",
+                                         "Choose which heads-up displays appear during play.", true),
                               SubmenuRow("settings_hide_items", "settings_hide_items_screen",
-                                         "Hide Items"),
+                                         "Hide Items", "Hide entries on the main menu."),
                           }});
 
   // 5a. HUD: the provider's seven fields, original spellings preserved (`show_steak`).
   out.push_back(PanelSpec{"settings_hud_panel", "settings_hud_screen",
                           "settings_interface_screen", MenuPanels(),
                           {
-                              BoolRow("settings_hud_hide", "interface.hide_hud", "Hide HUD", true),
+                              BoolRow("settings_hud_hide", "interface.hide_hud", "Hide HUD",
+                                      "Hide every on-screen display during play.", true),
                               BoolRow("settings_hud_gold", "interface.goldprogress",
-                                      "Gold Star Progress", true),
+                                      "Gold Star Progress",
+                                      "Show progress toward the gold-star goal.", true),
                               BoolRow("settings_hud_progress", "interface.progressbar",
-                                      "Song Progress Bar", true),
-                              BoolRow("settings_hud_timer", "interface.show_timer", "Timer", true),
+                                      "Song Progress Bar", "Show the song progress bar.", true),
+                              BoolRow("settings_hud_timer", "interface.show_timer", "Timer",
+                                      "Show the elapsed song time.", true),
                               BoolRow("settings_hud_pb", "interface.show_pb",
-                                      "Personal Best Progress", true),
+                                      "Personal Best Progress",
+                                      "Show progress toward your personal best score.", true),
                               BoolRow("settings_hud_streak", "interface.show_steak", "Note Streak",
-                                      true),
+                                      "Show the current note streak counter.", true),
                               BoolRow("settings_hud_input", "interface.input_viewer",
-                                      "Input Viewer", true),
+                                      "Input Viewer", "Show a live view of your controller input.",
+                                      true),
                           }});
 
   // 5b. Hide Items.
@@ -640,9 +720,11 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_interface_screen", MenuPanels(),
                           {
                               BoolRow("settings_offline", "interface.hide_offline_prompts",
-                                      "Offline Mode Prompts"),
+                                      "Offline Mode Prompts",
+                                      "Suppress the pop-ups shown while playing offline."),
                               BoolSubmenuRow("settings_main_menu", "interface.hide_main_menu",
-                                             "settings_main_menu_screen", "Main Menu"),
+                                             "settings_main_menu_screen", "Main Menu",
+                                             "Choose which entries are hidden on the main menu."),
                           }});
 
   // 5b-i. Main Menu: the master plus every actual row, by stable token. `splash_options` is the
@@ -652,28 +734,37 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_hide_items_screen", MenuPanels(),
                           {
                               BoolRow("settings_mm_master", "interface.hide_main_menu",
-                                      "Hide Selected Rows"),
+                                      "Hide Selected Rows",
+                                      "Master switch: when on, the rows below choose what is hidden."),
                               BoolRow("settings_mm_start", "interface.hidden_main_menu.splash_start",
-                                      "PLAY"),
+                                      "PLAY",
+                                      "Hide the main menu's PLAY entry when the master switch is on."),
                               BoolRow("settings_mm_leaderboard",
                                       "interface.hidden_main_menu.splash_leaderboard",
-                                      "LEADERBOARDS"),
+                                      "LEADERBOARDS",
+                                      "Hide the main menu's LEADERBOARDS entry when the master switch is on."),
                               BoolRow("settings_mm_achievements",
                                       "interface.hidden_main_menu.splash_achievements",
-                                      "ACHIEVEMENTS"),
-                              InfoRow("settings_mm_options", "HELP & OPTIONS"),
+                                      "ACHIEVEMENTS",
+                                      "Hide the main menu's ACHIEVEMENTS entry when the master switch is on."),
+                              InfoRow("settings_mm_options", "HELP & OPTIONS",
+                                      "This is the entry you are using, so it cannot be hidden."),
                               BoolRow("settings_mm_upgrade",
-                                      "interface.hidden_main_menu.splash_upgrade", "UPGRADE"),
+                                      "interface.hidden_main_menu.splash_upgrade", "UPGRADE",
+                                      "Hide the main menu's UPGRADE entry when the master switch is on."),
                               BoolRow("settings_mm_dlc", "interface.hidden_main_menu.splash_dlc",
-                                      "DOWNLOAD CONTENT"),
+                                      "DOWNLOAD CONTENT",
+                                      "Hide the main menu's DOWNLOAD CONTENT entry when the master switch is on."),
                               BoolRow("settings_mm_exit", "interface.hidden_main_menu.splash_exit",
-                                      "EXIT GAME"),
+                                      "EXIT GAME",
+                                      "Hide the main menu's EXIT GAME entry when the master switch is on."),
                           }});
 
   // The confirmation scene is copied from the installation under our own name, as with the menu.
-  Row restart = InfoRow("settings_restart_now", "Restart now");
+  Row restart = InfoRow("settings_restart_now", "Restart now",
+                        "Restart the game now to apply your saved changes.");
   restart.kind = Kind::kRestart;
-  Row close = InfoRow("settings_close", "Close");
+  Row close = InfoRow("settings_close", "Close", "Close this message.");
   close.kind = Kind::kClose;
   out.push_back(PanelSpec{"settings_restart_panel", "settings_restart_screen", kRootScreen,
                          MenuPanels(), {close, restart}, "../pause/settings_confirmation.milo",
@@ -681,7 +772,8 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_save_error_panel", "settings_save_error_screen", kRootScreen,
                          MenuPanels(), {close}, "../pause/settings_confirmation.milo",
                          "settings_save_error_message"});
-  Row achievements = InfoRow("settings_earn_achievements", "Unlock online achievements");
+  Row achievements = InfoRow("settings_earn_achievements", "Unlock online achievements",
+                             "Grant the online-only achievements. This cannot be undone.");
   achievements.kind = Kind::kAchievements;
   out.push_back(PanelSpec{"settings_achievements_confirm_panel", "settings_achievements_confirm_screen", "settings_achievements_screen",
                          MenuPanels(), {close, achievements}, "../pause/settings_confirmation.milo",
@@ -693,9 +785,16 @@ std::vector<PanelSpec> AllPanels() {
       size_t index = 0;
       for (const auto& [token, label] : g_configuration.menu_rows) {
         const std::string symbol = "settings_mm_live_" + std::to_string(index++);
+        // The live mirror follows the installed menu, so the caption is derived from the row's
+        // own label rather than a token table: a menu this record does not know still gets text.
+        const std::string description =
+            token == "splash_options"
+                ? std::string("This is the entry you are using, so it cannot be hidden.")
+                : "Hide the main menu's " + label + " entry when the master switch is on.";
         panel.rows.push_back(token == "splash_options"
-            ? InfoRow(symbol.c_str(), label.c_str())
-            : BoolRow(symbol.c_str(), ("interface.hidden_main_menu." + token).c_str(), label.c_str()));
+            ? InfoRow(symbol.c_str(), label.c_str(), description.c_str())
+            : BoolRow(symbol.c_str(), ("interface.hidden_main_menu." + token).c_str(), label.c_str(),
+                      description.c_str()));
       }
     }
     std::erase_if(panel.rows, [](Row& row) {
@@ -1005,7 +1104,10 @@ Node RowCase(const Row& row, const std::string_view symbol) {
           Cmd({Sym("if"), Cmd({Sym("!"), Cmd({Sym("file_exists"), Str(Path("snapshot", "restart.ok", "b:1"))})}),
                Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym("settings_restart_error")})})});
     case Kind::kCalibration:
-      return Arr({Sym(symbol), Cmd({Sym("pause_confirm_quit_song_screen"), Sym("set"),
+      // The in-song calibration route hands the game to retail's own confirm/quit flow, which
+      // hosts none of our panels; the caption ends with the row that opened it.
+      return Arr({Sym(symbol), HelpWrite(""),
+          Cmd({Sym("pause_confirm_quit_song_screen"), Sym("set"),
           Sym("next_screen"), Sym("cal_welcome_screen")}),
           Cmd({Sym("options_screen"), Sym("set"), Sym("back_screen"), Sym("splash_screen")}),
           Cmd({Sym("ui"), Sym("goto_screen"), Sym("pause_confirm_quit_song_screen")})});
@@ -1121,11 +1223,32 @@ Node DirectionTable(const std::vector<Cell>& cells, const bool forward) {
       continue;
     }
     const size_t target = forward ? i + 1 : i - 1;
+    // The move also publishes the caption of the row being moved *to*. The target row's canonical
+    // symbol is a compile-time fact of this table - no guest query is needed - and the write rides
+    // behind the selection so the caption can never name a row the highlight is not on.
+    const std::string target_symbol = cells[target].row->symbol;
     for (const std::string& symbol : cells[i].symbols) {
-      kids.push_back(Arr({Sym(symbol), SelectIndex(target)}));
+      kids.push_back(Arr({Sym(symbol), Cmd({Sym("do"), SelectIndex(target),
+                                            HelpWrite(target_symbol)})}));
     }
   }
   return Cmd(std::move(kids));
+}
+
+// The caption an entry publishes: the row the highlight is about to sit on, which is the first
+// *visible* row of the page - and which rows are visible depends on the provider gate, because a
+// page may begin with provider-only rows (Interface does). The two gate worlds each get their
+// write; where they agree (most pages) a single statement is emitted instead.
+Node EnterHelpWrite(const PanelSpec& panel) {
+  const std::vector<Cell> base = Cells(panel, false);
+  const std::vector<Cell> all = Cells(panel, true);
+  const std::string symbol = base.empty() ? "" : base.front().row->symbol;
+  const std::string provider_symbol = all.empty() ? "" : all.front().row->symbol;
+  if (symbol == provider_symbol) {
+    return HelpWrite(symbol);
+  }
+  return Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(kProviderQuery)}),
+              HelpWrite(provider_symbol), HelpWrite(symbol)});
 }
 
 // `{move_down {if_else <gate> <six-row table> <five-row table>}}`
@@ -1152,6 +1275,10 @@ Node PanelDefinition(const PanelSpec& panel) {
   Node enter = EnterExit();
   if (!panel.message.empty())
     enter.kids.push_back(Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(panel.message)}));
+  // The open-time caption (owner request, 2026-10-13): entering a page places the highlight on its
+  // first visible row, so the overlay is told which row that is. Emitted here rather than inside
+  // populate_menu because a commit re-runs populate and must not drag the caption back to row 0.
+  enter.kids.push_back(EnterHelpWrite(panel));
   std::vector<Node> extras;
   extras.push_back(Arr({Sym("kAction_Up"), Cmd({Var("this"), Sym("move_up")})}));
   extras.push_back(Arr({Sym("kAction_Down"), Cmd({Var("this"), Sym("move_down")})}));
@@ -1302,6 +1429,15 @@ std::vector<std::string> RequestPaths() {
   add(kProviderQuery);
   add(Path("commit", "-", "-"));
   add(Path("restart", "-", "-"));
+  // The caption events: the hide, plus every row's canonical symbol (see HelpWrite). Both the
+  // hide and the per-row writes are what the DTA emits, so the test below covers the whole
+  // surface's caption traffic with the same grammar the boot will use.
+  add(Path("help", "-", "-"));
+  for (const PanelSpec& panel : AllPanels()) {
+    for (const Row& row : panel.rows) {
+      add(Path("help", row.symbol, "-"));
+    }
+  }
   // The restart prompt's state: true once this session has committed a change that needs one. Asked
   // by the merged root's Cancel, which is the only place the prompt belongs.
   for (const auto* token : {"commit.ok", "restart.pending", "restart.ok"})
@@ -1333,6 +1469,34 @@ std::vector<std::string> RequestPaths() {
           break;
         default:
           break;
+      }
+    }
+  }
+  return out;
+}
+
+std::string HelpTextFor(const std::string_view symbol) {
+  if (symbol.empty()) {
+    return {};
+  }
+  // First match wins; the in-song twins duplicate the main-menu rows' symbols on purpose (one
+  // symbol set feeds one label table in two contexts), and their texts are copied with the rows.
+  for (const PanelSpec& panel : AllPanels()) {
+    for (const Row& row : panel.rows) {
+      if (row.symbol == symbol) {
+        return row.description;
+      }
+    }
+  }
+  return {};
+}
+
+std::vector<std::string> HelpSymbols() {
+  std::vector<std::string> out;
+  for (const PanelSpec& panel : AllPanels()) {
+    for (const Row& row : panel.rows) {
+      if (std::find(out.begin(), out.end(), row.symbol) == out.end()) {
+        out.push_back(row.symbol);
       }
     }
   }
