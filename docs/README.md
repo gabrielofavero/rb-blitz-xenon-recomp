@@ -42,6 +42,21 @@ documents under [`settings/`](settings).
 - **No machine paths in tracked files.** Use `<checkout>`, `<home>`, or a neutral example such as
   `D:\Songs`. Build output (`out/`, `installer/out/`) and dumped game data (`game/`) are local.
 
+## Changing these docs
+
+The workflow is a skill: [`.github/skills/documentation/SKILL.md`](../.github/skills/documentation/SKILL.md)
+(also `/documentation`). It covers where a document belongs, what each kind must contain, and how to
+move, merge, split or retire one — including the script that re-points the references in code
+comments. Verify a change with:
+
+```powershell
+python .github/skills/documentation/scripts/check_docs.py
+```
+
+It checks broken links, stale `docs/...` mentions, plan naming and placement, machine paths, line
+endings and orphaned documents. Auditing without editing is the read-only `docs-auditor` agent
+(roster: [`../.github/agents/README.md`](../.github/agents/README.md)).
+
 ## Index
 
 ### Guides

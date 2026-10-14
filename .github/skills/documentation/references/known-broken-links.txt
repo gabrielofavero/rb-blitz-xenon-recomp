@@ -1,0 +1,32 @@
+# References that are already broken, in two kinds: a link target that does not exist, and a
+# document path named in prose that was never written.
+#
+# One repo-relative path per line. The checker counts a reference listed here as "known" instead of
+# an error, so a real break stands out against a quiet baseline.
+#
+# (1) Files deleted from the tree (commit b7dfaca, "add real mouse support") and still cited by the
+# bring-up log (a historical record), the launcher plan (a finished record) and one guide (a live
+# reference). Fixing the guide means mapping the old names onto the current src/input/* files first —
+# unproven, so it is left to the owner.
+#
+# (2) Documents that this repo never had: the older plans name them because they came from an earlier
+# tree (see "Known stale references" in docs/README.md).
+#
+# Delete a line when its reference is fixed.
+
+src/input/ui_nav.h
+src/input/nav_detect.h
+tests/ui_nav_tests.cpp
+
+# (2) never written, named by the finished plans and the porting notes
+docs/engine/content-flow.md
+docs/engine/asset-model.md
+docs/engine/resolution-flow.md
+docs/engine/ui-layout.md
+docs/engine/ingame-layout.md
+docs/native/DTA_OVERLAY_ENGINE.md
+docs/native/NATIVE_HACK_AUDIT_2026-06-08.md
+docs/plans/vr-port-plan.md
+docs/plans/av-settings-plan.md
+docs/plans/button-mapping-plan.md
+docs/plans/load-guard-runtime-findings.md

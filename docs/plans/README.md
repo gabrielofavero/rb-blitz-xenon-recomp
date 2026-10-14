@@ -11,7 +11,10 @@ the age of a plan is visible from its name.
 | [`finished/`](finished) | Delivered; kept because the measurements and decisions are still cited. |
 | [`cancelled/`](cancelled) | Abandoned or superseded before delivery, kept so the same ground is not walked twice. |
 
-Moving a plan is one `git mv` into the next folder; the date prefix never changes.
+Moving a plan is one `git mv` into the next folder; the date prefix never changes. The naming and
+placement rules are part of the `documentation` skill
+([`.github/skills/documentation/SKILL.md`](../../.github/skills/documentation/SKILL.md)), which also
+re-points the references in code comments when a plan moves.
 
 ## Other plans
 
