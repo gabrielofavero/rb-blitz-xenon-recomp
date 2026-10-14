@@ -1083,6 +1083,14 @@ static void TestPayloadAndFinalize() {
   manifest.push_back("[game]");
   manifest.push_back("name = \"rb_blitz test build\"");
   manifest.push_back("");
+  // The provenance tools/make_payload.ps1 records and build.ps1 reads back to decide whether a
+  // snapshot may be reused (2026-10-14). The helper verifies the [[files]] entries and has to be
+  // indifferent to the table, so it belongs in this fixture rather than a separate one: every
+  // leg below installs and re-verifies a manifest that carries a [payload] block.
+  manifest.push_back("[payload]");
+  manifest.push_back("backends = \"d3d12,vulkan\"");
+  manifest.push_back("commit = \"0123456789abcdef0123456789abcdef01234567\"");
+  manifest.push_back("");
 
   std::uint64_t total = 0;
   for (const Entry& entry : entries) {
@@ -1127,6 +1135,9 @@ static void TestPayloadAndFinalize() {
   CHECK_TRUE(FileExists(app / "rb_blitz.toml"));
   CHECK_FALSE(DirectoryExists(StagingRoot(app)));
   CHECK_STR_EQ(ReadFileOrEmpty(progress_file), "100\ninstalled");
+  // The manifest travels verbatim, provenance included, so the installed tree can still say
+  // which backends and which commit its build was (2026-10-14).
+  CHECK_CONTAINS(ReadFileOrEmpty(app / kPayloadManifestName), "backends = \"d3d12,vulkan\"");
 
   BeginCase("the installed payload verifies and detects tampering");
 
@@ -2075,6 +2086,77 @@ static void TestWizardScript() {
   CHECK_CONTAINS(script, "second := gStageSubtitle;");
 }
 
+// The release scripts are PowerShell, so nothing here can run them - the same reason
+// TestWizardScript pins setup.iss by shape rather than by behaviour. What is pinned is the
+// property the owner's 2026-10-14 report was about: the release path may not embed a payload
+// snapshot it has not checked against the build tree it is about to ship. A change that drops
+// the check, the provenance that makes it possible, or the order the two run in, fails here
+// rather than in an install.
+static void TestPayloadScripts() {
+  BeginCase("the packer records where a snapshot came from");
+
+  const fs::path tools = fs::path(RBBLITZ_ROOT_DIR) / "installer" / "tools";
+  const std::string module = ReadFileOrEmpty(tools / "payload_provenance.ps1");
+  const std::string packer = ReadFileOrEmpty(tools / "make_payload.ps1");
+  const std::string build =
+      ReadFileOrEmpty(fs::path(RBBLITZ_ROOT_DIR) / "installer" / "build.ps1");
+  CHECK_FALSE(module.empty());
+  CHECK_FALSE(packer.empty());
+  CHECK_FALSE(build.empty());
+
+  // One implementation, dot-sourced by both halves, so the reader and the writer cannot
+  // drift: the backends come from the tree's own CMakeCache and the manifest is read the
+  // same way it is written.
+  CHECK_CONTAINS(module, "function Get-PayloadBackends");
+  CHECK_CONTAINS(module, "function Read-PayloadManifest");
+  CHECK_CONTAINS(module, "function Test-PayloadSnapshotCurrent");
+  CHECK_CONTAINS(module, "CMakeCache.txt");
+  CHECK_CONTAINS(module, "REXGLUE_USE_VULKAN:BOOL=ON");
+  CHECK_CONTAINS(packer, "payload_provenance.ps1");
+  CHECK_CONTAINS(build, "payload_provenance.ps1");
+
+  // The provenance the check needs: the backends the snapshot was built for and the commit
+  // it came from, written into the manifest beside the file digests.
+  CHECK_CONTAINS(packer, "[string] $Commit");
+  CHECK_CONTAINS(packer, "$manifest.Add('[payload]')");
+  CHECK_CONTAINS(packer, "backends = ");
+  CHECK_CONTAINS(packer, "commit = ");
+
+  BeginCase("the loader source the packer is told to use is the one it uses");
+
+  // `-VulkanLoaderDir` did nothing until 2026-10-14: the line that chose the loader assigned
+  // `$vulkanLoaderDir`, which is the same variable as the parameter (PowerShell names are
+  // case-insensitive), so the answer was wiped before it was read and the payload always took
+  // the search's last resort. The flag's answer has to live in a variable of its own.
+  CHECK_CONTAINS(packer, "$vulkanLoaderSource");
+  CHECK_FALSE(packer.find("$vulkanLoaderDir =") != std::string::npos);
+  CHECK_CONTAINS(packer, "Get-VulkanLoaderDir -Explicit $VulkanLoaderDir");
+  // The escape hatch for a machine that has no loader anywhere stays explicit.
+  CHECK_CONTAINS(packer, "-AllowMissingVulkanLoader");
+
+  BeginCase("the release build will not reuse a snapshot it cannot account for");
+
+  // The check runs both before the snapshot may be reused and over the snapshot that was just
+  // written; the second is what turns "this payload should match the tree" into a build
+  // failure when it does not.
+  const std::size_t pack = build.find("'make_payload.ps1'");
+  const std::size_t first_check = build.find("Test-PayloadSnapshotCurrent");
+  const std::size_t last_check = build.rfind("Test-PayloadSnapshotCurrent");
+  CHECK_TRUE(pack != std::string::npos);
+  CHECK_TRUE(first_check != std::string::npos);
+  CHECK_TRUE(last_check != std::string::npos);
+  CHECK_TRUE(first_check < pack);
+  CHECK_TRUE(last_check > pack);
+  CHECK_CONTAINS(build, "-ExpectedCommit $payloadCommit");
+  CHECK_CONTAINS(build, "'-Commit', $payloadCommit");
+  // A stale snapshot is rebuilt rather than kept, and keeping one anyway is the explicit
+  // -SkipPayload - which then says out loud what it kept.
+  CHECK_CONTAINS(build, "rebuilding the snapshot from the build tree");
+  CHECK_CONTAINS(build, "-SkipPayload");
+  CHECK_CONTAINS(build, "the kept snapshot was not taken from this build tree");
+  CHECK_CONTAINS(build, "the payload snapshot does not match the build tree it was taken from");
+}
+
 int main() {
   g_root = fs::temp_directory_path() / "rbblitz-installer-tests";
   std::string error;
@@ -2098,6 +2180,7 @@ int main() {
   TestUpdateManifest();
   TestLocations();
   TestWizardScript();
+  TestPayloadScripts();
   TestCommandLine();
 
   const int result = rb_blitz::test::Finish();

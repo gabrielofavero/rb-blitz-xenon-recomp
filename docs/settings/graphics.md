@@ -437,7 +437,7 @@ Grep inside a log: `Select-String -Path <log> -Pattern 'viewport d3d12|scissor d
 | --- | --- |
 | Capability schema | Frozen and filled: `CapabilitySnapshot` as contracts §5.3 defines it; `renderers[]` truthful per §4 above; `supported_resolutions` is the offer set; `primary_display_size`/`display_modes` formal. |
 | Resolution choices | Use `caps.supported_resolutions` (P3's `BuildDescriptors` already fills the row from it). Show `DisplayModeToken(size)`. |
-| Renderer choices | Use `caps.renderers` where `usable`; label from the token. A single usable renderer means the row has one choice — keep the row (it is the honest state) but do not present it as a choice list. |
+| Renderer choices | Use `caps.renderers` where `usable`; label from the token. A single usable renderer means the row has **nothing to choose, so it is not drawn at all** (owner decision, 2026-10-14 — this supersedes the table's original "keep the row, it is the honest state"). A one-entry list is a plugin built with one backend or a machine with no Vulkan loader; the row is omitted rather than shown as a single-choice select or as `Renderer: Unavailable`, and the boot names what was offered instead (`settings_menu: Renderer offers 1: D3D12 (the row is hidden: …)`, `src/hooks/settings_payload.cpp`). |
 | AA choices | `AntiAliasingTokens(caps, renderer_token)` — do not use the static list; a device without a verified label must not show `native`. |
 | Filtering choices | `FilteringTokens(caps, renderer_token)` — the label is the token; never write the label as a number. |
 | Editing | Bind the "changed capabilities" refusal to `Service::Set`'s returned reason; call `ValidateForRenderer` for AA/filtering/resolution after a pending renderer change. |
@@ -745,3 +745,91 @@ Two things the test caught, both worth keeping:
 - `out/_swap/ultrawide/find_screen_refs.py` — the functions that address the screen object (`0x8298ACA8`), recovered from the `lis` + signed displacement pairs.
 - `out/_swap/ultrawide/strings_at.py`, `scan_image_floats.py` — the DTA symbol windows (`screen_width`/`aspect`/`set_aspect`) and the constant hunt in the decrypted image.
 - `assets/game/360/ui/gen/game.dtb` — the engine's own `{rnd aspect}` / `{rnd set_aspect}` / `{get_hud_dir}` usage (9.2.2).
+
+### 11. The window: one size, the display's own aspect, and the presenter (P2, 2026-10-14)
+
+Status: **done and measured in a boot** (D3D12, this machine's 21:9 primary at 2560x1080, 2026-10-14).
+Part 3 §1's three facts are what makes a non-16:9 *frame* correct; two things were still the title's or
+the SDK's own defaults — the **window's** size and the **presenter's** aspect — so a boot nobody had
+configured never reached the ultrawide composition on its own.
+
+**The defect, from the tree.** The boot wrote `resolution_scale` and the guest frame and nothing else:
+`video_mode_width/height` stayed at their 1280x720 default, so the presenter (part 1 §3 — it
+letterboxes with the *video mode* aspect, not the frame's) drew the 21:9 frame into a 16:9-shaped
+region, and the window was created at the SDK's default 1280x720. `out/_swap/ultrawide/run.ps1`
+reached the measured `display=2560x1080` by passing `--video_mode_width/height` **by hand**; the
+product path never did.
+
+**What the boot does now** (`SettingsBoot::ApplyWindowPolicy`, `src/settings/boot.cpp`, called from
+`BeforeGraphicsSetup` — after the planner and the plugin, before the window exists):
+
+| Cvar | Value | Why |
+| --- | --- | --- |
+| `video_mode_width`/`_height` | the effective render size | the presenter derives its output region's shape from this, and it is also the startup window's own default size |
+| `window_width`/`window_height` | the fitted client size, **only when the decorated window would not fit the desktop** | the render size can equal the display mode (2560x1080 here), and the window's frame is then taller and wider than the usable area |
+| `window_resizable` | `false` | the window is one size; a drag must not be able to leave a shape the picture cannot fill ([patch 0017](../../patches/rexglue-sdk/0017-fixed-size-window.patch)) |
+
+Every write stands aside for a cvar another source already named (`rb_blitz.toml`, the environment,
+the command line) and says so, and each value is read back before it is reported — `SetFlagFromConfig`
+reports a *skipped* write as success, so "did it stand?" cannot be answered by its return value.
+
+**The arithmetic is host-side, SDK-free and tested:** `src/settings/window_policy.{h,cpp}`
+(`FitClientToDesktop`, `PhysicalToLogical`, `SameAspect`; `tests/window_policy_tests.cpp`, ctest
+`window_policy`, 68 checks). The desktop it fits into is measured with Win32 the same way
+`ProbeDisplay` asks for the display — `GetMonitorInfoW`'s work area,
+`AdjustWindowRectExForDpi(WS_OVERLAPPEDWINDOW)` for the decorations, `GetDpiForSystem` for the scale.
+`window_width`/`window_height` are *logical* pixels, so the fitted *physical* size is converted back
+with `PhysicalToLogical` before it is written.
+
+Measured, three boots with disposable user roots, `--fullscreen=false` (`out/_swap/p2/`):
+
+| Arm | Effective resolution | Guest frame | `display=` (video mode) | Window (Win32: client / framed) | `WS_THICKFRAME` |
+| --- | --- | --- | --- | --- | --- |
+| `fresh` — **no `settings.toml` at all** | 2560x1080 (Auto → the display's own mode) | 1280x540 x2 | **2560x1080** | **2354x993** / 2370x1032 | **absent** |
+| `manual-720` — `resolution = [1280, 720]` | 1280x720 | 1280x720 x1 | 1280x720 | **1280x720** / 1296x759 (nothing written) | absent |
+| `control-pre` — window and video mode named on the command line | 2560x1080 | 1280x540 x2 | **1280x720** | 1280x720 (the policy stood aside) | absent |
+
+The `fresh` arm *is* the requirement: a first run with nothing stored reaches the ultrawide
+composition with no visit to Help & Options (`settings_boot: display 2560x1080, 4 exact render
+sizes`, `settings_boot: guest render base 1280x540, draw scale 2`). Its window is 2354x993 rather than
+2560x1080 because the work area is 2560x1032 (a 48 px taskbar) and the frame adds 16x39 — 2354/993 =
+2.3706 against the frame's 2.3704, inside `SameAspect`'s tolerance. The 1280x720 arm shows the other
+half: nothing is written for a size that fits, so a 16:9 boot keeps the exact size the video mode
+gives it, with no unit round trip.
+
+The picture, measured with the §8.2 ruler (the title screen's green button disc; the 16:9 reference in
+`out/_swap/ultrawide/` reads 44x42 ≈ 1.048):
+
+| Arm | content box | green disc | reading |
+| --- | --- | --- | --- |
+| `fresh` | 2370x1020 inside a 2370x1032 window | 42x38 (1.105) | expanded, no bars |
+| `control-pre` | 1296x760 inside a 1296x759 window | **22x28 (0.786)** | **squashed by ~25 %** — the defect the policy removes |
+
+`control-pre` is the honest control rather than a reproduction of the old binary: with `video_mode_*`
+and `window_*` named on the command line the boot's writes are refused *by design*, the presenter is
+told 16:9 while the guest renders 21:9, and the disc comes out taller than it is wide.
+
+**An ordering fact worth keeping.** `xboxkrnl_video.cpp`'s `GetConfiguredVideoModeWidth` falls back to
+`window_width` when `video_mode_width` holds its **default value** — `HasNonDefaultValue` compares
+values, not sources. A boot whose render size is exactly 1280x720 therefore gets its video mode from
+the *window* cvar if the window was written; harmless (the fit preserves the aspect) but it is why a
+fourth arm that named only the video mode read `display=2354x993` while asking for 1280x720
+(`out/_swap/p2/control-old/`).
+
+**Unproven, and worth saying:**
+
+- The fit is measured against the **system** DPI and against `WS_OVERLAPPEDWINDOW`'s metrics, not
+  against the created window's own (`SDL_GetWindowBordersSize` needs the window to exist). No boot has
+  been taken at 125/150/300 %, on a non-primary target monitor, or in borderless/fullscreen reached by
+  switching from windowed **at runtime** rather than by restarting.
+- A display whose own mode the planner cannot produce (an aspect outside 1.0..3.2 — a 32:9 panel is
+  3.556) still falls back to a 16:9 size. That is unmeasured rather than stretched, and the offer set
+  never names a size the render path cannot make.
+- `window_resizable=false` is verified as "the window style carries no `WS_THICKFRAME` and no
+  `WS_MAXIMIZEBOX`", not by driving a drag. The separate Controller Settings utility builds its own SDL
+  window (`controller-settings/main.cpp`) and never reads the cvar.
+- The in-game **3D and HUD** half is unchanged by this section, and stays open at §9.4.
+
+Evidence: `out/_swap/p2/run.ps1` (the harness: fresh/user-root legs, Win32 window metrics, a capture),
+`fresh/` (`fresh.log`, `window.png`), `manual-720/`, `control-pre/` (`control-pre.log`, `window.png`),
+`control-old/`, and the standalone `window_policy_tests.exe`.

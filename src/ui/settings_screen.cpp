@@ -20,6 +20,10 @@ namespace {
 using dtb::Node;
 MenuConfiguration g_configuration;
 
+// The one select row whose list belongs to the machine and whose *disappearance* is a decision
+// rather than a failure - see the `Kind::kSelect` branch in `BuildPanels`.
+constexpr char kRendererRowSetting[] = "graphics.renderer";
+
 // Small builders, so the definitions below read as the DTA they are.
 Node Sym(const std::string_view name) { return Node::Symbol(name); }
 Node Str(const std::string_view text) { return Node::String(text); }
@@ -818,7 +822,19 @@ std::vector<PanelSpec> AllPanels() {
         if (row.kind == Kind::kSelect) {
           row.choices.clear();
           for (const auto& [token, label] : choices->second) row.choices.push_back({token, label});
-          if (row.choices.empty()) { row.kind = Kind::kInfo; row.label += ": Unavailable"; }
+          if (row.choices.empty()) {
+            row.kind = Kind::kInfo;
+            row.label += ": Unavailable";
+          } else if (row.setting == kRendererRowSetting && row.choices.size() < 2) {
+            // Owner decision, 2026-10-14: the Renderer row is drawn only when there is a backend to
+            // choose between. One entry means a plugin built with a single backend or a machine
+            // without a Vulkan loader - there is nothing to pick, and "Renderer: Unavailable" would
+            // read as a failure rather than as "this is the only way it can render". The boot still
+            // says what was offered (`settings_menu: Renderer offers N: ...`,
+            // src/hooks/settings_payload.cpp), so a packaging fault that ships a one-backend plugin
+            // is still visible in the log even though the row is gone.
+            return true;
+          }
         } else if (row.kind == Kind::kChoose) {
           return std::none_of(choices->second.begin(), choices->second.end(),
                              [&](const auto& c) { return c.first == row.choices.front().token; });

@@ -55,6 +55,7 @@
 #include "settings/paths.h"
 #include "settings/service.h"
 #include "settings/store.h"
+#include "settings/window_policy.h"
 
 namespace rb_blitz::settings::boot {
 
@@ -160,6 +161,13 @@ class SettingsBoot {
   // Writes one cvar and remembers it for the read-back verification. False when the registry refused
   // it (an unknown name: a plugin cvar before its plugin loaded).
   bool WriteCvar(const std::string& name, const std::string& value, SettingId id);
+  // The window's own cvars (P2): `video_mode_*`, `window_*` and `window_resizable`. They are not
+  // settings rows, so they are written and verified here rather than through `WriteCvar`'s
+  // `applied_` list, and a cvar another source already named is left alone instead of beaten.
+  bool WriteWindowCvar(const std::string& name, const std::string& value);
+  // Called once, from BeforeGraphicsSetup: make the *window* and the presenter follow the effective
+  // render size (src/settings/window_policy.h).
+  void ApplyWindowPolicy();
   // True when an explicit source (environment / command line) already owns this cvar, so the stored
   // row must not be written over it.
   bool ExplicitlyOwned(const std::string& name, SettingId id);

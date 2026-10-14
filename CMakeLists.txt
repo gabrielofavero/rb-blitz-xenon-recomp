@@ -127,6 +127,10 @@ set(RBBLITZ_SOURCES
     src/settings/bridge_sink.cpp
     src/settings/boot.cpp
     src/settings/graphics_boot.cpp
+    # P2's addition: the game window's own size (fit the decorated window into the display's usable
+    # area without changing its aspect, and the logical/physical conversion the SDK's window cvars
+    # are expressed in). SDK-free; the boot is the caller and the probe is Win32, like ProbeDisplay.
+    src/settings/window_policy.cpp
     # P9's two additions: the application-strategy seam (§5.5 - which committed rows apply to the
     # running game and which wait for the restart prompt) and the restart coordinator (§8 - the
     # exactly-once request, the rebuilt command line and the bootstrap's verified-identity wait).
@@ -364,6 +368,17 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_hud_layout_tests PRIVATE src)
     add_test(NAME hud_layout COMMAND rb_blitz_hud_layout_tests)
+
+    # The window's own size (src/settings/window_policy.h, P2): how a fixed-size window is fitted
+    # into the display's usable area without changing its aspect, and the physical -> logical
+    # conversion `window_width`/`window_height` are expressed in. SDK-free arithmetic like the HUD
+    # rule above, and tested for the same reason - the rule is the requirement.
+    add_executable(rb_blitz_window_policy_tests
+        tests/window_policy_tests.cpp
+        src/settings/window_policy.cpp
+    )
+    target_include_directories(rb_blitz_window_policy_tests PRIVATE src)
+    add_test(NAME window_policy COMMAND rb_blitz_window_policy_tests)
 
     add_executable(rb_blitz_path_policy_tests
         tests/path_policy_tests.cpp

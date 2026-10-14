@@ -53,7 +53,7 @@ this document.
 ### 1.1 Build and test commands (re-checked, measured)
 
 Toolchain bootstrap is one-time per checkout (`scripts/repair_flat_symlinks.ps1`, then
-`scripts/apply_sdk_patches.ps1` — 14 patches; it exits 1 on any **unexpected** edit inside
+`scripts/apply_sdk_patches.ps1` — 17 patches; it exits 1 on any **unexpected** edit inside
 `rexglue-sdk/`, including untracked directories).
 
 ```powershell
@@ -155,7 +155,7 @@ accurate. Two additions worth recording because they are the real seams the cont
 | DLC layout policy | `src/fs/dlc_layout.h`, `src/fs/dlc_library.h`, `src/fs/dlc_cache.h` | Installer validation reuses these. |
 | App lifecycle | `src/rb_blitz_app.h` | `OnPreSetup`, `OnConfigurePaths`, `OnPostLoadXexImage`, `OnPreLaunchModule`, `OnPostInitLogging`, `OnCreateDialogs`. No `OnFinalizePaths`/`OnShutdown` override today. |
 | SDK lifecycle | `rexglue-sdk/src/ui/rex_app.cpp` | `SetupEnvironment` (147 calls `OnConfigurePaths`) → `SetupPresentation` (314 calls `OnPreSetup`) → 92 `OnFinalizePaths` → 99 `ConstructRuntime` → 294 `OnPostLoadXexImage` → 450 `OnPreLaunchModule`; 511 `std::_Exit(0)`. Matches the parent plan §4.2. |
-| SDK patches | `patches/rexglue-sdk/0001..0014` | `0010` = input state filter, `0013` = cvar config source. No `guide` patch exists; the cvar is SDK-source. |
+| SDK patches | `patches/rexglue-sdk/0001..0017` | `0010` = input state filter, `0013` = cvar config source, `0017` = the fixed-size game window. No `guide` patch exists; the cvar is SDK-source. |
 
 `generated/default/*.cpp` are recompilation output; `generated/default/codegen.partition.json`
 recovers a partition number. **Never edit generated output as the implementation** (parent plan

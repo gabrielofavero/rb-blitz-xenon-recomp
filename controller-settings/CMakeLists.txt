@@ -125,8 +125,23 @@ endif()
 # checked a URL the release it shipped with did not publish would either find nothing or
 # find someone else's file, and neither is visible until a user complains.
 file(READ "${CMAKE_SOURCE_DIR}/installer/config/pins.toml" RBBLITZ_PINS_TOML)
-string(REGEX MATCH "\\[installer\\][^\\[]*" RBBLITZ_INSTALLER_PINS "${RBBLITZ_PINS_TOML}")
-string(REGEX MATCH "\\[update\\][^\\[]*" RBBLITZ_UPDATE_PINS "${RBBLITZ_PINS_TOML}")
+# Comment lines are dropped before the sections are cut out. A section is read as "from [x] up to
+# the next '['", so a bracket anywhere in between ends it - including one in a comment, which is
+# how `(`[name]`` on the [installer] section's first comment line hid `version = "0.1.0"` from the
+# reader below and failed *every* fresh configure of this tree with "no [installer] version in
+# installer/config/pins.toml" (measured 2026-10-14; the installer and Controller Settings' own
+# CMake projects do not read the file this way, which is why it went unnoticed).
+string(REPLACE "\n" ";" RBBLITZ_PINS_LINES "${RBBLITZ_PINS_TOML}")
+set(RBBLITZ_PINS_ACTIVE "")
+foreach(rbblitz_pins_line IN LISTS RBBLITZ_PINS_LINES)
+    string(STRIP "${rbblitz_pins_line}" rbblitz_pins_stripped)
+    if(rbblitz_pins_stripped MATCHES "^#")
+        continue()
+    endif()
+    string(APPEND RBBLITZ_PINS_ACTIVE "${rbblitz_pins_line}\n")
+endforeach()
+string(REGEX MATCH "\\[installer\\][^\\[]*" RBBLITZ_INSTALLER_PINS "${RBBLITZ_PINS_ACTIVE}")
+string(REGEX MATCH "\\[update\\][^\\[]*" RBBLITZ_UPDATE_PINS "${RBBLITZ_PINS_ACTIVE}")
 
 set(RBBLITZ_VERSION "" CACHE STRING "Version shown in Controller Settings' window title")
 if(RBBLITZ_VERSION STREQUAL "")

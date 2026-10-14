@@ -95,11 +95,14 @@ already built: the build step is skipped and the directory holding it is what th
 payload snapshot reads.
 
 .PARAMETER SkipPayload
-Do not create the payload snapshot, even if it is missing. Use with -PayloadUrl,
-or when the snapshot was made deliberately by tools\make_payload.ps1.
+Keep an existing payload snapshot exactly as it is, whatever it holds. Use with
+-PayloadUrl, or when the snapshot was made deliberately by tools\make_payload.ps1:
+the release path verifies a snapshot against the build tree before it reuses one,
+and this is the only way to keep one that does not match it.
 
 .PARAMETER RefreshPayload
-Recreate the payload snapshot even if out\payload already has one.
+Recreate the payload snapshot even when the existing one already matches the
+build tree. It is not needed to replace a stale snapshot: that happens on its own.
 
 .PARAMETER SkipArt
 Do not refresh the side wizard image (tools\make_art.ps1). It is optional and is
@@ -140,6 +143,11 @@ $ErrorActionPreference = 'Stop'
 
 $installerDir = $PSScriptRoot
 $repoRoot = Split-Path -Parent $installerDir
+
+# The payload-snapshot provenance checks (Get-PayloadBackends, Read-PayloadManifest,
+# Test-PayloadSnapshotCurrent) are shared with tools\make_payload.ps1, which writes the
+# provenance this file reads back.
+. (Join-Path $installerDir 'tools\payload_provenance.ps1')
 
 if (-not $PayloadDir) { $PayloadDir = Join-Path $installerDir 'out\payload' }
 if (-not $SourceDir) { $SourceDir = Join-Path $repoRoot 'out\build\win-amd64-release' }
@@ -380,27 +388,73 @@ if ($PayloadUrl) {
     Write-Host "   url     : $PayloadUrl"
     Write-Host "   sha256  : $(if ($PayloadSha256) { $PayloadSha256.ToLowerInvariant() } else { '(unverified)' })"
 } else {
+    $controllerSettingsDir = Split-Path -Parent $ControllerSettingsTarget
+    $treeBackends = Get-PayloadBackends -BuildDir $SourceDir
     $haveSnapshot = Test-Path -LiteralPath $payloadManifest
-    if ($haveSnapshot -and -not $RefreshPayload) {
-        Write-Host "   mode    : embedded in the setup executable"
-        Write-Host "   snapshot: $PayloadDir (kept; pass -RefreshPayload to rebuild it)"
-    } elseif ($SkipPayload) {
+
+    # A snapshot is a copy of a build tree that was correct the day it was taken, so it can
+    # only be reused for *that* tree. The check compares the snapshot's recorded provenance
+    # and the bytes of every file the tree owns; the failure it exists for is a plain release
+    # build keeping a snapshot from before `REXGLUE_USE_VULKAN=ON`, which shipped a game
+    # whose Renderer row had one choice (owner report, 2026-10-14).
+    $stale = @()
+    if ($haveSnapshot) {
+        $stale = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
+                    -ControllerSettingsDir $controllerSettingsDir `
+                    -ExpectedBackends $treeBackends -ExpectedCommit $payloadCommit)
+    }
+
+    if ($SkipPayload) {
         if (-not $haveSnapshot) {
             throw "-SkipPayload was given but $payloadManifest does not exist."
         }
         Write-Host "   mode    : embedded in the setup executable"
-        Write-Host "   snapshot: $PayloadDir"
+        Write-Host "   snapshot: $PayloadDir (kept; -SkipPayload)"
+        foreach ($reason in $stale) {
+            Write-Warning "the kept snapshot was not taken from this build tree: $reason"
+        }
+    } elseif ($haveSnapshot -and -not $RefreshPayload -and $stale.Count -eq 0) {
+        Write-Host "   mode    : embedded in the setup executable"
+        Write-Host "   snapshot: $PayloadDir (matches $SourceDir; -RefreshPayload rebuilds it anyway)"
     } else {
         if (-not (Test-Path -LiteralPath $SourceDir)) {
             throw ("no recompiled build to snapshot: $SourceDir does not exist. Build the emulator " +
                    'first, or pass -PayloadUrl to download the build at install time instead.')
         }
+        if ($haveSnapshot -and $stale.Count -gt 0) {
+            Write-Host '   stale   : the existing snapshot is not this build tree:'
+            foreach ($reason in $stale) { Write-Host "             - $reason" }
+            Write-Host '   action  : rebuilding the snapshot from the build tree'
+        } elseif ($RefreshPayload) {
+            Write-Host '   refresh : -RefreshPayload'
+        }
         Write-Host "   mode    : embedded in the setup executable"
         Write-Host "   snapshot: rebuilding from $SourceDir"
         $nativeArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makePayload,
-                        '-SourceDir', $SourceDir, '-ControllerSettingsDir', (Split-Path -Parent $ControllerSettingsTarget),
-                        '-PayloadDir', $PayloadDir, '-Clean')
+                        '-SourceDir', $SourceDir, '-ControllerSettingsDir', $controllerSettingsDir,
+                        '-PayloadDir', $PayloadDir, '-Commit', $payloadCommit, '-Clean')
         Invoke-Native -Exe 'powershell.exe' -Arguments $nativeArgs -What 'make_payload.ps1'
+
+        # A snapshot that does not describe the tree it was just taken from is a bug in the
+        # packaging half, and embedding it would hide it until after the install.
+        $problems = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
+                        -ControllerSettingsDir $controllerSettingsDir `
+                        -ExpectedBackends $treeBackends -ExpectedCommit $payloadCommit)
+        if ($problems.Count -gt 0) {
+            throw ("the payload snapshot does not match the build tree it was taken from:`n  " +
+                   ($problems -join "`n  "))
+        }
+    }
+
+    if ($treeBackends -contains 'vulkan') {
+        Write-Host "   backends: $($treeBackends -join ', ') - Vulkan and its loader are in the payload"
+    } elseif ($treeBackends.Count -gt 0) {
+        Write-Warning ("this build tree offers only $($treeBackends -join ', '), so the installed game's " +
+                       'Renderer row will have a single choice. Configure with -DREXGLUE_USE_VULKAN=ON ' +
+                       '(the Windows presets do) and rebuild the game, or pass -SkipPayload to keep this ' +
+                       'snapshot deliberately.')
+    } else {
+        Write-Warning "no CMakeCache.txt in $SourceDir, so the payload's renderer backends were not read"
     }
 
     if ($PayloadVersion) { $embedArgs += @('--payload-version', $PayloadVersion) }

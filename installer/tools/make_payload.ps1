@@ -38,6 +38,11 @@ that directory contain a different DLL set and must not be used.
 Version recorded in the manifest. Defaults to [installer] version in
 config/pins.toml.
 
+.PARAMETER Commit
+The commit the snapshotted build is from, recorded in the manifest's [payload]
+table so a snapshot can say which sources it came from. Optional: build.ps1
+passes the one it resolved, a hand-run snapshot records nothing.
+
 .PARAMETER Zip
 Also write installer\out\payload.zip, the release asset that build.ps1
 -PayloadUrl downloads. The manifest sits at the archive root, which is where the
@@ -57,6 +62,7 @@ param(
     [string] $PayloadDir,
     [string] $CrtDir,
     [string] $Version,
+    [string] $Commit,
     [string] $ZipPath,
     [string] $VulkanLoaderDir,
     [switch] $Zip,
@@ -67,6 +73,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Get-PayloadBackends and the manifest readers are shared with build.ps1, which decides
+# whether an existing snapshot may be reused; see that file for why the provenance matters.
+. (Join-Path $PSScriptRoot 'payload_provenance.ps1')
 
 $installerDir = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $installerDir
@@ -117,21 +127,6 @@ function Get-PeImports {
         }
     }
     return $imports
-}
-
-# The graphics backends the build tree was configured with. The SDK's own Windows default for
-# Vulkan is OFF, so this is the difference between a payload that can offer a second renderer and
-# one whose Renderer rows (Controller Settings' and the game's) have a single choice.
-function Get-PayloadBackends {
-    param([string] $BuildDir)
-    $backends = @()
-    $cache = Join-Path $BuildDir 'CMakeCache.txt'
-    if (-not (Test-Path -LiteralPath $cache)) { return $backends }
-    foreach ($line in Get-Content -LiteralPath $cache) {
-        if ($line -match '^REXGLUE_USE_D3D12:BOOL=ON') { $backends += 'd3d12' }
-        if ($line -match '^REXGLUE_USE_VULKAN:BOOL=ON') { $backends += 'vulkan' }
-    }
-    return $backends
 }
 
 # The Khronos Vulkan loader the payload ships. The SDK opens it with LoadLibrary (it is never an
@@ -187,11 +182,17 @@ $wanted = [ordered]@{
     'vcruntime140_1.dll'       = $CrtDir
 }
 
-$vulkanLoaderDir = ''
+# Where the loader that was actually shipped came from, kept in a variable of its own: naming
+# it $VulkanLoaderDir would be the same variable as the -VulkanLoaderDir parameter (PowerShell
+# names are case-insensitive), and assigning it here would wipe the answer before it is read -
+# which is what made every -VulkanLoaderDir silently fall through to the search below until
+# 2026-10-14 (measured: a -VulkanLoaderDir holding a 22-byte vulkan-1.dll still shipped
+# System32's 1,452,408-byte copy).
+$vulkanLoaderSource = ''
 if ($payloadBackends -contains 'vulkan') {
-    $vulkanLoaderDir = Get-VulkanLoaderDir -Explicit $VulkanLoaderDir
-    if ($vulkanLoaderDir) {
-        $wanted['vulkan-1.dll'] = $vulkanLoaderDir
+    $vulkanLoaderSource = Get-VulkanLoaderDir -Explicit $VulkanLoaderDir
+    if ($vulkanLoaderSource) {
+        $wanted['vulkan-1.dll'] = $vulkanLoaderSource
     } elseif (-not $AllowMissingVulkanLoader) {
         throw ("the build offers Vulkan ($SourceDir was configured with REXGLUE_USE_VULKAN=ON), but no " +
                "vulkan-1.dll was found to ship: none at `$env:VULKAN_SDK\Bin, under C:\VulkanSDK\*\Bin, or in " +
@@ -274,6 +275,14 @@ $manifest.Add('schema_version = 1')
 $manifest.Add('')
 $manifest.Add('[game]')
 $manifest.Add("name = `"rb_blitz $Version (win-amd64)`"")
+# The snapshot's provenance: what this copy is a copy *of*. build.ps1 refuses to reuse a
+# snapshot whose provenance does not match the tree it is about to embed, so a stale payload
+# cannot be shipped silently (see tools/payload_provenance.ps1). The keys are read back by
+# build.ps1 and ignored by the helper, which verifies the [[files]] entries alone.
+$manifest.Add('')
+$manifest.Add('[payload]')
+$manifest.Add("backends = `"$($payloadBackends -join ',')`"")
+$manifest.Add("commit = `"$Commit`"")
 foreach ($item in $entries) {
     $manifest.Add('')
     $manifest.Add('[[files]]')
@@ -297,7 +306,7 @@ foreach ($item in $entries) {
 # same pair of switches controller-settings/CMakeLists.txt and CMakeLists.txt read. The loader was handled
 # above (it is fatal to be missing when the build offers Vulkan, unless the caller opted out).
 if ($payloadBackends.Count -gt 0) {
-    Write-Host ("payload renderer backends: {0}" -f ($payloadBackends -join ', '))
+    Write-Host ("payload renderer backends: {0} (recorded in the manifest)" -f ($payloadBackends -join ', '))
     if ($payloadBackends -notcontains 'vulkan') {
         Write-Warning 'this payload cannot offer Vulkan; configure with -DREXGLUE_USE_VULKAN=ON (the Windows presets do)'
     }

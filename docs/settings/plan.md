@@ -199,7 +199,7 @@ The retail page keeps its root position (index 3) and gains the graphics rows in
 | Video | Submenu | New group. |
 | ↳ Resolution | Horizontal select | Full `WIDTHxHEIGHT` labels from primary-monitor modes intersected with modes the implemented render path supports. Exact render dimensions are required. See §7. |
 | ↳ V-Sync | Boolean | `vsync`; retain 60 Hz guest timing policy. |
-| ↳ Renderer | Horizontal select | Built backends intersected with runtime usable backends. Stable values such as `d3d12`, `vulkan`; never persist list positions. **Not in the owner's tree** — see §3.7. |
+| ↳ Renderer | Horizontal select | Built backends intersected with runtime usable backends. Stable values such as `d3d12`, `vulkan`; never persist list positions. **Not in the owner's tree** — see §3.7. Drawn only when at least two backends are usable (owner decision, 2026-10-14): one entry means a plugin built with a single backend or a machine with no Vulkan loader, and the row is omitted rather than shown as a single-choice select — the boot log names what was offered instead. |
 | ↳ Anti-aliasing | Boolean with submenu | None / Native (2x when proven for this backend/title) / FXAA / FXAA Extreme. Parent displays Off for None and On for another choice. |
 | ↳ A. Filtering | Horizontal select | Native, None, 1x, 2x, 4x, 8x, 16x, limited to backend/device capability. |
 | ↳ Overscan | Retail row | The owner's tree puts retail's Overscan here, where its framing belongs. Confirm the retail page still renders correctly with the row moved; if it does not, leave it on the Audio page and record the deviation. |

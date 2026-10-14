@@ -2404,6 +2404,60 @@ void TestHelpTopicsResolve() {
   CHECK_FALSE(IsGuestScreen(""));
 }
 
+// A backend row lists what this build and this machine can run: the payload fills
+// `configuration.choices["graphics.renderer"]` from the capability snapshot, which already drops a
+// backend this machine cannot use (src/settings/schema.cpp's `FillChoiceSource`, and the Vulkan
+// loader check behind it). With one entry there is nothing to choose, so the row is not drawn at all
+// (owner decision, 2026-10-14). The boot log still names the list, which is what keeps a packaging
+// fault that ships a one-backend plugin visible once its row is gone.
+void TestRendererRowVisibility() {
+  BeginCase("the Renderer row exists only when there is a backend to choose");
+
+  // A select row contributes one symbol per choice (`<row>_<token>`), so the row is visible in a
+  // definition when one of its choice symbols is.
+  const auto has_renderer_row = [] {
+    for (const dtb::Node& root : DefinitionRoots()) {
+      if (HasSymbol(root, "settings_renderer_d3d12") || HasSymbol(root, "settings_renderer_vulkan")) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const auto video_page_has_its_groups = [] {
+    for (const dtb::Node& root : DefinitionRoots()) {
+      if (HasSymbol(root, "settings_graphics_menu") && HasSymbol(root, "settings_display_menu")) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Two backends: the row is drawn, next to the two group rows that are always on the page.
+  {
+    MenuConfiguration configuration;
+    configuration.choices["graphics.renderer"] = {{"d3d12", "D3D12"}, {"vulkan", "VULKAN"}};
+    ConfigureMenu(configuration);
+    CHECK_TRUE(has_renderer_row());
+    CHECK_TRUE(video_page_has_its_groups());
+  }
+
+  // One backend - a plugin built with a single backend, or a machine with no Vulkan loader.
+  {
+    MenuConfiguration configuration;
+    configuration.choices["graphics.renderer"] = {{"d3d12", "D3D12"}};
+    ConfigureMenu(configuration);
+    CHECK_FALSE(has_renderer_row());
+    // Dropping one row must not disturb the page it was on.
+    CHECK_TRUE(video_page_has_its_groups());
+  }
+
+  // No configured list at all is not a one-backend machine: the schema's static fallback stays, so a
+  // boot whose capabilities never arrived still shows the row - and the row exists in the shipped
+  // surface by default, which is what the rest of this suite builds against.
+  ConfigureMenu(MenuConfiguration{});
+  CHECK_TRUE(has_renderer_row());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2451,6 +2505,7 @@ int main(int argc, char** argv) {
   TestRestartPromptOnlyOnLeave();
   TestInvertedBoolRow();
   TestProviderRowRemoval();
+  TestRendererRowVisibility();
   TestLocaleOverrides();
   TestLabels();
   TestHelpTextsCoverEveryRow();

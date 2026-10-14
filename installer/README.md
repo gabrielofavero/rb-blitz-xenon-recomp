@@ -157,7 +157,8 @@ A copy of everything the helper did is left next to the game:
 | `src/paths.cpp` | The two folders: reading `paths.toml` for the folder page's prefill, checking the answers, and committing them. The file format itself comes from the game (`src/settings/paths.cpp`, compiled in), so the installer cannot write a file the game reads differently. |
 | `config/pins.toml` | The only file that names the outside world: version, URLs, sizes, hashes. |
 | `config/ultimate_fingerprints.toml` | What the mod's files hash to, in the same schema as `../config/game_fingerprints.toml`. |
-| `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its Controller Settings and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`). |
+| `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its Controller Settings and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`), recording the snapshot's provenance in the manifest. |
+| `tools/payload_provenance.ps1` | The provenance checks the two scripts share: which backends a build tree was configured with, how to read the manifest back, and whether a snapshot is really the tree it claims to be a copy of. `build.ps1` decides with it whether an existing snapshot may be reused. |
 | `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/installer/`. |
 | `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest Controller Settings checks and an updater installs from. |
 | `build.ps1` | The release entry point: Controller Settings, the payload, the helper, the tests, the images, the updater, the setup executable, `update.toml`. |
@@ -185,8 +186,9 @@ That one command:
 1. builds `rb_blitz_controller_settings.exe` in the game's build tree (skip it with
    `-SkipControllerSettings`, or point at one built elsewhere with `-ControllerSettingsTarget`);
 2. snapshots the recompiled build — the game, its Controller Settings and the DLLs they
-   need — into `installer\out\payload` if the snapshot is missing (or rebuilds it
-   with `-RefreshPayload`);
+   need — into `installer\out\payload`, after checking an existing snapshot against the
+   build tree it claims to be a copy of (see [The payload allow-list](#the-payload-allow-list));
+   `-RefreshPayload` rebuilds it anyway, and `-SkipPayload` keeps it as it is, deliberately;
 3. generates the embedded config from `config\pins.toml`, resolving the
    `[payload] commit` pin to a real commit on the way;
 4. builds the helper with the `installer-release` preset (clang++) and stages it
@@ -316,7 +318,9 @@ going to claim (a release cut from a tag, or a rebuild of an earlier build). The
 value is never checked against anything at install time: it is a record, like the
 `[payload] version` string next to it, not a pin the helper enforces. The
 working tree is not consulted either — a build from a modified checkout still
-claims the last commit it has.
+claims the last commit it has. (The *snapshot* records its own provenance too, in
+`payload-manifest.toml`'s `[payload]` table, and that one is checked against the build tree on
+every release build — see [The payload allow-list](#the-payload-allow-list).)
 
 Only `build.ps1` can turn a ref into a commit, so `tools/embed_config.cpp` refuses
 to compile a pin that is not a 40-character commit id — including a bare
@@ -460,6 +464,38 @@ offer one choice, which has already been mistaken for a bug once. The Windows pr
 ON ([build-and-run.md](../docs/guides/build-and-run.md)), and the game additionally probes the loader
 before offering the backend (`src/settings/boot.cpp`).
 
+### A snapshot has to prove it is still the tree you meant to ship
+
+A snapshot is a copy of a build tree that was correct the day it was taken, and
+`installer\out\payload` outlives the build it came from. `REXGLUE_USE_VULKAN=ON` reached the
+Windows presets on 2026-10-13; a snapshot taken earlier still held a `rexgpu-xenos.dll` with
+one backend, and every plain `build.ps1` after that kept it, embedded it and installed it —
+which is what the owner met on 2026-10-14 as an installed game whose *Renderer* row offered
+D3D12 alone (P1 of [installed-game-fix-prompts.md](../docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md)).
+
+The manifest therefore records the snapshot's **provenance** — the backends of the tree it came
+from, and the commit it was taken at — and `build.ps1` checks a snapshot against the tree it is
+about to embed before reusing it:
+
+| Checked | On a mismatch |
+| --- | --- |
+| the manifest's `backends` against `CMakeCache.txt` in the build tree | rebuild |
+| the manifest's `commit` against the commit this build resolved, when both name one | rebuild |
+| every file the tree owns, byte for byte: `rb_blitz.exe`, `rb_blitz_controller_settings.exe`, `rexruntime.dll`, `rexgpu-xenos.dll` | rebuild |
+| `vulkan-1.dll` listed, when the tree offers Vulkan at all | rebuild |
+
+So a snapshot that records no provenance (every one written before 2026-10-14), or one built for
+different backends, is rebuilt with the reason printed (`stale   : the existing snapshot is not
+this build tree:`) rather than shipped. The same check runs again over the snapshot that was just
+taken, so a release that cannot account for its own payload fails the build instead of the
+install. `-SkipPayload` is the only way to keep a snapshot that does not match — the deliberate
+case, such as a snapshot made by hand from another tree — and it warns with the same reasons;
+`-RefreshPayload` forces a rebuild when nothing is wrong.
+
+The recorded commit is a label rather than an identity: it is the checkout's `HEAD`, so a build
+from a modified working tree records the last commit it has. The file digests above are what
+decide whether two snapshots are the same build.
+
 **The payload carries the Vulkan loader.** `vulkan-1.dll` is opened at run time by the SDK with
 `LoadLibrary` and never imported by anything, so a machine with a GPU driver but no loader — a
 stripped Windows install, a VM with a passthrough adapter — would otherwise be offered Vulkan and
@@ -473,6 +509,14 @@ Vulkan-capable GPU still cannot use the backend, and the game says so and falls 
 loader is fatal to the payload build (`install the Vulkan runtime, or pass -VulkanLoaderDir`);
 `-AllowMissingVulkanLoader` ships anyway and warns, which is the shape for a machine whose users
 all have drivers.
+
+`-VulkanLoaderDir` itself did nothing at all until 2026-10-14: the line that chose the loader
+assigned `$vulkanLoaderDir`, which *is* the `-VulkanLoaderDir` parameter (PowerShell variable
+names are case-insensitive), so the parameter's value was wiped before it was read and the
+search always ran through to its last resort. Measured then: a `-VulkanLoaderDir` holding a
+19-byte `vulkan-1.dll` still shipped System32's 1,452,408-byte copy, which is also why the fatal
+"no loader anywhere" path was unreachable on a machine that has one. The answer lives in
+`$vulkanLoaderSource` now; `installer_tests` fails if the old assignment comes back.
 
 ## Rock Band Blitz Ultimate
 

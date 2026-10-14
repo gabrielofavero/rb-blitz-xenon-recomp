@@ -7,9 +7,11 @@
 #include "settings/boot.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -36,6 +38,7 @@
 #include "settings/cvars.h"
 #include "settings/hot_apply.h"
 #include "settings/schema.h"
+#include "settings/window_policy.h"
 
 REXCVAR_DEFINE_BOOL(settings_safe_graphics, false, "Settings",
                     "Start with safe graphics without deleting saved preferences.")
@@ -122,6 +125,100 @@ void ProbeDisplay(CapabilityInputs& inputs) {
   }
 #endif
 }
+
+// --- P2: the desktop the game window has to fit into --------------------------------------------
+//
+// Win32 rather than SDL, for the same reason ProbeDisplay is Win32: this translation unit is the
+// game's own half and already asks the display through the OS. The frame metrics come from the very
+// function the window manager uses to turn a client rectangle into a window rectangle for a
+// WS_OVERLAPPEDWINDOW, so the fit is measured against the real decorations rather than a guess.
+//
+// `monitor` is the SDK's own cvar (0 = system default, 1 = primary, 2.. = the enumeration order its
+// window code uses); a value naming no display leaves the metrics unavailable, and an unavailable
+// measurement means no fit at all rather than a fit against the wrong screen.
+
+#ifdef _WIN32
+
+BOOL CALLBACK CollectMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
+  reinterpret_cast<std::vector<HMONITOR>*>(data)->push_back(monitor);
+  return TRUE;
+}
+
+// What a decorated window adds to its client area, at `dpi`. The DPI-aware entry point is resolved
+// at run time: it is the correct one on any Windows that has it, and the call below it is the
+// system-DPI approximation for the Windows versions that do not.
+bool FrameExtentForDpi(const UINT dpi, DisplayMode* out) {
+  RECT frame{0, 0, 0, 0};
+  using AdjustForDpiFn = BOOL(WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
+  static const AdjustForDpiFn adjust_for_dpi = reinterpret_cast<AdjustForDpiFn>(
+      ::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "AdjustWindowRectExForDpi"));
+  if (adjust_for_dpi != nullptr) {
+    if (adjust_for_dpi(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi) == FALSE) {
+      return false;
+    }
+  } else if (::AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0) == FALSE) {
+    return false;
+  }
+  out->width = int32_t(frame.right - frame.left);
+  out->height = int32_t(frame.bottom - frame.top);
+  return out->width > 0 && out->height > 0;
+}
+
+uint32_t SystemDpi() {
+  using GetDpiForSystemFn = UINT(WINAPI*)();
+  static const GetDpiForSystemFn get_dpi_for_system = reinterpret_cast<GetDpiForSystemFn>(
+      ::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "GetDpiForSystem"));
+  if (get_dpi_for_system != nullptr) {
+    if (const UINT dpi = get_dpi_for_system(); dpi != 0) {
+      return dpi;
+    }
+  } else if (HDC screen = ::GetDC(nullptr); screen != nullptr) {
+    const UINT dpi = static_cast<UINT>(::GetDeviceCaps(screen, LOGPIXELSX));
+    ::ReleaseDC(nullptr, screen);
+    if (dpi != 0) {
+      return dpi;
+    }
+  }
+  return 96;  // the medium DPI, i.e. 100%
+}
+
+DesktopMetrics ProbeDesktop(const int32_t monitor_index) {
+  DesktopMetrics desktop;
+  std::vector<HMONITOR> monitors;
+  if (::EnumDisplayMonitors(nullptr, nullptr, CollectMonitor,
+                            reinterpret_cast<LPARAM>(&monitors)) == FALSE ||
+      monitors.empty()) {
+    return desktop;
+  }
+  std::size_t index = 0;
+  if (monitor_index > 1) {
+    if (static_cast<std::size_t>(monitor_index - 1) >= monitors.size()) {
+      return desktop;  // a display that is not there: measure nothing rather than the wrong screen
+    }
+    index = static_cast<std::size_t>(monitor_index - 1);
+  }
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (::GetMonitorInfoW(monitors[index], &info) == FALSE) {
+    return desktop;
+  }
+  const uint32_t dpi = SystemDpi();
+  desktop.work_area = {int32_t(info.rcWork.right - info.rcWork.left),
+                       int32_t(info.rcWork.bottom - info.rcWork.top)};
+  if (!FrameExtentForDpi(dpi, &desktop.frame_extent)) {
+    // No frame metrics means no fit: leaving `available` false is the honest answer.
+    return desktop;
+  }
+  desktop.scale_percent = static_cast<uint32_t>(uint64_t(dpi) * 100 / 96);
+  desktop.available = desktop.work_area.width > 0 && desktop.work_area.height > 0;
+  return desktop;
+}
+
+#else
+
+DesktopMetrics ProbeDesktop(int32_t) { return DesktopMetrics{}; }
+
+#endif  // _WIN32
 
 // The migration status as a word, for the log. P3 names the states; this is only their spelling.
 const char* MigrationName(const MigrationStatus status) {
@@ -546,6 +643,121 @@ bool SettingsBoot::WriteCvar(const std::string& name, const std::string& value, 
   return true;
 }
 
+// ------------------------------------------------------------------------------------------------
+// P2: the window and the presenter follow the render size
+// ------------------------------------------------------------------------------------------------
+
+bool SettingsBoot::WriteWindowCvar(const std::string& name, const std::string& value) {
+  if (name.empty()) {
+    return false;
+  }
+  // This runs *after* the game's own rb_blitz.toml (loaded right after OnConfigurePaths) and at the
+  // same rank, so a plain config write would beat the file a developer put the value in. A cvar
+  // somebody else already named - the file, the environment or the command line - is therefore left
+  // completely alone: the window policy is a default for a boot nobody configured, not an override
+  // (contracts §4.2).
+  if (rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault) {
+    REXLOG_INFO("settings_boot: '{}' is explicitly configured ('{}'); the window policy left it "
+                "alone", name, rex::cvar::GetFlagByName(name));
+    return false;
+  }
+  if (!rex::cvar::SetFlagFromConfig(name, value)) {
+    REXLOG_WARN("settings_boot: the registry does not know '{}'; the window policy could not set "
+                "it", name);
+    return false;
+  }
+  // `SetFlagFromConfig` reports success for a skipped write as well as an applied one, so the value
+  // is read back - the same rule FinishInit applies to the stored rows.
+  if (const std::string actual = rex::cvar::GetFlagByName(name); actual != value) {
+    REXLOG_WARN("settings_boot: '{}' = '{}' did not stand (the effective value is '{}')", name,
+                value, actual);
+    return false;
+  }
+  // Named on the way out: the boot's own evidence that the window really was given this size and
+  // this handle policy, rather than a line whose absence has to be read as success.
+  REXLOG_INFO("settings_boot: window policy: {} = {}", name, value);
+  return true;
+}
+
+void SettingsBoot::ApplyWindowPolicy() {
+  // The render size this run really produces: the planner's guest size times its draw scale is the
+  // request back again, exactly (`PlanGuestScreen` is RenderPathSizes' inverse). With no plan the
+  // title renders its own 1280x720, and nothing about the window should move.
+  if (!screen_plan_.supported) {
+    REXLOG_INFO("settings_boot: no render plan this boot; the window keeps the title's own size");
+    return;
+  }
+  const DisplayMode render{screen_plan_.guest_size.width * screen_plan_.draw_scale,
+                           screen_plan_.guest_size.height * screen_plan_.draw_scale};
+
+  // The presenter derives the shape of its output region from the *video mode* aspect, not from the
+  // frame's (docs/settings/graphics.md part 1 §3), so a size the title would not have chosen has to
+  // be reported there or the correct frame is squashed into a 16:9-shaped region. The title itself
+  // never reads the video mode (part 1 §4); the presenter and the startup window's own default size
+  // are what do.
+  WriteWindowCvar("video_mode_width", std::to_string(render.width));
+  WriteWindowCvar("video_mode_height", std::to_string(render.height));
+
+  // The window itself: the same size, unless the decorated window would not fit the display's
+  // usable area (a render size equal to the display mode never does). `window_width`/`window_height`
+  // are *logical* pixels and outrank the video mode in the SDK's own resolution order, so they are
+  // written only when the fit really shrinks the window: a boot that fits keeps the exact size the
+  // video mode gives it, with no unit round trip at all.
+  const long monitor_index =
+      std::strtol(rex::cvar::GetFlagByName("monitor").c_str(), nullptr, 10);
+  const DesktopMetrics desktop = ProbeDesktop(static_cast<int32_t>(monitor_index));
+  const ClientFit fit = FitClientToDesktop(render, desktop);
+  const double aspect = double(render.width) / double(render.height);
+  if (!desktop.available) {
+    REXLOG_INFO("settings_boot: window {}x{} (aspect {:.4f}); no usable desktop measurement, so it "
+                "is created at the render size", render.width, render.height, aspect);
+  } else if (!fit.shrunk) {
+    // The video mode already gives exactly this size, so nothing is written. If somebody named the
+    // window's size instead, it is theirs and the line says so rather than implying this policy
+    // chose it.
+    const bool window_named =
+        rex::cvar::GetFlagSource("window_width") != rex::cvar::Source::kDefault ||
+        rex::cvar::GetFlagSource("window_height") != rex::cvar::Source::kDefault;
+    REXLOG_INFO("settings_boot: window {}x{} (aspect {:.4f}) fits the usable desktop {}x{} with "
+                "{}+{} px of decorations{}",
+                render.width, render.height, aspect, desktop.work_area.width,
+                desktop.work_area.height, desktop.frame_extent.width, desktop.frame_extent.height,
+                window_named ? "; the window size is explicitly configured" : "");
+  } else {
+    const DisplayMode logical = PhysicalToLogical(fit.client, desktop.scale_percent);
+    // Both halves, attempted even if the first is refused: the two are one size, and a half-applied
+    // pair would be worse than either outcome. The line below reports what happened, not what was
+    // wanted - a boot whose window size is explicitly configured keeps its own size and says so.
+    const bool wrote_width = WriteWindowCvar("window_width", std::to_string(logical.width));
+    const bool wrote_height = WriteWindowCvar("window_height", std::to_string(logical.height));
+    if (wrote_width && wrote_height) {
+      REXLOG_INFO(
+          "settings_boot: window {}x{} -> client {}x{} physical ({}x{} logical at {}%), aspect "
+          "{:.4f} kept, inside the usable desktop {}x{} minus {}x{} of decorations",
+          render.width, render.height, fit.client.width, fit.client.height, logical.width,
+          logical.height, desktop.scale_percent, aspect, desktop.work_area.width,
+          desktop.work_area.height, desktop.frame_extent.width, desktop.frame_extent.height);
+    } else {
+      REXLOG_WARN("settings_boot: a {}x{} render wants a {}x{} client here, but this boot's window "
+                  "size is explicitly configured; the fit was not applied and the window may not "
+                  "match the picture's shape",
+                  render.width, render.height, fit.client.width, fit.client.height);
+    }
+  }
+
+  // One size, decided here: the window is a picture, and dragging it into a shape the render size
+  // cannot fill is exactly the distortion this project removed. The separate Controller Settings
+  // utility builds its own SDL window (controller-settings/main.cpp) and never reads this cvar.
+  WriteWindowCvar("window_resizable", "false");
+  // The aspect the window shows and the aspect the render size has must be the same, or the
+  // presenter letterboxes what it was handed. Stated rather than assumed, so a mismatch is a log
+  // line and not a screenshot somebody has to interpret.
+  if (desktop.available && fit.shrunk && !SameAspect(fit.client, render)) {
+    REXLOG_WARN("settings_boot: the fitted window {}x{} is not the render size's aspect {:.4f}",
+                fit.client.width, fit.client.height, aspect);
+  }
+}
+
 bool SettingsBoot::ExplicitlyOwned(const std::string& name, const SettingId id) {
   const rex::cvar::Source source = rex::cvar::GetFlagSource(name);
   if (!HigherRank(source)) {
@@ -669,6 +881,9 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     REXLOG_INFO("settings_boot: HUD re-anchor shift {:.4f} layout units, {:.1f} px",
                 BootHudShiftUnits(), BootHudShiftPixels());
   }
+  // The window and the presenter (P2): the frame was just decided, so the window that shows it and
+  // the region the presenter scales it into are decided from the same number, here.
+  ApplyWindowPolicy();
   if (service_) {
     GraphicsValues effective;
     for (const auto id : {SettingId::kRenderer, SettingId::kResolution,

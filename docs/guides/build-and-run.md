@@ -267,6 +267,19 @@ Vulkan pulls in the SDK's
 are initialised in this checkout (see [known-issues.md](../reference/known-issues.md)); a fresh clone needs
 `git -C rexglue-sdk submodule update --init --recursive` for them.
 
+The same pair of switches reaches the **installed** product through a chain that has to agree at
+every step: the configured source tree → the freshly built game and GPU plugin → the installer's
+payload snapshot → the setup executable → the installed binaries. `build.ps1` checks the middle
+of that chain: `make_payload.ps1` records the snapshot's backends and commit in
+`payload-manifest.toml`, and an existing `installer\out\payload` is reused only when it proves to
+be the tree being shipped — otherwise it is rebuilt, with the reason printed. That check exists
+because it failed once: `REXGLUE_USE_VULKAN` reached these presets on 2026-10-13 and an older
+snapshot was kept, embedded and installed, so the installed game's *Renderer* row offered D3D12
+alone ([installer/README.md](../../installer/README.md) §"The payload allow-list",
+[known-issues.md](../reference/known-issues.md)). Read the backends out of the configure log above,
+not out of a `CMakeCache.txt` you happen to find — a second, stale `out/build/*` tree is a real
+configuration and not the one a given setup executable was built from.
+
 ### The first build on a tree that has never run codegen
 
 `generated/default/sources.cmake` is what names the 104 recompiled partitions to

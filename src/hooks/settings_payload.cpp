@@ -238,7 +238,13 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
       for (const auto& choice : renderers->second) {
         listed += (listed.empty() ? "" : ", ") + choice.second;
       }
-      REXLOG_INFO("settings_menu: Renderer offers {}: {}", renderers->second.size(), listed);
+      // A one-entry list also means the in-game row is not drawn at all (owner decision,
+      // 2026-10-14, src/ui/settings_screen.cpp), so say so here - the log is the only place that
+      // still names the backend when the row is gone.
+      REXLOG_INFO("settings_menu: Renderer offers {}: {}{}", renderers->second.size(), listed,
+                  renderers->second.size() < 2
+                      ? " (the row is hidden: one backend is not a choice)"
+                      : "");
     }
     for (const auto& binding : ultimate_adapter::RowBindings()) {
       const auto found = provider.choices.find(std::string(binding.variable));

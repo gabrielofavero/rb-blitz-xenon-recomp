@@ -47,14 +47,24 @@ Part 1 wherever they disagree.
   the screen.
 - **Verifiably open: no Windows preset can build a test right now** (`REXGLUE_USE_VULKAN=ON` makes the
   SDK's glslang guard write `BUILD_TESTING=OFF` before `include(CTest)`); a Vulkan-off tree configured
-  with `-DBUILD_TESTING=ON` builds everything and runs **37/37**.
+  with `-DBUILD_TESTING=ON` builds everything and runs **38/38** (was 37/37 until `window_policy` was
+  added on 2026-10-14). Building that tree **clobbers the Vulkan-on SDK objects** — the two configure
+  into the same `rexglue-sdk/out/win-amd64` — so re-run `cmake --preset win-amd64-release` before the
+  next release build.
+- **The window follows the resolution now (P2 of the installed-game review, 2026-10-14)**: the boot
+  writes `video_mode_width/height` (the presenter scales into a region of the frame's own shape),
+  `window_width/height` when the decorated window would not fit the desktop's usable area, and
+  `window_resizable = false` ([patch 0017](../../patches/rexglue-sdk/0017-fixed-size-window.patch)) —
+  measured: a first run with **nothing stored** reaches 2560x1080 on this machine's 21:9 primary with
+  a 2354x993 client and no `WS_THICKFRAME`. The game window is deliberately one size; the Controller
+  Settings utility is untouched. See [graphics.md](graphics.md) part 3 §11.
 - **Verifiably fixed**: the 2026-10-12 black startup (the generated payload made the patch archive
   two-part, which this title never reads — Part 2) and graphics recovery (the marker, fallback and
   safe mode all ran; older statements, including item 11 below, are wrong).
 - **The next three things to do**: (a) drive the merged menu once after the punch list (A
   advance/wrap, the restart prompt on leaving, On/Off in every language, Borderless); (b) the in-song
   entry (item 13) — merge into the pause panel's inline list and build the pause-context child
-  screens; (c) make a preset that can build a test again, so 37/37 is reproducible from the presets.
+  screens; (c) make a preset that can build a test again, so 38/38 is reproducible from the presets.
 
 ## Part 1 — Current status and remaining work (was `docs/plans/in-game-settings-remaining-work.md`)
 
@@ -163,6 +173,29 @@ Two things were missing and both are in:
   miss is fatal unless `-AllowMissingVulkanLoader`). Measured: 9-file snapshot,
   `vulkan-1.dll 1,452,408 bytes`, `payload renderer backends: d3d12, vulkan`; the game logs
   `settings_menu: Renderer offers 2: D3D12, VULKAN`.
+
+#### Renderer row: drawn only when there is a backend to choose (owner decision, 2026-10-14)
+
+The owner asked for the row to be hidden where it has nothing to offer, after an installed build appeared to
+offer D3D12 alone. That appearance was a **packaging** fault rather than the machine's: the setup
+executable had been built from `installer/out/payload` as it stood before `REXGLUE_USE_VULKAN=ON`, so it
+shipped a one-backend `rexgpu-xenos.dll`. `build.ps1` now verifies a snapshot against the build tree
+before reusing it, so that cannot happen silently again
+([installed-game-fix-prompts.md](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md) P1).
+The row rule is kept on its own merits:
+
+* `src/ui/settings_screen.cpp` drops the row from the Video page when the configured renderer list has
+  fewer than two entries. It is *not* drawn as `Renderer: Unavailable` (that reads as a failure) and not
+  left as a one-choice select, which is what `graphics.md` §10 originally specified — that entry is
+  superseded.
+* The state is not silent: `src/hooks/settings_payload.cpp` still logs the list, and says what happened to
+  the row — `settings_menu: Renderer offers 1: D3D12 (the row is hidden: one backend is not a choice)`.
+* Measured on this machine, where both backends are usable, nothing changes: the reinstalled copy logs
+  `settings_menu: Renderer offers 2: D3D12, VULKAN`, creates the Vulkan device and presents a menu frame
+  (`out/_swap/p1/installed2-vulkan.log`). The hidden case is pinned by `TestRendererRowVisibility`
+  (`tests/settings_screen_tests.cpp`); `settings_screen` is 27,772 checks green and the test-capable tree
+  is 38/38 (`out/build/rename-tests` — the Windows release preset cannot build a test at all, §"How the
+  test tree stands").
 
 #### Controller Settings cutover (P11b)
 
@@ -656,7 +689,7 @@ reset, unstage, or replace the working tree from an older commit.
 
 ### Workspace and operational details
 
-- Repository: `D:\Gabriel\Documentos\Coding\decomps\360\rb-blitz-xenon-recomp`; PowerShell
+- Repository: `<checkout>`; PowerShell
   (`exec_command` with `login: false` avoids a slow shell startup).
 - HEAD at handover: `a3fd698` (ultrawide resolution/diagnostics), preceded by `ebd7c27` and `6df0359`
   (graphics boot management/recovery) — recheck before editing, HEAD moved externally.
