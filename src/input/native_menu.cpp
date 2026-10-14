@@ -4,6 +4,7 @@
 #include <rex/hook.h>
 #include <rex/cvar.h>
 #include "hooks/help_observer.h"
+#include "hooks/content_progress.h"
 #include <bit>
 #include <cstring>
 #include <mutex>
@@ -93,6 +94,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   // from pause and its nested menus. A transition is never an input destination.
   const bool allowed = screen && U32(base, manager + 16) == 0 &&
       (name != "game_screen" || panel_name == "pause_panel");
+  rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
   std::lock_guard lock(mutex);
   if ((screen != current_screen || focus != current_focus || allowed != menu_available) &&
       REXCVAR_GET(mouse_native_trace))

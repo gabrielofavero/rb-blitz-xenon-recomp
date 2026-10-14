@@ -14,6 +14,7 @@
 
 #include "fs/dlc_cache.h"
 #include "fs/dlc_library.h"
+#include "fs/dlc_cached_library.h"
 
 #include <cstdint>
 #include <cstring>
@@ -307,6 +308,86 @@ int main() {
     CHECK_TRUE(LoadDlcCache(file, &refreshed, &reason));
     CHECK_TRUE(DlcCacheMatches(refreshed, {root}, 0, after, &reason));
     CHECK_EQ(refreshed.items.size(), 2);
+  }
+
+  BeginCase("the production loader distinguishes Off, cold, warm and explicit refresh");
+  {
+    Scratch s;
+    const auto root = s.base / "library";
+    const auto path = s.base / "cache" / "library.cache";
+    WritePackage(root / "one", "CON ", kRb3TitleId, kSavedGame);
+    auto off = LoadOrScanDlcLibrary(false, false, {root}, 0, 1, path);
+    CHECK_EQ(off.library.items.size(), 1);
+    CHECK_FALSE(off.hit);
+    CHECK_FALSE(fs::exists(path));
+    auto cold = LoadOrScanDlcLibrary(true, false, {root}, 0, 1, path);
+    CHECK_FALSE(cold.hit);
+    CHECK_TRUE(cold.written);
+    auto warm = LoadOrScanDlcLibrary(true, false, {root}, 0, 1, path);
+    CHECK_TRUE(warm.hit);
+    CHECK_EQ(warm.library.items.size(), 1);
+    CHECK_EQ(warm.scan_ms, 0);
+    auto refresh = LoadOrScanDlcLibrary(true, true, {root}, 0, 1, path);
+    CHECK_FALSE(refresh.hit);
+    CHECK_TRUE(refresh.written);
+    CHECK_TRUE(refresh.reason == "explicit refresh");
+    auto changed_type = LoadOrScanDlcLibrary(true, false, {root}, kSavedGame, 1, path);
+    CHECK_FALSE(changed_type.hit);
+    CHECK_EQ(changed_type.library.items[0].content_type, kSavedGame);
+    WritePackage(root / "two", "CON ", kRb3TitleId, kSavedGame);
+    auto added = LoadOrScanDlcLibrary(true, false, {root}, kSavedGame, 1, path);
+    CHECK_FALSE(added.hit);
+    CHECK_EQ(added.library.items.size(), 2);
+    WriteFile(path, "corrupt");
+    auto corrupt = LoadOrScanDlcLibrary(true, false, {root}, 0, 1, path);
+    CHECK_FALSE(corrupt.hit);
+    CHECK_TRUE(corrupt.written);
+    CHECK_EQ(corrupt.library.items.size(), 2);
+    const auto unavailable = s.base / "absent";
+    auto missing = LoadOrScanDlcLibrary(true, false, {unavailable}, 0, 1, path);
+    CHECK_FALSE(missing.hit);
+    CHECK_FALSE(missing.written);
+  }
+  BeginCase("corruption inside an otherwise parseable record is a miss");
+  {
+    DlcLibraryCache cache, parsed;
+    cache.items.push_back({"path/to/package", "song", kRb3TitleId, kMarketplace});
+    auto bytes = SerializeDlcCache(cache);
+    std::string reason;
+    CHECK_TRUE(ParseDlcCache(bytes.data(), bytes.size(), &parsed, &reason));
+    const std::string needle = "song";
+    auto at = std::search(bytes.begin(), bytes.end(), needle.begin(), needle.end());
+    CHECK_TRUE(at != bytes.end());
+    *at ^= 1;
+    CHECK_FALSE(ParseDlcCache(bytes.data(), bytes.size(), &parsed, &reason));
+    CHECK_TRUE(reason == "the cache checksum does not match");
+  }
+  BeginCase("unwritable destinations and rejected scans remain usable without a cache");
+  {
+    Scratch s;
+    const auto root = s.base / "library";
+    WritePackage(root / "one", "CON ", kRb3TitleId, kSavedGame);
+    WriteFile(s.base / "blocked", "a file cannot be a directory");
+    auto blocked = LoadOrScanDlcLibrary(true, false, {root}, 0, 1,
+                                        s.base / "blocked" / "library.cache");
+    CHECK_FALSE(blocked.hit);
+    CHECK_FALSE(blocked.written);
+    CHECK_EQ(blocked.library.items.size(), 1);
+    CHECK_TRUE(!blocked.write_reason.empty());
+    WriteFile(root / "broken", "CON ");
+    auto rejected = LoadOrScanDlcLibrary(true, false, {root}, 0, 1, s.base / "cache");
+    CHECK_FALSE(rejected.written);
+    CHECK_EQ(rejected.library.items.size(), 1);
+    CHECK_TRUE(!fs::exists(s.base / "cache"));
+  }
+  BeginCase("a failed atomic replacement preserves the old destination");
+  {
+    Scratch s;
+    const auto path = s.base / "destination";
+    WriteFile(path / "keep", "old data");
+    std::string reason;
+    CHECK_FALSE(SaveDlcCache(path, DlcLibraryCache{}, &reason));
+    CHECK_TRUE(fs::exists(path / "keep"));
   }
 
   return Finish();

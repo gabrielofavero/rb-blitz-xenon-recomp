@@ -42,6 +42,7 @@
 #include <vector>
 
 #include "fs/dlc_library.h"
+#include "fs/atomic_file.h"
 
 namespace rb_blitz::fs {
 
@@ -50,7 +51,7 @@ namespace rb_blitz::fs {
 // changes, so an old file is discarded by parse rather than misread.
 inline constexpr std::string_view kDlcCacheFileName = "dlc_library.cache";
 inline constexpr std::string_view kDlcCacheMagic = "RBDLCC01";
-inline constexpr uint32_t kDlcCacheVersion = 1;
+inline constexpr uint32_t kDlcCacheVersion = 2;
 
 // A tree's identity, cheap to recompute and cheap to compare. `hash` folds every
 // file's path, size and mtime; `file_count` and `total_size` are kept beside it so a
@@ -85,10 +86,8 @@ inline void MixBytes(uint64_t* hash, const std::string_view bytes) {
   }
 }
 
-// Every regular file under `root`, as (relative path, size, mtime). Missing roots
-// contribute nothing, which matches ScanDlcLibraries: an absent library is not an
-// error, but a root that exists and cannot be read is, because then the cache could
-// not be proved current.
+// Every regular file under `root`, as (path, size, mtime). An unavailable root
+// cannot prove an empty library: every walk/stat error refuses cache reuse.
 struct TreeEntry {
   std::string key;  // root index + '/' + root-relative path, UTF-8
   uint64_t size = 0;
@@ -112,23 +111,31 @@ inline bool CollectTreeEntries(const std::vector<std::filesystem::path>& roots,
 
     std::error_code ec;
     std::filesystem::directory_iterator it(
-        directory, std::filesystem::directory_options::skip_permission_denied, ec);
+        directory, std::filesystem::directory_options::none, ec);
     if (ec) {
-      *reason = "cannot be read";
+      *reason = directory.string() + ": " + ec.message();
       return false;
     }
 
-    for (const auto& entry : it) {
+    const std::filesystem::directory_iterator end;
+    while (it != end) {
+      const auto entry = *it;
+      it.increment(ec);
+      if (ec) { *reason = directory.string() + ": " + ec.message(); return false; }
       std::error_code entry_ec;
-      if (entry.is_directory(entry_ec) && !entry_ec) {
+      const auto status = entry.status(entry_ec);
+      if (entry_ec) { *reason = entry.path().string() + ": " + entry_ec.message(); return false; }
+      if (std::filesystem::is_directory(status)) {
         // A directory symlink is not followed (it could loop), exactly as
         // ScanDlcLibraries refuses to follow one.
-        if (!entry.is_symlink(entry_ec)) {
+        const bool symlink = entry.is_symlink(entry_ec);
+        if (entry_ec) { *reason = entry.path().string() + ": " + entry_ec.message(); return false; }
+        if (!symlink) {
           pending.emplace_back(root_index, entry.path());
         }
         continue;
       }
-      if (!entry.is_regular_file(entry_ec) || entry_ec) {
+      if (!std::filesystem::is_regular_file(status)) {
         continue;
       }
 
@@ -137,7 +144,7 @@ inline bool CollectTreeEntries(const std::vector<std::filesystem::path>& roots,
       std::error_code time_ec;
       const std::filesystem::file_time_type mtime = entry.last_write_time(time_ec);
       if (size_ec || time_ec) {
-        *reason = "cannot be read";
+        *reason = entry.path().string() + ": " + (size_ec ? size_ec : time_ec).message();
         return false;
       }
 
@@ -390,6 +397,9 @@ inline std::vector<uint8_t> SerializeDlcCache(const DlcLibraryCache& cache) {
     writer.Bytes(rejected.entry);
     writer.Bytes(rejected.reason);
   }
+  uint64_t checksum = 0xCBF29CE484222325ull;
+  for (const auto byte : writer.data()) detail::MixByte(&checksum, byte);
+  writer.U64(checksum);
   return writer.data();
 }
 
@@ -482,6 +492,13 @@ inline bool ParseDlcCache(const uint8_t* data, const std::size_t size, DlcLibrar
     cache.rejected.push_back(std::move(rejected));
   }
 
+  uint64_t stored_checksum = 0;
+  uint64_t checksum = 0xCBF29CE484222325ull;
+  if (size >= 8) for (size_t i = 0; i < size - 8; ++i) detail::MixByte(&checksum, data[i]);
+  if (!reader.U64(&stored_checksum) || reader.Remaining() != 0 || stored_checksum != checksum) {
+    *reason = "the cache checksum does not match";
+    return false;
+  }
   if (!reader.Ok()) {
     *reason = "the cache is truncated";
     return false;
@@ -496,11 +513,14 @@ inline bool LoadDlcCache(const std::filesystem::path& path, DlcLibraryCache* out
                          std::string* reason) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
-    *reason = "no cache file";
+    std::error_code ec;
+    *reason = std::filesystem::exists(path, ec) ? "cache cannot be read: " + path.string()
+                                              : "no cache file: " + path.string();
     return false;
   }
   std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),
                              std::istreambuf_iterator<char>());
+  if (file.bad()) { *reason = "cache read failed: " + path.string(); return false; }
   return ParseDlcCache(bytes.data(), bytes.size(), out, reason);
 }
 
@@ -511,34 +531,8 @@ inline bool SaveDlcCache(const std::filesystem::path& path, const DlcLibraryCach
                          std::string* reason) {
   const std::vector<uint8_t> bytes = SerializeDlcCache(cache);
 
-  std::error_code ec;
-  std::filesystem::create_directories(path.parent_path(), ec);
-  std::filesystem::path temporary = path;
-  temporary += ".tmp";
-  {
-    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-    if (!file) {
-      *reason = "cannot be written";
-      return false;
-    }
-    file.write(reinterpret_cast<const char*>(bytes.data()),
-               static_cast<std::streamsize>(bytes.size()));
-    if (!file) {
-      *reason = "cannot be written";
-      std::filesystem::remove(temporary, ec);
-      return false;
-    }
-  }
-
-  std::filesystem::remove(path, ec);
-  ec.clear();
-  std::filesystem::rename(temporary, path, ec);
-  if (ec) {
-    *reason = "cannot be put in place";
-    std::filesystem::remove(temporary, ec);
-    return false;
-  }
-  return true;
+  return WriteAtomic(path, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()),
+                     reason);
 }
 
 }  // namespace rb_blitz::fs

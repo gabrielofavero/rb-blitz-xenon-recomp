@@ -336,6 +336,21 @@ Three properties make the shape safe:
 
 The row is reachable only with `enhancements_dlc_cache` on: R5's compiled default hides `splash_dlc`, so the boot turning R7 on also drops that name from the hidden list — a row that refreshes the cache is not an offline-dead row.
 
+**P6 supersedes the dated status/progress behavior below (2026-10-14).** An actual host-cache
+hit now changes the English `server_connect_enumerating_content` record to **Loading Cached
+Content List**, at the whole-record settings-provider stage (`BuildMenuRecords`). The provider
+logs the precise path, key, value and hit state; Off/cold/refresh retain the discovery label.
+The host overlay uses real aggregate enumerator counts and an unnumbered finalization phase;
+`UIManager::Poll` (`native_menu.cpp`) observes the usable menu before restoring pacing. See
+[dlc.md](../guides/dlc.md) §4.4 and P6's installed evidence for the current contract. The following
+2026-10-10 measurements are retained as the history of the old implementation.
+
+Split-read checksum fix: `PatchFile` stages digest edits; `CompleteSplitFile` first proves the
+already-consumed head is unchanged, delivers the tail, and only then commits those edits.
+Previously it changed the guest digest before rejecting an undeliverable edit, producing a
+dirty-disc failure. `NtReadFile` uses the completed IOSB status/length (the SDK can return pending
+after completing the read); scatter reads are not treated as contiguous file data.
+
 **The two labels.** The row ships as `DOWNLOAD CONTENT` and the connect panel's status line as
 `Discovering Downloadable Content`, both in the game's English locale
 (`ui/locale/eng/gen/locale_keep.dtb`). R7 rewrites both (`RenameLabel`, src/ui/menu_options.h for the

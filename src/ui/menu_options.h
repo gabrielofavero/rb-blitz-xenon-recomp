@@ -54,9 +54,15 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <span>
 #include <vector>
 
 namespace rb_blitz::menu_options {
+
+// Deliver only bytes still owned by the current read. A rejected edit must not
+// change either the read buffer or its guest checksum record.
+bool DeliverSplitEdit(std::span<const uint8_t> original_head,
+                      std::span<const uint8_t> edited_file, std::span<uint8_t> second_read);
 
 // The rows the game cannot serve offline: the leaderboard, the achievement
 // list, and the downloadable-content browser. This is the compiled default of
@@ -90,7 +96,7 @@ inline constexpr char kDlcRowRefreshLabel[] = "Refresh Music Library";
 // discovery happening, so the screen says what it is doing instead.
 inline constexpr char kEnumeratingContentKey[] = "server_connect_enumerating_content";
 inline constexpr char kDiscoveringContentLabel[] = "Discovering Downloadable Content";
-inline constexpr char kLoadingCacheLabel[] = "Loading Song Cache";
+inline constexpr char kLoadingCacheLabel[] = "Loading Cached Content List";
 
 // What one call did, in the terms a log line and the tests both need.
 struct Outcome {

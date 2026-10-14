@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <numeric>
 #include "ui/settings_screen.h"
+#include "ui/menu_options.h"
 
 namespace rb_blitz::settings {
 namespace {
@@ -16,8 +17,16 @@ void U64(std::vector<uint8_t>& out, uint64_t n) {
 }
 }
 
+bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit) {
+  if (!cache_hit) return false;
+  std::string why;
+  return ui::screen::ReplaceLocaleEntry(roots, menu_options::kEnumeratingContentKey,
+      menu_options::kDiscoveringContentLabel, menu_options::kLoadingCacheLabel, &why);
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
-                      MenuRecords* records, std::string* error, bool merge_provider) {
+                      MenuRecords* records, std::string* error, bool merge_provider,
+                      bool cached_dlc_list) {
   namespace screen = ui::screen;
   MenuRecords built;
   auto edit = [&](const std::string& path, auto transform) {
@@ -66,6 +75,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
+      SetDiscoveryCacheLabel(&roots, cached_dlc_list);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
       // does not carry them, or carries a translation, is left alone by the same call.
       for (const auto& entry : screen::LocaleOverrides()) {

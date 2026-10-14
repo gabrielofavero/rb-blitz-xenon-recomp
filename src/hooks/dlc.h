@@ -75,11 +75,8 @@ bool RefreshArmed();
 // answered from the file it wrote last boot. False before Configure() and with R7 off.
 bool CacheServedThisBoot();
 
-// How many content packages this layer will present to the title's enumerator: the
-// entries of the flat library handed to the content manager, which is the DLC a dumped
-// song folder adds. Zero with no library, before Configure() or when the content manager
-// was not reached. The discovery screen's progress bar is given this as its total
-// (src/hooks/content_progress.cpp).
+// Registered flat and structured package count, for diagnostics. The progress
+// model reads the actual guest enumerators, which also contain writable/user content.
 std::size_t ContentItemCount();
 
 // The host paths of the flat library's packages, in the walk order the scan produced

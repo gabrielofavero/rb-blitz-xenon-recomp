@@ -2,6 +2,9 @@
 
 Where downloadable content goes, and what the guest does with it.
 
+**Current cache/status/progress behavior:** see §4.4 (P6, 2026-10-14). Earlier dated
+measurements in §4.1–4.3 describe their original builds and defaults.
+
 Blitz does not read a DLC directory of its own: it enumerates content through the
 emulated Xbox content APIs and opens what it found, and the SDK's content manager
 serves both halves. A package therefore has to sit where that manager looks, and the
@@ -142,7 +145,7 @@ many threads read it (§4.1).
 | `--dlc_library`, or `dlc_library` in `rb_blitz.toml` | *(empty)* | `;`-separated folders of §2.1; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
 | `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
-| `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | off | R7: persist the library enumeration (§4.1) and reuse it while the tree it describes is unchanged, and drop the emulator's per-package mount latency for the run; changing it needs a relaunch |
+| `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's last row asks for the same thing in a running title (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
@@ -214,8 +217,7 @@ fingerprints the tree — every regular file's root-relative path, size and modi
 time, hashed in sorted-path order so directory iteration order cannot change it — and
 reuses the cache only when the fingerprint, the roots and the override all match. Any
 difference, a missing or damaged file, or an unreadable root is a **miss**: the library
-is scanned exactly as it is today and the cache is rewritten, so a cache can never hide
-a package. `--refresh_dlc_cache` forces that miss.
+is scanned again. Since P6, only a complete, stable, rejection-free scan is persisted (§4.4). `--refresh_dlc_cache` forces that miss.
 
 The cached items are what the host hands the content manager
 (`set_extra_content_library()`); the guest's own enumeration, mounting and `songcache:`
@@ -463,6 +465,86 @@ reaches that handler through imports it really has (`XMsgStartIORequestEx`,
 is touched. The bar then animates: measured, one item per presented frame, 0 → 100% in
 46.7 s, and the fill grew 242 → 786 → 1,514 cyan pixels across three captures
 (`out/drive-ui/p2-*.png`).
+
+## 4.4 Current loading pipeline (P6, 2026-10-14)
+
+This section supersedes the cache defaults, status/progress and pacing rules in the dated
+2026-10-06/10 measurements above. Those numbers remain historical evidence, not the incremental
+benefit of Cache On today. Both cache and loading-phase uncapping default **On**; emulated mount
+delay defaults to zero independently of either toggle. Cache Off scans headers on every launch
+but keeps accurate progress and the separately selected pacing policy.
+
+The **host cache** stores the flat library's content list. It still fingerprints every file and
+does not cache structured-root traversal, guest enumeration, STFS mounts or song metadata. The
+production loader is [dlc_cached_library.h](../../src/fs/dlc_cached_library.h), shared by boot,
+refresh and [the benchmark](../../tools/dlc_cache_benchmark.cpp). Logs name effective roots,
+content type, hit/miss reason, counts, fingerprint/load/scan/verification/write times and write
+outcome. Existing enhancement/settings boot logs identify the setting's source; changing the
+in-game Cache DLC Library row still requires restart.
+
+Version 2 adds a checksum over the complete cache body. Missing, old-version, truncated, corrupt,
+root/type/fingerprint-mismatched caches fall back to scanning. An unreadable root, rejected entry
+or tree change during scanning prevents persistence of a partial answer. Writes use the shared
+atomic writer: failure preserves the previous destination and leaves the scanned library usable.
+The fingerprint remains path/size/mtime based; editing bytes while deliberately preserving all
+three is not detected without explicit refresh. The checksum detects cache-file corruption,
+not this separate limitation of source fingerprints.
+
+The **guest songcache** is a separate file under
+`<user_data_root>/<XUID>/5841122D/00000001/songcache/songcache`. A host hit does not imply that
+file exists or contains all current packages. `content_pipeline` logs observed songcache reads,
+metadata reads, writes, completed-item results, native subphase completion and usable-menu time.
+IO durations are time inside the host read/write call, **not** all guest parsing or mount time.
+STFS mount log timestamps bracket work; there is no isolated parser CPU timer.
+
+**Final installed acceptance (2026-10-14: one installer, seven boots, `out/_swap/p6/final-*`).**
+The card changes only on a real hit: the same one-package library and settings boot cold as
+*Discovering Downloadable Content* (5.286 s pipeline, 2 metadata reads) and warm as **Loading
+Cached Content List** with `host_cache_hit=true` and **0** metadata reads — the guest's own file is
+what serves it (`songcache_reads=1`). Every content shape (none, one flat package, structured only,
+mixed, and 1,773 flat packages) reached a usable menu, and the mixed leg's `YOUR SONGS` capture
+draws the library's own rows (`final-mixed/shots/songs.png`).
+
+For the 1,773-package library the **guest's file held 0 packages** — a 16-byte version-11 record —
+and stayed there: the warm twin, with the host cache in place, sampled the same file every 2 s for a
+60 s settle window and it never changed (30 samples, mtime untouched). The guest still enumerated
+3,546 items and still issued 3,546 metadata reads on both boots, so what the host cache removes is
+its own header scan and nothing of the guest's. The two large legs also show how much of the boot is
+storage, not parsing: same library, same binaries, host I/O inside those reads **6,130.5 ms** cold
+against **138.0 ms** warm, and the phase after the last enumeration **336.9 s → 94.1 s**. Always read
+"warm" here as *the host cache file*; the OS filesystem cache is uncontrolled, and the warm leg
+logged unexplained extra package mounts (5,039 by its menu, 5,261 after the settle) against the cold
+one's 3,546. Host-cache On describes the *host's* header scan; it says nothing about the guest's own
+cache, and a package count is not a playable song (see
+[known-issues.md](../reference/known-issues.md) for the DLC song-start fault).
+
+On an actual host hit, the English locale key `server_connect_enumerating_content` in
+`ui/locale/eng/gen/locale_keep.dtb` says **Loading Cached Content List**. Cold, Off and refresh
+boots keep **Discovering Downloadable Content**. The installed settings provider edits the
+whole generated locale record before archiving it; it no longer relies on a split-read edit
+reaching already-consumed bytes. Non-English originals are preserved. The fallback split-read
+hook commits checksum changes only after delivering the edited bytes; rejected edits previously
+changed the expected digest anyway and could produce `XamShowDirtyDiscErrorUI`.
+
+Progress uses each actual SDK aggregate enumerator's item count, including structured and user
+content. Handles can interleave. Only successful completed items count; pending submissions,
+terminators and failures do not. Each batch is bounded and monotonic, and a new attempt resets
+the model. The overlay shows **Reading content: N / T packages** while a batch has remaining
+items, then **Loading song information...**, **Reading saved song information...** or **Saving
+song information...** without a percentage. Finishing a batch does not declare overall completion.
+The old native percentage is hidden. This overlay works independently of Settings Labels.
+
+Pacing now stays uncapped through enumeration and finalization, restoring the player's value
+when UIManager observes `splash_screen` / `splash_panel` available with no transition pending.
+Native `Complete` hides the overlay (the connect panel can become an offline/login dialog), but
+does not restore pacing early. The former last-item and two-second-idle guesses are removed.
+Restoration is asynchronous: this guarantees a request at the verified menu boundary, not that
+no menu frame can ever be presented uncapped. Turning uncapping Off leaves V-Sync untouched.
+
+Installed measurements and the controlled trial table are in
+[P6's execution record](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md#p6--execution-record-2026-10-14).
+Evidence is under `out/_swap/p6/`. Existing DLC song-start faults remain separately tracked in
+[known-issues.md](../reference/known-issues.md); package counts alone do not prove playable songs.
 
 ## 5. Limits
 

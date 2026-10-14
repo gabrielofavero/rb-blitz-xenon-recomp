@@ -34,7 +34,9 @@ Part 1 wherever they disagree.
   owner decision, and a missing loader is refused on both sides.
 - **Boot speed (2026-10-13)**: the wait is the DLC discovery, not the A/V load; the defaults now cache
   the library, zero `deferred_overlapped_delay_ms` and free the frame rate, so the walk is ~0.3 s and
-  2,804 items enumerate in 39 s (was ~6 minutes).
+  2,804 items enumerate in 39 s (was ~6 minutes). Its *pacing* half — put the frame rate back at the
+  last item, the engine's own completion, or a two-second idle — is superseded by the P6 bullet below
+  (restoration now waits for the verified usable menu).
 - **Row descriptions (the help captions)** — the highlighted row's canonical symbol is published over the
   settings channel, retail/in-song pages are resolved by a host observer, and a host overlay draws the
   caption. Since **2026-10-14** (P4 of the installed-game review) the caption is a system sans at a
@@ -43,6 +45,19 @@ Part 1 wherever they disagree.
   its own row — **Interface → Settings Labels**, default On — which applies **live**, with no restart
   prompt. Seen by eye on a running screen on that date: 1280x720 and this machine's 21:9 primary
   (2560x1080 render, 2354x993 client).
+- **DLC cache, status text and loading progress (P6 of the installed-game review, 2026-10-14)**: the
+  host cache now names its hit/miss reason and per-phase timings, validates its body with a checksum,
+  replaces itself atomically and refuses to persist a partial scan; a **real** hit is what makes the
+  English `server_connect_enumerating_content` record read **Loading Cached Content List** (cold, Off
+  and refresh keep *Discovering Downloadable Content*); the loading overlay counts real enumerator
+  items and shows an unnumbered **Loading song information…** phase instead of a premature 100 %, and
+  V-Sync returns at the verified usable menu. Measured in the installed copy: the first comparison
+  removes **103.4 s → 17.7 s** of post-full-bar work, and a warm host cache removes **92.3 %** of the
+  host's own phase time but only **0.43 %** end-to-end — the title still enumerates and still
+  mounts/metadata-reads **742** of the 1,773 packages. The guest's *own* songcache is a separate file:
+  the same run wrote a 16-byte stub with **0 packages** in it, so a host hit says nothing about it.
+  Contract, limits and the trial table: [dlc.md](../guides/dlc.md) §4.4 and the review plan's P6
+  record ([installed-game-fix-prompts.md](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md)).
 - **Verifiably broken/open: the in-song entry** — a screen of ours cannot list the in-song panels
   (`pause_panel`, `game_fade_out_panel`, `game_panel`); any such screen faults the guest with
   `read of guest 0x00000024`, and Back fails on the same limitation. It is item 13 below and the only
@@ -52,8 +67,9 @@ Part 1 wherever they disagree.
   the screen.
 - **Verifiably open: no Windows preset can build a test right now** (`REXGLUE_USE_VULKAN=ON` makes the
   SDK's glslang guard write `BUILD_TESTING=OFF` before `include(CTest)`); a Vulkan-off tree configured
-  with `-DBUILD_TESTING=ON` builds everything and runs **38/38** (was 37/37 until `window_policy` was
-  added on 2026-10-14). Building that tree **clobbers the Vulkan-on SDK objects** — the two configure
+  with `-DBUILD_TESTING=ON` builds everything and runs **39/39** (**38/38** until `content_progress`
+  was added by P6 on 2026-10-14, 37/37 until `window_policy`). Building that tree **clobbers the
+  Vulkan-on SDK objects** — the two configure
   into the same `rexglue-sdk/out/win-amd64` — so re-run `cmake --preset win-amd64-release` before the
   next release build.
 - **The window follows the resolution now (P2 of the installed-game review, 2026-10-14)**: the boot
@@ -69,7 +85,8 @@ Part 1 wherever they disagree.
   `restart.ok` true, so *Restart now* was a silent no-op. The confirmation now inherits the leave
   target the root was about to use, every answer resolves that bit, and a failed save/lock names the
   path and the OS reason instead of "another writer or access denied". Driven before and after in
-  `out/_swap/p3/` (`repro3-close` vs `after-close`, `after-restart`); the host suite is still 38/38.
+  `out/_swap/p3/` (`repro3-close` vs `after-close`, `after-restart`); the host suite was 38/38 then
+  (39/39 once P6's `content_progress` landed the same day).
 - **Verifiably fixed**: the 2026-10-12 black startup (the generated payload made the patch archive
   two-part, which this title never reads — Part 2) and graphics recovery (the marker, fallback and
   safe mode all ran; older statements, including item 11 below, are wrong).
@@ -206,8 +223,9 @@ The row rule is kept on its own merits:
 * Measured on this machine, where both backends are usable, nothing changes: the reinstalled copy logs
   `settings_menu: Renderer offers 2: D3D12, VULKAN`, creates the Vulkan device and presents a menu frame
   (`out/_swap/p1/installed2-vulkan.log`). The hidden case is pinned by `TestRendererRowVisibility`
-  (`tests/settings_screen_tests.cpp`); `settings_screen` is 27,772 checks green and the test-capable tree
-  is 38/38 (`out/build/rename-tests` — the Windows release preset cannot build a test at all, §"How the
+  (`tests/settings_screen_tests.cpp`); `settings_screen` is 27,772 checks green, and the test-capable
+  tree is **39/39** since P6 added `content_progress` on 2026-10-14 (38/38 that morning;
+  `out/build/rename-tests` — the Windows release preset cannot build a test at all, §"How the
   test tree stands").
 
 #### Controller Settings cutover (P11b)
@@ -358,6 +376,12 @@ reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
   **abort**; it now passes with 91 checks.
 * **One flake**: `game_restart`'s child-wait case measured 0 ms once during a parallel build and
   passed 185/185 twice on an idle machine.
+* **2026-10-14 (P6 of the installed-game review)**: `content_progress` is the **39th** test — the
+  pipeline's own model (one count per real aggregate enumerator, terminators/pending/failures
+  excluded, an unnumbered finalization phase, reset per attempt) is now pinned rather than described.
+  The Vulkan-off tree is **39/39** re-run on the final P6 sources (`ctest --test-dir
+  out\build\rename-tests`), and `dlc_cache` grew the v2-checksum, refusal and writer cases. The 37/37
+  and 38/38 counts elsewhere on this page are those days' measurements, not today's.
 
 ### 3. What is left, by package
 

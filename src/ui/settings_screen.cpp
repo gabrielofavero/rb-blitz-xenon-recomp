@@ -530,7 +530,7 @@ std::vector<PanelSpec> AllPanels() {
                           {
                               BoolRow("settings_dlc_cache", "general.cache_dlc_library",
                                       "Cache DLC Library",
-                                      "Remember the content list so later boots skip the long library scan."),
+                                      "Reuse an unchanged package list on the next launch. Songs still need to load."),
                               SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
                                         "DLC Scan Threads",
                                         "How many threads scan your packages. More threads scan faster.",

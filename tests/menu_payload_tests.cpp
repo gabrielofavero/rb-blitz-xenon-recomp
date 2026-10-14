@@ -17,6 +17,7 @@
 
 #include "settings/menu_payload.h"
 #include "settings/ultimate_adapter.h"
+#include "ui/menu_options.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -213,6 +214,19 @@ void TestMountedPartOfTheWrongSizeIsNotCarried() {
 }  // namespace
 
 int main() {
+  BeginCase("the generated locale names a cached list only after a real host hit");
+  {
+    using rb_blitz::ui::dtb::Node;
+    namespace options = rb_blitz::menu_options;
+    std::vector<Node> locale{Node::Array({Node::Symbol(options::kEnumeratingContentKey),
+                                        Node::String(options::kDiscoveringContentLabel)})};
+    CHECK_FALSE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, false));
+    CheckStrEq(locale[0].kids[1].text, options::kDiscoveringContentLabel);
+    CHECK_TRUE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, true));
+    CheckStrEq(locale[0].kids[1].text, options::kLoadingCacheLabel);
+    CHECK_TRUE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, true));
+    CheckStrEq(locale[0].kids[1].text, options::kLoadingCacheLabel);
+  }
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();

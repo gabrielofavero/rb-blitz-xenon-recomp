@@ -1,8 +1,14 @@
 # Installed-game review: researched implementation prompts
 
 **2026-10-14 — research complete. P1, P2, P3 and P4 are implemented and verified (their status is
-below); P5 and P6 are not started.** This file moved from `plans/todo/` to `plans/in-progress/` when
+below); P6 is implemented, with its final installed acceptance recorded below; P5 is not started.**
+This file moved from `plans/todo/` to `plans/in-progress/` when
 P1 landed.
+
+Of section 3's six rows, **Provenance** and **DLC** are now measured in an installed copy (P6's
+acceptance pass, with the per-leg table and the build identity it ran). **Display**, **Settings** and
+**Captions** carry the partial coverage their own records name — no DPI sweep, no injected save
+failure, no in-song capture — and **Music** waits on P5.
 
 This handoff groups the owner's installed-game test report into six contexts. Preliminary research
 covered the current working tree, local CMake configuration, existing tests, historical findings,
@@ -736,6 +742,211 @@ currently exists. In the installed game verify final song count and DLC-only son
 playability as well as the label and bar. Report warm-cache gains and full-bar dwell
 before/after, including any remaining load cost and unverified phase boundaries.
 ```
+
+#### P6 — execution record (2026-10-14)
+
+**Implemented.** The host cache now has reason-bearing timings, checksum validation, atomic
+replacement and refusal to persist incomplete/unstable scans. The English hit label is **Loading
+Cached Content List**, delivered through the installed settings provider's whole locale record.
+Cold/Off/refresh use the discovery label. A real aggregate-enumerator model replaces the flat-count
+times-two estimate, excludes terminators/failures/pending calls, handles interleaved enumerators,
+and shows an unnumbered finalization phase. Loading-phase uncapping works independently of Cache
+On and restores the player's V-Sync at the verified usable main menu. Details and boundaries:
+[DLC guide §4.4](../../guides/dlc.md#44-current-loading-pipeline-p6-2026-10-14).
+
+**Root causes reproduced.** In the P1 installed artifact (`out/_swap/p1/install`), with 1,773
+flat packages and a copied guest cache from the older 1,402-package library, the first 100% event
+was `18:00:27.160`; V-Sync was restored one millisecond later. The guest then set a metadata
+total of **742**, mounted packages and only completed at `18:02:10.577`. The usable menu was
+`18:02:10.581`: **103.421 s after the full-bar event**, **117.726 s after the discovery screen**.
+This is post-enumeration work, not a failed host-cache hit (`before-large-1/boot.log`). The prior
+full-bar screenshot filename in that directory was captured late and actually shows the menu;
+the timing evidence is the log, not that screenshot.
+
+The initial baseline also reproduced an independent locale integration defect: a split-read
+edit changed the expected guest checksum before checking whether its edited first chunk could
+still be delivered. Rejecting the edit then caused a dirty-disc error. Digest edits are now
+committed only after delivering bytes, with a regression test. The installed provider edits the
+whole English record before archiving it. Completed IOSB status/byte count are used for reads;
+the SDK may return pending even though its synchronous read has completed. Scatter segment
+tables are no longer scanned as if they were contiguous file contents.
+
+**Artifact and controls.** Fresh dual-backend release, installer built using
+`powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1 -SkipArt -RefreshPayload`,
+then `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /CURRENTUSER /DIR=<disposable-install>
+/GAMEMETHOD=folder /GAMEFOLDER=<checkout>/game /ULTIMATESOURCE=none /RUNATEND=none`.
+The installed test runs use Vulkan, 1280×720 windowed, Ultimate, DLC Menu Songs Off, uncapping On,
+one header-scan thread and zero emulated mount delay. The launcher profile is explicitly empty;
+all user/cache roots are under `out/_swap/p6/`. `arguments.txt`, `hashes.json`, `boot.log`, screenshots
+and `result.json` in each run record the exact invocation, effective roots, setting source and
+outcome. Cache On/Off and refresh are command-line overrides in these comparisons; settings-row
+persistence/restart UI is not a new acceptance claim here.
+
+The working tree is modified on top of `88cd2e543cadb6158e40b213ae1f974160a19a48`; the manifest's
+commit alone is not build identity. The measured executable SHA-256 is
+`6281D66F570278FAAAB87239C4E064561051675D36616E86B30C99B1C4BE13BC`, runtime
+`7EE201B89E9F0F58E09F3BD7A572EF3972C0BB675B884AA61EE0533408CABDA3`, GPU plugin
+`AD1D3501F0B6C5EB290497803D255F16DFD9F3B90524BF85DA17483C38EDC842`.
+All three match build → payload → install (`artifact-hashes.json`); the packaged loader hash is
+`C939A1984BEF03DE9BB8FC0CF7D961D2C722CBF244E8683899C903990E59014A`.
+
+Those are the **matrix's** hashes. The final acceptance legs below ran the last build of the same
+tree (`cmake --preset win-amd64-release` → `cmake --build`, 18:35), whose executable SHA-256 is
+`91079A5D6C950EE1405171B42A2AFE794EA1A0DF5E794B388601E1ABF8064E12`, runtime
+`5326DBCCC1F661EC0F37A7395E5D79822B87176DF5332817B949AB5E115D588C`, GPU plugin
+`B745F2502A7AF231938AAACB1CD212E2F300EFCAEF10E1B7243601844BBEC080` — each matching
+build → payload → install (`artifact-final-hashes.json`), with the same loader hash. The two builds
+differ only because the log-field rename landed after the matrix had started: the per-file digests,
+not the recorded commit, are what decide identity.
+
+**Controlled installed trials.** `matrix-<trial>-<condition>/` uses the same 1,773-package library
+and a fresh copy of the same 1,009,556-byte guest cache for every leg. This is **partially warm**,
+not fully warm: 371 packages are outside that saved cache. Off has no host-cache file; cold On has
+none; warm On starts with a validated host-cache copy; refresh starts with that copy and forces
+scanning. Trial order is Off/cold/warm/refresh, refresh/warm/cold/Off, cold/Off/refresh/warm.
+The OS filesystem cache is uncontrolled and already warmed; none of these means cold storage.
+Process-to-menu time includes startup and the driver's fixed start-press delay, measured from
+the first log timestamp; discovery-to-menu uses the new phase clock. The captured native total
+and increment count are 742; STFS mount lines and metadata IO account for the remaining phase.
+Individual parser CPU time is unmeasured.
+
+Three trials per condition, all 12 reached the usable menu. Values are median (min–max).
+Host time is the sum of fingerprint/load/scan/verify/write measurements; other columns are seconds.
+
+| Condition | Host phases, ms | Process → menu, s | Discovery → menu, s | Enumeration, s | After enumeration, s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Off | 189.494 (174.201–250.422) | 41.380 (41.295–41.556) | 31.777 (31.695–31.841) | 14.046 (14.034–14.047) | 17.743 (17.649–17.794) |
+| On, cold host cache | 228.311 (222.923–229.453) | 41.425 (41.422–41.683) | 31.823 (31.559–31.934) | 14.048 (13.920–14.208) | 17.726 (17.640–17.775) |
+| On, warm host cache | 14.603 (14.598–16.852) | 41.201 (40.967–41.271) | 31.730 (31.639–31.739) | 13.986 (13.983–13.986) | 17.744 (17.656–17.754) |
+| Explicit refresh | 230.747 (220.191–254.734) | 41.281 (41.160–42.528) | 31.733 (31.587–31.842) | 14.020 (13.944–14.082) | 17.712 (17.643–17.760) |
+
+Warm hits: **3/3**. Each leg delivered **3,546** successful item results, **0** enumeration failures,
+**742** metadata reads and **1** guest-cache read; none wrote guest songcache. Its SHA-256 stayed
+unchanged in every leg (`guest-cache.json`). The `batches` field in these logs is the last batch ID,
+not a count; unique handle/batch records establish **three** enumerators (1,773, 1,773, 0). The final
+build renames that log field `last_batch` and corrects a stale pacing log sentence; behavior is unchanged.
+
+Median warm host-phase saving against Off: **174.891 ms (92.3%)**. Process-to-menu medians differ
+by only **179 ms (0.43%)**, with overlapping ranges; three OS-warm runs do not establish a reliable
+end-to-end cache speedup beyond the measured header-scan saving. Guest discovery is effectively
+unchanged by host-cache On/Off. Cold/refresh additionally pay fingerprint verification and atomic
+cache persistence; those costs are deliberately visible rather than attributed to guest discovery.
+
+The same production loader was also measured with no game/build running (`host-benchmark-2.csv`),
+three trials each, one scan thread, same 1,773 packages and already-warm filesystem:
+
+| Condition | Host-only wall time, ms, median (min–max) |
+| --- | ---: |
+| Off | 154.671 (151.906–176.548) |
+| On, cold host cache | 210.096 (194.322–211.895) |
+| On, warm host cache | 10.936 (10.398–11.988) |
+| Explicit refresh | 206.212 (199.544–209.901) |
+
+That host-only median warm saving is **143.735 ms (92.9%)** against Off. The earlier
+`host-benchmark-1.csv` is retained but was collected alongside a running game and is not the clean
+comparison above. No old 100-ms mount-delay savings are included in either cache claim.
+
+
+The first installed comparison (`installed-large-cold`) reached the usable menu in **31.611 s**,
+including **17.675 s** after enumeration, with 3,546 successful items, zero enumeration failures,
+742 metadata reads, one guest-cache read and no guest-cache write. That single before/after
+comparison removes **86.115 s (73.1%)** of discovery time; it is a pacing/finalization improvement,
+not a host-cache saving. `installed-large-cold/finalization.png` and
+`matrix-1-warm/finalization.png` verify discovery versus actual-hit text and the unnumbered
+**Loading song information...** state. Model tests ensure no terminal 100% bar is left visible;
+these captures do not constitute a frame-by-frame visual trace.
+
+**Validation.** `ctest --test-dir out/build/rename-tests --output-on-failure`: **39/39 passed**
+(`tests-final.log`); this SDK-free test configuration exists because the Vulkan release configure
+disables `BUILD_TESTING` through SDK glslang. It includes empty/one/large/structured-sized/mixed-sized
+enumerator cases, handle interleaving/reuse, reset, failures/terminators/pending calls, actual
+host-loader Off/cold/warm/refresh/type/change/corruption/unavailable/write-refusal cases and split
+delivery/locale-provider tests. The new split regression was rebuilt before the final suite.
+Installer tests: **421 checks passed**, fresh setup built (`installer-build2.log`). Filesystem
+tests initially failed inside the sandbox and passed unchanged with normal filesystem access.
+SDK patch check: zero failed patches, 40 expected modified files; only the existing nested
+`thirdparty/fmt/support/.gradle/` untracked directory was flagged. P6 makes no SDK changes.
+
+#### P6 — final installed acceptance (2026-10-14)
+
+One installer was built from the final tree and installed into a disposable directory
+(`/VERYSILENT /CURRENTUSER /GAMEMETHOD=folder /ULTIMATESOURCE=none`). Every leg boots that installed
+copy as an ordinary user with an empty launcher profile, a disposable user root, Vulkan, 1280×720
+windowed and DLC Menu Songs off; the harness is `out/_swap/p6/boot.ps1` driven by
+`out/_swap/p6/layouts.ps1`, and each leg writes `arguments.txt`, `hashes.json`, `boot.log`,
+`result.json` and `shots/` under `out/_swap/p6/<leg>/`. The binaries it ran are the second hash set
+above (`artifact-final-hashes.json`).
+
+| Leg | Content | Host cache | Outcome | Process → menu | Pipeline total | After last enumeration | Items | Metadata reads | Guest cache r/w | English label |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `final-empty` | no flat library, no structured root | none | usable menu | 15.1 s | 0.209 s | 0.030 s | 0 | 0 | 0 / 1 | *Discovering Downloadable Content* |
+| `final-single-cold` | one flat package (`soundtrack-flat`) | cold | usable menu | 20.1 s | 5.286 s | 5.105 s | 2 | 2 | 0 / 1 | *Discovering Downloadable Content* |
+| `final-single-warm` | the same package and profile | **warm** | usable menu | 14.5 s | 0.085 s | 0.022 s | 2 | **0** | **1 / 0** | **Loading Cached Content List** (`host_cache_hit=true`) |
+| `final-structured` | `game/dlc` only (21 structured packages) | cold | usable menu | 15.5 s | 0.320 s | 0.147 s | 2 | 2 | 0 / 1 | *Discovering Downloadable Content* |
+| `final-mixed` | one flat package + `game/dlc` (21 structured) | cold | usable menu | 15.3 s | 0.387 s | 0.190 s | 4 | 4 | 0 / 1 | *Discovering Downloadable Content* |
+| `final-large-guest-cold` | 1,773 flat packages, guest cache empty | cold (miss) | usable menu at 350.998 s; `result.json` says `timeout` because the harness's 360 s deadline expired 1.5 s *before* the menu line the log carries | 361.2 s | 350.998 s | 336.900 s | 3,546 | 3,546 | 0 / 1 | *Discovering Downloadable Content* |
+| `final-large-guest-warm` | the same library, profile and binaries | **warm (hit)** | usable menu | 184.5 s | 108.249 s | 94.067 s | 3,546 | 3,546 | **1 / 0** | **Loading Cached Content List** (`host_cache_hit=true`) |
+
+What the legs establish:
+
+- **Every content shape reaches a usable menu**, and the mixed leg's `YOUR SONGS` capture draws the
+  library's own rows (`final-mixed/shots/songs.png`: AC/DC *High Voltage (Live)*, All-American
+  Rejects, Avenged Sevenfold, Barenaked Ladies, Blink-182), so the final song list is populated
+  rather than merely counted. Five of the six legs carry that `songs.png` capture.
+- **Only a genuine hit changes the label.** `final-single-warm` is the same library, build and
+  settings as `final-single-cold` with the host cache left in place: it reads
+  *Loading Cached Content List* with `host_cache_hit=true`, and the guest's own cache is what skips
+  the work (`songcache_reads=1`, `metadata_reads=0` against the cold twin's 2).
+- **The card is not a completion claim.** The large leg's capture
+  (`final-large-guest-cold/finalization.png`) shows the unnumbered **Loading song information…**
+  overlay while the screen still reads *Discovering Downloadable Content* — the phase the old build
+  reported as a full bar.
+- **Cache On is not a promise about the guest.** With 1,773 packages the title still enumerates 3,546
+  items and still reads 3,546 metadata records, host hit or not; the saving is the host's own header
+  scan, which is what the trial table above measures.
+- **The two large legs are a storage measurement, not a cache one.** Same library, same profile, same
+  binaries: the guest issued the same **3,546** metadata reads both times, but the host's I/O inside
+  them measured **6,130.5 ms** cold against **138.0 ms** warm, and the phase after the last
+  enumeration shrank **336.9 s → 94.1 s**. The residual ~94 s is therefore guest-side work, not file
+  I/O. The warm leg also logged **more** guest package mounts (5,039 by the time its menu was
+  observed, 5,261 after the settle) than the cold one's 3,546, which is unexplained and stays an open
+  measurement.
+- **The guest's own cache is written once and never filled.** The 16-byte version-11 stub the cold leg
+  created was still 16 bytes — **0 packages** — through the warm leg, sampled every 2 s across the
+  60 s settle window (`final-large-guest-warm/guest-persistence.csv`: 30 samples, unchanged mtime).
+  The title re-mounts and re-reads the whole library on every boot.
+
+**Honest limits.** "Warm" in this record always means the **host cache file**, never storage, and the
+OS filesystem cache is uncontrolled and demonstrably moves these numbers (the 6,130.5 ms → 138.0 ms
+host I/O above is the same library, build and settings). A first attempt at the warm twin, run an hour
+later, mounted **1,579 of 3,546** packages in 364 s and was stopped by a 600 s deadline; it is kept
+only as the reason the deadline was raised (`final-large-guest-warm-deadline600/`) and its timings are
+not comparable. The installed copy is a per-user folder install under `out/_swap/p6/install-final`
+rather than the `Program Files` default, so an admin install's write policy is not exercised; **no leg
+played a DLC song** — the mixed leg's list draws the library, but DLC-only playability stays unverified
+and contradicted by the open song-start fault in
+[known-issues.md](../../reference/known-issues.md); the ~94 s is not broken down by stage (host I/O is
+138 ms of it; the rest is guest parsing/scheduling, per-stage CPU unmeasured); the extra mounts are
+unexplained as stated above; and the overlay text is a frame capture, not a frame-by-frame trace. The
+harness kills the process as soon as it sees the menu, so end-of-boot guest persistence is observed
+only through the settle window (`boot.ps1 -SettleSec`).
+
+**Reproduction.** Build with `cmake --preset win-amd64-release` then
+`cmake --build --preset win-amd64-release`, package/install as above. Launch the installed copy with
+`--game_data_root=<checkout>/game --user_data_root=<new-disposable-profile>
+--launcher_profile=<empty-toml> --dlc_library=<library> --dlc_root=<absent-structured-root>
+--enhancements_dlc_cache=true --enhancements_dlc_uncap_enumeration=true
+--enhancements_menu_dlc_songs=false --gpu_backend=vulkan --log_level=info --log_flush_interval=1`.
+Use the same settings file (`general.target='ultimate'`, windowed 1280×720), press Start and wait
+for `content_pipeline: usable menu`. Copy only disposable guest-cache seeds between comparison
+profiles. For Off change the cache argument; for cold omit the host cache; for warm reuse it;
+for refresh add `--refresh_dlc_cache=true`. Never clear the owner's cache or saves.
+
+For host-only phase isolation:
+`clang++ -O2 -std=c++23 -Isrc tools/dlc_cache_benchmark.cpp -o <output>/dlc_cache_benchmark.exe`,
+then `dlc_cache_benchmark.exe <library> <new-output-directory>`. It runs three trials of each
+condition through the production loader and emits CSV. It does not measure guest loading or
+claim to flush the OS cache. The full installed matrix's raw timings are `out/_swap/p6/matrix.csv`.
 
 ## 3. Final installed acceptance and evidence
 

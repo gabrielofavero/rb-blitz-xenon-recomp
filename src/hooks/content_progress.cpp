@@ -1,191 +1,59 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// rb_blitz - ReXGlue Recompiled Project
-//
-// R7's progress bar, restored from the guest's own UI rather than added to it.
-//
-// The connect panel the title shows between the start press and the main menu
-// (`ui/net/gen/server_connect.milo_xbox`) already contains the bar: a
-// `progress_bar.grp`, a `content_percent.lbl`, and a Flow (`enumerating_content1.flow`)
-// whose own comments read
-//
-//     (How much content we've enumerated so far
-//     (How much content we need to enumerate, -1 if we're not enumerating right now
-//
-// The Flow reads two properties of the panel object, `current_content` and
-// `total_content`, and shows `enumerating_content.grp` only while the total is not -1.
-// Nothing in the DTA sets them (every .dtb in the ark was decoded and searched), so the
-// engine's own C++ does - and it does it through one small object, recompiled here as
-// `sub_82759308`..`sub_827593C8`:
-//
-//   sub_82759308(this, panel)  constructor; current = total = -1, not enumerating
-//   sub_827593A8(this, total)  start: total = N, current = 0, then push
-//   sub_827593B8(this)         one more item: ++current, then push
-//   sub_827593C8(this)         done: current = total, then push
-//   sub_82759190(this)         push: panel.current_content = this+8, panel.total_content = this+12
-//
-// **Why the bar was hidden, measured 2026-10-10** (docs/plans/finished/2026-10-10-song-cache-plan.md §9.4):
-// this build's engine calls `SetTotal` exactly **once, after** the whole enumeration, with a
-// total of **0** - which the Flow reads as "not enumerating", so it hides the bar - and
-// `Increment` is **never called at all**. For the 46.8 s the discovery screen is up,
-// `total_content` is still -1 and there is nothing to draw. Handing `SetTotal` a total
-// cannot fix that: by the time it runs the enumeration is over.
-//
-// **What this file does instead.** The enumeration is 2,807 XAM app messages, one per
-// presented frame (`XamAppEnumerateContentAggregate`, message 0x0002000E, handled by
-// rexglue-sdk's `xam_app.cpp`). The guest reaches that handler through imports it really has
-// - `XMsgStartIORequestEx`, `XMsgInProcessCall`, `XMsgSystemProcessCall` - so this file counts
-// the items as they are enumerated and pushes the count into the panel with the engine's own
-// push (`sub_82759190`). No SDK source is touched; the engine's object and its push are used
-// exactly as the engine uses them, and the host only supplies the numbers it alone can know.
-//
-// The total is `2 x ContentItemCount()`: measured, the title drains two enumerators of the
-// library plus one empty one, and each of those makes one terminating call
-// (2 x 1,402 + 3 = 2,807 calls for 1,402 packages). The extras are clamped, so the bar is
-// monotonic to 100% across the screen.
-//
-// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and the deviation.
-//
-// Faithful behaviour: with the toggle off (its default) each hook calls the guest's own
-// function unchanged and touches no guest state, so the boot is the boot this project had
-// before the bar existed. That is also the behaviour with no DLC library registered:
-// there is no total to give, so there is nothing to deviate with.
-//
-// Deviation: with R7 on and a library registered, `sub_827593A8`'s total argument is
-// replaced when the engine announces a non-positive one (an unknown total), and
-// `sub_827593B8` gives the object the library's count before its first increment if the
-// object still has none. Both are the count of packages the content manager will hand
-// the title, which is exactly what the Flow wants, and both are logged with the value the
-// engine chose, so a boot says which of the two paths was taken.
-
+// P6: each aggregate enumerator is one measured phase, never an estimate of
+// overall loading. The guest still mounts, parses and persists after enumeration.
 #include "hooks/content_progress.h"
-
-#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstddef>
-#include <cstdint>
 #include <mutex>
-#include <string>
 #include <thread>
-
 #include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/logging.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xenumerator.h>
+#include <rex/system/xfile.h>
 #include <rex/system/xmemory.h>
 #include <rex/types.h>
 
-#include "hooks/dlc.h"
-
 #if defined(_WIN32)
-
 #include <windows.h>
-
-// Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
-REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 REXCVAR_DECLARE(bool, enhancements_dlc_uncap_enumeration);
-
-// The engine's own object, recompiled: its constructor, the setter trio, and the push.
 REX_EXTERN(__imp__sub_82759308);
 REX_EXTERN(__imp__sub_827593A8);
 REX_EXTERN(__imp__sub_827593B8);
 REX_EXTERN(__imp__sub_827593C8);
-REX_EXTERN(__imp__sub_82759190);
 
 namespace {
+using namespace rb_blitz::content_progress;
+std::mutex g_mutex;
+Model g_model;
+std::string g_detail;
+bool g_visible = false;
+bool g_guest_complete = false;
+uint64_t g_native_increments = 0;
+int64_t g_start_us = 0;
+int64_t g_last_enum_us = 0;
+uint64_t g_metadata_reads = 0, g_cache_reads = 0, g_cache_writes = 0;
+int64_t g_metadata_us = 0, g_cache_read_us = 0, g_cache_write_us = 0;
 
-// Read once in Configure(); guest threads only read it afterwards.
-bool g_enabled = false;
-
-// The guest is big-endian, and these fields are plain ints in its own image.
-int32_t LoadBe32(const uint8_t* p) {
-  return static_cast<int32_t>((uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
-                              (uint32_t(p[2]) << 8) | uint32_t(p[3]));
+int64_t NowMicros() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
 }
-
-void StoreBe32(uint8_t* p, int32_t value) {
-  const uint32_t v = static_cast<uint32_t>(value);
-  p[0] = static_cast<uint8_t>(v >> 24);
-  p[1] = static_cast<uint8_t>(v >> 16);
-  p[2] = static_cast<uint8_t>(v >> 8);
-  p[3] = static_cast<uint8_t>(v);
+uint32_t Be32(const uint8_t* p) {
+  return rex::memory::load_and_swap<uint32_t>(p);
 }
-
-// The object the engine builds for the discovery screen. Written once, on the guest thread
-// that builds the panel; read on the thread that enumerates. Zero until then.
-std::atomic<uint32_t> g_object{0};
-
-// How many items the host has counted, and the percent it last pushed. Atomic because the
-// app message is dispatched from the emulated console's own threads and a boot shows more
-// than one of them carrying it (measured: five different thread ids over one enumeration),
-// even though the calls arrive one per frame.
-std::atomic<uint32_t> g_counted{0};
-std::atomic<int> g_pushed_percent{-1};
-
-// The XAM app the content enumerator belongs to, and the message the title sends for one
-// item (`rexglue-sdk/src/kernel/xam/apps/xam_app.cpp`, case 0x0002000E).
-constexpr uint32_t kXamAppId = 0xFE;
-constexpr uint32_t kEnumerateContentAggregate = 0x0002000E;
-
-// The tree's XMsg entry points the guest reaches that handler through. All three take the
-// message in r4; which one a title routes its own calls through is a property of its code,
-// so all three are watched rather than guessed.
 using ImportFunc = void (*)(PPCContext&, uint8_t*);
-
 ImportFunc ResolveImport(const char* symbol) {
-  HMODULE runtime = GetModuleHandleA("rexruntime.dll");
-  return runtime != nullptr ? reinterpret_cast<ImportFunc>(GetProcAddress(runtime, symbol))
-                            : nullptr;
+  const auto runtime = GetModuleHandleA("rexruntime.dll");
+  return runtime ? reinterpret_cast<ImportFunc>(GetProcAddress(runtime, symbol)) : nullptr;
 }
-
-void Forward(ImportFunc* slot, const char* symbol, PPCContext& ctx, uint8_t* base) {
-  if (*slot == nullptr) {
-    *slot = ResolveImport(symbol);
-    if (*slot == nullptr) {
-      REXLOG_ERROR("content_progress: cannot resolve {} from rexruntime.dll; the call is dropped",
-                   symbol);
-      return;
-    }
-  }
-  (*slot)(ctx, base);
+void Forward(const char* symbol, PPCContext& ctx, uint8_t* base) {
+  // Each wrapper owns a static resolved function; no mutable cross-thread slot.
+  const auto original = ResolveImport(symbol);
+  if (original) original(ctx, base);
+  else { ctx.r3.u32 = 0x80004005; REXLOG_ERROR("content_pipeline: missing import {}", symbol); }
 }
-
-// Writes the two properties the Flow reads and pushes them with the engine's own push.
-//
-// The push is a recompiled guest function, so it is called the way the engine calls it -
-// with the object in r3 - but on a *copy* of the context, so the registers of the guest
-// call this is nested inside survive. r1 is left alone: this runs on the guest thread,
-// inside its own call, and a callee allocating below the caller's r1 is the ABI.
-void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t total) {
-  const uint32_t object = g_object.load(std::memory_order_relaxed);
-  if (object == 0) {
-    return;
-  }
-  uint8_t* memory = rex::memory::GuestPtr<uint8_t*>(base, object);
-  if (memory == nullptr) {
-    return;
-  }
-  StoreBe32(memory + 8, static_cast<int32_t>(current));
-  StoreBe32(memory + 12, static_cast<int32_t>(total));
-  PPCContext call = ctx;
-  call.r3.u64 = object;
-  __imp__sub_82759190(call, base);
-}
-
-// R7's frame pacing for the discovery (`enhancements_dlc_uncap_enumeration`).
-//
-// The title's enumeration advances one item per *presented* frame: 2,807 items over 46.7 s at
-// 60 Hz, 7.0 ms per item and 19.7 s with the frame rate free (measured, docs/guides/dlc.md §4.3). The
-// value that decides the frame rate is the SDK's own `vsync` cvar - Controller Settings' Graphics ▸
-// Window row, which belongs to the player - so this asks for it to be turned down for exactly as
-// long as the enumeration lasts and puts the player's value back at the first of three signs that
-// it is over: the last item counted, the engine's own completion, or a menu frame with no item
-// counted for two seconds.
-//
-// Neither the read nor the write happens on the thread that counts items: this project's rule is
-// that a guest thread never touches the cvar registry (the rule `Configure()` obeys), so each
-// request goes to a short-lived host thread, the way the refresh's scan is moved off the guest
-// thread (src/hooks/dlc.cpp). A boot asks twice, 46.7 s apart, so a detached thread each is
-// cheaper than a worker that idles for the whole run.
 bool g_uncap_enabled = false;
 
 // kIdle -> kFreeing -> kFreed -> kRestoring -> kIdle, claimed by the guest thread and completed
@@ -196,18 +64,8 @@ enum class Pacing { kIdle, kFreeing, kFreed, kRestoring };
 std::atomic<Pacing> g_pacing{Pacing::kIdle};
 std::mutex g_pacing_mutex;
 std::string g_player_vsync;  // what to put back, under g_pacing_mutex, while kFreed
-std::atomic<int64_t> g_last_item_ms{0};
-
-// The idle bound for the third sign. Items arrive every 16.66 ms while the discovery runs (and
-// thousands of times a second on a fast machine), so two seconds of silence is an enumeration
-// that has ended - and the menu frame this is asked from is one only reached after it has.
-constexpr int64_t kEnumerationIdleMillis = 2000;
-
-int64_t NowMillis() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(
-             std::chrono::steady_clock::now().time_since_epoch())
-      .count();
-}
+std::atomic<bool> g_restore_requested{false};
+void RequestFrameRateRestore(const char* why);
 
 // `vsync` is defined in rexruntime.dll's own GPU category, so it is read and written by name:
 // REXCVAR_GET would need a storage symbol this module does not define.
@@ -235,8 +93,9 @@ void FreeFrameRate() {
     g_player_vsync = before;
   }
   g_pacing.store(Pacing::kFreed);
+  if (g_restore_requested.load()) RequestFrameRateRestore("completion raced pacing startup");
   REXLOG_INFO("content_progress: the frame rate is free for the discovery (vsync false, was {}); "
-              "the player's own value goes back when the enumeration ends",
+              "the player's own value goes back when the usable menu is ready",
               before);
 }
 
@@ -247,13 +106,14 @@ void RestoreFrameRate() {
     std::lock_guard<std::mutex> lock(g_pacing_mutex);
     intended = g_player_vsync;
   }
-  g_pacing.store(Pacing::kIdle);
   if (intended.empty() || !rex::cvar::SetFlagByName("vsync", intended)) {
     REXLOG_WARN("content_progress: the frame rate could not be put back to vsync = {}; it stays "
                 "free for this run",
                 intended.empty() ? "unknown" : intended);
+    g_pacing.store(Pacing::kIdle);
     return;
   }
+  g_pacing.store(Pacing::kIdle);
   REXLOG_INFO("content_progress: the frame rate is the player's own again (vsync = {})", intended);
 }
 
@@ -267,10 +127,12 @@ void RequestFrameRateFree(const char* why) {
   REXLOG_INFO("content_progress: {}; the host lets the frame rate run free for the discovery "
               "(R7's frame pacing)",
               why);
+  g_restore_requested.store(false);
   std::thread(FreeFrameRate).detach();
 }
 
 void RequestFrameRateRestore(const char* why) {
+  g_restore_requested.store(true);
   Pacing freed = Pacing::kFreed;
   if (!g_pacing.compare_exchange_strong(freed, Pacing::kRestoring)) {
     return;
@@ -279,172 +141,160 @@ void RequestFrameRateRestore(const char* why) {
   std::thread(RestoreFrameRate).detach();
 }
 
-// One item was enumerated. Count it, and push when a whole percent moves, so the panel is
-// written ~100 times over the screen rather than once per frame.
-void CountItem(PPCContext& ctx, uint8_t* base) {
-  if (!g_enabled) {
-    return;
-  }
-  const std::size_t items = rb_blitz::dlc::ContentItemCount();
-  if (items == 0) {
-    return;
-  }
-  // Two passes over the library, plus one terminating call per enumerator (see the file
-  // comment), so the extras are clamped instead of allowed past 100%.
-  const uint32_t total = static_cast<uint32_t>(items) * 2;
-  const uint32_t counted = std::min(g_counted.fetch_add(1) + 1, total);
-  g_last_item_ms.store(NowMillis(), std::memory_order_relaxed);
-  if (counted == 1 && g_uncap_enabled) {
-    RequestFrameRateFree("the title is enumerating one item per presented frame");
-  }
-  const int percent = static_cast<int>((static_cast<uint64_t>(counted) * 100) / total);
-  if (percent != g_pushed_percent.load(std::memory_order_relaxed)) {
-    g_pushed_percent.store(percent, std::memory_order_relaxed);
-    PushProgress(ctx, base, counted, total);
-    if (percent == 0 || percent == 25 || percent == 50 || percent == 75 || percent == 100) {
-      REXLOG_INFO("content_progress: the discovery bar is at {} of {} item(s) ({}%)", counted,
-                  total, percent);
+
+void BeginAttempt() { // g_mutex held
+  g_model.Begin();
+  g_start_us = NowMicros();
+  g_last_enum_us = 0;
+  g_guest_complete = false;
+  g_native_increments = 0;
+  g_metadata_reads = g_cache_reads = g_cache_writes = 0;
+  g_metadata_us = g_cache_read_us = g_cache_write_us = 0;
+  g_detail = "Preparing downloadable content...";
+  REXLOG_INFO("content_pipeline: attempt {} started", g_model.Get().attempt);
+  if (g_uncap_enabled) RequestFrameRateFree("content discovery started");
+}
+
+void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapped_call) {
+  const bool enumerate = ctx.r3.u32 == 0xFE && ctx.r4.u32 == 0x2000E;
+  const uint32_t data = overlapped_call ? ctx.r6.u32 : ctx.r5.u32;
+  const uint32_t overlapped = overlapped_call ? ctx.r5.u32 : 0;
+  uint32_t handle = 0, total = 0;
+  if (enumerate && data) {
+    const uint32_t extra = Be32(base + data + 8);
+    if (extra) {
+      handle = Be32(base + extra + 4);
+      auto e = REX_KERNEL_STATE()->object_table()->LookupObject<rex::system::XEnumerator>(handle);
+      // The aggregate app creates exactly XStaticEnumerator<XCONTENT_AGGREGATE_DATA>.
+      if (e) total = static_cast<uint32_t>(
+          static_cast<rex::system::XStaticUntypedEnumerator*>(e.get())->item_count());
     }
   }
-  if (counted >= total) {
-    RequestFrameRateRestore("the last item of the enumeration was counted");
+  Forward(symbol, ctx, base);
+  if (!enumerate) return;
+  // This SDK dispatches the app synchronously even through the Async entry.
+  // StartIORequestEx then returns IO_PENDING but stores the actual HRESULT in
+  // XAM_OVERLAPPED.result (xam_msg.cpp / AppManager::DispatchMessageAsync).
+  uint32_t result = ctx.r3.u32;
+  if (overlapped && result == kPending) result = Be32(base + overlapped);
+  std::lock_guard lock(g_mutex);
+  if (!g_model.Get().active()) BeginAttempt();
+  const auto before = g_model.Get();
+  g_model.Enumerated(handle, total, result);
+  g_last_enum_us = NowMicros();
+  const auto& progress = g_model.Get();
+  g_detail = progress.determinate() ? "Reading downloadable content" : "Loading song information...";
+  if (progress.batch != before.batch || result != kSuccess || !progress.determinate()) {
+    REXLOG_INFO("content_pipeline: enumeration attempt={} batch={} handle={:08X} "
+                "completed={}/{} result={:08X} elapsed_ms={:.3f}",
+                progress.attempt, progress.batch, handle, progress.current, progress.total,
+                result, (NowMicros() - g_start_us) / 1000.0);
   }
 }
-
-// All three entry points are the same hook: the app is r3, the message is r4, and the
-// counting happens after the handler has run, so the item is already in the guest's buffer.
-void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, ImportFunc* slot) {
-  const uint32_t app = ctx.r3.u32;
-  const uint32_t message = ctx.r4.u32;
-  Forward(slot, symbol, ctx, base);
-  if (app == kXamAppId && message == kEnumerateContentAggregate) {
-    CountItem(ctx, base);
-  }
-}
-
-}  // namespace
+} // namespace
 
 namespace rb_blitz::content_progress {
-
 void Configure() {
-  g_enabled = REXCVAR_GET(enhancements_dlc_cache);
-  g_uncap_enabled = g_enabled && REXCVAR_GET(enhancements_dlc_uncap_enumeration);
-  if (g_enabled) {
-    REXLOG_INFO("content_progress: the discovery screen's progress bar is driven by the host "
-                "while the title enumerates (R7); set --enhancements_dlc_cache=false to leave "
-                "the bar exactly as the title draws it");
-  } else {
-    REXLOG_INFO("content_progress: R7 off; the discovery screen's progress bar is the "
-                "title's own");
-  }
-  if (g_uncap_enabled) {
-    REXLOG_INFO("content_progress: R7's frame pacing is on for the discovery: the frame rate "
-                "runs free while the title enumerates and the player's own value goes back when "
-                "it ends (--enhancements_dlc_uncap_enumeration=false leaves it alone)");
+  // Cache Off changes the host cache only. Progress and the separately selected
+  // pacing policy remain truthful for structured/user roots and uncached scans.
+  g_uncap_enabled = REXCVAR_GET(enhancements_dlc_uncap_enumeration);
+  REXLOG_INFO("content_pipeline: actual aggregate batches; pacing={} (independent of host cache)",
+              g_uncap_enabled);
+}
+void Tick() {} // kept for the shell poll; completion is UIManager's verified panel
+
+void ObserveScreen(std::string_view screen, std::string_view panel, bool available) {
+  std::lock_guard lock(g_mutex);
+  const bool discovery = panel == "server_connect_panel";
+  if (discovery && !g_model.Get().active()) BeginAttempt();
+  g_visible = discovery && g_model.Get().active() && !g_guest_complete;
+  if (available && screen == "splash_screen" && panel == "splash_panel" &&
+      g_model.MenuReady()) {
+    const auto& p = g_model.Get();
+    REXLOG_INFO("content_pipeline: usable menu attempt={} total_ms={:.3f} "
+                "after_last_enumeration_ms={:.3f} last_batch={} successful={} failures={} "
+                "metadata_reads={} metadata_io_ms={:.3f} songcache_reads={} read_ms={:.3f} "
+                "songcache_writes={} write_ms={:.3f}",
+                p.attempt, (NowMicros() - g_start_us) / 1000.0,
+                g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
+                p.batch, p.successful, p.failures, g_metadata_reads, g_metadata_us / 1000.0,
+                g_cache_reads, g_cache_read_us / 1000.0, g_cache_writes, g_cache_write_us / 1000.0);
+    g_visible = false;
+    RequestFrameRateRestore("the usable main menu is current with no transition pending");
   }
 }
-
-void Tick() {
-  if (g_pacing.load(std::memory_order_relaxed) != Pacing::kFreed) {
-    return;
-  }
-  const int64_t last = g_last_item_ms.load(std::memory_order_relaxed);
-  if (last == 0 || NowMillis() - last < kEnumerationIdleMillis) {
-    return;
-  }
-  RequestFrameRateRestore(
-      "a menu frame arrived with no content item counted for two seconds, so the discovery is "
-      "over");
+Display Snapshot() {
+  std::lock_guard lock(g_mutex);
+  return {g_model.Get(), g_detail, g_visible};
 }
-
-}  // namespace rb_blitz::content_progress
-
-// 0x82759308 (constructor): the object exists from here on and carries the panel it pushes
-// into at +4, so this is where the item hook learns where to write. The constructor returns
-// the object in r3.
-extern "C" REX_FUNC(sub_82759308) {
-  __imp__sub_82759308(ctx, base);
-  if (g_enabled && ctx.r3.u32 != 0) {
-    g_object.store(ctx.r3.u32, std::memory_order_relaxed);
+IoObservation BeginIo(uint32_t handle, bool write) {
+  auto file = REX_KERNEL_STATE()->object_table()->LookupObject<rex::system::XFile>(handle);
+  if (!file) return {};
+  const auto& name = file->name();
+  int kind = name == "songcache" ? (write ? 3 : 2)
+             : !write && (name == "songs.dta" || name == "songs.dtb") ? 1 : 0;
+  if (!kind) return {};
+  std::lock_guard lock(g_mutex);
+  if (!g_model.Get().active()) {
+    if (kind != 2) return {};
+    BeginAttempt();
   }
+  g_model.Finalizing();
+  g_detail = kind == 3 ? "Saving song information..."
+                      : kind == 2 ? "Reading saved song information..." : "Loading song information...";
+  return {kind, NowMicros()};
 }
+void EndIo(IoObservation io, uint32_t status) {
+  if (!io.kind) return;
+  const auto elapsed = NowMicros() - io.start_us;
+  std::lock_guard lock(g_mutex);
+  if (status == 0) {
+    if (io.kind == 1) { ++g_metadata_reads; g_metadata_us += elapsed; }
+    if (io.kind == 2) { ++g_cache_reads; g_cache_read_us += elapsed; }
+    if (io.kind == 3) { ++g_cache_writes; g_cache_write_us += elapsed; }
+  }
+  REXLOG_INFO("content_pipeline: guest_io kind={} result={:08X} elapsed_ms={:.3f}",
+               io.kind, status, elapsed / 1000.0);
+}
+} // namespace rb_blitz::content_progress
 
-// 0x827593A8 (SetTotal): the engine announcing how many items it is about to enumerate.
-// A non-positive total is "not enumerating" to the Flow that draws the bar, so with R7 on
-// the host's own count stands in for it. The host drives the bar per item (CountItem), and
-// the engine's start also zeroes the current count - so if the host has already counted
-// something, its numbers are put back straight after this, or the bar would jump back.
+// These setters describe only a late guest subphase (often total=0), not the
+// overall operation. Hide that percentage. The host displays actual per-batch
+// counts and an explicit, unnumbered finalization phase instead.
+extern "C" REX_FUNC(sub_82759308) { __imp__sub_82759308(ctx, base); }
 extern "C" REX_FUNC(sub_827593A8) {
-  const std::size_t known = g_enabled ? rb_blitz::dlc::ContentItemCount() * 2 : 0;
-  if (g_enabled) {
-    REXLOG_INFO("content_progress: the title announced a total of {} item(s) to enumerate "
-                "({} package(s) known to this build)",
-                ctx.r4.s32, rb_blitz::dlc::ContentItemCount());
-    if (ctx.r4.s32 <= 0 && known != 0) {
-      ctx.r4.s64 = static_cast<int64_t>(known);
-      REXLOG_INFO("content_progress: the total was not known to the title; the discovery "
-                  "bar is given {} instead",
-                  known);
-    }
-  }
+  REXLOG_INFO("content_pipeline: guest SetTotal({}); finalization remains pending", ctx.r4.s32);
+  ctx.r4.s32 = -1;
   __imp__sub_827593A8(ctx, base);
-  const uint32_t counted = g_counted.load(std::memory_order_relaxed);
-  if (g_enabled && counted != 0) {
-    PushProgress(ctx, base, counted, static_cast<uint32_t>(known));
-  }
 }
-
-// 0x827593B8 (Increment): one more item enumerated. This build's engine never calls it
-// (measured - docs/plans/finished/2026-10-10-song-cache-plan.md §9.4), which is why the host counts the items
-// itself; left hooked so the faithful path stays the engine's own function and so a build
-// that does call it still gets a total.
 extern "C" REX_FUNC(sub_827593B8) {
-  if (g_enabled) {
-    const std::size_t known = rb_blitz::dlc::ContentItemCount();
-    if (known != 0) {
-      if (uint8_t* object = rex::memory::GuestPtr<uint8_t*>(base, ctx.r3.u32)) {
-        if (LoadBe32(object + 12) <= 0) {
-          StoreBe32(object + 12, static_cast<int32_t>(known) * 2);
-          REXLOG_INFO("content_progress: the title had no total to enumerate; the discovery "
-                      "bar is given {} on its first item",
-                      known * 2);
-        }
-      }
-    }
-  }
+  { std::lock_guard lock(g_mutex); ++g_native_increments; }
   __imp__sub_827593B8(ctx, base);
 }
-
-// 0x827593C8 (Complete): the enumeration finished, so the Flow draws a full bar. The
-// engine's own numbers are left to run - current = total is exactly the full bar - and the
-// host's counter is reset for whatever enumerates next.
 extern "C" REX_FUNC(sub_827593C8) {
-  if (g_enabled) {
-    REXLOG_INFO("content_progress: the title's content enumeration finished; the discovery "
-                "bar is drawn full");
-    g_counted.store(0, std::memory_order_relaxed);
-    g_pushed_percent.store(-1, std::memory_order_relaxed);
-    RequestFrameRateRestore("the title's own completion ran");
+  {
+    std::lock_guard lock(g_mutex);
+    g_guest_complete = true;
+    g_visible = false; // the panel can now be an offline/login confirmation
+    REXLOG_INFO("content_pipeline: guest subphase complete native_increments={}; waiting for usable menu",
+                g_native_increments);
   }
   __imp__sub_827593C8(ctx, base);
 }
-
-// The per-item count: the XAM app messages the enumeration is made of. All three entry
-// points are watched, because which one the title's own code routes them through is a
-// property of that code; the message id is what makes a call one of ours.
 extern "C" REX_FUNC(__imp__XMsgStartIORequestEx) {
-  static ImportFunc original = nullptr;
-  WatchXmsg(ctx, base, "__imp__XMsgStartIORequestEx", &original);
+  WatchXmsg(ctx, base, "__imp__XMsgStartIORequestEx", true);
 }
-
 extern "C" REX_FUNC(__imp__XMsgInProcessCall) {
-  static ImportFunc original = nullptr;
-  WatchXmsg(ctx, base, "__imp__XMsgInProcessCall", &original);
+  WatchXmsg(ctx, base, "__imp__XMsgInProcessCall", false);
 }
-
 extern "C" REX_FUNC(__imp__XMsgSystemProcessCall) {
-  static ImportFunc original = nullptr;
-  WatchXmsg(ctx, base, "__imp__XMsgSystemProcessCall", &original);
+  WatchXmsg(ctx, base, "__imp__XMsgSystemProcessCall", false);
 }
-
-#endif  // _WIN32
+extern "C" REX_FUNC(__imp__NtWriteFile) {
+  const auto io = rb_blitz::content_progress::BeginIo(ctx.r3.u32, true);
+  const auto iosb = ctx.r7.u32;
+  Forward("__imp__NtWriteFile", ctx, base);
+  const auto result = iosb && !(ctx.r3.u32 & 0x80000000u) ? Be32(base + iosb) : ctx.r3.u32;
+  rb_blitz::content_progress::EndIo(io, result);
+}
+#endif

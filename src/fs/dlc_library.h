@@ -389,7 +389,7 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
 
     std::error_code ec;
     std::filesystem::directory_iterator entries(
-        directory, std::filesystem::directory_options::skip_permission_denied, ec);
+        directory, std::filesystem::directory_options::none, ec);
     if (ec) {
       detail::LibraryWalkEvent event;
       event.entry = directory.generic_string();
@@ -397,14 +397,20 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
       continue;
     }
 
-    for (const auto& entry : entries) {
-      if (entry.is_directory(ec) && !ec) {
+    const std::filesystem::directory_iterator end;
+    while (entries != end) {
+      const auto entry = *entries;
+      entries.increment(ec);
+      if (ec) { events.push_back({false, 0, directory.generic_string()}); break; }
+      const auto status = entry.status(ec);
+      if (ec) { events.push_back({false, 0, entry.path().generic_string()}); continue; }
+      if (std::filesystem::is_directory(status)) {
         if (!entry.is_symlink(ec)) {
           pending.push_back(entry.path());
         }
         continue;
       }
-      if (!entry.is_regular_file(ec) || ec) {
+      if (!std::filesystem::is_regular_file(status)) {
         continue;
       }
 

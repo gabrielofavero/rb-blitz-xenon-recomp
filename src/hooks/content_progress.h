@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// rb_blitz - ReXGlue Recompiled Project
-//
-// R7's progress bar. See src/hooks/content_progress.cpp for what the engine does with
-// it, what this build feeds it, and why the total is the one thing missing.
-//
-// The faithful behaviour (R7 off, the default) is this file doing nothing at all: the
-// hooks call the guest's own functions unchanged.
-
 #pragma once
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include "ui/content_progress.h"
 
 namespace rb_blitz::content_progress {
-
-// Reads the toggle once, before the guest starts: the hooks run on guest threads and
-// must not touch the cvar registry (the same rule menu_filter::Configure() follows).
-// Logs what it will do.
 void Configure();
-
-// Called once per menu frame from the shell-music poll (src/hooks/shell_music.cpp). Settles
-// R7's frame pacing if the discovery is over: the menu frame is the one frame its end is not
-// guaranteed to be seen on. One atomic load when nothing is in flight.
 void Tick();
+// UIManager::Poll supplies the focused panel and transition state.
+void ObserveScreen(std::string_view screen, std::string_view panel, bool available);
+struct Display {
+  Progress progress;
+  std::string detail;
+  bool visible = false;
+};
+Display Snapshot();
 
+// Timings of synchronous file calls, not the guest parser's CPU time.
+struct IoObservation { int kind = 0; int64_t start_us = 0; };
+IoObservation BeginIo(uint32_t handle, bool write);
+void EndIo(IoObservation observation, uint32_t status);
 }  // namespace rb_blitz::content_progress

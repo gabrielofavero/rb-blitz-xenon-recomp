@@ -85,6 +85,8 @@
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
 #include "fs/dlc_cache.h"
+#include "fs/dlc_cached_library.h"
+#include <chrono>
 #include "fs/refresh_state.h"
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
@@ -241,63 +243,20 @@ fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool for
                                         const uint32_t scan_threads,
                                         const std::filesystem::path& cache_path,
                                         const char* when, bool* cache_hit = nullptr) {
-  if (cache_hit != nullptr) {
-    *cache_hit = false;
-  }
-  bool fingerprint_ok = false;
-  fs::DlcTreeFingerprint fingerprint;
-  if (cache_enabled && !roots.empty()) {
-    std::string reason;
-    fingerprint_ok = fs::ComputeLibraryFingerprint(roots, &fingerprint, &reason);
-    if (!fingerprint_ok) {
-      REXLOG_WARN("dlc: the DLC libraries could not be fingerprinted ({}), scanning {}", reason,
-                  when);
-    }
-  }
-
-  if (cache_enabled && !roots.empty() && fingerprint_ok && !force_refresh) {
-    fs::DlcLibraryCache cached;
-    std::string cache_reason;
-    if (!fs::LoadDlcCache(cache_path, &cached, &cache_reason)) {
-      REXLOG_INFO("dlc: no usable library cache ({}), scanning", cache_reason);
-    } else {
-      std::string match_reason;
-      if (fs::DlcCacheMatches(cached, roots, force_content_type, fingerprint, &match_reason)) {
-        REXLOG_INFO("dlc: library cache hit for {} package(s) over {} file(s) in {}",
-                    cached.items.size(), fingerprint.file_count, cache_path.string());
-        if (cache_hit != nullptr) {
-          *cache_hit = true;
-        }
-        return fs::ToLibraryScanResult(cached);
-      }
-      REXLOG_INFO("dlc: library cache ignored ({}), scanning", match_reason);
-    }
-  } else if (cache_enabled && force_refresh && !roots.empty()) {
-    REXLOG_INFO("dlc: refresh requested, re-scanning the libraries and rewriting {}",
-                cache_path.string());
-  }
-
-  // Captured rather than read here: the boot path and the in-game refresh cannot
-  // disagree about the thread count the way they cannot disagree about the cache.
-  REXLOG_DEBUG("dlc: scanning {} library root(s) for package headers on {} thread(s)",
-               roots.size(), scan_threads == 0 ? fs::DefaultDlcScanThreads() : scan_threads);
-  fs::LibraryScanResult library = fs::ScanDlcLibraries(roots, force_content_type, scan_threads);
-  for (const auto& rejected : library.rejected) {
+  const auto result = fs::LoadOrScanDlcLibrary(cache_enabled, force_refresh, roots,
+                                              force_content_type, scan_threads, cache_path);
+  if (cache_hit) *cache_hit = result.hit;
+  REXLOG_INFO("dlc_cache: when={} enabled={} refresh={} result={} reason='{}' roots='{}' "
+              "content_type={:08X} path='{}' packages={} files={}", when, cache_enabled,
+              force_refresh, result.hit ? "hit" : "scan", result.reason, JoinLibraryRoots(roots),
+              force_content_type, cache_path.string(), result.library.items.size(), result.library.files_seen);
+  REXLOG_INFO("dlc_cache: fingerprint_ms={:.3f} load_ms={:.3f} scan_ms={:.3f} "
+              "verify_ms={:.3f} write_ms={:.3f} written={} write_reason='{}'",
+              result.fingerprint_ms, result.load_ms, result.scan_ms, result.verify_ms,
+              result.write_ms, result.written, result.write_reason);
+  for (const auto& rejected : result.library.rejected)
     REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
-  }
-  if (cache_enabled && fingerprint_ok) {
-    std::string save_reason;
-    const fs::DlcLibraryCache cache =
-        fs::MakeDlcLibraryCache(roots, force_content_type, fingerprint, library);
-    if (fs::SaveDlcCache(cache_path, cache, &save_reason)) {
-      REXLOG_INFO("dlc: library cache written for {} package(s) to {}", library.items.size(),
-                  cache_path.string());
-    } else {
-      REXLOG_WARN("dlc: library cache not written ({}), the libraries are scanned every boot",
-                  save_reason);
-    }
-  }
-  return library;
+  return result.library;
 }
 
 // One content type for the whole library when one was named; otherwise
@@ -444,6 +403,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // case the library exists for - is scanned as a library instead, so pointing
   // --dlc_root at a dumped song folder just works. An absent folder is the normal case
   // and produces no scan's worth of noise.
+  const auto structured_start = std::chrono::steady_clock::now();
   fs::DlcScanResult scan;
   bool structured = false;
   if (is_directory) {
@@ -455,6 +415,11 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       }
     }
   }
+
+  REXLOG_INFO("dlc_sources: structured_root='{}' structured={} packages={} scan_ms={:.3f} "
+              "user_root='{}' cache_root='{}'", root.string(), structured, scan.packages.size(),
+              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - structured_start).count(),
+              runtime->user_data_root().string(), runtime->cache_root().string());
 
   // A dlc_root that is not the structured layout is a library too, so pointing it at a
   // dumped song folder needs no other configuration; the configured libraries join it.
@@ -508,7 +473,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   const fs::LibraryScanResult library =
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
                         g_scan_threads, cache_path, "this boot", &g_cache_served);
-  g_content_count = library.items.size();
+  g_content_count = scan.packages.size() + library.items.size();
   g_structured_paths.clear();
   g_structured_paths.reserve(scan.packages.size());
   for (const auto& package : scan.packages) {
@@ -517,7 +482,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   RebuildPackagePaths(library.items);
   if (g_cache_served) {
     REXLOG_INFO("dlc: the DLC enumeration was loaded from the cache this boot (R7); the "
-                "main menu says so (\"Loading Song Cache\")");
+                "status reports the cached content list");
   }
 
   if (!library.items.empty()) {
@@ -610,7 +575,7 @@ void PublishPendingRefresh() {
     return;
   }
   content_manager->set_extra_content_library(std::move(items));
-  g_content_count = count;
+  g_content_count = g_structured_paths.size() + count;
   g_package_paths = std::move(paths);
   REXLOG_INFO("dlc: refreshed the running title's DLC library: {} package(s) in {}", count,
               JoinLibraryRoots(g_library_roots));

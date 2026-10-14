@@ -1352,6 +1352,19 @@ int main() {
     CHECK_TRUE(tail_intact);
   }
 
+  BeginCase("a split edit touching already-consumed bytes is not delivered");
+  {
+    const std::vector<uint8_t> head{1, 2, 3};
+    std::vector<uint8_t> tail{4, 5};
+    const std::vector<uint8_t> rejected{9, 2, 3, 8, 9};
+    CHECK_FALSE(DeliverSplitEdit(head, rejected, tail));
+    CHECK_TRUE(tail == std::vector<uint8_t>({4, 5}));
+    const std::vector<uint8_t> accepted{1, 2, 3, 8, 9};
+    CHECK_TRUE(DeliverSplitEdit(head, accepted, tail));
+    CHECK_TRUE(tail == std::vector<uint8_t>({8, 9}));
+    CHECK_FALSE(DeliverSplitEdit(head, std::span<const uint8_t>(accepted.data(), 4), tail));
+  }
+
   return Finish();
 }
 

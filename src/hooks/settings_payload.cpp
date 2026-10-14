@@ -11,6 +11,7 @@
 
 #include "fs/payload_overlay.h"
 #include "hooks/menu_filter.h"
+#include "hooks/dlc.h"
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "settings/boot.h"
@@ -282,7 +283,20 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   }
   MenuRecords records;
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
-                        ultimate::Provider().Active())) return fail();
+                        ultimate::Provider().Active(), dlc::CacheServedThisBoot())) return fail();
+  for (const auto& locale : locale_set) {
+    std::vector<ui::dtb::Node> roots;
+    ui::dtb::RootHeader header;
+    const auto& bytes = records.at(locale);
+    std::map<std::string, std::string> labels;
+    if (ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &error)) {
+      for (const auto& node : roots) CollectLocale(node, &labels);
+      const auto at = labels.find(menu_options::kEnumeratingContentKey);
+      REXLOG_INFO("settings_menu: discovery locale '{}' key='{}' value='{}' host_cache_hit={}",
+                  locale, menu_options::kEnumeratingContentKey,
+                  at == labels.end() ? "(missing)" : at->second, dlc::CacheServedThisBoot());
+    }
+  }
   Bytes part;
   std::string part_path;
   // The mounted part's own bytes, so the extended archive can stay a *one-part* archive: the title

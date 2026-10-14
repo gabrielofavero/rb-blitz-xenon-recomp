@@ -8,6 +8,7 @@
 #include "hooks/menu_filter.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -22,6 +23,7 @@
 #include <rex/types.h>
 
 #include "hooks/dlc.h"
+#include "hooks/content_progress.h"
 #include "settings/menu_compat.h"
 #include "ui/menu_options.h"
 
@@ -198,7 +200,24 @@ void RetargetIfNeeded(uint8_t* base, size_t file_size, const uint8_t before[20],
 // Patch whatever this buffer carries that these edits are for. True when the bytes
 // were rewritten - a candidate that is one file but not the other must not stop the
 // scan, because a single read block can carry both.
-bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
+struct ChecksumEdit {
+  size_t size;
+  std::array<uint8_t, 20> before, after;
+};
+
+void CommitChecksums(uint8_t* base, const std::vector<ChecksumEdit>& edits) {
+  for (const auto& edit : edits)
+    RetargetIfNeeded(base, edit.size, edit.before.data(), edit.after.data());
+}
+
+bool PatchFile(uint8_t* base, uint8_t* file, size_t available,
+               std::vector<ChecksumEdit>& edits) {
+  const auto defer = [&](size_t size, const uint8_t* before, const uint8_t* after) {
+    ChecksumEdit edit{size};
+    std::copy_n(before, 20, edit.before.begin());
+    std::copy_n(after, 20, edit.after.begin());
+    edits.push_back(edit);
+  };
   bool patched = false;
 
   if (g_settings.hide_rows) {
@@ -208,7 +227,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
       REXLOG_INFO("menu_filter: hid {} row(s) from the main menu's option list ({} bytes moved "
                   "into the list's #ifdef macro name): {}",
                   outcome.removed.size(), outcome.freed, Joined(outcome.removed));
-      RetargetIfNeeded(base, outcome.file_size, outcome.digest_before, outcome.digest_after);
+      defer(outcome.file_size, outcome.digest_before, outcome.digest_after);
       patched = true;
     } else {
       LogRejectionOnce("hide rows", outcome.reason);
@@ -225,7 +244,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
       REXLOG_INFO("menu_filter: relabelled \"{}\" to \"{}\" ({} bytes taken from an unused macro "
                   "name)",
                   renamed.from, renamed.to, renamed.borrowed);
-      RetargetIfNeeded(base, renamed.file_size, renamed.digest_before, renamed.digest_after);
+      defer(renamed.file_size, renamed.digest_before, renamed.digest_after);
       patched = true;
     } else {
       LogRejectionOnce("rename label", renamed.reason);
@@ -243,7 +262,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
                   "menu in offline mode",
                   skipped.removed, skipped.added,
                   skipped.padding == 0 ? "" : ", with the leftover parked in a skipped block");
-      RetargetIfNeeded(base, skipped.file_size, skipped.digest_before, skipped.digest_after);
+      defer(skipped.file_size, skipped.digest_before, skipped.digest_after);
       patched = true;
     } else {
       LogRejectionOnce("skip offline prompts", skipped.reason);
@@ -259,7 +278,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
       REXLOG_INFO("menu_filter: the downloadable-content row now refreshes the DLC cache ({} "
                   "bytes of its action paid for the call)",
                   tapped.padding);
-      RetargetIfNeeded(base, tapped.file_size, tapped.digest_before, tapped.digest_after);
+      defer(tapped.file_size, tapped.digest_before, tapped.digest_after);
       patched = true;
     } else {
       LogRejectionOnce("tap refresh row", tapped.reason);
@@ -278,7 +297,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
       REXLOG_INFO("menu_filter: relabelled the downloadable-content row \"{}\" to \"{}\" ({} "
                   "bytes taken from an unused macro name)",
                   renamed.from, renamed.to, renamed.borrowed);
-      RetargetIfNeeded(base, renamed.file_size, renamed.digest_before, renamed.digest_after);
+      defer(renamed.file_size, renamed.digest_before, renamed.digest_after);
       patched = true;
     } else {
       LogRejectionOnce("relabel the refresh row", renamed.reason);
@@ -295,7 +314,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available) {
       REXLOG_INFO("menu_filter: relabelled \"{}\" to \"{}\" ({} bytes taken from an unused macro "
                   "name); the enumeration is coming from the cache (R7)",
                   renamed.from, renamed.to, renamed.borrowed);
-      RetargetIfNeeded(base, renamed.file_size, renamed.digest_before, renamed.digest_after);
+      defer(renamed.file_size, renamed.digest_before, renamed.digest_after);
       patched = true;
     } else {
       LogRejectionOnce("relabel the cache load", renamed.reason);
@@ -332,19 +351,21 @@ void CompleteSplitFile(uint8_t* base, uint8_t* second, size_t second_length) {
   whole.insert(whole.end(), g_pending.head.begin(), g_pending.head.end());
   whole.insert(whole.end(), second, second + second_length);
 
-  if (!PatchFile(base, whole.data(), whole.size())) {
+  std::vector<ChecksumEdit> edits;
+  if (!PatchFile(base, whole.data(), whole.size(), edits)) {
     LogRejectionOnce("a file spanning two reads", "no edit is for it");
     return;
   }
 
-  if (std::memcmp(whole.data(), g_pending.head.data(), head_size) != 0) {
+  if (!rb_blitz::menu_options::DeliverSplitEdit(g_pending.head, whole,
+                                               std::span<uint8_t>(second, second_length))) {
     REXLOG_WARN("menu_filter: an edit to a file spanning two reads (ark offset {}) reaches into "
                 "the first {} byte(s), which this read does not carry and the guest has already "
                 "copied; it was not delivered",
                 g_pending.offset + g_pending.file_offset, head_size);
     return;
   }
-  std::memcpy(second, whole.data() + head_size, second_length);
+  CommitChecksums(base, edits);
   REXLOG_INFO("menu_filter: patched a file spanning two reads at ark offset {} ({} bytes before "
               "the seam, {} after; the edit falls entirely after it)",
               g_pending.offset + g_pending.file_offset, head_size, second_length);
@@ -364,10 +385,11 @@ struct ReadArgs {
   uint32_t length = 0;
   uint32_t buffer = 0;
   uint32_t offset_ptr = 0;
+  uint32_t status_ptr = 0;
 };
 
 ReadArgs Capture(const PPCContext& ctx) {
-  return ReadArgs{ctx.r9.u32, ctx.r8.u32, ctx.r10.u32};
+  return ReadArgs{ctx.r9.u32, ctx.r8.u32, ctx.r10.u32, ctx.r7.u32};
 }
 
 void HandleRead(const char* which, PPCContext& ctx, uint8_t* base, const ReadArgs& args) {
@@ -424,7 +446,9 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base, const ReadArg
     if (!rb_blitz::menu_options::LooksLikeDtb(host + at, length - at)) {
       continue;
     }
-    if (PatchFile(base, host + at, length - at)) {
+    std::vector<ChecksumEdit> edits;
+    if (PatchFile(base, host + at, length - at, edits)) {
+      CommitChecksums(base, edits);
       REXLOG_INFO("menu_filter: patched a file at byte {} of a {} byte {} read", at, length, which);
     } else {
       // Either not a file these edits are for, or one this read cut short - and the
@@ -533,19 +557,35 @@ void Configure() {
 }  // namespace rb_blitz::menu_filter
 
 extern "C" REX_FUNC(__imp__NtReadFile) {
-  const ReadArgs args = Capture(ctx);
+  const auto io = rb_blitz::content_progress::BeginIo(ctx.r3.u32, false);
+  ReadArgs args = Capture(ctx);
   if (auto original = ResolveOriginal(/*scatter=*/false)) {
     original(ctx, base);
   }
-  HandleRead("plain", ctx, base, args);
+  // NtReadFile performs the read synchronously, then may return STATUS_PENDING
+  // for APC delivery. The IOSB carries the completed status and actual byte count.
+  const uint32_t result = args.status_ptr && !(ctx.r3.u32 & 0x80000000u)
+      ? rex::memory::load_and_swap<uint32_t>(base + args.status_ptr) : ctx.r3.u32;
+  rb_blitz::content_progress::EndIo(io, result);
+  if (result == 0) {
+    if (args.status_ptr) args.length = std::min(args.length,
+        rex::memory::load_and_swap<uint32_t>(base + args.status_ptr + 4));
+    HandleRead("plain", ctx, base, args);
+  }
 }
 
 extern "C" REX_FUNC(__imp__NtReadFileScatter) {
-  const ReadArgs args = Capture(ctx);
+  const auto io = rb_blitz::content_progress::BeginIo(ctx.r3.u32, false);
+  ReadArgs args = Capture(ctx);
   if (auto original = ResolveOriginal(/*scatter=*/true)) {
     original(ctx, base);
   }
-  HandleRead("scatter", ctx, base, args);
+  const uint32_t result = args.status_ptr && !(ctx.r3.u32 & 0x80000000u)
+      ? rex::memory::load_and_swap<uint32_t>(base + args.status_ptr) : ctx.r3.u32;
+  rb_blitz::content_progress::EndIo(io, result);
+  // r8 is a segment table for Scatter, not a contiguous file buffer. Scanning
+  // it as args.length bytes can inspect unrelated guest memory. No locale edit.
+
 }
 
 #endif  // _WIN32

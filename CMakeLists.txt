@@ -437,6 +437,10 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_dlc_cache_tests PRIVATE src)
     add_test(NAME dlc_cache COMMAND rb_blitz_dlc_cache_tests)
 
+    add_executable(rb_blitz_content_progress_tests tests/content_progress_tests.cpp)
+    target_include_directories(rb_blitz_content_progress_tests PRIVATE src)
+    add_test(NAME content_progress COMMAND rb_blitz_content_progress_tests)
+
     # The in-game refresh's two rules (src/fs/refresh_state.h): one refresh at a time, and
     # a finished one published exactly once. SDK-free and thread-free like the DLC tests
     # above; the caller owns the threads, so the state machine is what is testable.

@@ -34,6 +34,7 @@
 #include <rex/ui/imgui_drawer.h>
 
 #include "hooks/settings_bridge.h"
+#include "hooks/content_progress.h"
 #include "ui/help_topics.h"
 
 REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
@@ -105,6 +106,34 @@ float CaptionFontSize(const ImVec2 display) {
   return std::clamp(display.y * kCaptionSizeFraction, kCaptionMinSize, kCaptionMaxSize);
 }
 
+// Discovery is independent of Settings Labels. A full batch is followed by an
+// explicitly unnumbered phase; it is never displayed as overall 100% complete.
+void DrawContentProgress(ImGuiIO& io) {
+  const auto state = content_progress::Snapshot();
+  if (!state.visible) return;
+  const float size = CaptionFontSize(io.DisplaySize);
+  ImGui::PushFont(g_caption_font, size);
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * .5f, io.DisplaySize.y * .66f),
+                          ImGuiCond_Always, ImVec2(.5f, 0));
+  ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x * .55f, 0));
+  ImGui::SetNextWindowBgAlpha(.75f);
+  const auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_AlwaysAutoResize;
+  if (ImGui::Begin("##content_progress", nullptr, flags)) {
+    if (state.progress.determinate()) {
+      ImGui::Text("Reading content: %u / %u packages",
+                  state.progress.current, state.progress.total);
+      ImGui::ProgressBar(float(state.progress.current) / float(state.progress.total),
+                         ImVec2(-1, size * .6f), "");
+    } else {
+      ImGui::TextWrapped("%s", state.detail.c_str());
+    }
+  }
+  ImGui::End();
+  ImGui::PopFont();
+}
+
 class CaptionSink final : public settings::bridge::HelpSink {
  public:
   void Show(const std::string_view symbol) override { PublishSymbol(symbol); }
@@ -121,6 +150,7 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
   }
 
   void OnDraw(ImGuiIO& io) override {
+    DrawContentProgress(io);
     std::string text;
     {
       std::lock_guard lock(g_text_mutex);

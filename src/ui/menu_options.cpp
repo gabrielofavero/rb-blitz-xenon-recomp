@@ -12,6 +12,14 @@
 #include <utility>
 
 namespace rb_blitz::menu_options {
+
+bool DeliverSplitEdit(std::span<const uint8_t> original_head,
+                      std::span<const uint8_t> edited_file, std::span<uint8_t> second_read) {
+  if (edited_file.size() != original_head.size() + second_read.size() ||
+      !std::equal(original_head.begin(), original_head.end(), edited_file.begin())) return false;
+  std::copy(edited_file.begin() + original_head.size(), edited_file.end(), second_read.begin());
+  return true;
+}
 namespace {
 
 // --- the file's own obfuscation -------------------------------------------

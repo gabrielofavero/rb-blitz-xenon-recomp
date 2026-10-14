@@ -279,9 +279,8 @@ class RbBlitzApp : public rex::ReXApp {
     // the two do not interact, but the DLC log line reads better next to the boot
     // identity and the payload line than before them.
     rb_blitz::dlc::Configure(runtime(), game_data_root());
-    // After dlc::Configure, whose package count is what the discovery screen's progress
-    // bar is given: the toggle is read here, before the guest starts, and the count is
-    // read from the DLC layer when the bar's own hooks run (src/hooks/content_progress.cpp).
+    // Capture pacing before guest threads start. Progress uses actual enumerators
+    // and UI completion, independently of whether the host cache was enabled/hit.
     rb_blitz::content_progress::Configure();
     // After dlc::Configure, whose enumeration is the pool R9 draws from: with the
     // toggle on, a few loaded DLC songs are mounted read-only and the main menu's
