@@ -31,12 +31,12 @@ build machine's path in it — and [`../docs/guides/ultimate-compat.md`](../docs
 | Page | What happens |
 | --- | --- |
 | Welcome | What the installer needs (a copy of the game they own), what it refuses to do (no game files included or downloaded). |
-| Install folder | Any writable folder; the default is under the user's own profile, so no administrator rights are needed (`/ALLUSERS` still forces a machine-wide install). The page also asks for the DLC library and the save folder, and is shown even when an install is already registered — a reinstall has to be able to see and change them ([details below](#the-dlc-library-and-the-saved-games)). |
+| Install folder | `C:\Program Files\Rock Band Blitz` by default: the install is the administrative one (Inno Setup's `PrivilegesRequired=admin`), so it prompts for elevation, and `/CURRENTUSER` is what installs under a user's own profile instead. The page also asks for the DLC library and the save folder, and is shown even when an install is already registered — a reinstall has to be able to see and change them ([details below](#the-dlc-library-and-the-saved-games)). |
 | Xbox 360 Game Files | The package / an extracted game folder / keep the data that is already installed in the install folder. The location is asked on this page, not on one of its own: choosing "package" or "folder" puts the prompt, the path box and its Browse button under the radios. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. |
-| Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release (selected by default), use a zip, use a folder, or do not install it. The zip or folder is asked for on this page too. |
-| Shortcuts | Which of the four shortcuts to create ([details below](#shortcuts)). |
+| Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release (selected by default), use a zip, use a folder, or do not install it. The zip or folder is asked for on this page, and *do not install* puts how to add it later in the same place: run this installer again, or copy the release's `Xbox` folder into `<install folder>\game\ultimate`. |
+| Shortcuts | Which of the two shortcuts to create — both are the game ([details below](#shortcuts)). |
 | Ready to install | The destination, the answers, and the commit this build is, for a last look before anything is written. |
-| Progress | One bar across four stages (build, game data, mod, finishing) with a live status line; cancel asks for confirmation while a stage runs. |
+| Progress | One bar across four stages (build, game data, mod, finishing). The first line names the stage and how far it has got ("Installing Rock Band Blitz Ultimate  (71%)"), the second what the helper is doing inside it ("adding the mod's songs and modes…"), which is what the stage's own sentence says until the helper has reported. Cancel asks for confirmation while a stage runs. |
 | Finish | A three-way choice — launch the game, open Controller Settings, or do nothing ([details below](#the-finish-page)). |
 
 The licence has no page: nothing in this wizard is agreed to, so the GPL-2.0 text
@@ -55,31 +55,36 @@ progress bar, and then it opens Controller Settings it came from.
 
 ### Shortcuts
 
-Four shortcuts, one per `[Tasks]` entry, so the wizard's Shortcuts page is the one
+Two shortcuts, one per `[Tasks]` entry, so the wizard's Shortcuts page is the one
 place that decides what is created and in what form a silent install can change
-it. The game's shortcut keeps its `--game_data_root="{app}\game"` argument, so the
-game still launches standalone; Controller Settings' takes no arguments and finds the
-game beside itself.
+it. Both are the game, and both keep their `--game_data_root="{app}\game"`
+argument: the game has to stay runnable on its own, without Controller Settings
+(Contract 4).
 
 | Task | Where | Shortcut | Default |
 | --- | --- | --- | --- |
 | `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | unchecked, interactive and silent |
-| `startmenucontroller` | Start menu | **Rock Band Blitz Controller Settings** — the settings application | unchecked, interactive and silent |
-| `controllericon` | Desktop | **Rock Band Blitz Controller Settings** | unchecked; `/LAUNCHERICON=1` or `/CONTROLLERICON=1` asks for it |
 | `desktopicon` | Desktop | **Rock Band Blitz** — the game | unchecked |
 
-The names are deliberately different so a list can tell them apart, and the
-game's shortcut is never repointed at Controller Settings: the game has to stay
-runnable on its own (D9, [`../docs/plans/finished/2026-09-27-launcher-plan.md`](../docs/plans/finished/2026-09-27-launcher-plan.md)).
+Controller Settings gets none (2026-10-14). The wizard installs one program for the
+user to run, and a second Start-menu entry for the settings application read as a
+second program beside it; that narrows D9, which named both
+([`../docs/plans/finished/2026-09-27-launcher-plan.md`](../docs/plans/finished/2026-09-27-launcher-plan.md)).
+The finish page still offers *Open Controller Settings* and the application is in the
+install folder, so a direct Start-menu or desktop entry is the one thing a user who
+wants it creates by hand. The two parameters that asked for its desktop icon
+(`/LAUNCHERICON=1`, `/CONTROLLERICON=1`) are gone with the task they named: a script
+that still passes one gets no shortcut and no error, which is what it would have got
+from the page anyway.
+
 Nothing is created unless the user asks: the wizard's page starts from no answer,
 the `[Tasks]` declarations carry `Flags: unchecked` so a silent install starts from
 no answer too, and `UsePreviousTasks=no` keeps an earlier install's choice from
 reappearing on a reinstall. `/TASKS=startmenu` (or `/MERGETASKS`) is what opts a
 shortcut back in, and it is the only thing that does.
 
-The executable keeps the filename `rb_blitz_controller_settings.exe`: shortcuts that already
-exist point at it, and its own window is what a user sees, which now says
-Controller Settings rather than "Controller Settings".
+The executable keeps the filename `rb_blitz_controller_settings.exe`: shortcuts an
+earlier release created point at it, and renaming it would break them.
 
 ### A game that is already installed
 
@@ -134,7 +139,8 @@ A copy of everything the helper did is left next to the game:
   whether the fingerprints matched, the executables it laid down), a `[game_data]`
   table (`source`, `directory`, `ultimate_installed`), a `[paths]` table recording the
   two folders the folder page asked for (`file`, and `dlc_root`/`save_root` — or
-  `dlc_default`/`save_default` when the answer was "the game's own"), and, when the mod
+  `dlc_default`/`save_default` when the answer was the game's own, which only a silent
+  install can still give by passing an empty `/DLCDIR`/`/SAVEDIR`), and, when the mod
   was installed, an `[ultimate]` table. Controller Settings' first-run prefill reads
   `[install] game_directory` and `[game_data] ultimate_installed` from it, and
   `payload_commit` is the build a bug report names (`launcher-plan` D4). An update,
@@ -324,6 +330,9 @@ Controller Settings checks for a newer release every time it starts and offers t
 ([controller-settings/README.md](../controller-settings/README.md), section "Checking for updates"). Both halves of
 that are built from this directory, and they are the two build products described below: a
 release manifest, and a second build of the wizard that installs a release it did not come with.
+That second build is administrative for the same reason the setup executable is (2026-10-14):
+what it updates is an install in `C:\Program Files`, so accepting an update asks for the
+elevation that install asked for.
 
 ### `update.toml`: the release manifest
 
@@ -517,31 +526,33 @@ Setup's own switches.
 | `/GAMEMETHOD` | `package` (default), `folder`, `installed` | Where the game data comes from. |
 | `/GAMEFOLDER` | folder | With `folder`: the extract root, or any folder above it. |
 | `/GAMEPACKAGE` | file | With `package`: the Xbox 360 container file. |
-| `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` (or the old Controller Settings profile) is kept; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
-| `/SAVEDIR` | folder | Where the saves go. Same omitted/empty rule as `/DLCDIR`; empty means the game's own folder under the user's Documents. |
+| `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` is read, then the old Controller Settings profile, then the default under the user's Documents; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
+| `/SAVEDIR` | folder | Where the saves go. Same rule as `/DLCDIR`; its default is `Documents\Rock Band Blitz\Saved Games`, and empty means the game's own save root under the user's Documents. |
 | `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder` | Whether and how to install the mod. |
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
-| `/CONTROLLERICON` | `1` | Also create Controller Settings' desktop shortcut. Its older spelling `/LAUNCHERICON=1` still works. |
-| `/TASKS` | `startmenu,startmenucontroller,controllericon,desktopicon` (Inno Setup) | Which shortcuts to create. Nothing is created without this: the declarations are unchecked and a silent install starts from no answer. |
+| `/TASKS` | `startmenu,desktopicon` (Inno Setup) | Which shortcuts to create. Nothing is created without this: the declarations are unchecked and a silent install starts from no answer. |
 | `/MERGETASKS` | `startmenu` (Inno Setup) | The additive form of the same thing; `!name` takes one away, which is already the default. |
 | `/RUNATEND` | `game` (wizard default), `controller`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. `Controller Settings` is accepted as the older spelling of `controller`. |
 | `/DIR` | folder | Install folder (Inno Setup). |
-| `/ALLUSERS`, `/CURRENTUSER` | — | Machine-wide instead of the default per-user install (Inno Setup). |
+| `/CURRENTUSER` | — | Install under the current user's own profile instead of machine-wide. The default is machine-wide (`/ALLUSERS`), because that is the mode whose default folder is `C:\Program Files`; an unattended run that cannot answer an elevation prompt has to pass this. |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | — | Usual unattended switches (Inno Setup). |
 
 Example — unattended install from a package, with the pinned mod, no dialog at all:
 
 ```bat
 RockBandBlitzSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
-  /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
+  /CURRENTUSER /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
   /GAMEMETHOD=package /GAMEPACKAGE="<the extracted package folder>" ^
   /DLCDIR="D:\Rock Band DLC" /SAVEDIR="D:\Rock Band Saves" ^
   /ULTIMATESOURCE=pin
 ```
 
 A silent install launches nothing unless `/RUNATEND` asks for it (see the finish
-page above); a silent *uninstall* always keeps the game data (see below).
+page above); a silent *uninstall* always keeps the game data (see below). It also
+cannot answer a UAC prompt: the setup asks for the elevation a machine-wide install
+needs, so an unattended run that is not already elevated passes `/CURRENTUSER` (as
+the example does) or `/DIR` into a folder it can write.
 
 ## The helper contract
 
@@ -633,11 +644,23 @@ The page is prefilled in this order, and the first answer that exists wins:
 | 1 | `/DLCDIR` or `/SAVEDIR` on the command line — a silent install's answers |
 | 2 | the installation's own `paths.toml`, when it parses |
 | 3 | the legacy Controller Settings profile (`%APPDATA%\rb_blitz\launcher.toml`, or beside a portable install), the file the old Controller Settings wrote — its `[settings] user_data_root`/`dlc_root`, or the older `[launch] user_data_dir`/`dlc_dir` |
-| 4 | nothing, which means the game's own folders |
+| 4 | the installer's own default, a folder under the user's Documents: `Documents\Rock Band Blitz\Downloaded Content` and `Documents\Rock Band Blitz\Saved Games` |
+
+Rung 4 is a folder rather than an empty field since 2026-10-14, and it is what makes
+both boxes *answers*: the page refuses an empty one, so what is recorded is what the
+page shows, and a silent install that was asked nothing writes the same two. The save
+root is the folder the game itself means by an empty one (its own settings row reads
+"Empty uses Documents\Rock Band Blitz"), so the installer records the answer the
+runtime would have fallen back to. The DLC root is this installer's own choice: the
+game's fallback is a `dlc` directory inside the read-only game data, which is nothing
+to ask a player for, so the library folder beside the saves is offered instead.
 
 The legacy profile is only consulted when the install is **not** running elevated:
 an all-users install started by an administrator must not import that
-administrator's own profile into the player's install.
+administrator's own profile into the player's install. The ordinary install *is*
+elevated since 2026-10-14, so rung 3 now reaches `/CURRENTUSER` installs only - a
+known narrowing of the machine-wide default, recorded in
+[`../docs/reference/known-issues.md`](../docs/reference/known-issues.md).
 
 What the installer refuses and what it accepts:
 
@@ -657,8 +680,10 @@ invisible to the game and destroyed by an uninstall that removes the game data.
   The check that runs *while the page is shown* touches nothing — it only reports —
   so a path on its way to being corrected leaves no folder behind; the folder is
   created when the user moves on.
-* An answer of **empty** means the game's own folder and stores nothing, and is not
-the same thing as **no answer**: an update writes no folder keys at all.
+* An answer of **empty** is no longer one the page can give: both boxes are answers
+and the page refuses an empty one. A *silent* install still can, and an explicitly
+empty `/DLCDIR=` or `/SAVEDIR=` means the game's own folder and stores nothing, which
+is not the same thing as **no answer** — an update writes no folder keys at all.
 
 The file is committed **last**, after the payload, the game data and the install
 manifest have all succeeded, so cancelling or failing an install leaves the
@@ -680,6 +705,11 @@ order) so a change that drops one fails the suite:
    save folder alone.
 4. A save folder typed as `<install folder>\game\saves`: the page refuses it and
    nothing is written.
+5. One of the two boxes cleared and Next pressed: the page refuses it and nothing is
+   written; typing a folder back in continues.
+6. A fresh install in the default `C:\Program Files\Rock Band Blitz`: the page opens
+   on it, `paths.toml` lands in it with both Document folders, and the game writes
+   its saves there rather than under Program Files.
 
 ## Troubleshooting
 

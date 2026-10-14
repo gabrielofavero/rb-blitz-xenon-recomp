@@ -682,6 +682,26 @@ Preserve explicit CLI overrides by displaying those rows as overridden. Do not q
 
 ## 9. Installer and Controller Settings changes
 
+> **2026-10-14, owner's decisions - these override the paragraphs they name.**
+> (1) The wizard is titled **Rock Band Blitz**: `installer/config/pins.toml`'s `name` is no
+> longer "Rock Band Blitz Xenon Recomp", so the title bar, the welcome text and "Setup will
+> install ... into the following folder" all name the game rather than the release.
+> (2) The install is **administrative** (`PrivilegesRequired=admin`), so its default
+> destination is `C:\Program Files\Rock Band Blitz`; `/CURRENTUSER` still installs per-user,
+> and the unattended acceptance run passes it. Consequence, recorded in
+> [`../reference/known-issues.md`](../reference/known-issues.md): the legacy-profile rung of
+> §9.1's resolution order is reached by `/CURRENTUSER` installs only.
+> (3) §9.1's last rung is no longer "the game's own folders": both folder boxes default to
+> `Documents\Rock Band Blitz\Downloaded Content` and `...\Saved Games`, neither may be left
+> empty on the page, and a silent install with no parameters writes the same two. The
+> omitted-versus-empty rule for `/DLCDIR=` / `/SAVEDIR=` is unchanged.
+> (4) §9.2's shortcut list is narrowed to **two, both the game**: Controller Settings gets no
+> shortcut, and `/LAUNCHERICON` / `/CONTROLLERICON` go with the task they named (the rename
+> plan kept them as aliases; `installer/README.md` names their removal).
+> (5) The mod page says how to add Rock Band Blitz Ultimate later when the answer is "do not
+> install it" - run the installer again, or copy the release's `Xbox` folder into
+> `<install folder>\game\ultimate`. `installer/README.md` carries all five.
+
 ### 9.1 Installer directory page
 
 Extend the existing `wpSelectDir` content so installation directory, DLC directory, and save directory are visible and editable together. Do not put the paths on the subsequent game-source page (`MethodPage`). Use appropriate vertical layout at 100–300% DPI; browse controls, keyboard order, and validation messages must fit.

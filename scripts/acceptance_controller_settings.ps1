@@ -144,8 +144,13 @@ function Invoke-Install() {
     # /RUNATEND=none because a silent install that started a game would be a window nobody
     # asked for; /GAMEMETHOD=folder because the dump is already extracted in the tree;
     # /ULTIMATESOURCE=none because the retail leg has to run *before* the mod exists.
+    # /CURRENTUSER because the setup installs machine-wide by default - Program Files,
+    # which needs the elevation an unattended run cannot answer - while this leg wants a
+    # per-user install into its own capture folder, which is exactly what the switch
+    # gives.
     $arguments = @(
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL",
+        "/CURRENTUSER",
         "/DIR=$appDir", "/LOG=$log", "/RUNATEND=none",
         "/GAMEMETHOD=folder", "/GAMEFOLDER=$GameRoot",
         "/ULTIMATESOURCE=none"

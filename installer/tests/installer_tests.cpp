@@ -799,8 +799,9 @@ static void TestConfig() {
   CHECK_EQ(pins.schema_version, 1u);
   // The wizard's own titles and both names the user sees come from here: `name`
   // titles the wizard, `short_name` is the program Add/Remove Programs lists, and
-  // the publisher is the author rather than the project.
-  CHECK_STR_EQ(pins.installer.name, "Rock Band Blitz Xenon Recomp");
+  // the publisher is the author rather than the project. Both names are the game's
+  // since 2026-10-14 - the release's own name belongs on the release page.
+  CHECK_STR_EQ(pins.installer.name, "Rock Band Blitz");
   CHECK_STR_EQ(pins.installer.short_name, "Rock Band Blitz");
   CHECK_CONTAINS(pins.installer.publisher, "Gabriel F");
   CHECK_STR_EQ(pins.installer.default_dir_name, "Rock Band Blitz");
@@ -2024,7 +2025,13 @@ static void TestWizardScript() {
     }
     line = end + 1;
   }
-  CHECK_EQ(declared, 4u);
+  // Two, and both are the game (2026-10-14): the settings application gets no
+  // shortcut at all, so its two task names have to be gone rather than unchecked.
+  CHECK_EQ(declared, 2u);
+  CHECK_CONTAINS(task_block, "Name: \"startmenu\"");
+  CHECK_CONTAINS(task_block, "Name: \"desktopicon\"");
+  CHECK_FALSE(script.find("startmenucontroller") != std::string::npos);
+  CHECK_FALSE(script.find("controllericon") != std::string::npos);
   // ...and an earlier install's selection is not quietly restored over that.
   CHECK_CONTAINS(script, "UsePreviousTasks=no");
   // A reinstall has to show the folder page: the locations are asked there.
@@ -2050,6 +2057,22 @@ static void TestWizardScript() {
   const std::size_t write = script.find("'write-paths --dest '");
   CHECK_TRUE(read < validate);
   CHECK_TRUE(validate < write);
+
+  BeginCase("the wizard installs the game into Program Files and asks for both folders");
+
+  // The install is the administrative one - the only mode autopf resolves to
+  // Program Files in - and the default destination is the game's own folder there.
+  CHECK_CONTAINS(script, "PrivilegesRequired=admin");
+  CHECK_CONTAINS(script, "DefaultDirName={autopf}\\{#AppDefaultDirName}");
+  // Neither box is optional any more, and both open on the folder under the user's
+  // Documents rather than on nothing at all (2026-10-14).
+  CHECK_CONTAINS(script, "DlcPromptLabel.Caption := 'DLC folder:';");
+  CHECK_CONTAINS(script, "SavePromptLabel.Caption := 'Saved games:';");
+  CHECK_CONTAINS(script, "DlcDirLeaf = 'Downloaded Content'");
+  CHECK_CONTAINS(script, "SaveDirLeaf = 'Saved Games'");
+  // The progress page's second line is the helper's own detail, or the sentence the
+  // stage was introduced with - never the first line's text twice.
+  CHECK_CONTAINS(script, "second := gStageSubtitle;");
 }
 
 int main() {

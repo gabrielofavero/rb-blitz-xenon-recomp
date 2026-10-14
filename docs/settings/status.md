@@ -337,6 +337,18 @@ Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks
 28. **The acceptance scripts' output-directory assumptions are unre-checked** against the merged
     screen. *`menu.md` §5 item 4*.
 
+**2026-10-14, after the owner's installer review** (not a numbered item: the numbers are the standing
+list). The installer is administrative and defaults to `C:\Program Files\Rock Band Blitz`, so
+`scripts/acceptance_controller_settings.ps1` now passes `/CURRENTUSER` to stay unattended; both folder
+boxes default to `Documents\Rock Band Blitz\...` and cannot be left empty; the wizard creates two
+shortcuts, both the game, so `startmenucontroller` / `controllericon` / `/LAUNCHERICON` /
+`/CONTROLLERICON` are gone; and the mod page says how to add the mod later. Item 25 got *worse* rather
+than better - the page gained a wider header gap, a wider status gap and a note label without the DPI
+check it asks for ever having been run - and item 26 (the updater leg) now also has to answer a UAC
+prompt, because the updater is administrative too. The narrowing of the legacy-profile prefill is in
+[`../reference/known-issues.md`](../reference/known-issues.md); the new shape is in
+`../../installer/README.md`.
+
 #### P8 — Controller Settings reduction and Guide removal
 
 29. **The full surface is still the default surface**; the reduced one is behind `--controller-only`,

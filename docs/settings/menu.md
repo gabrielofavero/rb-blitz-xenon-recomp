@@ -693,6 +693,17 @@ Read order: `plan.md` §9 (what this package owes) → this part (what it built,
 still open) → `../../installer/README.md` (the user-facing half). Evidence labels: **measured** = executed
 in this pass; **static** = read from source, not run; **proposal** = not implemented.
 
+> **2026-10-14 - amended by the owner's installer review; the living record is
+> `../../installer/README.md` and `plan.md` §9's own note.** Four of the decisions this part
+> records changed: the default destination is `C:\Program Files\Rock Band Blitz` (the setup is
+> `PrivilegesRequired=admin` now, which is also what narrows the legacy-profile prefill rung to
+> `/CURRENTUSER` installs), the two folder boxes default to `Documents\Rock Band Blitz\...` and
+> may no longer be left empty, the mod page explains how to add the mod later when the answer is
+> "do not install it", and the wizard creates **two** shortcuts, both the game - so
+> `startmenucontroller`, `controllericon`, `/LAUNCHERICON` and `/CONTROLLERICON` are gone. The
+> tables below still say four tasks and name those parameters; that was true when they were
+> written.
+
 ### 1. What the package was
 
 Parent plan §9.1/§9.2, on `wpSelectDir` itself: install, DLC and save folders asked for on the same page,

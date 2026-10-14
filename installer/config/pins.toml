@@ -13,10 +13,13 @@
 schema_version = 1
 
 [installer]
-# `name` titles the wizard and names the entry in Add/Remove Programs; the
-# uninstall entry itself shows `short_name`, so the program the user sees there
-# is "Rock Band Blitz" and not "Rock Band Blitz Xenon Recomp version 0.1.0".
-name = "Rock Band Blitz Xenon Recomp"
+# `name` titles the wizard and is what its own sentences call the program (`[name]`
+# expands to it); `short_name` is what Add/Remove Programs lists. Both are "Rock Band
+# Blitz": what the user installs is the game, and the release page is where the name
+# of the recompilation is written. Until 2026-10-14 `name` was "Rock Band Blitz Xenon
+# Recomp", which put the project's name in the wizard's title bar and in "Setup will
+# install ... into the following folder".
+name = "Rock Band Blitz"
 short_name = "Rock Band Blitz"
 version = "0.1.0"
 publisher = "Gabriel Fávero"

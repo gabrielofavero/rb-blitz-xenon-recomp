@@ -100,17 +100,12 @@
 ; Setup's version resource needs four components; the app version has three.
 #define SetupVersionQuad AppVersion + ".0"
 
-; D9 names the two Start-menu shortcuts so a list can tell them apart: the game
-; keeps AppShortName and Controller Settings' shortcut names the role it has in this
-; release, which is Controller Settings (parent plan §9.2).
-;
-; The executable was renamed with the rest of the application on 2026-10-14
-; (docs/plans/finished/2026-10-14-controller-settings-rename.md): it was
-; rb_blitz_launcher.exe, and shortcuts created before that date point at the old file.
-; Nothing had shipped (the product is pre-1.0), so this script ships the new name only
-; - and [UninstallDelete] still names the old one, so an install made from a pre-rename
-; build is cleaned up rather than leaving a dead executable behind.
-#define ControllerSettingsShortcutName AppShortName + " Controller Settings"
+; Only the game is given a shortcut (owner decision, 2026-10-14): the wizard
+; installs one program for the user to run, and a second Start-menu entry for the
+; settings application read as a second program beside it. This narrows D9, which
+; named Controller Settings' shortcuts; the executable keeps the filename
+; rb_blitz_controller_settings.exe, because shortcuts an earlier release created
+; point at it and Controller Settings is what starts it again.
 
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
@@ -125,7 +120,9 @@ VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} setup
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoCopyright={#AppPublisher}
+; {autopf} is the machine-wide Program Files here, because the install below is
+; administrative; a /CURRENTUSER install resolves it to that user's own Programs
+; folder instead, so the one directive covers both.
 DefaultDirName={autopf}\{#AppDefaultDirName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
@@ -142,10 +139,20 @@ DisableDirPage=no
 ; declared defaults below are unchecked for the same reason. An explicit
 ; /TASKS or /MERGETASKS still decides.
 UsePreviousTasks=no
-; No administrator rights are needed: the build, the game data and the mod all
-; live under the user's own profile by default. An administrator can still force
-; a machine-wide install with /ALLUSERS on the command line.
-PrivilegesRequired=lowest
+; An administrative install, because that is the mode autopf resolves to Program
+; Files in: the default destination is C:\Program Files\Rock Band Blitz, where a
+; game belongs, and the setup, the uninstaller and the updater ask for the
+; elevation the files there need. /CURRENTUSER is still honoured and installs under
+; the user's own profile instead, which is what an unattended run that may not
+; elevate has to pass (scripts\acceptance_controller_settings.ps1 does).
+;
+; Nothing the *game* writes lives in the install folder: the DLC library and the
+; saved games are asked for on the folder page and default to the user's Documents,
+; so a machine-wide install does not put a player's saves under Program Files. The
+; one exception is deliberate and predates this: paths.toml sits beside the
+; executable, which an elevated install writes and a later hand edit may need the
+; same rights for (parent plan §9.1).
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=commandline
 MinVersion={#AppMinWindowsBuild}
 ArchitecturesAllowed=x64compatible
@@ -191,7 +198,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
 WelcomeLabel1=Welcome to the {#AppName} setup
-WelcomeLabel2=This is a PC decompilation project of the Xbox 360 version of Rock Band Blitz.%n%nIt installs a ready-to-play build and takes the game data from your own Xbox 360 copy: an extracted game folder or the package. No game files are included or downloaded, and this is not affiliated with or endorsed by the game's publisher.%n%nContinue when the folder or the package is at hand.
+WelcomeLabel2=This is a PC decompilation project of the Xbox 360 version of Rock Band Blitz.%n%nIt installs a PC-enhanced build of the game and takes the data from your own Xbox 360 copy. You will need to provide either the XBLA package or a folder containing the extracted files. Keep in mind this is a fan-made project, not official in any way.
 WizardSelectTasks=Shortcuts
 SelectTasksDesc=Choose which shortcuts to create.
 SelectTasksLabel2=Select the shortcuts you would like Setup to create, then click Next.
@@ -207,17 +214,20 @@ DiskSpaceMBLabel=The game data you provide is not counted here; the free space i
 ; created - and nothing is created unless the user asks. The declarations below are
 ; the state a silent install starts from too (it has no page to ask on), so a
 ; silent install creates no shortcut at all: no previous selection is restored
-; (UsePreviousTasks=no), and /TASKS or /MERGETASKS is what opts one back in. The
-; Controller Settings desktop shortcut also keeps the older /LAUNCHERICON=1
-; spelling, which is what an existing script or shortcut builder would pass.
+; (UsePreviousTasks=no), and /TASKS or /MERGETASKS is what opts one back in.
+;
+; Two shortcuts, both the game, and neither label says who it is for: the game is
+; the only program this wizard offers to run, so "for the game" would only raise
+; the question of what the other one was. The two icon parameters that used to ask
+; for Controller Settings' desktop icon (/LAUNCHERICON, /CONTROLLERICON) are gone
+; with the task they named; a script that still passes one gets no shortcut and no
+; error, which is what it would have got from the page anyway.
 ;
 ; The updater has no shortcuts page and creates none: the install it is updating
 ; already has whatever the user asked for, and re-creating a shortcut the user has
 ; since deleted is not an update's job.
 #ifndef UpdaterMode
-Name: "startmenu"; Description: "Create a &Start menu shortcut for the game"; Flags: unchecked
-Name: "startmenucontroller"; Description: "Create a Start menu shortcut for &Controller Settings"; Flags: unchecked
-Name: "controllericon"; Description: "Create a &desktop shortcut for Controller Settings"; Flags: unchecked
+Name: "startmenu"; Description: "Create a &Start menu shortcut"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 #endif
 
@@ -251,15 +261,14 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 #endif
 
 [Icons]
-; Four shortcuts, each behind the [Tasks] entry the Shortcuts page shows, with
-; names a Start-menu list can tell apart. The game's keeps its --game_data_root
-; argument: it must stay runnable without Controller Settings (Contract 4).
-; Controller Settings' takes none; it finds the game beside itself.
+; The two shortcuts, each behind the [Tasks] entry the Shortcuts page shows. Both
+; are the game, and both keep their --game_data_root argument: the game has to stay
+; runnable without Controller Settings (Contract 4), which - with the shortcut it
+; no longer gets - leaves its own folder as the only way to start the settings
+; application besides the finish page.
 #ifndef UpdaterMode
 Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: startmenu
-Name: "{autoprograms}\{#ControllerSettingsShortcutName}"; Filename: "{app}\{#ControllerSettingsExeName}"; WorkingDir: "{app}"; Tasks: startmenucontroller
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{autodesktop}\{#ControllerSettingsShortcutName}"; Filename: "{app}\{#ControllerSettingsExeName}"; WorkingDir: "{app}"; Tasks: controllericon
 #endif
 
 ; D8 replaced the single postinstall [Run] entry with the finish page's three-way
@@ -278,9 +287,6 @@ Type: files; Name: "{app}\{#GameExeName}"
 ; survive an uninstall, like the game data (Contract 4). The helper's own cleanup
 ; keeps them for the same reason.
 Type: files; Name: "{app}\{#ControllerSettingsExeName}"
-; The name the executable had before the 2026-10-14 rename: an install made from an
-; earlier build has this file, and nothing else would take it away.
-Type: files; Name: "{app}\rb_blitz_launcher.exe"
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\payload-manifest.toml"
 Type: files; Name: "{app}\install-manifest.toml"
@@ -356,8 +362,6 @@ const
   UltimateSourceParam = 'ULTIMATESOURCE';
   UltimateZipParam = 'ULTIMATEZIP';
   UltimateFolderParam = 'ULTIMATEFOLDER';
-  LegacyIconParam = 'LAUNCHERICON';
-  ControllerIconParam = 'CONTROLLERICON';
   RunAtEndParam = 'RUNATEND';
   { The two external folders (parent plan §9.1). Given, they answer for a silent
     install the way the folder page does; not given, whatever the installation's own
@@ -365,6 +369,18 @@ const
     mean "the game's own folder", which is a different answer from "not given". }
   DlcDirParam = 'DLCDIR';
   SaveDirParam = 'SAVEDIR';
+
+  { The two folders' defaults, under the user's Documents, and the leaf the game's
+    own data lives in there. The save root is the one the game itself means by an
+    empty one (its own settings row says "Empty uses Documents\Rock Band Blitz"), so
+    prefilling it records the answer the runtime would have fallen back to. The DLC
+    root is this installer's choice: the game's own fallback is the dlc directory
+    inside the read-only game data, which is nothing to ask a player for, so what is
+    offered is the library folder beside the saves. Both are the user's to change on
+    the page. }
+  DataDirName = 'Rock Band Blitz';
+  DlcDirLeaf = 'Downloaded Content';
+  SaveDirLeaf = 'Saved Games';
 
   { The sentinel that a param expansion returns when the parameter was not given at
     all. Inno Setup cannot tell "absent" from "present and empty" any other way, and
@@ -381,10 +397,6 @@ const
   RunAtEndController = 'controller';
   RunAtEndLauncher = 'launcher';
   RunAtEndNothing = 'none';
-
-  { Controller Settings' desktop icon: the [Tasks] name, shared by the [Icons] entry
-    and the code that applies D9's default and the silent switch above. }
-  ControllerIconTask = 'controllericon';
 
   { Page indexes. }
   MethodPackage = 0;
@@ -427,6 +439,9 @@ var
   UltimatePromptLabel: TNewStaticText;
   UltimatePathEdit: TNewEdit;
   UltimateBrowseButton: TNewButton;
+  { The mod page's second occupant of the picker's band: what to do instead when the
+    answer is "do not install it". It and the picker are never visible together. }
+  UltimateNoteLabel: TNewStaticText;
 
   { The two extra locations on the install folder page. They belong there rather than
     on a page of their own because they are part of the same answer - where this
@@ -462,6 +477,10 @@ var
 
   gStageActive: Boolean;
   gStageTitle: String;
+  { The stage's own sentence - what it is doing, why it takes a while - which is the
+    progress page's second line whenever the helper has no detail of its own to put
+    there. }
+  gStageSubtitle: String;
   gFailed: Boolean;
   gFailureText: String;
 
@@ -529,6 +548,20 @@ begin
     Result := AddBackslash(root) + leaf;
 end;
 
+// The two folders the folder page offers when nothing else has an answer. Both are
+// under the user's Documents, which is where the game keeps its own data: its save
+// root's documented default is Documents\Rock Band Blitz, so prefilling these
+// records a place the player can find rather than a folder inside the install.
+function DefaultDlcDir: String;
+begin
+  Result := JoinPath(JoinPath(ExpandConstant('{userdocs}'), DataDirName), DlcDirLeaf);
+end;
+
+function DefaultSaveDir: String;
+begin
+  Result := JoinPath(JoinPath(ExpandConstant('{userdocs}'), DataDirName), SaveDirLeaf);
+end;
+
 // The scratch files every stage and probe writes. Resolved before the first page
 // rather than in InitializeWizard, because the updater reads the release manifest
 // from here while Setup is still deciding which pages to show.
@@ -573,16 +606,6 @@ end;
 function ParamUltimateFolder: String;
 begin
   Result := RemoveQuotes(Trim(ExpandConstant('{param:ULTIMATEFOLDER|}')));
-end;
-
-function ParamLegacyIcon: String;
-begin
-  Result := Trim(ExpandConstant('{param:LAUNCHERICON|}'));
-end;
-
-function ParamControllerIcon: String;
-begin
-  Result := Trim(ExpandConstant('{param:CONTROLLERICON|}'));
 end;
 
 // The two external folders (§9.1). `...Given` is what tells a silent install that
@@ -938,33 +961,40 @@ begin
   StagePage.ProgressBar.Refresh;
 end;
 
+// The page has two lines and both say something: the stage and how far it has got,
+// then what the helper is doing inside it. They used to be the stage title twice -
+// "Installing Rock Band Blitz Ultimate (71%)" over "Installing Rock Band Blitz
+// Ultimate" - because the second line was set to the first one's own text (owner
+// report, 2026-10-14). The detail the helper writes is what goes on the second line,
+// and a stage that has not reported yet keeps the sentence it was introduced with, so
+// the two lines are never the same string.
 procedure StageUpdate(const percent: Integer; const detail: String);
 var
-  text: String;
+  headline, second: String;
   overall: Integer;
 begin
-  text := detail;
-  if text = '' then
-    text := gStageTitle;
+  headline := gStageTitle;
   if percent >= 0 then
   begin
     overall := percent div 10;
     if overall > 100 then
       overall := 100;
     StagePage.SetProgress(overall, 100);
-    text := text + '  (' + Format('%d', [overall]) + '%)';
+    headline := headline + '  (' + Format('%d', [overall]) + '%)';
   end;
-  StagePage.SetText(text, '');
-  StagePage.Msg2Label.Caption := gStageTitle;
+  second := detail;
+  if second = '' then
+    second := gStageSubtitle;
+  StagePage.SetText(headline, second);
   PumpStagePaint;
 end;
 
 procedure ShowStage(const title, subtitle: String);
 begin
   gStageTitle := title;
+  gStageSubtitle := subtitle;
   StagePage.SetProgress(0, 100);
-  StagePage.SetText(title, '');
-  StagePage.Msg2Label.Caption := subtitle;
+  StagePage.SetText(title, subtitle);
   PumpStagePaint;
 end;
 
@@ -1184,16 +1214,24 @@ end;
 // The option list is drawn at the very left of the page, where the radios' own
 // marker sits against the page edge; it is indented so the marker has room. The
 // band that leaves under the list is where the picker for the chosen kind of
-// source goes, which is why the list is shortened here rather than sized by Inno.
+// source goes, which is why the list is shortened here rather than sized by Inno -
+// and it is a wide band on purpose: the radios and the picker they control read as
+// one question only while the gap between them is clearly larger than the one
+// between the radios themselves (owner request, 2026-10-14).
+//
+// `Note` is the other thing that band can hold. A page whose choice has an answer
+// with nothing to pick (the mod's "do not install") explains itself in the same
+// space instead, so the band is never empty and the two never share it.
 procedure PlacePicker(const Page: TInputOptionWizardPage; const Prompt: TNewStaticText;
-                      const PathEdit: TNewEdit; const Browse: TNewButton);
+                      const PathEdit: TNewEdit; const Browse: TNewButton;
+                      const Note: TNewStaticText);
 var
   list: TNewCheckListBox;
 begin
   list := Page.CheckListBox;
   list.Left := ScaleX(8);
   list.Width := list.Width - ScaleX(8);
-  list.Height := list.Height - ScaleY(60);
+  list.Height := list.Height - ScaleY(72);
 
   // The prompt's own height is fixed here rather than measured: it is one line, and
   // the edit below it is placed from it before any caption has been set.
@@ -1201,7 +1239,7 @@ begin
   Prompt.AutoSize := False;
   Prompt.WordWrap := False;
   Prompt.Left := list.Left;
-  Prompt.Top := list.Top + list.Height + ScaleY(12);
+  Prompt.Top := list.Top + list.Height + ScaleY(20);
   Prompt.Width := list.Width;
   Prompt.Height := ScaleY(15);
 
@@ -1216,6 +1254,19 @@ begin
   Browse.Top := PathEdit.Top - ScaleY(2);
   Browse.Width := ScaleX(92);
   Browse.Height := ScaleY(27);
+
+  // The note is wrapped and given three lines' worth of height: it is a sentence,
+  // not a caption, and 300% needs the room the band already has.
+  if Note <> nil then
+  begin
+    Note.Parent := list.Parent;
+    Note.AutoSize := False;
+    Note.WordWrap := True;
+    Note.Left := list.Left;
+    Note.Top := Prompt.Top;
+    Note.Width := list.Width;
+    Note.Height := ScaleY(45);
+  end;
 end;
 
 procedure UpdateMethodPicker;
@@ -1244,6 +1295,16 @@ begin
     UltimatePromptLabel.Caption := 'Ultimate folder:'
   else
     UltimatePromptLabel.Caption := 'Ultimate zip file:';
+
+  // "Do not install the mod" leaves the band the picker would have used, and what
+  // goes in it is what to do instead: the mod installs by dropping its files into
+  // the game folder (docs/guides/ultimate-compat.md), so the second half of that
+  // answer is something a user can do without this wizard at all (owner request,
+  // 2026-10-14).
+  UltimateNoteLabel.Visible := choice = UltimateNothing;
+  if UltimateNoteLabel.Visible then
+    UltimateNoteLabel.Caption := 'You can add the mod later: run this installer again, or copy ' +
+      'the release''s Xbox folder into game\ultimate in the install folder.';
 end;
 
 procedure MethodChoiceChanged(Sender: TObject);
@@ -1284,6 +1345,27 @@ begin
   else if GetOpenFileName('Choose the Rock Band Blitz Ultimate zip file.', path, '',
                           'Zip archives|*.zip|All files|*.*', '.zip') then
     UltimatePathEdit.Text := path;
+end;
+
+// --- the install folder page's own header ---------------------------------
+
+// Inno Setup gives this page two text blocks - the folder icon with "Setup will
+// install ... into the following folder" beside it, then "To continue, click Next
+// ..." - and puts 13 pixels between them, which at any DPI reads as one paragraph
+// (owner report, 2026-10-14). The second block and everything under it move down by
+// the extra gap here, and the DLC and save rows follow automatically because
+// LayoutLocationFields places them from WizardForm.DirEdit. This runs once, at the
+// wizard's creation: Inno lays the page out once, and shifting it per page change
+// would walk it off the bottom of the page.
+procedure LayoutSelectDirHeader;
+var
+  extra: Integer;
+begin
+  extra := ScaleY(10);
+  WizardForm.SelectDirBrowseLabel.Top := WizardForm.SelectDirBrowseLabel.Top + extra;
+  WizardForm.DirEdit.Top := WizardForm.DirEdit.Top + extra;
+  WizardForm.DirBrowseButton.Top := WizardForm.DirBrowseButton.Top + extra;
+  WizardForm.DiskSpaceLabel.Top := WizardForm.DiskSpaceLabel.Top + extra;
 end;
 
 // --- the two extra folders on the install folder page ---------------------
@@ -1338,7 +1420,11 @@ begin
   SaveBrowseButton.Height := DlcBrowseButton.Height;
 
   LocationStatusLabel.Left := WizardForm.DirEdit.Left;
-  LocationStatusLabel.Top := SavePathEdit.Top + SavePathEdit.Height + ScaleY(6);
+  // What the two answers turned out to be is a line of its own, not a caption: the
+  // save row ends and this begins a clear line below it (owner report, 2026-10-14),
+  // because read any closer the folder a Browse button picked looks like part of the
+  // line that reports it.
+  LocationStatusLabel.Top := SavePathEdit.Top + SavePathEdit.Height + ScaleY(16);
   LocationStatusLabel.Width := WizardForm.DirEdit.Width;
   LocationStatusLabel.Height := ScaleY(15);
 
@@ -1418,10 +1504,14 @@ begin
 end;
 
 // Fills the two fields. The order is parent plan §9.1's: the unattended parameter,
-// the installation's own paths.toml, the profile the game used to read, then
-// the default - which is an empty field, meaning "the game's own folder". A field the
-// user has already answered is never overwritten, so browsing for an install folder
-// does not undo a DLC folder they typed a moment ago.
+// the installation's own paths.toml, the profile the game used to read, then the
+// installer's own default - Documents\Rock Band Blitz\Downloaded Content and
+// ...\Saved Games, which is the rung that changed on 2026-10-14. It used to be an
+// empty field, meaning "the game's own folder", and the page offered that as an
+// answer; both boxes now always name a folder, so the same two are also what a silent
+// install that was asked nothing writes. A field the user has already answered is
+// never overwritten, so browsing for an install folder does not undo a DLC folder
+// they typed a moment ago.
 procedure PrefillLocations;
 var
   args, dlc, save, dir: String;
@@ -1466,8 +1556,15 @@ begin
       end;
     end;
   end;
-  if (dlc <> '') or (save <> '') then
-    gLocationAnswerFound := True;
+  // The last rung: what nobody answered still has an answer, so an install always
+  // records two folders. A silent install with no parameters therefore writes the
+  // same two the page would have shown, and an explicitly *empty* /DLCDIR or
+  // /SAVEDIR is still the different thing §9.1 makes it - the game's own folder.
+  if dlc = '' then
+    dlc := DefaultDlcDir;
+  if save = '' then
+    save := DefaultSaveDir;
+  gLocationAnswerFound := True;
   gDlcValue := dlc;
   gSaveValue := save;
 
@@ -1495,6 +1592,19 @@ begin
   Result := '';
   if gLocationsUi then
     LocationStatusLabel.Caption := '';
+
+  // Both boxes are answers, not extras (owner request, 2026-10-14): what the page
+  // shows is what gets recorded, so an empty one means the question is not answered
+  // yet. A *silent* install is the different case, and keeps §9.1's rule - an
+  // explicitly empty /DLCDIR or /SAVEDIR still means the game's own folder - and so
+  // is an update, which has no page and writes no folder keys at all.
+  if gLocationsUi and (not WizardSilent) and (not gUpdater) and
+     ((ChosenDlcDir = '') or (ChosenSaveDir = '')) then
+  begin
+    Result := 'both boxes have to name a folder, and one of them is empty';
+    Exit;
+  end;
+
   dir := RemoveBackslashUnlessRoot(Trim(WizardDirValue));
   if dir = '' then
     Exit;
@@ -1555,8 +1665,10 @@ end;
 // Inno Setup ticks whatever /TASKS named before this runs, so an explicit request is
 // honoured; everything else starts unchecked, which is also the declaration in
 // [Tasks] and what a silent install gets (§9.2). `!name` in /MERGETASKS means "do not
-// create it", which is the state this leaves it in anyway. The two desktop-icon
-// parameters are the older spelling of the same request.
+// create it", which is the state this leaves it in anyway. Both shortcuts are the
+// game's now, so the two desktop-icon parameters that used to ask for Controller
+// Settings' one are gone rather than kept as aliases: there is nothing left for them
+// to ask for.
 function TaskRequested(const name: String): Boolean;
 var
   text, item: String;
@@ -1581,8 +1693,6 @@ begin
     if Trim(item) = name then
       Result := True;
   end;
-  if (not Result) and (name = ControllerIconTask) then
-    Result := (ParamLegacyIcon = '1') or (ParamControllerIcon = '1');
 end;
 
 procedure ApplyTaskDefaults;
@@ -1590,12 +1700,10 @@ var
   names: array of String;
   index, position: Integer;
 begin
-  SetLength(names, 4);
+  SetLength(names, 2);
   names[0] := 'startmenu';
-  names[1] := 'startmenucontroller';
-  names[2] := ControllerIconTask;
-  names[3] := 'desktopicon';
-  for index := 0 to 3 do
+  names[1] := 'desktopicon';
+  for index := 0 to 1 do
   begin
     position := WizardForm.TasksList.Items.IndexOf(names[index]);
     if position >= 0 then
@@ -2012,7 +2120,7 @@ begin
 
   UltimatePage := CreateInputOptionPage(MethodPage.ID,
     'Rock Band Blitz Ultimate',
-    'A community mod by ultimate-mods-rb that adds the songs and the modes of the console versions. Recommended: it complements this recompilation.',
+    'It''s strongly recommended to use this community mod by ultimate-mods-rb. It restores features from online mode and adds many customization options.',
     'Choose if you want to install it, and how.',
     True, False);
   UltimatePage.Add('Download Rock Band Blitz Ultimate {#UltimateVersion} from GitHub');
@@ -2039,7 +2147,7 @@ begin
   MethodBrowseButton := TNewButton.Create(WizardForm);
   MethodBrowseButton.Caption := 'Browse...';
   MethodBrowseButton.OnClick := @MethodBrowseClick;
-  PlacePicker(MethodPage, MethodPromptLabel, MethodPathEdit, MethodBrowseButton);
+  PlacePicker(MethodPage, MethodPromptLabel, MethodPathEdit, MethodBrowseButton, nil);
 
   UltimatePromptLabel := TNewStaticText.Create(WizardForm);
   UltimatePathEdit := TNewEdit.Create(WizardForm);
@@ -2047,7 +2155,13 @@ begin
   UltimateBrowseButton := TNewButton.Create(WizardForm);
   UltimateBrowseButton.Caption := 'Browse...';
   UltimateBrowseButton.OnClick := @UltimateBrowseClick;
-  PlacePicker(UltimatePage, UltimatePromptLabel, UltimatePathEdit, UltimateBrowseButton);
+  UltimateNoteLabel := TNewStaticText.Create(WizardForm);
+  // Hidden until UpdateUltimatePicker says the answer is "do not install it": a
+  // control created at run time is visible by default, and an empty one would sit over
+  // the picker's row until the first page change.
+  UltimateNoteLabel.Visible := False;
+  PlacePicker(UltimatePage, UltimatePromptLabel, UltimatePathEdit, UltimateBrowseButton,
+              UltimateNoteLabel);
 
   MethodPage.CheckListBox.OnClick := @MethodChoiceChanged;
   UltimatePage.CheckListBox.OnClick := @UltimateChoiceChanged;
@@ -2058,7 +2172,7 @@ begin
   // stored in paths.toml inside it - and Inno Setup's page keeps its own row first.
   DlcPromptLabel := TNewStaticText.Create(WizardForm);
   DlcPromptLabel.Parent := WizardForm.DirEdit.Parent;
-  DlcPromptLabel.Caption := 'DLC folder (optional):';
+  DlcPromptLabel.Caption := 'DLC folder:';
   DlcPathEdit := TNewEdit.Create(WizardForm);
   DlcPathEdit.Parent := WizardForm.DirEdit.Parent;
   DlcPathEdit.OnChange := @LocationFieldChanged;
@@ -2069,7 +2183,7 @@ begin
 
   SavePromptLabel := TNewStaticText.Create(WizardForm);
   SavePromptLabel.Parent := WizardForm.DirEdit.Parent;
-  SavePromptLabel.Caption := 'Saved games (optional):';
+  SavePromptLabel.Caption := 'Saved games:';
   SavePathEdit := TNewEdit.Create(WizardForm);
   SavePathEdit.Parent := WizardForm.DirEdit.Parent;
   SavePathEdit.OnChange := @LocationFieldChanged;
@@ -2088,6 +2202,7 @@ begin
   RefreshMethodPage;
   UpdateMethodPicker;
   UpdateUltimatePicker;
+  LayoutSelectDirHeader;
   LayoutLocationFields;
   // The page the folder starts on, and whatever paths.toml or the user's old Controller Settings
   // profile already say about the other two. A silent install has no page to change
@@ -2173,7 +2288,7 @@ begin
     begin
       SuppressibleMsgBox('The DLC folder or the save folder cannot be used:' + kCrLf + kCrLf +
                          problem + kCrLf + kCrLf +
-                         'Pick another folder, or leave the box empty to use the game''s own.',
+                         'Pick a folder for each one; neither box can be left empty.',
                          mbError, MB_OK, IDOK);
       Result := False;
     end;
