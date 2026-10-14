@@ -175,7 +175,7 @@ void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t tot
 //
 // The title's enumeration advances one item per *presented* frame: 2,807 items over 46.7 s at
 // 60 Hz, 7.0 ms per item and 19.7 s with the frame rate free (measured, docs/guides/dlc.md §4.3). The
-// value that decides the frame rate is the SDK's own `vsync` cvar - the launcher's Graphics ▸
+// value that decides the frame rate is the SDK's own `vsync` cvar - Controller Settings' Graphics ▸
 // Window row, which belongs to the player - so this asks for it to be turned down for exactly as
 // long as the enumeration lasts and puts the player's value back at the first of three signs that
 // it is over: the last item counted, the engine's own completion, or a menu frame with no item

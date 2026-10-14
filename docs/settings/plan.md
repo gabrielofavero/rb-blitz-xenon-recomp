@@ -13,7 +13,7 @@ experimental 1080p guest-height hook was rejected after it corrupted title-scree
 
 Status: P0–P5 have executed (§2.4 records their artifacts). This revision **re-scopes the product to one merged Help & Options screen** and re-plans P6 onward around it, adding **P5b** for the merge itself. No new runtime validation was performed in this planning pass.
 
-Research date: 2026-10-11 (scope change; the original investigation is dated 2026-10-10). Baseline for the executed packages: `1e40765` plus the staged song-cache work. Source files take precedence over older plans. This document supersedes the launcher plan where the two disagree about settings ownership, launcher scope, resolution, or installer defaults.
+Research date: 2026-10-11 (scope change; the original investigation is dated 2026-10-10). Baseline for the executed packages: `1e40765` plus the staged song-cache work. Source files take precedence over older plans. This document supersedes Controller Settings plan where the two disagree about settings ownership, Controller Settings scope, resolution, or installer defaults.
 
 Execution starting point: read §1–§3 (the product specification), §5 (menu/bridge constraints, including the shared-list defect and the hot/restart policy), §10 (packages P5b–P12), and §11 (the live prompts; P0–P5's prompts are kept for reference only). Sections 4–9 define implementation contracts; §12 defines completion.
 
@@ -21,13 +21,13 @@ Execution starting point: read §1–§3 (the product specification), §5 (menu/
 
 The retail **HELP & OPTIONS** screen — reached from both the main menu and the in-song pause menu — becomes the game's only settings surface. It keeps the retail rows that already live there (Controls, Calibration, Audio/Video) at the same list positions and grows four rows of our own: **General**, **Gameplay** and **Interface**, with the product's categories inside them. There is no separate Advanced Settings entry and no second settings path. It works with retail assets alone. An optional Ultimate adapter adds the Ultimate rows to their categories without copying, distributing, or editing Ultimate's source or installed archives.
 
-The former launcher becomes **Controller Settings**. The user confirmed this name and confirmed that **Resolution means actual rendered resolution**, including 1920x1080. Merely resizing the window, changing the reported Xbox video mode, or changing a label does not satisfy this requirement.
+The former Controller Settings becomes **Controller Settings**. The user confirmed this name and confirmed that **Resolution means actual rendered resolution**, including 1920x1080. Merely resizing the window, changing the reported Xbox video mode, or changing a label does not satisfy this requirement.
 
 The installer asks for installation, DLC, and save locations on the **same directory page**, including reinstalls. DLC/save locations move to a separate hand-editable file and have no settings UI after installation. Shortcut checkboxes start unchecked. The interactive finish-page default is **Play the game**. Silent installs continue launching nothing unless explicitly requested.
 
 The user clarified the missing legends:
 
-- **L** means a setting originating in our launcher, available in-game independently of Ultimate.
+- **L** means a setting originating in our Controller Settings, available in-game independently of Ultimate.
 - **U** means a setting originating in Ultimate, absent when Ultimate is not installed.
 - Interaction types are boolean, horizontal select, submenu, and boolean with submenu. Ultimate's Force Skybox is the reference for the last type; HUD is a submenu and Gems is a horizontal select.
 
@@ -56,15 +56,15 @@ Evidence labels used here: **source** = inspected implementation; **decoded** = 
 
 | Area | Read these locations first | What is established |
 | --- | --- | --- |
-| Launcher rows | [settings.toml](../../launcher/config/settings.toml), [schema_view.cpp](../../launcher/src/schema_view.cpp), [shell.cpp](../../launcher/src/shell.cpp) | Schema generates rows; controller remapping and navigation also have bespoke UI outside the schema. |
-| Direct launch | [profile_apply.cpp](../../src/launcher/profile_apply.cpp), [rb_blitz_app.h](../../src/rb_blitz_app.h), [game_launch.cpp](../../launcher/src/game_launch.cpp) | Profile application occurs in `OnConfigurePaths`; target translation currently happens in `BuildLaunchCommand`. |
+| Controller Settings rows | [settings.toml](../../controller-settings/config/settings.toml), [schema_view.cpp](../../controller-settings/src/schema_view.cpp), [shell.cpp](../../controller-settings/src/shell.cpp) | Schema generates rows; controller remapping and navigation also have bespoke UI outside the schema. |
+| Direct launch | [profile_apply.cpp](../../src/profile/profile_apply.cpp), [rb_blitz_app.h](../../src/rb_blitz_app.h), [game_launch.cpp](../../controller-settings/src/game_launch.cpp) | Profile application occurs in `OnConfigurePaths`; target translation currently happens in `BuildLaunchCommand`. |
 | Config precedence | [0013 SDK patch](../../patches/rexglue-sdk/0013-cvar-config-source.patch), [cvar.h](../../rexglue-sdk/include/rex/cvar.h), [rex_app.cpp](../../rexglue-sdk/src/ui/rex_app.cpp) | Defaults < config < environment < CLI < runtime. Later equal-rank config writes win. Profile loads before `rb_blitz.toml`. |
-| Profile storage | [profile.h](../../src/launcher/profile.h), [profile.cpp](../../src/launcher/profile.cpp), [profile_path.cpp](../../src/launcher/profile_path.cpp) | Preserves comments/unknown fields; refuses malformed files; supports explicit file, environment, settings-directory pointer, portable marker, app-data fallback. Writer is not atomic. |
+| Profile storage | [profile.h](../../src/profile/profile.h), [profile.cpp](../../src/profile/profile.cpp), [profile_path.cpp](../../src/profile/profile_path.cpp) | Preserves comments/unknown fields; refuses malformed files; supports explicit file, environment, settings-directory pointer, portable marker, app-data fallback. Writer is not atomic. |
 | Installer | [setup.iss](../../installer/setup.iss), [commands.cpp](../../installer/src/commands.cpp), [install.cpp](../../installer/src/install.cpp), [embed_config.cpp](../../installer/tools/embed_config.cpp) | `wpSelectDir`, finish radios, shortcut tasks, helper commands, manifests, and generated shortcut terminology all need coordinated changes. |
 | Retail menu transforms | [menu_options.cpp](../../src/ui/menu_options.cpp), [menu_filter.cpp](../../src/hooks/menu_filter.cpp), [main-menu-flow.md](../engine/main-menu.md) | Grammar, byte-neutral edits, conditional-node handling, split reads, and retail checksum correction already exist. |
 | Guest-to-host precedent | [dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp), [shell_music.cpp](../../src/hooks/shell_music.cpp) | `songcache:/rbbz_dlc_refresh` reaches host file imports; `d:/` queries may be answered entirely inside the ARK layer. Publication happens on a guest menu frame. |
 | Ultimate activation | [ultimate.cpp](../../src/hooks/ultimate.cpp), [ultimate_plan.h](../../src/hooks/ultimate_plan.h), [payload_overlay.cpp](../../src/fs/payload_overlay.cpp) | Auto/off/force modes, separate or merged payloads, read-only overlay, three compatibility patch bits. Header existence alone is not sufficient proof of working settings objects. |
-| Input | [controller_tab.cpp](../../launcher/src/controller_tab.cpp), [remap.cpp](../../src/launcher/remap.cpp), [input/remap.cpp](../../src/input/remap.cpp), [pad_nav.cpp](../../launcher/src/pad_nav.cpp) | Guide is in the 17-target vocabulary and capture path. Controller functionality cannot be inventoried solely from schema rows. |
+| Input | [controller_tab.cpp](../../controller-settings/src/controller_tab.cpp), [remap.cpp](../../src/profile/remap.cpp), [input/remap.cpp](../../src/input/remap.cpp), [pad_nav.cpp](../../controller-settings/src/pad_nav.cpp) | Guide is in the 17-target vocabulary and capture path. Controller functionality cannot be inventoried solely from schema rows. |
 | Graphics | [texture/cache.cpp](../../rexglue-sdk/src/graphics/pipeline/texture/cache.cpp), [video_mode_util.h](../../rexglue-sdk/include/rex/graphics/video_mode_util.h), [window_sdl.cpp](../../rexglue-sdk/src/ui/window_sdl.cpp), [graphics_system.cpp](../../rexglue-sdk/src/graphics/graphics_system.cpp) | Integer scaling, guest mode vs window size, borderless fullscreen, backend selection, native MSAA, and FXAA are separate mechanisms. |
 | Save/restart | [local_save.cpp](../../src/hooks/local_save.cpp), [fs/local_save.h](../../src/fs/local_save.h), [rex_app.cpp](../../rexglue-sdk/src/ui/rex_app.cpp) | Existing guest serialization and durable-file techniques are useful; normal window close hard-exits. |
 
@@ -125,9 +125,9 @@ Generated partition numbers may change. Recover the owning file through `generat
 | **P5b** | [in-game-settings-merged-menu.md](menu.md); `src/ui/settings_screen.*` (rebuilt for the merge), 10,460 checks in ctest `settings_screen`, the payload generator in `out/_swap/p5b/make_payload.py` | **Executed for the main-menu entry.** One owned root screen with its own list resource (`settings_menu.milo`); five rows on a base install and six with the provider gate active; walk/clamp/scroll on an eight-row list; Back returns to the entry screen; the old Advanced Settings row, its screen and its locale entry are gone; installed retail records byte-identical after every boot. **One item open:** the in-song row cannot leave the pause list (measured, four arms) - see §3.1 of the handoff and §13 below |
 | **P6** | [in-game-settings-ultimate-adapter.md](architecture.md); `src/settings/ultimate_adapter.*`, the overlay's settings side (`src/fs/overlay_merge.h`, `payload_overlay.*`), the bridge's provider ends; 786 checks in ctest `ultimate_adapter` + `ultimate_adapter_payload` | **Executed.** The installed payload is inspected through its own ark index and its own definitions (6/6 required records, 8 panels, 21 persisted names, 16 defaults, 3 choice inventories) and shape-checked by name; its own file (`GAME:/ulti_settings.dta`) is redirected into user storage and **now actually writable** (measured before this pass: it existed nowhere, because the game mount is read-only); the provider's values are seeded into the store and the boot log records the guest's own open of the redirected record; every provider row carries `restart` with an empty evidence string. **Open:** the achievements action (§6.1), the combined payload's shadowed records, and `forceplot`/`which_skybox`'s screen tokens |
 | P7 | [in-game-settings-installer.md](menu.md); `installer/src/paths.*`, three helper commands, the wizard's install-folder page | The three locations are one page and one `paths.toml` file; shortcuts unchecked, finish default = the game, Controller Settings terminology. 406 installer checks green, ISCC compiles, silent install/reinstall/refusal/uninstall run for real |
-| P8 | [in-game-settings-controller-settings.md](menu.md); `launcher/`, `src/launcher/remap.*`, `src/input/remap.cpp`, `src/settings/cvars.h` | **Executed.** The reduced Controller Settings surface behind `--controller-only`, Guide removed from the vocabulary and cleared from every input path, the session's rebase-onto-disk save, and the controller-only profile allowlist |
+| P8 | [in-game-settings-controller-settings.md](menu.md); `controller-settings/`, `src/profile/remap.*`, `src/input/remap.cpp`, `src/settings/cvars.h` | **Executed.** The reduced Controller Settings surface behind `--controller-only`, Guide removed from the vocabulary and cleared from every input path, the session's rebase-onto-disk save, and the controller-only profile allowlist |
 | P9 | [in-game-settings-hot-apply-restart.md](architecture.md); `src/settings/hot_apply.*`, `src/hooks/hot_apply_runtime.*`, `src/platform/game_restart.*`, the strategy column in `src/settings/schema.cpp` | **Host half executed.** Every row carries its §5.5 strategy in the schema; `graphics.vsync` is `hot` on R7's measured live effect and is applied to a running boot (log lines in `out/_swap/p9/`); the restart coordinator (handoff token, argument allowlist, exactly-once request, spawn, verified-identity wait) and its bootstrap are written and measured against real child processes; 33/33 ctest. **Open:** the authored restart prompt (§8's native dialog), the Target row's soft restart, and the coordinator's `src/main.cpp` wiring - §6 of the handoff |
-| P10 | [in-game-settings-menu-compat.md](menu.md); `src/settings/menu_compat.{h,cpp}`, `menu_options::MenuInventory`, the hide decision in `src/hooks/menu_filter.cpp`, the fixed pool in `src/hooks/shell_music.cpp` | **Executed.** The §3.5 hide matrix is a decision function with tests (master off, absent selection, *explicitly empty*, custom, the protected merged entry refused by name, the refresh row kept while R7 owns it and reported when an explicit choice hides it); the Hide Main Menu list is fed from the effective menu (a new inventory walker, conditional rows included); the pool is fixed at 50 with the retired size reported as ignored; the rename is scoped to the mod's key; 34/34 ctest and five boot arms in `out/_swap/p10/`. **Open:** the launcher rows' removal (P8/P11), the alternate in-menu refresh action, and the descriptor-list boot wiring (P11) |
+| P10 | [in-game-settings-menu-compat.md](menu.md); `src/settings/menu_compat.{h,cpp}`, `menu_options::MenuInventory`, the hide decision in `src/hooks/menu_filter.cpp`, the fixed pool in `src/hooks/shell_music.cpp` | **Executed.** The §3.5 hide matrix is a decision function with tests (master off, absent selection, *explicitly empty*, custom, the protected merged entry refused by name, the refresh row kept while R7 owns it and reported when an explicit choice hides it); the Hide Main Menu list is fed from the effective menu (a new inventory walker, conditional rows included); the pool is fixed at 50 with the retired size reported as ignored; the rename is scoped to the mod's key; 34/34 ctest and five boot arms in `out/_swap/p10/`. **Open:** Controller Settings rows' removal (P8/P11), the alternate in-menu refresh action, and the descriptor-list boot wiring (P11) |
 
 | **P11a** | [in-game-settings-boot-wiring.md](architecture.md); `src/settings/boot.{h,cpp}`, `src/settings/bridge_sink.{h,cpp}`, `SinkQueries` in `src/hooks/settings_bridge.h`, the bootstrap in `src/main.cpp`, the four calls in `src/rb_blitz_app.h`; 81 checks in ctest `settings_bridge_service` (35/35 total) | **Executed — the game boots on the real store.** Identity, `paths.toml`, the legacy migration and `settings.toml` load at `OnConfigurePaths`; the target/licence, the renderer, the DLC and Interface rows and the two path roots are applied at the config rank (the GPU plugin's cvars once it has registered them); every write is read back and an overridden row is reported. The guest channel now edits through P3's `Service` (a transaction, a durable commit, provenance) while the provider's own rows stay with P6's write-through, and the restart bootstrap waits for the parent's verified identity before the SDK's entry point. Five boot arms in `out/_swap/p11a/` (migration, the diagnostic commit landing in `settings.toml`, the read-back boot, and a merged-menu arm that reads the store) plus P10's **explicitly empty** hidden-selection rule measured for real. **Open:** the display probe and Variant B (so Resolution/AA are stored, not applied - and the boot says so), the menu-rows seam's caller, the restart prompt, and all of P11b. Nothing committed. |
 
@@ -272,18 +272,21 @@ Main Menu details:
 | Menu DLC song pool size | Remove row; runtime constant 50, capped by successfully usable songs. Old profile values must not re-enable configurability. Verify package-handle lifetime and fallback on small/broken libraries. |
 | Separate native-MSAA control | Absorbed into the AA enum; no second user control. |
 | Presentation category | No new menu rows. Keep internal SDK knobs for diagnostics where needed; do not conflate them with Ultimate 4:3 Letterboxing. |
-| Launcher audio rows | No launcher rows; mute/buffer stay developer-only. The game's audio rows live under **Audio / Video → Audio** and are retail's own. |
+| Controller Settings audio rows | No Controller Settings rows; mute/buffer stay developer-only. The game's audio rows live under **Audio / Video → Audio** and are retail's own. |
 | Force monitor | No user UI. Use the primary display on ordinary boot; explicit developer flags may remain. Do not import an old forced-monitor profile value. |
 | Guide pass-through | Remove checkbox, remap target/source, capture, and project hotkey behavior. Ignore legacy Guide bindings with a migration diagnostic; enforce no Guide delivery even after remapping. |
 | Fullscreen row, absent from requested menu | Keep normal fullscreen default and existing window hotkeys; no extra menu category. Preserve a valid user's prior window preference if supported by the internal setting. |
 
 Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
 
-Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_launcher.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
+Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_controller_settings.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
 
-The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new launcher General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
+The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new Controller Settings General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
 
 ### 3.7 Placement decisions to confirm
+
+*(The sentence above about keeping the executable's filename is superseded — see the note at the end of
+this section's prompt copy, and [`../plans/finished/2026-10-14-controller-settings-rename.md`](../plans/finished/2026-10-14-controller-settings-rename.md).)*
 
 | Item | Why it is open | Default if unanswered |
 | --- | --- | --- |
@@ -294,9 +297,18 @@ The old Update and Install Ultimate workflows must not disappear accidentally du
 
 Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
 
-Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_launcher.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
+Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_controller_settings.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
 
-The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new launcher General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
+The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new Controller Settings General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
+
+> **Superseded 2026-10-14** by
+> [`../plans/finished/2026-10-14-controller-settings-rename.md`](../plans/finished/2026-10-14-controller-settings-rename.md).
+> This prompt asked an implementation to keep the executable's then-name (`rb_blitz_launcher.exe`) for
+> shortcut compatibility. Nothing has shipped (README.md: "This is not released yet"), so there was no
+> released shortcut to break and the rename landed instead: the directory, the CMake target, the
+> executable, the shared profile module and the test names all moved to `controller-settings` /
+> `rb_blitz_controller_settings` / `src/profile`. The *profile* kept its name (`launcher.toml`), and so
+> did the `--launcher_profile` flag and the cvar behind it.
 
 ## 4. Storage, migration, and boot contracts
 
@@ -364,13 +376,13 @@ policy_version = 1
 
 Do not write a file full of guessed machine defaults during installation. The runtime must choose graphics after inspecting the machine. User preference provenance is per setting, not a single global "configured" bit. Capability lists, detected CPU count, translated strings, and transient error state are not preferences and are not authoritative on disk.
 
-Resolve the settings directory by adapting the existing profile locator. Honor existing explicit `--launcher_profile`, `RBBLITZ_LAUNCHER_PROFILE`, `settings_dir.txt`, and portable marker for migration/compatibility. A nonstandard legacy profile basename maps to a distinct native-settings sibling (for example `<stem>.game-settings.toml`) to avoid collisions between explicit profiles in one directory; the ordinary `launcher.toml` maps to `settings.toml`. Freeze and test this mapping once. Do not start reading preferences from the save folder just because `user_data_root` changes.
+Resolve the settings directory by adapting the existing profile locator. Honor existing explicit `--launcher_profile`, `RBBLITZ_CONTROLLER_SETTINGS_PROFILE`, `settings_dir.txt`, and portable marker for migration/compatibility. A nonstandard legacy profile basename maps to a distinct native-settings sibling (for example `<stem>.game-settings.toml`) to avoid collisions between explicit profiles in one directory; the ordinary `launcher.toml` maps to `settings.toml`. Freeze and test this mapping once. Do not start reading preferences from the save folder just because `user_data_root` changes.
 
 The existing user-scoped preference behavior is retained; two installed copies may share general/controller preferences, but each has its own `paths.toml`. Portable and explicitly selected profiles remain isolated. Include two-installation tests so migrating one install's old path fields cannot redirect the other install.
 
 ### 4.2 Precedence and initialization order
 
-For native settings: compiled defaults / first-run automatic recommendations < migrated/current `settings.toml` < explicit `rb_blitz.toml` < environment < CLI. Current runtime overrides remain diagnostic state, not a reason to rewrite user preferences. Controller settings follow the existing profile/config precedence. Paths: path-file values replace legacy path fields; explicit developer config/environment/CLI overrides still win. Old launcher-generated command lines are a migration case, not the new normal.
+For native settings: compiled defaults / first-run automatic recommendations < migrated/current `settings.toml` < explicit `rb_blitz.toml` < environment < CLI. Current runtime overrides remain diagnostic state, not a reason to rewrite user preferences. Controller settings follow the existing profile/config precedence. Paths: path-file values replace legacy path fields; explicit developer config/environment/CLI overrides still win. Old Controller Settings-generated command lines are a migration case, not the new normal.
 
 The UI receives **requested**, **effective**, **pending**, **source**, and **restart-needed** separately. A value overridden by explicit CLI/environment/developer config should show its actual effective value and a brief override explanation; disable editing that row rather than saving a change that can never take effect. Ordinary launches should pass roots/profile identity only, not every setting as a CLI flag.
 
@@ -406,7 +418,7 @@ Migration is idempotent, staged, backed up, and owns only known fields. It must 
 8. Preserve opaque unknown tables, comments, and future keys. Version markers commit only after all required outputs are durable. Cross-file writes are not magically atomic: keep enough migration state to recover if `paths.toml` succeeds and `settings.toml` fails, or vice versa.
 9. Preserve existing valid choices as manual. A missing field uses its default/recommendation. A field equal to the historical default is not reliable evidence that the user never chose it; avoid resetting it solely on value equality.
 
-Normal configuration errors must not turn into permanent boot loops. Retain a last-known-good graphics record and an explicit development/recovery startup option that can bypass a bad graphics preference without deleting files. Document the manual recovery route because the external graphics launcher is going away.
+Normal configuration errors must not turn into permanent boot loops. Retain a last-known-good graphics record and an explicit development/recovery startup option that can bypass a bad graphics preference without deleting files. Document the manual recovery route because the external graphics Controller Settings is going away.
 
 ### 4.4 Durable saves and concurrent writers
 
@@ -424,7 +436,7 @@ For controller vs native settings, separate files avoid routine contention. Migr
 
 ### 5.1 Architecture
 
-"Host/client" here means the C++ runtime and emulated guest engine within one process. No network server, IPC service, or running launcher is needed.
+"Host/client" here means the C++ runtime and emulated guest engine within one process. No network server, IPC service, or running Controller Settings is needed.
 
 ```mermaid
 flowchart LR
@@ -461,7 +473,7 @@ Suggested new modules, with public names frozen before parallel implementation:
 | `src/fs/settings_overlay.*` | Exact virtual authored resources and narrowly redirected mutable settings file; only if the spike chooses this route. |
 | `src/platform/game_restart.*` | Structured process launch context, wait-for-parent bootstrap, exactly-once restart request. |
 
-Do not put all behavior in `rb_blitz_app.h`, copy the launcher's ImGui shell into a guest overlay, or make gameplay hooks depend on ImGui. The requested UI is native and follows Ultimate's layout.
+Do not put all behavior in `rb_blitz_app.h`, copy Controller Settings' ImGui shell into a guest overlay, or make gameplay hooks depend on ImGui. The requested UI is native and follows Ultimate's layout.
 
 ### 5.2 How to add a menu without shipping mod/game content
 
@@ -658,7 +670,7 @@ saved_pending_restart --A--> draining_saves -> spawn_waiting_child -> request_cl
 Required restart sequence:
 
 1. Verify the acknowledged native/provider settings revision still matches the pending state. Drain game-save activity required for a safe menu exit, plus any settings journal. Coordinate with an in-flight DLC refresh; cancel/join or wait through its existing ownership mechanism rather than racing its publication or file writes.
-2. Prepare a structured launch context: executable, absolute game-data root, working directory, selected profile identity, explicit developer arguments that should survive, and the newly persisted desired target. Rebuild arguments using the existing quoting lessons in `game_launch.cpp`; do not replay old launcher-generated setting flags that override the new file.
+2. Prepare a structured launch context: executable, absolute game-data root, working directory, selected profile identity, explicit developer arguments that should survive, and the newly persisted desired target. Rebuild arguments using the existing quoting lessons in `game_launch.cpp`; do not replay old Controller Settings-generated setting flags that override the new file.
 3. Launch a waiting child/bootstrap, passing only validated restart state. It must wait for the old process to exit **before** initializing the SDK, mounting saves, opening the audio/GPU device, or starting the title. Bind the wait to a process handle/verified identity, not an unverified PID susceptible to reuse. Use a timeout and a clear error path.
 4. If creating the child fails, keep the original game running and report failure. Only after child creation/handshake succeeds request close on the UI thread.
 5. Let the existing title termination path run; do not depend on `OnShutdown` or destructors after `_Exit`. The child then starts the game directly, once, reading the new files. It never opens Controller Settings.
@@ -675,7 +687,7 @@ Extend the existing `wpSelectDir` content so installation directory, DLC directo
 
 Resolution order for prefill: explicit unattended parameters > valid `paths.toml` in the selected installation > matching legacy profile path settings > defaults. On installation-directory changes, load that installation's existing paths if the user has not already edited the corresponding field; do not repeatedly overwrite a typed value when they browse the install folder. Reinstall displays both paths even when reusing existing game data. The updater may skip the directory page but must preserve the file.
 
-Resolve legacy per-user prefill in the intended player's context. An installer elevated as a different administrator must not import that administrator's unrelated launcher profile or create the player's preferences in the wrong app-data directory. `paths.toml` remains installation-scoped and does not require this ambiguity for discovery.
+Resolve legacy per-user prefill in the intended player's context. An installer elevated as a different administrator must not import that administrator's unrelated Controller Settings profile or create the player's preferences in the wrong app-data directory. `paths.toml` remains installation-scoped and does not require this ambiguity for discovery.
 
 Validation shares `src/fs/path_policy.h` and the existing DLC layout policy, updated for installer use:
 
@@ -692,9 +704,9 @@ Keep settings, saves, DLC, and hand-edited path information on uninstall by defa
 ### 9.2 Shortcuts and finish page
 
 - Add `Flags: unchecked` to shortcut task declarations, including Controller Settings tasks, and prevent previous-task restoration from silently rechecking them on an ordinary fresh/reinstall page. Existing code unchecks interactive tasks, but most silent defaults still come from checked declarations; test both paths.
-- Keep explicit `/TASKS`/equivalent selections effective. Add modern Controller Settings parameter spellings if needed and accept existing launcher spellings as deprecated compatibility aliases. Do not create shortcuts during an update that previously created none.
-- Rename descriptions and generated `LauncherShortcutName` text to Controller Settings. Remove/update existing legacy-labeled shortcuts only when they are known to belong to this installation; never delete user-created shortcuts by a loose filename match.
-- `ResolveRunAtEnd`, its initial state, finish radio ordering/captions, and updater defaults need review. Interactive default: game. Silent default: none. An explicit request for Controller Settings still works. `/RUNATEND=launcher` can remain an alias for backward compatibility, but visible text uses the new name.
+- Keep explicit `/TASKS`/equivalent selections effective. Add modern Controller Settings parameter spellings if needed and accept existing Controller Settings spellings as deprecated compatibility aliases. Do not create shortcuts during an update that previously created none.
+- Rename descriptions and generated `ControllerSettingsShortcutName` text to Controller Settings. Remove/update existing legacy-labeled shortcuts only when they are known to belong to this installation; never delete user-created shortcuts by a loose filename match.
+- `ResolveRunAtEnd`, its initial state, finish radio ordering/captions, and updater defaults need review. Interactive default: game. Silent default: none. An explicit request for Controller Settings still works. `/RUNATEND=Controller Settings` can remain an alias for backward compatibility, but visible text uses the new name.
 - Keep the game's shortcut and finish action passing the proper `--game_data_root`. They must work without launching Controller Settings or emitting settings as command-line overrides.
 - Update the ready-page summary and install report with the two selected paths. Reinstall/repair/updater tests must prove preferences and external folders survive.
 
@@ -710,7 +722,7 @@ Update README/build/distribution docs and packaging names where user-visible. Re
 
 ## 10. Milestones, gates, and parallelization
 
-Do not estimate this as "move launcher settings into a menu." The native guest screen/ABI, exact render dimensions, and safe persistence/restart are separate engineering efforts. Exact arbitrary resolution is the highest-uncertainty lane; use the spike result to size it before promising a release date. Relative sizes below describe scope, not elapsed-time guarantees.
+Do not estimate this as "move Controller Settings settings into a menu." The native guest screen/ABI, exact render dimensions, and safe persistence/restart are separate engineering efforts. Exact arbitrary resolution is the highest-uncertainty lane; use the spike result to size it before promising a release date. Relative sizes below describe scope, not elapsed-time guarantees.
 
 ### 10.1 Work packages
 
@@ -727,8 +739,8 @@ Do not estimate this as "move launcher settings into a menu." The native guest s
 | P7 | Installer paths and terminology | P3 path/migration APIs | Medium | **Executed** — [in-game-settings-installer.md](menu.md); same-page locations, reinstall/silent/update cases, unchecked shortcuts, default game action, one game-side follow-up (`settings::ResolvePathValue` decoding UTF-8) |
 | P8 | Controller Settings reduction and Guide removal | P3; native replacement gates before cutover | Medium | All prior non-Guide controls work; no Guide reaches guest; old shortcuts/profile compatible. |
 | P9 | Hot apply and restart coordinator | P5b; P3 save service; P6 completion contract | Large | **Host half executed** - [in-game-settings-hot-apply-restart.md](architecture.md). Per-row strategy recorded in the schema with the evidence column; the one proven hot row (`graphics.vsync`) applied to a running boot through a host-thread write and read back; the exactly-once request, the argument allowlist rebuild, the verified-identity wait and the bootstrap written and measured against real processes. **Open:** the authored prompt, the Target soft restart, the `src/main.cpp` bootstrap entry and the move to the real settings service on its wiring (P11) |
-| P10 | Merged menu compatibility cleanup | P3; P5b descriptor contract | Medium | **Executed** - [in-game-settings-menu-compat.md](menu.md). The hide matrix (including the explicit-empty selection and the protected merged entry), the hide list fed from the effective menu with conditional rows, the fixed 50-song pool with the retired size reported, and the rename's scope are decisions with tests; five boot arms confirm them. **Open:** the launcher rows' removal (P8/P11), the alternate in-menu refresh action, a 50-package pool boot, and the descriptor list's boot wiring (P11) |
-| P11 | Integration and default cutover | P5b–P10 | Large | **P11a executed** - [in-game-settings-boot-wiring.md](architecture.md): the boot reads the real store and the guest channel writes through it, the path file and the migration run, and the restart bootstrap is in the executable. **P11b open:** new path becomes the default, the old full launcher UI is removed, packaging/patch-record generation, and consistent boot/settings/installer behavior. |
+| P10 | Merged menu compatibility cleanup | P3; P5b descriptor contract | Medium | **Executed** - [in-game-settings-menu-compat.md](menu.md). The hide matrix (including the explicit-empty selection and the protected merged entry), the hide list fed from the effective menu with conditional rows, the fixed 50-song pool with the retired size reported, and the rename's scope are decisions with tests; five boot arms confirm them. **Open:** Controller Settings rows' removal (P8/P11), the alternate in-menu refresh action, a 50-package pool boot, and the descriptor list's boot wiring (P11) |
+| P11 | Integration and default cutover | P5b–P10 | Large | **P11a executed** - [in-game-settings-boot-wiring.md](architecture.md): the boot reads the real store and the guest channel writes through it, the path file and the migration run, and the restart bootstrap is in the executable. **P11b open:** new path becomes the default, the old full surface UI is removed, packaging/patch-record generation, and consistent boot/settings/installer behavior. |
 | P12 | Release acceptance and documentation | P11 | Medium–large | Evidence matrix complete, regression checks pass, distributions contain no copied content. |
 
 **One list of what is left.** [in-game-settings-remaining-work.md](status.md)
@@ -773,7 +785,7 @@ Some edges above are contract dependencies rather than a requirement to wait for
 | --- | --- | --- | --- | --- |
 | 0 (done) | — | — | — | P0: contracts and baseline recorded. |
 | 1 (done) | P1 guest screen/ABI | P2 exact-resolution spike | P3 storage/service | Reconciled contracts; wrote the findings docs. |
-| 2 (done) | P5 native menu (old tree) | P4 graphics, then recommendations | P7 installer after P3 | Kept the launcher gate; froze provider/restart navigation interfaces. |
+| 2 (done) | P5 native menu (old tree) | P4 graphics, then recommendations | P7 installer after P3 | Kept Controller Settings gate; froze provider/restart navigation interfaces. |
 | 3 | **P5b: the merge** — owns the merged screen, its list resource and its routes (**done for the main-menu entry**; the in-song row is measured non-re-pointable and the merge of the pause panel's inline list is the follow-up) | P6 Ultimate adapter once P5b freezes the navigation contract | P7 finish, then P8 Controller Settings | Boot wiring, `config/functions.toml` hook, packaging, patch-record generation. |
 | 4 | P9 hot-apply + restart after P5b/P6 | P10 merged-menu compatibility | Remaining P8 work | Integrate hooks in the agreed order; run shared smoke checks. |
 | 5 | P12 base/menu/hot-apply matrix | P12 graphics/restart matrix | P12 installer/controller/Ultimate matrix | P11 cutover first, then final P12 evidence/release review. |
@@ -792,7 +804,7 @@ If P4's Variant B hook turns out not to take effect, the storage/installer/menu 
 | New native menu code, the merged root screen, and its list resource | P5b. P6 uses provider extension points, not edits to P5b's menu file in parallel. |
 | Ultimate adapter and exact-file routing | P6; coordinate VFS dispatch hooks centrally. |
 | `installer/setup.iss`, installer helper, pins/template labels, installer tests | P7. P9 must not repurpose installer helpers without agreement. |
-| `launcher/`, `src/input/remap.*`, controller parts of `src/launcher/` | P8 after P3 has finished migration/profile changes. |
+| `controller-settings/`, `src/input/remap.*`, controller parts of `src/profile/` | P8 after P3 has finished migration/profile changes. |
 | `src/ui/menu_options.*`, `src/hooks/menu_filter.*`, `src/hooks/shell_music.*`, relevant enhancements | P10, respecting the pre-existing staged song-cache implementation. |
 | New restart code | P9; early executable bootstrap wired by coordinator. |
 
@@ -862,7 +874,7 @@ allowlist so migration cannot leave old native fields active.
 Create docs/settings/contracts.md with the actual declarations or
 links and versions. Keep transport-specific PPC details pending P1; do not freeze
 a guessed ABI. Reserve shared files and independent output/test directories.
-Define an internal development gate retaining the current launcher until G4.
+Define an internal development gate retaining the current Controller Settings until G4.
 Hand out P1/P2/P3 only after their contracts are sufficient for independent work.
 Done: G0 and a concrete integration/ownership record, not production cutover.
 ```
@@ -899,7 +911,7 @@ formatting gap. Done: G1 with captures and traces; hand the bridge/shell to P5.
 ```text
 Own an isolated graphics investigation branch and build output. Read section 7,
 the SDK integer draw-scale/cache/resolve paths, video_mode_util.h, and the old
-launcher plan's 2026-10-08 resolution finding. Establish 720p render-target,
+Controller Settings plan's 2026-10-08 resolution finding. Establish 720p render-target,
 viewport, resolve, and output measurements before changing anything.
 
 Find Blitz render allocation/viewport/projection/presentation call sites and
@@ -996,7 +1008,7 @@ main-menu rows through the P10 descriptor seam.
 
 Done: full base-only menu passes navigation/read/edit/reload and failed-write tests,
 including long resolution lists and changed capabilities. Hand the provider routing
-interface to P6. Do not delete the full launcher until the coordinator approves G4.
+interface to P6. Do not delete the full surface until the coordinator approves G4.
 ```
 
 ### P5b — Merge into Help & Options
@@ -1030,7 +1042,7 @@ installed retail/Ultimate records are unchanged. Record which retail list primit
 the owned resource is built from, or that it is authored, with the evidence.
 
 Done: G1b with captures and traces. Keep the development gate until the coordinator
-approves cutover; do not delete the launcher surface here. Hand the frozen
+approves cutover; do not delete Controller Settings surface here. Hand the frozen
 navigation contract to P6 and the descriptor/row-identity seam to P10.
 ```
 
@@ -1083,7 +1095,7 @@ Write paths.toml transactionally at successful finalization, not while browsing.
 Preserve the file on failure, update, and normal uninstall; never delete external
 saves/DLC. Do not seed graphics preferences on installation.
 
-Rename visible launcher text to Controller Settings. Set every ordinary shortcut
+Rename visible Controller Settings text to Controller Settings. Set every ordinary shortcut
 task default unchecked while honoring explicit task choices. Interactive finish
 default is Play the game; silent default remains none. Preserve legacy CLI aliases
 and direct game-root arguments. Audit updater and legacy shortcut handling.
@@ -1093,11 +1105,11 @@ Done: helper tests and real wizard evidence for fresh/reinstall/update/silent,
 Update installer docs and reports. Supply packaging changes to the coordinator.
 ```
 
-### P8 — Reduce the launcher to Controller Settings
+### P8 — Reduce Controller Settings to Controller Settings
 
 ```text
 Requires P3 migration completion and coordinator permission for final cutover after
-replacement acceptance. Own launcher UI/controller code and project remap filtering.
+replacement acceptance. Own Controller Settings UI/controller code and project remap filtering.
 Inventory real controller functionality in bespoke widgets as well as settings.toml.
 Keep all of it except Guide. Preserve keyboard/pad navigation, capture, mouse and
 trigger bindings, presets/resets, nav rebind and safe-mode behavior, and help text.
@@ -1198,8 +1210,8 @@ definitions by extending an installed retail record (the measured route for a pa
 of ours), and make sure the list resource the merged root uses is included and
 survives a base-only install with no Ultimate folder present.
 
-Run base-only and Ultimate flows before deleting the old launcher settings path.
-Verify direct game startup consumes target and preferences with no launcher flags;
+Run base-only and Ultimate flows before deleting the old Controller Settings settings path.
+Verify direct game startup consumes target and preferences with no Controller Settings flags;
 renderer fallback/current values match menu values; hot rows really applied live and
 restart rows never claimed to; save failures never restart; all U settings persist
 where promised; no orphaned submenu/back routes remain. Check old audio/presentation/
@@ -1208,7 +1220,7 @@ Ensure development SDK settings overlays are not advertised as a second product
 settings surface.
 
 Only after G4 make Help & Options and Controller Settings the defaults and remove
-the obsolete full launcher UI. Build clean patched SDK/game/controller/installer
+the obsolete full surface UI. Build clean patched SDK/game/controller/installer
 payloads, run focused regression tests once per relevant change, and hand a fixed
 candidate plus test identities to P12. Do not call this complete with open G2/P4
 resolution or first-run optimization work.
@@ -1219,7 +1231,7 @@ resolution or first-run optimization work.
 ```text
 Use the fixed P11 candidate and section 12 matrix. Split independent test areas
 across separate config/save/install directories. Use existing observe_ui/drive_ui
-and launcher/installer harnesses where appropriate; add assertions for actual
+and controller-settings/installer harnesses where appropriate; add assertions for actual
 menu state, file contents, process identity, and renderer dimensions, not OCR alone.
 Run targeted host regressions, fresh/migrated/direct/portable boots, native editing,
 Ultimate absent/inactive/present, Unicode/reinstall/unattended installer paths,
@@ -1269,7 +1281,7 @@ Existing command starting points, run in the correct working directory and with 
 # Repository root; coordinator's integration build, not concurrent worker outputs.
 cmake --preset win-amd64-release
 cmake --build --preset win-amd64-release
-ctest --test-dir out/build/win-amd64-release --output-on-failure -R 'launcher|menu_options|ultimate_plan|path_policy|payload_overlay|local_save|dlc|refresh_state|ui_nav'
+ctest --test-dir out/build/win-amd64-release --output-on-failure -R 'Controller Settings|menu_options|ultimate_plan|path_policy|payload_overlay|local_save|dlc|refresh_state|ui_nav'
 
 # Add the new settings/bridge/restart tests to CMake and run their actual names.
 # List first; do not count a regex matching zero tests as a pass.
@@ -1310,7 +1322,7 @@ New SDK modifications must have reproducible entries in `patches/rexglue-sdk`, v
 | Portable and alternate profile | Same target/settings semantics without installed helper or registry; correct native settings sibling; no writes to unrelated user config. |
 | Integrity/distribution | Input retail and Ultimate files unchanged; payload contains only original code/resources and approved dependencies; decoded dumps/private captures stay out of git/package. |
 
-Extend `scripts/ui_states.ps1`, `scripts/observe_ui.ps1`, and `scripts/drive_ui.ps1` for named merged-settings states rather than scattering brittle menu-index sequences. The existing `acceptance_launcher.ps1` assumes settings are emitted as argv; change those expectations to file ownership plus direct-boot behavior. Reuse `acceptance_ultimate.ps1`, launch, song, and persistence harnesses with isolated roots and the new save evidence.
+Extend `scripts/ui_states.ps1`, `scripts/observe_ui.ps1`, and `scripts/drive_ui.ps1` for named merged-settings states rather than scattering brittle menu-index sequences. The existing `acceptance_controller_settings.ps1` assumes settings are emitted as argv; change those expectations to file ownership plus direct-boot behavior. Reuse `acceptance_ultimate.ps1`, launch, song, and persistence harnesses with isolated roots and the new save evidence.
 
 Capture at least one complete base and one Ultimate edit→save→restart→play-song route. For rendering, report active render dimensions and timings alongside captures. For persistence, report before/after configuration bytes/revisions and the effective boot log. For process behavior, report parent/child identities and ordering. OCR alone proves none of those three contracts.
 

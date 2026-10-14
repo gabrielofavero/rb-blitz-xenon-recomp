@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "launcher/profile.h"
+#include "profile/profile.h"
 #include "settings/model.h"
 #include "settings/migration.h"
 #include "settings/paths.h"
@@ -82,7 +82,7 @@ class Service {
   // Loads settings.toml, migrates a legacy profile when one is supplied, and resolves the
   // document into requested/effective state. `legacy` may be null when there is none;
   // `legacy_usable` false reports an unreadable legacy file without importing from it.
-  DocumentStatus Boot(const rb_blitz::launcher::Profile* legacy, const PathEntry& existing_paths,
+  DocumentStatus Boot(const rb_blitz::profile::Profile* legacy, const PathEntry& existing_paths,
                       MigrationResult* migration, bool legacy_usable = true);
 
   // The host installs the probed capabilities (P2/P4) and the provider (P6).

@@ -4,7 +4,7 @@ Builds the Rock Band Blitz setup executable (rb_blitz_setup_helper.exe + setup.i
 
 .DESCRIPTION
 One command, four artefacts: the native helper, the payload the installer puts on
-disk, the updater the launcher runs, and the setup executable the user downloads.
+disk, the updater Controller Settings runs, and the setup executable the user downloads.
 Nothing here is needed to play the game - this script only builds the installer.
 
 The recompiled build travels one of two ways, and this script has to be told which:
@@ -30,11 +30,11 @@ RockBandBlitzSetup-latest.exe when the [payload] commit pin is "latest", which i
 the repository's own pin: a build that is not cut from a pinned commit is a
 rolling build and should not be named like a release.
 
-Two more files are built and are what the launcher's Update button needs, because
+Two more files are built and are what Controller Settings' Update button needs, because
 they are what an update is: RockBandBlitzUpdater.exe (this same wizard built with
 /DUpdaterMode=1, embedded into the setup executable and placed under the user's
 local application data) and update.toml (the release manifest, published as a
-release asset, which a launcher compares its version against). Both are printed at
+release asset, which Controller Settings compares its version against). Both are printed at
 the end with what a release has to publish. See README.md, section "Updating".
 
 .PARAMETER PayloadUrl
@@ -83,14 +83,14 @@ installer-release-msvc uses cl.exe from a Visual Studio developer prompt.
 .PARAMETER SkipTests
 Do not run the installer helper's test suite.
 
-.PARAMETER SkipLauncher
-Do not build rb_blitz_launcher.exe before the payload step. Use when it has
+.PARAMETER SkipControllerSettings
+Do not build rb_blitz_controller_settings.exe before the payload step. Use when it has
 already been built, or when the payload is downloaded at install time - which
 skips the step on its own.
 
-.PARAMETER LauncherTarget
-The rb_blitz_launcher.exe to package, when it is not where the game's build tree
-puts it (<SourceDir>\rb_blitz_launcher.exe, D1). Passing it means the launcher is
+.PARAMETER ControllerSettingsTarget
+The rb_blitz_controller_settings.exe to package, when it is not where the game's build tree
+puts it (<SourceDir>\rb_blitz_controller_settings.exe, D1). Passing it means Controller Settings is
 already built: the build step is skipped and the directory holding it is what the
 payload snapshot reads.
 
@@ -127,8 +127,8 @@ param(
     [string] $IsccPath,
     [string] $Preset = 'installer-release',
     [switch] $SkipTests,
-    [switch] $SkipLauncher,
-    [string] $LauncherTarget,
+    [switch] $SkipControllerSettings,
+    [string] $ControllerSettingsTarget,
     [switch] $SkipPayload,
     [switch] $RefreshPayload,
     [switch] $SkipArt,
@@ -293,38 +293,38 @@ function Resolve-PayloadCommit {
 }
 
 # --------------------------------------------------------------------------
-# 1. the launcher
+# 1. Controller Settings
 # --------------------------------------------------------------------------
-# The launcher is the second executable of the recompiled build (docs/plans/
+# Controller Settings is the second executable of the recompiled build (docs/plans/
 # launcher-plan.md D1) and the payload carries it (P0.5), so it has to exist
-# before the snapshot is taken. A tree that was never built with the launcher in
+# before the snapshot is taken. A tree that was never built with Controller Settings in
 # it fails here or, if this step is skipped, at make_payload.ps1 - which names the
-# missing input instead of quietly shipping a payload without the launcher.
-Write-Step 'Launcher'
+# missing input instead of quietly shipping a payload without Controller Settings.
+Write-Step 'Controller Settings'
 
-if (-not $LauncherTarget) { $LauncherTarget = Join-Path $SourceDir 'rb_blitz_launcher.exe' }
+if (-not $ControllerSettingsTarget) { $ControllerSettingsTarget = Join-Path $SourceDir 'rb_blitz_controller_settings.exe' }
 
-if ($SkipLauncher) {
-    Write-Host '   skipped : -SkipLauncher'
+if ($SkipControllerSettings) {
+    Write-Host '   skipped : -SkipControllerSettings'
 } elseif ($PayloadUrl) {
     Write-Host '   skipped : the payload is downloaded at install time (-PayloadUrl)'
-} elseif ($PSBoundParameters.ContainsKey('LauncherTarget')) {
-    if (-not (Test-Path -LiteralPath $LauncherTarget)) {
-        throw "-LauncherTarget was given but $LauncherTarget does not exist."
+} elseif ($PSBoundParameters.ContainsKey('ControllerSettingsTarget')) {
+    if (-not (Test-Path -LiteralPath $ControllerSettingsTarget)) {
+        throw "-ControllerSettingsTarget was given but $ControllerSettingsTarget does not exist."
     }
-    Write-Host "   used    : $LauncherTarget (not rebuilt)"
+    Write-Host "   used    : $ControllerSettingsTarget (not rebuilt)"
 } else {
     if (-not (Test-Path -LiteralPath $SourceDir)) {
-        throw ("no recompiled build tree to build the launcher in: $SourceDir does not exist. Build " +
-               'the emulator first (see docs/guides/build-and-run.md), pass -LauncherTarget for a launcher ' +
+        throw ("no recompiled build tree to build Controller Settings in: $SourceDir does not exist. Build " +
+               'the emulator first (see docs/guides/build-and-run.md), pass -ControllerSettingsTarget for Controller Settings ' +
                'built elsewhere, or pass -PayloadUrl to download the build at install time instead.')
     }
-    $launcherArgs = @('--build', $SourceDir, '--target', 'rb_blitz_launcher')
-    Invoke-Native -Exe 'cmake' -Arguments $launcherArgs -What 'cmake --build --target rb_blitz_launcher'
-    if (-not (Test-Path -LiteralPath $LauncherTarget)) {
-        throw "the launcher build reported success but $LauncherTarget is missing."
+    $settingsArgs = @('--build', $SourceDir, '--target', 'rb_blitz_controller_settings')
+    Invoke-Native -Exe 'cmake' -Arguments $settingsArgs -What 'cmake --build --target rb_blitz_controller_settings'
+    if (-not (Test-Path -LiteralPath $ControllerSettingsTarget)) {
+        throw "Controller Settings build reported success but $ControllerSettingsTarget is missing."
     }
-    Write-Host "   built   : $LauncherTarget"
+    Write-Host "   built   : $ControllerSettingsTarget"
 }
 
 # --------------------------------------------------------------------------
@@ -398,7 +398,7 @@ if ($PayloadUrl) {
         Write-Host "   mode    : embedded in the setup executable"
         Write-Host "   snapshot: rebuilding from $SourceDir"
         $nativeArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makePayload,
-                        '-SourceDir', $SourceDir, '-LauncherDir', (Split-Path -Parent $LauncherTarget),
+                        '-SourceDir', $SourceDir, '-ControllerSettingsDir', (Split-Path -Parent $ControllerSettingsTarget),
                         '-PayloadDir', $PayloadDir, '-Clean')
         Invoke-Native -Exe 'powershell.exe' -Arguments $nativeArgs -What 'make_payload.ps1'
     }
@@ -486,7 +486,7 @@ else { $setupBaseName = "RockBandBlitzSetup-$appVersion" }
 # The updater is this same wizard built with /DUpdaterMode=1: it carries no payload
 # (it installs the build the release manifest names) and drops the pages it has no
 # question about. The setup executable embeds it and puts it under the user's local
-# application data, which is what the launcher runs when an update is accepted
+# application data, which is what Controller Settings runs when an update is accepted
 # (README.md, section "Updating"). It is compiled *first*, because the setup's
 # [Files] entry reads the file at compile time.
 $updaterBaseName = 'RockBandBlitzUpdater'
@@ -522,7 +522,7 @@ if (-not (Test-Path -LiteralPath $setupExe)) { throw "ISCC reported success but 
 $setupInfo = Get-Item -LiteralPath $setupExe
 $setupHash = (Get-FileHash -LiteralPath $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
 
-# The release manifest: what a launcher compares its version against and what an
+# The release manifest: what Controller Settings compares its version against and what an
 # updater installs the build from. It is generated with the pins, and it belongs
 # next to the setup executable because a release publishes both (README.md,
 # section "Cutting a release").
@@ -561,7 +561,7 @@ if ($embedPayload) {
 Write-Host ''
 Write-Host 'Publish, in one release:'
 Write-Host ("   {0}" -f $setupInfo.Name)
-Write-Host  '   update.toml            the asset a launcher checks for a newer release'
+Write-Host  '   update.toml            the asset Controller Settings checks for a newer release'
 if (-not $embedPayload) {
     Write-Host  '   the payload archive that -PayloadUrl points at'
 }

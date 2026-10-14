@@ -8,9 +8,9 @@
 // snapshot, and the commit/restart results. P1/P5/P6 consume these names; a signature
 // change here is a coordinator-reviewed contract change, not a worker decision.
 //
-// SDK-free on purpose, for the same reason launcher/profile.h is: the game and the
-// launcher both compile it and tests/settings_*_tests.cpp exercise it without a boot.
-// The one cross-namespace dependency is rb_blitz::launcher::LaunchTarget — deliberately,
+// SDK-free on purpose, for the same reason controller-settings/profile.h is: the game and the
+// Controller Settings both compile it and tests/settings_*_tests.cpp exercise it without a boot.
+// The one cross-namespace dependency is rb_blitz::profile::LaunchTarget — deliberately,
 // so there is no second target enum and the stored spelling stays common/demo/ultimate.
 
 #pragma once
@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-#include "launcher/profile.h"
+#include "profile/profile.h"
 
 namespace rb_blitz::settings {
 
@@ -205,7 +205,7 @@ struct CapabilitySnapshot {
   // Populated only by a measured performance profile for this device/backend.
   // Display size or CPU count alone is never performance evidence.
   DisplayMode verified_sustainable_resolution;
-  rb_blitz::launcher::LaunchTarget active_target = rb_blitz::launcher::LaunchTarget::kCommon;
+  rb_blitz::profile::LaunchTarget active_target = rb_blitz::profile::LaunchTarget::kCommon;
   ProviderState provider;
 };
 

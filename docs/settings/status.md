@@ -26,7 +26,7 @@ Part 1 wherever they disagree.
   named in Target, the DLC page regrouped (*Refresh Music Library* now on the main menu), On/Off
   booleans, `Overscan: On`, Gameplay regrouped, Depth of Field moved to Graphics, a new Display row
   (Windowed/Borderless/Full Screen, [patch 0016](../../patches/README.md)), Video regrouped — **plus
-  the launcher cutover (P11b)**: `kGameOwnedRows` no longer travel on the command line, the target
+  Controller Settings cutover (P11b)**: `kGameOwnedRows` no longer travel on the command line, the target
   moves through migration (not `--ultimate_mode`/`--license_mask`), and
   `profile_controller_rows_only` defaults true.
 - **Vulkan is selectable now** (`REXGLUE_USE_VULKAN=ON` in the Windows presets; Renderer offers
@@ -59,7 +59,7 @@ Part 1 wherever they disagree.
 ## Part 1 — Current status and remaining work (was `docs/plans/in-game-settings-remaining-work.md`)
 
 > **Update 2026-10-13 (latest).** The owner drove the merged Help & Options surface in a running game
-> and gave an eleven-item punch list; all of it is implemented, and so is the launcher cutover it
+> and gave an eleven-item punch list; all of it is implemented, and so is Controller Settings cutover it
 > required (P11b) and the retirement of the second main-menu entry to the mod's own screen. The
 > release tree is **37/37 green** (`ctest --test-dir out\build\win-amd64-release`), subject to the
 > preset caveat below; the interactive acceptance matrix has still not been re-run.
@@ -100,7 +100,7 @@ The settings feature is wired through the real boot and guest UI:
 
 The owner drove the merged surface in a running game (Ultimate installed, live DLC library) and gave
 eleven changes. All eleven are in `src/ui/settings_screen.{h,cpp}` and the records it edits, with the
-game-side and launcher-side consequences listed after them:
+game-side and Controller Settings-side consequences listed after them:
 
 1. **The main-menu entry to the mod's own screen is gone.** "Help & Options is enough": with a
    compatible provider installed, the payload's own `mod_settings` row is *removed* from the splash
@@ -117,10 +117,10 @@ game-side and launcher-side consequences listed after them:
    one no longer interrupts the player mid-edit, and leaving with nothing pending does not ask.
 4. **Target lists the demo by name.** "Rock Band Blitz Demo" is a choice again
    ([settings_payload.cpp](../../src/hooks/settings_payload.cpp)); the recorded trial-boot fault is a
-   separate matter, and the launcher's radio says the same thing now
-   ([general_tab.cpp](../../launcher/src/general_tab.cpp)).
+   separate matter, and Controller Settings' radio says the same thing now
+   ([general_tab.cpp](../../controller-settings/src/general_tab.cpp)).
 5. **The DLC page and the refresh action.** *Cache DLC Library* reads `On`/`Off` instead of the
-   "Externally configured" marker it used to show — the launcher's `--enhancements_dlc_cache` row
+   "Externally configured" marker it used to show — Controller Settings' `--enhancements_dlc_cache` row
    outranked it, which made it read-only, and the cutover below removed that flag; *DLC Menu Songs*
    is **retired** — the menu music pool always takes what the library yields, so there is no row
    (`SettingId::kDlcMenuSongs` is kept as `Availability::kHidden` so old files and bridge tokens
@@ -151,7 +151,7 @@ Two things were missing and both are in:
   choice.
 * The game's row had hardcoded one backend (`"not probed: the one backend this project ships"`); the
   boot now builds one probe per `RBBLITZ_BACKENDS` entry ([CMakeLists.txt](../../CMakeLists.txt), the
-  same switches the plugin and the launcher's `--backends=` read) and checks for `vulkan-1.dll` at run
+  same switches the plugin and Controller Settings' `--backends=` read) and checks for `vulkan-1.dll` at run
   time. d3d12 stays the active/fallback entry — Vulkan is offered, not recommended — and a missing
   loader means the row is not offered and `--gpu_backend=vulkan` / a stored `vulkan` choice refuses
   and boots D3D12.
@@ -161,12 +161,12 @@ Two things were missing and both are in:
   `vulkan-1.dll 1,452,408 bytes`, `payload renderer backends: d3d12, vulkan`; the game logs
   `settings_menu: Renderer offers 2: D3D12, VULKAN`.
 
-#### The launcher cutover (P11b)
+#### Controller Settings cutover (P11b)
 
 Items 4 and 10 are only honest if the in-game rows own their settings, so on the owner's decision
-("the launcher stops passing game-owned settings; only paths/target/profile/controller flow"):
+("Controller Settings stops passing game-owned settings; only paths/target/profile/controller flow"):
 
-* `kGameOwnedRows` ([game_launch.cpp](../../launcher/src/game_launch.cpp)) — sixteen keys from
+* `kGameOwnedRows` ([game_launch.cpp](../../controller-settings/src/game_launch.cpp)) — sixteen keys from
   `enhancements_dlc_cache`/`dlc_scan_threads` through `resolution_scale`, `fullscreen`, `vsync`,
   `gpu_backend`, `swap_post_effect`, `native_2x_msaa`, `anisotropic_override` and `present_letterbox`
   — no longer travels on the command line (the tabs still write them to the profile), and the target
@@ -174,11 +174,11 @@ Items 4 and 10 are only honest if the in-game rows own their settings, so on the
   boot (only when it differs from the compiled default `common`), which keeps the in-game Target row
   editable.
 * `profile_controller_rows_only` now defaults **true**
-  ([profile_apply.cpp](../../src/launcher/profile_apply.cpp)): the game applies the controller rows and
-  the launcher-only host rows (monitor, safe areas, dither, overscan cutoff, two audio rows — no
+  ([profile_apply.cpp](../../src/profile/profile_apply.cpp)): the game applies the controller rows and
+  the host-only host rows (monitor, safe areas, dither, overscan cutoff, two audio rows — no
   in-game descriptor) and logs the rest as inert preservation data. Removing those tabs is P8's.
-* [capture_launcher.ps1](../../scripts/capture_launcher.ps1) and
-  [acceptance_launcher.ps1](../../scripts/acceptance_launcher.ps1) assert the exact command line, and
+* [capture_controller_settings.ps1](../../scripts/capture_controller_settings.ps1) and
+  [acceptance_controller_settings.ps1](../../scripts/acceptance_controller_settings.ps1) assert the exact command line, and
   each leg deletes its fixture's `<profile stem>.game-settings.toml` first (the Ultimate leg's licence
   line reads `(configured)`).
 
@@ -336,7 +336,7 @@ Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks
 
 #### P8 — Controller Settings reduction and Guide removal
 
-29. **The full launcher is still the default surface**; the reduced one is behind `--controller-only`,
+29. **The full surface is still the default surface**; the reduced one is behind `--controller-only`,
     and the cutover is P11's. *`contracts.md` §9.3; `menu.md` (Status)*.
 30. **The non-controller tabs/rows are not deleted** (the reduced surface merely draws none of them).
     *`menu.md` §1, §3.1; `plan.md` §10.1 (P8)*.
@@ -364,8 +364,8 @@ Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks
 
 #### P10 — merged-menu compatibility
 
-37. **The launcher-side rows are still there** — the retired rename toggle and the pool-size row live
-    on in `launcher/config/settings.toml`, inert in game and removed from neither. *`menu.md` §7;
+37. **Controller Settings-side rows are still there** — the retired rename toggle and the pool-size row live
+    on in `controller-settings/config/settings.toml`, inert in game and removed from neither. *`menu.md` §7;
     `plan.md` §10.1 (P10)* — waits on P8/P11.
 38. **The alternate in-menu refresh action is unbuilt** — hiding `splash_dlc` while it carries the
     refresh leaves the refresh with no main-menu row (the boot warns). *`menu.md` §7; `plan.md` §3.5*
@@ -378,7 +378,7 @@ Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks
 
 #### P11 — integration and default cutover
 
-41. **P11b is the whole remaining cutover** — the new path becomes the default, the old full launcher
+41. **P11b is the whole remaining cutover** — the new path becomes the default, the old full surface
     UI goes, packaging/patch-record generation, and consistent boot/settings/installer behaviour.
     *`plan.md` §10.1 (P11), §13* — P5b–P10 first.
 42. **The merged root's delivery is not packaged**: the patch record must be generated by extending an
@@ -466,13 +466,13 @@ Help & Options screen with the provider active.**
 | File | Change |
 | --- | --- |
 | `src/ui/settings_screen.cpp` | `RequestPaths()` lists `rbbz-settings/cancel/-/-` (fixes `settings_screen`). |
-| `tests/launcher_ultimate_state_tests.cpp` | `Scratch::Make()` returns `.lexically_normal()` (fixes `launcher_general`). |
+| `tests/controller_settings_general_tests.cpp` | `Scratch::Make()` returns `.lexically_normal()` (fixes `controller_settings_general`). |
 | `src/hooks/menu_filter.cpp` | `HandleRead()` captures `length`/`buffer`/`offset_ptr` **before** the original `NtReadFile` (caller-saved registers; the scan is linear in `length`). |
 | `src/settings/menu_payload.{h,cpp}` | `ExtendMenuArchive()` carries the mounted part's bytes verbatim, appends our records and keeps **one part** (same name, new size, existing offsets unchanged); with no mounted part it appends a part, as before. |
 | `src/hooks/settings_payload.cpp` | Reads the mounted part through the mount view; writes the extended part where the archive names it. |
 | `tests/menu_payload_tests.cpp` + `CMakeLists.txt` | New `menu_payload` ctest (35 checks): one part in/out, verbatim carry, every record inside its part, mismatched sizes left alone — parsing the header with the product's own v6 reader. |
 
-`ctest` is **36/36 green** on the current sources, and the game and launcher link.
+`ctest` is **36/36 green** on the current sources, and the game and Controller Settings link.
 
 ### The black startup: cause and fix
 
@@ -553,7 +553,7 @@ fixed this boot (the hang was unchanged, and the measured reads were a legitimat
 
 ### What is verified now
 
-* 36/36 ctest on the current sources; `rb_blitz` and `rb_blitz_launcher` link.
+* 36/36 ctest on the current sources; `rb_blitz` and `rb_blitz_controller_settings` link.
 * **Base mode** presents in ~54 s with the payload installed
   (`settings_menu: mounted 14 generated records over 0 provider records`).
 * **Ultimate mode** presents in ~50 s over the provider's own archive
@@ -678,14 +678,14 @@ cmake --build out/build/win-amd64-release --config Release -j 4
 ctest --test-dir out/build/win-amd64-release -C Release --output-on-failure
 ```
 
-The game and launcher built successfully, but **the source is newer than that build** (last service
+The game and Controller Settings built successfully, but **the source is newer than that build** (last service
 test, store validation, live-apply changes). One intervening link failed only because the test game
 still held the executable open — not a compile error. The toolchain warns that installed Clang
 19.1.7/CMake 4.4.0 differ from frozen 23.1.1/4.4.3; the build allows this and **no strict-toolchain
 pass is claimed**.
 
 Latest full CTest at handover: **33/35** — `settings_screen` (`RequestPaths()` omitted the newly
-emitted `rbbz-settings/cancel/-/-`) and `launcher_general` (the deeply nested empty-root fixture's
+emitted `rbbz-settings/cancel/-/-`) and `controller_settings_general` (the deeply nested empty-root fixture's
 mixed separators, `bare/a/b/...` vs backslashes); both were fixed on 2026-10-12 (Part 2). The earlier
 `path_policy` failure was sandbox temporary-path containment, not a product bug; migration now expects
 legacy explicit 720p to be imported because new profiles default to Auto. Logs:

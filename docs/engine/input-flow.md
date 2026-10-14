@@ -1,6 +1,6 @@
 # Native menu mouse (R6)
 
-`mouse_ui_nav=true` enables the menu cursor (default on; the launcher's Controller →
+`mouse_ui_nav=true` enables the menu cursor (default on; Controller Settings' Controller →
 Mouse support setting). Hover selects a native list row directly. Left click emits
 A, right click emits B, and wheel detents emit up/down (left/right for horizontal
 powerup lists). During `game_screen`, only
@@ -118,5 +118,5 @@ These local validation artifacts are ignored by Git. The test instance was left
 paused after the checks.
 
 The native mouse executable passes 152 assertions. CTest passes all seven relevant
-suites: `native_mouse`, `launcher_remap`, `launcher_launch`, `launcher_nav`,
+suites: `native_mouse`, `controller_settings_remap`, `controller_settings_launch`, `controller_settings_nav`,
 `settings_service`, `settings_store` and `settings_migration`.

@@ -12,12 +12,12 @@
 //     "any" value, so the SDK's own load is untouched), and the mouse driver is
 //     appended to whatever input factory is configured. Both are additive; a configured
 //     plugin and a configured factory are honoured.
-//   * OnConfigurePaths - faithfully, every path is honoured as given; here the launcher
+//   * OnConfigurePaths - faithfully, every path is honoured as given; here Controller Settings
 //     profile's `[settings]` rows are applied at the config rank first (D3 rank 4, so a
-//     game started without the launcher still sees the rows it saved, and the game's own
+//     game started without Controller Settings still sees the rows it saved, and the game's own
 //     rb_blitz.toml - loaded by the SDK after this hook - still outranks it), and a
 //     writable root that resolves inside the read-only game tree is dropped in favour of
-//     the platform user directory, so a launcher cannot make the game write into its own
+//     the platform user directory, so Controller Settings cannot make the game write into its own
 //     data. Any other directory is honoured as given.
 //   * ApplyContentLicense - the emulated console owns no licence, which sends the
 //     title down the trial path; here license_mask defaults to 1 (treated as
@@ -77,7 +77,7 @@
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
-#include "launcher/profile_apply.h"
+#include "profile/profile_apply.h"
 #include "settings/boot.h"
 #include "platform/game_restart.h"
 #include "ui/help_overlay.h"
@@ -125,13 +125,13 @@ class RbBlitzApp : public rex::ReXApp {
     // device can still be added. See src/input/mouse_ui.h.
     //
     rb_blitz::input::InstallMouseUiNavigation(config);
-    // The launcher's `[remap]` table, applied to the pad state the guest asks for. Its own
+    // Controller Settings' `[remap]` table, applied to the pad state the guest asks for. Its own
     // wrapper of input_factory, so both it and the mouse compose with whichever backend was
     // selected. See src/input/remap.h.
     rb_blitz::input::InstallPadRemap(config);
   }
 
-  // The graphics backend, from `gpu_backend` (launcher/config/settings.toml's Renderer row).
+  // The graphics backend, from `gpu_backend` (controller-settings/config/settings.toml's Renderer row).
   //
   // The SDK loads the GPU plugin itself, with its own default backend - "any", whichever
   // backend the plugin was compiled with. All this does is name one instead, and only when
@@ -189,21 +189,21 @@ class RbBlitzApp : public rex::ReXApp {
   // game_data_root (read-only) comes from --game_data_root / the cvar and is
   // mounted read-only by the SDK (allow_game_relative_writes defaults off).
   // Writable state (user/update/cache) must never live inside game_data_root: a
-  // launcher that asks for that gets the platform user directory instead. Any
+  // Controller Settings that asks for that gets the platform user directory instead. Any
   // other directory is honoured as given - see rb_blitz::fs::IsSameOrInside()
   // for why the check is not a std::filesystem::relative() call.
   void OnConfigurePaths(rex::PathConfig& paths) override {
-    // D3's rank 4, and the reason R4's standalone half works at all: the launcher's own rows,
+    // D3's rank 4, and the reason R4's standalone half works at all: Controller Settings' own rows,
     // applied at the config rank. This hook runs before the SDK loads the game's own
     // `<exe>.toml` (rex_app.cpp's SetupEnvironment), so the game's file still outranks the
     // profile at equal rank, and the command line and the environment - applied before any of
-    // this - outrank both. Without it only a game started by the launcher's Launch Game button
-    // saw any of the launcher's settings, because that is the only thing that passes them as
+    // this - outrank both. Without it only a game started by Controller Settings' Launch Game button
+    // saw any of Controller Settings' settings, because that is the only thing that passes them as
     // argv (docs/plans/finished/2026-09-27-launcher-plan.md §11 findings 6 and 7).
     //
     // The report is kept and logged in OnPostInitLogging, not here: logging is initialized a few
     // lines after this hook returns, so a line written now would go nowhere.
-    profile_apply_ = rb_blitz::launcher::ApplyLauncherProfileSettings();
+    profile_apply_ = rb_blitz::profile::ApplyProfileSettings();
 
     // P11a: the native settings store. It runs *after* the legacy profile's rows (which it migrates
     // and then outranks at equal rank) and *before* the SDK loads the game's own rb_blitz.toml
@@ -217,7 +217,7 @@ class RbBlitzApp : public rex::ReXApp {
         settings_boot_->ConfigurePaths(rex::filesystem::GetExecutableFolder());
 
     // The runtime derived these roots from the cvars *before* this hook ran, so a root a profile
-    // row just supplied is not in `paths` yet. Re-read the two a launcher row can name, exactly
+    // row just supplied is not in `paths` yet. Re-read the two Controller Settings row can name, exactly
     // as the runtime reads them; an empty cvar leaves the runtime's own default in place.
     if (!REXCVAR_GET(user_data_root).empty()) {
       paths.user_data_root = REXCVAR_GET(user_data_root);
@@ -248,7 +248,7 @@ class RbBlitzApp : public rex::ReXApp {
 
     // Writable roots default outside the game tree (platform user dir). The runtime has already
     // filled user_data_root with GetUserFolder()/GetName() ("rb_blitz") before this hook, so when
-    // nothing named a root explicitly it is replaced with the folder the launcher's *Save game
+    // nothing named a root explicitly it is replaced with the folder Controller Settings' *Save game
     // location* row shows - one spelling of the default, in both places. An explicit
     // --user_data_root, the cvar, or a hand-edited profile is left exactly as it is.
     if (REXCVAR_GET(user_data_root).empty()) {
@@ -310,7 +310,7 @@ class RbBlitzApp : public rex::ReXApp {
         context.executable = rex::filesystem::GetExecutablePath();
         context.game_data_root = game_data_root();
         context.working_directory = std::filesystem::current_path();
-        context.launcher_profile = settings_boot_->paths().legacy_profile;
+        context.profile_file = settings_boot_->paths().legacy_profile;
         context.target = target;
         context.developer_arguments = rb_blitz::platform::CommandLineArguments();
         if (!context.developer_arguments.empty()) context.developer_arguments.erase(context.developer_arguments.begin());
@@ -357,11 +357,11 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
   // Logging is up from here, which is why the profile application made in OnConfigurePaths is
-  // reported now and not there: what the launcher's file contributed (and which of its rows this
-  // build refused) is exactly the evidence a "my launcher setting did not apply" report needs. The
+  // reported now and not there: what Controller Settings' file contributed (and which of its rows this
+  // build refused) is exactly the evidence a "my Controller Settings setting did not apply" report needs. The
   // settings store's own boot lines follow it, for the same reason.
   void OnPostInitLogging() override {
-    rb_blitz::launcher::LogProfileApplyReport(profile_apply_);
+    rb_blitz::profile::LogProfileApplyReport(profile_apply_);
     if (settings_boot_) {
       settings_boot_->LogConfigured();
     }
@@ -440,7 +440,7 @@ class RbBlitzApp : public rex::ReXApp {
 
   // The build gate in CMakeLists.txt has already refused to recompile against a
   // dump other than the one config/game_fingerprints.toml describes, but a
-  // launcher can still point a built binary at a different game/ tree - a
+  // Controller Settings can still point a built binary at a different game/ tree - a
   // tree with a Rock Band Blitz Ultimate payload merged into it, for instance.
   // Nothing here aborts: the point is that the log says which revision (if any)
   // the running executable was actually booted against, so a bug report can be
@@ -489,8 +489,8 @@ class RbBlitzApp : public rex::ReXApp {
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
 
-  // What the launcher's profile contributed at OnConfigurePaths, reported once logging exists.
-  rb_blitz::launcher::ProfileApplyReport profile_apply_;
+  // What Controller Settings' profile contributed at OnConfigurePaths, reported once logging exists.
+  rb_blitz::profile::ProfileApplyReport profile_apply_;
 
   // P11a: the native settings store and its boot wiring (src/settings/boot.h). Created in
   // OnConfigurePaths - it needs the executable folder, which only exists from there on - and owned

@@ -22,8 +22,11 @@ Two programs outgrew the plan format and now live with their subject instead:
 
 - **In-game settings** — sixteen per-package records were consolidated into
   [`../settings/`](../settings). The live tracker is [`../settings/status.md`](../settings/status.md).
-- **The launcher** — its plan is finished ([`finished/2026-09-27-launcher-plan.md`](finished/2026-09-27-launcher-plan.md));
-  what the launcher still owes the settings work is tracked in `../settings/status.md`.
+- **The launcher → Controller Settings** — its plan is finished
+  ([`finished/2026-09-27-launcher-plan.md`](finished/2026-09-27-launcher-plan.md)); the application was
+  renamed on 2026-10-14
+  ([`finished/2026-10-14-controller-settings-rename.md`](finished/2026-10-14-controller-settings-rename.md)),
+  and what it still owes the settings work is tracked in `../settings/status.md`.
 
 The engine-level studies that plans here refer to (menu layout, toggles, input, diagnostics) live in
 [`../engine/`](../engine), not in this folder.

@@ -2,13 +2,13 @@
 # as a fallback) to a PNG for inspection during bring-up.
 param(
     [string]$OutFile = "out/bringup-capture.png",
-    # Which window to capture. The game is the default; the launcher's A1 run
-    # captures rb_blitz_launcher the same way.
+    # Which window to capture. The game is the default; Controller Settings' A1 run
+    # captures rb_blitz_controller_settings the same way.
     [string]$ProcessName = "rb_blitz",
     # Capture the client area - the pixels the process itself drew - instead of the
     # window rect, which also holds the frame and the title bar. The offset the
     # chrome adds is the display's content scale times the frame's own metrics, so a
-    # harness that crops a region out of the picture (scripts/capture_launcher.ps1)
+    # harness that crops a region out of the picture (scripts/capture_controller_settings.ps1)
     # cannot guess it: with this switch the picture starts where the UI starts. The
     # game's captures are of a fullscreen window and take the default.
     [switch]$ClientArea

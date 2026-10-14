@@ -110,7 +110,7 @@ void TestTextFormEditsTheRealStore() {
   BeginCase("the text form a DTA script writes reaches settings.toml");
   Harness h;
   // Stage *the other* value of the row: its compiled default is `true` (it took the setting over
-  // from the launcher flag, P11b) and a commit that writes the value a row already holds is
+  // from Controller Settings flag, P11b) and a commit that writes the value a row already holds is
   // `kNoChanges`, so writing `b:1` here would test nothing.
   const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
   CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +

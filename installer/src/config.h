@@ -74,11 +74,11 @@ struct PinsPayload {
   bool HasDownload() const { return !url.empty(); }
 };
 
-// How a launcher learns that a newer release exists, and where the updater that
+// How Controller Settings learns that a newer release exists, and where the updater that
 // installs one lives (docs/plans/finished/2026-09-27-launcher-plan.md D19).
 struct PinsUpdate {
-  // Where the launcher asks. Empty means this build has no release channel and no
-  // launcher compiled from it checks anything.
+  // Where Controller Settings asks. Empty means this build has no release channel and no
+  // Controller Settings compiled from it checks anything.
   std::string manifest_url;
   // The folder under the user's local application data that holds the updater.
   std::string dir_name;
@@ -113,13 +113,13 @@ bool ParsePins(std::string_view text, Pins* out, std::string* error);
 
 // --- the update manifest --------------------------------------------------
 
-// update.toml, the one file a release publishes for the launcher's update check
+// update.toml, the one file a release publishes for Controller Settings' update check
 // and for the updater that does the work. tools/embed_config.cpp generates it from
 // the pins, so the version in it cannot drift from the version the setup executable
 // is named after, and the release publishes it as the asset update.toml.
 //
 // Two readers, one document:
-//   * the launcher reads `version` and `requires_game_data` - is there an update,
+//   * Controller Settings reads `version` and `requires_game_data` - is there an update,
 //     and will it ask for the game files again;
 //   * the updater reads `payload_*` - what to install, from where, and what it
 //     should hash to.

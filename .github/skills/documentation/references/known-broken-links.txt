@@ -5,7 +5,7 @@
 # an error, so a real break stands out against a quiet baseline.
 #
 # (1) Files deleted from the tree (commit b7dfaca, "add real mouse support") and still cited by the
-# bring-up log (a historical record), the launcher plan (a finished record) and one guide (a live
+# bring-up log (a historical record), Controller Settings plan (a finished record) and one guide (a live
 # reference). Fixing the guide means mapping the old names onto the current src/input/* files first —
 # unproven, so it is left to the owner.
 #

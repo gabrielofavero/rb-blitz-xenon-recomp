@@ -124,7 +124,7 @@ Both are cached like any CMake option, so turn them back off by naming them
   backend can run at all, are properties of the host too ([known-issues.md](../reference/known-issues.md)):
   this tree compiles both D3D12 and Vulkan (`REXGLUE_USE_VULKAN=ON` in the Windows presets —
   `rexglue-sdk`'s own default is OFF on Windows, so a hand-configured tree can silently lose it),
-  and both the launcher's and the game's *Renderer* rows pick between them, with the Vulkan loader
+  and both Controller Settings' and the game's *Renderer* rows pick between them, with the Vulkan loader
   probed at boot so a machine without a Vulkan driver does not offer Vulkan at all and falls back
   to D3D12 instead of failing.
 - **Byte-for-byte reproducibility.** The check says which toolchain built a binary, not

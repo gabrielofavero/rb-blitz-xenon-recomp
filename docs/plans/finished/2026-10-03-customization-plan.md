@@ -768,7 +768,7 @@ table, which `[functions]` cannot name.
 
 > **Goal.** Design the cache D8 describes: the fingerprint of the DLC tree, the file format and
 > location in `cache_root`, the API (`load`, `validate`, `refresh`, `invalidate`), and who consumes it
-> (a host-side fast path for the guest's enumeration, or purely a launcher/lookup aid — S5/D1 answer
+> (a host-side fast path for the guest's enumeration, or purely a controller-settings/lookup aid — S5/D1 answer
 > which). Split the decision logic into an SDK-free header so it is unit-testable (Contract 4).
 > **Deliverable.** The design in `docs/engine/content-flow.md` § "cache", the header + `tests/`
 > target for the pure half, and a `--refresh_dlc_cache` entry point.
@@ -890,7 +890,7 @@ table, which `[functions]` cannot name.
 > **Deliverable.** [src/ui/menu_options.cpp](../../../src/ui/menu_options.cpp) (`SkipOfflinePrompts`), the
 > read hook and the checksum row in [src/hooks/menu_filter.cpp](../../../src/hooks/menu_filter.cpp), the
 > toggle `enhancements_skip_offline_dialog` in [src/enhancements.cpp](../../../src/enhancements.cpp), the
-> launcher row in [launcher/config/settings.toml](../../../launcher/config/settings.toml) (the *Interface*
+> launcher row in [controller-settings/config/settings.toml](../../../controller-settings/config/settings.toml) (the *Interface*
 > tab's *Startup* group), the map in §7, and the log line `menu_filter: the offline prompts are skipped
 > (518 bytes of unused state constants paid for 518 bytes of transitions): a start goes straight to the
 > menu in offline mode`.
@@ -1041,7 +1041,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 | Hook or patch creep | nine features × "cheapest rung" can quietly become nine shipped hacks | D3 fixes the rung per feature; every hook records its faithful behaviour; toggles default off |
 | Save-data damage (R7, R8) | both touch user data | D8 never writes the guest's cache; D9 backs up and is opt-in; both have host tests for the decision half |
 | Scope creep into the launcher | the toggles want a UI, and the launcher plan already owns it | this plan stops at the cvar + docs; the launcher plan's Graphics tab surfaces them |
-| Two settings authorities | `rb_blitz.toml` and the launcher profile can disagree | the launcher plan's precedence (D3 there) already fixes it; toggles use the same file |
+| Two settings authorities | `rb_blitz.toml` and the profile can disagree | the launcher plan's precedence (D3 there) already fixes it; toggles use the same file |
 | The research outlives its usefulness | maps written for a feature that changes | each map prompt states the feature it unblocks, and E3 closes the loop with honest "still open" sections |
 
 ---

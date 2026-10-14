@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Implementation of the pad remap (src/input/remap.h). See src/launcher/remap.h for what a
+// Implementation of the pad remap (src/input/remap.h). See src/profile/remap.h for what a
 // binding means; this file is only the device side of it.
 
 #include "input/remap.h"
@@ -19,15 +19,15 @@
 #include <rex/input/input_system.h>
 #include <rex/logging.h>
 
-#include "launcher/profile.h"
-#include "launcher/profile_apply.h"
-#include "launcher/remap.h"
+#include "profile/profile.h"
+#include "profile/profile_apply.h"
+#include "profile/remap.h"
 
 namespace rb_blitz::input {
 namespace {
 
-using rb_blitz::launcher::remap::Source;
-using rb_blitz::launcher::remap::SourceKind;
+using rb_blitz::profile::remap::Source;
+using rb_blitz::profile::remap::SourceKind;
 
 // The mouse buttons the grammar names, with SDL's mask for each.
 struct MouseButton {
@@ -45,7 +45,7 @@ constexpr MouseButton kMouseButtons[] = {
 
 // Everything a source resolves against, kept alive by the filter that holds it.
 struct RemapContext {
-  rb_blitz::launcher::remap::Table table;
+  rb_blitz::profile::remap::Table table;
 
   bool SourceDown(const Source& source) const {
     switch (source.kind) {
@@ -92,17 +92,17 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     return;
   }
 
-  // The same file the launcher's own Launch Game hands over with --launcher_profile, read the
-  // same way the profile's `[settings]` rows are (launcher/profile_apply.h). A profile this build
-  // cannot read - or a machine that has never run the launcher - is not a reason to refuse to
+  // The same file Controller Settings' own Launch Game hands over with --launcher_profile, read the
+  // same way the profile's `[settings]` rows are (controller-settings/profile_apply.h). A profile this build
+  // cannot read - or a machine that has never run Controller Settings - is not a reason to refuse to
   // start and not a reason to install no filter at all: `has_table` is false and the filter's
-  // whole job is then the Guide prohibition below. The launcher is where a user is told about a
+  // whole job is then the Guide prohibition below. Controller Settings is where a user is told about a
   // file that did not parse.
   std::string unreadable;
-  const std::optional<rb_blitz::launcher::Profile> profile =
-      rb_blitz::launcher::ReadLauncherProfile(&unreadable);
+  const std::optional<rb_blitz::profile::Profile> profile =
+      rb_blitz::profile::ReadProfile(&unreadable);
   if (!profile && !unreadable.empty()) {
-    REXLOG_WARN("remap: ignoring the launcher profile, {}", unreadable);
+    REXLOG_WARN("remap: ignoring the profile, {}", unreadable);
   }
 
   // Held by the filter, which the input system copies: this frame's table is not what it reads
@@ -111,25 +111,25 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
   const bool has_table = profile.has_value();
   std::size_t bound = 0;
   if (profile) {
-    context->table = rb_blitz::launcher::remap::Table::FromRows(profile->remap);
+    context->table = rb_blitz::profile::remap::Table::FromRows(profile->remap);
     // Guide is a platform button and is never delivered to the guest (contracts §2.3). A row a
     // person wrote once is preserved by a save but never applied, so the only honest thing to do
     // with it is to say so - "the button I bound does nothing" is otherwise indistinguishable
     // from a bug in the remap.
-    if (!rb_blitz::launcher::remap::RefusedRowNames(profile->remap).empty()) {
+    if (!rb_blitz::profile::remap::RefusedRowNames(profile->remap).empty()) {
       REXLOG_WARN(
           "remap: Guide is not remappable, so the profile's guide row is ignored (and Guide is "
           "kept out of the pad state the guest sees)");
     }
     // The table always has work to do, even with no `[remap]` rows: every control without a row
-    // has the launcher's default binding - its own pad control plus a keyboard key - which is how
+    // has Controller Settings' default binding - its own pad control plus a keyboard key - which is how
     // a keyboard works without the profile being edited. `BoundCount` is how many the *user*
     // rebound, which is what the log names.
     if (context->table.BoundCount() > 0 && !context->table.AnySourceSet()) {
       // A table of empty bindings is a pad that does nothing, which is a real thing to want and a
       // terrible thing to hit by accident. It is honoured, and said out loud.
       REXLOG_WARN(
-          "remap: the launcher profile binds {} control(s) to nothing, so no pad button will "
+          "remap: the profile binds {} control(s) to nothing, so no pad button will "
           "reach the game",
           context->table.BoundCount());
     }
@@ -154,7 +154,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     static_cast<rex::input::InputSystem*>(system.get())
         ->SetStateFilter([context, has_table](uint32_t user_index,
                                              rex::input::X_INPUT_STATE& state) {
-          namespace remap = rb_blitz::launcher::remap;
+          namespace remap = rb_blitz::profile::remap;
           const remap::PadState pad{state.gamepad.buttons, state.gamepad.left_trigger,
                                     state.gamepad.right_trigger};
           remap::PadState out;
@@ -182,12 +182,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
         });
     if (has_table) {
       REXLOG_INFO(
-          "remap: {} user rebind(s) from the launcher profile; every other control answers to its "
+          "remap: {} user rebind(s) from the profile; every other control answers to its "
           "default pad button and keyboard key (--launcher_profile <path> names another file)",
           bound);
     } else {
       REXLOG_INFO(
-          "remap: no launcher profile to read, so the pad keeps the SDK's own reporting and Guide "
+          "remap: no Controller Settings profile to read, so the pad keeps the SDK's own reporting and Guide "
           "is kept out of the state the guest sees");
     }
     return system;

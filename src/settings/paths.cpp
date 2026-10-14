@@ -133,7 +133,7 @@ fs::path SettingsFileForProfile(const fs::path& legacy_profile) {
   if (legacy_profile.empty()) {
     return {};
   }
-  if (legacy_profile.filename() == rb_blitz::launcher::kProfileFileName) {
+  if (legacy_profile.filename() == rb_blitz::profile::kProfileFileName) {
     return legacy_profile.parent_path() / "settings.toml";
   }
   std::string stem = legacy_profile.stem().string();
@@ -143,8 +143,8 @@ fs::path SettingsFileForProfile(const fs::path& legacy_profile) {
   return legacy_profile.parent_path() / (stem + ".game-settings.toml");
 }
 
-fs::path ResolveSettingsFile(const rb_blitz::launcher::ProfilePathInputs& inputs) {
-  return SettingsFileForProfile(rb_blitz::launcher::ResolveProfilePath(inputs));
+fs::path ResolveSettingsFile(const rb_blitz::profile::ProfilePathInputs& inputs) {
+  return SettingsFileForProfile(rb_blitz::profile::ResolveProfilePath(inputs));
 }
 
 }  // namespace rb_blitz::settings

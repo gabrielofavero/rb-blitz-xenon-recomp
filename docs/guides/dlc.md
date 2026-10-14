@@ -72,11 +72,11 @@ the same way:
 --dlc_library="D:\Songs"               # one or more folders, ';'-separated
 ```
 
-The launcher offers the same two shapes for its *DLC location* row: the
+Controller Settings offers the same two shapes for its *DLC location* row: the
 `dlc_layout` rule accepts a structured `<title_id>/<content_type>/<package>` folder
 **and** a flat library of loose containers, because a folder that is not the layout
 is what the runtime above reads as a library
-([launcher/src/path_validate.cpp](../../launcher/src/path_validate.cpp)).
+([controller-settings/src/path_validate.cpp](../../controller-settings/src/path_validate.cpp)).
 
 - Each container is read for **its own** title id and content type —
   `XContentMetadata::execution_info.title_id` and
@@ -141,7 +141,7 @@ many threads read it (§4.1).
 | `--dlc_root`, or `dlc_root` in `rb_blitz.toml` | `<game_data_root>/dlc` | root of the layout in §2; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library`, or `dlc_library` in `rb_blitz.toml` | *(empty)* | `;`-separated folders of §2.1; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
-| `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). The launcher's *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
+| `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | off | R7: persist the library enumeration (§4.1) and reuse it while the tree it describes is unchanged, and drop the emulator's per-package mount latency for the run; changing it needs a relaunch |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's last row asks for the same thing in a running title (§4.1) |
 
@@ -305,7 +305,7 @@ enumerator offering four and reporting the true count. One item per call is ther
 of the protocol as this title uses it, and the host has no way to enlarge a buffer the guest
 owns. [song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §13 has the spike and its measurement.
 
-The lever on it is therefore the frame rate — the launcher's own **Graphics ▸ Window ▸ V-Sync**
+The lever on it is therefore the frame rate — Controller Settings' own **Graphics ▸ Window ▸ V-Sync**
 row (`vsync`, re-read live by the GPU vsync worker): with `--vsync=false` the same 2,809 calls
 arrive every **7.0 ms** and the phase takes **19.7 s**, against 47 s.
 

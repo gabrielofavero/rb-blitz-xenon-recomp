@@ -7,12 +7,12 @@
 //                                literals, for rb_blitz_setup_helper.exe
 //   generated/pins.iss           the same pins as Inno Setup preprocessor
 //                                defines, for setup.iss
-//   generated/update.toml        the release manifest a launcher checks and an
+//   generated/update.toml        the release manifest Controller Settings checks and an
 //                                updater installs from (installer/README.md,
 //                                section "Updating")
 //
 // All three come from installer/config/pins.toml, so the wizard, the helper, the
-// launcher's update check and the updater cannot disagree about what they are
+// Controller Settings's update check and the updater cannot disagree about what they are
 // installing. Run with --help for the argument list.
 //
 // This file is deliberately standalone: it is the first thing the installer build
@@ -370,7 +370,7 @@ void EmitIsppNumber(std::ostream& out, std::string_view name, const std::string&
 }
 
 // The update manifest is TOML because both readers already parse a TOML subset
-// (src/config.cpp, launcher/src/update_manifest.cpp), and neither of those subsets
+// (src/config.cpp, controller-settings/src/update_manifest.cpp), and neither of those subsets
 // has escapes: a value that would need one is refused here rather than written in
 // a form one of them would misread.
 void EmitTomlString(std::ostream& out, std::string_view name, const std::string& value) {
@@ -614,7 +614,7 @@ int main(int argc, char** argv) {
   EmitIsppString(ispp, "UltimateReleaseUrl", ultimate->String("release_url"));
   EmitIsppString(ispp, "UltimateDestinationDir", ultimate->String("destination_dir"));
   ispp << "\n";
-  ispp << "// The update channel (docs/plans/finished/2026-09-27-launcher-plan.md D19): where a launcher\n";
+  ispp << "// The update channel (docs/plans/finished/2026-09-27-launcher-plan.md D19): where Controller Settings\n";
   ispp << "// looks, the folder under the user's local application data the updater is\n";
   ispp << "// placed in, and whether this release needs the user's game files again.\n";
   EmitIsppString(ispp, "UpdateManifestUrl", update->String("manifest_url"));
@@ -629,7 +629,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // update.toml: the file the release publishes for the launcher's check and for the
+  // update.toml: the file the release publishes for Controller Settings' check and for the
   // updater that installs the newer build. Everything in it is already in the pins,
   // so it is written here rather than by hand - a second copy of the version would be
   // a second answer to "which release is this".

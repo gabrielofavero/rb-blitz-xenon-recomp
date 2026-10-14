@@ -1,0 +1,681 @@
+# Controller Settings' settings schema - Contract 1 of docs/plans/finished/2026-09-27-launcher-plan.md (§4.1).
+#
+# One [[setting]] per row Controller Settings shows, and one [[group]] per category. The
+# build compiles this file into out/generated/settings_table.h (tools/embed_settings.cpp),
+# and it refuses a table that breaks a rule below, so a row cannot appear in the UI
+# without a tooltip, without a destination, or with an unearned "live" claim.
+#
+# Fields
+#   key       the cvar name; also the profile key, and - when argv = "flag" - the
+#             --flag Controller Settings passes to the game
+#   tab       general | interface | graphics | controller - the order too. There is no
+#             `experimental` (D14). The key is the schema's own name for the tab; Controller Settings
+#             labels the graphics tab "Audio / Video" (schema_view's DisplayTabName), because it
+#             holds the audio rows too. `interface` is the tab for edits to the game's own
+#             screens - what the player sees and navigates - so an interface enhancement goes
+#             there and not into the technical tabs.
+#   group     must match a [[group]] with the same tab
+#   label     the row's text in the tab
+#   kind      bool | int | float | enum | string | path_dir | path_file
+#   default   the compiled default as written; Controller Settings compares the profile
+#             against it to decide what to pass on the command line
+#   applies   restart | live. `live` requires an evidence comment (see below).
+#   tooltip   the user-facing sentence shown in the bottom bar. Never empty.
+#   argv      flag | none. `flag` emits `--<key>=<value>`; `none` is a host-level
+#             row Controller Settings translates itself (launch.target, D4)
+#   choices   enum only: the allowed values, e.g. ["sdl", "xinput"]
+#   choice_labels
+#             enum only, optional: one label per choice, same count and order, drawn in
+#             place of the value. The value stays `choices` - what the profile stores and
+#             the game is passed - so a row can read "1440p" while its value is the cvar's
+#             own "2". Used only where the value does not read as itself, and never
+#             together with `choices_from`; `--dump-layout` prints both.
+#   validate  path_dir / path_file only: `exists`, `dlc_layout` or
+#             `inside_game_root:forbid`, separated by `|`. `dlc_layout` accepts both DLC
+#             roots the runtime mounts (src/hooks/dlc.cpp): the structured
+#             <title_id>/<content_type>/<package> tree, and a flat library of loose
+#             CON/LIVE containers - a dumped song folder - read where it lies.
+#   min/max   int / float only, optional: the range the row's widget is bounded to, so
+#             the slider carries the cvar's real limits. Both or neither, and the
+#             default must sit inside it. `max` stays the schema's ceiling even when a
+#             `max_from` narrows it on the machine it runs on.
+#   max_from  int / float only, optional: `cpu_cores` narrows the widget's upper bound
+#             to this machine's logical processor count (never above `max`), because a
+#             row whose value is a thread count cannot usefully exceed what the machine
+#             has. The build cannot decide it - it is a fact about the running machine -
+#             so Controller Settings applies it at draw time. Such a row still declares a
+#             numeric `min`/`max`.
+#   visible   optional: a precondition the machine has to satisfy for the row to be shown
+#             at all. `multi_monitor` (a machine with one display has no monitor to
+#             choose between) and `ultimate_installed` (a row about the Ultimate
+#             mod's own menu has nothing to say where the mod is not installed); the
+#             tab hides the row and the focus ring skips it, so a hidden row is never
+#             a focus trap.
+#   choices_from  enum only, optional: where the row's choices really come from when the
+#             build decides them. `gpu_backends` is the only rule today, and the
+#             build passes the backends it compiled in (--backends) so a payload cannot
+#             offer a renderer it does not have. Such a row declares no `choices` itself.
+#
+# `applies = "live"` claims that the running game re-reads the value, so the row must
+# carry a comment naming the mechanism that does it, on the same line as `applies` or on
+# a comment-only line directly above it:
+#
+#     applies = "live"   # live: <where the change lands>
+#
+# Everything else is `restart` - including rows the runtime could re-read but that
+# nothing has cited yet, because a lifecycle tag is not a promise that a value applies
+# live (D12). A row that the runtime only consumes while starting up is `restart` even
+# though its cvar is registered hot-reloadable (input_backend is the example).
+#
+# Rows compiled out in this build (present_effect and the CAS/FSR parameters behind
+# REXGLUE_ENABLE_FIDELITYFX=OFF) are absent rather than greyed: the build flag is not
+# something a user can act on from Controller Settings (D12). Master volume is absent because
+# the SDK has no audio_volume cvar yet (D14). Per-button remapping is absent because it
+# is planned work, not a setting (D13).
+#
+# Two more absences are deliberate, and are decisions rather than omissions:
+#   * `video_mode_refresh_rate` and the free-form `video_mode_width`/`video_mode_height`
+#     are not exposed. The guest refresh rate changes how the title paces itself, and the
+#     runtime's own preset list is the only set of resolutions known to be safe - so the
+#     guest video mode is left at its native 1280x720 and the Display row carries the
+#     render multiplier instead of a video-mode word (it is the row below).
+#   * `window_width`/`window_height` are not exposed either: the window's own size is
+#     remembered from the last time the user dragged it, and a row for it would be a
+#     second control for something a gesture already does.
+#
+# And one row whose choices are a decision too:
+#   * The renderer's *choices* are the backends this build compiled in, not a fixed list
+#     (`choices_from` below). A payload built without Vulkan cannot offer it, because
+#     picking it would leave the game with no renderer at all - so the row lists what the
+#     build actually has. `gpu_backend` itself is a cvar of this project, not of the SDK
+#     (src/rb_blitz_app.h), because selecting the backend is a decision the *app* makes
+#     when it loads the GPU plugin.
+#   * A backend the *machine* cannot run is refused by the game and not by this list: the
+#     app probes the Vulkan loader before committing (src/rb_blitz_app.h), logs why, and
+#     boots on the backend the build would have picked by itself. See D18.
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Groups
+#
+# A group with no rows yet is declared `status = "unavailable"` together with the one
+# line that records *why*, so an unbuilt category is named in the schema and in
+# --dump-layout rather than being drawn as a disabled widget that looks like a setting,
+# or as a heading with an apology under it (D14, D18).
+# ---------------------------------------------------------------------------
+
+[[group]]
+name = "Launch target"
+tab  = "general"
+
+[[group]]
+name = "Paths"
+tab  = "general"
+
+# M1's "named but empty" General group (§1.1): the ultimate_patches bits (content
+# device / song blacklist / disk-error latch) stay out until B8.
+[[group]]
+name   = "Ultimate (advanced)"
+tab    = "general"
+status = "unavailable"
+note   = "The Ultimate content-device, song-blacklist and disk-error edits are not editable in this build."
+
+# R5 and R10: the game's own main menu. Its own group because neither is an Ultimate patch bit -
+# both edits are made when the menu's files are read, in either launch target, and R5 applies to
+# the retail content as well.
+[[group]]
+name = "Main menu"
+tab  = "interface"
+
+# R3: the flow from the title screen into the game, which is not the menu itself - the panel it
+# edits runs before the menu is shown and is reached from the title screen's start button.
+[[group]]
+name = "Startup"
+tab  = "interface"
+
+[[group]]
+name = "Display"
+tab  = "graphics"
+
+[[group]]
+name = "Window"
+tab  = "graphics"
+
+[[group]]
+name = "Rendering"
+tab  = "graphics"
+
+[[group]]
+name = "Presentation"
+tab  = "graphics"
+
+[[group]]
+name = "Audio"
+tab  = "graphics"
+
+# Developer rows (d3d12_readback_resolve, log_level) are out of M1 and disclosed only
+# with --show-dev-settings (D14), so M1 declares the group without a row.
+[[group]]
+name   = "Developer"
+tab    = "graphics"
+status = "unavailable"
+note   = "Developer rows are hidden unless Controller Settings is started with --show-dev-settings."
+
+[[group]]
+name = "Input"
+tab  = "controller"
+
+# The Controller tab's unbuilt groups: device list + deadzone (C1), keyboard mapping
+# (C2), per-button remap (C3-C6). Their rows arrive with those prompts (§1.1, D13).
+[[group]]
+name   = "Devices"
+tab    = "controller"
+status = "unavailable"
+note   = "The connected-controls list and per-device deadzone are not in this build yet."
+
+[[group]]
+name   = "Keyboard"
+tab    = "controller"
+status = "unavailable"
+note   = "Keyboard mapping is not editable in this build."
+
+[[group]]
+name   = "Manual"
+tab    = "controller"
+status = "unavailable"
+note   = "Per-button remapping is not available in this build."
+
+# ---------------------------------------------------------------------------
+# General
+# ---------------------------------------------------------------------------
+
+# The one row whose key is not a cvar: Controller Settings turns it into --ultimate_mode /
+# --license_mask itself (D4, §4.3), which is why it is argv = "none".
+[[setting]]
+key     = "launch.target"
+tab     = "general"
+group   = "Launch target"
+label   = "Launch target"
+kind    = "enum"
+choices = ["common", "demo", "ultimate"]
+default = "ultimate"
+applies = "restart"
+argv    = "none"
+tooltip = """
+Rock Band Blitz is the base game, unlocked. Rock Band Blitz (Trial) is its XBLA demo. Rock Band
+Blitz Ultimate is the base game plus the community mod: offline score saving, cheats, custom gems
+and song search.
+"""
+
+[[setting]]
+key     = "user_data_root"
+tab     = "general"
+group   = "Paths"
+label   = "Save game location"
+kind    = "path_dir"
+default = ""
+applies = "restart"
+argv    = "flag"
+validate = "inside_game_root:forbid"
+tooltip = """
+Where the title's saves live. Empty uses Documents\\Rock Band Blitz. A folder inside
+the game data folder is refused.
+"""
+
+[[setting]]
+key     = "dlc_root"
+tab     = "general"
+group   = "Paths"
+label   = "DLC location"
+kind    = "path_dir"
+default = ""
+applies = "restart"
+argv    = "flag"
+validate = "dlc_layout|inside_game_root:forbid"
+tooltip = """
+DLC folder: either laid out as <title_id>/<content_type>/<package>, or a flat song
+library of loose CON/LIVE packages, which is read where it lies. Empty uses the game
+folder's dlc directory.
+"""
+
+# R7. A flat DLC library is read by opening every container and reading its identity
+# header, every boot (src/fs/dlc_library.h). With this on the enumeration is persisted
+# beside the saves and reused while a fingerprint proves the tree unchanged
+# (src/fs/dlc_cache.h, docs/guides/dlc.md §4.1). The toggle also drops the emulator's
+# per-package mount latency for the run (deferred_overlapped_delay_ms = 0,
+# patches/rexglue-sdk/0011): on 1,402 packages the title's own discovery is 662 s with
+# the SDK's 100 ms and 379 s without it (docs/guides/dlc.md §4.2). The refresh is the main
+# menu's last row, and --refresh_dlc_cache does the same at boot. What no cache removes
+# is the title's own enumeration, one item per presented frame (docs/guides/dlc.md §4.3).
+[[setting]]
+key     = "enhancements_dlc_cache"
+tab     = "general"
+group   = "Paths"
+label   = "Cache DLC library scan"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+A dumped song folder is read by opening every package, every time the game starts
+with a folder of DLC. With this on the result is cached in the save folder and reused
+on later starts while the folder is unchanged, and the emulator stops waiting out its
+simulated per-package load time, so a large library starts much sooner. The main menu
+row that refreshes the library is drawn as "Refresh Song Library", the discovery
+screen's progress bar is given the library's package count, and a start that loads the
+enumeration from the cache says "Loading Song Cache" instead of "Discovering
+Downloadable Content". Refresh the cache from that main menu row, or pass
+--refresh_dlc_cache to do it at the next start. Needs a restart.
+"""
+
+# A cold library read is not disk-bound: the per-file cost of a *first* open is the
+# antivirus's on-open scan, measured at ~16 ms per file against ~0.03 ms once the file
+# has been seen, on an NVMe SSD (docs/guides/dlc.md §4.1). Opening several at once overlaps
+# it - 5.6x measured with the pool on (16.1 ms/file to 2.9 ms/file) - and the result is
+# identical at any thread count, because the walk and the merge stay on one thread in
+# walk order (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
+#
+# The row's default is 1, the honest "one at a time" reading: a user who wants the pool
+# turns it up, and nothing silently opens a machine's worth of files on a first run. The
+# slider stops at this machine's logical processor count (`max_from = "cpu_cores"`, which
+# is why the row declares no meaningful `max` of its own beyond the schema's ceiling) - a
+# thread count above it can only be a mistake. The game keeps `0` as "use the machine's
+# core count, capped at 8" for a hand-edited `rb_blitz.toml` or `--dlc_scan_threads=0`.
+[[setting]]
+key      = "dlc_scan_threads"
+tab      = "general"
+group    = "Paths"
+label    = "DLC scan threads"
+kind     = "int"
+default  = 1
+min      = 1
+max      = 32
+max_from = "cpu_cores"
+applies  = "restart"
+argv     = "flag"
+tooltip = """
+How many threads read a DLC library's package headers. 1 reads them one at a time; more
+overlaps the antivirus's first-open cost, which is what makes a cold library several
+times sooner to read. The slider stops at this machine's processor count, and the scan's
+result is the same at any value. Needs a restart.
+"""
+
+# ---------------------------------------------------------------------------
+# Interface - Main menu
+# ---------------------------------------------------------------------------
+
+# R5. Leaderboards, achievements and downloadable content are the three rows whose
+# screens need Rock Central, and offline each one is a notice at best. The title's
+# compiled menu file is edited when it is read (src/hooks/menu_filter.cpp), so the
+# row list is a cvar rather than a file the user patches: the ark index fixes every
+# entry's size, and the edit is byte-neutral.
+[[setting]]
+key     = "enhancements_hide_menu_options"
+tab     = "interface"
+group   = "Main menu"
+label   = "Hide offline menu items"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Removes the main menu's Leaderboards, Achievements and Downloadable Content rows,
+which are online-only and do nothing offline. The rows below name them. Needs a
+restart.
+"""
+
+[[setting]]
+key     = "enhancements_hidden_menu_options"
+tab     = "interface"
+group   = "Main menu"
+label   = "Menu items to hide"
+kind    = "string"
+default = "splash_leaderboard,splash_achievements,splash_dlc"
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Which main menu rows the setting above removes, by the title's own names
+(splash_leaderboard, splash_achievements, splash_dlc), separated by commas. Empty
+hides the three defaults. Needs a restart.
+"""
+
+# R10, and the one row whose default is on: it names the mod's own screen, so the
+# only run it can affect is one with the mod installed - which is exactly the
+# condition the row is shown under.
+[[setting]]
+key     = "enhancements_rename_mod_settings"
+tab     = "interface"
+group   = "Main menu"
+label   = "Rename Mod Settings"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+visible = "ultimate_installed"
+tooltip = """
+Rock Band Blitz Ultimate's own settings screen is called "Mod Settings"; this draws
+it as "Ultimate Settings" instead, the name the mod itself uses. Shown only when the
+Ultimate payload is installed. Needs a restart.
+"""
+
+# R9. The main menu's background music is the title's own three streamed tracks, chosen
+# at random and looped (the `shellmusic` block of config/synth.dtb, read by the engine's
+# ShellMusicPanel). With this on, each track the menu plays is one of the loaded DLC
+# songs instead, streamed read-only from the package it came from
+# (src/hooks/shell_music.cpp). The pool is the DLC this boot enumerated, so a run with
+# no library is unchanged.
+[[setting]]
+key     = "enhancements_menu_dlc_songs"
+tab     = "interface"
+group   = "Main menu"
+label   = "Play DLC songs in the menu"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = """
+The main menu loops the same few tracks the game ships. With this on, the background
+music is your loaded DLC instead: a song is picked at random from the library, played,
+and when it ends another is picked, like a jukebox. The songs stream from the packages
+themselves - nothing is copied. Needs a restart, and a DLC library: with none, the menu
+is unchanged.
+"""
+
+[[setting]]
+key     = "enhancements_menu_dlc_song_count"
+tab     = "interface"
+group   = "Main menu"
+label   = "Menu DLC song pool size"
+kind    = "int"
+default = 3
+min     = 1
+max     = 64
+applies = "restart"
+argv    = "flag"
+tooltip = """
+How many DLC songs the setting above draws from, spread over the whole library (each is
+streamed from its own package, so a larger pool holds that many packages open). 3 by
+default. Only read while "Play DLC songs in the menu" is on. Needs a restart.
+"""
+
+# R3, and the interface tab's second group: what happens between the title screen
+# and the menu. With Rock Central gone the connect process cannot succeed, and the
+# title asks the player two questions before it shows the menu - first the
+# failed-login notice, then "Proceed in Offline Mode?". Both are that panel's own
+# state transitions written into it when it is read (src/ui/menu_options.cpp), so
+# both can happen on their own.
+[[setting]]
+key     = "enhancements_skip_offline_dialog"
+tab     = "interface"
+group   = "Startup"
+label   = "Hide offline mode prompts"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Starting a game asks two questions before it will show the menu: that Rock Central
+cannot be reached, and whether to proceed in offline mode. With this on both answers
+are given for you, so a start goes straight to the menu in offline mode. Needs a
+restart.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Display
+# ---------------------------------------------------------------------------
+
+# The one display row, and it is the render multiplier rather than a video-mode word: setting the
+# guest's video mode never scaled the picture, only the window. What scales it is
+# `resolution_scale`, the multiple applied to the title's render targets, so the row carries that
+# cvar and names the resolution each step draws at (1x = native 720p, 2x = 1440p, 3x = 2160p/4K)
+# through `choice_labels`. 1080p is deliberately absent: it is 1.5x of 720p, the scale is a whole
+# number, and 2x (1440p) is the honest first step past it.
+[[setting]]
+key           = "resolution_scale"
+tab           = "graphics"
+group         = "Display"
+label         = "Render resolution"
+kind          = "enum"
+choices       = ["1", "2", "3", "4", "5", "6", "7"]
+choice_labels = ["720p", "1440p", "2160p (4K)", "2880p", "3600p", "4320p (8K)", "5040p"]
+default       = "1"
+applies       = "restart"
+argv          = "flag"
+tooltip = """
+The resolution the title really renders at: 1x is its native 720p, 2x is 1440p, 3x is 2160p
+(4K), and each step multiplies the render targets by that factor. Costs fill rate and memory.
+Needs a restart.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Window
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "fullscreen"
+tab     = "graphics"
+group   = "Window"
+label   = "Fullscreen"
+kind    = "bool"
+default = true
+applies = "live"   # live: RegisterChangeCallback("fullscreen", ...) in rex_app.cpp:353 calls Window::SetFullscreen
+argv    = "flag"
+tooltip = "Start the window in fullscreen mode. Applies immediately."
+
+[[setting]]
+key     = "monitor"
+tab     = "graphics"
+group   = "Window"
+label   = "Monitor"
+kind    = "int"
+default = 0
+min     = 0
+max     = 16
+visible = "multi_monitor"
+applies = "restart"
+argv    = "flag"
+tooltip = "Monitor to display on: 0 is the default, 1 the primary, 2 the second, and so on (0 to 16)."
+
+[[setting]]
+key     = "vsync"
+tab     = "graphics"
+group   = "Window"
+label   = "V-Sync"
+kind    = "bool"
+default = true
+applies = "live"   # live: the GPU vsync worker re-reads it every iteration (graphics_system.cpp:164)
+argv    = "flag"
+tooltip = "Pace presentation to the display's refresh. Off lets the title run free."
+
+# ---------------------------------------------------------------------------
+# Graphics - Rendering
+# ---------------------------------------------------------------------------
+
+# The graphics backend the game renders with. The choices are the backends this build
+# compiled in (`choices_from`), and the default is the one the plugin picks when nothing
+# names a backend - so leaving this row alone passes nothing and changes nothing.
+[[setting]]
+key         = "gpu_backend"
+tab         = "graphics"
+group       = "Rendering"
+label       = "Renderer"
+kind        = "enum"
+choices_from = "gpu_backends"
+default     = "d3d12"
+applies     = "restart"
+argv        = "flag"
+tooltip = """
+Which renderer to use. Only the backends this build compiled in are offered. Needs a
+restart.
+"""
+
+# The runtime has two anti-aliasing mechanisms and they are independent: this one is a
+# post-process pass over the finished frame, and native_2x_msaa below is about resolving the
+# title's own multisampled render targets. Both are exposed rather than merged into one
+# "quality" row, because one setting that silently changed two mechanisms would be a lie
+# about what it does.
+[[setting]]
+key     = "swap_post_effect"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Anti-aliasing (post-process)"
+kind    = "enum"
+choices = ["none", "fxaa", "fxaa_extreme"]
+default = "none"
+applies = "restart"
+argv    = "flag"
+tooltip = "Smooth the finished frame: none, FXAA or FXAA Extreme. Needs a restart."
+
+[[setting]]
+key     = "native_2x_msaa"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Anti-aliasing (native 2x MSAA)"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = "Resolve the title's 2x MSAA render targets on the host. Needs a restart."
+
+[[setting]]
+key     = "anisotropic_override"
+tab     = "graphics"
+group   = "Rendering"
+label   = "Anisotropic filtering"
+kind    = "int"
+default = 3
+min     = -1
+max     = 5
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Anisotropic filtering: -1 keeps the game's own value, 0 disables it, and 1 to 5 force 1x
+to 16x. Sharper at oblique angles, at more sampling cost.
+"""
+
+# ---------------------------------------------------------------------------
+# Graphics - Presentation
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "present_letterbox"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Letterbox"
+kind    = "bool"
+default = true
+applies = "live"   # live: re-read on every paint (presenter.cpp:925 and :960)
+argv    = "flag"
+tooltip = "Keep the title's aspect ratio with black bars instead of stretching the frame."
+
+[[setting]]
+key     = "present_safe_area_x"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Safe area (horizontal)"
+kind    = "int"
+default = 90
+min     = 0
+max     = 100
+applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:944)
+argv    = "flag"
+tooltip = "Horizontal safe area, 0 to 100, when overscan cutoff is on."
+
+[[setting]]
+key     = "present_safe_area_y"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Safe area (vertical)"
+kind    = "int"
+default = 90
+min     = 0
+max     = 100
+applies = "live"   # live: re-read on every paint, when overscan cutoff is on (presenter.cpp:908)
+argv    = "flag"
+tooltip = "Vertical safe area, 0 to 100, when overscan cutoff is on."
+
+[[setting]]
+key     = "present_allow_overscan_cutoff"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Overscan cutoff"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = "Crop the presented frame to the safe area above."
+
+[[setting]]
+key     = "present_dither"
+tab     = "graphics"
+group   = "Presentation"
+label   = "Dithering"
+kind    = "bool"
+default = false
+applies = "restart"
+argv    = "flag"
+tooltip = "Enable output dithering in the final present pass."
+# ---------------------------------------------------------------------------
+# Graphics - Audio
+# ---------------------------------------------------------------------------
+
+[[setting]]
+key     = "audio_mute"
+tab     = "graphics"
+group   = "Audio"
+label   = "Mute audio"
+kind    = "bool"
+default = false
+applies = "live"   # live: re-read for every buffer the SDL audio callback fills (sdl_audio_driver.cpp:198)
+argv    = "flag"
+tooltip = "Mute the game's audio."
+
+[[setting]]
+key     = "audio_maxqframes"
+tab     = "graphics"
+group   = "Audio"
+label   = "Audio buffer (frames)"
+kind    = "int"
+default = 8
+min     = 4
+max     = 64
+applies = "restart"
+argv    = "flag"
+tooltip = "Maximum buffered audio frames (4 to 64). Lower is lower latency."
+
+# ---------------------------------------------------------------------------
+# Controller - Input
+#
+# The rest of the Controller tab (device list, keyboard mapping, per-button remap) is the
+# remap lane, and the panel for it is drawn by the tab itself rather than by schema rows.
+# Keyboard support is always on and is not a setting (R13).
+#
+# There is deliberately no input-form row. `input_backend` (sdl/xinput) is a real cvar, but
+# SDL3's driver already opens every pad the machine has - XInput, DirectInput, WGI - through
+# SDL's controller database, so "accept all controllers" is what the default already does and
+# a selector would only offer a way to make a single-player game accept less. The cvar is
+# still there for a hand-edited `rb_blitz.toml` or `--input_backend=xinput` when a pad needs
+# the XInput path; it just is not a row (D13, amended).
+# ---------------------------------------------------------------------------
+
+# R6: native menu selection; mouse input is disabled while a song is playing.
+[[setting]]
+key     = "mouse_ui_nav"
+tab     = "controller"
+group   = "Input"
+label   = "Mouse support"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Point at menu items to select them directly. Left click selects (A), right click goes
+back (B), and the wheel navigates up/down. Hidden and inactive during songs; returns
+when paused. Needs a restart.
+"""
+
+# `guide_button` is deliberately *not* a row any more (P8). Guide belongs to the platform, the
+# project never delivers it to the guest, and the runtime clears the bit out of the pad state on
+# every input path (docs/settings/contracts.md §2.3; src/input/remap.cpp). A row
+# offering to pass it through would be a row that could not keep its promise.

@@ -97,7 +97,7 @@ See [`engine/README.md`](engine/README.md) for the per-document summary.
 | --- | --- |
 | [`settings/status.md`](settings/status.md) | **The live record**: what ships, the owner punch list, every open item by package, the black-startup post-mortem, the earlier handover. |
 | [`settings/plan.md`](settings/plan.md) | The master plan: requirements, the merged menu's row-by-row specification, storage and precedence, the package sequence. |
-| [`settings/contracts.md`](settings/contracts.md) | The frozen contracts (P0): identifier/value/descriptor shapes, state model, file shapes, migration, file ownership, the launcher dev gate. |
+| [`settings/contracts.md`](settings/contracts.md) | The frozen contracts (P0): identifier/value/descriptor shapes, state model, file shapes, migration, file ownership, Controller Settings dev gate. |
 | [`settings/architecture.md`](settings/architecture.md) | How it is built: the guest bridge, the panel/list API, storage and service, boot wiring, the Ultimate provider adapter, hot apply and restart. |
 | [`settings/menu.md`](settings/menu.md) | The surfaces: the merged Help & Options screen, menu compatibility (hide list, pool, rename), Controller Settings, and the installer's folder pages. |
 | [`settings/graphics.md`](settings/graphics.md) | Resolution and graphics: what the title can actually render, the capability/policy rules, and what a non-16:9 frame costs. |
@@ -106,10 +106,11 @@ See [`engine/README.md`](engine/README.md) for the per-document summary.
 
 | Document | Status |
 | --- | --- |
-| [`plans/finished/2026-09-27-launcher-plan.md`](plans/finished/2026-09-27-launcher-plan.md) | The launcher's own plan; 27 prompts built, with the residual hand-check list. |
+| [`plans/finished/2026-09-27-launcher-plan.md`](plans/finished/2026-09-27-launcher-plan.md) | Controller Settings' own plan; 27 prompts built, with the residual hand-check list. |
 | [`plans/finished/2026-10-03-customization-plan.md`](plans/finished/2026-10-03-customization-plan.md) | The guest-side enhancement research plan that produced `engine/` and the toggle registry. |
 | [`plans/finished/2026-10-09-save-persistence-findings.md`](plans/finished/2026-10-09-save-persistence-findings.md) | Why offline saves did not persist, the fix, and the evidence. |
 | [`plans/finished/2026-10-10-song-cache-plan.md`](plans/finished/2026-10-10-song-cache-plan.md) | The three song-cache issues, all prompts done, with the measurements. |
+| [`plans/finished/2026-10-14-controller-settings-rename.md`](plans/finished/2026-10-14-controller-settings-rename.md) | The launcher → Controller Settings rename: the decisions, the compatibility names that were kept, and the three collisions the pass created. |
 | [`plans/todo/2026-10-10-shader-cache-findings.md`](plans/todo/2026-10-10-shader-cache-findings.md) | First-play stalls: what is established, and the proposed preparation/distribution work. |
 | [`plans/todo/2026-10-13-load-guard-findings.md`](plans/todo/2026-10-13-load-guard-findings.md) | Song Load Guard feasibility, with [`load-guard-prompts.md`](plans/todo/2026-10-13-load-guard-prompts.md) for implementation. |
 | [`plans/todo/2026-10-13-rhythmverse-store-plan.md`](plans/todo/2026-10-13-rhythmverse-store-plan.md) | Wiring the RhythmVerse customs catalogue into the retail store: research complete, no code yet. |

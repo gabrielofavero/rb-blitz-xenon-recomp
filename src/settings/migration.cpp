@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The migration in src/settings/migration.h. It reads the launcher profile as data (it does
+// The migration in src/settings/migration.h. It reads the profile as data (it does
 // not rewrite it): the controller tables, the retired keys and everything unknown stay where
 // they are so a person's hand edits survive, and the runtime simply stops applying the
 // retired rows once it narrows to the controller allowlist (P8). What moves into
@@ -19,9 +19,9 @@
 namespace rb_blitz::settings {
 
 namespace fs = std::filesystem;
-using rb_blitz::launcher::LaunchTargetName;
-using rb_blitz::launcher::Profile;
-using rb_blitz::launcher::ProfileSetting;
+using rb_blitz::profile::LaunchTargetName;
+using rb_blitz::profile::Profile;
+using rb_blitz::profile::ProfileSetting;
 
 namespace {
 
@@ -212,7 +212,7 @@ MigrationResult Migrate(const Profile& legacy, Store& store, const PathEntry& ex
   if (!options.legacy_usable) {
     result.status = MigrationStatus::kMalformedLegacy;
     result.diagnostics.push_back(
-        "the launcher profile could not be read; it is left untouched and no settings were "
+        "the profile could not be read; it is left untouched and no settings were "
         "imported");
     return result;
   }
@@ -237,7 +237,7 @@ MigrationResult Migrate(const Profile& legacy, Store& store, const PathEntry& ex
       if (ReadFileText(store_paths.legacy_profile, &text, &existed) && existed &&
           !WriteFileAtomic(backup, text, &error)) {
         result.status = MigrationStatus::kInterruptedResumed;
-        result.diagnostics.push_back("could not back up the launcher profile: " + error);
+        result.diagnostics.push_back("could not back up the profile: " + error);
         return result;
       }
     }
@@ -408,7 +408,7 @@ MigrationResult Migrate(const Profile& legacy, Store& store, const PathEntry& ex
     }
   } else {
     result.diagnostics.push_back(
-        "the launcher profile belongs to a different installation; its path fields were not "
+        "the profile belongs to a different installation; its path fields were not "
         "applied");
   }
 

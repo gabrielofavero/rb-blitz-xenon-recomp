@@ -19,7 +19,7 @@
 ;
 ;   the updater - the same wizard with the payload taken from the release
 ;   manifest instead of its own build, and with the pages it has no question
-;   about removed. The launcher runs it when the user accepts an update, so it
+;   about removed. Controller Settings runs it when the user accepts an update, so it
 ;   never carries a payload and never touches the install folder's shortcuts.
 ;
 ; The directories below can be overridden from the command line so a release can
@@ -58,13 +58,13 @@
 ; payload manifest, which the helper reads back at the end of the install.
 #define HelperExeName "rb_blitz_setup_helper.exe"
 #define GameExeName "rb_blitz.exe"
-#define LauncherExeName "rb_blitz_launcher.exe"
+#define ControllerSettingsExeName "rb_blitz_controller_settings.exe"
 #define GameDirName "game"
 
 ; The updater the setup executable places under the user's local application data
 ; (see "Updating" in README.md). build.ps1 compiles it from this same script with
 ; /DUpdaterMode=1 before the setup, so the setup can embed it - a build without it
-; is refused below rather than shipping a launcher whose Update button cannot work.
+; is refused below rather than shipping Controller Settings whose Update button cannot work.
 #ifndef UpdaterExeName
   #define UpdaterExeName "RockBandBlitzUpdater.exe"
 #endif
@@ -101,11 +101,16 @@
 #define SetupVersionQuad AppVersion + ".0"
 
 ; D9 names the two Start-menu shortcuts so a list can tell them apart: the game
-; keeps AppShortName and the launcher's shortcut names the role it has in this
-; release, which is Controller Settings (parent plan §9.2). The executable keeps
-; its own name - rb_blitz_launcher.exe - because shortcuts that already exist
-; point at it and renaming the file would break them.
-#define LauncherShortcutName AppShortName + " Controller Settings"
+; keeps AppShortName and Controller Settings' shortcut names the role it has in this
+; release, which is Controller Settings (parent plan §9.2).
+;
+; The executable was renamed with the rest of the application on 2026-10-14
+; (docs/plans/finished/2026-10-14-controller-settings-rename.md): it was
+; rb_blitz_launcher.exe, and shortcuts created before that date point at the old file.
+; Nothing had shipped (the product is pre-1.0), so this script ships the new name only
+; - and [UninstallDelete] still names the old one, so an install made from a pre-rename
+; build is cleaned up rather than leaving a dead executable behind.
+#define ControllerSettingsShortcutName AppShortName + " Controller Settings"
 
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
@@ -211,8 +216,8 @@ DiskSpaceMBLabel=The game data you provide is not counted here; the free space i
 ; since deleted is not an update's job.
 #ifndef UpdaterMode
 Name: "startmenu"; Description: "Create a &Start menu shortcut for the game"; Flags: unchecked
-Name: "startmenulauncher"; Description: "Create a Start menu shortcut for &Controller Settings"; Flags: unchecked
-Name: "launchericon"; Description: "Create a &desktop shortcut for Controller Settings"; Flags: unchecked
+Name: "startmenucontroller"; Description: "Create a Start menu shortcut for &Controller Settings"; Flags: unchecked
+Name: "controllericon"; Description: "Create a &desktop shortcut for Controller Settings"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 #endif
 
@@ -233,7 +238,7 @@ Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: onlyifdo
 #endif
 #ifndef UpdaterMode
 ; The updater, under the user's local application data rather than in the install
-; folder: the launcher looks for it there, and the install folder is the game's own
+; folder: Controller Settings looks for it there, and the install folder is the game's own
 ; (the payload audit lists what may ship in it). It is small - a wizard with no
 ; payload in it - and [UninstallDelete] takes it away again.
 Source: "{#UpdaterExePath}"; DestDir: "{localappdata}\{#UpdateDirName}\update"; Flags: ignoreversion
@@ -252,14 +257,14 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 ; Controller Settings' takes none; it finds the game beside itself.
 #ifndef UpdaterMode
 Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: startmenu
-Name: "{autoprograms}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: startmenulauncher
+Name: "{autoprograms}\{#ControllerSettingsShortcutName}"; Filename: "{app}\{#ControllerSettingsExeName}"; WorkingDir: "{app}"; Tasks: startmenucontroller
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeName}"; WorkingDir: "{app}"; Tasks: launchericon
+Name: "{autodesktop}\{#ControllerSettingsShortcutName}"; Filename: "{app}\{#ControllerSettingsExeName}"; WorkingDir: "{app}"; Tasks: controllericon
 #endif
 
 ; D8 replaced the single postinstall [Run] entry with the finish page's three-way
 ; choice (see [Code] below): Inno can run at most one entry with a checkbox, and
-; the wizard now asks open game / open launcher / do nothing.
+; the wizard now asks open game / open Controller Settings / do nothing.
 
 [UninstallDelete]
 ; Files the helper wrote that Inno Setup never saw: the ones it downloaded, the
@@ -267,12 +272,15 @@ Name: "{autodesktop}\{#LauncherShortcutName}"; Filename: "{app}\{#LauncherExeNam
 ; by the uninstaller, so these entries only cost a failed delete.
 Type: files; Name: "{app}\{#HelperExeName}"
 Type: files; Name: "{app}\{#GameExeName}"
-; The launcher travels in the payload (see tools/make_payload.ps1) and is deleted
+; Controller Settings travels in the payload (see tools/make_payload.ps1) and is deleted
 ; with the rest of it. launcher.toml and paths.toml are deliberately not listed:
 ; they are the user's own settings - and the two folders the user chose - and they
 ; survive an uninstall, like the game data (Contract 4). The helper's own cleanup
 ; keeps them for the same reason.
-Type: files; Name: "{app}\{#LauncherExeName}"
+Type: files; Name: "{app}\{#ControllerSettingsExeName}"
+; The name the executable had before the 2026-10-14 rename: an install made from an
+; earlier build has this file, and nothing else would take it away.
+Type: files; Name: "{app}\rb_blitz_launcher.exe"
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\payload-manifest.toml"
 Type: files; Name: "{app}\install-manifest.toml"
@@ -283,7 +291,7 @@ Type: filesandordirs; Name: "{app}\.staging"
 Type: filesandordirs; Name: "{app}\{#GameDirName}\.staging"
 ; The updater the setup placed under the user's local application data, and the
 ; folder it lives in. It is outside the install folder on purpose (D19): the
-; launcher runs it, and a second copy of an installer inside the game's own
+; Controller Settings runs it, and a second copy of an installer inside the game's own
 ; directory would be one more file the payload audit has to allow.
 Type: filesandordirs; Name: "{localappdata}\{#UpdateDirName}\update"
 Type: dirifempty; Name: "{app}"
@@ -335,8 +343,8 @@ const
 
   { The updater: a second build of this script (/DUpdaterMode=1) that carries no
     payload and installs the build the release manifest names. The setup executable
-    puts it under the user's local application data, where the launcher looks for it
-    (launcher/src/update_launcher.cpp resolves the same folder). }
+    puts it under the user's local application data, where Controller Settings looks for it
+    (controller-settings/src/updater.cpp resolves the same folder). }
   UpdaterDirName = '{#UpdateDirName}';
   UpdaterLeafDir = 'update';
   UpdateManifestRel = 'rbblitz-update.toml';
@@ -348,12 +356,12 @@ const
   UltimateSourceParam = 'ULTIMATESOURCE';
   UltimateZipParam = 'ULTIMATEZIP';
   UltimateFolderParam = 'ULTIMATEFOLDER';
-  LauncherIconParam = 'LAUNCHERICON';
+  LegacyIconParam = 'LAUNCHERICON';
   ControllerIconParam = 'CONTROLLERICON';
   RunAtEndParam = 'RUNATEND';
   { The two external folders (parent plan §9.1). Given, they answer for a silent
     install the way the folder page does; not given, whatever the installation's own
-    paths.toml or the user's old launcher profile says is kept. Given *empty*, they
+    paths.toml or the user's old settings profile says is kept. Given *empty*, they
     mean "the game's own folder", which is a different answer from "not given". }
   DlcDirParam = 'DLCDIR';
   SaveDirParam = 'SAVEDIR';
@@ -374,9 +382,9 @@ const
   RunAtEndLauncher = 'launcher';
   RunAtEndNothing = 'none';
 
-  { The launcher's desktop icon: the [Tasks] name, shared by the [Icons] entry
+  { Controller Settings' desktop icon: the [Tasks] name, shared by the [Icons] entry
     and the code that applies D9's default and the silent switch above. }
-  LauncherIconTask = 'launchericon';
+  ControllerIconTask = 'controllericon';
 
   { Page indexes. }
   MethodPackage = 0;
@@ -400,7 +408,7 @@ const
   PayloadSizeBytes = {#PayloadSize};
   PayloadIsDownload = {#PayloadHasDownload};
   UltimateArchiveBytes = {#UltimateSize};
-  { The release manifest a launcher checks and the updater installs from. Empty in
+  { The release manifest Controller Settings checks and the updater installs from. Empty in
     a build that has no release channel, which the updater then says out loud. }
   UpdateManifestUrl = '{#UpdateManifestUrl}';
 
@@ -567,7 +575,7 @@ begin
   Result := RemoveQuotes(Trim(ExpandConstant('{param:ULTIMATEFOLDER|}')));
 end;
 
-function ParamLauncherIcon: String;
+function ParamLegacyIcon: String;
 begin
   Result := Trim(ExpandConstant('{param:LAUNCHERICON|}'));
 end;
@@ -851,7 +859,7 @@ end;
 //
 // Failing here ends Setup: the updater has no payload of its own, so there is
 // nothing it could install without the manifest, and saying so is the only honest
-// answer. The launcher's Update button is still there, so the user can try again.
+// answer. Controller Settings' Update button is still there, so the user can try again.
 function FetchUpdateManifest: Boolean;
 var
   reason: String;
@@ -1410,7 +1418,7 @@ begin
 end;
 
 // Fills the two fields. The order is parent plan §9.1's: the unattended parameter,
-// the installation's own paths.toml, the launcher profile the game used to read, then
+// the installation's own paths.toml, the profile the game used to read, then
 // the default - which is an empty field, meaning "the game's own folder". A field the
 // user has already answered is never overwritten, so browsing for an install folder
 // does not undo a DLC folder they typed a moment ago.
@@ -1431,7 +1439,7 @@ begin
     if dir <> '' then
     begin
       args := 'read-paths --install-dir ' + QuoteArg(dir);
-      // The old launcher profile is only consulted when this install is not running
+      // The old settings profile is only consulted when this install is not running
       // elevated: an administrator's own profile is not the player's, and the file
       // it names would be imported into the wrong person's install (§9.1).
       if not IsAdminInstallMode then
@@ -1573,8 +1581,8 @@ begin
     if Trim(item) = name then
       Result := True;
   end;
-  if (not Result) and (name = LauncherIconTask) then
-    Result := (ParamLauncherIcon = '1') or (ParamControllerIcon = '1');
+  if (not Result) and (name = ControllerIconTask) then
+    Result := (ParamLegacyIcon = '1') or (ParamControllerIcon = '1');
 end;
 
 procedure ApplyTaskDefaults;
@@ -1584,8 +1592,8 @@ var
 begin
   SetLength(names, 4);
   names[0] := 'startmenu';
-  names[1] := 'startmenulauncher';
-  names[2] := LauncherIconTask;
+  names[1] := 'startmenucontroller';
+  names[2] := ControllerIconTask;
   names[3] := 'desktopicon';
   for index := 0 to 3 do
   begin
@@ -2081,7 +2089,7 @@ begin
   UpdateMethodPicker;
   UpdateUltimatePicker;
   LayoutLocationFields;
-  // The page the folder starts on, and whatever paths.toml or the user's old launcher
+  // The page the folder starts on, and whatever paths.toml or the user's old Controller Settings
   // profile already say about the other two. A silent install has no page to change
   // them on, so this is also what it will write.
   PrefillLocations;
@@ -2422,7 +2430,7 @@ begin
       SuppressibleMsgBox('The new build could not be installed:' + kCrLf + kCrLf + gFailureText +
                          kCrLf + kCrLf +
                          'Nothing was changed. Check your internet connection and run the ' +
-                         'update again from the launcher.', mbError, MB_OK, IDOK);
+                         'update again from Controller Settings.', mbError, MB_OK, IDOK);
       Exit;
     end;
     NoteSource(gStageSummaryFile, 'source', 'version', gPayloadSource, gPayloadVersion);
@@ -2749,9 +2757,9 @@ begin
 end;
 
 // D8: the chosen action, after the wizard has closed. The game is started with
-// the same argument its shortcut carries, and it reads the launcher's profile on
+// the same argument its shortcut carries, and it reads Controller Settings' profile on
 // its own (Contract 3), so this honours the target the install left behind
-// without a second process; the launcher's entry is the launcher itself.
+// without a second process; Controller Settings' entry is Controller Settings itself.
 procedure DeinitializeSetup;
 var
   exePath, parameters: String;
@@ -2770,7 +2778,7 @@ begin
   end
   else if gRunAtEnd = RunAtEndController then
   begin
-    exePath := ExpandConstant('{app}\{#LauncherExeName}');
+    exePath := ExpandConstant('{app}\{#ControllerSettingsExeName}');
     parameters := '';
   end
   else

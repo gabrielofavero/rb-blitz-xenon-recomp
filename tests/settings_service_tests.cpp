@@ -188,7 +188,7 @@ void TestDurableEditReload() {
   CHECK_TRUE(
       service.Set(mixed, SettingId::kVsync, BoolV(false), service.capability_revision()).ok);
   // Stage *the other* value of the restart row: its compiled default is `true` (it took the setting
-  // over from the launcher flag, P11b) and a commit that writes the value a row already holds is
+  // over from Controller Settings flag, P11b) and a commit that writes the value a row already holds is
   // `kNoChanges` - so staging `true` here would leave the session with nothing to save.
   const bool cache_now = service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
   CHECK_TRUE(service.Set(mixed, SettingId::kCacheDlcLibrary, BoolV(!cache_now),
@@ -463,9 +463,9 @@ void TestCvarVocabulary() {
 
   BeginCase("cvars: the allowlist keeps the controller rows and retires the rest");
   {
-    // What a legacy launcher profile carries: two controller rows, the retired Guide pair, and the
+    // What a legacy Controller Settings profile carries: two controller rows, the retired Guide pair, and the
     // native rows that are about to become the game's own settings file's business (P8).
-    rb_blitz::launcher::ProfileSetting rows[6];
+    rb_blitz::profile::ProfileSetting rows[6];
     rows[0].key = "mouse_ui_nav";
     rows[0].value = "true";
     rows[1].key = "input_backend";
@@ -478,10 +478,10 @@ void TestCvarVocabulary() {
     rows[4].value = "D:\\Saves";
     rows[5].key = "dlc_root";
     rows[5].value = "D:\\DLC";
-    const std::vector<rb_blitz::launcher::ProfileSetting> all(
+    const std::vector<rb_blitz::profile::ProfileSetting> all(
         std::begin(rows), std::end(rows));
 
-    const std::vector<rb_blitz::launcher::ProfileSetting> kept = ControllerProfileRows(all);
+    const std::vector<rb_blitz::profile::ProfileSetting> kept = ControllerProfileRows(all);
     CHECK_EQ(kept.size(), 2u);
     if (kept.size() == 2) {
       CHECK_TRUE(kept[0].key == "mouse_ui_nav" && kept[0].value == "true");
@@ -489,16 +489,16 @@ void TestCvarVocabulary() {
     }
     // Nothing to keep is not an error, and a table of only retired rows keeps nothing.
     CHECK_EQ(ControllerProfileRows({}).size(), 0u);
-    const std::vector<rb_blitz::launcher::ProfileSetting> retired(rows + 2, rows + 4);
+    const std::vector<rb_blitz::profile::ProfileSetting> retired(rows + 2, rows + 4);
     CHECK_EQ(ControllerProfileRows(retired).size(), 0u);
   }
 
   BeginCase("cvars: the profile rows the game applies keep the host rows too");
   {
     // P11b's cutover narrows the applied set to what the in-game tree cannot own: the controller
-    // rows and the launcher-only host rows. A row the game has a settings row for is *not* applied
+    // rows and the host-only host rows. A row the game has a settings row for is *not* applied
     // (that is what keeps the in-game copy editable), and neither is the retired Guide pair.
-    rb_blitz::launcher::ProfileSetting rows[9];
+    rb_blitz::profile::ProfileSetting rows[9];
     rows[0].key = "mouse_ui_nav";
     rows[0].value = "false";
     rows[1].key = "audio_mute";
@@ -518,8 +518,8 @@ void TestCvarVocabulary() {
     rows[8].key = "guide_button";
     rows[8].value = "true";
 
-    const std::vector<rb_blitz::launcher::ProfileSetting> all(std::begin(rows), std::end(rows));
-    const std::vector<rb_blitz::launcher::ProfileSetting> kept =
+    const std::vector<rb_blitz::profile::ProfileSetting> all(std::begin(rows), std::end(rows));
+    const std::vector<rb_blitz::profile::ProfileSetting> kept =
         ProfileRowsTheGameApplies(all);
     CHECK_EQ(kept.size(), 4u);
     if (kept.size() == 4) {
@@ -528,11 +528,11 @@ void TestCvarVocabulary() {
       CHECK_TRUE(kept[2].key == "monitor");
       CHECK_TRUE(kept[3].key == "present_safe_area_x" && kept[3].value == "0.9");
     }
-    CHECK_TRUE(IsLauncherOnlyCvar("present_dither"));
-    CHECK_TRUE(IsLauncherOnlyCvar("present_allow_overscan_cutoff"));
-    CHECK_TRUE(IsLauncherOnlyCvar("audio_maxqframes"));
-    CHECK_FALSE(IsLauncherOnlyCvar("mouse_ui_nav"));
-    CHECK_FALSE(IsLauncherOnlyCvar("vsync"));
+    CHECK_TRUE(IsHostOnlyCvar("present_dither"));
+    CHECK_TRUE(IsHostOnlyCvar("present_allow_overscan_cutoff"));
+    CHECK_TRUE(IsHostOnlyCvar("audio_maxqframes"));
+    CHECK_FALSE(IsHostOnlyCvar("mouse_ui_nav"));
+    CHECK_FALSE(IsHostOnlyCvar("vsync"));
     CHECK_EQ(ProfileRowsTheGameApplies({}).size(), 0u);
   }
 
@@ -556,11 +556,11 @@ void TestCvarVocabulary() {
   policy.purchased_mask = 0xFF;
   policy.trial_mask = 0x01;
   const std::vector<CvarAssignment> ultimate =
-      TargetToCvars(rb_blitz::launcher::LaunchTarget::kUltimate, policy);
+      TargetToCvars(rb_blitz::profile::LaunchTarget::kUltimate, policy);
   CHECK_TRUE(ultimate[0].name == "ultimate_mode" && ultimate[0].value == "1");
   CHECK_TRUE(ultimate[1].name == "license_mask" && ultimate[1].value == "255");
   const std::vector<CvarAssignment> demo =
-      TargetToCvars(rb_blitz::launcher::LaunchTarget::kDemo, policy);
+      TargetToCvars(rb_blitz::profile::LaunchTarget::kDemo, policy);
   CHECK_TRUE(demo[0].value == "0" && demo[1].value == "1");
 
   BeginCase("cvars: precedence ranks put explicit sources above the settings file");

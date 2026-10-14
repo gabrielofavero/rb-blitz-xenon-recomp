@@ -16,7 +16,7 @@ work directories, the development gate, and the hand-off readiness of P1/P2/P3.
 Read order for an execution agent: the parent plan first (requirements, gates, ownership), then
 this file for the frozen names. Where the two disagree, **this file wins for names and interfaces**
 and the parent plan wins for product behavior. `docs/plans/finished/2026-09-27-launcher-plan.md` is superseded where it
-disagrees about settings ownership, launcher scope, resolution, or installer defaults (§1 of the
+disagrees about settings ownership, Controller Settings scope, resolution, or installer defaults (§1 of the
 parent plan).
 
 Evidence labels: **measured** = executed/observed in this pass; **source** = read from the
@@ -33,7 +33,7 @@ repository; **frozen** = a decision made here, binding on P1–P12.
 | Worktree | **clean** — `git status --porcelain` returns nothing |
 | Staged/unstaged work | **none** — the song-cache work the parent plan describes as "staged" is now committed (see `fd4b436`, `3f99544`, `7219e8b`, `1e40765`) |
 | Stashes | none |
-| `launcher/out/generated/settings_table.h` | present (generated, gitignored) — the launcher schema has been built at least once in this checkout |
+| `controller-settings/out/generated/settings_table.h` | present (generated, gitignored) — Controller Settings schema has been built at least once in this checkout |
 
 `git log --oneline -5`:
 
@@ -77,8 +77,8 @@ checkout is moved or copied, delete and reconfigure rather than building into th
 
 `local_save`, `crypto_keytable`, `payload_overlay`, `path_policy`, `fingerprint`, `ui_nav`,
 `probe_trace`, `dlc_layout`, `dlc_library`, `dlc_cache`, `refresh_state`, `menu_music_pool`,
-`menu_options`, `ultimate_plan`, `toolchain`, `launcher_profile`, `launcher_general`,
-`launcher_session`, `launcher_remap`, `launcher_update`, `launcher_launch`, `launcher_nav`.
+`menu_options`, `ultimate_plan`, `toolchain`, `controller_settings_profile`, `controller_settings_general`,
+`controller_settings_session`, `controller_settings_remap`, `controller_settings_update`, `controller_settings_launch`, `controller_settings_nav`.
 
 The installer helper's `installer` test lives in the separate `installer/` preset tree and is **not**
 part of the 22. Registering a new test is a change to a **shared file** (§9) and is the
@@ -92,14 +92,14 @@ P8 must keep the *complete* non-Guide controller functionality, so the inventory
 authoritative list of what "Controller Settings" owns. It is deliberately wider than the schema:
 most of the controller surface is **bespoke UI**, not schema rows.
 
-### 2.1 Schema rows (`launcher/config/settings.toml`)
+### 2.1 Schema rows (`controller-settings/config/settings.toml`)
 
 | Key | Tab/group | Disposition (parent plan §3.5/§9.3) |
 | --- | --- | --- |
 | `mouse_ui_nav` | controller / Input | **Keep** (controller-owned) |
 | `guide_button` | controller / Input | **Remove** row; Guide prohibited project-wide |
 
-The launcher tab order is `general`, `interface`, `graphics`, `controller`; the graphics tab is
+Controller Settings tab order is `general`, `interface`, `graphics`, `controller`; the graphics tab is
 labelled "Audio / Video" and also holds the audio rows. There is deliberately no
 input-form/`input_backend` row (source comment in `settings.toml`; the cvar is hand-edit only).
 
@@ -107,16 +107,16 @@ input-form/`input_backend` row (source comment in `settings.toml`; the cvar is h
 
 | Module | What it is |
 | --- | --- |
-| `launcher/src/controller_tab.{h,cpp}` | The button-mapping block: **17 controls** (`kControlRows = 17`), one *Assign* + one *Reset* per control, then *Reset all* (`kRowCount = 17*2+1 = 63`). 3 s listening window, multi-source bindings ("several inputs, one button"), rising-edge capture over keyboard/pad/mouse. Guide is a row **and** an SDL capture case (`SDL_GAMEPAD_BUTTON_GUIDE -> remap::Target::kGuide`). |
-| `src/launcher/remap.{h,cpp}` | The shared vocabulary the launcher writes and the game reads: `Target` (17 values incl. `kGuide`), `Source` (`pad:` / `key:` / `mouse:`), `Table`, `DefaultSources`, `Apply`. SDK-free and SDL-free. |
-| `launcher/src/pad_nav.{h,cpp}` | Pad-driven focus navigation for the launcher window. |
-| `launcher/src/pad_source.{h,cpp}` | `PadRegistry` — the launcher's opened pads (A3); the focus ring and the capture both read it. |
-| `launcher/src/virtual_pad.{h,cpp}` | Virtual/SDL pad synthesis used by the launcher UI. |
-| `launcher/src/nav.{h,cpp}`, `nav_bindings.{h,cpp}`, `nav_keys.{h,cpp}` | Launcher navigation rebinding (`[nav]` table), key capture, safe-mode recovery. |
+| `controller-settings/src/controller_tab.{h,cpp}` | The button-mapping block: **17 controls** (`kControlRows = 17`), one *Assign* + one *Reset* per control, then *Reset all* (`kRowCount = 17*2+1 = 63`). 3 s listening window, multi-source bindings ("several inputs, one button"), rising-edge capture over keyboard/pad/mouse. Guide is a row **and** an SDL capture case (`SDL_GAMEPAD_BUTTON_GUIDE -> remap::Target::kGuide`). |
+| `src/profile/remap.{h,cpp}` | The shared vocabulary Controller Settings writes and the game reads: `Target` (17 values incl. `kGuide`), `Source` (`pad:` / `key:` / `mouse:`), `Table`, `DefaultSources`, `Apply`. SDK-free and SDL-free. |
+| `controller-settings/src/pad_nav.{h,cpp}` | Pad-driven focus navigation for Controller Settings window. |
+| `controller-settings/src/pad_source.{h,cpp}` | `PadRegistry` — Controller Settings' opened pads (A3); the focus ring and the capture both read it. |
+| `controller-settings/src/virtual_pad.{h,cpp}` | Virtual/SDL pad synthesis used by Controller Settings UI. |
+| `controller-settings/src/nav.{h,cpp}`, `nav_bindings.{h,cpp}`, `nav_keys.{h,cpp}` | Controller Settings navigation rebinding (`[nav]` table), key capture, safe-mode recovery. |
 | `src/input/remap.cpp` | Game side: installs the `[remap]` state filter via `InputSystem::SetStateFilter` (SDK patch `0010`), reading the *same* shared table. |
 | `src/input/mouse_ui.{h,cpp}`, `ui_nav.h`, `nav_detect.h` | Mouse-as-pad navigation in the game; the cursor rule in `OnCreateDialogs`. |
-| `launcher/src/profile_session.{h,cpp}`, `settings_edit.{h,cpp}`, `row_ui.{h,cpp}`, `focus_*` | The editing/write plumbing the reduced screen must reuse. |
-| `launcher/README.md` §"Controller" | Documents the 17-target grammar incl. `guide`. Must be updated, not treated as code. |
+| `controller-settings/src/profile_session.{h,cpp}`, `settings_edit.{h,cpp}`, `row_ui.{h,cpp}`, `focus_*` | The editing/write plumbing the reduced screen must reuse. |
+| `controller-settings/README.md` §"Controller" | Documents the 17-target grammar incl. `guide`. Must be updated, not treated as code. |
 
 ### 2.3 Guide — every place it must be excluded (measured)
 
@@ -125,10 +125,10 @@ third-party SDL and `xam_ui` stubs are out of scope and not touched):
 
 | Location | Role |
 | --- | --- |
-| `launcher/config/settings.toml` (`guide_button`) | schema row (remove) |
-| `src/launcher/remap.cpp:38` | `{Target::kGuide, "guide", "Guide", 0x0400}` — vocabulary + guest bit `0x0400` |
-| `src/launcher/remap.h` | `Target::kGuide` enumerator; comments that Guide has no default |
-| `launcher/src/controller_tab.cpp:44` | SDL capture maps the Guide button to `Target::kGuide` |
+| `controller-settings/config/settings.toml` (`guide_button`) | schema row (remove) |
+| `src/profile/remap.cpp:38` | `{Target::kGuide, "guide", "Guide", 0x0400}` — vocabulary + guest bit `0x0400` |
+| `src/profile/remap.h` | `Target::kGuide` enumerator; comments that Guide has no default |
+| `controller-settings/src/controller_tab.cpp:44` | SDL capture maps the Guide button to `Target::kGuide` |
 | `rexglue-sdk/src/input/input_system.cpp:30` | `guide_button` cvar (SDK-owned; exposed by our schema) |
 | `rexglue-sdk/src/input/sdl/sdl_input_driver.cpp:580,660` | the cvar's consumers (mask/OR the guide bit into the guest state) |
 | `rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:59,298` | `keybind_guide` cvar (keyboard → guide bit) |
@@ -149,8 +149,8 @@ accurate. Two additions worth recording because they are the real seams the cont
 
 | Area | Verified path | Note |
 | --- | --- | --- |
-| Profile apply (game reads launcher profile) | `src/launcher/profile_apply.{h,cpp}` | Applies **all** `[settings]` rows at config rank in `OnConfigurePaths`; this is the function §8 narrows to the allowlist. |
-| Profile location | `src/launcher/profile_path.{h,cpp}` | `ResolveProfilePath` order: `--launcher_profile` → `RBBLITZ_LAUNCHER_PROFILE` → `<settings_dir>/launcher.toml` (pointer `settings_dir.txt`) → portable marker → `%APPDATA%\rb_blitz\launcher.toml`. Frozen as the base for the native-settings sibling mapping (§5). |
+| Profile apply (game reads Controller Settings profile) | `src/profile/profile_apply.{h,cpp}` | Applies **all** `[settings]` rows at config rank in `OnConfigurePaths`; this is the function §8 narrows to the allowlist. |
+| Profile location | `src/profile/profile_path.{h,cpp}` | `ResolveProfilePath` order: `--launcher_profile` → `RBBLITZ_CONTROLLER_SETTINGS_PROFILE` → `<settings_dir>/launcher.toml` (pointer `settings_dir.txt`) → portable marker → `%APPDATA%\rb_blitz\launcher.toml`. Frozen as the base for the native-settings sibling mapping (§5). |
 | Path policy | `src/fs/path_policy.h` | `IsSameOrInside` (weakly-canonical walk; deliberately not `std::filesystem::relative`). Shared by installer and runtime validation. |
 | DLC layout policy | `src/fs/dlc_layout.h`, `src/fs/dlc_library.h`, `src/fs/dlc_cache.h` | Installer validation reuses these. |
 | App lifecycle | `src/rb_blitz_app.h` | `OnPreSetup`, `OnConfigurePaths`, `OnPostLoadXexImage`, `OnPreLaunchModule`, `OnPostInitLogging`, `OnCreateDialogs`. No `OnFinalizePaths`/`OnShutdown` override today. |
@@ -195,7 +195,7 @@ intact**; it is never reinterpreted and never overwritten.
 Namespace `rb_blitz::settings`. These declarations are the contract; **P3 materializes them
 verbatim** in `src/settings/{model,schema,store,migration,paths,service}.h` (its owned files). P1/P5
 consume them; a signature change is a coordinator-reviewed contract change (§10), not a worker
-decision. The model uses `rb_blitz::launcher::LaunchTarget` (`kCommon`/`kDemo`/`kUltimate`) directly
+decision. The model uses `rb_blitz::profile::LaunchTarget` (`kCommon`/`kDemo`/`kUltimate`) directly
 — **no second target enum** — so the stored spelling stays `common`/`demo`/`ultimate`
 (`LaunchTargetName`/`ParseLaunchTarget`).
 
@@ -319,7 +319,7 @@ struct CapabilitySnapshot {
   std::vector<DisplayMode> display_modes;        // truthful, deduped; may be empty
   std::vector<RendererCapability> renderers;     // built/detected/usable/active
   std::vector<DisplayMode> supported_resolutions;// exact render dims the render path supports
-  rb_blitz::launcher::LaunchTarget active_target = rb_blitz::launcher::LaunchTarget::kCommon;
+  rb_blitz::profile::LaunchTarget active_target = rb_blitz::profile::LaunchTarget::kCommon;
   ProviderState provider;
 };
 
@@ -414,7 +414,7 @@ struct MigrationResult {
   bool wrote_paths = false;
 };
 
-MigrationResult Migrate(const rb_blitz::launcher::Profile& legacy,
+MigrationResult Migrate(const rb_blitz::profile::Profile& legacy,
                         Store& store, const PathEntry& existing_paths);
 ```
 
@@ -571,12 +571,12 @@ Refresh Song Library.
 
 ## 8. Runtime controller allowlist (frozen)
 
-Today `ApplyLauncherProfileSettings` (`src/launcher/profile_apply.cpp`) applies **every** `[settings]`
+Today `ApplyProfileSettings` (`src/profile/profile_apply.cpp`) applies **every** `[settings]`
 row from `launcher.toml` at the config rank. After migration that would leave retired native fields
 active. Frozen:
 
 ```cpp
-// The only cvars the runtime applies from the legacy launcher profile once migration is complete.
+// The only cvars the runtime applies from the legacy Controller Settings profile once migration is complete.
 // Everything else in its [settings] table is inert preservation data.
 inline constexpr std::string_view kControllerCvarAllowlist[] = {
     "mouse_ui_nav",     // controller-owned; Controller Settings writes it
@@ -586,7 +586,7 @@ inline constexpr std::string_view kControllerCvarAllowlist[] = {
 
 `guide_button` and `keybind_guide` are **excluded** by design (§2.3). The `[remap]` and `[nav]`
 tables, window geometry, and the `[update]` table remain controller-owned. P8/P11 narrow
-`ApplyLauncherProfileSettings` to this allowlist; P3 supplies the constant. Explicit developer
+`ApplyProfileSettings` to this allowlist; P3 supplies the constant. Explicit developer
 config/environment/CLI overrides still win over the profile.
 
 ---
@@ -605,7 +605,7 @@ config/environment/CLI overrides still win over the profile.
 | New native menu code and schema | P5 |
 | Ultimate adapter and exact-file routing | P6 (VFS dispatch hooks coordinated centrally) |
 | `installer/setup.iss`, installer helper, pins/template labels, installer tests | P7 (P9 must not repurpose installer helpers) |
-| `launcher/`, `src/input/remap.*`, controller parts of `src/launcher/` | P8, after P3 migration is done |
+| `controller-settings/`, `src/input/remap.*`, controller parts of `src/profile/` | P8, after P3 migration is done |
 | `src/ui/menu_options.*`, `src/hooks/menu_filter.*`, `src/hooks/shell_music.*`, relevant enhancements | P10 (respect the committed song-cache work) |
 | New restart code + early bootstrap wiring | P9 (bootstrap wired by coordinator) |
 
@@ -619,16 +619,16 @@ config/environment/CLI overrides still win over the profile.
 - Work from a branch/worktree rooted at `1e40765` (clean). Do not fork from a stale `HEAD` and lose
   the committed song-cache work.
 
-### 9.3 Development gate (retain the launcher until G4)
+### 9.3 Development gate (retain Controller Settings until G4)
 
-- The full launcher (all tabs and rows) and the existing `settings.toml` schema stay the **default**
-  product surface until G4. Do **not** delete launcher settings UI before the coordinator approves
+- The full surface (all tabs and rows) and the existing `settings.toml` schema stay the **default**
+  product surface until G4. Do **not** delete Controller Settings settings UI before the coordinator approves
   G4/P11.
 - The new native menu is registered behind an internal developer gate (a hidden, default-off
   developer cvar, in the spirit of the existing `--show-dev-settings`), so it can be exercised
   without cutting over.
-- P8 reduces the launcher to Controller Settings **behind this gate** until G4; the file names
-  `rb_blitz_launcher.exe` and `launcher.toml` are retained for shortcut/profile compatibility.
+- P8 reduces Controller Settings to Controller Settings **behind this gate** until G4; the file names
+  `rb_blitz_controller_settings.exe` and `launcher.toml` are retained for shortcut/profile compatibility.
 
 ---
 

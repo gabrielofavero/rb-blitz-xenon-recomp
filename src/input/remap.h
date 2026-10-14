@@ -10,7 +10,7 @@
 // `InputSystem::SetStateFilter`), which runs once on the merged state, on its way to the guest.
 //
 // What the filter does with it is wholly in this project: the profile's `[remap]` table is read
-// with the same module the launcher writes it with (src/launcher/remap.h), so the two cannot
+// with the same module Controller Settings writes it with (src/profile/remap.h), so the two cannot
 // disagree about what a binding means, and the physical sources it names are read from SDL -
 // which is also where the SDK's own pad state comes from, so no translation is duplicated.
 //
@@ -35,13 +35,13 @@
 
 namespace rb_blitz::input {
 
-// Reads the launcher profile's `[remap]` table and filters every pad state the guest asks for.
+// Reads the profile's `[remap]` table and filters every pad state the guest asks for.
 // Installed the same way mouse_ui is - by wrapping RuntimeConfig::input_factory - because that is
 // where the input system is created and disposed of, and the filter has to be in place before the
 // guest starts polling.
 //
 // A missing or unreadable profile is not an error: no table means the pad is left alone, which is
-// also what a player who never opened the launcher gets. The filter is still installed, because
+// also what a player who never opened Controller Settings gets. The filter is still installed, because
 // the Guide prohibition is not conditional on a profile existing.
 void InstallPadRemap(rex::RuntimeConfig& config);
 

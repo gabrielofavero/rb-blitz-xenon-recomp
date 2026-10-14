@@ -7,7 +7,7 @@
 //
 // Every toggle here is off by default except R3 and R10. R10's subject is the
 // Ultimate mod's own name: it only does anything when that payload is installed, and
-// the launcher hides its row when it is not. R3's subject is a question with one
+// Controller Settings hides its row when it is not. R3's subject is a question with one
 // answer: with Rock Central gone, a start can only go offline, so the two questions
 // it asks first are asked to confirm what the game has already worked out. Every toggle is honest about what it does
 // today: a description that ends in "Not implemented" is a toggle that gates
@@ -80,15 +80,15 @@ REXCVAR_DEFINE_STRING(enhancements_hidden_menu_options, rb_blitz::menu_options::
 // The one toggle whose default is on, because its subject is the mod's own name:
 // the row only exists when the Ultimate payload is installed, and it only ever
 // reads "Mod Settings" there. A run without the payload has neither the file nor
-// the label, so the edit has nothing to do; the launcher hides the row in that
-// case too (launcher/config/settings.toml, `visible = "ultimate_installed"`).
+// the label, so the edit has nothing to do; Controller Settings hides the row in that
+// case too (controller-settings/config/settings.toml, `visible = "ultimate_installed"`).
 REXCVAR_DEFINE_BOOL(enhancements_rename_mod_settings, true, "Enhancements",
                     "R10 rename the mod's settings row: draw the row the Ultimate mod adds as "
                     "\"Ultimate Settings\", which is the name the mod itself uses. Faithful: the "
                     "mod's own label, \"Mod Settings\".")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-// R6 uses the existing launcher Input setting as its sole switch.
+// R6 uses the existing Controller Settings Input setting as its sole switch.
 REXCVAR_DECLARE(bool, mouse_ui_nav);
 
 REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, true, "Enhancements",

@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // One question about the writable roots src/rb_blitz_app.h configures: does a
-// directory the launcher asked for sit inside the read-only game root? Kept free of
+// directory Controller Settings asked for sit inside the read-only game root? Kept free of
 // any SDK dependency for the same reason src/fs/overlay_merge.h is - it is pure host
 // path arithmetic, and tests/path_policy_tests.cpp has to cover it without booting
 // the game (docs/reference/rb3-references.md §7.3).
@@ -49,7 +49,7 @@ inline bool SamePathElement(const std::filesystem::path& lhs,
 // no such case.
 //
 // An empty candidate or root, or a path that cannot be made absolute, answers false:
-// the caller keeps the launcher's override instead of relocating writable state
+// the caller keeps Controller Settings' override instead of relocating writable state
 // behind its back.
 inline bool IsSameOrInside(const std::filesystem::path& candidate,
                            const std::filesystem::path& root) {

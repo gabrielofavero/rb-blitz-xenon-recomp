@@ -8,7 +8,7 @@
 // (Windows backslashes need no escaping); a relative value resolves against the directory
 // containing the file, never the process working directory.
 //
-// The native settings file is a sibling of the legacy launcher profile, derived once from
+// The native settings file is a sibling of the legacy Controller Settings profile, derived once from
 // ResolveProfilePath so the game never starts reading preferences out of the save folder
 // when user_data_root changes (§4.1 mapping table):
 //
@@ -21,7 +21,7 @@
 #include <filesystem>
 #include <string>
 
-#include "launcher/profile_path.h"
+#include "profile/profile_path.h"
 
 namespace rb_blitz::settings {
 
@@ -61,9 +61,9 @@ std::filesystem::path ResolvePathValue(const std::string& value, const std::file
 // The native settings file that belongs to a resolved legacy profile path (§4.1).
 std::filesystem::path SettingsFileForProfile(const std::filesystem::path& legacy_profile);
 
-// Resolves the settings file from the launcher-environment inputs, adapting the existing
-// profile locator (explicit --launcher_profile / RBBLITZ_LAUNCHER_PROFILE / settings_dir.txt
+// Resolves the settings file from Controller Settings-environment inputs, adapting the existing
+// profile locator (explicit --launcher_profile / RBBLITZ_CONTROLLER_SETTINGS_PROFILE / settings_dir.txt
 // pointer / portable marker / %APPDATA%). Empty only when there is nowhere to keep settings.
-std::filesystem::path ResolveSettingsFile(const rb_blitz::launcher::ProfilePathInputs& inputs);
+std::filesystem::path ResolveSettingsFile(const rb_blitz::profile::ProfilePathInputs& inputs);
 
 }  // namespace rb_blitz::settings

@@ -199,7 +199,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     // The renderer row is the one choice a player can be misled by: what it offers is decided by the
     // build's backends (RBBLITZ_BACKENDS) plus the machine's Vulkan loader, so a single-choice row is
     // either a one-backend build or a machine with no loader - both worth saying out loud, in the
-    // same words the launcher prints for the payload (`payload renderer backends:`).
+    // same words Controller Settings prints for the payload (`payload renderer backends:`).
     if (const auto renderers = configuration.choices.find("graphics.renderer");
         renderers != configuration.choices.end() && !renderers->second.empty()) {
       std::string listed;

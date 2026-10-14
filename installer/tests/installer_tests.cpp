@@ -1072,7 +1072,7 @@ static void TestPayloadAndFinalize() {
     std::string_view text;
   };
   const Entry entries[] = {{kRuntimeExeName, "not really the runtime"},
-                           {kLauncherExeName, "not really the launcher"},
+                           {kControllerSettingsExeName, "not really Controller Settings"},
                            {"rb_blitz.toml", "[backend]\n"},
                            {"rexruntime.dll", "not really a dll"}};
 
@@ -1115,12 +1115,12 @@ static void TestPayloadAndFinalize() {
   CHECK_TRUE(payload.fingerprints_matched);
   CHECK_FALSE(payload.version.empty());
   CHECK_CONTAINS(payload.source, "folder");
-  // The payload carries both executables (R3): the game and its launcher.
+  // The payload carries both executables (R3): the game and its Controller Settings.
   CHECK_EQ(payload.executables.size(), 2u);
   CHECK_STR_EQ(payload.executables[0], kRuntimeExeName);
-  CHECK_STR_EQ(payload.executables[1], kLauncherExeName);
+  CHECK_STR_EQ(payload.executables[1], kControllerSettingsExeName);
   CHECK_TRUE(FileExists(app / kRuntimeExeName));
-  CHECK_TRUE(FileExists(app / kLauncherExeName));
+  CHECK_TRUE(FileExists(app / kControllerSettingsExeName));
   CHECK_TRUE(FileExists(app / "rexruntime.dll"));
   CHECK_TRUE(FileExists(app / kPayloadManifestName));
   CHECK_TRUE(FileExists(app / "rb_blitz.toml"));
@@ -1139,16 +1139,16 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(error, "does not match");
   WriteText(app / kRuntimeExeName, entries[0].text);
 
-  BeginCase("an install whose manifest lists a missing launcher fails loudly");
+  BeginCase("an install whose manifest lists a missing Controller Settings fails loudly");
 
-  // The launcher travels in the payload (P0.5/D1). A folder that still has the
-  // game but lost rb_blitz_launcher.exe must fail verification and name the file
-  // rather than install "successfully" into a launcher-less state.
-  fs::remove(app / kLauncherExeName);
+  // Controller Settings travels in the payload (P0.5/D1). A folder that still has the
+  // game but lost rb_blitz_controller_settings.exe must fail verification and name the file
+  // rather than install "successfully" into Controller Settings-less state.
+  fs::remove(app / kControllerSettingsExeName);
   CHECK_FALSE(VerifyPayload(app, embedded, &verify, &error));
   CHECK_CONTAINS(error, "does not match");
-  CHECK_CONTAINS(error, kLauncherExeName);
-  WriteText(app / kLauncherExeName, entries[1].text);
+  CHECK_CONTAINS(error, kControllerSettingsExeName);
+  WriteText(app / kControllerSettingsExeName, entries[1].text);
   CHECK_TRUE(VerifyPayload(app, embedded, &verify, &error));
 
   BeginCase("a payload zip installs the same way a folder does");
@@ -1175,7 +1175,7 @@ static void TestPayloadAndFinalize() {
   CHECK_EQ(from_zip.bytes, total);
   CHECK_CONTAINS(from_zip.source, "archive");
   CHECK_TRUE(FileExists(zip_app / kRuntimeExeName));
-  CHECK_TRUE(FileExists(zip_app / kLauncherExeName));
+  CHECK_TRUE(FileExists(zip_app / kControllerSettingsExeName));
   CHECK_TRUE(FileExists(zip_app / "rexruntime.dll"));
   CHECK_TRUE(FileExists(zip_app / kPayloadManifestName));
   CHECK_FALSE(DirectoryExists(StagingRoot(zip_app)));
@@ -1206,9 +1206,9 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(manifest_text, "1.0.0-test");
   CHECK_CONTAINS(manifest_text, "payload_commit = \"" + std::string(kStandInCommit) + "\"");
   // The manifest names the executables the payload laid down, so a support reader
-  // can see the launcher was installed (R3/D1).
-  CHECK_CONTAINS(manifest_text, "executables = [\"rb_blitz.exe\", \"rb_blitz_launcher.exe\"]");
-  // The fields the launcher's first-run prefill reads (launcher/src/prefill.cpp): the game
+  // can see Controller Settings was installed (R3/D1).
+  CHECK_CONTAINS(manifest_text, "executables = [\"rb_blitz.exe\", \"rb_blitz_controller_settings.exe\"]");
+  // The fields Controller Settings' first-run prefill reads (controller-settings/src/prefill.cpp): the game
   // folder the manifest records, and the game-data section it can fall back to. A support report
   // also needs the install folder and the versions.
   CHECK_CONTAINS(manifest_text, "installer_version = \"1.0.0-test\"");
@@ -1227,7 +1227,7 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(report_text, "an extracted folder");
   CHECK_CONTAINS(report_text, "test entry");
   CHECK_CONTAINS(report_text, "Commit     : " + std::string(kStandInCommit));
-  CHECK_CONTAINS(report_text, "Executables: rb_blitz.exe, rb_blitz_launcher.exe");
+  CHECK_CONTAINS(report_text, "Executables: rb_blitz.exe, rb_blitz_controller_settings.exe");
   // The report's header and its game-data section, which is what a person reads instead of the
   // manifest's tables.
   CHECK_CONTAINS(report_text, "Folder     : " + app.string());
@@ -1262,7 +1262,7 @@ static void TestPayloadAndFinalize() {
   // The manifest is the only record of a downloaded payload, so the payload
   // files go too and are not left behind for the uninstaller to find.
   CHECK_FALSE(FileExists(app / kRuntimeExeName));
-  CHECK_FALSE(FileExists(app / kLauncherExeName));
+  CHECK_FALSE(FileExists(app / kControllerSettingsExeName));
   CHECK_FALSE(FileExists(app / "rexruntime.dll"));
   CHECK_FALSE(removed.empty());
 
@@ -1389,7 +1389,7 @@ static void TestUltimate() {
 // not say what went wrong".
 // The release manifest, and the command that fetches it (D19). The file the
 // repository generates is cross-checked against the pins it came from - drift
-// between them would make a launcher offer an update that cannot be installed, or
+// between them would make Controller Settings offer an update that cannot be installed, or
 // miss the one that can.
 static void TestUpdateManifest() {
   BeginCase("the generated update manifest matches the pins it came from");
@@ -1562,7 +1562,7 @@ std::string ValidateSummary(const fs::path& install, const fs::path& summary,
 std::string Utf8(const fs::path& path) { return Narrow(path.lexically_normal().native()); }
 
 // The environment variable the game's own profile resolution reads. A machine
-// running these tests may have it set (someone testing the launcher), so it is
+// running these tests may have it set (someone testing Controller Settings), so it is
 // cleared for the cases that resolve a profile and put back afterwards.
 class ScopedEnv {
  public:
@@ -1883,9 +1883,9 @@ static void TestLocations() {
   CHECK_STR_EQ(unicode_file.paths.user_data_root, Utf8(unicode_saves));
 
   // --- the legacy profile as a prefill source ---------------------------
-  BeginCase("the old launcher's folders are read, never written");
+  BeginCase("the old Controller Settings's folders are read, never written");
 
-  const ScopedEnv no_override("RBBLITZ_LAUNCHER_PROFILE", "");
+  const ScopedEnv no_override("RBBLITZ_CONTROLLER_SETTINGS_PROFILE", "");
   const fs::path old_install = FreshDir("legacy/install");
   const fs::path appdata = FreshDir("legacy/appdata");
   EnsureDirectory(appdata / "rb_blitz", nullptr);
@@ -1910,8 +1910,8 @@ static void TestLocations() {
   CHECK_STR_EQ(legacy.dlc_dir, "D:\\Old DLC");
 
   // The portable marker beside the executable wins over the user's own profile,
-  // because that is where the launcher itself looked.
-  WriteText(old_install / "rb_blitz_launcher.portable", "");
+  // because that is where Controller Settings itself looked.
+  WriteText(old_install / "rb_blitz_controller_settings.portable", "");
   WriteText(old_install / "launcher.toml",
             "schema_version = 1\n\n[settings]\nuser_data_root = \"E:\\\\Portable Saves\"\n");
   legacy = ReadLegacyPaths(old_install, appdata);
@@ -1919,7 +1919,7 @@ static void TestLocations() {
   CHECK_TRUE(legacy.dlc_dir.empty());
 
   // A settings folder the user moved is named by the pointer in the default folder.
-  fs::remove(old_install / "rb_blitz_launcher.portable");
+  fs::remove(old_install / "rb_blitz_controller_settings.portable");
   const fs::path moved = FreshDir("legacy/moved");
   WriteText(moved / "launcher.toml",
             "schema_version = 1\n\n[settings]\nuser_data_root = \"F:\\\\Moved Saves\"\n");

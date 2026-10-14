@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The store in src/settings/store.h. The design mirrors launcher/profile.cpp's line patcher
+// The store in src/settings/store.h. The design mirrors controller-settings/profile.cpp's line patcher
 // on purpose — do not rewrite the whole document — but strengthens the write path to meet
 // parent plan §4.4:
 //

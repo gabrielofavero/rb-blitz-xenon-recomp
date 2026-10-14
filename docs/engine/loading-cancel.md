@@ -8,7 +8,7 @@
 > corrected reproducer below remain historical evidence.
 
 *Status: **cancelled, and removed from the tree** (2026-10-07). R11's toggle, its timeout cvar,
-its launcher rows and `src/hooks/loading_cancel.cpp` are gone. §§1-4 are the history - what the
+its Controller Settings rows and `src/hooks/loading_cancel.cpp` are gone. §§1-4 are the history - what the
 title does, what was measured, the one question that was never closed, and the shape the removed
 module had - and are kept because the measurements are the value here. The two sections that
 matter for a future attempt are §5, the verified recipe for putting this build's own text on the

@@ -22,7 +22,7 @@
 
 namespace rb_blitz::settings {
 
-using rb_blitz::launcher::Profile;
+using rb_blitz::profile::Profile;
 
 namespace {
 

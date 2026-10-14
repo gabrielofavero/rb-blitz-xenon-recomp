@@ -31,7 +31,7 @@
 #include "config.h"
 #include "download.h"
 #include "install.h"
-#include "launcher/profile_path.h"
+#include "profile/profile_path.h"
 #include "paths.h"
 #include "stfs.h"
 #include "util.h"
@@ -620,7 +620,7 @@ int CommandProbeArchive(const std::vector<std::string>& args) {
 
 // --- the update channel ---------------------------------------------------
 
-// Fetches update.toml - the release manifest a launcher's update check reads and
+// Fetches update.toml - the release manifest Controller Settings's update check reads and
 // the updater installs from - and reports what it says. The file is kept at
 // --dest so the updater can hand the same bytes to its stages, and the values are
 // reported even when the manifest turns out to be unusable, because the wizard
@@ -840,7 +840,7 @@ int CommandVerifyGame(const std::vector<std::string>& args) {
 // --- the two folders the game reads from (parent plan §9.1) ----------------
 
 // The folder page's prefill, and nothing else: it reads `<install>/paths.toml` and,
-// when the wizard asked for it, the launcher profile the user already has. Both are
+// when the wizard asked for it, the profile the user already has. Both are
 // read-only, so a page the user cancels costs nothing. The wizard resolves the same
 // order the plan names - unattended parameter, this file, the legacy profile, the
 // default - by asking for the parts and choosing between them itself.
@@ -875,7 +875,7 @@ int CommandReadPaths(const std::vector<std::string>& args) {
   // administrator's own profile is not the player's (parent plan §9.1).
   if (context.Has("legacy-appdir")) {
     const fs::path exe_dir = PathFromUtf8(context.Get("legacy-appdir"));
-    const LegacyPaths legacy = ReadLegacyPaths(exe_dir, launcher::RoamingAppDataDir());
+    const LegacyPaths legacy = ReadLegacyPaths(exe_dir, profile::RoamingAppDataDir());
     context.summary.Flag("legacy_checked", true);
     context.summary.Text("legacy_profile", Display(legacy.profile));
     context.summary.Flag("legacy_found", legacy.has_file);
@@ -1100,7 +1100,7 @@ int CommandVersion(const std::vector<std::string>& args) {
   context.summary.Flag("payload_download_pinned", pins.payload.HasDownload());
   context.summary.Text("ultimate", pins.ultimate.version);
   context.summary.Text("ultimate_url", pins.ultimate.url);
-  // The update channel, so a bug report can name what a launcher would look at and
+  // The update channel, so a bug report can name what Controller Settings would look at and
   // which release asked for the game files again.
   context.summary.Text("update_manifest_url", pins.update.manifest_url);
   context.summary.Flag("update_requires_game_data", pins.update.requires_game_data);

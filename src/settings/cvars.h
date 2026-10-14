@@ -17,12 +17,12 @@
 #include <string_view>
 #include <vector>
 
-#include "launcher/profile.h"
+#include "profile/profile.h"
 #include "settings/model.h"
 
 namespace rb_blitz::settings {
 
-// §8, frozen: the only cvars the runtime applies from the legacy launcher profile once
+// §8, frozen: the only cvars the runtime applies from the legacy Controller Settings profile once
 // migration is complete. Everything else in its [settings] table is inert preservation data.
 // `guide_button` and `keybind_guide` are excluded by design (contracts §2.3).
 inline constexpr std::string_view kControllerCvarAllowlist[] = {
@@ -43,19 +43,19 @@ inline bool IsControllerCvar(std::string_view name) {
   return false;
 }
 
-// §8's narrowing. The legacy launcher profile's `[settings]` table is a source of game preferences
+// §8's narrowing. The legacy Controller Settings profile's `[settings]` table is a source of game preferences
 // only until the game has its own settings file; after that the controller rows are the only part
 // of it that is still ours, and everything else in the table is inert preservation data - a record
-// of what the old launcher wrote, kept so a person's file is not rewritten, applied to nothing.
+// of what the old Controller Settings wrote, kept so a person's file is not rewritten, applied to nothing.
 //
-// One exception, added with the P11b cutover (2026-10-13): a handful of launcher rows are *host*
+// One exception, added with the P11b cutover (2026-10-13): a handful of Controller Settings rows are *host*
 // rows with no in-game settings row at all - the monitor pick, the two safe areas, dither, the
 // overscan cutoff and the two audio rows. Help & Options cannot express them, the store has no
-// descriptor for them, and the launcher's tabs remain their only editor, so the profile stays their
-// carrier for a boot nobody launched through the launcher (R4's promise). A row the in-game tree
+// descriptor for them, and Controller Settings' tabs remain their only editor, so the profile stays their
+// carrier for a boot nobody launched through Controller Settings (R4's promise). A row the in-game tree
 // owns is *not* in this list, however similar its name looks: `present_letterbox` (the SDK's mouse
 // mapping) and the Interface page's Letterbox row (the payload's own variable) are two settings.
-inline constexpr std::string_view kLauncherOnlyCvarAllowlist[] = {
+inline constexpr std::string_view kHostOnlyCvarAllowlist[] = {
     "monitor",
     "present_safe_area_x",
     "present_safe_area_y",
@@ -64,12 +64,12 @@ inline constexpr std::string_view kLauncherOnlyCvarAllowlist[] = {
     "audio_mute",
     "audio_maxqframes",
 };
-inline constexpr std::size_t kLauncherOnlyCvarAllowlistCount =
-    sizeof(kLauncherOnlyCvarAllowlist) / sizeof(kLauncherOnlyCvarAllowlist[0]);
+inline constexpr std::size_t kHostOnlyCvarAllowlistCount =
+    sizeof(kHostOnlyCvarAllowlist) / sizeof(kHostOnlyCvarAllowlist[0]);
 
 // True when `name` is one of the host rows above - a row no in-game surface can edit.
-inline bool IsLauncherOnlyCvar(std::string_view name) {
-  for (std::string_view candidate : kLauncherOnlyCvarAllowlist) {
+inline bool IsHostOnlyCvar(std::string_view name) {
+  for (std::string_view candidate : kHostOnlyCvarAllowlist) {
     if (candidate == name) {
       return true;
     }
@@ -80,10 +80,10 @@ inline bool IsLauncherOnlyCvar(std::string_view name) {
 // Pure, so the rule is a test rather than a claim: P8 implements it, and the coordinator switches
 // it on with the boot wiring that gives the game its own file (a machine that narrowed before that
 // would lose the DLC root and the save location, which come from this table today).
-inline std::vector<rb_blitz::launcher::ProfileSetting> ControllerProfileRows(
-    const std::vector<rb_blitz::launcher::ProfileSetting>& rows) {
-  std::vector<rb_blitz::launcher::ProfileSetting> kept;
-  for (const rb_blitz::launcher::ProfileSetting& row : rows) {
+inline std::vector<rb_blitz::profile::ProfileSetting> ControllerProfileRows(
+    const std::vector<rb_blitz::profile::ProfileSetting>& rows) {
+  std::vector<rb_blitz::profile::ProfileSetting> kept;
+  for (const rb_blitz::profile::ProfileSetting& row : rows) {
     if (IsControllerCvar(row.key)) {
       kept.push_back(row);
     }
@@ -92,13 +92,13 @@ inline std::vector<rb_blitz::launcher::ProfileSetting> ControllerProfileRows(
 }
 
 // What the game still applies from the legacy profile: the controller rows (still ours) and the
-// launcher-only host rows (never the game's to own). Everything else in the table belongs to the
+// host-only host rows (never the game's to own). Everything else in the table belongs to the
 // game's own settings file now.
-inline std::vector<rb_blitz::launcher::ProfileSetting> ProfileRowsTheGameApplies(
-    const std::vector<rb_blitz::launcher::ProfileSetting>& rows) {
-  std::vector<rb_blitz::launcher::ProfileSetting> kept;
-  for (const rb_blitz::launcher::ProfileSetting& row : rows) {
-    if (IsControllerCvar(row.key) || IsLauncherOnlyCvar(row.key)) {
+inline std::vector<rb_blitz::profile::ProfileSetting> ProfileRowsTheGameApplies(
+    const std::vector<rb_blitz::profile::ProfileSetting>& rows) {
+  std::vector<rb_blitz::profile::ProfileSetting> kept;
+  for (const rb_blitz::profile::ProfileSetting& row : rows) {
+    if (IsControllerCvar(row.key) || IsHostOnlyCvar(row.key)) {
       kept.push_back(row);
     }
   }
@@ -118,7 +118,7 @@ struct LicensePolicy {
 };
 
 // The target translation, applied inside the game before Ultimate is configured (§7 table).
-std::vector<CvarAssignment> TargetToCvars(rb_blitz::launcher::LaunchTarget target,
+std::vector<CvarAssignment> TargetToCvars(rb_blitz::profile::LaunchTarget target,
                                           const LicensePolicy& policy);
 
 // The AA enum's translation to the backend's two mechanisms (§7.1). One row, one mapping.

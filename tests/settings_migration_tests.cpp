@@ -11,8 +11,8 @@
 
 #include "check.h"
 
-#include "launcher/profile.h"
-#include "launcher/profile_path.h"
+#include "profile/profile.h"
+#include "profile/profile_path.h"
 #include "settings/migration.h"
 #include "settings/paths.h"
 #include "settings/store.h"
@@ -28,9 +28,9 @@ using namespace rb_blitz::settings;
 using namespace rb_blitz::test;
 
 namespace fs = std::filesystem;
-using rb_blitz::launcher::LaunchTarget;
-using rb_blitz::launcher::Profile;
-using rb_blitz::launcher::ProfilePathInputs;
+using rb_blitz::profile::LaunchTarget;
+using rb_blitz::profile::Profile;
+using rb_blitz::profile::ProfilePathInputs;
 
 void CheckString(const char* file, int line, const std::string& actual, const std::string& expected,
                  const char* actual_expr, const char* expected_expr) {
@@ -73,7 +73,7 @@ struct Scratch {
   }
 };
 
-// A launcher profile in the shape the current launcher writes: every [settings] row present.
+// A Controller Settings profile in the shape the current Controller Settings writes: every [settings] row present.
 Profile LegacyProfile() {
   Profile profile;
   profile.target = LaunchTarget::kUltimate;
@@ -159,7 +159,7 @@ void TestPathFile() {
   CHECK_STR_EQ(ResolveSettingsFile(inputs).string(),
                (appdata / "rb_blitz" / "settings.toml").string());
   // A portable marker moves both the profile and its settings sibling beside the executable.
-  WriteFile(install / "rb_blitz_launcher.portable", "");
+  WriteFile(install / "rb_blitz_controller_settings.portable", "");
   CHECK_STR_EQ(ResolveSettingsFile(inputs).string(), (install / "settings.toml").string());
 }
 
@@ -182,7 +182,7 @@ void TestMigrateDefault() {
   CHECK_TRUE(result.stats.target_imported);
   // Keep the old target, 4x filtering, explicitly stored 720p resolution and the profile's
   // *Cache DLC Library* choice. That last one is the row whose compiled default became `true` when
-  // the in-game row took the setting over from the launcher flag (P11b), so a profile that stores
+  // the in-game row took the setting over from Controller Settings flag (P11b), so a profile that stores
   // `false` differs from the default and is imported like any other choice - which is the point:
   // the player's choice survives the migration.
   CHECK_EQ(result.stats.imported, 4);

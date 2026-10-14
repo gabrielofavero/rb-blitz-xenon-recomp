@@ -6,7 +6,7 @@
 # handful of project-owned files from the emulator tree instead of reimplementing
 # them: src/util/sha256.cpp and src/util/game_fingerprint.cpp (so the fingerprint
 # rules the installer enforces are literally the ones the runtime enforces), and
-# src/settings + src/launcher (so the paths.toml the installer writes is read back
+# src/settings + src/profile (so the paths.toml the installer writes is read back
 # by exactly the code the game reads it with). Every one of those is SDK-free by
 # design; nothing else from the emulator tree is reachable from here.
 
@@ -43,7 +43,7 @@ target_compile_features(rb_blitz_embed_config PRIVATE cxx_std_20)
 
 set(RBBLITZ_EMBEDDED_CONFIG "${RBBLITZ_INSTALLER_GENERATED}/embedded_config.h")
 set(RBBLITZ_ISPP_PINS "${RBBLITZ_INSTALLER_GENERATED}/pins.iss")
-# The release manifest: published as the asset `update.toml` (a launcher's update
+# The release manifest: published as the asset `update.toml` (Controller Settings's update
 # check reads it, and the updater installs the payload it names), and read by
 # installer/build.ps1, which prints it in the list of what a release has to publish.
 set(RBBLITZ_UPDATE_MANIFEST "${RBBLITZ_INSTALLER_GENERATED}/update.toml")
@@ -86,7 +86,7 @@ set(RBBLITZ_HELPER_SOURCES
     src/util.cpp
     src/zip.cpp)
 
-# The game's own path file (settings/paths.h) and the launcher profile it falls back
+# The game's own path file (settings/paths.h) and the profile it falls back
 # to, compiled from the emulator tree rather than reimplemented, so the bytes the
 # installer writes are literally the bytes the game reads (parent plan §4.4: "a
 # shared SDK-free storage module for the game and installer where their ownership
@@ -97,8 +97,8 @@ set(RBBLITZ_SHARED_SETTINGS_SOURCES
     "${RBBLITZ_ROOT}/src/settings/store.cpp"
     "${RBBLITZ_ROOT}/src/settings/schema.cpp"
     "${RBBLITZ_ROOT}/src/settings/paths.cpp"
-    "${RBBLITZ_ROOT}/src/launcher/profile.cpp"
-    "${RBBLITZ_ROOT}/src/launcher/profile_path.cpp")
+    "${RBBLITZ_ROOT}/src/profile/profile.cpp"
+    "${RBBLITZ_ROOT}/src/profile/profile_path.cpp")
 
 if(NOT MSVC)
     # The game's own sources define _CRT_SECURE_NO_WARNINGS themselves, which the

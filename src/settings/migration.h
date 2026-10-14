@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3 — legacy migration (contracts §4.3/§5.6). It imports the launcher profile's supported
+// P3 — legacy migration (contracts §4.3/§5.6). It imports the profile's supported
 // native fields into settings.toml, translates the ones whose meaning changed, writes the
 // path file, and keeps everything it does not own — the controller tables, unknown keys,
 // comments — exactly where it was. The legacy file gets a byte-identical backup before the
@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "launcher/profile.h"
+#include "profile/profile.h"
 #include "settings/paths.h"
 #include "settings/store.h"
 
@@ -56,10 +56,10 @@ struct MigrationOptions {
 };
 
 // The frozen P0 signature (contracts §5.6): imports into `store` and writes.
-MigrationResult Migrate(const rb_blitz::launcher::Profile& legacy, Store& store,
+MigrationResult Migrate(const rb_blitz::profile::Profile& legacy, Store& store,
                         const PathEntry& existing_paths);
 
-MigrationResult Migrate(const rb_blitz::launcher::Profile& legacy, Store& store,
+MigrationResult Migrate(const rb_blitz::profile::Profile& legacy, Store& store,
                         const PathEntry& existing_paths, const MigrationOptions& options);
 
 }  // namespace rb_blitz::settings

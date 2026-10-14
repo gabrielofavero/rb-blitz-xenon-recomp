@@ -2,13 +2,13 @@
 
 The Help & Options / Controller Settings program: a native settings store, a typed channel into the
 guest's DTA scripts, a merged Help & Options screen that the title itself draws, the graphics policy,
-and the launcher cutover that made the game own the rows it can apply.
+and Controller Settings cutover that made the game own the rows it can apply.
 
 ## Reading order
 
 | # | Document | Read it for |
 | --- | --- | --- |
-| 1 | [`contracts.md`](contracts.md) | The frozen interfaces (P0): `SettingId`/`Value`/`Descriptor`, requested/effective/pending provenance, the snapshot and capability shapes, both file shapes, migration rules, file ownership, and the launcher dev gate. Nothing here should change without a decision. |
+| 1 | [`contracts.md`](contracts.md) | The frozen interfaces (P0): `SettingId`/`Value`/`Descriptor`, requested/effective/pending provenance, the snapshot and capability shapes, both file shapes, migration rules, file ownership, and Controller Settings dev gate. Nothing here should change without a decision. |
 | 2 | [`plan.md`](plan.md) | The master plan: what was asked, the merged menu's row-by-row specification, storage and precedence, the package sequence (P0–P12), and the copy-ready prompts. |
 | 3 | [`architecture.md`](architecture.md) | How it is actually built — the guest bridge and its transport, the panel/list script API, the store and service, the boot wiring and its ordering, the Ultimate provider adapter and the settings redirect, hot apply and the restart coordinator. |
 | 4 | [`menu.md`](menu.md) | The surfaces a player sees: the merged Help & Options screen and its payload, menu compatibility (hide list, song pool, the mod-row rename), the Controller Settings surface and the Guide prohibition, and the installer's folder pages. |
@@ -49,5 +49,5 @@ The originals of everything consolidated are in git history before the 2026-10-1
 
 - [`../guides/dlc.md`](../guides/dlc.md) — the DLC library, its cache, and what a big library costs.
 - [`../engine/toggles.md`](../engine/toggles.md) — the enhancement toggles the settings screen exposes.
-- [`../plans/finished/2026-09-27-launcher-plan.md`](../plans/finished/2026-09-27-launcher-plan.md) — the launcher the settings work is progressively taking rows away from.
-- [`../../launcher/README.md`](../../launcher/README.md) — the launcher's own documentation.
+- [`../plans/finished/2026-09-27-launcher-plan.md`](../plans/finished/2026-09-27-launcher-plan.md) — Controller Settings the settings work is progressively taking rows away from.
+- [`../../controller-settings/README.md`](../../controller-settings/README.md) — Controller Settings' own documentation.

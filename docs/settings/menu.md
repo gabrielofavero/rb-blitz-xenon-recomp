@@ -1,7 +1,7 @@
-# In-game settings — the surfaces (menu, rows, launcher, installer)
+# In-game settings — the surfaces (menu, rows, Controller Settings, installer)
 
 Four per-package records of what a player sees and presses: the merged Help & Options screen (P5b), the
-menu-compatibility decisions behind it (P10), the Controller Settings launcher surface and the Guide
+menu-compatibility decisions behind it (P10), the Controller Settings Controller Settings surface and the Guide
 prohibition (P8), and the two installer folders the game reads (P7). Each part keeps its source's own
 section numbers, demoted one level, so an old reference to `docs/settings/menu.md (part 1, the merged menu)`
 §3.2 reads as Part 1 §3.2 here. Measurements, guest addresses, evidence paths, defects and open items are
@@ -324,7 +324,7 @@ cannot re-enable configurability, and a hand-edited config is not silently obeye
 The mod-row rename (`R10`) targets the mod's own locale key, `mod_settings`, and nothing else:
 `menu_compat::RenameCoversRow(key)` is the guard, tested against the protected entry, our panel name and the
 empty key. It is "the retired transform must not overwrite the merged root's label" in mechanical form;
-retiring the *user-facing* toggle (the launcher row, and the mod row's routing) belongs to the cutover, and
+retiring the *user-facing* toggle (Controller Settings row, and the mod row's routing) belongs to the cutover, and
 is listed in §7.
 
 ### 6. Evidence
@@ -356,9 +356,9 @@ from no selection), plus the inventory case appended to `menu_options`.
 
 ### 7. What P10 did not do
 
-* **The launcher-side row removal.** The retired rename toggle and the pool-size row are still rows in
-  `launcher/config/settings.toml`; they are now inert in the game (P10 reads neither), but removing them from
-  the launcher surface is the remaining P8 work and the P11 cutover.
+* **Controller Settings-side row removal.** The retired rename toggle and the pool-size row are still rows in
+  `controller-settings/config/settings.toml`; they are now inert in the game (P10 reads neither), but removing them from
+  Controller Settings surface is the remaining P8 work and the P11 cutover.
 * **The alternate in-menu refresh action.** When a user explicitly hides `splash_dlc` while it carries the
   refresh, the refresh has no main-menu row; the boot warns, and the alternate action (a row under
   Downloadable Content that calls the same sentinel) is §3.5's own follow-up. No second refresh
@@ -389,7 +389,7 @@ pwsh -NoProfile -File out\_swap\p10\run.ps1 -Label poollgcy  -SongCount 64
 
 ## Part 3 — Controller Settings + the Guide prohibition (was `docs/plans/in-game-settings-controller-settings.md`, P8)
 
-Status: **executed** (host tests green, runtime evidence captured). The **full launcher is still the default
+Status: **executed** (host tests green, runtime evidence captured). The **full surface is still the default
 surface**: the reduced one exists behind `--controller-only`, and the cutover is P11's per `contracts.md`
 §9.3. No installer or native-menu file was touched (P7 and P5b own those and ran in parallel). Contract
 version: P0's frozen contracts as recorded in `contracts.md` (§2.3 Guide, §8 controller allowlist, §9.1/§9.3
@@ -400,20 +400,20 @@ one `LaunchOptions` parameter (both named below). Read with `plan.md` §3.6, §9
 ### 1. What P8 was asked for, and what this pass did
 
 Plan §11 P8 asked for a controller-only surface and the Guide removal; both landed. Controller functions
-kept except Guide, bespoke widgets included (`launcher/src/controller_tab.{h,cpp}`,
-`src/launcher/remap.{h,cpp}`, `launcher/src/shell.{h,cpp}` — §3.2, §4.3); one controller-focused screen
+kept except Guide, bespoke widgets included (`controller-settings/src/controller_tab.{h,cpp}`,
+`src/profile/remap.{h,cpp}`, `controller-settings/src/shell.{h,cpp}` — §3.2, §4.3); one controller-focused screen
 behind `--controller-only` (§3.1, §4.2); keyboard/pad navigation, capture, mouse and trigger bindings,
 presets/resets, nav rebind, safe mode and help untouched and re-walked (§4.2, §5); non-controller tabs/rows
-no longer drawn, deletion itself P11's (gate §9.3 — §3.1, §7); filenames kept (`rb_blitz_launcher.exe`,
+no longer drawn, deletion itself P11's (gate §9.3 — §3.1, §7); filenames kept (`rb_blitz_controller_settings.exe`,
 `launcher.toml`) while window title/heading/help/README were renamed (§3.4); Update/Install Ultimate routed
 to the installer's workflow, no Update button or check on the reduced surface (§3.3); Play carries no
-native-setting flags, only `LaunchOptions::settings_rows` (`launcher/src/game_launch.{h,cpp}` — §3.5, §4.4).
-Guide: no source, target, capture or pass-through (`src/launcher/remap.cpp`, `launcher/config/settings.toml`,
-`launcher/src/controller_tab.cpp`, `src/input/remap.cpp` — §2); old entries inert with a clear diagnostic
+native-setting flags, only `LaunchOptions::settings_rows` (`controller-settings/src/game_launch.{h,cpp}` — §3.5, §4.4).
+Guide: no source, target, capture or pass-through (`src/profile/remap.cpp`, `controller-settings/config/settings.toml`,
+`controller-settings/src/controller_tab.cpp`, `src/input/remap.cpp` — §2); old entries inert with a clear diagnostic
 (`remap::IsRefusedTargetName`/`RefusedRowNames`, panel warning, game log — §2.3); Guide cleared from the
 final guest state on every input path (`remap::WithoutProhibitedButtons` + an always-installed filter —
 §2.2, §4.5); no unrelated trigger or OS Guide behaviour disabled (no SDK patch, no cvar consumer changed,
-only our own filter's output — §2.4); the launcher writes only `launcher.toml`, leaving
+only our own filter's output — §2.4); Controller Settings writes only `launcher.toml`, leaving
 `paths.toml`/`settings.toml` untouched (§6.2); `launcher.toml`'s name/format and its `[remap]` rows preserved
 (§6.1, §6.2).
 
@@ -448,7 +448,7 @@ that takes the bit back out, exactly as for a remap.
   `session.profile().remap` contains such a row.
 * **In the log**: `remap: Guide is not remappable, so the profile's guide row is ignored (and Guide is kept
   out of the pad state the guest sees)`.
-* **In the schema**: the `guide_button` row is gone from `launcher/config/settings.toml`, replaced by a
+* **In the schema**: the `guide_button` row is gone from `controller-settings/config/settings.toml`, replaced by a
   comment recording why it must not come back; the generated table is 27 rows (was 28).
 * **In migration**: unchanged from P3 — `guide_button` and `keybind_guide` are already in `IsRetiredKey`, so
   a legacy row becomes inert preservation data, not a new preference.
@@ -464,9 +464,9 @@ likewise untouched — the project never had a global hook for it.
 
 #### 3.1 The switch
 
-`--controller-only` (parsed in `launcher/main.cpp`, held as `ShellEnvironment::controller_settings_only`),
-default off: the full launcher stays the default surface until the coordinator approves G4/P11 (§9.3). Three
-decisions follow, all in the launcher:
+`--controller-only` (parsed in `controller-settings/main.cpp`, held as `ShellEnvironment::controller_settings_only`),
+default off: the full surface stays the default surface until the coordinator approves G4/P11 (§9.3). Three
+decisions follow, all in Controller Settings:
 
 1. `Shell::layout_` is `BuildTabLayout(kController)` instead of `BuildLayout()`: one tab, so the strip is not
    drawn (a strip holding one button is a control that does nothing) and the screen's own heading takes its
@@ -498,11 +498,20 @@ until the cutover.
 #### 3.4 Naming
 
 `WindowTitle(bool)` now returns "Rock Band Blitz Controller Settings (vX)" for the reduced surface and keeps
-the launcher's own name for the development surface; the `Fatal` message box follows it, and so does
-`--dump-display`'s report. The executable is still `rb_blitz_launcher.exe` and the profile still
-`launcher.toml`, deliberately (shortcuts and profiles keep working). `rb_blitz_launcher.rc` carries no
+Controller Settings' own name for the development surface; the `Fatal` message box follows it, and so does
+`--dump-display`'s report. `rb_blitz_controller_settings.rc` carries no
 description strings, so there was nothing to rename there — the installer's shortcut names and setup text are
 P7's, and this pass did not touch `installer/`.
+
+**Superseded 2026-10-14 by
+[`../plans/finished/2026-10-14-controller-settings-rename.md`](../plans/finished/2026-10-14-controller-settings-rename.md).**
+This paragraph used to end "the executable is still `rb_blitz_launcher.exe` and the profile still
+`launcher.toml`, deliberately (shortcuts and profiles keep working)". The *executable* was renamed with
+the rest of the application (`rb_blitz_launcher.exe` → `rb_blitz_controller_settings.exe`, `launcher/`
+→ `controller-settings/`, `src/launcher/` → `src/profile/`, one window title for both surfaces). The
+*profile* kept its name, and so did the flag and the cvar that name it: those are a file-on-disk and a
+command-line contract. Nothing had shipped, so no released shortcut depended on the old executable
+name.
 
 #### 3.5 Play
 
@@ -513,11 +522,11 @@ because `[remap]` and the controller cvars are read from the profile by the runt
 not from a command line; §4.4 has the printed proof.
 
 **Updated by the P11b cutover (2026-10-13)**, which this section predates: the full surface no longer passes
-the rows the in-game Help & Options tree owns (`kGameOwnedRows` in `launcher/src/game_launch.{h,cpp}`), and
+the rows the in-game Help & Options tree owns (`kGameOwnedRows` in `controller-settings/src/game_launch.{h,cpp}`), and
 the **target flags are gone from both surfaces** — the profile's `[launch] target` is imported into the
 game's own settings on the first boot instead, so the in-game Target row stays editable (Controller
 Settings' identity-only command line is unchanged by that). The game-side reading of the profile is narrowed
-to the controller rows and the launcher-only host rows (`settings::ProfileRowsTheGameApplies`); the rest of
+to the controller rows and the host-only host rows (`settings::ProfileRowsTheGameApplies`); the rest of
 the table is preservation data. Cutover status: [status.md](status.md).
 
 ### 4. Evidence
@@ -535,22 +544,22 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 
 | Test | Added |
 | --- | --- |
-| `launcher_remap` (251 checks) | the 16-target vocabulary and the 0xF3FF bit union; `guide` refused as target and as source; the preserved row, `RefusedRowNames`, `ToRows` round trip; the bit cleared through `Apply` and through `WithoutProhibitedButtons` |
-| `launcher_launch` (68 checks) | the identity-only command, with the same session proving the full builder still passes its rows |
-| `launcher_session` (298 checks) | the disk-merge save: a concurrent `[settings]` edit and a new table survive, this window's edits are written, a removal is still made, and the geometry/update writes follow the same rule |
+| `controller_settings_remap` (251 checks) | the 16-target vocabulary and the 0xF3FF bit union; `guide` refused as target and as source; the preserved row, `RefusedRowNames`, `ToRows` round trip; the bit cleared through `Apply` and through `WithoutProhibitedButtons` |
+| `controller_settings_launch` (68 checks) | the identity-only command, with the same session proving the full builder still passes its rows |
+| `controller_settings_session` (298 checks) | the disk-merge save: a concurrent `[settings]` edit and a new table survive, this window's edits are written, a removal is still made, and the geometry/update writes follow the same rule |
 | `settings_service` (89 checks) | `ControllerProfileRows`: the controller rows are kept, the retired Guide pair and the native rows are not |
 
 #### 4.2 The two surfaces, driven
 
 `out/_swap/p8/run.ps1` launches each surface against a scratch profile, foregrounds the window, walks the
-ring with the launcher's own bound keys, captures a picture per step, and asserts on `--focus-log`. Both
+ring with Controller Settings' own bound keys, captures a picture per step, and asserts on `--focus-log`. Both
 surfaces exit 0 and all ten assertions pass (`out/_swap/p8/controller-focus.txt`,
 `out/_swap/p8/full-focus.txt`):
 
 | Surface | Trace |
 | --- | --- |
 | Controller Settings | `tab=controller entry=0/37 rowindex=0/19 row=mouse_ui_nav` → `… rowindex=18/19 row=bar:close` → `bar:save` → `bar:play` → `mouse_ui_nav` → `rowindex=1/19 row=button-mapping-block` |
-| Full launcher | `tab=general entry=0/15 rowindex=0/9 row=launch.target` → `… row=bar:update` → `bar:close` → `bar:save` → `bar:play` |
+| Full Controller Settings | `tab=general entry=0/15 rowindex=0/9 row=launch.target` → `… row=bar:update` → `bar:close` → `bar:save` → `bar:play` |
 
 So the reduced surface really has one tab, three bar controls and no Update, while the full surface still has
 four tabs and four bar controls. Pictures: `out/_swap/p8/controller-*.png` (title bar *Rock Band Blitz
@@ -559,8 +568,8 @@ Controller Settings (v0.1.0)*, the 16 controls, a bar of Close / Save / Play Gam
 #### 4.3 Headless layout
 
 ```powershell
-rb_blitz_launcher.exe --dump-layout=<file>                    # full launcher: 4 tabs, no guide row
-rb_blitz_launcher.exe --controller-only --dump-layout=<file>  # one screen, 1 row, 3 unbuilt groups
+rb_blitz_controller_settings.exe --dump-layout=<file>                    # full surface: 4 tabs, no guide row
+rb_blitz_controller_settings.exe --controller-only --dump-layout=<file>  # one screen, 1 row, 3 unbuilt groups
 ```
 
 `out/_swap/p8/layout-full.txt` and `layout-controller.txt`; both report `every row carries a tooltip`, and
@@ -586,10 +595,10 @@ session), holding `out\build\win-amd64-release\rb_blitz.exe` open: `ninja` there
 until the game is closed. Everything else is verified:
 
 * every translation unit compiles — `ninja CMakeFiles/rb_blitz.dir/src/input/remap.cpp.obj
-  CMakeFiles/rb_blitz.dir/src/launcher/profile_apply.cpp.obj` exits 0;
+  CMakeFiles/rb_blitz.dir/src/profile/profile_apply.cpp.obj` exits 0;
 * the link is sound: the same `clang++` command with a scratch output name
   (`@CMakeFiles\rb_blitz.rsp -o rb_blitz_p8check.exe`) exits 0 and produces a 40,260,096-byte executable;
-* the launcher, both test executables and the game's other objects are current, and `ctest` is 29/29.
+* Controller Settings, both test executables and the game's other objects are current, and `ctest` is 29/29.
 
 To finish it in place, with the game closed: `cmake --build out\build\win-amd64-release --target rb_blitz`.
 
@@ -602,21 +611,21 @@ it, the filter is installed on both paths); the boot is the coordinator's or P12
 
 | File | Change |
 | --- | --- |
-| `src/launcher/remap.{h,cpp}` | Guide out of the vocabulary; `kTargetCount`, `kGuideButtonBit`, `WithoutProhibitedButtons`, `IsRefusedTargetName`, `RefusedRowNames`; `Apply` strips the bit |
+| `src/profile/remap.{h,cpp}` | Guide out of the vocabulary; `kTargetCount`, `kGuideButtonBit`, `WithoutProhibitedButtons`, `IsRefusedTargetName`, `RefusedRowNames`; `Apply` strips the bit |
 | `src/input/remap.{h,cpp}` | filter installed on every path; no-profile arm strips the prohibition bits; the Guide diagnostic |
-| `launcher/config/settings.toml` | `guide_button` row removed, with the reason written down |
-| `launcher/src/controller_tab.{h,cpp}` | 16 controls, no Guide capture, the refusal warning, tooltip corrected |
-| `launcher/src/game_launch.{h,cpp}` | `LaunchOptions`; the settings block is skippable |
-| `launcher/src/profile_session.{h,cpp}` | `RebaseOntoDisk`, `NoteWritten`, and the three writers using them |
-| `launcher/src/shell.{h,cpp}` | `ShellEnvironment::controller_settings_only`; one-tab layout and heading; dynamic bottom bar; Play options; target probe; update check skipped; "Play" hint; focus-trace bar names |
-| `launcher/main.cpp` | `--controller-only`; `WindowTitle(mode)`; `Fatal(mode, …)`; dump/print modes describe the surface asked for |
+| `controller-settings/config/settings.toml` | `guide_button` row removed, with the reason written down |
+| `controller-settings/src/controller_tab.{h,cpp}` | 16 controls, no Guide capture, the refusal warning, tooltip corrected |
+| `controller-settings/src/game_launch.{h,cpp}` | `LaunchOptions`; the settings block is skippable |
+| `controller-settings/src/profile_session.{h,cpp}` | `RebaseOntoDisk`, `NoteWritten`, and the three writers using them |
+| `controller-settings/src/shell.{h,cpp}` | `ShellEnvironment::controller_settings_only`; one-tab layout and heading; dynamic bottom bar; Play options; target probe; update check skipped; "Play" hint; focus-trace bar names |
+| `controller-settings/main.cpp` | `--controller-only`; `WindowTitle(mode)`; `Fatal(mode, …)`; dump/print modes describe the surface asked for |
 | `src/settings/cvars.{h,cpp}` | `ControllerProfileRows`; `IsControllerCvar`/`ControllerProfileRows` inline (the game's source list does not carry `src/settings/cvars.cpp`) |
-| `src/launcher/profile_apply.{h,cpp}` | `profile_controller_rows_only` (default off) and `ProfileApplyReport::rows_ignored` |
-| `tests/launcher_remap_tests.cpp`, `launcher_launch_tests.cpp`, `launcher_profile_session_tests.cpp`, `settings_service_tests.cpp` | the cases in §4.1 |
-| `../../launcher/README.md` | new "Controller Settings (P8)" section; Controller tab, grammar and intro text corrected |
+| `src/profile/profile_apply.{h,cpp}` | `profile_controller_rows_only` (default off) and `ProfileApplyReport::rows_ignored` |
+| `tests/controller_settings_remap_tests.cpp`, `controller_settings_launch_tests.cpp`, `controller_settings_session_tests.cpp`, `settings_service_tests.cpp` | the cases in §4.1 |
+| `../../controller-settings/README.md` | new "Controller Settings (P8)" section; Controller tab, grammar and intro text corrected |
 
-No file outside the launcher lane was touched except `src/input/remap.*`, `src/settings/cvars.*` and
-`src/launcher/profile_apply.*`, all assigned here by contracts §9.1. `installer/`, `src/ui/settings_screen.*`
+No file outside Controller Settings lane was touched except `src/input/remap.*`, `src/settings/cvars.*` and
+`src/profile/profile_apply.*`, all assigned here by contracts §9.1. `installer/`, `src/ui/settings_screen.*`
 and `src/rb_blitz_app.h` were not modified (P7, P5b and the coordinator ran in parallel).
 
 ### 6. What is left for others
@@ -624,16 +633,16 @@ and `src/rb_blitz_app.h` were not modified (P7, P5b and the coordinator ran in p
 #### 6.1 The coordinator
 
 1. **Flip `profile_controller_rows_only` to true — but only with the boot wiring that gives the game its own
-   settings file.** Contracts §8 narrows `ApplyLauncherProfileSettings` to the controller allowlist "once
-   migration is complete"; today the launcher profile is still where `user_data_root` and `dlc_root` come
+   settings file.** Contracts §8 narrows `ApplyProfileSettings` to the controller allowlist "once
+   migration is complete"; today the profile is still where `user_data_root` and `dlc_root` come
    from, so narrowing before the native store owns them would lose the DLC library and the save location. The
-   switch is the hands-off version of that change: `src/launcher/profile_apply.cpp`, default false, with
+   switch is the hands-off version of that change: `src/profile/profile_apply.cpp`, default false, with
    `ProfileApplyReport::rows_ignored` saying how many retired rows were left out.
 2. **Add `src/settings/cvars.cpp` to `RBBLITZ_SOURCES`** when the rest of the cvars module is wired; the two
    helpers P8 uses are inline in the header precisely so a game-target caller does not depend on that.
 3. **The cutover itself** (§9.3, P11): make Controller Settings the default surface, then delete the
    non-controller tabs, the General tab's settings-file block, `install_ultimate.*`, the update prompt and
-   `Update`'s plumbing out of `launcher/`. It must not take the updater/installer entry points (the
+   `Update`'s plumbing out of `controller-settings/`. It must not take the updater/installer entry points (the
    installer's, documented), the profile's `[remap]`/`[nav]`/`[update]` tables, or
    `--dump-*`/`--print-command`.
 4. **One game boot** to close §4.5: a profile carrying `guide = "pad:guide"` (and a boot with
@@ -641,25 +650,25 @@ and `src/rb_blitz_app.h` were not modified (P7, P5b and the coordinator ran in p
 
 #### 6.2 P12 (acceptance)
 
-* `scripts/acceptance_launcher.ps1` still asserts the settings-as-argv contract for the **full** surface,
+* `scripts/acceptance_controller_settings.ps1` still asserts the settings-as-argv contract for the **full** surface,
   which this pass deliberately did not change; the reduced surface is a different contract, so extend the
   harness with a `--controller-only` leg (the walk, the three-button bar, "no Update") and change the argv
   expectations only at the cutover.
-* `scripts/capture_launcher.ps1` walks four tabs and expects `bar:update` first; a reduced-surface leg
+* `scripts/capture_controller_settings.ps1` walks four tabs and expects `bar:update` first; a reduced-surface leg
   belongs beside it, and `out/_swap/p8/run.ps1` is the working prototype (foreground, scan-coded keys, trace
   assertions).
 
 #### 6.3 P5b / P6 / P10 (recorded here because they touch the same surface)
 
 * The merge retires the Advanced Settings row and routes Ultimate's `mod_settings` into Help & Options; the
-  reduced launcher screen is reached by the installer's shortcut instead of a row in the game's menu, so
+  reduced Controller Settings screen is reached by the installer's shortcut instead of a row in the game's menu, so
   nothing here conflicts.
 * The `[remap]` refusal is part of the merged screen's vocabulary too: the in-game Interface/HUD rows never
   had Guide fields, and the panel API (`architecture.md`) should keep it that way.
 
 ### 7. Known limitations, stated plainly
 
-* **The reduced surface is not the default** — the gate, not an oversight (§9.3): the full launcher, its
+* **The reduced surface is not the default** — the gate, not an oversight (§9.3): the full surface, its
   schema and its argv contract stay the product until G4/P11.
 * **The non-controller UI is still compiled in.** "Remove the dead wiring" holds for the screen (it draws
   none of it and its ring has no entries for it) but not the binary, because deleting it before the
@@ -687,12 +696,12 @@ in this pass; **static** = read from source, not run; **proposal** = not impleme
 ### 1. What the package was
 
 Parent plan §9.1/§9.2, on `wpSelectDir` itself: install, DLC and save folders asked for on the same page,
-prefilled from explicit parameters > the installation's own `paths.toml` > the legacy launcher profile >
+prefilled from explicit parameters > the installation's own `paths.toml` > the legacy Controller Settings profile >
 defaults; the two external folders committed to `paths.toml` **only** after a successful install, and
 preserved on failure, update and uninstall; validation sharing the game's own path policy and DLC layout
 policy; documented unattended path parameters with the omitted-versus-empty rule; every shortcut task
 unchecked, explicit task choices honoured, interactive finish default = the game and silent default =
-nothing; and the visible launcher text becoming **Controller Settings**.
+nothing; and the visible Controller Settings text becoming **Controller Settings**.
 
 ### 2. What was built
 
@@ -701,7 +710,7 @@ nothing; and the visible launcher text becoming **Controller Settings**.
 | `installer/src/paths.{h,cpp}` | New. `PathChoice` (present/value), `ReadPathFile`, `ReadLegacyPaths`, `ValidatePaths`, `WritePathFile`. The file format is **not** reimplemented: `settings::LoadPathFile` / `SavePathFile` from the emulator tree are compiled in (§4.4's shared SDK-free storage module). |
 | `installer/src/commands.cpp` | `read-paths` (prefill, read-only), `validate-paths` (the check), `write-paths` (the commit); `finalize` gained `--dlc-dir` / `--save-dir`. |
 | `installer/src/install.{h,cpp}` | `InstallSummary` records the two answers; the manifest gains a `[paths]` table and the report a **Locations** block. |
-| `installer/CMakeLists.txt` | Compiles `src/paths.cpp` plus `src/settings/{model,store,schema,paths}.cpp` and `src/launcher/{profile,profile_path}.cpp` from the emulator tree, with two warnings silenced for those files only (clang 19/C++20 sees one unused local and a duplicate `_CRT_SECURE_NO_WARNINGS` the game's build does not). |
+| `installer/CMakeLists.txt` | Compiles `src/paths.cpp` plus `src/settings/{model,store,schema,paths}.cpp` and `src/profile/{profile,profile_path}.cpp` from the emulator tree, with two warnings silenced for those files only (clang 19/C++20 sees one unused local and a duplicate `_CRT_SECURE_NO_WARNINGS` the game's build does not). |
 | `installer/setup.iss` | The install-folder page grows two rows (DLC, saved games) with their own pickers and a status line; prefill, validation on Next and in `PrepareToInstall`; `write-paths` last; `DisableDirPage=no`, `UsePreviousTasks=no`, all four `[Tasks]` unchecked; `/DLCDIR`, `/SAVEDIR`, `/CONTROLLERICON`; finish default = the game, third choice = Controller Settings; ready memo and report carry the two paths. |
 | `installer/tests/installer_tests.cpp` | `TestLocations()` and `TestWizardScript()`: 100 new checks (three of them the script's shape, which has no other harness). |
 | `../../installer/README.md` | The page, the shortcut table, the silent parameters, the helper commands, `paths.toml` ownership, and the by-hand checklist the wizard half needs. |
@@ -820,7 +829,7 @@ still runs the full check that produced the exit-7 evidence. Both builds of the 
    P3's file (`fs::path(Widen(value))`, the conversion `installer/src/util.cpp` uses), and it belongs to the
    coordinator: P7 must not fork the game's own reader, and the alternative — writing ANSI — would be wrong
    everywhere else the helper writes a file.
-4. **P11/P12:** the install-folder page is now a three-question page; `acceptance_launcher.ps1`'s assumption
+4. **P11/P12:** the install-folder page is now a three-question page; `acceptance_controller_settings.ps1`'s assumption
    that settings travel as argv is unaffected by P7 (no setting is emitted on a command line), but the
    installer's output directory assumptions in the acceptance scripts should be re-checked when the merged
    Help & Options screen lands.

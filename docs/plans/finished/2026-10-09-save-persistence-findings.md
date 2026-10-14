@@ -163,7 +163,7 @@ song metadata cache. This change stores progress produced from now on.
 
 * OS Windows. Repo `d:\Gabriel\Documentos\Coding\decomps\360\rb-blitz-xenon-recomp`.
 * Build: `cmake --preset win-amd64-release` then `cmake --build --preset win-amd64-release`
-  → `out\build\win-amd64-release\{rb_blitz.exe, rexruntime.dll, rexgpu-xenos.dll, rb_blitz_launcher.exe}`.
+  → `out\build\win-amd64-release\{rb_blitz.exe, rexruntime.dll, rexgpu-xenos.dll, rb_blitz_controller_settings.exe}`.
 * Tests: `ctest --test-dir out\build\win-amd64-release --output-on-failure` (19 tests, ~2.5 s).
 * SDK submodule state: `scripts\apply_sdk_patches.ps1` → `35 patched, 0 UNEXPECTED, 0 untracked`,
   exit 0. **The SDK work tree is clean** — every diagnostic I added was reverted

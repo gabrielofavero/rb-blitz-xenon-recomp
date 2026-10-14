@@ -720,7 +720,7 @@ bool VerifyPayloadTree(const fs::path& root, const Pins& pins, std::string_view 
   }
   // The payload's entry points, as the manifest names them, so the install
   // manifest and the report can say which programs were laid down (R3). A
-  // manifest that does not carry the launcher is recorded as such rather than
+  // manifest that does not carry Controller Settings is recorded as such rather than
   // failing here: verification is what the manifest says it is.
   for (const std::string_view exe : kPayloadExecutables) {
     const bool named = std::any_of(

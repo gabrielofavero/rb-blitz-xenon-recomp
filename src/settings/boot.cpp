@@ -30,9 +30,9 @@
 #include "hooks/hud_layout.h"
 #include "hooks/render_settings.h"
 #include "hooks/ultimate.h"
-#include "launcher/profile.h"
-#include "launcher/profile_apply.h"
-#include "launcher/profile_path.h"
+#include "profile/profile.h"
+#include "profile/profile_apply.h"
+#include "profile/profile_path.h"
 #include "settings/cvars.h"
 #include "settings/hot_apply.h"
 #include "settings/schema.h"
@@ -49,11 +49,11 @@ namespace {
 SettingsBoot* g_current = nullptr;
 
 // The cvars this module writes are read and written **by name** on purpose: their storage lives with
-// their definition (`launcher_profile` in src/launcher/profile_apply.cpp, `dlc_root` in
+// their definition (`launcher_profile` in src/profile/profile_apply.cpp, `dlc_root` in
 // src/hooks/dlc.cpp, `user_data_root` in the runtime's own flags), and a `REXCVAR_DECLARE` here would
 // ask the linker for storage another translation unit keeps private. The registry is the interface.
 
-// The anisotropic step this project has actually run: the retired launcher row's own default
+// The anisotropic step this project has actually run: the retired Controller Settings row's own default
 // (`anisotropic_override = 3`, i.e. 4x), which every measured boot in this repository used. It is
 // **not** a device probe - P4's probing item is still open - and it is deliberately conservative:
 // the ceiling only bounds what the menu may offer, so shipping a ceiling this project has run is
@@ -62,7 +62,7 @@ constexpr int32_t kShippedFilteringCeiling = 3;
 
 // The backends the GPU plugin was compiled with, from the build's own switch: CMakeLists.txt passes
 // the same `REXGLUE_USE_D3D12`/`REXGLUE_USE_VULKAN` values the plugin is built from and the
-// launcher's Renderer row reads (`--backends=`), so the three cannot disagree about what the plugin
+// Controller Settings's Renderer row reads (`--backends=`), so the three cannot disagree about what the plugin
 // contains. A target that compiles this file without that definition (a unit-test build) reports the
 // backend this project has always shipped.
 #if !defined(RBBLITZ_BACKENDS)
@@ -219,11 +219,12 @@ void SettingsBoot::SetCurrent(SettingsBoot* boot) { g_current = boot; }
 
 PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_dir) {
   // --- identity, the path file and the legacy profile ---------------------------------------
-  launcher::ProfilePathInputs inputs = launcher::ProfilePathInputsFromEnvironment(executable_dir);
+  profile::ProfilePathInputs inputs = profile::ProfilePathInputsFromEnvironment(executable_dir);
+  // The cvar is `launcher_profile` because the flag is `--launcher_profile` (src/profile/profile_apply.cpp).
   inputs.command_line_value = rex::cvar::GetFlagByName("launcher_profile");
   paths_.settings_file = ResolveSettingsFile(inputs);
   paths_.paths_file = ResolvePathFile(executable_dir);
-  paths_.legacy_profile = launcher::ResolveProfilePath(inputs);
+  paths_.legacy_profile = profile::ResolveProfilePath(inputs);
 
   path_file_ = LoadPathFile(paths_.paths_file);
   if (path_file_.status == PathFileResult::Status::kMalformed) {
@@ -231,19 +232,19 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   }
 
   std::string why;
-  std::optional<launcher::Profile> legacy = launcher::ReadLauncherProfile(&why);
+  std::optional<profile::Profile> legacy = profile::ReadProfile(&why);
   // A profile that is there but unreadable is reported and *not* imported from (contracts §4.3): the
-  // person is told by the launcher, and the game keeps the compiled defaults rather than a
+  // person is told by Controller Settings, and the game keeps the compiled defaults rather than a
   // half-imported profile.
   const bool legacy_usable = why.empty();
   if (!legacy_usable) {
-    diagnostics_.push_back("the launcher profile could not be read: " + why);
+    diagnostics_.push_back("the profile could not be read: " + why);
   }
 
   store_available_ = !paths_.settings_file.empty();
   if (!store_available_) {
     diagnostics_.push_back(
-        "nowhere to keep settings (no profile path, no app data folder); the legacy launcher rows "
+        "nowhere to keep settings (no profile path, no app data folder); the legacy Controller Settings rows "
         "are this run's only source and the guest channel keeps its in-memory store");
   } else {
     // The service is created *here*, once the paths are known: it holds a copy of them, so building
@@ -386,10 +387,10 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // --- the rows, at the config rank ---------------------------------------------------------
   if (service_) {
     const Value target_value = service_->EffectiveValue(SettingId::kTarget);
-    const std::optional<launcher::LaunchTarget> target =
-        launcher::ParseLaunchTarget(target_value.text);
+    const std::optional<profile::LaunchTarget> target =
+        profile::ParseLaunchTarget(target_value.text);
     const LicensePolicy policy{kPurchasedLicenseMask, kTrialLicenseMask};
-    ApplyCvars(TargetToCvars(target.value_or(launcher::LaunchTarget::kCommon), policy),
+    ApplyCvars(TargetToCvars(target.value_or(profile::LaunchTarget::kCommon), policy),
                SettingId::kTarget, /*defer_unregistered=*/false);
 
     // The renderer first (OnPreSetup reads it when it loads the plugin), then the rows the mod's own

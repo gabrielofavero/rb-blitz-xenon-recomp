@@ -6,7 +6,7 @@
 // belong to the coordinator's boot wiring (§4.2), not here.
 //
 // The two allowlist helpers are deliberately *not* here but inline in the header: §8's narrowing is
-// used by the game's own profile apply (src/launcher/profile_apply.cpp), and the game's source list
+// used by the game's own profile apply (src/profile/profile_apply.cpp), and the game's source list
 // does not carry this file yet - a definition here would be an undefined symbol in a build nobody
 // asked to change.
 
@@ -14,7 +14,7 @@
 
 namespace rb_blitz::settings {
 
-using rb_blitz::launcher::LaunchTarget;
+using rb_blitz::profile::LaunchTarget;
 
 std::vector<CvarAssignment> TargetToCvars(LaunchTarget target, const LicensePolicy& policy) {
   std::vector<CvarAssignment> assignments;

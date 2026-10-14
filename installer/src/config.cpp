@@ -391,7 +391,7 @@ bool ParseUpdateManifest(std::string_view text, UpdateManifest* out, std::string
   manifest.payload_commit = Lower(ReadString(root, "payload_commit"));
 
   // Only a manifest that pins a download to install from has to be complete. The
-  // launcher reads the same file to decide whether to offer an update at all, and
+  // Controller Settings reads the same file to decide whether to offer an update at all, and
   // treats the absence of a payload source as "nothing to offer" rather than as a
   // reason to say something.
   if (!manifest.payload_url.empty() &&

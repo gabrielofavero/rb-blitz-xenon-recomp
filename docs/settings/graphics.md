@@ -16,7 +16,7 @@ This file consolidates three records about the picture. Part 1 (P2) asks **what 
 
 *Exact render resolution (1920x1080) — P2 findings*
 
-Status: **P2 complete.** Exact 1920x1080 rendering is **reached and measured** (§1 and §5) with the SDK unchanged; no production cutover, no installer or launcher change, and no user-visible setting is in this pass. What remains is choosing between the two 1080p variants documented below and having the coordinator approve the one shared file the cleaner variant needs.
+Status: **P2 complete.** Exact 1920x1080 rendering is **reached and measured** (§1 and §5) with the SDK unchanged; no production cutover, no installer or Controller Settings change, and no user-visible setting is in this pass. What remains is choosing between the two 1080p variants documented below and having the coordinator approve the one shared file the cleaner variant needs.
 
 Evidence labels: **measured** = executed in this pass and read out of a log; **source** = read from the repository; **static** = read from the recompiled guest, not observed to execute.
 
@@ -82,7 +82,7 @@ And from `out/_swap/p2/scale2.log`, the two swap states of a single boot:
 [debug] [core] swapdims d3d12: guest_output=2560x1440  ... draw_scale=2x2 source_is_scaled=true
 ```
 
-So the existing integer multiplier **is** truthful once the title's own resolve path is running (`2x` really presents 2560x1440 — the "1440p" the launcher's `choice_labels` promise), and the boot/splash present before it is the SDK's own known unscaled-resolve case. 1080p is not an integer multiple of 720p, so no value of this multiplier reaches it.
+So the existing integer multiplier **is** truthful once the title's own resolve path is running (`2x` really presents 2560x1440 — the "1440p" Controller Settings' `choice_labels` promise), and the boot/splash present before it is the SDK's own known unscaled-resolve case. 1080p is not an integer multiple of 720p, so no value of this multiplier reaches it.
 
 ### 3. How a guest frame becomes host pixels
 
@@ -182,13 +182,13 @@ A float `draw_resolution_scale` would be exactly the substitute the plan forbids
 - **No GPU capture, and no per-draw viewport instrumentation.** The measured quantities are the guest's front-buffer size, the resolve destination size, the host render-target extent and the draw scale. The viewport is *derived* from the same scale by the code in §6 and was not logged per draw, so a GPU capture is still the independent confirmation P4 should take.
 - **Vulkan is instrumented but unproven.** The Vulkan swap log was written and compiles, but every measurement here is D3D12 (the backend this machine uses). Vulkan's render-target cache was deliberately left uninstrumented.
 - **No menu/song/AA/restart matrix** (§5.2) and no decision between Variant A and Variant B.
-- No installer, launcher, schema or user-visible change of any kind.
+- No installer, Controller Settings, schema or user-visible change of any kind.
 - Guest timing was not touched: every run used the build's own V-Sync and 60 Hz guest tick.
 
 **Known noise in this work**
 
 - The dev build tree `out/build/win-amd64-release` is **shared** with the concurrently running P1 and P3 lanes in this working tree; it is not the per-lane `out/build/win-amd64-release-p2` the contracts reserve. The instrumented SDK is therefore compiled into the binary every lane builds. Nothing in the instrumentation is reachable without debug logging, but the isolation rule was not honoured and a lane that needs a clean compare should use its own tree.
-- A cvar defined inside the GPU plugin (`rexgpu-xenos.dll`) cannot be set from `rb_blitz.toml` or the command line: the config is applied before the plugin registers its cvars, and the boot reports `Config: unknown cvar '<name>'`. This is why the instrumentation is gated by log *level* instead of a cvar, and it is worth recording for P4 — `resolution_scale` is affected by the same ordering (the launcher profile row for it is currently refused with "resolution_scale = 2 was refused by this build"). Setting it through the environment (`REX_RESOLUTION_SCALE=2`) does work, which is how run C was made.
+- A cvar defined inside the GPU plugin (`rexgpu-xenos.dll`) cannot be set from `rb_blitz.toml` or the command line: the config is applied before the plugin registers its cvars, and the boot reports `Config: unknown cvar '<name>'`. This is why the instrumentation is gated by log *level* instead of a cvar, and it is worth recording for P4 — `resolution_scale` is affected by the same ordering (the profile row for it is currently refused with "resolution_scale = 2 was refused by this build"). Setting it through the environment (`REX_RESOLUTION_SCALE=2`) does work, which is how run C was made.
 
 ### 8. Handoff to P4
 
@@ -236,7 +236,7 @@ Remove-Item Env:\REX_RESOLUTION_SCALE
 
 *In-game settings — P4 graphics capabilities, exact modes, first-run policy*
 
-Status: **P4 complete as a host-tested lane, with measured runtime evidence for the render path and the per-draw extents.** The pure half (capabilities + reconciliation + first-run + recovery) is implemented and tested: 146 host checks in a new `settings_graphics` ctest test, 28/28 tests green. The render path's *decision* is implemented and tested (`PlanGuestScreen`); the guest-side *application* of a 1080p guest size still needs the coordinator's one `[[midasm_hook]]` entry, and that request is written out verbatim in §7. No cutover, no installer change, no launcher change, no UI.
+Status: **P4 complete as a host-tested lane, with measured runtime evidence for the render path and the per-draw extents.** The pure half (capabilities + reconciliation + first-run + recovery) is implemented and tested: 146 host checks in a new `settings_graphics` ctest test, 28/28 tests green. The render path's *decision* is implemented and tested (`PlanGuestScreen`); the guest-side *application* of a 1080p guest size still needs the coordinator's one `[[midasm_hook]]` entry, and that request is written out verbatim in §7. No cutover, no installer change, no Controller Settings change, no UI.
 
 Read order: `contracts.md` (frozen names and the §5.3/§7.1 shapes P4 fills) → Part 1 (P2's measurements, which P4 extends) → `architecture.md` (the `Reconciler` seam P4 implements) → this file.
 

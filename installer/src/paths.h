@@ -56,7 +56,7 @@ struct PathFileState {
 PathFileState ReadPathFile(const std::filesystem::path& install_dir,
                            const std::filesystem::path& game_data_root);
 
-// The path fields of the legacy launcher profile - the file the old launcher wrote
+// The path fields of the legacy Controller Settings profile - the file the old Controller Settings wrote
 // and the game still reads. Only a *prefill* source (§9.1's third step); the
 // migration itself is the game's own (`settings::Migrate`), not the installer's.
 struct LegacyPaths {

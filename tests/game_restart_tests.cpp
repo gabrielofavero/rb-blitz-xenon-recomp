@@ -5,7 +5,7 @@
 //
 //   * the handoff token: the fixed shape, the bound, and every refusal (a wrong version, a
 //     truncated token, a zero pid or nonce, an unknown target, a token from the future);
-//   * the command line: the quoting rule the launcher already uses, and the allowlist rebuild -
+//   * the command line: the quoting rule Controller Settings already uses, and the allowlist rebuild -
 //     what survives a restart, and the one-shot arguments that must not;
 //   * the state machine: exactly-once, the stale revision, the "nothing saved yet" case, a child
 //     creation failure that leaves the parent running, and a second request that is refused;
@@ -13,7 +13,7 @@
 //     waits for its parent's *verified identity*, the identity-mismatch case, the timeout that
 //     refuses to start beside a living parent, and a failed spawn.
 //
-// The test executable doubles as the child: argv[0] is what the launcher spawns, so the process
+// The test executable doubles as the child: argv[0] is what Controller Settings spawns, so the process
 // legs need no fixture binary and no shell.
 
 #include <chrono>
@@ -371,7 +371,7 @@ void HandoffFromCommandLine() {
 }
 
 void QuotingFollowsTheWindowsRule() {
-  test::BeginCase("command line: quoting is the rule the launcher already uses");
+  test::BeginCase("command line: quoting is the rule the settings app already uses");
 
   CHECK_TRUE(QuoteArgument("plain") == "\"plain\"");
   CHECK_TRUE(QuoteArgument("with space") == "\"with space\"");
@@ -405,7 +405,7 @@ void ChildArgumentsAreAnAllowlist() {
   context.executable = "C:\\Program Files\\rb_blitz.exe";
   context.game_data_root = "D:\\Games\\Blitz";
   context.working_directory = "C:\\Program Files";
-  context.launcher_profile = "C:\\Users\\me\\AppData\\blitz\\launcher.toml";
+  context.profile_file = "C:\\Users\\me\\AppData\\blitz\\launcher.toml";
   context.target = "ultimate";
   context.developer_arguments = {"--log_level=debug", "--refresh_dlc_cache",
                                  std::string(kHandoffSwitch) + "v1.1.2.3.common"};
@@ -446,8 +446,8 @@ void ArgumentRetirement() {
 void CoordinatorIsExactlyOnce() {
   test::BeginCase("coordinator: one child per boot, and the failures keep the game running");
 
-  FakeLauncher launcher;
-  RestartCoordinator coordinator(&launcher);
+  FakeLauncher child;
+  RestartCoordinator coordinator(&child);
 
   LaunchContext context;
   context.executable = "C:\\Program Files\\rb_blitz.exe";
@@ -458,13 +458,13 @@ void CoordinatorIsExactlyOnce() {
   RestartOutcome outcome = coordinator.Request(0, 0, 1, context);
   CHECK_EQ(static_cast<int>(outcome.status),
            static_cast<int>(rb_blitz::settings::RestartStatus::kNotSaved));
-  CHECK_EQ(launcher.spawns, 0);
+  CHECK_EQ(child.spawns, 0);
 
   // A stale revision is refused, and nothing is started.
   outcome = coordinator.Request(3, 4, 1, context);
   CHECK_EQ(static_cast<int>(outcome.status),
            static_cast<int>(rb_blitz::settings::RestartStatus::kStaleRevision));
-  CHECK_EQ(launcher.spawns, 0);
+  CHECK_EQ(child.spawns, 0);
 
   // The real request: one child, the handshake phase, the rebuilt command line.
   outcome = coordinator.Request(4, 4, 9, context);
@@ -473,9 +473,9 @@ void CoordinatorIsExactlyOnce() {
   CHECK_EQ(static_cast<int>(outcome.phase), static_cast<int>(RestartPhase::kReady));
   CHECK_TRUE(coordinator.CloseRequested());
   CHECK_EQ(coordinator.spawned(), 1);
-  CHECK_EQ(launcher.spawns, 1);
-  CHECK_TRUE(launcher.last_executable == context.executable);
-  CHECK_TRUE(launcher.last_arguments.back().find(kHandoffSwitch) != std::string::npos);
+  CHECK_EQ(child.spawns, 1);
+  CHECK_TRUE(child.last_executable == context.executable);
+  CHECK_TRUE(child.last_arguments.back().find(kHandoffSwitch) != std::string::npos);
   CHECK_TRUE(coordinator.command_line().find(".ultimate") != std::string::npos);
   CHECK_EQ(coordinator.token().nonce, 9u);
   CHECK_TRUE(coordinator.token().target == "ultimate");
@@ -484,7 +484,7 @@ void CoordinatorIsExactlyOnce() {
   outcome = coordinator.Request(4, 4, 9, context);
   CHECK_EQ(static_cast<int>(outcome.status),
            static_cast<int>(rb_blitz::settings::RestartStatus::kAlreadyRequested));
-  CHECK_EQ(launcher.spawns, 1);
+  CHECK_EQ(child.spawns, 1);
   CHECK_EQ(coordinator.spawned(), 1);
 
   // A request id of zero (what a DTA script sends) still yields a non-zero identity, so the
@@ -500,10 +500,10 @@ void CoordinatorIsExactlyOnce() {
 void CoordinatedSpawnFailureKeepsTheParent() {
   test::BeginCase("coordinator: a failed spawn keeps the game running and reports it");
 
-  FakeLauncher launcher;
-  launcher.succeed = false;
-  launcher.failure = "CreateProcess failed with error 2";
-  RestartCoordinator coordinator(&launcher);
+  FakeLauncher child;
+  child.succeed = false;
+  child.failure = "CreateProcess failed with error 2";
+  RestartCoordinator coordinator(&child);
 
   LaunchContext context;
   context.executable = "C:\\missing\\rb_blitz.exe";
@@ -516,7 +516,7 @@ void CoordinatedSpawnFailureKeepsTheParent() {
   CHECK_TRUE(coordinator.error().find("error 2") != std::string::npos);
 
   // A failed attempt may be retried; a successful handshake never is.
-  launcher.succeed = true;
+  child.succeed = true;
   coordinator.ResetAfterFailure();
   const RestartOutcome retry = coordinator.Request(1, 1, 6, context);
   CHECK_EQ(static_cast<int>(retry.status),
@@ -528,7 +528,7 @@ void CoordinatedSpawnFailureKeepsTheParent() {
 }
 
 void CoordinatorWithoutALauncher() {
-  test::BeginCase("coordinator: no launcher in this build is a reported failure");
+  test::BeginCase("coordinator: no child in this build is a reported failure");
 
   RestartCoordinator coordinator(nullptr);
   LaunchContext context;
@@ -621,32 +621,32 @@ void BootstrapWaitsForTheParent() {
 void RealSpawnFailsForAMissingExecutable() {
   test::BeginCase("process: a spawn of something that is not there fails cleanly");
 
-  std::unique_ptr<ChildLauncher> launcher = CreateChildLauncher();
-  CHECK_TRUE(launcher != nullptr);
-  if (launcher == nullptr) {
+  std::unique_ptr<ChildLauncher> child = CreateChildLauncher();
+  CHECK_TRUE(child != nullptr);
+  if (child == nullptr) {
     return;
   }
   std::string error;
-  const bool started = launcher->Spawn("Z:\\this\\does\\not\\exist\\rb_blitz.exe", {},
+  const bool started = child->Spawn("Z:\\this\\does\\not\\exist\\rb_blitz.exe", {},
                                        TempDir(), &error);
   CHECK_FALSE(started);
   CHECK_FALSE(error.empty());
-  CHECK_EQ(launcher->ChildPid(), 0u);
+  CHECK_EQ(child->ChildPid(), 0u);
 }
 
 void RealChildRunsAndExits() {
   test::BeginCase("process: a real child is started and waited for");
 
-  std::unique_ptr<ChildLauncher> launcher = CreateChildLauncher();
-  CHECK_TRUE(launcher != nullptr);
-  if (launcher == nullptr) {
+  std::unique_ptr<ChildLauncher> child = CreateChildLauncher();
+  CHECK_TRUE(child != nullptr);
+  if (child == nullptr) {
     return;
   }
   const std::string self = SelfPath();
   std::string error;
-  CHECK_TRUE(launcher->Spawn(self, {"--child-exit-code", "7"}, TempDir(), &error));
-  CHECK_TRUE(launcher->ChildPid() != 0);
-  CHECK_TRUE(launcher->WaitForExit(30000, &error));
+  CHECK_TRUE(child->Spawn(self, {"--child-exit-code", "7"}, TempDir(), &error));
+  CHECK_TRUE(child->ChildPid() != 0);
+  CHECK_TRUE(child->WaitForExit(30000, &error));
   CHECK_TRUE(error.empty());
 }
 

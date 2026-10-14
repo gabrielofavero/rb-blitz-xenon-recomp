@@ -105,10 +105,10 @@ set(RBBLITZ_SOURCES
     src/input/remap.cpp
     src/input/mouse_ui.cpp
     src/input/native_menu.cpp
-    src/launcher/profile.cpp
-    src/launcher/profile_apply.cpp
-    src/launcher/profile_path.cpp
-    src/launcher/remap.cpp
+    src/profile/profile.cpp
+    src/profile/profile_apply.cpp
+    src/profile/profile_path.cpp
+    src/profile/remap.cpp
     # P6's addition to the coordinator-owned list: the Ultimate provider adapter (the ark index
     # reader, the shape check over the payload's own definitions, the row bindings and the
     # provider's settings file). SDK-free.
@@ -184,7 +184,7 @@ rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 
 # Which graphics backends the GPU plugin was compiled with, in the order the in-game *Renderer*
 # row should offer them. The same two variables decide what `rexgpu-xenos.dll` contains (the SDK
-# reads them itself) and what the launcher offers (`--backends=` in launcher/CMakeLists.txt), so
+# reads them itself) and what Controller Settings offers (`--backends=` in controller-settings/CMakeLists.txt), so
 # passing them on as one string keeps the three in step: the row can never offer a backend the
 # plugin does not have, and it never hides one it does. The boot reads this in
 # src/settings/boot.cpp (every backend gets a capability probe of its own).
@@ -522,63 +522,63 @@ if(BUILD_TESTING)
     add_test(NAME toolchain
              COMMAND rb_blitz_toolchain_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # The launcher profile: path resolution and the reader/writer (P0.3). SDK-free, so it
+    # Controller Settings profile: path resolution and the reader/writer (P0.3). SDK-free, so it
     # runs without booting anything, and compiled from src/ because the game executable
     # reads the same file (D1).
-    add_executable(rb_blitz_launcher_profile_tests
-        tests/launcher_profile_tests.cpp
-        src/launcher/profile.cpp
-        src/launcher/profile_path.cpp
+    add_executable(rb_blitz_controller_settings_profile_tests
+        tests/controller_settings_profile_tests.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
     )
-    target_include_directories(rb_blitz_launcher_profile_tests PRIVATE src)
-    add_test(NAME launcher_profile COMMAND rb_blitz_launcher_profile_tests)
+    target_include_directories(rb_blitz_controller_settings_profile_tests PRIVATE src)
+    add_test(NAME controller_settings_profile COMMAND rb_blitz_controller_settings_profile_tests)
 
     # The General tab's decidable half (B1): D5's four Ultimate states from directory
     # fixtures, the launch-target fallback, where the game is detected, and the schema's
     # `validate` rules. Dependency-free like the profile tests, and compiled from
-    # launcher/src because the launcher is what puts them on screen.
-    add_executable(rb_blitz_launcher_general_tests
-        tests/launcher_ultimate_state_tests.cpp
-        launcher/src/path_validate.cpp
-        launcher/src/ultimate_state.cpp
+    # controller-settings/src because Controller Settings is what puts them on screen.
+    add_executable(rb_blitz_controller_settings_general_tests
+        tests/controller_settings_general_tests.cpp
+        controller-settings/src/path_validate.cpp
+        controller-settings/src/ultimate_state.cpp
     )
-    target_include_directories(rb_blitz_launcher_general_tests PRIVATE src launcher/src)
-    add_test(NAME launcher_general COMMAND rb_blitz_launcher_general_tests)
+    target_include_directories(rb_blitz_controller_settings_general_tests PRIVATE src controller-settings/src)
+    add_test(NAME controller_settings_general COMMAND rb_blitz_controller_settings_general_tests)
 
     # B4's write path: the session on top of the profile module, plus the reader for the game's
     # own file that the precedence badge is decided from.
-    add_executable(rb_blitz_launcher_session_tests
-        tests/launcher_profile_session_tests.cpp
-        launcher/src/game_config.cpp
-        launcher/src/prefill.cpp
-        launcher/src/profile_session.cpp
-        src/launcher/profile.cpp
-        src/launcher/profile_path.cpp
+    add_executable(rb_blitz_controller_settings_session_tests
+        tests/controller_settings_session_tests.cpp
+        controller-settings/src/game_config.cpp
+        controller-settings/src/prefill.cpp
+        controller-settings/src/profile_session.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
     )
-    target_include_directories(rb_blitz_launcher_session_tests PRIVATE src launcher/src)
-    add_test(NAME launcher_session COMMAND rb_blitz_launcher_session_tests)
+    target_include_directories(rb_blitz_controller_settings_session_tests PRIVATE src controller-settings/src)
+    add_test(NAME controller_settings_session COMMAND rb_blitz_controller_settings_session_tests)
 
     # D16's vocabulary: the `[remap]` grammar, what the profile round-trips, and the rewrite
     # itself. Dependency-free like the profile tests - no pad, no window, no SDL - because the
     # device side is only the callback the game hands the rewrite (src/input/remap.cpp).
-    add_executable(rb_blitz_launcher_remap_tests
-        tests/launcher_remap_tests.cpp
-        src/launcher/profile.cpp
-        src/launcher/remap.cpp
+    add_executable(rb_blitz_controller_settings_remap_tests
+        tests/controller_settings_remap_tests.cpp
+        src/profile/profile.cpp
+        src/profile/remap.cpp
     )
-    target_include_directories(rb_blitz_launcher_remap_tests PRIVATE src)
-    add_test(NAME launcher_remap COMMAND rb_blitz_launcher_remap_tests)
+    target_include_directories(rb_blitz_controller_settings_remap_tests PRIVATE src)
+    add_test(NAME controller_settings_remap COMMAND rb_blitz_controller_settings_remap_tests)
 
     # D19's update check: the release manifest, the version comparison, and the two decisions
     # that come out of them (is there an update, and should the user be asked). Dependency-free
-    # like the profile tests - the fetch and the updater are launcher/src/update_launcher.cpp,
+    # like the profile tests - the fetch and the updater are controller-settings/src/updater.cpp,
     # which is the platform half and is not compiled here, so every rule is decided from text.
-    add_executable(rb_blitz_launcher_update_tests
-        tests/launcher_update_tests.cpp
-        launcher/src/update_check.cpp
+    add_executable(rb_blitz_controller_settings_update_tests
+        tests/controller_settings_update_tests.cpp
+        controller-settings/src/update_check.cpp
     )
-    target_include_directories(rb_blitz_launcher_update_tests PRIVATE launcher/src)
-    add_test(NAME launcher_update COMMAND rb_blitz_launcher_update_tests)
+    target_include_directories(rb_blitz_controller_settings_update_tests PRIVATE controller-settings/src)
+    add_test(NAME controller_settings_update COMMAND rb_blitz_controller_settings_update_tests)
 
     # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict
@@ -593,7 +593,7 @@ if(BUILD_TESTING)
     add_test(NAME settings_store COMMAND rb_blitz_settings_store_tests)
 
     # P3: the path file and the legacy migration. Compiled from src/ because the game reads
-    # the same files, and from src/launcher because the migration consumes the profile model.
+    # the same files, and from src/profile because the migration consumes the profile model.
     add_executable(rb_blitz_settings_migration_tests
         tests/settings_migration_tests.cpp
         src/settings/model.cpp
@@ -601,8 +601,8 @@ if(BUILD_TESTING)
         src/settings/store.cpp
         src/settings/paths.cpp
         src/settings/migration.cpp
-        src/launcher/profile.cpp
-        src/launcher/profile_path.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
     )
     target_include_directories(rb_blitz_settings_migration_tests PRIVATE src)
     add_test(NAME settings_migration COMMAND rb_blitz_settings_migration_tests)
@@ -618,8 +618,8 @@ if(BUILD_TESTING)
         src/settings/migration.cpp
         src/settings/cvars.cpp
         src/settings/service.cpp
-        src/launcher/profile.cpp
-        src/launcher/profile_path.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
     )
     target_include_directories(rb_blitz_settings_service_tests PRIVATE src)
     add_test(NAME settings_service COMMAND rb_blitz_settings_service_tests)
@@ -639,8 +639,8 @@ if(BUILD_TESTING)
         src/settings/service.cpp
         src/settings/capabilities.cpp
         src/settings/graphics_policy.cpp
-        src/launcher/profile.cpp
-        src/launcher/profile_path.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
     )
     target_include_directories(rb_blitz_settings_graphics_tests PRIVATE src)
     add_test(NAME settings_graphics COMMAND rb_blitz_settings_graphics_tests)
@@ -711,8 +711,8 @@ if(BUILD_TESTING)
         src/settings/service.cpp
         src/settings/bridge_sink.cpp
         src/hooks/settings_bridge.cpp
-        src/launcher/profile.cpp
-        src/launcher/profile_path.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
     )
     target_include_directories(rb_blitz_settings_bridge_service_tests PRIVATE src)
     add_test(NAME settings_bridge_service COMMAND rb_blitz_settings_bridge_service_tests)
@@ -730,7 +730,7 @@ if(BUILD_TESTING)
     add_test(NAME menu_compat COMMAND rb_blitz_menu_compat_tests)
 endif()
 
-# The launcher (docs/plans/finished/2026-09-27-launcher-plan.md D1): a second executable in this build tree,
+# Controller Settings (docs/plans/finished/2026-09-27-launcher-plan.md D1): a second executable in this build tree,
 # next to rb_blitz.exe, so a release always ships both. It carries its own settings
 # schema, which is compiled and validated at build time.
-add_subdirectory(launcher)
+add_subdirectory(controller-settings)

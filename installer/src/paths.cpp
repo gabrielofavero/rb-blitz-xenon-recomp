@@ -13,8 +13,8 @@
 
 #include "fs/dlc_layout.h"
 #include "fs/path_policy.h"
-#include "launcher/profile.h"
-#include "launcher/profile_path.h"
+#include "profile/profile.h"
+#include "profile/profile_path.h"
 #include "settings/paths.h"
 #include "util.h"
 
@@ -22,7 +22,7 @@ namespace rb_blitz::installer {
 
 namespace fs = std::filesystem;
 namespace rbfs = rb_blitz::fs;
-namespace launch = rb_blitz::launcher;
+namespace profile = rb_blitz::profile;
 namespace settings = rb_blitz::settings;
 
 namespace {
@@ -187,24 +187,24 @@ LegacyPaths ReadLegacyPaths(const fs::path& install_dir, const fs::path& app_dat
   LegacyPaths result;
   if (install_dir.empty() || app_data_dir.empty()) {
     // No user side to look in: an elevated install run by an administrator must not
-    // read that administrator's own launcher profile and call it the player's
+    // read that administrator's own Controller Settings profile and call it the player's
     // (parent plan §9.1). The caller passes an empty folder for exactly that case.
     return result;
   }
 
   // The game's own resolution order, including the environment override and the
   // settings-folder pointer, so a profile the user moved is still found.
-  launch::ProfilePathInputs inputs = launch::ProfilePathInputsFromEnvironment(install_dir);
+  profile::ProfilePathInputs inputs = profile::ProfilePathInputsFromEnvironment(install_dir);
   inputs.app_data_dir = app_data_dir;
-  result.profile = launch::ResolveProfilePath(inputs);
+  result.profile = profile::ResolveProfilePath(inputs);
   if (result.profile.empty()) {
     return result;
   }
 
-  const launch::ProfileLoadResult loaded = launch::LoadProfile(result.profile);
+  const profile::ProfileLoadResult loaded = profile::LoadProfile(result.profile);
   // The same meaning as PathFileState::has_file: a file that is there but does not
   // parse is still a file that is there.
-  result.has_file = loaded.status != launch::ProfileStatus::kMissingFile;
+  result.has_file = loaded.status != profile::ProfileStatus::kMissingFile;
   result.usable = loaded.usable();
   result.error = loaded.error;
   if (!result.usable) {
@@ -213,9 +213,9 @@ LegacyPaths ReadLegacyPaths(const fs::path& install_dir, const fs::path& app_dat
 
   // The same two fields the game's migration imports, in the same order: the
   // `[settings]` table first, the older `[launch]` values as the fallback.
-  const launch::ProfileSetting* save = loaded.profile.FindSetting("user_data_root");
+  const profile::ProfileSetting* save = loaded.profile.FindSetting("user_data_root");
   result.save_dir = save != nullptr ? save->value : loaded.profile.user_data_dir;
-  const launch::ProfileSetting* dlc = loaded.profile.FindSetting("dlc_root");
+  const profile::ProfileSetting* dlc = loaded.profile.FindSetting("dlc_root");
   result.dlc_dir = dlc != nullptr ? dlc->value : loaded.profile.dlc_dir;
   return result;
 }

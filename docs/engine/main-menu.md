@@ -208,7 +208,7 @@ The mod's settings row is a locale entry, and its text is data too: the panel's 
 The entries live in `ulti/locale/gen/locale_mod.dtb` — the mod's own locale file, inside the payload
 ark — each an array of exactly two elements, `[symbol key][string text]`, the shape every locale file
 in this title uses. A run without the payload never reads that file, so
-`enhancements_rename_mod_settings` has nothing to do and the launcher does not show the row.
+`enhancements_rename_mod_settings` has nothing to do and Controller Settings does not show the row.
 
 **"Ultimate Settings"** is five bytes longer, and the length is the ark's, so the bytes must come from
 inside the file — from the one thing in it that can give them up without changing anything the guest
@@ -477,8 +477,8 @@ and the split-read rule refused the file silently.
 | the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`, `PublishPendingRefresh`, `CacheServedThisBoot`, `ContentItemCount`), [src/fs/refresh_state.h](../../src/fs/refresh_state.h) (one at a time, published once) |
 | the discovery screen's progress bar (R7) | [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp), [src/hooks/content_progress.h](../../src/hooks/content_progress.h) |
 | the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
-| the launcher rows | [launcher/config/settings.toml](../../launcher/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |
-| the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/launcher_launch_tests.cpp](../../tests/launcher_launch_tests.cpp) (R3's argv) |
+| Controller Settings rows | [controller-settings/config/settings.toml](../../controller-settings/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |
+| the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/controller_settings_launch_tests.cpp](../../tests/controller_settings_launch_tests.cpp) (R3's argv) |
 | the harness | [scripts/ui_states.ps1](../../scripts/ui_states.ps1) (the `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob and the `offline-prompt` state), [scripts/observe_ui.ps1](../../scripts/observe_ui.ps1) (`-SkipOfflinePrompts`) |
 
 ### 10. Open
@@ -504,7 +504,7 @@ and the split-read rule refused the file silently.
   (six characters, five of which pay for "Ultimate"); a rebuild without it, or a differently-worded
   label, is refused (reason logged) and drawn as it ships. The English locale has the construct
   twenty-one times over — what pays for R7's two labels.
-- **Launcher row from a startup snapshot.** `DetectUltimateState` is read with the launch target's
+- **Controller Settings row from a startup snapshot.** `DetectUltimateState` is read with the launch target's
   state, so installing Ultimate *during* a session shows the row next start — the restart-scoped
   promise the row itself makes.
 - **The trial target is not ours.** With `--license_mask=0` the *stock* payload faults at boot, before

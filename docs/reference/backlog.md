@@ -36,17 +36,17 @@ that name an action.
 - [ ] Re-derive the 12-byte patch table if a payload release ships a different
       `default.xex` (compare its hash against `390e0ae0…` first).
 
-## 3. The launcher — the one active design
+## 3. Controller Settings — the one active design
 
-- [ ] [plans/launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md) — a launcher that owns the
+- [ ] [plans/launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md) — Controller Settings that owns the
       installed game's settings (General/Graphics/Controller; the Experimental tab is
       withdrawn, D14), ships in the installer payload beside `rb_blitz.exe` and launches
-      it. The current milestone is M1, "the launcher with the graphical settings"
+      it. The current milestone is M1, "Controller Settings with the graphical settings"
       (§1.1): three tabs, Graphics whole, General limited to the launch target plus the
-      save and DLC locations, and the launcher fully controller-navigable. It is written
+      save and DLC locations, and Controller Settings fully controller-navigable. It is written
       prompt-by-prompt with waves, a dependency graph and an open-questions list that has
       to be answered before wave 0. It absorbed the per-device remap design: lane C
-      builds the remap core and the launcher's Controller → Manual page is its panel.
+      builds the remap core and Controller Settings' Controller → Manual page is its panel.
       It also reuses the game's own UI art where it can (D15, [§10](../plans/finished/2026-09-27-launcher-plan.md)):
       background, logo, button prompts and the controller diagrams, all derived from the
       user's own game data on their machine and never shipped. §10 has the inventory of
@@ -54,23 +54,23 @@ that name an action.
       parsing detail that still blocks reading the art straight out of `game/`.
       Nothing in it gates release readiness.
 
-      **Status, 2026-10-05.** M1 ("the launcher with the graphical settings") is finished, and so are
+      **Status, 2026-10-05.** M1 ("Controller Settings with the graphical settings") is finished, and so are
       packaging (D3–D5), first-run prefill (D4) and the whole evidence lane — E1's test names, E2's
       capture harness, E3's installed end-to-end run and E4's write-up are all in the tree. Six prompts
       are left: A4 (cover art), A5 (accessibility and recovery), and C1, C2, C6 (the Controller tab's
       remaining lanes), none of them gated by anything. Re-measuring any of it is scripted rather than
-      manual now: `ctest -R launcher`, `scripts/capture_launcher.ps1` (the ring, the bar, a tab's body)
-      and `scripts/acceptance_launcher.ps1` (install the built setup, boot four legs, read the game's
+      manual now: `ctest -R Controller Settings`, `scripts/capture_controller_settings.ps1` (the ring, the bar, a tab's body)
+      and `scripts/acceptance_controller_settings.ps1` (install the built setup, boot four legs, read the game's
       own log).
 
-- [ ] **Make the launcher's settings reach a game the launcher did not start** — D3's rank 4, "the
+- [ ] **Make Controller Settings' settings reach a game Controller Settings did not start** — D3's rank 4, "the
       profile applied as a config file at the top of `OnConfigurePaths`", is not in the tree: measured
       2026-10-05, a top-level key in a profile handed to `--launcher_profile` does not reach a cvar, and
-      the launcher's rows arrive only as `--<key>=<value>` flags (`plans/launcher-plan.md` §11.6). So
+      Controller Settings' rows arrive only as `--<key>=<value>` flags (`plans/launcher-plan.md` §11.6). So
       *Launch Game* is covered and a double-click, or the game's own Start-menu shortcut, is not: it
       boots with `rb_blitz.toml` and the compiled defaults. Either apply `[settings]` at config rank
       before the game's own file — which is what D3 describes, and what R4's standalone half needs —
-      or drop rank 4 and document that the launcher is the entry point. One decision, then a small hook
+      or drop rank 4 and document that Controller Settings is the entry point. One decision, then a small hook
       or a documentation change.
 
 - [ ] **One store for the General tab's two path rows** — the panel writes `[launch] user_data_dir` /
@@ -118,7 +118,7 @@ packaging and auto-update, symbol-name campaigns, and mod APIs. DLC packages do 
 to custom-song content that no content API ever enumerated.
 
 Dropped for now, their documents deleted with them: in-game host Audio/Video settings,
-the per-device button-mapping layer (its remap half lives on in the launcher plan), and
+the per-device button-mapping layer (its remap half lives on in Controller Settings plan), and
 the VR port. Anything needed from them has to be re-derived.
 
 ## 5. Permanent non-goals

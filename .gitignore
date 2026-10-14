@@ -23,8 +23,8 @@
 /installer/out/
 /installer/generated/
 
-# Launcher: the settings schema compiled from launcher/config/settings.toml.
-/launcher/out/
+# Controller Settings: the settings schema compiled from controller-settings/config/settings.toml.
+/controller-settings/out/
 
 # Side wizard image made by installer/tools/make_art.ps1. The artwork is not ours
 # to license, so only the repository's own art is committed: assets/icon/ holds the

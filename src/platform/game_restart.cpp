@@ -31,7 +31,7 @@
 namespace rb_blitz::platform {
 namespace {
 
-using rb_blitz::launcher::LaunchTarget;
+using rb_blitz::profile::LaunchTarget;
 
 // --- small text helpers ------------------------------------------------------------------------
 
@@ -301,8 +301,8 @@ std::vector<std::string> BuildChildArguments(const LaunchContext& context,
   }
   // The saved file is the target's source. Passing a generated setting as a CLI flag would
   // make it an external override on every subsequent boot, disabling the Target row.
-  if (!context.launcher_profile.empty()) {
-    arguments.push_back("--launcher_profile=" + utf8(context.launcher_profile));
+  if (!context.profile_file.empty()) {
+    arguments.push_back("--launcher_profile=" + utf8(context.profile_file));
   }
   for (size_t i = 0; i < context.developer_arguments.size(); ++i) {
     const std::string& argument = context.developer_arguments[i];
@@ -534,7 +534,7 @@ const char* RestartPhaseToken(RestartPhase phase) {
   return "?";
 }
 
-RestartCoordinator::RestartCoordinator(ChildLauncher* launcher) : launcher_(launcher) {}
+RestartCoordinator::RestartCoordinator(ChildLauncher* child) : child_(child) {}
 
 RestartOutcome RestartCoordinator::Request(uint64_t saved_revision, uint64_t current_revision,
                                            uint64_t request_id, const LaunchContext& context) {
@@ -561,7 +561,7 @@ RestartOutcome RestartCoordinator::Request(uint64_t saved_revision, uint64_t cur
     outcome.error = "nothing durable has been saved yet";
     return outcome;
   }
-  if (launcher_ == nullptr) {
+  if (child_ == nullptr) {
     outcome.status = rb_blitz::settings::RestartStatus::kChildFailed;
     outcome.phase = RestartPhase::kFailed;
     phase_ = RestartPhase::kFailed;
@@ -591,7 +591,7 @@ RestartOutcome RestartCoordinator::Request(uint64_t saved_revision, uint64_t cur
   const std::vector<std::string> arguments = BuildChildArguments(context, token_);
   command_line_ = BuildCommandLine(context.executable, arguments);
   std::string spawn_error;
-  if (!launcher_->Spawn(context.executable, arguments, context.working_directory, &spawn_error)) {
+  if (!child_->Spawn(context.executable, arguments, context.working_directory, &spawn_error)) {
     // §8 step 4: a failed child creation keeps the original game running and reports the failure.
     phase_ = RestartPhase::kFailed;
     error_ = spawn_error;

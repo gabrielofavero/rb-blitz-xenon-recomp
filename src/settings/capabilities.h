@@ -138,7 +138,7 @@ struct CapabilityInputs {
   std::vector<DisplayMode> display_modes;  // truthful; may be empty
   std::vector<RendererProbe> renderers;
   RenderPathLimits render_path;
-  rb_blitz::launcher::LaunchTarget active_target = rb_blitz::launcher::LaunchTarget::kCommon;
+  rb_blitz::profile::LaunchTarget active_target = rb_blitz::profile::LaunchTarget::kCommon;
   ProviderState provider;
   uint64_t revision = 1;
 };

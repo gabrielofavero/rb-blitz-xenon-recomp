@@ -1,6 +1,6 @@
 # In-game settings — architecture (how the system is built)
 
-The in-game settings system is the project's native replacement for the launcher's settings surface: a
+The in-game settings system is the project's native replacement for Controller Settings' settings surface: a
 menu inside the title that reads and writes the same preferences and, where the title owns the value, the
 guest's own script world. This is the consolidated implementation record — the six per-package findings
 documents merged into one account of how the pieces are built (guest bridge, panel/list API, storage
@@ -619,7 +619,7 @@ Unit tests unchanged and still pass (`ctest -R dtb_author`).
 Status: **P3 complete** as a host-tested lane. `src/settings/{model,schema,store,migration,paths,service}.{h,cpp}`
 materialize the frozen G0 interfaces and pass 205 host checks across three new ctest tests. **No production
 code was wired into boot** — integration steps are in §6; the coordinator owns `src/rb_blitz_app.h`,
-`src/main.cpp` and `RBBLITZ_SOURCES`. No cutover, launcher change, installer change or UI. Read order:
+`src/main.cpp` and `RBBLITZ_SOURCES`. No cutover, Controller Settings change, installer change or UI. Read order:
 `contracts.md` → this part → `plan.md`. Labels: **measured** = executed this pass; **frozen** = G0 decision;
 **P3 addition** = a delta to a frozen shape, recorded for coordinator review.
 
@@ -630,7 +630,7 @@ Baseline `1e40765`, branch `p2-exact-1080p` (P1/P2 share this worktree). New fil
 `tests/settings_{store,migration,service}_tests.cpp`; the only shared file touched is the root
 `CMakeLists.txt` (three `add_executable`/`add_test` blocks inside `BUILD_TESTING`). **26/26 ctest passed**
 (3.27 s) — store 60 + migration 61 + service 84 = **205 checks**. The three targets are SDK-free and compile
-from `src/` plus `src/launcher/profile.cpp` and `src/launcher/profile_path.cpp`; nothing in `src/settings/`
+from `src/` plus `src/profile/profile.cpp` and `src/profile/profile_path.cpp`; nothing in `src/settings/`
 includes `rex/*`, `<windows.h>` or SDL, so no boot is required.
 
 ### 2. What each file is (frozen names materialized)
@@ -692,7 +692,7 @@ missing → `kInterruptedResumed`, paths finish on the next run without erasing 
 **A value equal to the compiled default is not written.** Keeps `settings.toml` minimal and keeps P4's
 first-run automatic policy meaningful (origin, not presence, says "the user chose this"). A legacy row at
 the *new* model's default imports as `default`; one that differs imports as `manual`, so an existing manual
-choice is never reset on value equality. Measured: a default launcher profile imports exactly two rows — the
+choice is never reset on value equality. Measured: a default Controller Settings profile imports exactly two rows — the
 target (`ultimate`) and the legacy `anisotropic_override = 3` (`4x`), the filtering the game actually ran.
 
 **Service (§5.2/§6).** `requested`/`effective`/`pending` are three values. `BeginEdit` on a stale revision
@@ -739,16 +739,16 @@ The service is host-side and needs no guest. Five insertion points, with the exa
 
 1. **`OnConfigurePaths`** — resolve identity and migrate before anything else reads settings.
    ```cpp
-   launcher::ProfilePathInputs inputs =
-       launcher::ProfilePathInputsFromEnvironment(rex::filesystem::GetExecutableFolder());
+   profile::ProfilePathInputs inputs =
+       profile::ProfilePathInputsFromEnvironment(rex::filesystem::GetExecutableFolder());
    inputs.command_line_value = REXCVAR_GET(launcher_profile);       // existing cvar
    settings::StorePaths sp;
    sp.settings_file  = settings::ResolveSettingsFile(inputs);
    sp.paths_file     = settings::ResolvePathFile(inputs.executable_dir);
-   sp.legacy_profile = launcher::ResolveProfilePath(inputs);
+   sp.legacy_profile = profile::ResolveProfilePath(inputs);
    const settings::PathFileResult paths = settings::LoadPathFile(sp.paths_file);   // may be missing
    std::string why;
-   auto legacy = launcher::ReadLauncherProfile(&why);               // existing helper
+   auto legacy = profile::ReadProfile(&why);               // existing helper
    settings::Service service(sp);
    settings::MigrationResult migration;
    service.Boot(legacy ? &*legacy : nullptr, paths.paths, &migration, legacy.has_value());
@@ -768,7 +768,7 @@ The service is host-side and needs no guest. Five insertion points, with the exa
    persisted/pending state, not init-only cvars.
 
 Also: `service.SetOverrides(...)` with the values `rb_blitz.toml` / environment / CLI won, so an overridden
-row is shown disabled with `OverrideExplanation`. P8 narrows `ApplyLauncherProfileSettings` to
+row is shown disabled with `OverrideExplanation`. P8 narrows `ApplyProfileSettings` to
 `settings::IsControllerCvar`. P9 consumes `Service::RequestRestart` after `CommitResult::saved_revision`.
 The UI gets an immutable by-value `Snapshot` from `GetSnapshot()` and never holds a host reference across a
 frame.
@@ -874,7 +874,7 @@ unknown token is refused rather than accepted.
 | # | Hook | What happens | Why there |
 | --- | --- | --- | --- |
 | 1 | `OnConfigurePaths` | identity → `paths.toml` → legacy profile → migrate → load `settings.toml`; then the capability snapshot, then target/licence, renderer, the DLC and Interface rows and the two path roots, at the config rank | Runs after the legacy profile's rows (which it migrates then outranks at equal rank) and *before* the SDK loads the game's own `rb_blitz.toml` — a later write at the same rank, so it still beats it (§4.2) |
-| 2 | `OnPostInitLogging` | the store's boot lines: file + status, the migration, rows applied, rows an explicit source owns, the two open items | First point where a line goes anywhere (same reason the launcher's profile report lives here) |
+| 2 | `OnPostInitLogging` | the store's boot lines: file + status, the migration, rows applied, rows an explicit source owns, the two open items | First point where a line goes anywhere (same reason Controller Settings' profile report lives here) |
 | 3 | `OnPostLoadXexImage` (after `ultimate::Configure`, before `bridge::Configure`) | provider values reach the service; the GPU plugin's own cvars are written now that it registered them; the channel is pointed at the service | Provider state is known only after `ultimate::Configure`; the plugin's cvars (`vsync`, `anisotropic_override`, `native_2x_msaa`, `swap_post_effect`, `resolution_scale`) do not exist at step 1; and `bridge::Configure` *seeds* through the channel, so the store must be installed already |
 | 4 | `OnPreLaunchModule` (before `FinalizeInit`) | read every applied cvar back; a row whose value did not stand is recorded as overridden | `SetFlagFromConfig` returning true does not prove the value won (§4.2): a later same-rank write — `rb_blitz.toml` — beats it, and a row the player cannot change must say so |
 
@@ -914,7 +914,7 @@ producible set unchanged rather than erasing a request.
 ### 5. Evidence (2026-10-11)
 
 Harness `out\_swap\p11a\run.ps1 -Label <name> [-Diagnostic] [-Reuse]`: boots `rb_blitz.exe` against a
-disposable `--user_data_root` with a legacy launcher profile, waits for the boot's last line (`N of M
+disposable `--user_data_root` with a legacy Controller Settings profile, waits for the boot's last line (`N of M
 applied value(s) stood`), stops the game, prints the lines that matter and dumps `settings.toml`.
 
 #### 5.1 Migration and the config-rank writes
@@ -925,7 +925,7 @@ Arm `migrate2` (`out/_swap/p11a/migrate2/migrate2.log`): `migration done - 2 row
 `anisotropic_override = 3 (applied once the GPU plugin registered it)` and `3 of 3 applied value(s) stood`.
 `settings.toml` was created with `[general] target`, `[graphics] filtering = '4x'`, both provenances and
 `[migration] imported = true`. The two imports are P3's measured outcome for a legacy profile (`target`,
-from the profile's own structured field — default `ultimate`, what the retired launcher meant by a default
+from the profile's own structured field — default `ultimate`, what the retired Controller Settings meant by a default
 profile — and `anisotropic_override = 3` as `4x`). The `[settings] target = "common"` row the arm writes is
 *not* the structured field, so it is preserved verbatim as an unknown row ("import only missing fields,
 preserve everything else").
@@ -979,7 +979,7 @@ selection — is now measured**, in the product spelling the store gives it. The
   bootstrap half is done and measured by P9.
 * **The provider's `unlock_all` native write** and **the achievements action**: P6's open items; the channel
   answers the action with `kUnsupported` rather than a cheerful lie.
-* **The launcher rows' removal, the in-song merge and the cutover** — P8/P5b-r2/P11b.
+* **Controller Settings rows' removal, the in-song merge and the cutover** — P8/P5b-r2/P11b.
 * **A 50-package menu pool boot**, the in-song entry, and the trial target: unchanged open items.
 
 ### 7. Tests
@@ -1020,7 +1020,7 @@ pwsh -NoProfile -File out\_swap\p5b\run.ps1 -Label p11a-store -Route basescroll
 | --- | --- |
 | P5b-r2 (in-song merge) | Nothing new to change, but it now runs with the store live: a screen edit writes `settings.toml` |
 | P9-ui (restart prompt) | `ServiceSink::restart_requested()` / `restart_request_id()` is the guest's request; `Service` + P9's `RestartCoordinator` are reachable from the boot; the prompt decides when to call `Request` |
-| P11b (cutover) | The store is the default source, so `profile_controller_rows_only` can finally be flipped; the launcher's `[settings]` rows other than the controller allowlist become inert preservation data |
+| P11b (cutover) | The store is the default source, so `profile_controller_rows_only` can finally be flipped; Controller Settings' `[settings]` rows other than the controller allowlist become inert preservation data |
 | P10's follow-up | `SetMenuRows` + `Current()` are the seam; the caller is the menu filter, which holds the record bytes |
 | P4's follow-up | `SettingsBoot::AfterLoadXexImage` is where a real display probe and the Variant B hook land; the two rows' "not applied" branches in `ApplyRow` are the switch |
 
@@ -1394,7 +1394,7 @@ Tests: `ctest` is **33/33** green in `out/build/win-amd64-release`, including tw
 provider adapter agree; the split; every apply outcome including the null-applier case) and `game_restart`
 (the token — round trip, bound, eleven refusal shapes; the Windows quoting rule; the argument allowlist
 rebuild — one-shot/transient arguments dropped, explicit developer arguments kept, the target's own flags;
-the state machine — exactly-once, stale revision, nothing-saved, spawn failure with a retry, no-launcher;
+the state machine — exactly-once, stale revision, nothing-saved, spawn failure with a retry, no-Controller Settings;
 and **real process legs** — a child started and waited for, a failing spawn, a child that waits for its
 parent's *verified identity* before it does anything, the reused-pid case that must not hold it hostage, and
 the timeout that refuses to start beside a living parent).
@@ -1426,7 +1426,7 @@ platform::LaunchContext context;
 context.executable = /* this executable */;
 context.game_data_root = /* the absolute root this boot used */;
 context.working_directory = /* its folder */;
-context.launcher_profile = /* the identity this boot was started with */;
+context.profile_file = /* the identity this boot was started with */;
 context.target = /* the newly persisted target's token */;
 context.developer_arguments = /* THIS boot's explicit dev flags, minus the retired ones */;
 platform::RestartCoordinator coordinator(platform::CreateChildLauncher().release());
@@ -1437,8 +1437,8 @@ if (coordinator.CloseRequested()) { /* ask the UI to close, then let OnClosing r
 `request_id` may be 0 (what a DTA script sends); the token still gets a non-zero identity.
 `developer_arguments` is an explicit allowlist supplied by the caller: this module drops the retired ones
 (`--restart-handoff=*`, `--restart-bootstrap`, anything naming `refresh_dlc_cache`) and keeps the rest,
-because a debugging flag must survive a restart (§8) — filtering *launcher-generated setting flags* is the
-caller's job, since that list lives in the launcher's own generated table.
+because a debugging flag must survive a restart (§8) — filtering *Controller Settings-generated setting flags* is the
+caller's job, since that list lives in Controller Settings' own generated table.
 
 #### 6.3 Where the live apply runs today, and where it must move
 

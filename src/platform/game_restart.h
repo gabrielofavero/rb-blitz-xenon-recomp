@@ -92,8 +92,8 @@ std::optional<HandoffToken> HandoffFromArguments(int argc, const char* const* ar
                                                  std::string* error);
 
 // The target's frozen spelling and its inverse, so a token and a `LaunchTarget` cannot disagree.
-std::string_view TargetToken(rb_blitz::launcher::LaunchTarget target);
-bool TargetFromToken(std::string_view token, rb_blitz::launcher::LaunchTarget* out);
+std::string_view TargetToken(rb_blitz::profile::LaunchTarget target);
+bool TargetFromToken(std::string_view token, rb_blitz::profile::LaunchTarget* out);
 
 // ------------------------------------------------------------------------------------------------
 // The command line a child is started with
@@ -103,7 +103,7 @@ struct LaunchContext {
   std::filesystem::path executable;        // the exe to start (this one, re-executed)
   std::filesystem::path game_data_root;    // absolute; empty = the game's own resolution
   std::filesystem::path working_directory; // empty = the executable's folder
-  std::filesystem::path launcher_profile;  // identity the old process was started with
+  std::filesystem::path profile_file;      // identity the old process was started with (--launcher_profile)
   std::string target = "common";           // the NEWLY persisted target (§8 step 2)
   // Developer arguments that survive a restart. Only these names are ever rebuilt onto the child's
   // command line; see `IsRetiredArgument` for the ones that are dropped instead.
@@ -112,7 +112,7 @@ struct LaunchContext {
 
 // The arguments a child is started with, in a stable order: where the data is, the target, the
 // profile identity, the surviving developer arguments, then the handoff switch. Deliberately NOT a
-// replay of the old command line: the old line carries launcher-generated setting flags that would
+// replay of the old command line: the old line carries Controller Settings-generated setting flags that would
 // override the file the player just wrote (§8 step 2).
 std::vector<std::string> BuildChildArguments(const LaunchContext& context,
                                              const HandoffToken& token);
@@ -123,8 +123,8 @@ std::string BuildCommandLine(const std::filesystem::path& executable,
 
 // The Windows quoting rule (MSDN, "Parsing C++ command-line arguments"): a run of backslashes that
 // precedes a quote is doubled and the quote is escaped; otherwise the run is emitted verbatim
-// inside the quotes. The same rule the launcher's own `BuildLaunchCommand` uses, repeated here
-// because this module is a separate target from the launcher.
+// inside the quotes. The same rule Controller Settings' own `BuildLaunchCommand` uses, repeated here
+// because this module is a separate target from Controller Settings.
 std::string QuoteArgument(std::string_view text);
 
 // Arguments a restart never rebuilds: the previous handoff (one-shot, consumed), the transient
@@ -156,7 +156,7 @@ class ChildLauncher {
   virtual uint32_t ChildPid() const = 0;
 };
 
-// The platform launcher: `CreateProcessW` with a UTF-8 command line converted properly, and a
+// The platform Controller Settings: `CreateProcessW` with a UTF-8 command line converted properly, and a
 // `WaitForSingleObject` bound. Null only if the platform has no implementation.
 std::unique_ptr<ChildLauncher> CreateChildLauncher();
 
@@ -192,8 +192,8 @@ struct RestartOutcome {
 // boot wiring; every method runs on the UI thread.
 class RestartCoordinator {
  public:
-  // `launcher` is borrowed and must outlive this object.
-  explicit RestartCoordinator(ChildLauncher* launcher);
+  // `Controller Settings` is borrowed and must outlive this object.
+  explicit RestartCoordinator(ChildLauncher* child);
 
   // §8 step 1 and 3-4. `saved_revision` is what the caller believes is durable; `current_revision`
   // is what the service reports now. A mismatch is `kStaleRevision` and nothing is spawned: a
@@ -220,7 +220,7 @@ class RestartCoordinator {
   void ResetAfterFailure();
 
  private:
-  ChildLauncher* launcher_ = nullptr;
+  ChildLauncher* child_ = nullptr;
   RestartPhase phase_ = RestartPhase::kIdle;
   std::string error_;
   HandoffToken token_;

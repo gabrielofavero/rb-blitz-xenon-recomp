@@ -38,7 +38,7 @@ TEXT_SUFFIXES = (
 )
 SKIP_PREFIXES = (
     "out/", "rexglue-sdk/", "game/", "assets/", "generated/", "_scratch/", ".git/",
-    "patches/rexglue-sdk/", "installer/out/", "launcher/out/", "tools/milotex/bin/",
+    "patches/rexglue-sdk/", "installer/out/", "profile/out/", "tools/milotex/bin/",
     "tools/milotex/obj/",
 )
 SKIP_EXACT = ("compile_commands.json",)
