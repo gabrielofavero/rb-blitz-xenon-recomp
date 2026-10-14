@@ -1,5 +1,12 @@
 # Cancelling a song load that never finishes (R11)
 
+> **New study (2026-10-13):** [Song Load Guard](../plans/load-guard-findings.md) examines
+> automatic 30s/60s cancellation, return to the **main menu**, and a native error popup using
+> the current settings/UI infrastructure. It distinguishes cooperative timeouts from fatal
+> exception recovery and includes [implementation prompts](../plans/load-guard-prompts.md).
+> No new runtime recovery was implemented or measured in that study. The R11 results and
+> corrected reproducer below remain historical evidence.
+
 *Status: **cancelled, and removed from the tree** (2026-10-07). R11's toggle, its timeout cvar,
 its launcher rows and `src/hooks/loading_cancel.cpp` are gone. §§1-4 are the history - what the
 title does, what was measured, the one question that was never closed, and the shape the removed
