@@ -1685,6 +1685,54 @@ void TestLocaleOverrides() {
   CHECK_TRUE(translated[0].kids[1].text == "Translated");
 }
 
+// The save-error page has to say what failed. Boots measured on an installed copy (2026-10-14) put
+// the "check that the settings folder is writable" text on a failure that was nothing of the kind,
+// which sent the player looking in the wrong place - so the panel asks the channel which reason it
+// was and swaps its message. The probes are pinned here because dropping one would silently restore
+// the wrong text, and so are the locale entries the tokens resolve to.
+void TestSaveErrorSaysWhy() {
+  BeginCase("the save-error page asks why the save failed and says so");
+
+  const std::vector<std::pair<std::string, std::string>> wanted = {
+      {"provider", "settings_save_error_provider"},
+      {"conflict", "settings_save_error_conflict"},
+      {"other", "settings_save_error_other"}};
+
+  std::vector<std::string> texts;
+  bool found = false;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 || root.kids[0].text != "new" ||
+        root.kids[2].tag != dtb::kSymbol || root.kids[2].text != "settings_save_error_panel") {
+      continue;
+    }
+    found = true;
+    CollectText(root, &texts);
+  }
+  CHECK_TRUE(found);
+
+  auto has_text = [&texts](const std::string& needle) {
+    return std::find(texts.begin(), texts.end(), needle) != texts.end();
+  };
+  // The default is the not-writable text; each other reason overrides it.
+  CHECK_TRUE(has_text("settings_save_error_message"));
+  for (const auto& [reason, message] : wanted) {
+    CHECK_TRUE(has_text(message));
+    CHECK_TRUE(has_text(std::string("rbbz-settings/snapshot/commit.failed/t:") + reason));
+  }
+  // Every message the panel can draw exists in the locale the surface adds, or the page would draw
+  // a bare symbol instead of a sentence.
+  for (const char* key : {"settings_save_error_message", "settings_save_error_provider",
+                          "settings_save_error_conflict", "settings_save_error_other"}) {
+    bool defined = false;
+    for (const auto& label : Labels()) {
+      if (label.first == key && !label.second.empty()) {
+        defined = true;
+      }
+    }
+    CHECK_TRUE(defined);
+  }
+}
+
 void TestLabels() {
   BeginCase("the surface's labels are complete, unique and printable");
 
@@ -2791,6 +2839,7 @@ int main(int argc, char** argv) {
   TestHelpEventsInTheDefinition();
   TestHelpTopicsResolve();
   TestConfirmationPagesAreCaptionFree();
+  TestSaveErrorSaysWhy();
   TestSettingsLabelsRow();
   TestAchievementActionWording();
   return Finish();

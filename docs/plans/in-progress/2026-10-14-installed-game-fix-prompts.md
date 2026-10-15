@@ -36,6 +36,7 @@ image alone cannot establish the duration or which work is pending.
 | R8 | Settings navigation can become stuck around a saving/writing message, and Restart now can do nothing. Saving and recovery must keep the menu usable. | P3 |
 | R9 | Cache On still shows discovery and takes a long time. Establish actual cache reuse and its measured benefit. | P6 |
 | R10 | Discovery progress appears finished while loading continues. Represent remaining work truthfully and reduce demonstrated bottlenecks. | P6 |
+| R11 | **Every** settings edit in an installed copy answers "Settings could not be saved. Check that the settings folder is writable", whatever row is changed. Saving must work for every row, and a failure must name what really failed. | P7 |
 
 Recommended order: **P1 -> P2 -> P3 -> P4 -> P6 -> P5**, followed by the installed acceptance pass
 in section 3. P1 establishes which binaries are being tested; P3 makes settings-based validation
@@ -1071,8 +1072,126 @@ then `dlc_cache_benchmark.exe <library> <new-output-directory>`. It runs three t
 condition through the production loader and emits CSV. It does not measure guest loading or
 claim to flush the OS cache. The full installed matrix's raw timings are `out/_swap/p6/matrix.csv`.
 
-## 3. Final installed acceptance and evidence
+### P7 — "Settings could not be saved" in an installed copy
 
+Preliminary findings (2026-10-14; read off the installed log and the tree — no boot was taken during
+this research):
+
+- `[local]` `<install>\logs\rb_blitz_001.log`, the 22:08 boot of the install the owner was testing:
+  five edits, and five times one `settings_bridge: set '<row>' -> ok (staged)` immediately followed
+  by `settings_bridge: commit '-' -> io error (gameplay.forceplot cannot hold that value,
+  gameplay.which_skybox cannot hold that value)`. `settings.toml` was never written (its mtime
+  stayed at 12:31 while that boot wrote its own graphics marker at 22:09), and the screen showed the
+  surface's own `settings_save_error_message`: *"Settings could not be saved. Check that the settings
+  folder is writable, then try again."*
+- `[local]` `%APPDATA%\rb_blitz\settings.toml.commit-journal` — written at 12:31, never removed —
+  holds `[native] 2 = "false"` (id 2 is `kCacheDlcLibrary`) and `[provider] 65, 66, 67 = "true",
+  "plot_bodega_a", "nfs_mw2012"`.
+- `[tree]` `Service::Commit` runs `RecoverCommit` **before** it writes anything, and recovery's last
+  step is `provider_->Save(provider)` → `EncodeProviderValues`. A journal whose provider rows the
+  encoder cannot spell therefore fails recovery, which fails the commit, and the journal is left in
+  place — so **every** later save on that installation is refused, whatever row it changes.
+- `[tree]` The two rows named in the error are the payload's *boolean-with-submenu* pair: the store's
+  descriptors are `ValueKind::kEnum` over the payload's inventory
+  ([architecture.md](../../settings/architecture.md) part 5 §3) and the screen offers those tokens,
+  while the adapter's bindings declared them `RowKind::kBool`. That is
+  [status.md](../../settings/status.md) item 18, and it is the source of the unencodable value.
+- `[tree]` The error text is chosen by the guest from one bit: `CommitResult` in
+  `src/ui/settings_screen.cpp` enters the save-error page whenever `snapshot/commit.ok` is false, so
+  a conflict, a refused value or a provider failure all wore the folder's text.
+- `[unproven]` Whether the owner's installation ever wrote a *provider* file: `<user_data>\ultimate`
+  exists but is empty, so every provider value in play came from the payload's compiled defaults.
+
+```text
+Fix "Settings could not be saved" for every row in an installed copy. Read P7 above,
+docs/settings/architecture.md part 3 §4 and part 5 §3, docs/settings/status.md item 18, and
+src/settings/{service,bridge_sink,ultimate_adapter}.cpp with src/hooks/settings_bridge_hooks.cpp.
+
+Reproduce it in a boot; the installed log alone names the io error and the two rows. Make the
+provider row's value path consistent end to end: one representation for the screen, the store and
+the request, and the provider's own spelling in its file, with the payload's inventory as the only
+authority. A row the player can press must be a row a commit can encode.
+
+Then make the failure impossible to repeat. A save that finds an interrupted save it cannot finish
+must not refuse forever: keep the bytes, name the reason, and let the player save - and prove a
+retry works. A save that fails on screen must say what failed instead of blaming the settings
+folder.
+
+Extend the host suites (ultimate_adapter, settings_service, settings_bridge_service,
+settings_screen) with the failing value, with a journal nobody can finish, and with a retry after a
+failure. Seed the owner's own journal into a driven boot and show the edit saves.
+```
+
+#### P7 — done (2026-10-15)
+
+**What was wrong.** Two independent defects on one path, both visible in the installed log alone.
+
+1. **The two flat-panel rows could not be spelled.** `forceplot` and `which_skybox` are the payload's
+   *boolean-with-submenu* pair: the payload's row is a `uOnOFF` toggle, its choices live in a panel of
+   its own, and that panel's `SELECT_MSG` stores the selected **position**
+   (`{set $which_skybox {$component selected_pos}}`). This build draws the whole choice set as one
+   select over the payload's tokens — which is what the screen, the store and a request all carry —
+   so the file is the only place that needs the position, and the bindings said `RowKind::kBool`
+   instead. A press on either row staged a token the encoder refused, and because that commit also
+   carried a *native* row it wrote the recovery journal first: `<settings>.commit-journal` survived
+   the failure, and held a provider value nothing could ever encode.
+2. **A journal nobody can finish refused every later save.** Recovery runs inside each commit, so the
+   journal above answered `io error` for *any* edit from then on — the installed log's five
+   consecutive failures — and `bridge_sink` maps that to the guest's save-error page, whose text
+   ("check that the settings folder is writable") described a failure that was not about a folder at
+   all. The committed native half of the interrupted save (`cache_dlc_library = false`) was on disk
+   the whole time.
+
+**What changed.** `RowBinding::position_value` (in `ultimate_adapter.h`) says a row's file value is
+the choice **position**, and the two rows are `kSelect`; the shape check accepts the payload's
+boolean row for exactly that pair and now *requires* the flat choice list that names the positions
+(`the provider declares no choice list for 'forceplot'`). `ConfigureProvider` resolves a
+file/default position into a token against the payload's inventory (dropping, with a note, a value
+that names no position) and `InstalledProviderSink::Save` resolves the token back into a position.
+`Service::Commit` **parks** a journal it cannot finish (`<settings>.commit-journal.stale`, numbered
+if taken; the bytes are kept) and lets the player's own save go ahead, recording why through
+`TakeRecoveryNote()` — which the boot logs and a commit appends to its own log line, so a park can
+never be silent. The save-error page now asks `snapshot/commit.failed/t:<reason>` and draws one of
+four texts (`not_writable` keeps the folder's wording; `provider` says the settings file saved and
+the mod's file did not; `conflict`; `other`).
+
+**Evidence** (`out/_swap/settings-save/`, 2026-10-15, `out/build/win-amd64-release`, D3D12,
+windowed, `ultimate` target with the installed payload and empty DLC roots; the harness is
+`out/_swap/settings-save/run.ps1 -Label X -SeedJournal <journal>`, which seeds the owner's **real**
+journal and the native row it expects):
+
+| Observation | Value |
+| --- | --- |
+| The failure, verbatim | The owner's install: `set 'general.dlc_scan_threads' -> ok (staged)` then `commit '-' -> io error (gameplay.forceplot cannot hold that value, gameplay.which_skybox cannot hold that value)`, five times, with `settings.toml` untouched |
+| The harness reproduces it on the **shipped** binary | `control-installed` — the installed `rb_blitz.exe` (from `installer-latest`, i.e. *without* this fix) run through the same route with the same seeded journal: `set 'general.cache_dlc_library' -> ok (staged)` → `commit '-' -> io error (gameplay.forceplot cannot hold that value, gameplay.which_skybox cannot hold that value)`; `settings.toml` keeps its pre-boot mtime (the 08:08:43 press wrote nothing) and the journal is still there (`out/_swap/settings-save/control-installed-userdata/settings.toml.commit-journal`, the owner's own 104 bytes). A harness that cannot reproduce the failure proves nothing about the fix; this one does |
+| The same route, after the fix | `armA-owner-journal` (journal seeded, nothing native committed yet): `set 'general.cache_dlc_library' -> ok (staged)` → `commit '-' -> ok (committed)` **twice**; `settings.toml` written at 07:52:59 with `cache_dlc_library` and `'general.cache_dlc_library' = 'manual'`; the journal is gone |
+| Recovery *completes* the interrupted save | `armB-owner-journal-recovered` (its native half already on disk, as the owner's install had it): the journal is finished during the provider install, and the provider's own file is created as `(0 (disable_plots TRUE) (forceplot 1) (which_skybox 2))` — the **positions**, `plot_bodega_a` = 1 and `nfs_mw2012` = 2, in the file the provider's loader reads; both edits after it commit (`ok (committed)`) |
+| A journal *nobody* can finish no longer refuses the save | `armC-unknown-token` (the same journal with `66 = "plot_does_not_exist"`): the boot warns `settings_boot: Interrupted provider settings are incompatible with this installation; the next save will set the journal aside`, and that save answers `commit '-' -> ok (committed; the interrupted save was kept as settings.toml.commit-journal.stale (Interrupted provider settings are incompatible with this installation))` — the note is reported **once** (the next commit is a plain `ok (committed)`), the parked file still holds the journal's 119 bytes, and `settings.toml` was written |
+| The surface stays editable | `04-toggled.png`: *Help & Options → Downloadable Content* with **Cache DLC Library: On** selected and **no** error dialog; the second pass toggles it back and commits again |
+| Host tests | **39/39** (`out/build/rename-tests`). New: `settings_service` pins that an uncompletable journal is parked and the save still lands (and that the parked bytes and the reason are both kept), `settings_bridge_service` pins the reason bits plus a retry after an I/O failure and after a provider failure, `ultimate_adapter` pins the pair's token ⇄ position contract and the refusal of a bare boolean, `settings_screen` pins that the save-error page asks why and that every message it can draw exists in the locale |
+| Docs check | `python .github/skills/documentation/scripts/check_docs.py` — 0 errors, the same 29 known warnings |
+
+**Honest limits.** The control leg runs the *installed* binary and the fix legs run the rebuilt
+`out/build/win-amd64-release` one, both against a disposable root and the owner's own journal — so
+the pair is a before/after on the same harness and the same state, but the *fix* has not been taken
+through a freshly built installer and a real install. The parking rule means an interrupted save that
+cannot be completed is kept as `<settings>.commit-journal.stale` rather than finished, so a future
+build that *can* finish one would have to be pointed at that file by hand; nothing reads `.stale`
+automatically, by design (guessing at it would be worse than saying so). `forceplot`/`which_skybox`
+are still `restart` rows, so a saved plot or skybox is applied on the next launch, not live. The
+`provider` failure text assumes the Ultimate provider is the only provider this build has, which is
+true today.
+
+**Reproducing it** (from `<checkout>`):
+
+```powershell
+cmake --preset win-amd64-release ; cmake --build --preset win-amd64-release
+Copy-Item "$env:APPDATA\rb_blitz\settings.toml.commit-journal" out\_swap\settings-save\journal-owner.toml
+pwsh -File out\_swap\settings-save\control-installed.ps1 -SeedJournal out\_swap\settings-save\journal-owner.toml  # the installed binary: io error
+pwsh -File out\_swap\settings-save\run.ps1 -Label armA-owner-journal -SeedJournal out\_swap\settings-save\journal-owner.toml  # the fix: ok (committed)
+```
+
+## 3. Final installed acceptance and evidence
 After the relevant fixes, build one fresh installer from the verified artifacts and run the
 following against its installed game as the ordinary player. Keep logs/captures in a disposable
 directory such as `out/_swap/installed-review/`; record the exact commands used, without putting

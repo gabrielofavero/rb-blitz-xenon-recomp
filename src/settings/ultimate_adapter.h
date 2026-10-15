@@ -225,6 +225,15 @@ struct RowBinding {
   RowKind kind = RowKind::kUnknown;
   Strategy strategy = Strategy::kRestart;
   std::string_view evidence;  // what was observed to justify kHot; empty = nothing yet
+  // The payload's **boolean-with-submenu** pair (`os_force_plot` -> `mod_force_plot_panel`): the
+  // row itself is a toggle, its choices live in a panel of their own, and that panel's SELECT_MSG
+  // stores the selected **position** (`{set $which_skybox {$component selected_pos}}`). This build
+  // exposes the whole choice set as one select over the provider's own tokens (plan §3.4), so the
+  // codec kind is `kSelect` while the payload's row stays a boolean - and the provider's *file*
+  // carries the position, which is what this flag says. The token/position translation lives in
+  // `ConfigureProvider` (read) and the provider sink's `Save` (write), both against the payload's
+  // own inventory, never a list of ours.
+  bool position_value = false;
 };
 
 const std::vector<RowBinding>& RowBindings();

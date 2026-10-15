@@ -118,6 +118,19 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   // "kSaved" / "kNoChanges" / ... for the log line.
   std::string_view last_commit_status() const { return CommitStatusToken(last_commit_status_); }
 
+  // Why the last commit failed, in the terms the merged screen can act on: the save-error panel
+  // asks `snapshot/commit.failed/t:<token>` per reason and picks its message from the answer, so a
+  // failure that is not a write failure of settings.toml no longer wears its text. Any commit that
+  // succeeds (or that had nothing to do) clears it, so the panel can never explain this save with
+  // an older failure.
+  //
+  // `kProvider` is the one case where part of the save *did* land: the settings file is written and
+  // the provider's own file (or its half of an interrupted one) is not, which the screen says
+  // rather than claiming nothing was saved.
+  enum class CommitFailure { kNone = 0, kNotWritable, kProvider, kConflict, kOther };
+  CommitFailure last_commit_failure() const { return last_commit_failure_; }
+  static const char* CommitFailureToken(CommitFailure failure);
+
   size_t local_count() const { return local_.size(); }
   size_t handled_count() const { return handled_.size(); }
 
@@ -167,6 +180,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_requires_restart_ = false;
   bool restart_pending_ = false;
   CommitStatus last_commit_status_ = CommitStatus::kNoChanges;
+  CommitFailure last_commit_failure_ = CommitFailure::kNone;
   ProviderSaver provider_saver_;
   bool edit_failed_ = false;
   bool commit_ok_ = true;

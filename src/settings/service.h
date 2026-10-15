@@ -103,6 +103,14 @@ class Service {
   DocumentStatus load_status() const { return load_status_; }
   uint64_t revision() const { return revision_; }
   uint64_t capability_revision() const { return capability_revision_; }
+  // What happened to an interrupted save: empty when there was none to finish, and otherwise the
+  // reason a *completed* one could not be finished - the callers log it, because a journal that is
+  // set aside is a data point the player's install cannot otherwise report.
+  const std::string& recovery_error() const { return recovery_error_; }
+  // The same note, reported **once**: whoever logs it takes it away, so one parked journal does not
+  // decorate every later commit. A park that happens during a commit is only ever visible here, and
+  // a silent one would look exactly like a commit that had nothing to say.
+  std::string TakeRecoveryNote();
 
   // --- the frozen bridge API ---------------------------------------------
   Snapshot GetSnapshot() const;
@@ -135,6 +143,8 @@ class Service {
   Source SourceFor(SettingId id, bool provider_row) const;
   std::filesystem::path JournalPath() const;
   bool RecoverCommit(std::string* error);
+  // Moves an interrupted save's journal aside so it cannot refuse the next one (see service.cpp).
+  bool ParkJournal(const std::string& reason);
 
   StorePaths paths_;
   Store store_;

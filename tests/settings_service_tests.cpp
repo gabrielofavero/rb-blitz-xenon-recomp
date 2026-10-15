@@ -454,6 +454,64 @@ void TestInterruptedCommitRecovery() {
   CHECK_TRUE(IsAutoResolution(LoadSettingsDocument(paths.settings_file).document.values.at(SettingId::kResolution)));
 }
 
+void TestUnfinishableCommitJournal() {
+  BeginCase("combined save: a journal nobody can finish is set aside, and saving still works");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  fs::path journal = paths.settings_file;
+  journal += ".commit-journal";
+  {
+    // An interrupted save: the settings file is written, the provider's half is not, so the journal
+    // stays behind for the next process to finish.
+    Service service(paths);
+    service.Boot(nullptr, {}, nullptr);
+    service.SetCapabilities(Capabilities());
+    FakeProvider provider;
+    provider.durable = false;
+    service.SetProviderSink(&provider);
+    const auto txn = service.BeginEdit(0);
+    CHECK_TRUE(service.Set(txn, SettingId::kVsync, BoolV(false), 1).ok);
+    CHECK_TRUE(service.Set(txn, SettingId::kHideHud, BoolV(true), 1).ok);
+    CHECK_TRUE(service.Commit(txn).status == CommitStatus::kPartial);
+    CHECK_TRUE(fs::exists(journal));
+  }
+  {
+    // The next process cannot finish it either (the provider's file still cannot be written).
+    Service service(paths);
+    service.Boot(nullptr, {}, nullptr);
+    service.SetCapabilities(Capabilities());
+    FakeProvider provider;
+    provider.durable = false;
+    service.SetProviderSink(&provider);
+    // Reported, and deliberately not moved yet: a later run with a working provider may still be
+    // able to finish it, so only a save that is actually blocked sets it aside.
+    CHECK_FALSE(service.recovery_error().empty());
+    CHECK_TRUE(fs::exists(journal));
+
+    // Any row press is a native edit, and it has to save. This is the installed-copy dead end: it
+    // used to answer `io error` here and the menu blamed the settings folder.
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(txn, SettingId::kVsync, BoolV(true), 1).ok);
+    const auto saved = service.Commit(txn);
+    CHECK_TRUE(saved.status == CommitStatus::kSaved);
+    CHECK_TRUE(LoadSettingsDocument(paths.settings_file)
+                   .document.values.at(SettingId::kVsync)
+                   .boolean);
+    CHECK_FALSE(fs::exists(journal));
+    fs::path parked = journal;
+    parked += ".stale";
+    // The bytes are kept, not deleted, and the reason is recorded where the boot can log it.
+    CHECK_TRUE(fs::exists(parked));
+    CHECK_TRUE(service.recovery_error().find(parked.filename().string()) != std::string::npos);
+    CHECK_TRUE(service.recovery_error().find("disk full") != std::string::npos);
+
+    // And the next save is an ordinary one: no journal, nothing to recover, nothing to explain.
+    const auto again = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(again, SettingId::kVsync, BoolV(false), 1).ok);
+    CHECK_TRUE(service.Commit(again).status == CommitStatus::kSaved);
+  }
+}
+
 void TestCvarVocabulary() {
   BeginCase("cvars: the controller allowlist excludes Guide");
   CHECK_TRUE(IsControllerCvar("mouse_ui_nav"));
@@ -579,6 +637,7 @@ int main() {
   TestProviderSeam();
   TestCombinedCommitAndRestart();
   TestInterruptedCommitRecovery();
+  TestUnfinishableCommitJournal();
   TestCvarVocabulary();
   return Finish();
 }

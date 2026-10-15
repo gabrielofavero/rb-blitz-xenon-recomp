@@ -702,6 +702,15 @@ native+provider commit writes a `<settings>.commit-journal`, validates both port
 and reports `kPartial` (never "nothing was saved") when only one part is durable. `RequestRestart` reports
 `kStaleRevision`/`kAlreadyRequested`.
 
+**Recovery is attempted inside every commit, and it cannot refuse the commit forever.** A commit first
+tries to *finish* an interrupted one (that is what the journal is for). Since 2026-10-15 an attempt that
+cannot succeed - the value cannot be spelled any more, the file moved under us, the provider is not there -
+**parks** the journal (`<settings>.commit-journal.stale`, numbered if taken; the bytes are kept) and lets the
+player's own save go ahead, recording the reason in `Service::recovery_error()` for the boot log. Before
+that, a journal nobody could complete refused *every* later save on the installation, and the menu answered
+"check that the settings folder is writable" for a failure that was not about the folder at all (measured on
+an installed copy, 2026-10-14; records: part 5 §3/§6.2 and the plan's P7).
+
 **Provider seam (§5.7/§6.2).** `ProviderSink` is P6's; with no sink a commit touching a provider row is
 `kPartial` with `settings.provider_unavailable` — P3 never reports an Ultimate save as durable on its own
 word. `kUnlockAll` is the one provider row persisted in `settings.toml` (`[ultimate_overrides] unlock_all`),
@@ -1077,8 +1086,8 @@ evidence column is needed): `gameplay.precision_mode`←`freq_ms` (boolean), `ga
 ←`disable_random_wiggles` (boolean), `gameplay.camera_angle`←`camera_angle` (slider, tokens
 `default`/`high`/`low`), `gameplay.game_speed`←`speedmod` (slider, percent 100–150),
 `gameplay.disable_dof`←`disable_dof` (boolean), `gameplay.disable_plots`←`disable_plots` (boolean,
-provider `reboot`-tagged), `gameplay.forceplot`←`forceplot` (boolean, choices behind a screen),
-`gameplay.which_skybox`←`which_skybox` (boolean, choices behind a screen), `gameplay.gems`←`gems` (select,
+provider `reboot`-tagged), `gameplay.forceplot`←`forceplot` (select over the payload's plot list),
+`gameplay.which_skybox`←`which_skybox` (select over the payload's skybox list), `gameplay.gems`←`gems` (select,
 payload inventory), `interface.letterbox`←`letterbox`, `interface.hide_hud`←`hide_hud`,
 `interface.goldprogress`←`goldprogress`, `interface.progressbar`←`progressbar`,
 `interface.show_timer`←`show_timer`, `interface.show_pb`←`show_pb`, `interface.show_steak`←`show_steak`,
@@ -1092,11 +1101,28 @@ package does) cannot change the running game — only the next boot. `Hide HUD`'
 
 Where the choices come from (plan §3.4, "the provider's inventory is authoritative"):
 
-| Variable | Where the adapter reads it | Measured on the owner's payload |
-| --- | --- | --- |
-| `gems` | the row's inline `(array …)` in `mod_visual_settings_panel` | `default, freq, amp2003, amp2016, monkey, ulti, x, bolt` (8) |
-| `which_skybox` | `mod_force_skybox_panel`'s flat `(data …)`, the screen's own `SELECT_MSG` storing a *position* | `default_skybox, no_skybox, nfs_mw2012` (3) |
-| `forceplot` | `mod_force_plot_panel`'s flat `(data …)` | `off` + 16 plots (17) |
+| Variable | Where the adapter reads it | Measured on the owner's payload | Spelling in the provider's file |
+| --- | --- | --- | --- |
+| `gems` | the row's inline `(array …)` in `mod_visual_settings_panel` | `default, freq, amp2003, amp2016, monkey, ulti, x, bolt` (8) | the token itself |
+| `which_skybox` | `mod_force_skybox_panel`'s flat `(data …)`, the screen's own `SELECT_MSG` storing a *position* | `default_skybox, no_skybox, nfs_mw2012` (3) | the **position** (`0` = `default_skybox`) |
+| `forceplot` | `mod_force_plot_panel`'s flat `(data …)` | `off` + 16 plots (17) | the **position** (`0` = `off`) |
+
+**The last column is the 2026-10-15 fix.** `forceplot` and `which_skybox` are the payload's
+*boolean-with-submenu* pair: the row in `mod_visual_settings_panel` is a `uOnOFF` toggle (`os_force_plot`),
+its choices live in a panel of its own, and that panel's `SELECT_MSG` stores the selected **position**
+(`{set $which_skybox {$component selected_pos}}`). This build exposes the whole choice set as one select
+over the payload's own tokens - the token is what the screen, the store and a request carry - so the row's
+*codec* kind is `kSelect` while the payload's own row kind stays a boolean, and `RowBinding::position_value`
+says that the provider's **file** holds the position. Both directions are one place each: `ConfigureProvider`
+turns a file/default position into a token on the way in (dropping, with a note, a value that names no
+position) and the provider sink's `Save` turns the token back into a position on the way out - against the
+payload's inventory both times.
+
+The half-finished version this replaced spelled the pair as booleans (`RowKind::kBool` in `AllBindings()`,
+with the screen supplying the payload's tokens and the file writer mapping `which_skybox` alone). A player
+who pressed *Force Plot* therefore wrote a token the encoder refused, and the refusal landed in the commit
+journal - where recovery could never finish it, which is the installed-copy dead end recorded in §6.2 and
+in the plan's P7.
 
 ### 4. The provider's own settings file, and why the redirect is the fix
 
@@ -1239,7 +1265,7 @@ provider's objects live. The row must not be presented as working until then.
 | Item | Why open | Who owns it |
 | --- | --- | --- |
 | **The combined payload's shadowed records.** P5b's generator edits the *base* `ui/gen/ui.dtb` and `ui/splash/gen/splash.dtb`; the payload also carries its own copies of both, which the player's build has mounted, so a patch record built from the base ark would wipe the mod's edits to those two records. | The generator must read the record from the **mounted** payload when it has one, then apply our edits on top — plan §11's "generate the patch record that carries project definitions by extending an installed retail record". Measured: both records are in the payload's 62 (verified with `scripts/hmx_ark.py list --hdr game/ultimate/gen/patch_xbox.hdr -v`). | P11 |
-| **`forceplot` and `which_skybox` tokens.** The merged screen's placeholder choice tokens (`plot_a`, `plot_b` / `none`, `custom`) are not the payload's (`plot_bodega_a` … / `no_skybox`, `nfs_mw2012`); the adapter now supplies the real inventory, so the screen's static list should be replaced by it. | P5b froze the row identity but not the choice tokens; the adapter's inventory is authoritative (plan §3.4). Until wired, those two rows draw a token the provider never reported. | P5b/P6 integration, next pass |
+| **`forceplot` and `which_skybox`: fixed 2026-10-15, and this entry is the corrected one.** It used to say the screen's placeholder tokens (`plot_a`, `plot_b` / `none`, `custom`) were not the payload's. They were replaced by the payload's inventory at boot (`src/hooks/settings_payload.cpp`) - that half was already wired - and the *value* side was wrong in a way the token half hid: the two rows are the payload's boolean-with-submenu pair, so the provider's file holds the chosen **position**, and a codec that spelled them as booleans refused the very token the menu had just written. On an installed copy that refusal was written into the commit journal, which recovery could then never finish, so **every** later edit answered `io error` and the menu blamed the settings folder (measured 2026-10-14, `out/_swap/settings-save/` + the plan's P7). Fixed by `RowBinding::position_value` (part 5 §3), by parking an uncompletable journal instead of refusing every save (part 3 §4), and by a reason token so the save-error page says which failure it was. | The tokens were never the whole contract. | done |
 | **A merged install** (the mod's documented install method: files copied over the game root) has no payload directory to inspect and no overlay to redirect through, so the adapter reports it absent. | The separate-payload arrangement is the one this project mounts (`game/ultimate` + `--ultimate_payload_root`); a merged install would need the records read out of the game's own ark and a different redirect route. | P6 follow-up / P11 |
 | **`unlockall`'s write path.** Its *default* is read from the payload (`ulti_init` sets it true) and the adapter exposes it, but its *value* belongs under native `[ultimate_overrides]` (plan §6.2) — i.e. in P3's store, which the bridge does not own yet. | The bridge writes only the provider's file. `EncodeProviderValues` skips the row by design and the file's `vars` list does not carry it, so nothing is silently lost — it is simply not persisted yet. | P3/P11 wiring |
 | **Provider rows with no value.** `ulti_init` sets 16 variables; 10 are rows this build draws, and the other 7 (e.g. `hide_hud`, `freq_ms`) have no provider default and no file pair, so the adapter reports them **absent** and the runtime says which: `no provider value for … ; those rows keep their own default`. | Inventing a value would overrule the payload (`os_hide_hud` reads an unset `$hide_hud`, i.e. false) and would hide a payload that later ships one; the screen's own state query already degrades to "off" for an absent value. | by design; P11 decides whether the compiled default is seeded through the service |

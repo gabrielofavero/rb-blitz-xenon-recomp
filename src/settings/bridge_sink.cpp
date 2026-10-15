@@ -124,6 +124,20 @@ bool WireValuesEqual(const WireValue& lhs, const WireValue& rhs) {
 // the sink
 // ------------------------------------------------------------------------------------------------
 
+// The reason tokens the save-error panel asks for. Spelled here, next to the state that answers
+// them, and one string per reason so the two halves cannot drift (`kNone` is not asked for: a
+// commit that succeeded has nothing to explain).
+const char* ServiceSink::CommitFailureToken(const CommitFailure failure) {
+  switch (failure) {
+    case CommitFailure::kNone: return "none";
+    case CommitFailure::kNotWritable: return "not_writable";
+    case CommitFailure::kProvider: return "provider";
+    case CommitFailure::kConflict: return "conflict";
+    case CommitFailure::kOther: return "other";
+  }
+  return "other";
+}
+
 bool ServiceSink::IsLocalToken(const std::string_view token) const {
   if (token == kProviderGateToken) {
     return true;  // P5b's gate: a view of the adapter's readiness, not a row
@@ -334,6 +348,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         commit_ok_ = false;
         last_commit_durable_ = false;
         last_commit_requires_restart_ = false;
+        last_commit_status_ = CommitStatus::kInvalid;
+        last_commit_failure_ = CommitFailure::kOther;
         status = Status::kInvalid;
         response.message = "the edit was refused; nothing saved";
         break;
@@ -349,6 +365,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       last_commit_durable_ = result.status == CommitStatus::kSaved;
       last_commit_requires_restart_ = result.restart_required;
       bool local_saved = true;
+      bool local_provider_failed = false;
       std::map<std::string, WireValue> provider_changes;
       for (const auto& [token, value] : staged_local_) {
         if (token == kProviderGateToken) continue;
@@ -363,6 +380,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         if (!local_saved) {
           result.status = last_commit_durable_ ? CommitStatus::kPartial : CommitStatus::kIoError;
           result.errors.push_back(error);
+          local_provider_failed = true;
         } else {
           last_commit_durable_ = true;
           last_commit_requires_restart_ = true;
@@ -410,18 +428,24 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         case CommitStatus::kSaved:
         case CommitStatus::kNoChanges:
           status = Status::kOk;
+          last_commit_failure_ = CommitFailure::kNone;
           break;
         case CommitStatus::kConflict:
           status = Status::kConflict;
+          last_commit_failure_ = CommitFailure::kConflict;
           break;
         case CommitStatus::kInvalid:
           status = Status::kInvalid;
+          last_commit_failure_ = CommitFailure::kOther;
           break;
         case CommitStatus::kPartial:
           // One part is durable and one is not. The guest cannot express "partly", and saying
           // "saved" would be a lie the menu cannot see, so it is an error whose message names the
-          // state (plan §6.3: never a blanket "nothing was saved").
+          // state (plan §6.3: never a blanket "nothing was saved"). The service reports `kPartial`
+          // for one reason only - the provider's half of the commit did not land - so the panel can
+          // say which half that was.
           status = Status::kIoError;
+          last_commit_failure_ = CommitFailure::kProvider;
           for (const std::string& error : result.errors) {
             if (response.message.empty()) {
               response.message = error;
@@ -435,6 +459,11 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
           break;
         case CommitStatus::kIoError:
           status = Status::kIoError;
+          // The settings file itself could not be written: this is the one case the "check that the
+          // settings folder is writable" text is true of. A failure of the *provider's* own file
+          // arrives here too when nothing was durable yet, and it is named as what it is.
+          last_commit_failure_ =
+              local_provider_failed ? CommitFailure::kProvider : CommitFailure::kNotWritable;
           for (const std::string& error : result.errors) {
             if (!response.message.empty()) {
               response.message += "; ";
@@ -450,6 +479,15 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       }
       commit_ok_ = status == Status::kOk;
       last_commit_status_ = result.status;
+      // A journal this commit had to set aside is reported exactly once, through the commit's own
+      // message (the guest only reads `commit.ok`, so nothing on screen changes): otherwise the park
+      // would be invisible, which is how the failure that caused it stayed hidden for a day.
+      if (service_ != nullptr) {
+        const std::string note = service_->TakeRecoveryNote();
+        if (!note.empty()) {
+          response.message += response.message.empty() ? note : "; " + note;
+        }
+      }
       // Sticky for the session (owner decision, 2026-10-13): a durable commit that needs a
       // restart sets the prompt's state once, and it stays set until the process restarts.
       if (commit_ok_ && last_commit_requires_restart_) restart_pending_ = true;
@@ -532,6 +570,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
 bool ServiceSink::Matches(const bridge::Request& request) const {
   if (request.setting == "restart.ok") return WireValuesEqual(WireValue::Bool(restart_ok_), request.value);
   if (request.setting == "commit.ok") return WireValuesEqual(WireValue::Bool(commit_ok_), request.value);
+  if (request.setting == "commit.failed")
+    return request.value.kind == bridge::ValueKind::kText &&
+           request.value.text == CommitFailureToken(last_commit_failure_);
   if (request.setting == "restart.pending")
     return WireValuesEqual(WireValue::Bool(restart_pending()), request.value);
   if (request.setting == "commit.restart_required")
@@ -604,6 +645,7 @@ void ServiceSink::Reset() {
   edit_failed_ = false;
   commit_ok_ = true;
   restart_ok_ = true;
+  last_commit_failure_ = CommitFailure::kNone;
   local_.clear();
   staged_local_.clear();
   staged_.clear();

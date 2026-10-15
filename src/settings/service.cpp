@@ -205,9 +205,19 @@ void Service::SetProviderSink(ProviderSink* sink) {
   if (sink != nullptr) {
     SetProviderValues(sink->ReadValues());
     rb_blitz::fs::FileLock lock;
-    if (lock.Acquire(JournalPath(), &recovery_error_)) RecoverCommit(&recovery_error_);
+    std::string recovery_reason;
+    if (lock.Acquire(JournalPath(), &recovery_error_)) {
+      // The attempt is made once here so the boot log can name the state; the journal is *not*
+      // parked yet, because a reason like "the provider is not compatible" can still be cured by
+      // a later run. The first save that finds it uncompletable does park it (see Commit).
+      if (!RecoverCommit(&recovery_reason)) {
+        recovery_error_ = recovery_reason + "; the next save will set the journal aside";
+      }
+    }
   }
 }
+
+std::string Service::TakeRecoveryNote() { return std::exchange(recovery_error_, std::string()); }
 
 void Service::SetProviderValues(std::map<SettingId, Value> values) {
   provider_values_ = std::move(values);
@@ -443,9 +453,17 @@ CommitResult Service::Commit(uint64_t txn) {
   rb_blitz::fs::FileLock commit_lock;
   std::string error;
   const auto previous_revision = revision_;
-  if (!commit_lock.Acquire(JournalPath(), &error) || !RecoverCommit(&error)) {
+  if (!commit_lock.Acquire(JournalPath(), &error)) {
     result.status = CommitStatus::kIoError;
     result.errors.push_back(error);
+    return result;
+  }
+  std::string recovery_reason;
+  if (!RecoverCommit(&recovery_reason) && !ParkJournal(recovery_reason)) {
+    // Either the interrupted save could be finished, or it is out of the way. Anything else means
+    // the journal really cannot be touched, which is an I/O failure of this commit.
+    result.status = CommitStatus::kIoError;
+    result.errors.push_back(recovery_error_);
     return result;
   }
 
@@ -562,6 +580,42 @@ CommitResult Service::Commit(uint64_t txn) {
     txn_ = 0;
   }
   return result;
+}
+
+// An interrupted save that this process cannot finish is **set aside**, not left in place.
+//
+// Recovery runs inside every commit, before anything is written (a crash between settings.toml and
+// the provider's file is what the journal exists for), so a journal nobody can complete refuses
+// *every* future save for the life of the installation. Measured on an installed copy 2026-10-14: a
+// journal whose provider rows the encoder could no longer spell made each edit answer "io error"
+// with that row's name, and the menu told the player the settings folder might not be writable. The
+// bytes are kept (`<file>.stale`, numbered when that name is taken) so the state stays inspectable;
+// what changes is that the player can save again.
+bool Service::ParkJournal(const std::string& reason) {
+  const std::filesystem::path journal = JournalPath();
+  if (journal.empty()) {
+    return true;
+  }
+  std::error_code ec;
+  std::filesystem::path target = journal;
+  target += ".stale";
+  for (int suffix = 1; suffix < 100 && std::filesystem::exists(target, ec); ++suffix) {
+    target = journal;
+    target += ".stale" + std::to_string(suffix);
+  }
+  std::filesystem::rename(journal, target, ec);
+  if (ec) {
+    recovery_error_ = "cannot set aside the interrupted save " + journal.string() + ": " +
+                      ec.message();
+    return false;
+  }
+  // The note names the file rather than the whole path: a response message is bounded (256 bytes,
+  // `BoundMessage` in src/hooks/settings_bridge.cpp) because it is for a person reading a log, and a
+  // settings directory can easily be longer than the reason put beside it. The boot already logs the
+  // directory the writes land in.
+  recovery_error_ = "the interrupted save was kept as " + target.filename().string() + " (" +
+                    (reason.empty() ? "no reason reported" : reason) + ")";
+  return true;
 }
 
 bool Service::RecoverCommit(std::string* error) {

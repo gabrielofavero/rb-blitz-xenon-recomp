@@ -87,6 +87,17 @@ Part 1 wherever they disagree.
   path and the OS reason instead of "another writer or access denied". Driven before and after in
   `out/_swap/p3/` (`repro3-close` vs `after-close`, `after-restart`); the host suite was 38/38 then
   (39/39 once P6's `content_progress` landed the same day).
+- **Settings can be saved again in an installed copy (2026-10-15)**: the flat-panel pair
+  (`forceplot`/`which_skybox`) was spelled as a boolean by the adapter's file codec while the menu,
+  the store and the request all carry the payload's **token**, so a press on either row staged a value
+  the commit could not encode — and that refusal landed in the commit journal, which recovery could
+  then never finish, so **every** later edit answered `io error` and the menu blamed the settings
+  folder (item 18 below, now fixed). The pair is a select over the payload's inventory whose *file*
+  value is the chosen **position**, an uncompletable journal is parked
+  (`<settings>.commit-journal.stale`) instead of refusing every save, and the save-error page names
+  the reason it saw. Driven with the owner's own journal seeded in `out/_swap/settings-save/` (the
+  edit commits; a seeded journal is *finished* into `ulti_settings.dta` as `(forceplot 1)
+  (which_skybox 2)`); 39/39 host tests.
 - **Verifiably fixed**: the 2026-10-12 black startup (the generated payload made the patch archive
   two-part, which this title never reads — Part 2) and graphics recovery (the marker, fallback and
   safe mode all ran; older statements, including item 11 below, are wrong).
@@ -449,8 +460,17 @@ reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
     `ui/splash/gen/splash.dtb`, while the payload also carries its own copies; a patch record built
     from the base ark would wipe the mod's edits. The record must be extended from the **mounted**
     payload. *`architecture.md` §6.2; `plan.md` §2.4, §11*.
-18. **`forceplot` / `which_skybox` choice tokens are placeholders** — the screen's static list is not
-    the payload's inventory. *`architecture.md` §6.2; `plan.md` §3.4*.
+18. **`forceplot` / `which_skybox`: fixed 2026-10-15** (was: "the screen's static list is not the
+    payload's inventory"). The token half was the smaller half. The two rows are the payload's
+    *boolean-with-submenu* pair, this build draws the whole choice set as one select, and the
+    provider's file stores the chosen **position** - so a codec that spelled them as booleans could
+    not encode the value the menu had just written. On an installed copy that refusal landed in the
+    commit journal, where recovery could never finish it, and **every** later edit answered "settings
+    could not be saved" with the folder as its explanation. Fixed by `RowBinding::position_value`
+    (token ⇄ position, both against the payload's inventory), by parking an uncompletable journal
+    instead of refusing every save, and by a reason token so the page names the failure it saw.
+    *`architecture.md` part 5 §3, §4; `docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md`
+    (P7)*.
 19. **`unlockall`'s write path does not exist** — its value belongs under native
     `[ultimate_overrides]`, which the bridge does not own; `EncodeProviderValues` skips it by design.
     *`architecture.md` §6.2; `architecture.md` §4, §6* — P11 owns it.

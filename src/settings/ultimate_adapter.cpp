@@ -313,10 +313,12 @@ const std::vector<RowBinding>& AllBindings() {
        Strategy::kRestart, ""},
       {SettingId::kDisablePlots, "gameplay.disable_plots", "disable_plots", RowKind::kBool,
        Strategy::kRestart, ""},
-      {SettingId::kForcePlot, "gameplay.forceplot", "forceplot", RowKind::kBool,
-       Strategy::kRestart, ""},
-      {SettingId::kForceSkybox, "gameplay.which_skybox", "which_skybox", RowKind::kBool,
-       Strategy::kRestart, ""},
+      // The boolean-with-submenu pair: the payload's row toggles, the panel behind it chooses, and
+      // what is stored is the position (see `RowBinding::position_value`).
+      {SettingId::kForcePlot, "gameplay.forceplot", "forceplot", RowKind::kSelect,
+       Strategy::kRestart, "", true},
+      {SettingId::kForceSkybox, "gameplay.which_skybox", "which_skybox", RowKind::kSelect,
+       Strategy::kRestart, "", true},
       {SettingId::kGems, "gameplay.gems", "gems", RowKind::kSelect, Strategy::kRestart, ""},
       // Interface (plan §3.5)
       {SettingId::kLetterbox, "interface.letterbox", "letterbox", RowKind::kBool,
@@ -1091,8 +1093,12 @@ ShapeReport CheckShape(const RecordBytes& records) {
         continue;
       }
       // A boolean row the provider pairs with a submenu (`os_force_plot`) is a boolean whose
-      // choices live behind a screen; the binding stays a boolean either way.
-      if (row->kind != binding.kind) {
+      // choices live behind a screen - and this build offers that whole choice set as one select
+      // (`binding.position_value`), so the payload's row kind and this binding's codec kind
+      // legitimately differ. The check that must still hold is that the choice set exists, below.
+      const bool paired_submenu = binding.position_value && row->kind == RowKind::kBool &&
+                                  binding.kind == RowKind::kSelect;
+      if (row->kind != binding.kind && !paired_submenu) {
         report.problems.push_back("the provider's row for '" + std::string(binding.variable) +
                                   "' is " + RowKindName(row->kind) + ", not " +
                                   RowKindName(binding.kind));
@@ -1121,6 +1127,16 @@ ShapeReport CheckShape(const RecordBytes& records) {
     // Two of the plan's rows are not ordinary bound values and are checked by name:
     // `unlockall` is the persistence exception (§6.2 - the provider's own saved-vars list does
     // not carry it), and the achievements row is a one-shot action, not a value.
+    // A `position_value` binding is served entirely by its panel's flat choice list: the file holds
+    // a position, and the position is only meaningful against that list. Without it the row could
+    // be read and written, but never named - so its absence is a problem rather than a note.
+    for (const RowBinding& binding : RowBindings()) {
+      if (binding.position_value && report.choices.count(std::string(binding.variable)) == 0) {
+        report.problems.push_back("the provider declares no choice list for '" +
+                                  std::string(binding.variable) + "', so " +
+                                  std::string(binding.token) + " cannot be named");
+      }
+    }
     if (const PanelShape* other = report.Panel("mod_other_settings_panel"); other != nullptr) {
       const bool has_unlock = std::any_of(other->rows.begin(), other->rows.end(),
                                           [](const RowShape& row) {
@@ -1607,16 +1623,37 @@ void ConfigureProvider(ProviderRuntime* runtime, const std::filesystem::path& pa
   for (const auto& [id, value] : DefaultsFromShape(runtime->shape)) {
     runtime->values.emplace(id, value);
   }
-  // The skybox writer stores a position; the menu and service expose stable provider tokens.
-  if (auto found = runtime->values.find(SettingId::kForceSkybox); found != runtime->values.end()) {
-    const auto choices = runtime->choices.find("which_skybox");
+  // The payload's flat-panel writers store a **position**; the screen, the store and the requests
+  // all speak the provider's tokens, so each such value is resolved here, once, against the
+  // payload's own inventory. A value that names no position (a foreign payload, or a spelling an
+  // earlier build wrote) is dropped rather than carried: the row then reads the compiled default
+  // and the next press writes a token this installation can encode. Keeping an unnameable value
+  // is what would poison the provider's file on the next commit.
+  for (const RowBinding& binding : FileBackedBindings()) {
+    if (!binding.position_value) continue;
+    auto found = runtime->values.find(binding.id);
+    if (found == runtime->values.end()) continue;
+    const auto choices = runtime->choices.find(std::string(binding.variable));
+    if (choices == runtime->choices.end() || choices->second.empty()) continue;
+    const std::vector<std::string>& tokens = choices->second;
+    const std::string& text = found->second.text;
     int32_t index = 0;
-    if (choices != runtime->choices.end() && ParseIntText(found->second.text, &index) &&
-        index >= 0 && static_cast<size_t>(index) < choices->second.size())
-      found->second.text = choices->second[index];
-  }
-  if (auto found = runtime->values.find(SettingId::kForcePlot); found != runtime->values.end()) {
-    if (found->second.text == "FALSE" || found->second.text == "0") found->second.text = "off";
+    if (const auto at = std::find(tokens.begin(), tokens.end(), text); at != tokens.end()) {
+      continue;  // already a token this payload reports
+    } else if (ParseIntText(text, &index) && index >= 0 &&
+               static_cast<size_t>(index) < tokens.size()) {
+      found->second.text = tokens[static_cast<size_t>(index)];
+    } else if (text == "FALSE" || text == "false" || text == "TRUE" || text == "true") {
+      // What this build used to write for the pair: a boolean. Off is position 0; `TRUE` names no
+      // position, so it resolves to the same place rather than inventing one.
+      found->second.text = tokens[0];
+    } else {
+      runtime->shape.notes.push_back("no position for " + std::string(binding.token) + " = '" +
+                                     text + "' in this payload's " +
+                                     std::string(binding.variable) +
+                                     " list; the row keeps its own default");
+      runtime->values.erase(found);
+    }
   }
   // A row the provider neither persists nor defaults is *absent*, and the adapter says so rather
   // than inventing a value: the provider's own variable is simply unset, and the caller's compiled

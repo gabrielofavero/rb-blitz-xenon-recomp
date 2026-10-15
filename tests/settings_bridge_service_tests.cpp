@@ -359,6 +359,70 @@ void TestRestartRefusalsAreVisible() {
   CHECK_TRUE(h.Holds("restart.ok", WireValue::Bool(true)));
 }
 
+void TestCommitFailureReasons() {
+  BeginCase("a failed save names the reason, and the retry the panel asks for really retries");
+  Harness h;
+  // A first durable save: the file has to exist before it can be made unwritable.
+  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  const std::string other =
+      std::string("rbbz-settings/set/general.cache_dlc_library/b:") + (before ? "0" : "1");
+  const std::string back =
+      std::string("rbbz-settings/set/general.cache_dlc_library/b:") + (before ? "1" : "0");
+  CHECK_TRUE(h.Send(other).status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  // Nothing to explain after a save that worked, so the panel's own default text stands.
+  CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kNone);
+  CHECK_TRUE(h.Holds("commit.failed", WireValue::Text("none")));
+  CHECK_TRUE(h.Holds("commit.ok", WireValue::Bool(true)));
+
+  // The settings file cannot be replaced. This is the one failure the "check that the settings
+  // folder is writable" text is true of, and the reason token says so.
+  std::error_code code;
+  fs::permissions(h.paths.settings_file, fs::perms::owner_read, fs::perm_options::replace, code);
+  CHECK_TRUE(h.Send(back).status == Status::kOk);
+  const Response failed = h.Send("rbbz-settings/commit/-/-");
+  CHECK_TRUE(failed.status == Status::kIoError);
+  CHECK_TRUE(failed.message.find("settings.toml") != std::string::npos);
+  CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kNotWritable);
+  CHECK_TRUE(h.Holds("commit.failed", WireValue::Text("not_writable")));
+  CHECK_FALSE(h.Holds("commit.failed", WireValue::Text("provider")));
+  CHECK_FALSE(h.Holds("commit.ok", WireValue::Bool(true)));
+
+  // The edit is still staged, so the retry the panel asks for is a real one - and it clears the
+  // reason, so the panel cannot explain the next save with this failure.
+  fs::permissions(h.paths.settings_file, fs::perms::owner_all, fs::perm_options::replace, code);
+  const Response retry = h.Send("rbbz-settings/commit/-/-");
+  CHECK_TRUE(retry.status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kNone);
+  CHECK_TRUE(h.Holds("commit.ok", WireValue::Bool(true)));
+  CHECK_FALSE(h.Holds("commit.failed", WireValue::Text("not_writable")));
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean == before);
+
+  // A failure of the provider's own file is *not* the settings folder's problem. With no
+  // service-side provider sink, a provider row is kept here (the local space, `SetProviderSaver`),
+  // which is the same failure the installed provider's file produces on a commit.
+  h.sink.SetProviderSaver([](const std::map<std::string, WireValue>&, std::string* error) {
+    *error = "the provider's own settings file is read-only";
+    return false;
+  });
+  CHECK_TRUE(h.Send("rbbz-settings/set/gameplay.forceplot/t:plot_bodega_a").status == Status::kOk);
+  const Response provider_failed = h.Send("rbbz-settings/commit/-/-");
+  CHECK_TRUE(provider_failed.status == Status::kIoError);
+  CHECK_TRUE(provider_failed.message.find("read-only") != std::string::npos);
+  CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kProvider);
+  CHECK_TRUE(h.Holds("commit.failed", WireValue::Text("provider")));
+  CHECK_FALSE(h.Holds("commit.failed", WireValue::Text("not_writable")));
+  CHECK_FALSE(h.Holds("commit.ok", WireValue::Bool(true)));
+
+  h.sink.SetProviderSaver([](const std::map<std::string, WireValue>&, std::string*) {
+    return true;
+  });
+  const Response provider_retry = h.Send("rbbz-settings/commit/-/-");
+  CHECK_TRUE(provider_retry.status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kNone);
+  CHECK_TRUE(h.Holds("commit.ok", WireValue::Bool(true)));
+}
+
 void TestWireModelConversions() {
   BeginCase("the wire and model value kinds meet in exactly one place");
   const schema::SchemaRow* bool_row = schema::FindRow(SettingId::kVsync);
@@ -399,6 +463,7 @@ int main() {
   TestCancelAndRestart();
   TestRestartPendingFollowsTheQuery();
   TestRestartRefusalsAreVisible();
+  TestCommitFailureReasons();
   TestWireModelConversions();
   return Finish();
 }

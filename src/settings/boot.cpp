@@ -283,8 +283,13 @@ class InstalledProviderSink final : public ProviderSink {
         result.error = "value absent from installed provider choices: " + variable;
         return result;
       }
-      if (variable == "which_skybox") encoded = std::to_string(found - choices->second.begin());
-      else if (variable == "forceplot" && encoded == "off") encoded = "FALSE";
+      // The payload's boolean-with-submenu pair is persisted as the **position** of the choice its
+      // own screen wrote (`{set $which_skybox {$component selected_pos}}`), so the token goes into
+      // the file as an index. Every other provider variable keeps the spelling its writer uses.
+      const ultimate_adapter::RowBinding* binding = ultimate_adapter::BindingForVariable(variable);
+      if (binding != nullptr && binding->position_value) {
+        encoded = std::to_string(found - choices->second.begin());
+      }
     }
     result.durable = ::rb_blitz::ultimate::SaveProvider(updates, &result.error);
     if (result.durable) for (const auto& [id, value] : values) values_[id] = value;
@@ -953,6 +958,13 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
     service_->SetProviderChoices(std::move(choices));
     provider_sink_ = std::make_unique<InstalledProviderSink>();
     service_->SetProviderSink(provider_sink_.get());
+    // Installing the sink is where the service tries to finish an interrupted save (its commit
+    // journal). Say so: a journal that cannot be completed is set aside by the next save rather
+    // than left to refuse it, and this line is the only record of what it held.
+    const std::string note = service_->TakeRecoveryNote();
+    if (!note.empty()) {
+      REXLOG_WARN("settings_boot: {}", note);
+    }
   }
   REXLOG_INFO("settings_boot: the provider is {} ({}); {} value(s) reach the store",
               provider.Active() ? "active" : "not active",

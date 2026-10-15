@@ -313,6 +313,12 @@ struct PanelSpec {
   std::vector<Row> rows;
   std::string scene = kSceneName;  // the dir the panel loads, per context (see `kPauseSceneName`)
   std::string message;
+  // A message the panel swaps in for a *reason* the host reports, queried on entry as
+  // `snapshot/commit.failed/t:<reason>`. P3's rule is that a failed save must say what failed:
+  // "check that the settings folder is writable" is only true of the I/O reason, and a journal or
+  // a refused value that wears that text sends the player looking in the wrong place (measured on
+  // an installed copy, 2026-10-14).
+  std::vector<std::pair<std::string, std::string>> message_by_reason;
 };
 
 Row BoolRow(const char* symbol, const char* setting, const char* label, const char* description,
@@ -690,9 +696,14 @@ std::vector<PanelSpec> AllPanels() {
                                         true),
                           }});
 
-  // 4b. Plots & Skyboxes. `which_skybox` index 0 is the provider's default/off, and its "no
-  // skybox" is a separate index - which is why the row is a select over tokens and never a
-  // boolean (plan §3.4).
+  // 4b. Plots & Skyboxes. Force Plot and Force Skybox are the payload's *boolean-with-submenu*
+  // pair: its own row toggles, a panel behind it chooses, and the provider's file keeps the chosen
+  // **position** (0 = off/default). This build draws the whole choice set as one select over the
+  // payload's own tokens (plan §3.4), so the tokens below are placeholders that the boot replaces
+  // with the inventory of the installed payload (`settings_payload.cpp`), while the token ⇄ position
+  // translation lives with the adapter (`ultimate_adapter.h`'s `RowBinding::position_value`).
+  // Never draw these two as booleans: a boolean cannot name a plot, and the commit could not spell
+  // it - which is the installed-copy dead end the plan's P7 records.
   out.push_back(PanelSpec{"settings_plots_panel", "settings_plots_screen",
                           "settings_gameplay_screen", MenuPanels(),
                           {
@@ -813,7 +824,11 @@ std::vector<PanelSpec> AllPanels() {
                          "settings_restart_message"});
   out.push_back(PanelSpec{"settings_save_error_panel", "settings_save_error_screen", kRootScreen,
                          MenuPanels(), {close}, "../pause/settings_confirmation.milo",
-                         "settings_save_error_message"});
+                         "settings_save_error_message",
+                         {// The default text is the I/O one, which is what the not-writable token says.
+                          {"provider", "settings_save_error_provider"},
+                          {"conflict", "settings_save_error_conflict"},
+                          {"other", "settings_save_error_other"}}});
   Row achievements = InfoRow("settings_earn_achievements", "Unlock Online Achievements",
                              "Grant the online-only achievements. This cannot be undone.");
   achievements.kind = Kind::kAchievements;
@@ -1347,6 +1362,15 @@ Node PanelDefinition(const PanelSpec& panel) {
   Node enter = EnterExit();
   if (!panel.message.empty())
     enter.kids.push_back(Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(panel.message)}));
+  // A reason-specific message is asked for once per entry: the queries are one-bit reads on the
+  // same channel the rows already use, and the panel's own default stays in place when none of
+  // them matches (an older host, or a failure the panel was not told about).
+  for (const auto& [reason, token] : panel.message_by_reason) {
+    enter.kids.push_back(Cmd(
+        {Sym("if"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.failed",
+                                                       "t:" + reason))}),
+         Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(token)})}));
+  }
   // The open-time caption (owner request, 2026-10-13): entering a page places the highlight on its
   // first visible row, so the overlay is told which row that is. Emitted here rather than inside
   // populate_menu because a commit re-runs populate and must not drag the caption back to row 0.
@@ -1514,6 +1538,15 @@ std::vector<std::string> RequestPaths() {
   // by the merged root's Cancel, which is the only place the prompt belongs.
   for (const auto* token : {"commit.ok", "restart.pending", "restart.ok"})
     add(Path("snapshot", token, "b:1"));
+  // And why a save failed, for the one page whose job is to say so. Derived from the panels that
+  // declare a reason rather than listed by hand, so a new reason cannot be added without its probe
+  // (the table is what the test parses with the bridge's grammar).
+  for (const PanelSpec& panel : AllPanels()) {
+    for (const auto& [reason, message] : panel.message_by_reason) {
+      (void)message;
+      add(Path("snapshot", "commit.failed", "t:" + reason));
+    }
+  }
   for (const PanelSpec& panel : AllPanels()) {
     for (const Row& row : panel.rows) {
       if (row.setting.empty()) {
@@ -2167,6 +2200,9 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
   out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
   out.emplace_back("settings_save_error_message", "Settings could not be saved. Check that the settings folder is writable, then try again.");
+  out.emplace_back("settings_save_error_provider", "Saved, but the Ultimate mod's own settings file could not be written. Close this message and try again.");
+  out.emplace_back("settings_save_error_conflict", "Something else changed the settings file. Close this message and try again.");
+  out.emplace_back("settings_save_error_other", "Settings could not be saved. Close this message and try again; if it keeps failing, restart the game.");
   out.emplace_back("settings_restart_error", "The game could not restart. Close this message and start the game again to apply your saved changes.");
   out.emplace_back("settings_achievements_message", "Unlock the four online achievements? This cannot be undone.");
   auto add = [&out](const std::string& key, const std::string& text) {

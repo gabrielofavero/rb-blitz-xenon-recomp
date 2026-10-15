@@ -14,6 +14,7 @@
 //
 // SDK-free: `src/settings/ultimate_adapter.cpp` plus the two UI modules the DTB parser needs.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -198,6 +199,7 @@ constexpr size_t kRootPanel = 0;
 constexpr size_t kGamePanel = 1;
 constexpr size_t kHudPanel = 3;
 constexpr size_t kOtherPanel = 4;
+constexpr size_t kForcePlotPanel = 5;
 constexpr size_t kSettingsObject = 7;
 
 std::vector<uint8_t> Compiled(const std::vector<Node>& roots) {
@@ -273,7 +275,22 @@ void TestBindings() {
   // Every binding's widget kind matches the plan's §3.4/§3.5 interaction.
   CHECK_TRUE(BindingForVariable("gems")->kind == RowKind::kSelect);
   CHECK_TRUE(BindingForVariable("camera_angle")->kind == RowKind::kSlider);
-  CHECK_TRUE(BindingForVariable("which_skybox")->kind == RowKind::kBool);
+  // Force Plot and Force Skybox are the payload's boolean-with-submenu pair: the row toggles, a
+  // panel behind it chooses, and the provider's file keeps the chosen **position**. This build
+  // draws the whole choice set as one select over the provider's own tokens (plan §3.4), so the
+  // codec kind is `kSelect` and `position_value` says the file holds a position - the two facts that
+  // have to travel together, because a select whose value could not be encoded is a row that
+  // cannot be saved at all (the installed-copy defect of 2026-10-14).
+  for (const char* variable : {"forceplot", "which_skybox"}) {
+    const RowBinding* binding = BindingForVariable(variable);
+    CHECK_TRUE(binding != nullptr);
+    CHECK_TRUE(binding != nullptr && binding->kind == RowKind::kSelect);
+    CHECK_TRUE(binding != nullptr && binding->position_value);
+  }
+  for (const RowBinding& binding : bindings) {
+    if (binding.id == SettingId::kForcePlot || binding.id == SettingId::kForceSkybox) continue;
+    CHECK_FALSE(binding.position_value);
+  }
 }
 
 void TestShapeAcceptsAFixture() {
@@ -299,6 +316,12 @@ void TestShapeAcceptsAFixture() {
   CHECK_TRUE(report.Row("os_hud_settings")->target_screen == "mod_hud_settings_screen");
   CHECK_TRUE(report.Row("os_force_plot")->target_screen == "mod_force_plot_screen");
   CHECK_TRUE(report.Row("os_force_plot")->reboot_tagged);
+  // The one legitimate payload-kind/binding-kind difference: the payload's row is a boolean whose
+  // choices live in a panel of its own, and this build exposes that choice set as one select. The
+  // allowance is exactly this pair - everything else must still match - so it is pinned here with
+  // the payload side asserted too.
+  CHECK_TRUE(report.Row("os_force_plot")->kind == RowKind::kBool);
+  CHECK_TRUE(BindingForVariable("forceplot")->kind == RowKind::kSelect);
   CHECK_TRUE(report.Row("os_cameraangle")->kind == RowKind::kSlider);
   CHECK_TRUE(report.Row("os_gems_fmt")->kind == RowKind::kSelect);
   CHECK_TRUE(report.Row("os_online_acc")->kind == RowKind::kSubmenu);
@@ -379,6 +402,18 @@ void TestShapeRefusals() {
     const ShapeReport report = CheckShape(records);
     CHECK_FALSE(report.ok);
     CHECK_TRUE(HasProblemLike(report, "ulti_settings.dta"));
+  }
+  {
+    // The flat choice panel behind a boolean-with-submenu row is what *names* its positions.
+    // Without it the row could still be read and written, but every value would be a number no
+    // screen could show and no user could choose, so the payload is refused by name.
+    std::vector<Node> roots = ProviderFixture();
+    roots.erase(roots.begin() + std::ptrdiff_t(kForcePlotPanel));
+    RecordBytes records;
+    records.mod_settings = Compiled(roots);
+    const ShapeReport report = CheckShape(records);
+    CHECK_FALSE(report.ok);
+    CHECK_TRUE(HasProblemLike(report, "declares no choice list for 'forceplot'"));
   }
   {
     // The achievements row is an action, not a value, and has no provider path without it.
@@ -496,12 +531,27 @@ void TestValueTranslation() {
     CHECK_TRUE(DecodeProviderValue(*bool_row, text, &back));
     CHECK_TRUE(back.kind == ValueKind::kBool && back.boolean == wanted);
   }
-  // The provider's own `which_skybox` spelling: index 0 is off, and any other index is on.
+  // The provider's flat-panel pair: the token is what the screen, the store and a request carry,
+  // and the *position* is the file's spelling - turned into a token on the way in by
+  // `ConfigureProvider` and back into a position on the way out by the provider sink. A boolean
+  // here was the defect this pins: the row drew, pressed and staged, and then the commit could not
+  // spell it, which refused every later save on that installation.
+  const RowBinding* plot_row = BindingForVariable("forceplot");
+  const RowBinding* skybox_row = BindingForVariable("which_skybox");
+  CHECK_TRUE(plot_row != nullptr && skybox_row != nullptr);
   Value skybox;
-  CHECK_TRUE(DecodeProviderValue(*BindingForVariable("which_skybox"), "0", &skybox));
-  CHECK_FALSE(skybox.boolean);
-  CHECK_TRUE(DecodeProviderValue(*BindingForVariable("which_skybox"), "2", &skybox));
-  CHECK_TRUE(skybox.boolean);
+  CHECK_TRUE(DecodeProviderValue(*plot_row, "plot_bodega_a", &skybox));
+  CHECK_TRUE(skybox.kind == ValueKind::kEnum && skybox.text == "plot_bodega_a");
+  std::string position;
+  CHECK_TRUE(EncodeProviderValue(*plot_row, skybox, &position));
+  CHECK_TRUE(position == "plot_bodega_a");
+  CHECK_TRUE(DecodeProviderValue(*skybox_row, "no_skybox", &skybox));
+  CHECK_TRUE(skybox.kind == ValueKind::kEnum && skybox.text == "no_skybox");
+  Value as_bool;
+  as_bool.kind = ValueKind::kBool;
+  as_bool.boolean = true;
+  CHECK_FALSE(EncodeProviderValue(*plot_row, as_bool, &position));
+  CHECK_FALSE(EncodeProviderValue(*skybox_row, as_bool, &position));
   // A boolean the file stores as a mapping-less TRUE still reads as on.
   CHECK_TRUE(DecodeProviderValue(*BindingForVariable("letterbox"), "TRUE", &skybox));
   CHECK_TRUE(skybox.boolean);
@@ -798,6 +848,21 @@ void TestRealPayload(const char* payload_root) {
   CHECK_TRUE(camera != nullptr && camera->text == "default");
   CHECK_TRUE(runtime.ValueFor(SettingId::kHideHud) == nullptr);
   CHECK_TRUE(runtime.ValueFor(SettingId::kPrecisionMode) == nullptr);
+  // The flat-panel pair must arrive as a *token* from the payload's own inventory, never as the
+  // position its file holds - the value the menu has to name to draw the row and to write it back.
+  for (const char* variable : {"forceplot", "which_skybox"}) {
+    const RowBinding* binding = BindingForVariable(variable);
+    const Value* value = runtime.ValueFor(binding->id);
+    const std::vector<std::string>* tokens = runtime.ChoicesFor(variable);
+    if (value == nullptr || tokens == nullptr) {
+      note("         %s has no provider value; the row keeps its own default\n",
+           std::string(binding->token).c_str());
+      continue;
+    }
+    note("         %s = %s\n", std::string(binding->token).c_str(), value->text.c_str());
+    CHECK_TRUE(value->kind == ValueKind::kEnum);
+    CHECK_TRUE(std::find(tokens->begin(), tokens->end(), value->text) != tokens->end());
+  }
   // The rows that fall back are named in the report rather than left as a silent zero.
   bool named = false;
   for (const std::string& observation : runtime.shape.notes) {
