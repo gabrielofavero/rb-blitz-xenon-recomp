@@ -37,9 +37,19 @@ inline constexpr size_t kNoIndex = static_cast<size_t>(-1);
 // the `.mogg` after the song key, so the same song carried by two packages - the walk can
 // see both a loose dump and a merged pack - has one name.
 inline std::string_view SongName(const std::string& stream) {
-  const size_t slash = stream.find_last_of('\\');
+  const size_t slash = stream.find_last_of("\\/");
   return slash == std::string::npos ? std::string_view(stream)
                                     : std::string_view(stream).substr(slash + 1);
+}
+
+// Mount aliases, path separators and filename case do not create another song.
+// Keep the original spelling in PoolEntry for the guest's case-sensitive Symbol lookup.
+inline std::string SongIdentity(const std::string& stream) {
+  std::string key(SongName(stream));
+  for (char& c : key) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  }
+  return key;
 }
 
 // The menu's pool: a random sample of the songs the walk found, up to `cap`, with a song
@@ -53,7 +63,7 @@ inline std::vector<PoolEntry> BuildPool(std::vector<PoolEntry> candidates, size_
   pool.reserve(std::min(cap, candidates.size()));
   std::vector<std::string> seen;
   for (PoolEntry& candidate : candidates) {
-    std::string name(SongName(candidate.stream));
+    std::string name = SongIdentity(candidate.stream);
     if (std::find(seen.begin(), seen.end(), name) != seen.end()) {
       continue;
     }
@@ -127,11 +137,8 @@ class Rotation {
   // history: a song that has already been played in this rotation is not new again because the
   // list it sits in changed shape.
   void SetPool(std::vector<std::string> names) {
+    for (std::string& name : names) name = SongIdentity(name);
     pool_ = std::move(names);
-    if (pool_.empty()) {
-      played_.clear();
-      last_.clear();
-    }
   }
 
   // The next song to play, or kNoIndex when nothing distinct is left (an empty pool, or a pool
@@ -167,7 +174,8 @@ class Rotation {
 
   // A song the menu could not actually start (the stream never appeared, or never advanced): it
   // steps out of this rotation so the next pick cannot hand it straight back.
-  void MarkFailed(const std::string& name) {
+  void MarkFailed(const std::string& song) {
+    const std::string name = SongIdentity(song);
     if (name.empty()) {
       return;
     }
@@ -186,9 +194,11 @@ class Rotation {
   size_t size() const { return pool_.size(); }
   const std::vector<std::string>& names() const { return pool_; }
   const std::string& last() const { return last_; }
-  bool failed(const std::string& name) const { return failed_.count(name) != 0; }
+  bool failed(const std::string& name) const { return failed_.count(SongIdentity(name)) != 0; }
   // A song that has failed enough times to sit out the rest of the boot.
-  bool quarantined(const std::string& name) const { return quarantined_.count(name) != 0; }
+  bool quarantined(const std::string& name) const {
+    return quarantined_.count(SongIdentity(name)) != 0;
+  }
 
  private:
   static constexpr int kMaxStrikes = 3;

@@ -1,10 +1,12 @@
 # Play Current Song (2026-10-14)
 
-**Status: executed, with the landing unverified — the press reaches the title, the title's own answer
-stops it (2026-10-14).** Owner request, same day as R9's in-game row revival. The row and its setting
-are in the product and boot-verified as far as the guest's own song manager lets them go; the *song
-start* the row asks for reproduces, through the title's own song list, the same guest fault this
-document measures. Nothing here is proven to work end to end.
+**Status: the press works end to end (2026-10-15) — the 2026-10-14 stall was a `String` handed to a
+`Symbol`-reading lookup, fixed and measured through `loading_screen` to `game_screen`.** The
+2026-10-14 finding stands as measured — every statement of the body ran and the id answered 0 — and
+its cause is now known: `SongMgr`'s native handler (`0x8244938C` → `0x823F94A0`) reads an interned
+**Symbol**, and the body handed it a **String**. See "2026-10-15: the landing, measured" at the end
+of this file; the title's own-list fault (A8) remains open and is not claimed fixed. The paragraphs
+below are the 2026-10-14 state, kept as measured.
 
 Owner request, normalized into requirements:
 
@@ -98,7 +100,40 @@ pwsh -File out\_swap\play-current\run.ps1 -Label retail -Route retail-play   # A
 pwsh -File out\_swap\play-current\run.ps1 -Label bundled -Route retail-play -NoLibrary  # A10
 ```
 
-The arms need a real library (`F:\Games\Rock Band DLCs\360 (CON)\Singles` by default, override `$Songs`
-and the symlink source for another machine) and stop `rb_blitz` if a previous arm left it. The reason
-the drive has to wait: the boot lands on `PRESS (A) TO START`, and a key sent during the content
-discovery stalls the enumeration (A12).
+The arms need a real library (the script's default points at the machine's own
+`<library-root>\Singles` folder; override `$Songs` and the symlink source elsewhere) and stop
+`rb_blitz` if a previous arm left it. The reason the drive has to wait: the boot lands on
+`PRESS (A) TO START`, and a key sent during the content discovery stalls the enumeration (A12).
+
+## 2026-10-15: the landing, measured
+
+**The cause of the 2026-10-14 no-op.** The body was not wrong about *what* it asked — it handed
+`{song_mgr get_song_id_from_short_name <key>}` the pool's own key and the manager answered 0. The
+argument's **kind** was wrong: `SongMgr`'s native handler (`0x8244938C`, which interns its argument
+through `0x823F94A0`) reads a **Symbol** payload, and the DTA baked a **String** — so no name could
+ever match, on-disc names included. The keys are `Sym("…")` nodes now
+([src/ui/settings_screen.cpp](../../../src/ui/settings_screen.cpp), pinned by
+`tests/settings_screen_tests.cpp`). Two supporting changes came with it: the body calls
+`{song_select_panel set_current_song}` with the resolved metadata so the song list's own
+current-song state agrees with what plays, and a press with no published track (or a name the
+manager does not carry) opens `settings_play_unavailable_screen` — *"The background song is not
+available to play. Please try again when another song starts."* — instead of the old silent no-op.
+
+**Evidence (`out/_swap/music-fix/final-press/`, 2026-10-15).** Two real packages symlinked, a
+disposable profile, windowed D3D12, `rb_blitz.exe` `A0B583A6…` (its `hashes.json` records all
+three binaries). The route: enter the main menu, wait until `highvoltage_live` is audibly playing,
+select row 2, press.
+
+| Line / capture | What it is |
+| --- | --- |
+| `shell_music: Play Current Song: the menu is playing pool 1 of 2 ("highvoltage_live")` | the probe answered the **audible** song |
+| `shell_music: the game took this menu track down; the rotation stops watching ("highvoltage_live")` | the game's own stop, caught by the menu-music hooks — and **no** deck advance follows |
+| `native_mouse: screen=loading_screen` (1 s later) + `Loading STFS header file: …\ACDC - High Voltage (Live)` | the loading screen mounts the song the press resolved |
+| the game's first screen (*"In Rock Band Blitz, it's all about earning big points… PRESS (A) TO BEGIN"*) → `screen=game_screen` | the retail landing, reached with zero guest faults |
+| `shots/{row2,loading,game2,gameplay}.png` | row 2 highlighted; the loading screen; the first screen; the note highway |
+
+**Not claimed.** The title's **own** list fault (A8) is untouched by this fix and stays open in
+[known-issues.md](../../reference/known-issues.md); the unavailable-page arm was not driven at
+runtime (its screen and label are pinned by the host tests); and the Ultimate-target landing
+(`powerup_select_screen`) was not re-measured on this build — the press was taken on the offline
+base target.

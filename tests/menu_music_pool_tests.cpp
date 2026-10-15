@@ -22,6 +22,7 @@
 #include "check.h"
 
 #include "hooks/menu_music_pool.h"
+#include "hooks/menu_music_playback.h"
 
 #include <cstddef>
 #include <random>
@@ -288,7 +289,60 @@ void TestRotationAnnouncesThePassBoundary() {
 
 }  // namespace
 
+void TestPlaybackLifecycle() {
+  using Playback = rb_blitz::shell_music::Playback;
+  using Event = Playback::Event;
+  BeginCase("one-shot playback publishes actual samples, finishes once, and cancels on exit");
+  Playback playback;
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(10, 10, false, false, 500) == Event::kNone);
+  CHECK_TRUE(playback.Observe(20, 10, true, false, 500) == Event::kAudible);
+  CHECK_TRUE(playback.Observe(30, 10, true, false, 1000) == Event::kNone);
+  CHECK_TRUE(playback.Observe(40, 10, false, true, 1000) == Event::kEnded);
+  CHECK_TRUE(playback.Observe(50, 10, false, true, 1000) == Event::kNone);
+  // Allocators may reuse an address: Begin must discard the previous source's position.
+  playback.Begin(60);
+  CHECK_TRUE(playback.Observe(70, 10, true, false, 100) == Event::kAudible);
+  playback.Stop();
+  CHECK_TRUE(playback.Observe(80, 0, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(90, 10, false, true, 100) == Event::kNone);
+
+  BeginCase("missing, failed, replaced and stalled streams cannot freeze the rotation");
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(3000, 0, false, false, 0) == Event::kFailed);
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(3000, 10, false, false, 0) == Event::kFailed);
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(1, 10, true, false, 100) == Event::kAudible);
+  CHECK_TRUE(playback.Observe(2, 20, true, false, 200) == Event::kFailed);
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(1, 10, true, false, 100) == Event::kAudible);
+  CHECK_TRUE(playback.Observe(3001, 10, true, false, 100) == Event::kFailed);
+  // Even a subsecond source must advance instead of replaying its prefix.
+  playback.Begin(0);
+  playback.Observe(1, 10, true, false, 2000);
+  CHECK_TRUE(playback.Observe(2, 10, true, false, 100) == Event::kEnded);
+}
+
+void TestCanonicalSongHistory() {
+  BeginCase("aliases, case and separators preserve identity, including an empty refresh");
+  std::mt19937 rng(2);
+  const auto pool = BuildPool({{"a", "\\songs\\Song\\Song"},
+                               {"b", "songs/song/SONG"}}, 50, rng);
+  CHECK_EQ(pool.size(), 1u);
+  CHECK_TRUE(pool[0].stream == "\\songs\\Song\\Song");
+  Rotation rotation(rng);
+  rotation.SetPool({"Song"});
+  CHECK_EQ(rotation.Next(), 0u);
+  rotation.SetPool({});
+  CHECK_EQ(rotation.Next(), kNoIndex);
+  rotation.SetPool({"SONG"});
+  CHECK_EQ(rotation.Next(), kNoIndex);
+}
+
 int main() {
+  TestPlaybackLifecycle();
+  TestCanonicalSongHistory();
   TestSongName();
   TestPlayProbePaths();
   TestPoolDedupesTheSameSong();

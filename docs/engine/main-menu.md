@@ -397,8 +397,10 @@ SONG — and on the offline base target it goes straight to the loading screen, 
 list's own Confirm does. On by default (`general.play_current_song`, "Play Current Song" on Help &
 Options → Downloadable Content), and *built only by a boot that has a pool*: with the DLC music off,
 or a library that yielded no song, the settings row reads unavailable and the menu entry is absent —
-a row that exists must work. **The landing is the intent, not a measurement:** what the press was
-measured to do is reach the host and stop at the song manager's own answer (§"The song manager decides").
+a row that exists must work. **The landing is now measured (2026-10-15):** press → the song the menu
+is playing is resolved → `loading_screen` → the game's first screen → `game_screen`, with the visible
+song matching the audible one; the arms are in
+[play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) §Evidence.
 
 **The two halves.**
 
@@ -426,32 +428,40 @@ is the package's own folder name (`SongName`: the last component of `\songs\<key
 is the spelling the body then asks `song_mgr` for. A press therefore costs one file question per pool
 entry, the whole `rbbz-play/` namespace is answered by the host (never forwarded — a forwarded bare
 name is a name the title's own file layer may answer out of data it already has, the lesson §7.1's
-sentinel taught), and a press with no track playing yet (the pool is built, but no track has been
-handed to the panel) writes no name and does nothing.
+sentinel taught), and a press with no track published yet (before the first track has produced
+samples) shows the unavailable message below instead of guessing.
 
-**The song manager decides whether the press goes on (measured 2026-10-14).** All of the body runs —
-every statement, `song_chosen` included, read off a staged trace through the probe channel — and
-`{song_mgr get_song_id_from_short_name <the pool's own key>}` then answers **0**, while
-`{song_mgr num_songs}` is non-zero: the manager's library does not carry the name at main-menu time,
-and `song_mgr data 0` hands the loading screen a null song, which the title dereferences a second later
-(`Unhandled guest access violation: read of guest 0x00000004`). Asking first
-(`{content_mgr refresh_synchronously}`, the loading screen's own first step) and visiting your own song
-list before the press change neither reading. The body therefore **guards on the id**: a press whose
-name the library does not carry does nothing instead of faulting. The one-step-further control is the
-title's own list — starting or previewing a *DLC* song from it mounts the package, runs the same AES
-path, and faults the same way, so that fault is not this row's; both are
-[known-issues.md](../reference/known-issues.md) `Open`, with the arms in
+**Why the lookup answered 0, and the fix (measured 2026-10-15).** The 2026-10-14 reading below was
+correct about *what* happened and wrong about the cause: `SongMgr`'s native handler (`0x8244938C`,
+interning its argument through `0x823F94A0`) reads a **Symbol** payload, and the body handed it a
+**String** — the lookup then never matched, for the pool's own key and for an on-disc name alike, and
+`song_mgr data 0` handed the loading screen a null song. The baked song keys are now `Sym("…")` nodes
+([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) `PlayCurrentSongBody`;
+`tests/settings_screen_tests.cpp` pins the node kind), the id resolves, and the press continues:
+`song_select_panel set_current_song` takes the resolved metadata before the `loading_screen` hand-off,
+so the song list's own current-song state agrees with what plays. A press with **no** published track
+(before the first track has produced samples, or with none playing) or a name the manager does not
+carry draws an explicit message — *"The background song is not available to play. Please try again
+when another song starts."* (`settings_play_unavailable_screen`) — instead of the old silent no-op.
+
+**Measured (2026-10-15)** — `out/_swap/music-fix/final-press` (two-package library, disposable profile,
+windowed D3D12). *Play Current Song* was pressed while `highvoltage_live` was audibly playing: the host
+answered the probe (`Play Current Song: the menu is playing pool 1 of 2 ("highvoltage_live")`), the
+game's own teardown logged `the game took this menu track down; the rotation stops watching` (the deck
+did **not** advance), one second later `loading_screen` mounted the song the press resolved
+(`Loading STFS header file: …\ACDC - High Voltage (Live)`), then the game's first screen (*"In Rock
+Band Blitz, it's all about earning big points… PRESS (A) TO BEGIN"*) and, on the A, `game_screen` —
+captured in `final-press/shots/{row2,loading,game2,gameplay}.png`. **Zero guest faults**, and the song
+the loading screen took is the song that was playing. The 2026-10-14 arms that dead-ended at the
+manager's "0" are kept in [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)
+§Evidence; the one open sibling is the title's **own** song list, which faults for a cause this fix
+does not claim to have touched ([known-issues.md](../reference/known-issues.md)).
+
+**Evidence [boot]** — the boot lines to look for are
+`settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`,
+`shell_music: Play Current Song: the menu is playing pool i of N ("<key>")` and, on an unavailable
+press, the `settings_play_unavailable` page; arms and captures are in
 [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) §Evidence.
-
-**Evidence [boot] 2026-10-14** — see [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)
-§ Evidence for the arm, its log lines and the captures; the boot lines to look for are
-`settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`
-and `shell_music: Play Current Song: the menu is playing pool i of N ("<key>")`.
-
-**Evidence [boot] 2026-10-14** — see [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)
-§ Evidence for the arm, its log lines and the captures; the boot lines to look for are
-`settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`
-and `shell_music: Play Current Song: the menu is playing pool i of N ("<key>")`.
 
 ### 8. Evidence
 
@@ -669,7 +679,7 @@ codegen trace's `VTableScanner`, run over the decrypted `default.xex`):
 4. makes a `ShellMusic` (FX dir `sfx/shell/shell_music_fx.milo`, string `0x8203ACC0`) and calls `ShellMusic::Load(path, gain, loop=1, play_from_buffer=1)`;
 5. which streams the path. `Load` has exactly one call site in the image — this one — the single point every menu track goes through.
 
-`0x827586D8` is the per-frame poll: the panel calls it every frame (from `0x822B7290`, `0x822B71F0`) and it applies the track's volume. Its end-of-track path (`0x82758904`: clear `ShellMusic+44`, stop the channels) is never reached on the menu, because the stream loops — the `loop` argument only scales a fade at the seam. What moves is the stream's own play position (`Stream+0xA0`, samples, advancing with the audio, verified live), restarting near zero at the seam. A position that went backwards is the observable end of a track — the point R9 hooks.
+`0x827586D8` is the per-frame poll: the panel calls it every frame (from `0x822B7290`, `0x822B71F0`) and it applies the track's volume. In retail the stream loops — the panel's `loop=1`/`play_from_buffer=1` arguments and the config's own fields (`ShellMusic+48`, `+60`) make it restart before its end — so the poll's end-of-track path (`0x82758904`: clear `ShellMusic+44`, stop the channels) is not reached on the menu, and the observable motion is the stream's own play position (`Stream+0xA0`, samples, advancing with the audio at ~44,100 counts a second). R9's handoff forces those loop fields off, and then the end of a song is the stream's own `StandardStream` **state 6** (`IsFinished`, `0x823E30D8`) — which the poll hook observes before the guest's teardown runs (2026-10-15; the earlier reading of a position rewind is kept in the P5 paragraph below as measured but superseded).
 
 `ShellMusic` is RB3's `MetaMusic` under another name: a streamed player with a random start offset and a loop, not a fixed sample bank. A pool entry is therefore a **stream path**, and anything the engine can stream can play in the menu.
 
@@ -703,15 +713,20 @@ inside the ark, whose index pins its size, so the array cannot grow past three e
    handful every boot;
 4. hooks `ShellMusic::Load` (`0x82757F50`). When the title asks for one of its own
    `sfx/shell/...` pool entries, the path is replaced with `menumusic<n>:\songs\<song>\<song>` — a
-   different song of exactly the same kind — and the original `Load` runs with it, unchanged
-   otherwise (the same gain, loop and FX the panel chose);
-5. hooks the poll (`0x827586D8`). While a song R9 started plays it watches that stream's own position
-   (`Stream+0xA0`); at the seam, where the song restarts, the position jumps backwards — the one thing
-   the guest offers as "this track ended" — and R9 loads the next song of the rotation onto the same
-   `ShellMusic`, so the menu walks its pool instead of repeating one track. A track that never
-   produces a sample is a load that failed: that song sits out the pass and the next candidate is
-   tried, with a bounded number of tries before the rotation gives up for this boot and hands the
-   menu back to the title's own tracks.
+   different song of exactly the same kind — and the original `Load` runs with it (the same gain and
+   FX the panel chose; the panel's `loop`/`play_from_buffer` arguments and the config's own loop
+   fields are forced off, so a streamed DLC song has one play and one end);
+5. hooks the poll (`0x827586D8`). While a song R9 started plays it watches the stream's own state:
+   the end is `StandardStream` **state 6** (`IsFinished`, `0x823E30D8`), and when it arrives R9
+   retires the finished stream (its destructor, `ShellMusic+44` cleared) and loads + starts the next
+   song of the rotation onto the same `ShellMusic`, so the menu walks its pool instead of repeating
+   one track ([src/hooks/menu_music_playback.h](../../src/hooks/menu_music_playback.h) is that
+   state machine). A track that never produces a sample is a load that failed: that song sits out the
+   pass and the next candidate is tried, with a bounded number of tries before the rotation gives up
+   for this boot and hands the menu back to the title's own tracks. A guest `Stop`/`StopStreams`/
+   destructor on that `ShellMusic` is **navigation** (the loading screen taking the audio over, the
+   menu being left): the rotation stops watching, keeps its history, and does **not** start another
+   song — measured 2026-10-15 (§ the correction below).
 6. keeps the rotation honest over the **pool** it drew, not over the library: every distinct song of
    the pool is heard once before any of them is heard again, no song ever follows itself — including
    across a reshuffle, a menu re-entry or a pool rebuilt by a library refresh, because the order is
@@ -732,7 +747,10 @@ the stream looping, one song played as long as the menu stayed open. The rotatio
 `Stream+0xA0` advances at about 44,100 counts a second and restarted near zero at the seam; three
 different songs followed in a row, about a song-length apart
 (`14:34:14 rihannashutupanddrive` -> `14:37:55 ringoffire3` -> `14:41:34 funhouse`), with no menu
-re-entry between them.
+re-entry between them. **Superseded in part (2026-10-15):** the "three different songs followed" is the
+same symptom the P5 paragraph below records — the host's next-track `Load` did not replace the playing
+stream, so those three names rotated in the log while the first song's audio kept playing. The
+substitution itself (the log line quoted here) remains measured and true.
 
 **Measured — the third thing, and what harvesting changed (2026-10-10).** One package is not always one
 song. `game/dlc/` is 20 one-file entitlement stubs — each `5841122D/00009000/*` holds only
@@ -751,7 +769,9 @@ stubs still contributing nothing. The rotation over that container was watched l
 library opened elsewhere again (`songs\jungleboogie`), so the opening song is not pinned to the
 container's first entry any more.
 
-**Measured — the rotation and its transition cost (2026-10-14, P5).** A fixture library of three
+**Measured — the rotation and its transition cost (2026-10-14, P5; superseded where it disagrees
+with the correction below — its log lines are real, but they observed one repeating stream and the
+host's bookkeeping, not a rotation).** A fixture library of three
 single-song packages (`Rancid - Maxwell Murder`, `FIDLAR - Wake Bake Skate`,
 `The Beatles - I'll Follow the Sun`, symlinked, so the pool **is** three songs) was held on the main
 menu for two passes with the instrumentation in [shell_music.cpp](../../src/hooks/shell_music.cpp)
@@ -765,15 +785,54 @@ measured 86 ms median and 250 ms maximum). The `ShellMusic::Load` call inside th
 so the number is the guest's own stream startup plus the audio device, not host work: nothing was
 prebuffered, no load was moved off the guest thread, and no song duration is guessed.
 
-**What the seam really is (open).** The trigger is the guest restarting its own stream, seen as the
-stream's sample counter (`Stream+0xA0`, verified advancing at ~44,100 counts a second) moving
-backwards. Its period is **not** proven to be the file's true end: the same three fixture packages
-wrapped after **109.6 s** in one boot and **93.5 s** in another, which a per-file constant would rule
-out, while the 2026-10-10 measurement recorded ~221 s for a 3:33 commercial track. The reading most
-consistent with all three is that the guest loops the stream at the point its own streaming buffer has
-reached, so the menu can play only the buffered prefix of a track before R9 replaces it (with R9 off,
-the title loops exactly that prefix). Settling it needs the stream object's own length field, which has
-not been located.
+**What the seam was taken to be (open 2026-10-14; answered 2026-10-15 below).** The trigger is the
+guest restarting its own stream, seen as the stream's sample counter (`Stream+0xA0`, verified
+advancing at ~44,100 counts a second) moving backwards. Its period was **not** proven to be the
+file's true end: the same three fixture packages appeared to wrap after **109.6 s** in one boot and
+**93.5 s** in another, which a per-file constant would rule out, while the 2026-10-10 measurement
+recorded ~221 s for a 3:33 commercial track. The reading most consistent with all three was that the
+guest loops the stream at the point its own streaming buffer has reached, so the menu can play only
+the buffered prefix of a track before R9 replaces it (with R9 off, the title loops exactly that
+prefix).
+
+**Measured — the rotation that actually changes the song (2026-10-15).** What the P5 arms could not
+show, and did not, is that the audio changed: `ShellMusic::Load` only stages a source
+(`0x82757F50`); the stream is built by `ShellMusic::Start` (`0x82758B98`), and Start **returns after
+a fade** when a stream is already playing (`0x82758BC4`) — so the old next-track `Load` left the
+first song's stream and audio running while the logs, and "Play Current Song", moved on. The
+handoff now retires the old stream through its own destructor, clears `ShellMusic+44`, stages the
+new source and calls `Start` ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp),
+`LoadOnGuest`). The handoff drives Load's own `loop` argument (r7, which Load stores into
+`ShellMusic+48` and Start turns into the stream's jump at `0x82758D64`): **off** for a DLC song,
+which must end so the rotation can advance; **on** for a title fallback, which loops as the title's
+own music does (the config's `play_from_memory` field, `ShellMusic+60`, is a separate knob and is
+left as Load reads it). And
+the end of a song is `StandardStream` **state 6** (`IsFinished`, `0x823E30D8`; `IsPlaying` is state
+3, `0x823E30F0`): the poll observes it before the guest's own teardown. The same state is also what
+the title reaches when it takes the menu music down on a screen change, so the hooks treat a guest
+`Stop` (`0x82758998`), `StopStreams` (`0x827583F8`) or destructor (`0x82758490`) on the menu
+`ShellMusic` as **navigation** — the rotation stops watching without advancing — and only a stream
+that reaches its own end rotates.
+
+Five driven boots measure it (`out/_swap/music-fix/`, disposable roots, D3D12, windowed).
+**`rotation3`** held the three-package fixture library on the menu for 30 minutes: eight
+transitions, three full passes, **no song ever following itself**, every pass playing all three — and
+each song now ending at its own stable length (`far_ifollowthesun` 115.0 s in each of its three
+plays, `wakebake` 109.6 s, `MaxwellMurder` 93.5 s), which the superseded paragraph above had misread
+as one file wrapping at two lengths. Each handover was audible **82–102 ms** after the previous
+track's end (`started playback … ms after the previous track's end`); **`final-rotation`**, the same
+pool on the final build (every teardown hook in), reproduced three passes in ~15 minutes with the
+same per-song lengths and no repeat. **`final-one`** (one-package
+pool) played its song once and logged `the DLC pool has nothing new to play; the menu goes back to
+the title's own tracks` — the sole DLC song is played, not looped. Its first pass also showed the
+fallback **one-shot** (an earlier cut of the handoff forced the no-loop flag on the fallback too,
+and the menu went silent after the title track was through); **`final-one-b`** is the fix — the
+title fallback keeps the panel's own `loop = 1`, and the watcher shows it: `the title fallback track
+is playing at 241.2 s`, `… looped after 349.9 s of samples`, `… playing at 11.4 s` — the title track
+loops at its own length and the menu never runs dry. **`final-press`** pressed *Play Current Song* mid-track: the press resolved the audible song
+and the game's own stop was caught one line later — `the game took this menu track down; the
+rotation stops watching ("highvoltage_live")` — the deck did **not** advance while the loading
+screen took the audio over (§7.2 has the rest of that arm).
 
 ### 5. Where it lives
 
@@ -781,9 +840,10 @@ not been located.
 | --- | --- |
 | The pool (data) | `config/synth.dtb` in `game/gen/main_xbox_0.ark` |
 | The pool reader + random pick | `0x822B7968`, `0x822B7550` (called on panel entry) |
-| The streamed player | `ShellMusic` `0x82758208` (ctor), `0x82757F50` (`Load`) |
-| The per-frame poll, and a track's end | `0x827586D8`; the stream's position, `Stream+0xA0` |
+| The streamed player | `ShellMusic` `0x82758208` (ctor), `0x82757F50` (`Load`), `0x82758B98` (`Start`), `0x827583F8` (`StopStreams`), `0x82758998` (`Stop`), `0x82758490` (destructor) |
+| The per-frame poll, and a track's end | `0x827586D8`; the end is `StandardStream` state 6 (`0x823E30D8`) |
 | The feature | [src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp) |
+| The rotation's playback state machine (host logic) | [src/hooks/menu_music_playback.h](../../src/hooks/menu_music_playback.h) |
 | The pool sample and the deck (host logic) | [src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h), `tests/menu_music_pool_tests.cpp` |
 | The toggles | [toggles.md](toggles.md) (R9) |
 | The library it draws from | [dlc.md](../guides/dlc.md), `rb_blitz::dlc::LibraryPackagePaths()` |

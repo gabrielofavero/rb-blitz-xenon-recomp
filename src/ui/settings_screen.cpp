@@ -829,6 +829,11 @@ std::vector<PanelSpec> AllPanels() {
                           {"provider", "settings_save_error_provider"},
                           {"conflict", "settings_save_error_conflict"},
                           {"other", "settings_save_error_other"}}});
+  if (g_configuration.play_current_song && !g_configuration.menu_music_songs.empty()) {
+    out.push_back(PanelSpec{"settings_play_unavailable_panel", "settings_play_unavailable_screen",
+                           "splash_screen", MenuPanels(), {close},
+                           "../pause/settings_confirmation.milo", "settings_play_unavailable"});
+  }
   Row achievements = InfoRow("settings_earn_achievements", "Unlock Online Achievements",
                              "Grant the online-only achievements. This cannot be undone.");
   achievements.kind = Kind::kAchievements;
@@ -2021,37 +2026,12 @@ bool InsertMenuRow(std::vector<dtb::Node>* nodes, const std::string_view after_r
 // ------------------------------------------------------------------------------------------------
 // The "Play Current Song" entry (owner feature, 2026-10-14)
 // ------------------------------------------------------------------------------------------------
-// The main menu's second row starts whichever song the menu is playing. None of the DTA below is
-// invented: each statement is one a shipped record already makes. In short:
-//
-//   * the song is resolved from its short name, mounted, and handed to the loading screen exactly as
-//     `quick_start_song` (ui/pause/gen/pause_to_new_game.dtb) does it:
-//     `{song_mgr get_song_id_from_short_name <name>}` -> `{song_mgr data <id>}` ->
-//     `{loading_screen set_song <data>}` + the content mount;
-//   * the branch that follows is the song list's own `song_chosen` (ui/song_select/gen/song_select.dtb,
-//     on `song_select_screen`): with the Ultimate payload's `unlockall` set it goes to
-//     `powerup_select_screen` - where the player picks power-ups and presses PLAY SONG - and on the
-//     offline base target it equips the fake power-ups, sets Expert and goes straight to
-//     `loading_screen` with `wait_for_button_press`. Reusing that method is what makes both targets
-//     do what the game does rather than what we guess it does.
-//
-// Which song is playing is the one thing the script cannot know: the host does, and the only answer
-// a host can give a DTA script is a boolean (`file_exists`). So the record bakes this boot's pool -
-// one probe per index, holding the package's own folder name as the song key - and the host answers
-// true for exactly one of them (src/hooks/shell_music.cpp, AnswerPlayQuery). A press therefore costs
-// one file question per pool entry, and the host never has to read guest state.
-//
-// `rbbz_play_song` doubles as the "found" flag: the probes write the name, and the guard below is
-// what keeps a press whose music never started (the pool was built, but no track has been handed to
-// the panel yet) from resolving an empty name.
-//
-// **What the body deliberately does *not* do: select the row in the song list.** The song list's
-// provider is populated by that screen's own `enter`, so at main-menu time there is no list to
-// select in; the panel's `set_current_song` would be the way to state it, but its argument shape is
-// not established (the shipped callers pass it the provider's own metadata object from inside
-// `update_current_song`, and the native side was not read), and a wrong-shaped store there would
-// break the song list later rather than this press. The panel keeps its own current-song state; what
-// this row guarantees is that the *right song plays*.
+// The host identifies the advancing stream through file_exists probes. The song key
+// MUST be a Symbol: SongMgr's native handler does not convert a String payload.
+// Metadata is validated, made current on the song panel, mounted and passed through
+// the title's song_chosen handler, preserving the retail/Ultimate flow. Missing audio
+// or metadata gets an explicit message instead of a silent no-op or null dereference.
+// See docs/engine/main-menu.md section 7.2 for the runtime evidence.
 namespace {
 constexpr char kPlaySongVar[] = "rbbz_play_song";
 constexpr char kPlayIdVar[] = "rbbz_play_id";
@@ -2062,35 +2042,35 @@ Node SetVar(const std::string_view name, Node value) {
 }
 
 std::vector<Node> PlayCurrentSongBody(const std::vector<std::string>& songs) {
-  std::vector<Node> statements;
-  statements.push_back(SetVar(kPlaySongVar, Str("")));
+  // SongMgr::Handle at 0x8244938C reads a Symbol payload (0x823F94A0), not a
+  // string. A string's DataArray pointer was being looked up as a symbol, returning
+  // zero even for songs already in the library. Preserve the package's spelling.
+  std::vector<Node> statements{SetVar(kPlaySongVar, Sym(""))};
   for (size_t i = 0; i < songs.size(); ++i) {
     statements.push_back(Cmd(
         {Sym("if"),
          Cmd({Sym("file_exists"), Str(std::string(kPlayProbePrefix) + std::to_string(i))}),
-         SetVar(kPlaySongVar, Str(songs[i]))}));
+         SetVar(kPlaySongVar, Sym(songs[i]))}));
   }
-  // The song manager's own answer decides whether the press goes on: `get_song_id_from_short_name`
-  // returns 0 for a name its library does not carry, and `song_mgr data 0` then hands the loading
-  // screen a null song - which the title dereferences a second later (`Unhandled guest access
-  // violation: read of guest 0x00000004`, measured 2026-10-14). A press whose name the library does
-  // not know therefore does nothing rather than faults.
-  statements.push_back(Cmd(
-      {Sym("if"), Cmd({Sym("!="), Var(kPlaySongVar), Str("")}),
-       Cmd({Sym("do"),
-            SetVar(kPlayIdVar,
-                   Cmd({Sym("song_mgr"), Sym("get_song_id_from_short_name"), Var(kPlaySongVar)})),
-            Cmd({Sym("if"), Cmd({Sym("!="), Var(kPlayIdVar), Node::Int(0)}),
-                 Cmd({Sym("do"),
-                      SetVar(kPlayDataVar, Cmd({Sym("song_mgr"), Sym("data"), Var(kPlayIdVar)})),
-                      // Song first, then the mount, then the branch - the same three steps, in the
-                      // same order, as the song list's own Confirm
-                      // (`ui/song_select/gen/song_select.dtb`).
-                      Cmd({Sym("loading_screen"), Sym("set_song"), Var(kPlayDataVar)}),
-                      Cmd({Sym("song_select_panel"), Sym("mount_current_content"),
-                           Var(kPlayIdVar)}),
-                      Cmd({Sym("song_select_screen"), Sym("song_chosen"),
-                           Cmd({Sym("user_mgr"), Sym("get_participating_user")})})})})})}));
+  const Node unavailable = EnterScreen("settings_play_unavailable_screen");
+  const Node choose = Cmd({Sym("do"),
+      // The metadata also becomes the panel's current song, so returning to the library
+      // and the power-up flow agree with the song handed to the loading screen.
+      Cmd({Sym("song_select_panel"), Sym("set_current_song"), Var(kPlayDataVar)}),
+      Cmd({Sym("loading_screen"), Sym("set_song"), Var(kPlayDataVar)}),
+      Cmd({Sym("song_select_panel"), Sym("mount_current_content"), Var(kPlayIdVar)}),
+      Cmd({Sym("song_select_screen"), Sym("song_chosen"),
+           Cmd({Sym("user_mgr"), Sym("get_participating_user")})})});
+  statements.push_back(Cmd({Sym("if_else"), Cmd({Sym("!="), Var(kPlaySongVar), Sym("")}),
+      Cmd({Sym("do"),
+           SetVar(kPlayIdVar,
+                  Cmd({Sym("song_mgr"), Sym("get_song_id_from_short_name"), Var(kPlaySongVar)})),
+           Cmd({Sym("if_else"), Cmd({Sym("!="), Var(kPlayIdVar), Node::Int(0)}),
+                Cmd({Sym("do"),
+                     SetVar(kPlayDataVar, Cmd({Sym("song_mgr"), Sym("data"), Var(kPlayIdVar)})),
+                     Cmd({Sym("if_else"), Var(kPlayDataVar), choose, unavailable})}),
+                unavailable})}),
+      unavailable}));
   return statements;
 }
 }  // namespace
@@ -2204,6 +2184,9 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   out.emplace_back("settings_save_error_conflict", "Something else changed the settings file. Close this message and try again.");
   out.emplace_back("settings_save_error_other", "Settings could not be saved. Close this message and try again; if it keeps failing, restart the game.");
   out.emplace_back("settings_restart_error", "The game could not restart. Close this message and start the game again to apply your saved changes.");
+  if (g_configuration.play_current_song && !g_configuration.menu_music_songs.empty()) {
+    out.emplace_back("settings_play_unavailable", "The background song is not available to play. Please try again when another song starts.");
+  }
   out.emplace_back("settings_achievements_message", "Unlock the four online achievements? This cannot be undone.");
   auto add = [&out](const std::string& key, const std::string& text) {
     for (const auto& item : out) {

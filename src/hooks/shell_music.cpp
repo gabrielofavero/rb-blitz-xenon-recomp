@@ -1,72 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// R9: change the main menu's background songs for loaded DLC ones.
+// DLC menu music uses the title's ShellMusic player with file streaming and native
+// looping disabled. At EOF, retire the active Stream, load the next source and Start it.
+// Load alone does not replace a playing Stream: that was the cause of the apparent
+// rotation logging different names while the same audio kept playing.
 //
-// What the title does by itself (recovered from the image; see
-// docs/engine/main-menu.md (part 2, the background music) for the addresses and the evidence):
+// The bounded pool contains up to 50 distinct songs from mounted DLC. Rotation history
+// uses canonical song identities. Play Current Song publishes only a source producing
+// samples, and menu exit clears it without starting another track.
 //
-//   * the main menu's background music is `ShellMusicPanel`, Blitz's rename of the
-//     RB3 engine's MetaMusic. It reads the `shellmusic` block of the synth config -
-//     `config/synth.dtb` in the ark, `(shellmusic (music (samples/shellmusic_1
-//     (gain 0.0)) (samples/shellmusic_2 ...) (samples/shellmusic_3 ...)))` - and
-//     holds those three entries as its whole pool.
-//   * when the panel is entered (0x822B7968) it picks one entry at random
-//     (0x822B7550, a `[0, size)` pick), formats `sprintf("sfx/shell/%s", entry)`,
-//     reads that entry's `gain`, makes a `ShellMusic` and calls
-//     `ShellMusic::Load(path, gain, loop=1, play_from_buffer=1)` (0x82757F50). `Load`
-//     streams the path; the three entries resolve to
-//     `sfx/shell/samples/shellmusic_1..3.mogg`, three stereo tracks in the ark.
-//   * the panel's per-frame poll (0x827586D8) then drives that stream, and the stream
-//     loops: the `loop` argument only scales a fade at the seam, it does not stop the
-//     loop. The title therefore plays ONE of its three tracks per menu visit and
-//     repeats it until the menu is left; nothing asks for a next track on its own.
-//
-// R9 widens the pool and gives the menu a jukebox rotation of it:
-//
-//   * the pool is the songs this boot found in the DLC it mounted - **every** `.mogg` a
-//     package holds, not just the first. A downloaded song is usually one package with one
-//     song, but a merged pack is one container holding a whole disc's worth of them, and
-//     taking only its first would pin the menu to whichever song sorted first, every boot.
-//     The songs are sampled at random from the whole library and the sample is redrawn
-//     every boot (Configure() below), so the menu is different every time;
-//   * `ShellMusic::Load` is hooked, so every pooled track the panel asks for becomes
-//     one of those songs;
-//   * the poll is hooked too. The stream it drives carries its own play position
-//     (`Stream+0xA0`, in samples, advancing with the audio), and at the seam where the
-//     song repeats that position jumps **backwards**. A position that went backwards on
-//     the object R9 substituted into is therefore the end of one of its songs, and the
-//     moment R9 hands the same ShellMusic the next song of the shuffled pool. The pool
-//     is deliberately small: the walk mounts only as many containers as it needs to fill
-//     it, and the deck is reshuffled when it runs out.
-//
-// Where a DLC song comes from: the title opens its downloadable songs from a mounted
-// content device (`cntXXXXXXXX:\songs\<key>\<key>.<ext>`) and never from `sfx/shell/`,
-// so a path in the synth config cannot name one. This layer therefore mounts the packages
-// rb_blitz::dlc::Configure() enumerated that carry songs, read-only, as devices of its own
-// (menumusic0:, menumusic1:, ...), and hands ShellMusic a path into one of them. Nothing is
-// copied, extracted or written under game/.
-//
-// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and the deviation.
-//
-// Faithful behaviour: with R9 off - its default - Configure() mounts nothing and the
-// hook is inert, so the boot is the one this project had before R9 existed: the menu
-// loops the title's own three tracks. The same is true with R9 on and no DLC library,
-// or when none of the chosen packages can be mounted or holds a stream: nothing joins
-// the pool, so the hook has nothing to substitute and every read is the guest's own.
-//
-// Deviation: with R9 on and at least one package mounted, each pooled track is replaced,
-// at the load that carries it, with `<alias>:\songs\<song>\<song>` - a different song of
-// the same kind (a streamed .mogg), played with the same gain, loop and FX the panel
-// already chose. The poll hook watches that stream's own position and, at the seam where
-// the song would repeat, loads the next song of the pool onto the same ShellMusic, so the
-// menu walks its library instead of repeating one track. Every substitution and every
-// turn of the deck is logged with the path the title asked for and the one it is given
-// instead.
+// Guest ABI and runtime evidence: docs/engine/main-menu.md, part 2, 2026-10-15 correction.
+// With DLC Menu Songs off, the guest loader, loop and navigation remain unchanged.
 
 #include "hooks/shell_music.h"
 
 #include "hooks/menu_music_pool.h"
+#include "hooks/menu_music_playback.h"
 
 #include <algorithm>
 #include <chrono>
@@ -111,6 +61,10 @@ REXCVAR_DECLARE(int32_t, enhancements_menu_dlc_song_count);
 
 REX_EXTERN(__imp__sub_82757F50);
 REX_EXTERN(__imp__sub_827586D8);
+REX_EXTERN(__imp__sub_82758B98);  // ShellMusic::Start
+REX_EXTERN(__imp__sub_827583F8);  // ShellMusic::StopStreams
+REX_EXTERN(__imp__sub_82758998);  // ShellMusic::Stop (menu exit)
+REX_EXTERN(__imp__sub_82758490);  // ShellMusic destructor
 
 namespace {
 
@@ -135,18 +89,11 @@ constexpr int kMaxSongs = 64;
 constexpr size_t kBufferCount = 8;
 constexpr size_t kBufferBytes = 512;
 
-// ShellMusic's own fields (its ctor is 0x82758208): the stream it plays, and - on that
-// stream - the sample position it has reached. The panel's poll loops the stream rather
-// than ending it, so a position that jumps backwards is the only signal that a track has
-// reached its end, and it is what R9 rotates on.
+// Verified in the retail image: ShellMusic+44 owns StandardStream, whose +0xA0
+// counts source samples. EOF is StandardStream state 6, not a guessed duration.
 constexpr uint32_t kStreamOffset = 44;
 constexpr uint32_t kPositionOffset = 0xA0;
-// A backwards jump smaller than this is a torn read of a counter the audio thread is
-// writing, not a seam: a seam restarts near zero and is minutes of samples away.
-constexpr uint32_t kRewindSlack = 44100;  // ~1 s at 44.1 kHz
-// The position counts samples and these mixdowns run at the standard rate (measured
-// 2026-10-10: ~44,100 counts a second), so a position is also a duration in seconds.
-constexpr double kSamplesPerSecond = 44100.0;
+constexpr double kSamplesPerSecond = 44100.0;  // diagnostic display for these mixdowns
 
 bool g_enabled = false;
 std::vector<PoolEntry> g_pool;
@@ -163,6 +110,7 @@ bool g_menu_music_enabled = false;
 // panel's own load and R9's rotation - move it. The "Play Current Song" probe channel answers from
 // it; never read outside g_mutex.
 int g_current_index = -1;
+int g_pending_index = -1;
 
 std::mutex g_mutex;
 std::mt19937 g_rng{std::random_device{}()};
@@ -175,42 +123,44 @@ rb_blitz::shell_music::Rotation g_rotation{g_rng};
 
 // How long a track R9 started may stay silent before the candidate is treated as a failed load,
 // and how many candidates in a row it tries before handing the menu back to the title's tracks.
-constexpr int64_t kAudibleDeadlineMs = 3000;
 constexpr int kMaxAttemptsPerSeam = 3;
+rb_blitz::shell_music::Playback g_playback;
 
 // True while the track playing on `g_music` is one of R9's own. Once the rotation hands the menu a
 // title track instead - a pool of one song, or every candidate failing - the poll stops watching,
-// because from that point on the title is playing its own music and loops it exactly as it does
-// without this feature.
+// because from that point on the title is playing its own music; it stays one-shot, so an
+// exhausted pool cannot quietly loop.
 bool g_watch = false;
 int g_attempts = 0;
+
+// True while the track playing on `g_music` is a title fallback (the pool had nothing
+// distinct left). The poll reports it - heartbeats, and the loop it takes when the title
+// track wraps - but never rotates: the title's own music is the title's own business.
+bool g_watch_title = false;
+
+// True while the host or ShellMusic::Start is assembling a track. Both call StopStreams as
+// cleanup before the new stream exists (Start does it inside its own body), and that cleanup
+// must not be read as the game tearing the menu music down. Never read outside the guest thread.
+bool g_setting_up_music = false;
 
 // The ShellMusic the last substitution went to, and the Load arguments the panel passed
 // it - the poll hook replays them when it starts the next track. Zero outside R9.
 uint32_t g_music = 0;
 double g_gain = 0.0;
-uint64_t g_loop = 1;
-uint64_t g_play_from_buffer = 1;
+uint64_t g_scale_pan = 1;
 
 // The stream R9 is watching, and the last position read from it, so a jump backwards can
 // be told from the first sample of a track. Reset with every track R9 starts.
-uint32_t g_stream = 0;
 uint32_t g_pos = 0;
 
 std::vector<uint32_t> g_buffers;
 size_t g_buffer_next = 0;
 
-// The transition timeline (P5). The guest offers exactly two observable moments: the stream's
-// position jumping backwards at the seam (the song ended and the stream restarted) and a fresh
-// stream's position advancing from zero (the next song is really being played). Both are logged
-// with wall-clock deltas, so a transition's cost is a measurement rather than an impression, and
-// the last position read before a seam doubles as the song's own length - neither the pool nor a
-// package carries a duration the host could read.
+// Timeline: native EOF to the next stream's advancing samples. This is a playback
+// proxy, not an audio-device latency measurement. Source identity is logged at startup.
 std::chrono::steady_clock::time_point g_track_started_at{};
 std::chrono::steady_clock::time_point g_seam_at{};
 std::string g_playing_name;      // the song key of the track R9 last handed the menu
-bool g_awaiting_audible = false; // a track was started; its first samples have not been seen yet
-uint32_t g_seam_samples = 0;     // the position the ended song reached, in samples
 // How often the playing track's position is reported while it plays. The stream's own position is
 // the only clock the guest offers, so a line that shows it advancing is what separates "the menu
 // is playing this song" from "the menu stopped playing anything".
@@ -223,17 +173,19 @@ int64_t MillisecondsSince(std::chrono::steady_clock::time_point from) {
       .count();
 }
 
+int64_t NowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 // The song key of a pool path, for the timeline log lines.
 std::string KeyOf(const std::string& path) {
   return std::string(rb_blitz::shell_music::SongName(path));
 }
 
-// A seam was seen on the track that is playing: the guest restarted it, which is the only
-// "this song ended" signal it offers. Recorded before the next track is loaded, because the
-// wait the player hears is the distance between this instant and the next track's first samples.
+// Record the completed source before starting the next one.
 void NoteSeam(uint32_t samples) {
   g_seam_at = std::chrono::steady_clock::now();
-  g_seam_samples = samples;
   REXLOG_INFO("shell_music: \"{}\" reached its end after {:.1f} s of samples ({:.1f} s in the "
               "menu) (R9)",
               g_playing_name.empty() ? std::string("?") : g_playing_name,
@@ -327,10 +279,12 @@ std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_p
 std::string NextPathLocked() {
   const size_t index = g_rotation.Next();
   if (index == rb_blitz::shell_music::kNoIndex) {
+    g_pending_index = -1;
     g_current_index = -1;
     return {};
   }
-  g_current_index = static_cast<int>(index);
+  g_pending_index = static_cast<int>(index);
+  g_current_index = -1;  // publish only after this stream starts advancing
   return g_pool[index].alias + ":" + g_pool[index].stream;
 }
 
@@ -343,31 +297,57 @@ constexpr const char* kTitleTracks[] = {"sfx/shell/samples/shellmusic_1",
 
 // Hand `path` to the same ShellMusic the menu is polling, with the Load arguments the panel chose
 // for its own pool entry. Runs on the guest thread from inside the poll and takes no lock while
-// calling into the guest.
+// calling into the guest. `loop` is the panel's own `loop` argument (Load stores it into
+// `ShellMusic+48`, and Start turns it into the stream's own jump at 0x82758D64): off for a DLC
+// song, which must end so the rotation can advance, on for a title fallback, which loops exactly
+// as the title's own music does.
 void LoadOnGuest(uint8_t* base, PPCContext& parent, uint32_t music, uint32_t buffer,
-                 const std::string& path) {
+                 const std::string& path, bool loop) {
+  // This handoff starts music; the StopStreams cleanup inside Start (0x82758C28) must not be
+  // mistaken for the game letting the track go.
+  const bool was_setting_up = g_setting_up_music;
+  g_setting_up_music = true;
+  // Load only changes the source. It does NOT replace the active stream. Dispose of that
+  // stream through its own destructor before loading/starting another song, as Start does
+  // when stopped (0x82758C08). Otherwise every logged "next" song is still the old audio.
+  const uint32_t old_stream = LoadBe32(base, music + kStreamOffset);
+  if (old_stream != 0) {
+    PPCContext destroy(parent);
+    destroy.r1.u32 -= 0x100;
+    destroy.r3.u32 = old_stream;
+    destroy.r4.u32 = 1;
+    const uint32_t destructor = LoadBe32(base, LoadBe32(base, old_stream));
+    rex::runtime::ResolveIndirectFunction(destructor)(destroy, base);
+    std::memset(rex::memory::GuestPtr<uint8_t*>(base, music + kStreamOffset), 0, 4);
+    PPCContext stop(parent);
+    stop.r1.u32 -= 0x100;
+    stop.r3.u32 = music;
+    __imp__sub_827583F8(stop, base);
+  }
   std::memcpy(rex::memory::GuestPtr<uint8_t*>(base, buffer), path.c_str(), path.size() + 1);
   PPCContext call(parent);
   call.r1.u32 -= 0x100;              // a scratch frame on the guest's own stack
   call.r3.u32 = music;               // this
   call.r4.u32 = buffer;              // filename
   call.f1.f64 = g_gain;              // volume, the one the panel passed
-  call.r6.u64 = g_loop;              // the panel's own loop flag
-  call.r7.u64 = g_play_from_buffer;  // and its play-from-buffer flag
+  call.r6.u64 = g_scale_pan;         // preserve the panel's pan scaling
+  call.r7.u64 = loop ? 1 : 0;        // the panel's own loop flag (Load stores it at +48)
   __imp__sub_82757F50(call, base);
-  g_stream = 0;  // the next poll baselines the new stream's position
+  *rex::memory::GuestPtr<uint8_t*>(base, music + 48) = loop ? 1 : 0;  // same field, read back
+  PPCContext start(parent);
+  start.r1.u32 -= 0x100;
+  start.r3.u32 = music;
+  __imp__sub_82758B98(start, base);
   g_pos = 0;
   g_track_started_at = std::chrono::steady_clock::now();
   g_heartbeat_at = g_track_started_at;
-  g_awaiting_audible = true;
+  g_playback.Begin(NowMs());
+  g_setting_up_music = was_setting_up;
 }
 
-// Hand the ShellMusic the menu is already polling the next song of the rotation. This is the
-// same call the panel's own pool loader makes - a `ShellMusic::Load` on a live object - with
-// the volume, loop and play-from-buffer flags the panel chose for the pool entry it
-// substituted (the stream loops either way, so the poll hook below is what notices the song
-// ending). When the rotation has nothing distinct left, the menu is given one of the title's own
-// three tracks instead, which is what stops a one-song pool from looping that one song forever.
+// Retire the old stream and start the next distinct song. A pool with no distinct
+// candidate falls back to the title's own tracks, which loop as the title's music does;
+// it never repeats the sole DLC song.
 void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
   std::string path;
   uint32_t buffer = 0;
@@ -392,12 +372,14 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
     return;
   }
   if (title_track) {
-    g_watch = false;  // the title's own music loops; the rotation has nothing left to do
+    g_watch = false;        // the title's own music loops; the rotation has nothing left to do
+    g_watch_title = true;   // ...but the poll still reports it, so a stalled fallback is visible
     REXLOG_INFO("shell_music: the DLC pool has nothing new to play; the menu goes back to the "
                 "title's own tracks (\"{}.mogg\") (R9)",
                 path);
   } else {
     g_watch = true;
+    g_watch_title = false;
     REXLOG_INFO("shell_music: the menu track ended; playing \"{}.mogg\" next (R9), handed over "
                 "{} ms after the seam{}",
                 path, MillisecondsSince(g_seam_at),
@@ -405,7 +387,7 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
                                        g_pool.size())
                          : std::string());
   }
-  LoadOnGuest(base, parent, music, buffer, path);
+  LoadOnGuest(base, parent, music, buffer, path, /*loop=*/title_track);
 }
 
 // A candidate whose load failed: it sits out the rest of this rotation, the menu gets the next
@@ -441,7 +423,8 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
     }
     if (buffer != 0 && path.size() + 1 <= kBufferBytes) {
       g_watch = false;
-      LoadOnGuest(base, parent, music, buffer, path);
+      g_watch_title = true;
+      LoadOnGuest(base, parent, music, buffer, path, /*loop=*/true);
     }
     return;
   }
@@ -481,10 +464,12 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   // Remember the object and the arguments the panel chose: the poll hook starts every
   // later track of the rotation the same way, when the song it started comes round again.
   g_music = ctx.r3.u32;
+  // Stream DLC from the file, with no native jump back to its beginning. The retail
+  // shell player otherwise buffers and loops one source indefinitely (0x82758D64).
+  *rex::memory::GuestPtr<uint8_t*>(base, g_music + 60) = 0;
+  ctx.r7.u64 = 0;
   g_gain = ctx.f1.f64;
-  g_loop = ctx.r6.u64;
-  g_play_from_buffer = ctx.r7.u64;
-  g_stream = 0;
+  g_scale_pan = ctx.r6.u64;
   g_pos = 0;
   size_t pool_size = 0;
   int index = -1;
@@ -492,13 +477,14 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_playing_name = KeyOf(path);
     pool_size = g_pool.size();
-    index = g_current_index;
+    index = g_pending_index;
   }
   g_track_started_at = std::chrono::steady_clock::now();
   g_seam_at = g_track_started_at;
   g_heartbeat_at = g_track_started_at;
-  g_awaiting_audible = true;
+  g_playback.Begin(NowMs());
   g_watch = true;
+  g_watch_title = false;
   g_attempts = 0;
   REXLOG_INFO("shell_music: the main menu asked for \"{}\"; playing \"{}.mogg\" instead (R9) "
               "(pool {} of {})",
@@ -656,6 +642,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     std::lock_guard<std::mutex> lock(g_mutex);
     g_rotation.SetPool(std::move(keys));
     g_watch = false;
+    g_watch_title = false;
     g_attempts = 0;
     g_playing_name.clear();
     g_current_index = -1;
@@ -716,23 +703,66 @@ bool AnswerPlayQuery(const std::string_view path, bool* answer) {
 
 }  // namespace rb_blitz::shell_music
 
-// 0x82757F50 (ShellMusic::Load): this=ctx.r3, filename=ctx.r4, volume=f1, loop=r6,
-// play_from_buffer=r7. Only the panel's own pool entries reach here, so the prefix
-// check is all the discrimination the substitution needs.
+// Load ABI: this=r3, filename=r4, gain=f1, scale_pan=r6, loop=r7. The config's
+// play_from_memory field is separate (ShellMusic+60); r7 controls Stream::SetJump.
 extern "C" REX_FUNC(sub_82757F50) {
   SubstituteFilename(base, ctx);
   __imp__sub_82757F50(ctx, base);
 }
 
-// 0x827586D8 (ShellMusic::Poll): the panel calls it every frame while the menu is up, and
-// it drives the track. The stream it plays loops - the `loop` argument only scales a fade
-// at the seam, it does not end it - so the song repeats for as long as the menu is open.
-// The stream carries its own position (`Stream+0xA0`, in samples, advancing with the
-// audio), and at the seam that position restarts near zero. A position that went
-// backwards on the object R9 substituted into is therefore the end of one of R9's songs
-// and the cue to load the next one. Any other ShellMusic has a different `this` and is
-// left alone; a stream that is already gone - the panel stopped the music on its way out -
-// is ignored too, because a stream R9 never saw cannot have jumped.
+// Stopping a menu stream is navigation, not a song end. In particular, do not start
+// another background song while the loading screen is taking over the audio system.
+void ForgetMenuMusic(uint32_t music) {
+  if (music != g_music) return;
+  std::string name;
+  bool watched = false;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    watched = g_watch || g_watch_title;
+    name = g_playing_name;
+    g_watch = false;
+    g_watch_title = false;
+    g_playback.Stop();
+    g_current_index = -1;
+    g_pending_index = -1;
+  }
+  if (watched) {
+    REXLOG_INFO("shell_music: the game took this menu track down; the rotation stops watching "
+                "(\"{}\") (R9)",
+                name);
+  }
+}
+
+extern "C" REX_FUNC(sub_82758998) {
+  ForgetMenuMusic(ctx.r3.u32);
+  __imp__sub_82758998(ctx, base);
+}
+
+extern "C" REX_FUNC(sub_82758490) {
+  ForgetMenuMusic(ctx.r3.u32);
+  __imp__sub_82758490(ctx, base);
+}
+
+// Start builds the track that was just loaded; its body calls StopStreams as cleanup
+// (0x82758C28) before the new stream exists. While it runs, that call is not a teardown.
+extern "C" REX_FUNC(sub_82758B98) {
+  const bool was_setting_up = g_setting_up_music;
+  g_setting_up_music = true;
+  __imp__sub_82758B98(ctx, base);
+  g_setting_up_music = was_setting_up;
+}
+
+// StopStreams is how the game lets the menu music go (the faded-out stop finishing, the poll's
+// own end-of-track teardown). That is navigation, never a reason to start the next song. The
+// host's own handoffs run with g_setting_up_music set and call __imp__ directly, so only a
+// guest-driven teardown reaches here.
+extern "C" REX_FUNC(sub_827583F8) {
+  if (!g_setting_up_music) ForgetMenuMusic(ctx.r3.u32);
+  __imp__sub_827583F8(ctx, base);
+}
+
+// Poll observes one-shot completion before the guest's Ready/Play branch. Stop and
+// destruction are handled separately, so a screen transition cannot advance the deck.
 extern "C" REX_FUNC(sub_827586D8) {
   if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current()) settings->MenuFrame();
   // R7's refreshed DLC library is handed to the content manager here, and this is the
@@ -752,60 +782,69 @@ extern "C" REX_FUNC(sub_827586D8) {
   // inside it cannot see. One atomic load when nothing is in flight.
   rb_blitz::content_progress::Tick();
   const uint32_t music = ctx.r3.u32;
-  const bool watched =
-      g_enabled && g_watch && !g_pool.empty() && music != 0 && music == g_music;
-  uint32_t before = 0;
+  const bool watched = g_enabled && (g_watch || g_watch_title) && !g_pool.empty() &&
+                       music != 0 && music == g_music;
   if (watched) {
-    before = LoadBe32(base, music + kStreamOffset);
+    const uint32_t stream = LoadBe32(base, music + kStreamOffset);
+    const uint32_t state = stream ? LoadBe32(base, stream + 20) : 0;
+    const uint32_t position = stream ? LoadBe32(base, stream + kPositionOffset) : 0;
+    if (g_watch_title) {
+      // The fallback plays the title's own track with the title's own loop (r7=1). Report it -
+      // a heartbeat, and the loop itself, seen as the position restarting - and never rotate;
+      // leaving the menu stops it through the hooks above. A fallback that ever *ends* is the
+      // failure this watching exists to make visible.
+      if (state == 6 || stream == 0) {
+        g_watch_title = false;
+        REXLOG_WARN("shell_music: the title fallback track ended; the menu's background music "
+                    "stops (R9)");
+      } else {
+        constexpr uint32_t kLoopSlack = 44100;  // ~1 s of samples: below this, a torn read
+        if (position + kLoopSlack < g_pos) {
+          REXLOG_INFO("shell_music: the title fallback track looped after {:.1f} s of samples "
+                      "(R9)",
+                      static_cast<double>(g_pos) / kSamplesPerSecond);
+        }
+        if (MillisecondsSince(g_heartbeat_at) >= kHeartbeatMs) {
+          g_heartbeat_at = std::chrono::steady_clock::now();
+          REXLOG_INFO("shell_music: the title fallback track is playing at {:.1f} s "
+                      "(position {}, state {}) (R9)",
+                      static_cast<double>(position) / kSamplesPerSecond, position, state);
+        }
+      }
+      g_pos = position;
+    } else {
+      // StandardStream's native predicates: IsPlaying == state 3 (0x823E30F0),
+      // IsFinished == state 6 (0x823E30D8). Observe EOF before Poll can restart anything.
+      const auto event = g_playback.Observe(NowMs(), stream, state == 3, state == 6, position);
+      using Event = rb_blitz::shell_music::Playback::Event;
+      if (event == Event::kEnded) {
+        NoteSeam(g_pos);
+        StartNextTrack(base, ctx, music);
+      } else if (event == Event::kFailed) {
+        NoteFailedCandidate(base, ctx, music);
+      } else {
+        if (event == Event::kAudible) {
+          g_attempts = 0;
+          {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_current_index = g_pending_index;
+          }
+          REXLOG_INFO("shell_music: \"{}\" started playback {} ms after the previous track's end "
+                      "(stream {:08X}, source \"{}\") (R9)",
+                      g_playing_name, MillisecondsSince(g_seam_at), stream,
+                      rex::memory::GuestPtr<const char*>(base, LoadBe32(base, music + 68)));
+        }
+        g_pos = position;
+        if (MillisecondsSince(g_heartbeat_at) >= kHeartbeatMs) {
+          g_heartbeat_at = std::chrono::steady_clock::now();
+          REXLOG_INFO("shell_music: playing \"{}\" at {:.1f} s (position {}, stream {:08X}, "
+                      "state {}) (R9)", g_playing_name,
+                      static_cast<double>(position) / kSamplesPerSecond, position, stream, state);
+        }
+      }
+    }
   }
   __imp__sub_827586D8(ctx, base);
-  if (!watched) {
-    return;
-  }
-  const uint32_t stream = LoadBe32(base, music + kStreamOffset);
-  if (stream == 0) {
-    // The title's own end-of-track path tore the stream down instead of looping it.
-    if (before != 0) {
-      NoteSeam(g_pos);
-      StartNextTrack(base, ctx, music);
-    }
-    return;
-  }
-  const uint32_t position = LoadBe32(base, stream + kPositionOffset);
-  if (stream != g_stream) {
-    g_stream = stream;
-    g_pos = position;
-    return;
-  }
-  // One line a minute while a track plays: the position advancing is the audible track, and its
-  // last value before a seam is the song's length.
-  if (MillisecondsSince(g_heartbeat_at) >= kHeartbeatMs) {
-    g_heartbeat_at = std::chrono::steady_clock::now();
-    REXLOG_INFO("shell_music: playing \"{}\" at {:.1f} s (position {}) (R9)", g_playing_name,
-                static_cast<double>(position) / kSamplesPerSecond, position);
-  }
-  // The handover is complete when the track R9 just started is really producing samples: this is
-  // the moment the player hears the new song, and the distance from the seam is the transition.
-  if (g_awaiting_audible && position > 0) {
-    g_awaiting_audible = false;
-    g_attempts = 0;
-    REXLOG_INFO("shell_music: \"{}\" is audible {} ms after the previous track's end (R9)",
-                g_playing_name, MillisecondsSince(g_seam_at));
-  }
-  // A candidate that never produced a sample was a load that did not work: it steps out of the
-  // rotation and the menu gets the next song (bounded - a run of failures ends the rotation for
-  // this boot). Measured rather than assumed: the deadline is generous next to the ~30-300 ms a
-  // working handover takes on this machine.
-  if (g_awaiting_audible && MillisecondsSince(g_track_started_at) > kAudibleDeadlineMs) {
-    NoteFailedCandidate(base, ctx, music);
-    return;
-  }
-  if (position + kRewindSlack < g_pos) {
-    NoteSeam(g_pos);
-    StartNextTrack(base, ctx, music);
-    return;
-  }
-  g_pos = position;
 }
 
 #endif  // _WIN32

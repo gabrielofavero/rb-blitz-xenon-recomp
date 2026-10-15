@@ -757,7 +757,7 @@ void TestPlayCurrentSongRow() {
   const std::vector<std::string> body = CaseWords(nodes, kPlayCurrentRow);
   for (const char* word : {"16candles", "lycanthrope", "file_exists",
                            "get_song_id_from_short_name", "set_song", "mount_current_content",
-                           "song_chosen"}) {
+                           "set_current_song", "song_chosen", "settings_play_unavailable_screen"}) {
     CHECK_TRUE(std::find(body.begin(), body.end(), word) != body.end());
   }
   // One probe per pool entry, named by its index in the pool order the payload baked.
@@ -767,9 +767,22 @@ void TestPlayCurrentSongRow() {
              body.end());
   CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "2") ==
              body.end());  // one probe per song, not one per pool cap
-  // The row must not navigate itself: which screen a chosen song opens is the game's own decision.
-  CHECK_TRUE(std::find(body.begin(), body.end(), "goto_screen") == body.end());
+  // The success destination remains the title's choice. Unavailable audio gets a visible answer.
+  CHECK_TRUE(std::find(body.begin(), body.end(), "powerup_select_screen") == body.end());
   CHECK_TRUE(std::find(body.begin(), body.end(), kRootScreen) == body.end());
+
+  // The guest's Symbol accessor copies the payload without string conversion. The old
+  // String node compiled and displayed perfectly, but EVERY lookup returned zero at runtime.
+  size_t song_symbols = 0;
+  auto check_song_types = [&](auto&& self, const dtb::Node& node) -> void {
+    if (node.text == "16candles" || node.text == "lycanthrope") {
+      CHECK_EQ(node.tag, dtb::kSymbol);
+      ++song_symbols;
+    }
+    for (const auto& child : node.kids) self(self, child);
+  };
+  for (const auto& node : Reparse(nodes, &reason)) check_song_types(check_song_types, node);
+  CHECK_EQ(song_symbols, 2u);
 
   // The label exists exactly while the row does (the menu draws the symbol's locale text).
   bool labelled = false;

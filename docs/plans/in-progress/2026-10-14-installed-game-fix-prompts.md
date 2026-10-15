@@ -793,6 +793,59 @@ python out\_swap\p5\report.py out\_swap\p5\after-short\boot.log
 checkout); `-DlcMenuSongs false` is the control that keeps the title's own tracks. The arm needs no
 particular library: any folder of single-song packages whose names are passed as `-Songs` works.
 
+#### P5 — correction: the rotation that changes the song (2026-10-15)
+
+**What the 2026-10-14 record could not show: the audio never changed.** `ShellMusic::Load`
+(`0x82757F50`) only stages a source; the stream is built by `ShellMusic::Start` (`0x82758B98`), and
+Start **returns after a fade** when a stream is already playing (`0x82758BC4`) — so every "next
+song" the record above logged was written while the first song's stream kept playing. The seam it
+measured (`Stream+0xA0` moving backwards) was that old stream's own loop, "the next track's first
+samples" were the same stream restarting, and its "109.6 s / 93.5 s" pair was **two different fixture
+files** (`wakebake` and `MaxwellMurder`), not one file wrapping at two lengths. The pool rules the
+record describes were always right; what it could not establish — that a different song is *heard* —
+is what this correction adds. **The owner's "it still repeats" was this defect.**
+
+**What changed** (`src/hooks/shell_music.cpp` unless noted):
+
+1. The handoff retires the finished stream through its own destructor, clears `ShellMusic+44`,
+   stages the next source and calls `Start` (`LoadOnGuest`).
+2. `loop` is a parameter of that handoff. `Load` stores its **r7** into `ShellMusic+48`
+   (`stb r7,48(r3)`) and Start turns that field into the stream's own jump (`0x82758D64`). A DLC
+   song is loaded with `loop = 0` so it can end; a **title fallback** keeps the panel's own
+   `loop = 1` so the title's music loops as the title's music does. (An earlier cut of this fix
+   passed 0 for the fallback too — the menu went silent after the fallback played once, which the
+   first one-song arm shows as a log that simply stops; corrected here.)
+3. The end of a song is `StandardStream` **state 6** (`IsFinished`, `0x823E30D8`), not a position
+   rewind. `Playback` ([src/hooks/menu_music_playback.h](../../../src/hooks/menu_music_playback.h))
+   owns the audition: no sample within 3 s, a replaced stream, or a stalled one fails that
+   candidate; EOF rotates.
+4. The game taking the menu music down is **navigation, not an end**: guest `Stop` (`0x82758998`),
+   `StopStreams` (`0x827583F8`) and the destructor (`0x82758490`) are hooked; the host's own
+   Load/Start run behind a "setting up music" flag (and `Start` itself runs behind it) so their
+   internal `StopStreams` cleanup cannot clear the state they are about to publish. Title fallbacks
+   are observed **report-only** — heartbeats, a loop line, and a warning if one ever ends.
+
+**Evidence** (`out/_swap/music-fix/`, 2026-10-15; every arm windowed 1280×720 D3D12 against a
+disposable user root, binaries recorded in each arm's `hashes.json`):
+
+| Arm | Binary | What it showed |
+| --- | --- | --- |
+| `rotation3` | `1545F4C4…` (the rotation before the teardown hooks) | a three-package fixture pool held on the menu for **30 minutes**: eight transitions, three full passes, **no song ever following itself**; each song ends at its own length, constant across passes (`far_ifollowthesun` 115.0 s ×3, `wakebake` 109.6 s, `MaxwellMurder` 93.5 s), and each handover is audible **82–102 ms** after the previous end |
+| `final-rotation` | `981EC98D…` (the final build, every hook in) | the same pool again, ~15 minutes: eight transitions and **two pass boundaries** — `MaxwellMurder` 93.5 s → `wakebake` 109.6 s → `far_ifollowthesun` 115.0 s, then two more passes with the same per-song lengths and no repeat; handovers 618–835 ms on this afternoon's busier machine (the same code path as `rotation3`'s 82–102 ms) |
+| `final-one` | `1545F4C4…` | one-package pool (the **before** of the fallback fix): the song plays once, the fallback line prints, and then the log simply stops — the menu is silent for the rest of the sitting |
+| `final-one-b` | `981EC98D…` | the same arm with the fallback loop restored: song once at 93.5 s → `the DLC pool has nothing new to play…` → the title track's watcher lines advance past its length (`… at 241.2 s`, `… at 301.3 s`), log `the title fallback track looped after 349.9 s of samples`, and keep going (`… at 11.4 s`) — no repeat of the DLC song, no silence |
+| `final-press` | `A0B583A6…` | press *Play Current Song* mid-track: probe answers the audible song → `the game took this menu track down; the rotation stops watching` with **no** deck advance → `loading_screen` mounts the resolved song → the game's first screen → `game_screen`; zero guest faults (§ Play Current Song's own record, `2026-10-14-play-current-song.md`) |
+
+**Host tests.** `ctest --test-dir out/build/rename-tests` **38/38**; `menu_music_pool` grew the
+playback-lifecycle cases (audible / end / fail / replaced / stalled) and the canonical-identity
+cases (`SetPool` lower-cases and collapses separators; an empty refresh keeps the history);
+`settings_screen` pins the Symbol-typed song keys and the unavailable page.
+
+**Honest limits.** The fallback's loop is the panel's own mechanism restored and reported (heartbeat
+/ loop / ended lines), not an audio-captured measurement; menu re-entry and a library refresh still
+have no boot arm; a genuinely failed candidate is pinned by the tests and the code path, not induced
+at runtime; and the 30-minute pass count is one boot of one fixture pool.
+
 ### P6 — DLC cache effectiveness, status text, and honest progress
 
 Preliminary findings:
