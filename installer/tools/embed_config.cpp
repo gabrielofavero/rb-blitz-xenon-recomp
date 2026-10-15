@@ -423,7 +423,7 @@ std::string Usage() {
          "--ultimate-fingerprints <f> --header <f> --ispp <f> --update-manifest <f>\n"
          "                             [--payload-version <v>] [--payload-url <u>]\n"
          "                             [--payload-sha256 <h>] [--payload-size <n>]\n"
-         "                             [--payload-commit <id>]\n";
+         "                             [--payload-commit <id>|none]\n";
 }
 
 bool ParseArguments(int argc, char** argv, Arguments* out) {
@@ -466,7 +466,12 @@ bool ParseArguments(int argc, char** argv, Arguments* out) {
     } else if (name == "--payload-size") {
       out->overrides["payload.size"] = *value;
     } else if (name == "--payload-commit") {
-      out->overrides["payload.commit"] = *value;
+      // `none` is the way a build says "this product ships no recompiled build of
+      // its own", which is what a latest downloader is: it installs the newest
+      // release's setup, so naming a commit here would name the wrong build. An
+      // empty value cannot spell it - the argument list is a CMake list, where an
+      // empty element disappears and the next switch becomes this one's value.
+      out->overrides["payload.commit"] = *value == "none" ? std::string() : *value;
     } else {
       Fail(std::string("unknown argument ") + std::string(name));
       return false;
@@ -592,12 +597,21 @@ int main(int argc, char** argv) {
   for (const auto& [define, key] : installer_strings) {
     EmitIsppString(ispp, define, installer->String(key));
   }
+  // What the wizard calls this build, which is not the same thing as the version of
+  // the project the installer came from: the title bar and Add/Remove Programs say
+  // what is *installed*. A pinned release installs 0.1.0 and is titled that way; a
+  // rolling build of main installs nightly-<commit>, because that is what it is (see
+  // build.ps1, which passes --payload-version for exactly this).
+  const std::string payload_version = payload->String("version");
+  const std::string app_ver_name =
+      payload_version.empty() ? installer->String("version") : payload_version;
+  EmitIsppString(ispp, "AppVerName", installer->String("name") + " " + app_ver_name);
   EmitIsppString(ispp, "AppMinWindowsBuild", installer->String("min_windows_build"));
   ispp << "\n";
   ispp << "// The recompiled build. PayloadUrl is empty when this build ships the payload\n";
   ispp << "// inside the setup executable instead of downloading it, and PayloadCommit is the\n";
   ispp << "// commit it was built from - empty when the build did not record one.\n";
-  EmitIsppString(ispp, "PayloadVersion", payload->String("version"));
+  EmitIsppString(ispp, "PayloadVersion", payload_version);
   EmitIsppString(ispp, "PayloadCommit", pinned_commit);
   EmitIsppString(ispp, "PayloadUrl", payload->String("url"));
   EmitIsppString(ispp, "PayloadSha256", payload->String("sha256"));

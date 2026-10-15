@@ -1,41 +1,60 @@
 <#
 .SYNOPSIS
-Builds the Rock Band Blitz setup executable (rb_blitz_setup_helper.exe + setup.iss + ISCC).
+Builds the Rock Band Blitz installers (rb_blitz_setup_helper.exe + an Inno Setup script + ISCC).
 
 .DESCRIPTION
-One command, four artefacts: the native helper, the payload the installer puts on
-disk, the updater Controller Settings runs, and the setup executable the user downloads.
-Nothing here is needed to play the game - this script only builds the installer.
+One command, three products. Each is a single .exe, and a release publishes exactly
+one file - the setup executable itself, nothing else (README.md, section "The three
+products").
 
-The recompiled build travels one of two ways, and this script has to be told which:
+  * the complete package (the default). Everything the game needs travels inside
+the setup executable: the payload snapshot in out\payload is compressed into it, so
+the installer needs no network access at all. Built from a tag it is the *pinned*
+release and is named after its version (RockBandBlitzSetup-<version>.exe). Built
+from the tip of main - which is what continuous building does for every commit - it
+is a rolling package and is named with the commit instead
+(RockBandBlitzSetup-<version>-<short commit>.exe).
 
-  * inside the setup executable (the default). The payload snapshot in
-    out\payload is compressed into the setup exe, so the installer needs no
-    network access at all. That snapshot is made by tools\make_payload.ps1 from a
-    recompiled build tree, and is created automatically if it is missing.
+  * the latest bootstrap (-Latest). It carries no payload and installs nothing
+itself: it asks GitHub for the newest *release* of this repository, downloads the one
+file on it, checks it against the size and digest GitHub reports, and runs it
+(bootstrap.iss). Named RockBandBlitzSetup-latest.exe.
 
-  * downloaded at install time (-PayloadUrl -PayloadSha256). Nothing is embedded
-    and the user's machine fetches the release asset instead. Pass -PayloadSize
-    too when the size is known: the wizard uses it to check free space before it
-    starts. Only this mode makes a release updatable: an update installs the build
-    the release manifest names, and a build that pinned no download has none to
-    name.
+  * the nightly bootstrap (-Nightly). The same program, asking for the newest build
+of *main* - the newest release the repository marks as a prerelease, which is how
+continuous building publishes every commit without cutting a release. Named
+RockBandBlitzSetup-nightly.exe.
 
+Neither bootstrap ever needs rebuilding: what it installs is whatever the newest
+build of its channel happens to be. "latest" therefore always means a release
+somebody cut, and "nightly" always means the newest thing main produced.
+
+There is a third, older mode - -PayloadUrl/-PayloadSha256, where the complete-package
+wizard downloads a pinned payload archive instead of embedding one. It is kept
+working - it is the engine the dormant updater executable installs with - and it is
+not what a release uses: a release publishes one file, so its payload travels inside
+that file.
+
+Nothing here is needed to play the game - this script only builds the installers.
 The Rock Band Blitz Ultimate mod is never embedded and never re-hosted; its
 release URL lives in config\pins.toml and the user's copy is downloaded from
 upstream, or supplied by the user, while the installer runs. See README.md.
 
-The setup executable is named RockBandBlitzSetup-<version>.exe, or
-RockBandBlitzSetup-latest.exe when the [payload] commit pin is "latest", which is
-the repository's own pin: a build that is not cut from a pinned commit is a
-rolling build and should not be named like a release.
+RockBandBlitzUpdater.exe (this same wizard with /DUpdaterMode=1, placed under the
+user's local application data by the setup executable) is still built for the
+complete package. Nothing calls it: Controller Settings stopped checking for updates
+on 2026-10-15, and the two bootstraps above are what replaced that path. See
+README.md, section "Updating".
 
-Two more files are built and are what Controller Settings' Update button needs, because
-they are what an update is: RockBandBlitzUpdater.exe (this same wizard built with
-/DUpdaterMode=1, embedded into the setup executable and placed under the user's
-local application data) and update.toml (the release manifest, published as a
-release asset, which Controller Settings compares its version against). Both are printed at
-the end with what a release has to publish. See README.md, section "Updating".
+.PARAMETER Latest
+Build the latest bootstrap (bootstrap.iss, -DChannelName=latest) instead of the
+complete package: no payload, no Controller Settings, no updater. It asks for the
+newest release. The result is RockBandBlitzSetup-latest.exe.
+
+.PARAMETER Nightly
+Build the nightly bootstrap (bootstrap.iss, -DChannelName=nightly): the same
+program, asking for the newest prerelease - the newest build of main - instead of
+the newest release. The result is RockBandBlitzSetup-nightly.exe.
 
 .PARAMETER PayloadUrl
 Download the recompiled build from this URL at install time instead of embedding
@@ -119,6 +138,8 @@ powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1 -Payload
 #>
 [CmdletBinding()]
 param(
+    [switch] $Latest,
+    [switch] $Nightly,
     [string] $PayloadUrl,
     [string] $PayloadSha256,
     [long]   $PayloadSize = 0,
@@ -143,6 +164,28 @@ $ErrorActionPreference = 'Stop'
 
 $installerDir = $PSScriptRoot
 $repoRoot = Split-Path -Parent $installerDir
+
+# Which of the three products this run builds. The two bootstraps are the same
+# program with a different channel compiled in, so everything that differs between
+# them is derived here, once, and spent by bootstrap.iss (README.md, section "The
+# three products").
+if ($Latest -and $Nightly) {
+    throw ('-Latest and -Nightly are two different products: pass one of them. -Latest installs ' +
+           'the newest release, -Nightly the newest build of main, and each is its own one-file ' +
+           'setup executable.')
+}
+$bootstrap = $Latest -or $Nightly
+$channelName = 'latest'
+$channelLabel = 'newest release'
+$channelWhat = 'the newest release'
+$channelBuildSwitch = '-Latest'
+if ($Nightly) {
+    $channelName = 'nightly'
+    $channelLabel = 'nightly build'
+    $channelWhat = 'the newest build of main'
+    $channelBuildSwitch = '-Nightly'
+}
+$bootstrapScript = Join-Path $installerDir 'bootstrap.iss'
 
 # The payload-snapshot provenance checks (Get-PayloadBackends, Read-PayloadManifest,
 # Test-PayloadSnapshotCurrent) are shared with tools\make_payload.ps1, which writes the
@@ -255,6 +298,26 @@ function Read-PinnedCommit {
     return ''
 }
 
+# The repository a latest build asks for its newest release. Not a second pin: it
+# is the same [installer] homepage the wizard's metadata and the helper's API URL
+# are built from, read here only so the build log can name what the downloader
+# will look for.
+function Read-PinnedHomepage {
+    param([string] $PinsFile)
+
+    $table = ''
+    foreach ($line in Get-Content -LiteralPath $PinsFile) {
+        if ($line -match '^\s*\[(?<name>[^\]]+)\]') {
+            $table = $Matches['name'].Trim()
+            continue
+        }
+        if ($table -eq 'installer' -and $line -match '^\s*homepage_url\s*=\s*"(?<value>[^"]*)"') {
+            return $Matches['value']
+        }
+    }
+    return ''
+}
+
 # "latest" is the newest commit of the checkout being built; any other value is a
 # ref or an id git has to resolve. Resolved here, before the pins are compiled
 # in, so that neither the helper nor the wizard ever sees a name it could only
@@ -312,7 +375,11 @@ Write-Step 'Controller Settings'
 
 if (-not $ControllerSettingsTarget) { $ControllerSettingsTarget = Join-Path $SourceDir 'rb_blitz_controller_settings.exe' }
 
-if ($SkipControllerSettings) {
+if ($bootstrap) {
+    # A bootstrap carries no payload, so it carries no Controller Settings either:
+    # the build it downloads has both.
+    Write-Host "   skipped : $channelBuildSwitch (the payload comes from $channelWhat)"
+} elseif ($SkipControllerSettings) {
     Write-Host '   skipped : -SkipControllerSettings'
 } elseif ($PayloadUrl) {
     Write-Host '   skipped : the payload is downloaded at install time (-PayloadUrl)'
@@ -340,7 +407,7 @@ if ($SkipControllerSettings) {
 # --------------------------------------------------------------------------
 Write-Step 'Payload'
 
-$embedPayload = -not $PayloadUrl
+$embedPayload = -not $PayloadUrl -and -not $bootstrap
 $embedArgs = @()
 
 # Which commit this build says it is. The pin is deliberate - "latest" is the
@@ -358,17 +425,40 @@ if ($PSBoundParameters.ContainsKey('PayloadCommit')) {
     $commitSpec = Read-PinnedCommit -PinsFile $pinsFile
 }
 $payloadCommit = ''
-if ($commitSpec) {
+if ($commitSpec -and -not $bootstrap) {
     $payloadCommit = Resolve-PayloadCommit -Spec $commitSpec -RepoRoot $repoRoot
     $embedArgs += @('--payload-commit', $payloadCommit)
 }
 
 # A build whose pin is "latest" is a rolling build of whatever the checkout is at,
-# not a release cut from a tag: it is named after that rather than after the
-# version string it shares with every other build of the same cycle.
-$latestBuild = $commitSpec -ieq 'latest'
+# not a release cut from a tag. It is still a complete package: a rolling package is
+# what the nightly bootstrap installs, and what a user gets who downloads it by hand -
+# so it has to contain the game. Everything that names it says "nightly-<commit>"
+# rather than "0.1.0": the file, the wizard's title and the install manifest, because
+# "0.1.0" is the version of the release this is not. A build from a real commit id
+# stays the pinned release and keeps the version name.
+$rollingPackage = $commitSpec -ieq 'latest'
+$shortCommit = if ($payloadCommit) { $payloadCommit.Substring(0, 7) } else { '' }
+$payloadVersionForPins = $PayloadVersion
+if (-not $payloadVersionForPins -and $rollingPackage -and $shortCommit) {
+    $payloadVersionForPins = "nightly-$shortCommit"
+}
 
-if ($PayloadUrl) {
+if ($bootstrap) {
+    # No payload step at all: the recompiled build belongs to the release this
+    # build downloads. Only the pins are compiled in, from which the helper reads
+    # the homepage of the repository to ask.
+    $homepage = Read-PinnedHomepage -PinsFile $pinsFile
+    # `none`: this product ships no recompiled build of its own, so it records no
+    # payload commit. The pins' own pin is still the one a complete package uses.
+    $embedArgs += @('--payload-commit', 'none')
+    Write-Host "   mode    : the $channelName bootstrap: no payload, $channelWhat is fetched at install time"
+    if ($homepage) {
+        Write-Host "   asks    : $homepage ($channelWhat's one file)"
+    } else {
+        Write-Host '   asks    : (no github homepage pin: this build cannot resolve a build)'
+    }
+} elseif ($PayloadUrl) {
     if (-not $PayloadSha256) {
         if (-not $AllowUnverifiedPayload) {
             throw ('-PayloadUrl needs -PayloadSha256: an installer that downloads its own build must ' +
@@ -381,7 +471,7 @@ if ($PayloadUrl) {
 
     if ($PayloadSha256) { $embedArgs += @('--payload-sha256', $PayloadSha256.ToLowerInvariant()) }
     if ($PayloadSize -gt 0) { $embedArgs += @('--payload-size', $PayloadSize.ToString()) }
-    if ($PayloadVersion) { $embedArgs += @('--payload-version', $PayloadVersion) }
+    if ($payloadVersionForPins) { $embedArgs += @('--payload-version', $payloadVersionForPins) }
     $embedArgs += @('--payload-url', $PayloadUrl)
 
     Write-Host "   mode    : downloaded at install time"
@@ -457,7 +547,7 @@ if ($PayloadUrl) {
         Write-Warning "no CMakeCache.txt in $SourceDir, so the payload's renderer backends were not read"
     }
 
-    if ($PayloadVersion) { $embedArgs += @('--payload-version', $PayloadVersion) }
+    if ($payloadVersionForPins) { $embedArgs += @('--payload-version', $payloadVersionForPins) }
 }
 
 Write-Host "   commit  : $(if ($payloadCommit) { $payloadCommit } else { 'not recorded' })"
@@ -534,40 +624,68 @@ $iscc = Find-Iscc
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 New-Item -ItemType Directory -Force -Path $generatedDir | Out-Null
 
-if ($latestBuild) { $setupBaseName = 'RockBandBlitzSetup-latest' }
-else { $setupBaseName = "RockBandBlitzSetup-$appVersion" }
+if ($bootstrap) {
+    $setupBaseName = "RockBandBlitzSetup-$channelName"
+} elseif ($rollingPackage -and $shortCommit) {
+    # A rolling package - what continuous building publishes for a commit on main -
+    # is named after that commit, and so is the version baked into it. Not "-latest":
+    # that is the name of the bootstrap which installs it, and two different files
+    # must not share a name.
+    $setupBaseName = "RockBandBlitzSetup-nightly-$shortCommit"
+} else {
+    $setupBaseName = "RockBandBlitzSetup-$appVersion"
+}
 
 # The updater is this same wizard built with /DUpdaterMode=1: it carries no payload
 # (it installs the build the release manifest names) and drops the pages it has no
 # question about. The setup executable embeds it and puts it under the user's local
-# application data, which is what Controller Settings runs when an update is accepted
-# (README.md, section "Updating"). It is compiled *first*, because the setup's
-# [Files] entry reads the file at compile time.
+# application data. Nothing runs it since Controller Settings stopped checking for
+# updates (2026-10-15) - it is built so the machinery stays working and tested, not
+# because a release path needs it today. It is compiled *first*, because the setup's
+# [Files] entry reads the file at compile time, and it belongs to the complete
+# package only: the two bootstraps carry no updater and no payload.
 $updaterBaseName = 'RockBandBlitzUpdater'
 $updaterExe = Join-Path $generatedDir "$updaterBaseName.exe"
-$updaterArgs = @('/Q',
-                 "/DGeneratedDir=$generatedDir",
-                 "/DDistDir=$generatedDir",
-                 "/DArtDir=$artDir",
-                 '/DUpdaterMode=1',
-                 "/F$updaterBaseName",
-                 $setupScript)
-Invoke-Native -Exe $iscc -Arguments $updaterArgs -What 'ISCC (updater)'
-if (-not (Test-Path -LiteralPath $updaterExe)) {
-    throw "ISCC reported success but $updaterExe is missing."
+if ($bootstrap) {
+    Write-Host "   skipped : $channelBuildSwitch carries and needs no updater"
+} else {
+    $updaterArgs = @('/Q',
+                     "/DGeneratedDir=$generatedDir",
+                     "/DDistDir=$generatedDir",
+                     "/DArtDir=$artDir",
+                     '/DUpdaterMode=1',
+                     "/F$updaterBaseName",
+                     $setupScript)
+    Invoke-Native -Exe $iscc -Arguments $updaterArgs -What 'ISCC (updater)'
+    if (-not (Test-Path -LiteralPath $updaterExe)) {
+        throw "ISCC reported success but $updaterExe is missing."
+    }
+    Write-Host "   updater : $(Get-SizeText (Get-Item -LiteralPath $updaterExe).Length) -> $updaterExe"
 }
-Write-Host "   updater : $(Get-SizeText (Get-Item -LiteralPath $updaterExe).Length) -> $updaterExe"
 
 Write-Step 'Compiling the setup executable'
 
 # /F overrides OutputBaseFilename, so the name lives here rather than in the
-# script: the version in it is the one this build actually compiled in.
+# script: the version in it is the one this build actually compiled in, and a
+# bootstrap is named after its channel.
+$wizardScript = if ($bootstrap) { $bootstrapScript } else { $setupScript }
+# What a bootstrap's channel is, as the four facts bootstrap.iss spends. They are
+# chosen here (this is the script that has the switch) and the .iss refuses to
+# compile without them, so a hand-run ISCC says what it is missing instead of
+# producing a bootstrap that is labelled as the other channel.
+$channelDefines = @()
+if ($bootstrap) {
+    $channelDefines = @("/DChannelName=$channelName",
+                        "/DChannelLabel=$channelLabel",
+                        "/DChannelWhat=$channelWhat",
+                        "/DChannelBuildSwitch=$channelBuildSwitch")
+}
 $isccArgs = @('/Q',
               "/DGeneratedDir=$generatedDir",
               "/DDistDir=$distDir",
-              "/DArtDir=$artDir",
+              "/DArtDir=$artDir") + $channelDefines + @(
               "/F$setupBaseName",
-              $setupScript)
+              $wizardScript)
 Invoke-Native -Exe $iscc -Arguments $isccArgs -What 'ISCC'
 
 $setupExe = Join-Path $distDir "$setupBaseName.exe"
@@ -576,46 +694,57 @@ if (-not (Test-Path -LiteralPath $setupExe)) { throw "ISCC reported success but 
 $setupInfo = Get-Item -LiteralPath $setupExe
 $setupHash = (Get-FileHash -LiteralPath $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
 
-# The release manifest: what Controller Settings compares its version against and what an
-# updater installs the build from. It is generated with the pins, and it belongs
-# next to the setup executable because a release publishes both (README.md,
-# section "Cutting a release").
-$updateManifest = Join-Path $distDir 'update.toml'
-Copy-Item -LiteralPath (Join-Path $generatedDir 'update.toml') -Destination $updateManifest -Force
-
 Write-Host ''
 Write-Host 'Built' -ForegroundColor Green
-Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
-if ($latestBuild) {
-    Write-Host  '             named "latest": the [payload] commit pin is "latest", so this is a'
-    Write-Host  '             rolling build of the checkout rather than a release. Pin a commit to'
-    Write-Host  '             name it after the version instead.'
+if ($bootstrap) {
+    Write-Host "   product : the $channelName bootstrap (installs $channelWhat)"
+} elseif ($rollingPackage) {
+    Write-Host '   product : a complete package, rolled from this checkout (not a pinned release)'
+} else {
+    Write-Host '   product : the complete package (the pinned release)'
 }
+Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
 Write-Host ('   size    : {0}' -f (Get-SizeText $setupInfo.Length))
 Write-Host ('   sha256  : {0}' -f $setupHash)
 Write-Host ('   helper  : {0}' -f (Get-SizeText $helperSize))
-Write-Host ('   updater : {0}' -f (Get-SizeText (Get-Item -LiteralPath $updaterExe).Length))
-Write-Host ('   update  : {0}' -f $updateManifest)
-Write-Host ('   commit  : {0}' -f $(if ($generatedCommit) { $generatedCommit } else { 'not recorded' }))
+if ($bootstrap) {
+    Write-Host  "             no payload: this setup fetches $channelWhat and runs its setup"
+    Write-Host  '             executable, so a new build of that channel needs no rebuild of this one.'
+} else {
+    Write-Host ('   updater : {0}' -f (Get-SizeText (Get-Item -LiteralPath $updaterExe).Length))
+    Write-Host ('   commit  : {0}' -f $(if ($generatedCommit) { $generatedCommit } else { 'not recorded' }))
+}
 if ($embedPayload) {
     Write-Host ('   payload : embedded from {0}' -f $PayloadDir)
     Write-Host  '             the setup executable is not byte-reproducible across build machines (ISCC'
     Write-Host  '             embeds the payload it finds in that directory), so publish the checksum you'
     Write-Host  '             measured here rather than a fixed one.'
-    Write-Host  '             NOTE: an update installs the payload the release manifest names, and this'
-    Write-Host  '             build pinned none, so its manifest offers no update to install. Publish the'
-    Write-Host  '             payload archive and rebuild with -PayloadUrl/-PayloadSha256/-PayloadSize'
-    Write-Host  '             to make this release updatable.'
-} else {
+} elseif (-not $bootstrap) {
     Write-Host ("   payload : downloaded from {0} at install time" -f $PayloadUrl)
     Write-Host  '             the release asset this URL points at is not byte-reproducible either: the zip'
     Write-Host  '             make_payload.ps1 writes depends on the deflate implementation of the machine'
     Write-Host  '             that ran it. Publish the checksum, and pass the same one here.'
 }
 Write-Host ''
-Write-Host 'Publish, in one release:'
+Write-Host 'Publish, in one release:' -ForegroundColor Green
 Write-Host ("   {0}" -f $setupInfo.Name)
-Write-Host  '   update.toml            the asset Controller Settings checks for a newer release'
-if (-not $embedPayload) {
-    Write-Host  '   the payload archive that -PayloadUrl points at'
+Write-Host  '   and nothing else: a release is one file. The game files the user already has, the'
+Write-Host  '   Ultimate mod (fetched from upstream) and this release''s own checksum printed above'
+Write-Host  '   are all the rest of the release notes.'
+if ($bootstrap) {
+    Write-Host ''
+    Write-Host  "This bootstrap itself is not a release asset - it is the one file that never changes,"
+    Write-Host  "published once. What it installs is ${channelWhat}:"
+    Write-Host '   powershell -File installer\build.ps1 -PayloadCommit <40 hex digits>'
+    Write-Host  '   and, for a rolling build of main, the same command from a clean checkout of main.'
+    Write-Host  'Attach the RockBandBlitzSetup-<version>[-<commit>].exe that prints to'
+    if ($Nightly) {
+        Write-Host  '   a *prerelease* - any tag - which is what marks it as a build of main and what'
+        Write-Host  '   the nightly bootstrap looks for. GitHub''s newest-release endpoint skips'
+        Write-Host  '   prereleases, so the latest bootstrap ignores it.'
+    } else {
+        Write-Host  '   a normal release - any tag - which is what the latest bootstrap installs. A'
+        Write-Host  '   prerelease is skipped by GitHub''s newest-release endpoint on purpose, so a'
+        Write-Host  '   build of main never reaches somebody who asked for the newest release.'
+    }
 }

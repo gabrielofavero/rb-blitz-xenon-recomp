@@ -21,7 +21,7 @@ settings location are real too (B4), the Audio / Video tab's rows are editable (
 Controller tab's button-mapping block rebinds the pad for real (D16) — Controller Settings writes
 `[remap]` and `rb_blitz.exe` reads it back through the shared vocabulary in
 [`../src/profile/remap.h`](../src/profile/remap.h). The window's own chrome is finished
-(A2): the bar's own controls - *Update*, *Close*, *Save* and *Launch Game* - live on the bottom, under the focused row's own help
+(A2): the bar's own controls - *Close*, *Save* and *Launch Game* - live on the bottom, under the focused row's own help
 — its tooltip and how to operate it — and Launch Game is B7's contract: it saves what is unsaved,
 builds the command line from the schema and starts the game. The controller navigation (A3) is
 real too, so a pad shows and edits every schema row alongside the keyboard, which stays a peer
@@ -89,11 +89,11 @@ out\build\win-amd64-release\rb_blitz_controller_settings.exe --controller-only -
   deleting it is the cutover's job, not this change's.
 * **One block under the schema's rows.** The General tab's settings-file block (Reset, Import,
   Export, Change settings location) is not part of this surface, so the ring has no entries for it.
-* **A bar of three.** *Update* is not on it. Installing a release, and installing Ultimate, are the
-  installer's and the updater's business now: the updater the setup executable leaves in
-  `%LOCALAPPDATA%` installs a release, and `rb_blitz_setup_helper.exe` is the documented route for
+* **A bar of three, on both surfaces.** *Update* is not on it - not on the reduced screen and not
+  on the full one. Installing a release, and installing Ultimate, are the installer's business now:
+  a release ships one setup executable, and `rb_blitz_setup_helper.exe` is the documented route for
   the Ultimate payload. Both are described in `../installer/README.md` and the distribution notes -
-  this screen links to neither, and starts no update check at all.
+  this screen links to neither, starts no update check, and makes no network request at all.
 * **A Play action that passes no settings.** *Play Game* starts `rb_blitz.exe` with the game data
   root, the launch target and the profile path, and no `--<key>=<value>` row (`LaunchOptions` in
   `src/game_launch.h`). What Controller Settings edits is delivered by the profile itself, at the
@@ -116,9 +116,8 @@ delete what it did not write) and is *told* it is ignored, on the screen and in 
 
 **A save rereads the file.** `ProfileSession::Save` rebases onto the document that is on disk before
 it writes, and merges only the keys this window changed - so a hand edit, an older Controller Settings, or
-another process that touched `launcher.toml` while the window was open is not reverted. The two
-writes Controller Settings makes without being asked (the exit-time window size, and the recorded update
-answer) do the same.
+another process that touched `launcher.toml` while the window was open is not reverted. The one
+write Controller Settings makes without being asked (the exit-time window size) does the same.
 
 ## The window, and why SDL_GPU
 
@@ -240,7 +239,7 @@ changes no C++ at all:
   place and become `NavAction`s; a pad produces the same vocabulary through its own source
   (`src/pad_source.cpp`, A3), and the shell does not know which device answered.
 - **The bottom bar (A2)** is the window's, not a tab's, and it is where a session ends: the
-  state of the settings file on the left, *Update*, *Close*, *Save* and *Launch Game* on the right, and
+  state of the settings file on the left, *Close*, *Save* and *Launch Game* on the right, and
   under them the focused row's own help — its tooltip, and how to operate it. There is no title
   text and no key legend at the top: the window's own title bar names Controller Settings and the release
   it came from, and the tab strip says which tab is up.
@@ -255,7 +254,7 @@ changes no C++ at all:
 | Keys | What they do |
 | --- | --- |
 | `Down` / `Up` (`Tab` / `Shift+Tab`) | Move the ring down / up a **row** |
-| `Right` / `Left` | Move the ring along the focused row's **options**: an enum's choices, a row of buttons (Import/Export/Reset), a slider's value, or the bottom bar's Update/Close/Save/Launch |
+| `Right` / `Left` | Move the ring along the focused row's **options**: an enum's choices, a row of buttons (Import/Export/Reset), a slider's value, or the bottom bar's Close/Save/Launch |
 | `Home` / `End` | First / last row |
 | `PageDown` / `PageUp` | Next / previous tab (`LB`/`RB` on a pad) |
 | `Enter` / `Space` | Operate the focused option, or the focused row: toggle a checkbox, choose an enum entry, step a slider, open the folder picker, or start the Ultimate install |
@@ -701,9 +700,9 @@ The tables in it, and who reads them:
 | `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from. A folder an older build saved in `[launch] user_data_dir` / `dlc_dir` is carried across to these keys once, on load, so a pick made before the change still reaches the game | Controller Settings, and the game — the controller rows as its own config source (D3 rank 4, `src/profile/profile_apply.cpp`); the rest are preservation data the game no longer reads |
 | `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
 | `[nav]` | Controller Settings' own key bindings (A5) | Controller Settings only |
-| `[update]` | `declined_version`, the release the user answered *Not now* to (D19) | Controller Settings only |
+| `[update]` | `declined_version`, the release an older build's update prompt recorded as answered *Not now* (D19). Nothing writes it any more: Controller Settings has no update check | preservation data only |
 
-`[update]` exists only while it has something in it, like `[nav]`, and a key beside
+`[update]` is left exactly as it is found and is never created by this build. A key beside
 `declined_version` that this build does not know survives a save like any other unknown key.
 
 
@@ -858,76 +857,32 @@ Controller Settings itself stays open on a failure, so the user can fix the fold
 `Start` on a pad is the same launch without the mouse (A3), refused in the same cases the button
 is disabled in.
 
-## Checking for updates (D19)
+## Updates: this window has none (2026-10-15)
 
-The bar's leftmost control, *Update*, is the one thing in Controller Settings that talks to the
-network, and it is built to be forgettable: it checks on every start, it never reports its own
-failures, and it asks the user exactly once per release.
+**Retired.** D19's check used to live here: a worker thread fetched a release manifest on every
+start, the bar's leftmost control was *Update*, and accepting the prompt started
+`%LOCALAPPDATA%\rb_blitz\update\RockBandBlitzUpdater.exe` to install what the manifest named.
+All of it is gone - the control, the prompt, the check, the manifest URL compiled into this
+executable, the `--dump-update` report and the `--no-update-check` switch - and so are the two
+modules behind it (`src/update_check.{h,cpp}`, `src/updater.{h,cpp}`). Controller Settings is a
+settings surface: it opens no socket, links no HTTP client (the `winhttp` link is gone with the
+code), and installing a release is the installer's business.
 
-**The check.** One HTTPS GET of a release manifest, on a worker thread so the window appears
-whether or not the network answers (`src/updater.cpp`; WinHTTP with short timeouts and
-the machine's own proxy configuration). The URL is `manifest_url` in
-[`installer/config/pins.toml`](../installer/config/pins.toml), compiled in at configure time, so
-Controller Settings and the installer that shipped it cannot point at different releases. An empty
-`manifest_url` — a build with no release channel — checks nothing.
+What an owner does instead: run the release's setup executable. A release publishes exactly one
+file - the setup executable - and nothing here has to be told about it, which is what the removal
+buys: no manifest to publish, no second asset to keep in step with the first, and no version of
+this window that can disagree with the installer beside it.
 
-The URL names the *latest* release's asset, which is what makes the check work forever without
-being rebuilt: GitHub resolves `/releases/latest/download/update.toml` to the newest release.
+**The updater executable is still built** (`installer/setup.iss` with `/DUpdaterMode=1`, placed
+under `%LOCALAPPDATA%\rb_blitz\update\` by the setup executable) and is deliberately untouched:
+it carries no payload and installs the build the release manifest names. Nothing starts it at the
+moment - Controller Settings was its only caller - so it is dormant equipment until the release
+model that replaces D19 says otherwise (`../installer/README.md`).
 
-**The rule** (`src/update_check.cpp`, pure and unit-tested) is four questions:
-
-1. Did the fetch and the parse succeed? A missing network, a 404, a manifest with a schema this
-   build does not understand — all of them end the same way: *nothing to offer*, and nothing is
-   said about it. This is why the tooltip's "you are running the newest release" is not a
-   promise: Controller Settings that cannot check cannot tell.
-2. Is the manifest's `version` newer than the version of Controller Settings that is running
-   (`RBBLITZ_CONTROLLER_SETTINGS_VERSION`, from the same pins file)? After an update the payload has
-   replaced Controller Settings, so Controller Settings *is* the newer build and the check settles on its own
-   — there is no "installed version" to keep in step.
-3. Does the release name a payload an updater could install? A release built with its payload
-   inside the setup executable (`[payload] url` empty) publishes no `payload_url`, so there is
-   nothing to install and no update is offered.
-4. Was this release already declined? `[update] declined_version` in `launcher.toml` records the
-   last version the user answered *Not now* to. The question is asked when the available release
-   is *newer* than that record, which gives D19's two behaviours exactly: never twice for the
-   same release, and once for each new one.
-
-**The button.** It is always in the bar — it is the last row of every tab's ring like Close,
-Save and Launch — and only its *state* changes: disabled while checking and when there is
-nothing to install (the tooltip says which of those it is), enabled when there is. A bar that
-grew a button a second after it opened would move everything beside it. Pressing it opens the
-prompt.
-
-**The prompt.** One modal, one question, and the answer is remembered:
-
-- *Update now* starts the updater and Controller Settings **leaves** — the updater has to be able to
-  replace the executable this window is running in, and it opens Controller Settings again when it is
-  done.
-- *Not now* (or Escape) writes the version into the profile. The button stays available for the
-  rest of the session and every later one; the question does not come back for that release, and
-  does come back for a newer one.
-- If there is no updater to run — Controller Settings installed by hand, or by an installer that predates
-  this — the release page opens instead and the version is recorded the same way: the user has
-  been told, which is what "never asked twice" is about.
-
-**The updater** is `%LOCALAPPDATA%\rb_blitz\update\RockBandBlitzUpdater.exe`: a second build of
-the installer wizard, put there by the setup executable and deliberately not in the install
-folder ([installer/README.md](../installer/README.md), section "Updating"). It fetches the same
-manifest for itself, installs the build it names, and asks for the game files again only when the
-release says it has to (`requires_game_data`). Controller Settings never runs it with arguments: what to
-install is the release's own business.
-
-**The check is inspectable.** `--dump-update[=<path>]` runs the same three steps in the
-foreground and prints what Controller Settings would decide — the manifest's version, whether an update
-would be offered, whether the user would be asked, what the button would say, and where the
-updater is — including the reason a check produced nothing. It is the answer to "why did the
-Controller Settings not offer me the update", and a build that has to exercise the whole path without a
-release existing points itself at a test server:
-
-```powershell
-cmake --preset win-amd64-release -DRBBLITZ_UPDATE_URL=http://127.0.0.1:8731/update.toml
-rb_blitz_controller_settings.exe --dump-update=out\update-report.txt
-```
+**What stays.** `[update] declined_version` in `launcher.toml` is still parsed and still preserved
+byte for byte by a save, so a profile written by a build that asked the question keeps its answer;
+nothing writes a new one. `ProfileSession::SaveUpdateDeclined` is still there and still tested (it
+is a profile API, not a check), and so is the profile suite's `TestUpdateDecline`.
 
 ## The Controller tab, and button mapping (D16)
 
@@ -1195,13 +1150,6 @@ whether it can be written, whether a save would change it, and every row the gam
 `rb_blitz.toml` decides - without opening a window, which is the fastest way to find out *why*
 something is wrong.
 
-`--no-update-check` makes no network request for the run (D19), so the bar's *Update* control is
-inert and says so. It is what a capture harness passes - a button whose state depends on whether
-a release exists cannot be part of a pixel comparison - and it is the switch for a machine that
-cannot reach the release page anyway: a firewall, a proxy that answers with a login page, or a
-metered link. The check itself is written to be invisible on such a machine, so the switch is
-about not waiting for it rather than about what it would say.
-
 ## How it is checked
 
 Four ways, in the order of what they cost:
@@ -1211,9 +1159,9 @@ Four ways, in the order of what they cost:
   [build-and-run.md §3](../docs/guides/build-and-run.md); the pattern is the same as the game's:
   no window, no SDL, no game image.
 - **The headless reports.** `--dump-layout`, `--dump-display`, `--dump-profile`,
-  `--dump-general`, `--dump-prefill`, `--dump-update` and `--print-command` each write what the
+  `--dump-general`, `--dump-prefill` and `--print-command` each write what the
   Controller Settings decided to a file and exit, before any window is created. They are the reason a claim
-  about a row, a path, a target, an update or a command line is asserted on *text* on a build
+  about a row, a path, a target or a command line is asserted on *text* on a build
   machine instead of read out of a screenshot by eye.
 - **The captures.** [scripts/capture_controller_settings.ps1](../scripts/capture_controller_settings.ps1) starts
   Controller Settings on a fixture profile, drives it with synthetic keys, captures the client

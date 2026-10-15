@@ -854,6 +854,17 @@ one-click install are in scope now; a store, a mod browser and everything else o
   the launcher would decide, including *why* a check produced nothing; `-DRBBLITZ_UPDATE_URL` points
   a build at a test server, which is how the path is exercised without a release existing.
 
+> **Retired 2026-10-15 (supersedes this whole D19 section).** D19's check was removed from
+> Controller Settings at the owner's direction: *"controller settings shouldn't check for updates.
+> Its a separated setting, not a launcher."* The `Update` control, the prompt, the manifest fetch,
+> the compiled-in `manifest_url`, `--dump-update` and `--no-update-check` are gone, along with
+> `controller-settings/src/update_check.{h,cpp}` and `src/updater.{h,cpp}` and their test target;
+> `[update] declined_version` survives as preservation data. What replaces it is the release model
+> now being worked out - a single setup executable per release, with the `latest` build a downloader
+> and a version-pinned build the complete package (`installer/README.md`). Everything above is kept
+> as the record of what D19 was and why; nothing in it describes the tree any more. The updater
+> executable itself is still built and placed exactly as described here, but nothing starts it.
+
 ---
 
 ## 4. Contracts that must exist before parallel work

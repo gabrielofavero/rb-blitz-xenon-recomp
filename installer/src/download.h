@@ -30,6 +30,9 @@ struct DownloadRequest {
   // Percent lines for the wizard's progress bar; empty means no reporting.
   std::filesystem::path progress_file;
   std::string user_agent = "rb_blitz_setup_helper/1.0";
+  // Sent as the Accept header when set. The GitHub release API uses it to pick
+  // which shape of answer to send; everything else here takes the default.
+  std::string accept;
 };
 
 struct DownloadResult {

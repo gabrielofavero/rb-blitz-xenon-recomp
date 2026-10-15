@@ -110,6 +110,13 @@
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
 AppName={#AppName}
+; What the wizard calls this build: the product plus the version of the recompiled
+; build inside it. A pinned release says 0.1.0; a rolling build of main says
+; nightly-<commit>, so the two are tellable apart in a taskbar, in Add/Remove
+; Programs and in a screenshot of a failure (measured 2026-10-15: both said
+; "version 0.1.0"). AppVersion stays the numeric pins version, which is what the
+; version resource needs.
+AppVerName={#AppVerName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppHomepageUrl}
@@ -349,8 +356,9 @@ const
 
   { The updater: a second build of this script (/DUpdaterMode=1) that carries no
     payload and installs the build the release manifest names. The setup executable
-    puts it under the user's local application data, where Controller Settings looks for it
-    (controller-settings/src/updater.cpp resolves the same folder). }
+    puts it under the user's local application data. Controller Settings links none of
+    this any more - it has no update check and never starts the updater (docs/settings/plan.md
+    §3.6) - so the folder is the updater's own and nobody else reads it. }
   UpdaterDirName = '{#UpdateDirName}';
   UpdaterLeafDir = 'update';
   UpdateManifestRel = 'rbblitz-update.toml';

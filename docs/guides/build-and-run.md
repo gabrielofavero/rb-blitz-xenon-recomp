@@ -837,7 +837,7 @@ cd out\build\win-amd64-release
 `--launcher_profile` is step 1 of the order Controller Settings and the game share, so naming one
 keeps a run away from `%APPDATA%\rb_blitz\launcher.toml` — which is what the harnesses
 below do. What Controller Settings decided is also readable without a window: `--dump-layout`,
-`--dump-display`, `--dump-profile`, `--dump-general`, `--dump-prefill`, `--dump-update`
+`--dump-display`, `--dump-profile`, `--dump-general`, `--dump-prefill`
 and `--print-command` each write their report to a file and exit, so Controller Settings' own
 output is the first thing to reach for on a build machine that has no display to look at.
 
@@ -853,7 +853,6 @@ cover:
 | `controller_settings_remap` | `rb_blitz_controller_settings_remap_tests` | the `[remap]` vocabulary: the grammar, the serialiser, the round trip |
 | `controller_settings_launch` | `rb_blitz_controller_settings_launch_tests` | Contract 3: the argv the game is started with, the pre-spawn readiness check, and B7's failure sentence |
 | `controller_settings_nav` | `rb_blitz_controller_settings_nav_tests` | A3's pad rules (deadzone, repeat, binding table), A2's walk from a ring entry to the row the bar names, and A5's keys — the chord grammar, the defaults, the chord-before-bare-key rule, the repeat rule, the `[nav]` round trip, and the focus ring's scaling |
-| `controller_settings_update` | `rb_blitz_controller_settings_update_tests` | D19's update check, minus the request: the release manifest, the dotted-version comparison, whether an update is offered, and whether the user is asked (once per release, never twice for the same one) |
 
 ```powershell
 cmake --build --preset win-amd64-debug

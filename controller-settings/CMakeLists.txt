@@ -90,8 +90,6 @@ set(RBBLITZ_CONTROLLER_SETTINGS_SOURCES
     src/settings_edit.cpp
     src/shell.cpp
     src/ultimate_state.cpp
-    src/update_check.cpp
-    src/updater.cpp
     src/virtual_pad.cpp
     # The profile and remap modules are shared with the game and dependency-free on purpose
     # (P0.3, D16), which is what lets Controller Settings compile them too: the profile module is how
@@ -156,24 +154,8 @@ if(RBBLITZ_VERSION STREQUAL "")
     endif()
 endif()
 
-# Where Controller Settings asks whether a newer release exists, and where it sends a user whose
-# update cannot be installed automatically. An empty manifest_url is a supported
-# configuration - a build with no release channel - and Controller Settings then checks nothing and
-# says nothing, which is what D19 asks of a check that cannot be completed.
-#
-# Read from pins.toml, or passed in: -DRBBLITZ_UPDATE_URL=<url> is what a build that has to
-# check a channel other than the release one uses (a staging release, or a test server serving
-# an update.toml - which is how --dump-update is exercised on a build machine without a
-# release existing yet). An empty value means "read pins.toml".
-set(RBBLITZ_UPDATE_URL "" CACHE STRING "Release manifest Controller Settings' update check fetches")
-if(RBBLITZ_UPDATE_URL STREQUAL "")
-    # Searched over the whole file rather than inside the [update] table: the key is written
-    # once, and a section-scoped match would end at the first bracket in a comment that
-    # explains the pins - which is how a documented value stops being read.
-    string(REGEX MATCH "manifest_url[ \t]*=[ \t]*\"([^\"]*)\"" RBBLITZ_UPDATE_MATCH
-                 "${RBBLITZ_PINS_TOML}")
-    set(RBBLITZ_UPDATE_URL "${CMAKE_MATCH_1}")
-endif()
+# Where a user whose install cannot be completed by hand is sent. A build with no homepage is a
+# supported configuration and simply has no page to open.
 string(REGEX MATCH "homepage_url[ \t]*=[ \t]*\"([^\"]*)\"" RBBLITZ_HOMEPAGE_MATCH
              "${RBBLITZ_INSTALLER_PINS}")
 set(RBBLITZ_HOMEPAGE_URL "${CMAKE_MATCH_1}")
@@ -182,9 +164,7 @@ target_compile_features(rb_blitz_controller_settings PRIVATE cxx_std_20)
 # Quotes included: the macro is a C++ string literal in Controller Settings' sources, so the value has to
 # arrive as one command-line argument with the quotes still around it.
 target_compile_definitions(rb_blitz_controller_settings PRIVATE
-    RBBLITZ_CONTROLLER_SETTINGS_VERSION="${RBBLITZ_VERSION}"
-    RBBLITZ_CONTROLLER_SETTINGS_UPDATE_URL="${RBBLITZ_UPDATE_URL}"
-    RBBLITZ_CONTROLLER_SETTINGS_RELEASES_URL="${RBBLITZ_HOMEPAGE_URL}/releases/latest")
+    RBBLITZ_CONTROLLER_SETTINGS_VERSION="${RBBLITZ_VERSION}")
 
 # D1 puts Controller Settings next to rb_blitz.exe in the build root rather than beside this
 # file, because that is the directory the payload snapshot reads (P0.5) and the one a
@@ -213,11 +193,10 @@ add_dependencies(rb_blitz_controller_settings rb_blitz_controller_settings_schem
 target_link_libraries(rb_blitz_controller_settings PRIVATE imgui SDL3::SDL3)
 
 if(WIN32)
-    # B8 opens the OS shell (the default browser for the pinned release URL, Explorer for the
-    # folder a manual install goes into) through ShellExecuteW. D19's update check is one HTTPS
-    # GET, over WinHTTP, for the same reason the installer's helper uses it: it is part of
-    # Windows, it honours the machine's proxy configuration, and it needs no extra DLL.
-    target_link_libraries(rb_blitz_controller_settings PRIVATE shell32 winhttp)
+    # B8 opens the OS shell (Explorer for the folder a manual install goes into) through
+    # ShellExecuteW. Nothing here makes a network request: Controller Settings has no update
+    # check, so it links no HTTP client at all.
+    target_link_libraries(rb_blitz_controller_settings PRIVATE shell32)
 endif()
 
 # B7's launch contract, as a test: the argv Controller Settings hands the game is built from the

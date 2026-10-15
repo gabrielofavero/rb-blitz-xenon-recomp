@@ -30,7 +30,6 @@
 #include "schema_view.h"
 #include "shell.h"
 #include "ultimate_state.h"
-#include "updater.h"
 #include "virtual_pad.h"
 
 #include <algorithm>
@@ -138,13 +137,6 @@ struct Options {
   // assertable without booting anything - and it is the first thing a bug report wants.
   bool print_command = false;
   std::string print_command_path;
-  // --dump-update[=<path>] runs D19's check in the foreground, decides exactly what Controller Settings
-  // would decide, and prints it: which release the manifest names, whether an update would be
-  // offered, whether the user would be asked, and where the updater is. It is the only way to see
-  // *why* Controller Settings said nothing, which is the answer to most update questions - and it is
-  // what a build machine can check without a window or a release.
-  bool dump_update = false;
-  std::string dump_update_path;
   // --focus-log=<path> writes what the focus ring and the input devices did, and leaves the
   // window alone (A3). It is how "the pad moved the ring" and "the bar named the focused row" are
   // read back without a screenshot: a WIN32 process has no console to print to, so it is a file.
@@ -153,12 +145,6 @@ struct Options {
   // direction down - a snapped stick, a cushion on the D-pad - cannot move the ring while it is
   // set, and Controller Settings is otherwise unusable with one plugged in.
   bool no_gamepad = false;
-  // --no-update-check makes no request at all, so the bar's Update control is inert for this run
-  // (D19). It is the harness's switch - a capture that compares pixels cannot have a control whose
-  // state depends on the network and on whether a release exists - and the recovery for a machine
-  // that cannot reach the release page anyway (a firewall, a proxy that answers with a login page,
-  // a metered link).
-  bool no_update_check = false;
   // --test-pad=<script> attaches a virtual pad and presses it on a schedule (controller-settings/src/
   // virtual_pad.h). It is A3's evidence hook: a pad plugging in mid-session, moving the ring and
   // being unplugged again, on a machine with no controller attached to it.
@@ -192,7 +178,6 @@ Options ParseOptions(int argc, char** argv) {
   constexpr std::string_view kDumpProfilePrefix = "--dump-profile=";
   constexpr std::string_view kDumpPrefillPrefix = "--dump-prefill=";
   constexpr std::string_view kDumpDisplayPrefix = "--dump-display=";
-  constexpr std::string_view kDumpUpdatePrefix = "--dump-update=";
   constexpr std::string_view kPrintCommandPrefix = "--print-command=";
   constexpr std::string_view kFocusLogPrefix = "--focus-log=";
   constexpr std::string_view kTestPadPrefix = "--test-pad=";
@@ -211,12 +196,8 @@ Options ParseOptions(int argc, char** argv) {
       options.dump_display = true;
     } else if (argument == "--print-command") {
       options.print_command = true;
-    } else if (argument == "--dump-update") {
-      options.dump_update = true;
     } else if (argument == "--no-gamepad") {
       options.no_gamepad = true;
-    } else if (argument == "--no-update-check") {
-      options.no_update_check = true;
     } else if (argument.size() > kTestPadPrefix.size() &&
                argument.substr(0, kTestPadPrefix.size()) == kTestPadPrefix) {
       options.test_pad_script = std::string(argument.substr(kTestPadPrefix.size()));
@@ -238,10 +219,6 @@ Options ParseOptions(int argc, char** argv) {
                argument.substr(0, kDumpDisplayPrefix.size()) == kDumpDisplayPrefix) {
       options.dump_display = true;
       options.dump_display_path = std::string(argument.substr(kDumpDisplayPrefix.size()));
-    } else if (argument.size() > kDumpUpdatePrefix.size() &&
-               argument.substr(0, kDumpUpdatePrefix.size()) == kDumpUpdatePrefix) {
-      options.dump_update = true;
-      options.dump_update_path = std::string(argument.substr(kDumpUpdatePrefix.size()));
     } else if (argument.size() > kDumpProfilePrefix.size() &&
                argument.substr(0, kDumpProfilePrefix.size()) == kDumpProfilePrefix) {
       options.dump_profile = true;
@@ -330,77 +307,6 @@ rb_blitz::profile::ProfileSession MakeDumpSession(const Options& options) {
   // changes what may be written - so it is set here too rather than only in the windowed path.
   session.SetSafeMode(options.safe_mode);
   return session;
-}
-
-int DumpUpdate(const Options& options) {
-  const rb_blitz::profile::ProfileSession session = MakeDumpSession(options);
-  const std::string url = rb_blitz::profile::UpdateManifestUrl();
-
-  // The same three steps Controller Settings' own check runs, in the same order, with the failure
-  // reasons kept instead of dropped: a report about a check that said nothing is worth nothing
-  // unless it says why.
-  rb_blitz::profile::UpdateCheck check;
-  std::string outcome;
-  if (url.empty()) {
-    // No state change: a build with no channel is the state Controller Settings calls "disabled".
-    outcome = "no update channel in this build";
-  } else {
-    check.state = rb_blitz::profile::UpdateCheck::State::kChecking;
-    std::string body;
-    std::string error;
-    rb_blitz::profile::ReleaseManifest manifest;
-    if (!rb_blitz::profile::FetchReleaseManifest(url, &body, &error)) {
-      check.state = rb_blitz::profile::UpdateCheck::State::kDone;
-      outcome = "nothing fetched (" + error + ")";
-    } else if (!rb_blitz::profile::ParseReleaseManifest(body, &manifest, &error)) {
-      check.state = rb_blitz::profile::UpdateCheck::State::kDone;
-      outcome = "a manifest this build cannot read (" + error + ")";
-    } else {
-      check.state = rb_blitz::profile::UpdateCheck::State::kDone;
-      check.fetched = true;
-      check.manifest = std::move(manifest);
-      outcome = "fetched";
-    }
-  }
-
-  const rb_blitz::profile::UpdateReport report = rb_blitz::profile::EvaluateUpdate(
-      check, rb_blitz::profile::RunningVersion(), session.profile().update_declined_version);
-
-  const std::filesystem::path updater = rb_blitz::profile::UpdaterPath();
-  std::error_code code;
-  std::string text;
-  text += "running version : " + rb_blitz::profile::RunningVersion() + "\n";
-  text += "manifest url    : " + (url.empty() ? std::string("(none)") : url) + "\n";
-  text += "check           : " + outcome + "\n";
-  text += "release version : " +
-          (check.fetched ? check.manifest.version : std::string("(unknown)")) + "\n";
-  text += std::string("requires files  : ") +
-          (check.fetched && check.manifest.requires_game_data ? "yes" : "no") + "\n";
-  text += std::string("status          : ") +
-          (report.status == rb_blitz::profile::UpdateStatus::kDisabled
-               ? "disabled"
-               : (report.status == rb_blitz::profile::UpdateStatus::kChecking
-                      ? "checking"
-                      : (report.status == rb_blitz::profile::UpdateStatus::kAvailable
-                             ? "available"
-                             : "nothing"))) +
-          "\n";
-  text += std::string("declined        : ") +
-          (session.profile().update_declined_version.empty()
-               ? std::string("(nothing)")
-               : session.profile().update_declined_version) +
-          "\n";
-  text += std::string("asks now        : ") + (report.ask ? "yes" : "no") + "\n";
-  text += std::string("button          : ") +
-          (report.status == rb_blitz::profile::UpdateStatus::kAvailable ? "enabled"
-                                                                         : "disabled") +
-          "\n";
-  text += "button says     : " + rb_blitz::profile::UpdateButtonText(report) + "\n";
-  text += "updater         : " + updater.string() + "\n";
-  text += std::string("updater present : ") +
-          (updater.empty() || !std::filesystem::exists(updater, code) ? "no" : "yes") + "\n";
-  text += "releases page   : " + rb_blitz::profile::ReleasesUrl() + "\n";
-  return Emit(text, options.dump_update_path, 0);
 }
 
 // The General tab, decided without a window.
@@ -690,9 +596,6 @@ int main(int argc, char** argv) {
   if (options.dump_display) {
     return DumpDisplay(options);
   }
-  if (options.dump_update) {
-    return DumpUpdate(options);
-  }
   if (options.print_command) {
     return PrintCommand(options);
   }
@@ -710,14 +613,6 @@ int main(int argc, char** argv) {
   shell_environment.focus_log_path = options.focus_log_path;
   // P8's development gate: the reduced surface, the one the product keeps.
   shell_environment.controller_settings_only = options.controller_only;
-  // D19: the release channel this build checks. It is compiled in from the same pins the
-  // installer is built from, and empty for a build that has none - which then checks nothing.
-  // --no-update-check empties it for one run, and the check is written so that "no channel" and
-  // "checked and found nothing" look the same to the user.
-  shell_environment.update_manifest_url =
-      (options.no_update_check || options.controller_only)
-          ? std::string()
-          : rb_blitz::profile::UpdateManifestUrl();
   rb_blitz::profile::VirtualPad test_pad;
   if (!options.test_pad_script.empty() && !test_pad.Start(options.test_pad_script, nullptr)) {
     std::fprintf(stderr, "--test-pad: '%s' is not a script this build understands\n",

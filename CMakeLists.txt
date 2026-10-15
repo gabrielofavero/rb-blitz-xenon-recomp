@@ -588,17 +588,6 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_controller_settings_remap_tests PRIVATE src)
     add_test(NAME controller_settings_remap COMMAND rb_blitz_controller_settings_remap_tests)
 
-    # D19's update check: the release manifest, the version comparison, and the two decisions
-    # that come out of them (is there an update, and should the user be asked). Dependency-free
-    # like the profile tests - the fetch and the updater are controller-settings/src/updater.cpp,
-    # which is the platform half and is not compiled here, so every rule is decided from text.
-    add_executable(rb_blitz_controller_settings_update_tests
-        tests/controller_settings_update_tests.cpp
-        controller-settings/src/update_check.cpp
-    )
-    target_include_directories(rb_blitz_controller_settings_update_tests PRIVATE controller-settings/src)
-    add_test(NAME controller_settings_update COMMAND rb_blitz_controller_settings_update_tests)
-
     # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict
     # rule that never lets a second writer clobber a hand edit. No SDK, no boot.

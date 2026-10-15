@@ -34,14 +34,11 @@
 #include "schema_view.h"
 #include "settings_table.h"
 #include "ultimate_state.h"
-#include "update_check.h"
-#include "updater.h"
 
 namespace rb_blitz::profile {
 
-// What the shell needs beyond the profile. Both of these are the caller's rather than the user's,
-// which is why neither is a setting in the file Controller Settings writes: one is a recovery switch and
-// the other is the evidence a check reads.
+// What the shell needs beyond the profile. These are the caller's rather than the user's, which is
+// why none of them is a setting in the file Controller Settings writes.
 struct ShellEnvironment {
   // D6's --no-gamepad: no pad is read, so a pad holding a direction down - a snapped stick, a
   // stuck trigger - cannot move the ring. The pads are still opened, because the remap block's
@@ -50,24 +47,18 @@ struct ShellEnvironment {
   bool gamepads = true;
   // --focus-log: where the trace of the ring and the input devices goes, empty for nowhere.
   std::string focus_log_path;
-  // D19: where Controller Settings asks whether a newer release exists. Empty for a build with no
-  // release channel, which then checks nothing and says nothing. The URL is compiled in from
-  // installer/config/pins.toml - the same file the installer and the release manifest come
-  // from - so Controller Settings cannot check a release the installer beside it would not install.
-  std::string update_manifest_url;
   // P8's development gate (docs/settings/contracts.md §9.3). True puts Controller Settings
   // into Controller Settings: one screen - the controller mapping table and the mouse row - with
-  // Save, Close and Play Game on the bar, and no other tab, no Update, and no Ultimate install
-  // (both of those are the installer's and the updater's business, plan §3.6). False is the full
-  // Controller Settings, which stays the default surface until the coordinator approves cutover (G4/P11).
+  // Save, Close and Play Game on the bar, and no other tab and no Ultimate install.
+  // False is the full Controller Settings, which stays the default surface until the coordinator
+  // approves cutover (G4/P11).
   bool controller_settings_only = true;
 };
 
-// The bottom bar's own controls, in the order they read on each surface. Which of them are on the
-// bar is the one thing the two surfaces disagree about (P8): Controller Settings has no Update,
-// because installing a release - and installing Ultimate - is the installer's and the updater's
-// business, not a row on a controller screen (docs/settings/plan.md §3.6).
-enum class BarOption : std::size_t { kUpdate, kClose, kSave, kPlay };
+// The bottom bar's own controls, in the order they read: Close, Save and Play Game. Installing a
+// release is the installer's business, not a row on a settings screen (docs/settings/plan.md §3.6),
+// so Controller Settings offers no update control on either surface and never looks for one.
+enum class BarOption : std::size_t { kClose, kSave, kPlay };
 
 class Shell {
  public:
@@ -89,15 +80,6 @@ class Shell {
   // the settings folder moved it.
   ProfileSession& session() { return session_; }
 
-  // D19: true once the user accepted the update prompt. The caller starts the updater and
-  // leaves - Controller Settings has to be gone before the update replaces it, and it opens again when
-  // the updater is done.
-  bool update_accepted() const { return update_accepted_; }
-
-  // What the update check has answered, for a report or a test. `--dump-update` uses the same
-  // rule on the same manifest, so what it prints is what this would decide.
-  const UpdateReport& update_report() const { return update_report_; }
-
  private:
   void ApplyAction(NavAction action);
   void RequestTab(int delta);
@@ -108,12 +90,6 @@ class Shell {
   bool DrawBottomBar();
   // B7: save what is unsaved, build Contract 3's command line and start the game.
   void LaunchGame();
-  // D19: the update prompt, opened by itself the first time a check finds a release the user
-  // has not already declined. Accepting starts the updater and leaves (UpdateAccepted); Not now
-  // records the version in the profile, so the question is asked once per release.
-  void DrawUpdatePrompt(NavAction action);
-  void AcceptUpdate();
-  void DeclineUpdate();
   // The bar's own two writes, split out of DrawBottomBar so a bound key (A5's Ctrl+S) does exactly
   // what the button does rather than a second copy of it: the save.
   void SaveProfile();
@@ -128,11 +104,6 @@ class Shell {
   // run.
   LaunchCommand CurrentLaunchCommand() const;
   void DrawLaunchModal(NavAction action);
-
-  // D19's check and what it has answered. The check itself runs on its own thread
-  // (updater.h) so the window appears whether or not the network answers; this only
-  // reads what it has found, once per frame, and decides whether to ask the user.
-  void RefreshUpdateReport();
 
   // The one line the bar shows, and whether it is news (red), a warning (yellow) or just the
   // last thing that happened (dim).
@@ -202,16 +173,6 @@ class Shell {
   std::string launch_error_;
   bool launch_popup_requested_ = false;
   bool launch_modal_open_ = false;
-  // D19: the update check, what it has answered, and the prompt's own state. `update_asked_`
-  // is per session: the prompt is opened once, and never again while Controller Settings is running,
-  // whatever the user answers.
-  UpdateChecker update_check_;
-  UpdateReport update_report_;
-  std::string update_note_;  // the sentence the prompt shows after a fallback
-  bool update_asked_ = false;
-  bool update_prompt_requested_ = false;
-  bool update_prompt_open_ = false;
-  bool update_accepted_ = false;
   // What the trace last reported, so it writes a line when something changes and not sixty times
   // a second.
   bool logged_focus_ = false;

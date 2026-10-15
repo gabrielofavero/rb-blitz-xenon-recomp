@@ -202,8 +202,17 @@ bool DownloadToFile(const DownloadRequest& request, DownloadResult* out, std::st
   WinHttpSetOption(http_request.get(), WINHTTP_OPTION_REDIRECT_POLICY, &redirect_policy,
                    sizeof(redirect_policy));
 
-  if (WinHttpSendRequest(http_request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                         WINHTTP_NO_REQUEST_DATA, 0, 0, 0) == FALSE) {
+  // One extra header at most, and only when the caller named one: the release
+  // API needs `Accept` to answer in the shape the reader expects, and a payload
+  // download sends nothing but the User-Agent WinHttpOpen already carries.
+  std::wstring headers;
+  if (!request.accept.empty()) {
+    headers = Widen(S("Accept: ", request.accept));
+  }
+  if (WinHttpSendRequest(http_request.get(),
+                         headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
+                         static_cast<DWORD>(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ==
+      FALSE) {
     *error = S("request failed: ", LastWin32Error());
     return false;
   }

@@ -32,12 +32,8 @@ constexpr const char* kBodyId = "##body";
 // not fit on the bar's one status line, and a bug report wants both at once.
 constexpr const char* kLaunchErrorPopup = "Cannot start the game";
 
-// D19's prompt, shown as a modal because it is the one thing Controller Settings asks rather than
-// reports: a newer release was found, and installing it closes the window the question is on.
-constexpr const char* kUpdatePopup = "A newer release is available";
-
-// The two colours the bottom bar already writes its status line in, named so D19's prompt uses
-// the same ones rather than a second copy of the same numbers.
+// The two colours the bottom bar already writes its status line in, named so a status line and a
+// modal use the same ones rather than a second copy of the same numbers.
 const ImVec4 kWarningText = ImVec4(0.95f, 0.75f, 0.25f, 1.0f);
 const ImVec4 kErrorText = ImVec4(0.95f, 0.42f, 0.38f, 1.0f);
 
@@ -105,29 +101,22 @@ const char* const kNoHelpText = "\xe2\x80\x94";  // D7's explicit empty state: a
 // is. The window title carries the same words (main.cpp's WindowTitle).
 constexpr const char* kControllerSettingsHeading = "Controller Settings";
 
-// The bottom bar's own controls, as the options of the ring's last row: Update, Close, Save and
-// Play Game. They are options rather than rows because Left and Right walk them and Up on the
-// first row (or Down on the last) lands on them - the only way a controller reaches Close without
-// a mouse, which is exactly what a controller-shaped screen cannot do without.
+// The bottom bar's own controls, as the options of the ring's last row: Close, Save and Play Game.
+// They are options rather than rows because Left and Right walk them and Up on the first row (or
+// Down on the last) lands on them - the only way a controller reaches Close without a mouse, which
+// is exactly what a controller-shaped screen cannot do without.
 //
-// Which of them are on the bar for a given surface is the one thing the two surfaces disagree
-// about (P8). Controller Settings has no Update: installing a release, and installing Ultimate,
-// are the installer's and the updater's business, not a row on a controller screen
-// (docs/settings/plan.md §3.6). Update stays leftmost where it is drawn, because an
-// action that leaves the window (and comes back to it) reads before the Close it would otherwise
-// sit on top of.
-const std::vector<BarOption>& BarOptionsFor(bool controller_settings_only) {
-  static const std::vector<BarOption> kFull = {BarOption::kUpdate, BarOption::kClose,
-                                              BarOption::kSave, BarOption::kPlay};
-  static const std::vector<BarOption> kControllerOnly = {BarOption::kClose, BarOption::kSave,
-                                                        BarOption::kPlay};
-  return controller_settings_only ? kControllerOnly : kFull;
+// The same three are on the bar on both surfaces (P8). Installing a release, and installing
+// Ultimate, are the installer's business, not a row on a settings screen
+// (docs/settings/plan.md §3.6), so there is no Update control here to draw or disable.
+const std::vector<BarOption>& BarOptions() {
+  static const std::vector<BarOption> kBar = {BarOption::kClose, BarOption::kSave,
+                                              BarOption::kPlay};
+  return kBar;
 }
 
 const char* BarLabel(BarOption option, bool running) {
   switch (option) {
-    case BarOption::kUpdate:
-      return "Update";
     case BarOption::kClose:
       return "Close";
     case BarOption::kSave:
@@ -143,8 +132,6 @@ const char* BarLabel(BarOption option, bool running) {
 // a real one.
 std::string_view BarHelpText(BarOption option) {
   switch (option) {
-    case BarOption::kUpdate:
-      return "Installs the newest release, using the updater this machine already has.";
     case BarOption::kClose:
       return "Leaves Controller Settings. Changes that are not saved are lost unless Save or Play Game "
              "is used.";
@@ -161,8 +148,6 @@ std::string_view BarHelpText(BarOption option) {
 // itself, so it cannot drift out of step with the bar the way a parallel array of names can.
 const char* BarTraceName(BarOption option) {
   switch (option) {
-    case BarOption::kUpdate:
-      return "bar:update";
     case BarOption::kClose:
       return "bar:close";
     case BarOption::kSave:
@@ -186,16 +171,11 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
                   ? std::vector<TabLayout>{BuildTabLayout(settings::Tab::kController, environment)}
                   : BuildLayout(environment)),
       keyboard_(std::make_unique<KeyboardNavSource>(keys_)),
-      bar_(BarOptionsFor(shell_environment.controller_settings_only)),
+      bar_(BarOptions()),
       controller_settings_only_(shell_environment.controller_settings_only) {
   if (shell_environment.gamepads) {
     gamepad_ = std::make_unique<GamepadNavSource>(pads_);
   }
-  // D19: the check starts here, on its own thread, and nothing waits for it. What it finds is
-  // read once per frame; a build with no release channel, or a machine with no network, simply
-  // never has anything to report. Controller Settings has no Update control and no prompt, so it
-  // starts no check at all.
-  update_check_.Start(controller_settings_only_ ? std::string() : shell_environment.update_manifest_url);
   // D5's target fallback lives in the General tab, which applies it to what it shows rather than
   // to the profile (B4): with a write path, mutating the stored target here would have made a
   // window resize record a choice the user never made.
@@ -308,11 +288,6 @@ bool Shell::Frame() {
   // registry rather than opening anything themselves.
   pads_.Refresh();
 
-  // D19: what the check has answered is read before anything draws, because it decides whether
-  // the prompt is opened, whether the bar's Update option does anything, and what its hint says.
-  // It costs a lock and a struct copy, and does nothing at all until the check finishes.
-  RefreshUpdateReport();
-
   // One action per frame from whichever device produced it (D6). The keyboard answers first
   // because it is the one a user can always reach - and because a pad whose stick is resting
   // against its stop should not be able to out-shout a deliberate key.
@@ -335,13 +310,12 @@ bool Shell::Frame() {
   LogDevice();
 
   if (action == NavAction::kCancel) {
-    // Escape belongs to the modal that is up - B4's reset confirmation, B8's install progress,
-    // B7's failed-start detail or D19's update prompt - and only means "leave Controller Settings" when
-    // nothing modal is on screen (A1). A listen that is running owns Escape too: cancelling it is
-    // what a user pressing Escape while counting down means, and quitting Controller Settings instead
-    // would be a trap.
-    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_ &&
-        !update_prompt_open_) {
+    // Escape belongs to the modal that is up - B4's reset confirmation, B8's install progress or
+    // B7's failed-start detail - and only means "leave Controller Settings" when nothing modal is
+    // on screen (A1). A listen that is running owns Escape too: cancelling it is what a user
+    // pressing Escape while counting down means, and quitting Controller Settings instead would be
+    // a trap.
+    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_) {
       return false;
     }
   }
@@ -349,8 +323,8 @@ bool Shell::Frame() {
   // has to keep being drawn for its state machine to keep running, and walking away would leave the
   // helper installing with nothing watching; a listen owns it because the key being pressed *is*
   // the input being captured.
-  const bool owns_keyboard = general_.ModalOpen() || controller_.Listening() ||
-                             launch_modal_open_ || update_prompt_open_;
+  const bool owns_keyboard =
+      general_.ModalOpen() || controller_.Listening() || launch_modal_open_;
 
   if (nav_bindings::IsBarAction(action)) {
     // A5: the actions the bottom bar's buttons and B4's badge own, bound to keys so that a keyboard
@@ -476,15 +450,10 @@ bool Shell::Frame() {
   // B7's failed-start detail is drawn from inside this window so its popup shares the id stack
   // LaunchGame opened it in; it owns Escape while it is up.
   DrawLaunchModal(action_);
-  // D19's prompt, for the same reason and in the same place. It is opened by the first frame
-  // whose check found something to install, and it is the only thing Controller Settings ever asks.
-  DrawUpdatePrompt(action_);
 
   ImGui::End();
   action_ = NavAction::kNone;
-  // Accepting the update leaves Controller Settings the same way Close does: the updater has to be able
-  // to replace the executable this frame loop is running in.
-  return running && !update_accepted_;
+  return running;
 }
 
 Shell::StatusLine Shell::CurrentStatus() const {
@@ -561,14 +530,9 @@ bool Shell::DrawBottomBar() {
       tab_ < rings_.size() && !rings_[tab_].Empty()
           ? rings_[tab_].RowStart(rings_[tab_].RowCount() - 1)
           : 0;
-  // D19: the Update button stays where it is and says what state it is in, rather than appearing
-  // when a check finishes - a bar that grew a button a second after it opened would move
-  // everything beside it. Disabled is that state for "nothing to install", for "still checking",
-  // and while the game Controller Settings started is running: an update replaces the very files that
-  // game has open, so a button that cannot work does not offer itself. Controller Settings has no
-  // Update button at all: what installs a release is the updater the installer left behind
-  // (plan §3.6), and the row is not drawn there.
-  const bool update_ready = update_report_.status == UpdateStatus::kAvailable && !running;
+  // The two ends of the bar are drawn on the same line as the row of buttons, and the buttons are
+  // right-aligned: every bar entry is measured first, so the status line on the left can be given
+  // what is left over.
   float total = 0.0f;
   for (const BarOption option : bar_) {
     total += ImGui::CalcTextSize(BarLabel(option, running)).x + style.FramePadding.x * 2.0f;
@@ -591,10 +555,8 @@ bool Shell::DrawBottomBar() {
     }
     const bool focused = bar_focused && bar_option == index;
     // A second copy of the title writing the same save folder is not something to discover by
-    // trying, so Play stays down until the game Controller Settings started has exited. Update is down
-    // unless a check has found something an updater can install.
-    const bool disabled = (option == BarOption::kPlay && running) ||
-                          (option == BarOption::kUpdate && !update_ready);
+    // trying, so Play stays down until the game Controller Settings started has exited.
+    const bool disabled = option == BarOption::kPlay && running;
     if (disabled) {
       ImGui::BeginDisabled();
     }
@@ -612,15 +574,9 @@ bool Shell::DrawBottomBar() {
     if (disabled) {
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered()) {
-        if (option == BarOption::kPlay) {
-          // B7: the save happens first, and the button says so - a launch that silently wrote the
-          // file would leave "which profile did it read?" unanswerable.
-          ImGui::SetTooltip("Saves your changes, then starts the game.");
-        } else if (running) {
-          ImGui::SetTooltip("Close the game first: an update replaces the files it runs from.");
-        } else {
-          ImGui::SetTooltip("%s", UpdateButtonText(update_report_).c_str());
-        }
+        // B7: the save happens first, and the button says so - a launch that silently wrote the
+        // file would leave "which profile did it read?" unanswerable.
+        ImGui::SetTooltip("Saves your changes, then starts the game.");
       }
     }
     if (clicked) {
@@ -631,22 +587,12 @@ bool Shell::DrawBottomBar() {
   // exactly where the button is.
   if (bar_focused && action_ == NavAction::kActivate && bar_option < bar_.size()) {
     const BarOption option = bar_[bar_option];
-    const bool disabled = (option == BarOption::kPlay && running) ||
-                          (option == BarOption::kUpdate && !update_ready);
-    if (!disabled) {
+    if (option != BarOption::kPlay || !running) {
       activated = option;
     }
   }
   if (activated.has_value()) {
     switch (*activated) {
-      case BarOption::kUpdate:
-        // Pressing Update is a request to install what the check found: it opens the prompt, which
-        // is where the answer - and the game-files question - is given. A note left by a previous
-        // answer belongs to that answer, not to this question.
-        update_note_.clear();
-        update_prompt_requested_ = true;
-        update_asked_ = false;
-        break;
       case BarOption::kClose:
         close = true;
         break;
@@ -919,118 +865,6 @@ void Shell::DrawLaunchModal(NavAction action) {
     // the popup is gone, so the next failure starts from a clean slate.
     launch_error_.clear();
   }
-}
-
-void Shell::RefreshUpdateReport() {
-  if (controller_settings_only_) {
-    // Controller Settings starts no check and draws no Update control (P8): there is nothing to
-    // poll, and nothing to ask the user about. Installing a release is the updater's job.
-    return;
-  }
-  // What the check has answered, and what to make of it. `EvaluateUpdate` is pure, so the rule
-  // "newer than the version running, and not already declined" is decided in one place that a
-  // test can call - and it is re-decided every frame, which is what makes the profile's own
-  // record the authority rather than a flag this frame loop would have to keep in step.
-  const std::string running_version = RunningVersion();
-  update_report_ = EvaluateUpdate(update_check_.Poll(), running_version,
-                                 session_.profile().update_declined_version);
-  // The prompt is opened once per session, and only while nothing else is modal: a question
-  // under another question is not a question (D19: asked silently first, and never twice for the
-  // same release).
-  if (update_report_.ask && !update_asked_ && !update_prompt_open_ && !general_.ModalOpen() &&
-      !controller_.Listening() && !launch_modal_open_) {
-    update_asked_ = true;
-    update_prompt_requested_ = true;
-  }
-}
-
-void Shell::AcceptUpdate() {
-  // The updater the installer left on this machine (installer/setup.iss, {localappdata}, never
-  // the install folder). It is what a release's own manifest is installed *by*: it fetches that
-  // manifest, installs the build it names and hands Controller Settings back, which is why Controller Settings
-  // leaves instead of watching it.
-  const std::filesystem::path updater = UpdaterPath();
-  std::string error;
-  if (StartUpdater(updater, &error)) {
-    update_accepted_ = true;
-    return;
-  }
-  // No updater to run - Controller Settings installed by hand, or by an installer that predates it - or
-  // one that could not be started. The release page is the only route left, so it is opened and
-  // the prompt says what happened; the version is recorded as answered either way, because the
-  // user has now been told about it and D19's "never again for this release" is about being
-  // told, not about the update happening. Pressing Update again reopens this same answer.
-  update_note_ = "The update could not be started (" + error +
-                 "), so the release page was opened instead. Download and run the setup "
-                 "executable from there, and this window will say the newest release is the "
-                 "one you have.";
-  OpenReleasesPage();
-  DeclineUpdate();
-}
-
-void Shell::DeclineUpdate() {
-  if (update_report_.version.empty()) {
-    return;
-  }
-  // Recorded so the question is not asked again for this release, in this session or any later
-  // one. A release newer than this one does get asked about again - that is the only case D19
-  // allows a second prompt - and it is decided by comparing versions, not by clearing a flag.
-  const SaveOutcome outcome = session_.SaveUpdateDeclined(update_report_.version);
-  if (!outcome.ok) {
-    // Controller Settings still works, so a settings file it cannot write is a note in the log rather
-    // than a dialog: the worst case is being asked about this release once more.
-    std::fprintf(stderr, "could not record the declined update in %s: %s\n",
-                 session_.path().string().c_str(), outcome.error.c_str());
-  }
-}
-
-void Shell::DrawUpdatePrompt(NavAction action) {
-  if (update_prompt_requested_) {
-    update_prompt_requested_ = false;
-    ImGui::OpenPopup(kUpdatePopup);
-  }
-  if (ImGui::BeginPopupModal(kUpdatePopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    if (!update_note_.empty()) {
-      // There was no updater to run (or it could not be started), so the release page was opened
-      // and the prompt says so instead of closing over it - see AcceptUpdate.
-      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 460.0f);
-      ImGui::PushStyleColor(ImGuiCol_Text, kWarningText);
-      ImGui::TextUnformatted(update_note_.c_str());
-      ImGui::PopStyleColor();
-      ImGui::PopTextWrapPos();
-      ImGui::Spacing();
-      if (ImGui::Button("Close") || action == NavAction::kCancel) {
-        update_note_.clear();
-        ImGui::CloseCurrentPopup();
-      }
-      ImGui::EndPopup();
-      update_prompt_open_ = ImGui::IsPopupOpen(kUpdatePopup);
-      return;
-    }
-
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 460.0f);
-    ImGui::TextUnformatted(UpdatePromptText(update_report_).c_str());
-    ImGui::PopTextWrapPos();
-    ImGui::Spacing();
-    // D19: the answer is one of two, and "not now" is a real answer - it is remembered, and it
-    // is the last time this release is mentioned. Escape is the same answer, because Escape
-    // belongs to the modal (see Frame).
-    if (ImGui::Button("Update now")) {
-      // Only closes when the updater was started: a failure falls through to the note above,
-      // which the next frame draws.
-      AcceptUpdate();
-      if (update_accepted_) {
-        ImGui::CloseCurrentPopup();
-      }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Not now") || action == NavAction::kCancel) {
-      DeclineUpdate();
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::EndPopup();
-  }
-  update_prompt_open_ = ImGui::IsPopupOpen(kUpdatePopup);
 }
 
 void Shell::LogFocus() {  if (!log_.enabled()) {

@@ -496,6 +496,14 @@ runs at all. The documented routes already exist — the updater the setup execu
 (`../../installer/README.md`, `../guides/distributable.md`; P7 owns their text). The full surface keeps both
 until the cutover.
 
+**Superseded 2026-10-15.** The check is gone from *both* surfaces, not just the reduced one: the
+`Update` control, the prompt, the manifest URL compiled into the executable and the two modules
+behind them (`controller-settings/src/update_check.{h,cpp}`, `src/updater.{h,cpp}`) were removed, and
+Controller Settings now makes no network request at all - it links no HTTP client. Installing a
+release is the installer's business on every surface (`../../controller-settings/README.md`, section
+"Updates: this window has none"). `UpdateChecker::Start("")` above is history: the class it
+names no longer exists.
+
 #### 3.4 Naming
 
 `WindowTitle(bool)` now returns "Rock Band Blitz Controller Settings (vX)" for the reduced surface and keeps
@@ -618,7 +626,7 @@ it, the filter is installed on both paths); the boot is the coordinator's or P12
 | `controller-settings/src/controller_tab.{h,cpp}` | 16 controls, no Guide capture, the refusal warning, tooltip corrected |
 | `controller-settings/src/game_launch.{h,cpp}` | `LaunchOptions`; the settings block is skippable |
 | `controller-settings/src/profile_session.{h,cpp}` | `RebaseOntoDisk`, `NoteWritten`, and the three writers using them |
-| `controller-settings/src/shell.{h,cpp}` | `ShellEnvironment::controller_settings_only`; one-tab layout and heading; dynamic bottom bar; Play options; target probe; update check skipped; "Play" hint; focus-trace bar names |
+| `controller-settings/src/shell.{h,cpp}` | `ShellEnvironment::controller_settings_only`; one-tab layout and heading; dynamic bottom bar (`BarOptions()`: Close/Save/Play on both surfaces since 2026-10-15); Play options; target probe; "Play" hint; focus-trace bar names |
 | `controller-settings/main.cpp` | `--controller-only`; `WindowTitle(mode)`; `Fatal(mode, …)`; dump/print modes describe the surface asked for |
 | `src/settings/cvars.{h,cpp}` | `ControllerProfileRows`; `IsControllerCvar`/`ControllerProfileRows` inline (the game's source list does not carry `src/settings/cvars.cpp`) |
 | `src/profile/profile_apply.{h,cpp}` | `profile_controller_rows_only` (default off) and `ProfileApplyReport::rows_ignored` |
