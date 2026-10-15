@@ -173,14 +173,8 @@ this prompt is about.
 | Reuse of a current snapshot | `build3-final-2026-10-14.log`: `snapshot: … (matches <tree>)`, `backends: d3d12, vulkan - Vulkan and its loader are in the payload` |
 | Stale detection | `build-2026-10-14.log`: a provenance-less snapshot → `stale` + `action: rebuilding the snapshot from the build tree`; `build5-recovery.log`: a manifest edited to `backends = "d3d12"` → `the snapshot was built for d3d12 and the build tree is configured for d3d12,vulkan` → rebuilt |
 | Deliberate escape hatch | `build4-skippayload.log`: `-SkipPayload` kept the edited snapshot and warned `the kept snapshot was not taken from this build tree: …` |
-> **Naming note (2026-10-15, after the release model changed).** `RockBandBlitzSetup-latest.exe`, as
-> recorded in this prompt, was the complete package built with a rolling commit pin. Since
-> 2026-10-15 that name is the *latest bootstrap* (a downloader that carries no payload), the rolling
-> complete package is `RockBandBlitzSetup-nightly-<commit>.exe`, and a pinned release is
-> `RockBandBlitzSetup-<version>.exe` — [`../finished/2026-10-15-release-model.md`](../finished/2026-10-15-release-model.md).
-> The measurements below are left exactly as they were taken; only the name they used has moved.
 
-| Installed files | `RockBandBlitzSetup-latest.exe` (24,856,075 bytes in the final build, `build6-green-2026-10-14.log`; the exe is not byte-reproducible) silent-installed `/CURRENTUSER` into `out/_swap/p1/install`; the installed `rb_blitz.exe`, `rexgpu-xenos.dll` and `rexruntime.dll` hash-match the build tree, `vulkan-1.dll` 1,452,408 bytes is present, and `install-manifest.toml` records `payload_commit` |
+| Installed files | The setup executable (24,856,075 bytes in the final build, `build6-green-2026-10-14.log`; the exe is not byte-reproducible) silent-installed `/CURRENTUSER` into `out/_swap/p1/install`; the installed `rb_blitz.exe`, `rexgpu-xenos.dll` and `rexruntime.dll` hash-match the build tree, `vulkan-1.dll` 1,452,408 bytes is present, and `install-manifest.toml` records `payload_commit` |
 | Vulkan on the installed copy | `installed-vulkan.log`: `Vulkan instance API version 1.3.290`, `Vulkan device 'NVIDIA GeForce GTX 970': API 1.3.289`, `VulkanPresenter: Created 1280x720 swapchain`, `settings_menu: Renderer offers 2: D3D12, VULKAN`, `settings_boot: presented menu frame` |
 | D3D12 control | `installed-d3d12.log`: the same installed copy with no backend named → `settings_boot: gpu_backend = d3d12`, D3D12 draw/scissor lines, presented frame |
 | Loader gate | `-VulkanLoaderDir <empty dir>` → `-VulkanLoaderDir was given but …\vulkan-1.dll does not exist.` (exit 1); `-VulkanLoaderDir <dir holding a stub>` → the stub is what the snapshot ships |
@@ -209,7 +203,7 @@ this prompt is the installer's, which does build: `ctest --preset installer-rele
 cmake --preset win-amd64-release ; cmake --build --preset win-amd64-release
 powershell -ExecutionPolicy Bypass -File installer\build.ps1 -SkipArt
 # one isolated install, as an ordinary user, with no Vulkan SDK on PATH:
-installer\out\dist\RockBandBlitzSetup-latest.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL ^
+installer\out\dist\RockBandBlitzSetup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL ^
   /CURRENTUSER /DIR=<dir> /GAMEMETHOD=folder /GAMEFOLDER=<checkout>\game /ULTIMATESOURCE=none /RUNATEND=none
 ```
 
@@ -1229,7 +1223,7 @@ journal and the native row it expects):
 | Observation | Value |
 | --- | --- |
 | The failure, verbatim | The owner's install: `set 'general.dlc_scan_threads' -> ok (staged)` then `commit '-' -> io error (gameplay.forceplot cannot hold that value, gameplay.which_skybox cannot hold that value)`, five times, with `settings.toml` untouched |
-| The harness reproduces it on the **shipped** binary | `control-installed` — the installed `rb_blitz.exe` (from `installer-latest`, i.e. *without* this fix) run through the same route with the same seeded journal: `set 'general.cache_dlc_library' -> ok (staged)` → `commit '-' -> io error (gameplay.forceplot cannot hold that value, gameplay.which_skybox cannot hold that value)`; `settings.toml` keeps its pre-boot mtime (the 08:08:43 press wrote nothing) and the journal is still there (`out/_swap/settings-save/control-installed-userdata/settings.toml.commit-journal`, the owner's own 104 bytes). A harness that cannot reproduce the failure proves nothing about the fix; this one does |
+| The harness reproduces it on the **shipped** binary | `control-installed` — the installed `rb_blitz.exe` (from the pre-fix setup executable, i.e. *without* this fix) run through the same route with the same seeded journal: `set 'general.cache_dlc_library' -> ok (staged)` → `commit '-' -> io error (gameplay.forceplot cannot hold that value, gameplay.which_skybox cannot hold that value)`; `settings.toml` keeps its pre-boot mtime (the 08:08:43 press wrote nothing) and the journal is still there (`out/_swap/settings-save/control-installed-userdata/settings.toml.commit-journal`, the owner's own 104 bytes). A harness that cannot reproduce the failure proves nothing about the fix; this one does |
 | The same route, after the fix | `armA-owner-journal` (journal seeded, nothing native committed yet): `set 'general.cache_dlc_library' -> ok (staged)` → `commit '-' -> ok (committed)` **twice**; `settings.toml` written at 07:52:59 with `cache_dlc_library` and `'general.cache_dlc_library' = 'manual'`; the journal is gone |
 | Recovery *completes* the interrupted save | `armB-owner-journal-recovered` (its native half already on disk, as the owner's install had it): the journal is finished during the provider install, and the provider's own file is created as `(0 (disable_plots TRUE) (forceplot 1) (which_skybox 2))` — the **positions**, `plot_bodega_a` = 1 and `nfs_mw2012` = 2, in the file the provider's loader reads; both edits after it commit (`ok (committed)`) |
 | A journal *nobody* can finish no longer refuses the save | `armC-unknown-token` (the same journal with `66 = "plot_does_not_exist"`): the boot warns `settings_boot: Interrupted provider settings are incompatible with this installation; the next save will set the journal aside`, and that save answers `commit '-' -> ok (committed; the interrupted save was kept as settings.toml.commit-journal.stale (Interrupted provider settings are incompatible with this installation))` — the note is reported **once** (the next commit is a plain `ok (committed)`), the parked file still holds the journal's 119 bytes, and `settings.toml` was written |

@@ -29,7 +29,6 @@
 #include "inflate.h"
 #include "install.h"
 #include "paths.h"
-#include "release_api.h"
 #include "settings/paths.h"
 #include "stfs.h"
 #include "util.h"
@@ -709,7 +708,7 @@ static void TestStfs() {
 
 // --- the commit pin ---------------------------------------------------------
 
-// The repository pin is a name ("latest") or a ref, both of which only
+// The repository pin is a ref ("HEAD") or a name, both of which only
 // installer\build.ps1 can turn into a commit, so a test that parses the file has
 // to put a valid id in its place.
 constexpr std::string_view kStandInCommit = "0000000000000000000000000000000000000000";
@@ -724,7 +723,7 @@ bool IsCommitId(std::string_view text) {
   });
 }
 
-// The pin as the file writes it, read without validation: "latest" is expected.
+// The pin as the file writes it, read without validation: "HEAD" is expected.
 std::string ReadCommitPin(const std::string& pins_text) {
   TomlDocument document;
   if (!ParseTomlSubset(pins_text, &document, nullptr)) {
@@ -839,10 +838,10 @@ static void TestConfig() {
   BeginCase("a commit pin has to be a commit id");
 
   rb_blitz::installer::Pins unresolved;
-  // The ref the pin usually carries, and a short id, are both refused: nothing
+  // The ref the pin carries ("HEAD"), and a short id, are both refused: nothing
   // but the build script can turn either into a commit, and a runtime that
   // guessed would record a guess.
-  CHECK_FALSE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, "latest"), &unresolved, &error));
+  CHECK_FALSE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, "HEAD"), &unresolved, &error));
   CHECK_CONTAINS(error, "[payload] commit");
   CHECK_FALSE(rb_blitz::installer::ParsePins(WithCommitPin(pins_text, "2c4d2e2"), &unresolved, &error));
   CHECK_CONTAINS(error, "[payload] commit");
@@ -1486,310 +1485,6 @@ static void TestUpdateManifest() {
   const std::string finalize_text = ReadFileOrEmpty(finalize_summary);
   CHECK_FALSE(finalize_text.find("unknown option") != std::string::npos);
   CHECK_CONTAINS(finalize_text, "ok=0");
-}
-
-// --- the newest release, as the downloader reads it --------------------------
-
-// A release resource, trimmed to the fields the reader is allowed to care about
-// and shaped like the real one: the interesting parts are that `tag_name` also
-// appears inside a value, that `name` appears twice (the release's own name and
-// the asset's), and that the asset is one object in an array.
-constexpr const char* kOneAssetRelease = R"({
-  "url": "https://api.github.com/repos/owner/repo/releases/1",
-  "assets_url": "https://api.github.com/repos/owner/repo/releases/1/assets",
-  "upload_url": "https://uploads.github.com/repos/owner/repo/releases/1/assets{?name,label}",
-  "tag_name": "v0.2.0",
-  "name": "Rock Band Blitz 0.2.0",
-  "body": "notes that mention \"tag_name\" in passing",
-  "draft": false,
-  "prerelease": false,
-  "assets": [
-    {
-      "url": "https://api.github.com/repos/owner/repo/releases/assets/9",
-      "id": 9,
-      "node_id": "RA_9",
-      "name": "RockBandBlitzSetup-0.2.0.exe",
-      "label": "",
-      "content_type": "application/octet-stream",
-      "state": "uploaded",
-      "size": 24880193,
-      "digest": "sha256:3EFC1B45D658424A0F0F2B7E1C4A5B6D7E8F901234567890ABCDEF1234567890",
-      "download_count": 3,
-      "browser_download_url": "https://github.com/owner/repo/releases/download/v0.2.0/RockBandBlitzSetup-0.2.0.exe"
-    }
-  ],
-  "tarball_url": "https://api.github.com/repos/owner/repo/tarball/v0.2.0"
-})";
-
-static void TestReleaseApi() {
-  BeginCase("the newest release is read by key, not by position");
-
-  LatestRelease release;
-  std::string error;
-  CHECK_TRUE(ParseLatestReleaseJson(kOneAssetRelease, &release, &error));
-  CHECK_STR_EQ(release.tag_name, "v0.2.0");
-  CHECK_EQ(release.asset_count, 1);
-  CHECK_STR_EQ(release.asset_name, "RockBandBlitzSetup-0.2.0.exe");
-  CHECK_STR_EQ(release.asset_url,
-               "https://github.com/owner/repo/releases/download/v0.2.0/"
-               "RockBandBlitzSetup-0.2.0.exe");
-  CHECK_EQ(release.asset_size, 24880193u);
-  CHECK_TRUE(release.digest_published);
-  // The `sha256:` prefix is GitHub's spelling, not ours: what comes out is the
-  // 64 hex characters a download is compared against.
-  CHECK_STR_EQ(release.asset_sha256,
-               "3efc1b45d658424a0f0f2b7e1c4a5b6d7e8f901234567890abcdef1234567890");
-
-  BeginCase("a release a downloader cannot install is refused, with the reason");
-
-  // Two files: the release model is one, and picking one of two would be a guess.
-  LatestRelease extra;
-  CHECK_TRUE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1,"browser_download_url":"https://g/a.exe"},
-         {"name":"b.exe","size":1,"browser_download_url":"https://g/b.exe"}]})",
-      &extra, &error));
-  CHECK_EQ(extra.asset_count, 2);
-
-  // A 404 body is what a repository with no release answers, and the message has
-  // to say that rather than "the field is missing".
-  CHECK_FALSE(ParseLatestReleaseJson(R"({"message":"Not Found"})", &extra, &error));
-  CHECK_CONTAINS(error, "no published release");
-
-  // No files at all.
-  CHECK_FALSE(ParseLatestReleaseJson(R"({"tag_name":"v1","assets":[]})", &extra, &error));
-  CHECK_CONTAINS(error, "carries no files");
-
-  // An asset the reader cannot fetch: no URL, a cleartext URL, no size.
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1}]})", &extra, &error));
-  CHECK_CONTAINS(error, "no download URL");
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1,
-         "browser_download_url":"http://g/a.exe"}]})",
-      &extra, &error));
-  CHECK_CONTAINS(error, "https");
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","browser_download_url":"https://g/a.exe"}]})",
-      &extra, &error));
-  CHECK_CONTAINS(error, "no size");
-
-  // A digest that is not a sha256 is refused rather than compared: a download
-  // that suddenly stopped being verifiable is the one case worth failing.
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1,"digest":"md5:abc",
-         "browser_download_url":"https://g/a.exe"}]})",
-      &extra, &error));
-  CHECK_CONTAINS(error, "not a sha256");
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1,"digest":"sha256:abc",
-         "browser_download_url":"https://g/a.exe"}]})",
-      &extra, &error));
-  CHECK_CONTAINS(error, "not a sha256");
-
-  BeginCase("a release served by this machine is the one cleartext URL allowed");
-
-  // The test hook's whole point: a release served from a local server, so the
-  // path from the API answer to a verified download can be run without
-  // publishing anything. Everything else cleartext is still refused.
-  LatestRelease local;
-  CHECK_TRUE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1,
-         "browser_download_url":"http://127.0.0.1:8731/a.exe"}]})",
-      &local, &error));
-  CHECK_STR_EQ(local.asset_url, "http://127.0.0.1:8731/a.exe");
-  CHECK_TRUE(IsLoopbackHttpUrl("http://127.0.0.1:8731/a.exe"));
-  CHECK_TRUE(IsLoopbackHttpUrl("http://localhost/a.exe"));
-  CHECK_TRUE(IsLoopbackHttpUrl("http://[::1]:8731/a.exe"));
-  CHECK_TRUE(IsLoopbackHttpUrl("http://user@localhost:80/a.exe"));
-  CHECK_FALSE(IsLoopbackHttpUrl("http://example.invalid/a.exe"));
-  CHECK_FALSE(IsLoopbackHttpUrl("http://127.0.0.1.example.invalid/a.exe"));
-  CHECK_FALSE(IsLoopbackHttpUrl("https://127.0.0.1/a.exe"));
-  CHECK_FALSE(IsLoopbackHttpUrl("http://"));
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":1,
-         "browser_download_url":"http://192.168.0.9/a.exe"}]})",
-      &local, &error));
-  CHECK_CONTAINS(error, "https");
-
-  BeginCase("a release with no digest installs on the size check, and says so");
-  LatestRelease loose;
-  CHECK_TRUE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[{"name":"a.exe","size":7,"digest":null,
-         "browser_download_url":"https://g/a.exe"}]})",
-      &loose, &error));
-  CHECK_FALSE(loose.digest_published);
-  CHECK_STR_EQ(loose.asset_sha256, "");
-  CHECK_EQ(loose.asset_size, 7u);
-
-  BeginCase("the release API URL is derived from the homepage pin");
-
-  CHECK_STR_EQ(LatestReleaseApiUrl("https://github.com/owner/repo"),
-               "https://api.github.com/repos/owner/repo/releases/latest");
-  CHECK_STR_EQ(LatestReleaseApiUrl("https://github.com/owner/repo.git"),
-               "https://api.github.com/repos/owner/repo/releases/latest");
-  // A trailing path is GitHub's business (a tree link, a page), not the API's.
-  CHECK_STR_EQ(LatestReleaseApiUrl("https://github.com/owner/repo/tree/main"),
-               "https://api.github.com/repos/owner/repo/releases/latest");
-  // Anything else has no API to ask, which the command reports rather than
-  // fetching something arbitrary.
-  CHECK_STR_EQ(LatestReleaseApiUrl("https://example.invalid/owner/repo"), "");
-  CHECK_STR_EQ(LatestReleaseApiUrl("https://github.com/owner"), "");
-  CHECK_STR_EQ(LatestReleaseApiUrl(""), "");
-
-  BeginCase("the nightly channel takes the newest release GitHub marks as a prerelease");
-
-  // A list, newest first, as `GET /releases` answers it: a release at the top and
-  // two builds of main under it. The nightly reader looks past the release - it is
-  // not a build of main - and takes the first prerelease.
-  const char* const kReleaseList = R"([
-    {"tag_name":"0.2.0","prerelease":false,"assets":[
-      {"name":"RockBandBlitzSetup-0.2.0.exe","size":11,
-       "browser_download_url":"https://g/0.2.0.exe"}]},
-    {"tag_name":"nightly-2026-10-15-96dce40","prerelease":true,"assets":[
-      {"name":"RockBandBlitzSetup-0.1.0-96dce40.exe","size":12,
-       "browser_download_url":"https://g/nightly.exe"}]},
-    {"tag_name":"nightly-2026-10-14-beef123","prerelease":true,"assets":[
-      {"name":"RockBandBlitzSetup-0.1.0-beef123.exe","size":13,
-       "browser_download_url":"https://g/older.exe"}]}
-  ])";
-
-  LatestRelease nightly;
-  CHECK_TRUE(ParseNewestNightlyJson(kReleaseList, &nightly, &error));
-  CHECK_STR_EQ(nightly.tag_name, "nightly-2026-10-15-96dce40");
-  CHECK_TRUE(nightly.prerelease);
-  CHECK_STR_EQ(nightly.asset_name, "RockBandBlitzSetup-0.1.0-96dce40.exe");
-  CHECK_EQ(nightly.asset_size, 12u);
-
-  // The newest nightly being unusable must not hide the one before it - but it is
-  // remembered, so the message can name what was wrong when nothing works.
-  LatestRelease skipped_newest;
-  CHECK_TRUE(ParseNewestNightlyJson(
-      R"([{"tag_name":"nightly-a","prerelease":true,"assets":[
-           {"name":"a.exe","size":1,"browser_download_url":"https://g/a.exe"},
-           {"name":"b.exe","size":1,"browser_download_url":"https://g/b.exe"}]},
-         {"tag_name":"nightly-b","prerelease":true,"assets":[
-           {"name":"c.exe","size":2,"browser_download_url":"https://g/c.exe"}]}])",
-      &skipped_newest, &error));
-  CHECK_STR_EQ(skipped_newest.tag_name, "nightly-b");
-
-  // No prerelease at all: the honest answer for a repository that has only ever
-  // cut releases, and it has to point at the other channel rather than read as
-  // "something went wrong".
-  CHECK_FALSE(ParseNewestNightlyJson(
-      R"([{"tag_name":"0.2.0","prerelease":false,"assets":[
-         {"name":"a.exe","size":1,"browser_download_url":"https://g/a.exe"}]}])",
-      &nightly, &error));
-  CHECK_CONTAINS(error, "no nightly build");
-  CHECK_CONTAINS(error, "latest build");
-
-  // Every prerelease unusable: the error names the newest one's problem.
-  CHECK_FALSE(ParseNewestNightlyJson(
-      R"([{"tag_name":"nightly-a","prerelease":true,"assets":[
-         {"name":"a.exe","size":1,"browser_download_url":"https://g/a.exe"},
-         {"name":"b.exe","size":1,"browser_download_url":"https://g/b.exe"}]}])",
-      &nightly, &error));
-  CHECK_CONTAINS(error, "nightly-a");
-  CHECK_CONTAINS(error, "exactly one");
-
-  // An empty list, and the two shapes swapped between the channels - each of which
-  // has to name what it got instead of a missing field.
-  CHECK_FALSE(ParseNewestNightlyJson("[]", &nightly, &error));
-  CHECK_CONTAINS(error, "published nothing yet");
-  CHECK_FALSE(ParseNewestNightlyJson(kOneAssetRelease, &nightly, &error));
-  CHECK_FALSE(ParseLatestReleaseJson(kReleaseList, &nightly, &error));
-  CHECK_CONTAINS(error, "list of releases");
-
-  // A prerelease flag that is not a boolean is refused rather than read as false:
-  // reading a nightly as a release is how `latest` would install a build of main.
-  CHECK_FALSE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","prerelease":"yes","assets":[
-         {"name":"a.exe","size":1,"browser_download_url":"https://g/a.exe"}]})",
-      &nightly, &error));
-  CHECK_CONTAINS(error, "prerelease flag");
-  // Absent means false, which is what a hand-written document and an older API
-  // answer both look like.
-  CHECK_TRUE(ParseLatestReleaseJson(
-      R"({"tag_name":"v1","assets":[
-         {"name":"a.exe","size":1,"browser_download_url":"https://g/a.exe"}]})",
-      &nightly, &error));
-  CHECK_FALSE(nightly.prerelease);
-
-  BeginCase("a channel is a name, an endpoint and a sentence");
-
-  CHECK_STR_EQ(NewestNightlyApiUrl("https://github.com/owner/repo"),
-               "https://api.github.com/repos/owner/repo/releases?per_page=30");
-  CHECK_STR_EQ(NewestNightlyApiUrl("https://example.invalid/owner/repo"), "");
-  CHECK_STR_EQ(ReleaseApiUrlFor(ReleaseChannel::kRelease, "https://github.com/owner/repo"),
-               "https://api.github.com/repos/owner/repo/releases/latest");
-  CHECK_STR_EQ(ReleaseApiUrlFor(ReleaseChannel::kNightly, "https://github.com/owner/repo"),
-               "https://api.github.com/repos/owner/repo/releases?per_page=30");
-
-  // The name is the product name: it is what the setup executable is called.
-  ReleaseChannel channel = ReleaseChannel::kRelease;
-  CHECK_TRUE(ParseReleaseChannel("latest", &channel));
-  CHECK_EQ(static_cast<int>(channel), static_cast<int>(ReleaseChannel::kRelease));
-  CHECK_STR_EQ(ReleaseChannelName(channel), "latest");
-  CHECK_TRUE(ParseReleaseChannel("release", &channel));
-  CHECK_EQ(static_cast<int>(channel), static_cast<int>(ReleaseChannel::kRelease));
-  CHECK_TRUE(ParseReleaseChannel("nightly", &channel));
-  CHECK_EQ(static_cast<int>(channel), static_cast<int>(ReleaseChannel::kNightly));
-  CHECK_STR_EQ(ReleaseChannelName(channel), "nightly");
-  CHECK_FALSE(ParseReleaseChannel("", &channel));
-  CHECK_FALSE(ParseReleaseChannel("experimental", &channel));
-  CHECK_FALSE(ParseReleaseChannel("Latest", &channel));
-  CHECK_CONTAINS(ReleaseChannelDescription(ReleaseChannel::kNightly), "main");
-  CHECK_CONTAINS(ReleaseChannelDescription(ReleaseChannel::kRelease), "newest release");
-
-  BeginCase("a nightly build is addressed by the commit it names");
-
-  // Main's tip, out of the commit resource. Only `sha` is read: the rest of the
-  // document is the commit's tree, author and message, none of which decides
-  // anything here.
-  std::string head_sha;
-  CHECK_TRUE(ParseMainCommitSha(
-      R"({"sha":"96dce40e926dc83783c873297aa945a39e6e1288","commit":{"message":"wip"},"parents":[]})",
-      &head_sha, &error));
-  CHECK_STR_EQ(head_sha, "96dce40e926dc83783c873297aa945a39e6e1288");
-  CHECK_FALSE(ParseMainCommitSha(R"({"message":"Not Found"})", &head_sha, &error));
-  CHECK_CONTAINS(error, "no default branch");
-  CHECK_STR_EQ(NewestMainCommitApiUrl("https://github.com/owner/repo"),
-               "https://api.github.com/repos/owner/repo/commits/main");
-  CHECK_STR_EQ(NewestMainCommitApiUrl("https://example.invalid/owner/repo"), "");
-
-  // The commit question follows the release question's host: an override that points
-  // a whole run at one server has to point *both* questions there, or a test cannot
-  // make the comparison disagree (which is how this rule was found).
-  CHECK_STR_EQ(CommitApiUrlFrom("https://api.github.com/repos/owner/repo/releases?per_page=30"),
-               "https://api.github.com/repos/owner/repo/commits/main");
-  CHECK_STR_EQ(CommitApiUrlFrom("https://api.github.com/repos/owner/repo/releases/latest"),
-               "https://api.github.com/repos/owner/repo/commits/main");
-  CHECK_STR_EQ(CommitApiUrlFrom("http://localhost:8736/releases?per_page=30"),
-               "http://localhost:8736/commits/main");
-  CHECK_STR_EQ(CommitApiUrlFrom("https://api.github.com/repos/owner/repo/tags"), "");
-  CHECK_STR_EQ(CommitApiUrlFrom(""), "");
-
-  // The commit a release names, out of its tag or its file name. The last hex run of
-  // seven or more, because the date in front of it is made of hex digits too - which
-  // is the one way this rule can be got wrong, so it is what the cases below pin.
-  CHECK_STR_EQ(CommitMarkerFromName("nightly-2026-10-15-96dce40"), "96dce40");
-  CHECK_STR_EQ(CommitMarkerFromName("RockBandBlitzSetup-nightly-96dce40.exe"), "96dce40");
-  CHECK_STR_EQ(CommitMarkerFromName("nightly-2026-10-15-96dce40e926dc83"), "96dce40e926dc83");
-  CHECK_STR_EQ(CommitMarkerFromName("0.1.0"), "");
-  CHECK_STR_EQ(CommitMarkerFromName("nightly-2026-10-15"), "");
-  CHECK_STR_EQ(CommitMarkerFromName(""), "");
-  // A long full commit id at the end wins over a short run earlier in the name, and
-  // the answer is lower case even when the tag is not.
-  CHECK_STR_EQ(CommitMarkerFromName("nightly-96DCE40-rockbandblitz-1234567"),
-               "1234567");
-
-  BeginCase("a digest is only a digest at 64 hex characters");
-  CHECK_TRUE(IsHexSha256("3efc1b45d658424a0f0f2b7e1c4a5b6d7e8f901234567890abcdef1234567890"));
-  // Upper case is not accepted here: GitHub writes digests in lower case, and the
-  // comparison is what normalises the one place a case could differ.
-  CHECK_FALSE(IsHexSha256("3EFC1B45D658424A0F0F2B7E1C4A5B6D7E8F901234567890ABCDEF1234567890"));
-  CHECK_FALSE(IsHexSha256("3efc1b45"));
-  CHECK_FALSE(IsHexSha256(
-      "3efc1b45d658424a0f0f2b7e1c4a5b6d7e8f901234567890abcdef123456789z"));
 }
 
 // The wizard only ever sees `--summary`, so a rejected command line has to leave
@@ -2483,7 +2178,6 @@ int main() {
   TestPayloadAndFinalize();
   TestUltimate();
   TestUpdateManifest();
-  TestReleaseApi();
   TestLocations();
   TestWizardScript();
   TestPayloadScripts();

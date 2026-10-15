@@ -21,6 +21,10 @@ schema_version = 1
 # install ... into the following folder".
 name = "Rock Band Blitz"
 short_name = "Rock Band Blitz"
+# The version of the installer and of the build inside it. Change this and run
+# installer\build.ps1 again: the setup executable is named after it
+# (RockBandBlitzSetup-<version>.exe), the wizard is titled with it and every
+# install manifest records it.
 version = "0.1.0"
 publisher = "Gabriel Fávero"
 homepage_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp"
@@ -40,7 +44,7 @@ min_windows_build = "10.0.17763"
 #
 # The downloaded form is the updater's engine, not a release path: a release
 # publishes exactly one file, so an install that fetched its payload would need a
-# second one on the release page (README.md, section "The three products").
+# second one on the release page (README.md, section "The one product").
 #
 # Left empty in the repository: a pin that does not exist yet is worse than a
 # clear "no payload source configured" message.
@@ -51,18 +55,12 @@ size = 0
 # Commit of the recompiled build this setup ships, recorded in the install
 # manifest and in the installation report - recorded, never verified, the way
 # `version` above is. build.ps1 resolves it before the pins are compiled in:
-# "latest" is the newest commit of the checkout being built, and any other value
-# is a ref or a commit id git has to resolve to one, so neither half of the
-# installer ever sees a ref. A build that does not go through build.ps1 has
-# nothing to resolve it and refuses a pin that is not a 40-character commit id
-# (write one here, or pass -PayloadCommit <id>); empty means "record nothing".
-#
-# The value decides what the build *is*, and what it calls itself: a commit id is
-# a pinned release (RockBandBlitzSetup-<version>.exe, titled "Rock Band Blitz
-# 0.1.0"), while "latest" is the rolling build of main that continuous building
-# publishes - named RockBandBlitzSetup-nightly-<commit>.exe and titled "Rock Band
-# Blitz nightly-<commit>", because 0.1.0 is the version of the release it is not.
-commit = "latest"
+# "HEAD" is the commit of the checkout being built, and any other value is a ref
+# or a commit id git has to resolve to one, so neither half of the installer ever
+# sees a ref. A build that does not go through build.ps1 has nothing to resolve it
+# and refuses a pin that is not a 40-character commit id (write one here, or pass
+# -PayloadCommit <id>); empty means "record nothing".
+commit = "HEAD"
 
 [update]
 # Dormant since 2026-10-15: Controller Settings no longer checks for updates, so

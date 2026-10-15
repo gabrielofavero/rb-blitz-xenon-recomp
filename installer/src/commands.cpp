@@ -33,7 +33,6 @@
 #include "install.h"
 #include "profile/profile_path.h"
 #include "paths.h"
-#include "release_api.h"
 #include "stfs.h"
 #include "util.h"
 #include "util/game_fingerprint.h"
@@ -687,241 +686,6 @@ int CommandFetchUpdate(const std::vector<std::string>& args) {
                              HumanBytes(manifest.payload_size), " of payload)"));
 }
 
-// --- the newest build of a channel ----------------------------------------
-
-// What both bootstrap setup executables are built on (README.md, section "The
-// three products"): they carry no payload, so this command is asked which build to
-// install and where its one file is, and the wizard then runs that file.
-//
-// `--channel` is the only difference between the two bootstraps:
-//
-//   latest    the newest release (`GET /releases/latest`, which GitHub resolves
-//             to the newest published release that is not a prerelease)
-//   nightly   the newest build of main (`GET /releases`, taking the newest entry
-//             marked as a prerelease)
-//
-// One command rather than two steps, because "what is the newest build" and
-// "where is the file" are one question with one answer: the release resource
-// reports the tag and its asset together, and a wizard that could ask for the tag
-// without the URL would have the two out of step.
-//
-// The file is downloaded with the size and the digest the resource reports, so a
-// truncated transfer and a file that is not the published one are both refused
-// here - before the wizard runs anything. A release whose asset carries no
-// digest is still installed, on the size check alone, and says so in the summary:
-// the bytes travel over https from GitHub either way, and refusing the install
-// would be worse than doing it and naming what was verified.
-// The newest commit of the default branch, or empty with a reason. Only the nightly
-// channel asks: "the newest build of main" and "the newest commit of main" are two
-// different answers the moment a commit is pushed, and a nightly build should be able
-// to say which of the two the user is about to install.
-//
-// The question goes to the server the release question went to - the same `--api`
-// override, the same host - because a comparison between two servers answers nothing.
-std::string FetchMainCommit(const fs::path& dest, const std::string& channel_api_url, std::string* error) {
-  std::string url = CommitApiUrlFrom(channel_api_url);
-  if (url.empty()) {
-    url = NewestMainCommitApiUrl(EmbeddedPins().installer.homepage_url);
-  }
-  if (url.empty()) {
-    *error = "[installer] homepage_url is not a github.com repository URL";
-    return {};
-  }
-  const fs::path file = dest / "main-commit.json";
-  if (!EnsureParentDirectory(file, error)) {
-    return {};
-  }
-  DownloadRequest request;
-  request.url = url;
-  request.destination = file;
-  request.accept = "application/vnd.github+json";
-  DownloadResult download;
-  if (!DownloadToFile(request, &download, error)) {
-    return {};
-  }
-  std::string json;
-  if (!ReadFileText(file, &json, error)) {
-    return {};
-  }
-  std::string sha;
-  if (!ParseMainCommitSha(json, &sha, error)) {
-    return {};
-  }
-  return sha;
-}
-
-int CommandResolveBuild(const std::vector<std::string>& args) {
-  CommandContext context;
-  if (!Begin(args, Keys({"dest", "channel", "api"}), &context)) {
-    return kUsage;
-  }
-  const fs::path dest = PathFromUtf8(context.Get("dest"));
-  if (dest.empty()) {
-    return Fail(&context, "resolve-build needs --dest: the directory to download into");
-  }
-  ReleaseChannel channel = ReleaseChannel::kRelease;
-  const std::string channel_text = context.Get("channel");
-  if (!channel_text.empty() && !ParseReleaseChannel(channel_text, &channel)) {
-    return Fail(&context, S("resolve-build does not know the channel '", channel_text,
-                            "': 'latest' installs the newest release and 'nightly' installs the "
-                            "newest build of main"));
-  }
-  const char* const channel_name = ReleaseChannelName(channel);
-
-  std::string api = context.Get("api");
-  if (api.empty()) {
-    const std::string homepage = EmbeddedPins().installer.homepage_url;
-    api = ReleaseApiUrlFor(channel, homepage);
-    if (api.empty()) {
-      return Fail(&context,
-                  S("resolve-build has no release API to ask: [installer] homepage_url is '",
-                    homepage, "', which is not a github.com repository URL "
-                    "(installer/config/pins.toml)"));
-    }
-  }
-
-  const fs::path listing = dest / "release.json";
-  if (!EnsureParentDirectory(listing, &context.error)) {
-    return Fail(&context, context.error);
-  }
-
-  DownloadRequest listing_request;
-  listing_request.url = api;
-  listing_request.destination = listing;
-  // GitHub's API refuses a request with no User-Agent, and the helper's default
-  // is one, so nothing has to be added here - but the Accept value is what picks
-  // this shape of answer over an older one.
-  listing_request.accept = "application/vnd.github+json";
-  DownloadResult listing_download;
-  std::string error;
-  if (!DownloadToFile(listing_request, &listing_download, &error)) {
-    // A 404 on the newest-release endpoint is GitHub's way of saying "this repository
-    // has never published a release", which is a different thing from a network
-    // failure and deserves its own sentence - it is the state of this repository
-    // today, and the answer is the other channel or a release to be cut.
-    if (listing_download.status_code == 404 && channel == ReleaseChannel::kRelease) {
-      return Fail(&context,
-                  S("this repository has no release yet (", api, " answered 404), so there is "
-                    "nothing for the latest build to install: the nightly build installs the "
-                    "newest build of main, and a release is what this channel waits for"));
-    }
-    return Fail(&context, S("could not ask ", api, ": ", error));
-  }
-
-  std::string json;
-  if (!ReadFileText(listing, &json, &error)) {
-    return Fail(&context, error);
-  }
-  LatestRelease release;
-  const bool read = channel == ReleaseChannel::kNightly ? ParseNewestNightlyJson(json, &release, &error)
-                                                       : ParseLatestReleaseJson(json, &release, &error);
-  if (!read) {
-    return Fail(&context, S("could not read what ", api, " answered: ", error));
-  }
-
-  // A nightly handed to the `latest` bootstrap is refused here rather than
-  // installed: `latest` means the newest release, and installing a build of main
-  // for somebody who asked for a release is the one mistake this channel exists to
-  // prevent. (GitHub's own endpoint excludes prereleases, so this can only happen
-  // through an --api override - which is exactly what a test does.)
-  if (channel == ReleaseChannel::kRelease && release.prerelease) {
-    return Fail(&context, S("release ", release.tag_name,
-                            " is marked as a prerelease, so it is a build of main rather than a "
-                            "release: the nightly channel is the one that installs these"));
-  }
-
-  // Which commit this is, and whether it is main's tip. The commit comes out of the
-  // release's own tag or file name - a convention the continuous build owns, checked
-  // by CommitMarkerFromName - and the tip comes from main itself. A failure to ask
-  // main is not a failure to install: the build is still the newest one published,
-  // and every sentence below stays true without the comparison.
-  std::string release_commit;
-  std::string head_commit;
-  bool at_tip = false;
-  if (channel == ReleaseChannel::kNightly) {
-    release_commit = CommitMarkerFromName(release.tag_name);
-    if (release_commit.empty()) {
-      release_commit = CommitMarkerFromName(release.asset_name);
-    }
-    std::string head_error;
-    head_commit = FetchMainCommit(dest, api, &head_error);
-    if (head_commit.empty()) {
-      log::Warn(S("could not ask main for its newest commit: ", head_error,
-                  " - the newest published nightly is installed either way, but this report "
-                  "cannot say whether it is main's tip"));
-    }
-    if (!release_commit.empty() && !head_commit.empty()) {
-      // A short commit is a prefix of the long one, so a prefix comparison is what
-      // "this is that commit" means.
-      at_tip = head_commit.size() >= release_commit.size() &&
-               head_commit.compare(0, release_commit.size(), release_commit) == 0;
-    }
-  }
-
-  // Everything the caller may want to report is written before the download, so
-  // a failed transfer still names the release it was for.
-  context.summary.Text("channel", channel_name);
-  context.summary.Text("tag_name", release.tag_name);
-  context.summary.Flag("prerelease", release.prerelease);
-  context.summary.Number("asset_count", static_cast<std::uint64_t>(release.asset_count));
-  context.summary.Text("asset_name", release.asset_name);
-  context.summary.Text("asset_url", release.asset_url);
-  context.summary.Number("asset_size", release.asset_size);
-  context.summary.Text("asset_sha256", release.asset_sha256);
-  context.summary.Flag("digest_published", release.digest_published);
-  if (channel == ReleaseChannel::kNightly) {
-    context.summary.Text("commit", release_commit);
-    context.summary.Text("head_commit", head_commit);
-    context.summary.Flag("at_tip", at_tip);
-  }
-
-  if (release.asset_count != 1) {
-    // The release model is one file per release: the setup executable the user
-    // downloads, and nothing else. A release with several files is one this
-    // downloader cannot choose from without guessing.
-    return Fail(&context, S("release ", release.tag_name, " carries ", release.asset_count,
-                            " files; this downloader installs a release with exactly one"));
-  }
-
-  const fs::path asset_path = dest / PathFromUtf8(release.asset_name).filename();
-  DownloadRequest request;
-  request.url = release.asset_url;
-  request.destination = asset_path;
-  request.expected_size = release.asset_size;
-  request.expected_sha256 = release.asset_sha256;
-  request.user_agent = "rb_blitz_setup_helper/1.0";
-  DownloadResult download;
-  if (!DownloadToFile(request, &download, &error)) {
-    return Fail(&context, S("could not fetch ", release.asset_name, ": ", error));
-  }
-  context.summary.Number("bytes", download.size);
-  context.summary.Text("sha256", download.sha256);
-  context.summary.Text("path", Display(asset_path));
-
-  if (!release.digest_published) {
-    log::Warn(S("release ", release.tag_name,
-                " published no digest for ", release.asset_name,
-                ": the download was checked against its published size alone"));
-  }
-
-  std::string sentence = S("the newest ", channel_name, " build is ", release.tag_name, ": ",
-                           release.asset_name, " (", HumanBytes(release.asset_size),
-                           release.digest_published ? ", sha256 verified)" : ", size verified)");
-  if (!release_commit.empty()) {
-    sentence += ", commit ";
-    sentence += release_commit;
-    if (!head_commit.empty()) {
-      // The two answers a nightly user actually wants: which commit did I get, and is
-      // it the newest one main has.
-      sentence += at_tip ? ", which is main's tip"
-                         : S(", and main's tip is ", head_commit.substr(0, 7));
-    }
-  } else if (channel == ReleaseChannel::kNightly) {
-    sentence += ", and its tag names no commit";
-  }
-  return Succeed(&context, sentence);
-}
-
 // --- payload --------------------------------------------------------------
 
 int CommandInstallPayload(const std::vector<std::string>& args) {
@@ -1341,13 +1105,6 @@ int CommandVersion(const std::vector<std::string>& args) {
   // a bug report can name what a dormant updater executable would look at.
   context.summary.Text("update_manifest_url", pins.update.manifest_url);
   context.summary.Flag("update_requires_game_data", pins.update.requires_game_data);
-  // Where the two bootstrap setup executables look for the build they install,
-  // derived from the same homepage pin: the newest release for `latest`, and the
-  // newest prerelease for `nightly`. Empty means this build's homepage is not a
-  // github.com repository, which is the one configuration a bootstrap cannot work
-  // in.
-  context.summary.Text("release_api", LatestReleaseApiUrl(pins.installer.homepage_url));
-  context.summary.Text("nightly_api", NewestNightlyApiUrl(pins.installer.homepage_url));
   context.summary.Text("game_fingerprints", "embedded");
   std::string line = S("helper ", kHelperVersion, ", installer ", pins.installer.version,
                        ", payload ", pins.payload.version);
@@ -1379,9 +1136,6 @@ constexpr CommandSpec kCommands[] = {
     {"fetch-update", CommandFetchUpdate, "--url <url> --dest <file>",
      "schema_version version requires_game_data payload_version payload_url payload_sha256 "
      "payload_size payload_commit bytes"},
-    {"resolve-build", CommandResolveBuild, "--dest <dir> [--channel latest|nightly] [--api <url>]",
-     "channel tag_name prerelease asset_count asset_name asset_url asset_size asset_sha256 "
-     "digest_published bytes sha256 path"},
     {"install-payload", CommandInstallPayload,
      "--dest <dir> [--from-pinned|--from-zip <p>|--from-dir <d>|--from-url <u>] [--sha256 <h>] "
      "[--size <n>] [--version <v>] [--progress <file>]",
@@ -1418,7 +1172,7 @@ constexpr CommandSpec kCommands[] = {
     {"version", CommandVersion, "", "helper installer payload payload_commit "
                                     "payload_download_pinned ultimate ultimate_url "
                                     "update_manifest_url update_requires_game_data "
-                                    "release_api nightly_api game_fingerprints"},
+                                    "game_fingerprints"},
 };
 
 }  // namespace

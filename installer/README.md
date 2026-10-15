@@ -7,22 +7,18 @@ from, whether they want Rock Band Blitz Ultimate, and which shortcuts to create,
 gets a folder with a launchable `rb_blitz.exe` in it — no compiler, no CMake, no
 instructions to follow.
 
-Three products are built from this directory, and four files: the *complete package* — one
-wizard, cut either pinned to a version or rolling from main's tip — and the two *bootstraps*,
-which carry nothing and fetch the newest build of a channel instead ([the section
-below](#the-three-products)). A release publishes exactly one of these files and nothing else.
+One product is built from this directory: the *complete package* — one wizard with the
+recompiled build inside it, made from the working tree it is run in ([the section
+below](#the-one-product)). A release publishes this one file and nothing else.
 
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
 
-## The three products
+## The one product
 
 | Product | What it is | What a release publishes |
 | --- | --- | --- |
-| `RockBandBlitzSetup-<version>.exe` | **The complete package, pinned.** `setup.iss` with the payload inside it: it installs with no network access at all. Built from a pinned commit, named after the version in `config/pins.toml`. | this file, alone |
-| `RockBandBlitzSetup-nightly-<commit>.exe` | **The complete package, rolled.** The same wizard built from the tip of main — what continuous building publishes for every commit. Named after the commit, and so is the version it reports. | this file, alone |
-| `RockBandBlitzSetup-latest.exe` | **The latest bootstrap.** `bootstrap.iss`: it carries no payload and installs nothing. It asks GitHub for the newest *release* of this repository, downloads the one file on it, checks the size and the sha256 GitHub published for it, and runs it. | not published as a release asset — it never changes, so it is built on demand and linked to |
-| `RockBandBlitzSetup-nightly.exe` | **The nightly bootstrap.** The same program asking for the newest build of *main*: the newest release the repository marks as a prerelease. It also reports which commit it installed and whether main has moved on since. | same as above |
+| `RockBandBlitzSetup-<version>.exe` | **The complete package.** `setup.iss` with the payload inside it: it installs with no network access at all. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | this file, alone |
 
 Why it is shaped that way:
 
@@ -30,34 +26,21 @@ Why it is shaped that way:
   else: no manifest, no payload archive, no checksum file to keep in step with it. A
   release that published a second file would be a release that can be published
   halfway.
-* **`latest` means a release, `nightly` means main.** GitHub's own `prerelease`
-  flag is what tells the two channels apart, not a naming convention in the tags:
-  `/releases/latest` (what `latest` asks) skips prereleases, so a build of main can
-  never reach somebody who asked for the newest release, and the continuous build
-  publishes one prerelease per commit for `nightly` to find.
-* **A bootstrap is one file that never changes.** What it installs is whatever the
-  newest build of its channel happens to be, so a new release needs no rebuild of it
-  and a user who downloaded it last year gets today's build.
-* **A bootstrap refuses to install a bootstrap.** If the newest build's file is
-  named `RockBandBlitzSetup-latest.exe` or `RockBandBlitzSetup-nightly.exe`, it is
-  itself a downloader, and installing it would loop for ever. That is refused by
-  name, with the fix in the message.
+* **The build is the checkout.** `build.ps1` snapshots the build tree in
+  `out\build\win-amd64-release`, records the commit `git rev-parse HEAD` answers, and
+  writes one file — the one a release publishes. Cutting a release is running the same
+  command from the tagged commit.
 
 ```powershell
-# the complete package, pinned to a commit
-powershell -File installer\build.ps1 -PayloadCommit <40 hex digits>   # RockBandBlitzSetup-<version>.exe
-# the complete package, rolled from this checkout (what main publishes)
-powershell -File installer\build.ps1                                 # RockBandBlitzSetup-nightly-<commit>.exe
-# the two bootstraps
-powershell -File installer\build.ps1 -Latest                          # RockBandBlitzSetup-latest.exe
-powershell -File installer\build.ps1 -Nightly                         # RockBandBlitzSetup-nightly.exe
+# from the repository root; the result is installer\out\dist\RockBandBlitzSetup-<version>.exe
+powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 ```
 
-Each product's window says which build it is — `Setup - Rock Band Blitz nightly-96dce40`,
-`Setup - Rock Band Blitz latest`, `Setup - Rock Band Blitz 0.1.0` — because a screenshot
-of a failure is how most of these get reported and "version 0.1.0" on a build of main
-sends the reader looking in the wrong place. `scripts/acceptance_product_titles.ps1`
-asserts the captions of the products it can open unattended.
+The version comes from one value — `[installer] version` in `installer\config\pins.toml`
+— and the file name, the wizard's title (`Setup - Rock Band Blitz <version>`) and every
+install manifest follow it; bump it there and run the command again.
+`scripts/acceptance_product_titles.ps1` asserts the built product's caption when the
+machine lets it open the window unattended.
 
 ## What the installer does and does not contain
 
@@ -102,7 +85,7 @@ puts the payload the *release manifest* names in place instead of one of its own
 
 **Nothing starts it any more.** It was Controller Settings' *Update* control that ran it, and
 that control was removed with D19's update check on 2026-10-15: installing a release is now
-running a setup executable, and the two bootstraps are what fetch the newest one. The updater
+downloading the release's setup executable and running it. The updater
 is still built and still placed under the user's local application data, so the machinery stays
 working and tested for whatever the release model decides to do with it next; the manifest it
 reads is no longer published (see [below](#the-manifest-is-no-longer-published)).
@@ -206,7 +189,6 @@ A copy of everything the helper did is left next to the game:
 | Path | What |
 | --- | --- |
 | `setup.iss` | The wizard: pages, sequencing, progress mapping, uninstall. Presentation only — it has no filesystem, HTTP or crypto support. Also the updater (compiled with `/DUpdaterMode=1`) and, with the payload inside it, the complete package. |
-| `bootstrap.iss` | The two bootstraps: no pages, no install folder, no uninstaller. It asks the helper which build is the newest one for its channel, downloads the one file on that release, checks it and runs it. `-DChannelName=latest\|nightly` decides which; `build.ps1 -Latest`/`-Nightly` passes the channel's own four facts. |
 | `src/` | `rb_blitz_setup_helper.exe`: STFS extraction, zip inflate, WinHTTP download, SHA-256 verification, file placement, manifests. |
 | `src/commands.cpp` | The helper's command line: one command per stage, `--summary` / `--log` / `--progress` for each. |
 | `src/paths.cpp` | The two folders: reading `paths.toml` for the folder page's prefill, checking the answers, and committing them. The file format itself comes from the game (`src/settings/paths.cpp`, compiled in), so the installer cannot write a file the game reads differently. |
@@ -215,8 +197,8 @@ A copy of everything the helper did is left next to the game:
 | `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its Controller Settings and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`), recording the snapshot's provenance in the manifest. |
 | `tools/payload_provenance.ps1` | The provenance checks the two scripts share: which backends a build tree was configured with, how to read the manifest back, and whether a snapshot is really the tree it claims to be a copy of. `build.ps1` decides with it whether an existing snapshot may be reused. |
 | `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/installer/`. |
-| `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest the dormant updater would install from. It also derives `AppVerName` from the payload version, which is what makes a rolling build call itself `nightly-<commit>` rather than `0.1.0`. |
-| `build.ps1` | The build entry point for all three products: Controller Settings, the payload, the helper, the tests, the images, the updater, and the setup executable that is the right one for what was asked (`-Latest`, `-Nightly`, `-PayloadCommit`, or none of them for a rolling package). |
+| `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest the dormant updater would install from. It also derives `AppVerName` from the payload version (falling back to the [installer] version), which is what the wizard's title shows. |
+| `build.ps1` | The build entry point: Controller Settings, the payload, the helper, the tests, the images, the updater, and the setup executable, all from this checkout. |
 | `tests/installer_tests.cpp` | The helper's test suite (`ctest`), dependency-free and game-data-free. |
 | `out/` | Build output. Nothing in it is committed. |
 
@@ -252,10 +234,10 @@ That one command:
 6. refreshes the optional side wizard image;
 7. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
 
-Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, or
-`RockBandBlitzSetup-latest.exe` when the `[payload] commit` pin is `latest` — the
-repository's own pin, which is a rolling build of the checkout rather than a
-release cut from a tag, and is named so nobody mistakes one for the other. Use
+Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, named after the
+version in `config\pins.toml`, recording the commit the `[payload] commit` pin
+resolves to (`HEAD` — the checkout being built — by default; `-PayloadCommit <40 hex
+digits>` records another one). Use
 `-Preset installer-release-msvc` from a Visual Studio developer prompt, and
 `-SkipArt`, `-SkipTests`, `-SkipControllerSettings`, `-ControllerSettingsTarget`, `-SkipPayload`,
 `-SkipSetup`, `-IsccPath` as needed — `Get-Help .\build.ps1 -Full` documents all
@@ -285,9 +267,8 @@ using the redistributable DLLs; those travel with the payload, which is why
 ## How the recompiled build travels
 
 Everything the complete package installs is *inside* it, so an install needs no
-network access at all. That is what a release, a rolling build and a user who keeps
-last year's bootstrap all rely on; the bootstraps are the ones that fetch
-([the three products](#the-three-products)).
+network access at all. That is what every release relies on: the payload travels in
+the same file as the wizard ([the one product](#the-one-product)).
 
 `setup.iss` still knows one older way to get the payload: the wizard downloads a
 pinned payload archive at install time (`-PayloadUrl -PayloadSha256 [-PayloadSize]`)
@@ -303,8 +284,8 @@ A release is the complete package and nothing else:
 # 1. the build itself, from the commit the release is for
 cmake --preset win-amd64-release; cmake --build --preset win-amd64-release
 
-# 2. the package: pinned to the commit, named after the version in pins.toml
-powershell -File installer\build.ps1 -PayloadCommit <40 hex digits>
+# 2. the package, made from that checkout
+powershell -File installer\build.ps1
 
 # 3. what ships, and what must never be in it (exit 0 = nothing was)
 powershell -File scripts\audit_distributable.ps1
@@ -313,20 +294,14 @@ powershell -File scripts\audit_distributable.ps1
 #    only asset, and write the sha256 build.ps1 printed into the release notes
 ```
 
-Builds of main need nobody at all: `.github/workflows/builds.yml` builds a commit as
-it lands, names the package after it (`RockBandBlitzSetup-nightly-<commit>.exe`) and
-publishes it as a **prerelease** — one file, tagged `nightly-<date>-<commit>`. That
-prerelease is what the nightly bootstrap installs, and GitHub's newest-release
-endpoint skips it, so the latest bootstrap ignores it. The workflow keeps the newest
-twenty of them and deletes older ones, so the release list stays a list.
+`.github/workflows/builds.yml` does the same on a tag whose name matches the pinned
+version, and publishes the file as the release's only asset. It runs on a self-hosted
+runner because the payload needs the user's own game data, which is deliberately not
+in the repository.
 
-The two bootstraps are built by the same workflow on demand and uploaded as workflow
-artifacts: they never change, so they are not release assets.
-
-Neither the setup executable nor the payload inside it is byte-reproducible across
-machines (the exe depends on the payload directory ISCC happens to find, and a payload
-zip on the deflate implementation that wrote it), so publish the checksum `build.ps1`
-printed rather than a fixed one.
+The setup executable is not byte-reproducible across machines (the exe depends on the
+payload directory ISCC happens to find), so publish the checksum `build.ps1` printed
+rather than a fixed one.
 
 A payload still may not be published without the audit having looked at it, because a
 payload is the one artefact that reaches somebody else's machine, and the audit is
@@ -347,7 +322,7 @@ and possibly no git:
 
 | The pin says | The build records |
 | --- | --- |
-| `latest` (the repository default) | The newest commit of the checkout being built, whatever `git rev-parse HEAD` answers at that moment. |
+| `HEAD` (the repository default) | The commit `git rev-parse HEAD` answers for the checkout being built. |
 | A commit id, or any other ref | That commit: `build.ps1` resolves it with git before the pins are compiled in. |
 | Empty | Nothing. The manifest carries `payload_commit = ""` and the report says `Commit     : unknown` — the honest answer for a build with no commit behind it, such as a tarball. |
 
@@ -364,7 +339,7 @@ every release build — see [The payload allow-list](#the-payload-allow-list).)
 Only `build.ps1` can turn a ref into a commit, so `tools/embed_config.cpp` refuses
 to compile a pin that is not a 40-character commit id — including a bare
 `cmake --preset installer-release` on a fresh clone, where the repository's
-`latest` has nothing to resolve it. Configure through the script, write a commit
+`HEAD` has nothing to resolve it. Configure through the script, write a commit
 id in `pins.toml`, or pass `-PayloadCommit`.
 
 ## Updating
@@ -372,16 +347,14 @@ id in `pins.toml`, or pass `-PayloadCommit`.
 **There is no update check any more.** Controller Settings used to ask for a release
 manifest on every start, offer an update, and run an updater that installed the build
 the manifest named (D19 of [2026-09-27-launcher-plan.md](../docs/plans/finished/2026-09-27-launcher-plan.md)). That was
-removed on 2026-10-15 at the owner's direction — *"controller settings shouldn't check for
-updates. It's a separated setting, not a launcher"* — and with it went the control, the prompt,
+removed on 2026-10-15, and with it went the control, the prompt,
 the manifest URL compiled into the executable, and the two modules behind them.
 
 What replacing an install means now:
 
 | What the user wants | What they do |
 | --- | --- |
-| the newest release | run `RockBandBlitzSetup-latest.exe`, or download the newest release's setup executable and run it |
-| the newest build of main | run `RockBandBlitzSetup-nightly.exe` |
+| the newest release | download the newest release's setup executable and run it |
 | one exact version | download that release's `RockBandBlitzSetup-<version>.exe` and run it |
 
 All three end the same way: a wizard installs over what is there, keeping the user's
@@ -456,7 +429,7 @@ One file, parsed at build time, embedded into both halves:
 | Section | Keys | Meaning |
 | --- | --- | --- |
 | `[installer]` | `name`, `short_name`, `version`, `publisher`, URLs, `default_dir_name`, `min_windows_build` | Everything the wizard's own resources need. `name` titles the wizard, `short_name` is the program Add/Remove Programs lists, and `publisher` is the author rather than the project; `default_dir_name` is appended to the folder the user picks; `min_windows_build` is `10.0.17763` because the runtime and its DLLs are x86-64-v2. Values may be UTF-8 — the generated `pins.iss` is, and Inno Setup reads it as UTF-8 — so an accented name arrives intact; a byte that is not valid UTF-8 is refused at build time instead. |
-| `[payload]` | `version`, `url`, `sha256`, `size`, `commit` | `version`, `url`, `sha256` and `size` are empty in the repository: a pin that does not exist yet fails with "no payload source configured" instead of downloading nothing, and the release workflow fills it in (or overrides it with `-PayloadUrl`/`-PayloadSha256`/`-PayloadSize`). `commit` is the exception — it ships as `latest`, which `build.ps1` resolves to the newest commit of the checkout before the pins are compiled in, so that every install can tell which build it is: see "Recording which build this is". |
+| `[payload]` | `version`, `url`, `sha256`, `size`, `commit` | `version`, `url`, `sha256` and `size` are empty in the repository: a pin that does not exist yet fails with "no payload source configured" instead of downloading nothing, and `-PayloadUrl`/`-PayloadSha256`/`-PayloadSize` fill them in for a build that downloads at install time. `commit` is the exception — it ships as `HEAD`, which `build.ps1` resolves to the checkout's commit before the pins are compiled in, so that every install can tell which build it is: see "Recording which build this is". |
 | `[ultimate]` | `version`, `url`, `sha256`, `size`, repository/release URLs, `archive_prefix`, `destination_dir` | The Ultimate release the wizard offers and the helper downloads. |
 | `[update]` | `manifest_url`, `dir_name`, `requires_game_data` | The update channel: where Controller Settings checks, the folder under the user's local application data the updater is placed in, and whether this release's payload needs the game data re-derived from the user's files. See "Updating". `manifest_url` may be empty (a build with no release channel, which then checks nothing), `dir_name` may not. |
 
@@ -811,6 +784,6 @@ order) so a change that drops one fails the suite:
 | The test suite fails in a download-mode build with a mismatch between the pin and `pins.toml` | Expected: pass `-SkipTests` (see "Cutting a release"). |
 | `-PayloadUrl needs -PayloadSha256` | An installer that downloads its own build must name which build it is. `-AllowUnverifiedPayload` exists for local testing only. |
 | A rebuild ignores a pin you just removed | `-DRBBLITZ_EMBED_EXTRA_ARGS` is a *cached* CMake variable. `build.ps1` always passes it (possibly empty), so build through the script rather than a bare `cmake --preset`. |
-| `[payload] commit '<x>' is not a 40-character commit id` while configuring | The pin is a name — `latest` by default — and only `build.ps1` has git at the right moment to resolve it. Configure through the script, or write a commit id (or nothing) in `config\pins.toml`. |
+| `[payload] commit '<x>' is not a 40-character commit id` while configuring | The pin is a ref — `HEAD` by default — and only `build.ps1` has git at the right moment to resolve it. Configure through the script, or write a commit id (or nothing) in `config\pins.toml`. |
 | `the generated pins.iss says commit '<a>' but this build resolved '<b>'` | A stale cached `-DRBBLITZ_EMBED_EXTRA_ARGS`, which would ship a setup executable claiming to be another build. Delete `installer\out\build` and build again. |
 | The wizard is up but nothing happens, then it fails after ten minutes | The helper died silently. Its own log is next to the install folder (`rbblitz-probe.log` in the temporary directory while the wizard is still open); `install-report.txt` in the finished install has the rest. |

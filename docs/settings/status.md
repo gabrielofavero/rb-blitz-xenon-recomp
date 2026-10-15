@@ -817,12 +817,10 @@ implementation for this handover; the next agent should resume from the working 
 The original request was to finish the in-game settings feature described by the planning MDs and make
 startup-critical settings apply before game processing; the user noticed the retail "Loading settings"
 message *after* pressing A and questioned whether resolution was applied too late. This audit found
-substantial missing wiring and bugs. The user then specified the resolution behavior, superseding the
-old benchmark requirement:
-
-> Default resolution is Auto. At startup, determine the best resolution for the current display and
-> apply it immediately. Respect a compatible manual choice on later boots. If that choice becomes
-> incompatible (for example, 4K saved, now a 1080p display), switch back to Auto.
+substantial missing wiring and bugs. The resolution behavior superseded the old benchmark
+requirement: resolution defaults to Auto, which picks the best size for the current display and
+applies it immediately at startup; a compatible manual choice survives later boots, and one that
+becomes incompatible (for example, 4K saved but now a 1080p display) switches back to Auto.
 
 No GPU benchmark is wanted — a display compatibility policy, not a performance claim — and manual
 graphics preferences still survive temporary recovery/fallback. Another session's ultrawide work in

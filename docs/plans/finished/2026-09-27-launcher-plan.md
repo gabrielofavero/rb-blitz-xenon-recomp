@@ -855,15 +855,12 @@ one-click install are in scope now; a store, a mod browser and everything else o
   a build at a test server, which is how the path is exercised without a release existing.
 
 > **Retired 2026-10-15 (supersedes this whole D19 section).** D19's check was removed from
-> Controller Settings at the owner's direction: *"controller settings shouldn't check for updates.
-> Its a separated setting, not a launcher."* The `Update` control, the prompt, the manifest fetch,
+> Controller Settings: the `Update` control, the prompt, the manifest fetch,
 > the compiled-in `manifest_url`, `--dump-update` and `--no-update-check` are gone, along with
 > `controller-settings/src/update_check.{h,cpp}` and `src/updater.{h,cpp}` and their test target;
 > `[update] declined_version` survives as preservation data. What replaced it is the release model
-> of [`2026-10-15-release-model.md`](2026-10-15-release-model.md): three products, one file per
-> release, and two bootstraps — `RockBandBlitzSetup-latest.exe` for the newest release and
-> `RockBandBlitzSetup-nightly.exe` for the newest build of main (`installer/README.md`, section
-> "The three products"). `update.toml` is still generated and is **no longer published**: a release
+> of [`2026-10-15-release-model.md`](2026-10-15-release-model.md): one file per release — the setup
+> executable itself. `update.toml` is still generated and is **no longer published**: a release
 > is one file. Everything above is kept as the record of what D19 was and why; nothing in it
 > describes the tree any more. The updater executable itself is still built and placed exactly as
 > described here, but nothing starts it.

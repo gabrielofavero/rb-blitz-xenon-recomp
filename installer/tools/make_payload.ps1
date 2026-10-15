@@ -214,7 +214,11 @@ if ($missing.Count -gt 0) {
 }
 
 if ($Clean -and (Test-Path -LiteralPath $PayloadDir)) {
-    Remove-Item -LiteralPath $PayloadDir -Recurse -Force
+    # .NET's own recursive delete, not Remove-Item -Recurse: Windows PowerShell 5.1's
+    # recursion can fail with a spurious "Could not find file" for a file it did manage
+    # to delete - measured 2026-10-15, on this directory, on msvcp140_atomic_wait.dll,
+    # which aborted the rebuild after deleting only part of the old snapshot.
+    [System.IO.Directory]::Delete((Resolve-Path -LiteralPath $PayloadDir).Path, $true)
 }
 New-Item -ItemType Directory -Force -Path $PayloadDir | Out-Null
 

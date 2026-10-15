@@ -1,8 +1,7 @@
 # 2026-10-15 — the native discovery bar (the P6 overlay retired)
 
-**Owner request (2026-10-15), verbatim:** *"as much as the generated load bar for dlc adds more
-context, i dont like that it is not game native. I want the in game, native bar and the info
-(discovering, load song information etc) to be real in game text"*.
+**Owner request (2026-10-15).** The generated overlay P6 added did not read as game-native: the
+in-game bar and its info (*discovering*, *load song information*, …) had to be the title's own.
 
 **What changed.** The host-side ImGui progress overlay P6 added (2026-10-14) is retired. The
 discovery screen is the title's own drawing again: the connect panel's `progress_bar.grp` /

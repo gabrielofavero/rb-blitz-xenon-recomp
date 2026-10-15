@@ -111,11 +111,9 @@
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
 AppName={#AppName}
 ; What the wizard calls this build: the product plus the version of the recompiled
-; build inside it. A pinned release says 0.1.0; a rolling build of main says
-; nightly-<commit>, so the two are tellable apart in a taskbar, in Add/Remove
-; Programs and in a screenshot of a failure (measured 2026-10-15: both said
-; "version 0.1.0"). AppVersion stays the numeric pins version, which is what the
-; version resource needs.
+; build inside it. It is the [installer] version unless build.ps1 was told to
+; record another payload version (tools/embed_config.cpp derives it). AppVersion
+; stays the numeric pins version, which is what the version resource needs.
 AppVerName={#AppVerName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}

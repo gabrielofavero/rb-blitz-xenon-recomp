@@ -410,7 +410,7 @@ struct Arguments {
 };
 
 // The commit of the recompiled build is recorded in every install manifest, so a
-// ref cannot be compiled in: build.ps1 resolves "latest" and refs with git, and a
+// ref cannot be compiled in: build.ps1 resolves "HEAD" and refs with git, and a
 // build that does not go through the script has no step that could.
 bool IsCommitId(std::string_view text) {
   return text.size() == 40 && std::all_of(text.begin(), text.end(), [](char c) {
@@ -423,7 +423,7 @@ std::string Usage() {
          "--ultimate-fingerprints <f> --header <f> --ispp <f> --update-manifest <f>\n"
          "                             [--payload-version <v>] [--payload-url <u>]\n"
          "                             [--payload-sha256 <h>] [--payload-size <n>]\n"
-         "                             [--payload-commit <id>|none]\n";
+         "                             [--payload-commit <id>]\n";
 }
 
 bool ParseArguments(int argc, char** argv, Arguments* out) {
@@ -466,12 +466,10 @@ bool ParseArguments(int argc, char** argv, Arguments* out) {
     } else if (name == "--payload-size") {
       out->overrides["payload.size"] = *value;
     } else if (name == "--payload-commit") {
-      // `none` is the way a build says "this product ships no recompiled build of
-      // its own", which is what either bootstrap is: it installs the newest build of
-      // its channel, so naming a commit here would name the wrong build. An
-      // empty value cannot spell it - the argument list is a CMake list, where an
-      // empty element disappears and the next switch becomes this one's value.
-      out->overrides["payload.commit"] = *value == "none" ? std::string() : *value;
+      // An empty value cannot spell "record nothing" - the argument list is a CMake
+      // list, where an empty element disappears and the next switch becomes this
+      // one's value. Set commit = "" in pins.toml to record nothing instead.
+      out->overrides["payload.commit"] = *value;
     } else {
       Fail(std::string("unknown argument ") + std::string(name));
       return false;
@@ -573,7 +571,7 @@ int main(int argc, char** argv) {
   const std::string pinned_commit = payload->String("commit");
   if (!pinned_commit.empty() && !IsCommitId(pinned_commit)) {
     Fail("[payload] commit '" + pinned_commit +
-         "' is not a 40-character commit id: installer\\build.ps1 resolves \"latest\" and refs "
+         "' is not a 40-character commit id: installer\\build.ps1 resolves \"HEAD\" and refs "
          "with git before the pins are compiled in (or write a commit id in pins.toml)");
     return 1;
   }
@@ -599,9 +597,9 @@ int main(int argc, char** argv) {
   }
   // What the wizard calls this build, which is not the same thing as the version of
   // the project the installer came from: the title bar and Add/Remove Programs say
-  // what is *installed*. A pinned release installs 0.1.0 and is titled that way; a
-  // rolling build of main installs nightly-<commit>, because that is what it is (see
-  // build.ps1, which passes --payload-version for exactly this).
+  // what is *installed*. `[payload] version` is empty in the repository, so the
+  // [installer] version is what a normal build titles itself with; build.ps1 can
+  // pass --payload-version to record something else.
   const std::string payload_version = payload->String("version");
   const std::string app_ver_name =
       payload_version.empty() ? installer->String("version") : payload_version;

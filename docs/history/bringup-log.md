@@ -1980,13 +1980,12 @@ recommends.
 ## Mouse navigation, second pass: the travel the clamps ate, and a click that waits (2026-09-22)
 
 The section above ends with "it is a menu device, not an analog one", and the first
-report from actually using it is about the half that sentence does not cover:
+report from actually using it is about the half that sentence does not cover: the
+pointer should land on the option it is over instantly, and the results read as
+inconsistent — sometimes an offset, sometimes nothing, as if it tried to navigate
+there instead of teleporting.
 
-> if my mouse is on an option, it should go there instantly. I'm finding results
-> inconsistent: sometimes there is offset, sometimes it doesn't work, because I think
-> it tries to navigate there instead of teleporting to the option.
-
-Two separate things are in that sentence, and both were real. The **offset** was two
+Two separate things are in that report, and both were real. The **offset** was two
 clamps in the stepper deleting travel, which in a relative model is exactly an offset;
 the **"doesn't work"** was those same clamps plus a button delivered while the walk it
 had asked for was still in flight. Neither is a setting, so both are code.

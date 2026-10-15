@@ -82,7 +82,6 @@ set(RBBLITZ_HELPER_SOURCES
     src/install.cpp
     src/main.cpp
     src/paths.cpp
-    src/release_api.cpp
     src/stfs.cpp
     src/util.cpp
     src/zip.cpp)
@@ -169,7 +168,6 @@ if(BUILD_TESTING)
         src/inflate.cpp
         src/install.cpp
         src/paths.cpp
-        src/release_api.cpp
         src/stfs.cpp
         src/util.cpp
         src/zip.cpp)

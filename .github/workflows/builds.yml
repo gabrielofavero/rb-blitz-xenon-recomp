@@ -1,20 +1,11 @@
-# Builds the Rock Band Blitz installer and publishes it.
+# Builds the Rock Band Blitz installer from a tag and publishes it.
 #
-# The release model is three products and one file per release (installer/README.md,
-# section "The three products"):
-#
-#   * a push to main publishes a *prerelease* - tagged nightly-<date>-<commit> - whose
-#     one asset is the complete package for that commit. Prereleases are what the
-#     nightly bootstrap installs, and GitHub's newest-release endpoint skips them, so
-#     nothing here ever reaches somebody who asked for the newest *release*.
-#
-#   * a tag publishes a release: the complete package built from the tagged commit,
-#     named after the pinned version, with the same one file. This is what the latest
-#     bootstrap installs, and what the release page shows.
-#
-#   * the two bootstraps are not release assets - they never change, because what they
-#     install is whatever their channel's newest build is - so they are built here on
-#     demand and uploaded as workflow artifacts, which is where a link to them points.
+# The release model is one product and one file per release (installer/README.md,
+# section "The one product"): the complete package built from the tagged commit, whose
+# one asset is the setup executable itself - no manifest, no payload archive, no
+# checksum file to keep in step with it. A release is cut by pushing a tag that matches
+# [installer] version in installer\config\pins.toml; for an installer that is not a
+# release, run installer\build.ps1 on the machine that has the game data.
 #
 # Everything runs on a self-hosted Windows runner, and that is a fact about the
 # project rather than a preference: building the game needs `game/default.xex` and the
@@ -24,24 +15,19 @@
 # below, and keep the game data where the build expects it.
 #
 # Nothing in this file is needed to play the game, and nothing in it runs on a
-# developer's machine unless they push to main or cut a tag.
+# developer's machine unless they push a tag.
 
 name: builds
 
 on:
   push:
-    branches: [main]
     tags: ['*']
-  # Manual runs: both bootstraps, with no release published. This is how a bootstrap
-  # is obtained after a change to it.
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  # One build per branch or tag at a time; a second push to main waits rather than
-  # publishing two prereleases that race each other.
+  # One build per tag at a time.
   group: builds-${{ github.ref }}
   cancel-in-progress: false
 
@@ -87,35 +73,23 @@ jobs:
           $version = (Select-String -Path installer\config\pins.toml -Pattern '^\s*version\s*=\s*"([^"]+)"' |
                       Select-Object -First 1).Matches[0].Groups[1].Value
           if (-not $version) { throw 'installer\config\pins.toml names no [installer] version' }
-          $short = '${{ github.sha }}'.Substring(0, 7)
-          if ('${{ github.ref_type }}' -eq 'tag') {
-            # A tag that does not match the pinned version would publish a release
-            # whose file name says one version and whose installer says another, and
-            # the installer's own title says the third thing this is not. Refused.
-            $tag = '${{ github.ref_name }}'.TrimStart('v')
-            if ($tag -ne $version) {
-              throw ("the tag ($tag) and the pinned version ($version) disagree: bump " +
-                     "[installer] version in installer\config\pins.toml, or tag $version")
-            }
-            "release=pinned" >> $env:GITHUB_OUTPUT
-            "name=RockBandBlitzSetup-$version" >> $env:GITHUB_OUTPUT
-            "title=Rock Band Blitz $version" >> $env:GITHUB_OUTPUT
-          } else {
-            "release=nightly-${{ github.run_number }}-$short" >> $env:GITHUB_OUTPUT
-            "name=RockBandBlitzSetup-nightly-$short" >> $env:GITHUB_OUTPUT
-            "title=Rock Band Blitz nightly $short" >> $env:GITHUB_OUTPUT
+          # A tag that does not match the pinned version would publish a release
+          # whose file name says one version and whose installer says another.
+          # Refused.
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          if ($tag -ne $version) {
+            throw ("the tag ($tag) and the pinned version ($version) disagree: bump " +
+                   "[installer] version in installer\config\pins.toml, or tag $version")
           }
-          Write-Host "product: $('${{ github.ref_type }}') -> $((Get-Content $env:GITHUB_OUTPUT | Select-String 'name='))"
+          "name=RockBandBlitzSetup-$version" >> $env:GITHUB_OUTPUT
+          "title=Rock Band Blitz $version" >> $env:GITHUB_OUTPUT
+          Write-Host "product: tag ${{ github.ref_name }} -> RockBandBlitzSetup-$version.exe"
 
       - name: Build the installer
         run: |
-          # A tag pins the commit it names (+PayloadCommit); main is the rolling build
-          # of what was checked out, which is what pins.toml's own "latest" pin means.
-          $args = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', 'installer\build.ps1')
-          if ('${{ github.ref_type }}' -eq 'tag') {
-            $args += @('-PayloadCommit', '${{ github.sha }}')
-          }
-          pwsh @args
+          # The tagged commit is the commit the release records: -PayloadCommit is
+          # passed explicitly so the install manifest names it.
+          pwsh -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1 -PayloadCommit '${{ github.sha }}'
 
       - name: Publish the one file
         run: |
@@ -133,56 +107,8 @@ jobs:
             "Built from commit ${{ github.sha }}."
           ) -join "`n"
 
-          if ('${{ github.ref_type }}' -eq 'tag') {
-            gh release create '${{ github.ref_name }}' $asset `
-              --title '${{ steps.product.outputs.title }}' --notes $notes
-          } else {
-            # A prerelease on purpose: it is a build of main, not a release, and the
-            # `latest` bootstrap must never see it.
-            gh release create '${{ steps.product.outputs.release }}' $asset `
-              --title '${{ steps.product.outputs.title }}' --notes $notes --prerelease `
-              --target '${{ github.sha }}'
-            # Twenty nights of history is plenty to roll back through; older ones are
-            # deleted so the release list stays a list rather than an archive.
-            gh release list --limit 200 --json tagName,createdAt,isPrerelease |
-              ConvertFrom-Json |
-              Where-Object isPrerelease |
-              Sort-Object createdAt -Descending |
-              Select-Object -Skip 20 |
-              ForEach-Object { gh release delete $_.tagName --yes --cleanup-tag }
-          }
+          gh release create '${{ github.ref_name }}' $asset `
+            --title '${{ steps.product.outputs.title }}' --notes $notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  bootstraps:
-    name: the two bootstraps (artifacts, never release assets)
-    runs-on: [self-hosted, windows, x64]
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - name: Check out this repository with its submodule
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Build both bootstraps
-        run: |
-          # They carry no payload, so they need neither the game data nor the game's
-          # build tree: the helper and the pins are the whole of it.
-          pwsh -File installer\build.ps1 -Latest -SkipTests
-          pwsh -File installer\build.ps1 -Nightly -SkipTests
-          Get-ChildItem installer\out\dist\RockBandBlitzSetup-{latest,nightly}.exe |
-            ForEach-Object {
-              $sha = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              Write-Host "$($_.Name): $($_.Length) bytes, sha256 $sha"
-            }
-
-      - name: Upload them
-        uses: actions/upload-artifact@v4
-        with:
-          name: bootstraps
-          path: |
-            installer/out/dist/RockBandBlitzSetup-latest.exe
-            installer/out/dist/RockBandBlitzSetup-nightly.exe
-          if-no-files-found: error

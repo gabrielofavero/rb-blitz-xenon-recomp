@@ -272,7 +272,7 @@ bool Pins::Validate(std::string* error) const {
   }
   if (!payload.commit.empty() && !IsHex(payload.commit, 40)) {
     return fail("[payload] commit has to be a 40-character commit id, or empty: a ref or "
-                "\"latest\" is resolved by installer/build.ps1 before the pins are compiled in");
+                "\"HEAD\" is resolved by installer/build.ps1 before the pins are compiled in");
   }
   if (ultimate.version.empty()) {
     return fail("[ultimate] version is required");
