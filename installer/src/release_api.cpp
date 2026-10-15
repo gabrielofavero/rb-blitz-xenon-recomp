@@ -513,7 +513,10 @@ bool ParseNewestNightlyJson(std::string_view json, LatestRelease* out, std::stri
   }
 
   if (seen == 0) {
-    SetError(error, "the release API answer has no releases in it");
+    SetError(error,
+             "this repository has published nothing yet: there is no build of main to install "
+             "(the continuous build publishes one prerelease per commit, and the newest nightly "
+             "is the newest of them)");
   } else if (!any_prerelease) {
     // The honest answer when a repository has only ever cut releases: there is no
     // build of main to install, and the user should be sent to the release one.
@@ -585,8 +588,7 @@ std::string NewestMainCommitApiUrl(std::string_view homepage_url) {
   return S(base, "/commits/main");
 }
 
-bool ParseMainCommitSha(std::string_view json, std::string* out, std::string* error) {
-  out->clear();
+bool ParseMainCommitSha(std::string_view json, std::string* out, std::string* error) {  out->clear();
   std::string sha;
   if (!FieldString(json, "sha", &sha) || sha.empty()) {
     // A 404 body, or a resource that is not a commit: either way there is no tip to
@@ -597,6 +599,15 @@ bool ParseMainCommitSha(std::string_view json, std::string* out, std::string* er
   }
   *out = std::move(sha);
   return true;
+}
+
+std::string CommitApiUrlFrom(std::string_view channel_api_url) {
+  constexpr std::string_view kReleases = "/releases";
+  const std::size_t at = channel_api_url.find(kReleases);
+  if (at == std::string_view::npos || at == 0) {
+    return {};
+  }
+  return S(channel_api_url.substr(0, at), "/commits/main");
 }
 
 std::string CommitMarkerFromName(std::string_view name) {

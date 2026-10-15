@@ -120,6 +120,15 @@ std::string ReleaseApiUrlFor(ReleaseChannel channel, std::string_view homepage_u
 // installed.
 std::string NewestMainCommitApiUrl(std::string_view homepage_url);
 
+// The same question, asked of the URL the channel was *actually* asked: everything
+// before the trailing `/releases...` plus `/commits/main`. This is what keeps a run
+// pointed at one server (--api, the /LATEST_API= test hook) pointed at that server for
+// both questions - deriving it from the homepage instead sent the commit question to
+// GitHub while the release came from the mock, so a mock could not fail a comparison
+// it was built to fail (found by scripts/acceptance_bootstrap.ps1, leg 5). Empty when
+// the URL names no `/releases` path to replace.
+std::string CommitApiUrlFrom(std::string_view channel_api_url);
+
 // The `sha` of a commit resource, from `GET .../commits/main`.
 bool ParseMainCommitSha(std::string_view json, std::string* out, std::string* error);
 

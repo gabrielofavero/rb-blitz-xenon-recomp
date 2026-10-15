@@ -1694,7 +1694,7 @@ static void TestReleaseApi() {
   // An empty list, and the two shapes swapped between the channels - each of which
   // has to name what it got instead of a missing field.
   CHECK_FALSE(ParseNewestNightlyJson("[]", &nightly, &error));
-  CHECK_CONTAINS(error, "no releases");
+  CHECK_CONTAINS(error, "published nothing yet");
   CHECK_FALSE(ParseNewestNightlyJson(kOneAssetRelease, &nightly, &error));
   CHECK_FALSE(ParseLatestReleaseJson(kReleaseList, &nightly, &error));
   CHECK_CONTAINS(error, "list of releases");
@@ -1755,6 +1755,18 @@ static void TestReleaseApi() {
   CHECK_STR_EQ(NewestMainCommitApiUrl("https://github.com/owner/repo"),
                "https://api.github.com/repos/owner/repo/commits/main");
   CHECK_STR_EQ(NewestMainCommitApiUrl("https://example.invalid/owner/repo"), "");
+
+  // The commit question follows the release question's host: an override that points
+  // a whole run at one server has to point *both* questions there, or a test cannot
+  // make the comparison disagree (which is how this rule was found).
+  CHECK_STR_EQ(CommitApiUrlFrom("https://api.github.com/repos/owner/repo/releases?per_page=30"),
+               "https://api.github.com/repos/owner/repo/commits/main");
+  CHECK_STR_EQ(CommitApiUrlFrom("https://api.github.com/repos/owner/repo/releases/latest"),
+               "https://api.github.com/repos/owner/repo/commits/main");
+  CHECK_STR_EQ(CommitApiUrlFrom("http://localhost:8736/releases?per_page=30"),
+               "http://localhost:8736/commits/main");
+  CHECK_STR_EQ(CommitApiUrlFrom("https://api.github.com/repos/owner/repo/tags"), "");
+  CHECK_STR_EQ(CommitApiUrlFrom(""), "");
 
   // The commit a release names, out of its tag or its file name. The last hex run of
   // seven or more, because the date in front of it is made of hex digits too - which

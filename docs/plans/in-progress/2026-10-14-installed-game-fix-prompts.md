@@ -173,6 +173,13 @@ this prompt is about.
 | Reuse of a current snapshot | `build3-final-2026-10-14.log`: `snapshot: … (matches <tree>)`, `backends: d3d12, vulkan - Vulkan and its loader are in the payload` |
 | Stale detection | `build-2026-10-14.log`: a provenance-less snapshot → `stale` + `action: rebuilding the snapshot from the build tree`; `build5-recovery.log`: a manifest edited to `backends = "d3d12"` → `the snapshot was built for d3d12 and the build tree is configured for d3d12,vulkan` → rebuilt |
 | Deliberate escape hatch | `build4-skippayload.log`: `-SkipPayload` kept the edited snapshot and warned `the kept snapshot was not taken from this build tree: …` |
+> **Naming note (2026-10-15, after the release model changed).** `RockBandBlitzSetup-latest.exe`, as
+> recorded in this prompt, was the complete package built with a rolling commit pin. Since
+> 2026-10-15 that name is the *latest bootstrap* (a downloader that carries no payload), the rolling
+> complete package is `RockBandBlitzSetup-nightly-<commit>.exe`, and a pinned release is
+> `RockBandBlitzSetup-<version>.exe` — [`../finished/2026-10-15-release-model.md`](../finished/2026-10-15-release-model.md).
+> The measurements below are left exactly as they were taken; only the name they used has moved.
+
 | Installed files | `RockBandBlitzSetup-latest.exe` (24,856,075 bytes in the final build, `build6-green-2026-10-14.log`; the exe is not byte-reproducible) silent-installed `/CURRENTUSER` into `out/_swap/p1/install`; the installed `rb_blitz.exe`, `rexgpu-xenos.dll` and `rexruntime.dll` hash-match the build tree, `vulkan-1.dll` 1,452,408 bytes is present, and `install-manifest.toml` records `payload_commit` |
 | Vulkan on the installed copy | `installed-vulkan.log`: `Vulkan instance API version 1.3.290`, `Vulkan device 'NVIDIA GeForce GTX 970': API 1.3.289`, `VulkanPresenter: Created 1280x720 swapchain`, `settings_menu: Renderer offers 2: D3D12, VULKAN`, `settings_boot: presented menu frame` |
 | D3D12 control | `installed-d3d12.log`: the same installed copy with no backend named → `settings_boot: gpu_backend = d3d12`, D3D12 draw/scissor lines, presented frame |

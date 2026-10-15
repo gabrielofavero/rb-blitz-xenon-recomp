@@ -467,8 +467,8 @@ bool ParseArguments(int argc, char** argv, Arguments* out) {
       out->overrides["payload.size"] = *value;
     } else if (name == "--payload-commit") {
       // `none` is the way a build says "this product ships no recompiled build of
-      // its own", which is what a latest downloader is: it installs the newest
-      // release's setup, so naming a commit here would name the wrong build. An
+      // its own", which is what either bootstrap is: it installs the newest build of
+      // its channel, so naming a commit here would name the wrong build. An
       // empty value cannot spell it - the argument list is a CMake list, where an
       // empty element disappears and the next switch becomes this one's value.
       out->overrides["payload.commit"] = *value == "none" ? std::string() : *value;

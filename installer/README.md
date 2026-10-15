@@ -7,8 +7,57 @@ from, whether they want Rock Band Blitz Ultimate, and which shortcuts to create,
 gets a folder with a launchable `rb_blitz.exe` in it — no compiler, no CMake, no
 instructions to follow.
 
+Three products are built from this directory, and four files: the *complete package* — one
+wizard, cut either pinned to a version or rolling from main's tip — and the two *bootstraps*,
+which carry nothing and fetch the newest build of a channel instead ([the section
+below](#the-three-products)). A release publishes exactly one of these files and nothing else.
+
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
+
+## The three products
+
+| Product | What it is | What a release publishes |
+| --- | --- | --- |
+| `RockBandBlitzSetup-<version>.exe` | **The complete package, pinned.** `setup.iss` with the payload inside it: it installs with no network access at all. Built from a pinned commit, named after the version in `config/pins.toml`. | this file, alone |
+| `RockBandBlitzSetup-nightly-<commit>.exe` | **The complete package, rolled.** The same wizard built from the tip of main — what continuous building publishes for every commit. Named after the commit, and so is the version it reports. | this file, alone |
+| `RockBandBlitzSetup-latest.exe` | **The latest bootstrap.** `bootstrap.iss`: it carries no payload and installs nothing. It asks GitHub for the newest *release* of this repository, downloads the one file on it, checks the size and the sha256 GitHub published for it, and runs it. | not published as a release asset — it never changes, so it is built on demand and linked to |
+| `RockBandBlitzSetup-nightly.exe` | **The nightly bootstrap.** The same program asking for the newest build of *main*: the newest release the repository marks as a prerelease. It also reports which commit it installed and whether main has moved on since. | same as above |
+
+Why it is shaped that way:
+
+* **One file per release, always.** A release is the setup executable and nothing
+  else: no manifest, no payload archive, no checksum file to keep in step with it. A
+  release that published a second file would be a release that can be published
+  halfway.
+* **`latest` means a release, `nightly` means main.** GitHub's own `prerelease`
+  flag is what tells the two channels apart, not a naming convention in the tags:
+  `/releases/latest` (what `latest` asks) skips prereleases, so a build of main can
+  never reach somebody who asked for the newest release, and the continuous build
+  publishes one prerelease per commit for `nightly` to find.
+* **A bootstrap is one file that never changes.** What it installs is whatever the
+  newest build of its channel happens to be, so a new release needs no rebuild of it
+  and a user who downloaded it last year gets today's build.
+* **A bootstrap refuses to install a bootstrap.** If the newest build's file is
+  named `RockBandBlitzSetup-latest.exe` or `RockBandBlitzSetup-nightly.exe`, it is
+  itself a downloader, and installing it would loop for ever. That is refused by
+  name, with the fix in the message.
+
+```powershell
+# the complete package, pinned to a commit
+powershell -File installer\build.ps1 -PayloadCommit <40 hex digits>   # RockBandBlitzSetup-<version>.exe
+# the complete package, rolled from this checkout (what main publishes)
+powershell -File installer\build.ps1                                 # RockBandBlitzSetup-nightly-<commit>.exe
+# the two bootstraps
+powershell -File installer\build.ps1 -Latest                          # RockBandBlitzSetup-latest.exe
+powershell -File installer\build.ps1 -Nightly                         # RockBandBlitzSetup-nightly.exe
+```
+
+Each product's window says which build it is — `Setup - Rock Band Blitz nightly-96dce40`,
+`Setup - Rock Band Blitz latest`, `Setup - Rock Band Blitz 0.1.0` — because a screenshot
+of a failure is how most of these get reported and "version 0.1.0" on a build of main
+sends the reader looking in the wrong place. `scripts/acceptance_product_titles.ps1`
+asserts the captions of the products it can open unattended.
 
 ## What the installer does and does not contain
 
@@ -43,15 +92,20 @@ The licence has no page: nothing in this wizard is agreed to, so the GPL-2.0 tex
 is not shown on the way past. It ships with the sources, and the installer is
 built from them.
 
-### The updater: the same wizard, asked for less
+### The updater: the same wizard, asked for less (dormant since 2026-10-15)
 
-`setup.iss` is compiled twice, and `/DUpdaterMode` decides which build the result is
-([details below](#updating)). The updater is the same wizard with the pages it has no question
-about removed — no welcome, no install folder (the install it is updating is registered, so
+`setup.iss` is compiled twice for the complete package, and `/DUpdaterMode` decides which
+build the result is ([details below](#the-updater-executable-and-its-manifest)). The updater is the same wizard with the pages it has
+no question about removed — no welcome, no install folder (the install it is updating is registered, so
 Inno Setup already knows where it is), no shortcuts, no Ultimate pages, no summary — and it
-puts the payload the *release manifest* names in place instead of one of its own. What is left
-is the one question it may have (the game files, when the release says it needs them) and the
-progress bar, and then it opens Controller Settings it came from.
+puts the payload the *release manifest* names in place instead of one of its own.
+
+**Nothing starts it any more.** It was Controller Settings' *Update* control that ran it, and
+that control was removed with D19's update check on 2026-10-15: installing a release is now
+running a setup executable, and the two bootstraps are what fetch the newest one. The updater
+is still built and still placed under the user's local application data, so the machinery stays
+working and tested for whatever the release model decides to do with it next; the manifest it
+reads is no longer published (see [below](#the-manifest-is-no-longer-published)).
 
 ### Shortcuts
 
@@ -151,7 +205,8 @@ A copy of everything the helper did is left next to the game:
 
 | Path | What |
 | --- | --- |
-| `setup.iss` | The wizard: pages, sequencing, progress mapping, uninstall. Presentation only — it has no filesystem, HTTP or crypto support. |
+| `setup.iss` | The wizard: pages, sequencing, progress mapping, uninstall. Presentation only — it has no filesystem, HTTP or crypto support. Also the updater (compiled with `/DUpdaterMode=1`) and, with the payload inside it, the complete package. |
+| `bootstrap.iss` | The two bootstraps: no pages, no install folder, no uninstaller. It asks the helper which build is the newest one for its channel, downloads the one file on that release, checks it and runs it. `-DChannelName=latest\|nightly` decides which; `build.ps1 -Latest`/`-Nightly` passes the channel's own four facts. |
 | `src/` | `rb_blitz_setup_helper.exe`: STFS extraction, zip inflate, WinHTTP download, SHA-256 verification, file placement, manifests. |
 | `src/commands.cpp` | The helper's command line: one command per stage, `--summary` / `--log` / `--progress` for each. |
 | `src/paths.cpp` | The two folders: reading `paths.toml` for the folder page's prefill, checking the answers, and committing them. The file format itself comes from the game (`src/settings/paths.cpp`, compiled in), so the installer cannot write a file the game reads differently. |
@@ -160,8 +215,8 @@ A copy of everything the helper did is left next to the game:
 | `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its Controller Settings and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`), recording the snapshot's provenance in the manifest. |
 | `tools/payload_provenance.ps1` | The provenance checks the two scripts share: which backends a build tree was configured with, how to read the manifest back, and whether a snapshot is really the tree it claims to be a copy of. `build.ps1` decides with it whether an existing snapshot may be reused. |
 | `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/installer/`. |
-| `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest Controller Settings checks and an updater installs from. |
-| `build.ps1` | The release entry point: Controller Settings, the payload, the helper, the tests, the images, the updater, the setup executable, `update.toml`. |
+| `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest the dormant updater would install from. It also derives `AppVerName` from the payload version, which is what makes a rolling build call itself `nightly-<commit>` rather than `0.1.0`. |
+| `build.ps1` | The build entry point for all three products: Controller Settings, the payload, the helper, the tests, the images, the updater, and the setup executable that is the right one for what was asked (`-Latest`, `-Nightly`, `-PayloadCommit`, or none of them for a rolling package). |
 | `tests/installer_tests.cpp` | The helper's test suite (`ctest`), dependency-free and game-data-free. |
 | `out/` | Build output. Nothing in it is committed. |
 
@@ -229,71 +284,55 @@ using the redistributable DLLs; those travel with the payload, which is why
 
 ## How the recompiled build travels
 
-One of two modes, chosen at build time:
+Everything the complete package installs is *inside* it, so an install needs no
+network access at all. That is what a release, a rolling build and a user who keeps
+last year's bootstrap all rely on; the bootstraps are the ones that fetch
+([the three products](#the-three-products)).
 
-* **Embedded** (default). `out\payload` is compressed into the setup executable,
-  so the installer needs no network access at all. The setup exe is then about
-  15 MB bigger than the payload.
-* **Downloaded at install time** (`-PayloadUrl -PayloadSha256 [-PayloadSize]`).
-  Nothing is embedded; the wizard checks free space against `-PayloadSize` and the
-  helper downloads the release asset, verifies its SHA-256, extracts it into
-  `<install folder>\.staging` and deletes the archive before moving the files into
-  place. Nothing else about the install differs.
-
-The recompiled build is GPL-2.0 and is ours, so embedding it is a packaging choice,
-not a licensing one. The Ultimate mod is the opposite — see below.
+`setup.iss` still knows one older way to get the payload: the wizard downloads a
+pinned payload archive at install time (`-PayloadUrl -PayloadSha256 [-PayloadSize]`)
+instead of carrying one. It is kept working because it is the engine the updater
+installs with — and it is **not** what a release uses: a release publishes one file,
+so putting the payload in a second file would be putting a release on two files.
 
 ### Cutting a release
 
-```powershell
-# 1. the build the installer will put on disk, plus the asset to publish
-powershell -ExecutionPolicy Bypass -File installer\tools\make_payload.ps1 -Clean -Zip
-
-# 2. publish installer\out\payload.zip as a release asset, then build the setup
-#    exe against the URL and the hash of what you just published
-powershell -ExecutionPolicy Bypass -File installer\build.ps1 `
-    -PayloadUrl 'https://github.com/<owner>/<repo>/releases/download/<tag>/payload.zip' `
-    -PayloadSha256 '<64 hex characters>' -PayloadSize <bytes> -SkipTests
-```
-
-`-SkipTests` is required for a download-mode build: the suite cross-checks the
-pins embedded in `pins.toml` against a command-line pin, and by design they
-differ. It is the *only* thing that fails; run the suite once in embed mode (the
-default) and it covers the same code.
-
-This is also the mode a release has to be cut in to be **updatable**: an update installs the
-payload the release manifest names, and a build that embedded its payload pinned no download
-for the manifest to name. `build.ps1` says so at the end of an embed-mode build rather than
-leaving it to be discovered by a user whose *Update* button does nothing.
-
-`build.ps1` prints the three assets a release publishes; publish all of them:
-
-| Asset | What it is |
-| --- | --- |
-| `RockBandBlitzSetup-<version>.exe` | the setup executable the user downloads |
-| `update.toml` | the release manifest: what Controller Settings checks, and what the updater installs from |
-| the payload archive `-PayloadUrl` points at | what the updater fetches, and what `-PayloadSha256`/`-PayloadSize` were measured from |
-
-Neither the payload zip nor the setup exe is byte-reproducible across machines
-(the zip depends on the deflate implementation that wrote it, the exe on the
-payload directory ISCC happens to find), so publish the checksums `build.ps1`
-prints rather than a fixed one. `update.toml` records those same numbers, so a
-release whose asset is re-uploaded with different bytes needs `update.toml`
-regenerated too.
-
-Either half can be published only after the audit has looked at it, because a
-payload is the one artefact that reaches somebody else's machine:
+A release is the complete package and nothing else:
 
 ```powershell
+# 1. the build itself, from the commit the release is for
+cmake --preset win-amd64-release; cmake --build --preset win-amd64-release
+
+# 2. the package: pinned to the commit, named after the version in pins.toml
+powershell -File installer\build.ps1 -PayloadCommit <40 hex digits>
+
 # 3. what ships, and what must never be in it (exit 0 = nothing was)
-powershell -ExecutionPolicy Bypass -File scripts\audit_distributable.ps1
+powershell -File scripts\audit_distributable.ps1
+
+# 4. publish installer\out\dist\RockBandBlitzSetup-<version>.exe as the release's
+#    only asset, and write the sha256 build.ps1 printed into the release notes
 ```
 
-It reads the payload allow-list, the game and mod fingerprints, the frozen
-toolchain paths and `git ls-files`, and it is the check that found the build
-machine's `__FILE__` path inside the first payload - [distributable.md](../docs/guides/distributable.md)
-has the finding, the fix and the two deliberate failures that prove the check can
-fail.
+Builds of main need nobody at all: `.github/workflows/builds.yml` builds a commit as
+it lands, names the package after it (`RockBandBlitzSetup-nightly-<commit>.exe`) and
+publishes it as a **prerelease** — one file, tagged `nightly-<date>-<commit>`. That
+prerelease is what the nightly bootstrap installs, and GitHub's newest-release
+endpoint skips it, so the latest bootstrap ignores it. The workflow keeps the newest
+twenty of them and deletes older ones, so the release list stays a list.
+
+The two bootstraps are built by the same workflow on demand and uploaded as workflow
+artifacts: they never change, so they are not release assets.
+
+Neither the setup executable nor the payload inside it is byte-reproducible across
+machines (the exe depends on the payload directory ISCC happens to find, and a payload
+zip on the deflate implementation that wrote it), so publish the checksum `build.ps1`
+printed rather than a fixed one.
+
+A payload still may not be published without the audit having looked at it, because a
+payload is the one artefact that reaches somebody else's machine, and the audit is
+what found the build machine's `__FILE__` path inside the first one —
+[distributable.md](../docs/guides/distributable.md) has the finding, the fix and the
+two deliberate failures that prove the check can fail.
 
 ### Recording which build this is
 
@@ -330,43 +369,30 @@ id in `pins.toml`, or pass `-PayloadCommit`.
 
 ## Updating
 
-Controller Settings checks for a newer release every time it starts and offers to install it
-([controller-settings/README.md](../controller-settings/README.md), section "Checking for updates"). Both halves of
-that are built from this directory, and they are the two build products described below: a
-release manifest, and a second build of the wizard that installs a release it did not come with.
-That second build is administrative for the same reason the setup executable is (2026-10-14):
-what it updates is an install in `C:\Program Files`, so accepting an update asks for the
-elevation that install asked for.
+**There is no update check any more.** Controller Settings used to ask for a release
+manifest on every start, offer an update, and run an updater that installed the build
+the manifest named (D19 of [2026-09-27-launcher-plan.md](../docs/plans/finished/2026-09-27-launcher-plan.md)). That was
+removed on 2026-10-15 at the owner's direction — *"controller settings shouldn't check for
+updates. It's a separated setting, not a launcher"* — and with it went the control, the prompt,
+the manifest URL compiled into the executable, and the two modules behind them.
 
-### `update.toml`: the release manifest
+What replacing an install means now:
 
-Generated by `tools/embed_config.cpp` from `config/pins.toml`, so the version in it cannot drift
-from the version the setup executable is named after, and published as a release asset named
-`update.toml` (see "Cutting a release"). It is read twice, by two different programs:
+| What the user wants | What they do |
+| --- | --- |
+| the newest release | run `RockBandBlitzSetup-latest.exe`, or download the newest release's setup executable and run it |
+| the newest build of main | run `RockBandBlitzSetup-nightly.exe` |
+| one exact version | download that release's `RockBandBlitzSetup-<version>.exe` and run it |
 
-| Reader | Keys it uses | What it decides |
-| --- | --- | --- |
-| Controller Settings | `version`, `requires_game_data`, `payload_url` | whether a newer release exists, whether it is worth asking about, and whether accepting it will ask for the game files |
-| the updater | `payload_version`, `payload_url`, `payload_sha256`, `payload_size`, `payload_commit` | what to install, from where, and what it must hash to |
+All three end the same way: a wizard installs over what is there, keeping the user's
+game data, DLC library and saved games, and replacing the files it owns. Nothing checks
+for anything in the background, nothing asks on a timer, and an install that nobody
+touches stays exactly as it is.
 
-`schema_version` is the manifest's own shape — `1` today, `kUpdateManifestSchemaVersion` in
-`src/config.h`. An updater or Controller Settings that reads a manifest with a schema it does not know
-refuses it and says so instead of guessing, which is what makes it safe for a future release to
-add keys.
+### The updater executable and its manifest
 
-The URL Controller Settings checks is `[update] manifest_url` in `pins.toml`, and it names the asset of
-the *latest* release (`.../releases/latest/download/update.toml`): GitHub resolves that to the
-newest release, so Controller Settings compiled today keeps finding tomorrow's release without being
-rebuilt. `[update] requires_game_data` is this release's answer to "does the payload change what
-the game reads out of the user's own game files": `false` — the usual case — keeps the game data
-that is already installed, and `true` has the updater ask for the package or the folder again.
-
-### `RockBandBlitzUpdater.exe`: the second build of the wizard
-
-`build.ps1` compiles `setup.iss` twice. The first build is the setup executable the user
-downloads; the second passes `/DUpdaterMode=1` and produces the updater, which carries **no
-payload** — it installs the build the release manifest names — and the setup executable embeds
-it. The setup then places it under the user's own local application data:
+`RockBandBlitzUpdater.exe` (the same wizard with `/DUpdaterMode=1`) is still built and still
+placed by the setup executable under the user's own local application data:
 
 ```
 %LOCALAPPDATA%\rb_blitz\update\RockBandBlitzUpdater.exe
@@ -374,35 +400,56 @@ it. The setup then places it under the user's own local application data:
 
 Deliberately **not** in the install folder, which is the game's own: the payload audit allows
 what may ship there, and a second copy of an installer in it would be one more file to explain.
-`[UninstallDelete]` removes it with the rest, and Controller Settings resolves the same path
-(`kUpdateDirName` in `controller-settings/src/updater.cpp`).
+What the updater does, when something runs it: fetch a release manifest over the URL pinned in
+`config/pins.toml`, install the payload it names, import the game data *or* keep the one that is
+there according to `requires_game_data`, write the manifest and the report with the **new**
+version and commit, and open Controller Settings again.
 
-What the updater does, in order: fetch `update.toml` (the wizard's own copy of the helper does
-it, over the pinned URL — the manifest is the only thing it needs to know), install the payload
-it names, import the game data *or* keep the one that is there according to
-`requires_game_data`, write the manifest and the report with the **new** version and commit, and
-open Controller Settings again.
+**Nothing runs it**, and that is a deliberate, recorded state rather than an oversight:
 
-Two details are worth knowing before changing any of it: Inno Setup records `AppVersion` — the
-  version of the executable that ran — and an updater is older than the release it installs, so
-  `CurStepChanged(ssDone)` writes the manifest's version into the uninstall entry. Without it, a
-  machine that had been updated twice would report the version of the first updater it ever ran,
-  and the next real install would offer to "update" an install that is already newer.
-* **It does not touch shortcuts, the Ultimate mod, or the helper.** `[Tasks]` and `[Icons]` are
-  compiled out of it, the mod is neither reinstalled nor removed, and the helper is placed only
-  when it is missing: the updater's own helper belongs to whatever release last put the updater
-  in place, which can be older than the one a later release left behind, and an update that moved
-  a file backwards would be worse than one that left it alone. A full install is what refreshes
-  the helper and the updater together — which is also the route for a manifest whose
-  `schema_version` this updater does not understand: it says so and names the release page rather
-  than guessing at a document it cannot read.
+* its only caller was Controller Settings' *Update* control, which no longer exists;
+* the manifest it fetches (`update.toml`) is **no longer published**: a release is one file,
+  and the manifest would be a second one. A machine that ran it today would fetch a 404 and
+  say so.
 
-An install made by an *older* setup executable has no updater under the application data. The
-Controller Settings then opens the release page instead of running one, and records the version as
-answered — the user was told, which is the whole of what the check promises. Installing a newer
-setup by hand puts the updater in place for the next release.
+It is kept because it is the one piece of the tree that installs a *payload* rather than a
+whole package, and the release model may still want that. Until something calls it, treat it as
+dormant equipment: built, tested by the installer suite, and not part of any user path.
 
-## Configuration: `config/pins.toml`
+Two details are worth knowing before changing any of it. Inno Setup records `AppVersion` — the
+version of the executable that ran — and an updater is older than the release it installs, so
+`CurStepChanged(ssDone)` writes the manifest's version into the uninstall entry. Without it, a
+machine that had been updated twice would report the version of the first updater it ever ran,
+and the next real install would offer to "update" an install that is already newer. And it does
+not touch shortcuts, the Ultimate mod, or the helper: `[Tasks]` and `[Icons]` are compiled out
+of it, the mod is neither reinstalled nor removed, and the helper is placed only when it is
+missing.
+
+An install made by an *older* setup executable has an updater under the application data that
+nothing will ever run. That is fine: it is a dormant file in the user's own folder, and
+`[UninstallDelete]` removes it with the rest.
+
+### The manifest is no longer published
+
+`out/generated/update.toml` is still generated by `tools/embed_config.cpp` from
+`config/pins.toml`, so the version in it cannot drift from the version the setup executable is
+named after. It is no longer **published**: a release is one file, and the manifest would be the
+second one. What it was, for whoever picks the updater up again:
+
+| Reader | Keys it uses | What it decided |
+| --- | --- | --- |
+| Controller Settings (removed) | `version`, `requires_game_data`, `payload_url` | whether a newer release exists, whether it was worth asking about, and whether accepting it would ask for the game files |
+| the updater | `payload_version`, `payload_url`, `payload_sha256`, `payload_size`, `payload_commit` | what to install, from where, and what it must hash to |
+
+`schema_version` is the manifest's own shape — `1` today, `kUpdateManifestSchemaVersion` in
+`src/config.h` — and a reader that does not know it refuses the document instead of guessing,
+which is what makes it safe for a future release to add keys. `[update] manifest_url` in
+`config/pins.toml` still names the *latest* release's `update.toml` (`.../releases/latest/download/
+update.toml`), which is the URL that would keep working forever without a rebuild — if a release
+published the file. `[update] requires_game_data` is this release's answer to "does the payload
+change what the game reads out of the user's own game files": `false` — the usual case — keeps the
+game data that is already installed, and `true` has the updater ask for the package or the folder
+again.
 
 One file, parsed at build time, embedded into both halves:
 

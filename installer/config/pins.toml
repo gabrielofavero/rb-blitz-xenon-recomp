@@ -36,11 +36,14 @@ min_windows_build = "10.0.17763"
 # The recompiled game the installer places. Either embedded in the setup
 # executable at build time (tools/make_payload.ps1 + build.ps1, the default) or
 # downloaded from `url` at install time; `build.ps1 -PayloadUrl/-PayloadSha256`
-# override the values below for a release without editing this file.
+# override the values below for a build without editing this file.
+#
+# The downloaded form is the updater's engine, not a release path: a release
+# publishes exactly one file, so an install that fetched its payload would need a
+# second one on the release page (README.md, section "The three products").
 #
 # Left empty in the repository: a pin that does not exist yet is worse than a
-# clear "no payload source configured" message. The release workflow (README.md,
-# section "Cutting a release") fills it in.
+# clear "no payload source configured" message.
 version = ""
 url = ""
 sha256 = ""
@@ -53,26 +56,33 @@ size = 0
 # installer ever sees a ref. A build that does not go through build.ps1 has
 # nothing to resolve it and refuses a pin that is not a 40-character commit id
 # (write one here, or pass -PayloadCommit <id>); empty means "record nothing".
+#
+# The value decides what the build *is*, and what it calls itself: a commit id is
+# a pinned release (RockBandBlitzSetup-<version>.exe, titled "Rock Band Blitz
+# 0.1.0"), while "latest" is the rolling build of main that continuous building
+# publishes - named RockBandBlitzSetup-nightly-<commit>.exe and titled "Rock Band
+# Blitz nightly-<commit>", because 0.1.0 is the version of the release it is not.
 commit = "latest"
 
 [update]
-# How Controller Settings finds out that a newer release exists, and how it installs it
-# (docs/plans/finished/2026-09-27-launcher-plan.md D19, installer/README.md section "Updating").
+# Dormant since 2026-10-15: Controller Settings no longer checks for updates, so
+# nothing reads `manifest_url` on a schedule any more, and a release no longer
+# publishes the file it points at (README.md, section "Updating"). It is kept - and
+# still compiled into the dormant updater and the helper - so the update path can be
+# picked up again without re-deriving the pins it needs.
 #
-# `manifest_url` is where Controller Settings looks on every start. tools/embed_config.cpp
-# compiles it into Controller Settings and also generates the file it points at
-# (out/generated/update.toml, published as the release asset `update.toml`), so the
-# version Controller Settings compares itself against is this file's installer version and
-# never a second copy of it. The URL names the *latest* release's asset on purpose:
-# GitHub redirects it, so Controller Settings built today keeps finding tomorrow's release
-# without being rebuilt.
+# `manifest_url` is where Controller Settings used to look on every start.
+# tools/embed_config.cpp generates the file it points at (out/generated/update.toml)
+# from this same file, so the version compared against was never a second copy of
+# this one. The URL names the *latest* release's asset on purpose: GitHub redirects
+# it, so a reader built today keeps finding tomorrow's release without being
+# rebuilt.
 manifest_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases/latest/download/update.toml"
 # The folder, under the user's own local application data, that holds the updater
 # the setup executable puts on disk (RockBandBlitzUpdater.exe). It is deliberately
-# not the install folder: Controller Settings' folder carries the game and its payload, and
+# not the install folder: the install folder carries the game and its payload, and
 # a second copy of an installer in it would be one more file to explain (and one more
-# file the payload audit has to allow). Controller Settings resolves the same folder, so the
-# two have to agree: see kUpdateDirName in controller-settings/src/updater.cpp.
+# file the payload audit has to allow).
 dir_name = "rb_blitz"
 # Whether this release changes what the game reads out of the user's own game
 # files. `false` - the usual case, where a release only moves the recompiled

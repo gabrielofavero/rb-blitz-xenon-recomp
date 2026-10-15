@@ -715,8 +715,14 @@ int CommandFetchUpdate(const std::vector<std::string>& args) {
 // channel asks: "the newest build of main" and "the newest commit of main" are two
 // different answers the moment a commit is pushed, and a nightly build should be able
 // to say which of the two the user is about to install.
-std::string FetchMainCommit(const fs::path& dest, std::string* error) {
-  const std::string url = NewestMainCommitApiUrl(EmbeddedPins().installer.homepage_url);
+//
+// The question goes to the server the release question went to - the same `--api`
+// override, the same host - because a comparison between two servers answers nothing.
+std::string FetchMainCommit(const fs::path& dest, const std::string& channel_api_url, std::string* error) {
+  std::string url = CommitApiUrlFrom(channel_api_url);
+  if (url.empty()) {
+    url = NewestMainCommitApiUrl(EmbeddedPins().installer.homepage_url);
+  }
   if (url.empty()) {
     *error = "[installer] homepage_url is not a github.com repository URL";
     return {};
@@ -789,6 +795,16 @@ int CommandResolveBuild(const std::vector<std::string>& args) {
   DownloadResult listing_download;
   std::string error;
   if (!DownloadToFile(listing_request, &listing_download, &error)) {
+    // A 404 on the newest-release endpoint is GitHub's way of saying "this repository
+    // has never published a release", which is a different thing from a network
+    // failure and deserves its own sentence - it is the state of this repository
+    // today, and the answer is the other channel or a release to be cut.
+    if (listing_download.status_code == 404 && channel == ReleaseChannel::kRelease) {
+      return Fail(&context,
+                  S("this repository has no release yet (", api, " answered 404), so there is "
+                    "nothing for the latest build to install: the nightly build installs the "
+                    "newest build of main, and a release is what this channel waits for"));
+    }
     return Fail(&context, S("could not ask ", api, ": ", error));
   }
 
@@ -828,7 +844,7 @@ int CommandResolveBuild(const std::vector<std::string>& args) {
       release_commit = CommitMarkerFromName(release.asset_name);
     }
     std::string head_error;
-    head_commit = FetchMainCommit(dest, &head_error);
+    head_commit = FetchMainCommit(dest, api, &head_error);
     if (head_commit.empty()) {
       log::Warn(S("could not ask main for its newest commit: ", head_error,
                   " - the newest published nightly is installed either way, but this report "

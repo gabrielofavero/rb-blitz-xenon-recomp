@@ -295,7 +295,7 @@ $wrong = Invoke-Bootstrap -Listing $wrongListing -CommitJson (New-CommitObject -
                           -ApiPath $happyPath -Label 'wrong-digest'
 Check 'the bootstrap exits non-zero' ($wrong.ExitCode -ne 0) "(exit $($wrong.ExitCode))"
 Check 'nothing was run' (-not (Test-Path -LiteralPath $wrong.Report))
-Check 'the failure names the mismatch' ((Read-Text -Path $wrong.Log) -match 'sha256') `
+Check 'the failure names the mismatch' ((Read-Text -Path $wrong.Log) -match 'SHA-?256') `
       '- the log does not say what was wrong'
 
 # --- leg 3: the other channel's build -------------------------------------
