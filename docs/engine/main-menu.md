@@ -707,10 +707,17 @@ inside the ark, whose index pins its size, so the array cannot grow past three e
    otherwise (the same gain, loop and FX the panel chose);
 5. hooks the poll (`0x827586D8`). While a song R9 started plays it watches that stream's own position
    (`Stream+0xA0`); at the seam, where the song restarts, the position jumps backwards — the one thing
-   the guest offers as "this track ended" — and R9 loads the next song of the deck onto the same
-   `ShellMusic`, so the menu walks its pool instead of repeating one track. The pool is a shuffled
-   deck: every song is heard before any repeats, the deck reshuffles when it runs out, and the first
-   song of a new deck is never the one that just played
+   the guest offers as "this track ended" — and R9 loads the next song of the rotation onto the same
+   `ShellMusic`, so the menu walks its pool instead of repeating one track. A track that never
+   produces a sample is a load that failed: that song sits out the pass and the next candidate is
+   tried, with a bounded number of tries before the rotation gives up for this boot and hands the
+   menu back to the title's own tracks.
+6. keeps the rotation honest over the **pool** it drew, not over the library: every distinct song of
+   the pool is heard once before any of them is heard again, no song ever follows itself — including
+   across a reshuffle, a menu re-entry or a pool rebuilt by a library refresh, because the order is
+   remembered by song *identity* rather than by position — and a pool that can only offer the song
+   that just played is not a rotation at all: that song plays once and the menu is then given one of
+   the title's own three tracks, rather than looping one song forever
    ([src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h), tests/menu_music_pool_tests.cpp).
 
 Nothing is copied, extracted or written under `game/`, and with R9 off (or no library) nothing is
@@ -743,6 +750,30 @@ stubs still contributing nothing. The rotation over that container was watched l
 `menumusic0:\songs\bangyourhead`, three different songs with no repeat. A second boot of the same
 library opened elsewhere again (`songs\jungleboogie`), so the opening song is not pinned to the
 container's first entry any more.
+
+**Measured — the rotation and its transition cost (2026-10-14, P5).** A fixture library of three
+single-song packages (`Rancid - Maxwell Murder`, `FIDLAR - Wake Bake Skate`,
+`The Beatles - I'll Follow the Sun`, symlinked, so the pool **is** three songs) was held on the main
+menu for two passes with the instrumentation in [shell_music.cpp](../../src/hooks/shell_music.cpp)
+logging the seam and the next track's first samples. One arm's sequence was
+`MaxwellMurder` -> `wakebake` -> `far_ifollowthesun` -> `MaxwellMurder`, the last pick logging
+`opening a new pass over the 3 song(s) of the pool`: every distinct song was heard before any of them
+repeated, no song followed itself, and the song that had just played did not open the new pass.
+Transition cost — measured as **seam -> the next track's first samples** — was a median of **81 ms**
+(81-83 ms over three transitions; an arm with the same fixtures and the earlier index-based deck
+measured 86 ms median and 250 ms maximum). The `ShellMusic::Load` call inside that window took 0-2 ms,
+so the number is the guest's own stream startup plus the audio device, not host work: nothing was
+prebuffered, no load was moved off the guest thread, and no song duration is guessed.
+
+**What the seam really is (open).** The trigger is the guest restarting its own stream, seen as the
+stream's sample counter (`Stream+0xA0`, verified advancing at ~44,100 counts a second) moving
+backwards. Its period is **not** proven to be the file's true end: the same three fixture packages
+wrapped after **109.6 s** in one boot and **93.5 s** in another, which a per-file constant would rule
+out, while the 2026-10-10 measurement recorded ~221 s for a 3:33 commercial track. The reading most
+consistent with all three is that the guest loops the stream at the point its own streaming buffer has
+reached, so the menu can play only the buffered prefix of a track before R9 replaces it (with R9 off,
+the title loops exactly that prefix). Settling it needs the stream object's own length field, which has
+not been located.
 
 ### 5. Where it lives
 

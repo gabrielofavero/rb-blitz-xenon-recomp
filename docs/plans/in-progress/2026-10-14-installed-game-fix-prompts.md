@@ -1,14 +1,16 @@
 # Installed-game review: researched implementation prompts
 
 **2026-10-14 — research complete. P1, P2, P3 and P4 are implemented and verified (their status is
-below); P6 is implemented, with its final installed acceptance recorded below; P5 is not started.**
+below); P6 is implemented, with its final installed acceptance recorded below; P5 is implemented and
+its rotation is measured in an installed copy (its record is also below).**
 This file moved from `plans/todo/` to `plans/in-progress/` when
 P1 landed.
 
 Of section 3's six rows, **Provenance** and **DLC** are now measured in an installed copy (P6's
-acceptance pass, with the per-leg table and the build identity it ran). **Display**, **Settings** and
-**Captions** carry the partial coverage their own records name — no DPI sweep, no injected save
-failure, no in-song capture — and **Music** waits on P5.
+acceptance pass, with the per-leg table and the build identity it ran), and **Music** has the rotation
+and its transition cost measured in an installed copy with the song-end question left open (P5).
+**Display**, **Settings** and **Captions** carry the partial coverage their own records name — no DPI
+sweep, no injected save failure, no in-song capture.
 
 This handoff groups the owner's installed-game test report into six contexts. Preliminary research
 covered the current working tree, local CMake configuration, existing tests, historical findings,
@@ -661,6 +663,127 @@ requires zero repeated audible tracks within the defined exclusion window and
 no unexplained multi-second transition stalls. Record actual runtime evidence
 separately from the existing menu_music_pool unit-test result.
 ```
+
+#### P5 — execution record (2026-10-14)
+
+**What the rotation is now.** `Deck` in [menu_music_pool.h](../../../src/hooks/menu_music_pool.h) — an
+index shuffle that started over whenever the pool changed size — is replaced by a `Rotation` that
+remembers **song keys**:
+
+- every distinct song of the pool is heard once before any of them is heard again, and a pick is
+  never the song that just played; at the pass boundary the song that has just ended is not allowed
+  to open the next pass;
+- a pool rebuilt with the same songs in another order cannot replay a song the pass has already
+  heard, because the history is identity, not position (the same guard covers a library refresh or
+  the toggle going off and on again);
+- a song whose load failed sits out the pass it failed in and is tried again in the next one; three
+  failures retire it from the boot's rotation;
+- a pool that can only offer the song that just played reports "nothing distinct left" rather than
+  repeating it. The runtime then hands the menu one of the title's own three tracks
+  (`sfx/shell/samples/shellmusic_<n>`, the panel's own pool, loaded through the original
+  `ShellMusic::Load` so it is not substituted again) and stops watching it, so the title's music
+  loops exactly as it does without this feature. That is the deliberate end of a one-song library
+  rather than a loop of one song.
+
+**Runtime.** [shell_music.cpp](../../../src/hooks/shell_music.cpp) picks through the rotation, treats
+a track that produces no sample within **3 s** as a failed candidate (quarantine, next candidate, at
+most three in a row, then the title's tracks), and keeps `Play Current Song` in step: the index it
+answers for is the song the rotation actually handed over, and it reads as none whenever the menu is
+not playing one of ours.
+
+**How it was measured.** `out/_swap/p5/run.ps1` boots a build against a disposable user root and a
+fixture library of *N* symlinked single-song packages (so the pool **is** *N*), enters the main menu
+once with `--mnk_mode=1`, and then leaves the pad alone. The instrumentation in `shell_music.cpp`
+logs the only two moments the guest offers: the **seam** (the stream's position jumping backwards,
+logged with the position it had reached — which is the song's own length, measured rather than
+guessed) and the next stream's **first samples**. `out/_swap/p5/report.py <boot.log>` turns those
+lines into a per-transition table. The transition gap is therefore **seam → the next track's first
+samples**: the audio device's own buffer latency sits inside that number and is not separable, and a
+fade the guest writes into the sample data at the seam is not part of it.
+
+**What the rotation covers.** The pool, not the library: `Configure()` samples up to **50** songs out
+of the packages this boot mounted ([menu_music_pool.h](../../../src/hooks/menu_music_pool.h),
+`PoolCap`), and the exclusion rule — no song before every other song of the rotation has been heard —
+is a guarantee about *that sample*. A 1,773-package library is heard on the menu as a 50-song
+rotation, and a different sample every boot; the library-wide promise would need a pool the size of
+the library, which is not what this feature is.
+
+**Evidence** (`out/_swap/p5/`, 2026-10-14; every arm windowed 1280×720 with Vulkan, one A press to
+enter the main menu and then no input at all):
+
+| Arm | Binary | Pool | Transitions | Observed sequence | Gap, median (min–max) |
+| --- | --- | ---: | ---: | --- | ---: |
+| `baseline-short` | build tree, pre-P5 | 3 | 3 | `wakebake` → `MaxwellMurder` → `far_ifollowthesun` → `wakebake` | 86 ms (83–250) |
+| `after-short` | **installed** `CAD559E37F15…` | 3 | **6 (2 passes)** | `MaxwellMurder` → `wakebake` → `far_ifollowthesun` → *(new pass)* `MaxwellMurder` → `far_ifollowthesun` → `wakebake` → *(new pass)* `far_ifollowthesun` | 82 ms (81–83) |
+| `one-short-before` | installed P6 `91079A5D6C95…` | 1 | 3 | `MaxwellMurder` → `MaxwellMurder` → `MaxwellMurder` | — |
+| `after-one-short` | **installed** `CAD559E37F15…` | 1 | 1 | `MaxwellMurder` → *the title's own track* | 83 ms |
+| `one-long` | installed P6 `91079A5D6C95…` | 1 (72 MB file) | 0 in 6:52 | `highvoltage_live` | — |
+
+Each arm's `arguments.txt`, `hashes.json`, `boot.log`, `timeline.txt`, `result.json` (and `final.png`
+where the arm ended on its own) sit in its directory; `out/_swap/p5/report.py <boot.log>` reproduces
+the tables above.
+
+What the arms establish, rule by rule:
+
+- **Every song before any repeat, no song after itself** (`after-short`): six transitions over two
+  full passes of a three-song pool, with the two pass boundaries logged explicitly (`opening a new
+  pass over the 3 song(s) of the pool`) and zero cases of a song following itself. In the second pass
+  the order differed from the first, so the boundary is a fresh pass rather than a repeat of the
+  previous order.
+- **A one-song pool is not a rotation**: the old installed build reloaded the same song at every seam,
+  three times (`one-short-before`: `MaxwellMurder` → `MaxwellMurder` → `MaxwellMurder`). The new build
+  plays it once and then logs `the DLC pool has nothing new to play; the menu goes back to the title's
+  own tracks ("sfx/shell/samples/shellmusic_2.mogg")` (`after-one-short`), after which the poll stops
+  watching, so the track that follows is the title's own and loops as it does without this feature.
+- **The transition gap is small and is not host work**: median 82 ms in the installed arm
+  (`after-short`), 86 ms before it, with the `ShellMusic::Load` call inside that window returning in
+  0–2 ms. The gap is the guest's own stream startup plus the audio device. No prebuffering was added,
+  and no call was moved off the guest thread, because the measurement did not ask for either.
+- **`Play Current Song` follows the audible track**: the pool index the probe answers for is the song
+  the rotation handed over, and it is cleared to none both when a candidate fails and when the menu
+  falls back to the title's own music — so the row reads unavailable exactly when a DLC track is not
+  playing.
+
+**Validation.** `menu_music_pool` is **4,427 checks** in 13 cases — pool identity/dedup/cap/shuffle, the
+rotation hearing every song of a pass before repeating one, 300 picks × 7 pool sizes with no song
+following itself, the one-song rule, identity kept across a rebuilt pool, a failed candidate skipped
+and retried in the next pass (retired after three strikes), and the pass-boundary flag. The whole
+Vulkan-off suite is **39/39** (`ctest --test-dir out\build\rename-tests`, re-run on these sources), and
+`check_docs.py` reports 0 errors. The runtime half is the five arms above rather than the unit tests:
+the "before" legs ran `out/build/win-amd64-release` (the build tree) or the P6 install, and the "after"
+legs ran an installer built from these sources and installed into `out/_swap/p5/install`
+(`rb_blitz.exe` = `CAD559E37F1594AE121C785E871A9AE0F4281A0E158D4166814E83C9D0F1DCA2`; the runtime and
+GPU plugin are the P6 hashes, unchanged).
+
+**Honest limits.** The gap is a *position-based proxy*: the seam is the guest's own stream restart and
+the end is the next stream's first non-zero sample, so the audio device's buffer latency is inside the
+number and neither a fade the guest writes at the seam nor any silence inside a song is separated from
+it (no audio capture exists in this harness). Nothing here proves whether the seam is the file's true
+end — see [main-menu.md](../../engine/main-menu.md) part 2, "What the seam really is (open)": the same
+three fixture packages wrapped at a different point in two boots, so the guest is looping at its
+streaming buffer rather than provably at the end of the file, and a long commercial track may play only
+its buffered prefix on the menu. A failed candidate was **not** induced at runtime (it is pinned by the
+unit tests and by the code path, which needs a package whose stream cannot be opened); duplicate
+packages/aliases, library refresh and menu re-entry are likewise unit-tested only — the runtime arm is
+three distinct packages, and a refresh does not rebuild the music pool today (`SetPool` runs once per
+boot), so the identity-across-rebuild rule has no runtime arm. Long trailing silence, short tracks
+below the 1 s rewind slack, and the 50-song pool boundary were not exercised in a boot.
+
+**Reproduction.** From `<checkout>`: `cmake --preset win-amd64-release` then
+`cmake --build --preset win-amd64-release`; for the installed legs also
+`powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1 -SkipArt -RefreshPayload`
+and a silent `/CURRENTUSER /GAMEMETHOD=folder /ULTIMATESOURCE=none` install. Then
+
+```powershell
+pwsh -File out\_swap\p5\run.ps1 -Label after-short -Build out/_swap/p5/install -Seconds 600 -Fresh
+pwsh -File out\_swap\p5\run.ps1 -Label after-one-short -Build out/_swap/p5/install `
+  -Songs 'Rancid - Maxwell Murder' -Seconds 300 -Fresh
+python out\_swap\p5\report.py out\_swap\p5\after-short\boot.log
+```
+
+`-Songs` is the pool (one song per package, symlinked from a folder of single-song packages outside the
+checkout); `-DlcMenuSongs false` is the control that keeps the title's own tracks. The arm needs no
+particular library: any folder of single-song packages whose names are passed as `-Songs` works.
 
 ### P6 — DLC cache effectiveness, status text, and honest progress
 

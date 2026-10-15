@@ -6,16 +6,18 @@
 //
 // It is deliberately free of the SDK, of guest memory and of any global state, so the
 // two answers that matter - "is the opening song different every boot" and "does a song
-// ever follow itself" - can be reasoned about and tested (tests/menu_music_pool_tests.cpp)
-// without booting the game. shell_music.cpp owns the devices, the hooks and the guest
-// strings; everything here is bookkeeping.
+// ever follow itself, or come back before the pool has been heard out" - can be reasoned
+// about and tested (tests/menu_music_pool_tests.cpp) without booting the game.
+// shell_music.cpp owns the devices, the hooks and the guest strings; everything here is
+// bookkeeping.
 
 #pragma once
 
 #include <algorithm>
 #include <cstddef>
-#include <numeric>
+#include <map>
 #include <random>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -101,51 +103,126 @@ inline int PlayProbeIndex(std::string_view path) {
   return value;
 }
 
-// The play order of the pool: a shuffled deck, dealt to the end and then reshuffled. A
-// per-load pick can hand the same song back twice in a row; a deck cannot, and the first
-// card of a new deck is never the card that just played, so no song ever follows itself.
-class Deck {
+// The rotation over the pool: every song is heard once before any of them is heard again, no song
+// follows itself - including across a reshuffle, a menu re-entry or a rebuilt pool - and a song
+// whose load failed steps aside for the rest of the rotation instead of being handed out again.
+//
+// Two things are deliberate here and worth stating, because they are what the owner's report
+// ("long gaps and repeat") turned into rules:
+//
+//   * **history is by song identity, not by index.** A pool is rebuilt whenever the library it was
+//     drawn from changes (a refresh, or the toggle going off and on again), and indices mean
+//     something different afterwards. The rotation therefore remembers the song *keys* it has
+//     played, so a rebuilt pool cannot hand back a song that has just been heard just because its
+//     index moved.
+//   * **one distinct playable song is not a rotation.** A pool that can only offer the song that
+//     just played reports "nothing distinct left" (`kNoIndex`) rather than repeating it; the caller
+//     decides what the player hears instead (src/hooks/shell_music.cpp hands the menu back to the
+//     title's own three tracks, which is music rather than a loop of one song).
+class Rotation {
  public:
-  explicit Deck(std::mt19937& rng) : rng_(rng) {}
+  explicit Rotation(std::mt19937& rng) : rng_(rng) {}
 
-  // The next index of the pool, or kNoIndex when there is no pool. `pool_size` is the size
-  // of the pool being walked; a different size - a new library, or R9 switched off and on
-  // again - starts a fresh deck.
-  size_t Next(size_t pool_size) {
-    if (pool_size == 0) {
-      Reset();
+  // The pool to rotate over, in draw order. Calling this again with a rebuilt pool keeps the
+  // history: a song that has already been played in this rotation is not new again because the
+  // list it sits in changed shape.
+  void SetPool(std::vector<std::string> names) {
+    pool_ = std::move(names);
+    if (pool_.empty()) {
+      played_.clear();
+      last_.clear();
+    }
+  }
+
+  // The next song to play, or kNoIndex when nothing distinct is left (an empty pool, or a pool
+  // whose only unplayed song is the one that just played).
+  size_t Next() {
+    if (pool_.empty()) {
       return kNoIndex;
     }
-    if (pool_size != size_) {
-      Reset();
-      size_ = pool_size;
-    }
-    if (next_ >= order_.size()) {
-      order_.resize(pool_size);
-      std::iota(order_.begin(), order_.end(), size_t{0});
-      std::shuffle(order_.begin(), order_.end(), rng_);
-      if (order_.size() > 1 && order_.front() == last_) {
-        std::swap(order_.front(), order_[1]);
+    std::vector<size_t> fresh = Candidates();
+    // A pass that has played everything it can is dealt again: this pass's failures get another
+    // chance (a song that failed once is not out for the boot, only for the pass it failed in),
+    // and the song that just played is not the one that opens the new pass.
+    if (fresh.empty()) {
+      failed_.clear();
+      played_.clear();
+      fresh = Candidates();
+      if (!fresh.empty()) {
+        ++rotations_;
       }
-      next_ = 0;
+      last_reshuffled_ = true;
+    } else {
+      last_reshuffled_ = false;
     }
-    last_ = order_[next_++];
-    return last_;
+    if (fresh.empty()) {
+      return kNoIndex;  // one distinct playable song, and it has just played
+    }
+    std::uniform_int_distribution<size_t> pick(0, fresh.size() - 1);
+    const size_t index = fresh[pick(rng_)];
+    played_.insert(pool_[index]);
+    last_ = pool_[index];
+    return index;
   }
 
-  void Reset() {
-    order_.clear();
-    next_ = 0;
-    last_ = kNoIndex;
-    size_ = 0;
+  // A song the menu could not actually start (the stream never appeared, or never advanced): it
+  // steps out of this rotation so the next pick cannot hand it straight back.
+  void MarkFailed(const std::string& name) {
+    if (name.empty()) {
+      return;
+    }
+    const int strikes = ++strikes_[name];
+    failed_.insert(name);
+    if (strikes >= kMaxStrikes) {
+      quarantined_.insert(name);
+    }
   }
+
+  // Did the last Next() start a new pass over the pool? (For the log line, and for a test that
+  // wants to see the boundary rather than infer it.)
+  bool reshuffled() const { return last_reshuffled_; }
+  // How many times a full pass has been dealt, since the first one. Zero before the first pick.
+  size_t rotations() const { return rotations_; }
+  size_t size() const { return pool_.size(); }
+  const std::vector<std::string>& names() const { return pool_; }
+  const std::string& last() const { return last_; }
+  bool failed(const std::string& name) const { return failed_.count(name) != 0; }
+  // A song that has failed enough times to sit out the rest of the boot.
+  bool quarantined(const std::string& name) const { return quarantined_.count(name) != 0; }
 
  private:
+  static constexpr int kMaxStrikes = 3;
+
+  // Every index this pass could still hand out: not quarantined, not already played in this pass,
+  // and - when the pass opens - not the song that just played.
+  std::vector<size_t> Candidates() {
+    std::vector<size_t> fresh;
+    for (size_t i = 0; i < pool_.size(); ++i) {
+      const std::string& name = pool_[i];
+      if (Quarantined(name) || played_.count(name) != 0) {
+        continue;
+      }
+      if (played_.empty() && name == last_) {
+        continue;  // the song that just played never opens the pass that follows it
+      }
+      fresh.push_back(i);
+    }
+    return fresh;
+  }
+
+  bool Quarantined(const std::string& name) const {
+    return quarantined_.count(name) != 0 || failed_.count(name) != 0;
+  }
+
   std::mt19937& rng_;
-  std::vector<size_t> order_;
-  size_t next_ = 0;
-  size_t last_ = kNoIndex;
-  size_t size_ = 0;
+  std::vector<std::string> pool_;
+  std::set<std::string> played_;        // song keys heard in the current pass
+  std::set<std::string> failed_;        // keys that failed in the current pass
+  std::set<std::string> quarantined_;   // keys that failed too often to try again this boot
+  std::map<std::string, int> strikes_;
+  std::string last_;
+  bool last_reshuffled_ = false;
+  size_t rotations_ = 0;
 };
 
 }  // namespace rb_blitz::shell_music

@@ -9,9 +9,13 @@
 //     is counted once, the sample is never larger than the requested size, and it is
 //     shuffled rather than taken in walk order (a merged pack hands over all its songs at
 //     once, so walk order would always open on the same track);
-//   * the deck deals every song once per cycle and never hands the same song back twice in
-//     a row, including across a reshuffle - which is exactly what a per-load random pick
-//     gets wrong.
+//   * the rotation plays every distinct song of the pool before it repeats one, never hands
+//     the song that just played back straight away - including across a reshuffle, a menu
+//     re-entry or a rebuilt pool, because it remembers song *identities* rather than indices -
+//     and, when the pool can only offer the song that just played, says so instead of looping
+//     that one song forever;
+//   * a song whose load failed sits out the pass it failed in, is tried again in the next, and
+//     is retired from the boot's rotation only after repeated failures.
 //
 // No SDK, no game image, no boot: the fixtures are song names.
 
@@ -143,53 +147,143 @@ void TestPoolIsShuffled() {
   CHECK_TRUE(saw_a_different_order);
 }
 
-void TestDeckEmpty() {
-  BeginCase("deck has no card to deal from an empty pool");
+// The song keys of a pool of `count` distinct songs, in pool order.
+std::vector<std::string> PoolKeys(size_t count) {
+  std::vector<std::string> keys;
+  for (size_t i = 0; i < count; ++i) {
+    keys.push_back("song" + std::to_string(i));
+  }
+  return keys;
+}
+
+void TestRotationEmpty() {
+  BeginCase("the rotation has nothing to hand out from an empty pool");
   std::mt19937 rng(1);
-  Deck deck(rng);
-  CHECK_EQ(deck.Next(0), kNoIndex);
+  Rotation rotation(rng);
+  CHECK_EQ(rotation.Next(), kNoIndex);
+  CHECK_EQ(rotation.rotations(), 0);
+  // A pool that appears, then goes away (R9 switched off and on), is not a rotation to keep.
+  rotation.SetPool({"only"});
+  CHECK_TRUE(rotation.Next() != kNoIndex);
+  rotation.SetPool({});
+  CHECK_EQ(rotation.Next(), kNoIndex);
 }
 
-void TestDeckDealsEverySongOnce() {
-  BeginCase("deck deals every song exactly once per cycle");
-  for (size_t size = 1; size <= 8; ++size) {
-    std::mt19937 rng(100u + static_cast<unsigned>(size));
-    Deck deck(rng);
-    std::vector<int> dealt(size, 0);
-    for (size_t i = 0; i < size; ++i) {
-      const size_t index = deck.Next(size);
-      CHECK_TRUE(index < size);
-      ++dealt[index];
-    }
-    for (size_t i = 0; i < size; ++i) {
-      CHECK_EQ(dealt[i], 1);
-    }
-  }
-}
-
-void TestDeckNeverDealsTheSameSongTwiceInARow() {
-  BeginCase("deck never deals the same song twice in a row");
+void TestRotationHearsEverySongBeforeRepeatingOne() {
+  BeginCase("a pass plays every distinct song before any of them is played again");
   for (size_t size = 2; size <= 8; ++size) {
-    std::mt19937 rng(200u + static_cast<unsigned>(size));
-    Deck deck(rng);
-    size_t previous = kNoIndex;
-    for (int deal = 0; deal < 500; ++deal) {
-      const size_t index = deck.Next(size);
-      CHECK_EQ(index == previous, 0);
-      previous = index;
+    std::mt19937 rng(300u + static_cast<unsigned>(size));
+    Rotation rotation(rng);
+    rotation.SetPool(PoolKeys(size));
+    std::set<std::string> heard;
+    for (size_t i = 0; i < size; ++i) {
+      const size_t index = rotation.Next();
+      CHECK_TRUE(index < size);
+      const std::string& key = rotation.names()[index];
+      CHECK_EQ(heard.count(key), 0);
+      heard.insert(key);
+    }
+    CHECK_EQ(heard.size(), size);
+  }
+}
+
+void TestRotationNeverRepeatsTheSongThatJustPlayed() {
+  BeginCase("no song ever follows itself, over as many passes as it is dealt");
+  for (size_t size = 2; size <= 8; ++size) {
+    std::mt19937 rng(400u + static_cast<unsigned>(size));
+    Rotation rotation(rng);
+    rotation.SetPool(PoolKeys(size));
+    std::string previous;
+    for (int deal = 0; deal < 300; ++deal) {
+      const size_t index = rotation.Next();
+      CHECK_TRUE(index != kNoIndex);
+      const std::string key = rotation.names()[index];
+      CHECK_TRUE(key != previous);
+      previous = key;
     }
   }
 }
 
-void TestDeckReshuffles() {
-  BeginCase("deck starts from a different card under different seeds");
-  std::set<size_t> first_cards;
-  for (unsigned seed = 0; seed < 32; ++seed) {
-    std::mt19937 rng(seed);
-    Deck deck(rng);
-    first_cards.insert(deck.Next(8));
+void TestRotationOneSongDoesNotRepeatItself() {
+  BeginCase("a one-song pool plays it once and then has nothing distinct left");
+  std::mt19937 rng(5);
+  Rotation rotation(rng);
+  rotation.SetPool({"only"});
+  CHECK_EQ(rotation.Next(), 0);
+  // The rule the owner's report turned into: not the same song again, for as long as it is the
+  // only distinct thing the pool can offer. The caller hands the menu the title's own tracks here.
+  CHECK_EQ(rotation.Next(), kNoIndex);
+  CHECK_EQ(rotation.Next(), kNoIndex);
+}
+
+void TestRotationKeepsHistoryAcrossARebuiltPool() {
+  BeginCase("a rebuilt pool cannot hand back a song this pass has already played");
+  std::mt19937 rng(6);
+  Rotation rotation(rng);
+  rotation.SetPool({"a", "b", "c"});
+  const size_t first = rotation.Next();
+  const std::string played = rotation.names()[first];
+  // The same songs come back reordered and one is added: identity, not position, decides. A song
+  // that has been heard is not new again because the list around it changed shape.
+  rotation.SetPool({"c", "a", "d", "b"});
+  std::set<std::string> this_pass{played};
+  for (int i = 0; i < 3; ++i) {
+    const size_t index = rotation.Next();
+    CHECK_TRUE(index != kNoIndex);
+    const std::string& key = rotation.names()[index];
+    CHECK_EQ(this_pass.count(key), 0);
+    this_pass.insert(key);
   }
-  CHECK_TRUE(first_cards.size() > 1);
+}
+
+void TestRotationSkipsAFailedSongAndRetriesItNextPass() {
+  BeginCase("a song that failed steps out of the pass, is retried in the next, and is retired "
+            "after repeated failures");
+  std::mt19937 rng(7);
+  Rotation rotation(rng);
+  rotation.SetPool({"a", "b", "c"});
+  const size_t index = rotation.Next();
+  const std::string failed = rotation.names()[index];
+  rotation.MarkFailed(failed);
+  CHECK_TRUE(rotation.failed(failed));
+  // The rest of this pass never hands it back.
+  for (int i = 0; i < 2; ++i) {
+    const size_t next = rotation.Next();
+    CHECK_TRUE(next != kNoIndex);
+    CHECK_TRUE(rotation.names()[next] != failed);
+  }
+  // The next pass does try it again (one failure is a pass-level quarantine, not a boot-level).
+  bool seen_again = false;
+  for (int i = 0; i < 12 && !seen_again; ++i) {
+    const size_t next = rotation.Next();
+    CHECK_TRUE(next != kNoIndex);
+    seen_again = rotation.names()[next] == failed;
+  }
+  CHECK_TRUE(seen_again);
+  // After enough strikes it sits out the rest of the boot.
+  rotation.MarkFailed(failed);
+  rotation.MarkFailed(failed);
+  rotation.MarkFailed(failed);
+  CHECK_TRUE(rotation.quarantined(failed));
+  for (int i = 0; i < 60; ++i) {
+    const size_t next = rotation.Next();
+    CHECK_TRUE(next == kNoIndex || rotation.names()[next] != failed);
+  }
+}
+
+void TestRotationAnnouncesThePassBoundary() {
+  BeginCase("the rotation says when it starts a new pass over the pool");
+  std::mt19937 rng(8);
+  Rotation rotation(rng);
+  rotation.SetPool(PoolKeys(3));
+  CHECK_EQ(rotation.reshuffled(), 0);
+  for (size_t i = 0; i < 3; ++i) {
+    rotation.Next();
+    CHECK_EQ(rotation.reshuffled(), 0);
+  }
+  rotation.Next();  // the fourth pick is the first of the next pass
+  CHECK_EQ(rotation.reshuffled(), 1);
+  CHECK_EQ(rotation.rotations(), 1);
 }
 
 }  // namespace
@@ -201,9 +295,12 @@ int main() {
   TestPoolCapsAndStaysASubset();
   TestPoolKeepsWhatItHas();
   TestPoolIsShuffled();
-  TestDeckEmpty();
-  TestDeckDealsEverySongOnce();
-  TestDeckNeverDealsTheSameSongTwiceInARow();
-  TestDeckReshuffles();
+  TestRotationEmpty();
+  TestRotationHearsEverySongBeforeRepeatingOne();
+  TestRotationNeverRepeatsTheSongThatJustPlayed();
+  TestRotationOneSongDoesNotRepeatItself();
+  TestRotationKeepsHistoryAcrossARebuiltPool();
+  TestRotationSkipsAFailedSongAndRetriesItNextPass();
+  TestRotationAnnouncesThePassBoundary();
   return Finish();
 }
