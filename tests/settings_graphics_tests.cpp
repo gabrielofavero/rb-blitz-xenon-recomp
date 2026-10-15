@@ -702,7 +702,7 @@ void TestServiceIntegration() {
 }  // namespace
 
 void TestGraphicsBootJournal() {
-  BeginCase("graphics startup recovers failed attempts, preserves intent, and excludes live processes");
+  BeginCase("graphics startup recovers a failed boot, retries the request once, and never loops");
   const auto directory = std::filesystem::temp_directory_path() / "rb-blitz-graphics-boot-test";
   std::filesystem::create_directories(directory);
   const auto file = directory / "settings.toml";
@@ -711,50 +711,164 @@ void TestGraphicsBootJournal() {
   const GraphicsValues safe = {{SettingId::kRenderer, EnumV("d3d12")},
       {SettingId::kResolution, ResolutionV(1280, 720)},
       {SettingId::kAntiAliasing, EnumV("none")}, {SettingId::kFiltering, EnumV("native")}};
-  auto requested = safe;
-  requested[SettingId::kResolution] = ResolutionV(1920, 1080);
+  auto wanted = safe;
+  wanted[SettingId::kResolution] = ResolutionV(1920, 1080);
   std::string error;
   {
     GraphicsBootState first;
     CHECK_TRUE(first.Open(file, &error));
-    CHECK_TRUE(IsRes(first.Select(safe, safe, false).at(SettingId::kResolution), 1280, 720));
+    CHECK_TRUE(IsRes(first.Select(safe, safe, safe, false).at(SettingId::kResolution), 1280, 720));
+    CHECK_FALSE(first.recovered());
+    CHECK_FALSE(first.retrying());
     CHECK_TRUE(first.Begin(safe, &error));
     GraphicsBootState concurrent;
-    CHECK_FALSE(concurrent.Open(file, &error));
+    CHECK_FALSE(concurrent.Open(file, &error));  // a live boot is never treated as a crash
     CHECK_TRUE(first.Presented(&error));
   }
   {
+    // A request whose boot died before the menu frame (Begin without Presented) is recovered.
     GraphicsBootState failed;
     CHECK_TRUE(failed.Open(file, &error));
-    CHECK_TRUE(IsRes(failed.Select(requested, safe, false).at(SettingId::kResolution), 1920, 1080));
+    CHECK_TRUE(IsRes(failed.Select(wanted, wanted, safe, false).at(SettingId::kResolution), 1920,
+                     1080));
     CHECK_FALSE(failed.recovered());
-    CHECK_TRUE(failed.Begin(requested, &error));  // simulate process death before a menu frame
+    CHECK_TRUE(failed.Begin(wanted, &error));  // simulate process death before a menu frame
   }
   {
     GraphicsBootState recovery;
     CHECK_TRUE(recovery.Open(file, &error));
-    const auto effective = recovery.Select(requested, safe, false);
+    const auto effective = recovery.Select(wanted, wanted, safe, false);
     CHECK_TRUE(recovery.recovered());
+    CHECK_FALSE(recovery.retrying());
     CHECK_TRUE(IsRes(effective.at(SettingId::kResolution), 1280, 720));
     CHECK_TRUE(recovery.Begin(effective, &error));
     CHECK_TRUE(recovery.Presented(&error));
   }
   {
-    GraphicsBootState next;
-    CHECK_TRUE(next.Open(file, &error));
-    CHECK_TRUE(IsRes(next.Select(requested, safe, false).at(SettingId::kResolution), 1280, 720));
-    CHECK_TRUE(next.recovered());
-    requested[SettingId::kResolution] = ResolutionV(2560, 1440);
-    CHECK_TRUE(IsRes(next.Select(requested, safe, false).at(SettingId::kResolution), 2560, 1440));
-    CHECK_FALSE(next.recovered());
-    CHECK_TRUE(next.Begin(requested, &error));
-    CHECK_TRUE(next.Closed(&error)); // an intentional close during loading is not a GPU failure
+    // ... and it is retried exactly once on a later boot; when the retry presents, it proved the
+    // request and the recovery is over.
+    GraphicsBootState retry;
+    CHECK_TRUE(retry.Open(file, &error));
+    CHECK_TRUE(IsRes(retry.Select(wanted, wanted, safe, false).at(SettingId::kResolution), 1920,
+                     1080));
+    CHECK_TRUE(retry.retrying());
+    CHECK_FALSE(retry.recovered());
+    CHECK_TRUE(retry.Begin(wanted, &error));
+    CHECK_TRUE(retry.Presented(&error));
+  }
+  {
+    GraphicsBootState healed;
+    CHECK_TRUE(healed.Open(file, &error));
+    CHECK_TRUE(IsRes(healed.Select(wanted, wanted, safe, false).at(SettingId::kResolution), 1920,
+                     1080));
+    CHECK_FALSE(healed.recovered());
+    CHECK_FALSE(healed.retrying());
+  }
+  // A request that fails a second time keeps the recovery values until it changes: no retry loop.
+  auto bigger = wanted;
+  bigger[SettingId::kResolution] = ResolutionV(2560, 1440);
+  {
+    GraphicsBootState failed;
+    CHECK_TRUE(failed.Open(file, &error));
+    CHECK_TRUE(IsRes(failed.Select(bigger, bigger, safe, false).at(SettingId::kResolution), 2560,
+                     1440));
+    CHECK_TRUE(failed.Begin(bigger, &error));
+  }
+  {
+    GraphicsBootState recovery;
+    CHECK_TRUE(recovery.Open(file, &error));
+    const auto effective = recovery.Select(bigger, bigger, safe, false);
+    CHECK_TRUE(recovery.recovered());
+    CHECK_TRUE(recovery.Begin(effective, &error));
+    CHECK_TRUE(recovery.Presented(&error));
+  }
+  {
+    GraphicsBootState retry;
+    CHECK_TRUE(retry.Open(file, &error));
+    CHECK_TRUE(IsRes(retry.Select(bigger, bigger, safe, false).at(SettingId::kResolution), 2560,
+                     1440));
+    CHECK_TRUE(retry.retrying());
+    CHECK_TRUE(retry.Begin(bigger, &error));  // the retry dies too
+  }
+  {
+    GraphicsBootState latched;
+    CHECK_TRUE(latched.Open(file, &error));
+    const auto effective = latched.Select(bigger, bigger, safe, false);
+    CHECK_TRUE(latched.recovered());
+    CHECK_FALSE(latched.retrying());
+    // The recovery value is the last boot that presented (episode 1 healed at 1920x1080), not a
+    // fixed floor - the title is on whatever was last known good.
+    CHECK_TRUE(IsRes(effective.at(SettingId::kResolution), 1920, 1080));
+    CHECK_TRUE(latched.Begin(effective, &error));
+    CHECK_TRUE(latched.Presented(&error));
+  }
+  {
+    GraphicsBootState still_latched;
+    CHECK_TRUE(still_latched.Open(file, &error));
+    CHECK_TRUE(IsRes(
+        still_latched.Select(bigger, bigger, safe, false).at(SettingId::kResolution), 1920, 1080));
+    CHECK_TRUE(still_latched.recovered());
+    CHECK_FALSE(still_latched.retrying());
+  }
+  {
+    // A changed choice is a fresh attempt even when it resolves to the same pixels: `Auto` and
+    // the explicit size it resolves to are different requests (the owner's installed-copy case).
+    GraphicsBootState chosen_instead;
+    CHECK_TRUE(chosen_instead.Open(file, &error));
+    auto auto_wanted = bigger;
+    auto_wanted[SettingId::kResolution] = ResolutionV(0, 0);
+    const auto effective = chosen_instead.Select(auto_wanted, bigger, safe, false);
+    CHECK_FALSE(chosen_instead.recovered());
+    CHECK_FALSE(chosen_instead.retrying());
+    CHECK_TRUE(IsRes(effective.at(SettingId::kResolution), 2560, 1440));
+    CHECK_TRUE(chosen_instead.Begin(bigger, &error));
+    CHECK_TRUE(chosen_instead.Presented(&error));
+  }
+  // A clean close during the retry boot is not a verdict: the retry is not spent.
+  auto small = wanted;
+  small[SettingId::kResolution] = ResolutionV(1600, 900);
+  {
+    GraphicsBootState failed;
+    CHECK_TRUE(failed.Open(file, &error));
+    CHECK_TRUE(IsRes(failed.Select(small, small, safe, false).at(SettingId::kResolution), 1600,
+                     900));
+    CHECK_TRUE(failed.Begin(small, &error));
+  }
+  {
+    GraphicsBootState recovery;
+    CHECK_TRUE(recovery.Open(file, &error));
+    const auto effective = recovery.Select(small, small, safe, false);
+    CHECK_TRUE(recovery.recovered());
+    CHECK_TRUE(recovery.Begin(effective, &error));
+    CHECK_TRUE(recovery.Presented(&error));
+  }
+  {
+    GraphicsBootState close_during_retry;
+    CHECK_TRUE(close_during_retry.Open(file, &error));
+    CHECK_TRUE(IsRes(close_during_retry.Select(small, small, safe, false).at(SettingId::kResolution),
+                     1600, 900));
+    CHECK_TRUE(close_during_retry.retrying());
+    CHECK_FALSE(close_during_retry.recovered());
+    CHECK_TRUE(close_during_retry.Begin(small, &error));
+    CHECK_TRUE(close_during_retry.Closed(&error));  // quit during loading: no verdict
+  }
+  {
+    GraphicsBootState retried_again;
+    CHECK_TRUE(retried_again.Open(file, &error));
+    CHECK_TRUE(IsRes(retried_again.Select(small, small, safe, false).at(SettingId::kResolution),
+                     1600, 900));
+    CHECK_TRUE(retried_again.retrying());
+    CHECK_FALSE(retried_again.recovered());
+    CHECK_TRUE(retried_again.Begin(small, &error));
+    CHECK_TRUE(retried_again.Presented(&error));
   }
   {
     GraphicsBootState clean;
     CHECK_TRUE(clean.Open(file, &error));
-    CHECK_TRUE(IsRes(clean.Select(requested, safe, false).at(SettingId::kResolution), 2560, 1440));
+    CHECK_TRUE(IsRes(clean.Select(small, small, safe, false).at(SettingId::kResolution), 1600,
+                     900));
     CHECK_FALSE(clean.recovered());
+    CHECK_FALSE(clean.retrying());
   }
   CHECK_FALSE(std::filesystem::exists(file)); // requested preferences were never rewritten
   std::filesystem::remove_all(directory, ec);

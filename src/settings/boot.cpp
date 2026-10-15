@@ -442,16 +442,30 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     std::string error;
     if (!graphics_boot_.Open(paths_.settings_file, &error) && !error.empty())
       diagnostics_.push_back(error);
-    GraphicsValues requested;
-    for (const auto& [id, value] : recommendations) requested[id] = service_->EffectiveValue(id);
-    const auto fallback = RecoverGraphics(capability_snapshot_, requested.at(SettingId::kResolution),
-                                          requested.at(SettingId::kRenderer).text, true);
+    // The journal keys on what the player chose (`wanted`), while the recovery target and the
+    // self-recovery guard are judged against what this boot would really apply (`attempt`): a
+    // resolution left on Auto and an explicit size it resolves to are the same pixels but not
+    // the same request, and choosing one after the other must earn a fresh attempt (the owner's
+    // installed-copy report, 2026-10-15).
+    GraphicsValues wanted;
+    GraphicsValues attempt;
+    for (const SettingId id : {SettingId::kRenderer, SettingId::kResolution,
+                               SettingId::kAntiAliasing, SettingId::kFiltering}) {
+      wanted[id] = service_->RequestedValue(id);
+      attempt[id] = service_->EffectiveValue(id);
+    }
+    const auto fallback = RecoverGraphics(capability_snapshot_, attempt.at(SettingId::kResolution),
+                                          attempt.at(SettingId::kRenderer).text, true);
     const GraphicsValues safe = {{SettingId::kRenderer, fallback.renderer},
                                  {SettingId::kResolution, fallback.resolution},
                                  {SettingId::kAntiAliasing, fallback.anti_aliasing},
                                  {SettingId::kFiltering, fallback.filtering}};
     const bool forced_safe = REXCVAR_GET(settings_safe_graphics);
-    auto selected = graphics_boot_.Select(requested, safe, forced_safe);
+    auto selected = graphics_boot_.Select(wanted, attempt, safe, forced_safe);
+    if (graphics_boot_.retrying()) {
+      diagnostics_.push_back(
+          "the saved graphics request failed to present before; this boot retries it once");
+    }
     if (graphics_boot_.recovered() || forced_safe) {
       for (auto& [id, value] : selected)
         value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;

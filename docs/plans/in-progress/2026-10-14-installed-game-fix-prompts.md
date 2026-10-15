@@ -2,7 +2,9 @@
 
 **2026-10-14 — research complete. P1, P2, P3 and P4 are implemented and verified (their status is
 below); P6 is implemented, with its final installed acceptance recorded below; P5 is implemented and
-its rotation is measured in an installed copy (its record is also below).**
+its rotation is measured in an installed copy (its record is also below).** P7 (the settings commit
+journal nobody could finish) and P8 (the graphics boot journal's latch) landed 2026-10-15 and have
+their records below.
 This file moved from `plans/todo/` to `plans/in-progress/` when
 P1 landed.
 
@@ -37,6 +39,7 @@ image alone cannot establish the duration or which work is pending.
 | R9 | Cache On still shows discovery and takes a long time. Establish actual cache reuse and its measured benefit. | P6 |
 | R10 | Discovery progress appears finished while loading continues. Represent remaining work truthfully and reduce demonstrated bottlenecks. | P6 |
 | R11 | **Every** settings edit in an installed copy answers "Settings could not be saved. Check that the settings folder is writable", whatever row is changed. Saving must work for every row, and a failure must name what really failed. | P7 |
+| R12 | A resolution left on Auto must boot the wide mode, and a resolution change answered with **Restart now** must boot the new size. | P8 |
 
 Recommended order: **P1 -> P2 -> P3 -> P4 -> P6 -> P5**, followed by the installed acceptance pass
 in section 3. P1 establishes which binaries are being tested; P3 makes settings-based validation
@@ -1249,6 +1252,80 @@ cmake --preset win-amd64-release ; cmake --build --preset win-amd64-release
 Copy-Item "$env:APPDATA\rb_blitz\settings.toml.commit-journal" out\_swap\settings-save\journal-owner.toml
 pwsh -File out\_swap\settings-save\control-installed.ps1 -SeedJournal out\_swap\settings-save\journal-owner.toml  # the installed binary: io error
 pwsh -File out\_swap\settings-save\run.ps1 -Label armA-owner-journal -SeedJournal out\_swap\settings-save\journal-owner.toml  # the fix: ok (committed)
+```
+
+### P8 — the graphics boot journal's latch (installed-copy report, 2026-10-15)
+
+Preliminary findings, from the installed copy's own logs and journal before any change (all kept in
+`out/_swap/gfx-journal/owner/`):
+
+- `[measured]` `<install>\logs\rb_blitz_002..006.log`: every installed boot from the first launch
+  answered `settings_boot: safe graphics selected; requested preferences are retained and editable`
+  and ran `guest render base 1280x720`, while `settings.toml` held `resolution = 'auto'` — which
+  resolves to 2560x1080 on this 21:9 primary. The wide frame never appeared.
+- `[measured]` The same logs: a resolution change at `19:44:42` (`set 'graphics.resolution' -> ok`,
+  `commit '-' -> ok (committed)`), **Restart now** at `19:44:50` — and the child's boot at
+  `19:44:50.646` recovered again (`guest render base 1280x720`). Only a later launch
+  (`rb_blitz_006.log`, `19:46:49`) ran wide, because it could not take the journal's lock
+  (`cannot lock …settings.toml.graphics-boot.toml.lock: sharing violation: another writer holds the
+  file`) and therefore skipped recovery entirely.
+- `[measured]` The journal itself: `pending = false`, `requested`/`recovery_for` equal to the
+  effective signature of the wide request, `last_good = [1280, 720]` — a sticky latch that no boot
+  could clear while the request stayed the same.
+- `[tree]` `GraphicsBootState::Select` built its signature from the **effective** values, so the
+  menu's `Auto` → the explicit size it already resolves to was not "a changed preference" (which
+  the code's own comment said earned a fresh attempt); and once `recovery_for` matched a request,
+  every later boot recovered — permanently, and with the log as the only witness.
+
+#### P8 — done (2026-10-15)
+
+**What was wrong.** The per-profile `settings.toml.graphics-boot.toml` journal exists to recover a
+boot that died before its menu frame. It did that by substituting last-known-good **for as long as
+the request signature stayed equal** to the one that failed once — however old that failure was
+(here: a stale journal from an earlier build) — and it never surfaced the substitution: the menu
+showed the requested value while the boot ran 1280x720.
+
+**What changed.** `src/settings/graphics_boot.{h,cpp}`: the journal's signature now keys on what
+the player **chose** (`RequestedValue`; `'auto'` renders as its own token), while the *effective*
+values (new second argument) decide the recovery target and the "recovering would be the same
+attempt" guard. A request that died once is recovered on the next boot and then **retried exactly
+once** on a later boot — a retry that presents clears the recovery, a retry that dies keeps it
+until the request changes (the `retried` flag is persisted; a journal without it reads as "not
+spent"), and a clean close before the menu frame does not spend the retry. `src/settings/boot.cpp`
+passes the two maps and logs the retry (`the saved graphics request failed to present before; this
+boot retries it once`).
+
+**Evidence** (`out/_swap/gfx-journal/`, 2026-10-15, `out/build/win-amd64-release`, D3D12, windowed,
+empty DLC roots; harness `run.ps1 -Label X -Mode retry|auto|restart`; the owner's real journal
+copied verbatim into each disposable root):
+
+| Arm | What it showed |
+| --- | --- |
+| `owner/` | The pre-fix state, preserved: the real logs, `settings.toml` and the latched journal |
+| `retry` | The latched request itself: `the saved graphics request failed to present before; this boot retries it once` → `guest render base 1280x540, draw scale 2`, `video_mode_width = 2560`/`height = 1080`, `presented menu frame`; journal after: `recovery_for = ""`, `retried = false`, `last_good = [2560, 1080]` — healed |
+| `auto` | Resolution `'auto'` through the same journal is a fresh attempt (no recovery, no retry line) → the same wide frame; journal cleared |
+| `restart` | One A (Auto → 2560x1080) commits (`ok (committed)`) but raises **no** prompt when leaving the root — the prompt's gate compares current effective values against the boot's baseline, and nothing would change; no `request_restart` line |
+| `restart2` | A, A (Auto → 2560x1080 → 1920x1080) → `03-leave-root.png` is **"SETTINGS SAVED. RESTART THE GAME TO APPLY THESE CHANGES."** → `request_restart '-' -> ok (restart requested)` → parent hard-exits `20:17:35.980` → child boots `20:17:36.543` with `guest render base 960x540, draw scale 2` / `video_mode 1920x1080`, `presented menu frame`; `settings.toml` holds `resolution = [1920, 1080]` |
+
+**Host tests.** `settings_graphics` = **234 checks** — the journal case rewritten: recover → retry →
+heal; a second failure latches; a clean close keeps the retry unspent; a changed choice re-attempts
+even on the same pixels; a live boot is never treated as a crash. Full tree suite **38/38**
+(`out/build/rename-tests`, its current roster).
+
+**Honest limits.** A request that fails twice keeps last-known-good until it changes — one bounded
+retry, not a loop (deliberate). The recovered/latched state is visible in the log only; the
+menu-facing note for `settings.graphics.recovered_from_failure` (part 2 §5.4's UI table) is still
+unwired. The fix is measured against the release build tree, not through a freshly built
+installer. The `restart` leg's "no prompt" is the value-based `RestartPending()` gate working as
+intended, and it also means a change that does not alter the effective size is deliberately quiet.
+
+**Reproducing it** (from `<checkout>`):
+
+```powershell
+cmake --preset win-amd64-release ; cmake --build --preset win-amd64-release
+pwsh -File out\_swap\gfx-journal\run.ps1 -Label retry    -Mode retry     # the latched request retries and applies wide
+pwsh -File out\_swap\gfx-journal\run.ps1 -Label auto     -Mode auto      # Auto applies wide through the same journal
+pwsh -File out\_swap\gfx-journal\run.ps1 -Label restart2 -Mode restart   # change + Restart now -> the child boots the new size
 ```
 
 ## 3. Final installed acceptance and evidence
