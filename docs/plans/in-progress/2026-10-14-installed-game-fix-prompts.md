@@ -938,6 +938,12 @@ and shows an unnumbered finalization phase. Loading-phase uncapping works indepe
 On and restores the player's V-Sync at the verified usable main menu. Details and boundaries:
 [DLC guide §4.4](../../guides/dlc.md#44-current-loading-pipeline-p6-2026-10-14).
 
+**Superseded in part (2026-10-15, owner request).** The host overlay described here was retired:
+the same counts are pushed into the **title's own** discovery bar through the engine's own push
+(`sub_82759190`), and the screen's words are the title's locale entries again. The counting model,
+the cache/status work, the pacing boundary and the installed measurements above stand. Record:
+[2026-10-15-native-discovery-bar.md](../finished/2026-10-15-native-discovery-bar.md).
+
 **Root causes reproduced.** In the P1 installed artifact (`out/_swap/p1/install`), with 1,773
 flat packages and a copied guest cache from the older 1,402-package library, the first 100% event
 was `18:00:27.160`; V-Sync was restored one millisecond later. The guest then set a metadata

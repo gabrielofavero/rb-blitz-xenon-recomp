@@ -62,5 +62,22 @@ int main() {
   model.Enumerated(6, 0, kSuccess);
   CHECK_EQ(model.Get().successful, 1);
   CHECK_FALSE(model.Get().determinate());
+  BeginCase("the bar's two numbers sum every batch, so parallel walks read as one count");
+  model.Begin();
+  model.Enumerated(4, 1402, kSuccess);
+  model.Enumerated(5, 1402, kSuccess);
+  model.Enumerated(4, 1402, kSuccess);
+  CHECK_EQ(model.ItemsCounted(), 3u);
+  CHECK_EQ(model.ItemsExpected(), 2804u);
+  CHECK_EQ(model.Get().current, 2);  // the batch the last call belonged to
+  CHECK_EQ(model.Get().total, 1402);
+  BeginCase("a batch with no announced size adds no denominator");
+  model.Enumerated(6, 0, kSuccess);
+  CHECK_EQ(model.ItemsCounted(), 3u);
+  CHECK_EQ(model.ItemsExpected(), 2804u);
+  BeginCase("a new attempt zeroes the bar's numbers");
+  model.Begin();
+  CHECK_EQ(model.ItemsCounted(), 0u);
+  CHECK_EQ(model.ItemsExpected(), 0u);
   return Finish();
 }

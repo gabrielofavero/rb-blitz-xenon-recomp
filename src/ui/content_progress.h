@@ -78,6 +78,26 @@ class Model {
     return true;
   }
 
+  // The panel's own two numbers - what the title's progress bar reads as `current_content`
+  // and `total_content`. Summed over every batch of the attempt, because several
+  // enumerators run in parallel and a per-batch number would move the bar backwards
+  // whenever their calls interleave. A batch that announced no size contributes no
+  // denominator, and an attempt that never ran sums to zero.
+  uint32_t ItemsCounted() const {
+    uint32_t counted = 0;
+    for (const auto& entry : batches_) {
+      counted += entry.second.current;
+    }
+    return counted;
+  }
+  uint32_t ItemsExpected() const {
+    uint32_t expected = 0;
+    for (const auto& entry : batches_) {
+      expected += entry.second.total;
+    }
+    return expected;
+  }
+
  private:
   Progress progress_;
   struct Batch { uint32_t number = 0, current = 0, total = 0; bool ended = false; };

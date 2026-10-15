@@ -49,9 +49,11 @@ Part 1 wherever they disagree.
   host cache now names its hit/miss reason and per-phase timings, validates its body with a checksum,
   replaces itself atomically and refuses to persist a partial scan; a **real** hit is what makes the
   English `server_connect_enumerating_content` record read **Loading Cached Content List** (cold, Off
-  and refresh keep *Discovering Downloadable Content*); the loading overlay counts real enumerator
-  items and shows an unnumbered **Loading song information…** phase instead of a premature 100 %, and
-  V-Sync returns at the verified usable menu. Measured in the installed copy: the first comparison
+  and refresh keep *Discovering Downloadable Content*); since **2026-10-15** the loading numbers
+  live in the title's own bar — the host pushes the aggregate enumerator counts through the
+  engine's own push and draws no overlay (the P6 overlay is retired;
+  [native-discovery-bar.md](../plans/finished/2026-10-15-native-discovery-bar.md)) — and V-Sync
+  returns at the verified usable menu. Measured in the installed copy: the first comparison
   removes **103.4 s → 17.7 s** of post-full-bar work, and a warm host cache removes **92.3 %** of the
   host's own phase time but only **0.43 %** end-to-end — the title still enumerates and still
   mounts/metadata-reads **742** of the 1,773 packages. The guest's *own* songcache is a separate file:
@@ -389,7 +391,8 @@ reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
   passed 185/185 twice on an idle machine.
 * **2026-10-14 (P6 of the installed-game review)**: `content_progress` is the **39th** test — the
   pipeline's own model (one count per real aggregate enumerator, terminators/pending/failures
-  excluded, an unnumbered finalization phase, reset per attempt) is now pinned rather than described.
+  excluded, the bar's two numbers summed per attempt across the batches, reset per attempt — since
+  2026-10-15 pushed into the title's own bar, not an overlay) is now pinned rather than described.
   The Vulkan-off tree is **39/39** re-run on the final P6 sources (`ctest --test-dir
   out\build\rename-tests`), and `dlc_cache` grew the v2-checksum, refusal and writer cases. The 37/37
   and 38/38 counts elsewhere on this page are those days' measurements, not today's.

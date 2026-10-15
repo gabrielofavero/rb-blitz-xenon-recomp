@@ -336,14 +336,17 @@ Three properties make the shape safe:
 
 The row is reachable only with `enhancements_dlc_cache` on: R5's compiled default hides `splash_dlc`, so the boot turning R7 on also drops that name from the hidden list — a row that refreshes the cache is not an offline-dead row.
 
-**P6 supersedes the dated status/progress behavior below (2026-10-14).** An actual host-cache
-hit now changes the English `server_connect_enumerating_content` record to **Loading Cached
-Content List**, at the whole-record settings-provider stage (`BuildMenuRecords`). The provider
-logs the precise path, key, value and hit state; Off/cold/refresh retain the discovery label.
-The host overlay uses real aggregate enumerator counts and an unnumbered finalization phase;
-`UIManager::Poll` (`native_menu.cpp`) observes the usable menu before restoring pacing. See
-[dlc.md](../guides/dlc.md) §4.4 and P6's installed evidence for the current contract. The following
-2026-10-10 measurements are retained as the history of the old implementation.
+**P6 supersedes the dated status/progress behavior below (2026-10-14); a 2026-10-15 change
+retires P6's overlay.** An actual host-cache hit now changes the English
+`server_connect_enumerating_content` record to **Loading Cached Content List**, at the
+whole-record settings-provider stage (`BuildMenuRecords`). The provider logs the precise path,
+key, value and hit state; Off/cold/refresh retain the discovery label. **The discovery bar is the
+title's own again** — the host pushes P6's aggregate enumerator counts through the engine's own
+push and draws no overlay
+([native-discovery-bar.md](../plans/finished/2026-10-15-native-discovery-bar.md),
+[dlc.md](../guides/dlc.md) §4.4). `UIManager::Poll` (`native_menu.cpp`) observes the usable menu
+before restoring pacing. The following 2026-10-10 measurements are retained as the history of the
+old implementation.
 
 Split-read checksum fix: `PatchFile` stages digest edits; `CompleteSplitFile` first proves the
 already-consumed head is unchanged, delivers the tail, and only then commits those edits.
@@ -372,7 +375,10 @@ for the whole 46.7 s. With `enhancements_dlc_cache` on the host counts the items
 app messages the enumeration is made of, hooked through
 `XMsgStartIORequestEx`/`XMsgInProcessCall`/`XMsgSystemProcessCall`) and pushes them with the engine's
 own push, so the bar animates 0 → 100%. See [dlc.md](../guides/dlc.md) §4.2,
-[2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §12.
+[2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §12 — and
+**2026-10-15**: the host drive is restored on top of P6's model — the title's own bar fills
+0 → 100 % during the enumeration and the engine refills it for its mounting phase; no overlay is
+drawn ([native-discovery-bar.md](../plans/finished/2026-10-15-native-discovery-bar.md)).
 
 **Why 46.7 s, and what shortens it.** One item per *presented* frame ⇒ the screen lasts 2,807 of the
 title's frames: 16.66 ms at 60 Hz (46.7 s), 5.68 ms with the frame rate free (15.96 s). Measured

@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // P6: each aggregate enumerator is one measured phase, never an estimate of
 // overall loading. The guest still mounts, parses and persists after enumeration.
+//
+// The phase is shown by the title's own UI (owner request, 2026-10-15): the connect panel
+// carries `progress_bar.grp` / `content_percent.lbl` and a Flow that reads the panel's
+// `current_content` / `total_content` properties, so this file drives *those* through the
+// engine's own push (`sub_82759190`) instead of drawing a host overlay over the frame. The
+// words on the screen are the title's own (its locale entries and its own saveload states);
+// the host supplies numbers only. The numbers are the actual enumerators' item counts, summed
+// over every batch of the attempt. The host stops pushing at the guest's own end-of-enumeration
+// call (`SetTotal`): the engine then resets the same bar for its mounting phase and refills it
+// with its own `Increment` calls (measured, out/_swap/dlc-native-bar/bar-2, 2026-10-15).
 #include "hooks/content_progress.h"
 #include <atomic>
 #include <chrono>
@@ -18,6 +28,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 REXCVAR_DECLARE(bool, enhancements_dlc_uncap_enumeration);
+REX_EXTERN(__imp__sub_82759190);  // the engine's own push into the panel
 REX_EXTERN(__imp__sub_82759308);
 REX_EXTERN(__imp__sub_827593A8);
 REX_EXTERN(__imp__sub_827593B8);
@@ -27,9 +38,12 @@ namespace {
 using namespace rb_blitz::content_progress;
 std::mutex g_mutex;
 Model g_model;
-std::string g_detail;
-bool g_visible = false;
-bool g_guest_complete = false;
+// The engine's progress object (its constructor returns it: +4 panel, +8 current, +12
+// total). Written once, on the guest thread that builds the panel; read on the thread that
+// enumerates. Zero until then.
+std::atomic<uint32_t> g_object{0};
+// The last whole percent handed to the title's bar, under g_mutex; -1 = nothing pushed.
+int g_pushed_percent = -1;
 uint64_t g_native_increments = 0;
 int64_t g_start_us = 0;
 int64_t g_last_enum_us = 0;
@@ -42,6 +56,36 @@ int64_t NowMicros() {
 }
 uint32_t Be32(const uint8_t* p) {
   return rex::memory::load_and_swap<uint32_t>(p);
+}
+// The guest is big-endian, and these fields are plain ints in its own image.
+void StoreBe32(uint8_t* p, int32_t value) {
+  const uint32_t v = static_cast<uint32_t>(value);
+  p[0] = static_cast<uint8_t>(v >> 24);
+  p[1] = static_cast<uint8_t>(v >> 16);
+  p[2] = static_cast<uint8_t>(v >> 8);
+  p[3] = static_cast<uint8_t>(v);
+}
+
+// Writes the two properties the title's Flow reads (`current_content` / `total_content`) and
+// pushes them with the engine's own push. The push is a recompiled guest function, so it is
+// called the way the engine calls it - object in r3 - but on a *copy* of the context, so the
+// registers of the guest call this is nested inside survive. r1 is left alone: this runs on
+// the guest thread, inside its own call, and a callee allocating below the caller's r1 is
+// the ABI.
+void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t total) {
+  const uint32_t object = g_object.load(std::memory_order_relaxed);
+  if (object == 0) {
+    return;
+  }
+  uint8_t* memory = rex::memory::GuestPtr<uint8_t*>(base, object);
+  if (memory == nullptr) {
+    return;
+  }
+  StoreBe32(memory + 8, static_cast<int32_t>(current));
+  StoreBe32(memory + 12, static_cast<int32_t>(total));
+  PPCContext call = ctx;
+  call.r3.u64 = object;
+  __imp__sub_82759190(call, base);
 }
 using ImportFunc = void (*)(PPCContext&, uint8_t*);
 ImportFunc ResolveImport(const char* symbol) {
@@ -146,11 +190,10 @@ void BeginAttempt() { // g_mutex held
   g_model.Begin();
   g_start_us = NowMicros();
   g_last_enum_us = 0;
-  g_guest_complete = false;
   g_native_increments = 0;
   g_metadata_reads = g_cache_reads = g_cache_writes = 0;
   g_metadata_us = g_cache_read_us = g_cache_write_us = 0;
-  g_detail = "Preparing downloadable content...";
+  g_pushed_percent = -1;
   REXLOG_INFO("content_pipeline: attempt {} started", g_model.Get().attempt);
   if (g_uncap_enabled) RequestFrameRateFree("content discovery started");
 }
@@ -177,28 +220,49 @@ void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapp
   // XAM_OVERLAPPED.result (xam_msg.cpp / AppManager::DispatchMessageAsync).
   uint32_t result = ctx.r3.u32;
   if (overlapped && result == kPending) result = Be32(base + overlapped);
-  std::lock_guard lock(g_mutex);
-  if (!g_model.Get().active()) BeginAttempt();
-  const auto before = g_model.Get();
-  g_model.Enumerated(handle, total, result);
-  g_last_enum_us = NowMicros();
-  const auto& progress = g_model.Get();
-  g_detail = progress.determinate() ? "Reading downloadable content" : "Loading song information...";
-  if (progress.batch != before.batch || result != kSuccess || !progress.determinate()) {
-    REXLOG_INFO("content_pipeline: enumeration attempt={} batch={} handle={:08X} "
-                "completed={}/{} result={:08X} elapsed_ms={:.3f}",
-                progress.attempt, progress.batch, handle, progress.current, progress.total,
-                result, (NowMicros() - g_start_us) / 1000.0);
+  uint32_t counted = 0, expected = 0;
+  int percent = -1;
+  {
+    std::lock_guard lock(g_mutex);
+    if (!g_model.Get().active()) BeginAttempt();
+    const auto before = g_model.Get();
+    g_model.Enumerated(handle, total, result);
+    g_last_enum_us = NowMicros();
+    const auto& progress = g_model.Get();
+    if (progress.batch != before.batch || result != kSuccess || !progress.determinate()) {
+      REXLOG_INFO("content_pipeline: enumeration attempt={} batch={} handle={:08X} "
+                  "completed={}/{} result={:08X} elapsed_ms={:.3f}",
+                  progress.attempt, progress.batch, handle, progress.current, progress.total,
+                  result, (NowMicros() - g_start_us) / 1000.0);
+    }
+    // The title's bar: the Flow asks the panel for these two numbers, summed over every
+    // batch of the attempt, so parallel walks read as one monotonic count.
+    counted = g_model.ItemsCounted();
+    expected = g_model.ItemsExpected();
+    if (expected != 0) {
+      const int moved = static_cast<int>((static_cast<uint64_t>(counted) * 100) / expected);
+      if (moved != g_pushed_percent) {
+        g_pushed_percent = moved;
+        percent = moved;
+      }
+    }
+  }
+  if (percent < 0) return;
+  PushProgress(ctx, base, counted, expected);
+  if (percent == 0 || percent == 25 || percent == 50 || percent == 75 || percent == 100) {
+    REXLOG_INFO("content_pipeline: the title's own bar is at {} of {} item(s) ({}%)", counted,
+                expected, percent);
   }
 }
 } // namespace
 
 namespace rb_blitz::content_progress {
 void Configure() {
-  // Cache Off changes the host cache only. Progress and the separately selected
-  // pacing policy remain truthful for structured/user roots and uncached scans.
+  // Cache Off changes the host cache only. The bar and the separately selected pacing
+  // policy remain truthful for structured/user roots and uncached scans.
   g_uncap_enabled = REXCVAR_GET(enhancements_dlc_uncap_enumeration);
-  REXLOG_INFO("content_pipeline: actual aggregate batches; pacing={} (independent of host cache)",
+  REXLOG_INFO("content_pipeline: the title's own discovery bar follows the actual aggregate "
+              "batches; pacing={} (independent of host cache)",
               g_uncap_enabled);
 }
 void Tick() {} // kept for the shell poll; completion is UIManager's verified panel
@@ -207,7 +271,6 @@ void ObserveScreen(std::string_view screen, std::string_view panel, bool availab
   std::lock_guard lock(g_mutex);
   const bool discovery = panel == "server_connect_panel";
   if (discovery && !g_model.Get().active()) BeginAttempt();
-  g_visible = discovery && g_model.Get().active() && !g_guest_complete;
   if (available && screen == "splash_screen" && panel == "splash_panel" &&
       g_model.MenuReady()) {
     const auto& p = g_model.Get();
@@ -219,13 +282,8 @@ void ObserveScreen(std::string_view screen, std::string_view panel, bool availab
                 g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
                 p.batch, p.successful, p.failures, g_metadata_reads, g_metadata_us / 1000.0,
                 g_cache_reads, g_cache_read_us / 1000.0, g_cache_writes, g_cache_write_us / 1000.0);
-    g_visible = false;
     RequestFrameRateRestore("the usable main menu is current with no transition pending");
   }
-}
-Display Snapshot() {
-  std::lock_guard lock(g_mutex);
-  return {g_model.Get(), g_detail, g_visible};
 }
 IoObservation BeginIo(uint32_t handle, bool write) {
   auto file = REX_KERNEL_STATE()->object_table()->LookupObject<rex::system::XFile>(handle);
@@ -240,8 +298,6 @@ IoObservation BeginIo(uint32_t handle, bool write) {
     BeginAttempt();
   }
   g_model.Finalizing();
-  g_detail = kind == 3 ? "Saving song information..."
-                      : kind == 2 ? "Reading saved song information..." : "Loading song information...";
   return {kind, NowMicros()};
 }
 void EndIo(IoObservation io, uint32_t status) {
@@ -258,25 +314,54 @@ void EndIo(IoObservation io, uint32_t status) {
 }
 } // namespace rb_blitz::content_progress
 
-// These setters describe only a late guest subphase (often total=0), not the
-// overall operation. Hide that percentage. The host displays actual per-batch
-// counts and an explicit, unnumbered finalization phase instead.
-extern "C" REX_FUNC(sub_82759308) { __imp__sub_82759308(ctx, base); }
+// 0x82759308 (constructor): the object exists from here on and carries the panel the push
+// writes into at +4, so this is where the host learns where to write. Returns the object in r3.
+extern "C" REX_FUNC(sub_82759308) {
+  __imp__sub_82759308(ctx, base);
+  if (ctx.r3.u32 != 0) {
+    g_object.store(ctx.r3.u32, std::memory_order_relaxed);
+  }
+}
+
+// 0x827593A8 (SetTotal): the engine announcing a phase's total. It also zeroes the current
+// count and pushes, so the Flow draws the bar from 0 again. This build calls it once, after the
+// enumeration: measured with a total of 0 (2026-10-10, docs/plans/finished/
+// 2026-10-10-song-cache-plan.md §9.4) and with 3546 - the enumeration's own count - on
+// 2026-10-15. The Flow reads a non-positive total as "not enumerating ... -1", so only such an
+// announcement is rewritten to -1; a positive one runs as the title wrote it. The host never
+// re-pushes after it: the engine's own `Increment` calls refill the bar for the mounting phase.
 extern "C" REX_FUNC(sub_827593A8) {
-  REXLOG_INFO("content_pipeline: guest SetTotal({}); finalization remains pending", ctx.r4.s32);
-  ctx.r4.s32 = -1;
+  uint32_t counted = 0, expected = 0;
+  {
+    std::lock_guard lock(g_mutex);
+    counted = g_model.ItemsCounted();
+    expected = g_model.ItemsExpected();
+  }
+  REXLOG_INFO("content_pipeline: the title announced a total of {} item(s) to enumerate (the "
+              "host counted {} of {}); the bar returns to the title's own numbers",
+              ctx.r4.s32, counted, expected);
+  if (ctx.r4.s32 <= 0) {
+    ctx.r4.s32 = -1;  // the Flow's own 'not enumerating' value
+  }
   __imp__sub_827593A8(ctx, base);
 }
+
+// 0x827593B8 (Increment): one more item, in the engine's own bookkeeping. This build never
+// calls it (same measurement), which is why the host counts the XAM messages itself; hooked
+// so a build that does call it is still counted.
 extern "C" REX_FUNC(sub_827593B8) {
   { std::lock_guard lock(g_mutex); ++g_native_increments; }
   __imp__sub_827593B8(ctx, base);
 }
+
+// 0x827593C8 (Complete): the engine says the enumeration is over. No push from here: this
+// call sets current = total on the object, and with the -1 above the bar is hidden - the
+// title's own calls own the panel until the next attempt.
 extern "C" REX_FUNC(sub_827593C8) {
   {
     std::lock_guard lock(g_mutex);
-    g_guest_complete = true;
-    g_visible = false; // the panel can now be an offline/login confirmation
-    REXLOG_INFO("content_pipeline: guest subphase complete native_increments={}; waiting for usable menu",
+    REXLOG_INFO("content_pipeline: guest subphase complete native_increments={}; the title "
+                "owns the panel from here",
                 g_native_increments);
   }
   __imp__sub_827593C8(ctx, base);

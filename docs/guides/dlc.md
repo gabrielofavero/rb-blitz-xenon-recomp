@@ -529,10 +529,17 @@ changed the expected digest anyway and could produce `XamShowDirtyDiscErrorUI`.
 Progress uses each actual SDK aggregate enumerator's item count, including structured and user
 content. Handles can interleave. Only successful completed items count; pending submissions,
 terminators and failures do not. Each batch is bounded and monotonic, and a new attempt resets
-the model. The overlay shows **Reading content: N / T packages** while a batch has remaining
-items, then **Loading song information...**, **Reading saved song information...** or **Saving
-song information...** without a percentage. Finishing a batch does not declare overall completion.
-The old native percentage is hidden. This overlay works independently of Settings Labels.
+the model. **The numbers are the title's own loading screen's (2026-10-15, owner request):**
+the connect panel's Flow reads `current_content` / `total_content`, and the host pushes the
+per-attempt sums through the engine's own push (`sub_82759190`) once per whole percent — no host
+overlay is drawn (P6's is retired). Measured with the owner's 1,773-package library
+(`out/_swap/dlc-native-bar/bar-2`): 3,546 items in 14.4 s, pushes at 0/25/50/75/100 % and none
+after 15:06:19.5, the drawn fill growing 196 → 1,284 counted cyan pixels across shots 02–07. At
+the engine's own end-of-enumeration call (`SetTotal`, 3,546 here — 0 in the 2026-10-10
+measurement) the host stops pushing; the engine resets the same bar and its own `Increment`
+calls refill it through the mounting phase (shots 08 → 114, still climbing when the leg was
+killed). Either way the phase's words are the title's own locale entries. Record:
+[native-discovery-bar.md](../plans/finished/2026-10-15-native-discovery-bar.md).
 
 Pacing now stays uncapped through enumeration and finalization, restoring the player's value
 when UIManager observes `splash_screen` / `splash_panel` available with no transition pending.
