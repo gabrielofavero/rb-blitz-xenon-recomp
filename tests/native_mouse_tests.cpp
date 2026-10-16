@@ -174,7 +174,7 @@ int main() {
   rail.Reset();
   CHECK_FALSE(rail.NextFrame());
 
-  BeginCase("rail grid math follows row pitch and stays sign-true");
+  BeginCase("rail thumb math walks firstShowing across the measured rail");
   std::vector<MenuRow> rail_rows{
       {{.3f, .2f}, 0, true, MenuBounds{.2f, .15f, .4f, .25f}},
       {{.3f, .3f}, 1, false, MenuBounds{.2f, .25f, .4f, .35f}},
@@ -182,12 +182,21 @@ int main() {
       {{.3f, .5f}, 3, true, MenuBounds{.2f, .45f, .4f, .55f}}};
   const float pitch = RailPitch(rail_rows);
   CHECK_TRUE(std::abs(pitch - .1f) < .001f);
-  CHECK_EQ(RailSlot(.5f, .2f, pitch), 3);
-  CHECK_EQ(RailSlot(.2f, .2f, pitch), 0);
-  CHECK_EQ(RailSlot(.14f, .2f, pitch), -1);
-  CHECK_EQ(RailSlot(.9f, .2f, pitch), 7);
-  CHECK_EQ(RailSlot(.2f, .2f, 0), 0);
   CHECK_TRUE(RailPitch({{{.5f, .5f}, 0, true}}) == 0);
+  // The library's rail: top .2175, bottom .8348, one-row-pitch thumb, 41 scrollable rows.
+  const float per = RailPerFirst(.8348f - .2175f, .0624f, 41);
+  CHECK_TRUE(std::abs(per - (.8348f - .2175f - .0624f) / 41) < 1e-7f);
+  CHECK_EQ(RailPerFirst(.6f, .06f, 0), 0);
+  CHECK_EQ(RailPerFirst(.05f, .06f, 41), 0);
+  CHECK_EQ(RailFirstFromY(.2175f, .2175f, per, 41), 0);
+  CHECK_EQ(RailFirstFromY(.8348f, .2175f, per, 41), 41);
+  CHECK_EQ(RailFirstFromY(.95f, .2175f, per, 41), 41);
+  CHECK_EQ(RailFirstFromY(.05f, .2175f, per, 41), 0);
+  CHECK_EQ(RailFirstFromY(.5f, .2175f, per, 41), int(std::lround((.5f - .2175f) / per)));
+  CHECK_EQ(RailFirstFromY(.5f, .2175f, 0, 41), 0);
+  CHECK_TRUE(RailYOnThumb(.2175f + per * 10 + .01f, .2175f, per, .0624f, 10));
+  CHECK_FALSE(RailYOnThumb(.2175f + per * 10 + .09f, .2175f, per, .0624f, 10));
+  CHECK_TRUE(RailYOnThumb(.5f, .2175f, per, .4f, 0));
 
   BeginCase("final pad packets expose mouse edges beside an idle controller");
   PadPacket packets;

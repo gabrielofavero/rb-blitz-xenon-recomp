@@ -2,12 +2,12 @@
 
 `mouse_ui_nav=true` enables the menu cursor (default on; Controller Settings' Controller →
 Mouse support setting). Hover selects a native list row directly. Left click emits
-A, right click emits B, and wheel detents emit D-pad up/down (left/right for horizontal
-powerup lists) — one discrete native step per detent, never an analog stick pulse. A
-vertical list's scroll gutter — the strip just right of its rows, where the song library
-draws its rail and thumb — takes clicks and drags. During `game_screen`, only
-the focused `pause_panel` accepts mouse input. Transitions, focus loss and gameplay
-discard pending events, partial wheel detents and button pulses.
+A, right click emits B, and wheel detents step non-scrolled lists (left/right for
+horizontal lists like the powerup rows). A vertical list that draws a scroll rail —
+the song library — follows the desktop scrollbar rule instead: the wheel, a thumb
+drag and a track click all move the view and never the selection. Gameplay hides
+the cursor: only the focused `pause_panel` accepts mouse input. Transitions, focus
+loss and gameplay discard pending events, partial wheel detents and button pulses.
 
 The old screenshot detector, hover aligner, relative-motion stepper and their
 configuration flags have been removed. `enhancements_native_mouse` was an unused
@@ -85,31 +85,43 @@ is animating (state +48 differs from +52), the next wheel detent stays queued;
 button release still runs immediately. This prevents fast bursts losing steps at
 the visible edge of a song or powerup list.
 
-A detent becomes a D-pad press, not stick travel. Retail steps a list once per
-directional press, while a two-frame analog pulse depends on the guest's own
-threshold and repeat handling — measured 2026-10-16: four one-frame right-stick
-strikes on `song_select_screen` moved the library not at all, and one wheel detent
-pulsed as `thumb_ly` could arrive as zero or two selection steps. Each detent now
-pulses `kDown`/`kUp` (bit 2/1) through the same delivery-gated path a click uses,
-so a burst of detents is a burst of native presses and the guest's own scroll
-animation and end-of-list clamp apply.
+On every list that is *not* a vertical scrolled list — the horizontal powerup rows,
+for instance — a detent becomes a D-pad press, not stick travel. Retail steps a
+list once per directional press, while a two-frame analog pulse depends on the
+guest's own threshold and repeat handling — measured 2026-10-16: four one-frame
+right-stick strikes on `song_select_screen` moved the library not at all, and one
+wheel detent pulsed as `thumb_ly` could arrive as zero or two selection steps.
+Each such detent pulses `kDown`/`kUp` (bit 2/1) through the same delivery-gated
+path a click uses, so a burst of detents is a burst of native presses and the
+guest's own scroll animation and end-of-list clamp apply.
 
-The gutter beside a vertical list's rows (`MouseMenuRailHit`) is the scrollbar. A
-press there is a drag, not a click: it never emits A. Dragging maps cursor travel
-onto the captured row grid (`RailPitch`, `RailSlot`), one row of list per row of
-mouse; a click that never moved puts the row under the cursor at the top of the
-band. The selection rides with the viewport — a row of scroll is a row of
-selection, so the highlighted slot stays on screen and the guest's inactive rows
-(artist headings) are skipped — and the state is applied through
+A vertical list that draws a scroll rail — the song library — takes the native
+scrollbar rule instead (owner decision, 2026-10-16): the wheel and the rail move
+the *view* and never the selection, like a desktop scrollbar. The selection stays
+where it was, even when it is scrolled out of the band; the guest reports that as
+selected slot -1, which the mapping tolerates because every scroll application
+passes the last row a draw positively identified (`last_selected_row`, reset on
+screen or focus change) rather than the live slot. The wheel moves one visual row
+per detent: the step is the row pitch over the thumb's travel per first-row step,
+and successive detents advance the *pending target* (list +228) so a burst is not
+lost to the animation.
+
+The rail itself is mapped from the thumb's own geometry (`docs` record below):
+the thumb is one row pitch tall and its top crosses the rail as the first visible
+row walks 0..maxFirst, where `maxFirst` is the list's own last page. It comes from
+the provider's `NumData()` minus the visible row count — Blitz puts `NumData` at
+vtable slot 10 of `UIListProvider` (RB3's layout has one extra virtual before it),
+and the call is only made after the rebuilt slot is checked against the known
+recompiled address (`822DAE10`); a refused answer leaves the gutter inert rather
+than guessing. With that map a track click slides the thumb to the cursor, a press
+on the thumb grabs it (no jump on release) and a drag moves the view row-for-row
+with the cursor, clamped to `[0, maxFirst]`. Applications go through
 UIList::SetSelected plus the same scroll-start and scroll-complete notifications
-hover uses, with the list clamping the value to its own last page (`824C1938`,
-`824C1DE8`, `824C1F08`). The selected *slot* reads -1 while the selection sits
-outside the band, which is why the drag anchors on the last row a draw positively
-identified (`last_selected_row`, reset on every screen or focus change) rather
-than on the live slot. The strip is published per draw and invalidated on a screen
-or focus change, so a drag can never be applied to a retired list; drag frames
-coalesce to the latest position and bypass the pad pulse gates because they do not
-emit pad input.
+hover uses (`824C1938`, `824C1DE8`, `824C1F08`). A press on the rail is a scroll,
+not a click: it never emits A. The strip is published per draw and invalidated on
+a screen or focus change, so a drag can never be applied to a retired list; drag
+frames coalesce to the latest position and bypass the pad pulse gates because
+they do not emit pad input.
 
 The synthetic mouse device establishes controller connectivity. Fixed mouse actions
 are merged after user controller remapping, for player one only. Raw mouse remap
@@ -123,7 +135,8 @@ applied on the window thread through SDL.
 `rb_blitz_native_mouse_tests` covers pointer mapping, row hit tests, disabled rows,
 move/click ordering, wheel bursts, fractional detents, scrollbar drag coalescing
 (press/release never dropped, drags latest-wins, traffic flowing while a click
-pulse waits for its release), the rail row-grid math, press/release delivery gating
+pulse waits for its release), the rail thumb math (travel per step, first-from-y
+with both clamps, the on-thumb grab test), press/release delivery gating
 behind a delayed input thread, per-player final packet identity and boundary
 resets. `scripts/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
 `drag:x1:y1:x2:y2`, `wheel:detents` and `cursor:visible/hidden` actions for live
@@ -212,51 +225,53 @@ CTest targets pass in `out/build/win-amd64-debug` — the tree whose configure
 keeps tests on, because a Vulkan-enabled configure forces `BUILD_TESTING` off
 from the SDK's `thirdparty/CMakeLists.txt` and the release tree cannot run them.
 
-### Live acceptance, 2026-10-16 — wheel steps and the library scrollbar
+### Live acceptance, 2026-10-16 — the library scrollbar behaves natively
 
-The owner asked for the music library's scroll to behave natively: wheel
-reliable, and the drawn rail/thumb clickable and draggable instead of
-wheel-only. Same environment as the record above (Release, 1280x720 windowed,
-local `game/dlc`, isolated profile under `out/mouse-fix-verify/`, `drive_ui.ps1`).
+The owner asked for the music library's scroll to behave like a desktop
+scrollbar: wheel, thumb drag and track click all move the *view*, and the
+selected song must not move with it (that is what the controller is for). Same
+environment as the record above (Release build, windowed, local `game/dlc`
+library, isolated profile under `out/mouse-fix-verify/`, driven with
+`drive_ui.ps1`).
 
-Wheel. Detents no longer pretend to be analog stick travel; each one pulses the
-D-pad bit. The measurement that drove that: four one-frame right-stick strikes
-at the song list produced no viewport or selection change at all
-(`s15-dpad4.png`, no `mouse_probe` state lines), while the same physical input
-as D-pad presses moved the list predictably. With the D-pad build, one detent is
-exactly one song: parked on "(0.25, 0.30)", three downward detents moved the
-selected *display slot* 0 → 2 → 4 → 6 → 8 and two upward detents returned 8 → 6
-→ 4 — ±2 slots per song because the slot grid counts the disabled artist-heading
-rows between songs (`scroll5.log`, `t0-t5*.png`). Selection slot and viewport
-are separate: `firstShowing` stays 0 while the selection walks the band, which is
-why the earlier readings of "two steps for one detent" were the viewport
-catching up, not dropped/multiplied input.
+Calibration. The thumb is a light block on the rail; `thumb_scan.py` in the
+evidence directory finds it in a window capture. Against the list state:
+thumb top 255px at `firstShowing` 0, 457px at 15, 659px at 30, 807px at 41 with
+a 62px thumb — 13.457px per first-row step, i.e. one step is about a fifth of a
+visual row, and the thumb is one row pitch tall. The engine's own clamp gives
+`maxFirst` 41 for this 51-row library (`NumData` 51 from the provider vtable,
+minus the 10 visible rows; a `first` of 41 is where repeated bottom clicks stop
+and where the thumb touches the rail's bottom edge). In game units the rail is
+`[0.2175, 0.8348]`, the thumb 0.0624, and travel-per-step
+`(rail − thumb) / maxFirst` — 0.013534, within 0.2% of the measured slope. The
+provider call is `UIListProvider::NumData` at vtable slot 10 (`822DAE10`: return
+`(this+56 - this+52) / 4`; RB3's header has one extra virtual before `NumData`),
+guarded by comparing the rebuilt slot against that address before calling, and
+cross-checked against a base-songs-only boot (7 rows, `maxFirst` 0, hence an
+unscrollable rail).
 
-Scrollbar. The strip is derived from what the draw captured, not from pixel
-constants: the song rows' labelled bounds end at game x ≈ 0.567, the scene's
-rail mesh sits at ≈ 0.595–0.606, and the published strip is `[right + .023,
-right + .047]` — 0.590–0.614 — which covers the rail without touching the star
-column (`railhit p=0.602 … rail=0.590,0.203,0.614,0.863 hit=true`,
-`accept-final.log`). Driven with real drags and clicks:
+Measured in the same boot (`native2.log` plus the `n*` captures):
 
-- Rail click at y=0.35: viewport target 0 → 2, i.e. the clicked row comes to the
-  top of the band (`f1-click-rail.png`).
-- Drag y=0.30 → 0.50: three rows down (2 → 3 → 4 → 5); drag back y=0.50 → 0.30:
-  three rows up (5 → 4 → 3 → 2) — one row of list per row of mouse
-  (`f2-drag-down.png`, `f3-drag-up.png`).
-- Rail click at y=0.60: +6 rows (2 → 8); click at y=0.45: +3 (8 → 11); the
-  clicked row lands at the top each time (`f4-click-low.png`, `f5-click-mid.png`).
-- Every apply carries the selection with it (traces show `row` moving with
-  `first`), so the highlighted song and its album panel stay on screen and
-  disabled artist headings are skipped. One earlier build shipped the flaw this
-  fixes: passing the unchanged selection row let the guest set the selected
-  slot to -1 (`selDisp=4294967295` in `scroll8.log`) and froze every following
-  press; the drag now anchors on the last row a draw identified and moves the
-  row and viewport together.
-- Wheel still steps afterwards (±2 slots, `f6`/`f7`), and a rail press never
-  emits A: the screen stayed `song_select_screen` through five rail
-  interactions; one row click afterwards started the song (the same log's
-  `available=false` transition into `powerup_select_screen`, `f8-row-click.png`).
+- Wheel: three detents advanced the view target 0 → 5 → 10 → 15, six detents to
+  30; the thumb measured 457px and 659px against 456.9/658.7 predicted. Every
+  apply logged `row=0` — the selection never moved — and the album panel still
+  read *Random Song* after six rows of scrolling (`n0-parked.png`,
+  `n2-wheel6.png`). One detent is one visual row.
+- Track click at y=0.60: the thumb slid to 632px against 631 predicted, i.e.
+  the thumb top lands at the cursor (`n3-trackclick.png`).
+- A press on the thumb does not jump: a second click at the same point left it
+  at 632px (`n4-thumbclick.png`).
+- Drag: y 0.50 → 0.70 moved the view +15 first-steps and clamped at the rail's
+  bottom (thumb 807..867px); a further drag to y 0.95 stayed clamped
+  (`n5-dragdown.png`, `n6-overscroll.png`). Dragging back 0.80 → 0.40 moved −30
+  to `first` 11 (thumb 403px against 403.0 predicted) and one wheel-up detent
+  took it to 6 (thumb 336px against 335.7) (`n7-dragup.png`, `n8-wheelup.png`).
+- A rail press never emits A — the screen stayed on the library through every
+  rail interaction — and a row click afterwards still started the song (the same
+  log's `available=false` transition into `powerup_select_screen`).
+- The powerup screen (horizontal, no rail) keeps the D-pad detent path: one
+  wheel detent still steps the category selection one cell
+  (`nC-powerup-wheel1.png`).
 
 Harness note for future scripted checks: `drive_ui.ps1` coordinates are
 normalized to the window client, which for this configuration is wider than the
@@ -264,13 +279,14 @@ normalized to the window client, which for this configuration is wider than the
 y' ≈ y (measured from the `hit=`/`railhit` traces, `scroll7.log`); the rail's
 game x 0.59–0.61 is drive x ≈ 0.576.
 
-Evidence: `out/mouse-fix-verify/` — `scroll5.log`, `scroll8.log`,
-`scroll9.log`, `accept-final.log` and the captures named here. The 2026-10-16
-crash probes that produced the temporary in-draw `mouse_probe` dumper are
-superseded: projecting and logging inside `UIListDir::Draw` stalled frames hard
-enough to desync the GPU ring twice (the `ExecutePacketType0/3 overflow …
-PRIMARY RINGBUFFER` signature), a boot with raw-read-only logging was clean, and
-the probe is removed from the shipped code. `rb_blitz_native_mouse_tests` now
-passes 421 checks (the new cases: scrollbar queue coalescing that never drops a
-press or release, scrollbar traffic flowing while a click pulse waits for its
-release, and the rail row-grid math); all 38 CTest targets pass.
+Evidence: `out/mouse-fix-verify/` — `native2.log` (every scroll application and
+the rail map), `calib.log` + `c0..c4*.png` (the firstShowing↔thumb points),
+`numdata2.log` (the live `NumData`=51 check), `n0..n8*.png` and the
+`thumb_scan.py` that measures the thumb. The earlier same-session probes that
+projected meshes inside `UIListDir::Draw` stalled frames hard enough to desync
+the GPU ring twice (the `ExecutePacketType0/3 overflow … PRIMARY RINGBUFFER`
+signature) — raw-read logging boots clean and no probe ships.
+`rb_blitz_native_mouse_tests` passes 421 checks (scrollbar queue coalescing,
+pulse-flow interplay, and the rail thumb math: travel per step, first-from-y
+with both clamps, and the on-thumb grab test); all 38 CTest targets pass in
+`out/build/win-amd64-debug`.

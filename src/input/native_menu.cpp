@@ -29,6 +29,7 @@ REX_EXTERN(__imp__sub_824BFEF0); // UIListMeshElement::Draw
 REX_EXTERN(sub_821E14A8);       // Multiply(Vector3, Transform)
 REX_EXTERN(sub_821FF4A0);       // RndCam::WorldToScreen
 REX_EXTERN(sub_824E3008);       // UIListState::Selected (logical index)
+REX_EXTERN(sub_822DAE10);       // UIListProvider::NumData (vtable slot 10 in Blitz)
 
 namespace rb_blitz::input {
 namespace {
@@ -65,10 +66,10 @@ struct Geometry {
   bool horizontal = false;
   MenuBounds bounds;
   std::vector<MenuRow> rows;
-  // Captured for the scrollbar mapping: the focused row's data index and the row
-  // grid (pitch and the first row's centre) the gutter drags against.
+  // Captured for the scrollbar mapping: the focused row's data index and the row pitch
+  // the wheel's step size follows.
   int selected = -1;
-  float band_top = 0, band_bottom = 0, pitch = 0;
+  float pitch = 0;
 };
 thread_local Geometry geometry;
 thread_local uint32_t frame_number = 0;
@@ -99,6 +100,39 @@ uint32_t Focus(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   sub_824B1980(call.frame, base);
   return call.frame.ctx.r3.u32;
 }
+// The song library's rail, measured 2026-10-16 against the list state (calibration in
+// docs/engine/input-flow.md): the thumb is one row pitch tall (kThumbHeight) and its top
+// walks from kRailTop to kRailBottom - kThumbHeight as firstShowing walks 0..maxFirst.
+constexpr float kRailTop = .2175f, kRailBottom = .8348f, kThumbHeight = .0624f;
+constexpr uint32_t kNumDataFn = 0x822DAE10u;  // UIListProvider::NumData (vtable slot 10)
+struct RailMap {
+  bool known = false;
+  uint32_t list = 0;
+  int max_first = 0;
+};
+thread_local RailMap rail_map;
+float RailPerFirstNow() {
+  return RailPerFirst(kRailBottom - kRailTop, kThumbHeight, rail_map.max_first);
+}
+// Resolve how far the focused list can scroll: provider NumData minus the visible row
+// count. The vtable slot is checked against the recompiled address before calling, and a
+// refused answer leaves the gutter inert rather than guessing.
+bool EnsureRailMap(PPCContext& ctx, uint8_t* base, uint32_t list) {
+  if (rail_map.known && rail_map.list == list) return true;
+  rail_map = {};
+  const auto provider = U32(base, list + 208);
+  const auto vtable = provider ? U32(base, provider) : 0;
+  if (!vtable || U32(base, vtable + 10 * 4) != kNumDataFn) return false;
+  GuestCall call(ctx);
+  call.frame.ctx.r3.u32 = provider;
+  sub_822DAE10(call.frame, base);
+  const int rows = call.frame.ctx.r3.s32, display = int(U32(base, list + 180));
+  if (rows <= 0 || display <= 0) return false;
+  rail_map = {true, list, std::max(0, rows - display)};
+  if (REXCVAR_GET(mouse_native_trace))
+    REXLOG_INFO("native_mouse: scroll rail rows={} numDisplay={} maxFirst={}", rows, display, rail_map.max_first);
+  return true;
+}
 void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const uint32_t screen = U32(base, manager + 44);
   const uint32_t focus = screen ? Focus(ctx, base, manager) : 0;
@@ -113,6 +147,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   if (screen != current_screen || focus != current_focus || allowed != menu_available) {
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
+    rail_map = {};
     if (REXCVAR_GET(mouse_native_trace))
       REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
   }
@@ -145,22 +180,22 @@ void Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   sub_824C1F08(c, base);
   if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: selected row={} list={:08X}", row, geometry.list);
 }
-// One live gutter drag. `first` and the row grid are frozen when the press lands,
-// so the mapping stays stable while the list animates underneath the cursor. The
-// selection row rides with the viewport (a row of scroll is a row of selection), the
-// way the guest's own directional scroll keeps the highlighted slot on screen.
+// One live gutter drag. `first` is the view target frozen when the press landed; the
+// selection is never moved by the scrollbar, so no row rides along with it.
 struct RailDrag {
   bool active = false, moved = false;
   uint32_t list = 0;
-  int first = 0, row = -1;
-  float y = 0, first_center = 0, pitch = 0;
+  int first = 0;
+  float y = 0;
 };
 thread_local RailDrag rail_drag;
-// Scroll the viewport and carry the selection with it, then notify the providers the
-// way the guest's own scroll does. The list clamps `first` to its last page.
-void ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, int row) {
-  first = std::max(0, first);
-  row = std::max(0, row);
+// Move only the viewport, keep the guest's selection row, then notify the providers the
+// way the guest's own scroll does. `first` is clamped to the list's own last page.
+void ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first) {
+  const int row = geometry.selected >= 0 ? geometry.selected : last_selected_row;
+  if (row < 0) return;
+  if (rail_map.known && rail_map.list == list) first = std::clamp(first, 0, rail_map.max_first);
+  else first = std::max(0, first);
   const uint32_t current = U32(base, list + 224);
   if (uint32_t(first) == current) return;
   const int direction = first > int(current) ? 1 : -1;
@@ -235,43 +270,54 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   ++frame_number;
   Context(ctx, base, manager);
   std::optional<MenuMouseEvent> event;
+  const bool fresh = geometry.list && geometry.list == current_focus && geometry.frame + 1 == frame_number;
+  const bool railed = fresh && !geometry.horizontal && geometry.pitch > 0 && RailSnapshot().valid;
   // Retail UIListState rejects another directional input while the viewport is
-  // animating (firstShowing != targetShowing). Keep that detent queued instead.
-  const bool can_scroll = !geometry.list || geometry.list != current_focus || geometry.frame + 1 != frame_number ||
-      U32(base, current_focus + 224) == U32(base, current_focus + 228);
+  // animating (firstShowing != targetShowing). Keep that detent queued instead - except
+  // on a railed list, where the wheel advances a plain target and needs no hold.
+  const bool can_scroll = !fresh || railed || U32(base, current_focus + 224) == U32(base, current_focus + 228);
   { std::lock_guard lock(mutex); event = queue.NextFrame(can_scroll); }
   if (!event) return;
-  // Scrollbar traffic drives the list directly (no pad pulse, no horizontal remap),
-  // so it is handled before the directional path below.
+  // Scrollbar traffic drives the list's view directly (no pad pulse, no horizontal
+  // remap), so it is handled before the directional path below.
   if (event->action == MouseAction::kScrollbarDown || event->action == MouseAction::kScrollbarDrag ||
       event->action == MouseAction::kScrollbarUp) {
-    const bool fresh = geometry.list && geometry.list == current_focus &&
-        geometry.frame + 1 == frame_number && geometry.pitch > 0;
     if (event->action == MouseAction::kScrollbarDown) {
       rail_drag = {};
-      // The selected slot reads -1 while a scroll has the selection outside the band;
-      // anchor on the last row a draw identified instead.
+      // Anchor on the pending target: the thumb's drawn position follows it, and the
+      // drag then moves the view port row-for-row with the cursor.
       const int anchor = geometry.selected >= 0 ? geometry.selected : last_selected_row;
-      if (fresh && anchor >= 0)
-        rail_drag = {true, false, current_focus, int(U32(base, current_focus + 224)), anchor,
-                     event->point.y, geometry.band_top, geometry.pitch};
+      if (fresh && railed && anchor >= 0 && EnsureRailMap(ctx, base, current_focus))
+        rail_drag = {true, false, current_focus, int(U32(base, current_focus + 228)), event->point.y};
       if (REXCVAR_GET(mouse_native_trace))
         REXLOG_INFO("native_mouse: gutter press y={:.3f} armed={}", event->point.y, rail_drag.active);
     } else if (event->action == MouseAction::kScrollbarDrag) {
-      if (rail_drag.active && rail_drag.list == current_focus && fresh) {
-        const int delta = RailSlot(event->point.y, rail_drag.y, rail_drag.pitch);
-        ScrollListTo(ctx, base, rail_drag.list, rail_drag.first + delta, rail_drag.row + delta);
+      const float per = RailPerFirstNow();
+      if (rail_drag.active && rail_drag.list == current_focus && fresh && railed && per > 0) {
+        const int delta = int(std::lround((event->point.y - rail_drag.y) / per));
+        ScrollListTo(ctx, base, rail_drag.list,
+                     std::clamp(rail_drag.first + delta, 0, rail_map.max_first));
         rail_drag.moved = true;
       }
     } else {
-      // A press that never moved places the row under the cursor at the top of
-      // the band, the way a track click lands on the rail in a native scrollbar.
-      if (rail_drag.active && rail_drag.list == current_focus && fresh && !rail_drag.moved) {
-        const int delta = RailSlot(rail_drag.y, rail_drag.first_center, rail_drag.pitch);
-        ScrollListTo(ctx, base, rail_drag.list, rail_drag.first + delta, rail_drag.row + delta);
-      }
+      // A press that never moved slides the thumb to the cursor unless it already sat on
+      // the thumb (which is a grab), the way a track click lands in a native scrollbar.
+      const bool on_thumb = RailYOnThumb(rail_drag.y, kRailTop, RailPerFirstNow(), kThumbHeight, rail_drag.first);
+      if (rail_drag.active && rail_drag.list == current_focus && fresh && railed &&
+          !rail_drag.moved && !on_thumb)
+        ScrollListTo(ctx, base, rail_drag.list, RailFirstFromY(rail_drag.y, kRailTop, RailPerFirstNow(), rail_map.max_first));
       rail_drag = {};
     }
+    return;
+  }
+  // The wheel scrolls a railed list's view instead of stepping its selection (owner
+  // rule, 2026-10-16): a scrollbar moves the view; selection is a controller behaviour.
+  if ((event->action == MouseAction::kUp || event->action == MouseAction::kDown) && railed &&
+      EnsureRailMap(ctx, base, current_focus) && rail_map.max_first > 0) {
+    const float per = RailPerFirstNow();
+    const int step = std::max(1, int(std::lround(geometry.pitch / per)));
+    const int base_first = int(U32(base, current_focus + 228));
+    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? step : -step));
     return;
   }
   const auto screen = current_screen, focus = current_focus;
@@ -477,23 +523,14 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
   geometry.pitch = RailPitch(geometry.rows);
-  float top = INFINITY, bottom = -INFINITY;
-  for (const auto& row : geometry.rows)
-    if (row.bounds) {
-      top = std::min(top, (row.bounds->top + row.bounds->bottom) * .5f);
-      bottom = std::max(bottom, (row.bounds->top + row.bounds->bottom) * .5f);
-    }
-  geometry.band_top = top; geometry.band_bottom = bottom;
   MenuRail rail;
   float right = -INFINITY;
   for (const auto& row : geometry.rows)
     if (row.bounds) right = std::max(right, row.bounds->right);
-  if (!geometry.horizontal && geometry.pitch > 0 && std::isfinite(top) && std::isfinite(right)) {
-    // The song library's rail sits ~2.3% of the screen right of the row text, with the
-    // star column between: start the strip at the row button's own edge, not the label's.
+  if (!geometry.horizontal && geometry.pitch > 0 && std::isfinite(right)) {
+    // The rail's own extent, not the row band: the thumb travels inside it (measured).
     rail.left = right + .023f; rail.right = rail.left + .024f;
-    rail.top = top - geometry.pitch * .75f;
-    rail.bottom = bottom + geometry.pitch * .75f;
+    rail.top = kRailTop; rail.bottom = kRailBottom;
     rail.valid = true;
   }
   PublishRail(rail);

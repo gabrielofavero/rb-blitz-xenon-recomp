@@ -72,10 +72,10 @@ enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight,
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
 // The scrollbar strip sits in the gutter right of a vertical list's rows, where the
-// song library draws its rail and thumb. Points there map onto the row grid: a drag
-// is one row of travel per row of mouse movement, a click moves the row under the
-// cursor to the top of the band. The guest list clamps the result to its own last
-// page, so the top needs no scroll-bar geometry of its own.
+// song library draws its rail and thumb. Points there map onto the thumb's own
+// geometry: the thumb is one row pitch tall and travels between the rail's top and
+// bottom as the view's first row walks 0..maxFirst, so a row of mouse movement is a
+// row of thumb movement and the guest list clamps the result to its own last page.
 struct MenuRail { float left = 0, top = 0, right = 0, bottom = 0; bool valid = false; };
 inline float RailPitch(const std::vector<MenuRow>& rows) {
   std::vector<float> ys;
@@ -86,10 +86,21 @@ inline float RailPitch(const std::vector<MenuRow>& rows) {
   for (size_t i = 1; i < ys.size(); ++i) pitch = std::max(pitch, ys[i] - ys[i - 1]);
   return pitch > 0 ? pitch : 0;
 }
-// Row offset of a point from the first row's centre; the sign follows the screen.
-inline int RailSlot(float y, float first_center, float pitch) {
-  if (!(pitch > 0)) return 0;
-  return int(std::lround((y - first_center) / pitch));
+// Thumb travel per unit of firstShowing over a rail of `rail_height` whose thumb is
+// `thumb_height` tall: the thumb crosses (rail - thumb) in max_first steps.
+inline float RailPerFirst(float rail_height, float thumb_height, int max_first) {
+  const float travel = rail_height - thumb_height;
+  return max_first > 0 && travel > 0 ? travel / float(max_first) : 0;
+}
+// The firstShowing whose thumb top sits at `y`.
+inline int RailFirstFromY(float y, float rail_top, float per_first, int max_first) {
+  if (!(per_first > 0) || max_first <= 0) return 0;
+  return std::clamp(int(std::lround((y - rail_top) / per_first)), 0, max_first);
+}
+// Whether `y` is on the thumb (with a small grab margin) for a view at `first`.
+inline bool RailYOnThumb(float y, float rail_top, float per_first, float thumb_height, int first) {
+  const float top = rail_top + per_first * float(first);
+  return y >= top - .004f && y <= top + thumb_height + .004f;
 }
 
 // Guest-frame pulses, independent of how many times XInput is polled per frame.
