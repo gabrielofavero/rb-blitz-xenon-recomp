@@ -178,11 +178,13 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           state.gamepad.right_trigger = out.right_trigger;
           // Fixed menu actions bypass user pad remaps. The synthetic driver keeps
           // a controller slot connected, but contributes no buttons before this filter.
+          // Wheel detents travel as D-pad presses (1/2/4/8), not stick travel: the
+          // guest treats each press as one discrete step, where a two-frame stick
+          // pulse depends on its own analog threshold/repeat handling that can drop
+          // or multiply steps unpredictably.
           if (user_index == 0) {
             const auto mouse = SampleMenuMousePadState();
-            state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x3000);
-            if (mouse & 3) state.gamepad.thumb_ly = mouse & 1 ? 32767 : -32767;
-            if (mouse & 12) state.gamepad.thumb_lx = mouse & 4 ? -32767 : 32767;
+            state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x300F);
           }
           // Publish the identity of the state actually delivered, after both
           // remapping and native mouse input. Taking max(device packets) can

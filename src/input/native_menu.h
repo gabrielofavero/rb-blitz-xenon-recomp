@@ -67,8 +67,30 @@ inline int HitMenuRow(MenuPoint p, const MenuBounds& bounds,
   return closest && closest->enabled ? closest->index : -1;
 }
 
-enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight };
+enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight,
+                         kScrollbarDown, kScrollbarDrag, kScrollbarUp };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
+
+// The scrollbar strip sits in the gutter right of a vertical list's rows, where the
+// song library draws its rail and thumb. Points there map onto the row grid: a drag
+// is one row of travel per row of mouse movement, a click moves the row under the
+// cursor to the top of the band. The guest list clamps the result to its own last
+// page, so the top needs no scroll-bar geometry of its own.
+struct MenuRail { float left = 0, top = 0, right = 0, bottom = 0; bool valid = false; };
+inline float RailPitch(const std::vector<MenuRow>& rows) {
+  std::vector<float> ys;
+  for (const auto& row : rows) if (row.bounds) ys.push_back((row.bounds->top + row.bounds->bottom) * .5f);
+  if (ys.size() < 3) return 0;
+  std::sort(ys.begin(), ys.end());
+  float pitch = 0;
+  for (size_t i = 1; i < ys.size(); ++i) pitch = std::max(pitch, ys[i] - ys[i - 1]);
+  return pitch > 0 ? pitch : 0;
+}
+// Row offset of a point from the first row's centre; the sign follows the screen.
+inline int RailSlot(float y, float first_center, float pitch) {
+  if (!(pitch > 0)) return 0;
+  return int(std::lround((y - first_center) / pitch));
+}
 
 // Guest-frame pulses, independent of how many times XInput is polled per frame.
 // Both the press and release must reach a pad poll before advancing: UI frames
@@ -81,11 +103,21 @@ class MenuMouseQueue {
     screen_ = screen; focus_ = focus; enabled_ = enabled;
   }
   void Reset() {
-    events_.clear(); wheel_ = 0;
+    events_.clear(); scrollbar_.clear(); wheel_ = 0;
     if (pulse_) release_pending_ = true;
     pulse_ = 0; frames_ = 0; sampled_ = false;
   }
   bool enabled() const { return enabled_; }
+  // Drag frames coalesce to the latest pointer position; presses and releases are
+  // never dropped, so a click that begins and ends inside one UI frame still lands.
+  void Scrollbar(MouseAction action, MenuPoint point) {
+    if (!enabled_) return;
+    if (action == MouseAction::kScrollbarDrag && !scrollbar_.empty() &&
+        scrollbar_.back().action == MouseAction::kScrollbarDrag)
+      scrollbar_.back().point = point;
+    else if (scrollbar_.size() < 8)
+      scrollbar_.push_back({action, point});
+  }
   void Push(MouseAction action, MenuPoint point = {}) {
     if (!enabled_) return;
     if (action == MouseAction::kMove && !events_.empty() &&
@@ -102,6 +134,12 @@ class MenuMouseQueue {
   }
   std::optional<MenuMouseEvent> NextFrame(bool can_scroll = true) {
     if (!enabled_) return {};
+    // Scrollbar traffic bypasses the pad pulse gates: it drives the list directly
+    // and must keep flowing while a press pulse is still waiting for its release.
+    if (!scrollbar_.empty()) {
+      auto event = scrollbar_.front(); scrollbar_.pop_front();
+      return event;
+    }
     if (frames_ > 0) { --frames_; return {}; }
     if (pulse_) {
       if (sampled_) { pulse_ = 0; sampled_ = false; release_pending_ = true; }
@@ -118,6 +156,9 @@ class MenuMouseQueue {
     return event;
   }
   void Pulse(MouseAction action) {
+    // Directions are D-pad bits (up 1, down 2, left 4, right 8) rather than stick
+    // travel: the guest steps a list once per press, so one wheel detent is one
+    // native step and no analog threshold or repeat rule can drop or multiply it.
     pulse_ = action == MouseAction::kAccept ? 0x1000 :
              action == MouseAction::kBack ? 0x2000 :
              action == MouseAction::kUp ? 1 : action == MouseAction::kDown ? 2 :
@@ -135,7 +176,7 @@ class MenuMouseQueue {
   int wheel_ = 0, frames_ = 0;
   uint16_t pulse_ = 0;
   bool sampled_ = false, release_pending_ = false;
-  std::deque<MenuMouseEvent> events_;
+  std::deque<MenuMouseEvent> events_, scrollbar_;
 };
 
 // Thread-safe bridge. Window events contain no guest pointers; only the UIManager
@@ -145,6 +186,9 @@ bool MouseMenuAvailable();
 void MouseMenuFocus(bool focused);
 void QueueMenuMouse(MouseAction action, MenuPoint point);
 void QueueMenuWheel(int delta);
+void QueueMenuScrollbar(MouseAction action, MenuPoint point);
+// Whether a point is in the focused list's scrollbar gutter, as the last draw left it.
+bool MouseMenuRailHit(MenuPoint point);
 uint16_t MenuMousePadState();
 uint16_t SampleMenuMousePadState();
 

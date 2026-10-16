@@ -19,6 +19,7 @@
 #                       accepts keys while it believes it has focus)
 #   mouse:<x>:<y>      move to normalized game-client coordinates (0..1)
 #   click:left|right   click at the current pointer position
+#   drag:x1:y1:x2:y2   press at (x1,y1), move in steps, release at (x2,y2)
 #   wheel:<detents>    scroll (positive up, negative down)
 #   cursor:visible|hidden  assert the native cursor visibility
 param(
@@ -241,6 +242,30 @@ foreach ($action in $Actions) {
             [RbDriveWin32]::mouse_event($down, 0, 0, 0, [IntPtr]::Zero)
             Start-Sleep -Milliseconds 50
             [RbDriveWin32]::mouse_event($up, 0, 0, 0, [IntPtr]::Zero)
+        }
+        "drag" {
+            # drag:x1:y1:x2:y2 (normalized client coords): press, move in steps, release.
+            $h = Focus-GameWindow
+            $rect = New-Object RbDriveWin32+Rect
+            [RbDriveWin32]::GetClientRect($h, [ref]$rect) | Out-Null
+            $xy = @([double]$parts[1]) + @($parts[2].Split(":") | ForEach-Object { [double]$_ })
+            if ($xy.Count -ne 4) { throw "drag needs x1:y1:x2:y2" }
+            function Move-Client([double]$nx, [double]$ny) {
+                $p = New-Object RbDriveWin32+Point
+                $p.x = [int]($nx * $rect.right); $p.y = [int]($ny * $rect.bottom)
+                [RbDriveWin32]::ClientToScreen($h, [ref]$p) | Out-Null
+                [RbDriveWin32]::SetCursorPos($p.x, $p.y) | Out-Null
+            }
+            Move-Client $xy[0] $xy[1]
+            Start-Sleep -Milliseconds 60
+            [RbDriveWin32]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
+            $steps = 12
+            for ($i = 1; $i -le $steps; $i++) {
+                Move-Client ($xy[0] + ($xy[2] - $xy[0]) * $i / $steps) ($xy[1] + ($xy[3] - $xy[1]) * $i / $steps)
+                Start-Sleep -Milliseconds 24
+            }
+            [RbDriveWin32]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+            Write-Host "drag $($xy -join ',') sent"
         }
         "wheel" {
             Focus-GameWindow | Out-Null

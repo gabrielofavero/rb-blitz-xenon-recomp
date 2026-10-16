@@ -148,6 +148,47 @@ int main() {
   q.Context(1, 2, true);
   CHECK_FALSE(q.NextFrame());
 
+  BeginCase("scrollbar drags coalesce and never lose a press or release");
+  MenuMouseQueue rail;
+  rail.Context(1, 2, true);
+  rail.Scrollbar(MouseAction::kScrollbarDown, {.6f, .3f});
+  rail.Scrollbar(MouseAction::kScrollbarDrag, {.6f, .31f});
+  rail.Scrollbar(MouseAction::kScrollbarDrag, {.6f, .35f});
+  rail.Scrollbar(MouseAction::kScrollbarUp, {.6f, .35f});
+  auto drag = rail.NextFrame();
+  CHECK_TRUE(drag && drag->action == MouseAction::kScrollbarDown && drag->point.y == .3f);
+  drag = rail.NextFrame();
+  CHECK_TRUE(drag && drag->action == MouseAction::kScrollbarDrag && drag->point.y == .35f);
+  drag = rail.NextFrame();
+  CHECK_TRUE(drag && drag->action == MouseAction::kScrollbarUp);
+  CHECK_FALSE(rail.NextFrame());
+
+  BeginCase("scrollbar traffic flows while a button pulse waits for its release");
+  rail.Push(MouseAction::kAccept, {.5f, .5f});
+  rail.Pulse(rail.NextFrame()->action);
+  rail.Scrollbar(MouseAction::kScrollbarDrag, {.6f, .2f});
+  CHECK_TRUE(rail.NextFrame()->action == MouseAction::kScrollbarDrag);
+  CHECK_EQ(rail.pulse(), 0x1000);
+  rail.SamplePad();
+  CHECK_FALSE(rail.NextFrame());
+  rail.Reset();
+  CHECK_FALSE(rail.NextFrame());
+
+  BeginCase("rail grid math follows row pitch and stays sign-true");
+  std::vector<MenuRow> rail_rows{
+      {{.3f, .2f}, 0, true, MenuBounds{.2f, .15f, .4f, .25f}},
+      {{.3f, .3f}, 1, false, MenuBounds{.2f, .25f, .4f, .35f}},
+      {{.3f, .4f}, 2, true, MenuBounds{.2f, .35f, .4f, .45f}},
+      {{.3f, .5f}, 3, true, MenuBounds{.2f, .45f, .4f, .55f}}};
+  const float pitch = RailPitch(rail_rows);
+  CHECK_TRUE(std::abs(pitch - .1f) < .001f);
+  CHECK_EQ(RailSlot(.5f, .2f, pitch), 3);
+  CHECK_EQ(RailSlot(.2f, .2f, pitch), 0);
+  CHECK_EQ(RailSlot(.14f, .2f, pitch), -1);
+  CHECK_EQ(RailSlot(.9f, .2f, pitch), 7);
+  CHECK_EQ(RailSlot(.2f, .2f, 0), 0);
+  CHECK_TRUE(RailPitch({{{.5f, .5f}, 0, true}}) == 0);
+
   BeginCase("final pad packets expose mouse edges beside an idle controller");
   PadPacket packets;
   PadSample pad;

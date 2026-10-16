@@ -65,9 +65,24 @@ struct Geometry {
   bool horizontal = false;
   MenuBounds bounds;
   std::vector<MenuRow> rows;
+  // Captured for the scrollbar mapping: the focused row's data index and the row
+  // grid (pitch and the first row's centre) the gutter drags against.
+  int selected = -1;
+  float band_top = 0, band_bottom = 0, pitch = 0;
 };
 thread_local Geometry geometry;
 thread_local uint32_t frame_number = 0;
+// The last row a draw positively identified as selected. The guest sets the selected
+// *slot* to -1 when a scroll left the selection outside the band, so the slot cannot
+// be the anchor; this survives that and is reset on every screen or focus change.
+thread_local int last_selected_row = -1;
+
+// The gutter the window thread may arm a drag in: published per draw so input that
+// arrives between frames still sees the last confirmed strip, never a retired list.
+std::mutex rail_mutex;
+MenuRail menu_rail;
+MenuRail RailSnapshot() { std::lock_guard lock(rail_mutex); return menu_rail; }
+void PublishRail(const MenuRail& rail) { std::lock_guard lock(rail_mutex); menu_rail = rail; }
 
 // All side calls use isolated registers and reserve space below the guest frame.
 // Output buffers are above that call's linkage area and survive nested guest calls.
@@ -95,10 +110,13 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const bool allowed = screen && U32(base, manager + 16) == 0 &&
       (name != "game_screen" || panel_name == "pause_panel");
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
+  if (screen != current_screen || focus != current_focus || allowed != menu_available) {
+    MenuRail stale; PublishRail(stale);
+    last_selected_row = -1;
+    if (REXCVAR_GET(mouse_native_trace))
+      REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
+  }
   std::lock_guard lock(mutex);
-  if ((screen != current_screen || focus != current_focus || allowed != menu_available) &&
-      REXCVAR_GET(mouse_native_trace))
-    REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
   current_screen = screen; current_focus = focus; menu_available = allowed;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled());
 }
@@ -127,6 +145,36 @@ void Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   sub_824C1F08(c, base);
   if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: selected row={} list={:08X}", row, geometry.list);
 }
+// One live gutter drag. `first` and the row grid are frozen when the press lands,
+// so the mapping stays stable while the list animates underneath the cursor. The
+// selection row rides with the viewport (a row of scroll is a row of selection), the
+// way the guest's own directional scroll keeps the highlighted slot on screen.
+struct RailDrag {
+  bool active = false, moved = false;
+  uint32_t list = 0;
+  int first = 0, row = -1;
+  float y = 0, first_center = 0, pitch = 0;
+};
+thread_local RailDrag rail_drag;
+// Scroll the viewport and carry the selection with it, then notify the providers the
+// way the guest's own scroll does. The list clamps `first` to its last page.
+void ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, int row) {
+  first = std::max(0, first);
+  row = std::max(0, row);
+  const uint32_t current = U32(base, list + 224);
+  if (uint32_t(first) == current) return;
+  const int direction = first > int(current) ? 1 : -1;
+  GuestCall call(ctx);
+  auto& c = call.frame.ctx;
+  c.r3.u32 = list; c.r4.s32 = row; c.r5.u32 = uint32_t(first);
+  sub_824C1938(c, base);
+  c.r3.u32 = list + 84; c.r4.u32 = list + 176; c.r5.s32 = direction; c.r6.u32 = 0;
+  sub_824C1DE8(c, base);
+  c.r3.u32 = list + 84; c.r4.u32 = list + 176;
+  sub_824C1F08(c, base);
+  if (REXCVAR_GET(mouse_native_trace))
+    REXLOG_INFO("native_mouse: scrollbar first={} target={} row={} dir={}", current, first, row, direction);
+}
 }
 
 bool MouseSupportEnabled() { return REXCVAR_GET(mouse_ui_nav); }
@@ -146,6 +194,15 @@ void QueueMenuMouse(MouseAction action, MenuPoint point) {
 void QueueMenuWheel(int delta) {
   std::lock_guard lock(mutex);
   if (MouseSupportEnabled()) queue.Wheel(delta);
+}
+void QueueMenuScrollbar(MouseAction action, MenuPoint point) {
+  std::lock_guard lock(mutex);
+  if (MouseSupportEnabled()) queue.Scrollbar(action, point);
+}
+bool MouseMenuRailHit(MenuPoint point) {
+  const auto rail = RailSnapshot();
+  return MouseSupportEnabled() && rail.valid &&
+      MenuBounds{rail.left, rail.top, rail.right, rail.bottom}.Contains(point);
 }
 uint16_t MenuMousePadState() {
   std::lock_guard lock(mutex);
@@ -184,6 +241,39 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       U32(base, current_focus + 224) == U32(base, current_focus + 228);
   { std::lock_guard lock(mutex); event = queue.NextFrame(can_scroll); }
   if (!event) return;
+  // Scrollbar traffic drives the list directly (no pad pulse, no horizontal remap),
+  // so it is handled before the directional path below.
+  if (event->action == MouseAction::kScrollbarDown || event->action == MouseAction::kScrollbarDrag ||
+      event->action == MouseAction::kScrollbarUp) {
+    const bool fresh = geometry.list && geometry.list == current_focus &&
+        geometry.frame + 1 == frame_number && geometry.pitch > 0;
+    if (event->action == MouseAction::kScrollbarDown) {
+      rail_drag = {};
+      // The selected slot reads -1 while a scroll has the selection outside the band;
+      // anchor on the last row a draw identified instead.
+      const int anchor = geometry.selected >= 0 ? geometry.selected : last_selected_row;
+      if (fresh && anchor >= 0)
+        rail_drag = {true, false, current_focus, int(U32(base, current_focus + 224)), anchor,
+                     event->point.y, geometry.band_top, geometry.pitch};
+      if (REXCVAR_GET(mouse_native_trace))
+        REXLOG_INFO("native_mouse: gutter press y={:.3f} armed={}", event->point.y, rail_drag.active);
+    } else if (event->action == MouseAction::kScrollbarDrag) {
+      if (rail_drag.active && rail_drag.list == current_focus && fresh) {
+        const int delta = RailSlot(event->point.y, rail_drag.y, rail_drag.pitch);
+        ScrollListTo(ctx, base, rail_drag.list, rail_drag.first + delta, rail_drag.row + delta);
+        rail_drag.moved = true;
+      }
+    } else {
+      // A press that never moved places the row under the cursor at the top of
+      // the band, the way a track click lands on the rail in a native scrollbar.
+      if (rail_drag.active && rail_drag.list == current_focus && fresh && !rail_drag.moved) {
+        const int delta = RailSlot(rail_drag.y, rail_drag.first_center, rail_drag.pitch);
+        ScrollListTo(ctx, base, rail_drag.list, rail_drag.first + delta, rail_drag.row + delta);
+      }
+      rail_drag = {};
+    }
+    return;
+  }
   const auto screen = current_screen, focus = current_focus;
   if (geometry.list == focus && geometry.frame + 1 == frame_number && geometry.horizontal) {
     if (event->action == MouseAction::kUp) event->action = MouseAction::kLeft;
@@ -316,6 +406,7 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
   }
   CaptureRow(base, bounds);
 }
+// Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
   const uint32_t list = ctx.r5.u32 - 176;
   // Record the focused list's identity for the help caption observer (src/hooks/help_observer.cpp)
@@ -383,6 +474,29 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
     result.horizontal = max_x - min_x > max_y - min_y;
   }
   geometry = std::move(result);
+  geometry.selected = capture.selected;
+  if (capture.selected >= 0) last_selected_row = capture.selected;
+  geometry.pitch = RailPitch(geometry.rows);
+  float top = INFINITY, bottom = -INFINITY;
+  for (const auto& row : geometry.rows)
+    if (row.bounds) {
+      top = std::min(top, (row.bounds->top + row.bounds->bottom) * .5f);
+      bottom = std::max(bottom, (row.bounds->top + row.bounds->bottom) * .5f);
+    }
+  geometry.band_top = top; geometry.band_bottom = bottom;
+  MenuRail rail;
+  float right = -INFINITY;
+  for (const auto& row : geometry.rows)
+    if (row.bounds) right = std::max(right, row.bounds->right);
+  if (!geometry.horizontal && geometry.pitch > 0 && std::isfinite(top) && std::isfinite(right)) {
+    // The song library's rail sits ~2.3% of the screen right of the row text, with the
+    // star column between: start the strip at the row button's own edge, not the label's.
+    rail.left = right + .023f; rail.right = rail.left + .024f;
+    rail.top = top - geometry.pitch * .75f;
+    rail.bottom = bottom + geometry.pitch * .75f;
+    rail.valid = true;
+  }
+  PublishRail(rail);
 }
 } // namespace rb_blitz::input
 
