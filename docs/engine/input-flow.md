@@ -68,8 +68,16 @@ the same focused list can select a row. Hover never emits directional input.
 Window events contain coordinates and actions, never guest object pointers. The
 guest thread owns geometry and native UI calls. A synchronized queue bridges the
 window thread to UIManager::Poll. Moves coalesce without crossing click events.
-Click selection happens before the A pulse. Each pulse lasts two guest frames and
-has a full released frame; repeated XInput polls cannot shorten it. Wheel bursts
+Click selection happens before the A pulse. A pulse — and its release — is gated
+on delivery: the pressed state is held until the pad state filter, the last stop
+before the guest (`src/input/remap.cpp`), has sampled it, and never shorter than
+two UI frames; the release is then held until that filter samples it too, and
+only then may the next queued event pulse. A press cannot expire before the
+guest's input thread polls, and a second click cannot ride the first press's
+release. Because upstream device merging keeps the largest device packet number,
+an idle physical pad's counter could hide a mouse press from a guest that skips
+input with an unchanged packet number; the filter therefore derives the packet
+number it delivers from the state it hands over (`src/input/pad_packet.h`). Wheel bursts
 preserve individual detents and fractional deltas accumulate. While the native viewport
 is animating (state +48 differs from +52), the next wheel detent stays queued;
 button release still runs immediately. This prevents fast bursts losing steps at
@@ -85,7 +93,8 @@ applied on the window thread through SDL.
 ## Checks
 
 `rb_blitz_native_mouse_tests` covers pointer mapping, row hit tests, disabled rows,
-move/click ordering, wheel bursts, fractional detents, pulse lifetime and boundary
+move/click ordering, wheel bursts, fractional detents, press/release delivery gating
+behind a delayed input thread, per-player final packet identity and boundary
 resets. `scripts/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
 `wheel:detents` and `cursor:visible/hidden` actions for live acceptance checks.
 
@@ -120,3 +129,54 @@ paused after the checks.
 The native mouse executable passes 152 assertions. CTest passes all seven relevant
 suites: `native_mouse`, `controller_settings_remap`, `controller_settings_launch`, `controller_settings_nav`,
 `settings_service`, `settings_store` and `settings_migration`.
+
+### Live acceptance, 2026-10-16 — click delivery
+
+The owner reported that hovering the powerup categories worked but clicking did
+not open them, while the controller did, and that confirmation prompts elsewhere
+sometimes needed a second click. Two delivery defects were measured and fixed: a
+press could expire after two UI frames before the guest's separate input thread
+sampled the pad state, and the merged packet number could stay unchanged while a
+mouse button changed — upstream merging keeps the largest device packet number,
+so an idle physical pad's counter hid the mouse's smaller one — in which case the
+guest's poll wrapper treated the state as unchanged (`sub_82504AA0` in
+`generated/default/rb_blitz_recomp.67.cpp` compares the new packet number with
+the old one) and skipped it.
+
+Windows Release build, windowed 1280x720, Ultimate with the local `game/dlc`
+library, a physical controller connected and an isolated profile
+(`out/mouse-fix-verify/userdata`) — the controller is what re-created the
+intermittent loss; the previous session's same-environment probe had one click
+swallowed (`out/mouse-click-fix/baseline-powerups.png` still on the main menu)
+and the next one acted (`baseline-click2.png`, powerup screen). Driven end to end
+through `scripts/drive_ui.ps1`, one left-click (or right-click/wheel) per step,
+this build:
+
+- A single click on the title's START started the game, and a single click on
+  *Play Current Song* reached the powerup screen (`06-click-play.png`).
+- One click opened the Overdrive category (`08-click-overdrive.png`) and one
+  click opened Note (`09-click-note.png`); right-click closed each; hovering a
+  choice plus one click equipped it — the description panel read *BLAST NOTES*
+  after the click (`11-cell2.png`) — and the *No Power-Up Selected* cell
+  deselected it.
+- Two wheel detents moved the category selection two steps, Overdrive to Track,
+  while the equipped Note choice stayed (`12-wheel.png`).
+- Open → right-click close → reopen delivered all three edges within ~1.5 s
+  (`13-reopen.png`), the fast second-click case that used to need repeats.
+- One click on *Exit Game* raised the confirmation (`16-exitconfirm.png`); one
+  more click on YES closed the process ("Execution complete"), where the owner's
+  pre-fix experience had been confirmation prompts needing repeat clicks.
+
+Evidence: `out/mouse-fix-verify/` — `verify2.log` (the `native_mouse` trace,
+with a screen/focus transition for every click above) and the captures named
+here. One boot of the same build died in its content discovery with the guest
+audio thread's null read (`Unhandled guest access violation: read of guest
+0x00000000 … thread 0xF8000028`, kept as `verify-crash1.log`) — the same signature
+as `out/_swap/p5b/lab1.log` (2026-10-11, thread `F8000028` is the MOGG path per
+[diagnostics.md](diagnostics.md)) — and did not reproduce on the next boot; not
+attributed to this change.
+
+`rb_blitz_native_mouse_tests` passes 406 checks (its runner's own count); all 38
+CTest targets pass in `out/build/win-amd64-debug` — the tree whose configure
+keeps tests on, because a Vulkan-enabled configure forces `BUILD_TESTING` off
+from the SDK's `thirdparty/CMakeLists.txt` and the release tree cannot run them.

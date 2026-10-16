@@ -6,9 +6,12 @@
 
 #include "input/remap.h"
 #include "input/native_menu.h"
+#include "input/pad_packet.h"
 
+#include <array>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -46,6 +49,8 @@ constexpr MouseButton kMouseButtons[] = {
 // Everything a source resolves against, kept alive by the filter that holds it.
 struct RemapContext {
   rb_blitz::profile::remap::Table table;
+  std::mutex packet_mutex;
+  std::array<PadPacket, 4> packets;
 
   bool SourceDown(const Source& source) const {
     switch (source.kind) {
@@ -174,10 +179,20 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // Fixed menu actions bypass user pad remaps. The synthetic driver keeps
           // a controller slot connected, but contributes no buttons before this filter.
           if (user_index == 0) {
-            const auto mouse = MenuMousePadState();
+            const auto mouse = SampleMenuMousePadState();
             state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x3000);
             if (mouse & 3) state.gamepad.thumb_ly = mouse & 1 ? 32767 : -32767;
             if (mouse & 12) state.gamepad.thumb_lx = mouse & 4 ? -32767 : 32767;
+          }
+          // Publish the identity of the state actually delivered, after both
+          // remapping and native mouse input. Taking max(device packets) can
+          // leave this unchanged even though a mouse button changed.
+          if (user_index < context->packets.size()) {
+            const auto& pad = state.gamepad;
+            std::lock_guard lock(context->packet_mutex);
+            state.packet_number = context->packets[user_index].Observe(
+                {pad.buttons, pad.left_trigger, pad.right_trigger,
+                 pad.thumb_lx, pad.thumb_ly, pad.thumb_rx, pad.thumb_ry});
           }
         });
     if (has_table) {

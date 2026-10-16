@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "input/native_menu.h"
+#include "input/pad_packet.h"
 using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
@@ -59,10 +60,12 @@ int main() {
   CHECK_TRUE(e && e->action == MouseAction::kAccept && e->point.y == .8f);
   q.Pulse(e->action);
   for (int i = 0; i < 100; ++i) CHECK_EQ(q.pulse(), 0x1000);
+  CHECK_EQ(q.SamplePad(), 0x1000);
   CHECK_FALSE(q.NextFrame());
   CHECK_EQ(q.pulse(), 0x1000);
   CHECK_FALSE(q.NextFrame());
   CHECK_EQ(q.pulse(), 0);
+  CHECK_EQ(q.SamplePad(), 0);
   CHECK_TRUE(q.NextFrame()->action == MouseAction::kMove);
 
   BeginCase("fractional wheel, fast detents, and reversal");
@@ -78,8 +81,10 @@ int main() {
   q.Wheel(-240);
   CHECK_TRUE(q.NextFrame()->action == MouseAction::kDown);
   q.Pulse(MouseAction::kDown);
+  CHECK_EQ(q.SamplePad(), 2);
   CHECK_FALSE(q.NextFrame(false));
   CHECK_FALSE(q.NextFrame(false)); CHECK_EQ(q.pulse(), 0);
+  CHECK_EQ(q.SamplePad(), 0);
   CHECK_FALSE(q.NextFrame(false));
   CHECK_TRUE(q.NextFrame(true)->action == MouseAction::kDown);
   q.Push(MouseAction::kMove, {.5f,.5f});
@@ -87,9 +92,50 @@ int main() {
 
   BeginCase("horizontal powerup wheel pulses release before the next direction");
   q.Pulse(MouseAction::kRight); CHECK_EQ(q.pulse(), 8);
+  CHECK_EQ(q.SamplePad(), 8);
   CHECK_FALSE(q.NextFrame()); CHECK_FALSE(q.NextFrame()); CHECK_EQ(q.pulse(), 0);
   q.Pulse(MouseAction::kLeft); CHECK_EQ(q.pulse(), 4);
   q.Reset();
+
+  BeginCase("a delayed input thread cannot lose a click or its release");
+  MenuMouseQueue delayed;
+  delayed.Context(1, 2, true);
+  delayed.Push(MouseAction::kAccept);
+  delayed.Pulse(delayed.NextFrame()->action);
+  delayed.Push(MouseAction::kAccept);
+  // UI frames and connectivity reads do not acknowledge delivery to player one.
+  for (int i = 0; i < 60; ++i) {
+    CHECK_FALSE(delayed.NextFrame());
+    CHECK_EQ(delayed.pulse(), 0x1000);
+  }
+  CHECK_EQ(delayed.SamplePad(), 0x1000);
+  CHECK_FALSE(delayed.NextFrame());
+  CHECK_EQ(delayed.pulse(), 0);
+  // A second click must wait until the input thread also sees the release.
+  for (int i = 0; i < 60; ++i) CHECK_FALSE(delayed.NextFrame());
+  CHECK_EQ(delayed.SamplePad(), 0);
+  auto second = delayed.NextFrame();
+  CHECK_TRUE(second && second->action == MouseAction::kAccept);
+
+  BeginCase("many pad polls cannot shorten a press or skip the released frame");
+  delayed.Pulse(MouseAction::kAccept);
+  for (int i = 0; i < 20; ++i) CHECK_EQ(delayed.SamplePad(), 0x1000);
+  CHECK_FALSE(delayed.NextFrame());
+  CHECK_EQ(delayed.SamplePad(), 0x1000);
+  delayed.Push(MouseAction::kBack);
+  CHECK_FALSE(delayed.NextFrame());
+  CHECK_EQ(delayed.SamplePad(), 0);
+  CHECK_TRUE(delayed.NextFrame()->action == MouseAction::kBack);
+
+  BeginCase("new submenu clicks wait for the previous category click to release");
+  delayed.Pulse(MouseAction::kAccept);
+  CHECK_EQ(delayed.SamplePad(), 0x1000);
+  delayed.Context(1, 3, true);
+  delayed.Push(MouseAction::kAccept);
+  CHECK_EQ(delayed.pulse(), 0);
+  CHECK_FALSE(delayed.NextFrame());
+  CHECK_EQ(delayed.SamplePad(), 0);
+  CHECK_TRUE(delayed.NextFrame()->action == MouseAction::kAccept);
 
   BeginCase("gameplay, focus loss and transitions discard pulses and pending input");
   for (int boundary = 0; boundary < 3; ++boundary) {
@@ -101,5 +147,34 @@ int main() {
   q.Push(MouseAction::kAccept); q.Wheel(-120);
   q.Context(1, 2, true);
   CHECK_FALSE(q.NextFrame());
+
+  BeginCase("final pad packets expose mouse edges beside an idle controller");
+  PadPacket packets;
+  PadSample pad;
+  // Upstream merging can keep returning the same large physical-device packet
+  // while the mouse's smaller packet advances. Only final state matters here.
+  auto packet = packets.Observe(pad);
+  CHECK_EQ(packets.Observe(pad), packet);
+  pad.buttons = 0x1000;
+  CHECK_EQ(packets.Observe(pad), ++packet);
+  for (int i = 0; i < 20; ++i) CHECK_EQ(packets.Observe(pad), packet);
+  pad.buttons = 0;
+  CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.buttons = 0x1000;
+  CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.buttons = 0x2000;
+  CHECK_EQ(packets.Observe(pad), ++packet);
+
+  BeginCase("packets cover every analog axis and trigger as well as buttons");
+  pad.left_trigger = 1; CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.right_trigger = 1; CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.thumb_lx = -32767; CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.thumb_ly = 32767; CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.thumb_rx = -123; CHECK_EQ(packets.Observe(pad), ++packet);
+  pad.thumb_ry = 456; CHECK_EQ(packets.Observe(pad), ++packet);
+  CHECK_EQ(packets.Observe(pad), packet);
+  PadPacket player_two;
+  CHECK_EQ(player_two.Observe({}), 1);
+  CHECK_EQ(packets.Observe(pad), packet);
   return Finish();
 }

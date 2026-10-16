@@ -151,6 +151,11 @@ uint16_t MenuMousePadState() {
   std::lock_guard lock(mutex);
   return MouseSupportEnabled() ? queue.pulse() : 0;
 }
+uint16_t SampleMenuMousePadState() {
+  std::lock_guard lock(mutex);
+  const auto pulse = queue.SamplePad();
+  return MouseSupportEnabled() ? pulse : 0;
+}
 
 uint32_t CurrentScreen() {
   std::lock_guard lock(mutex);

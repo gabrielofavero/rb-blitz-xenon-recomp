@@ -71,6 +71,8 @@ enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
 // Guest-frame pulses, independent of how many times XInput is polled per frame.
+// Both the press and release must reach a pad poll before advancing: UI frames
+// can run while the guest's separate input thread is delayed.
 // Every screen/focus boundary discards queued input, including partial wheel ticks.
 class MenuMouseQueue {
  public:
@@ -78,7 +80,11 @@ class MenuMouseQueue {
     if (screen != screen_ || focus != focus_ || enabled != enabled_) Reset();
     screen_ = screen; focus_ = focus; enabled_ = enabled;
   }
-  void Reset() { events_.clear(); wheel_ = 0; pulse_ = 0; frames_ = 0; }
+  void Reset() {
+    events_.clear(); wheel_ = 0;
+    if (pulse_) release_pending_ = true;
+    pulse_ = 0; frames_ = 0; sampled_ = false;
+  }
   bool enabled() const { return enabled_; }
   void Push(MouseAction action, MenuPoint point = {}) {
     if (!enabled_) return;
@@ -97,7 +103,14 @@ class MenuMouseQueue {
   std::optional<MenuMouseEvent> NextFrame(bool can_scroll = true) {
     if (!enabled_) return {};
     if (frames_ > 0) { --frames_; return {}; }
-    if (pulse_) { pulse_ = 0; return {}; } // one complete release frame
+    if (pulse_) {
+      if (sampled_) { pulse_ = 0; sampled_ = false; release_pending_ = true; }
+      return {}; // at least one complete release frame
+    }
+    if (release_pending_) {
+      if (!sampled_) return {};
+      release_pending_ = false;
+    }
     if (events_.empty()) return {};
     const auto action = events_.front().action;
     if (!can_scroll && (action == MouseAction::kUp || action == MouseAction::kDown)) return {};
@@ -110,13 +123,18 @@ class MenuMouseQueue {
              action == MouseAction::kUp ? 1 : action == MouseAction::kDown ? 2 :
              action == MouseAction::kLeft ? 4 : action == MouseAction::kRight ? 8 : 0;
     frames_ = pulse_ ? 1 : 0; // two guest frames down, then one frame released
+    sampled_ = false;
   }
   uint16_t pulse() const { return enabled_ ? pulse_ : 0; }
+  // Only the final player-one pad filter acknowledges delivery. The synthetic
+  // driver's connectivity/packet queries must not consume the pulse.
+  uint16_t SamplePad() { sampled_ = true; return pulse(); }
  private:
   uint32_t screen_ = 0, focus_ = 0;
   bool enabled_ = false;
   int wheel_ = 0, frames_ = 0;
   uint16_t pulse_ = 0;
+  bool sampled_ = false, release_pending_ = false;
   std::deque<MenuMouseEvent> events_;
 };
 
@@ -128,6 +146,7 @@ void MouseMenuFocus(bool focused);
 void QueueMenuMouse(MouseAction action, MenuPoint point);
 void QueueMenuWheel(int delta);
 uint16_t MenuMousePadState();
+uint16_t SampleMenuMousePadState();
 
 // The UIManager frame state the help caption observer (src/hooks/help_observer.cpp) reads, as the
 // last frame's Context() stored it. `FocusedListDrawn()` is the list the previous frame's draw
