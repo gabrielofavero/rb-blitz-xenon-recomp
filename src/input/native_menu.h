@@ -200,6 +200,8 @@ void QueueMenuWheel(int delta);
 void QueueMenuScrollbar(MouseAction action, MenuPoint point);
 // Whether a point is in the focused list's scrollbar gutter, as the last draw left it.
 bool MouseMenuRailHit(MenuPoint point);
+// The rail plus a small margin: clicks here are swallowed instead of pressing A.
+bool MouseMenuScrollZone(MenuPoint point);
 uint16_t MenuMousePadState();
 uint16_t SampleMenuMousePadState();
 

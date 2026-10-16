@@ -101,10 +101,11 @@ the *view* and never the selection, like a desktop scrollbar. The selection stay
 where it was, even when it is scrolled out of the band; the guest reports that as
 selected slot -1, which the mapping tolerates because every scroll application
 passes the last row a draw positively identified (`last_selected_row`, reset on
-screen or focus change) rather than the live slot. The wheel moves one visual row
-per detent: the step is the row pitch over the thumb's travel per first-row step,
-and successive detents advance the *pending target* (list +228) so a burst is not
-lost to the animation.
+screen or focus change) rather than the live slot. The wheel moves one list row
+per detent — `firstShowing` counts rows, so a detent is one row on any library and
+the fraction of the list it covers shrinks as the library grows. Successive
+detents advance the *pending target* (list +228) so a burst is not lost to the
+animation.
 
 The rail itself is mapped from the thumb's own geometry (`docs` record below):
 the thumb is one row pitch tall and its top crosses the rail as the first visible
@@ -122,6 +123,16 @@ not a click: it never emits A. The strip is published per draw and invalidated o
 a screen or focus change, so a drag can never be applied to a retired list; drag
 frames coalesce to the latest position and bypass the pad pulse gates because
 they do not emit pad input.
+
+Leaving a drawn row clears the mouse's own hover (the trace logs `unhover`), and a
+left click only emits A when the pointer is on a row that a draw of the currently
+focused list identified in the same frame; on empty space, on a stale hover or on
+the rail strip the press is swallowed (`MouseMenuScrollZone` in `mouse_ui.cpp`).
+The retail selection highlight is the engine's — it follows the selected row — so
+the mouse's unhover is behavioural, not cosmetic: writing the selected slot to -1
+was tried and discarded because the engine recomputes the slot every update.
+Screens with no captured list — the title screen's *PRESS (A) TO START* — keep
+the at-principle A, so a mouse-only boot still works.
 
 The synthetic mouse device establishes controller connectivity. Fixed mouse actions
 are merged after user controller remapping, for player one only. Raw mouse remap
@@ -237,8 +248,8 @@ library, isolated profile under `out/mouse-fix-verify/`, driven with
 Calibration. The thumb is a light block on the rail; `thumb_scan.py` in the
 evidence directory finds it in a window capture. Against the list state:
 thumb top 255px at `firstShowing` 0, 457px at 15, 659px at 30, 807px at 41 with
-a 62px thumb — 13.457px per first-row step, i.e. one step is about a fifth of a
-visual row, and the thumb is one row pitch tall. The engine's own clamp gives
+a 62px thumb — 13.457px of thumb travel per first-row step, with the thumb one
+row pitch (62px) tall. The engine's own clamp gives
 `maxFirst` 41 for this 51-row library (`NumData` 51 from the provider vtable,
 minus the 10 visible rows; a `first` of 41 is where repeated bottom clicks stop
 and where the thumb touches the rail's bottom edge). In game units the rail is
@@ -250,25 +261,34 @@ guarded by comparing the rebuilt slot against that address before calling, and
 cross-checked against a base-songs-only boot (7 rows, `maxFirst` 0, hence an
 unscrollable rail).
 
-Measured in the same boot (`native2.log` plus the `n*` captures):
+Measured across the calibration boot and the two follow-up boots (`native2.log`
++ `n*` captures; `hover5.log`; `final1.log` + `z*` captures):
 
-- Wheel: three detents advanced the view target 0 → 5 → 10 → 15, six detents to
-  30; the thumb measured 457px and 659px against 456.9/658.7 predicted. Every
-  apply logged `row=0` — the selection never moved — and the album panel still
-  read *Random Song* after six rows of scrolling (`n0-parked.png`,
-  `n2-wheel6.png`). One detent is one visual row.
-- Track click at y=0.60: the thumb slid to 632px against 631 predicted, i.e.
-  the thumb top lands at the cursor (`n3-trackclick.png`).
+- Wheel: one detent = one row of view. Three detents stepped the target
+  0 → 1 → 2 → 3 with the thumb at 296px (295.4 predicted) and six detents
+  reached 6 with the thumb at 336px (335.7 predicted); every apply logged
+  `row=0` — the selection never moved — and the album panel still read
+  *Random Song* after six rows of scrolling (`final1.log`, `z1-wheel3.png`,
+  `z2-wheel6.png`).
+- Track click at y=0.60: the thumb slid to 632px against 631.8 predicted, i.e.
+  the thumb top lands at the cursor (`n3-trackclick.png`, re-checked in
+  `z3-trackclick.png`).
 - A press on the thumb does not jump: a second click at the same point left it
   at 632px (`n4-thumbclick.png`).
 - Drag: y 0.50 → 0.70 moved the view +15 first-steps and clamped at the rail's
   bottom (thumb 807..867px); a further drag to y 0.95 stayed clamped
   (`n5-dragdown.png`, `n6-overscroll.png`). Dragging back 0.80 → 0.40 moved −30
-  to `first` 11 (thumb 403px against 403.0 predicted) and one wheel-up detent
-  took it to 6 (thumb 336px against 335.7) (`n7-dragup.png`, `n8-wheelup.png`).
+  to `first` 11 (thumb 403px against 403.0 predicted) (`n7-dragup.png`); a drag
+  y 0.50 → 0.62 moved 28 → 37 (8.9 rows expected) and ended at 753px
+  (752.9 predicted) (`z4-drag.png`).
 - A rail press never emits A — the screen stayed on the library through every
-  rail interaction — and a row click afterwards still started the song (the same
-  log's `available=false` transition into `powerup_select_screen`).
+  rail interaction — and a row click afterwards still started the song (the
+  `available=false` transition into `powerup_select_screen`; re-confirmed in
+  `final1.log` with `z5-rowclick.png`).
+- Leaving the rows logs `unhover` and unhovered clicks press nothing: after the
+  pointer left the row band (x 0.30 → 0.90, `row=-1`, `unhover list=44188448`)
+  a click on empty space and a click on the strip between rows and rail both
+  left the screen on `song_select_screen` (`hover5.log`).
 - The powerup screen (horizontal, no rail) keeps the D-pad detent path: one
   wheel detent still steps the category selection one cell
   (`nC-powerup-wheel1.png`).
@@ -281,12 +301,14 @@ game x 0.59–0.61 is drive x ≈ 0.576.
 
 Evidence: `out/mouse-fix-verify/` — `native2.log` (every scroll application and
 the rail map), `calib.log` + `c0..c4*.png` (the firstShowing↔thumb points),
-`numdata2.log` (the live `NumData`=51 check), `n0..n8*.png` and the
-`thumb_scan.py` that measures the thumb. The earlier same-session probes that
+`numdata2.log` (the live `NumData`=51 check), `n0..n8*.png`, the follow-up
+boots `hover5.log` (unhover, click gating) and `final1.log` + `z1..z5*.png`
+(one-row detents, rail mapping re-check), and the `thumb_scan.py` that measures
+the thumb. The earlier same-session probes that
 projected meshes inside `UIListDir::Draw` stalled frames hard enough to desync
 the GPU ring twice (the `ExecutePacketType0/3 overflow … PRIMARY RINGBUFFER`
 signature) — raw-read logging boots clean and no probe ships.
-`rb_blitz_native_mouse_tests` passes 421 checks (scrollbar queue coalescing,
+`rb_blitz_native_mouse_tests` passes 428 checks (scrollbar queue coalescing,
 pulse-flow interplay, and the rail thumb math: travel per step, first-from-y
 with both clamps, and the on-thumb grab test); all 38 CTest targets pass in
 `out/build/win-amd64-debug`.

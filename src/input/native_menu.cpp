@@ -77,6 +77,10 @@ thread_local uint32_t frame_number = 0;
 // *slot* to -1 when a scroll left the selection outside the band, so the slot cannot
 // be the anchor; this survives that and is reset on every screen or focus change.
 thread_local int last_selected_row = -1;
+// The list the mouse itself last hovered a row on (0 = none). Only a hover the mouse
+// set may be cleared when the pointer leaves it; a controller's own selection is never
+// touched by mouse motion.
+thread_local uint32_t mouse_hover_list = 0;
 
 // The gutter the window thread may arm a drag in: published per draw so input that
 // arrives between frames still sees the last confirmed strip, never a retired list.
@@ -148,6 +152,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
     rail_map = {};
+    mouse_hover_list = 0;
     if (REXCVAR_GET(mouse_native_trace))
       REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
   }
@@ -155,19 +160,35 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   current_screen = screen; current_focus = focus; menu_available = allowed;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled());
 }
-void Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
+// Returns whether the point named a row of the focused list. When it did not, a hover
+// the mouse owns is cleared: the guest's selected *slot* drops to -1 (its own
+// no-selection encoding), so a later click on empty space cannot act on a stale hover.
+// The selected *row* stays as the controller's anchor.
+bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   // The pointer from the last draw is valid only for the same focused component
   // in the immediately preceding frame. Never dereference a retired screen's list.
   if (!geometry.list || geometry.frame + 1 != frame_number ||
-      current_focus != geometry.list) return;
+      current_focus != geometry.list) return false;
   const int row = HitMenuRow(point, geometry.bounds, geometry.rows);
   if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: hit={},{} row={} bounds={},{},{},{}", point.x, point.y, row, geometry.bounds.left, geometry.bounds.top, geometry.bounds.right, geometry.bounds.bottom);
-  if (row < 0) return;
+  if (row < 0) {
+    // The mouse left whatever it was on: the hover it owned is cleared, so a click that
+    // does not land on an element cannot press anything (owner rule, 2026-10-16). The
+    // guest's selection highlight itself cannot be cleared without selecting another row
+    // - the engine derives the slot from the selected row every update - so the
+    // highlighted row and the album panel keep the retail selection while nothing is
+    // hovered, exactly like a desktop list keeps its selected item.
+    if (mouse_hover_list == geometry.list && REXCVAR_GET(mouse_native_trace))
+      REXLOG_INFO("native_mouse: unhover list={:08X}", geometry.list);
+    mouse_hover_list = 0;
+    return false;
+  }
+  mouse_hover_list = geometry.list;
   GuestCall call(ctx);
   auto& c = call.frame.ctx;
   c.r3.u32 = geometry.list + 176;
   sub_824E3008(c, base);
-  if (c.r3.s32 == row) return;
+  if (c.r3.s32 == row) return true;
   const int direction = row > c.r3.s32 ? 1 : -1;
   c.r3.u32 = geometry.list; c.r4.s32 = row; c.r5.u32 = U32(base, geometry.list + 224);
   sub_824C1938(c, base);
@@ -179,6 +200,7 @@ void Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   c.r3.u32 = geometry.list + 84; c.r4.u32 = geometry.list + 176;
   sub_824C1F08(c, base);
   if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: selected row={} list={:08X}", row, geometry.list);
+  return true;
 }
 // One live gutter drag. `first` is the view target frozen when the press landed; the
 // selection is never moved by the scrollbar, so no row rides along with it.
@@ -219,6 +241,8 @@ bool MouseMenuAvailable() {
 }
 void MouseMenuFocus(bool focused) {
   std::lock_guard lock(mutex);
+  if (focused != window_focused && REXCVAR_GET(mouse_native_trace))
+    REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
   queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled());
 }
@@ -238,6 +262,14 @@ bool MouseMenuRailHit(MenuPoint point) {
   const auto rail = RailSnapshot();
   return MouseSupportEnabled() && rail.valid &&
       MenuBounds{rail.left, rail.top, rail.right, rail.bottom}.Contains(point);
+}
+bool MouseMenuScrollZone(MenuPoint point) {
+  // The rail plus a small margin: a click here belongs to the scrollbar even when it
+  // misses the strip, so it must not fall through to the A press (a rail-adjacent click
+  // used to start the selected song).
+  const auto rail = RailSnapshot();
+  return MouseSupportEnabled() && rail.valid &&
+      MenuBounds{rail.left - .022f, rail.top - .025f, rail.right + .020f, rail.bottom + .025f}.Contains(point);
 }
 uint16_t MenuMousePadState() {
   std::lock_guard lock(mutex);
@@ -312,12 +344,13 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   // The wheel scrolls a railed list's view instead of stepping its selection (owner
   // rule, 2026-10-16): a scrollbar moves the view; selection is a controller behaviour.
+  // One detent is one list row (firstShowing counts rows), so the sensitivity is the
+  // same per detent on any library - the fraction of the list it covers shrinks with
+  // the library, the way a desktop scrollbar gets more granular with more content.
   if ((event->action == MouseAction::kUp || event->action == MouseAction::kDown) && railed &&
       EnsureRailMap(ctx, base, current_focus) && rail_map.max_first > 0) {
-    const float per = RailPerFirstNow();
-    const int step = std::max(1, int(std::lround(geometry.pitch / per)));
     const int base_first = int(U32(base, current_focus + 228));
-    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? step : -step));
+    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? 1 : -1));
     return;
   }
   const auto screen = current_screen, focus = current_focus;
@@ -325,8 +358,16 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     if (event->action == MouseAction::kUp) event->action = MouseAction::kLeft;
     if (event->action == MouseAction::kDown) event->action = MouseAction::kRight;
   }
-  if (event->action == MouseAction::kMove || event->action == MouseAction::kAccept)
-    Select(ctx, base, event->point);
+  if (event->action == MouseAction::kMove || event->action == MouseAction::kAccept) {
+    const bool on_row = Select(ctx, base, event->point);
+    // A click only presses what the mouse is on: on a screen whose list tracks the mouse,
+    // an unhovered click (empty space, or a scroll-gutter miss) must not press A (owner
+    // rule, 2026-10-16). Screens without a captured list - the title's own prompt, for
+    // one - keep their at-principle A, which is how they are started.
+    if (event->action == MouseAction::kAccept && !on_row && geometry.list == current_focus &&
+        geometry.frame + 1 == frame_number)
+      return;
+  }
   // A selection notification can itself replace a screen, so recheck before A.
   Context(ctx, base, manager);
   std::lock_guard lock(mutex);

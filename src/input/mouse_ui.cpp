@@ -119,11 +119,12 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     if (!MouseSupportEnabled()) return;
     if (auto p = Point(e)) {
       if (e.button() == rex::ui::MouseEvent::Button::kLeft) {
-        // The gutter belongs to the scrollbar: a press there must not click the row.
+        // The gutter belongs to the scrollbar: a press there must not click the row,
+        // and a miss just outside the strip must not press A either.
         if (MouseMenuRailHit(*p)) {
           dragging_ = true;
           QueueMenuScrollbar(MouseAction::kScrollbarDown, *p);
-        } else QueueMenuMouse(MouseAction::kAccept, *p);
+        } else if (!MouseMenuScrollZone(*p)) QueueMenuMouse(MouseAction::kAccept, *p);
       }
       if (e.button() == rex::ui::MouseEvent::Button::kRight) QueueMenuMouse(MouseAction::kBack, *p);
     }
