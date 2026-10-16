@@ -167,7 +167,7 @@ Five rows — the same size as the retail help list that already renders here, s
 | --- | --- | --- |
 | Target | Submenu | Native setting: Rock Band Blitz / Rock Band Blitz Ultimate when installed / existing Trial target subject to the trial gate below. Maps to `ultimate_mode` and `license_mask` inside the game, before Ultimate configuration. |
 | Downloadable Content | Submenu | Always present. |
-| ↳ Cache DLC Library | Boolean | `enhancements_dlc_cache`; current default false. Preserve refresh functionality. |
+| ↳ Cache DLC Library | Boolean | `enhancements_dlc_cache`; current default **true** (2026-10-13). The main menu's *Refresh Music Library* row is its visible control; the press re-runs the title's own discovery pass ([main-menu.md](../engine/main-menu.md) §7.1). |
 | ↳ DLC scan threads | Horizontal select | `dlc_scan_threads`; default 1; choices 1 through `min(32, max(1, usable_logical_processors))`. Match the existing UI concept of logical processors, not physical-core count. |
 | ↳ DLC menu songs | Boolean | `enhancements_menu_dlc_songs`; **shipped 2026-10-14 as a visible row**, default **true** (`general.dlc_menu_songs`), carrier of the in-game *DLC Menu Songs* row; the sample pool is fixed to 50, bounded by valid available songs ([play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) D1). |
 | ↳ Play current song | Boolean | `general.play_current_song`; **shipped 2026-10-14**, default **true**; adds the main menu's second entry, which starts the menu's own background song. Gated on the row above: with that off, or a library that yielded no song, this row reads unavailable and the menu entry is absent ([main-menu.md](../engine/main-menu.md) §7.2). |

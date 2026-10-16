@@ -229,6 +229,10 @@ struct Tapped {
   bool applied = false;   // the file was rewritten
   size_t file_size = 0;   // the .dtb's own length, 4-byte seed included
   size_t padding = 0;     // bytes given back to the file as a discarded value
+  // The action also enters the discovery screen (`{ui goto_screen server_connect_screen}`).
+  // False when the row's action was too tight to hold the navigation, in which case the
+  // press still refreshes the library - it just does it without the visible pass.
+  bool navigates = false;
   uint8_t digest_before[20] = {};
   uint8_t digest_after[20] = {};
   std::string reason;     // why nothing was written, when applied is false
@@ -238,11 +242,22 @@ struct Tapped {
 // (`splash_dlc`) is dead offline - its own action shows a "store unavailable" notice -
 // so instead of adding a row, this gives that row a job: its action becomes a call to
 // the title's own `file_exists` on a name no file has
-// (`d:/rbbz_dlc_refresh`; the mount prefix is what makes the engine's own file layer
+// (`songcache:/rbbz_dlc_refresh`; the device is what makes the engine's own file layer
 // resolve it through the guest's file calls instead of stopping at a name it cannot
 // place). src/hooks/dlc_refresh.cpp watches the kernel file calls the engine then
-// makes, sees the name in the path, and re-runs the DLC scan. The query answers false,
-// so nothing the player sees changes; the refresh is the host's reaction to being asked.
+// makes, sees the name in the path, and re-runs the DLC scan.
+//
+// The action also enters `server_connect_screen` - the screen the start button enters -
+// so the press shows the title's own discovery pass ("Discovering Downloadable
+// Content", the bar, the mounting) rather than refreshing silently behind the menu
+// (owner decision, 2026-10-15). The replacement is two sibling statements, retail's own
+// shape for multi-statement cases: the navigation first, then the sentinel call. A
+// `{do ...}` wrapper only ever ran its first child in-game, so with one order the screen
+// was never entered and with the other the call never fired (measured 2026-10-15). The
+// host holds the pass's first enumeration message until the re-scan's result is handed
+// to the content manager, so the pass enumerates the fresh list
+// (src/hooks/content_progress.cpp -> dlc::WaitForRefreshBeforeEnumeration).
+// A row whose action cannot hold both statements keeps the call alone.
 //
 // Byte-neutral like the rest of this module: the replacement action is padded back to
 // the bytes the original one used, with a value inside a `do` block that the guest

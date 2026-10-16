@@ -1280,18 +1280,27 @@ int main() {
     CHECK_TRUE(!root.empty());
     CHECK_EQ(end, size - 4);
 
-    // The row's action is now the sentinel call and nothing else: one argument that
-    // names the call, one that names the file no file has, one value the block
-    // evaluates and discards.
+    // The row's action is now two sibling statements plus the padding: the trip through
+    // the title's own discovery pass, the sentinel call, and a value the case evaluates
+    // and discards. Siblings, retail's own shape for multi-statement cases - a `{do ...}`
+    // wrapper only ever ran its first child in-game (measured 2026-10-15).
     const Node* row = FindCase(root, kDlcFixtureRow);
     CHECK_TRUE(row != nullptr);
     if (row != nullptr) {
-      CHECK_EQ(row->kids.size(), 2);
+      CHECK_EQ(row->kids.size(), 4);
       CHECK_TRUE(HasText(*row, "file_exists"));
+      CHECK_TRUE(tapped.navigates);
       // The mount prefix is part of the path the host sees, so it is part of what the
       // module writes; a bare name is answered inside the engine and never reaches a
       // file call (docs/engine/main-menu.md (part 1, the option list) §7.1).
       CHECK_TRUE(HasText(*row, "songcache:/rbbz_dlc_refresh"));
+      // The screen the title's own start button enters, so the press shows the discovery
+      // pass rather than refreshing silently behind the menu.
+      CHECK_TRUE(HasText(*row, "server_connect_screen"));
+      // The navigation is the FIRST statement: the sentinel call is answered by no device
+      // the emulator serves, so nothing may depend on it having run.
+      CHECK_TRUE(HasText(row->kids[1], "server_connect_screen"));
+      CHECK_TRUE(HasText(row->kids[2], "songcache:/rbbz_dlc_refresh"));
       CHECK_EQ(CountText(*row, std::string(tapped.padding, 'z')), 1);
       CHECK_EQ(CountText(*row, std::string(400, 'x')), 0);
     }
@@ -1323,6 +1332,27 @@ int main() {
 
     std::vector<uint8_t> absent = DlcCaseFile(400, false);
     CHECK_FALSE(TapRefreshCache(absent.data(), absent.size()).applied);
+  }
+
+  BeginCase("an action that holds the call but not the navigation keeps the refresh alone");
+  {
+    // Between the two costs: long enough for `file_exists`, too tight for the connect
+    // call. The refresh is never the part that is dropped.
+    std::vector<uint8_t> file = DlcCaseFile(40);
+    const Tapped tapped = TapRefreshCache(file.data(), file.size());
+    CHECK_TRUE(tapped.applied);
+    CHECK_FALSE(tapped.navigates);
+    size_t end = 0;
+    const std::vector<Node> root = ReadRoot(file, &end);
+    const Node* row = FindCase(root, kDlcFixtureRow);
+    CHECK_TRUE(row != nullptr);
+    if (row != nullptr) {
+      CHECK_EQ(row->kids.size(), 3);
+      CHECK_TRUE(HasText(*row, "file_exists"));
+      CHECK_TRUE(HasText(*row, "songcache:/rbbz_dlc_refresh"));
+      CHECK_FALSE(HasText(*row, "server_connect_screen"));
+      CHECK_EQ(CountText(*row, std::string(tapped.padding, 'z')), 1);
+    }
   }
 
   BeginCase("a row whose action cannot hold the call is refused");

@@ -141,8 +141,11 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   }
   menu_labels["splash_options"] = "HELP & OPTIONS";
   // With R7 on, the downloadable-content row performs the library refresh and is drawn as such
-  // (`menu_filter`'s own relabel); the hide-list label mirrors what the menu really says.
-  if (rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true") {
+  // (`SetRefreshRowLabel` builds the label into the locale records below, for the main menu, and
+  // the hide-list label mirrors what the menu really says).
+  const bool dlc_cache_on =
+      rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true";
+  if (dlc_cache_on) {
     menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
   }
 
@@ -283,7 +286,8 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   }
   MenuRecords records;
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
-                        ultimate::Provider().Active(), dlc::CacheServedThisBoot())) return fail();
+                        ultimate::Provider().Active(), dlc::CacheServedThisBoot(),
+                        dlc_cache_on)) return fail();
   for (const auto& locale : locale_set) {
     std::vector<ui::dtb::Node> roots;
     ui::dtb::RootHeader header;

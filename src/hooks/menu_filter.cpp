@@ -275,9 +275,9 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available,
     const rb_blitz::menu_options::Tapped tapped =
         rb_blitz::menu_options::TapRefreshCache(file, available);
     if (tapped.applied) {
-      REXLOG_INFO("menu_filter: the downloadable-content row now refreshes the DLC cache ({} "
+      REXLOG_INFO("menu_filter: the downloadable-content row now refreshes the DLC cache{} ({} "
                   "bytes of its action paid for the call)",
-                  tapped.padding);
+                  tapped.navigates ? " and re-runs the discovery pass" : "", tapped.padding);
       defer(tapped.file_size, tapped.digest_before, tapped.digest_after);
       patched = true;
     } else {

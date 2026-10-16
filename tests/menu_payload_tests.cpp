@@ -227,6 +227,25 @@ int main() {
     CHECK_TRUE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, true));
     CheckStrEq(locale[0].kids[1].text, options::kLoadingCacheLabel);
   }
+  BeginCase("the generated locale renames the downloadable-content row when R7 owns it");
+  {
+    using rb_blitz::ui::dtb::Node;
+    namespace options = rb_blitz::menu_options;
+    std::vector<Node> locale{Node::Array(
+        {Node::Symbol(options::kDlcRowKey), Node::String(options::kDlcRowLabel)})};
+    CHECK_FALSE(rb_blitz::settings::SetRefreshRowLabel(&locale, false));
+    CheckStrEq(locale[0].kids[1].text, options::kDlcRowLabel);
+    CHECK_TRUE(rb_blitz::settings::SetRefreshRowLabel(&locale, true));
+    CheckStrEq(locale[0].kids[1].text, options::kDlcRowRefreshLabel);
+    // A translation of the shipped label, or a locale that never carried it, is left
+    // alone: the replacement needs the exact text (the same scope the in-flight
+    // menu_filter relabel has always had). ReplaceLocaleEntry reports done either way -
+    // "left as it ships" is the outcome, not a refusal.
+    std::vector<Node> translated{Node::Array(
+        {Node::Symbol(options::kDlcRowKey), Node::String("Inhalt herunterladen")})};
+    CHECK_TRUE(rb_blitz::settings::SetRefreshRowLabel(&translated, true));
+    CheckStrEq(translated[0].kids[1].text, "Inhalt herunterladen");
+  }
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();

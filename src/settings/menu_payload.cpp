@@ -24,9 +24,18 @@ bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit) {
       menu_options::kDiscoveringContentLabel, menu_options::kLoadingCacheLabel, &why);
 }
 
+bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_active) {
+  if (!refresh_row_active) return false;
+  std::string why;
+  // Only the locales that spell the row's shipped label are relabelled; a translation of "Download
+  // Content" is left alone (the same scope the in-flight relabel always had).
+  return ui::screen::ReplaceLocaleEntry(roots, menu_options::kDlcRowKey,
+      menu_options::kDlcRowLabel, menu_options::kDlcRowRefreshLabel, &why);
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
-                      bool cached_dlc_list) {
+                      bool cached_dlc_list, bool refresh_row_active) {
   namespace screen = ui::screen;
   MenuRecords built;
   auto edit = [&](const std::string& path, auto transform) {
@@ -76,6 +85,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
       SetDiscoveryCacheLabel(&roots, cached_dlc_list);
+      SetRefreshRowLabel(&roots, refresh_row_active);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
       // does not carry them, or carries a translation, is left alone by the same call.
       for (const auto& entry : screen::LocaleOverrides()) {

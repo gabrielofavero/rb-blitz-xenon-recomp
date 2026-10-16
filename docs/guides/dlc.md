@@ -146,7 +146,7 @@ many threads read it (§4.1).
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
 | `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
-| `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's last row asks for the same thing in a running title (§4.1) |
+| `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Music Library* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
 and every write path in the content manager (create, thumbnail, install, delete)
@@ -358,18 +358,28 @@ boot about to use it. Neither touches the title's own `songcache`, which is the 
 business — a package the scan has just discovered is a package the title has not read
 yet, so its own discovery reads it and extends its own cache.
 
-**The refresh runs behind the frame, one at a time (measured 2026-10-10).** Reading every
+**The refresh runs on a worker, and since 2026-10-15 the press rides it.** Reading every
 container is the same per-file cost the cold boot pays, so an in-game refresh of the
 1,402-package library is **30.2-31.0 s** — and it used to run on the thread that asked,
 which is the frame, so the press froze the game for half a minute
 ([plans/song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §9.5). It now runs on a worker, and
 two rules bound it ([src/fs/refresh_state.h](../../src/fs/refresh_state.h), pinned by
 [tests/refresh_state_tests.cpp](../../tests/refresh_state_tests.cpp)): **one at a time** — a
-second press while the scan is in flight is logged and ignored, so a trigger that fires
-twice cannot queue a second scan — and **published exactly once**, because two guest
-threads can reach the publish point together. Measured on that boot: the press returned in
-**1 ms**, the menu kept drawing and taking input for the whole scan, and the same tree
-re-scanned in **77 ms** once it was warm.
+second press while the scan is in flight rides the first instead of queueing a second
+scan — and **published exactly once**, because two guest threads can reach the publish
+point together.
+
+The press itself waits for that worker, **bounded at 15 s**, because the row now also
+re-enters the title's own discovery pass ([main-menu.md](../engine/main-menu.md) §7.1) and
+that pass snapshots the content list **when its aggregate enumerators are created** —
+measured, the creates run before the pass's first message and are made by guest code the
+mod cannot wait on, so nothing downstream can wait for the scan instead. A warm press (the
+common case - the boot just walked the same tree) rides ~0.15 s; a scan still running at the
+bound returns the press and the pass runs over the previous list, with the fresh one landing
+for the next enumeration. Measured 2026-10-15 (`out/_swap/menu-run/refresh12`): a 300-package
+library added after the menu came up gave a press wait of 8.9 s,
+`XamContentAggregateCreateEnumerator: added 600 items`, the pass ran **600/600** with the
+title's own **Discovering Downloadable Content** screen and bar up, and the menu returned.
 
 **Where the refreshed list lands, and why not on the worker.** The result is handed to the
 content manager from a *guest* thread, because ContentManager's

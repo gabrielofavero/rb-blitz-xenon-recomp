@@ -311,18 +311,34 @@ is not exactly as long as the input; or the root array outgrew the header's coun
 ### 7.1 The refresh row (R7)
 
 R7's refresh is asked for from the menu, and the row that asks is the same `splash_dlc` case R5
-*removes* by default. `TapRefreshCache` rewrites that case's action into a call to the title's own
-`file_exists` on a name no file has:
+*removes* by default. `TapRefreshCache` rewrites that case's action into two sibling statements and a
+padding value:
 
 ```
-{splash_dlc {do {file_exists "songcache:/rbbz_dlc_refresh"} "zzz…"}}
+{splash_dlc {ui goto_screen server_connect_screen} {file_exists "songcache:/rbbz_dlc_refresh"} "zzz…"}
 ```
 
-The call is the signal — the engine asks the host a file question, and
+The first statement is the **discovery pass the title's own start button enters** (`SELECT_MSG`'s
+`start.but` branch does the same call), so the press visibly re-runs the discovery - the connect
+screen, its bar, the mounting - exactly as a first boot's start does. The second is the signal — the
+engine asks the host a file question, and
 [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) watches the kernel's file entry points for
 that name — and the string after it pads the case's bytes back to exactly what they were.
-`file_exists` answers false, so nothing the player sees changes; the host hears the question
-([dlc.md](../guides/dlc.md) §4.2).
+
+Two measured constraints shaped this shape (2026-10-15). **Siblings, not a `{do …}` block**: a `do`
+wrapper only ever ran its first child in-game — with the call first the screen was never entered
+(`out/_swap/menu-run/refresh2`), with the navigation first the call never fired (`refresh3`) — while
+retail's own multi-statement cases (`splash_exit`, `splash_achievements`) are sibling statements.
+**The navigation first**: the sentinel is answered by no device the emulator serves, so it fails at
+the file layer, and nothing after the failure is guaranteed to run. The refresh itself is never the
+part that is dropped: a row whose action is too tight for the navigation keeps the call alone and
+still refreshes (silently).
+
+The press **waits (bounded at 15 s) for the re-scan**, so the pass enumerates the fresh list: the
+pass's aggregate enumerators snapshot the content list when they are **created** — measured, the
+creates run before the pass's first message, from guest code the mod cannot wait on — so the waiting
+lives in the press, before any of the pass has run ([dlc.md](../guides/dlc.md) §4.2,
+[src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) `WaitForRefreshToLand`).
 
 Three properties make the shape safe:
 
@@ -354,16 +370,20 @@ Previously it changed the guest digest before rejecting an undeliverable edit, p
 dirty-disc failure. `NtReadFile` uses the completed IOSB status/length (the SDK can return pending
 after completing the read); scatter reads are not treated as contiguous file data.
 
-**The two labels.** The row ships as `DOWNLOAD CONTENT` and the connect panel's status line as
+**The two labels.** The row ships as `Download Content` and the connect panel's status line as
 `Discovering Downloadable Content`, both in the game's English locale
-(`ui/locale/eng/gen/locale_keep.dtb`). R7 rewrites both (`RenameLabel`, src/ui/menu_options.h for the
-constants): the row becomes `Refresh Song Library`, the status line `Loading Song Cache` when the host
-answered this boot's enumeration out of the cache (`dlc: CacheServedThisBoot()`) — no discovery to
-announce. That locale is the file §10's split-read rule exists for: it spans two 64 KiB reads, the
-second landing in **a different guest buffer** (192 KiB from the end of the first) with the first
-already copied out, so it is assembled host-side, identified by its *archive* offset, written back into
-the second block only, and paid out of the **last** `#ifdef HX_PS3` so both labels and their donor fall
-inside the patchable block (log lines in §8) ([dlc.md](../guides/dlc.md) §4.2,
+(`ui/locale/eng/gen/locale_keep.dtb`). R7 rewrites both: the row becomes `Refresh Music Library`,
+the status line `Loading Cached Content List` when the host answered this boot's enumeration out of
+the cache (`dlc: CacheServedThisBoot()`) - no discovery to announce. **Both are built into the
+payload's generated locale records since 2026-10-15** (`SetRefreshRowLabel` / `SetDiscoveryCacheLabel`,
+[src/settings/menu_payload.cpp](../../src/settings/menu_payload.cpp) - the payload's records carry no
+split-read length constraint), because the in-flight `menu_filter` relabel cannot reach a locale that
+spans more than two archive reads: with a provider installed the ~87 KB English locale sits across
+**three** read blocks and the relabel was silently refused (measured 2026-10-15: the installed copy
+drew `Download Content` while the same build without the provider drew the refresh label). The
+in-flight relabel remains as the no-payload fallback; its constraints (a file spanning two reads,
+written back into the second block only, paid out of the **last** `#ifdef HX_PS3`) are §10's
+split-read story ([dlc.md](../guides/dlc.md) §4.2,
 [2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §11).
 
 **The progress bar.** The same panel carries one (`progress_bar.grp`, `content_percent.lbl` in
@@ -391,7 +411,8 @@ cvar registry), and the option is off by default: the *V-Sync* row belongs to th
 [2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §14).
 
 **What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
-plus its padding, an action that already carries the sentinel (a second pass), and any file that is
+(a row that can hold the call but not the navigation keeps the call and refreshes without the
+visible pass), an action that already carries the sentinel (a second pass), and any file that is
 not a `.dtb` this module can re-serialize: each leaves the file exactly as it was and logs why.
 
 ### 7.2 The Play Current Song row (2026-10-14)
