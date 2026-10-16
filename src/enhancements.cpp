@@ -99,6 +99,18 @@ REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, true, "Enhancements",
                     "its refresh row; loading progress and pacing are independent.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// The refresh entry's own row (owner request, 2026-10-15): while R7 owns the main menu's
+// downloadable-content row, that row is also something a player may not want in the menu, and
+// removing it used to mean digging into Interface -> Hidden Items. This cvar is the carrier of
+// the in-game "Refresh Music Library" row on the Downloadable Content page; with it off, the
+// menu's row is hidden and the library is only re-scanned when its fingerprint changes at boot.
+REXCVAR_DEFINE_BOOL(enhancements_refresh_music_library, true, "Enhancements",
+                    "R7's refresh entry: show the main menu's Refresh Music Library row, which "
+                    "re-scans the DLC folders and re-runs the discovery pass. On by default. "
+                    "Off hides the row; the boot's own scan is unaffected (a changed library is "
+                    "always re-read). Needs enhancements_dlc_cache.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, true, "Enhancements",
                     "Temporarily disable VSync while content loads, restoring the player's "
                     "value when the usable main menu is current. On by default and independent "
@@ -171,7 +183,7 @@ struct ToggleRow {
 // what the log walks, so a toggle that is not here is a toggle nobody sees. The size is
 // explicit, and it has to match the rows below: a short initializer list is not an error,
 // it leaves the last row - a null name and a null `enabled` - in the table.
-constexpr std::array<ToggleRow, 10> kToggles{{
+constexpr std::array<ToggleRow, 11> kToggles{{
     {"enhancements_expand_resolution", "R1 custom resolutions",
      [] { return REXCVAR_GET(enhancements_expand_resolution); }},
     {"enhancements_ui_scale", "R2 UI accessibility",
@@ -186,6 +198,8 @@ constexpr std::array<ToggleRow, 10> kToggles{{
      [] { return REXCVAR_GET(mouse_ui_nav); }},
     {"enhancements_dlc_cache", "R7 DLC cache",
      [] { return REXCVAR_GET(enhancements_dlc_cache); }},
+    {"enhancements_refresh_music_library", "R7 refresh music library row (the in-game row)",
+     [] { return REXCVAR_GET(enhancements_refresh_music_library); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
     {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (the in-game DLC Menu Songs row)",
@@ -197,7 +211,7 @@ constexpr std::array<ToggleRow, 10> kToggles{{
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6 and R10 "
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R7, R9 and R10 "
               "(docs/engine/toggles.md)",
               kToggles.size());
   for (const ToggleRow& row : kToggles) {

@@ -118,6 +118,15 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "cache_dlc_library"}, "dlc", "Cache DLC Library",
                      "Reuse a cached DLC library scan on the next launch."));
+  // The main menu's refresh entry (owner request, 2026-10-15): the row `splash_dlc` carries
+  // TapRefreshCache while R7 is on, so it is a feature toggle of its own - a player who does not
+  // want the entry can remove it here instead of digging into Interface -> Hidden Items. It is a
+  // restart row like the other menu-shaping ones: the row list is baked when the menu's records
+  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale.
+  rows.push_back(Row(Make(SettingId::kRefreshMusicLibrary, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "refresh_music_library"}, "dlc", "Refresh Music Library",
+                     "Show the main menu entry that re-scans your DLC folders."));
   {
     Descriptor d = Make(SettingId::kDlcScanThreads, Category::kGeneral, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kInt, IntValue(1),
@@ -347,6 +356,7 @@ constexpr StrategyEntry kStrategies[] = {
     // General
     {SettingId::kTarget, ApplicationStrategy::kRestart, ""},
     {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
+    {SettingId::kRefreshMusicLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
     // Read while the menu's music pool is built (src/hooks/shell_music.cpp, at
     // OnPostLoadXexImage), so a new process is what a change needs.

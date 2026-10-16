@@ -24,6 +24,15 @@ bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);
 // record spanning more than two archive reads (measured 2026-10-15: with a provider installed the
 // 87 KB English locale sits across three read blocks and the relabel was silently refused).
 bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);
+// The same row's *action*, built into the payload's own copy of the splash record
+// (`ui/splash/gen/splash.dtb`; the in-flight twin is menu_filter's `TapRefreshCache`). Two sibling
+// statements - the title's connect/discovery screen, then the `file_exists` the host answers by
+// re-scanning - with no byte budget: the payload's record may grow, so both always fit and nothing
+// is padded. The overlay prefers this copy, and the in-flight edit cannot be relied on for it
+// (measured 2026-10-15: with a provider installed the press still ran the title's own store body
+// while every read that carried the row was rewritten - out/_swap/menu-run/refresh14). False when
+// the flag is off, when the roots hold no such case, or when it already carries the sentinel.
+bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);
 // Extend an existing patch index with our records. Existing records retain their offsets,
 // compression and checksums, and the ark keeps the part count it had: when the mounted index has a
 // single part its bytes are carried into the new one (`mounted_part`) and only the last records

@@ -94,6 +94,12 @@ std::string_view CvarForSetting(SettingId id) {
   switch (id) {
     case SettingId::kCacheDlcLibrary:
       return "enhancements_dlc_cache";
+    case SettingId::kRefreshMusicLibrary:
+      // The main menu's own row for the refresh (owner request, 2026-10-15). Its consumer is
+      // src/hooks/menu_filter.cpp, which builds the hide decision at boot and also feeds
+      // src/hooks/settings_payload.cpp's locale, so the boot applies it at the config rank like
+      // the other enhancement rows and an explicit flag or environment value outranks it.
+      return "enhancements_refresh_music_library";
     case SettingId::kDlcMenuSongs:
       // R9's row, whose consumer reads the cvar (src/hooks/shell_music.cpp): the boot applies the
       // row here at the config rank, so an explicit flag or environment value outranks it exactly

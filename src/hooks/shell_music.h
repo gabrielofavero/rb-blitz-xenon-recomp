@@ -7,10 +7,15 @@
 
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
+
+// `PPCContext` for StandDownForRefresh's signature: the SDK's own context type, the same one every
+// hook in this tree takes (rex/hook.h pulls this header in).
+#include <rex/ppc/context.h>
 
 namespace rex {
 class Runtime;
@@ -63,5 +68,20 @@ int CurrentPoolIndex();
 // Returns false (and leaves `*answer` alone) for a path this layer does not own, so the caller
 // keeps forwarding it to the original.
 bool AnswerPlayQuery(std::string_view path, bool* answer);
+
+// R7's refresh press takes the menu's current track down *before* it blocks (owner report,
+// 2026-10-16). The press waits on the guest thread while the library scan catches up
+// (src/hooks/dlc.cpp's bounded wait), and a stream left playing while nothing advances it makes
+// the audio device repeat its last buffered slice - the owner heard it as a stuck record. Tearing
+// the stream down through the same path a screen change uses (its own destructor, then
+// StopStreams) leaves nothing to repeat; the menu's own re-entry reloads the pool when the pass
+// returns, and because the interrupted song counts as played the rotation hands over the *next*
+// one rather than replaying what was cut.
+//
+// Runs on the guest thread that answers the press, inside the file hook that recognises the
+// refresh sentinel (`src/hooks/dlc_refresh.cpp`); `base` and `ctx` are that thread's. Returns true
+// when a stream was really torn down, false when the menu had nothing playing (or nothing has ever
+// been polled - the menu is not up).
+bool StandDownForRefresh(uint8_t* base, PPCContext& ctx);
 
 }  // namespace rb_blitz::shell_music

@@ -38,6 +38,7 @@ REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
 REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
 REXCVAR_DECLARE(bool, enhancements_skip_offline_dialog);
 REXCVAR_DECLARE(bool, enhancements_dlc_cache);
+REXCVAR_DECLARE(bool, enhancements_refresh_music_library);
 
 namespace {
 
@@ -50,6 +51,9 @@ struct Settings {
   bool rename_settings_row = false;
   bool skip_offline_prompts = false;
   bool tap_refresh_row = false;
+  // The refresh entry's own switch (`general.refresh_music_library`): with it off, the row that
+  // performs the refresh is hidden even while R7 owns it.
+  bool refresh_row_on = true;
   bool relabel_refresh_row = false;
   bool relabel_cache_load = false;
 
@@ -271,7 +275,9 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available,
 
   if (g_settings.tap_refresh_row) {
     // R7: give the downloadable-content row the refresh job. The row's action becomes a
-    // `file_exists` on a name no file has; src/hooks/dlc_refresh.cpp hears the question.
+    // `file_exists` on a name no file has; src/hooks/dlc_refresh.cpp hears the question. This is
+    // the byte-budgeted twin of the payload's own body (src/settings/menu_payload.cpp): it owns
+    // the retail record, while the record the overlay prefers carries the body already.
     const rb_blitz::menu_options::Tapped tapped =
         rb_blitz::menu_options::TapRefreshCache(file, available);
     if (tapped.applied) {
@@ -502,6 +508,7 @@ void Configure() {
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
   g_settings.skip_offline_prompts = REXCVAR_GET(enhancements_skip_offline_dialog);
   g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
+  g_settings.refresh_row_on = REXCVAR_GET(enhancements_refresh_music_library);
 
   // P10: the hide decision is the §3.5 rule, not a branch - master off hides nothing, an empty
   // selection is a *deliberate* empty (the old fallback re-hid the compiled defaults, which is the
@@ -515,21 +522,33 @@ void Configure() {
   request.selected = menu_options::ParseRowNames(configured_rows);
   request.defaults = menu_options::ParseRowNames(menu_options::kDefaultRows);
   request.refresh_row_owns_refresh = g_settings.tap_refresh_row;
+  request.refresh_row_enabled = g_settings.refresh_row_on;
   const rb_blitz::settings::menu_compat::HideDecision decision =
       rb_blitz::settings::menu_compat::DecideHiddenRows(request);
   g_settings.rows = decision.hidden;
-  g_settings.hide_rows = g_settings.hide_rows && !decision.hidden.empty();
+  // The list is edited whenever the decision named a row: the hide master governs the *selection*,
+  // not the refresh entry's own switch, which takes its row away with the master on or off (the
+  // decision above says which rows those are, and its note is logged below).
+  g_settings.hide_rows = !decision.hidden.empty();
 
   if (g_settings.tap_refresh_row) {
     // R7 gives the downloadable-content row a new job (TapRefreshCache), so it stays in the list
     // (the decision above says so), and the same toggle repaints the row and the discovery screen:
     // the row's shipped label ("Download Content") is an online-store name for something that now
     // refreshes a library, and the discovery screen's is a lie whenever the host cache answered.
-    g_settings.relabel_refresh_row = true;
     g_settings.relabel_cache_load = true;
-    REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache and is drawn "
-                "as \"{}\" (R7)",
-                menu_options::kDlcRowRefreshLabel);
+    if (g_settings.refresh_row_on) {
+      g_settings.relabel_refresh_row = true;
+      REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache and is drawn "
+                  "as \"{}\" (R7)",
+                  menu_options::kDlcRowRefreshLabel);
+    } else {
+      // The entry is off (Help & Options -> Downloadable Content), so the row was hidden by the
+      // decision above and there is nothing to repaint. The discovery screen's caption still
+      // belongs to the cache, which is untouched by that switch.
+      REXLOG_INFO("menu_filter: R7 is on but the Refresh Music Library entry is off; the "
+                  "downloadable-content row is hidden from the menu");
+    }
   }
   g_configured = true;
 

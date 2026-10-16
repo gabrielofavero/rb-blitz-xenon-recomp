@@ -37,6 +37,7 @@
 #include <rex/types.h>
 
 #include "hooks/dlc.h"
+#include "hooks/shell_music.h"
 
 #if defined(_WIN32)
 
@@ -90,7 +91,7 @@ GuestString ObjectPath(uint8_t* base, const uint32_t addr) {
   return chars == nullptr ? GuestString{} : GuestString{chars, length};
 }
 
-void CheckSentinel(GuestString path) {
+void CheckSentinel(GuestString path, uint8_t* base, PPCContext& ctx) {
   if (path.empty()) {
     return;
   }
@@ -103,6 +104,14 @@ void CheckSentinel(GuestString path) {
   REXLOG_INFO("dlc: refresh asked for from the main menu (\"{}\"), re-scanning the DLC "
               "libraries",
               std::string_view(path.text, path.length));
+  // R9/R7 (owner report, 2026-10-16): the press blocks this guest thread while the scan catches
+  // up (dlc::RefreshConfigured's bounded wait), and a stream left playing with nothing advancing
+  // it makes the audio device repeat its last buffered slice - the owner heard a stuck record.
+  // Take the menu's track down first, exactly as a screen change would, so there is nothing left
+  // to repeat; the menu's own re-entry starts the rotation's next song when the pass returns.
+  if (rb_blitz::dlc::RefreshArmed()) {
+    rb_blitz::shell_music::StandDownForRefresh(base, ctx);
+  }
   rb_blitz::dlc::RefreshConfigured();
 }
 
@@ -144,7 +153,7 @@ void Forward(ImportFunc* slot, const char* symbol, PPCContext& ctx, uint8_t* bas
 extern "C" REX_FUNC(__imp__NtCreateFile) {
   if (rb_blitz::dlc::RefreshArmed()) {
     rb_blitz::dlc::PublishPendingRefresh();
-    CheckSentinel(ObjectPath(base, ctx.r5.u32));
+    CheckSentinel(ObjectPath(base, ctx.r5.u32), base, ctx);
   }
   static ImportFunc original = nullptr;
   Forward(&original, "__imp__NtCreateFile", ctx, base);
@@ -153,7 +162,7 @@ extern "C" REX_FUNC(__imp__NtCreateFile) {
 extern "C" REX_FUNC(__imp__NtOpenFile) {
   if (rb_blitz::dlc::RefreshArmed()) {
     rb_blitz::dlc::PublishPendingRefresh();
-    CheckSentinel(ObjectPath(base, ctx.r5.u32));
+    CheckSentinel(ObjectPath(base, ctx.r5.u32), base, ctx);
   }
   static ImportFunc original = nullptr;
   Forward(&original, "__imp__NtOpenFile", ctx, base);
@@ -162,7 +171,7 @@ extern "C" REX_FUNC(__imp__NtOpenFile) {
 extern "C" REX_FUNC(__imp__NtQueryFullAttributesFile) {
   if (rb_blitz::dlc::RefreshArmed()) {
     rb_blitz::dlc::PublishPendingRefresh();
-    CheckSentinel(ObjectPath(base, ctx.r3.u32));
+    CheckSentinel(ObjectPath(base, ctx.r3.u32), base, ctx);
   }
   static ImportFunc original = nullptr;
   Forward(&original, "__imp__NtQueryFullAttributesFile", ctx, base);

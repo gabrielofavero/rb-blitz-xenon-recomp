@@ -415,6 +415,22 @@ cvar registry), and the option is off by default: the *V-Sync* row belongs to th
 visible pass), an action that already carries the sentinel (a second pass), and any file that is
 not a `.dtb` this module can re-serialize: each leaves the file exactly as it was and logs why.
 
+**The press also stands the menu's music down** (2026-10-16): the wait below blocks the guest
+thread, and a stream left playing through it repeats its last buffered slice. The track is taken
+down before the block and the rotation's next song starts on the first menu frame after it - part 2
+§4 has the mechanism and the measurement, and `out/_swap/menu-run/music3` is the arm.
+
+**The entry's own switch (2026-10-15).** Help & Options → Downloadable Content → *Refresh Music
+Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, default On)
+removes that row from the menu. It is a property of the feature rather than of the hide list: off
+hides `splash_dlc` with the hide master on **or** off and whatever the Interface ▸ Hide Items
+selection says, it does not raise the hide list's "the refresh lost its row" warning (that warning
+is for a player who hid it *by accident*), and the payload's own locale stops repainting the row
+(`refresh_row_active` follows `enhancements_dlc_cache && enhancements_refresh_music_library`). The
+boot's scan is untouched by the switch — a library whose tree changed is still re-read at the next
+boot — and with `enhancements_dlc_cache` off the row is the title's own online entry again, over
+which this switch has no say ([dlc.md](../guides/dlc.md) §4.1).
+
 ### 7.2 The Play Current Song row (2026-10-14)
 
 **The feature.** The main menu's **second** entry starts whichever song the menu is playing as its
@@ -770,6 +786,38 @@ inside the ark, whose index pins its size, so the array cannot grow past three e
 
 Nothing is copied, extracted or written under `game/`, and with R9 off (or no library) nothing is
 mounted and the hook calls the guest unchanged.
+
+**R7's refresh press stands the menu down, and starts the next song itself (2026-10-16).** The press
+blocks the guest thread while the library scan catches up ([src/hooks/dlc.cpp](../../src/hooks/dlc.cpp)'s
+bounded wait), and a stream left playing with nothing advancing it makes the audio device repeat its
+last buffered slice - the owner heard it as a stuck record. So the press takes the menu's current
+track down **before** it blocks (`shell_music::StandDownForRefresh`, called from the refresh
+sentinel's file hook [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp)): the same teardown
+a screen change does - the stream's own destructor, `ShellMusic+44` cleared, `StopStreams`, all under
+`g_setting_up_music` so it cannot be read as the game navigating. It is deliberately scoped to a boot
+that can start music again (**R9 on and a pool mounted**): with R9 off the track belongs to the
+title, whose own screens restart it, and this layer must not leave the menu silent for music it did
+not play.
+
+The resume is this layer's job, because the menu's own re-entry after the pass does **not** reload
+the pool (measured: no `the main menu asked for` line follows the return). The poll starts the
+rotation's next song on the first menu frame at least **1.5 s** after the stand-down - the delay
+keeps a poll that slips through the screen transition from starting music into a screen that is
+already leaving - and the interrupted song counts as played, so the music comes back as a
+**different** one. Measured 2026-10-16 (`out/_swap/menu-run/music3`, 300 pre-linked packages, Ultimate,
+windowed, `-PreLink 300`): `anything` audibly playing, press at 00:16:47.362 → `the refresh press
+takes this menu track down ("anything")` 56 ms later → the fresh 300-package list handed over 1.04 s
+after the press, the pass enumerating it (`added 300 items`, attempt 2) → `the menu is back after the
+refresh; the rotation starts the next song` at 00:16:48.925 and `justthewayyouare` audibly playing at
+00:16:49.351 - **music is back 1.9 s after the press, already on the discovery screen** - and no
+`the game took this menu track down` line for it afterwards. That arm's window ended while the pass
+was still finalising; `out/_swap/menu-run/refresh16` is the arm where the same press runs the pass to
+its end (`usable menu attempt=2 total_ms=27966`, the fresh list enumerated as 300 items on both
+aggregate passes).
+The test harness grew the arm it needed: `refresh-check.ps1 -PreLink N` links packages **before** the
+boot (so the menu really has an R9 song playing) and `-LinkCount -1` adds none afterwards; it also
+waits for the title's own `content_pipeline: usable menu attempt=1` before driving the menu, because a
+fixed wait pressed through the loading screen and missed the row (`music1`).
 
 **Measured.** An in-game run shows the substitution — `shell_music: the main menu asked for
 "sfx/shell/samples/shellmusic_1"; playing "menumusic9:\songs\themonster\themonster.mogg" instead (R9)`

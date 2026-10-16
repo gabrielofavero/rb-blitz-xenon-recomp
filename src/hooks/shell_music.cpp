@@ -143,6 +143,15 @@ bool g_watch_title = false;
 // must not be read as the game tearing the menu music down. Never read outside the guest thread.
 bool g_setting_up_music = false;
 
+// Set by R7's refresh stand-down and cleared by the menu frame that starts the rotation's next
+// song. The menu's own re-entry does *not* reload the pool after the refresh pass (measured
+// 2026-10-16: no `the main menu asked for` line follows the pass), so this layer owes the
+// resume; the delay keeps a poll that slips through the screen transition from starting music
+// into a screen that is already leaving.
+bool g_stand_down = false;
+std::chrono::steady_clock::time_point g_stand_down_at{};
+constexpr int64_t kResumeAfterStandDownMs = 1500;
+
 // The ShellMusic the last substitution went to, and the Load arguments the panel passed
 // it - the poll hook replays them when it starts the next track. Zero outside R9.
 uint32_t g_music = 0;
@@ -161,6 +170,12 @@ size_t g_buffer_next = 0;
 std::chrono::steady_clock::time_point g_track_started_at{};
 std::chrono::steady_clock::time_point g_seam_at{};
 std::string g_playing_name;      // the song key of the track R9 last handed the menu
+
+// The ShellMusic the menu's own poll last reported (`sub_827586D8`'s `this`). Learned with R9 on
+// or off, because R7's refresh press takes whatever the menu is playing down - the title's own
+// track included - so nothing is left repeating while the press blocks the frame.
+uint32_t g_menu_music = 0;
+
 // How often the playing track's position is reported while it plays. The stream's own position is
 // the only clock the guest offers, so a line that shows it advancing is what separates "the menu
 // is playing this song" from "the menu stopped playing anything".
@@ -312,6 +327,30 @@ constexpr const char* kTitleTracks[] = {"sfx/shell/samples/shellmusic_1",
                                         "sfx/shell/samples/shellmusic_2",
                                         "sfx/shell/samples/shellmusic_3"};
 
+// Retire the stream a ShellMusic currently holds, the way the engine's own Start does
+// (0x82758C08): the stream's own destructor with the "remove from the pool" flag, the field
+// cleared, then StopStreams. Shared by the rotation's handover and R7's refresh stand-down, which
+// must leave nothing playing that a blocked frame cannot advance.
+void RetireStreamOnGuest(uint8_t* base, PPCContext& parent, uint32_t music) {
+  const uint32_t old_stream = LoadBe32(base, music + kStreamOffset);
+  if (old_stream == 0) {
+    return;
+  }
+  {
+    PPCContext destroy(parent);
+    destroy.r1.u32 -= 0x100;
+    destroy.r3.u32 = old_stream;
+    destroy.r4.u32 = 1;
+    const uint32_t destructor = LoadBe32(base, LoadBe32(base, old_stream));
+    rex::runtime::ResolveIndirectFunction(destructor)(destroy, base);
+  }
+  std::memset(rex::memory::GuestPtr<uint8_t*>(base, music + kStreamOffset), 0, 4);
+  PPCContext stop(parent);
+  stop.r1.u32 -= 0x100;
+  stop.r3.u32 = music;
+  __imp__sub_827583F8(stop, base);
+}
+
 // Hand `path` to the same ShellMusic the menu is polling, with the Load arguments the panel chose
 // for its own pool entry. Runs on the guest thread from inside the poll and takes no lock while
 // calling into the guest. `loop` is the panel's own `loop` argument (Load stores it into
@@ -327,20 +366,7 @@ void LoadOnGuest(uint8_t* base, PPCContext& parent, uint32_t music, uint32_t buf
   // Load only changes the source. It does NOT replace the active stream. Dispose of that
   // stream through its own destructor before loading/starting another song, as Start does
   // when stopped (0x82758C08). Otherwise every logged "next" song is still the old audio.
-  const uint32_t old_stream = LoadBe32(base, music + kStreamOffset);
-  if (old_stream != 0) {
-    PPCContext destroy(parent);
-    destroy.r1.u32 -= 0x100;
-    destroy.r3.u32 = old_stream;
-    destroy.r4.u32 = 1;
-    const uint32_t destructor = LoadBe32(base, LoadBe32(base, old_stream));
-    rex::runtime::ResolveIndirectFunction(destructor)(destroy, base);
-    std::memset(rex::memory::GuestPtr<uint8_t*>(base, music + kStreamOffset), 0, 4);
-    PPCContext stop(parent);
-    stop.r1.u32 -= 0x100;
-    stop.r3.u32 = music;
-    __imp__sub_827583F8(stop, base);
-  }
+  RetireStreamOnGuest(base, parent, music);
   std::memcpy(rex::memory::GuestPtr<uint8_t*>(base, buffer), path.c_str(), path.size() + 1);
   PPCContext call(parent);
   call.r1.u32 -= 0x100;              // a scratch frame on the guest's own stack
@@ -510,6 +536,8 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   g_watch = true;
   g_watch_title = false;
   g_attempts = 0;
+  // The panel asked for music itself, so there is no stand-down left to resume.
+  g_stand_down = false;
   REXLOG_INFO("shell_music: the main menu asked for \"{}\"; playing \"{}.mogg\" instead (R9) "
               "(pool {} of {})",
               asked, path, index, pool_size);
@@ -692,6 +720,62 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 }
 
+bool StandDownForRefresh(uint8_t* base, PPCContext& ctx) {
+  if (base == nullptr) {
+    return false;
+  }
+  const uint32_t music = g_menu_music;
+  if (music == 0) {
+    // No menu poll has ever run: the menu is not up, so there is nothing of ours playing.
+    return false;
+  }
+  // Only take music down when this layer can start it again. With R9 off, or a pool that mounted
+  // nothing, the track belongs to the title, whose own screens own restarting it - this hook must
+  // not leave the menu silent for music it did not play. The R9-with-a-pool case is the owner's
+  // report, and it is the one the poll resumes.
+  if (!g_enabled || g_pool.empty()) {
+    return false;
+  }
+
+  // The bookkeeping a screen change does (ForgetMenuMusic): the rotation stops watching, but its
+  // history stays - the song that was cut counts as played, so the next start is a different one.
+  std::string name;
+  bool watched = false;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    watched = g_watch || g_watch_title;
+    name = g_playing_name;
+    g_watch = false;
+    g_watch_title = false;
+    g_playback.Stop();
+    g_current_index = -1;
+    g_pending_index = -1;
+    g_play_selection.Stop();
+  }
+
+  const bool had_stream = LoadBe32(base, music + kStreamOffset) != 0;
+  if (had_stream) {
+    // Our own teardown, not the game's: g_setting_up_music keeps the StopStreams hook inside
+    // RetireStreamOnGuest from reading this as a navigation.
+    const bool was_setting_up = g_setting_up_music;
+    g_setting_up_music = true;
+    RetireStreamOnGuest(base, ctx, music);
+    g_setting_up_music = was_setting_up;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_stand_down = true;
+    g_stand_down_at = std::chrono::steady_clock::now();
+  }
+  if (had_stream || watched) {
+    REXLOG_INFO("shell_music: the refresh press takes this menu track down (\"{}\") before the "
+                "scan blocks the frame; the menu reloads its pool when the discovery pass "
+                "returns, with the next song of the rotation (R7/R9)",
+                name.empty() ? std::string("the title's own track") : name);
+  }
+  return had_stream;
+}
+
 bool MenuMusicEnabled() { return g_menu_music_enabled; }
 
 bool HasPool() {
@@ -835,6 +919,23 @@ extern "C" REX_FUNC(sub_827586D8) {
   // inside it cannot see. One atomic load when nothing is in flight.
   rb_blitz::content_progress::Tick();
   const uint32_t music = ctx.r3.u32;
+  // R7's refresh press needs to know which ShellMusic the menu is playing on when it takes the
+  // track down (StandDownForRefresh). Learning it here costs one store per frame and needs no
+  // gates: this poll *is* the menu's music, with R9 on or off.
+  if (music != 0) {
+    g_menu_music = music;
+  }
+  // ...and it is also where the resume happens. The stand-down fired on the press; a poll only
+  // arrives again once the menu is really back (no poll runs while the connect screen owns the
+  // audio), so the first one after the discovery - with the transition behind it - starts the
+  // rotation's next song.
+  if (g_stand_down && music != 0 && g_enabled && !g_pool.empty() &&
+      MillisecondsSince(g_stand_down_at) >= kResumeAfterStandDownMs) {
+    g_stand_down = false;
+    REXLOG_INFO("shell_music: the menu is back after the refresh; the rotation starts the next "
+                "song (R7/R9)");
+    StartNextTrack(base, ctx, music);
+  }
   const bool watched = g_enabled && (g_watch || g_watch_title) && !g_pool.empty() &&
                        music != 0 && music == g_music;
   if (watched) {

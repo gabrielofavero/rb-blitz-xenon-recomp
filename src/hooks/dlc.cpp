@@ -209,8 +209,9 @@ std::string JoinLibraryGroups(const std::vector<fs::LibraryItem>& items) {
 
 // The library roots the boot path and the in-game refresh both read: the structured
 // root when it is *not* the layout (a dumped song folder), plus every configured
-// library. Naming the same folder twice is harmless because the scan keys a package by
-// its own identity.
+// library. The same folder named twice - a `dlc_root` a `dlc_library` entry also names,
+// which is the shape the refresh harness drives - is one root, not two: walked twice,
+// the scan files every package twice under two names (fs::UniqueLibraryRoots).
 std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::path& game_data_root,
                                                         const std::filesystem::path& root,
                                                         const bool root_is_library) {
@@ -222,7 +223,7 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
     std::error_code ec;
     roots.push_back(std::filesystem::absolute(fs::ResolveDlcRoot(entry, game_data_root), ec));
   }
-  return roots;
+  return fs::UniqueLibraryRoots(roots);
 }
 
 // Reads the library enumeration from the cache when the toggle is on, the tree is
@@ -666,13 +667,15 @@ void DrainRefreshForRestart() {
 // PublishPendingRefresh() is called on this (guest) thread, exactly like the file-call hooks do
 // at the menu, because the content manager's list is a plain vector the worker must not write.
 //
-// Bounded on purpose: measured scans run ~0.15 s warm and ~45 s for a fully cold walk of the
-// owner's 1,773-package library. A warm press (the common case - the boot just walked the same
-// tree) waits invisible milliseconds; the bound covers the in-between cases where the OS evicted
-// some of the tree. A scan still running after the bound must not hold the press any longer: the
-// press returns, the pass runs over the previous list, and the fresh one lands mid-pass for the
-// next enumeration (the shell poll and the file hooks publish it) - pressing Refresh again is
-// then warm and instant.
+// Bounded on purpose: a refresh always re-reads every container header - that is what the row
+// asks for - so the press pays the per-file cost the cold boot pays. Measured 2026-10-15
+// (out/_swap/menu-run/refresh12): 8.1 s of scan for a 600-file walk, 13.6 ms each on the default
+// single thread, 8.9 s of press wait; docs/guides/dlc.md §4.2 has the per-file table and
+// `dlc_scan_threads` divides it. The bound is where that stops being an acceptable hold: a scan
+// still running after it must not hold the press any longer. The press returns, the pass runs over
+// the previous list, and the fresh one lands mid-pass for the next enumeration (the shell poll and
+// the file hooks publish it). The scan rewrote the cache, so the next *boot* is the cheap one; a
+// second press in the same session scans again, because an explicit refresh never accepts the cache.
 void WaitForRefreshToLand() {
   if (!g_cache_enabled || g_runtime == nullptr) {
     return;

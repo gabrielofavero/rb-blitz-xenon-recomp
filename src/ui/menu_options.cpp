@@ -636,17 +636,11 @@ Node* FindSkippedBlock(Node& node) {
 // repurposes that one row rather than adding one, so nothing in the option array moves.
 constexpr char kDlcRowName[] = "splash_dlc";
 
-// The name the row's DTA asks for. No file has it, so the title's own `file_exists`
-// answers false and nothing the player can see changes; what changes is that the
-// engine asks the host, and src/hooks/dlc_refresh.cpp is watching. The *device* is
-// what makes the engine resolve the name at all: a path under `d:` is answered out of
-// the ark the title already has mapped (measured: no host call is made for one), while
-// a device it owns - the title opens `songcache:\songcache` itself at startup - is
-// asked through the guest's file calls, which is where the host sees the name.
-constexpr char kRefreshSentinelPath[] = "songcache:/rbbz_dlc_refresh";
+// The name the row's DTA asks for lives in menu_options.h (`kRefreshSentinelPath`), because the
+// payload's own copy of the row builds the same call (src/settings/menu_payload.cpp).
 
-// What the host looks for inside the path it is handed. Kept apart from the path
-// above so a change of mount cannot break the hook, and vice versa.
+// What the host looks for inside the path it is handed. Kept apart from the path above so a change
+// of mount cannot break the hook, and vice versa.
 constexpr char kRefreshSentinel[] = "rbbz_dlc_refresh";
 
 // The switch case for `name`: an array whose *first* element is the row's name. The
@@ -924,7 +918,7 @@ Tapped TapRefreshCache(uint8_t* file, size_t available) {
   const Node call =
       CommandNode({TextNode(kSymbol, "file_exists"), TextNode(kString, kRefreshSentinelPath)}, 0);
   const Node discover = CommandNode({TextNode(kSymbol, "ui"), TextNode(kSymbol, "goto_screen"),
-                                     TextNode(kSymbol, "server_connect_screen")}, 0);
+                                     TextNode(kSymbol, kRefreshRowDiscoverScreen)}, 0);
   constexpr size_t kTextHeader = 8;  // tag + length
   const size_t fixed_call = NodeSize(call) + kTextHeader;
   const size_t fixed_discover = fixed_call + NodeSize(discover);

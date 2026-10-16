@@ -145,7 +145,12 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   // the hide-list label mirrors what the menu really says).
   const bool dlc_cache_on =
       rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true";
-  if (dlc_cache_on) {
+  // The refresh entry has a switch of its own (owner request, 2026-10-15): with it off, the row
+  // is hidden by menu_filter, so the locale does not repaint it either - the label and the row it
+  // belongs to are decided by the same answer.
+  const bool refresh_row_on =
+      rex::cvar::GetFlagByName("enhancements_refresh_music_library") == "true";
+  if (dlc_cache_on && refresh_row_on) {
     menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
   }
 
@@ -287,7 +292,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   MenuRecords records;
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), dlc::CacheServedThisBoot(),
-                        dlc_cache_on)) return fail();
+                        dlc_cache_on && refresh_row_on)) return fail();
   for (const auto& locale : locale_set) {
     std::vector<ui::dtb::Node> roots;
     ui::dtb::RootHeader header;

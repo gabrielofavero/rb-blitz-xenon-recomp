@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -103,6 +104,47 @@ inline std::filesystem::path ResolveDlcRoot(const std::string_view configured,
     root = game_data_root / root;
   }
   return root.lexically_normal();
+}
+
+// The key two roots are compared by: the normalised UTF-8 spelling with any trailing
+// separator dropped. That last step is needed because lexically_normal() keeps a trailing
+// separator in some spellings ("foo/./bar/../" -> "foo/"), and a folder written with a slash
+// is still the same folder.
+inline std::string LibraryRootKey(const std::filesystem::path& root) {
+  const std::u8string text = root.lexically_normal().generic_u8string();
+  std::string key(reinterpret_cast<const char*>(text.data()), text.size());
+  while (key.size() > 1 && key.back() == '/') {
+    key.pop_back();
+  }
+  return key;
+}
+
+// The same folder named twice - once as the configured DLC root and once as a library, the shape
+// a harness that wants a disposable library drives - is one root, not two. The library scan walks
+// every root it is handed, and it makes a file name unique only inside its own (title_id,
+// content_type) group, so a second walk of the same folder files every package a second time
+// under a different name: measured, a 300-package folder named twice produced 600 items, and the
+// title enumerated all 600 (out/_swap/menu-run/refresh12, 2026-10-15). The first spelling is kept
+// - the roots are part of the cache's fingerprint, so a cosmetic change would discard a current
+// cache - and the comparison is lexical (LibraryRootKey), so a trailing separator or a `..` does
+// not name a second root. Two spellings a filesystem would consider one directory but a lexical
+// comparison does not (a case difference, a junction) are still two roots, exactly as
+// DlcCacheMatches treats them.
+//
+// A root nested inside another is NOT deduped: a caller who names both is asking for those files
+// twice, and dropping the inner root would silently change what a caller can see.
+inline std::vector<std::filesystem::path> UniqueLibraryRoots(
+    const std::vector<std::filesystem::path>& roots) {
+  std::vector<std::filesystem::path> unique;
+  std::vector<std::string> keys;
+  for (const auto& root : roots) {
+    const std::string key = LibraryRootKey(root);
+    if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
+      keys.push_back(key);
+      unique.push_back(root);
+    }
+  }
+  return unique;
 }
 
 // True when the root holds the layout above - at least one child directory named like

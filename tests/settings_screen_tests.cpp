@@ -805,12 +805,19 @@ void TestPlayCurrentSongRow() {
   std::string error;
   CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
 
-  // The two rows this feature adds to the Downloadable Content page owe the line budget measured for
-  // this surface (a drawn line is `<label>: <value>`; over 28 characters the value is not drawn).
+  // The rows the recent owner requests add to the Downloadable Content page owe the line budget
+  // measured for this surface (a drawn line is `<label>: <value>`; over 28 characters the value is
+  // not drawn). `settings_dlc_refresh` is the refresh entry's own switch (owner request,
+  // 2026-10-15) - "Refresh Music Library: On" is 25 characters, and its label alone 21.
   for (const auto& label : Labels()) {
     if (label.first == "settings_dlc_menu_songs_on" ||
-        label.first == "settings_play_current_on") {
+        label.first == "settings_play_current_on" ||
+        label.first == "settings_dlc_refresh_on" ||
+        label.first == "settings_dlc_refresh_off") {
       CHECK_TRUE(label.second.size() <= 28u);
+    }
+    if (label.first == "settings_dlc_refresh_on") {
+      CHECK_TRUE(label.second == "Refresh Music Library: On");
     }
   }
   CHECK_TRUE(std::string(kPlayCurrentLabel).size() <= 22u);

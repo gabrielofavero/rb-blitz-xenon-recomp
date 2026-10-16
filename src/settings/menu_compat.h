@@ -62,6 +62,10 @@ struct HideRequest {
   // away. The *default* selection therefore leaves it alone; an explicit user choice may hide it,
   // and the caller is told the refresh lost its row.
   bool refresh_row_owns_refresh = false;
+  // The main menu's refresh entry (owner request, 2026-10-15): `general.refresh_music_library`.
+  // With it off the row goes - deliberately, with the master on or off, and without the
+  // "needs another row" note an accidental hiding raises.
+  bool refresh_row_enabled = true;
 };
 
 struct HideDecision {
@@ -70,6 +74,7 @@ struct HideDecision {
   std::vector<std::string> refused;
   bool refresh_row_left_visible = false;  // kept because it owns the refresh
   bool alternate_refresh_needed = false;  // the user hid it anyway: the refresh needs another row
+  bool refresh_row_disabled = false;      // the refresh entry is switched off, so its row is gone
   std::string note;  // one printable line, for the boot log
 };
 

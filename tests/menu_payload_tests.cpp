@@ -246,6 +246,61 @@ int main() {
     CHECK_TRUE(rb_blitz::settings::SetRefreshRowLabel(&translated, true));
     CheckStrEq(translated[0].kids[1].text, "Inhalt herunterladen");
   }
+  BeginCase("the payload's own splash copy carries the refresh action when R7 owns the row");
+  {
+    using rb_blitz::ui::dtb::Node;
+    namespace options = rb_blitz::menu_options;
+    // The switch the row is dispatched in, with a sibling case so the walk has to find the right
+    // one. The shipped body is retail's own online-store branch, which is what the press must no
+    // longer run with R7 on.
+    const auto fixture = [] {
+      return std::vector<Node>{Node::Command(
+          {Node::Symbol("switch"), Node::Symbol("selected_sym"),
+           Node::Array({Node::Symbol("splash_start"),
+                        Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                                       Node::Symbol("demo_screen")})}),
+           Node::Array({Node::Symbol(options::kDlcRowKey),
+                        Node::Command({Node::Symbol("if_else"), Node::Symbol("online"),
+                                       Node::Symbol("store"), Node::Symbol("popup")})})})};
+    };
+
+    std::vector<Node> splash = fixture();
+    CHECK_FALSE(rb_blitz::settings::SetRefreshRowAction(&splash, false));
+    CHECK_EQ(splash[0].kids.size(), 4u);  // the switch is untouched while the flag is off
+    CHECK_EQ(splash[0].kids[3].kids.size(), 2u);  // ...and so is the shipped body
+
+    CHECK_TRUE(rb_blitz::settings::SetRefreshRowAction(&splash, true));
+    // kids: the row symbol, then exactly two statements - no padding, because this record is the
+    // payload's own and may grow, which is the whole reason the action is built here.
+    const Node& kase = splash[0].kids[3];
+    CHECK_EQ(kase.kids.size(), 3u);
+    CheckStrEq(kase.kids[0].text, options::kDlcRowKey);
+    const Node& discover = kase.kids[1];
+    CHECK_EQ(discover.kids.size(), 3u);
+    CheckStrEq(discover.kids[0].text, "ui");
+    CheckStrEq(discover.kids[1].text, "goto_screen");
+    CheckStrEq(discover.kids[2].text, options::kRefreshRowDiscoverScreen);
+    const Node& call = kase.kids[2];
+    CHECK_EQ(call.kids.size(), 2u);
+    CheckStrEq(call.kids[0].text, "file_exists");
+    CheckStrEq(call.kids[1].text, options::kRefreshSentinelPath);
+    // The sibling case is untouched: the walk found the dlc case by name.
+    CHECK_EQ(splash[0].kids[2].kids.size(), 2u);
+
+    // Idempotent the same way the in-flight edit is: a case that already carries the sentinel is
+    // left alone, so the payload and the hook can both be armed without rewriting twice.
+    CHECK_FALSE(rb_blitz::settings::SetRefreshRowAction(&splash, true));
+    CHECK_EQ(splash[0].kids[3].kids.size(), 3u);
+
+    // A record that ships no such case is a refusal, not a failure: the in-flight edit still owns
+    // the retail copy.
+    std::vector<Node> other{Node::Command(
+        {Node::Symbol("switch"), Node::Symbol("selected_sym"),
+         Node::Array({Node::Symbol("splash_start"),
+                      Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                                     Node::Symbol("demo_screen")})})})};
+    CHECK_FALSE(rb_blitz::settings::SetRefreshRowAction(&other, true));
+  }
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();

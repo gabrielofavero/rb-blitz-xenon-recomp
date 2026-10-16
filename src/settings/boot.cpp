@@ -516,11 +516,11 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // made in AfterLoadXexImage - where the fact that they could not be written at the config rank
     // is reported rather than swallowed.
     for (const SettingId id :
-         {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kDlcScanThreads,
-          SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts, SettingId::kHideMainMenu,
-          SettingId::kHiddenMainMenu, SettingId::kVsync, SettingId::kFiltering,
-          SettingId::kResolution, SettingId::kAntiAliasing, SettingId::kDisplay,
-          SettingId::kSettingsLabels}) {
+         {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kRefreshMusicLibrary,
+          SettingId::kDlcScanThreads, SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts,
+          SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
+          SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
+          SettingId::kDisplay, SettingId::kSettingsLabels}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }

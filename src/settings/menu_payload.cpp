@@ -33,6 +33,56 @@ bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_acti
       menu_options::kDlcRowLabel, menu_options::kDlcRowRefreshLabel, &why);
 }
 
+// The refresh row's action as the payload's copy of the splash record carries it. The two
+// statements and their order are menu_options.h's (`kRefreshRowDiscoverScreen`,
+// `kRefreshSentinelPath`), shared with the byte-budgeted in-flight edit so the two can never
+// disagree about what the press does.
+std::vector<Node> RefreshRowBody() {
+  return {Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                         Node::Symbol(menu_options::kRefreshRowDiscoverScreen)}),
+          Node::Command({Node::Symbol("file_exists"),
+                         Node::String(menu_options::kRefreshSentinelPath)})};
+}
+
+// The `splash_dlc` case wherever the switch that dispatches it lives, in these roots. The walk
+// mirrors menu_options::FindSwitchCase, which owns the same idea for the byte-level twin: the
+// case's first element is the row's name, which is what tells it apart from the option array
+// that lists the same name somewhere else.
+Node* FindRefreshRowCase(Node* node) {
+  if (node->tag == ui::dtb::kArray && node->kids.size() >= 2 &&
+      node->kids[0].tag == ui::dtb::kSymbol && node->kids[0].text == menu_options::kDlcRowKey) {
+    return node;
+  }
+  for (Node& kid : node->kids) {
+    if (Node* found = FindRefreshRowCase(&kid)) return found;
+  }
+  return nullptr;
+}
+
+bool ContainsString(const Node& node, const std::string_view text) {
+  if (node.tag == ui::dtb::kString && node.text == text) return true;
+  for (const Node& kid : node.kids) {
+    if (ContainsString(kid, text)) return true;
+  }
+  return false;
+}
+
+bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_active) {
+  if (!refresh_row_active || roots == nullptr) return false;
+  // The in-flight twin's guard, for the same reason: a case that already carries the call is left
+  // alone rather than rewritten a second time.
+  for (Node& root : *roots) {
+    if (Node* row = FindRefreshRowCase(&root)) {
+      for (size_t i = 1; i < row->kids.size(); ++i) {
+        if (ContainsString(row->kids[i], menu_options::kRefreshSentinelPath)) return false;
+      }
+      break;
+    }
+  }
+  std::string why;
+  return ui::screen::RerouteRow(roots, menu_options::kDlcRowKey, RefreshRowBody(), &why);
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool cached_dlc_list, bool refresh_row_active) {
@@ -67,6 +117,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           std::string ignored;
           screen::RemoveRow(&roots, screen::kProviderMenuRow, &ignored);
         }
+        // R7's own row (2026-10-15): this copy is the one the overlay prefers, so the action is
+        // built here rather than left to menu_filter's in-flight edit, which cannot be relied on
+        // for a mounted record (measured: the press ran the title's own store body while every
+        // read that carried the row was rewritten). A record without that case is not an error -
+        // the in-flight edit is still armed for the retail copy.
+        SetRefreshRowAction(&roots, refresh_row_active);
         // The Play Current Song entry (owner feature, 2026-10-14), when the boot configured it:
         // the row right after PLAY, and the case that starts the song the menu is playing. A boot
         // with no pool refuses, and that refusal is *not* fatal - a menu without the row is exactly

@@ -90,6 +90,20 @@ inline constexpr char kDlcRowKey[] = "splash_dlc";
 inline constexpr char kDlcRowLabel[] = "Download Content";
 inline constexpr char kDlcRowRefreshLabel[] = "Refresh Music Library";
 
+// The refresh row's action, shared by the two places that build it: the in-flight edit
+// (`TapRefreshCache`, byte-budgeted because the ark index fixes the file's length) and the
+// payload's own copy of the splash record (`SetRefreshRowAction`, where the record may grow).
+//
+// `kRefreshRowDiscoverScreen` is the screen the title's own start button enters, so a press shows
+// the discovery pass rather than refreshing behind the menu. `kRefreshSentinelPath` is a name no
+// file has, so what the player sees does not change - and the *device* is what makes the engine
+// resolve the name at all: a path under `d:` is answered out of the ark the title already has
+// mapped (measured: no host call is made for one), while a device it owns - the title opens
+// `songcache:\songcache` itself at startup - is asked through the guest's file calls, which is
+// where src/hooks/dlc_refresh.cpp hears the name.
+inline constexpr char kRefreshRowDiscoverScreen[] = "server_connect_screen";
+inline constexpr char kRefreshSentinelPath[] = "songcache:/rbbz_dlc_refresh";
+
 // The connect panel's own status line for the content enumeration
 // (`server_connect.dtb` maps `kServerConnectPanel_EnumeratingContent` to this token).
 // With R7 on and the host's enumeration answered from the persisted cache there is no

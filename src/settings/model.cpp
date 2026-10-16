@@ -24,6 +24,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "dlc_menu_songs";
     case SettingId::kPlayCurrentSong:
       return "play_current_song";
+    case SettingId::kRefreshMusicLibrary:
+      return "refresh_music_library";
     case SettingId::kUnlockAll:
       return "unlock_all";
     case SettingId::kUnlockOnlineAchievements:

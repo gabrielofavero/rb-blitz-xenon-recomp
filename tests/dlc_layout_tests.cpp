@@ -305,5 +305,36 @@ int main() {
                DlcRegistration::kNoContentManager);
   }
 
+  // The list the scan is handed, not the registration decision: a folder named twice is one
+  // root because the scan files a repeated package under a second name rather than skipping it
+  // (measured 600 items for a 300-package folder, out/_swap/menu-run/refresh12, 2026-10-15).
+  BeginCase("a folder named twice is one library root");
+  {
+    const fs::path one = "Songs";
+    const fs::path other = "Other";
+
+    std::vector<fs::path> same{one, other, one};
+    const std::vector<fs::path> deduped = UniqueLibraryRoots(same);
+    CHECK_EQ(deduped.size(), 2);
+    CHECK_TRUE(deduped[0] == one);
+    CHECK_TRUE(deduped[1] == other);
+
+    // The spelling decides after normalisation, not the string: a trailing separator or a
+    // `..` step names the same folder, so it is dropped like an exact repeat.
+    std::vector<fs::path> spelled{fs::path("Songs") / "", one / ".." / "Songs", one};
+    CHECK_EQ(UniqueLibraryRoots(spelled).size(), 1);
+
+    // Two genuinely different trees stay two, and only the FIRST spelling of a repeat is
+    // kept - the roots are part of the cache's fingerprint.
+    std::vector<fs::path> distinct{one, other};
+    CHECK_EQ(UniqueLibraryRoots(distinct).size(), 2);
+    std::vector<fs::path> empty;
+    CHECK_EQ(UniqueLibraryRoots(empty).size(), 0);
+    std::vector<fs::path> repeated{one, one};
+    const std::vector<fs::path> kept = UniqueLibraryRoots(repeated);
+    CHECK_EQ(kept.size(), 1);
+    CHECK_TRUE(kept[0] == one);
+  }
+
   return Finish();
 }

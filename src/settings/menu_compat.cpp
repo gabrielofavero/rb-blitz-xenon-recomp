@@ -41,9 +41,20 @@ void PushUnique(std::vector<std::string>* out, const std::string& name) {
 
 HideDecision DecideHiddenRows(const HideRequest& request) {
   HideDecision decision;
+  // The entry toggle is not the hide list: it is the refresh feature's own row, so it applies
+  // whether or not the hide master is on, and it is the player's own choice rather than a loss to
+  // report. Everything below either adds the row to `hidden` or leaves it to the selection.
+  const bool refresh_row_off = request.refresh_row_owns_refresh && !request.refresh_row_enabled;
   if (!request.master) {
     // "Off disables filtering while preserving checked choices": the selection is not consulted at
     // all, and the caller keeps whatever it stored for the next time the master goes on.
+    if (refresh_row_off) {
+      PushUnique(&decision.hidden, kRefreshMenuRow);
+      decision.refresh_row_disabled = true;
+      decision.note = "the hide master is off, and the Refresh Music Library entry is off too, so "
+                      "its row is gone";
+      return decision;
+    }
     decision.note = "the hide master is off; every row the title ships stays in the menu";
     return decision;
   }
@@ -67,7 +78,12 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
       continue;
     }
     if (request.refresh_row_owns_refresh && name == kRefreshMenuRow) {
-      if (request.selection_explicit) {
+      if (refresh_row_off) {
+        // Switched off in Help & Options: the row goes, once, and this is not the "refresh lost a
+        // row" case - the player asked for exactly this.
+        PushUnique(&decision.hidden, name);
+        decision.refresh_row_disabled = true;
+      } else if (request.selection_explicit) {
         // The player asked for it by name, so it goes - and the refresh has lost its row.
         PushUnique(&decision.hidden, name);
         decision.alternate_refresh_needed = true;
@@ -81,6 +97,13 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
     PushUnique(&decision.hidden, name);
   }
 
+  // The entry toggle applies whatever the selection says: a custom selection that does not name
+  // the row must not leave the switch ineffective.
+  if (refresh_row_off) {
+    PushUnique(&decision.hidden, kRefreshMenuRow);
+    decision.refresh_row_disabled = true;
+  }
+
   std::string note = "hiding " + std::to_string(decision.hidden.size()) + " row(s)";
   if (!decision.hidden.empty()) {
     note += ": " + Join(decision.hidden);
@@ -91,6 +114,9 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
   if (decision.refresh_row_left_visible) {
     note += "; " + std::string(kRefreshMenuRow) +
             " stays because it refreshes the DLC library";
+  }
+  if (decision.refresh_row_disabled) {
+    note += "; the Refresh Music Library entry is off, so its row is gone";
   }
   if (decision.alternate_refresh_needed) {
     note += "; the library refresh lost its row, so it needs another one";

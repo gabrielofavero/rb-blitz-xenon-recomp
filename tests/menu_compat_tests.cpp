@@ -137,6 +137,78 @@ void RefreshRowMayBeHiddenExplicitly() {
   CHECK_TRUE(decision.note.find("needs another one") != std::string::npos);
 }
 
+void RefreshEntryOffHidesTheRow() {
+  test::BeginCase("hide: the refresh entry's own switch takes its row away with the defaults");
+
+  // `general.refresh_music_library` off (owner request, 2026-10-15): the refresh row is the
+  // feature's own entry, so the compiled default - which deliberately leaves it visible while R7
+  // owns it - must not keep it. It is the player's choice, so nothing needs another row.
+  HideRequest request = Base();
+  request.master = true;
+  request.refresh_row_owns_refresh = true;
+  request.refresh_row_enabled = false;
+  const HideDecision decision = DecideHiddenRows(request);
+  CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements,splash_dlc");
+  CHECK_FALSE(decision.refresh_row_left_visible);
+  CHECK_FALSE(decision.alternate_refresh_needed);
+  CHECK_TRUE(decision.refresh_row_disabled);
+  CHECK_TRUE(decision.note.find("entry is off") != std::string::npos);
+}
+
+void RefreshEntryOffAlsoHidesItFromACustomSelection() {
+  test::BeginCase("hide: the switch applies to a custom selection that does not name the row");
+
+  HideRequest request = Base();
+  request.master = true;
+  request.selection_explicit = true;
+  request.selected = {"splash_start"};
+  request.refresh_row_owns_refresh = true;
+  request.refresh_row_enabled = false;
+  const HideDecision decision = DecideHiddenRows(request);
+  CHECK_TRUE(Joined(decision.hidden) == "splash_start,splash_dlc");
+  CHECK_FALSE(decision.alternate_refresh_needed);
+  CHECK_TRUE(decision.refresh_row_disabled);
+}
+
+void RefreshEntryOffIgnoresTheHideMaster() {
+  test::BeginCase("hide: the switch hides its row with the hide master off too");
+
+  // The master governs the hide *selection*: a player who never turned it on must still be able to
+  // remove the refresh entry, which is what its own row in Help & Options is for.
+  HideRequest request = Base();
+  request.master = false;
+  request.selection_explicit = true;
+  request.selected = {"splash_start"};
+  request.refresh_row_owns_refresh = true;
+  request.refresh_row_enabled = false;
+  const HideDecision decision = DecideHiddenRows(request);
+  CHECK_TRUE(Joined(decision.hidden) == "splash_dlc");
+  CHECK_TRUE(decision.note.find("master is off") != std::string::npos);
+  CHECK_TRUE(decision.note.find("entry is off") != std::string::npos);
+  CHECK_TRUE(decision.refresh_row_disabled);
+  CHECK_FALSE(decision.alternate_refresh_needed);
+  // With the entry on, the master-off answer is the untouched menu it has always been.
+  HideRequest on = request;
+  on.refresh_row_enabled = true;
+  CHECK_TRUE(DecideHiddenRows(on).hidden.empty());
+}
+
+void RefreshEntryOffMeansNothingWithoutR7() {
+  test::BeginCase("hide: the switch is inert while the row is not the refresh row");
+
+  // R7 off (`enhancements_dlc_cache` off): `splash_dlc` is the title's own online row again, so the
+  // refresh entry's switch says nothing about it - the compiled trio hides it as before.
+  HideRequest request = Base();
+  request.master = true;
+  request.refresh_row_owns_refresh = false;
+  request.refresh_row_enabled = false;
+  const HideDecision decision = DecideHiddenRows(request);
+  CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements,splash_dlc");
+  CHECK_FALSE(decision.refresh_row_disabled);
+  CHECK_FALSE(decision.alternate_refresh_needed);
+  CHECK_FALSE(decision.refresh_row_left_visible);
+}
+
 void PoolIsFixedAtFifty() {
   test::BeginCase("pool: 50 songs, bounded by what the library can supply");
 
@@ -226,6 +298,10 @@ int main() {
   ProtectedEntryIsRefusedByName();
   RefreshRowIsKeptForTheDefaults();
   RefreshRowMayBeHiddenExplicitly();
+  RefreshEntryOffHidesTheRow();
+  RefreshEntryOffAlsoHidesItFromACustomSelection();
+  RefreshEntryOffIgnoresTheHideMaster();
+  RefreshEntryOffMeansNothingWithoutR7();
   PoolIsFixedAtFifty();
   LegacyPoolCountIsIgnoredOutLoud();
   RenameCannotReachTheMergedRoot();

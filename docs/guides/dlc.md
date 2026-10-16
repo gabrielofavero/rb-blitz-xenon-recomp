@@ -146,6 +146,7 @@ many threads read it (§4.1).
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
 | `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
+| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | on | The main menu's refresh entry's own switch: the visible row is Help & Options → Downloadable Content → *Refresh Music Library* (`general.refresh_music_library`). Off hides that menu row; the boot's scan is unaffected. Only meaningful with the cache on (§4.1). Changing it needs a relaunch. |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Music Library* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
@@ -358,6 +359,15 @@ boot about to use it. Neither touches the title's own `songcache`, which is the 
 business — a package the scan has just discovered is a package the title has not read
 yet, so its own discovery reads it and extends its own cache.
 
+Since 2026-10-15 that entry has a switch of its own: Help & Options → Downloadable Content →
+*Refresh Music Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`,
+default On). Off hides the menu row — with the hide master on or off, and whatever the Interface ▸
+Hide Items selection says, because the row is this feature's own entry rather than one of the
+retail rows that list governs — and the payload stops repainting it. Nothing else changes: a
+library whose tree changed is still re-scanned at the next boot, and `--refresh_dlc_cache` still
+forces one. With the cache off the row is the title's own online entry and this switch says
+nothing about it.
+
 **The refresh runs on a worker, and since 2026-10-15 the press rides it.** Reading every
 container is the same per-file cost the cold boot pays, so an in-game refresh of the
 1,402-package library is **30.2-31.0 s** — and it used to run on the thread that asked,
@@ -373,13 +383,25 @@ The press itself waits for that worker, **bounded at 15 s**, because the row now
 re-enters the title's own discovery pass ([main-menu.md](../engine/main-menu.md) §7.1) and
 that pass snapshots the content list **when its aggregate enumerators are created** —
 measured, the creates run before the pass's first message and are made by guest code the
-mod cannot wait on, so nothing downstream can wait for the scan instead. A warm press (the
-common case - the boot just walked the same tree) rides ~0.15 s; a scan still running at the
-bound returns the press and the pass runs over the previous list, with the fresh one landing
-for the next enumeration. Measured 2026-10-15 (`out/_swap/menu-run/refresh12`): a 300-package
-library added after the menu came up gave a press wait of 8.9 s,
-`XamContentAggregateCreateEnumerator: added 600 items`, the pass ran **600/600** with the
+mod cannot wait on, so nothing downstream can wait for the scan instead. Because that wait blocks
+the guest thread, the press also takes the menu's background music down before it blocks (a stream
+with nothing advancing it repeats its last buffered slice) and starts the rotation's next song on
+the first menu frame after it — measured, music is back 1.9 s after the press, already on the
+discovery screen ([main-menu.md](../engine/main-menu.md) part 2 §4, `out/_swap/menu-run/music3`).
+A refresh always
+reads every container's header again — that is what the row asks for — so the press pays the
+same per-file cost a cold boot pays (§4.2), and the bound is what keeps that from becoming a
+stall: a scan still running at the bound returns the press and the pass runs over the previous
+list, with the fresh one landing for the next enumeration. Measured 2026-10-15
+(`out/_swap/menu-run/refresh12`): a library linked in after the menu had come up refreshed in
+**8.1 s** of scan — `packages=600`, 13.6 ms per file on the default single thread — and the
+press returned after **8.9 s**; the pass then enumerated the fresh list,
+`XamContentAggregateCreateEnumerator: added 600 items`, **600/600** with the
 title's own **Discovering Downloadable Content** screen and bar up, and the menu returned.
+(That run named its fixture folder as both the DLC root and a library, so the old root list
+walked every package twice; `fs::UniqueLibraryRoots` dedupes that now — the timings above are
+what one press really costs.) The scan rewrote the cache, so the next *boot* is a hit; an
+explicit refresh never accepts the cache, so a second press scans again.
 
 **Where the refreshed list lands, and why not on the worker.** The result is handed to the
 content manager from a *guest* thread, because ContentManager's

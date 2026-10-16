@@ -537,6 +537,13 @@ std::vector<PanelSpec> AllPanels() {
                               BoolRow("settings_dlc_cache", "general.cache_dlc_library",
                                       "Cache DLC Library",
                                       "Reuse an unchanged package list on the next launch. Songs still need to load."),
+                              // The refresh entry's own control (owner request, 2026-10-15). It sits
+                              // beside the cache row because that is what it needs: the main menu's
+                              // row only exists while R7 owns it, and this is how a player removes
+                              // that entry without going through Interface -> Hidden Items.
+                              BoolRow("settings_dlc_refresh", "general.refresh_music_library",
+                                      "Refresh Music Library",
+                                      "Show the main menu entry that re-scans your DLC folders and re-runs the discovery pass. Needs Cache DLC Library."),
                               SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
                                         "DLC Scan Threads",
                                         "How many threads scan your packages. More threads scan faster.",
