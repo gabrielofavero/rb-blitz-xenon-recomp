@@ -2045,15 +2045,21 @@ std::vector<Node> PlayCurrentSongBody(const std::vector<std::string>& songs) {
   // SongMgr::Handle at 0x8244938C reads a Symbol payload (0x823F94A0), not a
   // string. A string's DataArray pointer was being looked up as a symbol, returning
   // zero even for songs already in the library. Preserve the package's spelling.
-  std::vector<Node> statements{SetVar(kPlaySongVar, Sym(""))};
+  std::vector<Node> statements{
+      Cmd({Sym("file_exists"), Str("rbbz-play/begin")}), SetVar(kPlaySongVar, Sym(""))};
   for (size_t i = 0; i < songs.size(); ++i) {
     statements.push_back(Cmd(
         {Sym("if"),
          Cmd({Sym("file_exists"), Str(std::string(kPlayProbePrefix) + std::to_string(i))}),
          SetVar(kPlaySongVar, Sym(songs[i]))}));
   }
-  const Node unavailable = EnterScreen("settings_play_unavailable_screen");
+  const auto unavailable = [](const char* reason) {
+    return Cmd({Sym("do"),
+        Cmd({Sym("file_exists"), Str(std::string("rbbz-play/result/") + reason)}),
+        EnterScreen("settings_play_unavailable_screen")});
+  };
   const Node choose = Cmd({Sym("do"),
+      Cmd({Sym("file_exists"), Str("rbbz-play/result/resolved")}),
       // The metadata also becomes the panel's current song, so returning to the library
       // and the power-up flow agree with the song handed to the loading screen.
       Cmd({Sym("song_select_panel"), Sym("set_current_song"), Var(kPlayDataVar)}),
@@ -2068,9 +2074,9 @@ std::vector<Node> PlayCurrentSongBody(const std::vector<std::string>& songs) {
            Cmd({Sym("if_else"), Cmd({Sym("!="), Var(kPlayIdVar), Node::Int(0)}),
                 Cmd({Sym("do"),
                      SetVar(kPlayDataVar, Cmd({Sym("song_mgr"), Sym("data"), Var(kPlayIdVar)})),
-                     Cmd({Sym("if_else"), Var(kPlayDataVar), choose, unavailable})}),
-                unavailable})}),
-      unavailable}));
+                     Cmd({Sym("if_else"), Var(kPlayDataVar), choose, unavailable("missing-data")})}),
+                unavailable("missing-name")})}),
+      unavailable("no-track")}));
   return statements;
 }
 }  // namespace

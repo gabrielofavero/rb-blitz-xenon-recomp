@@ -448,15 +448,19 @@ song matching the audible one; the arms are in
 answer a host can give through the channel this project already owns is a boolean (`file_exists`,
 [src/hooks/settings_bridge_hooks.cpp](../../src/hooks/settings_bridge_hooks.cpp)). So the payload
 **bakes the boot's pool** into the body — one probe per pool entry, `rbbz-play/current/<index>` — and
-the host answers true for exactly the index the menu is playing
+the host answers true for exactly one selected index, captured by `rbbz-play/begin`
 ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), `AnswerPlayQuery`; the path parser is
 [src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h)). The song key baked with each probe
-is the package's own folder name (`SongName`: the last component of `\songs\<key>\<key>.mogg`), which
-is the spelling the body then asks `song_mgr` for. A press therefore costs one file question per pool
+comes from `songs.dta`/`songs.dtb`: the top-level song Symbol whose `(song (name ...))` matches the
+complete audio path. The stream basename is only a fallback when metadata is absent/unreadable;
+with readable metadata, unmatched or ambiguous streams are excluded. This supersedes the original
+assumption that the filename always names the song. A press costs one file question per pool
 entry, the whole `rbbz-play/` namespace is answered by the host (never forwarded — a forwarded bare
 name is a name the title's own file layer may answer out of data it already has, the lesson §7.1's
-sentinel taught), and a press with no track published yet (before the first track has produced
-samples) shows the unavailable message below instead of guessing.
+sentinel taught), plus begin/result queries. During a silent handoff the selection keeps the last
+heard song for up to **2 s**; afterward, or at first startup, it uses the pending candidate. Once the
+new stream advances, its song wins immediately. Failed candidates, title fallback and screen exit
+invalidate their selections. A captured press stays on one index throughout its probe sequence.
 
 **Why the lookup answered 0, and the fix (measured 2026-10-15).** The 2026-10-14 reading below was
 correct about *what* happened and wrong about the cause: `SongMgr`'s native handler (`0x8244938C`,
@@ -466,8 +470,8 @@ interning its argument through `0x823F94A0`) reads a **Symbol** payload, and the
 ([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) `PlayCurrentSongBody`;
 `tests/settings_screen_tests.cpp` pins the node kind), the id resolves, and the press continues:
 `song_select_panel set_current_song` takes the resolved metadata before the `loading_screen` hand-off,
-so the song list's own current-song state agrees with what plays. A press with **no** published track
-(before the first track has produced samples, or with none playing) or a name the manager does not
+so the song list's own current-song state agrees with what plays. A press with **no** selectable track
+(for example, title fallback) or a name the manager does not
 carry draws an explicit message — *"The background song is not available to play. Please try again
 when another song starts."* (`settings_play_unavailable_screen`) — instead of the old silent no-op.
 
@@ -486,8 +490,10 @@ does not claim to have touched ([known-issues.md](../reference/known-issues.md))
 
 **Evidence [boot]** — the boot lines to look for are
 `settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`,
-`shell_music: Play Current Song: the menu is playing pool i of N ("<key>")` and, on an unavailable
-press, the `settings_play_unavailable` page; arms and captures are in
+`shell_music: Play Current Song request: selected=... audible=... pending=... title_fallback=...`,
+`Play Current Song: selected pool i of N ("<key>")`, and `Play Current Song result: resolved`,
+`no-track`, `missing-name` or `missing-data`. Selection alone does **not** prove guest lookup success.
+On an unavailable press the `settings_play_unavailable` page remains; arms and captures are in
 [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) §Evidence.
 
 ### 8. Evidence
@@ -861,6 +867,16 @@ and the game's own stop was caught one line later — `the game took this menu t
 rotation stops watching ("highvoltage_live")` — the deck did **not** advance while the loading
 screen took the audio over (§7.2 has the rest of that arm).
 
+**Selection reliability follow-up (2026-10-15).** Startup now gets **8 s** to produce its first
+samples; a stream that was already advancing still fails after **3 s** without progress. A successful
+start clears prior failure strikes, so three unrelated slow starts separated by successful plays
+cannot permanently quarantine a song. Three consecutive unsuccessful starts still retire it. The
+2 s selection grace and metadata lookup in §7.2 reduce unavailable presses without changing the
+no-immediate-repeat rule or selecting a DLC song while title music is playing. Host tests cover the
+boundaries and failed-candidate invalidation. A copied package with renamed assets, retaining its
+original song key, resolves and reaches gameplay in `out/_swap/music-fix/reliability-path/`; see the
+[follow-up record](../plans/in-progress/2026-10-14-play-current-song.md#2026-10-15-reducing-unavailable-presses).
+
 ### 5. Where it lives
 
 | Thing | Where |
@@ -871,6 +887,7 @@ screen took the audio over (§7.2 has the rest of that arm).
 | The per-frame poll, and a track's end | `0x827586D8`; the end is `StandardStream` state 6 (`0x823E30D8`) |
 | The feature | [src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp) |
 | The rotation's playback state machine (host logic) | [src/hooks/menu_music_playback.h](../../src/hooks/menu_music_playback.h) |
+| Package metadata to song-key mapping | [src/hooks/menu_music_metadata.cpp](../../src/hooks/menu_music_metadata.cpp), `tests/menu_music_pool_tests.cpp` |
 | The pool sample and the deck (host logic) | [src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h), `tests/menu_music_pool_tests.cpp` |
 | The toggles | [toggles.md](toggles.md) (R9) |
 | The library it draws from | [dlc.md](../guides/dlc.md), `rb_blitz::dlc::LibraryPackagePaths()` |

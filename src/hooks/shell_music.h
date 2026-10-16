@@ -49,16 +49,17 @@ bool MenuMusicEnabled();
 bool HasPool();
 
 // The pool's songs, in pool order, as the song key the title's own song manager knows them by
-// (`SongName`: the last component of the stream path, e.g. `16candles`). Empty with no pool.
+// (from package metadata, or the stream basename when metadata is absent). Empty with no pool.
 std::vector<std::string> PoolSongNames();
 
-// The pool index of the track the menu is playing right now, or -1 before one has been chosen (and
-// with no pool).
+// The pool index whose stream is audibly advancing, or -1 during loading and with no pool.
 int CurrentPoolIndex();
 
 // The host's answer for one `rbbz-play/<...>` query path - what the menu's Play Current Song row
 // asks through `file_exists`:
-//   `rbbz-play/current/<i>` - true when pool index `i` is the track playing now.
+//   `rbbz-play/begin` - snapshot a selection (audible, recently heard, or pending at startup).
+//   `rbbz-play/current/<i>` - true for the selected index, stable throughout one press.
+//   `rbbz-play/result/<reason>` - record guest lookup success/failure and end the snapshot.
 // Returns false (and leaves `*answer` alone) for a path this layer does not own, so the caller
 // keeps forwarding it to the original.
 bool AnswerPlayQuery(std::string_view path, bool* answer);

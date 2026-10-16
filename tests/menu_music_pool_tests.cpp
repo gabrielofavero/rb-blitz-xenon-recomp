@@ -23,6 +23,8 @@
 
 #include "hooks/menu_music_pool.h"
 #include "hooks/menu_music_playback.h"
+#include "hooks/menu_music_metadata.h"
+#include "ui/dtb_author.h"
 
 #include <cstddef>
 #include <random>
@@ -309,9 +311,16 @@ void TestPlaybackLifecycle() {
 
   BeginCase("missing, failed, replaced and stalled streams cannot freeze the rotation");
   playback.Begin(0);
-  CHECK_TRUE(playback.Observe(3000, 0, false, false, 0) == Event::kFailed);
+  CHECK_TRUE(playback.Observe(3000, 0, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(8000, 0, false, false, 0) == Event::kFailed);
   playback.Begin(0);
-  CHECK_TRUE(playback.Observe(3000, 10, false, false, 0) == Event::kFailed);
+  CHECK_TRUE(playback.Observe(7999, 10, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(8000, 10, false, false, 0) == Event::kFailed);
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(3000, 10, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(4000, 10, true, false, 100) == Event::kAudible);
+  CHECK_TRUE(playback.Observe(6999, 10, true, false, 100) == Event::kNone);
+  CHECK_TRUE(playback.Observe(7000, 10, true, false, 100) == Event::kFailed);
   playback.Begin(0);
   CHECK_TRUE(playback.Observe(1, 10, true, false, 100) == Event::kAudible);
   CHECK_TRUE(playback.Observe(2, 20, true, false, 200) == Event::kFailed);
@@ -340,7 +349,112 @@ void TestCanonicalSongHistory() {
   CHECK_EQ(rotation.Next(), kNoIndex);
 }
 
+void TestPlaySelection() {
+  BeginCase("a press can use startup or the recent handoff and keeps one selection throughout");
+  PlaySelection selection;
+  CHECK_EQ(selection.Choose(0), -1);
+  selection.Loading(2, 100);
+  CHECK_EQ(selection.Choose(101), 2);  // first stream need not have produced samples yet
+  selection.Audible(2);
+  selection.Loading(4, 1000);
+  CHECK_EQ(selection.Capture(1001), 2);  // the song the player just heard
+  selection.Audible(4);
+  CHECK_EQ(selection.Query(1002), 2);  // no double hit if the stream changes between probes
+  selection.Complete();
+  CHECK_EQ(selection.Query(1003), 4);
+  selection.Loading(6, 2000);
+  CHECK_EQ(selection.Choose(4000), 4);
+  CHECK_EQ(selection.Choose(4001), 6);
+  selection.Failed(6);
+  selection.Loading(7, 5000);
+  CHECK_EQ(selection.Choose(5001), 7);  // failed candidates cannot extend the old grace period
+  selection.Audible(7);
+  selection.Failed(7);
+  selection.Loading(8, 6000);
+  CHECK_EQ(selection.Choose(6001), 8);  // never offer the failed audible song as a grace choice
+  selection.Stop();  // title fallback, exit, or destruction
+  CHECK_EQ(selection.Capture(6002), -1);
+  selection.Loading(9, 6003);
+  CHECK_EQ(selection.Query(6004), -1);  // a no-track snapshot is also stable
+  selection.Complete();
+  CHECK_EQ(selection.Choose(6005), 9);
+}
+
+void TestFailureRecovery() {
+  BeginCase("a successful start resets earlier strikes but three consecutive failures retire it");
+  std::mt19937 rng(10);
+  Rotation rotation(rng);
+  rotation.SetPool({"ColdSong", "other"});
+  rotation.MarkFailed("ColdSong");
+  rotation.MarkFailed("COLDSong");
+  rotation.MarkStarted("coldsong");
+  CHECK_FALSE(rotation.failed("ColdSong"));
+  rotation.MarkFailed("ColdSong");
+  rotation.MarkFailed("ColdSong");
+  CHECK_FALSE(rotation.quarantined("ColdSong"));
+  rotation.MarkFailed("ColdSong");
+  CHECK_TRUE(rotation.quarantined("ColdSong"));
+}
+
+void TestSongMetadata() {
+  BeginCase("DTA song keys follow the full audio path, preserving the guest symbol spelling");
+  const std::string text = R"dta(
+    ; (fake (song (name "songs/one/audio")))
+    (ActualKey (name "A display title (live)") (artist "NotTheKey")
+      (song (name "songs/one/audio") (tracks ((guitar (0 1))))))
+    /* a second record shares the basename, never the identity */
+    ('SecondKey' (song (name 'songs/two/audio')))
+  )dta";
+  std::string error;
+  const auto parse = [&](const std::string& input) {
+    return ReadSongMetadata(std::span(reinterpret_cast<const uint8_t*>(input.data()), input.size()),
+                            false, &error);
+  };
+  const auto songs = parse(text);
+  CHECK_TRUE(error.empty());
+  CHECK_EQ(songs.size(), 2u);
+  CHECK_TRUE(SongKeyForStream(songs, "\\songs\\ONE\\Audio.mogg") == "ActualKey");
+  CHECK_TRUE(SongKeyForStream(songs, "./songs/two/audio") == "SecondKey");
+  CHECK_TRUE(SongKeyForStream(songs, "songs/three/audio").empty());
+  CHECK_TRUE(SongKeyForStream({{"first", "songs/a"}, {"second", "songs/a"}},
+                              "songs/a").empty());
+  CHECK_TRUE(parse(text + "(broken").empty());  // never use a partially parsed file
+  CHECK_TRUE(!error.empty());
+  CHECK_TRUE(parse("(key (song (name \"unterminated)))").empty());
+  CHECK_TRUE(parse("/* unterminated").empty());
+  CHECK_TRUE(parse(std::string(70, '(') + "key" + std::string(70, ')')).empty());
+  CHECK_TRUE(parse(std::string(2 * 1024 * 1024 + 1, ' ')).empty());
+
+  BeginCase("compiled metadata produces the same keys and rejects damaged bytes");
+  namespace dtb = rb_blitz::ui::dtb;
+  using N = dtb::Node;
+  auto bytes = dtb::Compile({N::Array({N::Symbol("ActualKey"),
+      N::Array({N::Symbol("song"), N::Array({N::Symbol("name"),
+                                           N::String("songs/one/audio")})})})});
+  const auto compiled = ReadSongMetadata(bytes, true, &error);
+  CHECK_TRUE(error.empty());
+  CHECK_TRUE(SongKeyForStream(compiled, "songs/one/audio") == "ActualKey");
+  bytes.resize(6);
+  CHECK_TRUE(ReadSongMetadata(bytes, true, &error).empty());
+  CHECK_TRUE(!error.empty());
+
+  BeginCase("pool deduplication uses resolved song keys instead of coincidentally equal filenames");
+  std::mt19937 rng(11);
+  const auto pool = BuildPool({{"a", "songs/one/audio", "ActualKey"},
+                               {"b", "songs/two/audio", "SecondKey"},
+                               {"c", "songs/copy/different", "actualkey"}}, 50, rng);
+  CHECK_EQ(pool.size(), 2u);
+  std::set<std::string> keys;
+  for (const auto& song : pool) keys.insert(PoolSongKey(song));
+  CHECK_TRUE(keys.contains("ActualKey"));
+  CHECK_TRUE(keys.contains("SecondKey"));
+  CHECK_TRUE(PoolSongKey({"legacy", "songs/legacy/name"}) == "name");
+}
+
 int main() {
+  TestSongMetadata();
+  TestPlaySelection();
+  TestFailureRecovery();
   TestPlaybackLifecycle();
   TestCanonicalSongHistory();
   TestSongName();

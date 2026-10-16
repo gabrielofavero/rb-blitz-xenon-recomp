@@ -756,6 +756,9 @@ void TestPlayCurrentSongRow() {
   // the offline base target).
   const std::vector<std::string> body = CaseWords(nodes, kPlayCurrentRow);
   for (const char* word : {"16candles", "lycanthrope", "file_exists",
+                           "rbbz-play/begin", "rbbz-play/result/resolved",
+                           "rbbz-play/result/no-track", "rbbz-play/result/missing-name",
+                           "rbbz-play/result/missing-data",
                            "get_song_id_from_short_name", "set_song", "mount_current_content",
                            "set_current_song", "song_chosen", "settings_play_unavailable_screen"}) {
     CHECK_TRUE(std::find(body.begin(), body.end(), word) != body.end());

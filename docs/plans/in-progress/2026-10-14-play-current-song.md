@@ -137,3 +137,50 @@ select row 2, press.
 runtime (its screen and label are pinned by the host tests); and the Ultimate-target landing
 (`powerup_select_screen`) was not re-measured on this build — the press was taken on the offline
 base target.
+
+## 2026-10-15: reducing unavailable presses
+
+**Implemented.** The press snapshots one selection before querying pool indices. It uses the
+audible song, retains the just-heard song for at most 2 s of a handoff, and otherwise accepts the
+pending song (including first startup). Once the new song advances it takes priority. A failed
+candidate is removed from this selection; further failures cannot renew the old song's grace.
+Title fallback and menu exit clear it. The audible index remains distinct from this approximation.
+
+Package metadata now supplies the short name: top-level song key matched to the full
+`(song (name ...))` audio path in `songs.dta` or compiled `songs.dtb`. It preserves Symbol spelling,
+handles quoted DTA symbols/comments and deduplicates by resolved key. Readable metadata that has no
+unambiguous match excludes that audio file from the pool; missing/unreadable metadata retains the
+legacy basename fallback. Parsing is bounded and read-only. A cold decoder has 8 s to start; a
+running stream still gets 3 s without progress. Successful starts clear earlier failure strikes;
+three consecutive unsuccessful starts still quarantine the song. The immediate-repeat prohibition
+and the bounded three-attempt fallback remain.
+
+**Diagnostics.** `Play Current Song request` records selected/audible/pending indices and title
+fallback. `Play Current Song result` records `resolved`, `no-track`, `missing-name` or `missing-data`.
+The old index-hit log by itself never proved the guest resolved that key; the result now does.
+
+**Measured [boot], 2026-10-15:** `out/_swap/music-fix/reliability-path/`, disposable profile,
+D3D12, offline base target. A copied AC/DC package retained its real key `highvoltage_live`, while
+all asset paths were renamed to `songs/key_voltage_live/key_voltage_live`. At 22:20:47 the host
+logged that mapping; at 22:21:11 the press selected `highvoltage_live` and the guest returned
+`result: resolved`. At 22:21:12 it entered `loading_screen`, and at 22:21:36 `game_screen`.
+`shots/{row,after,gameplay}.png` captures the row, introductory screen and note highway; no guest
+fault occurred in this arm. This exercises the filename/key mismatch that the old basename lookup
+could not resolve. `hashes.json` identifies the tested binaries.
+
+An earlier synthetic fixture (`reliability-key`) changed the stock song's key instead of its
+paths and faulted during content discovery before a press. It is rejected test input, not evidence
+for this feature: the stock metadata depends on the known identity. Original library packages were
+not edited.
+
+**Checks [measured].** `menu_music_pool` covers textual/compiled metadata, ambiguous paths, malformed
+input, distinct keys sharing filenames, startup/stall deadlines, recovery of failure strikes,
+handoff boundaries, failed candidates and a stable press snapshot. `settings_screen` checks the
+begin/result protocol and Symbol arguments. Release build passes. All **38 CTest tests** pass with
+workspace-local `TEMP`/`TMP` (`out/_swap/play-reliability-ctest-local-temp.log`); the initial run's
+`path_policy` failure on a nonexistent descendant disappears with that temporary root.
+
+**Remaining limits.** Timing/quarantine branches are deterministic host-test coverage, not injected
+live decoder failures. Ultimate's power-up landing was not re-measured in this follow-up. Genuine
+title music has no playable library song; damaged or unsupported metadata can still prevent guest
+resolution. The unavailable page remains for those cases, with a distinct reason in the log.

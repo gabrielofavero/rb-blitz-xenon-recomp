@@ -100,6 +100,7 @@ set(RBBLITZ_SOURCES
     # running game (today `graphics.vsync` -> the SDK's own `vsync`, the call R7 already measured).
     src/hooks/hot_apply_runtime.cpp
     src/hooks/shell_music.cpp
+    src/hooks/menu_music_metadata.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
     src/input/remap.cpp
@@ -513,6 +514,9 @@ if(BUILD_TESTING)
     # that uses it (src/hooks/shell_music.cpp) needs the SDK and a boot; this half does not.
     add_executable(rb_blitz_menu_music_pool_tests
         tests/menu_music_pool_tests.cpp
+        src/hooks/menu_music_metadata.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
     )
     target_include_directories(rb_blitz_menu_music_pool_tests PRIVATE src)
     add_test(NAME menu_music_pool COMMAND rb_blitz_menu_music_pool_tests)

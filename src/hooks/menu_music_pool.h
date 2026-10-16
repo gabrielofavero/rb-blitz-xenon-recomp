@@ -29,6 +29,7 @@ namespace rb_blitz::shell_music {
 struct PoolEntry {
   std::string alias;
   std::string stream;
+  std::string song_key{};  // songs.dta/dtb key, which need not equal the filename
 };
 
 inline constexpr size_t kNoIndex = static_cast<size_t>(-1);
@@ -52,6 +53,10 @@ inline std::string SongIdentity(const std::string& stream) {
   return key;
 }
 
+inline std::string PoolSongKey(const PoolEntry& song) {
+  return song.song_key.empty() ? std::string(SongName(song.stream)) : song.song_key;
+}
+
 // The menu's pool: a random sample of the songs the walk found, up to `cap`, with a song
 // seen twice collapsed to one entry. The candidates arrive in walk order, and a merged pack
 // hands over every song it holds at once, so taking them in turn would open on the same
@@ -63,7 +68,7 @@ inline std::vector<PoolEntry> BuildPool(std::vector<PoolEntry> candidates, size_
   pool.reserve(std::min(cap, candidates.size()));
   std::vector<std::string> seen;
   for (PoolEntry& candidate : candidates) {
-    std::string name = SongIdentity(candidate.stream);
+    std::string name = SongIdentity(PoolSongKey(candidate));
     if (std::find(seen.begin(), seen.end(), name) != seen.end()) {
       continue;
     }
@@ -184,6 +189,14 @@ class Rotation {
     if (strikes >= kMaxStrikes) {
       quarantined_.insert(name);
     }
+  }
+
+  // A successful start breaks a run of failures. Three unrelated cold-load delays over
+  // hours of successful playback must not permanently remove an otherwise healthy song.
+  void MarkStarted(const std::string& song) {
+    const auto name = SongIdentity(song);
+    strikes_.erase(name);
+    failed_.erase(name);
   }
 
   // Did the last Next() start a new pass over the pool? (For the log line, and for a test that

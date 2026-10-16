@@ -90,7 +90,7 @@ struct MenuConfiguration {
   // Native overrides applied after the installed provider's initialization.
   std::map<std::string, bool> boot_booleans;
   // The "Play Current Song" entry (owner feature, 2026-10-14). `play_current_song` is the setting;
-  // `menu_music_songs` is the boot's menu-music pool, as the song keys the package folders name
+  // `menu_music_songs` is the boot's menu-music pool, using the package metadata's song keys
   // (src/hooks/shell_music.cpp). The row is built only when both say yes: the setting off means the
   // player did not ask for it, and an empty pool means there is no DLC song to start - the two
   // states the settings screen reports as unavailable on its own row.

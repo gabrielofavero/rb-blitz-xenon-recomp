@@ -17,6 +17,7 @@
 
 #include "hooks/menu_music_pool.h"
 #include "hooks/menu_music_playback.h"
+#include "hooks/menu_music_metadata.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,6 +38,7 @@
 #include <rex/cvar.h>
 #include <rex/filesystem/device.h>
 #include <rex/filesystem/entry.h>
+#include <rex/filesystem/file.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/filesystem/devices/stfs_container_device.h>
 #include <rex/filesystem/vfs.h>
@@ -105,12 +107,11 @@ std::vector<PoolEntry> g_pool;
 // both to say which of the two states a boot is in.
 bool g_menu_music_enabled = false;
 
-// The pool index of the track the menu is playing right now (-1 before one has been chosen, and
-// with no pool). Set wherever a track is picked for the deck, so both ways a track starts - the
-// panel's own load and R9's rotation - move it. The "Play Current Song" probe channel answers from
-// it; never read outside g_mutex.
+// Audible and loading indices are separate. PlaySelection snapshots a press and bridges the
+// short handoff without claiming a loading stream is audible. Never read outside g_mutex.
 int g_current_index = -1;
 int g_pending_index = -1;
+rb_blitz::shell_music::PlaySelection g_play_selection;
 
 std::mutex g_mutex;
 std::mt19937 g_rng{std::random_device{}()};
@@ -121,15 +122,14 @@ std::mt19937 g_rng{std::random_device{}()};
 // (src/hooks/menu_music_pool.h).
 rb_blitz::shell_music::Rotation g_rotation{g_rng};
 
-// How long a track R9 started may stay silent before the candidate is treated as a failed load,
-// and how many candidates in a row it tries before handing the menu back to the title's tracks.
+// Playback bounds startup and stalled progress separately. Limit consecutive attempts before
+// handing the menu back to the title's tracks.
 constexpr int kMaxAttemptsPerSeam = 3;
 rb_blitz::shell_music::Playback g_playback;
 
 // True while the track playing on `g_music` is one of R9's own. Once the rotation hands the menu a
 // title track instead - a pool of one song, or every candidate failing - the poll stops watching,
-// because from that point on the title is playing its own music; it stays one-shot, so an
-// exhausted pool cannot quietly loop.
+// because from that point on the title is playing its own looping music.
 bool g_watch = false;
 int g_attempts = 0;
 
@@ -176,11 +176,6 @@ int64_t MillisecondsSince(std::chrono::steady_clock::time_point from) {
 int64_t NowMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-// The song key of a pool path, for the timeline log lines.
-std::string KeyOf(const std::string& path) {
-  return std::string(rb_blitz::shell_music::SongName(path));
 }
 
 // Record the completed source before starting the next one.
@@ -251,6 +246,26 @@ std::vector<std::string> FindSongStreams(rex::filesystem::Device& device) {
   return streams;
 }
 
+std::vector<rb_blitz::shell_music::SongMetadata> FindSongMetadata(rex::filesystem::Device& device) {
+  for (const char* path : {"\\songs\\songs.dta", "\\songs\\songs.dtb", "\\songs\\gen\\songs.dtb"}) {
+    auto* entry = device.ResolvePath(path);
+    if (!entry || entry->size() == 0 || entry->size() > 2 * 1024 * 1024) continue;
+    rex::filesystem::File* file = nullptr;
+    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file) continue;
+    std::vector<uint8_t> bytes(static_cast<size_t>(entry->size()));
+    size_t read = 0;
+    const auto status = file->ReadSync(bytes, 0, &read);
+    file->Destroy();
+    if (status != 0 || read != bytes.size()) continue;
+    std::string error;
+    auto songs = rb_blitz::shell_music::ReadSongMetadata(bytes,
+        std::string_view(path).ends_with(".dtb"), &error);
+    if (!songs.empty()) return songs;
+    if (!error.empty()) REXLOG_WARN("shell_music: cannot read {}: {}", path, error);
+  }
+  return {};
+}
+
 // The package as a read-only guest device: an STFS container mounted where it lies, or
 // an already-extracted package directory. Null when the SDK will not mount it.
 std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_path,
@@ -281,10 +296,12 @@ std::string NextPathLocked() {
   if (index == rb_blitz::shell_music::kNoIndex) {
     g_pending_index = -1;
     g_current_index = -1;
+    g_play_selection.Stop();
     return {};
   }
   g_pending_index = static_cast<int>(index);
   g_current_index = -1;  // publish only after this stream starts advancing
+  g_play_selection.Loading(g_pending_index, NowMs());
   return g_pool[index].alias + ":" + g_pool[index].stream;
 }
 
@@ -366,7 +383,8 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
       buffer = g_buffers[g_buffer_next];
       g_buffer_next = (g_buffer_next + 1) % g_buffers.size();
     }
-    g_playing_name = title_track ? std::string() : KeyOf(path);
+    g_playing_name = g_pending_index >= 0
+        ? rb_blitz::shell_music::PoolSongKey(g_pool[g_pending_index]) : std::string();
   }
   if (path.empty() || buffer == 0 || path.size() + 1 > kBufferBytes) {
     return;
@@ -401,10 +419,11 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
       g_rotation.MarkFailed(failed);
       g_playing_name.clear();
     }
+    g_play_selection.Failed(g_pending_index);
     g_current_index = -1;
   }
-  REXLOG_WARN("shell_music: \"{}\" produced no samples {} ms after it was started; it sits out "
-              "the rest of this rotation (R9)",
+  REXLOG_WARN("shell_music: \"{}\" failed to start or stopped advancing ({} ms since start); "
+              "it sits out the rest of this rotation (R9)",
               failed, MillisecondsSince(g_track_started_at));
   if (++g_attempts >= kMaxAttemptsPerSeam && !g_pool.empty()) {
     REXLOG_WARN("shell_music: {} candidate(s) in a row could not be started; the menu goes back "
@@ -422,6 +441,11 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
       }
     }
     if (buffer != 0 && path.size() + 1 <= kBufferBytes) {
+      {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_pending_index = -1;
+        g_play_selection.Stop();
+      }
       g_watch = false;
       g_watch_title = true;
       LoadOnGuest(base, parent, music, buffer, path, /*loop=*/true);
@@ -475,7 +499,7 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   int index = -1;
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_playing_name = KeyOf(path);
+    g_playing_name = rb_blitz::shell_music::PoolSongKey(g_pool[g_pending_index]);
     pool_size = g_pool.size();
     index = g_pending_index;
   }
@@ -520,6 +544,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // The index only means something for this boot's pool, and this is the one place the pool is
   // built: a fresh boot has no current track until the panel picks one.
   g_current_index = -1;
+  g_pending_index = -1;
+  g_play_selection.Stop();
   g_enabled = g_menu_music_enabled;
   REXLOG_INFO("shell_music: \"DLC Menu Songs\" is {} (enhancements_menu_dlc_songs = {}); {}",
               g_menu_music_enabled ? "on" : "off",
@@ -584,6 +610,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       REXLOG_WARN("shell_music: {} holds no streamable .mogg, skipping it", package.string());
       continue;
     }
+    const auto metadata = FindSongMetadata(*device);
     const std::string alias = fmt::format("menumusic{}", mounts);
     if (!file_system->RegisterDevice(std::move(device))) {
       REXLOG_WARN("shell_music: cannot register the device for {}", package.string());
@@ -595,7 +622,16 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     }
     ++mounts;
     for (std::string& stream : streams) {
-      candidates.push_back({alias, std::move(stream)});
+      std::string key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
+      if (!metadata.empty() && key.empty()) {
+        REXLOG_WARN("shell_music: {}:{} has no unambiguous song metadata; excluding it from "
+                    "the menu pool", alias, stream);
+        continue;
+      }
+      if (!key.empty() && key != rb_blitz::shell_music::SongName(stream)) {
+        REXLOG_INFO("shell_music: song metadata maps {}:{} to key \"{}\"", alias, stream, key);
+      }
+      candidates.push_back({alias, std::move(stream), std::move(key)});
     }
   }
 
@@ -637,7 +673,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     std::vector<std::string> keys;
     keys.reserve(g_pool.size());
     for (const PoolEntry& entry : g_pool) {
-      keys.emplace_back(rb_blitz::shell_music::SongName(entry.stream));
+      keys.emplace_back(rb_blitz::shell_music::PoolSongKey(entry));
     }
     std::lock_guard<std::mutex> lock(g_mutex);
     g_rotation.SetPool(std::move(keys));
@@ -668,7 +704,7 @@ std::vector<std::string> PoolSongNames() {
   std::vector<std::string> names;
   names.reserve(g_pool.size());
   for (const PoolEntry& entry : g_pool) {
-    names.emplace_back(rb_blitz::shell_music::SongName(entry.stream));
+    names.emplace_back(rb_blitz::shell_music::PoolSongKey(entry));
   }
   return names;
 }
@@ -682,17 +718,33 @@ bool AnswerPlayQuery(const std::string_view path, bool* answer) {
   if (!path.starts_with(rb_blitz::shell_music::kPlayNamespace)) {
     return false;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (path == "rbbz-play/begin") {
+    const int chosen = g_play_selection.Capture(NowMs());
+    REXLOG_INFO("shell_music: Play Current Song request: selected={} audible={} pending={} "
+                "title_fallback={}", chosen, g_current_index, g_pending_index, g_watch_title);
+    if (answer) *answer = chosen >= 0;
+    return true;
+  }
+  const int current = g_play_selection.Query(NowMs());
+  if (path == "rbbz-play/result/resolved" || path == "rbbz-play/result/no-track" ||
+      path == "rbbz-play/result/missing-name" || path == "rbbz-play/result/missing-data") {
+    const std::string key = current >= 0 && static_cast<size_t>(current) < g_pool.size()
+        ? PoolSongKey(g_pool[current]) : std::string();
+    REXLOG_INFO("shell_music: Play Current Song result: {} (pool {}, key \"{}\")",
+                path.substr(std::string_view("rbbz-play/result/").size()), current, key);
+    g_play_selection.Complete();
+    if (answer) *answer = true;
+    return true;
+  }
   const int index = rb_blitz::shell_music::PlayProbeIndex(path);
-  const int current = CurrentPoolIndex();
   const bool hit = index >= 0 && index == current;
-  // The probe channel is the only thing the menu's Play Current Song row says to the host, so the
-  // one line that matters is written here: which song was asked for, and whether it is the one
-  // playing. A malformed probe in our namespace is answered false and never forwarded.
+  // This confirms selection only; the result query separately records the guest's lookup.
+  // A malformed probe in our namespace is answered false and never forwarded.
   if (hit) {
-    const std::vector<std::string> names = PoolSongNames();
-    REXLOG_INFO("shell_music: Play Current Song: the menu is playing pool {} of {} (\"{}\")",
-                index, names.size(),
-                index < static_cast<int>(names.size()) ? names[static_cast<size_t>(index)]
+    REXLOG_INFO("shell_music: Play Current Song: selected pool {} of {} (\"{}\")",
+                index, g_pool.size(),
+                index < static_cast<int>(g_pool.size()) ? PoolSongKey(g_pool[index])
                                                        : std::string("?"));
   }
   if (answer != nullptr) {
@@ -725,6 +777,7 @@ void ForgetMenuMusic(uint32_t music) {
     g_playback.Stop();
     g_current_index = -1;
     g_pending_index = -1;
+    g_play_selection.Stop();
   }
   if (watched) {
     REXLOG_INFO("shell_music: the game took this menu track down; the rotation stops watching "
@@ -828,6 +881,8 @@ extern "C" REX_FUNC(sub_827586D8) {
           {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_current_index = g_pending_index;
+            g_play_selection.Audible(g_current_index);
+            g_rotation.MarkStarted(g_playing_name);
           }
           REXLOG_INFO("shell_music: \"{}\" started playback {} ms after the previous track's end "
                       "(stream {:08X}, source \"{}\") (R9)",
