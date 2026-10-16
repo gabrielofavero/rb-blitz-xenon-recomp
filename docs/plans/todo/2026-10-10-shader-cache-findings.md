@@ -1,10 +1,15 @@
-# Shader cache and gameplay stalls: findings and handoff
+# Shader cache and gameplay stalls: findings and implementation plan
 
-Date: 2026-10-10.
+Date: 2026-10-10. Architecture review and implementation plan updated 2026-10-16.
 Scope: first-play freezes that become less frequent with further play and do not
 recur at the same spot after restarting a song.
 Status: read-only investigation completed; cause of individual freezes is not yet
 measured. This document proposes follow-up work, not an implemented fix.
+
+The [2026-10-16 implementation plan](#implementation-plan-2026-10-16) extends the
+original investigation and defines the next work. It corrects the earlier assumption
+that requesting blocking startup preload guarantees completion on D3D12. Historical
+measurements below are retained; no new gameplay measurements were taken in this review.
 
 ## Assessment
 
@@ -15,19 +20,22 @@ However, improvement on replay also fits asset loading and other resource caches
 Do not treat the shader explanation as confirmed until a stall is correlated with
 compilation or a pipeline wait.
 
-The recommended direction is to collect portable shader/pipeline records, prepare
-the known pipelines before gameplay, and distribute a versioned baseline if the
-measurements support that approach. Keep investigating any stalls that remain with
-a warm cache.
+The recommended direction is **a game-specific pipeline catalogue, preparation before
+playback, and a verified completion barrier**. Repair the existing D3D12 preload
+barrier first, then expand coverage to guest and renderer-helper pipelines. Generate
+guest shader records locally from the user's installed assets; distribute compatible
+pipeline recipes and hashes rather than the game's shader bytes. Add local native
+pipeline caching later if preparation time warrants it. Keep investigating stalls
+that remain with a warm cache.
 
 ## What the repository and local runs establish
 
 | Finding | Evidence |
 | --- | --- |
 | Persistent shader storage defaults to enabled. | `store_shaders` in [graphics_system.cpp](../../../rexglue-sdk/src/graphics/graphics_system.cpp), including its `InitializeShaderStorage` implementation. |
-| Stored pipelines are prepared before the main guest thread starts. | [rex_app.cpp](../../../rexglue-sdk/src/ui/rex_app.cpp) calls `InitializeShaderStorage(..., true)` before `main_thread->Resume()`. |
+| Startup requests blocking preparation before the main guest thread starts. | [rex_app.cpp](../../../rexglue-sdk/src/ui/rex_app.cpp):464 calls `InitializeShaderStorage(..., true)` before `main_thread->Resume()`. **Correction, 2026-10-16:** the D3D12 implementation can return with workers still busy; see finding F1 below. |
 | The recent local runs use D3D12. | Their startup logs identify a DXGI NVIDIA GeForce GTX 970 adapter and D3D12 pipeline creation. This describes those runs, not every user's backend. |
-| The cache actually loads, rather than merely being configured. | `out/build/win-amd64-release/logs/rb_blitz_006.log`, lines 207–209: 186 shader translations in 9 ms, then 356 graphics pipelines in 356 ms. |
+| The cache actually loads, rather than merely being configured. | Historical `out/build/win-amd64-release/logs/rb_blitz_006.log`, lines 207–209: 186 shader translations in 9 ms, then a report of 356 graphics pipelines in 356 ms. **Correction, 2026-10-16:** D3D12's pipeline counter counts scheduled/attempted entries, not confirmed successful completions; F1 explains why this time is not a reliable readiness measurement. |
 | The stored coverage grew through use. | `rb_blitz_002.log`: 171 shader translations and 324 pipelines; subsequent local logs: 186 and 356. These are preload counts, not measured stall counts or proof of completeness. |
 | Async compilation defaults to enabled. | `async_shader_compilation` in [command_processor.cpp](../../../rexglue-sdk/src/graphics/command_processor.cpp); D3D12 creation threads default to automatic selection. |
 | D3D12 still waits for compilation during submission. | `D3D12CommandProcessor::EndSubmission()` calls `PipelineCache::EndSubmission()`. The latter creates queued pipelines on the processor thread and waits for busy creation workers. |
@@ -79,9 +87,9 @@ Encountering a new combination during a song can therefore require new work.
 
 The D3D12 async draw path can skip a draw whose pipeline is not ready, yet the
 submission path subsequently waits for queued compilation. On Vulkan, shader
-translation occurs before the async pipeline decision, and placeholder pipeline
-creation can also be synchronous. Switching backend or enabling async is not by
-itself a guarantee of hitch-free gameplay.
+translation occurs before the async pipeline decision, placeholder pipeline creation
+can be synchronous, and ordinary submissions also drain/wait for pipeline work.
+Switching backend or enabling async is not by itself a guarantee of hitch-free gameplay.
 
 ## What you should do as the player
 
@@ -137,8 +145,9 @@ guess which shader corresponds to a freeze.
 
 ## What an agent should do
 
-The following is proposed future work. Creating this document does not authorize
-renderer changes or controlled gameplay runs in the current task.
+The following is the original three-phase outline. The detailed plan below refines
+its order and acceptance gates. Creating this document does not implement renderer
+changes or perform controlled gameplay runs.
 
 ### Phase 1: establish the cause
 
@@ -184,13 +193,13 @@ and what remains untested.
 
 ### Phase 3: implement preparation and distribution
 
-1. Package a versioned baseline or generate the necessary records from the user's
-   game installation. The `.xsh` format contains original game shader bytes, so
-   make that an explicit distribution decision consistent with how this project
-   handles game assets, rather than treating the file as metadata only.
+1. Generate guest shader records from the user's game installation and package a
+   versioned catalogue of compatible pipeline recipes. The `.xsh` format contains
+   original game shader bytes. Decision D2 below selects local generation to follow
+   the project's existing asset-distribution policy.
 2. Seed/merge records into the resolved writable cache without discarding existing
    discoveries. Handle missing, incompatible and corrupt records predictably.
-3. Reuse the existing blocking startup preload. Add progress reporting and safe
+3. Repair and reuse the existing blocking startup preload. Add progress reporting and safe
    cancellation if its duration warrants it. Explore song-loading warmup only if
    pipeline requirements can be identified before the song begins.
 4. Keep learning new combinations at runtime. Preserve provenance and invalidate
@@ -236,3 +245,299 @@ creation cost: [Pipeline Cache](https://docs.vulkan.org/guide/latest/pipeline_ca
 - The player confirms notes, effects, audio and input remain correct.
 - Coverage and machine limits are written down; no claim of universal, complete
   pre-caching is made from a single machine or a handful of songs.
+
+## Implementation plan (2026-10-16)
+
+Status: **planned; implementation not started**. Source review used project `70eb041`
+and SDK `c94f5eb`, including the checkout's existing SDK patches. Source line numbers
+below refer to that working tree. External API references were checked on 2026-10-16.
+No build, game launch, cache deletion, or performance experiment was performed.
+
+### Requirements and recommended scope
+
+During an active song, the supported rendering path should use already-created,
+correct pipelines. Preparation may lengthen startup/loading, but must finish before
+the song's audio/gameplay clock starts. Notes, hit feedback and render-to-texture
+dependencies must remain correct. A smooth frame graph with missing draws fails.
+
+Start with a **global catalogue for each supported content/rendering configuration**,
+loaded at startup. This fits the existing preload architecture and avoids depending
+on an unproven guest song-loading hook. The historical few-hundred-pipeline counts
+make this a sensible first experiment, not a bound on the game's total pipeline set.
+Add per-song preparation only if measurements show global preparation or residency
+is too expensive, or new content requires additional pipelines.
+
+This is achievable for a measured, bounded catalogue. Neither static CPU recompilation
+nor a learned cache proves every future shader/state combination is covered. Unknown
+custom content and untested settings remain outside that guarantee until validated.
+
+### Source findings that change the implementation
+
+| ID | Finding and evidence | Required consequence |
+| --- | --- | --- |
+| F1 | In D3D12 [pipeline_cache.cpp](../../../rexglue-sdk/src/graphics/d3d12/pipeline_cache.cpp):529–541, `creation_thread_needed_count` is computed, but the growth loop compares the current size with `creation_thread_original_count`, initialized to that same size. No temporary workers are added. At 653–684, the blocking worker wait is inside `size > original_count`, so the ordinary path skips it. `CreateQueuedPipelinesOnProcessorThread()` at 3246 only drains the queue; other workers may still be creating PSOs. | Fix worker-count logic **and** put the blocking completion barrier outside temporary-worker cleanup. Even fixing the loop alone leaves the no-growth case uncovered. Reproduce with a deliberately delayed worker; effect on reported song stalls is unmeasured. |
+| F2 | D3D12 increments `pipelines_created` at 650 regardless of eventual worker success; `IsCreatingPipelines()` at 787 reports queue/busy state, not success. Vulkan [pipeline_cache.cpp](../../../rexglue-sdk/src/graphics/vulkan/pipeline_cache.cpp):624–687 actually joins preload workers and counts successes. However, at 3541–3549 a failed async real pipeline can leave a placeholder with `is_placeholder` cleared. | Define explicit successful/failed completion per required pipeline. Neither a log count, an empty queue, nor a cleared placeholder flag is a sufficient readiness test. |
+| F3 | [ReXApp::LaunchModule](../../../rexglue-sdk/src/ui/rex_app.cpp):430–469 performs blocking storage initialization inside a deferred UI-thread callback. [GraphicsSystem::InitializeShaderStorage](../../../rexglue-sdk/src/graphics/graphics_system.cpp):342–364 either uses a paused command processor or dispatches to its thread and waits. | Keep the guest start barrier, but expose an asynchronous preparation operation and UI progress. Simply displaying a progress label before the existing call would still freeze event processing. |
+| F4 | D3D12 [command_processor.cpp](../../../rexglue-sdk/src/graphics/d3d12/command_processor.cpp):2480–2482 skips an unready pipeline's draw; 3490 waits before deferred commands execute. Vulkan `ConfigurePipeline()` translates first at 1058, may create a placeholder synchronously at 1166, and its ordinary `EndSubmission()` drains/waits at 746–787. | Background compilation is not the playback guarantee on either backend. Preserve submission correctness while moving work before playback. |
+| F5 | D3D12 storage obtains needed translation modifications from pipeline descriptions (246–318), then translates those variants (405–425). Its [PipelineDescription](../../../rexglue-sdk/include/rex/graphics/d3d12/pipeline_cache.h):183–222 includes shader hashes/modifications, depth, stencil, blend, topology and render-target state. | Loading every guest shader alone does not prepare all variants or PSOs. Catalogue actual normalized recipes, not a cartesian product of shader pairs. |
+| F6 | [D3D12RenderTargetCache](../../../rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp):1777 and 3734/3773 builds transfer shaders/pipelines lazily; `GetOrCreateDumpPipeline` and `GetOrCreateDirectResolvePipeline` are other lazy paths. [VulkanRenderTargetCache](../../../rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp):4509/4531 also creates transfer pipelines. These are separate from guest `.xpso` records. | Inventory and prepare required helper variants too. Instrument the graphics/compute creation helpers as well as the guest pipeline cache. A full guest catalogue alone can still leave first-use compilation. |
+
+F1 is a control-flow defect established by source inspection. Its frequency and
+latency impact remain unmeasured. F6 identifies additional possible compilation
+sites, not proof that every site executes during a song.
+
+### Decisions
+
+| ID | Decision | Reason |
+| --- | --- | --- |
+| D1 | Repair preload completion, then prepare a global catalogue before guest execution; keep required pipelines resident through playback. | Smallest useful change builds on the current renderer and protects the first song as well as replays. |
+| D2 | Distribute versioned recipes, shader identities and coverage metadata; obtain guest shader bytes locally. | `.xsh` contains game data. [Distributable policy](../../guides/distributable.md) requires the user's game assets and excludes bundled retail/mod payloads. |
+| D3 | Treat D3D12 and Vulkan recipes, rendering paths and capability variants independently. | `.d3d12.xpso` and `.vk.xpso` are different formats. A baseline must match the effective backend/path, not merely the requested setting. |
+| D4 | Readiness means every required real pipeline succeeded for the current device/configuration generation. | Queue completion and placeholder availability do not establish rendering correctness. |
+| D5 | Keep native driver caches local and optional; add them after coverage/readiness works. | They reduce repeated preparation cost, but cannot discover missing recipes or provide portable GPU binaries. |
+| D6 | Do not use skipped draws, generic placeholders or mid-song compile waits as the advertised rhythm-safe solution. | All can disrupt playable visuals or timing. Unknown recipes remain a visible coverage failure in validation. |
+
+### Proposed preparation flow
+
+```mermaid
+flowchart TD
+    A[Resolve content, backend and effective graphics settings] --> B[Validate catalogue and merge local discoveries]
+    B --> C[Resolve guest shader bytes from local assets]
+    C --> D[Translate required variants and create guest plus helper pipelines]
+    D --> E{All required real pipelines ready?}
+    E -->|Yes| F[Resume guest or release verified song-start gate]
+    E -->|Failure or missing data| G[Report failure and allow retry or return]
+    G --> B
+```
+
+The runtime needs a reusable, bounded preparation API, separate from storage-file
+initialization. Suggested operation shape: begin a catalogue/configuration generation,
+query `{required, queued, running, succeeded, failed, missing}`, request cancellation,
+and obtain a completion result. These are proposed fields, not existing APIs.
+
+Each entry moves through `unresolved -> queued -> running -> ready/failed`; cancellation
+is explicit. `ready` requires a successful real pipeline, its dependencies, and a
+matching device/configuration generation. Do not publish a successful aggregate result
+if any required entry was rejected, failed, or silently skipped for missing shader data.
+An empty/missing baseline must not be reported as complete coverage just because its
+required count is zero. Compiling known records and validating coverage are separate facts.
+
+Retain shader data, binding layouts, root signatures/render passes and pipeline handles
+until workers and in-flight GPU users finish. Keep storage/creation mutation on the
+existing owner thread or an explicitly synchronized preparation context; the UI reads
+snapshots and must not modify pipeline maps. Avoid waiting while holding a queue lock.
+Cancellation stops enqueueing and joins in-flight work safely; a driver compilation
+already in progress may not be cancellable. Never terminate its thread.
+
+Keep the UI responsive with host-side preparation progress whose rendering does not
+depend on guest command-processor work blocked by preparation. Do not busy-poll on the
+UI thread. Show actual completed/required counts and failed entries, with retry/return
+on failure. At startup, cancellation exits cleanly before guest execution; later
+song-level cancellation requires a verified guest transition. Cap worker concurrency
+and measure UI/audio contention instead of assuming more threads are always faster.
+
+### Building the catalogue
+
+1. **Capture exact recipes at their creation sites.** Record shader stage/hash and
+   translation modification, the normalized backend pipeline description, and helper
+   pipeline keys. Include effect/scene context where known and distinguish lookup misses
+   from creation attempts, successful creation and first use. Existing D3D12
+   `PROFILE_PIPELINE_CACHE_HIT/MISS` counters help, but omit timing and context and the
+   current-pipeline fast path; do not interpret them as complete per-draw telemetry.
+2. **Cover reachable visuals.** Exercise the checklist above: loading, notes and track
+   switching, all power-ups and overlapping effects, streak/checkpoint changes, pause,
+   endings/results, backgrounds, retail/Ultimate and representative DLC/custom content.
+   Use a development replay/capture route with isolated saves if automated. Never make
+   normal players complete scored songs merely to train the release baseline.
+3. **Resolve shaders before rendering.** The game provides `xbox_shaders` and
+   `xbox_preinit_shaders`; see [asset layout](../../guides/assets.md). Investigate their
+   parser and map records to the renderer's exact microcode hashes. The names alone
+   do not prove every runtime shader or permutation is present. Validate extracted
+   bytes, stage and byte order against a runtime capture before trusting extraction.
+4. **Merge without losing discoveries.** Deduplicate by complete normalized identity,
+   compare contents on hash collisions, validate sizes/headers/versions/hashes, and
+   keep baseline provenance distinct from user observations. Import from a read-only
+   source into writable storage before the SDK opens its append streams. Current
+   loaders can truncate invalid tails, so never point them at the only baseline copy.
+5. **Improve coverage using guest material/state analysis.** Relate shader families to
+   guest rendering-state construction and effects. Enumerate reachable combinations,
+   including less common helper transfers. Captures seed this work; saturation across
+   a few routes is not proof of completeness. Unknown or dynamically produced shaders
+   need a verified discovery route before first playback.
+
+For the first experiment, reuse the developer's existing local `.xsh/.xpso` records.
+For a distributable first-run solution, local asset resolution plus the recipe catalogue
+is required. If extraction does not cover an entry, mark it unresolved and investigate
+guest material initialization or an isolated preparation scene. A recorded previous
+song run cannot prepare an unseen first song by itself.
+
+Catalogue metadata should identify title ID, supported game/mod shader-content digest,
+schema and translator compatibility versions, backend, EDRAM path, relevant device
+feature choices and effective translation/render settings. Carry immutable coverage
+provenance and a catalogue checksum. Shader stage, bytecode and modification belong in
+entry identity. Changes to AA, resolution/draw scale, binding model or render path must
+be audited for pipeline impact; conservatively invalidate readiness until that impact
+is known. Retail and Ultimate sharing a title ID is not enough to certify equal coverage.
+
+### Startup first; song loading only at a verified boundary
+
+The first delivery should preload the union of known required entries before
+`main_thread->Resume()`. It does not need to know the selected song. Reuse this on every
+launch because disk caches do not preserve live GPU objects between processes.
+
+A later per-song stage would prepare the baseline plus dependencies selected by the
+song, scene, power-ups and content. It must hold **every** route into active gameplay
+before audio and scoring begin while allowing guest loading, UI events and GPU work to
+continue. A host pipeline count reaching zero cannot replace the title's asset-load
+completion condition. [Loading-cancel findings](../../engine/loading-cancel.md) and
+the [Load Guard study](2026-10-13-load-guard-findings.md) are required context: a safe
+loading/return transition cannot be assumed from a visible loading screen alone.
+
+Do not implement this by suspending the guest arbitrarily, waiting inside a draw hook,
+advancing a hidden scored song, or restarting shader storage each time a song is chosen.
+Prove the exact completion/confirmation routes and clock ownership first. Until then,
+global startup preparation is the supported integration point. Mid-session content or
+graphics changes invalidate readiness; reprepare at a verified non-playback boundary
+or use the existing restart mechanism where appropriate.
+
+### Unexpected pipeline during a song
+
+There is no general cheap way to render an unseen pipeline correctly without creating
+it. A pre-song barrier cannot protect a combination it did not know about.
+
+- In validation, any new translation, guest/helper pipeline creation, compile wait,
+  skipped draw or placeholder use during active playback fails the covered route.
+  Capture its identity and event, then extend the catalogue or explain the scope gap.
+- During development and for unsupported content, preserve the renderer's existing
+  recovery behavior and collect bounded miss diagnostics. Such a run is not certified
+  free of compilation stalls or missing draws. Do not silently claim preparation
+  succeeded for unsupported content.
+- A strict product guarantee requires closing coverage, rejecting an unsupported
+  configuration before song start, or implementing a proven correct fallback renderer.
+  An automatic mid-song pause is itself a gameplay interruption and requires synchronized
+  audio, simulation and scoring semantics; it is not part of the initial fix.
+
+Do not remove `EndSubmission()` waits as the first patch. Deferred command handles,
+resource lifetimes, translation metadata and failure paths require a separate audit.
+With complete preparation these waits have no compilation to wait for; removing them
+does not address an incomplete catalogue.
+
+### Optional caches and alternative approaches
+
+| Approach | Assessment for this game |
+| --- | --- |
+| Global recipe catalogue + verified preload | Recommended first delivery. Reuses the current architecture; costs startup time and resident pipeline memory. Coverage remains explicit. |
+| Per-song dependency preparation | Useful if global scope grows too expensive. Requires exact guest start gates and predictive dependencies; waiting for a quiet queue alone is insufficient. |
+| Persist translated DXBC/DXIL or SPIR-V | Saves translator work, not final PSO creation. Needs translator/modification/feature keys and all analysis/binding metadata used by the runtime. Historical 9 ms translation versus reported 356 ms pipeline work does not make this the first priority; remeasure after F1. |
+| Local native pipeline caches | Reduce repeated driver work during preparation. Add D3D12 cached blobs or a supported pipeline library, and a Vulkan `VkPipelineCache`; neither creates missing recipes. |
+| More async workers or backend switching | Both current backends retain synchronous work/waits. More workers may contend with audio and input. No correctness or latency guarantee. |
+| Vulkan graphics pipeline libraries/dynamic state | Potential later reduction in pipeline permutations/creation cost. Requires feature detection, backend changes and measurements; does not replace coverage or prepare D3D12. |
+| Universal interpreter/ubershader | A separate renderer project. An interpreter for the Xenos shader ISA plus compatible pipeline states would need substantial correctness/performance work; there is no ready fallback in this tree. Poor first choice for one game's bounded workload. |
+| Replace the guest renderer with a native game renderer | Could give direct control over materials and dependencies, but needs extensive engine reverse engineering and visual parity validation. Much larger scope than fixing the existing renderer's preparation. |
+
+For D3D12, prototype `GetCachedBlob`/`CachedPSO` around the finalized host description,
+or feature-check `ID3D12PipelineLibrary` if shared pipeline data justifies it. Include
+host descriptor, shaders, root signature, translator/settings and adapter/driver identity
+in invalidation. Retry without a rejected blob during preparation, retaining portable
+recipes. Microsoft documents hardware/driver/machine specificity and mismatch errors
+for [cached PSOs](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_cached_pipeline_state).
+A [pipeline library](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12device1-createpipelinelibrary)
+requires support detection, lifetime retention of its input buffer, and synchronization
+of concurrent loads of the same PSO.
+
+For Vulkan, provide a real cache to graphics/compute creation sites, serialize it outside
+playback, and validate its header, vendor/device IDs and `pipelineCacheUUID`; also
+namespace application translation/settings compatibility. Design cache access/merging
+and serialization around the selected Vulkan synchronization rules, rather than sharing
+a mutable blob between workers. See the [pipeline cache guide](https://docs.vulkan.org/guide/latest/pipeline_cache.html)
+and [header definition](https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineCacheHeaderVersionOne.html).
+Treat invalid/truncated native data as a local cache miss, never as missing game data.
+Write atomically, bound disk usage and coordinate concurrent instances; keep artifacts
+under the writable cache root, separate from portable recipes and saves.
+
+Khronos' [graphics pipeline library example](https://docs.vulkan.org/samples/latest/samples/extensions/graphics_pipeline_library/README.html)
+shows reuse of pipeline parts; linking/optimization can still cost time. Dolphin's
+[ubershader account](https://dolphin-emu.org/blog/2017/07/30/ubershaders/) demonstrates
+a correct fallback strategy for its GameCube/Wii pipeline. Applying that idea to this
+Xenos renderer is an architectural inference, not evidence of an available solution.
+
+### Work packages and completion gates
+
+The packages below refine the original three phases; all are unstarted. Implement
+S0–S4 before optional native-cache work. Ship D3D12 first if needed, but report Vulkan
+as unvalidated until it passes the same criteria.
+
+| ID | Work and likely files | Deliverable / exit gate |
+| --- | --- | --- |
+| S0 | Add bounded timing/events at translation, real/helper creation, submission wait, readback and frame/audio/input boundaries. Use existing [diagnostics](../../engine/diagnostics.md) and SDK perf infrastructure. | Preserved reproducible evidence correlates stalls with work; distinguish other stalls and confirm effective backend/settings. |
+| S1 | Repair F1 in SDK D3D12 `pipeline_cache.cpp`; add explicit terminal states/results to both backend caches. | A delayed in-flight worker proves blocking preload cannot return early even when no extra worker is needed. A failed PSO or retained placeholder cannot report success. Test zero/one/multiple workers, duplicate requests and cancellation races. |
+| S2 | Add catalogue inspector/capture/merge and local shader extraction; include render-target helper recipes. Suggested new project tooling lives under `tools/`; private captures remain under ignored `out/`. | Corrupt/truncated/incompatible records are rejected safely; merging preserves existing discoveries; every required shader resolves from installed content; coverage report identifies remaining gaps. |
+| S3 | Add preparation lifecycle/progress to graphics APIs and `ReXApp::LaunchModule`; integrate content/configuration selection through [RbBlitzApp](../../../src/rb_blitz_app.h) and the existing settings service. | Guest execution remains suspended until preparation succeeds, UI stays responsive, cancellation cleans up, and catalogue/device/configuration changes invalidate readiness. Global scope avoids unverified song hooks. |
+| S4 | Exercise the full visual matrix, inspect all misses and expand coverage. Add song-start gating only if needed and independently proven. | Zero compilation/placeholder/skipped-draw events during covered songs; audio, input, scoring and visuals remain correct. First-ever application-cache run is included. |
+| S5 | Optional local native caches, then translated-bytecode caching only if profiling warrants it. | Reduced preparation time measured separately from gameplay; driver/GPU/SDK changes rebuild safely, with no lost portable records. |
+| S6 | Package recipes/manifest via [make_payload.ps1](../../../installer/tools/make_payload.ps1); update payload manifest/audit and installer behavior for any new files. | Fresh install/update prepares from user assets, never ships `.xsh` game bytes, preserves learned entries/saves, and passes packaging plus gameplay validation. |
+
+SDK changes must be reproducible through the project's [patch workflow](../../../patches/README.md),
+not only edits inside the submodule. Run patch applicability checks, relevant renderer
+builds, focused concurrency/cache-format tests and both backend smoke tests as each
+package lands. Update this plan's status and the relevant settings/graphics/diagnostic
+documentation when behavior changes. No new user-facing tuning switch is required
+merely to expose implementation internals.
+
+### Measurement protocol and acceptance
+
+Use an isolated `--cache_root` under ignored `out/` and preserve the normal cache and
+saves. Record binary/revision and SDK patch identity, backend/path, GPU/driver,
+effective graphics settings, catalogue/content hashes, selected song/loadout and
+audio configuration. Prepare independent runs with:
+
+| Run | What it establishes |
+| --- | --- |
+| Empty application cache, no baseline | Existing behavior and a reproducible first-use comparison. Driver/OS caches may still be warm. |
+| Empty application cache + local-asset catalogue preparation | Whether the first song is protected without any prior user playthrough. |
+| Immediate replay, same process | In-memory reuse; insufficient by itself to prove persistence. |
+| Full restart with portable records only | Correct preload completion and coverage independent of new native-cache features. |
+| Full restart with native cache, if implemented | Additional preparation-time benefit, not a coverage test. |
+| Graphics/backend/content change; driver/GPU change where available | Correct invalidation and rebuilding. State clearly which changes were simulated versus tested on hardware. |
+| Corrupt/truncated cache, missing shader, failed compile, cancellation | Honest readiness/error handling; no partial success or save/cache loss. |
+
+Measure startup/pre-song preparation time, live pipeline count/memory, runtime misses,
+successful/failed creations, worker and command-processor wait durations, skipped draws,
+placeholder uses, presented-frame intervals and guest `VdSwap`/host `XE_SWAP` gaps.
+Include input-poll gaps and audio underrun/clock-drift evidence where instrumentation
+can provide it; an input polling gap alone is not a measured input-to-display latency.
+Buffer events and flush outside playback rather than logging every draw synchronously.
+
+At a 60 Hz target the frame budget is about 16.67 ms. Report median, p95, p99, maximum
+and counts over 33.3/50/100/250 ms, with causes for outliers and sample counts. These
+are reporting thresholds, not permission to introduce a smaller rhythm-disrupting hitch.
+The compilation acceptance target is **zero runtime translation, real/helper pipeline
+creation, compile-related waits, skipped draws and placeholders during the supported
+active-song routes** after preparation. Confirm that preparation's worker activity has
+also stopped, not merely moved off the render thread.
+
+Run full songs through their endings, repeat after process restart, and exercise the
+power-up/visual matrix on representative NVIDIA/AMD/Intel hardware and each supported
+backend/path as available. Record gaps instead of implying untested hardware passed.
+Visually compare notes, lanes, feedback and effects; check audio/score timing with an
+actual player. Investigate remaining long frames separately, especially render-target
+readback, texture conversion/upload, asset loading and synchronization. This plan
+removes compilation from tested playback paths; it does not establish that every
+possible source of stutter has been eliminated.
+
+### Open questions before implementation can claim full coverage
+
+- What fraction of guest shaders and modifications can the two shader assets resolve,
+  and are any shaders constructed or patched dynamically?
+- Which helper pipeline keys are reachable for each supported EDRAM path, feature
+  set, AA mode and draw scale, and what is their residency cost?
+- Do different songs introduce new materials/shaders or mostly reuse common effects?
+  Measure additions by route rather than assuming one cache per song or universal reuse.
+- Where are all song-start/audio-start transitions, and which can safely defer
+  completion? This blocks per-song gating, not startup preparation.
+- How much of the user's stutter is compilation versus readback/resource work, and
+  how much first-run preparation time is acceptable after the true barrier is fixed?
+
+The first concrete fix to pursue is S1, supported by S0 instrumentation. A release
+claim of protected first-song playback additionally needs S2–S4 coverage/readiness
+and S6 packaging; a preload barrier alone cannot prepare previously unknown pipelines.
