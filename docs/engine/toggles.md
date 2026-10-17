@@ -120,6 +120,19 @@ R10 needs no key: what it renames is the mod's
 own row, and the two labels it moves between are the module's constants
 (`src/ui/menu_options.h`) rather than a user's list.
 
+## Graphics cvars (not enhancement toggles)
+
+The in-song HUD re-anchor of [graphics.md](../settings/graphics.md) part 3 §9 lives in
+[src/hooks/hud_layout_runtime.cpp](../../src/hooks/hud_layout_runtime.cpp), not `src/enhancements.cpp`.
+Its four cvars are registered here so they are not invisible:
+
+| Cvar | Default | What it does |
+| --- | --- | --- |
+| `hud_reanchor` | on | Applies the owner's rule to a non-16:9 frame at two seams: the scripted `set_local_pos` handler, and a per-present pass that finds the stock HUD's top-level groups after the scene loads (graphics.md §9.2.3–9.2.4). The scene write is followed by the transformable's dirty routine so the renderer sees it. A 16:9 boot is the identity and is never touched; off restores the authored positions. The scene pass is implemented but still awaiting a valid in-song capture in this environment (known-issues). |
+| `hud_reanchor_hud_half_height` | 180 | The HUD scene's half-height in its own units (a 360-unit-tall virtual screen), used to turn the layout-unit shift into HUD units. Inferred from the payload's 16:9 anchors, not a measured camera constant — tune only against a capture. |
+| `hud_reanchor_probe` | off | Diagnostics: logs each distinct HUD `set_local_pos` (object, dir, x/y/z) and the shift applied, so one boot can supply the scale measurement. |
+| `hud_reanchor_scan` | off | Diagnostics, read-only: scans the guest heap for the loaded HUD `ObjectDir` and logs its object list/positions. Off in normal play; the next stock-HUD seam measurement. |
+
 ## Adding a toggle
 
 1. Add the `REXCVAR_DEFINE_BOOL/STRING` to [src/enhancements.cpp](../../src/enhancements.cpp) with the

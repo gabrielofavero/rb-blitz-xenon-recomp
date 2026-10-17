@@ -43,6 +43,7 @@
 #include <rex/system/xmemory.h>
 
 #include "diag/probe.h"
+#include "hooks/hud_layout_runtime.h"
 #include "hooks/render_settings.h"
 
 REX_EXTERN(__imp__ByteGrinder_GetEncMethod);
@@ -347,6 +348,9 @@ extern "C" REX_FUNC(sub_8251D580) {
   // Belt and braces: the screen constructor runs before the boot has necessarily published the
   // requested size, and this hook runs every frame, so the layout aspect is applied here as well.
   rb_blitz::settings::WriteGuestLayoutAspect(base);
+  // The stock HUD's groups are authored scene data, so their shift is applied after the scene
+  // has loaded and is visible on the next frame (docs/settings/graphics.md part 3 §9.2.3).
+  rb_blitz::hooks::HudReanchorPresent(ctx, base);
   if (poke) {
     PokeLayoutFields(base);
   }

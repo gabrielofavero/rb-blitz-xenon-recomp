@@ -88,6 +88,7 @@ set(RBBLITZ_SOURCES
     src/hooks/dlc.cpp
     src/hooks/dlc_refresh.cpp
     src/hooks/hud_layout.cpp
+    src/hooks/hud_layout_runtime.cpp
     src/hooks/local_save.cpp
     src/hooks/menu_filter.cpp
     src/hooks/settings_bridge.cpp

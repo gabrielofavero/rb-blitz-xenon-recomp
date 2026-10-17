@@ -168,5 +168,33 @@ int main() {
     CHECK_CLOSE(ShiftHudX(0.0005, 0.5925925925925926, 0.0), 0.5930925925925926, 1e-12);
   }
 
+  BeginCase("an element authored off the 16:9 frame stays off a wider frame");
+  {
+    // The owner's ultrawide capture: the "NEW PERSONAL BEST" banner is authored beyond the
+    // 16:9 edge (the developer parked it off-screen at the old aspect), and a wider frame
+    // that left it in place revealed it. The rule moves it *further* out by the same delta
+    // as every other off-centre element, so it stays hidden - it does not become part of
+    // the new composition just because the frame grew.
+    const uint32_t wider[][2] = {{1680, 720}, {2560, 1080}, {3440, 1440}};
+    const double off_screen[] = {-2.5, -2.0, -1.9, 1.9, 2.0, 2.5};
+    for (const uint32_t* size : wider) {
+      const double to = static_cast<double>(size[0]) / static_cast<double>(size[1]);
+      const double units = HudShiftUnits(size[0], size[1]);
+      CHECK_TRUE(to > kHudReferenceAspect);
+      for (double x : off_screen) {
+        // The premise of the case: the authored position is outside the 16:9 frame.
+        CHECK_TRUE(std::fabs(x) > kHudReferenceAspect);
+        const double moved = ShiftHudX(x, units);
+        // It moves in its own direction, and it stays outside the new frame.
+        CHECK_TRUE(std::fabs(moved) > std::fabs(x));
+        CHECK_TRUE(std::fabs(moved) >= to);
+        CHECK_TRUE((x < 0.0) == (moved < 0.0));
+      }
+    }
+    // The exact number for the validated arm: 2.0 -> 2.5926 at 2560x1080, which is still
+    // beyond the 2.3704 edge.
+    CHECK_CLOSE(ShiftHudX(2.0, HudShiftUnits(2560, 1080)), 2.5925925925925926, 1e-12);
+  }
+
   return Finish();
 }
