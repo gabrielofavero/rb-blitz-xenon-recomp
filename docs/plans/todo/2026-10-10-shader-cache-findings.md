@@ -1,6 +1,6 @@
 # Shader cache and gameplay stalls: findings and implementation plan
 
-Date: 2026-10-10. Architecture review and implementation plan updated 2026-10-16.
+Date: 2026-10-10. Architecture review 2026-10-16; plan finalized 2026-10-17.
 Scope: first-play freezes that become less frequent with further play and do not
 recur at the same spot after restarting a song.
 Status: read-only investigation completed; cause of individual freezes is not yet
@@ -371,6 +371,20 @@ is required. If extraction does not cover an entry, mark it unresolved and inves
 guest material initialization or an isolated preparation scene. A recorded previous
 song run cannot prepare an unseen first song by itself.
 
+**Static extraction leads, inspected 2026-10-16:** the local archive manifest
+`assets/game/360/_ark_main_xbox.json` lists `xbox_preinit_shaders` at 160,557 bytes and
+`xbox_shaders` at 5,271,431 bytes. Both extracted files begin with bytes `58 4F 42 58`
+(`XOBX`), rather than the SDK cache header. Strings in the existing decrypted image
+`out/in-game-settings-research/retail.bin` point to `%s_shaders` at guest `0x8202A668`
+and `%s_preinit_shaders` at `0x8202A674`. Generated functions `sub_8224D400` and
+`sub_8224D4F0` reference them and dispatch through vtable offset `+88`;
+`sub_8224D838` is a candidate stream-opening loader and `sub_8224DC70` a candidate
+record parser. These are reverse-engineering leads, not established loader ABIs or
+proof of complete coverage. Resolve functions by guest address after regeneration,
+never by editing generated code. The files above are ignored local evidence and may
+be absent elsewhere. The extraction spike must establish record boundaries, byte order,
+stage/permutation identity and correspondence to runtime microcode hashes.
+
 Catalogue metadata should identify title ID, supported game/mod shader-content digest,
 schema and translator compatibility versions, backend, EDRAM path, relevant device
 feature choices and effective translation/render settings. Carry immutable coverage
@@ -378,6 +392,8 @@ provenance and a catalogue checksum. Shader stage, bytecode and modification bel
 entry identity. Changes to AA, resolution/draw scale, binding model or render path must
 be audited for pipeline impact; conservatively invalidate readiness until that impact
 is known. Retail and Ultimate sharing a title ID is not enough to certify equal coverage.
+Use the effective provider selected by [ultimate.cpp](../../../src/hooks/ultimate.cpp):284–311,
+including separate versus merged content, rather than relying only on a requested mode.
 
 ### Startup first; song loading only at a verified boundary
 
@@ -392,6 +408,16 @@ continue. A host pipeline count reaching zero cannot replace the title's asset-l
 completion condition. [Loading-cancel findings](../../engine/loading-cancel.md) and
 the [Load Guard study](2026-10-13-load-guard-findings.md) are required context: a safe
 loading/return transition cannot be assumed from a visible loading screen alone.
+
+The inspected `loading_screen` has two start routes: `load_finished` either waits for
+confirmation or calls `start_game` directly. Gate both, rather than only the A-button
+handler. `sub_822C38F8`, called by `sub_822C45A8`, is a completion-analysis lead, not a
+proven deferrable callback. Preserve exactly-once completion and verify object lifetimes.
+For guest-side observation, share the existing `UIManager::Poll` hook
+(`sub_824B2958`) in [native_menu.cpp](../../../src/input/native_menu.cpp); do not add
+another strong hook or run guest transitions from compilation workers. Readiness must
+not depend on mouse support or host window focus. `game_screen` also contains pause UI,
+so its name alone is insufficient to identify active playback.
 
 Do not implement this by suspending the guest arbitrarily, waiting inside a draw hook,
 advancing a hidden scored song, or restarting shader storage each time a song is chosen.
