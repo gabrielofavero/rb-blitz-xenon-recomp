@@ -3,6 +3,7 @@
 #include "input/native_menu.h"
 
 #include <cstring>
+#include <limits>
 #include <imgui.h>
 #include <SDL3/SDL.h>
 #include <rex/cvar.h>
@@ -108,9 +109,16 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnMouseMove(rex::ui::MouseEvent& e) override {
     if (!MouseSupportEnabled()) return;
+    const bool moved = e.x() != last_x_ || e.y() != last_y_;
     if (auto p = Point(e)) {
       if (dragging_) QueueMenuScrollbar(MouseAction::kScrollbarDrag, *p);
-      else if (e.x() != last_x_ || e.y() != last_y_) QueueMenuMouse(MouseAction::kMove, *p);
+      else if (moved) QueueMenuMouse(MouseAction::kMove, *p);
+    } else if (moved && !dragging_) {
+      // A move that lands outside the game rectangle (pillarbox, overscan cutoff) has left
+      // every row: the guest must not keep hovering one. A point that no bounds can contain
+      // stands in for the departure, and a later inside move coalesces back onto it.
+      const float miss = std::numeric_limits<float>::quiet_NaN();
+      QueueMenuMouse(MouseAction::kMove, {miss, miss});
     }
     last_x_ = e.x(); last_y_ = e.y();
     e.set_handled(true);
@@ -140,7 +148,9 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnMouseWheel(rex::ui::MouseEvent& e) override {
     if (!MouseSupportEnabled()) return;
-    if (Point(e)) QueueMenuWheel(e.scroll_y());
+    // The point rides the detent: the guest re-catches the row that lands under it when the
+    // scroll settles (MouseScrollFollow in native_menu.h).
+    if (auto p = Point(e)) QueueMenuWheel(e.scroll_y(), *p);
     e.set_handled(true);
   }
   std::function<rex::ui::Window*()> provider_;

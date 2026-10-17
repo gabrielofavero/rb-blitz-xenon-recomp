@@ -71,6 +71,76 @@ enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight,
                          kScrollbarDown, kScrollbarDrag, kScrollbarUp };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
+// Hover ownership and the unhover lift (owner rule, 2026-10-16). Hover selects a row; when the
+// pointer leaves the rows the frame the player sees drops the highlight too - but only the hover
+// the mouse itself owns. The engine's selected row is never written: the lift strips the
+// highlight from the *draw* of the list while it still shows the row the mouse set (see DrawList
+// in native_menu.cpp), and it ends the moment a *different* row is positively selected (a
+// controller press, a wheel detent on a list whose wheel steps the selection, a screen change),
+// so a pad's own highlight is never hidden. A scroll that takes the lifted row out of the band
+// reports no selected row at all, which is not a selection change: the lift holds until the
+// scroll-aware catch replaces it (MouseScrollFollow below) or another selection arrives. Pure so
+// the tests can pin the rule without a guest.
+struct MouseHighlight {
+  // What a pointer-leave did, for the trace and the tests.
+  enum class Leave { kIgnored, kKept, kLifted };
+  uint32_t owner_list = 0;   // The list whose selection the mouse set (0 = none).
+  int owner_row = -1;        // The row it set it to.
+  uint32_t lifted_list = 0;  // The list drawing unhighlighted after the pointer left (0 = none).
+  int lifted_row = -1;
+
+  void Hover(uint32_t list, int row) {
+    owner_list = list; owner_row = row;
+    lifted_list = 0; lifted_row = -1;
+  }
+  // The pointer left `list`'s rows, which still show `current`. Only the row the mouse itself
+  // set is lifted; ownership ends either way.
+  Leave PointerLeft(uint32_t list, int current) {
+    if (owner_list != list) return Leave::kIgnored;
+    const bool owned = owner_row == current;
+    owner_list = 0; owner_row = -1;
+    if (!owned) return Leave::kKept;
+    lifted_list = list; lifted_row = current;
+    return Leave::kLifted;
+  }
+  // Whether `list` still draws unhighlighted: while the lifted row is still its selection. Any
+  // other selection a draw can name (a controller press, a wheel detent where the wheel steps
+  // the selection) ends the lift and the highlight returns; a scroll that pushed the lifted row
+  // out of the band reports no selected row at all (`current` < 0), which is the same selection -
+  // the lift holds until the catch lands or a real selection change arrives.
+  bool Lifted(uint32_t list, int current) {
+    if (lifted_list != list) return false;
+    if (current >= 0 && lifted_row != current) { lifted_list = 0; lifted_row = -1; return false; }
+    return true;
+  }
+  void Reset() { owner_list = 0; owner_row = -1; lifted_list = 0; lifted_row = -1; }
+};
+
+// The scroll-aware hover (owner rule, 2026-10-16). A scrolled list's wheel, thumb drag and track
+// click move the *view*, so the rows slide under a stationary pointer; the frame the player sees
+// must let the highlight go where the pointer now points. The scroll the mouse applied ends the
+// hover it owned (the row it set is sliding away from the pointer - the MouseHighlight lift
+// keeps the frame unhighlighted), and the row that comes to rest under the pointer is caught
+// again exactly as a pointer move would catch it; no row there leaves the hover empty. Armed by
+// every applied scroll with that scroll's pointer, re-targeted by any later pointer event, and
+// taken once on the first quiet frame whose drawn geometry already shows the new view (one
+// detent per frame would otherwise catch a row it is about to scroll away again). Pure so the
+// tests can pin the rule without a guest.
+struct MouseScrollFollow {
+  bool armed = false;
+  MenuPoint point;
+  void Arm(MenuPoint p) { armed = true; point = p; }
+  // A later pointer event is where the catch must land instead.
+  void Pointer(MenuPoint p) { if (armed) point = p; }
+  // The pending catch, taken once; empty when no scroll is waiting to be followed.
+  std::optional<MenuPoint> Take() {
+    if (!armed) return {};
+    armed = false;
+    return point;
+  }
+  void Reset() { armed = false; }
+};
+
 // The scrollbar strip sits in the gutter right of a vertical list's rows, where the
 // song library draws its rail and thumb. Points there map onto the thumb's own
 // geometry: the thumb is one row pitch tall and travels between the rail's top and
@@ -135,14 +205,17 @@ class MenuMouseQueue {
         events_.back().action == MouseAction::kMove) events_.back().point = point;
     else if (events_.size() < 128) events_.push_back({action, point});
   }
-  void Wheel(int delta) {
+  void Wheel(int delta, MenuPoint point) {
     if (!enabled_) return;
     // A direction reversal must not pay off the previous fractional detent.
     if ((delta > 0 && wheel_ < 0) || (delta < 0 && wheel_ > 0)) wheel_ = 0;
     wheel_ = std::clamp(wheel_ + delta, -120 * 64, 120 * 64);
-    while (wheel_ >= 120) { Push(MouseAction::kUp); wheel_ -= 120; }
-    while (wheel_ <= -120) { Push(MouseAction::kDown); wheel_ += 120; }
+    while (wheel_ >= 120) { Push(MouseAction::kUp, point); wheel_ -= 120; }
+    while (wheel_ <= -120) { Push(MouseAction::kDown, point); wheel_ += 120; }
   }
+  // Whether anything the user queued is still waiting: the scroll-aware hover's catch waits for
+  // the drain (a detent applied after a catch would re-anchor on the row it left behind).
+  bool Pending() const { return !events_.empty() || !scrollbar_.empty(); }
   std::optional<MenuMouseEvent> NextFrame(bool can_scroll = true) {
     if (!enabled_) return {};
     // Scrollbar traffic bypasses the pad pulse gates: it drives the list directly
@@ -196,7 +269,9 @@ bool MouseSupportEnabled();
 bool MouseMenuAvailable();
 void MouseMenuFocus(bool focused);
 void QueueMenuMouse(MouseAction action, MenuPoint point);
-void QueueMenuWheel(int delta);
+// The wheel carries the pointer position: a detent scrolls the view under a stationary pointer,
+// and the scroll-aware hover catches the row that lands there (MouseScrollFollow).
+void QueueMenuWheel(int delta, MenuPoint point);
 void QueueMenuScrollbar(MouseAction action, MenuPoint point);
 // Whether a point is in the focused list's scrollbar gutter, as the last draw left it.
 bool MouseMenuRailHit(MenuPoint point);

@@ -60,6 +60,10 @@ Hover preserves UIListState's first visible row (+48, list +224), then sends bot
 scroll and scroll-complete notifications. It neither recenters the viewport nor
 steps through intervening choices. Powerup submenus retain native A/B semantics:
 click a category to open it, click a choice to equip it, or right-click to go back.
+The open wheel's category keeps its highlight even when the pointer leaves it —
+opening the wheel moves focus to it, so only the wheel's own frame is ever stripped
+(owner rule, 2026-10-16: the inner options follow the hover rule; the category
+follows it whenever its wheel is closed).
 
 Window coordinates are mapped back through the presenter's aspect, letterbox and
 overscan rectangle. Only geometry from the immediately preceding guest frame and
@@ -96,14 +100,23 @@ path a click uses, so a burst of detents is a burst of native presses and the
 guest's own scroll animation and end-of-list clamp apply.
 
 A vertical list that draws a scroll rail — the song library — takes the native
-scrollbar rule instead (owner decision, 2026-10-16): the wheel and the rail move
-the *view* and never the selection, like a desktop scrollbar. The selection stays
-where it was, even when it is scrolled out of the band; the guest reports that as
-selected slot -1, which the mapping tolerates because every scroll application
-passes the last row a draw positively identified (`last_selected_row`, reset on
-screen or focus change) rather than the live slot. The wheel moves one list row
-per detent — `firstShowing` counts rows, so a detent is one row on any library and
-the fraction of the list it covers shrinks as the library grows. Successive
+scrollbar rule instead (owner rule, 2026-10-16): the wheel and the rail move the
+*view*, like a desktop scrollbar, and the hover then follows the content — once the
+burst has drained and the drawn frame shows the new view, the row that came to rest
+under the pointer is caught exactly as a pointer move would catch it, and a catch
+that finds no row (an artist heading, empty space, the rail) leaves the hover empty.
+The catch (`MouseScrollFollow` in `native_menu.h`) is armed by every applied scroll
+with that scroll's own pointer (the wheel event carries its position) and retargets
+to any later pointer event; the scroll has already ended the hover the mouse owned
+(the lift below, so the highlight never rides the old row away), and the catch waits
+for the burst because a detent applied after a catch would re-anchor the guest's
+selection on the row that catch just left. With no row under the pointer the guest's
+selection stays where the scroll left it, even out of the band; the guest reports
+that as selected slot -1, which the mapping tolerates because every scroll
+application passes the last row a draw positively identified (`last_selected_row`,
+reset on screen or focus change) rather than the live slot. The wheel moves one list
+row per detent — `firstShowing` counts rows, so a detent is one row on any library
+and the fraction of the list it covers shrinks as the library grows. Successive
 detents advance the *pending target* (list +228) so a burst is not lost to the
 animation.
 
@@ -124,15 +137,31 @@ a screen or focus change, so a drag can never be applied to a retired list; drag
 frames coalesce to the latest position and bypass the pad pulse gates because
 they do not emit pad input.
 
-Leaving a drawn row clears the mouse's own hover (the trace logs `unhover`), and a
-left click only emits A when the pointer is on a row that a draw of the currently
-focused list identified in the same frame; on empty space, on a stale hover or on
-the rail strip the press is swallowed (`MouseMenuScrollZone` in `mouse_ui.cpp`).
-The retail selection highlight is the engine's — it follows the selected row — so
-the mouse's unhover is behavioural, not cosmetic: writing the selected slot to -1
-was tried and discarded because the engine recomputes the slot every update.
-Screens with no captured list — the title screen's *PRESS (A) TO START* — keep
-the at-principle A, so a mouse-only boot still works.
+Leaving a drawn row ends the mouse's own hover (the trace logs `unhover … highlight=off`
+or `highlight=kept`), and a left click only emits A when the pointer is on a row
+that a draw of the currently focused list identified in the same frame; on empty
+space, on a stale hover or on the rail strip the press is swallowed
+(`MouseMenuScrollZone` in `mouse_ui.cpp`). The unhover is visible too (owner rule,
+2026-10-16): while the list still shows the row the pointer left, that frame is
+drawn without the highlight — the per-draw element record the engine marked
+highlighted drops to active (`+24`: `kUIListWidgetHighlight` 1 → 0), the
+draw-state's highlight display slot reads -1 so highlight-only slots stop
+drawing, and the shared highlight mesh (`UIListHighlight::Draw`, recognised in
+the `824E0900` hook) is skipped for the frame. All three are read from the
+draw-state `824E5020` receives, which the caller frees right after, so nothing
+survives the frame and no guest list state is ever written to hide a highlight.
+The lift ends by itself the moment `UIListState::Selected` names a *different*
+row — a controller press, a screen change — or when the scroll's own catch
+re-hovers one (`Hover` clears it); a scroll that pushes the lifted row out of the
+band reports no selected row at all (slot -1), which is the same selection, so the
+lift holds until something really replaces it. A pad's own selection is never
+drawn unhighlighted. A pointer move that lands outside the
+game rectangle (pillarbox, overscan cutoff) queues a row-missing move so leaving
+the frame unhovers too. **Superseded:** "writing the selected slot to -1" (this
+section's earlier form; tried and discarded because the engine recomputes the
+slot every update) — the per-frame lift replaces it. Screens with no captured
+list — the title screen's *PRESS (A) TO START* — keep the at-principle A, so a
+mouse-only boot still works.
 
 The synthetic mouse device establishes controller connectivity. Fixed mouse actions
 are merged after user controller remapping, for player one only. Raw mouse remap
@@ -144,12 +173,15 @@ applied on the window thread through SDL.
 ## Checks
 
 `rb_blitz_native_mouse_tests` covers pointer mapping, row hit tests, disabled rows,
-move/click ordering, wheel bursts, fractional detents, scrollbar drag coalescing
-(press/release never dropped, drags latest-wins, traffic flowing while a click
-pulse waits for its release), the rail thumb math (travel per step, first-from-y
-with both clamps, the on-thumb grab test), press/release delivery gating
-behind a delayed input thread, per-player final packet identity and boundary
-resets. `scripts/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
+move/click ordering, wheel bursts (each detent carrying its pointer), fractional
+detents, scrollbar drag coalescing (press/release never dropped, drags
+latest-wins, traffic flowing while a click pulse waits for its release), the queue
+drain gate the scroll-aware catch waits on, the catch model (armed by an applied
+scroll, retargeted by any later pointer event, taken once, discarded on a
+boundary), the lift holding while a scroll reports no selected row, the rail thumb
+math (travel per step, first-from-y with both clamps, the on-thumb grab test),
+press/release delivery gating behind a delayed input thread, per-player final
+packet identity and boundary resets. `scripts/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
 `drag:x1:y1:x2:y2`, `wheel:detents` and `cursor:visible/hidden` actions for live
 acceptance checks.
 
@@ -311,4 +343,48 @@ signature) — raw-read logging boots clean and no probe ships.
 `rb_blitz_native_mouse_tests` passes 428 checks (scrollbar queue coalescing,
 pulse-flow interplay, and the rail thumb math: travel per step, first-from-y
 with both clamps, and the on-thumb grab test); all 38 CTest targets pass in
+`out/build/win-amd64-debug`.
+
+### Live acceptance, 2026-10-16 — the hover follows a scroll
+
+The owner reported the remaining glitch from the record above: with the pointer
+resting on a song, a wheel scroll moved the rows out from under it but the
+highlight stayed on the row it was originally hovered on — a slight scroll left
+the highlight one row above the pointer, and a large one could leave it drawn
+detached from any row. The scroll-aware catch above is the fix; this run replays
+the report. Same kind of environment (Release build, windowed, `drive_ui.ps1`,
+isolated profile under `out/_swap/scroll-follow/`), with a 60-package fixture
+library (`--dlc_root` pointing at the fixture; the rail map logs 51 rows, 10
+visible, `maxFirst` 41, one row pitch ≈ 0.0624 game units).
+
+Driven on `song_select_screen` with the pointer parked at (0.35, 0.25) — the
+first visible row's slot (trace `rb_blitz_012.log`; captures `10..18*.png` in
+`out/_swap/scroll-follow/shots/`; the bar's pixel rows measured by `rowseek.py`
+against its sampled gold `(254, 217, 20)`):
+
+- Hover the first row → bar rows 257..302. `wheel:-2` → the trace logs
+  `unhover … highlight=off (scroll)`, both detents apply (`first` 0→1→2, every
+  application keeping the same anchor row), then one `scroll follow` →
+  `hit row=2` → `selected row=2`; the bar's rows are still 257..302 — it stays at
+  the pointer while the content scrolls, and the row under it is the one the
+  wheel brought there (`11-wheel2.png`: the bar lands on *Kids in the Street*).
+- `wheel:-6` → six applications in one burst, one catch (`row=8` → *Always*),
+  the bar still 257..302. No per-detent re-catch: every application logged the
+  same anchor row, so no frame flipped the selection back to the row a catch had
+  just left.
+- `wheel:1` → the bar returns on the song that scrolled back under the pointer
+  (shot 14). `wheel:-1` lands the pointer on the *COLLECTIVE SOUL* heading: the
+  catch reports `row=-1` and the bar is gone; scrolling further with the pointer
+  on the heading (`wheel:-5`) leaves it gone (shots 13 and 15 carry no highlight
+  pixels at all), which is the "stays and clips" report retired.
+- A rail drag (`0.61,0.30 → 0.61,0.327`) moves the view two rows with the
+  pointer on the rail: each drag frame catches `row=-1`, the bar stays gone
+  (shot 16), and hovering a row afterwards brings it back on that row
+  (shot 18, bar rows 319..364 — one slot down, exactly under the pointer).
+
+The non-scrolled surfaces are untouched by construction: the catch is only armed
+by an applied rail scroll, so the main menu's and the powerup lists' wheel still
+steps the selection through D-pad detents exactly as before.
+`rb_blitz_native_mouse_tests` passes 460 checks (the scroll-aware catch and the
+wheel's pointer, on top of the record above); all 38 CTest targets pass in
 `out/build/win-amd64-debug`.

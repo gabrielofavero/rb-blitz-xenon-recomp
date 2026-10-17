@@ -77,10 +77,14 @@ thread_local uint32_t frame_number = 0;
 // *slot* to -1 when a scroll left the selection outside the band, so the slot cannot
 // be the anchor; this survives that and is reset on every screen or focus change.
 thread_local int last_selected_row = -1;
-// The list the mouse itself last hovered a row on (0 = none). Only a hover the mouse
-// set may be cleared when the pointer leaves it; a controller's own selection is never
-// touched by mouse motion.
-thread_local uint32_t mouse_hover_list = 0;
+// The mouse's hover ownership and the unhover lift (MouseHighlight in native_menu.h).
+// Only a hover the mouse itself set may be lifted when the pointer leaves it; a
+// controller's own selection is never touched by mouse motion.
+thread_local MouseHighlight mouse_highlight;
+// The scroll-aware hover (MouseScrollFollow in native_menu.h): a scroll the mouse applied moves
+// the rows, so the row that comes to rest under the pointer is caught once the burst has drained
+// and the drawn frame shows the new view.
+thread_local MouseScrollFollow scroll_follow;
 
 // The gutter the window thread may arm a drag in: published per draw so input that
 // arrives between frames still sees the last confirmed strip, never a retired list.
@@ -152,7 +156,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
     rail_map = {};
-    mouse_hover_list = 0;
+    mouse_highlight.Reset();
+    scroll_follow.Reset();
     if (REXCVAR_GET(mouse_native_trace))
       REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
   }
@@ -160,10 +165,19 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   current_screen = screen; current_focus = focus; menu_available = allowed;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled());
 }
-// Returns whether the point named a row of the focused list. When it did not, a hover
-// the mouse owns is cleared: the guest's selected *slot* drops to -1 (its own
-// no-selection encoding), so a later click on empty space cannot act on a stale hover.
-// The selected *row* stays as the controller's anchor.
+// UIListState::Selected - the list's live selection - read with isolated registers like
+// every other side call (the same read the hit test's ordering uses).
+int SelectedRow(PPCContext& ctx, uint8_t* base, uint32_t list) {
+  GuestCall call(ctx);
+  call.frame.ctx.r3.u32 = list + 176;
+  sub_824E3008(call.frame.ctx, base);
+  return call.frame.ctx.r3.s32;
+}
+// Returns whether the point named a row of the focused list. When it did not, the mouse's
+// own hover ends: a click that does not land on an element cannot press anything, and the
+// highlight leaves the frame while the list still shows the row the mouse set (owner rule,
+// 2026-10-16 - MouseHighlight in native_menu.h). The guest's selected row itself is never
+// written, so the album panel and the controller keep their anchor.
 bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   // The pointer from the last draw is valid only for the same focused component
   // in the immediately preceding frame. Never dereference a retired screen's list.
@@ -172,24 +186,18 @@ bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   const int row = HitMenuRow(point, geometry.bounds, geometry.rows);
   if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: hit={},{} row={} bounds={},{},{},{}", point.x, point.y, row, geometry.bounds.left, geometry.bounds.top, geometry.bounds.right, geometry.bounds.bottom);
   if (row < 0) {
-    // The mouse left whatever it was on: the hover it owned is cleared, so a click that
-    // does not land on an element cannot press anything (owner rule, 2026-10-16). The
-    // guest's selection highlight itself cannot be cleared without selecting another row
-    // - the engine derives the slot from the selected row every update - so the
-    // highlighted row and the album panel keep the retail selection while nothing is
-    // hovered, exactly like a desktop list keeps its selected item.
-    if (mouse_hover_list == geometry.list && REXCVAR_GET(mouse_native_trace))
-      REXLOG_INFO("native_mouse: unhover list={:08X}", geometry.list);
-    mouse_hover_list = 0;
+    const auto left = mouse_highlight.PointerLeft(geometry.list, SelectedRow(ctx, base, geometry.list));
+    if (left != MouseHighlight::Leave::kIgnored && REXCVAR_GET(mouse_native_trace))
+      REXLOG_INFO("native_mouse: unhover list={:08X} highlight={}", geometry.list,
+                  left == MouseHighlight::Leave::kLifted ? "off" : "kept");
     return false;
   }
-  mouse_hover_list = geometry.list;
+  mouse_highlight.Hover(geometry.list, row);
+  const int selected = SelectedRow(ctx, base, geometry.list);
+  if (selected == row) return true;
+  const int direction = row > selected ? 1 : -1;
   GuestCall call(ctx);
   auto& c = call.frame.ctx;
-  c.r3.u32 = geometry.list + 176;
-  sub_824E3008(c, base);
-  if (c.r3.s32 == row) return true;
-  const int direction = row > c.r3.s32 ? 1 : -1;
   c.r3.u32 = geometry.list; c.r4.s32 = row; c.r5.u32 = U32(base, geometry.list + 224);
   sub_824C1938(c, base);
   // Refresh providers and send the engine's scroll-complete notification, without
@@ -212,14 +220,22 @@ struct RailDrag {
 };
 thread_local RailDrag rail_drag;
 // Move only the viewport, keep the guest's selection row, then notify the providers the
-// way the guest's own scroll does. `first` is clamped to the list's own last page.
-void ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first) {
+// way the guest's own scroll does. `first` is clamped to the list's own last page; an
+// applied scroll ends the hover it owned and arms the scroll-aware catch under `pointer`
+// (MouseHighlight/MouseScrollFollow in native_menu.h): the row the pointer was on is
+// sliding away, so the highlight lifts and then lands wherever the rows stop.
+bool ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, MenuPoint pointer) {
   const int row = geometry.selected >= 0 ? geometry.selected : last_selected_row;
-  if (row < 0) return;
+  if (row < 0) return false;
   if (rail_map.known && rail_map.list == list) first = std::clamp(first, 0, rail_map.max_first);
   else first = std::max(0, first);
   const uint32_t current = U32(base, list + 224);
-  if (uint32_t(first) == current) return;
+  if (uint32_t(first) == current) return false;
+  const auto left = mouse_highlight.PointerLeft(list, row);
+  if (left != MouseHighlight::Leave::kIgnored && REXCVAR_GET(mouse_native_trace))
+    REXLOG_INFO("native_mouse: unhover list={:08X} highlight={} (scroll)", list,
+                left == MouseHighlight::Leave::kLifted ? "off" : "kept");
+  scroll_follow.Arm(pointer);
   const int direction = first > int(current) ? 1 : -1;
   GuestCall call(ctx);
   auto& c = call.frame.ctx;
@@ -231,6 +247,7 @@ void ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first) {
   sub_824C1F08(c, base);
   if (REXCVAR_GET(mouse_native_trace))
     REXLOG_INFO("native_mouse: scrollbar first={} target={} row={} dir={}", current, first, row, direction);
+  return true;
 }
 }
 
@@ -250,9 +267,9 @@ void QueueMenuMouse(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);
   if (MouseSupportEnabled()) queue.Push(action, point);
 }
-void QueueMenuWheel(int delta) {
+void QueueMenuWheel(int delta, MenuPoint point) {
   std::lock_guard lock(mutex);
-  if (MouseSupportEnabled()) queue.Wheel(delta);
+  if (MouseSupportEnabled()) queue.Wheel(delta, point);
 }
 void QueueMenuScrollbar(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);
@@ -308,7 +325,28 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   // animating (firstShowing != targetShowing). Keep that detent queued instead - except
   // on a railed list, where the wheel advances a plain target and needs no hold.
   const bool can_scroll = !fresh || railed || U32(base, current_focus + 224) == U32(base, current_focus + 228);
-  { std::lock_guard lock(mutex); event = queue.NextFrame(can_scroll); }
+  bool idle = false, enabled = false;
+  {
+    std::lock_guard lock(mutex);
+    event = queue.NextFrame(can_scroll);
+    idle = !queue.Pending();
+    enabled = queue.enabled();
+  }
+  // The scroll-aware hover's landing (MouseScrollFollow in native_menu.h): the scroll has been
+  // applied and drawn (a fresh frame carries the new view), the burst has drained and the
+  // viewport is at rest, so the row under the pointer is caught - or the hover stays empty (the
+  // lift the scroll started keeps it that way when no row landed there). A disabled queue means
+  // discarded input, so the catch is dropped instead of landing late.
+  if (!event && idle && fresh &&
+      U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
+    if (auto point = scroll_follow.Take()) {
+      if (enabled) {
+        if (REXCVAR_GET(mouse_native_trace))
+          REXLOG_INFO("native_mouse: scroll follow point={},{}", point->x, point->y);
+        Select(ctx, base, *point);
+      }
+    }
+  }
   if (!event) return;
   // Scrollbar traffic drives the list's view directly (no pad pulse, no horizontal
   // remap), so it is handled before the directional path below.
@@ -328,7 +366,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       if (rail_drag.active && rail_drag.list == current_focus && fresh && railed && per > 0) {
         const int delta = int(std::lround((event->point.y - rail_drag.y) / per));
         ScrollListTo(ctx, base, rail_drag.list,
-                     std::clamp(rail_drag.first + delta, 0, rail_map.max_first));
+                     std::clamp(rail_drag.first + delta, 0, rail_map.max_first), event->point);
         rail_drag.moved = true;
       }
     } else {
@@ -337,7 +375,9 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       const bool on_thumb = RailYOnThumb(rail_drag.y, kRailTop, RailPerFirstNow(), kThumbHeight, rail_drag.first);
       if (rail_drag.active && rail_drag.list == current_focus && fresh && railed &&
           !rail_drag.moved && !on_thumb)
-        ScrollListTo(ctx, base, rail_drag.list, RailFirstFromY(rail_drag.y, kRailTop, RailPerFirstNow(), rail_map.max_first));
+        ScrollListTo(ctx, base, rail_drag.list,
+                     RailFirstFromY(rail_drag.y, kRailTop, RailPerFirstNow(), rail_map.max_first),
+                     event->point);
       rail_drag = {};
     }
     return;
@@ -350,7 +390,8 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   if ((event->action == MouseAction::kUp || event->action == MouseAction::kDown) && railed &&
       EnsureRailMap(ctx, base, current_focus) && rail_map.max_first > 0) {
     const int base_first = int(U32(base, current_focus + 228));
-    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? 1 : -1));
+    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? 1 : -1),
+                 event->point);
     return;
   }
   const auto screen = current_screen, focus = current_focus;
@@ -359,6 +400,8 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     if (event->action == MouseAction::kDown) event->action = MouseAction::kRight;
   }
   if (event->action == MouseAction::kMove || event->action == MouseAction::kAccept) {
+    // A later pointer event is where a pending scroll catch must land (MouseScrollFollow).
+    scroll_follow.Pointer(event->point);
     const bool on_row = Select(ctx, base, event->point);
     // A click only presses what the mouse is on: on a screen whose list tracks the mouse,
     // an unhovered click (empty space, or a scroll-gutter miss) must not press A (owner
@@ -379,6 +422,8 @@ struct DrawCapture {
   uint32_t first = 0, end = 0, row = 0;
   int selected = -1;
   std::optional<MenuBounds> highlight;
+  // The mouse's unhover frame: the shared highlight mesh is skipped while this draw runs.
+  bool suppress = false;
 };
 thread_local DrawCapture* drawing = nullptr;
 
@@ -513,6 +558,28 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   const auto display = U32(base, ctx.r4.u32 + 48);
   for (auto row = capture.first; row < capture.end; row += 44)
     if (U32(base, row + 32) == display) capture.selected = U32(base, row + 36);
+  // The mouse's unhover (owner rule, 2026-10-16; MouseHighlight in native_menu.h) is
+  // cosmetic and per-draw: while the list still shows the row the pointer left, this
+  // frame draws without a highlight. The element records are a per-draw local the caller
+  // frees right after DrawWidgets, so nothing here survives the frame, and the captured
+  // row geometry above was read from the real selected slot. A selection change the mouse
+  // did not make ends the lift instead, so a controller's own highlight is never hidden.
+  if (mouse_highlight.lifted_list == list) {
+    if (!mouse_highlight.Lifted(list, SelectedRow(ctx, base, list))) {
+      if (REXCVAR_GET(mouse_native_trace))
+        REXLOG_INFO("native_mouse: highlight back list={:08X}", list);
+    } else {
+      // The element the engine marked highlighted drops to active (+24: 1 -> 0), and the
+      // draw-state's highlight display slot reads -1, which makes highlight-only slots
+      // (drawstate +48) skip. The shared highlight mesh is skipped in the DrawMesh hook
+      // via capture.suppress. Nothing else in the draw uses these fields.
+      for (auto row = capture.first; row < capture.end; row += 44)
+        if (U32(base, row + 24) == 1)
+          rex::memory::store_and_swap<uint32_t>(base + row + 24, 0);
+      rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32 + 48, uint32_t(-1));
+      capture.suppress = true;
+    }
+  }
   auto previous = drawing; drawing = &capture;
   __imp__sub_824E5020(ctx, base);
   drawing = previous;
@@ -610,9 +677,14 @@ REX_HOOK_RAW(sub_824E9A90) {
 REX_HOOK_RAW(sub_824E0900) {
   using namespace rb_blitz::input;
   const auto mesh = ctx.r4.u32;
-  const bool highlight = drawing && !ctx.r8.u32 && U32(base, U32(base, ctx.r3.u32) + 100) == 0x824E9098;
+  const bool bar = drawing && !ctx.r8.u32 && U32(base, U32(base, ctx.r3.u32) + 100) == 0x824E9098;
+  // The mouse's unhover frame draws no bar and captures no cell: the cell would be the
+  // bar's own projection, and the hover that selects a row again restores both in the same
+  // frame the pointer lands (`UIListHighlight::Draw`, at vtable +100). The mesh's transform
+  // is left at its resting value; UIListHighlight::Draw restores it after every draw anyway.
+  if (bar && drawing->suppress) return;
   __imp__sub_824E0900(ctx, base);
-  if (highlight) drawing->highlight = ProjectMesh(ctx, base, mesh);
+  if (bar) drawing->highlight = ProjectMesh(ctx, base, mesh);
 }
 
 REX_HOOK_RAW(sub_823F0118) {

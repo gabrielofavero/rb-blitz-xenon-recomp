@@ -45,6 +45,75 @@ int main() {
   CHECK_EQ(HitMenuRow({.55f,.376f}, {0,0,1,1}, library), -1);
   CHECK_EQ(HitMenuRow({.55f,.407f}, {0,0,1,1}, library), -1);
 
+  BeginCase("the mouse's unhover lifts only the highlight it owns (owner rule)");
+  MouseHighlight h;
+  h.Hover(0x10, 3);
+  CHECK_FALSE(h.Lifted(0x10, 3));  // a hover draws the highlight
+  CHECK_TRUE(h.PointerLeft(0x10, 3) == MouseHighlight::Leave::kLifted);
+  CHECK_TRUE(h.Lifted(0x10, 3));   // ... and the list stays unlit
+  CHECK_TRUE(h.Lifted(0x10, -1));  // scrolled out of the band: same selection, still unlit
+  CHECK_TRUE(h.Lifted(0x10, 3));
+  CHECK_FALSE(h.Lifted(0x10, 4));  // a controller moved it: the highlight returns
+  CHECK_FALSE(h.Lifted(0x10, 4));
+  CHECK_FALSE(h.Lifted(0x20, 3));  // another list is never affected
+  h.Hover(0x10, 5);
+  CHECK_TRUE(h.PointerLeft(0x10, 6) == MouseHighlight::Leave::kKept);  // moved before the leave
+  CHECK_FALSE(h.Lifted(0x10, 6));
+  h.Hover(0x10, 2);
+  CHECK_TRUE(h.PointerLeft(0x10, 2) == MouseHighlight::Leave::kLifted);
+  CHECK_TRUE(h.Lifted(0x10, 2));
+  h.Hover(0x10, 2);                // landing on the row again owns it and lifts nothing
+  CHECK_FALSE(h.Lifted(0x10, 2));
+  CHECK_TRUE(h.PointerLeft(0x99, 2) == MouseHighlight::Leave::kIgnored);
+  h.Hover(0x10, 2);
+  h.Reset();
+  CHECK_TRUE(h.PointerLeft(0x10, 2) == MouseHighlight::Leave::kIgnored);
+  CHECK_FALSE(h.Lifted(0x10, 2));
+
+  BeginCase("a move outside the game rectangle leaves every row");
+  MenuMouseQueue outside;
+  outside.Context(1, 2, true);
+  outside.Push(MouseAction::kMove, {.5f, .5f});
+  outside.Push(MouseAction::kMove, {NAN, NAN});  // what the window thread sends for outside
+  auto miss = outside.NextFrame();
+  CHECK_TRUE(miss && miss->action == MouseAction::kMove);
+  CHECK_EQ(HitMenuRow(miss->point, {0,0,1,1}, library), -1);
+
+  BeginCase("a scroll the mouse applied re-catches the hover under the pointer");
+  MouseScrollFollow follow;
+  CHECK_FALSE(follow.Take().has_value());  // no scroll waiting: nothing lands
+  follow.Arm({.4f, .6f});
+  auto land = follow.Take();
+  CHECK_TRUE(land && land->x == .4f && land->y == .6f);
+  CHECK_FALSE(follow.Take().has_value());  // ... exactly once per applied scroll
+  follow.Arm({.4f, .6f});
+  follow.Pointer({.5f, .7f});              // a later pointer event re-targets the catch
+  land = follow.Take();
+  CHECK_TRUE(land && land->x == .5f && land->y == .7f);
+  follow.Pointer({.5f, .7f});              // an event without a scroll arms nothing
+  CHECK_FALSE(follow.Take().has_value());
+  follow.Arm({.1f, .2f});
+  follow.Reset();                          // a screen or focus change discards it
+  CHECK_FALSE(follow.Take().has_value());
+
+  BeginCase("wheel detents carry the pointer and the burst drains before the catch");
+  MenuMouseQueue wheel;
+  wheel.Context(1, 2, true);
+  wheel.Wheel(120, {.5f, .6f});
+  auto detent = wheel.NextFrame();
+  CHECK_TRUE(detent && detent->action == MouseAction::kUp && detent->point.x == .5f && detent->point.y == .6f);
+  CHECK_FALSE(wheel.Pending());
+  wheel.Wheel(-240, {.2f, .3f});
+  CHECK_TRUE(wheel.Pending());             // both detents are still queued
+  detent = wheel.NextFrame();
+  CHECK_TRUE(detent && detent->action == MouseAction::kDown && detent->point.y == .3f);
+  CHECK_TRUE(wheel.Pending());
+  CHECK_TRUE(wheel.NextFrame()->action == MouseAction::kDown);
+  CHECK_FALSE(wheel.Pending());
+  wheel.Wheel(360, {.5f, .5f});
+  wheel.Reset();
+  CHECK_FALSE(wheel.Pending());            // discarded input is not followed either
+
   BeginCase("move coalescing preserves click ordering and never synthesizes directions");
   MenuMouseQueue q;
   q.Context(1, 2, true);
@@ -69,16 +138,16 @@ int main() {
   CHECK_TRUE(q.NextFrame()->action == MouseAction::kMove);
 
   BeginCase("fractional wheel, fast detents, and reversal");
-  q.Wheel(60); CHECK_FALSE(q.NextFrame());
-  q.Wheel(60); CHECK_TRUE(q.NextFrame()->action == MouseAction::kUp);
-  q.Wheel(-360);
+  q.Wheel(60, {.5f, .5f}); CHECK_FALSE(q.NextFrame());
+  q.Wheel(60, {.5f, .5f}); CHECK_TRUE(q.NextFrame()->action == MouseAction::kUp);
+  q.Wheel(-360, {.5f, .5f});
   for (int i = 0; i < 3; ++i) CHECK_TRUE(q.NextFrame()->action == MouseAction::kDown);
   CHECK_FALSE(q.NextFrame());
-  q.Wheel(60); q.Wheel(-120);
+  q.Wheel(60, {.5f, .5f}); q.Wheel(-120, {.5f, .5f});
   CHECK_TRUE(q.NextFrame()->action == MouseAction::kDown);
 
   BeginCase("scroll animations retain wheel detents without retaining button pulses");
-  q.Wheel(-240);
+  q.Wheel(-240, {.5f, .5f});
   CHECK_TRUE(q.NextFrame()->action == MouseAction::kDown);
   q.Pulse(MouseAction::kDown);
   CHECK_EQ(q.SamplePad(), 2);
@@ -140,11 +209,11 @@ int main() {
   BeginCase("gameplay, focus loss and transitions discard pulses and pending input");
   for (int boundary = 0; boundary < 3; ++boundary) {
     q.Context(1, 2, true);
-    q.Pulse(MouseAction::kBack); q.Wheel(480); q.Push(MouseAction::kAccept);
+    q.Pulse(MouseAction::kBack); q.Wheel(480, {.5f, .5f}); q.Push(MouseAction::kAccept);
     q.Context(boundary == 0 ? 9 : 1, boundary == 1 ? 9 : 2, boundary != 2);
     CHECK_EQ(q.pulse(), 0); CHECK_FALSE(q.NextFrame());
   }
-  q.Push(MouseAction::kAccept); q.Wheel(-120);
+  q.Push(MouseAction::kAccept); q.Wheel(-120, {.5f, .5f});
   q.Context(1, 2, true);
   CHECK_FALSE(q.NextFrame());
 
