@@ -581,7 +581,7 @@ Restoration is asynchronous: this guarantees a request at the verified menu boun
 no menu frame can ever be presented uncapped. Turning uncapping Off leaves V-Sync untouched.
 
 Installed measurements and the controlled trial table are in
-[P6's execution record](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md#p6--execution-record-2026-10-14).
+[P6's execution record](../plans/finished/2026-10-14-installed-game-fix-prompts.md#p6--execution-record-2026-10-14).
 Evidence is under `out/_swap/p6/`. Existing DLC song-start faults remain separately tracked in
 [known-issues.md](../reference/known-issues.md); package counts alone do not prove playable songs.
 

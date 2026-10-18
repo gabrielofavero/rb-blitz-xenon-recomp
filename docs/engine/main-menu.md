@@ -443,7 +443,7 @@ or a library that yielded no song, the settings row reads unavailable and the me
 a row that exists must work. **The landing is now measured (2026-10-15):** press → the song the menu
 is playing is resolved → `loading_screen` → the game's first screen → `game_screen`, with the visible
 song matching the audible one; the arms are in
-[play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) §Evidence.
+[play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) §Evidence.
 
 **The two halves.**
 
@@ -500,7 +500,7 @@ did **not** advance), one second later `loading_screen` mounted the song the pre
 Band Blitz, it's all about earning big points… PRESS (A) TO BEGIN"*) and, on the A, `game_screen` —
 captured in `final-press/shots/{row2,loading,game2,gameplay}.png`. **Zero guest faults**, and the song
 the loading screen took is the song that was playing. The 2026-10-14 arms that dead-ended at the
-manager's "0" are kept in [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)
+manager's "0" are kept in [play-current-song.md](../plans/finished/2026-10-14-play-current-song.md)
 §Evidence; the one open sibling is the title's **own** song list, which faults for a cause this fix
 does not claim to have touched ([known-issues.md](../reference/known-issues.md)).
 
@@ -510,7 +510,7 @@ does not claim to have touched ([known-issues.md](../reference/known-issues.md))
 `Play Current Song: selected pool i of N ("<key>")`, and `Play Current Song result: resolved`,
 `no-track`, `missing-name` or `missing-data`. Selection alone does **not** prove guest lookup success.
 On an unavailable press the `settings_play_unavailable` page remains; arms and captures are in
-[play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) §Evidence.
+[play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) §Evidence.
 
 ### 8. Evidence
 
@@ -923,7 +923,7 @@ cannot permanently quarantine a song. Three consecutive unsuccessful starts stil
 no-immediate-repeat rule or selecting a DLC song while title music is playing. Host tests cover the
 boundaries and failed-candidate invalidation. A copied package with renamed assets, retaining its
 original song key, resolves and reaches gameplay in `out/_swap/music-fix/reliability-path/`; see the
-[follow-up record](../plans/in-progress/2026-10-14-play-current-song.md#2026-10-15-reducing-unavailable-presses).
+[follow-up record](../plans/finished/2026-10-14-play-current-song.md#2026-10-15-reducing-unavailable-presses).
 
 ### 5. Where it lives
 

@@ -1503,7 +1503,7 @@ poll-rate line anywhere — the only frame-ish figure in a run is the payload
 overlay's textual `1694 KB / 75.1`, which needs a payload boot, and
 `XAudioSubmitRenderDriverFrame` appears in bursts of about ten lines per run
 instead of once per frame. So the measurement starts with patch 0004
-([`patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch`](../../patches/rexglue-sdk/0004-trace-frame-swaps-and-input-polls.patch),
+([`patches/rexglue-sdk/0019-trace-frame-swaps-and-input-polls.patch`](../../patches/rexglue-sdk/0019-trace-frame-swaps-and-input-polls.patch),
 three files, +52/−1), gated by the same `--log_level=trace` switch as the other
 local traces:
 

@@ -59,7 +59,7 @@ Part 1 wherever they disagree.
   mounts/metadata-reads **742** of the 1,773 packages. The guest's *own* songcache is a separate file:
   the same run wrote a 16-byte stub with **0 packages** in it, so a host hit says nothing about it.
   Contract, limits and the trial table: [dlc.md](../guides/dlc.md) §4.4 and the review plan's P6
-  record ([installed-game-fix-prompts.md](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md)).
+  record ([installed-game-fix-prompts.md](../plans/finished/2026-10-14-installed-game-fix-prompts.md)).
 - **Verifiably broken/open: the in-song entry** — a screen of ours cannot list the in-song panels
   (`pause_panel`, `game_fade_out_panel`, `game_panel`); any such screen faults the guest with
   `read of guest 0x00000024`, and Back fails on the same limitation. It is item 13 below and the only
@@ -172,7 +172,12 @@ game-side and Controller Settings-side consequences listed after them:
 4. **Target lists the demo by name.** "Rock Band Blitz Demo" is a choice again
    ([settings_payload.cpp](../../src/hooks/settings_payload.cpp)); the recorded trial-boot fault is a
    separate matter, and Controller Settings' radio says the same thing now
-   ([general_tab.cpp](../../controller-settings/src/general_tab.cpp)).
+   ([general_tab.cpp](../../controller-settings/src/general_tab.cpp)). **Fixed 2026-10-18:** the
+   Ultimate choice had disappeared from that row, because `ultimate::Configure` derived the provider
+   root from `ultimate_mode` and the boot applies the stored target as that cvar — so a profile whose
+   target was "Rock Band Blitz" inspected the game root, found no payload, and stopped offering the
+   one control that selects Ultimate. The payload is now inspected where it lives, and the mode only
+   decides whether it is applied; a fresh profile lists all three choices.
 5. **The DLC page and the refresh action.** *Cache DLC Library* reads `On`/`Off` instead of the
    "Externally configured" marker it used to show — Controller Settings' `--enhancements_dlc_cache` row
    outranked it, which made it read-only, and the cutover below removed that flag; *Refresh
@@ -182,7 +187,7 @@ game-side and Controller Settings-side consequences listed after them:
    `enhancements_menu_dlc_songs` (the owner asked for the R9 toggle in-game, and the *Play Current
    Song* row beside it is gated on it); the *pool size* row (`enhancements_menu_dlc_song_count`) stays
    retired and its description says it is ignored. See
-   [play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md) D1.
+   [play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) D1.
 6. **Boolean rows read On / Off, not the locale's ENABLED / DISABLED.** The payload overrides the two
    locale tokens the retail checkboxes use (`LocaleOverrides()`), per language, without touching any
    other string.
@@ -225,7 +230,7 @@ offer D3D12 alone. That appearance was a **packaging** fault rather than the mac
 executable had been built from `installer/out/payload` as it stood before `REXGLUE_USE_VULKAN=ON`, so it
 shipped a one-backend `rexgpu-xenos.dll`. `build.ps1` now verifies a snapshot against the build tree
 before reusing it, so that cannot happen silently again
-([installed-game-fix-prompts.md](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md) P1).
+([installed-game-fix-prompts.md](../plans/finished/2026-10-14-installed-game-fix-prompts.md) P1).
 The row rule is kept on its own merits:
 
 * `src/ui/settings_screen.cpp` drops the row from the Video page when the configured renderer list has
@@ -303,7 +308,7 @@ Evidence: `settings_screen` **26,518 checks** and `settings_bridge` **343 checks
 ##### P4 of the installed-game review: appearance, the caption-free pages, and the switch (2026-10-14)
 
 The owner's report (R3/R4/R7 of
-[2026-10-14-installed-game-fix-prompts.md](../plans/in-progress/2026-10-14-installed-game-fix-prompts.md))
+[2026-10-14-installed-game-fix-prompts.md](../plans/finished/2026-10-14-installed-game-fix-prompts.md))
 was that the caption read as small, technical and boxed; that it competed with the calibration wizard
 and with the restart/save-error/confirmation messages; and that the achievement action's wording was
 wrong. All three are now measured in a boot rather than asserted.
@@ -473,7 +478,7 @@ reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
     could not be saved" with the folder as its explanation. Fixed by `RowBinding::position_value`
     (token ⇄ position, both against the payload's inventory), by parking an uncompletable journal
     instead of refusing every save, and by a reason token so the page names the failure it saw.
-    *`architecture.md` part 5 §3, §4; `docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md`
+    *`architecture.md` part 5 §3, §4; `docs/plans/finished/2026-10-14-installed-game-fix-prompts.md`
     (P7)*.
 19. **`unlockall`'s write path does not exist** — its value belongs under native
     `[ultimate_overrides]`, which the bridge does not own; `EncodeProviderValues` skips it by design.
@@ -625,7 +630,7 @@ prompt, because the updater is administrative too. The narrowing of the legacy-p
    row. What still needs a populated-library look is that the row refreshes the library after the
    *DLC Menu Songs* retirement — **superseded 2026-10-14**: the row is no longer retired (§5), so the
    look is owed on a boot whose DLC page shows both rows
-   ([play-current-song.md](../plans/in-progress/2026-10-14-play-current-song.md)).
+   ([play-current-song.md](../plans/finished/2026-10-14-play-current-song.md)).
 
 ### Boot ownership
 

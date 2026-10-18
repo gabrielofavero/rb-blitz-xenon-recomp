@@ -73,7 +73,7 @@ record: the engine's own argument follows what it has to process (0 with nothing
 * P6's overlay (host-drawn "Reading content: N / T packages" and unnumbered
   *Loading song information…* phases) is retired; its counting model, cache work, pacing boundary
   and installed measurements stand. See the P6 record in
-  [`../in-progress/2026-10-14-installed-game-fix-prompts.md`](../in-progress/2026-10-14-installed-game-fix-prompts.md).
+  [`../in-progress/2026-10-14-installed-game-fix-prompts.md`](2026-10-14-installed-game-fix-prompts.md).
 * §12 of the song-cache plan pushed `counted` / `2 × ContentItemCount()`. Today's numbers are the
   enumerators' own sizes summed per attempt — the same 3,546 for this library, now measured
   rather than inferred.

@@ -294,7 +294,14 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // its own to read (its records live inside the game's own archive) and no overlay to serve the
   // settings file. That arrangement is reported rather than guessed at.
   const bool separate_payload = ShouldMountOverlay(has_payload, merged) && mode != Mode::kOff;
-  const auto provider_root = separate_payload ? payload_root : game_data_root;
+  // Inspect the payload where it lives whether or not *this* boot is Ultimate. The in-game Target
+  // row only offers "Rock Band Blitz Ultimate" when the payload is there, and that row is how a
+  // player selects it for the next boot; deriving the provider root from the mode instead made the
+  // option disappear as soon as the stored target was "Rock Band Blitz" (or the compiled default),
+  // because the boot applies that target as ultimate_mode = 0 - a one-way door out of Ultimate.
+  // The mode still decides whether the payload is *applied*: active_target below, and
+  // separate_payload for the overlay mount.
+  const auto provider_root = ShouldMountOverlay(has_payload, merged) ? payload_root : game_data_root;
 
   // The provider is inspected once, here, before anything else looks at it: the shape check is
   // what decides whether the settings redirect is meaningful, and the redirect is part of the

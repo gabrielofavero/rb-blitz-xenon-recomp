@@ -494,6 +494,14 @@ development, the Keyboard + Mouse switch is forced off until its dispatch is pro
 defaults (Controller off, Keyboard + Mouse on) wait until all six actions, per-type exclusive
 routing, the native-preset coexistence path, and both menu entry paths pass acceptance together.
 
+P0 status (2026-10-18): **closed for the action seam, with named residuals** — §10.6 measures live
+native presses for all six actions, the full four-producer bypass with before/after pairs, a
+direct-dispatch judgement proof, the track repeat's owner and stop path, and the Pause/song-end/
+Ultimate/no-pad/tutorial-menu/calibration-menu contexts. Guest keystrokes are closed statically (the
+title imports no keystroke API). Four items stay open and belong to later packages: per-action edge/hold
+semantics (O2, P3), the tutorial's and calibration's interactive segments (O4, P3), raw SDL source
+provenance (O5, P2), and a direct pause (O10, P3). Do not claim those. **P1 can start.**
+
 ## 7. Validation and release criteria
 
 ### 7.1 Automated checks
@@ -607,5 +615,256 @@ python .github/skills/documentation/scripts/check_docs.py
 git diff --check
 ```
 
-Keep this plan in `todo/` until feature implementation starts. When it does, move it to
-`in-progress/` and maintain P0-P6 evidence here without treating planned checks as passed.
+P0 implementation started on 2026-10-17, so this file lives in `in-progress/`. Maintain P0-P6
+evidence here without treating planned checks as passed.
+
+## 10. P0 evidence — the gameplay seam (2026-10-18)
+
+P0 is **closed for the action seam and open in four named places** (§10.5): the boundary, both source
+types, the lookup bypass, native/direct coexistence, the full producer bypass, a judgement proof and
+the alternate contexts are proven live; what remains is listed beside each item and belongs to P2/P3. The
+instrument is `src/diag/gameplay_probe.cpp` (cvars `probe_gameplay`, `probe_gameplay_bypass`,
+`probe_gameplay_inject`, `probe_gameplay_inject_track`; each has the `REX_<UPPERCASE>` environment
+override). The live arms are driven by `out/_swap/p0/run.ps1` on the release build with
+`--mnk_mode=1`, which maps Space to pad A, L to X, P to Y, and Return to Start.
+
+### 10.1 Native model (static, 2026-10-17)
+
+`assets/game/360/config/gen/macros.dtb` defines the gameplay vocabulary: `kBMAction_None 0`,
+`Lane0 1`, `Lane1 2`, `Lane2 3`, `TrackUp 4`, `TrackDown 5`, `UsePowerUp 6`, `Swing 7`,
+`AwardJackpot 8`. `assets/game/360/config/gen/beatmatch_controller.dtb` holds four joypad presets
+and three keyboard presets (decoded 2026-10-17 in `out/_swap/p0/defs/beatmatch_controller.txt`);
+every preset row uses only `Lane0`, `Lane1`, `TrackUp`, `TrackDown`, and `UsePowerUp`. No shipped
+preset row references `Lane2`, `Swing`, or `AwardJackpot`. The joypad block also carries
+`delay_until_repeat_ms` and `repeat_rate_ms` (both `#1`), which is consistent with the held-action
+repeat observed in §10.3.
+The physical button ids come from the `kPad` enum in
+`assets/game/360/dotdot/dotdot/system/run/config/gen/macros.dtb`: LT0, RT1, LB2, RB3, Y4, B5, A6,
+X7, Back8, LS9, RS10, Start11, DUp12, DRight13, DDown14, DLeft15, LStickUp16, LStickRight17,
+LStickDown18, LStickLeft19, RStickUp20, RStickRight21, RStickDown22, RStickLeft23.
+
+Preset 0 (the live configuration, `cfg=0xd`) resolves to: LT/LB → TrackDown, RT/RB → TrackUp,
+X → UsePowerUp, any LStick or D-pad direction → Lane0, A or any RStick direction → Lane1. Start
+(button 11) resolves to no `kBMAction`; Pause is a separate game-screen path (§10.3).
+
+### 10.2 Seam (all guest functions take `(PPCContext&, uint8_t* base)`)
+
+| Symbol | Role and register use | Evidence |
+| --- | --- | --- |
+| `sub_82435EB0` | Controller factory (`NewController`): reads `beatmatcher.controllers.beatmatch_controller_mapping`, builds `sub_82443A70` (112-byte joypad) or `sub_82442EC8` (120-byte keyboard) | `out/_swap/p0/native/native.log` — `NewController -> 0x… (cfg=0xd)`; lookups for buttons 15 and 13 are logged in the same tick |
+| `sub_82443A70` | JoypadController constructor; vtable `0x820874C4`; overrides +20 `sub_82443710`, +88 `sub_82443440`, +92 `sub_82443A30`, +96 `sub_82443400`, +104 `sub_82443A04` | static |
+| `sub_82443A30` | JoypadController vtable +92, per-frame update; called during a song at roughly 30 ms cadence | probe timer seam, §10.3 |
+| `sub_82443478` | ButtonDown: button at `[msg+4]` → `sub_824432A0` → `sub_824364B0(controller, action, 0)` | `native.log` down/dispatch pairs |
+| `sub_82443528` | ButtonUp: button → `sub_824432A0` → `sub_824367E0(controller, action)` | `native.log` up/release pairs |
+| `sub_824432A0` | Button→action lookup over `[this+84]` index and `[this+88]` mapping vector; 0 for unmapped | bypass point, §10.3 |
+| `sub_824364B0` | **Gameplay action boundary** (`r3`=controller, `r4`=action, `r5`=arg): returns unless `[this+52]`; lanes 1/2/3 send lane `action-1`; 4 sends +1 track, 5 sends −1, 6 power-up, 7 swing, 8 jackpot. For 4/5 also calls `sub_8243F298(target, ±1)` and `sub_82396D40(target, arg)` | live dispatch/release, §10.3 |
+| `sub_824367E0` | Release (`r3`=controller, `r4`=action): handles lanes 1/2/3, swing 7, power-up 6; **no case for 4/5/8** | static; direct release of tracks has no effect |
+| `sub_82436A28` | Message-event producer: resolves a symbol and calls `sub_824364B0(controller, action, 0)` | static — a second producer into the same boundary |
+| `sub_82442B30` | Keyboard controller ButtonDown analogue; resolves a symbol and reaches the boundary through `sub_82442718` | static |
+| `sub_82436BF8` | Held-action auto-repeat: `[+68]` action (0 = idle), `[+56]/[+60]` interval, `[+64]` rate, `[+72]` accumulator, `[+76]` active; calls `sub_824364B0(this, action, 1)` when the accumulator passes | static; matches the 108 ms live repeat, §10.3 |
+| `sub_8238A0F0` | `Game::update_controls` (Game vtable `0x82063310` +0x68), called once at song start, not a frame seam | `native.log` — logged once |
+
+### 10.3 Live arms (2026-10-18, base song, release build)
+
+| Plan action | kBMAction | Producer seen | Consumer call | Release | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| First Note | Lane0 = 1 | preset maps LStick/D-pad directions; no live native press yet | direct `sub_824364B0(…,1,0)` | `sub_824367E0(…,1)` | direct path proven; native edge is static-only |
+| Second Note | Lane1 = 2 | live A (button 6) | native `dispatch action=2 arg=0`, then direct `action=2` | native and direct `release action=2` | proven both ways |
+| Move Lane Right | TrackUp = 4 | preset maps RT/RB | direct `action=4`, arg 0 then 1 | no release case | consumer reached; held/repeat semantics unresolved |
+| Move Lane Left | TrackDown = 5 | preset maps LT/LB | direct `action=5`, arg 0 then 1 | no release case | consumer reached, then a native repeat ran for the rest of the arm |
+| Powerup | UsePowerUp = 6 | preset maps X; no live native X yet | direct `action=6 arg=0` | direct `release action=6` | direct path proven |
+| Pause | none (`kAction_Start`) | live Start (button 11) | none — `lookup … button=11 -> 0` | n/a | Start paused the game (`pause-shots/05-pause.png`); Pause is a game-screen DTA path, not a `kBMAction` |
+
+Evidence files: `out/_swap/p0/native/native.log` (native A → Lane1), `inject/inject.log` (native press
+and direct 1/2/6 in one session), `bypass/bypass.log` (lookup suppressed, direct 1/2/6 still land),
+`track/track.log` (native repeat), `pause/pause.log` (button 11 → 0), with shots under
+`inject-shots/` and `pause-shots/`.
+
+The direct calls are emitted by the probe's timer on `sub_82443A30`: Lane0 at tick 60 (release 70),
+TrackUp at 120 (`arg=1` at 125, gated by `probe_gameplay_inject_track`), Lane1 at 180 (release 190),
+TrackDown at 240 (`arg=1` at 245, same gate), UsePowerUp at 300 (release 310). Consecutive injected
+actions measured ~26 ms of probe time per tick in both arms, so the sequence spans about 8 s; the
+tick numbers are a probe clock, not a game contract.
+
+**Bypass.** With `probe_gameplay_bypass=true`, both the down and up lookups for button 6 log
+`bypass lookup` and return 0; no native dispatch or release follows, while the direct 1/2/6 actions
+still dispatch. The bypass is therefore sufficient for the lookup consumer, but it is **not** a full
+producer bypass: `sub_82436A28`, `sub_82442B30`, and the repeat `sub_82436BF8` reach
+`sub_824364B0` without going through `sub_824432A0`. P3 must suppress all four producers (or replace
+the controller object) and prove it.
+
+**Coexistence.** `inject/inject.log` contains the native `down button=6 → dispatch action=2 arg=0` and
+its `release`, plus direct `action=1` and `action=6` dispatches/releases in the same song. Each press
+produced exactly one dispatch; no double-fire and no starvation. This is the shipping Keyboard +
+Mouse shape (native preset authoritative for the pad, direct actions beside it) at probe fidelity.
+
+**Track repeat (important).** `track/track.log` shows the direct action-5 dispatch at 00:36:59.5,
+then 208 native-originated `dispatch … action=5 arg=1` calls from 00:37:04.5 to 00:37:26.8
+(~108 ms apart, ~9.3/s), continuing until the process ended. Action 4 did not start a repeat. The
+cadence matches `sub_82436BF8`; `sub_824367E0(5)` is not a stop path. Direct mapping must model
+Move Lane Left/Right as a held/repeating source and own the stop, or the native repeat outlives the
+binding. Whether the repeat is the controller's own held-state object or the game's track-scroll
+state is **not resolved**; the live trace only proves the handler is re-entered natively.
+
+*Superseded by §10.6 (still measured, better understood): the repeat **is** the controller's own
+held-action slot, and the release **is** the stop path — `sub_824364B0` stores the action at `[+68]`
+on `arg == 0`, `sub_82436BF8` re-dispatches from `[+64]`, and `sub_824367E0` clears `[+68]`. The
+`track` arm's slot trace reads `0 → 4 → … → 0` around the press/release pair. This arm's 208
+repeats ran because its TrackDown dispatch was never released.*
+
+### 10.4 Verdicts for the open items
+
+Updated 2026-10-18 by the second evidence pass (§10.6). An item is *closed* only where a live arm
+shows the thing it asked for; the reason for each still-open item is written beside it.
+
+- **O1 (consumers/bypass). CLOSED.** The consumer set is named (§10.2) and the boundary is proven.
+  The full producer bypass is proven by the `challenge-block` arm: one run suppresses all four
+  producers — `from=button_down`/`button_up`, `from=message` (reached by the guest-stack fixture
+  through `sub_82436A28`), `from=keyboard_down`/`keyboard_up` (through `sub_82442B30`) — and the
+  `block` arm adds `from=repeat` (`sub_82436BF8`, `lr=0x82443a48`). The same arm shows the
+  *unblocked* control run reaching the boundary from every one of those producers
+  (`challenge`), so each suppression has its before/after pair.
+- **O3 (initial bindings). CLOSED for the vocabulary, open for the final spelling.** Native preset 0
+  gives the Controller defaults: First Note = `pad:lstick_up/down/left/right` +
+  `pad:dpad_up/down/left/right`; Second Note = `pad:a` + `pad:rstick_up/down/left/right`; Move Lane
+  Right = `pad:rt`, `pad:rb`; Move Lane Left = `pad:lt`, `pad:lb`; Powerup = `pad:x`; Pause =
+  `pad:start`. §10.6 confirms every one of those six on a *live* native press. For the keyboard
+  table, the shipped keyboard preset 0 (`out/_swap/p0/defs/beatmatch_controller.txt`) is the
+  evidence-based proposal: First Note = 1/7/a/f/l; Second Note = 2/8/s/j/;; Move Lane Right =
+  Right/k/x/.; Move Lane Left = Left/d/z/,; Powerup = Space; Pause stays the host's Start binding.
+  P1 freezes the final spelling and defaults.
+- **O7 (vocabulary). CLOSED.** The five preset-produced actions plus Pause cover every gameplay input
+  the native preset produces. `Lane2`, `Swing`, and `AwardJackpot` are defined but not reachable from
+  any shipped preset: **inert** (no row, no default). Tutorial skip, calibration confirm, and song-end
+  inputs stay **inert for the gameplay tables** and owned by the game/General Mapping: the tutorial
+  and calibration *menus* were reached and produced no dispatch at all (§10.6), and the end-of-song
+  screen is a UI screen reached after the song controller is gone.
+- **O8 (analog direction). CLOSED.** Stick directions are native bindable `kPad` values 16–23, preset
+  0 binds them, and the `dpad` and `ultimate3` arms show them arriving as live native presses
+  (button 16 → `lane0`, button 12/13–15 → `lane0`). The vocabulary needs `pad:lstick_left/right/up/down`
+  and `pad:rstick_*`; the Controller default reproduces preset 0 by binding all four directions, even
+  though the native preset treats any direction as the same action.
+- **O9 (coexistence). CLOSED at probe fidelity.** Proven in §10.3 and repeated in `ultimate3`. The
+  synthesized-pad provenance question (a `pad:` source must not fire because the SDK's keyboard
+  emulation set the same bit) is **not** answered by a pad-only run: it stays P2 work, and the
+  `sources` arm that would have measured raw SDL sampling never ran (§10.6).
+- **O6 (guest keystrokes). CLOSED.** The import table has no keystroke API at all (§10.5), so no guest
+  consumer exists to gate; the keyboard producer is unreachable without fabricated messages.
+- **O10 (pause). OPEN.** Start is not a `kBMAction`; the live pause came through the game-screen path,
+  and in the `pause` arm the `Start` press resolves to `action=0 (none)` on both the down and the up.
+  Pause routing is therefore a context rule, not a dispatch action: P3 must route a direct Pause
+  binding into the same pause screen and prove that a held binding cannot pause again on resume.
+  Nothing in this pass measures a *direct* pause.
+
+### 10.5 What P0 still owes
+
+Closed by §10.6 (2026-10-18): every item this list carried on the first pass.
+
+1. **Live native presses** — proven for all six: Lane0 (button 16 = LStickUp, and 12–15 = the D-pad
+   directions, `dpad`), Second Note (button 6 = A), TrackUp (button 3 = RB, button 1 = RT),
+   TrackDown (button 2 = LB, button 0 = LT), Powerup (button 7 = X). `native-hold`, `dpad` and
+   `ultimate3`.
+2. **Judgement proof** — `spam` dispatches alternating Lane0/Lane1 directly for ~50 s and the HUD
+   score rises 0 → 470 → 1,760 → 2,720 (`spam-shots/score-sheet.png`), so a direct dispatch is judged
+   by the game's own note pipeline, not merely accepted by the handler.
+3. **Track stop and repeat owner** — the repeat is the *controller's own held-action state*:
+   `sub_824364B0` stores the action at `[+68]` when a track press arrives with `arg == 0`, the action
+   is re-dispatched by `sub_82436BF8` after `[+60]` and then every `[+64]`, and
+   `sub_824367E0` clears `[+68]` on release. The `track` arm logs the slot `0 → 4 → … → 0` around a
+   press/release pair, and the `ultimate`/`ultimate3` arms show the native repeat stopping when the
+   button is released. A direct track action must therefore be **released**, not abandoned.
+4. **Full bypass of all four producers** — `challenge-block` + `block` (§10.4 O1).
+5. **The alternate contexts** — measured except the tutorial's and calibration's *interactive*
+   segments: `Pause` (`pause`, `pause-block`), song end (`song-end`, the results screen),
+   `Ultimate` (`ultimate3`), no pad (`no-pad`, 25 dispatches with `--input_backend=none`), and the
+   two context menus (`tutorial3` → *How to Play*, `calibration` → *Calibrate System*, both with
+   zero dispatches).
+
+What this pass does **not** close, and P3 must carry:
+
+- **O2, action edge/hold semantics per action.** The probe dispatches with an explicit release and
+  the judgement proof shows score, but no arm measures press-edge vs held-state per action, nor the
+  double-fire question for a pad binding and a key binding on one action.
+- **O4, the tutorial's and calibration's interactive segments.** Their menus are measured; entering
+  *Basic Tutorial* and playing it, and running the *Calibration Wizard*, were not.
+- **O5, source provenance.** The `sources` arm ran on 2026-10-18 (`out/gameplay-mapping/p0/sources/`, argv
+  carries `--probe_gameplay_sources=true`) and produced **no** `source=` and no direct-action lines, so
+  raw SDL sampling is still unmeasured: "a `pad:` source cannot fire because the SDK's keyboard emulation
+  set the same bit" stays unproven, and the first question for P2 is why the sampler saw no edges (keyboard
+  focus, or the SDL keyboard state read from a non-video thread). `no-pad` proves a keyboard-only boot is
+  *connected* and can play, which is the connectivity half only.
+- **O6, guest keystrokes. CLOSED (static).** The title's import table
+  (`generated/default/rb_blitz_init.cpp`) carries **zero** `XamInputGetKeystroke` (or any keystroke)
+  imports; the only keyboard-named import is `XamShowKeyboardUI`, the on-screen text-entry dialog, which
+  is not a gameplay path. There is no guest keystroke consumer to gate, and the keyboard controller's
+  ButtonDown (`sub_82442B30`) stays reachable only if key messages were delivered - nothing in this port
+  delivers them, which is why the `challenge` fixture had to fabricate one.
+- **O10, a direct pause.** See §10.4.
+- **The analog stick under a real thumb.** The native presses came from the host's keyboard
+  emulation mapping a key to a pad bit (that is how `drive_ui` works), so analog *magnitude* and the
+  deadzone of a physical stick were not exercised.
+
+P0's action-seam question is answered: the six actions have one validated boundary, every native
+producer into it is named and can be suppressed, a direct dispatch is judged by the game, and the
+track repeat is owned by the controller's own slot. P3's "all six actions work" acceptance is now
+reachable, but it must still show the score response *through a real binding* and close O2/O5/O6/O10
+before it can claim live acceptance.
+
+### 10.6 Second evidence pass (2026-10-18) — the arms that closed §10.5, and a picture freeze
+
+All releases at build time 10:15–10:36 on 2026-10-18, base song unless the arm says otherwise. The
+harness is `scripts/probe_gameplay.ps1` (the deliverable) with the scratch arm driver
+`out/_swap/p0/run.ps1` for the later switches; evidence under `out/_swap/p0/<label>/` (combined log)
+and `<label>-shots/`.
+
+| Arm | What it measured | Evidence |
+| --- | --- | --- |
+| `native-hold` | Native presses for A (button 6 → `lane1`), LStickUp (16 → `lane0`), X (7 → `use_powerup`), RB (3 → `track_up`), LB (2 → `track_down`), LT (0 → `track_down`), RT (1 → `track_up`), each with its release; RT held 7 s exercises the controller's own repeat | `native-hold/native-hold.log` |
+| `dpad` | The four D-pad ids (12–15) each resolve to `lane0` under preset 0, with the arrows rebound to plain keys first | `dpad/dpad.log`, `dpad-shots/09-dpad.png` |
+| `bypass` / `block` / `pause-block` | The lookup bypass suppresses the preset (`bypass lookup … return 0`) while direct actions still land; the dispatch block suppresses every producer including `from=repeat`; the block holds across a pause | `bypass/`, `block/`, `pause-block/` |
+| `challenge` / `challenge-block` | The message producer (`sub_82436A28`) and keyboard producer (`sub_82442B30`) reached the boundary in the control run and were blocked in the second, using guest-stack fixtures built by the probe rather than a fabricated `lr` | `challenge/`, `challenge-block/` |
+| `track` | `track slot before track_up action=0` → `after track_up press action=4` → native repeats → `after track_down release action=0 (none) repeating=0`: the release clears `[+68]` and the repeat stops. The §10.3 statement that `sub_824367E0` has no case for 4/5/8 was wrong about the *slot*; the release is the stop path | `track/track.log` |
+| `spam` | 50 s of alternating direct Lane0/Lane1 dispatches raise the HUD score 0 → 470 → 1,760 → 2,720: a direct dispatch is judged by the game's own pipeline | `spam-shots/score-sheet.png` |
+| `no-pad` | `--input_backend=none` boots, is connected, plays, and dispatches 25 actions (keyboard-only connectivity, no physical pad) | `no-pad/no-pad.log` |
+| `song-end` | The results screen is reached (`THESE DAYS`, `Finale 400`, `A CONTINUE`) after the song controller is torn down | `song-end-shots/08-song-end.png` |
+| `pause` | Start pauses the game through the game-screen path and resolves to `action=0 (none)`; `05-pause.png` / `11-resume.png` | `pause/pause.log` |
+| `ultimate3` | The Ultimate payload plays a song: all six native presses, plus the payload's own SELECT POWER-UPS screen on the way in | `ultimate3/ultimate3.log`, `ultimate3-shots/01b-powerups.png` |
+| `tutorial3`, `calibration` | *How to Play* and *Calibrate System* reached; the same physical controls that map to gameplay actions produce **zero** dispatch lines in either menu | `out/gameplay-mapping/p0/tutorial3-shots/03-tutorial.png`, `.../calibration-shots/03-calibration.png` |
+
+**The freeze, its cause, and its fix.** `ultimate2` (the same route as `ultimate`, same flags) showed
+every one of its eight screenshots byte-identical, the first being the title's "Discovering
+Downloadable Content" screen, while the guest kept running behind it. The boot log ends with
+`ExecutePacketType0 overflow (read count 00007C44, packet count 00007EF8)` and
+`**** PRIMARY RINGBUFFER: Failed to execute packet.`; two earlier ad-hoc Ultimate boots
+(`ultimate-nocache`, `ultimate-manual`) stalled the same way with no log kept. The cause is in the
+SDK's command processor, not in the probe or the payload: the ring's write pointer is a separate
+store from the packet data, so a packet header can be readable before its payload lands. That packet
+is *incomplete*, but `ExecutePrimaryBuffer` treated any failed packet as the end of the frame and
+returned the write index, discarding every remaining packet — including the frame's `XE_SWAP`. With
+the swap gone nothing was presented again, which is the frozen picture.
+
+Patch `0018-command-processor-incomplete-packet-recovery.patch` makes that packet a retry instead:
+the read pointer does not advance, `WorkerThreadMain` reloads the write pointer and calls back in,
+and the same packet executes once the payload is visible. A packet still incomplete after 64 retries,
+or a handler that failed after consuming payload, resynchronises past its header so the rest of the
+frame (in particular its swap) still runs, bounded at 8 resyncs per boot. `ExecutePacketType1` gained
+the length check its siblings already had — it read two payload words unconditionally.
+
+Measured recovery, same boot shape that froze before (`hunt104006-1`, 2026-10-18):
+`ExecutePacketType0 overflow (read count 00002DDC, packet count 00007A30)` followed by
+`**** PRIMARY RINGBUFFER: packet at 00000054 is incomplete (11740 byte(s) published); retrying (1 of 64)`,
+**no** `Failed to execute packet`, and the picture keeps updating (`after.png` ≠ `after-move.png`;
+`after-move.png` is the song list with the Ultimate SELECT POWER-UPS screen behind it). Ten Ultimate
+boots on the fixed build (that one plus `hunt*`/`observe*`/`ultimate3`) presented normally.
+`docs/reference/known-issues.md` carries the row.
+
+**Harness changes this pass needed** (`scripts/probe_gameplay.ps1`): the window is no longer started
+`-WindowStyle Hidden` (a hidden window cannot be captured or driven); the guest's own title is waited
+for by OCR before any key is sent, because input during the boot or the content discovery is what the
+packet desync was first seen with; and every menu tap carries its own `wait:1`, since the guest drops
+a run of taps with no wait between them.
+
+**Still open** (unchanged by this pass): the tutorial's and calibration's interactive segments (O4), raw
+SDL source provenance (O5 - the `sources` arm ran and logged no edges; P2 owns the next question),
+per-action edge/hold semantics (O2), a direct pause (O10), and the analog stick under a real thumb.
+Guest keystrokes (O6) closed statically: the title imports no keystroke API. See §10.5.

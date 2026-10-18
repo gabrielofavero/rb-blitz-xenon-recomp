@@ -27,7 +27,7 @@ namespace rb_blitz::fs {
 
 // The OS's own verdict on a failed file operation, as a stable phrase plus its numeric code.
 //
-// P3's rule (docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md, D5) is that a failed
+// P3's rule (docs/plans/finished/2026-10-14-installed-game-fix-prompts.md, D5) is that a failed
 // save names the operation, the path and the error - never a generic "saving" state. The old text
 // here was "cannot lock settings file (another writer or access denied)", which cannot tell a
 // transient competing writer (retry) from a directory the player may not write (stop and report).

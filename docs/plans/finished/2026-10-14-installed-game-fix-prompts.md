@@ -106,7 +106,7 @@ does not prove device support or successful presentation.
 
 ```text
 Fix the installed game's missing Vulkan option. Read P1 and D1 in
-docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md, installer/README.md,
+docs/plans/finished/2026-10-14-installed-game-fix-prompts.md, installer/README.md,
 installer/build.ps1, installer/tools/make_payload.ps1, CMakeLists.txt,
 CMakePresets.json, src/settings/boot.cpp, and src/rb_blitz_app.h.
 
@@ -246,7 +246,7 @@ DPI and decorations.
 
 ```text
 Fix first-launch ultrawide selection and the game window's dimensions together.
-Read P2/D2 in docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md and
+Read P2/D2 in docs/plans/finished/2026-10-14-installed-game-fix-prompts.md and
 docs/settings/graphics.md, especially its custom-resolution findings.
 
 Reproduce from the installed artifact using a genuinely fresh disposable profile
@@ -378,7 +378,7 @@ not by itself fix contention or an unwritable directory.
 
 ```text
 Fix settings navigation becoming stuck around saving and Restart now doing
-nothing. Read P3/D5 in docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md,
+nothing. Read P3/D5 in docs/plans/finished/2026-10-14-installed-game-fix-prompts.md,
 docs/settings/architecture.md, and the settings/restart modules identified there.
 
 Capture the exact message, screen, focused row and input sequence. Trace set,
@@ -510,7 +510,7 @@ Preliminary findings:
 
 ```text
 Improve the in-game settings help captions and apply the requested wording change.
-Read P4/D3 in docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md and the
+Read P4/D3 in docs/plans/finished/2026-10-14-installed-game-fix-prompts.md and the
 repository's .github/skills/in-game-settings/SKILL.md before changing menu rows.
 
 Use a visibly larger, friendly outline/sans font with DPI-aware sizing and a
@@ -634,7 +634,7 @@ pool/song identity; a transition must not advertise a different song from the on
 
 ```text
 Fix menu background music gaps and repeats. Read P5/D4 in
-docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md, src/hooks/shell_music.cpp,
+docs/plans/finished/2026-10-14-installed-game-fix-prompts.md, src/hooks/shell_music.cpp,
 src/hooks/menu_music_pool.h and docs/engine/main-menu.md part 2.
 
 Reproduce on the installed build with a known multi-song library and capture
@@ -871,14 +871,14 @@ Preliminary findings:
   and pacing restoration could contribute to the plateau. The screenshot does not distinguish them.
 - `[tree]` `dlc.cpp:474–482` now disables emulated content-mount latency on every boot. Older
   cache measurements attributed this saving to caching. Treat the
-  [finished cache plan](../finished/2026-10-10-song-cache-plan.md) as dated evidence, not proof
+  [finished cache plan](2026-10-10-song-cache-plan.md) as dated evidence, not proof
   of the current incremental benefit of Cache On.
 - `[tree]` [acceptance_dlc.ps1](../../../scripts/acceptance_dlc.ps1) deliberately creates fresh
   user roots for its correctness legs. Repeating those legs alone cannot measure a warm cache.
 
 ```text
 Investigate and fix the DLC cache/status/progress experience as one loading
-pipeline. Read P6/D6 in docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md,
+pipeline. Read P6/D6 in docs/plans/finished/2026-10-14-installed-game-fix-prompts.md,
 docs/guides/dlc.md and the cited cache, discovery, locale and progress modules.
 
 Start with the installed artifact from P1 and capture effective cache setting and
@@ -939,7 +939,7 @@ On and restores the player's V-Sync at the verified usable main menu. Details an
 the same counts are pushed into the **title's own** discovery bar through the engine's own push
 (`sub_82759190`), and the screen's words are the title's locale entries again. The counting model,
 the cache/status work, the pacing boundary and the installed measurements above stand. Record:
-[2026-10-15-native-discovery-bar.md](../finished/2026-10-15-native-discovery-bar.md).
+[2026-10-15-native-discovery-bar.md](2026-10-15-native-discovery-bar.md).
 
 **Root causes reproduced.** In the P1 installed artifact (`out/_swap/p1/install`), with 1,773
 flat packages and a copied guest cache from the older 1,402-package library, the first 100% event

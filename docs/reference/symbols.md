@@ -117,6 +117,29 @@ The two other rows of the MOGG table below are not `[functions]` entries:
 `__imp__XeKeysSetKey` / `__imp__XeKeysAesCbc` from import resolution, and
 `0x8280C568` is a `.data` table, which `[functions]` cannot name.
 
+### Gameplay action seam (P0, 2026-10-18)
+
+These are **analysis names, not `[functions]` entries**: nothing was renamed and no boundary moved.
+They are listed because the gameplay-input plan and
+[gameplay_probe.cpp](../../src/diag/gameplay_probe.cpp) cite them, and a citation needs a table.
+Evidence is the live P0 arms recorded in
+[plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+§10.2–§10.6 unless the row says static.
+
+| Guest address | Name | Evidence | Confidence |
+| --- | --- | --- | --- |
+| `0x82435EB0` | `BeatMatch_NewController` | Factory that reads `beatmatcher.controllers.beatmatch_controller_mapping` and builds the joypad (112-byte, `0x82443A70`) or keyboard (120-byte, `0x82442EC8`) controller; live `NewController -> 0x… (cfg=0xd)` at every song start. | 9 |
+| `0x824364B0` | `BeatMatch_DispatchAction` | The one validated boundary every press reaches: `r4` = `kBMAction`, `r5` = `arg`; returns unless `[this+52]` is set; stores a track action at `[+68]` when `arg == 0`. All four producers (button, keyboard, symbol message, held repeat) reach it. | 10 |
+| `0x824367E0` | `BeatMatch_ReleaseAction` | Release half of the same boundary; clears the held-action slot `[+68]`, which is what stops the track repeat. | 10 |
+| `0x824432A0` | `BeatMatch_LookupAction` | Button id → `kBMAction` through the selected mapping array; returns 0 for an unmapped button. The candidate preset bypass. | 10 |
+| `0x82443478` / `0x82443528` | `BeatMatch_ButtonDown` / `BeatMatch_ButtonUp` | Digital-button producers ([msg+4] → the button id); return address `0x8244351C` / `0x824435D4` at the boundary. | 9 |
+| `0x82436A28` | `BeatMatch_SymbolMessage` | Resolves a `send_down_action`/`send_up_action` symbol and calls the boundary; the second producer, reached by the `challenge` fixture. | 9 |
+| `0x82436BF8` | `BeatMatch_HeldRepeat` | Re-dispatches `[+68]` with `arg = 1` after `[+60]` and then every `[+64]`; the fourth producer (measured ~108 ms cadence). | 9 |
+| `0x82442B30` | `BeatMatch_KeyboardButtonDown` | Keyboard controller's down producer; inert in this port (the title imports no keystroke API), proven live only by the `challenge` fixture. | 8 |
+| `0x82443A30` | `BeatMatch_JoypadUpdate` | Per-frame controller override; the probe's timer and the only place a direct action is injected in P0. | 9 |
+| `0x82443C20` | `BeatMatch_ControllerDestroy` | Controller destructor; clears the probe's injection target at song end. | 8 |
+| `0x8238A0F0` | `Game_UpdateControls` | `Game` vtable +0x68, called once at song start (setup, not a frame seam). | 8 |
+
 ## Unresolved-call resolution (before the first compile)
 
 The three absolute tail branches flagged by the first validation run were

@@ -1,0 +1,164 @@
+# The command processor must not treat an incomplete packet as a corrupt ring.
+#
+# Found finishing P0 of docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, while
+# booting the Ultimate payload: 2 of ~22 boots froze the picture on the discovery screen for
+# good. The log ends with
+#   ExecutePacketType0 overflow (read count 00007C44, packet count 00007EF8)
+#   **** PRIMARY RINGBUFFER: Failed to execute packet.
+# - a packet header that had been published while its payload had not. The old code then broke
+# out of the primary-buffer loop and returned the write index, i.e. it threw away every
+# remaining packet of that frame, including its XE_SWAP, so nothing was presented again while
+# the guest kept running (docs/reference/known-issues.md).
+#
+# The ring write pointer is a separate store from the packet data, so a reader can legitimately
+# observe a header before the payload it announces has landed; that packet is incomplete, not
+# corrupt, and the fix is to not consume it. ExecutePrimaryBuffer now returns without advancing
+# the read pointer, which makes WorkerThreadMain reload the write pointer and call back in, and
+# the same packet executes normally once the rest of the payload is visible. A packet that is
+# still incomplete after 64 retries, or a handler that failed after consuming payload, is
+# treated as a desync instead: the loop steps over that header and keeps executing, so the rest
+# of the frame - in particular its swap packet - still runs, bounded at 8 resyncs per boot
+# before falling back to the old "drop the rest of the ring" behaviour.
+#
+# ExecutePacketType1 gains the length check its two sibling types already had: it read two
+# payload words unconditionally, so a truncated type-1 packet consumed the next packet's header
+# as data. The check also marks the packet incomplete, so it is retried rather than skipped.
+#
+# No cvar, no behaviour change on a well-formed ring: 10 consecutive Ultimate boots and every
+# base-game arm since the change present normally, and the recovery path is only reachable from
+# a packet that does not fit the published bytes.
+
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index da8e4324..27448422 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -252,6 +252,23 @@ class CommandProcessor {
+   uint32_t read_ptr_update_freq_ = 0;
+   uint32_t read_ptr_writeback_ptr_ = 0;
+ 
++  // The guest publishes the ring's write pointer as a separate store, so the
++  // primary buffer can be observed mid-write: a packet header that is readable
++  // while its payload has not landed yet. Such a packet is incomplete, not
++  // corrupt, so it is retried (the worker reloads the write pointer for every
++  // call) instead of discarding the rest of the ring - discarding it also threw
++  // away the frame's swap packet, which froze this title's picture for good
++  // (docs/reference/known-issues.md, 2026-10-18). Only a packet that is still
++  // incomplete after kMaxIncompletePacketRetries is treated as a desync.
++  static constexpr uint32_t kMaxIncompletePacketRetries = 64;
++  static constexpr uint32_t kMaxResyncPerBoot = 8;
++  uint32_t incomplete_packet_retries_ = 0;
++  uint32_t resync_bad_packets_ = 0;
++  // Set by a packet-type length check that ran out of published bytes, cleared
++  // by every packet read. It is the difference between "wait for more" and
++  // "this packet is malformed, skip it".
++  bool last_packet_incomplete_ = false;
++
+   std::unique_ptr<rex::thread::Event> write_ptr_index_event_;
+   std::atomic<uint32_t> write_ptr_index_;
+ 
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index a7443756..8250215d 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -619,14 +619,57 @@ uint32_t CommandProcessor::ExecutePrimaryBuffer(uint32_t read_index, uint32_t wr
+   memory::RingBuffer reader(memory_->TranslatePhysical(primary_buffer_ptr_), primary_buffer_size_);
+   reader.set_read_offset(read_index * sizeof(uint32_t));
+   reader.set_write_offset(write_index * sizeof(uint32_t));
+-  do {
+-    if (!ExecutePacket(&reader)) {
+-      // This probably should be fatal - but we're going to continue anyways.
+-      REXGPU_ERROR("**** PRIMARY RINGBUFFER: Failed to execute packet.");
+-      assert_always();
++  while (reader.read_count()) {
++    const uint32_t packet_start = reader.read_offset();
++    if (ExecutePacket(&reader)) {
++      incomplete_packet_retries_ = 0;
++      continue;
++    }
++
++    // Two different failures look the same from here:
++    //  * a packet whose payload does not fit in the bytes the guest has
++    //    published - the length checks fail before anything is consumed, and
++    //    last_packet_incomplete_ is set. The write pointer is a separate store,
++    //    so it can be visible before the packet it points at is complete; such a
++    //    packet is incomplete, not corrupt;
++    //  * a handler that failed after consuming payload - the packet really is
++    //    malformed.
++    // Only the first is worth retrying: returning without advancing the read
++    // pointer makes the worker reload the write pointer and call back in, and
++    // the same packet executes normally once the rest of the payload lands.
++    //
++    // Discarding the rest of the ring here (the behaviour this replaces) is what
++    // froze this title's picture for good: the frame's swap packet was thrown
++    // away with it, nothing was presented again, and the guest kept running
++    // behind a dead picture (docs/reference/known-issues.md, 2026-10-18).
++    if (last_packet_incomplete_ && incomplete_packet_retries_ < kMaxIncompletePacketRetries) {
++      ++incomplete_packet_retries_;
++      REXGPU_WARN(
++          "**** PRIMARY RINGBUFFER: packet at {:08X} is incomplete ({} byte(s) published); "
++          "retrying ({} of {})",
++          packet_start, reader.read_count(), incomplete_packet_retries_,
++          kMaxIncompletePacketRetries);
++      reader.set_read_offset(packet_start);
++      return read_index;
++    }
++
++    // Still incomplete after every retry, or malformed outright: resynchronise.
++    // Stepping over the failed packet's header and continuing keeps the rest of
++    // the frame - in particular its swap packet - running instead of stopping
++    // the picture for good. Bounded, so a permanently garbage ring cannot spin
++    // here for ever.
++    reader.set_read_offset(packet_start + uint32_t(sizeof(uint32_t)));
++    incomplete_packet_retries_ = 0;
++    if (++resync_bad_packets_ > kMaxResyncPerBoot) {
++      REXGPU_ERROR("**** PRIMARY RINGBUFFER: packet at {:08X} still failing after {} resync(s); "
++                   "dropping the rest of the ring",
++                   packet_start, kMaxResyncPerBoot);
+       break;
+     }
+-  } while (reader.read_count());
++    REXGPU_ERROR("**** PRIMARY RINGBUFFER: resynchronising past a bad packet at {:08X} "
++                 "(resync {} of {})",
++                 packet_start, resync_bad_packets_, kMaxResyncPerBoot);
++  }
+ 
+   OnPrimaryBufferEnd();
+ 
+@@ -663,6 +706,7 @@ void CommandProcessor::ExecutePacket(uint32_t ptr, uint32_t count) {
+ }
+ 
+ bool CommandProcessor::ExecutePacket(memory::RingBuffer* reader) {
++  last_packet_incomplete_ = false;
+   const uint32_t packet = reader->ReadAndSwap<uint32_t>();
+   const uint32_t packet_type = packet >> 30;
+   if (packet == 0) {
+@@ -697,6 +741,7 @@ bool CommandProcessor::ExecutePacketType0(memory::RingBuffer* reader, uint32_t p
+   if (reader->read_count() < count * sizeof(uint32_t)) {
+     REXGPU_ERROR("ExecutePacketType0 overflow (read count {:08X}, packet count {:08X})",
+                  reader->read_count(), count * sizeof(uint32_t));
++    last_packet_incomplete_ = true;
+     return false;
+   }
+ 
+@@ -714,6 +759,13 @@ bool CommandProcessor::ExecutePacketType0(memory::RingBuffer* reader, uint32_t p
+ bool CommandProcessor::ExecutePacketType1(memory::RingBuffer* reader, uint32_t packet) {
+   // Type-1 packet.
+   // Contains two registers of data. Type-0 should be more common.
++  if (reader->read_count() < 2 * sizeof(uint32_t)) {
++    // Without this the two reads below run past the published payload and eat
++    // the next packet's header. Same reasoning as ExecutePacketType0.
++    REXGPU_ERROR("ExecutePacketType1 overflow (read count {:08X})", reader->read_count());
++    last_packet_incomplete_ = true;
++    return false;
++  }
+   uint32_t reg_index_1 = packet & 0x7FF;
+   uint32_t reg_index_2 = (packet >> 11) & 0x7FF;
+   uint32_t reg_data_1 = reader->ReadAndSwap<uint32_t>();
+@@ -738,6 +790,7 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
+   if (reader->read_count() < count * sizeof(uint32_t)) {
+     REXGPU_ERROR("ExecutePacketType3 overflow (read count {:08X}, packet count {:08X})",
+                  reader->read_count(), count * sizeof(uint32_t));
++    last_packet_incomplete_ = true;
+     return false;
+   }
+ 

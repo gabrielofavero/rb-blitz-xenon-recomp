@@ -491,7 +491,7 @@ A snapshot is a copy of a build tree that was correct the day it was taken, and
 Windows presets on 2026-10-13; a snapshot taken earlier still held a `rexgpu-xenos.dll` with
 one backend, and every plain `build.ps1` after that kept it, embedded it and installed it —
 which is what the owner met on 2026-10-14 as an installed game whose *Renderer* row offered
-D3D12 alone (P1 of [installed-game-fix-prompts.md](../docs/plans/in-progress/2026-10-14-installed-game-fix-prompts.md)).
+D3D12 alone (P1 of [installed-game-fix-prompts.md](../docs/plans/finished/2026-10-14-installed-game-fix-prompts.md)).
 
 The manifest therefore records the snapshot's **provenance** — the backends of the tree it came
 from, and the commit it was taken at — and `build.ps1` checks a snapshot against the tree it is

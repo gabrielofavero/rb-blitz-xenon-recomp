@@ -243,6 +243,16 @@ retail/Ultimate material is research, not a deliverable.
   provider rows currently read and write through the stub bridge.
 * **P9** owns the per-row `hot`/`restart` strategy and the restart flow; the `Target` rows (`kChoose`) only
   set `general.target` and leave the screen, because the restart prompt is P9's.
+* **The `Target` row's choices are a fact about the install, not about the current boot.**
+  "Rock Band Blitz" and "Rock Band Blitz Demo" are always offered; "Rock Band Blitz Ultimate" is
+  offered whenever the payload is on disk (`provider.payload_present`, which is
+  `InspectInstallation(<game>/ultimate)` succeeding), *including* a boot whose stored target is
+  `common`. That indirection is load-bearing: the boot applies the stored target as
+  `ultimate_mode` (0 for common/demo, 1 for ultimate), so deriving the inspected root from the mode
+  would hide the only control that can select Ultimate as soon as the target was anything else.
+  Measured 2026-10-18: a fresh profile lists all three (`out/_swap/p0/target-row-fixed-shots/02-choices.png`),
+  choosing Ultimate stores `general.target = 'ultimate'`, and the next flag-free boot reports
+  `ultimate: provider compatible` + `provider active` and mounts the overlay.
 * **P10** owns the hide list, the 50-song pool and the refresh protection; the Main Menu panel already lists
   every actual row by stable token and keeps HELP & OPTIONS present and inert.
 * **P11** owns packaging: the payload generator here is the *shape* required (generate the patch record from

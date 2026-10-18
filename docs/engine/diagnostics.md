@@ -83,6 +83,33 @@ Three facts fall straight out of it, none guessed: `lr=0x82768E08` on `hv_decryp
 
 **The menu path is deliberately not wired yet** — a point needs an already-identified function, and the main menu's have no names; finding them is S2's work in [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md), and the probe is what it does it with. So P2's verification is "the instrument works on a real path", not "the title → main menu trace exists" — that trace is S2's output.
 
+### The gameplay-seam probe (P0, 2026-10-18)
+
+[gameplay_probe.cpp](../../src/diag/gameplay_probe.cpp) is a separate, narrow instrument for the
+controller-to-action seam of [plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §10. It hooks the guest controller
+factory, `ButtonDown`/`ButtonUp`, the button→action lookup, the action dispatch and release, the
+per-frame `JoypadController` update, and `Game::update_controls`; it logs each in the release
+`core` log instead of the trace ring. The cvars are registered here because they are not
+enhancement toggles, and each also accepts the `REX_<UPPERCASE>` environment override:
+
+| Cvar | Default | What it does |
+| --- | --- | --- |
+| `probe_gameplay` | off | Enables the logs: controller creation/destruction, the lookup result per button, down/up, and every entry into the action dispatch/release with its action and arg. |
+| `probe_gameplay_bypass` | off | Makes the button→action lookup return 0, so the native pad produces no dispatch. The direct actions still run. |
+| `probe_gameplay_inject` | off | Runs a timed direct-action sequence from the per-frame controller update: Lane0, TrackUp and TrackDown (gated), Lane1, UsePowerUp, with lane/power-up releases. **It dispatches real actions into the live song**, so it is a P0/P3 arm, never a menu-time diagnostic. |
+| `probe_gameplay_inject_track` | off | Adds the TrackUp/TrackDown pair to the sequence. Kept separate because a direct track action starts the controller's own held-action repeat, which runs until the same action is released (`sub_824367E0` clears the slot). |
+| `probe_gameplay_block_dispatch` | off | Suppresses **every** native entry into the action boundary while the song controller exists — press, release, the symbol message producer, the keyboard controller and the held-action repeat — so one run can show all four producers blocked. Direct probe actions still dispatch. |
+| `probe_gameplay_challenge` | off | Drives the two dormant producers (`sub_82436A28`'s symbol message and `sub_82442B30`'s keyboard controller) from guest-stack fixtures the probe builds, rather than from a fabricated return address. Pair with `block_dispatch` for the before/after pair. |
+| `probe_gameplay_sources` | off | Logs raw SDL keyboard/mouse state beside the pad (G/H = notes, N/M = tracks, mouse buttons = notes) and dispatches on its edges. The arm that measures source provenance; it has **not** been run yet (plan §10.5, O5). |
+| `probe_gameplay_inject_spam` | off | Replaces the fixed sequence with an alternating Lane0/Lane1 press-release loop starting 8 s into the song, for the judgement proof (the HUD score rises) rather than a handler-only check. |
+
+The matching harness is `scripts/probe_gameplay.ps1`: it boots the release build with `--mnk_mode=1`,
+waits for the guest's own title by OCR before sending any key, drives the menu to a song, presses
+native pad controls and/or runs an injection arm, and keeps the combined log and shots. Every menu
+tap carries its own `wait:1` — the guest drops a run of taps with no wait between them — and the
+window is never started hidden, because a hidden window cannot be captured or driven. The scratch
+driver `out/_swap/p0/run.ps1` carries the later switches that have not been folded back.
+
 ### Adding a point
 
 1. Pick a function that is already named, or an address proved by hand ([symbols.md](../reference/symbols.md) is the table).
