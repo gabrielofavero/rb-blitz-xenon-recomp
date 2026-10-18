@@ -54,6 +54,7 @@
 #include <cstdint>
 #include <cstring>
 #include <SDL3/SDL.h>
+#include "diag/gameplay_probe.h"
 #include "input/native_menu.h"
 
 #include <rex/cvar.h>
@@ -62,12 +63,9 @@
 #include <rex/ppc/context.h>
 #include <rex/system/xmemory.h>
 
-REX_EXTERN(__imp__sub_82435EB0);
-REX_EXTERN(__imp__sub_82443C20);
-REX_EXTERN(__imp__sub_82443A30);
+REX_EXTERN(__imp__sub_824432A0);
 REX_EXTERN(__imp__sub_82443478);
 REX_EXTERN(__imp__sub_82443528);
-REX_EXTERN(__imp__sub_824432A0);
 REX_EXTERN(__imp__sub_824364B0);
 REX_EXTERN(__imp__sub_824367E0);
 REX_EXTERN(__imp__sub_82442B30);
@@ -209,11 +207,11 @@ uint32_t MessageButton(PPCContext& ctx, uint8_t* base, uint32_t message) {
 
 // The JoypadController the game created for the current song. Kept from the
 // factory hook so the per-frame seam can dispatch into the same object the
-// native mapping uses.
+// native mapping uses. The production hook (src/hooks/gameplay_input.cpp) owns
+// the pointer; this copy exists for the probe's fixtures and block rule.
 thread_local uint32_t g_controller = 0;
 thread_local uint32_t g_last_update_game = 0;
 thread_local uint32_t g_fixture_controller = 0;
-thread_local int g_tick = 0;
 thread_local int32_t g_spam_action = 0;
 thread_local uint32_t g_sources = 0;
 
@@ -284,8 +282,7 @@ void ReleaseAction(PPCContext& ctx, uint8_t* base, uint32_t controller, int32_t 
 // logged before the press and after the release on every arm.
 constexpr int kSpamFirstTick = 300;  // about 8 s at 28 ms/tick: the HUD still reads 0
 
-void TimedInject(PPCContext& ctx, uint8_t* base, uint32_t controller) {
-  const int tick = g_tick;
+void TimedInject(PPCContext& ctx, uint8_t* base, uint32_t controller, int tick) {
   if (REXCVAR_GET(probe_gameplay_inject_spam)) {
     if (tick < kSpamFirstTick) {
       if (tick == kSpamFirstTick - 1) {
@@ -438,30 +435,27 @@ void SampleSources(PPCContext& ctx, uint8_t* base) {
 
 }  // namespace
 
-// The factory: log which controller class a user got and keep its pointer.
-REX_HOOK_RAW(sub_82435EB0) {
-  const bool on = REXCVAR_GET(probe_gameplay);
-  const uint32_t config = ctx.r4.u32;
-  __imp__sub_82435EB0(ctx, base);
-  if (on) {
-    g_controller = static_cast<uint32_t>(ctx.r3.u32);
-    g_tick = 0;
-    g_spam_action = 0;
-    g_sources = 0;
-    REXLOG_INFO("gameplay_probe: NewController -> {:#x} (cfg={:#x}, vtable={:#x})",
-                ctx.r3.u32, config, g_controller ? LoadBe32(base, g_controller) : 0);
+// The factory: the production hook (src/hooks/gameplay_input.cpp) owns sub_82435EB0, because one
+// guest address can only have one definition. It calls this with the object it adopted.
+void rb_blitz::diag::gameplay_probe::ControllerCreated(uint32_t controller, uint32_t config,
+                                                      uint32_t vtable) {
+  g_controller = controller;
+  g_spam_action = 0;
+  g_sources = 0;
+  if (REXCVAR_GET(probe_gameplay)) {
+    REXLOG_INFO("gameplay_probe: NewController -> {:#x} (cfg={:#x}, vtable={:#x})", controller,
+                config, vtable);
   }
 }
 
-// The controller destructor clears the injection target so a song end cannot
-// leave a stale pointer armed.
-REX_HOOK_RAW(sub_82443C20) {
-  if (REXCVAR_GET(probe_gameplay) &&
-      static_cast<uint32_t>(ctx.r3.u32) == g_controller) {
-    g_controller = 0;
+// The destructor callback, called by the production hook before the original runs.
+void rb_blitz::diag::gameplay_probe::ControllerDestroyed(uint32_t controller) {
+  if (REXCVAR_GET(probe_gameplay) && controller == g_controller) {
     REXLOG_INFO("gameplay_probe: controller destroyed");
   }
-  __imp__sub_82443C20(ctx, base);
+  if (controller == g_controller) {
+    g_controller = 0;
+  }
 }
 
 // Game::update_controls is setup, not the per-frame injection seam.
@@ -526,39 +520,42 @@ REX_HOOK_RAW(sub_82443528) {
   __imp__sub_82443528(ctx, base);
 }
 
-// The validated dispatch boundary: every press of a mapped action arrives here,
-// from all four producers. Blocks the press entirely when asked.
-REX_HOOK_RAW(sub_824364B0) {
-  if (REXCVAR_GET(probe_gameplay)) {
-    const uint32_t lr = static_cast<uint32_t>(ctx.lr);
-    REXLOG_INFO(
-        "gameplay_probe: dispatch controller={:#x} action={} ({}) arg={} from={} lr={:#x} origin={}",
-        ctx.r3.u32, ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)), ctx.r5.u32,
-        ProducerOf(lr, static_cast<uint32_t>(ctx.r5.u32)), lr, "native");
-    if (BlockNative(ctx.r3.u32)) {
-      REXLOG_INFO("gameplay_probe: blocked native dispatch action={} ({}) from={} lr={:#x}",
-                  ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)),
-                  ProducerOf(lr, static_cast<uint32_t>(ctx.r5.u32)), lr);
-      return;
-    }
+// The validated dispatch boundary, called from the production hook
+// (src/hooks/gameplay_input.cpp): every press of a mapped action arrives here, from all four
+// producers. Logs it and answers whether the probe's own block switch asks for it to be dropped.
+bool rb_blitz::diag::gameplay_probe::PressBoundary(PPCContext& ctx, uint8_t* base) {
+  if (!REXCVAR_GET(probe_gameplay)) {
+    return false;
   }
-  __imp__sub_824364B0(ctx, base);
+  const uint32_t lr = static_cast<uint32_t>(ctx.lr);
+  REXLOG_INFO(
+      "gameplay_probe: dispatch controller={:#x} action={} ({}) arg={} from={} lr={:#x} origin={}",
+      ctx.r3.u32, ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)), ctx.r5.u32,
+      ProducerOf(lr, static_cast<uint32_t>(ctx.r5.u32)), lr, "native");
+  if (BlockNative(ctx.r3.u32)) {
+    REXLOG_INFO("gameplay_probe: blocked native dispatch action={} ({}) from={} lr={:#x}",
+                ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)),
+                ProducerOf(lr, static_cast<uint32_t>(ctx.r5.u32)), lr);
+    return true;
+  }
+  return false;
 }
 
 // The release half of the same boundary, blocked by the same switch.
-REX_HOOK_RAW(sub_824367E0) {
-  if (REXCVAR_GET(probe_gameplay)) {
-    const uint32_t lr = static_cast<uint32_t>(ctx.lr);
-    REXLOG_INFO("gameplay_probe: release controller={:#x} action={} ({}) from={} lr={:#x}",
-                ctx.r3.u32, ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)),
-                ProducerOf(lr, 0), lr);
-    if (BlockNative(ctx.r3.u32)) {
-      REXLOG_INFO("gameplay_probe: blocked native release action={} ({}) from={} lr={:#x}",
-                  ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)), ProducerOf(lr, 0), lr);
-      return;
-    }
+bool rb_blitz::diag::gameplay_probe::ReleaseBoundary(PPCContext& ctx, uint8_t* base) {
+  if (!REXCVAR_GET(probe_gameplay)) {
+    return false;
   }
-  __imp__sub_824367E0(ctx, base);
+  const uint32_t lr = static_cast<uint32_t>(ctx.lr);
+  REXLOG_INFO("gameplay_probe: release controller={:#x} action={} ({}) from={} lr={:#x}",
+              ctx.r3.u32, ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)),
+              ProducerOf(lr, 0), lr);
+  if (BlockNative(ctx.r3.u32)) {
+    REXLOG_INFO("gameplay_probe: blocked native release action={} ({}) from={} lr={:#x}",
+                ctx.r4.s32, ActionName(static_cast<int32_t>(ctx.r4.s32)), ProducerOf(lr, 0), lr);
+    return true;
+  }
+  return false;
 }
 
 // The keyboard controller's ButtonDown. Its producer is inert under this port
@@ -581,13 +578,15 @@ REX_HOOK_RAW(sub_82436A28) {
   __imp__sub_82436A28(ctx, base);
 }
 
-REX_HOOK_RAW(sub_82443A30) {
-  if (REXCVAR_GET(probe_gameplay) && g_controller != 0 && ctx.r3.u32 == g_controller &&
-      rb_blitz::input::GameScreenActive() && LoadBe8(base, g_controller + 52)) {
-    ++g_tick;
-    if (g_tick == 30 && REXCVAR_GET(probe_gameplay_challenge)) ChallengeProducers(ctx, base);
-    if (REXCVAR_GET(probe_gameplay_inject)) TimedInject(ctx, base, g_controller);
-    if (REXCVAR_GET(probe_gameplay_sources)) SampleSources(ctx, base);
+// The per-frame seam: the production hook (src/hooks/gameplay_input.cpp) owns sub_82443A30 and
+// calls this only for a live song's controller with the probe's own tick. `controller` is the
+// object the production hook adopted.
+void rb_blitz::diag::gameplay_probe::Frame(PPCContext& ctx, uint8_t* base, uint32_t controller,
+                                           int tick) {
+  if (!REXCVAR_GET(probe_gameplay)) {
+    return;
   }
-  __imp__sub_82443A30(ctx, base);
+  if (tick == 30 && REXCVAR_GET(probe_gameplay_challenge)) ChallengeProducers(ctx, base);
+  if (REXCVAR_GET(probe_gameplay_inject)) TimedInject(ctx, base, controller, tick);
+  if (REXCVAR_GET(probe_gameplay_sources)) SampleSources(ctx, base);
 }

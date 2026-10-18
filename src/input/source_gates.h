@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -149,6 +150,74 @@ struct ActionHold {
 // the game's own player, and a host action must never be injected into every polled slot.
 inline constexpr uint32_t kGameplayUser = 0;
 inline bool IsGameplayUser(uint32_t user_index) { return user_index == kGameplayUser; }
+
+// ---------------------------------------------------------------------------------------------
+// P3: the action boundary the guest dispatcher consumes (plan D4/D5).
+// ---------------------------------------------------------------------------------------------
+
+// X_INPUT_GAMEPAD_START. It is the one pad control the game reads *outside* the action boundary,
+// through the game screen's own pause path (P0 measured Start resolving to `kBMAction_None` while
+// still pausing, plan §10.3/§10.4 O10), so it is the one control the overlay has to raise for a
+// direct Pause rather than dispatch. Kept as a bit here so this module stays SDK-free; a test
+// pins it against `remap::TargetBit(Target::kStart)`.
+inline constexpr uint16_t kStartButtonBit = 0x0010;
+
+// The pad controls the Controller table's own sources name, as X_INPUT_GAMEPAD bits. Stick
+// directions contribute nothing: their travel is analog and the native preset's reaction to it is
+// what the boundary suppression stops. A source this build does not understand contributes
+// nothing either - it cannot have been applied, so it cannot own a control.
+uint16_t ControllerOwnedButtons(const profile::gameplay_remap::Table& table);
+
+// What the state filter must do to the pad it is about to hand the guest while a gameplay table
+// routes input (D3/D4). `clear_buttons` are physical controls the Controller table owns: with the
+// native preset bypassed, the guest must not read them as pad input either, and Start is always
+// one of them because the native pause path is part of that preset. `set_buttons` carries the
+// Pause action, whose only route into the game is that same pause path.
+struct GameplayPadOverlay {
+  uint16_t clear_buttons = 0;
+  uint16_t set_buttons = 0;
+  bool operator==(const GameplayPadOverlay&) const = default;
+};
+
+// `controller_active`/`keyboard_mouse_active` are the two tables' routing; `pause_held` is the
+// union's Pause action, `controller_buttons` what `ControllerOwnedButtons` answered. Start is
+// delivered exactly when an active table's Pause action is held, whatever the physical pad says:
+// the Controller table's own `pad:start` binding therefore still pauses, an unbound Start does
+// nothing, and a keyboard/mouse Pause works with the native pad path untouched.
+GameplayPadOverlay GameplayOverlay(bool controller_active, bool keyboard_mouse_active,
+                                   bool pause_held, uint16_t controller_buttons);
+
+// The dispatcher's queue (D5). The poll and the guest's frame seam are different points in time:
+// a tap that begins and ends between two visits must arrive as a press *and* a release, in that
+// order, or the strike it meant disappears. One press and one release are therefore remembered
+// per action; a longer burst collapses to one of each, and the consumer reconciles the final held
+// state, so no action can be left down. Pure: the caller owns the lock.
+class ActionEdges {
+ public:
+  // One poll's union held state for `action`; queues the edge a change makes.
+  void Observe(profile::gameplay_remap::Action action, bool held_now);
+  // The queued edges in order (a press before a release when both are pending). Returns how many
+  // were written; a capacity below two leaves the rest queued.
+  std::size_t Drain(profile::gameplay_remap::Action action, bool* out, std::size_t capacity);
+  bool Pending(profile::gameplay_remap::Action action) const;
+  // The last observed held state - what the consumer reconciles against.
+  bool Held(profile::gameplay_remap::Action action) const;
+  // A boundary: queued edges are dropped and every action reads as released, so the next poll
+  // cannot deliver the old context's press or a release nobody asked for. The consumer must
+  // still release what it already dispatched.
+  void Clear();
+
+ private:
+  struct Slot {
+    bool press = false;
+    bool release = false;
+  };
+  static constexpr std::size_t kIndex(profile::gameplay_remap::Action action) {
+    return static_cast<std::size_t>(action);
+  }
+  std::array<Slot, profile::gameplay_remap::kActionCount> slots_{};
+  std::array<bool, profile::gameplay_remap::kActionCount> held_{};
+};
 
 // The kernel of the synthetic host device: it enumerates while either host gate is open, so a
 // keyboard-only or mouse-only configuration stays connected without a pad (D2), and it

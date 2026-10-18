@@ -43,9 +43,9 @@ namespace rb_blitz::input {
 // `keyboard_support` and `mouse_ui_nav` are *source gates*: off means that device drives nothing.
 // The two gameplay switches are routing selectors: off keeps the device usable everywhere else and
 // only stops that table's direct actions. P2 (2026-10-18) made the gates real and evaluates both
-// tables' sources and edges every poll (src/input/source_gates.h); the routing the two gameplay
-// switches select is held off by the plan's sequencing guard until P3's dispatch exists
-// (`kGameplayDispatchReady` in src/input/remap.cpp).
+// tables' sources and edges every poll (src/input/source_gates.h); P3 dispatches them through the
+// title's own action boundary (src/hooks/gameplay_input.h), and the filter applies the pad overlay
+// that keeps the bypassed native preset and the direct Pause honest.
 struct GameplaySwitches {
   bool keyboard_support = true;          // `keyboard_support`
   bool mouse_support = true;             // `mouse_ui_nav` - the existing Mouse Support row

@@ -40,6 +40,10 @@ param(
     # be installed, so the harness's own key-driven pad presses stop reaching the guest and no
     # gameplay source trace line appears.
     [switch]$NoKeyboard,
+    # P3's held-track arm: hold Move Lane Right (K) past the controller's own repeat delay and then
+    # release it, so a real binding shows both the native repeat it arms and the release that
+    # stops it (the plan's D5 held-state rule).
+    [switch]$LongTrack,
     [ValidateSet("Song", "Tutorial", "Calibration")][string]$Context = "Song",
     [switch]$KeepRunning,
     [string]$Backend = '',
@@ -241,6 +245,14 @@ try {
                       "shot:09-dpad.png")
     }
     if ($Pause) { $actions += @('key:start', 'wait:3', 'shot:05-pause.png', 'key:start', 'wait:3', 'shot:11-resume.png') }
+    if ($LongTrack) {
+        # The controller's own repeat starts about 5 s after a track press (P0's `track` arm), so
+        # the hold has to outlast that; the release must then stop it (sub_824367E0 clears the
+        # held-action slot). Move Lane Left is held second so both directions are covered.
+        $actions += @('hold:key_k:13', 'wait:2', "shot:12-track-right.png",
+                      'hold:key_d:13', 'wait:2', "shot:13-track-left.png", 'wait:3',
+                      "shot:14-track-stopped.png")
+    }
     & (Join-Path $root 'scripts\drive_ui.ps1') -Actions $actions -OutDir $relativeShots
 
     if ($SongEnd) {

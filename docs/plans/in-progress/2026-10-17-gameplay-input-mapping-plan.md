@@ -1,11 +1,14 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0 is closed for the action seam, P1 and P2 have landed (§10,
-§11, §12); P3-P6 are not started.** This document records the requested behavior, a source review
+**Status: in progress, 2026-10-18. P0 is closed for the action seam, P1, P2 and P3 have landed
+(§10, §11, §12, §13); P4-P6 are not started.** This document records the requested behavior, a source review
 at `ca8fa2a`, proposed implementation decisions, and the investigation required before choosing
-guest hooks. Configuration and its settings surface exist as of P1, and P2 samples every source
-behind the two device gates; no gameplay action is dispatched yet, so nothing about a song is
-affected by the new switches.
+guest hooks. Configuration and its settings surface exist as of P1, P2 samples every source
+behind the two device gates, and P3 dispatches the six actions through the title's own validated
+boundary: with the Keyboard + Mouse switch on (the shipping default) a key or mouse binding plays
+the game, and with the Controller switch on the saved native preset is bypassed and its pad
+controls are taken out of the delivered state. The Controller switch still ships **off**, so a
+player who never enables it keeps the native preset exactly as before.
 
 Planning pass 2 (2026-10-17) added the supersession record (§2), the settings-schema and
 focus-ring constraints, the build-target registration, the development sequencing guard, the
@@ -515,6 +518,13 @@ connectivity, the action edges and boundary rule, the cursor rule, and the live 
 P2 dispatches nothing, and the sequencing guard now has a name in code (`kGameplayDispatchReady` in
 `src/input/remap.cpp`): the stored values of both gameplay switches are read and logged, but the
 routing they select is held off, so General Mapping and the native preset behave exactly as before.
+P3 status (2026-10-18): **landed, and P4 can start** — §13 records the guest adapter, the boundary
+suppression of all native producers, the pad overlay that carries Pause and hides the Controller
+table's controls, the edge/reconcile model, the axis leak it found and fixed, and four live arms
+(keyboard play, held track repeat and stop, direct pause, and the Controller table's bypass with no
+physical pad). `kGameplayDispatchReady` is now `true`; the Controller switch still defaults off, and
+the pad arm, the analog stick under a real thumb and the tutorial/calibration interactive segments
+stay unmeasured (§13.4).
 ## 7. Validation and release criteria
 
 ### 7.1 Automated checks
@@ -1060,3 +1070,106 @@ that re-read had been erasing the press the events had recorded.
   by unit test and the 2026-10-13 measurement; the native-menu queue by the existing `native_mouse`
   suite (the queue is disabled in gameplay and resets on the boundary, which is what keeps a
   gameplay press out of it).
+
+## 13. P3 evidence — direct gameplay dispatch (2026-10-18)
+
+**P3 landed; P4 can start.** A gameplay table's held action now reaches the title's own validated
+action boundary, and the Controller table's routing also suppresses every native producer into it.
+`kGameplayDispatchReady` in [src/input/remap.cpp](../../../src/input/remap.cpp) is `true`, so the two
+gameplay switches select the routing their names describe; the Controller switch still defaults
+off, so the native preset remains the shipping behaviour for a player who never enables it.
+
+### 13.1 What landed
+
+| P3 item | Where it landed |
+| --- | --- |
+| Guest adapter | New [src/hooks/gameplay_input.h](../../../src/hooks/gameplay_input.h) / [.cpp](../../../src/hooks/gameplay_input.cpp): five hooks (controller factory `sub_82435EB0`, destructor `sub_82443C20`, per-frame `sub_82443A30`) plus the two boundary hooks (`sub_824364B0` press, `sub_824367E0` release), the `kBMAction` mapping, the dispatcher state and the trace lines |
+| One hook per address | `REX_HOOK_RAW(sub_…)` defines the symbol the recompiled caller binds to, so two definitions cannot link. The P0 probe's five hooks moved out of [src/diag/gameplay_probe.cpp](../../../src/diag/gameplay_probe.cpp); the probe now exposes callbacks ([src/diag/gameplay_probe.h](../../../src/diag/gameplay_probe.h)) that the production hooks call, and keeps the hooks production does not own (the lookup, ButtonDown/Up, the message producer) |
+| Native bypass | `NativeActionsSuppressed()` is true exactly while the Controller table routes gameplay input; the boundary hooks drop every native press *and* release while it holds. All four P0 producers reach those two functions, so one decision covers ButtonDown/Up, the keyboard producer, the explicit message producer and the controller's own repeat (§10.4 O1). Direct calls use `__imp__sub_824364B0`, the unhooked function, so the suppressor can never eat its own dispatch |
+| Pad overlay | `GameplayPadOverlay`/`GameplayOverlay` in [src/input/source_gates.h](../../../src/input/source_gates.h): while the Controller table routes, every pad control its sources name (`ControllerOwnedButtons`, `0x531F` for the shipped defaults) and Start are removed from the state the guest reads; Start is raised exactly while an active table's Pause action is held. That is how the direct Pause reaches the game's own pause path - Start is not a `kBMAction` (§10.4 O10) |
+| Physical pad only while routing | The filter hands `Apply` the *physical* pad (buttons, triggers and axes) instead of the merged state while either gameplay switch routes, so the legacy MnK emulation is no longer a second keyboard path into the native preset (R4). With both switches off the merged state is used exactly as before |
+| Edge model | `ActionEdges` (SDK-free): one press and one release remembered per action, drained in order by the seam, reconciled against the latest published level. A tap between two guest frames arrives as press then release; a collapsed burst cannot leave an action stuck. The two tables are unioned per action from their own `ActionHold`s, so a source that must release before re-arming keeps that rule |
+| Boundaries | `InvalidateGameplayInput()` also calls `gameplay_input::NoteBoundary()`: queued edges are dropped and the seam releases everything the guest believes is down on its next visit, which is what stops a held track action's repeat across a pause, a focus loss or a song end. The poll's own reset (context, gates, routing, pad connect) does the same |
+| Boot evidence | `gameplay mapping: direct dispatch on (plan P3) - … owns the pad control(s) 0x531f in the delivered state`, plus the existing switch/source lines; with `input_source_trace` every direct press/release and every suppressed native producer is logged |
+
+### 13.2 Rules the code now enforces
+
+- The **Controller** table's press goes through `sub_824364B0(controller, kBMAction, 0)` and its
+  release through `sub_824367E0(controller, kBMAction)` - the same calls the native preset makes,
+  so note judgement, calibration, lane animation and the power-up rules stay the game's own.
+- A held track action arms the controller's own repeat exactly as a native press does (P0's
+  measured `[+68]` slot); the release is what stops it, and the release is always delivered -
+  including when a boundary ends the hold.
+- Pause is level-driven through the Start bit, never through the boundary: a held Pause keeps Start
+  down (as a held physical Start would), and the context change to the pause panel invalidates the
+  hold, so resuming cannot inherit it.
+- The seam runs on the live controller's own update and flushes releases in *any* context; only new
+  presses require a live song (`GameScreenActive()` and the controller's `[+52]` byte).
+
+### 13.3 Live arms (release build, 2026-10-18)
+
+The harness is `scripts/probe_gameplay.ps1`; the new `-LongTrack` switch drove the long holds
+below. Every arm used `--mnk_mode=1`, `--input_source_trace=true` and the default tables (Keyboard
++ Mouse on, Controller off) unless it says otherwise. Evidence under
+`out/gameplay-mapping/p0/<label>/` with shots in `<label>-shots/`.
+
+| Arm | What it measured | Evidence |
+| --- | --- | --- |
+| `p3-km-song` | Keyboard play through the **shipped default table**: `powerup` (Space), `second_note` (J), `move_lane_right` (K), `move_lane_left` (D) each logged a press and a release from a 2 s hold, and the song ran (lane view in `03-gameplay.png`). It also exposed the axis leak below: the K+M-only arm produced one native `lane0` press from a held `D` at 14:43:41.326 | `p3-km-song/p3-km-song.log`, `p3-km-song-shots/` |
+| `p3-km-hold` | The held-action contract through a real binding: `move_lane_right` pressed at 14:46:40.606, the controller's own repeat began 5.0 s later (14:46:45.574) at ~108 ms cadence, and the release at 14:46:53.597 was the last `action=4` line; `move_lane_left` repeated the same way and stopped at its 14:47:09.584 release. 152 native repeat dispatches in the arm, none after a release | `p3-km-hold/p3-km-hold.log`, shots 12-14 |
+| `p3-km-pause` | A direct Pause: `action=pause down active=on source=key:Return` at 14:49:36.313, `screen=game_screen panel=pause_panel` 40 ms later, the second Return in the pause context (`active=off`) resumed at 14:49:40.418, and no further pause followed. `05-pause.png` is the game's own GAME PAUSED screen | `p3-km-pause/p3-km-pause.log`, `p3-km-pause-shots/05-pause.png` |
+| `p3-controller-on`, `p3-controller-on-b` | The Controller table's bypass with **no physical pad** (`REX_GAMEPLAY_MAPPING_CONTROLLER=true`): the probe's message fixture and keyboard fixture reached the boundary (`from=message`, `from=keyboard_down`) and were suppressed; the K+M table still dispatched five presses beside them. The first arm also caught a native `from=button_down` lane0 and proved the suppression drops it; after the axis fix (below) only the deliberate fixtures reach the boundary | `p3-controller-on/`, `p3-controller-on-b/` logs and shots |
+| `p3-km-axes` | The re-run of the keyboard arm after the fix: **0** native dispatches in the whole song while all four actions still dispatched, i.e. the MnK path no longer reaches the native preset at all | `p3-km-axes/p3-km-axes.log` |
+
+**The axis leak (found and fixed by this pass).** The filter rewrote the delivered buttons and
+triggers but left the merged stick axes in `state.gamepad`, so the legacy MnK emulation's WASD
+travel still reached the guest and the title derived its own stick-direction button (`kPad` 17,
+LStickRight) from it - a native `lane0` press while every button bit was already being cleared.
+The filter now writes the axes back from the same `PadState` it rewrote the buttons from
+(`thumb_lx/ly/rx/ry`), which is the identity when the merged state was used. `p3-km-axes` is the
+measurement: zero native dispatches after the fix, against one at 14:43:41.326 before it.
+
+### 13.4 What this pass does not claim
+
+- **No physical-pad live arm.** This machine has no pad, and the Controller table's `pad:` sources
+  deliberately read the physical drivers only, so the pad half of P3 is unit-tested and its
+  suppression is measured through the probe's fixtures, not through a real controller. The
+  **Controller switch ships off**, so this is not a shipping default.
+- **No analog stick under a real thumb**, and no XInput boot (both P0/P2 residuals).
+- **The tutorial's and calibration's interactive segments (O4)** are still unmeasured; their menus
+  produced zero dispatches in P0.
+- **The native category is still visible (P5).** With the Controller switch on, the category is
+  harmless (the preset is bypassed) but not hidden yet.
+- **The table UI is P4.** The shipped defaults are the only bindings a player can use until the
+  six-action tables and their capture exist.
+- **A held navigation stick across the menu-to-song transition** can still deliver one native
+  button message before the first direct-routing poll (measured once, `p3-km-song` at 14:43:41.326
+  - the same event as the axis leak). The axis fix removes its cause for MnK input; a real pad's
+  queued message at that boundary is not measured.
+
+### 13.5 Verdicts for the P0 open items
+
+- **O2 (action edge/hold semantics). CLOSED for the shipping consumers.** Every action's live
+  behaviour is now measured through a real binding: notes and the power-up take a press and a
+  release (`p3-km-song`), the two track actions arm the controller's own repeat and stop on
+  release (`p3-km-hold`), and Pause is the level-driven Start bit (`p3-km-pause`). Two bindings of
+  the same action overlap into one held action by construction (the union of the two tables), and
+  a release of every contributor followed by a new press is a new edge - both pinned by the
+  `ActionHold`/`ActionEdges` unit cases.
+- **O10 (a direct pause). CLOSED.** `p3-km-pause` enters the same GAME PAUSED screen the native
+  Start path reaches, and the release-before-rearming rule keeps the resume from bouncing.
+- **O6 (guest keystrokes)** stays closed statically (no keystroke import), and the P2 arms above
+  keep the keyboard controller's producer reachable only by a fabricated message.
+- O4 (tutorial/calibration interactive segments), the pad arm and the analog stick remain open as
+  §13.4 lists them.
+
+### 13.6 Tests
+
+`rb_blitz_input_gates_tests` (ctest `input_gates`) grew from 116 to **151 checks**: the Start bit
+equals `remap::TargetBit(Target::kStart)`, the shipped controller table owns `0x531F` of pad bits
+(directions and triggers contribute none), the overlay's clear/set matrix for every routing
+combination, a tap between two visits arriving as press-then-release, a one-slot drain leaving the
+release queued, a repeated press not queueing twice, and a boundary dropping the queue while
+reading as released. The full suite is **40/40** in the Vulkan-off debug tree
+(`cmake --preset win-amd64-debug -DREXGLUE_USE_VULKAN=OFF -DBUILD_TESTING=ON`,
+`ctest --test-dir out/build/win-amd64-debug`, 2026-10-18).

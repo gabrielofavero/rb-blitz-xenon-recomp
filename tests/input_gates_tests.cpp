@@ -369,5 +369,102 @@ int main() {
     CHECK_TRUE(HostDeviceConnected(kOpen));
   }
 
+  BeginCase("Start is the game's own pause bit, and the controller table owns its pad controls");
+  {
+    // The bare bit above must be the pad's Start, or the overlay would raise a button the game
+    // does not read as Pause.
+    CHECK_EQ(kStartButtonBit, remap::TargetBit(remap::Target::kStart));
+    const gameplay::Table controller(gameplay::TableKind::kController);
+    // Preset 0's controls: the four D-pad directions, A, X, both shoulders and Start. The
+    // triggers and the stick directions have no bit (analog), so the mask never names them.
+    CHECK_EQ(ControllerOwnedButtons(controller), uint16_t{0x531F});
+    // A table whose rows bind nothing owns nothing, and a key source owns no pad control.
+    gameplay::Table empty(gameplay::TableKind::kController);
+    for (const gameplay::Action action : gameplay::Actions()) {
+      empty.Set(action, {});
+    }
+    CHECK_EQ(ControllerOwnedButtons(empty), uint16_t{0x0000});
+    empty.Set(gameplay::Action::kPowerup, {Key("Space")});
+    CHECK_EQ(ControllerOwnedButtons(empty), uint16_t{0x0000});
+    // A stick direction is travel, not a control: only `pad:x` contributes a bit.
+    empty.Set(gameplay::Action::kPowerup, {Pad("x"), Pad("lstick_up")});
+    CHECK_EQ(ControllerOwnedButtons(empty), uint16_t{0x4000});
+  }
+
+  BeginCase("the pad overlay clears what the controller table owns and raises Pause only");
+  {
+    const uint16_t owned = 0x4000;
+    // Controller routing: its controls and Start are taken out of the delivered pad.
+    const GameplayPadOverlay controller =
+        GameplayOverlay(true, false, false, owned);
+    CHECK_EQ(controller.clear_buttons, uint16_t{owned | kStartButtonBit});
+    CHECK_EQ(controller.set_buttons, uint16_t{0});
+    // A held Pause puts Start back, whether or not the table binds it.
+    CHECK_EQ(GameplayOverlay(true, false, true, owned).set_buttons, kStartButtonBit);
+    // Keyboard + Mouse only: the native pad path is untouched, so nothing is cleared - but a
+    // direct Pause still has to reach the same screen.
+    const GameplayPadOverlay keyboard_only =
+        GameplayOverlay(false, true, false, owned);
+    CHECK_EQ(keyboard_only.clear_buttons, uint16_t{0});
+    CHECK_EQ(keyboard_only.set_buttons, uint16_t{0});
+    const GameplayPadOverlay keyboard_pause = GameplayOverlay(false, true, true, owned);
+    CHECK_EQ(keyboard_pause.clear_buttons, uint16_t{0});
+    CHECK_EQ(keyboard_pause.set_buttons, kStartButtonBit);
+    // In a menu neither table routes: the pad is the menu's own.
+    const GameplayPadOverlay menu = GameplayOverlay(false, false, false, owned);
+    CHECK_EQ(menu.clear_buttons, uint16_t{0});
+    CHECK_EQ(menu.set_buttons, uint16_t{0});
+  }
+
+  BeginCase("a tap between two visits arrives as a press and a release, in that order");
+  {
+    ActionEdges edges;
+    // Nothing happened: nothing to deliver.
+    CHECK_FALSE(edges.Pending(gameplay::Action::kFirstNote));
+    edges.Observe(gameplay::Action::kFirstNote, true);
+    edges.Observe(gameplay::Action::kFirstNote, false);
+    CHECK_TRUE(edges.Pending(gameplay::Action::kFirstNote));
+    bool out[2] = {false, true};
+    CHECK_EQ(edges.Drain(gameplay::Action::kFirstNote, out, 2), std::size_t{2});
+    CHECK_TRUE(out[0]);
+    CHECK_FALSE(out[1]);
+    CHECK_FALSE(edges.Pending(gameplay::Action::kFirstNote));
+    CHECK_FALSE(edges.Held(gameplay::Action::kFirstNote));
+    // A quiet poll produces nothing, and a repeated press cannot queue twice.
+    edges.Observe(gameplay::Action::kFirstNote, false);
+    CHECK_FALSE(edges.Pending(gameplay::Action::kFirstNote));
+    edges.Observe(gameplay::Action::kFirstNote, true);
+    edges.Observe(gameplay::Action::kFirstNote, true);
+    CHECK_EQ(edges.Drain(gameplay::Action::kFirstNote, out, 2), std::size_t{1});
+    CHECK_FALSE(edges.Pending(gameplay::Action::kFirstNote));
+    CHECK_TRUE(edges.Held(gameplay::Action::kFirstNote));
+    // The release is the last state, so the consumer reconciles it.
+    edges.Observe(gameplay::Action::kFirstNote, false);
+    CHECK_FALSE(edges.Held(gameplay::Action::kFirstNote));
+  }
+
+  BeginCase("a boundary drops the queue, and a short drain keeps the rest pending");
+  {
+    ActionEdges edges;
+    edges.Observe(gameplay::Action::kMoveLaneRight, true);
+    edges.Observe(gameplay::Action::kMoveLaneRight, false);
+    bool out[2] = {false, false};
+    // One slot: the press comes out, the release stays.
+    CHECK_EQ(edges.Drain(gameplay::Action::kMoveLaneRight, out, 1), std::size_t{1});
+    CHECK_TRUE(out[0]);
+    CHECK_TRUE(edges.Pending(gameplay::Action::kMoveLaneRight));
+    CHECK_EQ(edges.Drain(gameplay::Action::kMoveLaneRight, out, 2), std::size_t{1});
+    CHECK_FALSE(out[0]);
+    // A boundary drops what is queued and reads as released: the next poll cannot deliver a
+    // press or a release from the old context.
+    edges.Observe(gameplay::Action::kPowerup, true);
+    edges.Clear();
+    CHECK_FALSE(edges.Pending(gameplay::Action::kPowerup));
+    CHECK_FALSE(edges.Held(gameplay::Action::kPowerup));
+    edges.Observe(gameplay::Action::kPowerup, true);
+    CHECK_EQ(edges.Drain(gameplay::Action::kPowerup, out, 2), std::size_t{1});
+    CHECK_TRUE(out[0]);
+  }
+
   return Finish();
 }

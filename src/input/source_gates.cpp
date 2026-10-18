@@ -6,6 +6,9 @@
 
 #include "input/source_gates.h"
 
+#include <optional>
+#include <vector>
+
 namespace rb_blitz::input {
 namespace {
 
@@ -134,6 +137,86 @@ ActionHold::Edge ActionHold::Observe(bool held_now) {
     edge.released = true;
   }
   return edge;
+}
+
+uint16_t ControllerOwnedButtons(const Table& table) {
+  uint16_t bits = 0;
+  for (const Action action : profile::gameplay_remap::Actions()) {
+    const std::vector<Source>* sources = table.Effective(action);
+    if (sources == nullptr) {
+      continue;
+    }
+    for (const Source& source : *sources) {
+      if (source.kind != SourceKind::kPad) {
+        continue;
+      }
+      // A stick direction is not a control (src/profile/remap.h): it has no bit, and the
+      // boundary suppression is what stops the preset acting on it.
+      const std::optional<profile::remap::Target> target =
+          profile::remap::ParseTarget(source.name);
+      if (target.has_value()) {
+        bits = static_cast<uint16_t>(bits | profile::remap::TargetBit(*target));
+      }
+    }
+  }
+  return bits;
+}
+
+GameplayPadOverlay GameplayOverlay(bool controller_active, bool keyboard_mouse_active,
+                                   bool pause_held, uint16_t controller_buttons) {
+  GameplayPadOverlay overlay;
+  if (controller_active) {
+    // The preset is bypassed, so its controls must not reach the guest as pad input either -
+    // and Start is the pause path, which is part of what "bypassed" covers.
+    overlay.clear_buttons =
+        static_cast<uint16_t>(controller_buttons | profile::remap::TargetBit(
+                                                        profile::remap::Target::kStart));
+  }
+  if ((controller_active || keyboard_mouse_active) && pause_held) {
+    overlay.set_buttons = profile::remap::TargetBit(profile::remap::Target::kStart);
+  }
+  return overlay;
+}
+
+void ActionEdges::Observe(Action action, bool held_now) {
+  Slot& slot = slots_[kIndex(action)];
+  bool& held = held_[kIndex(action)];
+  if (held_now == held) {
+    return;
+  }
+  held = held_now;
+  if (held_now) {
+    slot.press = true;
+  } else {
+    slot.release = true;
+  }
+}
+
+std::size_t ActionEdges::Drain(Action action, bool* out, std::size_t capacity) {
+  Slot& slot = slots_[kIndex(action)];
+  std::size_t written = 0;
+  // Press first: a tap queued as press+release must reach the guest in that order.
+  if (slot.press && written < capacity) {
+    out[written++] = true;
+    slot.press = false;
+  }
+  if (slot.release && written < capacity) {
+    out[written++] = false;
+    slot.release = false;
+  }
+  return written;
+}
+
+bool ActionEdges::Pending(Action action) const {
+  const Slot& slot = slots_[kIndex(action)];
+  return slot.press || slot.release;
+}
+
+bool ActionEdges::Held(Action action) const { return held_[kIndex(action)]; }
+
+void ActionEdges::Clear() {
+  slots_.fill(Slot{});
+  held_.fill(false);
 }
 
 }  // namespace rb_blitz::input

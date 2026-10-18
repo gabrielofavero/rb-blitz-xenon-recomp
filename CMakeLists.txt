@@ -108,6 +108,11 @@ set(RBBLITZ_SOURCES
     src/input/remap.cpp
     src/input/mouse_ui.cpp
     src/input/native_menu.cpp
+    # P3 of the gameplay-mapping plan: the guest adapter that dispatches a gameplay table's
+    # actions through the title's own validated boundary (the controller factory/destructor, the
+    # per-frame seam and the press/release boundary), and the pad overlay that bypasses the native
+    # preset without blanking input the menus, pause and calibration still need.
+    src/hooks/gameplay_input.cpp
     # P2 of the gameplay-mapping plan: the source gates (SDK-free rules) and the title's own input
     # system (the SDK's drivers with the MnK emulation behind the keyboard gate, plus the physical
     # pad sampling a `pad:` gameplay source reads instead of the merged state).

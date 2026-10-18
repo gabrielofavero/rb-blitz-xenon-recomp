@@ -5,6 +5,7 @@
 // binding means; this file is only the device side of it.
 
 #include "input/remap.h"
+#include "hooks/gameplay_input.h"
 #include "input/native_menu.h"
 #include "input/pad_packet.h"
 #include "input/source_gates.h"
@@ -118,12 +119,12 @@ PhysicalInput SamplePhysicalInput() {
 // held state for both gameplay tables instead of releasing into the guest late.
 std::atomic<uint32_t> g_gameplay_boundary{0};
 
-// Plan §6's sequencing guard: the direct dispatch is P3's work. Until it exists and passes, a
-// build must not let either gameplay switch change what a key, a mouse button or the pad does -
-// in particular the Keyboard + Mouse table must not stop General Mapping's keyboard from feeding
-// the native preset. The *stored* values are still read and reported; only the routing they
-// select is held off. P3 flips this constant with its acceptance.
-constexpr bool kGameplayDispatchReady = false;
+// Plan §6's sequencing guard. P2 held both gameplay switches' routing off while nothing
+// consumed them; P3's dispatch exists (src/hooks/gameplay_input.cpp), so the switches now select
+// the routing their names describe. The constant stays as the one place a build could hold the
+// direct tables off again without deleting the code path - and the boot line below names which
+// side of it the build is on.
+constexpr bool kGameplayDispatchReady = true;
 
 GameplaySwitches EffectiveGameplayRouting(GameplaySwitches switches) {
   if (!kGameplayDispatchReady) {
@@ -145,12 +146,16 @@ struct RemapContext {
       rb_blitz::profile::gameplay_remap::TableKind::kController};
   rb_blitz::profile::gameplay_remap::Table keyboard_mouse_actions{
       rb_blitz::profile::gameplay_remap::TableKind::kKeyboardMouse};
+  // The pad controls the Controller table's sources name (P3, plan D4): while that table is
+  // active they are taken out of the state the guest reads, because the preset they would feed is
+  // bypassed. Fixed at load - a table is not edited while a game runs (D7).
+  uint16_t controller_buttons = 0;
   std::mutex packet_mutex;
   std::array<PadPacket, 4> packets;
 
   // P2's per-poll gameplay state: one hold per action per table, and the facts a boundary is made
-  // of. P3 reads the holds and consumes the edges; until it does the state is what makes the
-  // gates, the edges and the boundaries real rather than planned.
+  // of. P3 publishes the union of the active tables' holds (plan D5's action boundary) through
+  // `hooks/gameplay_input.h`, which queues the edges the guest seam dispatches.
   std::mutex gameplay_mutex;
   std::array<ActionHold, profile::gameplay_remap::kTableKindCount *
                              profile::gameplay_remap::kActionCount>
@@ -168,8 +173,9 @@ struct RemapContext {
   GameplayRouting gameplay_routing;
   uint32_t gameplay_boundary = 0;
 
-  void ObserveGameplay(const PhysicalInput& input, const SourceGates& gates,
-                       const GameplaySwitches& effective, bool gameplay, bool trace) {
+  gameplay_input::PadOverlay ObserveGameplay(const PhysicalInput& input, const SourceGates& gates,
+                                             const GameplaySwitches& effective, bool gameplay,
+                                             bool trace) {
     const GameplayRouting routing{effective.controller_mapping,
                                   effective.keyboard_mouse_mapping};
     // A low-rate heartbeat while tracing: it says whether the sampler is running at all and what
@@ -202,6 +208,14 @@ struct RemapContext {
                        gameplay != gameplay_active ||
                        input.pad_connected != gameplay_pad_connected ||
                        !(gates == gameplay_gates) || !(routing == gameplay_routing);
+    // P3: a boundary is also the dispatcher's, and it is taken *before* this poll evaluates
+    // anything. Queued edges of the old context must not survive into the new one, and the guest
+    // seam has to release what it already dispatched (a held track action repeats until it is
+    // released). Done outside `gameplay_mutex`: `NoteBoundary` owns its own lock and nothing here
+    // may hold two.
+    if (reset) {
+      gameplay_input::NoteBoundary();
+    }
     struct TraceLine {
       profile::gameplay_remap::TableKind kind;
       profile::gameplay_remap::Action action;
@@ -210,6 +224,7 @@ struct RemapContext {
       std::string source;
     };
     std::vector<TraceLine> lines;
+    gameplay_input::Poll poll;
     {
       std::lock_guard lock(gameplay_mutex);
       if (reset) {
@@ -249,6 +264,22 @@ struct RemapContext {
           hold.Observe(down);
         }
       }
+      // Plan D5's action boundary: the two tables are unioned per action, so a pad binding and a
+      // key binding on the same note hold it down until both release, and a press that follows a
+      // release of every contributing source is a new press.
+      for (const profile::gameplay_remap::Action action : profile::gameplay_remap::Actions()) {
+        const bool controller_held =
+            gameplay_holds[Index(profile::gameplay_remap::TableKind::kController, action)].held;
+        const bool keyboard_mouse_held =
+            gameplay_holds[Index(profile::gameplay_remap::TableKind::kKeyboardMouse, action)].held;
+        poll.held[static_cast<std::size_t>(action)] = controller_held || keyboard_mouse_held;
+      }
+      poll.gameplay = gameplay;
+      poll.controller_active =
+          TableActive(routing, profile::gameplay_remap::TableKind::kController, gameplay);
+      poll.keyboard_mouse_active =
+          TableActive(routing, profile::gameplay_remap::TableKind::kKeyboardMouse, gameplay);
+      poll.controller_buttons = controller_buttons;
     }
     // Logged outside the lock: a trace line is a formatted string and a write, and no other poll
     // should wait on it.
@@ -257,8 +288,12 @@ struct RemapContext {
           "input source: gameplay={} table={} action={} {} active={} source={}",
           gameplay ? "on" : "off", profile::gameplay_remap::TableKindSection(line.kind),
           profile::gameplay_remap::ActionName(line.action), line.down ? "down" : "up",
-          line.active ? "on" : "off (sequencing guard)", line.source);
+          line.active ? "on" : "off (table inactive)", line.source);
     }
+    // P3 publishes the poll and gets back the overlay for the pad state of this same poll. The
+    // dispatcher queues the edges and the guest seam (src/hooks/gameplay_input.cpp) consumes
+    // them; nothing here calls into the guest.
+    return gameplay_input::PublishPoll(poll);
   }
 
   static std::size_t Index(profile::gameplay_remap::TableKind kind,
@@ -297,6 +332,10 @@ bool KeyboardSupportEnabled() { return REXCVAR_GET(keyboard_support); }
 
 void InvalidateGameplayInput() {
   g_gameplay_boundary.fetch_add(1, std::memory_order_relaxed);
+  // P3 (plan D5): the dispatcher drops what it queued and releases what the guest already holds
+  // on its next frame, so a press or release from the old context can never arrive late - and a
+  // held track action cannot keep repeating across a pause, a screen change or a focus loss.
+  gameplay_input::NoteBoundary();
 }
 
 GameplaySwitches ReadGameplaySwitches() {
@@ -367,6 +406,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     }
     bound = context->table.BoundCount();
   }
+  // P3: the pad controls the Controller table owns. While that table routes gameplay input the
+  // preset is bypassed, so these bits are removed from the state the guest reads and only the
+  // direct dispatch can produce their actions. Computed with no profile too: the compiled defaults
+  // own the same controls the native preset 0 does, so enabling the Controller table without ever
+  // opening Controller Settings works as promised.
+  context->controller_buttons = ControllerOwnedButtons(context->controller_actions);
 
   std::function<std::unique_ptr<rex::system::IInputSystem>(bool)> backend;
   if (config.input_factory) {
@@ -392,25 +437,30 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // D2: both gates are read at poll time, so config/env/CLI precedence and a runtime
           // change are observed by every consumer from one place.
           const GameplaySwitches requested = ReadGameplaySwitches();
-          // The device gates are real in P2; the routing the two gameplay switches select is
-          // held off until P3's dispatch exists (plan §6's sequencing guard).
+          // P3: the switches now select the routing their names describe. The sequencing-guard
+          // constant is the one place a build can hold them off again.
           const GameplaySwitches effective = EffectiveGameplayRouting(requested);
           const SourceGates gates{requested.keyboard_support, requested.mouse_support};
           const bool gameplay = GameScreenActive();
 
-          // General Mapping keeps the merged pad state it has always rewritten. That state is
-          // the physical pads plus the SDK's legacy MnK emulation when `mnk_mode` is on, and the
-          // emulation is deliberately admitted here (it is how every acceptance harness drives
-          // the menus, and General Mapping is its only consumer). A `pad:` *gameplay* source
-          // reads the physical pad instead - see `physical` below.
-          const remap::PadState pad{state.gamepad.buttons,     state.gamepad.left_trigger,
-                                    state.gamepad.right_trigger, state.gamepad.thumb_lx,
-                                    state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
-                                    state.gamepad.thumb_ry};
           // One physical snapshot per poll, shared by every evaluator (D5): the rewrite's
           // key/mouse sources and both gameplay tables read the same raw devices, so they can
           // never disagree about what is held.
           const PhysicalInput physical = SamplePhysicalInput();
+          // General Mapping's input pad. It is the merged state - the physical pads plus the
+          // SDK's legacy MnK emulation when `mnk_mode` is on, which is how every acceptance
+          // harness drives the menus - except while a gameplay table routes input: then the
+          // guest sees the *physical* pad only, because the MnK emulation is a second keyboard
+          // path into the native preset and General Mapping's key/mouse sources stop at the menu
+          // while a direct table is on (R4). A `pad:` gameplay source reads the physical pad in
+          // either case (src/input/source_gates.h).
+          const remap::PadState merged{state.gamepad.buttons,     state.gamepad.left_trigger,
+                                      state.gamepad.right_trigger, state.gamepad.thumb_lx,
+                                      state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
+                                      state.gamepad.thumb_ry};
+          const bool direct_routing =
+              gameplay && (effective.controller_mapping || effective.keyboard_mouse_mapping);
+          const remap::PadState pad = direct_routing ? physical.pad : merged;
           remap::PadState out;
           if (has_table) {
             DownView view;
@@ -431,6 +481,17 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // before it rewrites anything, so only a bound one is driven to an end.
           state.gamepad.left_trigger = out.left_trigger;
           state.gamepad.right_trigger = out.right_trigger;
+          // The axes are the *other* half of the MnK gate, and forgetting them was a measured
+          // leak (P3, 2026-10-18): the legacy emulation synthesizes stick travel from WASD as
+          // well as buttons, and the title derives its own stick-direction buttons (kPad 16-23)
+          // from the axes, so a held `D` produced a native lane0 press in a song while every
+          // button bit was already being cleared. `Apply` copies the axes it was handed, so
+          // writing them back is the identity when the merged state was used and the physical
+          // axes when a gameplay table routes.
+          state.gamepad.thumb_lx = out.left_x;
+          state.gamepad.thumb_ly = out.left_y;
+          state.gamepad.thumb_rx = out.right_x;
+          state.gamepad.thumb_ry = out.right_y;
           // Fixed menu actions bypass user pad remaps. The synthetic driver keeps
           // a controller slot connected, but contributes no buttons before this filter.
           // Wheel detents travel as D-pad presses (1/2/4/8), not stick travel: the
@@ -441,6 +502,20 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             const auto mouse = SampleMenuMousePadState();
             state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x300F);
           }
+          // P3: the gameplay tables' source state, edges and pad overlay, for player one only.
+          // Host keyboard and mouse actions belong to that slot; users 1..3 are not polled with
+          // anything attached and must not receive a copy of player one's input. The overlay is
+          // applied here - after General Mapping and after the native pointer's pulses - so it is
+          // the last word on the two controls that cross the native gameplay boundary: the
+          // Controller table's own buttons are removed while it routes, and Start carries the
+          // direct Pause action (plan D3/D4).
+          if (IsGameplayUser(user_index)) {
+            const gameplay_input::PadOverlay overlay = context->ObserveGameplay(
+                physical, gates, effective, gameplay, REXCVAR_GET(input_source_trace));
+            state.gamepad.buttons =
+                uint16_t((uint16_t(state.gamepad.buttons) & ~overlay.clear_buttons) |
+                         overlay.set_buttons);
+          }
           // Publish the identity of the state actually delivered, after both
           // remapping and native mouse input. Taking max(device packets) can
           // leave this unchanged even though a mouse button changed.
@@ -450,13 +525,6 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             state.packet_number = context->packets[user_index].Observe(
                 {pad.buttons, pad.left_trigger, pad.right_trigger,
                  pad.thumb_lx, pad.thumb_ly, pad.thumb_rx, pad.thumb_ry});
-          }
-          // P2: the gameplay tables' source state and edges, for player one only. Host keyboard
-          // and mouse actions belong to that slot; users 1..3 are not polled with anything
-          // attached and must not receive a copy of player one's input.
-          if (IsGameplayUser(user_index)) {
-            context->ObserveGameplay(physical, gates, effective, gameplay,
-                                     REXCVAR_GET(input_source_trace));
           }
         });
     if (has_table) {
@@ -486,13 +554,19 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
         switches.keyboard_mouse_mapping ? "on" : "off",
         CvarSourceName(rex::cvar::GetFlagSource("gameplay_mapping_keyboard_mouse")));
     if (!kGameplayDispatchReady) {
-      // Said out loud, because it is the one place a stored switch does not do what its name
-      // says yet: the direct dispatch arrives with P3, and until it does, routing through these
-      // tables would stop the keyboard from feeding the native preset without replacing it.
+      // The one place a stored switch would not do what its name says: the direct dispatch is
+      // held off in this build, so routing through the tables would stop input without
+      // replacing it.
       REXLOG_INFO(
-          "gameplay mapping: the direct dispatch is not built into this build yet, so both "
-          "gameplay switches are held off; General Mapping and the native preset behave as "
-          "before (the stored values above are preserved)");
+          "gameplay mapping: this build holds the direct dispatch off, so both gameplay "
+          "switches are inert; General Mapping and the native preset behave as before (the "
+          "stored values above are preserved)");
+    } else {
+      REXLOG_INFO(
+          "gameplay mapping: direct dispatch on (plan P3) - a table whose switch is on drives "
+          "the six actions; the Controller table also bypasses the native preset and owns the "
+          "pad control(s) {:#06x} in the delivered state",
+          context->controller_buttons);
     }
     // P2's provenance line: where each source kind is read from. `pad` is the physical drivers
     // (never the merged state), key/mouse are SDL's own raw state, and the mouse is gameplay-only
