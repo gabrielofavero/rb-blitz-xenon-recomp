@@ -3527,7 +3527,7 @@ own letterbox, so the numbers are guest pixels — gives the marker's shape dire
 | --- | --- | --- |
 | HELP & OPTIONS pages (Controls, Calibration, Audio/Video, Credits) | one solid **455x46** bar at x=413 | **53.6** (Controls, one press) |
 | Main menu, LEADERBOARDS, ACHIEVEMENTS, HELP list, DOWNLOAD CONTENT, EXIT GAME | the label recoloured, **~18 px** tall, 60-265 px wide | **25-27** (leaderboards) |
-| In-song pause menu ([out/m5-acceptance/run01-paused.png](../../out/m5-acceptance/run01-paused.png)) | the seven option rows, read from the ink profile | **37-38** |
+| In-song pause menu (capture `out/m5-acceptance/run01-paused.png`, pruned 2026-10-18) | the seven option rows, read from the ink profile | **37-38** |
 | MOD SETTINGS | not captured by either walk | **40** (OCR centroid, second pass) |
 
 Two facts fall out of that. The marker is sometimes a bar and sometimes a recoloured label,
