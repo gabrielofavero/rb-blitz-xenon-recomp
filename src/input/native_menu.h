@@ -289,4 +289,8 @@ uint32_t CurrentScreen();
 uint32_t CurrentFocus();
 uint32_t FocusedListDrawn();
 bool MenuAvailable();
+// A live song: the screen is `game_screen` and the focused panel is not the pause panel
+// (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on
+// the title, the loading screens and while paused.
+bool GameScreenActive();
 } // namespace rb_blitz::input

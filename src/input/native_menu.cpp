@@ -56,6 +56,7 @@ std::mutex mutex;
 MenuMouseQueue queue;
 bool window_focused = false;
 bool menu_available = false;
+bool game_screen_active = false;
 uint32_t current_screen = 0, current_focus = 0;
 // The focused list the previous frame's draw identified (see DrawList). Read by the help caption
 // observer; 0 when no list has been drawn as the focused component yet.
@@ -151,6 +152,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   // from pause and its nested menus. A transition is never an input destination.
   const bool allowed = screen && U32(base, manager + 16) == 0 &&
       (name != "game_screen" || panel_name == "pause_panel");
+  const bool in_song = screen != 0 && name == "game_screen" && panel_name != "pause_panel";
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
   if (screen != current_screen || focus != current_focus || allowed != menu_available) {
     MenuRail stale; PublishRail(stale);
@@ -163,6 +165,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   std::lock_guard lock(mutex);
   current_screen = screen; current_focus = focus; menu_available = allowed;
+  game_screen_active = in_song;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled());
 }
 // UIListState::Selected - the list's live selection - read with isolated registers like
@@ -313,6 +316,10 @@ uint32_t FocusedListDrawn() {
 bool MenuAvailable() {
   std::lock_guard lock(mutex);
   return menu_available;
+}
+bool GameScreenActive() {
+  std::lock_guard lock(mutex);
+  return game_screen_active;
 }
 
 void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {

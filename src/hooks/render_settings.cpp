@@ -113,42 +113,43 @@ void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
   if (written == bits) {
     return;  // already this boot's value; do not touch the image again
   }
-  size_t done = 0;
-  for (const uint32_t address : {kLayoutAspectLo, kLayoutAspectHi}) {
+  // The literal pool is inside the image's code region and the page is read-only (the first
+  // attempt on the sibling 16/9 constant was refused as a guest access violation). Our own
+  // process owns the page, so it is opened for the write and closed again.
+  const auto write_guarded = [&](uint32_t address, uint32_t guard, uint32_t value,
+                                 const char* what) -> bool {
     uint8_t* field = rex::memory::GuestPtr<uint8_t*>(base, address);
     if (field == nullptr) {
-      continue;
+      return false;
     }
     const uint32_t before = LoadGuestBe32(field);
     // Shape guard: these addresses are only meaningful on the image they were measured on. If the
-    // field does not hold 16:9's inverse, the image is not that image, and writing a float into
-    // whatever is there would be worse than leaving the layout alone.
-    if (before != kAspect16By9Inverse) {
-      REXLOG_WARN("render: 0x{:08X} holds {:#010X}, not the measured {:#010X}; layout aspect left "
-                  "alone (unsupported image?)",
-                  address, before, kAspect16By9Inverse);
-      continue;
+    // field does not hold its measured value, the image is not that image, and writing a float
+    // into whatever is there would be worse than leaving the layout alone.
+    if (before != guard) {
+      REXLOG_WARN("render: 0x{:08X} holds {:#010X}, not the measured {:#010X}; {} left alone "
+                  "(unsupported image?)",
+                  address, before, guard, what);
+      return false;
     }
-    // The literal pool is inside the image's code region and the page is read-only (the first
-    // attempt on the sibling 16/9 constant was refused as a guest access violation). Our own
-    // process owns the page, so it is opened for the write and closed again.
     DWORD previous = 0;
-    bool wrote = false;
-    if (::VirtualProtect(field, sizeof(uint32_t), PAGE_READWRITE, &previous) != 0) {
-      StoreGuestBe32(field, bits);
-      DWORD ignored = 0;
-      ::VirtualProtect(field, sizeof(uint32_t), previous, &ignored);
-      wrote = true;
+    if (::VirtualProtect(field, sizeof(uint32_t), PAGE_READWRITE, &previous) == 0) {
+      REXLOG_WARN("render: 0x{:08X} could not be opened for the {}", address, what);
+      return false;
+    }
+    StoreGuestBe32(field, value);
+    DWORD ignored = 0;
+    ::VirtualProtect(field, sizeof(uint32_t), previous, &ignored);
+    REXLOG_INFO("render: {} 0x{:08X} {:#010X} -> {:#010X}", what, address, before, value);
+    return true;
+  };
+  size_t done = 0;
+  for (const uint32_t address : {kLayoutAspectLo, kLayoutAspectHi}) {
+    if (write_guarded(address, kAspect16By9Inverse, bits, "layout aspect")) {
       ++done;
     }
-    REXLOG_INFO("render: layout aspect 0x{:08X} {:#010X} -> {:#010X} (1/{} at {}x{})", address,
-                before, bits, inverse_aspect == 0.0f ? 0.0f : 1.0f / inverse_aspect, width,
-                height);
-    if (!wrote) {
-      REXLOG_WARN("render: 0x{:08X} could not be opened for the layout aspect", address);
-    }
   }
-  // Only latch once the write really landed, so a boot that reached here before the fields were
+  // Only latch once the writes really landed, so a boot that reached here before the fields were
   // mapped (or on an image whose guard refused) tries again rather than silently giving up.
   if (done == 2) {
     written = bits;

@@ -123,7 +123,7 @@ budget, and the row-text budget — are a skill:
 | [`plans/todo/2026-10-10-shader-cache-findings.md`](plans/todo/2026-10-10-shader-cache-findings.md) | Shader-stutter findings and implementation plan: preload completion, pipeline coverage, preparation before playback, and distribution. |
 | [`plans/todo/2026-10-13-load-guard-findings.md`](plans/todo/2026-10-13-load-guard-findings.md) | Song Load Guard feasibility, with [`load-guard-prompts.md`](plans/todo/2026-10-13-load-guard-prompts.md) for implementation. |
 | [`plans/todo/2026-10-13-rhythmverse-store-plan.md`](plans/todo/2026-10-13-rhythmverse-store-plan.md) | Wiring the RhythmVerse customs catalogue into the retail store: research complete, no code yet. |
-| [`plans/todo/2026-10-17-gameplay-input-mapping-plan.md`](plans/todo/2026-10-17-gameplay-input-mapping-plan.md) | General vs Gameplay Mapping: direct input-to-action bindings, source gates, native-preset bypass, and hiding the native Controls category. Planning; no code yet. |
+| [`plans/todo/2026-10-17-gameplay-input-mapping-plan.md`](plans/todo/2026-10-17-gameplay-input-mapping-plan.md) | General vs Gameplay Mapping: two independent per-input-type switches (Controller, Keyboard + Mouse), each with its own hidable action table and source kinds, plus source gates, the controller-only native-preset bypass, and hiding the native Controls category only for controller mapping. Planning; no code yet. |
 
 ### History
 
