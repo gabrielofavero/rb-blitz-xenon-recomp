@@ -108,6 +108,11 @@ set(RBBLITZ_SOURCES
     src/input/remap.cpp
     src/input/mouse_ui.cpp
     src/input/native_menu.cpp
+    # P2 of the gameplay-mapping plan: the source gates (SDK-free rules) and the title's own input
+    # system (the SDK's drivers with the MnK emulation behind the keyboard gate, plus the physical
+    # pad sampling a `pad:` gameplay source reads instead of the merged state).
+    src/input/source_gates.cpp
+    src/input/title_input.cpp
     src/profile/profile.cpp
     src/profile/profile_apply.cpp
     src/profile/profile_path.cpp
@@ -608,6 +613,20 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_gameplay_remap_tests PRIVATE src)
     add_test(NAME gameplay_remap COMMAND rb_blitz_gameplay_remap_tests)
+
+    # P2 of the gameplay-mapping plan: the source gates, the physical snapshot's source-kind
+    # classification, the per-table exclusion of the other kind, the action edges and the
+    # boundary rule. SDK-free and SDL-free - the device layer is the plain data a sampler hands
+    # in - so the rules are pinned without a pad, a window or a boot.
+    add_executable(rb_blitz_input_gates_tests
+        tests/input_gates_tests.cpp
+        src/input/source_gates.cpp
+        src/profile/profile.cpp
+        src/profile/gameplay_remap.cpp
+        src/profile/remap.cpp
+    )
+    target_include_directories(rb_blitz_input_gates_tests PRIVATE src)
+    add_test(NAME input_gates COMMAND rb_blitz_input_gates_tests)
 
     # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict

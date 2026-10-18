@@ -350,6 +350,21 @@ bool operator==(const Source& left, const Source& right) {
   return left.kind == right.kind && left.name == right.name;
 }
 
+bool PadSourceHeld(const PadState& state, std::string_view name) {
+  // The two vocabularies are disjoint - a target name is never a stick direction and vice versa -
+  // so the order of the two questions cannot matter.
+  if (const std::optional<Target> from = ParseTarget(name)) {
+    return TargetIsTrigger(*from)
+               ? TriggerPressed(*from == Target::kLeftTrigger ? state.left_trigger
+                                                              : state.right_trigger)
+               : (state.buttons & TargetBit(*from)) != 0;
+  }
+  if (const std::optional<PadDirection> direction = ParsePadDirection(name)) {
+    return DirectionPressed(state, *direction);
+  }
+  return false;
+}
+
 std::optional<Source> ParseSource(std::string_view text) { return ParseOneSource(text); }
 
 std::string FormatSource(const Source& source) {
@@ -458,15 +473,7 @@ void Apply(const Table& table, const PadState& state, DownFn down, void* context
           // A `pad:` name is either one of the 16 controls (answered from the button bit or the
           // trigger byte) or a stick direction (answered from the axes). The two vocabularies are
           // disjoint, so the order of the two questions cannot matter.
-          if (const std::optional<Target> from = ParseTarget(source.name)) {
-            this_one = TargetIsTrigger(*from)
-                           ? TriggerPressed(*from == Target::kLeftTrigger ? state.left_trigger
-                                                                          : state.right_trigger)
-                           : (state.buttons & TargetBit(*from)) != 0;
-          } else if (const std::optional<PadDirection> direction =
-                         ParsePadDirection(source.name)) {
-            this_one = DirectionPressed(state, *direction);
-          }
+          this_one = PadSourceHeld(state, source.name);
           break;
         }
         case SourceKind::kKey:

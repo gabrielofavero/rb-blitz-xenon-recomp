@@ -163,12 +163,118 @@ slot every update) — the per-frame lift replaces it. Screens with no captured
 list — the title screen's *PRESS (A) TO START* — keep the at-principle A, so a
 mouse-only boot still works.
 
-The synthetic mouse device establishes controller connectivity. Fixed mouse actions
-are merged after user controller remapping, for player one only. Raw mouse remap
-sources are suppressed while native menu mouse support is enabled, including during
-gameplay. Keyboard and controller bindings continue through their existing path.
+The synthetic host device establishes controller connectivity while either host gate is
+open (P2 made it follow Keyboard Support as well as Mouse Support). Fixed mouse actions
+are merged after user controller remapping, for player one only. `[remap]` mouse
+sources are gameplay-only raw device state (P2, below): the native pointer owns the
+mouse in every menu, and a live song samples the button mask itself. Keyboard and
+controller bindings continue through their existing path.
 ImGui pointer capture and window focus loss clear the queue. Cursor visibility is
 applied on the window thread through SDL.
+
+## Source gates and physical provenance (P2, 2026-10-18)
+
+P2 of [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+turns the two device switches into real gates and gives every mapping evaluator one physical
+snapshot to read. The code is `src/input/source_gates.{h,cpp}` (the rules, SDK-free),
+`src/input/title_input.{h,cpp}` (the title's input system), and the state filter in
+`src/input/remap.cpp`.
+
+**The two device gates are read at poll time.** `keyboard_support` off blocks every keyboard path:
+General Mapping's `key:` sources, both gameplay tables' `key:` sources, and the SDK's legacy
+keyboard emulation (below). `mouse_ui_nav` off blocks every mouse path: the native pointer, both
+gameplay tables' `mouse:` sources, and General Mapping's `mouse:` sources. Neither gate disables
+Controller Settings' own `[nav]` keys or capture - the utility is a separate process. The two
+gameplay switches (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) are *routing*
+selectors, not device gates: off never removes a device from the menus.
+
+**One physical snapshot per poll.** The state filter runs on the guest input thread and builds:
+a pad from the SDK's *physical* drivers only (`SamplePhysicalPad`), the keyboard from the
+window's own key **events** (`HostKeyDown`, a latch `mouse_ui.cpp` keeps as a
+`WindowInputListener`), and the mouse button mask and window focus from the window thread's own
+last report (`HostMouseButtons`/`HostInputFocused`; SDL documents `SDL_GetMouseState` and
+`SDL_GetKeyboardFocus` as main-thread calls, so the sampler never asks them). An unfocused window
+plays nothing.
+
+The keyboard source is measured, not assumed: P2's first live arm ran with a heartbeat that
+printed the sampler's raw key probe, and it read `sdl_focus=off keys=00` while the harness held
+every bound key (2026-10-18, `out/gameplay-mapping/p0/p2-sources-e/`) — SDL's global keyboard
+state array is blind in this process, while the key *events* keep delivering (the MnK emulation
+navigates the menus with them). The sampler therefore reads the event latch, which is also the
+shape plan D5 asks for (raw device events, not a polled aggregate): a press and release between
+two guest polls still produces its edges. SDL's state array remains a fallback for a key already
+held when the listener attached.
+
+- A `pad:` gameplay source answers from the physical pad's state and nothing else. The SDK's
+  legacy keyboard/mouse emulation (`mnk_mode`) synthesizes pad bits, and they are merged into the
+  state the guest sees - General Mapping still reads that merged state, because it is the
+  emulation's only consumer and the acceptance harnesses drive the menus through it - but a
+  `pad:` gameplay binding cannot become active because a key raised the same bit.
+- A `key:`/`mouse:` gameplay source answers from raw device state, never from the remapped or the
+  synthesized pad. A gameplay mouse press therefore never enters the native-menu queue: the queue
+  only accepts events while a native menu is available, and a song is not one.
+- The keyboard/mouse emulation driver is installed only while `keyboard_support` is on. With the
+  gate off it is absent, so no `mnk_mode`/`keybind_*` setting can synthesize a pad bit; the boot
+  log says so (`title_input:` line).
+- The synthetic host device enumerates while *either* host gate is open, so a keyboard-only or
+  mouse-only configuration stays connected with no pad attached. It is synthetic, so the SDK parks
+  it past every physical ordinal, it contributes no pad state of its own, and rumble ignores it.
+
+**General Mapping's `key:`/`mouse:` context rule.** Keys drive the menus, and play too while both
+gameplay switches are off; mouse sources are gameplay-only (the native pointer owns menu mouse).
+While either gameplay switch is on, gameplay is the direct tables' business and General Mapping's
+key/mouse sources stop at the menu. The direct tables themselves act only while playing and only
+while their own switch is on. Until P3's dispatch exists, the plan's sequencing guard holds the
+*effective* routing of both switches off - the stored values are read and logged, but General
+Mapping and the native preset behave exactly as before.
+
+**Boundaries.** Every held action is dropped without an edge - not released into the guest late -
+when the window loses focus, the guest screen or focus changes, input enters or leaves gameplay,
+either device gate or either routing switch changes, or a pad arrives or leaves. The native
+menu's screen/focus change and focus-loss paths call `InvalidateGameplayInput()`; the poll that
+sees the change invalidates under its own lock. The `input_source_trace` cvar logs each sampled
+source transition with its table, action, binding and whether the table was active, which is how
+P2's live arm observes the sampler without a debugger.
+
+**Checks.** `rb_blitz_input_gates_tests` (ctest `input_gates`) covers the gate matrix (keyboard
+off, mouse off, both, unfocused), pad provenance (a physical state with nothing pressed answers
+nothing, the pinned stick threshold), each table refusing the other input kind even when a source
+is injected past the parser, one source on two actions firing both, multi-source OR and
+release-one-keeps-held, the action-edge model (one press, one release, quiet polls, a boundary
+that is not a release and re-arms only on the key's release), the routing table for both switches
+in both contexts, the General Mapping context matrix, player-one ownership, host-device
+connectivity, the cursor rule, final packet identity after a remapped key, and the no-pad startup
+where every controller source is inert and the keyboard still works.
+
+### Live acceptance, 2026-10-18 — the sampler
+
+Release build, `--input_source_trace` on, `scripts/probe_gameplay.ps1` driving a song through the
+song list. Evidence under `out/gameplay-mapping/p0/`.
+
+- **The keyboard source had to be changed, and the change is measured.**
+  `p2-sources-e` printed the sampler's own heartbeat over a whole song:
+  `gameplay=on focused=on sdl_focus=off ... keys=00` while the harness held every bound key —
+  SDL's global keyboard array is blind in this process (it also reports no keyboard focus), while
+  the window's key events keep delivering. The event latch then produced, in gameplay:
+  `second_note ← key:J`, `move_lane_right ← key:K`, `move_lane_left ← key:D`,
+  `powerup ← key:Space`, each with a down and an up edge (`p2-sources-f`).
+- **The mouse source is event-latched for the same reason.** `p2-final-mouse` logged
+  `native_mouse: button=1 down mask=01` and, 4 ms later,
+  `powerup ← mouse:left`; the right click produced no binding (only the left was bound in that
+  arm's scratch profile). The per-frame `SDL_GetMouseState` re-read was removed because it erased
+  the event-latched press between frames — that is what made the first mouse arm (`p2-mouse`)
+  silent.
+- **The sequencing guard is visible on every line**: all of the above read
+  `active=off (sequencing guard)`, and the boot logs
+  `the direct dispatch is not built into this build yet, so both gameplay switches are held off`.
+- **Keyboard Support off is total.** `p2-final-keyboard-off-b` logged
+  `title_input: legacy MnK emulation is not installed - keyboard_support is off, so no
+  mnk_mode/keybind_* setting can synthesize pad input`, produced **0** sampled source edges and
+  **0** native dispatches while the harness pressed its keys, and the title never advanced: the
+  same keys that drive the whole route with the gate on reach nothing with it off.
+- Every arm ran with no physical pad (`pad_connected=off`), so the controller table's side is
+  unit-tested rather than live-measured on this machine.
+
 
 ## Checks
 

@@ -28,6 +28,18 @@ param(
     [switch]$Ultimate,
     [switch]$Challenge,
     [switch]$Sources,
+    # P2's instrument: log every gameplay-table source transition (with the binding that caused
+    # it and whether the table was active). One switch per question so an arm never has to guess
+    # what was measured.
+    [switch]$SourceTrace,
+    # P2's mouse-source arm: keep native mouse support ON and give the Keyboard + Mouse table a
+    # mouse binding, so a click in a song can be observed as `source=mouse:left`. Without this the
+    # harness runs `--no-mouse_ui_nav` as it always has, which is the mouse-gate control.
+    [switch]$MouseSource,
+    # P2's keyboard-gate arm: turn Keyboard Support off. The legacy MnK emulation driver must not
+    # be installed, so the harness's own key-driven pad presses stop reaching the guest and no
+    # gameplay source trace line appears.
+    [switch]$NoKeyboard,
     [ValidateSet("Song", "Tutorial", "Calibration")][string]$Context = "Song",
     [switch]$KeepRunning,
     [string]$Backend = '',
@@ -60,12 +72,22 @@ target = 'common'
 [graphics]
 resolution = 'auto'
 "@ | Set-Content -Path (Join-Path $scratch 'settings.toml')
-Set-Content -Path (Join-Path $scratch 'launcher.toml') -Value ''
+$launcherToml = Join-Path $scratch 'launcher.toml'
+Set-Content -Path $launcherToml -Value ''
+if ($MouseSource) {
+    # The Keyboard + Mouse table's Powerup, with a mouse button beside the key: the click the
+    # -Sources arm already sends then has a binding to observe.
+    Add-Content -Path $launcherToml -Value @'
+
+[gameplay_remap_keyboard_mouse]
+powerup = 'key:Space, mouse:left'
+'@
+}
 
 $logDir = $outDir
 
-$exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--no-mouse_ui_nav', '--fullscreen=false',
-             "--user_data_root=$scratch", "--launcher_profile=$(Join-Path $scratch 'launcher.toml')",
+$exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--fullscreen=false',
+             "--user_data_root=$scratch", "--launcher_profile=$launcherToml",
              "--dlc_library=$empty", "--dlc_root=$empty",
              '--enhancements_dlc_cache=true', '--enhancements_dlc_uncap_enumeration=true',
              "--log_file=$(Join-Path $outDir 'game.log')", '--probe_gameplay=true', '--mouse_native_trace=true',
@@ -76,7 +98,15 @@ $exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--no-mouse_ui_nav', '--f
              "--probe_gameplay_block_dispatch=$($Block.IsPresent.ToString().ToLower())",
              "--probe_gameplay_challenge=$($Challenge.IsPresent.ToString().ToLower())",
              "--probe_gameplay_sources=$($Sources.IsPresent.ToString().ToLower())")
+# The native pointer is off unless a mouse-source arm asks for it - that is the mouse-gate control.
+if (-not $MouseSource) { $exeArgs += '--no-mouse_ui_nav' }
+# The SDK spells a false boolean `--no-<cvar>`: the hyphen is the prefix, the cvar keeps its
+# underscore. `--no_keyboard_support` is an unknown cvar, not a false switch.
+if ($NoKeyboard) { $exeArgs += '--no-keyboard_support' }
 if ($Backend) { $exeArgs += "--input_backend=$Backend" }
+# The source trace travels through the environment (the SDK's own `REX_` + uppercase spelling), so
+# the arm does not depend on how the command line parses a trailing bool.
+if ($SourceTrace) { $env:REX_INPUT_SOURCE_TRACE = 'true' } else { Remove-Item Env:REX_INPUT_SOURCE_TRACE -ErrorAction SilentlyContinue }
 if ($Ultimate) {
     # The verified payload boot (docs/guides/ultimate-compat.md): mode 2 mounts
     # the content device. ultimate_patches keeps its default (all bits).
@@ -146,7 +176,15 @@ try {
                  'key:a', 'wait:1',
                  'wait:10', "shot:04-after.png")
     if ($Sources) {
+        # G/H/N/M were the P0 probe's own source letters (unbound in the product's tables);
+        # J/K/D and Space (`key:a` sends Space) are the Keyboard + Mouse table's own defaults, so
+        # `--input_source_trace` has something real to report. The bound keys are also *held* for
+        # two seconds, because the sampler's heartbeat is one line per ~2.5 s and a 90 ms tap can
+        # fall between two heartbeats even when the key is really down. Every tap has its own
+        # wait: the guest drops a run of taps with no wait between them.
         $actions += @('key:key_g', 'wait:1', 'key:key_h', 'wait:1',
+                      'hold:key_j:2', 'wait:1', 'hold:key_k:2', 'wait:1', 'hold:key_d:2', 'wait:1',
+                      'hold:a:2', 'wait:1',
                       'mouse:0.5:0.5', 'click:left', 'wait:1', 'click:right', 'wait:1',
                       'hold:key_n:6', 'wait:1', 'hold:key_m:6', 'wait:1', 'shot:10-sources.png')
     }
@@ -234,4 +272,4 @@ Get-ChildItem $logDir -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Objec
     ForEach-Object { Get-Content $_.FullName } | Set-Content -Path $combined
 Write-Host "shots: $shots"
 Write-Host "log:   $combined"
-Select-String -Path $combined -Pattern 'gameplay_probe: (challenge|track slot|source=|controller destroyed)|blocked native' | Select-Object -First 30 | ForEach-Object { $_.Line }
+Select-String -Path $combined -Pattern 'gameplay_probe: (challenge|track slot|source=|controller destroyed)|blocked native|input source:|input sources:|title_input:' | Select-Object -First 60 | ForEach-Object { $_.Line }

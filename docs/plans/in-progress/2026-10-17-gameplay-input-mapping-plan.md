@@ -1,11 +1,11 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0 is closed for the action seam and P1 has landed (§10, §11);
-P2-P6 are not started.** This document records the requested behavior, a source review at
-`ca8fa2a`, proposed implementation decisions, and the investigation required before choosing guest
-hooks. Configuration and its settings surface exist as of P1; no input is sampled for the gameplay
-tables and no gameplay action is dispatched yet, so nothing about a song is affected by the new
-switches.
+**Status: in progress, 2026-10-18. P0 is closed for the action seam, P1 and P2 have landed (§10,
+§11, §12); P3-P6 are not started.** This document records the requested behavior, a source review
+at `ca8fa2a`, proposed implementation decisions, and the investigation required before choosing
+guest hooks. Configuration and its settings surface exist as of P1, and P2 samples every source
+behind the two device gates; no gameplay action is dispatched yet, so nothing about a song is
+affected by the new switches.
 
 Planning pass 2 (2026-10-17) added the supersession record (§2), the settings-schema and
 focus-ring constraints, the build-target registration, the development sequencing guard, the
@@ -509,6 +509,12 @@ switches and their allowlist, the settings surface's first half, and the boot lo
 P1 added no consumer: the switches gate nothing and dispatch nothing until P2 (source gates) and P3
 (direct dispatch), so the sequencing guard above stays in force — a build must not act on either
 gameplay switch before its acceptance passes.
+P2 status (2026-10-18): **landed, and P3 can start** — §12 records the source gates, the physical
+snapshot and its provenance, the title input system and the legacy-MnK policy, the synthetic
+connectivity, the action edges and boundary rule, the cursor rule, and the live arms that close O5.
+P2 dispatches nothing, and the sequencing guard now has a name in code (`kGameplayDispatchReady` in
+`src/input/remap.cpp`): the stored values of both gameplay switches are read and logged, but the
+routing they select is held off, so General Mapping and the native preset behave exactly as before.
 ## 7. Validation and release criteria
 
 ### 7.1 Automated checks
@@ -970,3 +976,87 @@ file were read by the game's own profile apply, the switches beside them arrived
 counts show the compiled defaults filling the five actions the file did not mention. A table with no
 rows at all is `gameplay_remap`'s no-rows case: 6 of 6 actions firing in both tables from the
 compiled defaults, pinned without a process.
+
+
+## 12. P2 evidence — physical input and source gates (2026-10-18)
+
+**P2 landed; P3 can start.** Every producer that can deliver a keyboard or mouse input now reads one
+physical snapshot behind the two device gates, and `pad:` gameplay sources read the physical pad
+instead of the merged state the SDK hands the guest. P2 dispatches nothing: the sequencing guard in
+§6 is now a named constant in code (`kGameplayDispatchReady` in `src/input/remap.cpp`) and holds
+both gameplay switches' *routing* off, so General Mapping and the native preset behave exactly as
+before. The live arms below close P0's O5 (raw source provenance) by measuring the sampler.
+
+### 12.1 What landed
+
+| P2 item | Where it landed | Evidence |
+| --- | --- | --- |
+| Source-gate rules, SDK-free | New [source_gates.h](../../../src/input/source_gates.h) / [.cpp](../../../src/input/source_gates.cpp): `SourceGates`, `DeviceOf`/`MouseMaskFor`, `PhysicalInput`, `SourceHeld`, `HeldSource`/`ActionHeld` (each table's kind filter is enforced again at the point of use), `TableActive`, `GeneralSourceAllowed`, `ActionHold` (edges, invalidation, release-before-rearming), player-one ownership, `HostDeviceConnected`, `CursorVisible` | New [tests/input_gates_tests.cpp](../../../tests/input_gates_tests.cpp), ctest `input_gates` = **116 checks**, registered in [CMakeLists.txt](../../../CMakeLists.txt) |
+| Title-owned input system | New [title_input.h](../../../src/input/title_input.h) / [.cpp](../../../src/input/title_input.cpp): the SDK's drivers with the legacy MnK emulation installed only while Keyboard Support is on (boot-logged), and the physical drivers remembered so `SamplePhysicalPad` merges **only** their state (synthetic devices excluded) | `title_input:` boot lines in every arm below |
+| One physical snapshot per poll | `SamplePhysicalInput` in [remap.cpp](../../../src/input/remap.cpp): pad from `SamplePhysicalPad`, keys from the window's key-event latch (`HostKeyDown`), mouse mask from the button-event latch (`HostMouseButtons`), focus from the window thread | `input source: sampler ...` heartbeat and per-action edges |
+| Gates in General Mapping | `SourceDown` now `GeneralSourceAllowed` + `SourceHeld`: keyboard gate, focus, mouse gameplay-only (the old inverted rule is gone), and the direct-table routing rule (held off by the guard until P3) | `input_gates` gate/context matrix |
+| Synthetic connectivity | `MousePad` (now "Host input") enumerates while **either** host gate is open and contributes no pad state; the SDK's synthetic ordering and rumble rules already keep it off the physical ordinals | `input_gates` `HostDeviceConnected` cases; [mouse_ui.cpp](../../../src/input/mouse_ui.cpp) |
+| Cursor rule | `CursorVisible` extracted from `MouseCursor::OnDraw` into the SDK-free header and unit-tested | `input_gates` cursor case |
+| Boundaries | `InvalidateGameplayInput()` from [native_menu.cpp](../../../src/input/native_menu.cpp)'s context change and focus loss; the poll also resets on context/gate/routing/pad-connect changes; `ActionHold` drops without an edge and requires a release before re-arming | `input_gates` edge/boundary cases |
+| Diagnostics and harness | `input_source_trace` cvar (heartbeat + per-action edges naming the binding), `mouse_native_trace` button lines, `probe_gameplay.ps1 -SourceTrace/-MouseSource/-NoKeyboard`, `drive_ui.ps1` spare bound letters | live arms below |
+
+### 12.2 The keyboard source is measured, not assumed (O5)
+
+The first live arm (`out/gameplay-mapping/p0/p2-sources-e/`, control) ran the
+trace with a heartbeat printing the sampler's raw key probe; over a whole song it read
+`focused=on sdl_focus=off ... keys=00` while the harness held every bound key. SDL's **global
+keyboard state array is blind in this process** (SDL reports no keyboard focus at all), while the
+window's key *events* keep delivering — that is how the MnK emulation has always navigated the
+menus. The sampler therefore reads an event latch fed by the same `WindowInputListener` calls, which
+is also what plan D5 asks for (raw device events, not a polled aggregate): a press and release
+between two guest polls still produces its edges. The mouse mask is latched from button events for
+the same reason; `p2-mouse-b` proved a gameplay click reaches the listener
+(`native_mouse: button=1 down mask=01`) after the per-frame `SDL_GetMouseState` re-read was removed —
+that re-read had been erasing the press the events had recorded.
+
+### 12.3 What this pass does not claim
+
+- **No dispatch.** Both gameplay switches still act on nothing; the guard holds their routing off.
+- **No native-category hiding (P5) and no table UI (P4).**
+- **No positive controller-table arm.** This machine has no physical pad, and the SDK's MnK
+  emulation is exactly what the provenance rule excludes, so the `pad:` side is pinned by the unit
+  suite; P3 owes the pad arm.
+- **No XInput boot.** The title factory builds the XInput driver through the same two lines as SDL,
+  but no pad was available to boot it.
+- **The cursor's live behavior** in gameplay was measured on 2026-10-13 ([input-flow.md](../../engine/input-flow.md));
+  P2 extracted the rule and unit-tested it but did not re-shoot it.
+- **Analog stick under a real thumb** remains unmeasured (P0's residual).
+
+### 12.4 Tests
+
+- New suite `input_gates` = **116 checks**; the full host suite in the Vulkan-off debug tree:
+  **40/40 tests pass** (2026-10-18, `ctest --test-dir out/build/win-amd64-debug`).
+- Existing suites re-run after the `PadSourceHeld` refactor: `gameplay_remap` 397 checks,
+  `controller_settings_remap` 323 checks.
+
+### 12.5 Live arms
+
+| Arm | What it measured | Evidence |
+| --- | --- | --- |
+| `p2-sources-e` | The control: the sampler runs in gameplay with focus, and SDL's state array is blind (`sdl_focus=off keys=00`) while bound keys were held | `out/gameplay-mapping/p0/p2-sources-e/` |
+| `p2-sources-f` | The latch names the binding in gameplay: `second_note ← key:J`, `move_lane_right ← key:K`, `move_lane_left ← key:D`, `powerup ← key:Space`, each with a down and an up edge; menu-context presses are sampled with `active=off` | `out/gameplay-mapping/p0/p2-sources-f/` |
+| `p2-final-mouse` | Keyboard and mouse in one song: the same four keys plus `powerup ← mouse:left` (the listener logged `button=1 down mask=01` immediately before it), every line `active=off (sequencing guard)`; the right click produced no binding (unbound) and nothing native | `out/gameplay-mapping/p0/p2-final-mouse/` |
+| `p2-final-keyboard-off-b` | Keyboard Support off: the boot log says the MnK emulation is not installed, the harness's keys reach nothing (the title never advances; no dispatch lines), and no source edge is produced | `out/gameplay-mapping/p0/p2-final-keyboard-off-b/` |
+
+### 12.6 Verdicts
+
+- **O5 (raw source provenance). CLOSED for the sampling path.** Both source kinds are measured live;
+  `pad:` provenance is proven by construction (`SamplePhysicalPad` merges only the physical drivers)
+  and by the unit case that a neutral physical state answers nothing. The pad half has no live arm
+  on this machine (no physical pad).
+- **R1's device gates**, **R4's routing rule**, **R5's preservation**, **R7/R8/R9's utility
+  isolation**, **R10's vocabulary**, and **R11's per-table kinds** were not in P2's scope beyond the
+  gates: dispatch, hiding and the table UI remain P3/P4/P5. The gates themselves are unit-tested and
+  the keyboard gate is measured live above.
+- The remaining P2 acceptance items are covered as follows: keyboard-off live (above) plus unit
+  cases; mouse-off by the `--no-mouse_ui_nav` default of every arm (a click in `p2-sources-f`
+  produced no binding) and the unit gate cases; mixed device input, no-controller startup, final
+  packet identity, wrong-kind exclusion and boundary resets by `input_gates` cases; the cursor rule
+  by unit test and the 2026-10-13 measurement; the native-menu queue by the existing `native_mouse`
+  suite (the queue is disabled in gameplay and resets on the boundary, which is what keeps a
+  gameplay press out of it).

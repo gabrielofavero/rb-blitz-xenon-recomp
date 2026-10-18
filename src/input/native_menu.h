@@ -7,6 +7,7 @@
 #include <deque>
 #include <limits>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace rb_blitz::input {
@@ -268,6 +269,21 @@ class MenuMouseQueue {
 bool MouseSupportEnabled();
 bool MouseMenuAvailable();
 void MouseMenuFocus(bool focused);
+// The host's raw device state, as the window thread last saw it - for the guest-side physical
+// sampler (plan P2), which must not call SDL's mouse/focus queries itself: SDL documents both as
+// main-thread only. `HostMouseButtons` is `SDL_GetMouseState()`'s mask bits; `HostInputFocused` is
+// the game window's own focus, not the pointer's availability (an ImGui overlay taking the
+// pointer must not stop the keyboard from playing).
+uint32_t HostMouseButtons();
+bool HostInputFocused();
+// SDL's own keyboard-focus answer, as the window thread last saw it. `HostInputFocused` is the
+// game window's Win32 focus (tracked from the window listener); this is what SDL's keyboard state
+// array is scoped to. A silent key sample has to be able to tell the two apart.
+bool HostSdlKeyboardFocused();
+// Whether the key the profile names is physically down, from the window's own key events (the
+// latch `mouse_ui.cpp` keeps). This is the sampler's keyboard source: SDL's global state array
+// was measured blind in this process (P2, 2026-10-18), while the events keep working.
+bool HostKeyDown(std::string_view name);
 void QueueMenuMouse(MouseAction action, MenuPoint point);
 // The wheel carries the pointer position: a detent scrolls the view under a stationary pointer,
 // and the scroll-aware hover catches the row that lands there (MouseScrollFollow).

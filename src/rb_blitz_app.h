@@ -80,6 +80,7 @@
 #include "hooks/ultimate.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
+#include "input/title_input.h"
 #include "profile/profile_apply.h"
 #include "settings/boot.h"
 #include "platform/game_restart.h"
@@ -127,10 +128,17 @@ class RbBlitzApp : public rex::ReXApp {
     // input system is built from it, so this is the point where an extra input
     // device can still be added. See src/input/mouse_ui.h.
     //
+    // P2 of the gameplay-mapping plan: the SDK installs its own default factory before this hook
+    // (ReXApp::SetupPresentation), so the title's system has to replace it here - the two
+    // installers below wrap whatever is here. Without this the SDK's MnK driver would ignore the
+    // keyboard gate and no physical driver would be visible for a `pad:` gameplay source
+    // (measured 2026-10-18: no `title_input:` line and an empty physical pad list).
+    config.input_factory = REX_INPUT_BACKEND(rb_blitz::input::CreateTitleInputSystem);
     rb_blitz::input::InstallMouseUiNavigation(config);
     // Controller Settings' `[remap]` table, applied to the pad state the guest asks for. Its own
     // wrapper of input_factory, so both it and the mouse compose with whichever backend was
-    // selected. See src/input/remap.h.
+    // selected. See src/input/remap.h. Since P2 of the gameplay-mapping plan this is also where
+    // the source gates and the gameplay tables' physical snapshot live.
     rb_blitz::input::InstallPadRemap(config);
   }
 

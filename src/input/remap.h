@@ -42,8 +42,10 @@ namespace rb_blitz::input {
 //
 // `keyboard_support` and `mouse_ui_nav` are *source gates*: off means that device drives nothing.
 // The two gameplay switches are routing selectors: off keeps the device usable everywhere else and
-// only stops that table's direct actions. P1 stores and reports them; the consumers arrive with P2
-// (source gates) and P3 (dispatch), which is why nothing here acts on the values yet.
+// only stops that table's direct actions. P2 (2026-10-18) made the gates real and evaluates both
+// tables' sources and edges every poll (src/input/source_gates.h); the routing the two gameplay
+// switches select is held off by the plan's sequencing guard until P3's dispatch exists
+// (`kGameplayDispatchReady` in src/input/remap.cpp).
 struct GameplaySwitches {
   bool keyboard_support = true;          // `keyboard_support`
   bool mouse_support = true;             // `mouse_ui_nav` - the existing Mouse Support row
@@ -52,6 +54,16 @@ struct GameplaySwitches {
 };
 
 GameplaySwitches ReadGameplaySwitches();
+
+// The two source gates as their own names, for the device side: `keyboard_support` (read here)
+// and the existing Mouse Support switch (`MouseSupportEnabled` in input/native_menu.h).
+bool KeyboardSupportEnabled();
+
+// A boundary the gameplay tables must not carry held state across: the window lost focus, the
+// guest UI changed screen, or a transition made input go nowhere. The next poll drops every held
+// action instead of delivering a late press or a release the guest never asked for (plan D5).
+// Safe from any thread; the poll that sees it invalidates under its own lock.
+void InvalidateGameplayInput();
 
 // Reads the profile's `[remap]` table and filters every pad state the guest asks for.
 // Installed the same way mouse_ui is - by wrapping RuntimeConfig::input_factory - because that is

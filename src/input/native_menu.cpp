@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Retail guest ABI and validation: docs/engine/input-flow.md.
 #include "input/native_menu.h"
+#include "input/remap.h"
 #include <rex/hook.h>
 #include <rex/cvar.h>
 #include "hooks/help_observer.h"
@@ -160,6 +161,10 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     rail_map = {};
     mouse_highlight.Reset();
     scroll_follow.Reset();
+    // P2 (plan D5): a screen or focus change is a boundary the gameplay tables must not carry
+    // held state across. The gameplay holds are dropped without an edge on the next poll, so a
+    // press or release from the old context can never arrive late in the new one.
+    InvalidateGameplayInput();
     if (REXCVAR_GET(mouse_native_trace))
       REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
   }
@@ -265,6 +270,10 @@ void MouseMenuFocus(bool focused) {
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
   queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled());
+  // P2 (plan D5): losing the window drops every gameplay hold. The physical layer already
+  // reports nothing while unfocused; this makes the *edge* disappear too, so a key released
+  // behind another window cannot be delivered as one the guest acted on.
+  if (!focused) InvalidateGameplayInput();
 }
 void QueueMenuMouse(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);

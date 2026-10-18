@@ -197,6 +197,13 @@ inline constexpr uint8_t kTriggerThreshold = 0x1F;
 // True when the trigger byte counts as pressed.
 inline bool TriggerPressed(uint8_t value) { return value > kTriggerThreshold; }
 
+// Whether a `pad:` source's own name is held on `state`: one of the 16 controls (answered from
+// the button bit or the trigger byte) or a stick direction (answered from the axes). False for a
+// name that is neither. Public because the physical snapshot the gameplay tables read asks the
+// same question outside a `[remap]` rewrite (src/input/source_gates.h), and the two answers must
+// never disagree about when `pad:a` is down.
+bool PadSourceHeld(const PadState& state, std::string_view name);
+
 // One physical input a binding can come from.
 enum class SourceKind { kPad, kKey, kMouse };
 
