@@ -293,9 +293,11 @@ The Controller tab now draws the two gameplay tables P1's profile stored
 
 Evidence: `controller_settings_nav` 2,838 checks and 40/40 ctest; the live matrix under
 `out/_swap/p4/` (four switch combinations, both device-support arms, the help page, a wrong-kind
-row and a capture→Save) with its traces. What this does **not** change: P5's native-category
-hiding is still owed, the Gameplay Mapping help page does not yet claim it, and the tracked
-windowed capture legs still target the four-tab surface that P8's gate moved off by default.
+row and a capture→Save) with its traces. What this does **not** change: P5/P6 were cancelled on
+2026-10-18 (the change of course), so no build hides the native category; P7 replaces it with the
+in-game **Controls** menu and disables Default Presets while Controller Custom is On. The tracked
+windowed capture legs still target the four-tab surface that P8's gate moved off by default, and
+P8 owns re-pointing them.
 
 #### Boot speed and one frozen picture (owner report, 2026-10-13, later)
 

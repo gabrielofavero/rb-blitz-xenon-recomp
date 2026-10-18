@@ -1,11 +1,13 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0 is closed for the action seam, P1-P4 have landed
-(§10, §11, §12, §13, §15); P5-P6 are not started; P7-P8 are planned as a second milestone.**
-**Milestone 1 delivers P1-P6 with the external Controller Settings executable. Milestone 2
-delivers P7-P8: all player settings in game and retirement of that executable.** P0 remains the
-prerequisite investigation. Sections 1-8 describe Milestone 1 unless explicitly qualified;
-§14 defines the later menu, capture, apply, and retirement contracts that supersede it.
+**Status: in progress, 2026-10-18. P0-P4 have landed (§10, §11, §12, §13, §15). P5 and P6 are
+cancelled by the 2026-10-18 change of course: the external Controller Settings executable is an
+interim development tool, not a delivery milestone, so its native-category hiding and its
+integrated acceptance are not built. P7-P8 are the remaining delivery, in that order: all player
+settings in game, then retirement of the executable.** P0 remains the prerequisite investigation.
+Sections 1-8 describe the requested behaviour and the P0-P4 evidence unless explicitly qualified;
+§14 defines the in-game menu, capture, apply, and retirement contracts that supersede the
+external-utility parts of §4, §5, §6.1 and §7.
 
 This document records the requested behavior, a source review
 at `ca8fa2a`, proposed implementation decisions, and the investigation required before choosing
@@ -27,12 +29,19 @@ accepting only its own source kinds. Native-preset bypass and native Controller-
 now follow the Controller switch alone; the Keyboard + Mouse switch leaves the preset and its
 category untouched. This pass also added no runtime measurements.
 
-Planning pass 4 (2026-10-18) adds P7-P8 and §14 at the user's request. P1-P6 remain the first
-delivery milestone, including their external settings surface and acceptance. The second milestone
-replaces the native Control/Controller category with a nested **Controls** menu, moves the native
-presets under it, brings the external app's settings and mapping functionality into the game, and
-removes the app after parity and migration acceptance. This is planning only; no new runtime
-behavior or measurement is claimed.
+Planning pass 4 (2026-10-18) added P7-P8 and §14 at the user's request: replace the native
+Control/Controller category with a nested **Controls** menu, move the native presets under it,
+bring the external app's settings and mapping functionality into the game, and remove the app
+after parity and migration acceptance. Pass 5 supersedes its sequencing: P1-P6 are no longer the
+first delivery milestone.
+
+Planning pass 5 (2026-10-18) is a change of course requested after P4 landed: there is no
+external-utility delivery to finish. P5 (hide the native category) and P6 (integrated utility
+acceptance and docs) are cancelled with named successors — P7 takes the user-visible rule (Controls
+stays visible; Default Presets is disabled while Controller Custom is On) and P8 takes the
+acceptance and documentation — because building them only to remove the executable in P8 would
+produce no shipped state. The next package is P7, then P8. This is planning only; no new runtime
+behaviour or measurement is claimed.
 
 ## 1. Requested behavior
 
@@ -64,9 +73,9 @@ mouse, or controller mode.
 | R3. Gameplay switches | Controller Gameplay Mapping defaults to off; Keyboard + Mouse defaults to on. Each enabled table accepts multiple inputs per action, independently of General Mapping and of the saved native preset. |
 | R4. One gameplay authority per input type | Controller on: only the Controller table produces controller gameplay actions; the native preset cannot also act. Controller off: the native preset interprets controller input as today. Keyboard + Mouse on: only its table produces keyboard/mouse gameplay actions, and General Mapping no longer feeds keyboard/mouse input to gameplay. Keyboard + Mouse off: General Mapping feeds the native preset as today. The two input types may act simultaneously. |
 | R5. Preserve native preferences | Enabling controller Gameplay Mapping neither changes nor clears the saved controller preset; disabling it restores use of that same preset. The Keyboard + Mouse switch never touches the preset. |
-| R6. Native menu visibility | Hide the native Controller/Controls category in Help & Options whenever controller Gameplay Mapping is effective, in both main-menu and paused-game entry paths. With only Keyboard + Mouse enabled, keep the category visible and functional. |
+| R6. Native menu visibility | Hide the native Controller/Controls category in Help & Options whenever controller Gameplay Mapping is effective, in both main-menu and paused-game entry paths. With only Keyboard + Mouse enabled, keep the category visible and functional. **Superseded 2026-10-18:** P5 is cancelled and no build hides the category; P7 replaces it with the Controls menu and disables Default Presets while Controller Custom is On (§14.2). |
 | R7. Disabled sources stay visible | In either gameplay table, strike through each disabled keyboard/mouse binding and render it with the subtitle color. Keep enabled bindings in the same row normal. Do not delete bindings. |
-| R8. Disabled tables | Each switch hides its own table when off, retains its bindings, and removes hidden controls from navigation/capture. The section, description, both switches, and help remain visible. |
+| R8. Disabled tables | Each switch hides its own table when off, retains its bindings, and removes hidden controls from navigation/capture. The section, description, both switches, and help remain visible. **Superseded for the shipped in-game surface 2026-10-18:** the external app keeps this behaviour until P8 removes it; the in-game menu keeps Custom Mapping visible and editable while its Custom switch is Off (§14.2). |
 | R9. Utility isolation | Disabling Keyboard Support or Mouse Support does not disable Controller Settings' own navigation or binding capture. The utility stays operable with any device and can re-enable the source. |
 | R10. Vocabulary completeness | P0 proves the six actions cover every gameplay input the native preset produces. Any additional native gameplay path is listed and given an explicit inert-or-bind decision before direct mode ships. |
 | R11. Input-type separation | The Controller table accepts only `pad:` sources; the Keyboard + Mouse table accepts only `key:` and `mouse:` sources. A captured or hand-written source of the wrong type is refused and reported, never silently stored or applied. |
@@ -92,12 +101,12 @@ implementation owners; function names identify the inspected portions.
 | Settings UI | [controller_tab.cpp](../../../controller-settings/src/controller_tab.cpp), `ControllerTab::Draw`, renders a single button table; `BindingText` flattens all sources to one string. The `?` currently shows a hover tooltip. [shell.cpp](../../../controller-settings/src/shell.cpp) draws schema rows first (`DrawTab`) and the custom mapping block after them. `ControllerTab::kRowCount` is a compile-time count and `Shell`'s constructor sizes `rings_` once (`shell.cpp:191-206`). Consequence: neither gameplay switch can be a schema row and land between the tables, and a hidden table keeps dead focus entries unless the ring is rebuilt. |
 | Profile storage | [profile.h](../../../src/profile/profile.h) and [profile.cpp](../../../src/profile/profile.cpp) model `[settings]`, `[remap]`, and `[nav]`, preserving unrelated data. [profile_session.cpp](../../../controller-settings/src/profile_session.cpp), `MergeRows`/`RebaseOntoDisk`, merges concurrent edits by table. New gameplay bindings need full read/write/merge/reset support, not only a parser. |
 | Runtime setting ownership | [src/settings/cvars.h](../../../src/settings/cvars.h), `kControllerCvarAllowlist`, currently permits `mouse_ui_nav` and `input_backend`. New switches must enter this allowlist or they can save successfully without reaching a standalone game launch. |
-| Native category | [src/ui/settings_screen.cpp](../../../src/ui/settings_screen.cpp), `AllPanels`, routes `controls` to `controller_config_screen`. `PauseRootRows` and `MergePauseListRows` populate the paused game's inline list using `pause_controls`. Hiding only the main-menu row is incomplete. |
-| Menu configuration | [settings_screen.h](../../../src/ui/settings_screen.h), `MenuConfiguration`, and [settings_payload.cpp](../../../src/hooks/settings_payload.cpp) already pass boot configuration into menu generation. Carry the effective Controller switch through this seam rather than modifying the user's installed menu files; the Keyboard + Mouse switch does not affect menu visibility. |
+| Native category | [src/ui/settings_screen.cpp](../../../src/ui/settings_screen.cpp), `AllPanels`, routes `controls` to `controller_config_screen`. `PauseRootRows` and `MergePauseListRows` populate the paused game's inline list using `pause_controls`. Hiding only the main-menu row is incomplete. P5's planned hiding was cancelled on 2026-10-18; P7 replaces the route with Controls. Until P7 lands the category stays visible even while the Controller switch bypasses its preset — an interim development state that must not be released (§14.2). |
+| Menu configuration | [settings_screen.h](../../../src/ui/settings_screen.h), `MenuConfiguration`, and [settings_payload.cpp](../../../src/hooks/settings_payload.cpp) already pass boot configuration into menu generation. Carry the effective Controller switch through this seam rather than modifying the user's installed menu files; the Keyboard + Mouse switch does not affect menu visibility. P5's sole use of this seam is cancelled; P7 builds the replacement route through it instead. |
 | Preset forcing is not a solution | [src/enhancements.cpp](../../../src/enhancements.cpp) declares `enhancements_force_controller_scheme` / `enhancements_controller_scheme`, explicitly marked not implemented. Neither disables native interpretation or provides direct actions. |
 | Prior rules this supersedes | [controller-settings/config/settings.toml](../../../controller-settings/config/settings.toml) line 652 says "Keyboard support is always on and is not a setting (R13)", and [docs/plans/finished/2026-09-27-launcher-plan.md](../finished/2026-09-27-launcher-plan.md) R13 binds it. [docs/engine/toggles.md](../../engine/toggles.md) line 72 calls the mouse "hidden and inactive during gameplay"; [docs/reference/known-issues.md](../../reference/known-issues.md) line 23 says clicks and wheel are "disabled during gameplay and restored on pause"; [input-flow.md](../../engine/input-flow.md) says raw mouse sources are suppressed "including during gameplay". This plan supersedes those current-state statements. The finished plan is not edited; the live documents and schema text are the ones to update. |
 | Build registration | The game's source list is `RBBLITZ_SOURCES` in [CMakeLists.txt](../../../CMakeLists.txt); [controller-settings/CMakeLists.txt](../../../controller-settings/CMakeLists.txt) compiles `src/profile/profile.cpp`, `profile_path.cpp` and `remap.cpp` directly, and [installer/CMakeLists.txt](../../../installer/CMakeLists.txt) compiles `profile.cpp`/`profile_path.cpp` too. A new `src/profile/gameplay_remap.*` must be registered in the game and Controller Settings targets; keep `Profile` a storage-only row table so the installer's copy needs no new dependency. |
-| In-game settings spec | [docs/settings/plan.md](../../settings/plan.md) §3.2 and its row-position statement say the Controls page keeps its inventory and "nothing about them changes". Conditional removal contradicts that when controller Gameplay Mapping is on; the owning spec, not only `menu.md`, must record the new rule. |
+| In-game settings spec | [docs/settings/plan.md](../../settings/plan.md) §3.2 and its row-position statement say the Controls page keeps its inventory and "nothing about them changes". P5's conditional removal is cancelled; P7 replaces that inventory with the nested Controls menu (§14.1), so the owning spec, not only `menu.md`, must record the replacement when P7 lands. |
 
 The existing mouse timing and packet-delivery constraints are documented in
 [input-flow.md](../../engine/input-flow.md). Preserve them. A successful UI-only mapping test is
@@ -361,11 +370,11 @@ tooltip when P4 lands; do not edit the finished plan. The unbuilt `Keyboard` gro
 mapping is not editable in this build") stays true: it is about General Mapping, not this
 Keyboard + Mouse gameplay table; P4 should keep the two distinct in help.
 
-Sequencing guard: until P3's controller bypass passes acceptance, force the effective Controller
-switch off (its compiled default is already off) so no build hides the native Controller category
-before direct actions work. Until P3's keyboard/mouse dispatch passes acceptance, keep the
-effective Keyboard + Mouse switch off in development builds even though its compiled default is
-on. Shipping defaults are Controller off and Keyboard + Mouse on once acceptance passes.
+Sequencing guard (historical, 2026-10-18): P3's acceptance passed and P5 is cancelled, so no build
+has ever hidden the native Controller category; the Controller switch still defaults off. Until
+P3's keyboard/mouse dispatch passed acceptance, the Keyboard + Mouse switch was held off in
+development builds even though its compiled default is on. Shipping defaults are Controller off
+and Keyboard + Mouse on once P7's parity acceptance passes.
 
 Implement both `[gameplay_remap_controller]` and `[gameplay_remap_keyboard_mouse]` across parsing,
 surgical serialization, fresh-file serialization, dirty comparison, rebased saves, profile-wide
@@ -396,7 +405,11 @@ for routing and menu visibility. No profile watcher or mid-song reconfiguration 
 this first implementation. If live application is added later, update both consumers atomically
 at a safe boundary and flush input before switching.
 
-## 4. Controller Settings presentation
+## 4. Controller Settings presentation (external app, P4)
+
+**Superseded for delivery (2026-10-18):** this is the external app's surface as built in P4. It
+remains available until P8 removes it, but no further work is planned here. §14 defines the
+in-game surface that replaces it.
 
 Render exactly these sections in this order:
 
@@ -427,7 +440,7 @@ editing bindings. The explanations cover:
 | Help | Content |
 | --- | --- |
 | General Mapping | Inputs emulate controller buttons; several sources may be bound; while a gameplay mapping switch is on, these bindings control menus only; with the matching switch off they also feed the saved native preset during play; native pointer gestures own menu mouse interaction; Assign/Reset/Save behavior. |
-| Gameplay Mapping | Two independent switches. Controller: pad input triggers the six actions directly, native presets are inactive, and their category is hidden while it is on; the saved preset is retained and restored when it is off. Keyboard + Mouse: key/mouse input triggers the six actions directly while the native preset remains authoritative for the controller. Each table accepts only its own input type; disabled device bindings are kept and crossed; Pause changes context to General Mapping; changes take effect on next game launch. |
+| Gameplay Mapping | Two independent switches. Controller: pad input triggers the six actions directly, and native presets are inactive while it is on; the saved preset is retained and restored when it is off. The planned category-hiding sentence was cancelled with P5; P4's built help omits it, and P7 replaces the category with Controls. Keyboard + Mouse: key/mouse input triggers the six actions directly while the native preset remains authoritative for the controller. Each table accepts only its own input type; disabled device bindings are kept and crossed; Pause changes context to General Mapping; changes take effect on next game launch. |
 
 Extract a shared table/binding renderer instead of copying `ControllerTab::Draw`; instantiate it
 once per gameplay table with a source-kind filter. Keep the three-column arrangement, wrapping,
@@ -470,7 +483,14 @@ occupied. `Escape` closes help before it closes the window, through the existing
 checks. Keyboard Support off affects only the game runtime: Controller Settings' own `[nav]`
 keys and capture stay usable, and both gameplay tables stay editable.
 
-## 5. Hide the native controller category
+## 5. Hide the native controller category (cancelled 2026-10-18)
+
+**P5 is not built.** No build hides the native Controller/Controls category. P7 replaces the
+category with the nested **Controls** menu and disables **Default Presets** while Controller
+**Custom** is On (§14.2). Until P7 lands, the category stays visible even while the Controller
+switch bypasses its preset; the row is misleading in that interim development state, which must
+not be released. The rest of this section is the cancelled design, kept with its source findings
+so the decision is not lost.
 
 Add the effective **Controller** switch value to `MenuConfiguration`, supplied before menu
 records are built. Filter the `controls` route from the merged root and `pause_controls` from the
@@ -494,10 +514,11 @@ targets, but a run with the Controller switch on must not assume the Controls ro
 
 ## 6. Work packages and dependencies
 
-### 6.1 Milestone 1 — mappings with external settings (P0-P6)
+### 6.1 Closed external-utility milestone — P0-P4 landed, P5-P6 cancelled (2026-10-18)
 
-Keep these packages and their completion criteria intact. P6 is a delivery boundary: this
-milestone can ship before the in-game mapping editor exists.
+P0-P4 landed; their evidence is in §10-§13 and §15. P5 and P6 are kept as records with their
+successors named, but neither is a prerequisite for P7. There is no external-utility delivery
+boundary: the executable is an interim tool that P8 retires.
 
 | Package | Work and likely owners | Completion evidence |
 | --- | --- | --- |
@@ -506,16 +527,15 @@ milestone can ship before the in-game mapping editor exists.
 | P2. Unify physical input and gates | Share physical snapshots/edges, focus and capture policy, player ownership, and synthetic connectivity; classify every event by source kind so each gameplay table sees only its own; isolate legacy MnK. Extend `src/input/remap.*`, `mouse_ui.*`, `native_menu.*`, and input-factory wiring in `src/rb_blitz_app.h`. Add an SDK patch only if needed; `patches/README.md` gains its row when one lands. | Keyboard-off and mouse-off tests across all producers, mixed device input, no-controller startup, SDL/XInput, final packet identity, source provenance, wrong-kind exclusion per table, no stale input after boundaries, the OS cursor stays hidden in gameplay, and a gameplay mouse press never reaches the native-menu queue. |
 | P3. Dispatch direct gameplay actions | Implement the P0-proven guest adapter, the controller native bypass (only when the Controller switch is on), the keyboard/mouse action injection that composes with the native preset, action-specific edge/hold behavior, pause routing, and context lifecycle. Keep each switch's off path on the original behavior. Integrate with `CMakeLists.txt`; do not edit generated recompiler output. | All six actions work through both tables with arbitrary per-type bindings; the controller table never leaks through a conflicting native preset while enabled; the Keyboard + Mouse table coexists with the native controller preset; simultaneous sources and rapid notes behave correctly; saved preset remains unchanged. |
 | P4. Build the settings surface | Add the Keyboard Support schema row and the ordered sections with two per-table switches; share rendering/capture with per-table source filters; add clickable help; strike gated sources; hide each table independently; rebuild focus layout. Owners: `controller-settings/config/settings.toml`, `controller_tab.*`, `shell.*`, `schema_view.*`, `row_ui.*`, and shared UI helpers as needed. Replace the one-time ring sizing with a runtime layout, add the help modal to the shell's focus model, and update `--dump-layout` plus the capture/acceptance scripts that assert old rows. | Screenshots and navigation traces for all four switch combinations and all device-support combinations; wrong-type capture is refused visibly; capture/reset/Save/Play persists exactly what runtime reads; hidden rows are never focusable; the utility stays navigable with a source disabled. |
-| P5. Apply native category visibility | Pass the effective Controller switch into menu generation; filter both `controls` and `pause_controls` on that value, keeping provider gating independent and leaving the category visible when only Keyboard + Mouse is on. Owners: `src/ui/settings_screen.*`, `src/hooks/settings_payload.cpp`, `docs/settings/plan.md` §3.2, relevant help observers/tests. | Generated menu-tree tests and live main-menu/pause screenshots across the Controller switch on/off for base and Ultimate, plus a Keyboard + Mouse-only arm proving the category is preserved; preset value and Back routes preserved; the row-position spec and its scripts agree with the conditional list. |
-| P6. Integrated acceptance and docs | Build game and utility, run targeted suites and live song checks, verify launch/restart/profile behavior and installed payload, then update owning docs. | Acceptance matrix below passes with evidence under `out/gameplay-mapping/`. Update, as behavior lands: `docs/engine/input-flow.md` (raw-mouse paragraph, keyboard line, per-device gameplay-table rules, a new live-acceptance section), `docs/engine/toggles.md` (`mouse_ui_nav` row: no longer "hidden and inactive during gameplay"; add the gameplay switches and `keyboard_support` if they join the toggle registry), `docs/reference/known-issues.md` (R6 row), `docs/settings/contracts.md` §8 (allowlist), `docs/settings/plan.md` §3.2 and the row-position rule, `docs/settings/menu.md` and `docs/settings/status.md`, `docs/reference/symbols.md` (P0 names), `docs/README.md` (index), `controller-settings/README.md`, and `patches/README.md` if a patch lands. |
+| P5. Apply native category visibility — **cancelled 2026-10-18; successor P7/§14.2.** | Pass the effective Controller switch into menu generation; filter both `controls` and `pause_controls` on that value, keeping provider gating independent and leaving the category visible when only Keyboard + Mouse is on. Owners: `src/ui/settings_screen.*`, `src/hooks/settings_payload.cpp`, `docs/settings/plan.md` §3.2, relevant help observers/tests. | Generated menu-tree tests and live main-menu/pause screenshots across the Controller switch on/off for base and Ultimate, plus a Keyboard + Mouse-only arm proving the category is preserved; preset value and Back routes preserved; the row-position spec and its scripts agree with the conditional list. |
+| P6. Integrated acceptance and docs — **cancelled 2026-10-18; successor P8/§14.5-§14.6.** | Build game and utility, run targeted suites and live song checks, verify launch/restart/profile behavior and installed payload, then update owning docs. | Acceptance matrix below passes with evidence under `out/gameplay-mapping/`. Update, as behavior lands: `docs/engine/input-flow.md` (raw-mouse paragraph, keyboard line, per-device gameplay-table rules, a new live-acceptance section), `docs/engine/toggles.md` (`mouse_ui_nav` row: no longer "hidden and inactive during gameplay"; add the gameplay switches and `keyboard_support` if they join the toggle registry), `docs/reference/known-issues.md` (R6 row), `docs/settings/contracts.md` §8 (allowlist), `docs/settings/plan.md` §3.2 and the row-position rule, `docs/settings/menu.md` and `docs/settings/status.md`, `docs/reference/symbols.md` (P0 names), `docs/README.md` (index), `controller-settings/README.md`, and `patches/README.md` if a patch lands. |
 
-Order: **P0 -> P1 -> P2 -> P3**, with **P4 after P1** and **P5 after the shared switch contract in
-P1**. P6 requires P0-P5, not P7-P8. The main uncertainty is P0/P3; do not describe this as only adding
-two mapping tables. P5 must not be effective while P3 is unproven: the Controller switch is forced
-off until then, so a build cannot hide the native category without a working replacement. During
-development, the Keyboard + Mouse switch is forced off until its dispatch is proven. The shipping
-defaults (Controller off, Keyboard + Mouse on) wait until all six actions, per-type exclusive
-routing, the native-preset coexistence path, and both menu entry paths pass acceptance together.
+Order (historical): **P0 -> P1 -> P2 -> P3** landed, with **P4 after P1**. P5 and P6 are cancelled,
+so the external-utility milestone ends at P4 and there is no P6 delivery boundary. The sequencing
+guard in P2/P3 is historical: dispatch is enabled and the Controller switch still defaults off.
+The shipping defaults (Controller off, Keyboard + Mouse on) are confirmed by P7's parity
+acceptance; until P7 lands, the external app is an interim tool, not a release. The next package
+is **P7**, then **P8** (§6.2).
 
 P0 status (2026-10-18): **closed for the action seam, with named residuals** — §10.6 measures live
 native presses for all six actions, the full four-producer bypass with before/after pairs, a
@@ -543,27 +563,38 @@ table's controls, the edge/reconcile model, the axis leak it found and fixed, an
 physical pad). `kGameplayDispatchReady` is now `true`; the Controller switch still defaults off, and
 the pad arm, the analog stick under a real thumb and the tutorial/calibration interactive segments
 stay unmeasured (§13.4).
-P4 status (2026-10-18): **landed, and P5 can start** — §15 records the three binding tables, the
-shared renderer and span layout, the per-table capture and source-kind refusal, the crossed
-device-gated bindings, the two `?` pages, the runtime ring rebuild, the `--dump-layout` block rows,
-and the live arms for all four switch combinations, both device-support arms, the hidden rows and
-Save. The Controller switch still defaults off, so the shipping behaviour is unchanged.
+P4 status (2026-10-18): **landed; it is the last external-app package** — §15 records the three
+binding tables, the shared renderer and span layout, the per-table capture and source-kind
+refusal, the crossed device-gated bindings, the two `?` pages, the runtime ring rebuild, the
+`--dump-layout` block rows, and the live arms for all four switch combinations, both
+device-support arms, the hidden rows and Save. The Controller switch still defaults off, so the
+shipping behaviour is unchanged.
+P5/P6 status (2026-10-18): **cancelled by the change of course** — no build hides the native
+category; P7's Controls menu replaces it and disables Default Presets while Controller Custom is
+On, and P8 owns the integrated acceptance and documentation. P7 is next.
 
-### 6.2 Milestone 2 — in-game controls and executable retirement (P7-P8)
+### 6.2 Remaining delivery — in-game controls and executable retirement (P7-P8)
+
+This is now the only remaining milestone and it starts at P7. P7 must deliver the in-game
+Controls menu with parity; P8 removes the executable after that parity passes. P7 also absorbs
+P5's user-visible intent: Controls always stays visible, and Default Presets is disabled while
+Controller Custom is On — no build hides the category.
 
 | Package | Work and likely owners | Completion evidence |
 | --- | --- | --- |
 | P7. Move settings and mappings into the game | Implement §14's nested Controls menu in both main-menu and paused Help & Options, including Input Types, General Mapping, both Gameplay Mapping branches, native Default Presets, per-row Assign/Reset, table resets, help, and the pause-frame listening dialog. Reuse shared profile/source/capture logic and extend the settings service/bridge for binding edits and safe runtime application. Inventory every player-facing setting still owned by the external app and give it an in-game home. Likely owners: `src/ui/settings_screen.*`, `src/hooks/settings_payload.*`, `src/hooks/settings_bridge*`, `src/settings/`, `src/profile/`, `src/input/`, and reusable logic currently under `controller-settings/src/`. | Generated menu and service tests plus live base/Ultimate main-menu and pause routes; complete parity inventory; capture, reset, disabled states, safe apply, persistence, recovery, native-preset preservation, and song-resume evidence from §14. The external executable remains available until P8 passes. |
 | P8. Retire Controller Settings and finish acceptance | After P7 parity, remove the external executable target and obsolete app-only UI, launch entry points, packaging requirements and shortcuts; move any still-shared code/schema/tests to their owning game modules first. Preserve existing profiles and configuration precedence. Update installer upgrade/repair behavior, scripts, and live documentation; run §14's full migration and release matrix. | A clean build/install/upgrade/repair launches the game directly with all settings available in game, retains existing user configuration, and neither requires nor ships `rb_blitz_controller_settings.exe`. No supported setting workflow starts a second settings process. Evidence lives under `out/gameplay-mapping/in-game/`; old utility acceptance is replaced by equivalent in-game checks. |
 
-Order: **P6 -> P7 -> P8**. Design and reusable-code preparation may happen earlier, but Milestone 2
-does not delay or redefine Milestone 1 acceptance. P7 must pass before removal in P8; neither a
-partial menu nor a renamed executable satisfies retirement. P7-P8 are **not started**.
+Order: **P4 -> P7 -> P8**. P5 and P6 are cancelled, not prerequisites; design and reusable-code
+preparation start immediately. P7 must pass before removal in P8; neither a partial menu nor a
+renamed executable satisfies retirement. P7-P8 are **not started**.
 
 ## 7. Validation and release criteria
 
-This section is Milestone 1's release matrix. Milestone 2 adds §14.6 and replaces the old
-utility-only, launch-only, and native-category-hiding expectations where §14 explicitly says so.
+This section is the external-utility milestone's validation matrix, recorded while P5-P6 were
+planned; those packages are cancelled (§6.1), so it is not a release gate. Its P0-P4 arms remain
+valid evidence and become P8's gameplay-regression baseline. The shipped release matrix is §14.6,
+including the Controls replacement in §14.2.
 
 ### 7.1 Automated checks
 
@@ -607,10 +638,13 @@ for the new semantics. Register it in CMake. Include:
 Run the configured build and targeted CTest suites using
 [build-and-run.md](../../guides/build-and-run.md). Confirm the chosen build tree actually registers
 tests with `ctest --test-dir <build-dir> -N`; [input-flow.md](../../engine/input-flow.md) records a
-Vulkan-enabled configure that disabled `BUILD_TESTING`. P6 also requires real gameplay; passing
+Vulkan-enabled configure that disabled `BUILD_TESTING`. P7/P8 also require real gameplay; passing
 pure evaluator or generated-menu tests alone cannot validate the guest hooks.
 
 ### 7.2 Live acceptance matrix
+
+The utility rows below describe the external app as built in P4; they remain valid until P8
+retires it. The menu-visibility row is superseded (see its note).
 
 | Scenario | Required observation |
 | --- | --- |
@@ -626,7 +660,7 @@ pure evaluator or generated-menu tests alone cannot validate the guest hooks.
 | Both keyboard and mouse off | Controller gameplay and UI remain usable; every keyboard/mouse binding is retained and crossed in the Keyboard + Mouse table. |
 | Mixed inputs | Pad, keyboard, and mouse can perform different actions together, and alternative sources for one action obey the measured edge/hold rule without duplicates or stuck releases. |
 | Pause boundary | A custom Pause binding from either table pauses once. General Mapping controls the menu. Holding/clicking across Pause/Resume does not fire a note, powerup, menu confirm, or second pause. |
-| Menu visibility | Native Controller/Controls is absent in main-menu and paused Help & Options when the Controller switch is on, present in both when it is off, on base and Ultimate; a Keyboard + Mouse-only arm keeps it present. Other categories and Back still work. |
+| Menu visibility | Native Controller/Controls is absent in main-menu and paused Help & Options when the Controller switch is on, present in both when it is off, on base and Ultimate; a Keyboard + Mouse-only arm keeps it present. Other categories and Back still work. **Superseded 2026-10-18:** P5 is cancelled and no build hides the category; P7 keeps Controls visible and disables Default Presets while Controller Custom is On (§14.2). |
 | Utility editing | Three tabs/sections, both help buttons, two switches, mixed crossed/normal bindings, independent table hide/show, per-table capture with wrong-type refusal, reset isolation, wrapped text, keyboard/controller focus, and Save/Play all behave as specified. |
 | Utility with a source disabled | Controller Settings navigates and captures with Keyboard Support off (a separate process); Save persists; the game ignores those keys. |
 | Mouse in gameplay | With support and the Keyboard + Mouse switch on, the cursor stays hidden, a bound mouse button performs its action without moving a menu selection, and native hover returns on pause. |
@@ -657,12 +691,16 @@ game variant, preset, and build revision beside each live result; use an isolate
 | O9 | Native-preset coexistence | The default configuration keeps the native controller preset active beside direct keyboard/mouse actions. Prove with a live song that a held native pad action and a simultaneous direct key action neither double-fire nor starve each other, and that General Mapping's synthesized pad bits cannot be read as physical pad input. |
 | O10 | Direct-table interaction at Pause | Confirm that a pause from either table enters the same pause context, that General Mapping alone owns the paused UI, and that releasing a held pause binding after resume cannot immediately pause again or leak a note. |
 
-The per-input-type split, each table accepting only its own source kinds, and the visibility rule
-(controller switch hides the native category; Keyboard + Mouse preserves it) are requested
-behavior. The launch-scoped apply policy, the exact binding defaults, the duplicate-source policy
-(allow and note), the UI-only General Mapping rule while a direct table is on, and the development
-sequencing guard are proposed product decisions. All other decisions above implement the requested
-separation, source toggles, native-preset preservation, and visibility rules.
+The per-input-type split, each table accepting only its own source kinds, and the six-action
+vocabulary are requested behavior. The external-utility visibility rule (hide the native
+category) and the utility's table-hiding behavior were requested for that surface, then
+superseded on 2026-10-18: P5/P6 are cancelled, and the shipped surface is §14's Controls menu,
+where Controls stays visible and Default Presets is disabled while Controller Custom is On. The
+launch-scoped apply policy (D7) is replaced by P7's safe-apply policy; the exact binding defaults,
+the duplicate-source policy (allow and note), and the UI-only General Mapping rule while a direct
+table is on remain. The development sequencing guard is historical (dispatch is enabled and the
+Controller switch still defaults off). All other decisions above implement the requested
+separation, source toggles, native-preset preservation, and the in-game visibility rules.
 
 ## 9. Planning-pass verification
 
@@ -676,8 +714,9 @@ python .github/skills/documentation/scripts/check_docs.py
 git diff --check
 ```
 
-P0 implementation started on 2026-10-17, so this file lives in `in-progress/`. Maintain P0-P8
-evidence here without treating planned checks as passed.
+P0 implementation started on 2026-10-17, so this file lives in `in-progress/`. Maintain P0-P4
+evidence and P5-P8 records here without treating planned checks as passed. P5/P6 are cancelled;
+P7/P8 are planned.
 
 ## 10. P0 evidence — the gameplay seam (2026-10-18)
 
@@ -959,8 +998,8 @@ pass acceptance.
 - **No gameplay is exercised.** §11.4 records a short 2026-10-18 boot that printed the two lines;
   it reaches the menu only, so no song, note, lane, power-up or pause path was driven.
 - **No table UI.** The six-action tables, per-table capture, the strike-through of a gated source,
-  the help modal and the per-table visibility are P4; the native-category hiding is P5. P1 draws
-  the switches only.
+  the help modal and the per-table visibility are P4; the native-category hiding was P5 (cancelled
+  2026-10-18; P7 replaces the category instead — §14.2). P1 draws the switches only.
 - **No `--dump-layout` row for the switches.** They are custom-block rows, not schema rows; the
   new schema row (`keyboard_support`) does appear there.
 
@@ -1065,7 +1104,8 @@ that re-read had been erasing the press the events had recorded.
 ### 12.3 What this pass does not claim
 
 - **No dispatch.** Both gameplay switches still act on nothing; the guard holds their routing off.
-- **No native-category hiding (P5) and no table UI (P4).**
+- **No native-category hiding (P5, cancelled 2026-10-18 — P7 replaces the category) and no table
+  UI (P4).**
 - **No positive controller-table arm.** This machine has no physical pad, and the SDK's MnK
   emulation is exactly what the provenance rule excludes, so the `pad:` side is pinned by the unit
   suite; P3 owes the pad arm.
@@ -1099,8 +1139,8 @@ that re-read had been erasing the press the events had recorded.
   on this machine (no physical pad).
 - **R1's device gates**, **R4's routing rule**, **R5's preservation**, **R7/R8/R9's utility
   isolation**, **R10's vocabulary**, and **R11's per-table kinds** were not in P2's scope beyond the
-  gates: dispatch, hiding and the table UI remain P3/P4/P5. The gates themselves are unit-tested and
-  the keyboard gate is measured live above.
+  gates: dispatch and the table UI remained P3/P4, and hiding was P5 (later cancelled; P7 replaces
+  the category). The gates themselves are unit-tested and the keyboard gate is measured live above.
 - The remaining P2 acceptance items are covered as follows: keyboard-off live (above) plus unit
   cases; mouse-off by the `--no-mouse_ui_nav` default of every arm (a click in `p2-sources-f`
   produced no binding) and the unit gate cases; mixed device input, no-controller startup, final
@@ -1176,8 +1216,9 @@ measurement: zero native dispatches after the fix, against one at 14:43:41.326 b
 - **No analog stick under a real thumb**, and no XInput boot (both P0/P2 residuals).
 - **The tutorial's and calibration's interactive segments (O4)** are still unmeasured; their menus
   produced zero dispatches in P0.
-- **The native category is still visible (P5).** With the Controller switch on, the category is
-  harmless (the preset is bypassed) but not hidden yet.
+- **The native category is still visible (P5 was cancelled; P7 replaces it with Controls —
+  §14.2).** With the Controller switch on, the category is harmless (the preset is bypassed) but
+  not hidden.
 - **The table UI is P4.** The shipped defaults are the only bindings a player can use until the
   six-action tables and their capture exist.
 - **A held navigation stick across the menu-to-song transition** can still deliver one native
@@ -1212,10 +1253,11 @@ reading as released. The full suite is **40/40** in the Vulkan-off debug tree
 (`cmake --preset win-amd64-debug -DREXGLUE_USE_VULKAN=OFF -DBUILD_TESTING=ON`,
 `ctest --test-dir out/build/win-amd64-debug`, 2026-10-18).
 
-## 14. Milestone 2 contract — in-game Controls (P7-P8)
+## 14. Remaining delivery contract — in-game Controls (P7-P8)
 
-**Planned, not implemented.** The requested end state is one game with all player settings
-reachable in game. The external Controller Settings executable is retired. The hierarchy,
+**The remaining delivery; planned, not implemented.** P5-P6 were cancelled on 2026-10-18, so this
+is the whole remaining scope, not a later milestone. The requested end state is one game with all
+player settings reachable in game. The external Controller Settings executable is retired. The hierarchy,
 always-on controller input, preset disabling, per-binding resets, and pause-menu frame below are
 the requested behavior; apply, recovery, and migration details are proposed implementation
 decisions to make that behavior complete.
@@ -1296,7 +1338,7 @@ out of the pause panel is safe.
 - The two **Custom** switches reuse `gameplay_mapping_controller` (default Off) and
   `gameplay_mapping_keyboard_mouse` (default On). The label **Keyboard & Mouse** changes display
   wording only; keep the serialized table and setting names. Preserve per-input-type routing,
-  physical-source provenance, simultaneous devices, and the six-action vocabulary from P1-P6.
+  physical-source provenance, simultaneous devices, and the six-action vocabulary from P1-P4.
 - **Default Presets** becomes disabled immediately when Controller Custom is On, with help
   explaining that custom mappings are active. It remains visible, cannot be activated through
   any navigation device or alternate route, and is re-enabled when Custom is Off. Never clear
@@ -1321,9 +1363,11 @@ out of the pause panel is safe.
   appropriate Help & Options category before P8. Do not put unrelated graphics/audio/path
   settings under Controls just because the old executable exposed them.
 
-For Milestone 2, this replaces R6/§5/P5's whole-category hiding and R8/§4's off-table hiding.
-Their Milestone 1 evidence remains valid for that release. Update `docs/settings/plan.md`'s
-Controls inventory and row-position contract when P7 lands.
+This replaces R6/§5/P5's whole-category hiding and R8/§4's off-table hiding. The change of course
+(2026-10-18) cancelled P5 and P6, so those external-utility rules are never built and no build
+hides the category; the shipped rule is the one above and in §14.1. P4's external-app evidence
+remains valid for the app until P8 removes it. Update `docs/settings/plan.md`'s Controls inventory
+and row-position contract when P7 lands.
 
 ### 14.3 Listening dialog in the pause-menu frame
 
@@ -1412,7 +1456,7 @@ Record supersession of the earlier plan that retained a controller-only executab
 finished plans and historical evidence as history. This request authorizes planning the new
 end state; the present edit does not remove or change runtime/installer code.
 
-### 14.6 Milestone 2 acceptance
+### 14.6 Remaining-delivery acceptance
 
 | Scenario | Required evidence |
 | --- | --- |
@@ -1422,18 +1466,20 @@ end state; the present edit does not remove or change runtime/installer code.
 | Listening lifecycle | Keyboard, mouse, pad buttons/triggers/stick directions, held activation, wrong-type input, Cancel, timeout, focus loss and disconnect behave as specified. Back/Escape are still bindable. No capture press reaches navigation or a song, and cancellation changes no file. |
 | Save and safe apply | Editing from a paused song persists and takes effect on resume without a second settings process or game relaunch for input settings. A save failure keeps the old effective mapping. Concurrent file edits, unknown rows, explicit false values and config/env/CLI overrides retain their contracts. No stale holds, extra notes or second Pause occur. |
 | Recovery | With no pad, disabling the last usable source or removing essential navigation remains recoverable in game. Repeat with an already unusable imported/old profile and with a pad disconnected during editing; disabled sources remain blocked outside capture/recovery. |
-| Gameplay regression | Re-run P6's action, timing, source-provenance, coexistence, pause/resume and boundary checks with in-game-authored profiles. Replace only the superseded utility/category/apply expectations; do not drop unresolved physical-pad or tutorial/calibration coverage. |
+| Gameplay regression | Re-run P0-P4's action, timing, source-provenance, coexistence, pause/resume and boundary checks with in-game-authored profiles. Replace only the superseded utility/category/apply expectations; do not drop unresolved physical-pad or tutorial/calibration coverage. |
 | Existing users | An existing external-app profile retains General Mapping, both gameplay tables, gates, native preset and supported remaining settings after upgrade, direct launch and another save/restart. No required first-run utility or destructive reset. |
 | Distribution retirement | Clean build plus fresh install, upgrade and repair contain no settings executable and no obsolete launch action. The game launches directly, all player settings are reachable in game, and profile/save files remain intact. |
 
 Keep captures, configuration before/after, input/dispatch traces, installer manifests and build
 revision together under `out/gameplay-mapping/in-game/`. Run the documentation checker and
 `git diff --check` as well as the relevant game/settings/input and installer tests. P7/P8 remain
-planned until this evidence exists; Milestone 1 can be delivered independently at P6.
+planned until this evidence exists; P8 is the delivery boundary, and there is no separate
+external-utility release.
 
 ## 15. P4 evidence — the settings surface (2026-10-18)
 
-**P4 landed; P5 can start.** The Controller tab now draws all three binding tables, owns one
+**P4 landed; it is the last external-app package — P5/P6 are cancelled by the 2026-10-18 change
+of course, and P7 is next.** The Controller tab now draws all three binding tables, owns one
 capture session with a per-table source-kind filter, crosses a binding whose device support is
 off, opens its two help pages as modals, and reports a layout change so the shell rebuilds the
 ring instead of keeping entries for a row nobody draws. No game behaviour changed: the Controller
@@ -1496,15 +1542,16 @@ off — `mouse:left` in arm 3, the key spans in arms 2/6 — and not on the enab
 
 ### 15.4 What P4 does not claim
 
-- **P5 is not done.** The native Controller category is still visible; the Gameplay Mapping help
-  page deliberately omits the plan §4 sentence about the category being hidden until P5 lands.
+- **P5 was cancelled (2026-10-18).** The native Controller category stays visible; P7 replaces it
+  with Controls and disables Default Presets while Controller Custom is On (§14.2). P4's Gameplay
+  Mapping help page deliberately omitted the category-hiding sentence.
 - **No physical pad on this machine**, so a pad press *captured into* the Controller table and the
   pad's own source select are unmeasured. The parse-time wrong-kind refusal is measured (arm 7);
   the capture-time refusal is unit-tested (`AcceptsSource`) and code-inspected, not shot.
 - **The tracked capture script's windowed legs still assume the four-tab full surface** (they
   start on `general` and Page-Down to `interface`); that predates P4 and follows P8's default flip.
-  Its headless leg was made surface-aware here. P6/P8 own re-pointing the windowed legs at the
-  reduced screen.
+  Its headless leg was made surface-aware here. P8 owns re-pointing the windowed legs at the
+  reduced screen (P6 is cancelled).
 - **No reset-all or per-row Reset was shot live.** Both are the existing `Table::Reset` plumbing
   (P1's tests) now reached from the shared renderer; arm 8 covers the save half of the loop.
 - **The four-switch matrix was measured on the reduced surface only**; the full surface draws the
