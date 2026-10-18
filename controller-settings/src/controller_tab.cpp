@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Implementation of the button-mapping block (controller-settings/src/controller_tab.h).
+// Implementation of the Controller tab's block (controller-settings/src/controller_tab.h).
 
 #include "controller_tab.h"
 
 #include "imgui.h"
 
 #include <algorithm>
+#include <cfloat>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
 
-#include "row_ui.h"
+#include "binding_text.h"
+#include "binding_table.h"
 
 namespace rb_blitz::profile {
 namespace {
@@ -20,29 +23,9 @@ namespace {
 // Not constexpr: ImVec4 has no constexpr constructor.
 const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
 
-// The two Gameplay Mapping switches live in the block rather than as schema rows: the schema
-// draws its rows above the block, and the switches belong *under* the General Mapping table where
-// the plan's settings layout puts them (§4). Their keys are `[settings]` entries all the same, so
-// Controller Settings, the game's profile apply and a hand edit all meet in one place
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md D6).
-constexpr const char* kControllerGameplayKey = "gameplay_mapping_controller";
-constexpr const char* kKeyboardMouseGameplayKey = "gameplay_mapping_keyboard_mouse";
-
-// What a switch is when the profile says nothing. These must match the compiled defaults in
-// src/input/remap.cpp and the schema rows' own `default` values.
-constexpr bool kControllerGameplayDefault = false;
-constexpr bool kKeyboardMouseGameplayDefault = true;
-
-// A `[settings]` boolean, or its default when the profile has no row for it (B4 writes a row
-// only when it differs from the compiled default).
-bool SettingBool(const ProfileSession& session, std::string_view key, bool fallback) {
-  const ProfileSetting* row = session.profile().FindSetting(key);
-  if (row == nullptr) {
-    return fallback;
-  }
-  return row->value == "true";
-}
-
+// The two `?` pages. The `###` keeps the display title clean and gives each popup an id of its own.
+constexpr const char* kGeneralHelpPopup = "General Mapping###general-mapping-help";
+constexpr const char* kGameplayHelpPopup = "Gameplay Mapping###gameplay-mapping-help";
 
 // The trigger reading the SDK treats as pressed: it keeps a trigger as the byte `value >> 7` and
 // compares that against HID_SDL_TRIGG_THRES, so the same arithmetic here captures a press at the
@@ -86,9 +69,7 @@ std::optional<remap::Target> TargetForPadButton(SDL_GamepadButton button) {
     default:
       // Everything else has no control of its own to capture into, and that deliberately includes
       // Guide: it is a platform button, no target names it any more, and the runtime keeps it out
-      // of the guest's pad state (docs/settings/contracts.md §2.3). The extra
-      // buttons a modern pad has - paddles, the touchpad, misc - are the same case: the SDK folds
-      // them onto buttons that already exist, and a binding names a control rather than a key.
+      // of the guest's pad state (docs/settings/contracts.md §2.3).
       return std::nullopt;
   }
 }
@@ -112,25 +93,39 @@ constexpr MouseCapture kMouseCaptures[] = {
     {SDL_BUTTON_MASK(SDL_BUTTON_X2), "x2"},
 };
 
-// The value column's text: the sources, or nothing at all for a control the pad still reports
-// by itself. Twenty-odd rows of "unchanged" would be twenty-odd rows of noise, and the column
-// being empty is a clear enough way to say it - the "?" beside the heading is where the rule is
-// written down.
-std::string BindingText(const std::vector<remap::Source>* sources) {
-  if (sources == nullptr) {
-    return {};
+// Whether a source is available for play: a pad always is (there is no pad switch), a key follows
+// Keyboard Support and a mouse button follows Mouse Support. A source that is not available is
+// still listed - presence and availability are different facts (plan R7).
+bool SourceEnabled(const remap::Source& source, bool keyboard_on, bool mouse_on) {
+  switch (source.kind) {
+    case remap::SourceKind::kPad:
+      return true;
+    case remap::SourceKind::kKey:
+      return keyboard_on;
+    case remap::SourceKind::kMouse:
+      return mouse_on;
   }
-  if (sources->empty()) {
-    return "Nothing can press this";
-  }
-  std::string text;
-  for (const remap::Source& source : *sources) {
-    if (!text.empty()) {
-      text += ", ";
-    }
-    text += remap::FormatSource(source);
-  }
+  return true;
+}
+
+std::string ListeningText(double until, double now) {
+  char text[64] = {};
+  std::snprintf(text, sizeof(text), "Listening... %.1fs", std::max(0.0, until - now));
   return text;
+}
+
+std::string DisabledSourceHint(bool keyboard_on, bool mouse_on) {
+  std::string hint;
+  if (!keyboard_on) {
+    hint = "Keyboard support is off, so the game ignores these keys.";
+  }
+  if (!mouse_on) {
+    if (!hint.empty()) {
+      hint += " ";
+    }
+    hint += "Mouse support is off, so the game ignores these mouse buttons.";
+  }
+  return hint;
 }
 
 }  // namespace
@@ -139,44 +134,20 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
                          NavAction action) {
   const double now = ImGui::GetTime();
   if (listening_ && now >= listen_until_) {
-    status_ = std::string(remap::TargetLabel(*listening_)) +
-              " was not changed: nothing was pressed";
+    status_ = ListeningLabel(*listening_) + " was not changed: nothing was pressed";
     listening_.reset();
+    listen_hint_.clear();
   }
 
-  ImGui::SeparatorText("Button mapping");
-  // The rule the rows must not repeat: one sentence and a "?" rather than a line of explanation
-  // per control.
-  ImGui::TextDisabled(
-      "Assign listens for three seconds and adds the first input it sees: a pad button, a key, "
-      "or a mouse button.");
-  ImGui::SameLine();
-  ImGui::SmallButton("?");
-  if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip(
-        "Every control already answers to its own pad button and a keyboard key: the D-pad is\n"
-        "WASD, the face buttons are the I/J/K/L diamond, the shoulders are Q/E, and the sticks,\n"
-        "Back and Start have their own keys.\n"
-        "\n"
-        "Assign adds to what a control already has, so one button can answer to several inputs.\n"
-        "Press Assign again to add another.\n"
-        "\n"
-        "Reset removes your own row, which puts the control back to that default.\n"
-        "Reset all does that for every control at once.\n"
-        "\n"
-        "The triggers are left to the pad: a keyboard cannot stand in for a trigger's travel.\n"
-        "Guide is not remappable - it belongs to the platform, and the game never receives it.\n"
-        "\n"
-        "Escape cancels a listen. Assignments are written by Save, on the bottom bar.");
-  }
-  ImGui::Spacing();
+  // The block the draw and the ring have to agree about. The shell sized the ring from this same
+  // function before the frame; a switch flipped below changes it and reports the change.
+  const ControllerBlock block = BlockFor(session.profile());
 
-  ImGui::Spacing();
-  // Above the list rather than below it: the list is taller than most windows, so a line under
-  // it is a line nobody reads.
+  // The block's own messages sit above it rather than under it: the tables are taller than most
+  // windows, so a line beneath them is a line nobody reads.
   if (!status_.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-    ImGui::TextUnformatted(status_.c_str());
+    ImGui::TextWrapped("%s", status_.c_str());
     ImGui::PopStyleColor();
     ImGui::Spacing();
   }
@@ -184,8 +155,7 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
   // A `[remap]` row this build refuses - Guide, and only Guide - is preserved by a save and never
   // applied (docs/settings/contracts.md §2.3). Saying so is the difference between
   // "the button I bound does nothing" being a decision and being a bug report.
-  const std::vector<std::string> refused =
-      remap::RefusedRowNames(session.profile().remap);
+  const std::vector<std::string> refused = remap::RefusedRowNames(session.profile().remap);
   if (!refused.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
     ImGui::TextWrapped(
@@ -196,120 +166,8 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
     ImGui::Spacing();
   }
 
-  const remap::Table table = remap::Table::FromRows(session.profile().remap);
-  const std::vector<remap::Target>& targets = remap::Targets();
-  // Three columns - the control, what presses it, and the row's own two buttons - with an equal share
-  // of the width each, so the three sit at even intervals down the whole list and the row reads as
-  // one small table. Left to themselves the columns end up at whatever distance their own text
-  // happens to make: a one-letter control's binding starts a hair away from it, and a wide one's
-  // further along, which is the "everything at a different distance" this replaces. Equal shares
-  // also put the buttons about two thirds across, which is where the schema tabs put the widget
-  // their own rows drive, and safely clear of the scrollbar this list always has.
-  ImGui::BeginTable("##bindings", 3,
-                    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings);
-  ImGui::TableSetupColumn("Control");
-  ImGui::TableSetupColumn("Assigned to");
-  ImGui::TableSetupColumn("##actions");
-  for (std::size_t index = 0; index < targets.size(); ++index) {
-    const remap::Target target = targets[index];
-    const bool listening_here = listening_ && *listening_ == target;
-    // What presses the control: the user's row, or the binding Controller Settings ships. Reset only
-    // applies to the user's own row - a control on its default has nothing to remove.
-    const std::vector<remap::Source>* sources = table.Effective(target);
-    const bool user_bound = table.IsBound(target);
-
-    // A table disambiguates its columns but not its rows, so every row's "Assign" would be the
-    // same ImGui id and the click would land on the first row that submitted one. The row's own
-    // index is what makes each row its own scope.
-    ImGui::PushID(static_cast<int>(index));
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(std::string(remap::TargetLabel(target)).c_str());
-
-    ImGui::TableSetColumnIndex(1);
-    ImGui::AlignTextToFramePadding();
-    // Wrapped at the column's own edge rather than clipped at it: the binding is the one column
-    // whose text can outgrow the room it has (a control bound to several inputs), and a binding on
-    // two lines is readable where one that runs out of its cell is not.
-    ImGui::PushTextWrapPos(0.0f);
-    if (listening_here) {
-      ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-      ImGui::Text("Listening... %.1fs", listen_until_ - now);
-      ImGui::PopStyleColor();
-    } else if (sources != nullptr && sources->empty()) {
-      ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
-      ImGui::TextUnformatted(BindingText(sources).c_str());
-      ImGui::PopStyleColor();
-    } else if (sources != nullptr) {
-      ImGui::TextUnformatted(BindingText(sources).c_str());
-    }
-    ImGui::PopTextWrapPos();
-
-    ImGui::TableSetColumnIndex(2);
-    // Only one listen at a time: while one is running, every other row's Assign is disabled
-    // rather than quietly stealing the capture.
-    if (Item(first_row + index * 2, ring, action, listening_here ? "Cancel" : "Assign",
-             !listening_ || listening_here)) {
-      if (listening_here) {
-        listening_.reset();
-        status_ = "Listen cancelled";
-      } else {
-        BeginListening(target);
-        status_.clear();
-      }
-    }
-    ImGui::SameLine();
-    if (Item(first_row + index * 2 + 1, ring, action, "Reset", user_bound && !listening_)) {
-      remap::Table reset = table;
-      reset.Reset(target);
-      session.profile().remap = reset.ToRows();
-      status_ = std::string(remap::TargetLabel(target)) + " is back to the default";
-    }
-    ImGui::PopID();
-  }
-  ImGui::EndTable();
-
-  ImGui::Spacing();
-  if (Item(first_row + targets.size() * 2, ring, action, "Reset all bindings",
-           table.BoundCount() > 0)) {
-    remap::Table reset = table;
-    reset.ResetAll();
-    session.profile().remap = reset.ToRows();
-    status_ = "Every control is back to the keys it ships with";
-  }
-
-  // The second half of the tab: Gameplay Mapping, split per input type (plan D1/D2). P1 draws the
-  // two switches and the profile plumbing; the six-action tables themselves are P4, so the section
-  // says what the switch does without pretending the table is here yet.
-  ImGui::Spacing();
-  ImGui::SeparatorText("Gameplay mapping");
-  ImGui::TextDisabled(
-      "Bind inputs directly to gameplay actions. Controller and Keyboard + Mouse each accept only "
-      "their own inputs. Changes apply the next time the game starts.");
-  ImGui::Spacing();
-
-  const bool controller_on = SettingBool(session, kControllerGameplayKey, kControllerGameplayDefault);
-  if (SwitchRow(first_row + kControllerSwitchRow, ring, action, "Controller", controller_on)) {
-    session.SetSetting(kControllerGameplayKey, controller_on ? "false" : "true",
-                       kControllerGameplayDefault ? "true" : "false", ValueStyle::kBare);
-    status_ = controller_on
-                  ? "Controller gameplay mapping is off: the saved controller preset plays again"
-                  : "Controller gameplay mapping is on: its table plays, the saved preset does "
-                    "not, and the change applies the next time the game starts";
-  }
-  const bool keyboard_mouse_on =
-      SettingBool(session, kKeyboardMouseGameplayKey, kKeyboardMouseGameplayDefault);
-  if (SwitchRow(first_row + kKeyboardMouseSwitchRow, ring, action, "Keyboard + Mouse",
-                keyboard_mouse_on)) {
-    session.SetSetting(kKeyboardMouseGameplayKey, keyboard_mouse_on ? "false" : "true",
-                       kKeyboardMouseGameplayDefault ? "true" : "false", ValueStyle::kBare);
-    status_ = keyboard_mouse_on
-                  ? "Keyboard + Mouse gameplay mapping is off: keys and mouse go through "
-                    "General Mapping, and the change applies the next time the game starts"
-                  : "Keyboard + Mouse gameplay mapping is on: that table plays beside the saved "
-                    "controller preset, and the change applies the next time the game starts";
-  }
+  DrawGeneralMapping(block, first_row, ring, session, action, now);
+  DrawGameplayMapping(block, first_row, ring, session, action, now);
 
   // Only while a listen is running: the edges it looks for are measured against the previous
   // frame, and a panel nobody is capturing with has no reason to poll SDL sixty times a second.
@@ -317,98 +175,433 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
   // so the click that started it cannot be captured by it.
   if (listening_) {
     if (const std::optional<remap::Source> captured = CapturedInput()) {
-      CommitCapture(session, *captured);
+      if (!CommitCapture(session, *captured)) {
+        // A source the table refuses must not re-fire every frame while it is held: this frame
+        // becomes the "previous" the next edge is measured against.
+        SnapshotInput();
+      }
     } else {
       SnapshotInput();
     }
   }
 }
 
-bool ControllerTab::Item(std::size_t index, FocusModel& ring, NavAction action,
-                         const char* label, bool enabled) {
-  const bool focused = action == NavAction::kActivate && !ring.Empty() && ring.Index() == index;
-  const bool in_ring = !ring.Empty() && ring.Index() == index;
-  if (!enabled) {
-    ImGui::BeginDisabled();
+void ControllerTab::DrawGeneralMapping(const ControllerBlock& block, std::size_t first_row,
+                                       FocusModel& ring, ProfileSession& session, NavAction action,
+                                       double now) {
+  ImGui::SeparatorText("General Mapping");
+  // The rule the rows must not repeat: one sentence and a `?` rather than a line of explanation
+  // per control.
+  ImGui::TextDisabled(
+      "Map inputs to controller buttons. While a gameplay mapping is on, these bindings control "
+      "menus only.");
+  ImGui::SameLine();
+  DrawHelpRow(first_row + BlockRowStart(block, block.general_help), ring, action,
+              HelpPage::kGeneral,
+              "Opens the General Mapping explanation: what these bindings do in menus and in "
+              "play, and how Assign and Reset work.");
+  ImGui::Spacing();
+
+  const remap::Table table = remap::Table::FromRows(session.profile().remap);
+  const std::vector<remap::Target>& targets = remap::Targets();
+  std::vector<BindingRowView> views;
+  views.reserve(targets.size());
+  for (std::size_t index = 0; index < targets.size(); ++index) {
+    const remap::Target target = targets[index];
+    BindingRowView view;
+    view.id = index;
+    view.label = remap::TargetLabel(target);
+    // What presses the control: the user's row, or the binding Controller Settings ships. Reset
+    // only applies to the user's own row - a control on its default has nothing to remove.
+    if (const std::vector<remap::Source>* sources = table.Effective(target)) {
+      view.nothing_bound = sources->empty();
+      for (const remap::Source& source : *sources) {
+        view.spans.push_back(binding_text::Span{remap::FormatSource(source), true});
+      }
+    }
+    view.listening = Listening();
+    view.listening_here =
+        listening_ && listening_->table == TableId::kGeneral && listening_->target == target;
+    if (view.listening_here) {
+      view.listening_text = ListeningText(listen_until_, now);
+    }
+    // Only one listen at a time: while one is running, every other row's Assign is disabled
+    // rather than quietly stealing the capture.
+    view.assign_enabled = !Listening() || view.listening_here;
+    view.reset_enabled = table.IsBound(target);
+    views.push_back(std::move(view));
   }
-  if (in_ring) {
-    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+
+  const BindingTableResult result =
+      DrawBindingTable("##general_bindings", views,
+                       first_row + BlockRowStart(block, block.general_table), ring, action);
+  if (result.assign.has_value() && *result.assign < targets.size()) {
+    const remap::Target target = targets[*result.assign];
+    const bool listening_here =
+        listening_ && listening_->table == TableId::kGeneral && listening_->target == target;
+    if (listening_here) {
+      listening_.reset();
+      listen_hint_.clear();
+      status_ = "Listen cancelled";
+    } else {
+      ListeningRow row;
+      row.table = TableId::kGeneral;
+      row.target = target;
+      BeginListening(row);
+    }
   }
-  const bool clicked = ImGui::Button(label);
-  if (in_ring) {
+  if (result.reset.has_value() && *result.reset < targets.size()) {
+    remap::Table reset = table;
+    reset.Reset(targets[*result.reset]);
+    session.profile().remap = reset.ToRows();
+    status_ = std::string(remap::TargetLabel(targets[*result.reset])) + " is back to the default";
+  }
+
+  ImGui::Spacing();
+  if (DrawBlockButton(first_row + BlockRowStart(block, block.general_reset_all), ring, action,
+                      "Reset all bindings", table.BoundCount() > 0)) {
+    remap::Table reset = table;
+    reset.ResetAll();
+    session.profile().remap = reset.ToRows();
+    status_ = "Every control is back to the keys it ships with";
+  }
+}
+
+void ControllerTab::DrawGameplayMapping(const ControllerBlock& block, std::size_t first_row,
+                                        FocusModel& ring, ProfileSession& session, NavAction action,
+                                        double now) {
+  (void)now;
+  ImGui::Spacing();
+  ImGui::SeparatorText("Gameplay Mapping");
+  ImGui::TextDisabled(
+      "Bind inputs directly to gameplay actions. Each table accepts only its own input type. "
+      "Changes apply the next time the game starts.");
+  ImGui::SameLine();
+  DrawHelpRow(first_row + BlockRowStart(block, block.gameplay_help), ring, action,
+              HelpPage::kGameplay,
+              "Opens the Gameplay Mapping explanation: the two switches, what each table "
+              "accepts, and when changes apply.");
+  ImGui::Spacing();
+
+  DrawGameplaySwitch(block, first_row + BlockRowStart(block, block.controller_switch), ring, action,
+                     session, /*controller=*/true, block.switches.controller);
+  if (block.has_controller_table()) {
+    ImGui::Indent();
+    // The Controller table has no device gate: a pad has no switch of its own (plan R1).
+    DrawGameplayTable(TableId::kController,
+                      first_row + BlockRowStart(block, block.controller_table),
+                      first_row + BlockRowStart(block, block.controller_reset_all), ring, session,
+                      action, /*keyboard_on=*/true, /*mouse_on=*/true);
+    ImGui::Unindent();
+  }
+
+  ImGui::Spacing();
+  DrawGameplaySwitch(block, first_row + BlockRowStart(block, block.keyboard_mouse_switch), ring,
+                     action, session, /*controller=*/false, block.switches.keyboard_mouse);
+  if (block.has_keyboard_mouse_table()) {
+    const bool keyboard_on =
+        SettingBool(session.profile(), kKeyboardSupportKey, kKeyboardSupportDefault);
+    const bool mouse_on = SettingBool(session.profile(), kMouseSupportKey, kMouseSupportDefault);
+    ImGui::Indent();
+    DrawGameplayTable(TableId::kKeyboardMouse,
+                      first_row + BlockRowStart(block, block.keyboard_mouse_table),
+                      first_row + BlockRowStart(block, block.keyboard_mouse_reset_all), ring,
+                      session, action, keyboard_on, mouse_on);
+    ImGui::Unindent();
+  }
+}
+
+void ControllerTab::DrawGameplaySwitch(const ControllerBlock& block, std::size_t row,
+                                       FocusModel& ring, NavAction action, ProfileSession& session,
+                                       bool controller, bool on) {
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted(controller ? "Controller" : "Keyboard + Mouse");
+  ImGui::SameLine();
+  if (!DrawBlockButton(row, ring, action, on ? "On" : "Off", true)) {
+    return;
+  }
+
+  const bool next = !on;
+  session.SetSetting(controller ? kGameplayControllerKey : kGameplayKeyboardMouseKey,
+                     next ? "true" : "false",
+                     (controller ? kGameplayControllerDefault : kGameplayKeyboardMouseDefault)
+                         ? "true"
+                         : "false",
+                     ValueStyle::kBare);
+
+  BlockSwitches switches = block.switches;
+  if (controller) {
+    switches.controller = next;
+  } else {
+    switches.keyboard_mouse = next;
+  }
+  const ControllerBlock after = BuildControllerBlock(switches);
+  pending_focus_ = controller ? after.controller_switch : after.keyboard_mouse_switch;
+  layout_changed_ = true;
+
+  // A listen that belonged to a table the user just hid has nothing to assign any more.
+  const TableId listening_table =
+      controller ? TableId::kController : TableId::kKeyboardMouse;
+  if (!next && listening_ && listening_->table == listening_table) {
+    listen_hint_.clear();
+    listening_.reset();
+    status_ = "Listen cancelled: the table is hidden";
+    return;
+  }
+  if (controller) {
+    status_ = next ? "Controller gameplay mapping is on: its table plays, the saved preset does "
+                     "not, and the change applies the next time the game starts"
+                   : "Controller gameplay mapping is off: the saved controller preset plays again";
+  } else {
+    status_ = next
+                  ? "Keyboard + Mouse gameplay mapping is on: that table plays beside the saved "
+                    "controller preset, and the change applies the next time the game starts"
+                  : "Keyboard + Mouse gameplay mapping is off: keys and mouse go through General "
+                    "Mapping, and the change applies the next time the game starts";
+  }
+}
+
+void ControllerTab::DrawGameplayTable(TableId table_id, std::size_t first_row,
+                                      std::size_t reset_all_row, FocusModel& ring,
+                                      ProfileSession& session, NavAction action, bool keyboard_on,
+                                      bool mouse_on) {
+  const gameplay_remap::TableKind kind =
+      table_id == TableId::kController ? gameplay_remap::TableKind::kController
+                                       : gameplay_remap::TableKind::kKeyboardMouse;
+  std::vector<ProfileSetting>& rows =
+      table_id == TableId::kController ? session.profile().gameplay_remap_controller
+                                       : session.profile().gameplay_remap_keyboard_mouse;
+  gameplay_remap::Table table = gameplay_remap::Table::FromRows(kind, rows);
+
+  // A row this build keeps but does not apply - a source of the other input type, or a value it
+  // cannot read - is named rather than left looking like a binding that silently does nothing.
+  for (const gameplay_remap::Table::RejectedRow& rejected : table.Rejected()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
+    ImGui::TextWrapped("%s in this table is kept but not applied: %s", rejected.row.key.c_str(),
+                       rejected.reason.c_str());
     ImGui::PopStyleColor();
   }
-  // A5: the outline as well as the colour, so the ring is legible without relying on the shade.
-  DrawFocusOutline(in_ring);
-  if (!enabled) {
-    ImGui::EndDisabled();
+
+  std::vector<BindingRowView> views;
+  views.reserve(gameplay_remap::kActionCount);
+  for (std::size_t index = 0; index < gameplay_remap::kActionCount; ++index) {
+    const gameplay_remap::Action action_id = gameplay_remap::Actions()[index];
+    BindingRowView view;
+    view.id = index;
+    view.label = gameplay_remap::ActionLabel(action_id);
+    bool any_disabled = false;
+    if (const std::vector<remap::Source>* sources = table.Effective(action_id)) {
+      view.nothing_bound = sources->empty();
+      for (const remap::Source& source : *sources) {
+        const bool enabled = SourceEnabled(source, keyboard_on, mouse_on);
+        any_disabled = any_disabled || !enabled;
+        view.spans.push_back(binding_text::Span{remap::FormatSource(source), enabled});
+      }
+    }
+    if (any_disabled) {
+      view.disabled_hint = DisabledSourceHint(keyboard_on, mouse_on);
+    }
+    view.listening = Listening();
+    view.listening_here =
+        listening_ && listening_->table == table_id && listening_->action == action_id;
+    if (view.listening_here) {
+      view.listening_text = ListeningText(listen_until_, ImGui::GetTime());
+    }
+    view.assign_enabled = !Listening() || view.listening_here;
+    view.reset_enabled = table.IsBound(action_id);
+    views.push_back(std::move(view));
   }
-  // A pointer is a device like any other (D6): hovering adopts the ring, so the bottom bar
-  // describes the button the mouse is over rather than the last one the keyboard left behind.
-  AdoptRingOnHover(index, ring);
-  if (in_ring && !ImGui::IsItemVisible()) {
-    ImGui::SetScrollHereY(0.5f);
+
+  const BindingTableResult result = DrawBindingTable(
+      table_id == TableId::kController ? "##controller_gameplay" : "##keyboard_mouse_gameplay",
+      views, first_row, ring, action);
+  if (listening_ && listening_->table == table_id && !listen_hint_.empty()) {
+    // The same sentence the top of the block carries, repeated where the user is looking: a
+    // listen refused for the wrong input type must not look like a stalled capture.
+    ImGui::PushStyleColor(ImGuiCol_Text, kWarning);
+    ImGui::TextWrapped("%s", listen_hint_.c_str());
+    ImGui::PopStyleColor();
   }
-  return enabled && (clicked || focused);
+  if (result.assign.has_value() && *result.assign < gameplay_remap::kActionCount) {
+    const gameplay_remap::Action action_id = gameplay_remap::Actions()[*result.assign];
+    const bool listening_here =
+        listening_ && listening_->table == table_id && listening_->action == action_id;
+    if (listening_here) {
+      listen_hint_.clear();
+      listening_.reset();
+      status_ = "Listen cancelled";
+    } else {
+      ListeningRow row;
+      row.table = table_id;
+      row.action = action_id;
+      BeginListening(row);
+    }
+  }
+  if (result.reset.has_value() && *result.reset < gameplay_remap::kActionCount) {
+    gameplay_remap::Table reset = table;
+    reset.Reset(gameplay_remap::Actions()[*result.reset]);
+    rows = reset.ToRows();
+    status_ = std::string(gameplay_remap::ActionLabel(gameplay_remap::Actions()[*result.reset])) +
+              " is back to the default in this table";
+  }
+
+  ImGui::Spacing();
+  if (DrawBlockButton(reset_all_row, ring, action, "Reset all bindings", table.BoundCount() > 0)) {
+    gameplay_remap::Table reset = table;
+    reset.ResetAll();
+    rows = reset.ToRows();
+    status_ = table_id == TableId::kController
+                  ? "Every Controller gameplay binding is back to the pad preset's controls"
+                  : "Every Keyboard + Mouse gameplay binding is back to the title's keyboard "
+                    "preset";
+  }
 }
 
-std::vector<std::size_t> ControllerTab::FocusRows() {
-  std::vector<std::size_t> rows;
-  rows.reserve(kRowCount);
-  for (std::size_t control = 0; control < kControlRows; ++control) {
-    rows.push_back(2);
+void ControllerTab::DrawHelpRow(std::size_t row, FocusModel& ring, NavAction action, HelpPage page,
+                                std::string_view preview) {
+  if (DrawBlockButton(row, ring, action, "?", true)) {
+    OpenHelp(page);
   }
-  rows.push_back(1);  // Reset all bindings
-  rows.push_back(1);  // Controller gameplay switch
-  rows.push_back(1);  // Keyboard + Mouse gameplay switch
-  return rows;
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("%.*s", static_cast<int>(preview.size()), preview.data());
+  }
 }
 
-bool ControllerTab::SwitchRow(std::size_t index, FocusModel& ring, NavAction action,
-                              const char* label, bool on) {
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted(label);
-  ImGui::SameLine();
-  return Item(index, ring, action, on ? "On" : "Off", true);
+void ControllerTab::OpenHelp(HelpPage page) {
+  // The page takes over the block: a listen that was counting down would otherwise assign the
+  // input the user presses to close the page.
+  if (listening_) {
+    listening_.reset();
+    listen_hint_.clear();
+    status_ = "Listen cancelled";
+  }
+  help_page_ = page;
+  help_request_ = true;
 }
 
-std::string ControllerTab::HelpText(std::size_t row) {
-  const std::vector<remap::Target>& targets = remap::Targets();
-  if (row == kResetAllRow) {
-    return "Removes every assignment at once, so every control goes back to the keys it ships with.";
+void ControllerTab::DrawHelpModal(NavAction action) {
+  if (help_page_ == HelpPage::kNone) {
+    return;
   }
-  if (row == kControllerSwitchRow) {
-    return "Controller gameplay mapping: on, the Controller table drives the six gameplay actions "
-           "directly and the saved controller preset is bypassed; off, the saved preset plays "
-           "exactly as before. The preset itself is kept either way. Applies the next time the "
-           "game starts.";
+  const bool general = help_page_ == HelpPage::kGeneral;
+  const char* id = general ? kGeneralHelpPopup : kGameplayHelpPopup;
+  const bool requested = help_request_;
+  if (requested) {
+    help_request_ = false;
+    ImGui::OpenPopup(id);
   }
-  if (row == kKeyboardMouseSwitchRow) {
-    return "Keyboard + Mouse gameplay mapping: on, that table drives the six gameplay actions "
-           "directly while the controller keeps its saved preset; off, keys and mouse go through "
-           "General Mapping. Applies the next time the game starts.";
+  ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 0.0f), ImVec2(720.0f, FLT_MAX));
+  if (ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextWrapped("%s", general ? GeneralMappingHelp().data() : GameplayMappingHelp().data());
+    ImGui::Spacing();
+    if (ImGui::Button("Close") || action == NavAction::kCancel) {
+      ImGui::CloseCurrentPopup();
+      help_page_ = HelpPage::kNone;
+    }
+    ImGui::EndPopup();
+  } else if (!requested) {
+    // Closed by something that is not our button (the window went away, a viewport changed).
+    // Keeping "open" with no popup on screen would swallow Escape for the rest of the session.
+    help_page_ = HelpPage::kNone;
   }
-  if (row >= targets.size() * 2) {
-    return {};
-  }
-  const std::string label(remap::TargetLabel(targets[row / 2]));
-  if (row % 2 == 0) {
-    return label + ": adds the next input it sees - a pad button, a key or a mouse button - to "
-                   "what already presses it.";
-  }
-  // The default a Reset restores is both devices': the control's own pad button and a key, which
-  // is what the block's own rule above says.
-  return label + ": removes your assignments, putting the control back to its own pad button and "
-                 "its key.";
 }
 
-void ControllerTab::BeginListening(remap::Target target) {
-  listening_ = target;
+bool ControllerTab::TakeLayoutChange() {
+  const bool changed = layout_changed_;
+  layout_changed_ = false;
+  return changed;
+}
+
+ControllerBlock ControllerTab::BlockFor(const Profile& profile) {
+  return BuildControllerBlock(ReadBlockSwitches(profile));
+}
+
+std::string ControllerTab::HelpText(const Profile& profile, std::size_t entry) {
+  const ControllerBlock block = BlockFor(profile);
+  const std::size_t row = BlockRowForEntry(block, entry);
+  return row == kNoBlockRow ? std::string() : BlockHelpText(block, row);
+}
+
+std::string ControllerTab::TraceName(const Profile& profile, std::size_t entry) {
+  const ControllerBlock block = BlockFor(profile);
+  const std::size_t row = BlockRowForEntry(block, entry);
+  return row == kNoBlockRow ? std::string("block:unknown") : BlockTraceName(block, row);
+}
+
+std::string ControllerTab::ListeningLabel(const ListeningRow& row) const {
+  if (row.table == TableId::kGeneral) {
+    return std::string(remap::TargetLabel(row.target));
+  }
+  return std::string(gameplay_remap::ActionLabel(row.action));
+}
+
+void ControllerTab::BeginListening(ListeningRow row) {
+  listening_ = row;
   listen_until_ = ImGui::GetTime() + kListenSeconds;
+  status_.clear();
+  listen_hint_.clear();
   // The mouse button that opened this is down right now, and so is whatever the user happened
   // to be holding. Recording that as "the previous frame" is what leaves all of them without an
   // edge to be captured on.
   SnapshotInput();
+}
+
+bool ControllerTab::CommitCapture(ProfileSession& session, const remap::Source& source) {
+  if (!listening_) {
+    return false;
+  }
+  const ListeningRow row = *listening_;
+  if (row.table == TableId::kGeneral) {
+    remap::Table table = remap::Table::FromRows(session.profile().remap);
+    std::vector<remap::Source> sources;
+    // The *effective* list, not the user's row: a control on its default shows that default, and
+    // the first assignment adds to what the screen says rather than silently dropping it (§4).
+    if (const std::vector<remap::Source>* existing = table.Effective(row.target)) {
+      sources = *existing;
+    }
+    if (std::find(sources.begin(), sources.end(), source) == sources.end()) {
+      sources.push_back(source);
+    }
+    table.Set(row.target, std::move(sources));
+    session.profile().remap = table.ToRows();
+    status_ = std::string(remap::TargetLabel(row.target)) + " now answers to " +
+              remap::FormatSource(source);
+    listening_.reset();
+    listen_hint_.clear();
+    return true;
+  }
+
+  const gameplay_remap::TableKind kind = row.table == TableId::kController
+                                             ? gameplay_remap::TableKind::kController
+                                             : gameplay_remap::TableKind::kKeyboardMouse;
+  // Each table accepts only its own input type; a source of the other kind is refused with the
+  // reason rather than stored where the game would never read it (plan R11).
+  if (!gameplay_remap::AcceptsSource(kind, source)) {
+    listen_hint_ = "This table takes " +
+                   std::string(kind == gameplay_remap::TableKind::kController
+                                   ? "pad inputs"
+                                   : "keys and mouse buttons") +
+                   " only: " + remap::FormatSource(source) + " was not added. Still listening.";
+    return false;
+  }
+  std::vector<ProfileSetting>& profile_rows =
+      kind == gameplay_remap::TableKind::kController ? session.profile().gameplay_remap_controller
+                                                    : session.profile().gameplay_remap_keyboard_mouse;
+  gameplay_remap::Table table = gameplay_remap::Table::FromRows(kind, profile_rows);
+  std::vector<remap::Source> sources;
+  if (const std::vector<remap::Source>* existing = table.Effective(row.action)) {
+    sources = *existing;
+  }
+  if (std::find(sources.begin(), sources.end(), source) == sources.end()) {
+    sources.push_back(source);
+  }
+  table.Set(row.action, std::move(sources));
+  profile_rows = table.ToRows();
+  status_ = std::string(gameplay_remap::ActionLabel(row.action)) + " now answers to " +
+            remap::FormatSource(source) + " in this table";
+  listening_.reset();
+  listen_hint_.clear();
+  return true;
 }
 
 std::optional<remap::Source> ControllerTab::CapturedInput() const {
@@ -483,25 +676,6 @@ std::optional<remap::Source> ControllerTab::CapturedInput() const {
     }
   }
   return std::nullopt;
-}
-
-void ControllerTab::CommitCapture(ProfileSession& session, const remap::Source& source) {
-  const remap::Target target = *listening_;
-  listening_.reset();
-
-  remap::Table table = remap::Table::FromRows(session.profile().remap);
-  std::vector<remap::Source> sources;
-  if (const std::vector<remap::Source>* existing = table.Bindings(target)) {
-    sources = *existing;
-  }
-  if (std::find(sources.begin(), sources.end(), source) == sources.end()) {
-    sources.push_back(source);
-  }
-  table.Set(target, std::move(sources));
-  session.profile().remap = table.ToRows();
-
-  status_ = std::string(remap::TargetLabel(target)) + " now answers to " +
-            remap::FormatSource(source);
 }
 
 void ControllerTab::SnapshotInput() {

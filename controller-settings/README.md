@@ -42,7 +42,10 @@ drivable with the keyboard, the mouse or a controller.
 | `src/settings_edit.{h,cpp}` | The per-kind editor that writes a row's change into the profile (B2) |
 | `src/row_ui.{h,cpp}` | The row pieces both the shell and the General tab draw with, and the precedence badge (A1, B1, B2, B4) |
 | `src/general_tab.{h,cpp}` | The General tab: the launch target, the two locations, the pickers, and the Ultimate install (B1, B8) |
-| `src/controller_tab.{h,cpp}` | The Controller tab's button-mapping block: the control list, the three-second capture and the resets (D16) |
+| `src/controller_tab.{h,cpp}` | The Controller tab's block: the General Mapping table, the two gameplay tables, the one capture session and the two `?` pages (D16, P4) |
+| `src/controller_block.{h,cpp}` | The block's visible layout — which rows exist under each gameplay switch, where each starts in the flat ring, what the bar and the trace call them — no ImGui, no SDL (P4) |
+| `src/binding_table.{h,cpp}` | The three-column table all three mappings are drawn by, and the ring-reachable button it uses (P4) |
+| `src/binding_text.{h,cpp}` | The measured, wrap-aware span layout behind a binding's value cell and its strike line — no ImGui, no SDL (P4) |
 | `src/game_launch.{h,cpp}` | Contract 3's argv, and the process Controller Settings starts with it — no ImGui, no SDL (B7) |
 | `src/install_ultimate.{h,cpp}` | B8's action: runs `rb_blitz_setup_helper.exe install-ultimate` and reports its progress, with the manual route when it fails |
 | `src/ultimate_state.{h,cpp}` | D5's four payload states, the target fallback and where the game is — no ImGui, no SDL (B1) |
@@ -699,8 +702,8 @@ The tables in it, and who reads them:
 | `[launch]` | the launch target and the game-directory override | Controller Settings, and the **game's first boot** — the target is imported into the game's own settings there (P11b cutover, Contract 3) |
 | `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from. A folder an older build saved in `[launch] user_data_dir` / `dlc_dir` is carried across to these keys once, on load, so a pick made before the change still reaches the game | Controller Settings, and the game — the controller rows as its own config source (D3 rank 4, `src/profile/profile_apply.cpp`); the rest are preservation data the game no longer reads |
 | `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
-| `[gameplay_remap_controller]` | the Controller tab's **Controller** gameplay switch (P1 of the gameplay-mapping plan) | the game's gameplay-mapping configuration reader; no action is dispatched from it yet (P3) |
-| `[gameplay_remap_keyboard_mouse]` | the Controller tab's **Keyboard + Mouse** gameplay switch (P1) | the same reader; the keyboard table ships enabled, the controller table ships off |
+| `[gameplay_remap_controller]` | the Controller tab's **Controller** table (P4) | the game's gameplay input: while its switch is on, this table drives the six actions and the native controller preset is bypassed (P3) |
+| `[gameplay_remap_keyboard_mouse]` | the Controller tab's **Keyboard + Mouse** table (P4) | the same dispatcher, beside the native controller preset; the keyboard table ships enabled, the controller table ships off (P3) |
 | `[nav]` | Controller Settings' own key bindings (A5) | Controller Settings only |
 | `[update]` | `declined_version`, the release an older build's update prompt recorded as answered *Not now* (D19). Nothing writes it any more: Controller Settings has no update check | preservation data only |
 
@@ -898,10 +901,38 @@ Under the remap sit the two **Gameplay Mapping** switches (P1 of
 [the gameplay-input-mapping plan](../docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)):
 *Controller* (off by default) and *Keyboard + Mouse* (on by default). Each is a `[settings]` row -
 `gameplay_mapping_controller` / `gameplay_mapping_keyboard_mouse` - and each owns a table of its
-own (`[gameplay_remap_controller]`, `[gameplay_remap_keyboard_mouse]`). P1 stores and shows the
-switches; the six-action tables they will show, the capture that fills them and the strike-through
-of a gated source are P4, and nothing acts on either switch until P2/P3 land. The section's own
-sentence says the changes apply the next time the game starts, which is the plan's D7 decision.
+own (`[gameplay_remap_controller]`, `[gameplay_remap_keyboard_mouse]`), drawn by the same
+three-column renderer as the remap with the same Assign/Reset per row and a table-scoped
+*Reset all bindings*. The section's own sentence says the changes apply the next time the game
+starts, which is the plan's D7 decision.
+
+**Each table accepts only its own input type** (P4's R11). *Assign* in the Controller table takes
+a pad button, trigger or stick direction and refuses a key or mouse button with a visible hint
+("This table takes pad inputs only: key:J was not added. Still listening."); the Keyboard + Mouse
+table does the same in the other direction. A source of the wrong kind that is hand-written into
+the profile is kept verbatim, reported above the table and never applied
+(`gameplay_remap::Table::Rejected`). One capture session is shared by all three tables and is
+owned by the row that started it, so an Assign elsewhere is disabled rather than quietly stealing
+the press.
+
+**A table hides while its switch is off and keeps its bindings.** Both switches stay focusable
+while their table is hidden - a switch that hid itself would be a table nobody could bring back -
+and the tab's block is rebuilt when a switch moves, so a hidden table contributes no rows to the
+focus ring at all. `--dump-layout` names every block row and its switch state, which is how a
+harness checks that without a window (`surface`, `block  <n> rows` and the `block row` lines).
+
+**A binding whose device support is off stays visible and is crossed out.** In the Keyboard +
+Mouse table, a `key:` source is drawn in the subtitle colour with a strike line when *Keyboard
+support* is off, and a `mouse:` source when *Mouse support* is off; enabled sources in the same
+row stay normal. The strike is measured per source and per wrapped line
+(`binding_text::Wrap`), and hovering the value says which switch is off. The bindings are kept,
+the utility's own navigation and capture still work with either device off (R9), and the game is
+what ignores the device.
+
+**The two `?` buttons are real focus entries.** Each section's description has one; hovering it
+previews a sentence and clicking it, or pressing Enter on it, opens a persistent page
+(*General Mapping* or *Gameplay Mapping*) drawn as a modal, which Escape closes without closing
+the window. While a page is up the ring behind it does not move and no binding can be changed.
 
 There is no input-source choice anywhere, deliberately. The game is single-player, so the
 Controller Settings listens to **every** connected pad, the keyboard and the mouse in the same frame, and a

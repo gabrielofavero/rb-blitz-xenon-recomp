@@ -1,7 +1,7 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0 is closed for the action seam, P1, P2 and P3 have landed
-(§10, §11, §12, §13); P4-P6 are not started; P7-P8 are planned as a second milestone.**
+**Status: in progress, 2026-10-18. P0 is closed for the action seam, P1-P4 have landed
+(§10, §11, §12, §13, §15); P5-P6 are not started; P7-P8 are planned as a second milestone.**
 **Milestone 1 delivers P1-P6 with the external Controller Settings executable. Milestone 2
 delivers P7-P8: all player settings in game and retirement of that executable.** P0 remains the
 prerequisite investigation. Sections 1-8 describe Milestone 1 unless explicitly qualified;
@@ -543,6 +543,11 @@ table's controls, the edge/reconcile model, the axis leak it found and fixed, an
 physical pad). `kGameplayDispatchReady` is now `true`; the Controller switch still defaults off, and
 the pad arm, the analog stick under a real thumb and the tutorial/calibration interactive segments
 stay unmeasured (§13.4).
+P4 status (2026-10-18): **landed, and P5 can start** — §15 records the three binding tables, the
+shared renderer and span layout, the per-table capture and source-kind refusal, the crossed
+device-gated bindings, the two `?` pages, the runtime ring rebuild, the `--dump-layout` block rows,
+and the live arms for all four switch combinations, both device-support arms, the hidden rows and
+Save. The Controller switch still defaults off, so the shipping behaviour is unchanged.
 
 ### 6.2 Milestone 2 — in-game controls and executable retirement (P7-P8)
 
@@ -1425,3 +1430,89 @@ Keep captures, configuration before/after, input/dispatch traces, installer mani
 revision together under `out/gameplay-mapping/in-game/`. Run the documentation checker and
 `git diff --check` as well as the relevant game/settings/input and installer tests. P7/P8 remain
 planned until this evidence exists; Milestone 1 can be delivered independently at P6.
+
+## 15. P4 evidence — the settings surface (2026-10-18)
+
+**P4 landed; P5 can start.** The Controller tab now draws all three binding tables, owns one
+capture session with a per-table source-kind filter, crosses a binding whose device support is
+off, opens its two help pages as modals, and reports a layout change so the shell rebuilds the
+ring instead of keeping entries for a row nobody draws. No game behaviour changed: the Controller
+switch still defaults off, and the stored tables are the ones P1 froze.
+
+### 15.1 What landed
+
+| P4 item | Where it landed | Evidence |
+| --- | --- | --- |
+| One visible-layout model | New [controller_block.h](../../../controller-settings/src/controller_block.h)/[.cpp](../../../controller-settings/src/controller_block.cpp): `BuildControllerBlock` (row indices and per-row option counts for any switch pair), `BlockRowAt`, `BlockRowStart`/`BlockRowForEntry` (flat ring index ↔ row), `BlockTraceName`, `BlockHelpText`, and the two help pages. The switch keys and defaults live there once, and `ReadBlockSwitches` reads them from the profile | `controller_settings_block_tests.cpp`, the layout/switches/help cases |
+| Shared table renderer | New [binding_table.h](../../../controller-settings/src/binding_table.h)/[.cpp](../../../controller-settings/src/binding_table.cpp): the three-column table (control, measured value, Assign/Reset) instantiated for General Mapping and both gameplay tables; one `DrawBlockButton` for every ring-reachable button in the block | the same suite's layout checks; live shots below |
+| Measured spans and the strike | New [binding_text.h](../../../controller-settings/src/binding_text.h)/[.cpp](../../../controller-settings/src/binding_text.cpp): every source is its own span, `", "` its own un-struck separator, the wrap is measured in the cell, and a source wider than a line is split. The value cell draws each span in its colour and a strike line under each disabled one, per wrapped line | `TestBindingSpans` and live arms 2/3/6 |
+| Per-table capture and source kinds | The Controller table accepts `pad:` only and the Keyboard + Mouse table `key:`/`mouse:` only, at capture (`CommitCapture` → `AcceptsSource`) and at parse (`Table::FromRows` → `Rejected`). A refused capture leaves the listen armed with a visible sentence | `TestSourceKinds` (P1); live arm 7 for the parse path |
+| Assign adds to the effective list | `CommitCapture` now reads `Effective()`, not `Bindings()`, for all three tables, so the first assignment adds to the compiled defaults the screen shows instead of silently replacing them (§4's explicit check) | live arm 8: the profile holds the default list plus the captured key |
+| Two `?` pages | Each section's `?` is a real ring entry; hover previews a sentence and Activate/click opens a modal page. The shell treats the page as a modal owner, so Escape closes the page and a second Escape leaves, and no ring movement or bar action happens behind it | live arm 4 and `11-help-open.png` |
+| Runtime ring layout | `Shell::BuildRings` replaces the one-time sizing; the shell rebuilds when `ControllerTab::TakeLayoutChange()` reports a switch, moves the ring to that switch, and also resyncs before input when the profile changed outside the tab. The focus trace now records a ring-size change even when the focused entry is unchanged | live arm 1 trace: 68/38 → 55/31 → 42/24 → 55/31 |
+| Block rows in `--dump-layout` | `DescribeLayout` takes the block and prints `block  <n> rows, Controller on/off, Keyboard + Mouse on/off` plus one `block row` line per row, with `[off, table hidden]` and `[?]` annotations (main.cpp reads the profile) | `out/p4/dump-layout.txt`, `out/p4/dump-both.txt`; `TestDumpNamesTheBlock` |
+| Harness checks | [capture_controller_settings.ps1](../../../scripts/capture_controller_settings.ps1) now checks both switches and the visible/hidden table in the dump, and its tab checks follow the surface the build opens with | headless leg **20/20** (`out/p4/capture-headless/`) |
+
+The run also found and fixed two defects of the new code, both visible in the live trace:
+**the dump's block was nested inside the unbuilt-group loop** (printed once per unbuilt group of
+the Controller tab, three times), and **the bottom bar and the focus trace were handed a flat
+ring entry where the new row-based helpers expected a row** (the trace named `block:keyboard-mouse-
+switch` for the row that draws `control/dpad_down`). `BlockRowForEntry` is that conversion, and
+`CheckBlockIsCoherent` now pins it for every option of every row.
+
+### 15.2 Tests
+
+- `controller_settings_nav` (the nav/help/keys/block binary) is **2,838 checks** in the debug tree;
+  the full suite is **40/40** (`ctest --test-dir out/build/win-amd64-debug`, 2026-10-18).
+- The new pure cases: the four switch combinations' row indices and options; every row's name and
+  sentence; `BlockRowForEntry` for every option; the two help pages; and the span layout's
+  separators, wrapping, disabled-only strikes, long-source splitting, empty list and strike
+  thickness.
+- The headless capture leg asserts the block rows from `--dump-layout` (both switches named, the
+  shipping Keyboard + Mouse table shown, the hidden Controller table contributing no rows).
+
+### 15.3 Live arms (release behaviour, debug build, 2026-10-18)
+
+The driver is the scratch `out/_swap/p4/run.ps1` (the same key-injection and `capture_window.ps1`
+the tracked harness uses). Every arm writes its own fixture profile, runs the *reduced* Controller
+Settings surface (`--controller-only`, `--no-gamepad`), reads `--focus-log`, and keeps its
+screenshots and trace under `out/_swap/p4/`.
+
+| Arm | What it measured | Evidence |
+| --- | --- | --- |
+| `arm1` | All four switch combinations on one walk: both on (**68 entries / 38 rows**), Controller off (**55/31**), both off (**42/24**), Keyboard + Mouse on again (**55/31**). The ring lands on the switch that changed and the hidden tables contribute no rows; the focus trace records each rebuild | `focus-arm1.log`, `01-both-on.png`…`06-kbm-on-again.png` |
+| `arm4` | The General Mapping `?` page: the ring reaches `block:general-help`, Enter opens the modal (`11-help-open.png`), a Down while it is up writes **no** focus line, Escape closes the page (the window stays), and the next Down moves to `block:control/a` | `focus-arm4.log`, `10-general-help.png`…`14-after-help.png` |
+| `arm5` | The fourth combination from the profile: Controller on, Keyboard + Mouse off → **55 entries / 31 rows** at boot, the Controller table drawn and the other table absent | `15-controller-only.png`, `focus-arm5.log` |
+| `arm2` | Keyboard Support off: thirty Downs still walk the block to `block:keyboard-mouse/action/first_note` (the utility's own keys are unaffected, R9), and the Keyboard + Mouse table draws its key sources crossed while `mouse:left` stays normal | `08-keyboard-off-table.png`, `focus-arm2.log` |
+| `arm3` | Mouse Support off: the same walk, the same row, `mouse:left` crossed and the keys normal | `09-mouse-off-table.png`, `focus-arm3.log` |
+| `arm6` | Both device supports off: the walk still reaches the table and every key and mouse source in it is crossed | `16-both-devices-off.png`, `focus-arm6.log` |
+| `arm7` | A hand-written `first_note = "key:J"` in `[gameplay_remap_controller]`: the table prints *"first_note in this table is kept but not applied: key:J is a key, and gameplay_remap_controller accepts pad sources only"* and falls back to the compiled pad default | `17-wrong-kind-row.png`, `focus-arm7.log` |
+| `arm8` | Capture → Save: Enter on Keyboard + Mouse **First Note** starts the listen, `a` is captured, and the row reads `key:J, key:K, mouse:left, key:A`; Ctrl+S writes the profile, whose `[gameplay_remap_keyboard_mouse] first_note` holds exactly that list | `18-assigned-a.png`, `19-saved.png`, the fixture profile |
+| `pad` | The scripted virtual pad (`--test-pad`, 22 D-pad steps at 600 ms) walked the block from the schema rows through `block:control/*`: the new rows are reachable by a pad, not only by the keyboard | `focus-pad.log` |
+
+The crossed-source evidence is also numeric: the strike line has a measured signature
+(brightness 100–175, a continuous run per source) that appears only on the arm whose device is
+off — `mouse:left` in arm 3, the key spans in arms 2/6 — and not on the enabled source beside it.
+
+### 15.4 What P4 does not claim
+
+- **P5 is not done.** The native Controller category is still visible; the Gameplay Mapping help
+  page deliberately omits the plan §4 sentence about the category being hidden until P5 lands.
+- **No physical pad on this machine**, so a pad press *captured into* the Controller table and the
+  pad's own source select are unmeasured. The parse-time wrong-kind refusal is measured (arm 7);
+  the capture-time refusal is unit-tested (`AcceptsSource`) and code-inspected, not shot.
+- **The tracked capture script's windowed legs still assume the four-tab full surface** (they
+  start on `general` and Page-Down to `interface`); that predates P4 and follows P8's default flip.
+  Its headless leg was made surface-aware here. P6/P8 own re-pointing the windowed legs at the
+  reduced screen.
+- **No reset-all or per-row Reset was shot live.** Both are the existing `Table::Reset` plumbing
+  (P1's tests) now reached from the shared renderer; arm 8 covers the save half of the loop.
+- **The four-switch matrix was measured on the reduced surface only**; the full surface draws the
+  same Controller tab (the block is the tab's own), but its windowed leg was not re-run (see
+  above).
+- **A pointer was not re-driven for the new rows.** Hover/adopt is the same `AdoptRingOnHover`
+  every other button uses, and the tracked harness's mouse leg still covers it; the pad was driven
+  live (the `pad` arm).
+- **Small-window layout was not shot.** The value cell wraps at `GetContentRegionAvail()` rather
+  than at the window edge, which is the mechanism a small window needs; the 1280-wide captures show
+  wrapping (the Controller First Note default is two lines in arm 7).

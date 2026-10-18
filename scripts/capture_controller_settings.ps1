@@ -117,9 +117,10 @@ param(
     # machine rather than one.
     [double[]]$UiScales = @(1.0, 1.5, 2.0),
     # The walkthrough leg's budget: Home plus this many Downs per tab. More than the rows any ring
-    # in Controller Settings has (the largest is the Controller tab's 21), and deliberately blind -
-    # the leg presses first and reads the trace once at the end, because a harness that reads the
-    # log between presses is measuring its own timing.
+    # in Controller Settings has (the largest is the Controller tab's 24 rows with the shipping
+    # switches - 2 schema rows, the block's 21 rows and the bar - or 31 with the Controller table
+    # shown), and deliberately blind - the leg presses first and reads the trace once at the end,
+    # because a harness that reads the log between presses is measuring its own timing.
     [int]$LapPresses = 45,
     [int]$SettleSeconds = 2,
     [int]$WindowTimeoutSec = 40
@@ -475,12 +476,28 @@ $fixtureText = ConvertTo-NormalizedProfile $fixtureRaw
 
 $layout = Invoke-Dump "dump-layout"
 Add-Check "headless" "--dump-layout runs without a window" ($layout.Exit -eq 0 -and $layout.Text -ne "") "exit $($layout.Exit)"
-foreach ($tab in @("general", "graphics", "controller")) {
+# Which surface this build opens with (P8's gate). The reduced screen has the Controller tab and
+# no other, so the tab list and the rows that live on the other tabs are asserted only where the
+# surface really draws them.
+$fullSurface = $layout.Text -match "surface\s*: full surface"
+$tabs = if ($fullSurface) { @("general", "graphics", "controller") } else { @("controller") }
+foreach ($tab in $tabs) {
     Add-Check "headless" "the '$tab' tab reaches the layout" ($layout.Text -match "tab ${tab}: \d+ rows") ""
 }
 Add-Check "headless" "every row carries a tooltip" ($layout.Text -match "every row carries a tooltip") ""
-Add-Check "headless" "the launch target offers all three choices" `
-    ($layout.Text -match "row\s+launch\.target.*choices: common, demo, ultimate") ""
+if ($fullSurface) {
+    Add-Check "headless" "the launch target offers all three choices" `
+        ($layout.Text -match "row\s+launch\.target.*choices: common, demo, ultimate") ""
+}
+# P4: the Controller tab's block is not a schema row, so the dump has to name it. The fixture has
+# no `[settings]` rows, so this is the shipping configuration - Controller off, Keyboard + Mouse
+# on - and the Controller table's rows must be absent rather than merely unfocusable.
+Add-Check "headless" "the Controller tab's block names both gameplay switches" `
+    ($layout.Text -match "block:controller-switch" -and $layout.Text -match "block:keyboard-mouse-switch") ""
+Add-Check "headless" "the shipping block shows the Keyboard + Mouse table" `
+    ($layout.Text -match "block:keyboard-mouse/action/first_note \(2 options\)") ""
+Add-Check "headless" "the hidden Controller table contributes no rows" `
+    (-not ($layout.Text -match "block:controller/action/")) ""
 
 $display = Invoke-Dump "dump-display"
 $uiScale = 1.0

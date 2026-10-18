@@ -10,6 +10,8 @@
 #include <string>
 #include <utility>
 
+#include "controller_block.h"
+
 namespace rb_blitz::profile {
 namespace {
 
@@ -222,7 +224,8 @@ std::string FlattenHelpText(std::string_view text) {
   return out;
 }
 
-std::string DescribeLayout(const std::vector<TabLayout>& layout) {
+std::string DescribeLayout(const std::vector<TabLayout>& layout,
+                           const ControllerBlock* controller_block) {
   std::string out;
   for (const TabLayout& tab : layout) {
     out += "tab ";
@@ -298,6 +301,47 @@ std::string DescribeLayout(const std::vector<TabLayout>& layout) {
       out += ": ";
       out += GroupNoteText(*group);
       out += "\n";
+    }
+    // The Controller tab's block, which is not a schema row: the two gameplay switches decide
+    // which of its rows exist at all, so the dump has to be told the block it is describing.
+    // Every row is named, because "is a hidden table still focusable?" is exactly the question a
+    // harness must be able to answer without a window.
+    if (controller_block != nullptr && tab.tab == settings::Tab::kController) {
+      out += "  block  ";
+      out += std::to_string(controller_block->row_count);
+      out += " rows, Controller ";
+      out += controller_block->switches.controller ? "on" : "off";
+      out += ", Keyboard + Mouse ";
+      out += controller_block->switches.keyboard_mouse ? "on" : "off";
+      out += "\n";
+      for (std::size_t row = 0; row < controller_block->row_count; ++row) {
+        const BlockRowInfo info = BlockRowAt(*controller_block, row);
+        out += "    block row ";
+        out += std::to_string(row);
+        out += " ";
+        out += BlockTraceName(*controller_block, row);
+        out += " (";
+        out += std::to_string(controller_block->row_options[row]);
+        out += controller_block->row_options[row] == 1 ? " option" : " options";
+        out += ")";
+        switch (info.kind) {
+          case BlockRowKind::kControllerSwitch:
+          case BlockRowKind::kKeyboardMouseSwitch: {
+            const bool on = info.kind == BlockRowKind::kControllerSwitch
+                                ? controller_block->switches.controller
+                                : controller_block->switches.keyboard_mouse;
+            out += on ? " [on]" : " [off, table hidden]";
+            break;
+          }
+          case BlockRowKind::kGeneralHelp:
+          case BlockRowKind::kGameplayHelp:
+            out += " [?]";
+            break;
+          default:
+            break;
+        }
+        out += "\n";
+      }
     }
   }
   return out;

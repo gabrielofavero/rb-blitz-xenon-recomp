@@ -23,6 +23,7 @@
 
 #include "game_launch.h"
 #include "general_report.h"
+#include "controller_block.h"
 #include "profile/profile.h"
 #include "profile/profile_path.h"
 #include "prefill.h"
@@ -261,6 +262,10 @@ int Emit(const std::string& text, const std::string& path, int code) {  if (path
   return file.good() ? code : 1;
 }
 
+// Defined below with the other headless reports. The layout dump needs the session because the
+// Controller tab's block rows follow the two gameplay switches (`[settings]` rows).
+rb_blitz::profile::ProfileSession MakeDumpSession(const Options& options);
+
 int DumpLayout(const Options& options) {
   // The dump is evidence about *this* install, so it asks the same question the shell asks: the
   // Ultimate payload's presence decides R10's row, which is the one rule a build machine can
@@ -280,7 +285,14 @@ int DumpLayout(const Options& options) {
                 rb_blitz::profile::settings::Tab::kController, environment)}
           : rb_blitz::profile::BuildLayout(environment);
 
-  const std::string text = rb_blitz::profile::DescribeLayout(layout);
+  // The Controller tab's block is not a schema row: the two gameplay switches decide which of its
+  // tables exist. The dump describes the block the profile selects, so "the Controller table is
+  // hidden, its rows are not focusable" is answerable without a window (P4).
+  rb_blitz::profile::ProfileSession session = MakeDumpSession(options);
+  const rb_blitz::profile::ControllerBlock block = rb_blitz::profile::BuildControllerBlock(
+      rb_blitz::profile::ReadBlockSwitches(session.profile()));
+
+  const std::string text = rb_blitz::profile::DescribeLayout(layout, &block);
   const bool complete = text.find("MISSING-TOOLTIP") == std::string::npos;
   std::string all = "surface : ";
   all += options.controller_only ? "controller settings (one screen)\n" : "full surface\n";

@@ -69,6 +69,9 @@ set_source_files_properties(${RBBLITZ_IMGUI_BACKENDS} PROPERTIES
 
 set(RBBLITZ_CONTROLLER_SETTINGS_SOURCES
     main.cpp
+    src/binding_table.cpp
+    src/binding_text.cpp
+    src/controller_block.cpp
     src/controller_tab.cpp
     src/focus_log.cpp
     src/game_config.cpp
@@ -237,13 +240,18 @@ if(BUILD_TESTING)
     # keys' in nav_bindings.cpp rather than in the glue beside them. It needs the generated table
     # for the same reason the launch tests do.
     add_executable(rb_blitz_controller_settings_nav_tests
+        "${CMAKE_SOURCE_DIR}/tests/controller_settings_block_tests.cpp"
         "${CMAKE_SOURCE_DIR}/tests/controller_settings_pad_nav_tests.cpp"
         "${CMAKE_SOURCE_DIR}/tests/controller_settings_help_tests.cpp"
         "${CMAKE_SOURCE_DIR}/tests/controller_settings_keys_tests.cpp"
+        src/binding_text.cpp
+        src/controller_block.cpp
         src/pad_nav.cpp
         src/nav_bindings.cpp
         src/schema_view.cpp
         "${CMAKE_SOURCE_DIR}/src/profile/profile.cpp"
+        "${CMAKE_SOURCE_DIR}/src/profile/remap.cpp"
+        "${CMAKE_SOURCE_DIR}/src/profile/gameplay_remap.cpp"
     )
     target_include_directories(rb_blitz_controller_settings_nav_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/src"

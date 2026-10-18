@@ -25,6 +25,7 @@
 #include "focus_log.h"
 #include "game_launch.h"
 #include "general_tab.h"
+#include "controller_block.h"
 #include "controller_tab.h"
 #include "profile/profile.h"
 #include "nav.h"
@@ -84,6 +85,20 @@ class Shell {
   void ApplyAction(NavAction action);
   void RequestTab(int delta);
   void DrawTab(const TabLayout& tab, FocusModel& ring);
+  // Sizes every tab's ring from the schema's rows, the block each tab draws after them and the
+  // bottom bar. Called once by the constructor and again whenever the Controller tab's visible
+  // rows change: each gameplay switch hides its own table, so a ring sized once would keep dead
+  // entries for rows nobody draws (plan P4's "hidden rows are never focusable").
+  //
+  // `focus_row` names a Controller block row the ring should land on after the rebuild - the
+  // switch that was just flipped - instead of clamping the old flat index, which may have been
+  // inside a table that is now gone.
+  void BuildRings(std::optional<std::size_t> focus_row = std::nullopt);
+  // Rebuilds the ring when the Controller tab's visible rows changed since it was sized - which
+  // also covers a switch moved by a profile reset or an import, not only by the tab's own button.
+  // Called once a frame before any input is read, so the ring the user moves is the ring the tab
+  // is about to draw.
+  void SyncControllerRows();
   // The bottom bar (A2): what the settings file is doing on the left, the actions that end
   // a session on the right, and under them the focused row's own help and the hints for it.
   // Returns false when Close was chosen.
@@ -150,6 +165,9 @@ class Shell {
   ControllerTab controller_;
   std::vector<TabLayout> layout_;
   std::vector<FocusModel> rings_;
+  // The Controller block the Controller tab's ring was last sized from. Its visible rows depend
+  // on the two gameplay switches, and the tab reports a change so the ring can be rebuilt.
+  ControllerBlock controller_block_;
   std::size_t tab_ = 0;
   NavAction action_ = NavAction::kNone;
   // The right stick's scroll of the tab body's scrollbar: pixels to move the body by, applied once
@@ -178,6 +196,10 @@ class Shell {
   bool logged_focus_ = false;
   settings::Tab logged_tab_ = settings::Tab::kGeneral;
   std::size_t logged_entry_ = 0;
+  // The ring's size when the last line was written. A switch that hides a table can keep the
+  // focused entry's index unchanged (the table behind it disappears) while the ring shrinks, and
+  // "the block was resized" is exactly what a P4 trace has to show.
+  std::size_t logged_count_ = 0;
   std::optional<InputDevice> logged_device_;
   bool logged_pads_ = false;
   std::size_t logged_pad_count_ = 0;

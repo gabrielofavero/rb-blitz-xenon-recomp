@@ -268,6 +268,35 @@ Items 4 and 10 are only honest if the in-game rows own their settings, so on the
   each leg deletes its fixture's `<profile stem>.game-settings.toml` first (the Ultimate leg's licence
   line reads `(configured)`).
 
+#### Gameplay Mapping tables on the Controller tab (P4, 2026-10-18)
+
+The Controller tab now draws the two gameplay tables P1's profile stored
+([gameplay-input-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §4/§15):
+
+* **Three tables, one renderer.** General Mapping and both gameplay tables are drawn by
+  [binding_table.cpp](../../controller-settings/src/binding_table.cpp); each gameplay table owns one
+  input type (`pad:` for Controller, `key:`/`mouse:` for Keyboard + Mouse) and refuses the other at
+  capture and at parse. One capture session is shared by all three tables.
+* **Each switch hides its own table**, both switches stay focusable while their table is hidden, and
+  the tab reports a layout change so the shell rebuilds the ring
+  ([controller_block.cpp](../../controller-settings/src/controller_block.cpp)); a hidden table
+  contributes no focus entries. The focus trace now records a ring-size change.
+* **A binding whose device is off stays listed and is crossed out** in the Keyboard + Mouse table
+  ([binding_text.cpp](../../controller-settings/src/binding_text.cpp)), and the utility's own
+  navigation and capture still work with Keyboard Support or Mouse Support off (R9).
+* **The two `?` buttons are focus entries** opening persistent help pages; the shell owns Escape
+  while one is up, so Escape closes the page and a second Escape leaves.
+* **`--dump-layout` names the block**: `block  <n> rows, Controller on/off, Keyboard + Mouse
+  on/off` and one `block row` line per row, so a harness can check which table is visible without a
+  window. [capture_controller_settings.ps1](../../scripts/capture_controller_settings.ps1)'s
+  headless leg asserts it (20/20 on 2026-10-18).
+
+Evidence: `controller_settings_nav` 2,838 checks and 40/40 ctest; the live matrix under
+`out/_swap/p4/` (four switch combinations, both device-support arms, the help page, a wrong-kind
+row and a capture→Save) with its traces. What this does **not** change: P5's native-category
+hiding is still owed, the Gameplay Mapping help page does not yet claim it, and the tracked
+windowed capture legs still target the four-tab surface that P8's gate moved off by default.
+
 #### Boot speed and one frozen picture (owner report, 2026-10-13, later)
 
 * **The freeze** (seen once) is a GPU command-processor packet desync: the log ends with

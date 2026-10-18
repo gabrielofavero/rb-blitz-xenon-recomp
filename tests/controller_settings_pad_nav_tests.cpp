@@ -203,6 +203,9 @@ void TestButtonNames() {
 void RunControllerSettingsHelpChecks();
 // ...and the third: A5's keys, in tests/controller_settings_keys_tests.cpp.
 void RunControllerSettingsKeysChecks();
+// ...and the fourth: the Controller tab's block layout and the binding value column, in
+// tests/controller_settings_block_tests.cpp (P4 of the gameplay-input-mapping plan).
+void RunControllerSettingsBlockChecks();
 
 int main() {
   TestDeadzone();
@@ -216,5 +219,6 @@ int main() {
   TestButtonNames();
   RunControllerSettingsHelpChecks();
   RunControllerSettingsKeysChecks();
+  RunControllerSettingsBlockChecks();
   return rb_blitz::test::Finish();
 }

@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
@@ -187,9 +188,18 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
   // hides never reaches the layout, so the ring cannot land on one.
   //
   // Controller Settings has one tab in `layout_` and no General block: the reduced screen is one
-  // screen of controller rows, so the only block under the schema's rows is the mapping table.
+  // screen of controller rows, so the only block under the schema's rows is the mapping block.
+  // The Controller block's rows depend on the two gameplay switches, so the block is read here
+  // once and rebuilt by SyncControllerRows when a switch moves.
+  controller_block_ = ControllerTab::BlockFor(session_.profile());
+  BuildRings();
+}
+
+void Shell::BuildRings(std::optional<std::size_t> focus_row) {
+  const std::size_t focused_tab = tab_;
   rings_.resize(layout_.size());
   for (std::size_t index = 0; index < layout_.size(); ++index) {
+    const std::size_t previous = rings_[index].Index();
     std::vector<std::size_t> rows = SchemaRowOptions(layout_[index]);
     switch (layout_[index].tab) {
       case settings::Tab::kGeneral:
@@ -203,11 +213,12 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
         rows.push_back(ProfilePanel::kRowCount);
         break;
       case settings::Tab::kController: {
-        // D16's mapping table: one row per control, Assign and Reset side by side, then Reset all
-        // and the two Gameplay Mapping switches. The block owns the list, so the ring the shell
-        // sizes and the entries the block draws are one arithmetic rather than two.
-        const std::vector<std::size_t> block = ControllerTab::FocusRows();
-        rows.insert(rows.end(), block.begin(), block.end());
+        // D16's mapping block: one row per control, Assign and Reset side by side, then the
+        // Gameplay Mapping switches and whichever tables they are showing. The block owns the
+        // list, so the ring the shell sizes and the entries the block draws are one arithmetic
+        // rather than two.
+        rows.insert(rows.end(), controller_block_.row_options.begin(),
+                    controller_block_.row_options.end());
         break;
       }
       case settings::Tab::kGraphics:
@@ -219,7 +230,46 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
     }
     rows.push_back(bar_.size());
     rings_[index].Reset(std::move(rows));
+    // Keep the user where they were unless the caller named a row: a rebuild that reset every
+    // ring to its first entry would move the focus whenever a switch was flipped.
+    if (index == focused_tab && focus_row.has_value() &&
+        layout_[index].tab == settings::Tab::kController) {
+      rings_[index].SetIndex(SchemaFocusEntries(layout_[index]) +
+                             BlockRowStart(controller_block_, *focus_row));
+    } else if (rings_[index].Count() > 0) {
+      rings_[index].SetIndex(std::min(previous, rings_[index].Count() - 1));
+    }
   }
+}
+
+void Shell::SyncControllerRows() {
+  const ControllerBlock block = ControllerTab::BlockFor(session_.profile());
+  if (block.row_options == controller_block_.row_options) {
+    return;
+  }
+  // A switch moved outside the tab's own button (a profile reset, an import, a reload): keep the
+  // ring on that switch if it was on one, rather than clamping to whatever row took its place.
+  std::optional<std::size_t> focus;
+  if (tab_ < layout_.size() && layout_[tab_].tab == settings::Tab::kController &&
+      tab_ < rings_.size()) {
+    const std::size_t index = rings_[tab_].Index();
+    const std::size_t schema_entries = SchemaFocusEntries(layout_[tab_]);
+    if (index >= schema_entries) {
+      const BlockRowInfo info = BlockRowAt(controller_block_, index - schema_entries);
+      switch (info.kind) {
+        case BlockRowKind::kControllerSwitch:
+          focus = block.controller_switch;
+          break;
+        case BlockRowKind::kKeyboardMouseSwitch:
+          focus = block.keyboard_mouse_switch;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  controller_block_ = block;
+  BuildRings(focus);
 }
 
 settings::Tab Shell::CurrentTab() const {
@@ -288,6 +338,10 @@ bool Shell::Frame() {
   // plugged in this frame is usable in it: the ring's source and C5's capture both read the
   // registry rather than opening anything themselves.
   pads_.Refresh();
+  // A switch moved by anything other than the tab's own button (a profile reset, an import) has
+  // to reach the ring before the ring is moved this frame, or the first press lands on a row the
+  // tab is not drawing.
+  SyncControllerRows();
 
   // One action per frame from whichever device produced it (D6). The keyboard answers first
   // because it is the one a user can always reach - and because a pad whose stick is resting
@@ -311,21 +365,29 @@ bool Shell::Frame() {
   LogDevice();
 
   if (action == NavAction::kCancel) {
-    // Escape belongs to the modal that is up - B4's reset confirmation, B8's install progress or
-    // B7's failed-start detail - and only means "leave Controller Settings" when nothing modal is
-    // on screen (A1). A listen that is running owns Escape too: cancelling it is what a user
-    // pressing Escape while counting down means, and quitting Controller Settings instead would be
-    // a trap.
-    if (!general_.ModalOpen() && !controller_.Listening() && !launch_modal_open_) {
+    // Escape belongs to the modal that is up - B4's reset confirmation, B8's install progress,
+    // B7's failed-start detail or the Controller tab's `?` page - and only means "leave
+    // Controller Settings" when nothing modal is on screen (A1). A listen that is running owns
+    // Escape too: cancelling it is what a user pressing Escape while counting down means, and
+    // quitting Controller Settings instead would be a trap.
+    if (!general_.ModalOpen() && !controller_.Listening() && !controller_.HelpOpen() &&
+        !launch_modal_open_) {
       return false;
     }
   }
   // Whether a modal or a listen owns the keyboard this frame. A modal owns it because its own tab
   // has to keep being drawn for its state machine to keep running, and walking away would leave the
   // helper installing with nothing watching; a listen owns it because the key being pressed *is*
-  // the input being captured.
+  // the input being captured; the Controller tab's help page owns it so the ring behind it stays
+  // where it was.
   const bool owns_keyboard =
-      general_.ModalOpen() || controller_.Listening() || launch_modal_open_;
+      general_.ModalOpen() || controller_.Listening() || controller_.HelpOpen() ||
+      launch_modal_open_;
+  if (controller_.HelpOpen() && action != NavAction::kCancel) {
+    // The help page is a reading surface, not a place to change something: every other action is
+    // spent before it can move the ring, toggle a switch or start the game.
+    action = NavAction::kNone;
+  }
 
   if (nav_bindings::IsBarAction(action)) {
     // A5: the actions the bottom bar's buttons and B4's badge own, bound to keys so that a keyboard
@@ -440,12 +502,23 @@ bool Shell::Frame() {
       } else if (layout_[tab_].tab == settings::Tab::kController) {
         DrawTab(layout_[tab_], rings_[tab_]);
         controller_.Draw(SchemaFocusEntries(layout_[tab_]), rings_[tab_], session_, action_);
+        // A gameplay switch flipped this frame: the tab's visible rows changed, so the ring is
+        // rebuilt now - before the next frame reads a key - and lands on the switch that moved.
+        if (controller_.TakeLayoutChange()) {
+          controller_block_ = ControllerTab::BlockFor(session_.profile());
+          BuildRings(controller_.PendingFocusRow());
+        }
       } else {
         DrawTab(layout_[tab_], rings_[tab_]);
       }
     }
   }
   ImGui::EndChild();
+
+  // The Controller tab's `?` pages are drawn here rather than inside the scrolling body: a modal
+  // opened in a row's id scope would not be the same popup the next frame looks for, and the body
+  // may have scrolled away from the row that opened it.
+  controller_.DrawHelpModal(action_);
 
   const bool running = DrawBottomBar();
   // B7's failed-start detail is drawn from inside this window so its popup shares the id stack
@@ -687,7 +760,7 @@ Shell::HelpEntry Shell::HelpForEntry(std::size_t entry) const {
     case settings::Tab::kGeneral:
       return HelpEntry{ProfilePanel::HelpText(local), "Activate"};
     case settings::Tab::kController:
-      return HelpEntry{ControllerTab::HelpText(local), "Activate"};
+      return HelpEntry{ControllerTab::HelpText(session_.profile(), local), "Activate"};
     case settings::Tab::kGraphics:
       break;
     case settings::Tab::kInterface:
@@ -873,14 +946,16 @@ void Shell::LogFocus() {  if (!log_.enabled()) {
   }
   const settings::Tab tab = CurrentTab();
   const std::size_t entry = FocusedRow();
-  if (logged_focus_ && tab == logged_tab_ && entry == logged_entry_) {
+  const std::size_t count = tab_ < rings_.size() ? rings_[tab_].Count() : 0;
+  if (logged_focus_ && tab == logged_tab_ && entry == logged_entry_ &&
+      count == logged_count_) {
     return;
   }
   logged_focus_ = true;
   logged_tab_ = tab;
   logged_entry_ = entry;
+  logged_count_ = count;
 
-  const std::size_t count = tab_ < rings_.size() ? rings_[tab_].Count() : 0;
   std::string text = "tab=";
   text += settings::TabName(tab);
   text += " entry=" + std::to_string(entry) + "/" + std::to_string(count);
@@ -902,9 +977,17 @@ void Shell::LogFocus() {  if (!log_.enabled()) {
       text += setting->key;
     } else {
       // The block a tab draws after its rows: named rather than numbered, because "which button
-      // of the mapping table is that?" is the question the trace is meant to answer.
-      text += tab == settings::Tab::kGeneral ? " row=settings-file-block"
-                                             : " row=button-mapping-block";
+      // of the mapping block is that?" is the question the trace is meant to answer. The
+      // Controller block's names are the block's own - a control, an action, a switch, a help
+      // page - so the trace can say which row of which table the ring is on.
+      if (tab == settings::Tab::kGeneral) {
+        text += " row=settings-file-block";
+      } else {
+        const std::size_t schema_entries = SchemaFocusEntries(layout_[tab_]);
+        const std::size_t local = entry >= schema_entries ? entry - schema_entries : 0;
+        text += " row=";
+        text += ControllerTab::TraceName(session_.profile(), local);
+      }
     }
   }
   const HelpEntry help = HelpForEntry(entry);

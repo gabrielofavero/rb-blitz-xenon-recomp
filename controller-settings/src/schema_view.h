@@ -22,6 +22,10 @@
 
 namespace rb_blitz::profile {
 
+// Defined in controller_block.h; the layout dump names the Controller tab's block rows when the
+// caller passes the block the tab would draw.
+struct ControllerBlock;
+
 // A group's rows, in the table's order. Only groups this build has something to draw in are
 // here at all: a category with nothing in it is not a setting, so it is not on the tab (D14).
 struct LayoutGroup {
@@ -123,6 +127,12 @@ std::string_view GroupNoteText(const settings::Group& group);
 // that every schema row reaches a tab and every row carries a tooltip. An enum row also
 // prints its choices, because one row's are decided by the build rather than by the schema
 // (`choices_from`) and "is this build offering Vulkan?" must be answerable without a window.
-std::string DescribeLayout(const std::vector<TabLayout>& layout);
+//
+// `controller_block` is the Controller tab's block, whose rows depend on the two gameplay
+// switches and so are not schema rows at all. When it is passed the dump names every block row -
+// which tables are showing and which actions each one offers - so a harness can check the layout
+// without a window (P4's `--dump-layout` obligation).
+std::string DescribeLayout(const std::vector<TabLayout>& layout,
+                           const ControllerBlock* controller_block = nullptr);
 
 }  // namespace rb_blitz::profile
