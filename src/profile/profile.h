@@ -72,6 +72,17 @@ struct Profile {
   // did not. The game reads it to rewrite the pad state the guest asks for (src/profile/remap.h):
   // a table is not a scalar, so it is not one of the `[settings]` keys.
   std::vector<ProfileSetting> remap;  // file order
+  // The two gameplay-mapping tables (src/profile/gameplay_remap.h), one row per gameplay action the
+  // user rebound and nothing for the ones they did not:
+  //
+  //   * `[gameplay_remap_controller]` - `pad:` sources only;
+  //   * `[gameplay_remap_keyboard_mouse]` - `key:`/`mouse:` sources only.
+  //
+  // Like `[remap]` they are tables rather than scalars, so they are not `[settings]` keys, and
+  // like `[remap]` they are *additive*: an older build that does not know them leaves them
+  // untouched in the document, which is why adding them did not bump `kProfileSchemaVersion`.
+  std::vector<ProfileSetting> gameplay_remap_controller;       // file order
+  std::vector<ProfileSetting> gameplay_remap_keyboard_mouse;  // file order
   // The `[nav]` table (A5): one row per Controller Settings action the user rebound and nothing for the ones
   // they left alone, which is why a profile nobody has rebound has no `[nav]` table at all. Only
   // Controller Settings reads it - the game's profile reader wants `[remap]` - and it is the one table

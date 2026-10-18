@@ -699,6 +699,8 @@ The tables in it, and who reads them:
 | `[launch]` | the launch target and the game-directory override | Controller Settings, and the **game's first boot** — the target is imported into the game's own settings there (P11b cutover, Contract 3) |
 | `[settings]` | every other row, keyed by cvar — the two path rows included, under `user_data_root` / `dlc_root`, which is also what `--print-command` reads them from. A folder an older build saved in `[launch] user_data_dir` / `dlc_dir` is carried across to these keys once, on load, so a pick made before the change still reaches the game | Controller Settings, and the game — the controller rows as its own config source (D3 rank 4, `src/profile/profile_apply.cpp`); the rest are preservation data the game no longer reads |
 | `[remap]` | the Controller tab (D16) | the game (B8's wrapper of the pad state) |
+| `[gameplay_remap_controller]` | the Controller tab's **Controller** gameplay switch (P1 of the gameplay-mapping plan) | the game's gameplay-mapping configuration reader; no action is dispatched from it yet (P3) |
+| `[gameplay_remap_keyboard_mouse]` | the Controller tab's **Keyboard + Mouse** gameplay switch (P1) | the same reader; the keyboard table ships enabled, the controller table ships off |
 | `[nav]` | Controller Settings' own key bindings (A5) | Controller Settings only |
 | `[update]` | `declined_version`, the release an older build's update prompt recorded as answered *Not now* (D19). Nothing writes it any more: Controller Settings has no update check | preservation data only |
 
@@ -886,10 +888,20 @@ is a profile API, not a check), and so is the profile suite's `TestUpdateDecline
 
 ## The Controller tab, and button mapping (D16)
 
-The one schema row left on this tab is *Mouse support* (P8 removed *Guide button pass-through*,
-because the project never delivers Guide to the guest - see "Controller Settings" above). Below it
-is the remap, which is not a setting but a table: `[remap]` in the profile, one row per pad control
+The tab's schema rows are *Mouse support* and *Keyboard support* (P8 removed *Guide button
+pass-through*, because the project never delivers Guide to the guest - see "Controller Settings"
+above; the keyboard's own source gate arrived with the gameplay-mapping plan's P1). Below them is
+the remap, which is not a setting but a table: `[remap]` in the profile, one row per pad control
 the user rebound and nothing at all for the ones they did not.
+
+Under the remap sit the two **Gameplay Mapping** switches (P1 of
+[the gameplay-input-mapping plan](../docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)):
+*Controller* (off by default) and *Keyboard + Mouse* (on by default). Each is a `[settings]` row -
+`gameplay_mapping_controller` / `gameplay_mapping_keyboard_mouse` - and each owns a table of its
+own (`[gameplay_remap_controller]`, `[gameplay_remap_keyboard_mouse]`). P1 stores and shows the
+switches; the six-action tables they will show, the capture that fills them and the strike-through
+of a gated source are P4, and nothing acts on either switch until P2/P3 land. The section's own
+sentence says the changes apply the next time the game starts, which is the plan's D7 decision.
 
 There is no input-source choice anywhere, deliberately. The game is single-player, so the
 Controller Settings listens to **every** connected pad, the keyboard and the mouse in the same frame, and a
@@ -944,7 +956,7 @@ writes it and the game reads it, so the two cannot disagree about what a binding
 | --- | --- | --- |
 | key | a control name: `a`, `b`, `x`, `y`, `left_shoulder`, `right_shoulder`, `left_trigger`, `right_trigger`, `back`, `start`, `left_thumb`, `right_thumb`, `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right` | the control being rebound. `guide` is deliberately not one (P8): a row that spells it is preserved and never applied, and the game clears the bit |
 | value | a `, `-separated list of sources | what presses it. Empty means nothing does |
-| `pad:` source | a control name, as above | the pad's own control, read from the pad's state *before* any rewriting |
+| `pad:` source | a control name, as above, or a stick direction (`lstick_up`, `lstick_down`, `lstick_left`, `lstick_right`, `rstick_up`, `rstick_down`, `rstick_left`, `rstick_right`) | the pad's own control, read from the pad's state *before* any rewriting; a direction reads the stick's travel at `kStickThreshold` (P1 of the gameplay-mapping plan, which is why the gameplay tables can reproduce the native preset's "any direction is Lane0") |
 | `key:` source | an SDL scancode name: `Space`, `F1`, `W` | a keyboard key |
 | `mouse:` source | `left`, `right`, `middle`, `x1`, `x2` | a mouse button |
 

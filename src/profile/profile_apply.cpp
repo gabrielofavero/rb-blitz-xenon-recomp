@@ -31,10 +31,11 @@ REXCVAR_DEFINE_STRING(launcher_profile, "", "Runtime",
 // profile row other than the controller rows and the host-only host rows is no longer applied.
 // A build that needs the old behaviour can set this off again from the command line.
 REXCVAR_DEFINE_BOOL(profile_controller_rows_only, true, "Compatibility",
-                    "Apply only the controller rows (mouse_ui_nav, input_backend) and the "
-                    "host-only host rows (monitor, safe areas, dither, overscan cutoff, audio) "
-                    "from the profile; every other row is preserved in the file and not "
-                    "applied");
+                    "Apply only the controller rows (mouse_ui_nav, input_backend, "
+                    "keyboard_support, gameplay_mapping_controller, "
+                    "gameplay_mapping_keyboard_mouse) and the host-only host rows (monitor, "
+                    "safe areas, dither, overscan cutoff, audio) from the profile; every other "
+                    "row is preserved in the file and not applied");
 
 namespace rb_blitz::profile {
 

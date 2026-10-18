@@ -649,7 +649,12 @@ tooltip = "Maximum buffered audio frames (4 to 64). Lower is lower latency."
 #
 # The rest of the Controller tab (device list, keyboard mapping, per-button remap) is the
 # remap lane, and the panel for it is drawn by the tab itself rather than by schema rows.
-# Keyboard support is always on and is not a setting (R13).
+#
+# Keyboard support is a setting since the gameplay-mapping work
+# (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, D2). It supersedes R13 of the
+# launcher plan, which had said the keyboard is always on; the plan's R9 keeps the split honest -
+# the switch gates the *game's* keyboard sources, never this utility's own navigation, so
+# Controller Settings stays operable with any device and can always turn the source back on.
 #
 # There is deliberately no input-form row. `input_backend` (sdl/xinput) is a real cvar, but
 # SDL3's driver already opens every pad the machine has - XInput, DirectInput, WGI - through
@@ -673,6 +678,23 @@ tooltip = """
 Point at menu items to select them directly. Left click selects (A), right click goes
 back (B), and the wheel navigates up/down. Hidden and inactive during songs; returns
 when paused. Needs a restart.
+"""
+
+# The keyboard's own source gate (gameplay-mapping plan R1/D2). Controller Settings reads its own
+# keys regardless (R9); this is about what the game acts on.
+[[setting]]
+key     = "keyboard_support"
+tab     = "controller"
+group   = "Input"
+label   = "Keyboard support"
+kind    = "bool"
+default = true
+applies = "restart"
+argv    = "flag"
+tooltip = """
+Use the keyboard to navigate menus and play. Turning it off blocks every key the game would
+act on, including keys bound in General Mapping and in the Keyboard + Mouse gameplay table.
+Controller Settings' own keys are unaffected. Needs a restart.
 """
 
 # `guide_button` is deliberately *not* a row any more (P8). Guide belongs to the platform, the

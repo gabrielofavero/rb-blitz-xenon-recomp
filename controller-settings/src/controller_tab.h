@@ -59,10 +59,18 @@ class ControllerTab {
   // mis-click does not lock the panel, and the countdown is on screen the whole time.
   static constexpr double kListenSeconds = 3.0;
 
-  // The block's flat focus entries: one Assign and one Reset per control, then Reset all. The
-  // shell sizes each control's row with two options and Reset all with one, so this is the sum
-  // and must stay in step with the fields the panel draws.
-  static constexpr std::size_t kRowCount = kControlRows * 2 + 1;
+  // The block's flat focus rows, in draw order: one row per control (Assign and Reset side by
+  // side), the "Reset all bindings" row, then the two Gameplay Mapping switches
+  // (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §4).
+  static constexpr std::size_t kResetAllRow = kControlRows * 2;
+  static constexpr std::size_t kControllerSwitchRow = kResetAllRow + 1;
+  static constexpr std::size_t kKeyboardMouseSwitchRow = kResetAllRow + 2;
+  static constexpr std::size_t kRowCount = kKeyboardMouseSwitchRow + 1;
+
+  // The number of ring options each block row takes, which is what the shell sizes its ring from.
+  // The block walks the same list to place its entries, so the count cannot drift from the draw
+  // (shell.cpp's one-place rule for every block).
+  static std::vector<std::size_t> FocusRows();
 
   // `pads` is Controller Settings' open pads (A3). A capture reads them through the registry rather
   // than opening anything itself: SDL only reads a pad somebody has opened, so the registry is
@@ -88,6 +96,11 @@ class ControllerTab {
   // One button, ring-reachable, disabled when `enabled` is false.
   bool Item(std::size_t index, FocusModel& ring, NavAction action, const char* label,
             bool enabled);
+
+  // A Gameplay Mapping switch: its label, then the ring-reachable On/Off button. Returns true
+  // when the user flipped it, in which case the caller writes the new value into the profile.
+  bool SwitchRow(std::size_t index, FocusModel& ring, NavAction action, const char* label,
+                 bool on);
 
   void BeginListening(remap::Target target);
   // Adds the captured input to the control's binding, which is how "several inputs, one button"

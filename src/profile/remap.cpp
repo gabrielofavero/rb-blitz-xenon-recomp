@@ -49,6 +49,28 @@ constexpr std::array<TargetInfo, kTargetCount> kTargetInfo{{
 // a newer Controller Settings's row it happens not to understand.
 constexpr std::string_view kRefusedTargetNames[] = {"guide"};
 
+// The stick directions, in the order `PadDirection` declares them. A direction is a source name
+// rather than a target: it is thumb travel the guest reads from the pad's axes, not one of the
+// 16 controls its button field carries.
+struct DirectionInfo {
+  PadDirection direction;
+  const char* name;
+};
+
+constexpr std::array<DirectionInfo, kPadDirectionCount> kDirectionInfo{{
+    {PadDirection::kLeftStickUp, "lstick_up"},
+    {PadDirection::kLeftStickDown, "lstick_down"},
+    {PadDirection::kLeftStickLeft, "lstick_left"},
+    {PadDirection::kLeftStickRight, "lstick_right"},
+    {PadDirection::kRightStickUp, "rstick_up"},
+    {PadDirection::kRightStickDown, "rstick_down"},
+    {PadDirection::kRightStickLeft, "rstick_left"},
+    {PadDirection::kRightStickRight, "rstick_right"},
+}};
+
+static_assert(kDirectionInfo.size() == kPadDirectionCount,
+              "kPadDirectionCount must match the direction table");
+
 static_assert(kTargetInfo.size() == kTargetCount,
               "kTargetCount must match the target table: the panel sizes its ring from it");
 
@@ -120,6 +142,11 @@ bool IsKnownPadName(std::string_view name) {
       return true;
     }
   }
+  for (const DirectionInfo& info : kDirectionInfo) {
+    if (info.name == name) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -156,6 +183,8 @@ std::optional<Source> ParseOneSource(std::string_view text) {
   return Source{*kind, name};
 }
 
+}  // namespace
+
 // Nothing when any token is not a source this build knows, which is what makes a value either
 // wholly understood or kept verbatim - a half-applied list would silently drop the one source a
 // newer Controller Settings meant.
@@ -181,7 +210,7 @@ std::optional<std::vector<Source>> ParseSourceList(std::string_view text) {
   return sources;
 }
 
-std::string JoinSources(const std::vector<Source>& sources) {
+std::string FormatSourceList(const std::vector<Source>& sources) {
   std::string text;
   for (const Source& source : sources) {
     if (!text.empty()) {
@@ -191,8 +220,6 @@ std::string JoinSources(const std::vector<Source>& sources) {
   }
   return text;
 }
-
-}  // namespace
 
 const std::vector<Target>& Targets() {
   static const std::vector<Target> targets = [] {
@@ -223,6 +250,36 @@ std::optional<Target> ParseTarget(std::string_view name) {
 std::string_view TargetLabel(Target target) {
   const TargetInfo* info = InfoFor(target);
   return info == nullptr ? std::string_view{} : std::string_view(info->label);
+}
+
+const std::vector<PadDirection>& PadDirections() {
+  static const std::vector<PadDirection> directions = [] {
+    std::vector<PadDirection> all;
+    all.reserve(kDirectionInfo.size());
+    for (const DirectionInfo& info : kDirectionInfo) {
+      all.push_back(info.direction);
+    }
+    return all;
+  }();
+  return directions;
+}
+
+std::string_view PadDirectionName(PadDirection direction) {
+  for (const DirectionInfo& info : kDirectionInfo) {
+    if (info.direction == direction) {
+      return info.name;
+    }
+  }
+  return {};
+}
+
+std::optional<PadDirection> ParsePadDirection(std::string_view name) {
+  for (const DirectionInfo& info : kDirectionInfo) {
+    if (info.name == name) {
+      return info.direction;
+    }
+  }
+  return std::nullopt;
 }
 
 bool IsRefusedTargetName(std::string_view name) {
@@ -325,7 +382,7 @@ std::vector<ProfileSetting> Table::ToRows() const {
     }
     // A basic string, always: an empty list and a list are both strings, so the value's style
     // cannot be inferred and does not need to be.
-    rows.push_back(ProfileSetting{std::string(TargetName(target)), JoinSources(*sources),
+    rows.push_back(ProfileSetting{std::string(TargetName(target)), FormatSourceList(*sources),
                                   ValueStyle::kBasic});
   }
   for (const ProfileSetting& row : unknown_) {
@@ -398,14 +455,18 @@ void Apply(const Table& table, const PadState& state, DownFn down, void* context
       bool this_one = false;
       switch (source.kind) {
         case SourceKind::kPad: {
-          const std::optional<Target> from = ParseTarget(source.name);
-          if (!from) {
-            break;
+          // A `pad:` name is either one of the 16 controls (answered from the button bit or the
+          // trigger byte) or a stick direction (answered from the axes). The two vocabularies are
+          // disjoint, so the order of the two questions cannot matter.
+          if (const std::optional<Target> from = ParseTarget(source.name)) {
+            this_one = TargetIsTrigger(*from)
+                           ? TriggerPressed(*from == Target::kLeftTrigger ? state.left_trigger
+                                                                          : state.right_trigger)
+                           : (state.buttons & TargetBit(*from)) != 0;
+          } else if (const std::optional<PadDirection> direction =
+                         ParsePadDirection(source.name)) {
+            this_one = DirectionPressed(state, *direction);
           }
-          this_one = TargetIsTrigger(*from)
-                         ? TriggerPressed(*from == Target::kLeftTrigger ? state.left_trigger
-                                                                        : state.right_trigger)
-                         : (state.buttons & TargetBit(*from)) != 0;
           break;
         }
         case SourceKind::kKey:

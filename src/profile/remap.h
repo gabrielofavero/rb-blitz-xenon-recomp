@@ -17,7 +17,8 @@
 //   * A *source* is a pad control (`pad:`), a keyboard key (`key:`) or a mouse button
 //     (`mouse:`). The pad's own controls are named with the target vocabulary, because the
 //     SDK's pad mapping is one physical control per bit and the pad's buttons are labelled that
-//     way anyway.
+//     way anyway; the eight stick directions are the one addition (`PadDirection`), because the
+//     title's own presets bind them and a pad source has to be able to name them.
 //   * A target with no row in `[remap]` has the binding this module ships for it (`DefaultSources`):
 //     the pad's own control plus a keyboard key, so a keyboard is a complete stand-in for the
 //     pad without the profile having to say so. The two analog triggers have no default: a
@@ -85,6 +86,34 @@ std::optional<Target> ParseTarget(std::string_view name);
 // The name a person reads on their pad: "A", "Left bumper", "D-pad up".
 std::string_view TargetLabel(Target target);
 
+// The four directions of each analog stick, as a `pad:` *source* name. They are deliberately not
+// targets: a stick direction is a person's thumb travel rather than one of the 16 controls the
+// guest's button field carries, so no binding can make it a control of its own. The title's own
+// controller presets bind the guest's stick-direction buttons (kPad 16-23), which is why the
+// gameplay tables need to name them (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+// §10.4, O8), and why `Apply` answers them from the pad's axes.
+//
+// The spelling is the direction, not the axis: `lstick_up`, `rstick_left`, and so on - the same
+// words the pad reports them as.
+enum class PadDirection : uint8_t {
+  kLeftStickUp,
+  kLeftStickDown,
+  kLeftStickLeft,
+  kLeftStickRight,
+  kRightStickUp,
+  kRightStickDown,
+  kRightStickLeft,
+  kRightStickRight,
+};
+
+inline constexpr std::size_t kPadDirectionCount = 8;
+
+// Every direction, in `PadDirection`'s declaration order.
+const std::vector<PadDirection>& PadDirections();
+
+std::string_view PadDirectionName(PadDirection direction);
+std::optional<PadDirection> ParsePadDirection(std::string_view name);
+
 // True for a `[remap]` row name this build refuses on purpose - Guide, and only Guide. A row with
 // this key is preserved verbatim by a save (it is not a name this build could write) but never
 // applied, and the Controller Settings screen names it so a user who bound Guide once is told it
@@ -101,12 +130,49 @@ uint16_t TargetBit(Target target);
 bool TargetIsTrigger(Target target);
 
 // The guest's pad state as the remap reads and writes it. `buttons` is X_INPUT_GAMEPAD's
-// button half; the trigger bytes are its analog half.
+// button half; the trigger bytes and the four stick axes are its analog half. The axes follow
+// X_INPUT_GAMEPAD's convention - left is negative X, up is positive Y - and are only read by a
+// `pad:lstick_*`/`pad:rstick_*` source; nothing in this module rewrites them.
 struct PadState {
   uint16_t buttons = 0;
   uint8_t left_trigger = 0;
   uint8_t right_trigger = 0;
+  int16_t left_x = 0;
+  int16_t left_y = 0;
+  int16_t right_x = 0;
+  int16_t right_y = 0;
 };
+
+// How far a stick must travel before a direction source counts as pressed: half of full travel,
+// the same point SDL's own deadzone-free games use and the one the title's preset treats as a
+// direction. A direction is a direction, not a control, so there is nothing in between that a
+// binding could mean - and pinning one number here is what keeps the two executables agreeing
+// about when `pad:lstick_up` is down.
+inline constexpr int16_t kStickThreshold = 0x4000;
+
+// True when `direction` is held on the pad state.
+inline bool DirectionPressed(const PadState& state, PadDirection direction) {
+  const int threshold = kStickThreshold;
+  switch (direction) {
+    case PadDirection::kLeftStickUp:
+      return state.left_y > threshold;
+    case PadDirection::kLeftStickDown:
+      return state.left_y < -threshold;
+    case PadDirection::kLeftStickLeft:
+      return state.left_x < -threshold;
+    case PadDirection::kLeftStickRight:
+      return state.left_x > threshold;
+    case PadDirection::kRightStickUp:
+      return state.right_y > threshold;
+    case PadDirection::kRightStickDown:
+      return state.right_y < -threshold;
+    case PadDirection::kRightStickLeft:
+      return state.right_x < -threshold;
+    case PadDirection::kRightStickRight:
+      return state.right_x > threshold;
+  }
+  return false;
+}
 
 // The bit Guide occupies in the guest's button field (X_INPUT_GAMEPAD_GUIDE). No binding can name
 // it any more and the project never delivers it: the SDK's own `guide_button` and `keybind_guide`
@@ -144,10 +210,19 @@ struct Source {
 bool operator==(const Source& left, const Source& right);
 inline bool operator!=(const Source& left, const Source& right) { return !(left == right); }
 
-// "pad:a", "key:space", "mouse:left". Nothing for text this build does not understand, which is
-// what lets a newer Controller Settings's binding survive a round trip through an older one.
+// "pad:a", "pad:lstick_up", "key:space", "mouse:left". Nothing for text this build does not
+// understand, which is what lets a newer Controller Settings's binding survive a round trip
+// through an older one.
 std::optional<Source> ParseSource(std::string_view text);
 std::string FormatSource(const Source& source);
+
+// The comma-separated list a `[remap]` or `[gameplay_remap_*]` value spells. Nothing when any
+// token is not a source this build knows, which is what makes a value either wholly understood or
+// kept verbatim - a half-applied list would silently drop the one source a newer Controller
+// Settings meant. Exposed so the gameplay tables read the same grammar rather than a second copy
+// of it (src/profile/gameplay_remap.h).
+std::optional<std::vector<Source>> ParseSourceList(std::string_view text);
+std::string FormatSourceList(const std::vector<Source>& sources);
 
 // One target's binding, as `[remap]` spells it.
 struct Binding {
@@ -210,9 +285,10 @@ class Table {
 using DownFn = bool (*)(void* context, const Source& source);
 
 // The rewrite. `state` is what the SDK reported, which is also the pad's own controls one for
-// one - so a `pad:` source reads `state`, and every binding sees the same originals no matter
-// what another binding does. Writes the result into `*out`, which may be the same object as
-// `state` for in-place use.
+// one - so a `pad:` source reads `state` (a control's bit or trigger byte, or a stick direction's
+// travel), and every binding sees the same originals no matter what another binding does. Writes
+// the result into `*out`, which may be the same object as `state` for in-place use. The stick
+// axes are copied through untouched: no binding writes them, and the guest reads its own axes.
 //
 // The result never carries a refused bit (`kGuideButtonBit`), whatever `state` held.
 void Apply(const Table& table, const PadState& state, DownFn down, void* context, PadState* out);

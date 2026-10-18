@@ -98,6 +98,9 @@ set(RBBLITZ_CONTROLLER_SETTINGS_SOURCES
     "${CMAKE_SOURCE_DIR}/src/profile/profile.cpp"
     "${CMAKE_SOURCE_DIR}/src/profile/profile_path.cpp"
     "${CMAKE_SOURCE_DIR}/src/profile/remap.cpp"
+    # The gameplay mapping tables (P1 of the gameplay-mapping plan): the same module the game
+    # reads, so a row Controller Settings writes means one thing in both processes.
+    "${CMAKE_SOURCE_DIR}/src/profile/gameplay_remap.cpp"
     ${RBBLITZ_IMGUI_BACKENDS})
 
 if(WIN32)

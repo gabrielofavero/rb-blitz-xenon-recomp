@@ -365,6 +365,66 @@ void TestSaveMergesDiskChanges(Scratch& scratch) {
   CHECK_CONTAINS(after_remove, "[third_tool]");
 }
 
+void TestGameplayTablesMerge(Scratch& scratch) {
+  BeginCase("P1: the two gameplay tables merge into the document on disk like `[remap]`");
+
+  // P1 of the gameplay-mapping plan asks for the rebased save to be part of the storage contract:
+  // a row this window edits in one table must not revert another writer's edit in the other, and
+  // a row neither touched must stay exactly as the disk has it.
+  const fs::path install = scratch.Make("gameplay-merge-install");
+  const fs::path app_data = scratch.Make("gameplay-merge-appdata");
+  const fs::path profile_path = app_data / "rb_blitz" / kProfileFileName;
+  WriteText(profile_path,
+            "schema_version = 1\n"
+            "\n"
+            "[gameplay_remap_controller]\n"
+            "first_note = \"pad:lstick_up\"\n"
+            "\n"
+            "[gameplay_remap_keyboard_mouse]\n"
+            "first_note = \"key:J\"\n"
+            "pause = \"key:Return\"\n");
+
+  ProfileSession session = MakeSession(install, app_data, LoadProfile(profile_path));
+  // This window's edit: the Controller table's powerup row.
+  session.profile().gameplay_remap_controller.push_back(
+      ProfileSetting{"powerup", "pad:y", ValueStyle::kBasic});
+
+  // The other writer changes the keyboard/mouse table while the window is open.
+  std::string other = ReadText(profile_path);
+  other.replace(other.find("first_note = \"key:J\""), std::string("first_note = \"key:J\"").size(),
+                "first_note = \"key:J, mouse:left\"");
+  WriteText(profile_path, other);
+
+  const SaveOutcome outcome = session.Save();
+  CHECK_TRUE(outcome.ok);
+  CHECK_TRUE(outcome.wrote);
+
+  const std::string saved = ReadText(profile_path);
+  // This window's row is written...
+  CHECK_CONTAINS(saved, "powerup = \"pad:y\"");
+  // ...the other writer's edit survives, rather than being reverted to what this window loaded...
+  CHECK_CONTAINS(saved, "first_note = \"key:J, mouse:left\"");
+  // ...and the row neither touched is exactly as it was.
+  CHECK_CONTAINS(saved, "first_note = \"pad:lstick_up\"");
+  CHECK_CONTAINS(saved, "pause = \"key:Return\"");
+
+  BeginCase("P1: a profile-wide reset clears both gameplay tables and names it first");
+
+  const ResetPlan plan = session.WhatResetWouldRemove();
+  bool named = false;
+  for (const std::string& item : plan.launch) {
+    named = named || item.find("gameplay binding") != std::string::npos;
+  }
+  CHECK_TRUE(named);
+  session.ResetToDefaults();
+  CHECK_TRUE(session.profile().gameplay_remap_controller.empty());
+  CHECK_TRUE(session.profile().gameplay_remap_keyboard_mouse.empty());
+  CHECK_TRUE(session.Save().ok);
+  const std::string reset = ReadText(profile_path);
+  CHECK_NOT_CONTAINS(reset, "pad:lstick_up");
+  CHECK_NOT_CONTAINS(reset, "key:J");
+}
+
 void TestSafeMode(Scratch& scratch) {
   BeginCase("A5: --safe-mode starts on the defaults, and replaces a file it could not read");
 
@@ -1112,6 +1172,7 @@ int main() {
   TestRoundTrip(scratch);
   TestSaveWithNothingChanged(scratch);
   TestSaveMergesDiskChanges(scratch);
+  TestGameplayTablesMerge(scratch);
   TestSafeMode(scratch);
   TestWindowGeometry(scratch);
   TestUpdateDecline(scratch);

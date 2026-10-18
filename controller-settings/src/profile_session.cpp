@@ -170,6 +170,13 @@ Profile MergeEdits(const Profile& fresh, const Profile& base, const Profile& mod
   }
   MergeRows(base.settings, model.settings, &merged.settings);
   MergeRows(base.remap, model.remap, &merged.remap);
+  // The two gameplay tables are their own tables for the same reason `[remap]` is: a rebase must
+  // carry this window's edits to one action without touching the other writer's work in the same
+  // file (plan D6 - "rebased saves" is part of P1's storage contract).
+  MergeRows(base.gameplay_remap_controller, model.gameplay_remap_controller,
+            &merged.gameplay_remap_controller);
+  MergeRows(base.gameplay_remap_keyboard_mouse, model.gameplay_remap_keyboard_mouse,
+            &merged.gameplay_remap_keyboard_mouse);
   MergeRows(base.nav, model.nav, &merged.nav);
   return merged;
 }
@@ -505,6 +512,12 @@ ResetPlan ProfileSession::WhatResetWouldRemove() const {
   if (!profile.remap.empty()) {
     plan.launch.push_back("every button binding, back to the pad as it came");
   }
+  // ...and so are the two gameplay tables (P1 of the gameplay-mapping plan): a reset that left a
+  // custom scheme behind would keep playing it.
+  if (!profile.gameplay_remap_controller.empty() ||
+      !profile.gameplay_remap_keyboard_mouse.empty()) {
+    plan.launch.push_back("every gameplay binding, back to the schemes they ship with");
+  }
   // ...and Controller Settings' own keys are one too (A5): a reset that left the ring bound to a key
   // the user was trying to get rid of would be the same mistake.
   if (!profile.nav.empty()) {
@@ -525,6 +538,8 @@ void ProfileSession::ResetToDefaults() {
   // Every recorded setting goes, which is what makes the next save drop every `[settings]` key.
   profile.settings.clear();
   profile.remap.clear();
+  profile.gameplay_remap_controller.clear();
+  profile.gameplay_remap_keyboard_mouse.clear();
   profile.nav.clear();
 }
 

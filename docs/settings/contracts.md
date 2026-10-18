@@ -579,13 +579,24 @@ active. Frozen:
 // The only cvars the runtime applies from the legacy Controller Settings profile once migration is complete.
 // Everything else in its [settings] table is inert preservation data.
 inline constexpr std::string_view kControllerCvarAllowlist[] = {
-    "mouse_ui_nav",     // controller-owned; Controller Settings writes it
-    "input_backend",    // hand-edit only (no schema row); kept for the XInput path
+    "mouse_ui_nav",                     // controller-owned; Controller Settings writes it
+    "input_backend",                    // hand-edit only (no schema row); kept for the XInput path
+    "keyboard_support",                 // Controller Settings' Keyboard support row
+    "gameplay_mapping_controller",      // Controller Gameplay Mapping switch
+    "gameplay_mapping_keyboard_mouse",  // Keyboard + Mouse Gameplay Mapping switch
 };
 ```
 
-`guide_button` and `keybind_guide` are **excluded** by design (§2.3). The `[remap]` and `[nav]`
-tables, window geometry, and the `[update]` table remain controller-owned. P8/P11 narrow
+The three gameplay-mapping rows joined the frozen list on 2026-10-18 with P1 of
+[the gameplay-input-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+(its §D2/D6 supersede this section's earlier two-entry spelling for the switches that plan adds).
+Controller Settings writes them, and a game started on its own has no other way to read them; the
+allowlist is what makes a standalone boot see the same values as a *Launch Game* boot. None of them
+had a consumer before P2/P3, so the change added configuration, not behaviour.
+
+`guide_button` and `keybind_guide` are **excluded** by design (§2.3). The `[remap]`, `[nav]`,
+`[gameplay_remap_controller]` and `[gameplay_remap_keyboard_mouse]` tables, window geometry, and the
+`[update]` table remain controller-owned. P8/P11 narrow
 `ApplyProfileSettings` to this allowlist; P3 supplies the constant. Explicit developer
 config/environment/CLI overrides still win over the profile.
 

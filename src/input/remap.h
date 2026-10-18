@@ -35,6 +35,24 @@
 
 namespace rb_blitz::input {
 
+// The switches that decide where a physical input goes (plan D2/D6,
+// docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md). Read at poll time from the
+// cvars Controller Settings' profile feeds, so the input filter, the menu generator and the
+// settings preview observe one effective value per switch rather than three readings of a file.
+//
+// `keyboard_support` and `mouse_ui_nav` are *source gates*: off means that device drives nothing.
+// The two gameplay switches are routing selectors: off keeps the device usable everywhere else and
+// only stops that table's direct actions. P1 stores and reports them; the consumers arrive with P2
+// (source gates) and P3 (dispatch), which is why nothing here acts on the values yet.
+struct GameplaySwitches {
+  bool keyboard_support = true;          // `keyboard_support`
+  bool mouse_support = true;             // `mouse_ui_nav` - the existing Mouse Support row
+  bool controller_mapping = false;       // `gameplay_mapping_controller`
+  bool keyboard_mouse_mapping = true;    // `gameplay_mapping_keyboard_mouse`
+};
+
+GameplaySwitches ReadGameplaySwitches();
+
 // Reads the profile's `[remap]` table and filters every pad state the guest asks for.
 // Installed the same way mouse_ui is - by wrapping RuntimeConfig::input_factory - because that is
 // where the input system is created and disposed of, and the filter has to be in place before the

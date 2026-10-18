@@ -202,13 +202,14 @@ Shell::Shell(ProfileSession session, GameRoots roots, RowEnvironment environment
         // B4's block: Reset to defaults, Import, Export, Change settings location, side by side.
         rows.push_back(ProfilePanel::kRowCount);
         break;
-      case settings::Tab::kController:
-        // D16's mapping table: one row per control, Assign and Reset side by side, then Reset all.
-        for (std::size_t control = 0; control < kControlRows; ++control) {
-          rows.push_back(2);
-        }
-        rows.push_back(1);
+      case settings::Tab::kController: {
+        // D16's mapping table: one row per control, Assign and Reset side by side, then Reset all
+        // and the two Gameplay Mapping switches. The block owns the list, so the ring the shell
+        // sizes and the entries the block draws are one arithmetic rather than two.
+        const std::vector<std::size_t> block = ControllerTab::FocusRows();
+        rows.insert(rows.end(), block.begin(), block.end());
         break;
+      }
       case settings::Tab::kGraphics:
         break;
       case settings::Tab::kInterface:

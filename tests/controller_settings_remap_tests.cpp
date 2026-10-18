@@ -208,6 +208,33 @@ void TestVocabulary() {
   const auto key = ParseSource("key:space");
   CHECK_TRUE(key.has_value());
   CHECK_STR_EQ(key->name, "space");
+
+  BeginCase("P1: a stick direction is a source name, not a control, and round-trips as one");
+
+  // The gameplay tables' controller defaults need direction sources (the gameplay-mapping plan
+  // §10.4 O8), and the grammar is shared, so the spelling is pinned here: every direction parses,
+  // formats back to itself, and none of them is a *target* - a direction is thumb travel the guest
+  // reads from the axes, not one of the 16 controls its button field carries.
+  CHECK_EQ(PadDirections().size(), kPadDirectionCount);
+  std::map<std::string, PadDirection> directions;
+  for (const PadDirection direction : PadDirections()) {
+    const std::string name(PadDirectionName(direction));
+    CHECK_FALSE(name.empty());
+    CHECK_TRUE(directions.find(name) == directions.end());
+    directions.emplace(name, direction);
+    CHECK_TRUE(ParsePadDirection(name).has_value());
+    CHECK_TRUE(*ParsePadDirection(name) == direction);
+    CHECK_FALSE(ParseTarget(name).has_value());
+    const auto source = ParseSource("pad:" + name);
+    CHECK_TRUE(source.has_value());
+    if (source) {
+      CHECK_TRUE(source->kind == SourceKind::kPad);
+      CHECK_STR_EQ(FormatSource(*source), "pad:" + name);
+    }
+  }
+  // Two directions of two sticks, so the vocabulary is exactly the four each way.
+  CHECK_TRUE(!ParsePadDirection("stick_up").has_value());
+  CHECK_TRUE(!ParsePadDirection("lstick_forward").has_value());
 }
 
 void TestTableRoundTrip() {
@@ -359,6 +386,30 @@ void TestRewrite() {
   const PadState released = Run(triggers, PadState{});
   CHECK_EQ(released.right_trigger, 0x00);
   CHECK_EQ(released.left_trigger, 0x00);
+
+  BeginCase("P1: a direction source reads the stick's travel at one pinned threshold");
+
+  // `pad:lstick_up` is answered from the axes (X_INPUT_GAMEPAD's convention: up is positive Y),
+  // at `kStickThreshold` and nowhere below it, so the two executables and the guest's own preset
+  // agree about when a direction is held.
+  const Table stick = Table::FromRows(Bindings({"dpad_up=pad:lstick_up"}));
+  PadState stick_resting;
+  stick_resting.left_y = kStickThreshold;
+  CHECK_EQ(Run(stick, stick_resting).buttons & TargetBit(Target::kDpadUp), 0);
+  stick_resting.left_y = static_cast<int16_t>(kStickThreshold + 1);
+  CHECK_EQ(Run(stick, stick_resting).buttons & TargetBit(Target::kDpadUp),
+           TargetBit(Target::kDpadUp));
+  // The other axis, the other stick and the opposite direction do not fire it.
+  PadState sideways;
+  sideways.left_x = static_cast<int16_t>(kStickThreshold + 1);
+  sideways.right_y = static_cast<int16_t>(kStickThreshold + 1);
+  CHECK_EQ(Run(stick, sideways).buttons & TargetBit(Target::kDpadUp), 0);
+  PadState down;
+  down.left_y = static_cast<int16_t>(-(kStickThreshold + 1));
+  CHECK_EQ(Run(stick, down).buttons & TargetBit(Target::kDpadUp), 0);
+  // And the axes are copied through untouched: no binding writes them, because the guest reads the
+  // pad's own analog travel.
+  CHECK_TRUE(Run(stick, stick_resting).left_y == stick_resting.left_y);
 }
 
 void TestProfileKeepsTheTable() {

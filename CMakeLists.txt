@@ -112,6 +112,9 @@ set(RBBLITZ_SOURCES
     src/profile/profile_apply.cpp
     src/profile/profile_path.cpp
     src/profile/remap.cpp
+    # P1 of the gameplay-mapping plan: the two gameplay action tables (SDK-free, shared with
+    # Controller Settings so the two processes cannot disagree about what a row means).
+    src/profile/gameplay_remap.cpp
     # P6's addition to the coordinator-owned list: the Ultimate provider adapter (the ark index
     # reader, the shape check over the payload's own definitions, the row bindings and the
     # provider's settings file). SDK-free.
@@ -593,6 +596,18 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_controller_settings_remap_tests PRIVATE src)
     add_test(NAME controller_settings_remap COMMAND rb_blitz_controller_settings_remap_tests)
+
+    # P1 of the gameplay-mapping plan: the two gameplay tables, their per-table source kinds,
+    # their compiled defaults and the profile storage all three tables share. Dependency-free like
+    # the remap suite: no pad, no window, no SDL, no boot.
+    add_executable(rb_blitz_gameplay_remap_tests
+        tests/gameplay_remap_tests.cpp
+        src/profile/profile.cpp
+        src/profile/gameplay_remap.cpp
+        src/profile/remap.cpp
+    )
+    target_include_directories(rb_blitz_gameplay_remap_tests PRIVATE src)
+    add_test(NAME gameplay_remap COMMAND rb_blitz_gameplay_remap_tests)
 
     # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict

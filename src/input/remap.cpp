@@ -23,14 +23,54 @@
 #include <rex/logging.h>
 
 #include "profile/profile.h"
+#include "profile/gameplay_remap.h"
 #include "profile/profile_apply.h"
 #include "profile/remap.h"
+
+// P1 of docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md: the switches D2/D6
+// define. Controller Settings writes them through its profile (the allowlist in
+// src/settings/cvars.h), so a boot nobody launched through Controller Settings has to read them
+// from here; the compiled defaults match the schema rows' own defaults.
+REXCVAR_DEFINE_BOOL(keyboard_support, true, "Input",
+                    "Keyboard support: while on, the title's keyboard rows (General Mapping's key "
+                    "sources and the Keyboard + Mouse gameplay table) drive the game. Off blocks "
+                    "that device; Controller Settings' own keys are unaffected. Needs a restart.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_BOOL(gameplay_mapping_controller, false, "Input",
+                    "Controller Gameplay Mapping: on, the Controller binding table drives the "
+                    "six gameplay actions directly and the saved native preset is bypassed. "
+                    "Off, the saved preset plays exactly as before. Needs a restart.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_BOOL(gameplay_mapping_keyboard_mouse, true, "Input",
+                    "Keyboard + Mouse Gameplay Mapping: on, that binding table drives the six "
+                    "gameplay actions directly while the native controller preset stays "
+                    "authoritative for a pad. Off, keys and mouse use General Mapping. Needs a "
+                    "restart.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace rb_blitz::input {
 namespace {
 
 using rb_blitz::profile::remap::Source;
 using rb_blitz::profile::remap::SourceKind;
+
+// The same word the enhancements' toggle log uses, so two boot lines cannot spell a source
+// differently.
+const char* CvarSourceName(const rex::cvar::Source source) {
+  switch (source) {
+    case rex::cvar::Source::kDefault:
+      return "default";
+    case rex::cvar::Source::kConfig:
+      return "config";
+    case rex::cvar::Source::kEnvironment:
+      return "environment";
+    case rex::cvar::Source::kCommandLine:
+      return "command line";
+    case rex::cvar::Source::kRuntime:
+      return "runtime";
+  }
+  return "unknown";
+}
 
 // The mouse buttons the grammar names, with SDL's mask for each.
 struct MouseButton {
@@ -49,6 +89,15 @@ constexpr MouseButton kMouseButtons[] = {
 // Everything a source resolves against, kept alive by the filter that holds it.
 struct RemapContext {
   rb_blitz::profile::remap::Table table;
+  // The two gameplay-mapping tables (src/profile/gameplay_remap.h). Loaded here, with the same
+  // profile read as `[remap]`, so every consumer sees one configuration; neither is consulted by
+  // the rewrite yet - P2 reads them for the source gates and P3 for the direct dispatch. Their
+  // kinds are fixed at construction, because a table with no profile rows still answers from its
+  // own compiled defaults.
+  rb_blitz::profile::gameplay_remap::Table controller_actions{
+      rb_blitz::profile::gameplay_remap::TableKind::kController};
+  rb_blitz::profile::gameplay_remap::Table keyboard_mouse_actions{
+      rb_blitz::profile::gameplay_remap::TableKind::kKeyboardMouse};
   std::mutex packet_mutex;
   std::array<PadPacket, 4> packets;
 
@@ -91,6 +140,15 @@ bool SourceDownThunk(void* context, const Source& source) {
 
 }  // namespace
 
+GameplaySwitches ReadGameplaySwitches() {
+  GameplaySwitches switches;
+  switches.keyboard_support = REXCVAR_GET(keyboard_support);
+  switches.mouse_support = MouseSupportEnabled();
+  switches.controller_mapping = REXCVAR_GET(gameplay_mapping_controller);
+  switches.keyboard_mouse_mapping = REXCVAR_GET(gameplay_mapping_keyboard_mouse);
+  return switches;
+}
+
 void InstallPadRemap(rex::RuntimeConfig& config) {
   // Tool mode has no window, no pad and no guest.
   if (config.tool_mode) {
@@ -113,10 +171,20 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
   // Held by the filter, which the input system copies: this frame's table is not what it reads
   // from.
   auto context = std::make_shared<RemapContext>();
+  // The two gameplay tables are read whether or not a profile exists: an absent profile means the
+  // compiled defaults, which is a complete scheme (D6: a fresh install can play without opening
+  // Controller Settings).
+  namespace gameplay = rb_blitz::profile::gameplay_remap;
   const bool has_table = profile.has_value();
   std::size_t bound = 0;
   if (profile) {
     context->table = rb_blitz::profile::remap::Table::FromRows(profile->remap);
+    context->controller_actions =
+        gameplay::Table::FromRows(gameplay::TableKind::kController,
+                                  profile->gameplay_remap_controller);
+    context->keyboard_mouse_actions =
+        gameplay::Table::FromRows(gameplay::TableKind::kKeyboardMouse,
+                                  profile->gameplay_remap_keyboard_mouse);
     // Guide is a platform button and is never delivered to the guest (contracts §2.3). A row a
     // person wrote once is preserved by a save but never applied, so the only honest thing to do
     // with it is to say so - "the button I bound does nothing" is otherwise indistinguishable
@@ -160,8 +228,10 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
         ->SetStateFilter([context, has_table](uint32_t user_index,
                                              rex::input::X_INPUT_STATE& state) {
           namespace remap = rb_blitz::profile::remap;
-          const remap::PadState pad{state.gamepad.buttons, state.gamepad.left_trigger,
-                                    state.gamepad.right_trigger};
+          const remap::PadState pad{state.gamepad.buttons,     state.gamepad.left_trigger,
+                                    state.gamepad.right_trigger, state.gamepad.thumb_lx,
+                                    state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
+                                    state.gamepad.thumb_ry};
           remap::PadState out;
           if (has_table) {
             remap::Apply(context->table, pad, &SourceDownThunk, context.get(), &out);
@@ -206,6 +276,53 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
       REXLOG_INFO(
           "remap: no Controller Settings profile to read, so the pad keeps the SDK's own reporting and Guide "
           "is kept out of the state the guest sees");
+    }
+
+    // P1's evidence line (plan §6 P1): the effective switches and their sources, then what each
+    // gameplay table would run. Nothing consumes the switches yet, so this is the one place a
+    // standalone boot names them - the same line a Controller Settings launch prints.
+    const GameplaySwitches switches = ReadGameplaySwitches();
+    REXLOG_INFO(
+        "gameplay mapping: keyboard_support={} ({}) mouse_ui_nav={} ({}) "
+        "gameplay_mapping_controller={} ({}) gameplay_mapping_keyboard_mouse={} ({})",
+        switches.keyboard_support ? "on" : "off",
+        CvarSourceName(rex::cvar::GetFlagSource("keyboard_support")),
+        switches.mouse_support ? "on" : "off",
+        CvarSourceName(rex::cvar::GetFlagSource("mouse_ui_nav")),
+        switches.controller_mapping ? "on" : "off",
+        CvarSourceName(rex::cvar::GetFlagSource("gameplay_mapping_controller")),
+        switches.keyboard_mouse_mapping ? "on" : "off",
+        CvarSourceName(rex::cvar::GetFlagSource("gameplay_mapping_keyboard_mouse")));
+    const auto& controller_actions = context->controller_actions;
+    const auto& keyboard_mouse_actions = context->keyboard_mouse_actions;
+    REXLOG_INFO(
+        "gameplay mapping: [{}] {} user row(s), {} action(s) firing of {}; [{}] {} user row(s), "
+        "{} action(s) firing of {}",
+        gameplay::TableKindSection(gameplay::TableKind::kController),
+        controller_actions.BoundCount(), controller_actions.EffectiveBoundCount(),
+        gameplay::kActionCount,
+        gameplay::TableKindSection(gameplay::TableKind::kKeyboardMouse),
+        keyboard_mouse_actions.BoundCount(), keyboard_mouse_actions.EffectiveBoundCount(),
+        gameplay::kActionCount);
+    for (const gameplay::TableKind kind : gameplay::TableKinds()) {
+      const gameplay::Table& table = kind == gameplay::TableKind::kController
+                                       ? controller_actions
+                                       : keyboard_mouse_actions;
+      // A row this table keeps but will not apply: said out loud, because a binding that does
+      // nothing is otherwise indistinguishable from a bug.
+      for (const gameplay::Table::RejectedRow& rejected : table.Rejected()) {
+        REXLOG_WARN("gameplay mapping: [{}] row '{} = {}' is kept and not applied: {}",
+                    gameplay::TableKindSection(kind), rejected.row.key, rejected.row.value,
+                    rejected.reason);
+      }
+      // The all-empty scheme, which is a real thing to want and a terrible thing to hit by
+      // accident - the same warning the `[remap]` table gets above.
+      if (table.BoundCount() > 0 && !table.AnySourceSet()) {
+        REXLOG_WARN(
+            "gameplay mapping: the profile binds every action in [{}] to nothing, so that "
+            "table will not fire anything",
+            gameplay::TableKindSection(kind));
+      }
     }
     return system;
   };

@@ -784,6 +784,12 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
       profile.settings.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     } else if (ref.section == "remap") {
       profile.remap.push_back(ProfileSetting{ref.key, ref.value, ref.style});
+    } else if (ref.section == "gameplay_remap_controller") {
+      profile.gameplay_remap_controller.push_back(
+          ProfileSetting{ref.key, ref.value, ref.style});
+    } else if (ref.section == "gameplay_remap_keyboard_mouse") {
+      profile.gameplay_remap_keyboard_mouse.push_back(
+          ProfileSetting{ref.key, ref.value, ref.style});
     } else if (ref.section == "nav") {
       profile.nav.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     }
@@ -849,6 +855,14 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
   for (const ProfileSetting& binding : profile.remap) {
     Schedule(layout, &pending, "remap", binding.key, binding.value, binding.style);
   }
+  for (const ProfileSetting& binding : profile.gameplay_remap_controller) {
+    Schedule(layout, &pending, "gameplay_remap_controller", binding.key, binding.value,
+             binding.style);
+  }
+  for (const ProfileSetting& binding : profile.gameplay_remap_keyboard_mouse) {
+    Schedule(layout, &pending, "gameplay_remap_keyboard_mouse", binding.key, binding.value,
+             binding.style);
+  }
   for (const ProfileSetting& binding : profile.nav) {
     Schedule(layout, &pending, "nav", binding.key, binding.value, binding.style);
   }
@@ -858,9 +872,9 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
     Schedule(layout, &pending, "update", "declined_version", profile.update_declined_version,
              ValueStyle::kBasic);
   }
-  // `[settings]`, `[remap]` and `[nav]` are modelled as a whole, so a key the model no longer has
-  // is dropped. Everything outside them is untouched, which is what protects a newer Controller Settings's
-  // keys.
+  // `[settings]`, `[remap]`, the two gameplay tables and `[nav]` are modelled as a whole, so a key
+  // the model no longer has is dropped. Everything outside them is untouched, which is what
+  // protects a newer Controller Settings's keys.
   for (const KeyRef& ref : layout.keys) {
     if (ref.section == "update") {
       // Only the one key this module owns is dropped, so anything a newer Controller Settings records
@@ -870,16 +884,22 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
       }
       continue;
     }
-    const bool modelled =
-        ref.section == "settings" || ref.section == "remap" || ref.section == "nav";
-    if (!modelled) {
+    const std::vector<ProfileSetting>* rows = nullptr;
+    if (ref.section == "settings") {
+      rows = &profile.settings;
+    } else if (ref.section == "remap") {
+      rows = &profile.remap;
+    } else if (ref.section == "gameplay_remap_controller") {
+      rows = &profile.gameplay_remap_controller;
+    } else if (ref.section == "gameplay_remap_keyboard_mouse") {
+      rows = &profile.gameplay_remap_keyboard_mouse;
+    } else if (ref.section == "nav") {
+      rows = &profile.nav;
+    }
+    if (rows == nullptr) {
       continue;
     }
-    const std::vector<ProfileSetting>& rows = ref.section == "settings"
-                                                  ? profile.settings
-                                                  : (ref.section == "remap" ? profile.remap
-                                                                            : profile.nav);
-    const bool kept = std::any_of(rows.begin(), rows.end(), [&](const ProfileSetting& row) {
+    const bool kept = std::any_of(rows->begin(), rows->end(), [&](const ProfileSetting& row) {
       return row.key == ref.key;
     });
     if (!kept) {
@@ -957,6 +977,20 @@ std::string RenderProfile(const Profile& profile) {
     text += newline;
     text += "[remap]" + newline;
     for (const ProfileSetting& binding : profile.remap) {
+      text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
+    }
+  }
+  if (!profile.gameplay_remap_controller.empty()) {
+    text += newline;
+    text += "[gameplay_remap_controller]" + newline;
+    for (const ProfileSetting& binding : profile.gameplay_remap_controller) {
+      text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
+    }
+  }
+  if (!profile.gameplay_remap_keyboard_mouse.empty()) {
+    text += newline;
+    text += "[gameplay_remap_keyboard_mouse]" + newline;
+    for (const ProfileSetting& binding : profile.gameplay_remap_keyboard_mouse) {
       text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
     }
   }

@@ -134,6 +134,26 @@ Its four cvars are registered here so they are not invisible:
 | `hud_reanchor_probe` | off | Diagnostics: logs the HUD scene dir, the container inventory with each element's authored x, every element resolution and applied shift, and the present hook's window cost with a per-element breakdown every 600 frames. This is the evidence behind the element table. |
 | `hud_reanchor_scan` | off | Diagnostics **only** since the object-hash lookup replaced it: sweeps ±2 MiB of guest heap around the live HUD scene and logs every transformable-looking record, to map a scene whose containers have not been read. **Expensive** — an uncached page test is a heap query plus `VirtualQuery`, ~1.2 ms here, so a sweep is seconds of frame time in slices of up to ~200 ms (graphics.md §9.2.6). The placement never uses it. |
 
+## Input switches (gameplay mapping, P1)
+
+Three cvars registered by `src/input/remap.cpp` for
+[the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md). They are
+**declared and stored** (P1, 2026-10-18) and nothing reads them for routing yet: P2 adds the source
+gates and P3 the direct dispatch, so a boot today only reports them (the `gameplay mapping:` log
+lines). They are listed here so a hand edit has one place to look, not because they change a boot.
+
+| Cvar | Default | Reads it today | Planned consumer |
+| --- | --- | --- | --- |
+| `keyboard_support` | on | nothing (P1 stores it) | P2's source gates: off blocks every keyboard-to-game path. Controller Settings' own `[nav]` keys are deliberately unaffected (plan R9). |
+| `gameplay_mapping_controller` | **off** | nothing | P3's controller dispatch and P5's native-category hiding. Off = the saved native preset plays, exactly as before. |
+| `gameplay_mapping_keyboard_mouse` | **on** | nothing | P3's keyboard/mouse dispatch; the native controller preset stays authoritative beside it. |
+
+All three are `kRequiresRestart` and are written by Controller Settings through its profile (the
+allowlist in `docs/settings/contracts.md` §8), so a game started on its own reads them from the
+profile and a game started by *Launch Game* reads the same file. The plan's sequencing guard applies
+until P3 passes acceptance: a build must not act on the Controller switch before the controller
+bypass works, and must not act on the Keyboard + Mouse switch before its dispatch does.
+
 ## Adding a toggle
 
 1. Add the `REXCVAR_DEFINE_BOOL/STRING` to [src/enhancements.cpp](../../src/enhancements.cpp) with the

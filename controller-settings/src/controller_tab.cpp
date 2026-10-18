@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "row_ui.h"
@@ -18,6 +19,29 @@ namespace {
 
 // Not constexpr: ImVec4 has no constexpr constructor.
 const ImVec4 kWarning{0.95f, 0.75f, 0.25f, 1.0f};
+
+// The two Gameplay Mapping switches live in the block rather than as schema rows: the schema
+// draws its rows above the block, and the switches belong *under* the General Mapping table where
+// the plan's settings layout puts them (§4). Their keys are `[settings]` entries all the same, so
+// Controller Settings, the game's profile apply and a hand edit all meet in one place
+// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md D6).
+constexpr const char* kControllerGameplayKey = "gameplay_mapping_controller";
+constexpr const char* kKeyboardMouseGameplayKey = "gameplay_mapping_keyboard_mouse";
+
+// What a switch is when the profile says nothing. These must match the compiled defaults in
+// src/input/remap.cpp and the schema rows' own `default` values.
+constexpr bool kControllerGameplayDefault = false;
+constexpr bool kKeyboardMouseGameplayDefault = true;
+
+// A `[settings]` boolean, or its default when the profile has no row for it (B4 writes a row
+// only when it differs from the compiled default).
+bool SettingBool(const ProfileSession& session, std::string_view key, bool fallback) {
+  const ProfileSetting* row = session.profile().FindSetting(key);
+  if (row == nullptr) {
+    return fallback;
+  }
+  return row->value == "true";
+}
 
 
 // The trigger reading the SDK treats as pressed: it keeps a trigger as the byte `value >> 7` and
@@ -255,6 +279,38 @@ void ControllerTab::Draw(std::size_t first_row, FocusModel& ring, ProfileSession
     status_ = "Every control is back to the keys it ships with";
   }
 
+  // The second half of the tab: Gameplay Mapping, split per input type (plan D1/D2). P1 draws the
+  // two switches and the profile plumbing; the six-action tables themselves are P4, so the section
+  // says what the switch does without pretending the table is here yet.
+  ImGui::Spacing();
+  ImGui::SeparatorText("Gameplay mapping");
+  ImGui::TextDisabled(
+      "Bind inputs directly to gameplay actions. Controller and Keyboard + Mouse each accept only "
+      "their own inputs. Changes apply the next time the game starts.");
+  ImGui::Spacing();
+
+  const bool controller_on = SettingBool(session, kControllerGameplayKey, kControllerGameplayDefault);
+  if (SwitchRow(first_row + kControllerSwitchRow, ring, action, "Controller", controller_on)) {
+    session.SetSetting(kControllerGameplayKey, controller_on ? "false" : "true",
+                       kControllerGameplayDefault ? "true" : "false", ValueStyle::kBare);
+    status_ = controller_on
+                  ? "Controller gameplay mapping is off: the saved controller preset plays again"
+                  : "Controller gameplay mapping is on: its table plays, the saved preset does "
+                    "not, and the change applies the next time the game starts";
+  }
+  const bool keyboard_mouse_on =
+      SettingBool(session, kKeyboardMouseGameplayKey, kKeyboardMouseGameplayDefault);
+  if (SwitchRow(first_row + kKeyboardMouseSwitchRow, ring, action, "Keyboard + Mouse",
+                keyboard_mouse_on)) {
+    session.SetSetting(kKeyboardMouseGameplayKey, keyboard_mouse_on ? "false" : "true",
+                       kKeyboardMouseGameplayDefault ? "true" : "false", ValueStyle::kBare);
+    status_ = keyboard_mouse_on
+                  ? "Keyboard + Mouse gameplay mapping is off: keys and mouse go through "
+                    "General Mapping, and the change applies the next time the game starts"
+                  : "Keyboard + Mouse gameplay mapping is on: that table plays beside the saved "
+                    "controller preset, and the change applies the next time the game starts";
+  }
+
   // Only while a listen is running: the edges it looks for are measured against the previous
   // frame, and a panel nobody is capturing with has no reason to poll SDL sixty times a second.
   // A listen that begins on this frame already recorded the state it began in (BeginListening),
@@ -296,10 +352,44 @@ bool ControllerTab::Item(std::size_t index, FocusModel& ring, NavAction action,
   return enabled && (clicked || focused);
 }
 
+std::vector<std::size_t> ControllerTab::FocusRows() {
+  std::vector<std::size_t> rows;
+  rows.reserve(kRowCount);
+  for (std::size_t control = 0; control < kControlRows; ++control) {
+    rows.push_back(2);
+  }
+  rows.push_back(1);  // Reset all bindings
+  rows.push_back(1);  // Controller gameplay switch
+  rows.push_back(1);  // Keyboard + Mouse gameplay switch
+  return rows;
+}
+
+bool ControllerTab::SwitchRow(std::size_t index, FocusModel& ring, NavAction action,
+                              const char* label, bool on) {
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted(label);
+  ImGui::SameLine();
+  return Item(index, ring, action, on ? "On" : "Off", true);
+}
+
 std::string ControllerTab::HelpText(std::size_t row) {
   const std::vector<remap::Target>& targets = remap::Targets();
-  if (row >= targets.size() * 2) {
+  if (row == kResetAllRow) {
     return "Removes every assignment at once, so every control goes back to the keys it ships with.";
+  }
+  if (row == kControllerSwitchRow) {
+    return "Controller gameplay mapping: on, the Controller table drives the six gameplay actions "
+           "directly and the saved controller preset is bypassed; off, the saved preset plays "
+           "exactly as before. The preset itself is kept either way. Applies the next time the "
+           "game starts.";
+  }
+  if (row == kKeyboardMouseSwitchRow) {
+    return "Keyboard + Mouse gameplay mapping: on, that table drives the six gameplay actions "
+           "directly while the controller keeps its saved preset; off, keys and mouse go through "
+           "General Mapping. Applies the next time the game starts.";
+  }
+  if (row >= targets.size() * 2) {
+    return {};
   }
   const std::string label(remap::TargetLabel(targets[row / 2]));
   if (row % 2 == 0) {

@@ -468,8 +468,11 @@ cmake --build --preset win-amd64-release
 ctest --test-dir out\build\win-amd64-release --output-on-failure
 ```
 
-Expected output is `9/9` passing (`crypto_keytable`, `payload_overlay`, `path_policy`,
-`fingerprint`, `ui_nav`, `dlc_layout`, `dlc_library`, `ultimate_plan`, `toolchain`). Exactly one case needs the dump at
+Expected output is however many tests that tree registers — `ctest --test-dir <dir> -N` lists them.
+A `REXGLUE_USE_VULKAN=ON` configure forces `BUILD_TESTING` off from the SDK's
+`thirdparty/CMakeLists.txt`, so a release tree may register none while the debug tree keeps them on
+with `-DREXGLUE_USE_VULKAN=OFF -DBUILD_TESTING=ON` ([input-flow.md](../engine/input-flow.md) records
+the same hazard). Exactly one case needs the dump at
 all (`fingerprint_real_game_dump` hashes `game\default.xex`), and it prints
 `[ SKIP ]` instead of running when the dump is absent or, with
 `RBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, when it is not the supported revision. A failing check

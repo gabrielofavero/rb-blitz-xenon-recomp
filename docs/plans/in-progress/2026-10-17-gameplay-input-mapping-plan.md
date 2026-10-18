@@ -1,9 +1,11 @@
 # General and Gameplay Mapping
 
-**Status: planning, 2026-10-17. Implementation has not started.** This document records the
-requested behavior, a source review at `ca8fa2a`, proposed implementation decisions, and the
-investigation required before choosing guest hooks. No gameplay dispatch hook or new setting has
-been implemented or tested by this planning pass.
+**Status: in progress, 2026-10-18. P0 is closed for the action seam and P1 has landed (§10, §11);
+P2-P6 are not started.** This document records the requested behavior, a source review at
+`ca8fa2a`, proposed implementation decisions, and the investigation required before choosing guest
+hooks. Configuration and its settings surface exist as of P1; no input is sampled for the gameplay
+tables and no gameplay action is dispatched yet, so nothing about a song is affected by the new
+switches.
 
 Planning pass 2 (2026-10-17) added the supersession record (§2), the settings-schema and
 focus-ring constraints, the build-target registration, the development sequencing guard, the
@@ -501,7 +503,12 @@ Ultimate/no-pad/tutorial-menu/calibration-menu contexts. Guest keystrokes are cl
 title imports no keystroke API). Four items stay open and belong to later packages: per-action edge/hold
 semantics (O2, P3), the tutorial's and calibration's interactive segments (O4, P3), raw SDL source
 provenance (O5, P2), and a direct pause (O10, P3). Do not claim those. **P1 can start.**
-
+P1 status (2026-10-18): **landed, and P2 can start** — §11 records the two tables, the frozen
+defaults, the stick-direction vocabulary, the profile storage and reset/merge rules, the three
+switches and their allowlist, the settings surface's first half, and the boot log that names them.
+P1 added no consumer: the switches gate nothing and dispatch nothing until P2 (source gates) and P3
+(direct dispatch), so the sequencing guard above stays in force — a build must not act on either
+gameplay switch before its acceptance passes.
 ## 7. Validation and release criteria
 
 ### 7.1 Automated checks
@@ -868,3 +875,98 @@ a run of taps with no wait between them.
 SDL source provenance (O5 - the `sources` arm ran and logged no edges; P2 owns the next question),
 per-action edge/hold semantics (O2), a direct pause (O10), and the analog stick under a real thumb.
 Guest keystrokes (O6) closed statically: the title imports no keystroke API. See §10.5.
+
+## 11. P1 evidence — shared configuration (2026-10-18)
+
+**P1 landed; P2 can start.** The two gameplay tables, their frozen defaults, the profile storage,
+the three switches and the first half of the settings surface exist and are tested. P1 has no
+runtime consumer: no input is sampled for a gameplay table and no action is dispatched, so the
+sequencing guard in §6 stays in force — a build must not act on either gameplay switch before P2/P3
+pass acceptance.
+
+### 11.1 What landed
+
+| P1 item | Where it landed | Evidence |
+| --- | --- | --- |
+| Action vocabulary and the two tables | New [src/profile/gameplay_remap.h](../../../src/profile/gameplay_remap.h) / [.cpp](../../../src/profile/gameplay_remap.cpp): six actions (`first_note`, `second_note`, `move_lane_right`, `move_lane_left`, `powerup`, `pause`), `Table::FromRows`/`ToRows`/`Bindings`/`Effective`/`Set`/`Reset`/`ResetAll`, and `Rejected()` as the diagnostic list | `tests/gameplay_remap_tests.cpp`, `TestVocabulary` and `TestSourceKinds` |
+| Per-table source kinds (R11) | `AcceptsSourceKind`: `[gameplay_remap_controller]` takes `pad:` only, `[gameplay_remap_keyboard_mouse]` takes `key:`/`mouse:` only. A wrong-kind row is kept verbatim, reported with the reason, and not applied — never half-applied | same suite, `TestSourceKinds` |
+| Frozen defaults (O3) | `DefaultSources`. Controller reproduces the measured native preset 0: all four LStick and D-pad directions → `first_note`; `pad:a` plus all four RStick directions → `second_note`; `pad:right_trigger`/`right_shoulder` → `move_lane_right`; `pad:left_trigger`/`left_shoulder` → `move_lane_left`; `pad:x` → `powerup`; `pad:start` → `pause`. Keyboard + Mouse reproduces the shipped keyboard preset 0: `1/7/A/F/L`, `2/8/S/J/Semicolon`, `Right/K/X/Period`, `Left/D/Z/Comma`, `Space`, `Return`, with **no mouse binding** (plan D6: opt-in) | same suite, the two default cases |
+| Pad vocabulary for directions (O8) | [src/profile/remap.h](../../../src/profile/remap.h)/[.cpp](../../../src/profile/remap.cpp): `PadDirection` (`lstick_up/down/left/right`, `rstick_*`), one pinned `kStickThreshold = 0x4000`, `PadState` gains the four stick axes, `Apply` answers a direction from them, and the axes are copied through untouched. `ParseSourceList`/`FormatSourceList` are public so both tables read one grammar | `tests/controller_settings_remap_tests.cpp`, the direction case |
+| Profile storage | `Profile::gameplay_remap_controller` / `gameplay_remap_keyboard_mouse`; reader, surgical patching writer, fresh-document renderer, drop-on-empty, `ResetPlan` + `ResetToDefaults`, and the rebased-save merge in [profile_session.cpp](../../../controller-settings/src/profile_session.cpp) | `gameplay_remap` suite `TestProfileStorage`; `controller_settings_session` `TestGameplayTablesMerge` |
+| No schema-version bump | The tables are additive; a `schema_version = 1` document carrying both loads, and the profile module leaves a table it does not model untouched | `gameplay_remap` suite, the version case |
+| Switches and allowlist | `keyboard_support` (on), `gameplay_mapping_controller` (off) and `gameplay_mapping_keyboard_mouse` (on) defined in [src/input/remap.cpp](../../../src/input/remap.cpp); all three added to `kControllerCvarAllowlist` in [src/settings/cvars.h](../../../src/settings/cvars.h); `ReadGameplaySwitches()` is the one reading of them | `gameplay_remap` suite `TestSwitchesAreAppliedByABoot`; `TestExplicitValues` |
+| Settings surface, first half | Schema row **Keyboard support** in the `Input` group ([settings.toml](../../../controller-settings/config/settings.toml)); the R13 note rewritten; the **Controller** and **Keyboard + Mouse** switches drawn by the Controller tab's custom block under the mapping table, with their own ring rows (`ControllerTab::FocusRows`, which the shell now sizes the ring from), bottom-bar help, and a status line that says the change applies the next time the game starts | generated `controller-settings/out/generated/settings_table.h`; `controller_settings_nav` suite |
+| Boot log (D2) | `gameplay mapping: keyboard_support=… (source) mouse_ui_nav=… (source) gameplay_mapping_controller=… (source) gameplay_mapping_keyboard_mouse=… (source)` and `gameplay mapping: [<section>] N user row(s), M action(s) firing of 6; …`, plus a warning per refused row and one for an all-empty table | `[tree]` — see the unproven item below |
+
+### 11.2 What this pass does not claim
+
+- **No consumer.** The switches gate nothing and dispatch nothing: source gating is P2 and the
+  direct dispatch is P3. A boot today behaves exactly as it did before P1.
+- **No gameplay is exercised.** §11.4 records a short 2026-10-18 boot that printed the two lines;
+  it reaches the menu only, so no song, note, lane, power-up or pause path was driven.
+- **No table UI.** The six-action tables, per-table capture, the strike-through of a gated source,
+  the help modal and the per-table visibility are P4; the native-category hiding is P5. P1 draws
+  the switches only.
+- **No `--dump-layout` row for the switches.** They are custom-block rows, not schema rows; the
+  new schema row (`keyboard_support`) does appear there.
+
+### 11.3 How the tests were run
+
+The release tree in this checkout was configured with `REXGLUE_USE_VULKAN=ON`, whose
+`thirdparty/CMakeLists.txt` forces `BUILD_TESTING` off (the hazard [input-flow.md](../../engine/input-flow.md)
+records), so `ctest --test-dir out/build/win-amd64-release` cannot register the suite. Each affected
+suite was therefore compiled with the preset's own compiler and run directly; the files and flags
+are the ones the CMake targets use:
+
+```powershell
+clang++ -std=c++23 -O1 -I src tests/gameplay_remap_tests.cpp src/profile/profile.cpp `
+  src/profile/gameplay_remap.cpp src/profile/remap.cpp -o out/_swap/p1/tests/gameplay_remap_tests.exe
+clang++ -std=c++23 -O1 -I src tests/controller_settings_remap_tests.cpp src/profile/profile.cpp `
+  src/profile/remap.cpp -o out/_swap/p1/tests/controller_settings_remap_tests.exe
+clang++ -std=c++23 -O1 -I src -I controller-settings/src `
+  tests/controller_settings_session_tests.cpp controller-settings/src/game_config.cpp `
+  controller-settings/src/prefill.cpp controller-settings/src/profile_session.cpp `
+  src/profile/profile.cpp src/profile/profile_path.cpp -o out/_swap/p1/tests/session.exe
+clang++ -std=c++23 -O1 -I src tests/controller_settings_profile_tests.cpp src/profile/profile.cpp `
+  src/profile/profile_path.cpp -o out/_swap/p1/tests/profile.exe
+clang++ -std=c++23 -O1 -I src -I controller-settings/src -I controller-settings/out/generated `
+  tests/controller_settings_pad_nav_tests.cpp tests/controller_settings_help_tests.cpp `
+  tests/controller_settings_keys_tests.cpp controller-settings/src/pad_nav.cpp `
+  controller-settings/src/nav_bindings.cpp controller-settings/src/schema_view.cpp `
+  src/profile/profile.cpp -o out/_swap/p1/tests/nav.exe
+```
+
+Results on 2026-10-18: `gameplay_remap` 397 checks passed, `controller_settings_remap` 323,
+`controller_settings_session` 310 (including the new merge/reset case), `controller_settings_profile`
+165, and the nav/help/keys suite 398. The release game and Controller Settings targets build clean
+(`cmake --build --preset win-amd64-release`, exit 0); the new source is registered in
+`RBBLITZ_SOURCES`, `controller-settings/CMakeLists.txt`, and the `gameplay_remap` test target.
+
+The same suites run under CTest in the **debug** tree, which is the configure this checkout has that
+keeps tests on (`-DREXGLUE_USE_VULKAN=OFF -DBUILD_TESTING=ON`; the preset alone forces Vulkan on and
+the SDK turns `BUILD_TESTING` off again): `ctest --test-dir out/build/win-amd64-debug` — **39/39
+tests pass**, `gameplay_remap` among them (test #27), in 26.1 s. Log:
+`out/_swap/p1/p1-ctest-debug.log`.
+
+### 11.4 A live boot names the switches (2026-10-18)
+
+One 20-second release-build boot from `out/build/win-amd64-release`, killed after the input system
+was built, with an isolated profile at `out/_swap/p1/boot/launcher.toml` (the three switches written
+explicitly; one row in each gameplay table) and `--game_data_root=<checkout>/game
+--input_backend=none`. The game reached the menu and the log printed, in this order:
+
+```text
+[info] remap: 0 user rebind(s) from the profile; every other control answers to its default pad button and keyboard key (--launcher_profile <path> names another file)
+[info] gameplay mapping: keyboard_support=on (config) mouse_ui_nav=on (default) gameplay_mapping_controller=off (config) gameplay_mapping_keyboard_mouse=on (config)
+[info] gameplay mapping: [gameplay_remap_controller] 1 user row(s), 6 action(s) firing of 6; [gameplay_remap_keyboard_mouse] 1 user row(s), 6 action(s) firing of 6
+```
+
+That is P1's acceptance line: a standalone boot names the effective value of each switch **and where
+it came from** (`config` for the three profile rows, `default` for the absent `mouse_ui_nav`), plus
+each table's binding count. Source: `out/build/win-amd64-release/logs/rb_blitz_003.log`.
+
+The same boot also proves the profile path end to end for the new keys: the two gameplay rows in the
+file were read by the game's own profile apply, the switches beside them arrived as cvars, and the
+counts show the compiled defaults filling the five actions the file did not mention. A table with no
+rows at all is `gameplay_remap`'s no-rows case: 6 of 6 actions firing in both tables from the
+compiled defaults, pinned without a process.
