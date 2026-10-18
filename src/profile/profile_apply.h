@@ -21,6 +21,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -40,6 +41,11 @@ namespace rb_blitz::profile {
 // not null it receives a reason worth reporting (a file that did not parse, or could not be read)
 // and is cleared otherwise.
 std::optional<Profile> ReadProfile(std::string* why = nullptr);
+
+// The file `ReadProfile` reads and a save would write: the same resolution order, exposed once so
+// the in-game Controls store (src/input/input_store.cpp) writes the profile the boot read rather
+// than resolving it a second way. Empty when this process has nowhere to keep one.
+std::filesystem::path CurrentProfilePath();
 
 // What one application of the profile did, so the caller can report it once logging is up.
 struct ProfileApplyReport {

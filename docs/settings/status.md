@@ -299,6 +299,33 @@ in-game **Controls** menu and disables Default Presets while Controller Custom i
 windowed capture legs still target the four-tab surface that P8's gate moved off by default, and
 P8 owns re-pointing them.
 
+#### Controls in the game (P7, 2026-10-18)
+
+The input surface is in the game now (plan §16). Help & Options → Controls opens our own nested
+menu, so the external app is no longer the only place to change a binding:
+
+* **Controls** → `Input Types` (Controller: Always on; Keyboard `keyboard_support`; Mouse
+  `mouse_support`), `General Mapping` (16 controls, each drawing `Default`/`Custom` plus its
+  bindings, with an Assign/Reset child page and a table-level Reset All) and `Gameplay Mapping`
+  (Controller: Default Presets — retail's page, disabled while Custom is On — Custom, Custom
+  Mapping; Keyboard & Mouse: Custom, Custom Mapping; six actions and Reset All in each table).
+* **The listening dialog is a screen** (`settings_listen_screen`): a capture waits for neutral,
+  a tap of the candidate binds it on release, a hold past 700 ms cancels, a wrong-kind press
+  names the kind and keeps listening, and the dialog leaves by a host Back pulse. A completed
+  capture is saved through the profile (`launcher.toml`, the same tables P1 froze) and applied on
+  the next poll: the switches are live, not launch-scoped.
+* **The profile keeps only differences**: a switch set back to its compiled default is dropped
+  instead of written, so Custom Off leaves no `gameplay_mapping_controller` line.
+* **Retail's controller page is the Default Presets destination**, not a deleted screen, and the
+  in-song list's `Controls` row now jumps to the pause twin of this menu (unit-tested; not yet
+  driven — [known-issues.md](../reference/known-issues.md)).
+
+Evidence: `rb_blitz_settings_screen_tests` 89,484 checks and `rb_blitz_input_bindings_tests` 80
+checks, 41/41 ctest; one tracked driven boot, 56 steps, 0 failures
+(`out/gameplay-mapping/in-game/p7-live4/`, `p7-live4-shots/`). What this does **not** do: retire
+the executable, move the remaining non-input settings, drive the in-song page or a pad, or
+recover a saved profile with every source already off (plan §16.5). Those are P8's.
+
 #### Boot speed and one frozen picture (owner report, 2026-10-13, later)
 
 * **The freeze** (seen once) is a GPU command-processor packet desync: the log ends with

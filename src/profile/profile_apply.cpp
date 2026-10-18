@@ -43,11 +43,7 @@ std::optional<Profile> ReadProfile(std::string* why) {
   if (why != nullptr) {
     why->clear();
   }
-  ProfilePathInputs inputs = ProfilePathInputsFromEnvironment(
-      rex::filesystem::GetExecutableFolder());
-  inputs.command_line_value = REXCVAR_GET(launcher_profile);
-
-  const std::filesystem::path path = ResolveProfilePath(inputs);
+  const std::filesystem::path path = CurrentProfilePath();
   if (path.empty()) {
     return std::nullopt;
   }
@@ -59,6 +55,13 @@ std::optional<Profile> ReadProfile(std::string* why) {
     return std::nullopt;
   }
   return std::move(loaded.profile);
+}
+
+std::filesystem::path CurrentProfilePath() {
+  ProfilePathInputs inputs = ProfilePathInputsFromEnvironment(
+      rex::filesystem::GetExecutableFolder());
+  inputs.command_line_value = REXCVAR_GET(launcher_profile);
+  return ResolveProfilePath(inputs);
 }
 
 ProfileApplyReport ApplyProfileSettings() {

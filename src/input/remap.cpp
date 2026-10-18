@@ -6,10 +6,14 @@
 
 #include "input/remap.h"
 #include "hooks/gameplay_input.h"
+#include "input/effective_input.h"
+#include "input/host_pad.h"
+#include "input/input_capture.h"
 #include "input/native_menu.h"
 #include "input/pad_packet.h"
 #include "input/source_gates.h"
 #include "input/title_input.h"
+#include "settings/input_bindings.h"
 
 #include <array>
 #include <atomic>
@@ -39,19 +43,16 @@
 REXCVAR_DEFINE_BOOL(keyboard_support, true, "Input",
                     "Keyboard support: while on, the title's keyboard rows (General Mapping's key "
                     "sources and the Keyboard + Mouse gameplay table) drive the game. Off blocks "
-                    "that device; Controller Settings' own keys are unaffected. Needs a restart.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+                    "that device; Controller Settings' own keys are unaffected. Applied live at the "
+                    "menu/pause boundary the in-game Controls page saves at.");
 REXCVAR_DEFINE_BOOL(gameplay_mapping_controller, false, "Input",
                     "Controller Gameplay Mapping: on, the Controller binding table drives the "
                     "six gameplay actions directly and the saved native preset is bypassed. "
-                    "Off, the saved preset plays exactly as before. Needs a restart.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+                    "Off, the saved preset plays exactly as before.");
 REXCVAR_DEFINE_BOOL(gameplay_mapping_keyboard_mouse, true, "Input",
                     "Keyboard + Mouse Gameplay Mapping: on, that binding table drives the six "
                     "gameplay actions directly while the native controller preset stays "
-                    "authoritative for a pad. Off, keys and mouse use General Mapping. Needs a "
-                    "restart.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+                    "authoritative for a pad. Off, keys and mouse use General Mapping.");
 
 // P2's live instrument (plan §6): one line per press/release the physical layer sees for a
 // gameplay table, naming the binding that caused it. Off by default; the acceptance arm runs with
@@ -136,20 +137,6 @@ GameplaySwitches EffectiveGameplayRouting(GameplaySwitches switches) {
 
 // Everything a source resolves against, kept alive by the filter that holds it.
 struct RemapContext {
-  rb_blitz::profile::remap::Table table;
-  // The two gameplay-mapping tables (src/profile/gameplay_remap.h). Loaded here, with the same
-  // profile read as `[remap]`, so every consumer sees one configuration; neither is dispatched by
-  // the rewrite - P2 evaluates them for the source gates and the edges, P3 dispatches. Their
-  // kinds are fixed at construction, because a table with no profile rows still answers from its
-  // own compiled defaults.
-  rb_blitz::profile::gameplay_remap::Table controller_actions{
-      rb_blitz::profile::gameplay_remap::TableKind::kController};
-  rb_blitz::profile::gameplay_remap::Table keyboard_mouse_actions{
-      rb_blitz::profile::gameplay_remap::TableKind::kKeyboardMouse};
-  // The pad controls the Controller table's sources name (P3, plan D4): while that table is
-  // active they are taken out of the state the guest reads, because the preset they would feed is
-  // bypassed. Fixed at load - a table is not edited while a game runs (D7).
-  uint16_t controller_buttons = 0;
   std::mutex packet_mutex;
   std::array<PadPacket, 4> packets;
 
@@ -175,7 +162,8 @@ struct RemapContext {
 
   gameplay_input::PadOverlay ObserveGameplay(const PhysicalInput& input, const SourceGates& gates,
                                              const GameplaySwitches& effective, bool gameplay,
-                                             bool trace) {
+                                             bool trace, const EffectiveInput& config,
+                                             const uint16_t controller_buttons) {
     const GameplayRouting routing{effective.controller_mapping,
                                   effective.keyboard_mouse_mapping};
     // A low-rate heartbeat while tracing: it says whether the sampler is running at all and what
@@ -241,8 +229,8 @@ struct RemapContext {
       }
       for (const profile::gameplay_remap::TableKind kind : profile::gameplay_remap::TableKinds()) {
         const profile::gameplay_remap::Table& table =
-            kind == profile::gameplay_remap::TableKind::kController ? controller_actions
-                                                                   : keyboard_mouse_actions;
+            kind == profile::gameplay_remap::TableKind::kController ? config.controller
+                                                                   : config.keyboard_mouse;
         const bool active = TableActive(routing, kind, gameplay);
         for (const profile::gameplay_remap::Action action : profile::gameplay_remap::Actions()) {
           // One evaluation per action per poll, whatever is done with it: the sampler's answer is
@@ -353,65 +341,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     return;
   }
 
-  // The same file Controller Settings' own Launch Game hands over with --launcher_profile, read the
-  // same way the profile's `[settings]` rows are (controller-settings/profile_apply.h). A profile this build
-  // cannot read - or a machine that has never run Controller Settings - is not a reason to refuse to
-  // start and not a reason to install no filter at all: `has_table` is false and the filter's
-  // whole job is then the Guide prohibition below. Controller Settings is where a user is told about a
-  // file that did not parse.
-  std::string unreadable;
-  const std::optional<rb_blitz::profile::Profile> profile =
-      rb_blitz::profile::ReadProfile(&unreadable);
-  if (!profile && !unreadable.empty()) {
-    REXLOG_WARN("remap: ignoring the profile, {}", unreadable);
-  }
-
-  // Held by the filter, which the input system copies: this frame's table is not what it reads
-  // from.
+  // P7: the three binding tables come from the one published snapshot
+  // (src/input/effective_input.h). A poll copies the pointer once and uses that copy for its
+  // whole length, so a commit that lands between two polls is observed whole or not at all.
+  // The initial snapshot is published by the boot's Controls store before the input system is
+  // created; a tool or a test sees compiled defaults.
   auto context = std::make_shared<RemapContext>();
-  // The two gameplay tables are read whether or not a profile exists: an absent profile means the
-  // compiled defaults, which is a complete scheme (D6: a fresh install can play without opening
-  // Controller Settings).
-  namespace gameplay = rb_blitz::profile::gameplay_remap;
-  const bool has_table = profile.has_value();
-  std::size_t bound = 0;
-  if (profile) {
-    context->table = rb_blitz::profile::remap::Table::FromRows(profile->remap);
-    context->controller_actions =
-        gameplay::Table::FromRows(gameplay::TableKind::kController,
-                                  profile->gameplay_remap_controller);
-    context->keyboard_mouse_actions =
-        gameplay::Table::FromRows(gameplay::TableKind::kKeyboardMouse,
-                                  profile->gameplay_remap_keyboard_mouse);
-    // Guide is a platform button and is never delivered to the guest (contracts §2.3). A row a
-    // person wrote once is preserved by a save but never applied, so the only honest thing to do
-    // with it is to say so - "the button I bound does nothing" is otherwise indistinguishable
-    // from a bug in the remap.
-    if (!rb_blitz::profile::remap::RefusedRowNames(profile->remap).empty()) {
-      REXLOG_WARN(
-          "remap: Guide is not remappable, so the profile's guide row is ignored (and Guide is "
-          "kept out of the pad state the guest sees)");
-    }
-    // The table always has work to do, even with no `[remap]` rows: every control without a row
-    // has Controller Settings' default binding - its own pad control plus a keyboard key - which is how
-    // a keyboard works without the profile being edited. `BoundCount` is how many the *user*
-    // rebound, which is what the log names.
-    if (context->table.BoundCount() > 0 && !context->table.AnySourceSet()) {
-      // A table of empty bindings is a pad that does nothing, which is a real thing to want and a
-      // terrible thing to hit by accident. It is honoured, and said out loud.
-      REXLOG_WARN(
-          "remap: the profile binds {} control(s) to nothing, so no pad button will "
-          "reach the game",
-          context->table.BoundCount());
-    }
-    bound = context->table.BoundCount();
-  }
-  // P3: the pad controls the Controller table owns. While that table routes gameplay input the
-  // preset is bypassed, so these bits are removed from the state the guest reads and only the
-  // direct dispatch can produce their actions. Computed with no profile too: the compiled defaults
-  // own the same controls the native preset 0 does, so enabling the Controller table without ever
-  // opening Controller Settings works as promised.
-  context->controller_buttons = ControllerOwnedButtons(context->controller_actions);
 
   std::function<std::unique_ptr<rex::system::IInputSystem>(bool)> backend;
   if (config.input_factory) {
@@ -422,8 +357,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     backend = REX_INPUT_BACKEND(rb_blitz::input::CreateTitleInputSystem);
   }
 
-  config.input_factory = [backend = std::move(backend), context = std::move(context), has_table,
-                          bound](bool tool_mode) {
+  config.input_factory = [backend = std::move(backend), context = std::move(context)](
+                            bool tool_mode) {
     std::unique_ptr<rex::system::IInputSystem> system = backend(tool_mode);
     if (tool_mode || !system) {
       return system;
@@ -431,9 +366,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     // The same cast mouse_ui makes, and for the same reason: this is the one input system the
     // SDK and this project ship, and the filter is the seam the SDK grew for exactly this.
     static_cast<rex::input::InputSystem*>(system.get())
-        ->SetStateFilter([context, has_table](uint32_t user_index,
+        ->SetStateFilter([context](uint32_t user_index,
                                              rex::input::X_INPUT_STATE& state) {
           namespace remap = rb_blitz::profile::remap;
+          // P7: one snapshot for the whole poll; see InstallPadRemap.
+          const std::shared_ptr<const EffectiveInput> config = CurrentInput();
+          const bool has_table = config->profile_present;
           // D2: both gates are read at poll time, so config/env/CLI precedence and a runtime
           // change are observed by every consumer from one place.
           const GameplaySwitches requested = ReadGameplaySwitches();
@@ -447,20 +385,73 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // key/mouse sources and both gameplay tables read the same raw devices, so they can
           // never disagree about what is held.
           const PhysicalInput physical = SamplePhysicalInput();
+          // P7: the listening dialog. The raw frame is consumed every poll so the key serial stays
+          // current; while a capture is armed the guest is handed a neutral pad below, which is
+          // what keeps the candidate press from navigating the menu it is being bound in. The
+          // capture sees the devices ungated, so a binding can be prepared for a disabled device.
+          static thread_local uint64_t key_serial = 0;
+          std::vector<std::string> new_keys;
+          HostKeyEventsSince(&key_serial, &new_keys);
+          const bool capture_armed = capture::Armed();
+          if (capture_armed) {
+            capture::Observation observation;
+            observation.focused = physical.window_focused;
+            observation.any_key_down = HostAnyKeyDown();
+            observation.new_keys = std::move(new_keys);
+            observation.mouse_buttons = physical.mouse_buttons;
+            observation.pad = physical.pad;
+            // The hold rule's oracle, from the levels this poll already has: a tap of Back or
+            // Escape binds it, a long hold of either cancels the dialog (so both stay bindable,
+            // which a "B cancels" rule could not offer - plan §14.3).
+            const profile::remap::PadState pad_now = physical.pad;
+            const uint32_t mouse_now = physical.mouse_buttons;
+            observation.still_held = [pad_now, mouse_now](const profile::remap::Source& source) {
+              switch (source.kind) {
+                case profile::remap::SourceKind::kPad:
+                  return capture::PadSourceHeld(pad_now, source.name);
+                case profile::remap::SourceKind::kMouse:
+                  return capture::MouseSourceHeld(mouse_now, source.name);
+                case profile::remap::SourceKind::kKey:
+                  return HostKeyDown(source.name);
+              }
+              return false;
+            };
+            const capture::Tick tick = capture::Observe(observation);
+            if (tick.captured.has_value()) {
+              settings::InputBindingStore* store = settings::InputBindings();
+              std::string why;
+              if (store != nullptr &&
+                  store->CompleteCapture(tick.captured->token, tick.captured->source, &why)) {
+                // Leave the dialog the way a player's B would: a real pad bit for two polls.
+                PulseHostPad(0x2000);
+              } else {
+                capture::PostStatusMessage("Could not save: " +
+                                           (why.empty() ? std::string("the profile was refused")
+                                                        : why));
+              }
+            } else if (tick.leave) {
+              // The cancel gesture and the timeout leave the same way; the row is untouched
+              // because nothing was ever staged.
+              PulseHostPad(0x2000);
+            }
+          }
           // General Mapping's input pad. It is the merged state - the physical pads plus the
           // SDK's legacy MnK emulation when `mnk_mode` is on, which is how every acceptance
           // harness drives the menus - except while a gameplay table routes input: then the
           // guest sees the *physical* pad only, because the MnK emulation is a second keyboard
           // path into the native preset and General Mapping's key/mouse sources stop at the menu
           // while a direct table is on (R4). A `pad:` gameplay source reads the physical pad in
-          // either case (src/input/source_gates.h).
+          // either case (src/input/source_gates.h). With Keyboard Support off the MnK emulation
+          // stands down in every context (P7's live gate), so the physical pad is what the guest
+          // may see - a synthesized bit is a keyboard path whether a menu or a song is current.
           const remap::PadState merged{state.gamepad.buttons,     state.gamepad.left_trigger,
                                       state.gamepad.right_trigger, state.gamepad.thumb_lx,
                                       state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
                                       state.gamepad.thumb_ry};
           const bool direct_routing =
               gameplay && (effective.controller_mapping || effective.keyboard_mouse_mapping);
-          const remap::PadState pad = direct_routing ? physical.pad : merged;
+          const remap::PadState pad =
+              (direct_routing || !gates.keyboard) ? physical.pad : merged;
           remap::PadState out;
           if (has_table) {
             DownView view;
@@ -469,7 +460,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             view.gameplay = gameplay;
             view.keyboard_mouse_mapping = effective.keyboard_mouse_mapping;
             view.controller_mapping = effective.controller_mapping;
-            remap::Apply(context->table, pad, &SourceDownThunk, &view, &out);
+            remap::Apply(config->general, pad, &SourceDownThunk, &view, &out);
           } else {
             // No profile to read: the pad is left exactly as the SDK reports it, and the one
             // thing that still happens is the prohibition. Guide therefore cannot reach the guest
@@ -500,7 +491,24 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // or multiply steps unpredictably.
           if (user_index == 0) {
             const auto mouse = SampleMenuMousePadState();
-            state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x300F);
+            if (!capture_armed) {
+              state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x300F);
+            }
+            // P7: the host's own Back pulse (the listening dialog leaving itself). It follows the
+            // same delivery as a player press and is never gated by Mouse Support.
+            state.gamepad.buttons = uint16_t(state.gamepad.buttons) | TakeHostPadPulse();
+          }
+          // A capture owns raw input until it completes or is cancelled: the guest sees a neutral
+          // pad and no gameplay action, so the press being bound cannot navigate, pause, or strike
+          // a note (plan §14.3).
+          if (capture_armed) {
+            state.gamepad.buttons = 0;
+            state.gamepad.left_trigger = 0;
+            state.gamepad.right_trigger = 0;
+            state.gamepad.thumb_lx = 0;
+            state.gamepad.thumb_ly = 0;
+            state.gamepad.thumb_rx = 0;
+            state.gamepad.thumb_ry = 0;
           }
           // P3: the gameplay tables' source state, edges and pad overlay, for player one only.
           // Host keyboard and mouse actions belong to that slot; users 1..3 are not polled with
@@ -508,10 +516,13 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // applied here - after General Mapping and after the native pointer's pulses - so it is
           // the last word on the two controls that cross the native gameplay boundary: the
           // Controller table's own buttons are removed while it routes, and Start carries the
-          // direct Pause action (plan D3/D4).
-          if (IsGameplayUser(user_index)) {
+          // direct Pause action (plan D3/D4). While a capture is armed the overlay is skipped: the
+          // candidate press is the dialog's input, not the song's.
+          if (IsGameplayUser(user_index) && !capture_armed) {
+            const uint16_t controller_buttons = ControllerOwnedButtons(config->controller);
             const gameplay_input::PadOverlay overlay = context->ObserveGameplay(
-                physical, gates, effective, gameplay, REXCVAR_GET(input_source_trace));
+                physical, gates, effective, gameplay, REXCVAR_GET(input_source_trace), *config,
+                controller_buttons);
             state.gamepad.buttons =
                 uint16_t((uint16_t(state.gamepad.buttons) & ~overlay.clear_buttons) |
                          overlay.set_buttons);
@@ -527,20 +538,9 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
                  pad.thumb_lx, pad.thumb_ly, pad.thumb_rx, pad.thumb_ry});
           }
         });
-    if (has_table) {
-      REXLOG_INFO(
-          "remap: {} user rebind(s) from the profile; every other control answers to its "
-          "default pad button and keyboard key (--launcher_profile <path> names another file)",
-          bound);
-    } else {
-      REXLOG_INFO(
-          "remap: no Controller Settings profile to read, so the pad keeps the SDK's own reporting and Guide "
-          "is kept out of the state the guest sees");
-    }
-
-    // P1's evidence line (plan §6 P1): the effective switches and their sources, then what each
-    // gameplay table would run. P2 reads the gates at poll time; this line remains the one place a
-    // standalone boot names them - the same line a Controller Settings launch prints.
+    // P1's evidence line (plan §6 P1): the effective switches and their sources. The binding
+    // table counts are logged by the Controls store when it is created (P7), because the store is
+    // the one owner of the tables and this point runs before it.
     const GameplaySwitches switches = ReadGameplaySwitches();
     REXLOG_INFO(
         "gameplay mapping: keyboard_support={} ({}) mouse_ui_nav={} ({}) "
@@ -565,8 +565,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
       REXLOG_INFO(
           "gameplay mapping: direct dispatch on (plan P3) - a table whose switch is on drives "
           "the six actions; the Controller table also bypasses the native preset and owns the "
-          "pad control(s) {:#06x} in the delivered state",
-          context->controller_buttons);
+          "pad controls its own sources name in the delivered state");
     }
     // P2's provenance line: where each source kind is read from. `pad` is the physical drivers
     // (never the merged state), key/mouse are SDL's own raw state, and the mouse is gameplay-only
@@ -577,42 +576,11 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
         rex::cvar::GetFlagByName("mnk_mode") == "true"
             ? (switches.keyboard_support ? "on (merged into the guest pad, never a `pad:` gameplay "
                                            "source)"
-                                         : "off (keyboard_support is off, so the driver is not "
-                                           "installed)")
+                                         : "installed but standing down: keyboard_support is off, "
+                                           "so none of its state is delivered")
             : "off",
         REXCVAR_GET(input_source_trace) ? "on" : "off",
         CvarSourceName(rex::cvar::GetFlagSource("input_source_trace")));
-    const auto& controller_actions = context->controller_actions;
-    const auto& keyboard_mouse_actions = context->keyboard_mouse_actions;
-    REXLOG_INFO(
-        "gameplay mapping: [{}] {} user row(s), {} action(s) firing of {}; [{}] {} user row(s), "
-        "{} action(s) firing of {}",
-        gameplay::TableKindSection(gameplay::TableKind::kController),
-        controller_actions.BoundCount(), controller_actions.EffectiveBoundCount(),
-        gameplay::kActionCount,
-        gameplay::TableKindSection(gameplay::TableKind::kKeyboardMouse),
-        keyboard_mouse_actions.BoundCount(), keyboard_mouse_actions.EffectiveBoundCount(),
-        gameplay::kActionCount);
-    for (const gameplay::TableKind kind : gameplay::TableKinds()) {
-      const gameplay::Table& table = kind == gameplay::TableKind::kController
-                                       ? controller_actions
-                                       : keyboard_mouse_actions;
-      // A row this table keeps but will not apply: said out loud, because a binding that does
-      // nothing is otherwise indistinguishable from a bug.
-      for (const gameplay::Table::RejectedRow& rejected : table.Rejected()) {
-        REXLOG_WARN("gameplay mapping: [{}] row '{} = {}' is kept and not applied: {}",
-                    gameplay::TableKindSection(kind), rejected.row.key, rejected.row.value,
-                    rejected.reason);
-      }
-      // The all-empty scheme, which is a real thing to want and a terrible thing to hit by
-      // accident - the same warning the `[remap]` table gets above.
-      if (table.BoundCount() > 0 && !table.AnySourceSet()) {
-        REXLOG_WARN(
-            "gameplay mapping: the profile binds every action in [{}] to nothing, so that "
-            "table will not fire anything",
-            gameplay::TableKindSection(kind));
-      }
-    }
     return system;
   };
 }

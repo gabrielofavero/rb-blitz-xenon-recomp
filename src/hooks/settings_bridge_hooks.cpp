@@ -38,9 +38,12 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <rex/cvar.h>
@@ -52,9 +55,14 @@
 #include "hooks/ultimate.h"
 #include "hooks/shell_music.h"
 #include "hooks/hot_apply_runtime.h"
+#include "input/input_store.h"
+#include "input/remap.h"
+#include "input/title_input.h"
+#include "profile/profile_apply.h"
 #include "settings/boot.h"
 #include "settings/bridge_sink.h"
 #include "settings/hot_apply.h"
+#include "settings/input_bindings.h"
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
 
@@ -114,6 +122,9 @@ MemorySink g_memory;
 RequestSink* g_sink = &g_memory;
 SinkQueries* g_queries = &g_memory;
 Dispatcher g_dispatcher(&g_memory);
+// P7: the controller profile's binding rows, created once at Configure() and kept for the life of
+// the process. The help caption and the sink both borrow it; nothing else owns it.
+std::unique_ptr<::rb_blitz::input::InputStore> g_input_store;
 
 // Rejection logs are rate-limited: a guest that asks about a malformed frame every frame must not
 // fill the log, and the first one is the one that matters.
@@ -226,6 +237,10 @@ const char* OpName(const Op op) {
     case Op::kInvoke: return "invoke";
     case Op::kRequestRestart: return "request_restart";
     case Op::kHelp: return "help";
+    case Op::kCapture: return "capture";
+    case Op::kCaptureCancel: return "capture_cancel";
+    case Op::kBindReset: return "bind_reset";
+    case Op::kBindResetAll: return "bind_reset_all";
   }
   return "?";
 }
@@ -654,6 +669,82 @@ bool TakeWrite(PPCContext& ctx, uint8_t* base) {
 void Configure() {
   g_enabled = REXCVAR_GET(settings_bridge);
   g_forward_only = REXCVAR_GET(settings_bridge_forward_only);
+
+  // P7: one writer for the controller profile. The four switches are read from the cvars here -
+  // the boot applied the profile at config rank before this point, so an explicit command-line or
+  // environment value has already won - and a row whose value came from either of those stays
+  // read-only in the menu. The store publishes the initial binding snapshot before the input
+  // system is created, so the first poll reads the profile's tables rather than a default.
+  {
+    const auto effective_bool = [](const char* name, const bool compiled_default) {
+      const std::string text = rex::cvar::GetFlagByName(name);
+      if (text.empty()) return compiled_default;
+      return text != "false";
+    };
+    const auto locked = [](const char* name) {
+      const rex::cvar::Source source = rex::cvar::GetFlagSource(name);
+      return source == rex::cvar::Source::kCommandLine ||
+             source == rex::cvar::Source::kEnvironment;
+    };
+    ::rb_blitz::input::InputStoreOptions options;
+    options.keyboard_support = effective_bool("keyboard_support", true);
+    options.mouse_support = effective_bool("mouse_ui_nav", true);
+    options.custom_controller = effective_bool("gameplay_mapping_controller", false);
+    options.custom_keyboard_mouse = effective_bool("gameplay_mapping_keyboard_mouse", true);
+    options.keyboard_locked = locked("keyboard_support");
+    options.mouse_locked = locked("mouse_ui_nav");
+    options.custom_controller_locked = locked("gameplay_mapping_controller");
+    options.custom_keyboard_mouse_locked = locked("gameplay_mapping_keyboard_mouse");
+    options.apply_switch = [](std::string_view name, const bool value, std::string* error) {
+      const std::string text = value ? "true" : "false";
+      bool ok = false;
+      std::string why;
+      // The project rule: a guest thread must not touch the cvar registry. This runs from the
+      // settings write hook, so the write goes to a short-lived host thread and is read back.
+      std::thread worker([&name, &text, &ok, &why] {
+        if (!rex::cvar::SetFlagByName(std::string(name), text)) {
+          why = "the cvar refused the value";
+          return;
+        }
+        const std::string after = rex::cvar::GetFlagByName(std::string(name));
+        if (after != text) {
+          why = "the cvar still reads '" + after + "'";
+          return;
+        }
+        ok = true;
+      });
+      worker.join();
+      if (!ok && error != nullptr) {
+        *error = why;
+      }
+      return ok;
+    };
+    options.on_published = [] { ::rb_blitz::input::InvalidateGameplayInput(); };
+    options.pad_connected = [] {
+      rex::input::X_INPUT_STATE state{};
+      return ::rb_blitz::input::SamplePhysicalPad(&state);
+    };
+
+    const std::filesystem::path path = ::rb_blitz::profile::CurrentProfilePath();
+    ::rb_blitz::profile::ProfileLoadResult load;
+    if (!path.empty()) {
+      load = ::rb_blitz::profile::LoadProfile(path);
+    }
+    g_input_store = ::rb_blitz::input::InputStore::Load(path, load, options);
+    g_input_store->PublishInitial();
+    ::rb_blitz::settings::SetInputBindings(g_input_store.get());
+    if (auto* sink = dynamic_cast<ServiceSink*>(g_sink)) {
+      sink->SetInputBindingStore(g_input_store.get());
+    }
+    if (path.empty()) {
+      REXLOG_WARN("settings_bridge: Controls store has nowhere to keep the profile; edits will "
+                  "not be saved");
+    } else {
+      REXLOG_INFO("settings_bridge: Controls store '{}'; {}", path.string(),
+                  g_input_store->Summary());
+    }
+  }
+
   SeedProvider();
   REXLOG_INFO("settings_bridge: typed guest channel {} (namespace '{}', forward-only {})",
               g_enabled ? "on" : "off", kNamespacePrefix, g_forward_only ? "on" : "off");

@@ -7,6 +7,7 @@
 #include <deque>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -284,6 +285,13 @@ bool HostSdlKeyboardFocused();
 // latch `mouse_ui.cpp` keeps). This is the sampler's keyboard source: SDL's global state array
 // was measured blind in this process (P2, 2026-10-18), while the events keep working.
 bool HostKeyDown(std::string_view name);
+// True while any key is physically down. P7's capture uses this to wait for the press that opened
+// the listening dialog to be released before it captures anything.
+bool HostAnyKeyDown();
+// The key-down events since `*serial`, by SDL scancode name (`Space`, `Return`, `A`), and the new
+// serial. A tap between two polls is still one event; the ring is bounded, and a caller that fell
+// behind resumes at the newest event rather than replaying a stale key.
+void HostKeyEventsSince(uint64_t* serial, std::vector<std::string>* names);
 void QueueMenuMouse(MouseAction action, MenuPoint point);
 // The wheel carries the pointer position: a detent scrolls the view under a stationary pointer,
 // and the scroll-aware hover catches the row that lands there (MouseScrollFollow).

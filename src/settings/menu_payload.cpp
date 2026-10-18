@@ -134,9 +134,16 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
-        return screen::RerouteRow(&roots, screen::kPauseMenuRow,
+        if (!screen::RerouteRow(&roots, screen::kPauseMenuRow,
             {Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
-                             Node::Symbol(screen::kRootPauseScreen)})}, error);
+                             Node::Symbol(screen::kRootPauseScreen)})}, error)) return false;
+        // P7: the in-song list's Controls row is retail's own `pause_controls` case, which opened
+        // retail's controller page. It now opens our Controls page (the same jump shape retail's
+        // case already used, so the measured in-song transition is unchanged); Default Presets
+        // inside it is the row that reaches retail's page in song.
+        return screen::RerouteRow(&roots, "pause_controls",
+            {Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                             Node::Symbol("settings_controls_pause_screen")})}, error);
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {

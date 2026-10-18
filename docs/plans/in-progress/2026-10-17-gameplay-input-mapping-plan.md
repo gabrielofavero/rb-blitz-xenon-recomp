@@ -1,10 +1,10 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0-P4 have landed (§10, §11, §12, §13, §15). P5 and P6 are
-cancelled by the 2026-10-18 change of course: the external Controller Settings executable is an
-interim development tool, not a delivery milestone, so its native-category hiding and its
-integrated acceptance are not built. P7-P8 are the remaining delivery, in that order: all player
-settings in game, then retirement of the executable.** P0 remains the prerequisite investigation.
+**Status: in progress, 2026-10-18. P0-P4 have landed (§10, §11, §12, §13, §15) and so has P7
+(§16). P5 and P6 are cancelled by the 2026-10-18 change of course: the external Controller
+Settings executable is an interim development tool, not a delivery milestone, so its
+native-category hiding and its integrated acceptance are not built. P8 — retirement of the
+executable after parity — is the remaining delivery.** P0 remains the prerequisite investigation.
 Sections 1-8 describe the requested behaviour and the P0-P4 evidence unless explicitly qualified;
 §14 defines the in-game menu, capture, apply, and retirement contracts that supersede the
 external-utility parts of §4, §5, §6.1 and §7.
@@ -571,7 +571,8 @@ device-support arms, the hidden rows and Save. The Controller switch still defau
 shipping behaviour is unchanged.
 P5/P6 status (2026-10-18): **cancelled by the change of course** — no build hides the native
 category; P7's Controls menu replaces it and disables Default Presets while Controller Custom is
-On, and P8 owns the integrated acceptance and documentation. P7 is next.
+On, and P8 owns the integrated acceptance and documentation. P7 has since landed (§16); P8 is
+next.
 
 ### 6.2 Remaining delivery — in-game controls and executable retirement (P7-P8)
 
@@ -587,7 +588,8 @@ Controller Custom is On — no build hides the category.
 
 Order: **P4 -> P7 -> P8**. P5 and P6 are cancelled, not prerequisites; design and reusable-code
 preparation start immediately. P7 must pass before removal in P8; neither a partial menu nor a
-renamed executable satisfies retirement. P7-P8 are **not started**.
+renamed executable satisfies retirement. P7 has **landed** on 2026-10-18 (§16); P8 is **not
+started**.
 
 ## 7. Validation and release criteria
 
@@ -1255,9 +1257,9 @@ reading as released. The full suite is **40/40** in the Vulkan-off debug tree
 
 ## 14. Remaining delivery contract — in-game Controls (P7-P8)
 
-**The remaining delivery; planned, not implemented.** P5-P6 were cancelled on 2026-10-18, so this
-is the whole remaining scope, not a later milestone. The requested end state is one game with all
-player settings reachable in game. The external Controller Settings executable is retired. The hierarchy,
+**P7 is implemented (§16); P8 is planned, not implemented.** P5-P6 were cancelled on 2026-10-18,
+so this is the whole remaining scope, not a later milestone. The requested end state is one game
+with all player settings reachable in game. The external Controller Settings executable is retired. The hierarchy,
 always-on controller input, preset disabling, per-binding resets, and pause-menu frame below are
 the requested behavior; apply, recovery, and migration details are proposed implementation
 decisions to make that behavior complete.
@@ -1366,8 +1368,8 @@ out of the pause panel is safe.
 This replaces R6/§5/P5's whole-category hiding and R8/§4's off-table hiding. The change of course
 (2026-10-18) cancelled P5 and P6, so those external-utility rules are never built and no build
 hides the category; the shipped rule is the one above and in §14.1. P4's external-app evidence
-remains valid for the app until P8 removes it. Update `docs/settings/plan.md`'s Controls inventory
-and row-position contract when P7 lands.
+remains valid for the app until P8 removes it. `docs/settings/plan.md`'s Controls inventory and
+row-position contract were updated when P7 landed (2026-10-18, §16.6).
 
 ### 14.3 Listening dialog in the pause-menu frame
 
@@ -1392,6 +1394,15 @@ the shared settings transaction, close the dialog, and return to the same bindin
 failure reports the error and leaves the previous effective mapping intact. Flush consumed
 events and require release before navigation/gameplay rearms; resuming a song must not inherit
 the assignment press.
+
+**What P7 built, and the one intentional change to the shared capture.** The gesture is a hold:
+a candidate is bound when it is released, and cancelling is holding it past
+`capture::kHoldToCancel` (700 ms), so Back and Escape stay assignable. The page carries no
+pressable Cancel row, because while a capture is armed the guest receives a neutral pad and a
+press could not reach one anyway. The change to the shared implementation is that a wrong-kind
+press now starts the same hold timer: without it, a page whose table takes only `pad:` sources
+could not be left by holding a key, which is the only exit a player without a controller has
+(§16.2). A tap of a wrong kind still only reports the kind and keeps listening.
 
 ### 14.4 Persistence, application, and recovery
 
@@ -1424,6 +1435,14 @@ available device. Controller support being On is not proof that a pad exists. Re
 capture may use a narrowly scoped raw-input path, but ordinary menus/gameplay must still respect
 the saved device gates; recovery must not silently reset the profile. Record this replacement
 for R9 and any recovery-only exception to R1 when P7 lands.
+
+**What P7 built, and what it did not.** An edit that would leave every source off is refused by
+the store (`InputStore::Commit`), with a sentence naming the reason; the Input Types rows are the
+in-game way back for a profile that still has one usable source. What is **not** built is the
+recovery surface for a profile that arrives already unusable from the external app (both host
+devices off, no pad, no reachable menu row): the game starts and the keyboard/mouse gates stay
+closed, so Input Types cannot be reached to reopen them. Until that surface exists, such a
+profile needs a hand edit or the external app. This is the standing gap P8 inherits.
 
 ### 14.5 Retire the executable only after parity (P8)
 
@@ -1472,9 +1491,10 @@ end state; the present edit does not remove or change runtime/installer code.
 
 Keep captures, configuration before/after, input/dispatch traces, installer manifests and build
 revision together under `out/gameplay-mapping/in-game/`. Run the documentation checker and
-`git diff --check` as well as the relevant game/settings/input and installer tests. P7/P8 remain
-planned until this evidence exists; P8 is the delivery boundary, and there is no separate
-external-utility release.
+`git diff --check` as well as the relevant game/settings/input and installer tests. P8 is the
+delivery boundary, and there is no separate external-utility release. P7's evidence for the rows
+it covers is §16.4; the paused-song, gameplay-regression, existing-user and distribution rows
+stay P8's.
 
 ## 15. P4 evidence — the settings surface (2026-10-18)
 
@@ -1563,3 +1583,144 @@ off — `mouse:left` in arm 3, the key spans in arms 2/6 — and not on the enab
 - **Small-window layout was not shot.** The value cell wraps at `GetContentRegionAvail()` rather
   than at the window edge, which is the mechanism a small window needs; the 1280-wide captures show
   wrapping (the Controller First Note default is two lines in arm 7).
+
+## 16. P7 evidence — the in-game Controls menu (2026-10-18)
+
+**P7 landed.** Help & Options → Controls is now our own nested menu on both entry paths — Input
+Types, General Mapping, and Gameplay Mapping with Controller (Default Presets, Custom, Custom
+Mapping) and Keyboard & Mouse (Custom, Custom Mapping) — every binding row has an Assign/Reset
+child, the listening dialog is a real screen, and a completed capture is persisted through the
+profile and applied live at the next poll. Retail's controller preset page moved beneath
+Gameplay Mapping → Controller → Default Presets, where it refuses to open while Custom is On.
+P8 (retire the executable, the full migration and release matrix) remains. The evidence below is
+one tracked driven boot plus the host suites; §16.5 says plainly what was not measured.
+
+### 16.1 What landed
+
+| P7 item | Where it landed | Evidence |
+| --- | --- | --- |
+| Binding/source grammar in one place | New [src/profile/input_rows.h](../../../src/profile/input_rows.h)/[.cpp](../../../src/profile/input_rows.cpp): `InputRowKind`, the three table tokens (`GeneralBindingToken`, `GameplayBindingToken`, `ResetAllToken`), the row symbol/`_screen`/`_assign`/`_reset` naming, and the label text | `rb_blitz_input_bindings_tests` grammar cases; the screens the boot logs are those symbols |
+| One effective snapshot per poll | New [src/input/effective_input.h](../../../src/input/effective_input.h)/[.cpp](../../../src/input/effective_input.cpp) (`EffectiveInput` = gates + both routing switches + `profile_present`), published by the store and read by the state filter | §16.2 rule 1; `RemapContext::ObserveGameplay` takes the snapshot |
+| The store | New [src/input/input_store.h](../../../src/input/input_store.h)/[.cpp](../../../src/input/input_store.cpp) behind [src/settings/input_bindings.h](../../../src/settings/input_bindings.h): three tables and the three switches, rebase-merge `Commit` via `LoadProfile`/`SaveProfile`, per-row and per-table reset, a save failure named, and the last-usable-route refusal | `store:` cases in the suite; live arms 20–22 and 13/15 |
+| The capture state machine | New [src/input/input_capture.h](../../../src/input/input_capture.h)/[.cpp](../../../src/input/input_capture.cpp): wait for neutral, release-to-bind, hold-to-cancel (`kHoldToCancel` = 700 ms), wrong-kind feedback that keeps listening, 20 s timeout, background window captures nothing | `capture:` cases; live arms 12–15 and 25–28 |
+| The bridge operations | [src/hooks/settings_bridge.h](../../../src/hooks/settings_bridge.h)/[.cpp](../../../src/hooks/settings_bridge.cpp) ops 10–13 (`capture`, `capture-cancel`, `bind-reset`, `bind-reset-all`); [src/settings/bridge_sink.cpp](../../../src/settings/bridge_sink.cpp) stages input rows separately and refuses a binding token through `set` | `rb_blitz_settings_screen_tests`' request-grammar cases; the boot log's `settings_bridge:` lines |
+| Store installation at boot | [src/hooks/settings_bridge_hooks.cpp](../../../src/hooks/settings_bridge_hooks.cpp) creates the store from `CurrentProfilePath()` + `LoadProfile`, options from the cvars with command-line/environment locks, a host-thread switch writer with read-back, and the publish hook = `InvalidateGameplayInput` | `settings_bridge: Controls store '<path>'; keyboard_support=on mouse_ui_nav=on custom_controller=off custom_keyboard_mouse=on; [remap] 0 row(s); …` in the arm's log; `--launcher_profile` in `argv.txt` |
+| The menu tree | [src/ui/settings_screen.cpp](../../../src/ui/settings_screen.cpp): `Kind::{kStateSubmenu,kStateAction,kRouteGated,kCapture,kCaptureCancel}`, `Row.off_label`/`path`, the full Controls tree, per-row Assign/Reset pages, the shared `settings_listen_screen`, and the pause-context twins | `rb_blitz_settings_screen_tests` (exact contents, back targets, destinations, labels); live arms 03–09 and 17–18 |
+| The in-song entry | [src/settings/menu_payload.cpp](../../../src/settings/menu_payload.cpp) re-points retail's `pause_controls` case at `settings_controls_pause_screen` (retail's own jump shape, not the `pause_options` focus switch) | unit-tested only — see §16.5 |
+| Live application | [src/input/remap.cpp](../../../src/input/remap.cpp): the poll reads `CurrentInput()`, applies `config->general` from that snapshot, hands the guest a neutral pad while a capture is armed, pulses its own Back on completion/cancel (`PulseHostPad(0x2000)`), and treats Keyboard Support off as "the MnK emulation stands down in every context" | live arms 13/15/28/36 leave and return through the dialog; [input-flow.md](../../engine/input-flow.md) § P7 |
+| Tests | New [tests/input_bindings_tests.cpp](../../../tests/input_bindings_tests.cpp) (`input_bindings`), additions to [tests/settings_screen_tests.cpp](../../../tests/settings_screen_tests.cpp), both registered in [CMakeLists.txt](../../../CMakeLists.txt) | 41/41 `ctest` in the debug tree, 2026-10-18 |
+
+### 16.2 Rules the code enforces
+
+1. **The switches are read live, not at launch.** The filter takes one `EffectiveInput` per poll
+   and builds the source gates from it, so Keyboard/Mouse Support, both Custom switches and the
+   tables apply to the next poll after a commit — no restart, no second writer. A cvar written
+   from the menu is host-thread work and is read back before it is reported.
+2. **A capture owns raw input.** While the dialog is armed the guest receives a neutral pad (all
+   buttons, triggers and axes zero), the gameplay overlay is skipped, and mouse menu pulses are
+   not added, so the press being bound cannot navigate, pause or strike a note. The capture reads
+   the devices *ungated*, so a binding can be prepared for a device that is off for play.
+3. **The cancel gesture is a hold, and it works on every kind.** A candidate binds when it is
+   released; holding it past 700 ms cancels. A **wrong-kind** press starts the same timer, which
+   is what makes the dialog leaveable when nothing connected can be bound there (the Controller
+   table and a keyboard-only machine). This was a live defect, not a design choice: the first
+   acceptance run held a key in the Controller table for 2 s and the dialog stayed (arm 28 below).
+4. **Assign adds and deduplicates.** A capture appends to the effective list, so the shipped
+   defaults stay in place; the profile stores the resulting list. Reset removes that row's
+   override; Reset All removes the table's, and its row reads `Reset All: Nothing` when there is
+   nothing to remove.
+5. **The profile records differences from the compiled defaults.** A switch whose value equals its
+   compiled default is erased from the profile instead of being written as a redundant line
+   (D6). So Custom off after Custom on leaves no `gameplay_mapping_controller` line at all,
+   which is why the harness asserts absence.
+6. **The last usable route is protected.** A commit that would leave Keyboard and Mouse both off
+   with no pad connected is refused with a sentence and leaves the file untouched.
+
+### 16.3 Tests
+
+`cmake --build out/build/win-amd64-debug` + `ctest --test-dir out/build/win-amd64-debug`,
+2026-10-18: **41/41 passed** (36.40 s). The two suites P7 touches:
+
+- `input_bindings` — **80 checks**: the token/symbol round trip for all three tables and both
+  reset tokens, the capture rules (release-first, wrong kind, hold-to-cancel including a
+  wrong-kind hold, cancel, focus loss), the store (staged switches, default erasure, per-row and
+  per-table reset preserving unknown rows, the save path, the last-route refusal, capture
+  assignment dedupe and `Describe`).
+- `settings_screen` — **89,484 checks**: the tree's exact rows, the Assign/Reset destinations, the
+  pause twins and back targets, the label/state text, and the request grammar including the four
+  new operations.
+
+### 16.4 Live acceptance — one driven boot
+
+`pwsh -NoProfile -File scripts\acceptance_controls.ps1 -Label p7-live4` (release build,
+`--mnk_mode=1`, scratch profile, empty DLC library, 2026-10-18): **56 steps, 0 failures**. Evidence:
+`out/gameplay-mapping/in-game/p7-live4/` (log, argv, the profile before/after each arm) and
+`p7-live4-shots/` (every step has a hover shot and its result shot). The harness clicks rows by the
+bounds the host logs, so it never counts taps; every assertion is on the host's
+`native_mouse: screen=…` line.
+
+| Arm (steps) | What it measured | Evidence |
+| --- | --- | --- |
+| `02`–`04` | HELP & OPTIONS → Controls opens `settings_controls_screen`, and Input Types opens `settings_input_types_screen`, whose first row is the fixed `Controller: Always on` | `02-help-and-options.png`…`04-input-types.png` |
+| `05`–`08` | Back from each child returns to `settings_controls_screen`; General Mapping then Gameplay Mapping open their screens | `05-back-controls.png`, `06`/`07`, screen lines |
+| `09`–`13` | General Mapping → A Button opens `settings_bind_general_a_screen`; Assign opens `settings_listen_screen`; a tap of `G` returns to the row page and the profile holds the default list plus the key | `profile-13-after-tap.toml`: `[remap] a = "pad:a, key:K, key:G"` |
+| `14`–`15` | Assign again, then a 2 s hold: the dialog returns to the row page and the profile is **byte-identical** (SHA-256 compared) | `15-cancelled.png`, `Assert-Same` |
+| `16`–`18` | Back to Controls, then Gameplay Mapping → Controller (`settings_gameplay_controller_screen`) | `16-back-controls.png`, `17`/`18` |
+| `20` | Custom toggles on: the profile gains `gameplay_mapping_controller = true`; the page stays put | `profile-20-custom-on.toml` |
+| `21` | Default Presets (one row up) refuses while Custom is On: the screen does not change | `21-default-presets.png` |
+| `22` | Custom toggles off: the default-equal row is dropped, so the profile has no `gameplay_mapping_controller` line | `profile-22-custom-off.toml` |
+| `23`–`27` | Controller → Custom Mapping → First Note → Assign: a `key:g` press is refused by kind, the dialog keeps listening, and the profile is byte-identical | `27-wrong-kind.png`, `profile-25-before-wrong-kind.toml` vs the live file |
+| `28` | A 2 s hold of that wrong-kind key **leaves** the dialog to `settings_bind_controller_first_note_screen` | `28-left-by-hold.png`; this step is why rule 3 exists |
+| `29`–`36` | Back chain to Gameplay Mapping, Keyboard & Mouse → Custom Mapping → First Note → Assign → tap `G`: returns to the row page, `[gameplay_remap_keyboard_mouse] first_note` gains `key:G` | `profile-36-after-km-tap.toml`: `first_note = "key:1, key:7, key:A, key:F, key:L, key:G"` |
+| `37`–`41` | Four Backs are four levels (bind page → actions → K+M page → Gameplay Mapping → Controls), and Back from Controls reaches the merged root and then `splash_screen` | `37`…`41` shots and the log's screen chain |
+
+Two harness defects and one product defect were found by the run and fixed:
+
+- **The boot prologue was wrong** (`p7-live`): pressing A once and waiting for the settings frame
+  was not enough — the main menu's list does not draw (and log row geometry) until the content
+  pipeline's connect/discovery pass completes, so the first click found no rows. The harness now
+  presses A in a loop and waits for `native_mouse: row=0 bounds=` (≤3 attempts, 120 s each).
+- **The back chain was one level short** (`p7-live3`): two Backs from the bind page land on the
+  Controller *page*, not on Gameplay Mapping, so the next click toggled Custom instead of opening
+  Keyboard & Mouse. The harness now sends three.
+- **The Custom-off assertion expected an explicit `false`** (`p7-live2`): the store erases a
+  value equal to its compiled default (rule 5), so the profile is the right place to look for
+  *absence*, not for `false`. The assertion was corrected; the code was not.
+- **Hold-to-cancel did not cancel a wrong-kind press** (`p7-live2`, step 28): the state machine
+  only started the hold timer for an allowed source. Fixed in `input_capture.cpp` (the wrong-kind
+  branch fills the same pending candidate), the header's contract text updated, and
+  `TestCaptureWrongKindHoldsToCancel` added.
+
+### 16.5 What P7 does not claim
+
+- **The in-song Controls entry was not driven live.** `InSongPanels()` builds the same tree with
+  the pause panel set and the `_pause_screen` names, and the pause record's `pause_controls` case
+  is re-pointed at it; the tree, the twins and their back targets are asserted by
+  `rb_blitz_settings_screen_tests`, but no boot has opened the page from a paused song. The edit
+  deliberately keeps retail's own `{ui goto_screen …}` shape (P5b measured that *taking focus
+  away from `pause.lst`* — replacing the `pause_options` focus switch — faults the guest,
+  `read of guest 0x00000024`); a live refused-or-not verdict is P8's.
+- **No physical pad on this machine.** A pad press captured into the Controller table, a pad
+  hold as the cancel gesture, and stick-direction capture are unit-tested and code-inspected, not
+  shot. The same applies to Gameplay Mapping → Controller being toggled in a song.
+- **An already-unusable imported profile has no in-game recovery.** The store refuses an *edit*
+  that would leave no usable source (§14.4), but a profile that arrives with Keyboard and Mouse
+  both off and no pad cannot reach Input Types. The external app or a hand edit is the way back
+  until P8 builds the recovery surface.
+- **Reset All and per-row Reset were not clicked live.** Their request paths and store behaviour
+  are unit-tested; the live arms cover Assign, the hold, both switches and the gated preset.
+- **The 20 s timeout, focus loss, mouse and pad captures, and an explicit-empty override were not
+  shot.** All four are deterministic frames in `rb_blitz_input_bindings_tests`.
+- **The parity inventory §14.5 and all installer/executable retirement work are P8's.** No
+  external setting was added to the in-game menu in this pass beyond the input surface §14.2
+  names; the remaining player-facing settings still live in the external app until P8 moves or
+  retires them.
+
+### 16.6 Documents updated with P7
+
+`docs/settings/plan.md` §3 (root row 1 and the row-position statement) and §3.2,
+`docs/settings/menu.md` Part 1 §3 (the Controls row and the pause-record reroute),
+`docs/engine/input-flow.md` (rules 1–4 and the live gates), `docs/engine/toggles.md` (the three
+input switches are now in-game rows and apply live), `docs/reference/known-issues.md` (the
+in-song, pad and recovery limits above), and `docs/settings/status.md` (P7's section). The index
+did not change: no document moved.

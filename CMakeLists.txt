@@ -118,6 +118,15 @@ set(RBBLITZ_SOURCES
     # pad sampling a `pad:` gameplay source reads instead of the merged state).
     src/input/source_gates.cpp
     src/input/title_input.cpp
+    # P7 of the gameplay-mapping plan: the in-game Controls store. The effective snapshot the poll
+    # reads (published again after every commit), the capture state machine and its host devices,
+    # the store that owns the controller profile's binding rows, and the token grammar the
+    # generated menu, the sandbox and the tests share.
+    src/input/effective_input.cpp
+    src/input/host_pad.cpp
+    src/input/input_capture.cpp
+    src/input/input_store.cpp
+    src/profile/input_rows.cpp
     src/profile/profile.cpp
     src/profile/profile_apply.cpp
     src/profile/profile_path.cpp
@@ -500,6 +509,11 @@ if(BUILD_TESTING)
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
         src/hooks/settings_bridge.cpp
+        # P7: the surface now emits the Controls rows, whose token grammar and labels live in the
+        # profile's own vocabulary.
+        src/profile/input_rows.cpp
+        src/profile/remap.cpp
+        src/profile/gameplay_remap.cpp
         # The help captions' retail-page resolver: its table is half of the surface's caption
         # coverage (the other half lives in settings_screen.cpp), so it is tested beside it.
         src/ui/help_topics.cpp
@@ -520,6 +534,9 @@ if(BUILD_TESTING)
         src/ui/settings_screen.cpp
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
+        src/profile/input_rows.cpp
+        src/profile/remap.cpp
+        src/profile/gameplay_remap.cpp
     )
     target_include_directories(rb_blitz_menu_payload_tests PRIVATE src)
     add_test(NAME menu_payload COMMAND rb_blitz_menu_payload_tests)
@@ -632,6 +649,23 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_input_gates_tests PRIVATE src)
     add_test(NAME input_gates COMMAND rb_blitz_input_gates_tests)
+
+    # P7 of the gameplay-mapping plan: the in-game Controls rows. The `input.*` grammar, the
+    # listening session's release-first and wrong-kind rules, and the store's one-writer save
+    # against a temporary profile. SDK-free and SDL-free, like the store itself.
+    add_executable(rb_blitz_input_bindings_tests
+        tests/input_bindings_tests.cpp
+        src/input/input_capture.cpp
+        src/input/input_store.cpp
+        src/input/effective_input.cpp
+        src/profile/input_rows.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
+        src/profile/gameplay_remap.cpp
+        src/profile/remap.cpp
+    )
+    target_include_directories(rb_blitz_input_bindings_tests PRIVATE src)
+    add_test(NAME input_bindings COMMAND rb_blitz_input_bindings_tests)
 
     # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict
@@ -766,6 +800,9 @@ if(BUILD_TESTING)
         src/hooks/settings_bridge.cpp
         src/profile/profile.cpp
         src/profile/profile_path.cpp
+        src/profile/input_rows.cpp
+        src/profile/remap.cpp
+        src/profile/gameplay_remap.cpp
     )
     target_include_directories(rb_blitz_settings_bridge_service_tests PRIVATE src)
     add_test(NAME settings_bridge_service COMMAND rb_blitz_settings_bridge_service_tests)

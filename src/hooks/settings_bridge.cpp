@@ -282,6 +282,10 @@ const char* OpToken(const Op op) {
     case Op::kInvoke: return "invoke";
     case Op::kRequestRestart: return "restart";
     case Op::kHelp: return "help";
+    case Op::kCapture: return "capture";
+    case Op::kCaptureCancel: return "capture-cancel";
+    case Op::kBindReset: return "bind-reset";
+    case Op::kBindResetAll: return "bind-reset-all";
     case Op::kUnknown: return "";
   }
   return "";
@@ -289,7 +293,8 @@ const char* OpToken(const Op op) {
 
 Op OpFromToken(const std::string_view token) {
   for (const Op op : {Op::kSnapshot, Op::kBeginEdit, Op::kSet, Op::kCancelField, Op::kCommit,
-                      Op::kCancelEdit, Op::kInvoke, Op::kRequestRestart, Op::kHelp}) {
+                      Op::kCancelEdit, Op::kInvoke, Op::kRequestRestart, Op::kHelp,
+                      Op::kCapture, Op::kCaptureCancel, Op::kBindReset, Op::kBindResetAll}) {
     if (token == OpToken(op)) {
       return op;
     }
@@ -758,6 +763,16 @@ Response MemorySink::Handle(const Request& request) {
       // edit.
       status = Status::kUnsupported;
       response.message = "a caption event is not a store request";
+      break;
+    case Op::kCapture:
+    case Op::kCaptureCancel:
+    case Op::kBindReset:
+    case Op::kBindResetAll:
+      // The binding operations belong to the profile-side InputBindingStore
+      // (src/settings/input_bindings.h), which the in-memory store does not model. Answering
+      // rather than falling through keeps a diagnostic boot from claiming an edit it never made.
+      status = Status::kUnsupported;
+      response.message = "the in-memory store has no input bindings";
       break;
     case Op::kUnknown:
       status = Status::kUnknownOp;

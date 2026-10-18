@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "profile/input_rows.h"
 #include "settings/schema.h"
 
 namespace rb_blitz::settings {
@@ -230,6 +231,42 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         response.message = "a set needs a setting token";
         break;
       }
+      // P7: the Controls switches are kept by the input store (they are the controller profile's
+      // `[settings]` rows). A binding row is never set through `set`: Assign goes through the
+      // capture op, Reset through `bind-reset`.
+      if (input_store_ != nullptr && input_store_->IsToken(request.setting)) {
+        if (profile::ParseInputRowToken(request.setting).kind ==
+            profile::InputRowKind::kKeyboardSupport ||
+            profile::ParseInputRowToken(request.setting).kind ==
+                profile::InputRowKind::kMouseSupport ||
+            profile::ParseInputRowToken(request.setting).kind ==
+                profile::InputRowKind::kCustomController ||
+            profile::ParseInputRowToken(request.setting).kind ==
+                profile::InputRowKind::kCustomKeyboardMouse) {
+          if (request.value.kind != bridge::ValueKind::kBool) {
+            status = Status::kInvalid;
+            response.message = "a switch takes a boolean";
+            break;
+          }
+          std::string why;
+          if (!input_store_->StageBool(request.setting, request.value.boolean, &why)) {
+            status = Status::kInvalid;
+            response.message = why.empty() ? "the switch was refused" : why;
+            break;
+          }
+          input_staged_ = true;
+          response.message = "staged (controller profile)";
+          break;
+        }
+        status = Status::kInvalid;
+        response.message = "a binding row is assigned through capture, not set";
+        break;
+      }
+      if (request.setting.starts_with("input.")) {
+        status = Status::kInvalid;
+        response.message = "this build does not describe that input row";
+        break;
+      }
       if (IsLocalToken(request.setting)) {
         if (request.setting != kProviderGateToken) {
           // A row the provider owns still validates its *kind* here: the descriptor is ours even
@@ -340,6 +377,28 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
     }
     case bridge::Op::kCommit: {
       last_commit_changes_.clear();
+      // P7: the input store commits its staged rows through the profile's own surgical save and
+      // publishes the new binding snapshot. It is committed first so a settings failure cannot
+      // leave a half-applied Controls edit behind; a failure here refuses the whole commit.
+      bool input_ok = true;
+      bool input_committed = false;
+      std::string input_error;
+      if (input_store_ != nullptr && input_staged_) {
+        input_ok = input_store_->Commit(&input_error);
+        input_committed = input_ok;
+        if (!input_ok) {
+          last_commit_durable_ = false;
+          last_commit_requires_restart_ = false;
+          last_commit_status_ = CommitStatus::kIoError;
+          last_commit_failure_ = CommitFailure::kNotWritable;
+          commit_ok_ = false;
+          status = Status::kIoError;
+          response.message = input_error.empty() ? "the controller profile could not be saved"
+                                                 : input_error;
+          break;
+        }
+        input_staged_ = false;
+      }
       if (edit_failed_) {
         if (service_ && txn_) service_->Cancel(txn_);
         txn_ = 0;
@@ -474,8 +533,15 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       }
       if (status == Status::kOk && response.message.empty()) {
         response.value = WireValue::Bool(true);
-        response.message = result.status == CommitStatus::kNoChanges ? "nothing to commit"
-                                                                    : "committed";
+        response.message = result.status == CommitStatus::kNoChanges && !input_committed
+                               ? "nothing to commit"
+                               : "committed";
+      }
+      if (input_committed && result.status == CommitStatus::kNoChanges) {
+        // The profile save is the durable half of this commit even though settings.toml had
+        // nothing to write.
+        last_commit_durable_ = true;
+        saved_revision_ = service_ ? service_->revision() : 0;
       }
       commit_ok_ = status == Status::kOk;
       last_commit_status_ = result.status;
@@ -507,6 +573,59 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       } else {
         response.message = "action taken";
       }
+      break;
+    }
+    case bridge::Op::kCapture: {
+      if (input_store_ == nullptr || !input_store_->IsToken(request.setting)) {
+        status = Status::kUnsupported;
+        response.message = "this build has no in-game capture";
+        break;
+      }
+      std::string why;
+      if (!input_store_->BeginCapture(request.setting, &why)) {
+        status = Status::kInvalid;
+        response.message = why.empty() ? "capture refused" : why;
+        break;
+      }
+      response.message = "listening";
+      break;
+    }
+    case bridge::Op::kCaptureCancel:
+      if (input_store_ != nullptr) {
+        input_store_->CancelCapture();
+      }
+      response.message = "capture cancelled";
+      break;
+    case bridge::Op::kBindReset: {
+      if (input_store_ == nullptr || !input_store_->IsToken(request.setting)) {
+        status = Status::kUnsupported;
+        response.message = "this build has no in-game bindings";
+        break;
+      }
+      std::string why;
+      if (!input_store_->StageReset(request.setting, &why)) {
+        status = Status::kInvalid;
+        response.message = why.empty() ? "reset refused" : why;
+        break;
+      }
+      input_staged_ = true;
+      response.message = "staged (controller profile)";
+      break;
+    }
+    case bridge::Op::kBindResetAll: {
+      if (input_store_ == nullptr || !input_store_->IsToken(request.setting)) {
+        status = Status::kUnsupported;
+        response.message = "this build has no in-game bindings";
+        break;
+      }
+      std::string why;
+      if (!input_store_->StageResetAll(request.setting, &why)) {
+        status = Status::kInvalid;
+        response.message = why.empty() ? "reset refused" : why;
+        break;
+      }
+      input_staged_ = true;
+      response.message = "staged (controller profile)";
       break;
     }
     case bridge::Op::kHelp:
@@ -577,6 +696,12 @@ bool ServiceSink::Matches(const bridge::Request& request) const {
     return WireValuesEqual(WireValue::Bool(restart_pending()), request.value);
   if (request.setting == "commit.restart_required")
     return WireValuesEqual(WireValue::Bool(commit_ok_ && last_commit_requires_restart_), request.value);
+  if (input_store_ != nullptr && input_store_->IsToken(request.setting)) {
+    if (request.value.kind != bridge::ValueKind::kBool) {
+      return false;
+    }
+    return input_store_->Matches(request.setting, request.value.boolean);
+  }
   constexpr std::string_view prefix = "interface.hidden_main_menu.";
   if (request.setting.starts_with(prefix)) {
     const Value value = CurrentValue(SettingId::kHiddenMainMenu);
@@ -608,6 +733,12 @@ bool ServiceSink::Acknowledged(const uint64_t request_id) const {
 }
 
 bool ServiceSink::Get(const std::string_view setting, WireValue* out) const {
+  if (input_store_ != nullptr && input_store_->IsToken(setting)) {
+    if (out != nullptr) {
+      *out = WireValue::Bool(input_store_->Matches(setting, true));
+    }
+    return true;
+  }
   if (IsLocalToken(setting)) {
     return GetLocal(setting, out);
   }
@@ -661,6 +792,7 @@ void ServiceSink::Reset() {
   last_commit_requires_restart_ = false;
   restart_pending_ = false;
   last_commit_status_ = CommitStatus::kNoChanges;
+  input_staged_ = false;
 }
 
 }  // namespace rb_blitz::settings

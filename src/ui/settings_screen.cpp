@@ -14,6 +14,10 @@
 #include <utility>
 #include <vector>
 
+#include "profile/gameplay_remap.h"
+#include "profile/input_rows.h"
+#include "profile/remap.h"
+
 namespace rb_blitz::ui::screen {
 namespace {
 
@@ -268,6 +272,21 @@ enum class Kind {
   kSelect,       // horizontal select: one symbol per choice, Confirm advances, Left/Right pick
   kSubmenu,      // submenu: one symbol, Confirm enters `screen`
   kBoolSubmenu,  // boolean with a submenu: `_on`/`_off` symbols, Confirm enters `screen`
+  // P7's read-only state rows. Each draws a `_on`/`_off` pair selected by a query, like a
+  // boolean, but a press never writes the setting:
+  //
+  //   kStateSubmenu  the pair is "Custom"/"Default" and Confirm enters `screen` (a binding row);
+  //   kStateAction   the `_on` spelling writes `path` and commits (Reset / Reset All); an `_off`
+  //                  press is inert, which is the disabled row the plan asks for;
+  //   kRouteGated    the `_on` spelling enters the retail screen (Default Presets while the
+  //                  Controller table is not custom).
+  kStateSubmenu,
+  kStateAction,
+  kRouteGated,
+  // One-shot Controls rows: `path` is a `rbbz-settings/` write. `kCapture` arms the listening
+  // session and enters the dialog. The dialog is left by the capture itself (the hold gesture or
+  // the timeout), so no row writes the bridge's `capture-cancel` op.
+  kCapture,
   kChoose,       // one-shot choice: set `setting` to the row's own token, commit, leave
   kAction,       // one-shot action: invoke `setting`
   kInfo,         // a row that is present but deliberately does nothing (the protected entry)
@@ -290,6 +309,11 @@ struct Row {
   std::string screen;
   std::string member;
   std::string label;
+  // The `_off` spelling's text when it says more than the label (`Reset: Default`,
+  // `Default Presets: Disabled`). Empty means the ordinary label.
+  std::string off_label;
+  // The `rbbz-settings/` write a Controls row performs (capture, capture-cancel, reset, reset-all).
+  std::string path;
   // The one to two line caption the help overlay shows while this row is highlighted (owner
   // request, 2026-10-13). Every row carries one; the factories below take it as a required
   // argument so a row cannot be added without it, and tests/settings_screen_tests.cpp fails a row
@@ -427,6 +451,73 @@ Row RouteRow(const char* symbol, const char* screen, const char* member, const c
   return row;
 }
 
+// P7: a binding row. Its state reads Custom when the profile has a stored row for it and Default
+// when the compiled default is what plays; Confirm enters the row's own Assign/Reset page.
+// `label` is the control or action's own name ("A", "First Note"); the state suffix keeps the
+// drawn line inside the 28-character budget the in-game-settings skill records.
+Row StateSubmenuRow(const char* symbol, const char* setting, const char* screen, const char* label,
+                    const char* description) {
+  Row row;
+  row.symbol = symbol;
+  row.kind = Kind::kStateSubmenu;
+  row.setting = setting;
+  row.screen = screen;
+  row.label = label;
+  row.off_label = std::string(label) + ": Default";
+  row.description = description;
+  return row;
+}
+
+// A read-only state pair whose `_on` press writes `path` and commits: Reset on a binding row,
+// Reset All on a table. The `_off` press is deliberately inert, which is what the plan's
+// "disabled when no custom row exists" means on this surface.
+Row StateActionRow(const char* symbol, const char* setting, const char* path, const char* label,
+                   const char* off_label, const char* description) {
+  Row row;
+  row.symbol = symbol;
+  row.kind = Kind::kStateAction;
+  row.setting = setting;
+  row.path = path;
+  row.label = label;
+  row.off_label = off_label != nullptr ? off_label : label;
+  row.description = description;
+  return row;
+}
+
+// A gated retail route: the `_on` spelling (the one drawn as available) enters the screen; the
+// `_off` spelling is present but inert. `inverted` reads the label-on state from a false setting,
+// exactly as InvertedBoolRow does (`Default Presets` is available while Custom is off).
+Row RouteGatedRow(const char* symbol, const char* screen, const char* member, const char* setting,
+                  const char* label, const char* off_label, const char* description,
+                  bool inverted = false) {
+  Row row;
+  row.symbol = symbol;
+  row.kind = Kind::kRouteGated;
+  row.screen = screen;
+  row.member = member;
+  row.setting = setting;
+  row.label = label;
+  row.off_label = off_label != nullptr ? off_label : label;
+  row.description = description;
+  row.inverted = inverted;
+  return row;
+}
+
+// The Assign row: arm the capture for `path` (a `capture/<token>/-` write) and enter the shared
+// listening dialog. The dialog sets its own back target when entered, so every binding row can
+// share one screen.
+Row CaptureRow(const char* symbol, const char* path, const char* screen, const char* label,
+               const char* description) {
+  Row row;
+  row.symbol = symbol;
+  row.kind = Kind::kCapture;
+  row.path = path;
+  row.screen = screen;
+  row.label = label;
+  row.description = description;
+  return row;
+}
+
 std::vector<Choice> Choices(std::initializer_list<const char*> tokensAndLabels) {
   std::vector<Choice> out;
   const std::vector<const char*> words(tokensAndLabels);
@@ -483,8 +574,8 @@ std::vector<PanelSpec> AllPanels() {
                           {
                               SubmenuRow("settings_general", "settings_general_screen", "General",
                                          "Target, downloadable content, achievements, and the game's own pages."),
-                              RouteRow("controls", "controller_config_screen", "back_screen", "",
-                                       "Choose the controller mapping used during play."),
+                              SubmenuRow("controls", "settings_controls_screen", "",
+                                         "Choose the devices and the controller mappings that play the game."),
                               RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
                                        "Line up the audio and video so notes hit in time with the music."),
                               SubmenuRow("audio_video_options", "settings_av_screen", "",
@@ -493,6 +584,180 @@ std::vector<PanelSpec> AllPanels() {
                                          "Gameplay changes provided by the Ultimate mod.", true),
                               SubmenuRow("settings_interface", "settings_interface_screen",
                                          "Interface", "HUD, letterboxing, and hidden main-menu entries."),
+                          }});
+
+  // ----------------------------------------------------------------------------------------------
+  // P7's Controls tree (plan §14.1). The root's `controls` row now opens this page instead of
+  // adopting retail's controller screen in place; Default Presets is the row that adopts retail's
+  // page, and only while the Controller table is not custom.
+  //
+  // Every page here stays within the in-game-settings skill's six-visible-row budget except the
+  // General Mapping page, which lists all 16 non-Guide controls: the plan explicitly accepts a
+  // long binding list scrolling (§14.6), and its in-song twin behaves the same way.
+  // ----------------------------------------------------------------------------------------------
+  out.push_back(PanelSpec{"settings_controls_panel", "settings_controls_screen", kRootScreen,
+                          MenuPanels(),
+                          {
+                              SubmenuRow("settings_controls_input_types",
+                                         "settings_input_types_screen", "Input Types",
+                                         "Choose which devices drive the game."),
+                              SubmenuRow("settings_controls_general", "settings_general_mapping_screen",
+                                         "General Mapping",
+                                         "The inputs that press controller buttons in menus and, with both gameplay tables off, in play."),
+                              SubmenuRow("settings_controls_gameplay",
+                                         "settings_gameplay_mapping_screen", "Gameplay Mapping",
+                                         "The inputs that play notes, change lanes, use power-ups, and pause."),
+                          }});
+
+  // 6a. Input Types. Controller is fixed on with the explanation the plan asks for; Keyboard and
+  // Mouse are the two device gates (`keyboard_support` and `mouse_ui_nav`).
+  out.push_back(PanelSpec{"settings_input_types_panel", "settings_input_types_screen",
+                          "settings_controls_screen", MenuPanels(),
+                          {
+                              InfoRow("settings_input_controller", "Controller: Always on",
+                                      "Rock Band Blitz was designed for a controller, so controller input is always supported."),
+                              BoolRow("settings_input_keyboard", "input.keyboard_support", "Keyboard",
+                                      "Let the keyboard play and navigate. Off blocks every key outside binding capture."),
+                              BoolRow("settings_input_mouse", "input.mouse_support", "Mouse",
+                                      "Let the mouse point, click, and (when bound) play. Off blocks every mouse button."),
+                          }});
+
+  // 6b. General Mapping: one row per non-Guide control plus Reset All, and one Assign/Reset page
+  // per row. The drawn line is "<control>: Custom" or "<control>: Default"; the actual inputs are
+  // the row's caption (the store describes them), because the list draws one locale string per
+  // state and cannot carry an arbitrary binding list.
+  {
+    std::vector<Row> rows;
+    for (const profile::remap::Target target : profile::remap::Targets()) {
+      const std::string token = profile::GeneralBindingToken(target);
+      const std::string symbol = profile::InputRowSymbol(token);
+      const std::string screen = symbol + "_screen";
+      const std::string label = std::string(profile::remap::TargetLabel(target));
+      rows.push_back(StateSubmenuRow(symbol.c_str(), token.c_str(), screen.c_str(), label.c_str(),
+                                     "Press to assign or reset the inputs for this control."));
+    }
+    rows.push_back(StateActionRow("settings_reset_general", "input.reset.general",
+                                  Path("bind-reset-all", "input.reset.general", "-").c_str(),
+                                  "Reset All", "Reset All: Nothing",
+                                  "Remove every custom General Mapping row and restore the compiled defaults."));
+    out.push_back(PanelSpec{"settings_general_mapping_panel", "settings_general_mapping_screen",
+                            "settings_controls_screen", MenuPanels(), std::move(rows)});
+    for (const profile::remap::Target target : profile::remap::Targets()) {
+      const std::string token = profile::GeneralBindingToken(target);
+      const std::string symbol = profile::InputRowSymbol(token);
+      const std::string screen = symbol + "_screen";
+      const std::string assign = symbol + "_assign";
+      const std::string reset = symbol + "_reset";
+      out.push_back(PanelSpec{symbol + "_panel", screen, "settings_general_mapping_screen",
+                              MenuPanels(),
+                              {
+                                  CaptureRow(assign.c_str(), Path("capture", token, "-").c_str(),
+                                             "settings_listen_screen", "Assign",
+                                             "Press the input you want to add to this control."),
+                                  StateActionRow(reset.c_str(), token.c_str(),
+                                                 Path("bind-reset", token, "-").c_str(), "Reset",
+                                                 "Reset: Default",
+                                                 "Remove this control's custom inputs and restore its default."),
+                              }});
+    }
+  }
+
+  // 6c. Gameplay Mapping: two input types, each with its Custom switch and its own six actions.
+  out.push_back(PanelSpec{"settings_gameplay_mapping_panel", "settings_gameplay_mapping_screen",
+                          "settings_controls_screen", MenuPanels(),
+                          {
+                              SubmenuRow("settings_gameplay_controller",
+                                         "settings_gameplay_controller_screen", "Controller",
+                                         "The pad's six gameplay actions, or the game's own presets."),
+                              SubmenuRow("settings_gameplay_keyboard_mouse",
+                                         "settings_gameplay_keyboard_mouse_screen", "Keyboard & Mouse",
+                                         "The keyboard and mouse's six gameplay actions."),
+                          }});
+  out.push_back(PanelSpec{"settings_gameplay_controller_panel",
+                          "settings_gameplay_controller_screen", "settings_gameplay_mapping_screen",
+                          MenuPanels(),
+                          {
+                              RouteGatedRow("settings_default_presets", "controller_config_screen",
+                                            "back_screen", "input.custom_controller",
+                                            "Default Presets", "Default Presets: Disabled",
+                                            "The game's own controller presets. Turn Custom off to use them.",
+                                            true),
+                              BoolRow("settings_custom_controller", "input.custom_controller", "Custom",
+                                      "Use the custom Controller mapping instead of the saved preset."),
+                              SubmenuRow("settings_controller_mapping",
+                                         "settings_controller_actions_screen", "Custom Mapping",
+                                         "Assign the six gameplay actions to pad controls."),
+                          }});
+  out.push_back(PanelSpec{"settings_gameplay_keyboard_mouse_panel",
+                          "settings_gameplay_keyboard_mouse_screen",
+                          "settings_gameplay_mapping_screen", MenuPanels(),
+                          {
+                              BoolRow("settings_custom_keyboard_mouse", "input.custom_keyboard_mouse",
+                                      "Custom",
+                                      "Use the custom Keyboard & Mouse mapping for gameplay."),
+                              SubmenuRow("settings_keyboard_mouse_mapping",
+                                         "settings_keyboard_mouse_actions_screen", "Custom Mapping",
+                                         "Assign the six gameplay actions to keys and mouse buttons."),
+                          }});
+  for (const profile::gameplay_remap::TableKind kind : profile::gameplay_remap::TableKinds()) {
+    const bool controller = kind == profile::gameplay_remap::TableKind::kController;
+    const std::string page = controller ? "settings_gameplay_controller_screen"
+                                        : "settings_gameplay_keyboard_mouse_screen";
+    const std::string actions_panel =
+        controller ? "settings_controller_actions_panel" : "settings_keyboard_mouse_actions_panel";
+    const std::string actions_screen =
+        controller ? "settings_controller_actions_screen" : "settings_keyboard_mouse_actions_screen";
+    std::vector<Row> rows;
+    for (const profile::gameplay_remap::Action action : profile::gameplay_remap::Actions()) {
+      const std::string token = profile::GameplayBindingToken(kind, action);
+      const std::string symbol = profile::InputRowSymbol(token);
+      const std::string screen = symbol + "_screen";
+      const std::string label = std::string(profile::gameplay_remap::ActionLabel(action));
+      rows.push_back(StateSubmenuRow(symbol.c_str(), token.c_str(), screen.c_str(), label.c_str(),
+                                     "Press to assign or reset the inputs for this action."));
+    }
+    const std::string reset_token =
+        controller ? "input.reset.controller" : "input.reset.keyboard_mouse";
+    const std::string reset_symbol =
+        controller ? "settings_reset_controller" : "settings_reset_keyboard_mouse";
+    rows.push_back(StateActionRow(reset_symbol.c_str(), reset_token.c_str(),
+                                  Path("bind-reset-all", reset_token, "-").c_str(), "Reset All",
+                                  "Reset All: Nothing",
+                                  "Remove every custom action binding in this table."));
+    out.push_back(PanelSpec{actions_panel, actions_screen, page, MenuPanels(), std::move(rows)});
+    for (const profile::gameplay_remap::Action action : profile::gameplay_remap::Actions()) {
+      const std::string token = profile::GameplayBindingToken(kind, action);
+      const std::string symbol = profile::InputRowSymbol(token);
+      const std::string screen = symbol + "_screen";
+      const std::string assign = symbol + "_assign";
+      const std::string reset = symbol + "_reset";
+      out.push_back(PanelSpec{symbol + "_panel", screen, actions_screen, MenuPanels(),
+                              {
+                                  CaptureRow(assign.c_str(), Path("capture", token, "-").c_str(),
+                                             "settings_listen_screen", "Assign",
+                                             "Press the input you want to add to this action."),
+                                  StateActionRow(reset.c_str(), token.c_str(),
+                                                 Path("bind-reset", token, "-").c_str(), "Reset",
+                                                 "Reset: Default",
+                                                 "Remove this action's custom inputs and restore its default."),
+                              }});
+    }
+  }
+
+  // 6d. The listening dialog. One screen serves every binding row; the Assign row that opened it
+  // is its back target (set at navigation time).
+  //
+  // The page carries no pressable Cancel row on purpose: while a capture is armed the guest is
+  // handed a neutral pad, so a press could not reach a row here - and a press that did reach one
+  // would be the very input the player is binding. The cancel gesture is therefore the hold
+  // (capture::kHoldToCancel, drawn by the caption): a tap of Back or Escape binds it, a held one
+  // cancels, which is the only rule that keeps both controls assignable (plan §14.3).
+  out.push_back(PanelSpec{"settings_listen_panel", "settings_listen_screen",
+                          "settings_controls_screen", MenuPanels(),
+                          {
+                              InfoRow("settings_listen_status", "Listening for input",
+                                      "Tap the input you want to bind. Hold it to cancel, or wait "
+                                      "for the page to close itself."),
                           }});
 
   // 1. General: the four rows the plan puts here, plus the two retail screens it adopts.
@@ -993,6 +1258,9 @@ std::vector<std::string> RowSymbols(const Row& row) {
   switch (row.kind) {
     case Kind::kBool:
     case Kind::kBoolSubmenu:
+    case Kind::kStateSubmenu:
+    case Kind::kStateAction:
+    case Kind::kRouteGated:
       return {row.symbol + "_on", row.symbol + "_off"};
     case Kind::kSelect: {
       std::vector<std::string> out;
@@ -1085,7 +1353,9 @@ Node PopulateMenu(const PanelSpec& panel) {
   }
 
   for (const Row& row : panel.rows) {
-    if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu) {
+    if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu ||
+        row.kind == Kind::kStateSubmenu || row.kind == Kind::kStateAction ||
+        row.kind == Kind::kRouteGated) {
       const std::string on = row.symbol + "_on";
       const std::string off = row.symbol + "_off";
       // The pair keeps its usual meaning (`_on` = the row reads On); an inverted row's setting is
@@ -1169,6 +1439,24 @@ Node RowCase(const Row& row, const std::string_view symbol) {
     case Kind::kSubmenu:
     case Kind::kBoolSubmenu:
       return Arr({Sym(symbol), EnterScreen(row.screen)});
+    case Kind::kStateSubmenu:
+      // Both spellings enter: the state says whether the row is customised, and the page behind
+      // it is the one place to change or reset that.
+      return Arr({Sym(symbol), EnterScreen(row.screen)});
+    case Kind::kStateAction: {
+      if (symbol != std::string(row.symbol) + "_on") {
+        return Arr({Sym(symbol), Cmd({Var("this"), Sym("populate_menu")})});
+      }
+      return Arr({Sym(symbol), Write(row.path), Write(Path("commit", "-", "-")),
+                  CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+    }
+    case Kind::kRouteGated:
+      if (symbol != std::string(row.symbol) + "_on") {
+        return Arr({Sym(symbol), Cmd({Var("this"), Sym("populate_menu")})});
+      }
+      return Arr({Sym(symbol), EnterRetail(row.screen, row.member)});
+    case Kind::kCapture:
+      return Arr({Sym(symbol), Write(row.path), EnterScreen(row.screen)});
     case Kind::kChoose:
       return Arr({Sym(symbol), Write(ChoiceSet(row, row.choices.front())),
                   Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Leave())});
@@ -1561,16 +1849,25 @@ std::vector<std::string> RequestPaths() {
   }
   for (const PanelSpec& panel : AllPanels()) {
     for (const Row& row : panel.rows) {
-      if (row.setting.empty()) {
+      // A capture row carries its write in `path`, not in `setting`; the two branches below are
+      // the only rows of this surface with no setting at all.
+      if (row.setting.empty() && row.kind != Kind::kCapture) {
         continue;
       }
       switch (row.kind) {
         case Kind::kBool:
         case Kind::kBoolSubmenu:
+        case Kind::kStateSubmenu:
+        case Kind::kStateAction:
+        case Kind::kRouteGated:
           add(QueryPath(row));
           if (row.inverted) add(Path("snapshot", row.setting, "b:0"));
           add(SetPath(row, "b:1"));
           add(SetPath(row, "b:0"));
+          if (!row.path.empty()) add(row.path);
+          break;
+        case Kind::kCapture:
+          add(row.path);
           break;
         case Kind::kSelect:
           for (const Choice& choice : row.choices) {
@@ -1595,6 +1892,12 @@ std::vector<std::string> RequestPaths() {
 std::string HelpTextFor(const std::string_view symbol) {
   if (symbol.empty()) {
     return {};
+  }
+  // The in-song pause list spells the Controls row with retail's own symbol (`pause_controls`);
+  // it opens our Controls page now (the payload re-points that case), so it gets the same text
+  // the main-menu row has.
+  if (symbol == "pause_controls") {
+    return HelpTextFor("controls");
   }
   // First match wins; the in-song twins duplicate the main-menu rows' symbols on purpose (one
   // symbol set feeds one label table in two contexts), and their texts are copied with the rows.
@@ -2219,6 +2522,14 @@ std::vector<std::pair<std::string, std::string>> Labels() {
         // way its row label does (owner decision, 2026-10-13).
         add(row.symbol + "_on", row.label + ": On");
         add(row.symbol + "_off", row.label + ": Off");
+      } else if (row.kind == Kind::kStateSubmenu) {
+        // A binding row's pair: whether the row is the player's or the compiled default.
+        add(row.symbol + "_on", row.label + ": Custom");
+        add(row.symbol + "_off", row.off_label.empty() ? row.label + ": Default"
+                                                        : row.off_label);
+      } else if (row.kind == Kind::kStateAction || row.kind == Kind::kRouteGated) {
+        add(row.symbol + "_on", row.label);
+        add(row.symbol + "_off", row.off_label.empty() ? row.label : row.off_label);
       } else if (row.kind == Kind::kSelect) {
         for (const Choice& choice : row.choices) {
           add(row.symbol + "_" + SymbolToken(choice.token), row.label + ": " + choice.label);

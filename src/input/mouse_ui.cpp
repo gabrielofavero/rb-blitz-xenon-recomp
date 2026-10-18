@@ -9,8 +9,11 @@
 #include <limits>
 #include <array>
 #include <atomic>
+#include <deque>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <imgui.h>
 #include <SDL3/SDL.h>
 #include <rex/cvar.h>
@@ -22,7 +25,7 @@
 
 REXCVAR_DEFINE_BOOL(mouse_ui_nav, true, "Input",
     "Native menu mouse: point to select, left/right click A/B, wheel up/down. "
-    "Hidden and inactive during gameplay; available again when paused.");
+    "Gameplay pointer capture follows the plan's D3 rule, not this switch alone.");
 
 // Defined in src/input/native_menu.cpp; read here for the button-event trace only.
 REXCVAR_DECLARE(bool, mouse_native_trace);
@@ -48,6 +51,30 @@ std::atomic<bool> g_sdl_keyboard_focused{false};
 // instead of SDL's state array: the same source MnK proves on every acceptance run, and the shape
 // plan D5 asks for (physical input sampled from raw device events).
 std::array<std::atomic<bool>, SDL_SCANCODE_COUNT> g_keys_down;
+// P7's capture needs the *name* of the key that was just pressed, which `HostKeyDown(name)`
+// cannot answer (it asks about one name at a time). Every key-down is therefore also appended to
+// a small serial-numbered ring; the filter consumes what arrived since its last observation, so a
+// tap that begins and ends between two polls is still one event.
+std::atomic<uint32_t> g_any_key_down{0};
+
+struct KeyEvent {
+  uint64_t serial = 0;
+  std::string name;
+};
+std::mutex g_key_events_mutex;
+std::deque<KeyEvent> g_key_events;
+uint64_t g_key_event_serial = 0;
+
+void PushKeyEvent(const std::string_view name) {
+  std::lock_guard lock(g_key_events_mutex);
+  KeyEvent event;
+  event.serial = ++g_key_event_serial;
+  event.name = std::string(name);
+  g_key_events.push_back(std::move(event));
+  while (g_key_events.size() > 32) {
+    g_key_events.pop_front();
+  }
+}
 
 // The SDL keycode for a Windows virtual key, for the keys a binding can reasonably name. Letters
 // and digits are the ASCII offset every platform agrees on; the rest is the punctuation and
@@ -137,13 +164,23 @@ void LatchKey(rex::ui::VirtualKey key, bool down) {
   }
   const SDL_Scancode scancode = SDL_GetScancodeFromKey(keycode, nullptr);
   if (scancode > SDL_SCANCODE_UNKNOWN && scancode < SDL_SCANCODE_COUNT) {
-    g_keys_down[scancode] = down;
+    const bool was = g_keys_down[scancode].exchange(down, std::memory_order_relaxed);
+    if (down && !was) {
+      g_any_key_down.fetch_add(1, std::memory_order_relaxed);
+      if (const char* name = SDL_GetScancodeName(scancode); name != nullptr && name[0] != 0) {
+        PushKeyEvent(name);
+      }
+    } else if (!down && was) {
+      g_any_key_down.fetch_sub(1, std::memory_order_relaxed);
+    }
   }
 }
 
 void ClearKeys() {
   for (auto& down : g_keys_down) {
-    down = false;
+    if (down.exchange(false, std::memory_order_relaxed)) {
+      g_any_key_down.fetch_sub(1, std::memory_order_relaxed);
+    }
   }
 }
 uint32_t MouseMask(rex::ui::MouseEvent::Button button) {
@@ -364,6 +401,24 @@ bool HostKeyDown(std::string_view name) {
   int count = 0;
   const bool* keys = SDL_GetKeyboardState(&count);
   return keys != nullptr && scancode < count && keys[scancode];
+}
+bool HostAnyKeyDown() { return g_any_key_down.load(std::memory_order_relaxed) != 0; }
+void HostKeyEventsSince(uint64_t* serial, std::vector<std::string>* names) {
+  if (serial == nullptr || names == nullptr) {
+    return;
+  }
+  std::lock_guard lock(g_key_events_mutex);
+  for (const KeyEvent& event : g_key_events) {
+    if (event.serial > *serial) {
+      names->push_back(event.name);
+      *serial = event.serial;
+    }
+  }
+  // A ring that wrapped past the caller's serial leaves nothing to replay: the next press is the
+  // capture's input, and inventing the lost events would capture a key nobody pressed now.
+  if (*serial < g_key_event_serial && g_key_events.empty()) {
+    *serial = g_key_event_serial;
+  }
 }
 
 void InstallMouseUiNavigation(rex::RuntimeConfig& config) {

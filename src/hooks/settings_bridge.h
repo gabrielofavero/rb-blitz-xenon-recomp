@@ -89,6 +89,14 @@ enum class Op : uint16_t {
   // value, expects no response and deliberately never reaches the settings store: the hook half
   // routes it to the registered HelpSink and answers the guest's write like any other.
   kHelp = 9,
+  // P7's Controls rows (plan §14.3/§14.4). `kCapture` arms the listening session for a binding
+  // row (`capture/<input.token>/-`); `kCaptureCancel` disarms it; `kBindReset` removes one
+  // binding row's override; `kBindResetAll` removes a table's overrides. They are writes, not
+  // settings edits: the first two act at once, the last two stage a row for the next commit.
+  kCapture = 10,
+  kCaptureCancel = 11,
+  kBindReset = 12,
+  kBindResetAll = 13,
 };
 
 // The status of a response. Values are wire-stable.

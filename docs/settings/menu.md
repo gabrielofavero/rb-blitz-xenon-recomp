@@ -26,6 +26,11 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 > deferring this screen set until the pause panels are loaded; the merged root and its children now open
 > from the in-song pause menu, Back returns to pause, and Back from pause resumes play. See
 > [status.md](status.md).
+>
+> **Current-state correction (2026-10-18, P7):** root index 1 (`Controls`) is no longer retail's
+> controller page. It opens the in-game Controls menu (§3.3 below), and retail's page moved under
+> Gameplay Mapping → Controller → Default Presets; the pause record's `pause_controls` case is
+> re-pointed at the pause twin of that menu.
 
 Status: **executed for the main-menu entry**, one measured engine constraint left open for the in-song
 entry. Evidence is real boots against the pinned retail image (§4); every "measured" line names its log and
@@ -98,9 +103,11 @@ Confirm:
 
 D rules out our panel and scene; E rules out the route, driver and environment. The fault is the edit:
 taking focus away from `pause.lst` while the pause state machine still drives it leaves that machine reading
-a list it no longer has. **So the shipped payload does not edit the pause record at all** (`make_payload.py`
-skips it unless `--pause` is passed for an experiment), and `PauseRouteBody()` reproduces retail's own
-statement so the edit is a no-op rather than a crash; the in-song page stays retail's own for now.
+a list it no longer has. **So the shipped payload does not edit the `pause_options` focus switch**
+(`make_payload.py` skips it unless `--pause` is passed for an experiment), and `PauseRouteBody()` reproduces
+retail's own statement so the edit is a no-op rather than a crash; the in-song page stays retail's own for
+now. **P7 supersedes this for one row:** the existing `pause_controls` *jump* case is re-pointed at the
+pause twin of the Controls menu (§3.3); the focus switch is still untouched.
 
 #### 3.1 The next experiment, in order
 
@@ -115,6 +122,30 @@ statement so the edit is a no-op rather than a crash; the in-song page stays ret
    screen per panel with a context-dependent panel set and back target.
 3. Only then re-point `pause_options`, if the merge is to keep the retail pause list's row count. Until
    step 1 lands, the row stays retail's.
+
+#### 3.3 P7 reroutes the Controls row without touching the focus switch (2026-10-18)
+
+The rule this section measured stands: **no edit may take focus away from `pause.lst`.** P7 did
+not need to break it. Retail's `pause_controls` case was already a plain jump
+(`{ui goto_screen controller_config_pause_screen}`), so replacing its *target* with the pause
+context's own Controls screen keeps the shape the guest already accepted:
+
+```dta
+{pause_controls {ui goto_screen settings_controls_pause_screen}}
+```
+
+That screen and its children are the in-song twins `settings_screen.cpp` builds for every page of
+ours (`InSongPanels()`: pause panel set, `_pause_screen` names, back targets mapped to the same
+context), so the whole nested Controls menu exists in song with its Back chain returning through
+Default Presets → Controller → Gameplay Mapping → Controls → the pause list. The main-menu root's
+`controls` row opens the same tree with `settings_controls_screen`.
+
+**What is measured and what is not.** The screen definitions, the twins and the reroute target are
+asserted by `rb_blitz_settings_screen_tests` (89,484 checks, 2026-10-18), and the main-menu half was
+driven live end to end (`out/gameplay-mapping/in-game/p7-live4/`, 56 steps, 0 failures — plan §16.4).
+The **in-song** half has not been driven in a boot; the next in-song experiment is that page, and
+it is P8's. If it faults, this note is the record that the jump shape — not the focus switch — is
+what the reroute kept.
 
 #### 3.2 What the in-song page can be, measured (P5b-r2)
 

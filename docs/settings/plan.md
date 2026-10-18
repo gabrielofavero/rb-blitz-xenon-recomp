@@ -137,14 +137,14 @@ Generated partition numbers may change. Recover the owning file through `generat
 
 **One entry point.** The retail **HELP & OPTIONS** screen is reached from the main menu (`splash_options`) and from the in-song pause menu (`pause_options`); it becomes the single settings surface. The separate **Advanced Settings** main-menu row from the earlier scope is retired, and Ultimate's `mod_settings` row is routed into the merged screen on a working integration (kept as a fallback only for an unrecognized payload). Version one adds no second settings entry point.
 
-**Status of the two entries after P5b.** The main-menu entry reaches the merged root and is verified in a boot. The **in-song entry is still retail's own page**: retail's in-song Help & Options is not a screen jump but a focus switch to a second list inside the pause panel, and re-pointing that row at our screen faults the guest (`read of guest 0x00000024`, four arms — [in-game-settings-merged-menu.md](menu.md) §3). The shipped payload therefore leaves the pause record pristine; the merge of that inline list (its five symbols and its dispatch) is the next experiment, and the plan's §3 tree describes the in-song page as it will be once that lands.
+**Status of the two entries after P5b, and after P7.** The main-menu entry reaches the merged root and is verified in a boot. The **in-song entry is still retail's own page**: retail's in-song Help & Options is not a screen jump but a focus switch to a second list inside the pause panel, and re-pointing that row at our screen faults the guest (`read of guest 0x00000024`, four arms — [in-game-settings-merged-menu.md](menu.md) §3). The shipped payload therefore leaves that focus switch pristine; the merge of that inline list (its five symbols and its dispatch) is the next experiment, and the plan's §3 tree describes the in-song page as it will be once that lands. **Since P7 (2026-10-18)** the one retail-row edit the payload makes is the existing `pause_controls` *jump* case, re-pointed at the pause twin of the Controls menu; the focus switch itself is untouched ([menu.md](menu.md) §3.3).
 
 **Root rows, in order.** Six with Ultimate installed; `Gameplay` is omitted when it has no available rows, so a base-only install shows five.
 
 | # | Root row | Interaction | Contents |
 | --- | --- | --- | --- |
 | 0 | General | Submenu | Target, Downloadable Content, Achievements & Unlocks, How to Play, Credits |
-| 1 | Controls | Retail screen | Unchanged retail controller page |
+| 1 | Controls | Submenu (P7, 2026-10-18) | In-game Controls menu: Input Types, General Mapping, Gameplay Mapping (§3.2). Retail's controller preset page moved beneath Gameplay Mapping → Controller → Default Presets |
 | 2 | Calibration | Retail wizard | Unchanged retail calibration |
 | 3 | Audio / Video | Submenu | Video group, Audio group |
 | 4 | Gameplay | Submenu (Ultimate rows only) | Precision/wiggles/camera/speed/DoF, Plots & Skyboxes, Gems |
@@ -152,7 +152,7 @@ Generated partition numbers may change. Recover the owning file through `generat
 
 Two properties of that ordering are deliberate:
 
-- **The retail rows keep their positions.** Retail's list is `How to Play, Controls, Calibration, Audio/Video, Credits`; the merged list keeps `Controls`, `Calibration` and `Audio/Video` at indices 1, 2 and 3, so the route-driven acceptance scripts (`New-UiHelpRoute 1|2|3`) still land on the same screens. `General` takes the old `How to Play` slot and `Gameplay` takes the old `Credits` slot, so only the row-0 and row-4 needles change.
+- **The retail rows keep their positions.** Retail's list is `How to Play, Controls, Calibration, Audio/Video, Credits`; the merged list keeps `Controls`, `Calibration` and `Audio/Video` at indices 1, 2 and 3, so the route-driven acceptance scripts (`New-UiHelpRoute 1|2|3`) still land on the same screens. `General` takes the old `How to Play` slot and `Gameplay` takes the old `Credits` slot, so only the row-0 and row-4 needles change. **Since P7 (2026-10-18) index 1 is a submenu of ours, not retail's page** — the index and the route survive, the destination does not: a script that expects retail's controller page at index 1 must now walk Controls → Gameplay Mapping → Controller → Default Presets.
 - **Visibility is not a fixed row count.** Base = 5 rows, Ultimate = 6. Never ship a dead Ultimate row on a base install, and never leave an empty group behind as an unfocusable row.
 
 No settings screen depends on Guide.
@@ -189,7 +189,20 @@ Target details:
 
 ### 3.2 Controls and Calibration
 
-Both are retail screens, reached from the merged root at the same list index they occupy today (1 and 2). Nothing about them changes: the controls page keeps its full controller inventory, and the calibration wizard keeps its shape. Their routing must survive the merge, because these are the two rows users reach most often and because `acceptance_save.ps1` drives **Help & Options → Calibration → Calibrate Manually** and asserts the offset round-trips (`docs/guides/build-and-run.md`).
+**Superseded 2026-10-18 by P7 for the Controls half.** Calibration is still retail's wizard at root index 2 and nothing about it changed. Controls is no longer retail's page: root index 1 opens an in-game **Controls** menu of our own
+([gameplay-input-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §14.1 and §16), with this inventory:
+
+| Controls row | Kind | Contents |
+| --- | --- | --- |
+| Input Types | Submenu | `Controller: Always on` (information row, not a toggle), `Keyboard` (`keyboard_support`), `Mouse` (`mouse_support`) |
+| General Mapping | Submenu | One row per non-Guide controller control (16), each drawing `<control>: Default` or `<control>: Custom` with the bindings as its caption; Assign/Reset child page per row; `Reset All` for the table |
+| Gameplay Mapping | Submenu | `Controller` page: `Default Presets` (retail's page, disabled while Custom is On), `Custom: On/Off` (`gameplay_mapping_controller`), `Custom Mapping` (six actions + `Reset All`); `Keyboard & Mouse` page: `Custom: On/Off` (`gameplay_mapping_keyboard_mouse`), `Custom Mapping` (six actions + `Reset All`) |
+
+The six actions in both gameplay tables are First Note, Second Note, Move Lane Right, Move Lane Left, Powerup and Pause. Every Assign child opens the one shared listening dialog (`settings_listen_screen`); every Reset child removes that row's override. Retail's controller inventory is not deleted — it is the **Default Presets** destination, so a player who turns Controller Custom off still reaches it in two more presses.
+
+The in-song Help & Options keeps retail's inline list, but its `Controls` row (`pause_controls`) now jumps to the pause-context twin of this menu instead of retail's controller page; see [menu.md](menu.md) Part 1 §3.
+
+Their routing must survive the merge, because these are the two rows users reach most often and because `acceptance_save.ps1` drives **Help & Options → Calibration → Calibrate Manually** and asserts the offset round-trips (`docs/guides/build-and-run.md`).
 
 ### 3.3 Audio / Video
 

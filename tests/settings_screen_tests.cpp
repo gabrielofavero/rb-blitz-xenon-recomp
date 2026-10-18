@@ -395,11 +395,13 @@ void TestDefinitionRoundTrip() {
   BeginCase("the authored definition compiles, parses back and recompiles identically");
 
   const std::vector<dtb::Node> authored = DefinitionRoots();
-  // Twenty panels and twenty screens per context - the main-menu one and the in-song one - so
-  // 2 * 20 * 2 roots. The two contexts are a pair of declarations each, not one shared tree: a panel
-  // whose bodies name a destination (a submenu must) cannot be hosted by two contexts, because the
-  // destination differs between them (P5b-r2).
-  CHECK_EQ(authored.size(), 80u);
+  // Thirty-seven panels and their screens per context - the main-menu one and the in-song one -
+  // so 2 * 37 * 2 roots. The two contexts are a pair of declarations each, not one shared tree: a
+  // panel whose bodies name a destination (a submenu must) cannot be hosted by two contexts,
+  // because the destination differs between them (P5b-r2). P7's Controls tree added 37 pages: the
+  // root, input types, General Mapping and its 16 children, Gameplay Mapping and its two pages,
+  // the two action tables and their 12 children, and the listening dialog.
+  CHECK_EQ(authored.size(), 148u + 80u);
 
   std::string error;
   const std::vector<dtb::Node> parsed = Reparse(authored, &error);
@@ -419,11 +421,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 40u);  // twenty pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 114u);  // thirty-seven pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 40u);
+  CHECK_EQ(screens.size(), 114u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + 20)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -489,8 +491,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 20);
-  CHECK_EQ(in_song, 20);
+  CHECK_EQ(main_menu, 57);
+  CHECK_EQ(in_song, 57);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -525,12 +527,18 @@ void TestScreenBackTargets() {
   // the parent's twin.
   int in_song = 0;
   int root_twins = 0;
+  const std::vector<std::string> screens = ScreenNames();
+  const size_t half = screens.size() / 2;
+  const std::vector<std::string> in_song_names(
+      screens.begin() + static_cast<std::ptrdiff_t>(half), screens.end());
   for (const dtb::Node& root : roots) {
     const std::vector<std::string> words = Words(root);
     if (std::find(words.begin(), words.end(), "UIScreen") == words.end()) {
       continue;
     }
-    if (!HasTextSuffix(root, "_pause_screen")) {
+    if (root.kids.size() < 3 || root.kids[2].tag != dtb::kSymbol ||
+        std::find(in_song_names.begin(), in_song_names.end(), root.kids[2].text) ==
+            in_song_names.end()) {
       continue;
     }
     ++in_song;
@@ -545,7 +553,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 20);  // one per page, the root included
+  CHECK_EQ(in_song, 57);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -571,9 +579,11 @@ void TestRequestPathsParse() {
       continue;
     }
     // A commit carries no setting and no value; every other request addresses one - except the
-    // caption event, whose setting is empty precisely when it says "no row" (the hide).
+    // caption event, whose setting is empty precisely when it says "no row" (the hide), and the
+    // requests that name a whole surface rather than one row (a cancelled capture, a reset-all).
     if (request.op == Op::kCommit || request.op == Op::kRequestRestart ||
-        request.op == Op::kCancelEdit || request.op == Op::kHelp) {
+        request.op == Op::kCancelEdit || request.op == Op::kHelp ||
+        request.op == Op::kCaptureCancel) {
       CHECK_TRUE(request.value.kind == ValueKind::kNone);
       if (request.op != Op::kHelp) {
         CHECK_TRUE(request.setting.empty());
@@ -624,6 +634,9 @@ void TestRequestPathsParse() {
       continue;
     }
     ++checked;
+    if (std::find(paths.begin(), paths.end(), literal) == paths.end()) {
+      std::printf("         missing request path: %s\n", literal.c_str());
+    }
     CHECK_TRUE(std::find(paths.begin(), paths.end(), literal) != paths.end());
   }
   CHECK_TRUE(checked > 40);
@@ -906,20 +919,26 @@ void TestInSongContext() {
   // twin to land on, and no in-song panel names a main-menu destination (which is what would send a
   // page in a song back out to the main-menu tree).
   const std::vector<std::string> screens = ScreenNames();
+  const size_t half = screens.size() / 2;
   std::vector<std::string> menu_screens;
-  for (const std::string& screen : screens) {
-    if (screen.find("_pause_screen") != std::string::npos) {
-      continue;
-    }
-    menu_screens.push_back(screen);
-    CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screen)) != screens.end());
+  for (size_t i = 0; i < half; ++i) {
+    menu_screens.push_back(screens[i]);
+    CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
+               screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 20u);
+  CHECK_EQ(menu_screens.size(), 57u);
+  std::vector<std::string> in_song_panels_names = PanelNames();
+  in_song_panels_names.erase(in_song_panels_names.begin(),
+                             in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
   int in_song_panels = 0;
   for (const dtb::Node& root : DefinitionRoots()) {
     const std::vector<std::string> words = Words(root);
-    if (std::find(words.begin(), words.end(), "UIPanel") == words.end() ||
-        !HasTextSuffix(root, "_pause_panel")) {
+    if (std::find(words.begin(), words.end(), "UIPanel") == words.end()) {
+      continue;
+    }
+    const std::string& name = root.kids[2].text;
+    if (std::find(in_song_panels_names.begin(), in_song_panels_names.end(), name) ==
+        in_song_panels_names.end()) {
       continue;
     }
     ++in_song_panels;
@@ -927,7 +946,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 20);
+  CHECK_EQ(in_song_panels, 57);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1180,7 +1199,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 40);                   // the twenty panels, in both contexts
+  CHECK_EQ(fills, 114);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1324,7 +1343,7 @@ void TestEveryDestinationExists() {
       }
     }
   }
-  CHECK_EQ(screens, 40);
+  CHECK_EQ(screens, 114);
   // Every row that enters a screen of ours contributes one `{ui goto_screen <name>}`; the count is
   // reported rather than guessed at, because a change of row kind moves it.
   std::printf("         %d screen(s), %d goto_screen target(s), all known\n", screens, targets);
@@ -1373,7 +1392,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 40);  // the twenty panels, in both contexts
+  CHECK_EQ(tables, 114);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1409,7 +1428,7 @@ void TestButtonTableIsOneSwitch() {
     const size_t extra = all.size() - 1u - static_cast<size_t>(in_moves);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 40);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 114);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1509,9 +1528,9 @@ void TestRestartPromptOnlyOnLeave() {
     CHECK_FALSE(HasText(root, "commit.restart_required"));
     CHECK_FALSE(HasText(root, "rbbz-settings/cancel/-/-"));
   }
-  CHECK_EQ(panels, 40);
+  CHECK_EQ(panels, 114);
   CHECK_EQ(root_cancels, 2);
-  CHECK_EQ(other_cancels, 38);
+  CHECK_EQ(other_cancels, 112);
 }
 
 // A `{<receiver> set <member> <value>}` call, with the value node kept so a test can say what the
@@ -2507,7 +2526,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 40);      // twenty pages, in both contexts
+  CHECK_EQ(panels, 114);      // every page, in both contexts
   CHECK_EQ(enters, panels);  // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);   // the unclamped direction cases, across the surface
   CHECK_TRUE(clears >= panels);
@@ -2676,7 +2695,7 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 40);         // the whole surface, in both contexts
+  CHECK_EQ(panels, 114);         // the whole surface, in both contexts
   CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
 }
 

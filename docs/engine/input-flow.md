@@ -356,6 +356,46 @@ Release build, `scripts/probe_gameplay.ps1`, default tables (Keyboard + Mouse on
 - **Not measured here:** a physical pad (none on this machine), the analog stick under a real
   thumb, an XInput boot, and the tutorial/calibration interactive segments.
 
+## In-game edits and the capture dialog (P7, 2026-10-18)
+
+P7 of [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+moves the settings surface into the game: the Controls menu edits the profile through the settings
+bridge and the change reaches the next poll. The code is
+[src/input/input_store.cpp](../../src/input/input_store.cpp) (the store),
+[src/input/effective_input.cpp](../../src/input/effective_input.cpp) (the snapshot),
+[src/input/input_capture.cpp](../../src/input/input_capture.cpp) (the dialog) and the filter in
+[src/input/remap.cpp](../../src/input/remap.cpp). Plan §16 holds the evidence.
+
+**One snapshot per poll replaces the launch-time read.** The filter takes
+`CurrentInput()` — a `shared_ptr<const EffectiveInput>` holding both device gates, both routing
+switches and whether a profile was found — and builds every evaluator from it: `Apply` gets
+`config->general`, `ObserveGameplay` gets the tables, and the source gates are built from the same
+snapshot. A committed edit publishes a new snapshot and calls `InvalidateGameplayInput()`, so the
+next poll drops held actions and re-arms on release. The keyboard gate is total in every context:
+with Keyboard Support off the SDK's MnK emulation is not even installed, so the guest cannot see a
+synthesized pad bit in a menu either (`title_input:` says why). Keyboard and mouse off changes
+nothing about the *menu mouse* — `SampleMenuMousePadState` is added only when no capture is armed
+and is a host pointer, not a bound source.
+
+**A capture owns raw input.** While `capture::Armed()` the guest's pad is zeroed after General
+Mapping and before the gameplay overlay, the overlay is skipped entirely, and the native menu's
+mouse pulses are not added; the capture itself reads the ungated devices (so a binding may be
+prepared for a disabled device) and the dialog's Back is a host pad pulse
+(`PulseHostPad(0x2000)`: a bit for two polls) rather than a synthetic key, so it cannot become a
+binding and is not gated by Mouse Support.
+
+**The gesture is a hold, on every kind.** A candidate binds on release; holding it past
+`kHoldToCancel` (700 ms) cancels. A **wrong-kind** press (a key into the Controller table) prints
+which kind the row takes and starts the same timer, so the dialog can always be left on a
+keyboard-only machine — a wrong-kind tap still only reports the kind. The page has no pressable
+Cancel row: while armed, a press could not reach one, and a press that did would be the very input
+being bound (plan §14.3). Twenty seconds without an input closes the page; an unfocused window
+captures nothing and re-waits for neutral; a completed capture is saved through the store, and a
+save failure is posted as the overlay's text and leaves the effective mapping as it was.
+
+**What this pass did not drive:** the in-song variant of the dialog and the Controls menu, a pad
+capture, and the Gameplay Mapping → Controller toggle inside a song (plan §16.5).
+
 ## Checks
 
 `rb_blitz_native_mouse_tests` covers pointer mapping, row hit tests, disabled rows,

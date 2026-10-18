@@ -49,6 +49,7 @@
 #include <vector>
 
 #include "hooks/settings_bridge.h"
+#include "settings/input_bindings.h"
 #include "settings/model.h"
 #include "settings/service.h"
 
@@ -149,6 +150,10 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
     restart_pending_query_ = std::move(query);
   }
 
+  // P7: the controller profile's binding rows. Null in a build without the store (the bridge
+  // tests); an `input.*` token is then refused by name rather than staged into nothing.
+  void SetInputBindingStore(InputBindingStore* store) { input_store_ = store; }
+
  private:
   // True when the token's value is kept here rather than in the service (see the file header).
   bool IsLocalToken(std::string_view token) const;
@@ -178,6 +183,10 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_durable_ = false;
   uint64_t saved_revision_ = 0;
   bool last_commit_requires_restart_ = false;
+  // True while an `input.*` row is staged in the input store. A commit persists that store
+  // alongside the settings transaction; its own failure is reported as a save failure.
+  bool input_staged_ = false;
+  InputBindingStore* input_store_ = nullptr;
   bool restart_pending_ = false;
   CommitStatus last_commit_status_ = CommitStatus::kNoChanges;
   CommitFailure last_commit_failure_ = CommitFailure::kNone;

@@ -34,6 +34,8 @@
 #include <rex/ui/imgui_drawer.h>
 
 #include "hooks/settings_bridge.h"
+#include "input/input_capture.h"
+#include "settings/input_bindings.h"
 #include "ui/help_topics.h"
 
 REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
@@ -126,9 +128,18 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
       std::lock_guard lock(g_text_mutex);
       text = g_text;
     }
+    // P7: the listening dialog's live state is not a row caption - it changes while the player
+    // holds the page, and a wrong-kind press must say so without waiting for a selection move. It
+    // is drawn even when Settings Labels is off, because a capture that cannot be cancelled is a
+    // navigation problem rather than optional help.
+    const std::string capture_status = input::capture::StatusText();
+    const bool capturing = !capture_status.empty();
+    if (capturing) {
+      text = capture_status;
+    }
     // Off is invisible, not "drawn and empty", and the cvar is re-read here so the toggle is
     // live - the probe overlay's rule, and what makes Interface -> Settings Labels a `hot` row.
-    if (text.empty() || !REXCVAR_GET(settings_help_overlay)) {
+    if (text.empty() || (!capturing && !REXCVAR_GET(settings_help_overlay))) {
       return;
     }
 
@@ -205,6 +216,15 @@ void PublishText(std::string text) {
 }
 
 void PublishSymbol(const std::string_view symbol) {
+  // P7: a Controls binding row's caption is the row's current inputs, which the static table
+  // cannot know. The store answers first; every other symbol keeps the existing resolution.
+  if (settings::InputBindings() != nullptr) {
+    const std::string described = settings::InputBindings()->Describe(symbol);
+    if (!described.empty()) {
+      PublishText(described);
+      return;
+    }
+  }
   PublishText(TextForSymbol(symbol));
 }
 
