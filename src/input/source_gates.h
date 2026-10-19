@@ -27,13 +27,16 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <string_view>
 
 #include "profile/gameplay_remap.h"
 #include "profile/remap.h"
+#include "settings/input_bindings.h"
 
 namespace rb_blitz::input {
 
@@ -231,5 +234,56 @@ inline bool HostDeviceConnected(const SourceGates& gates) { return gates.keyboar
 inline bool CursorVisible(bool mouse_support, bool menu_available, bool imgui_wants_capture) {
   return mouse_support && (menu_available || imgui_wants_capture);
 }
+
+// ---------------------------------------------------------------------------------------------
+// P8: the Controls recovery path (plan §14.4).
+// ---------------------------------------------------------------------------------------------
+//
+// A saved profile can leave the menu with no usable input at all: both host gates closed and no
+// pad connected. Ordinary input is inert then, so the player cannot reach the row that would fix
+// it - which is the recovery surface R9 provided outside the game until P8 retired that app. The
+// in-game path is deliberately narrow: while (and only while) no route exists, one fixed key held
+// for `kRecoveryHold` reopens the keyboard gate. It never runs otherwise, it changes exactly one
+// stored switch, and it says what it did (src/ui/help_overlay.cpp). That is the whole exception
+// to R1: menus and gameplay still follow the saved gates everywhere else.
+inline constexpr std::chrono::milliseconds kRecoveryHold{2000};
+// F10 is not a default binding and no retail page uses it; the name is the profile's spelling.
+inline constexpr std::string_view kRecoveryKey = "f10";
+
+// True when nothing can drive the menus: both host gates closed, no pad. A pad is a route even
+// though it is not a host gate, so its presence always disables the recovery path.
+bool RecoveryNeeded(const SourceGates& gates, bool pad_connected);
+
+// Watches the recovery key. `Observe` is one poll and returns true exactly once per complete
+// hold; any release, or a poll where recovery is not needed, starts over - a key that was already
+// down when the profile was read cannot trigger it, and a failed recovery needs a fresh hold.
+// The hold starts on a *rising* edge (the key was observed up, then down), and `was_down_`
+// starts true so the very first poll can never read as one: a key physically held while the
+// profile loads must be released and pressed again.
+class RecoveryHold {
+ public:
+  bool Observe(bool needed, bool key_down, std::chrono::steady_clock::time_point now);
+  bool Holding() const { return holding_; }
+
+ private:
+  bool holding_ = false;
+  bool done_ = false;
+  bool was_down_ = true;
+  std::chrono::steady_clock::time_point since_{};
+};
+
+// What the recovery path's one action did.
+enum class RecoveryOutcome : uint8_t {
+  kRearmed,    // staged and committed: keyboard_support is on and the save landed
+  kNoStore,    // no Controls store in this build (a tool, or a boot that never installed one)
+  kRefused,    // the store refused the switch (a command-line/environment lock, say)
+  kSaveFailed  // the switch was staged but the profile could not be saved or applied
+};
+
+// The recovery path's one action: reopen the keyboard gate through the installed store. It
+// stages exactly one switch (`input.keyboard_support = true`), commits once, and touches nothing
+// else - the profile is not reset, the mouse switch is not touched, and a refusal is named in
+// `why` rather than reported as success. SDK-free: the store interface is all this calls.
+RecoveryOutcome RecoverKeyboard(settings::InputBindingStore* store, std::string* why);
 
 }  // namespace rb_blitz::input

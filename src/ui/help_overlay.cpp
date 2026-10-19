@@ -35,6 +35,7 @@
 
 #include "hooks/settings_bridge.h"
 #include "input/input_capture.h"
+#include "input/remap.h"
 #include "settings/input_bindings.h"
 #include "ui/help_topics.h"
 
@@ -123,6 +124,10 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
   }
 
   void OnDraw(ImGuiIO& io) override {
+    // P8 (plan §14.4/§17.2): the recovery path's observation point. This draw runs every frame,
+    // whether or not a device is connected - the guest's state filter does not run while nothing
+    // enumerates, which is exactly the state a recovery exists for.
+    input::TickInputRecovery();
     std::string text;
     {
       std::lock_guard lock(g_text_mutex);
@@ -134,12 +139,20 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // navigation problem rather than optional help.
     const std::string capture_status = input::capture::StatusText();
     const bool capturing = !capture_status.empty();
-    if (capturing) {
+    // P8: the same rule for recovery. A profile with both host gates off and no pad leaves no
+    // route at all, so the "hold F10" sentence cannot be optional either; it outranks a row
+    // caption, and the two live states never apply at once (one needs a menu, the other needs no
+    // usable input).
+    const std::string recovery_status = input::RecoveryNotice();
+    const bool recovering = !recovery_status.empty();
+    if (recovering) {
+      text = recovery_status;
+    } else if (capturing) {
       text = capture_status;
     }
     // Off is invisible, not "drawn and empty", and the cvar is re-read here so the toggle is
     // live - the probe overlay's rule, and what makes Interface -> Settings Labels a `hot` row.
-    if (text.empty() || (!capturing && !REXCVAR_GET(settings_help_overlay))) {
+    if (text.empty() || (!capturing && !recovering && !REXCVAR_GET(settings_help_overlay))) {
       return;
     }
 

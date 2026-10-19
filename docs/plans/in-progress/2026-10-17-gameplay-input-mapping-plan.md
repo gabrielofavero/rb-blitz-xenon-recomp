@@ -1,13 +1,15 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0-P4 have landed (§10, §11, §12, §13, §15) and so has P7
-(§16). P5 and P6 are cancelled by the 2026-10-18 change of course: the external Controller
-Settings executable is an interim development tool, not a delivery milestone, so its
-native-category hiding and its integrated acceptance are not built. P8 — retirement of the
-executable after parity — is the remaining delivery.** P0 remains the prerequisite investigation.
-Sections 1-8 describe the requested behaviour and the P0-P4 evidence unless explicitly qualified;
-§14 defines the in-game menu, capture, apply, and retirement contracts that supersede the
-external-utility parts of §4, §5, §6.1 and §7.
+**Status: in progress, 2026-10-18. P0-P4 have landed (§10, §11, §12, §13, §15) and so have P7
+(§16) and P8a (§18). P5 and P6 are cancelled by the 2026-10-18 change of course: the external
+Controller Settings executable is an interim development tool, not a delivery milestone, so its
+native-category hiding and its integrated acceptance are not built. P8 is split into **P8a**
+(recovery and parity) and **P8b** (retire the executable) — §17 — and P8a has now landed: the
+recovery path, the in-song Controls arm and the parity verification are measured (§18), and
+**P8b is the next and only remaining package.** P0 remains the prerequisite investigation.
+Sections 1-8 describe the requested behaviour and the P0-P4 evidence unless explicitly
+qualified; §14 defines the in-game menu, capture, apply, and retirement contracts that supersede
+the external-utility parts of §4, §5, §6.1 and §7.
 
 This document records the requested behavior, a source review
 at `ca8fa2a`, proposed implementation decisions, and the investigation required before choosing
@@ -571,25 +573,27 @@ device-support arms, the hidden rows and Save. The Controller switch still defau
 shipping behaviour is unchanged.
 P5/P6 status (2026-10-18): **cancelled by the change of course** — no build hides the native
 category; P7's Controls menu replaces it and disables Default Presets while Controller Custom is
-On, and P8 owns the integrated acceptance and documentation. P7 has since landed (§16); P8 is
-next.
+On, and P8 owns the integrated acceptance and documentation. P7 has since landed (§16) and P8a
+has landed (§18); P8b is next.
 
-### 6.2 Remaining delivery — in-game controls and executable retirement (P7-P8)
+### 6.2 Remaining delivery — in-game controls, recovery, and executable retirement (P7-P8b)
 
-This is now the only remaining milestone and it starts at P7. P7 must deliver the in-game
-Controls menu with parity; P8 removes the executable after that parity passes. P7 also absorbs
-P5's user-visible intent: Controls always stays visible, and Default Presets is disabled while
-Controller Custom is On — no build hides the category.
+This is now the only remaining milestone. P7 delivered the in-game Controls menu (§16); **P8 is
+delivered as two packages (§17)**: P8a finishes the recovery surface and the parity inventory
+without touching the build or packaging, and P8b removes the executable after that parity passes.
+P7 also absorbed P5's user-visible intent: Controls always stays visible, and Default Presets is
+disabled while Controller Custom is On — no build hides the category.
 
 | Package | Work and likely owners | Completion evidence |
 | --- | --- | --- |
-| P7. Move settings and mappings into the game | Implement §14's nested Controls menu in both main-menu and paused Help & Options, including Input Types, General Mapping, both Gameplay Mapping branches, native Default Presets, per-row Assign/Reset, table resets, help, and the pause-frame listening dialog. Reuse shared profile/source/capture logic and extend the settings service/bridge for binding edits and safe runtime application. Inventory every player-facing setting still owned by the external app and give it an in-game home. Likely owners: `src/ui/settings_screen.*`, `src/hooks/settings_payload.*`, `src/hooks/settings_bridge*`, `src/settings/`, `src/profile/`, `src/input/`, and reusable logic currently under `controller-settings/src/`. | Generated menu and service tests plus live base/Ultimate main-menu and pause routes; complete parity inventory; capture, reset, disabled states, safe apply, persistence, recovery, native-preset preservation, and song-resume evidence from §14. The external executable remains available until P8 passes. |
-| P8. Retire Controller Settings and finish acceptance | After P7 parity, remove the external executable target and obsolete app-only UI, launch entry points, packaging requirements and shortcuts; move any still-shared code/schema/tests to their owning game modules first. Preserve existing profiles and configuration precedence. Update installer upgrade/repair behavior, scripts, and live documentation; run §14's full migration and release matrix. | A clean build/install/upgrade/repair launches the game directly with all settings available in game, retains existing user configuration, and neither requires nor ships `rb_blitz_controller_settings.exe`. No supported setting workflow starts a second settings process. Evidence lives under `out/gameplay-mapping/in-game/`; old utility acceptance is replaced by equivalent in-game checks. |
+| P7. Move settings and mappings into the game — **landed 2026-10-18 (§16)** | Implement §14's nested Controls menu in both main-menu and paused Help & Options, including Input Types, General Mapping, both Gameplay Mapping branches, native Default Presets, per-row Assign/Reset, table resets, help, and the pause-frame listening dialog. Reuse shared profile/source/capture logic and extend the settings service/bridge for binding edits and safe runtime application. | Generated menu and service tests plus live base/Ultimate main-menu and pause routes; capture, reset, disabled states, safe apply, persistence, native-preset preservation. The external executable remains available until P8b. |
+| P8a. Recovery and parity (§17) — **landed 2026-10-18 (§18)** | Finish the in-game recovery path for a saved profile with no usable route (the `RecoveryNeeded`/`RecoveryHold` seam started in `src/input/source_gates.h`), wire it into the filter and the caption, test it, and drive it live. Close P7's remaining live arm (the in-song Controls entry), verify the §17.1 parity inventory row by row against the build, and classify every host-only app row. No build, packaging, or installer change. Owners: `src/input/`, `src/ui/help_overlay.cpp`, `scripts/acceptance_controls.ps1` (or a second tracked harness), the docs §18 names. | The recovery arm passes live (a profile with both host gates off and no pad reopens the keyboard on one held key, changes one stored switch, and says so); the in-song route reaches Input Types and a bind page and returns to the song; §17.1 has no row without a destination or a written classification; all suites green; `check_docs.py` clean. |
+| P8b. Retire Controller Settings and finish acceptance (§17) | After P8a parity, remove the external executable target and obsolete app-only UI, launch entry points, packaging requirements and shortcuts; move any still-shared code/schema/tests to their owning game modules first (`tests/controller_settings_profile_tests.cpp` and `controller_settings_remap_tests.cpp` keep their checks under game-owned names). Preserve existing profiles and configuration precedence. Update installer upgrade/repair behavior, scripts, and live documentation; run §14's migration and release matrix. | A clean build/install/upgrade/repair launches the game directly with all settings available in game, retains existing user configuration, and neither requires nor ships `rb_blitz_controller_settings.exe`. No supported setting workflow starts a second settings process. Evidence lives under `out/gameplay-mapping/in-game/`; old utility acceptance is replaced by equivalent in-game checks. |
 
-Order: **P4 -> P7 -> P8**. P5 and P6 are cancelled, not prerequisites; design and reusable-code
-preparation start immediately. P7 must pass before removal in P8; neither a partial menu nor a
-renamed executable satisfies retirement. P7 has **landed** on 2026-10-18 (§16); P8 is **not
-started**.
+Order: **P4 -> P7 -> P8a -> P8b**. P5 and P6 are cancelled, not prerequisites. P7 has **landed**
+on 2026-10-18 (§16) and P8a has **landed** on 2026-10-18 (§18); **P8b is the only remaining
+package** and is **not started**. The executable keeps working until P8b: P8a changed no
+packaging.
 
 ## 7. Validation and release criteria
 
@@ -1442,9 +1446,15 @@ in-game way back for a profile that still has one usable source. What is **not**
 recovery surface for a profile that arrives already unusable from the external app (both host
 devices off, no pad, no reachable menu row): the game starts and the keyboard/mouse gates stay
 closed, so Input Types cannot be reached to reopen them. Until that surface exists, such a
-profile needs a hand edit or the external app. This is the standing gap P8 inherits.
+profile needs a hand edit or the external app. This is the gap **P8a** closes (§17.2); the app
+still ships until P8b. **Closed by P8a (2026-10-18, §18.3):** one 2 s hold of F10 reopens the
+keyboard through the same store, writes exactly one switch, and the caption says so even with
+Settings Labels off.
 
 ### 14.5 Retire the executable only after parity (P8)
+
+**P8 is split into P8a (recovery and parity) and P8b (this retirement) — §17.** P8a changes no
+build, packaging, or installer file; P8b is this section, and it starts only after P8a's arms pass.
 
 The P7 parity inventory maps each supported external setting/action to its in-game destination
 and acceptance evidence. Include input toggles, all three mapping tables, capture, resets, help,
@@ -1699,14 +1709,17 @@ Two harness defects and one product defect were found by the run and fixed:
   `rb_blitz_settings_screen_tests`, but no boot has opened the page from a paused song. The edit
   deliberately keeps retail's own `{ui goto_screen …}` shape (P5b measured that *taking focus
   away from `pause.lst`* — replacing the `pause_options` focus switch — faults the guest,
-  `read of guest 0x00000024`); a live refused-or-not verdict is P8's.
+  `read of guest 0x00000024`); a live refused-or-not verdict is P8's. **Closed by P8a
+  (2026-10-18, §18.4):** a paused song now drives pause → Help & Options → Controls → Input Types
+  and a bind page → the listening dialog's hold-to-cancel → back to the pause panel → resume, on
+  the base game, with no guest fault (`out/gameplay-mapping/in-game/p8a-in-song3/`).
 - **No physical pad on this machine.** A pad press captured into the Controller table, a pad
   hold as the cancel gesture, and stick-direction capture are unit-tested and code-inspected, not
   shot. The same applies to Gameplay Mapping → Controller being toggled in a song.
 - **An already-unusable imported profile has no in-game recovery.** The store refuses an *edit*
   that would leave no usable source (§14.4), but a profile that arrives with Keyboard and Mouse
-  both off and no pad cannot reach Input Types. The external app or a hand edit is the way back
-  until P8 builds the recovery surface.
+  both off and no pad cannot reach Input Types. P8a builds and drives the recovery path (§17.2);
+  until it lands, the external app or a hand edit is the way back.
 - **Reset All and per-row Reset were not clicked live.** Their request paths and store behaviour
   are unit-tested; the live arms cover Assign, the hold, both switches and the gated preset.
 - **The 20 s timeout, focus loss, mouse and pad captures, and an explicit-empty override were not
@@ -1714,7 +1727,7 @@ Two harness defects and one product defect were found by the run and fixed:
 - **The parity inventory §14.5 and all installer/executable retirement work are P8's.** No
   external setting was added to the in-game menu in this pass beyond the input surface §14.2
   names; the remaining player-facing settings still live in the external app until P8 moves or
-  retires them.
+  retires them. §17.1 is the row-by-row inventory P8a verifies.
 
 ### 16.6 Documents updated with P7
 
@@ -1724,3 +1737,320 @@ Two harness defects and one product defect were found by the run and fixed:
 input switches are now in-game rows and apply live), `docs/reference/known-issues.md` (the
 in-song, pad and recovery limits above), and `docs/settings/status.md` (P7's section). The index
 did not change: no document moved.
+
+## 17. P8 split — recovery and parity, then retirement (2026-10-18)
+
+**P8 is two packages, delivered in this order, and P8a has landed (§18).** It was planned as one
+(§6.2): remove the external executable after P7's parity. Two facts make one step wrong. The
+recovery surface the removal owes
+(§14.4) is game code with its own live arm, and the executable's removal changes the build, the
+installer, distribution and every app-only test at once. Neither half needs the other's code to be
+correct, and each fails differently — a missing recovery path strands a player, a half-removed
+installer ships a broken product — so they are accepted separately. **The executable keeps
+working between them: P8a changes no build, packaging, or installer file.**
+
+| | P8a. Recovery and parity | P8b. Retire the executable |
+| --- | --- | --- |
+| Adds | The recovery path (§17.2), the in-song Controls arm, the verified parity inventory (§17.1) | Removes the target, app-only UI/tests/scripts, payload entry, shortcuts, installer launch actions |
+| Touches | `src/input/source_gates.{h,cpp}`, `src/input/remap.cpp`, `src/ui/help_overlay.cpp`, tests, a tracked harness, docs | Root and app CMake, `installer/**`, `scripts/*controller_settings*`, `docs/settings/*`, READMEs, the plan's move to `finished/` |
+| Ships | The same files as P7, plus recovery | One executable: `rb_blitz.exe` |
+| Acceptance | §17.3 | §17.4 |
+
+### 17.1 Parity inventory — every external row and where it went
+
+The external app's full surface is its 26 schema rows plus the Controller tab's bespoke mapping
+UI and the app-window `[nav]` scheme. This table is the row-by-row answer §14.5 asks for;
+**P8a verifies it against the build** (it is documentation now, a checklist then). "Host-only"
+means the row never had an in-game descriptor: the profile still carries it (P11b's
+`kHostOnlyCvarAllowlist`), and after P8b `rb_blitz.toml`/CLI is its documented editor.
+
+| App row (tab) | In-game destination today | Evidence / classification |
+| --- | --- | --- |
+| `launch.target` (general) | General → **Target** (`settings_target_screen`) | the row shipped with P11; the Ultimate choice is measured (`docs/settings/status.md`, the Target row) |
+| `user_data_root` (general) | **Installer wizard** save-folder page → `paths.toml` | installer P7 (three-question page); not an in-game row by design — installation work stays with the installer |
+| `dlc_root` (general) | **Installer wizard** DLC-folder page → `paths.toml` | same |
+| `enhancements_dlc_cache` (general) | General → Downloadable Content → **Cache DLC Library** (`settings_dlc_cache`) | `settings_dlc` panel; P6/P11 live arms |
+| `dlc_scan_threads` (general) | General → Downloadable Content → **DLC scan threads** | `settings_dlc` panel; schema + `settings_screen` tests |
+| `enhancements_hide_menu_options` (interface) | Interface → Hide Items → **Main Menu** (`interface.hide_main_menu`) | P10 hide matrix; `settings_mm_master` |
+| `enhancements_hidden_menu_options` (interface) | Interface → Hide Items → **Hidden Rows** (`interface.hidden_main_menu`) | P10 (the explicit-empty selection is measured) |
+| `enhancements_rename_mod_settings` (interface) | **Retired**: one fixed retail label | P10 scoped the rename to the mod key and retired the toggle (`docs/settings/plan.md` §3.6) |
+| `enhancements_menu_dlc_songs` (interface) | General → Downloadable Content → **DLC Menu Songs** (`general.dlc_menu_songs`) | `settings_dlc_menu_songs`; P5/R9 |
+| `enhancements_menu_dlc_song_count` (interface) | **Retired**: pool fixed at 50 | P10 reports the old value as ignored |
+| `enhancements_skip_offline_dialog` (interface) | Interface → Hide Items → **Offline Mode Prompts** (`interface.hide_offline_prompts`) | `settings_offline`; R3 |
+| `resolution_scale` (graphics) | Audio/Video → Video → **Resolution** (`graphics.resolution`) | the P4/ultrawide work; `settings_video_screen` |
+| `fullscreen` (graphics) | Audio/Video → Video → **Display** (`graphics.display`) | `settings_display_screen`; the installed-game work's P3 |
+| `monitor` (graphics) | **Obsolete app-window geometry**: the game sizes its one window from the system DPI and the primary display (`src/settings/window_policy.*`) | plan §14.5's app-window clause; value preserved, no row |
+| `vsync` (graphics) | Audio/Video → Video → **V-Sync** (`graphics.vsync`) | the one `hot` row (`settings_vsync`) |
+| `gpu_backend` (graphics) | Audio/Video → Video → **Renderer** (`graphics.renderer`) | the two-backend work; `settings_screen` tests |
+| `swap_post_effect`, `native_2x_msaa` (graphics) | Audio/Video → Video → Graphics → **Anti-Aliasing** (one row over both) | `settings_aa`; `settings_screen` tests |
+| `anisotropic_override` (graphics) | Audio/Video → Video → Graphics → **Anisotropic Filtering** | `settings_filtering` |
+| `present_letterbox` (graphics) | **No in-game row by design**: the Interface page's *4:3 Letterboxing* row edits the payload's own `interface.letterbox`, a different variable; this host cvar stays a `rb_blitz.toml`/CLI override | `src/settings/cvars.h` says so by name; P11b cutover |
+| `present_safe_area_x`, `present_safe_area_y`, `present_allow_overscan_cutoff`, `present_dither` (graphics) | **Host-only** developer presentation rows, profile-carried; the player-facing 4:3/overscan controls are the Interface row and retail's own Audio/Video row | `kHostOnlyCvarAllowlist`; preserved, not exposed |
+| `audio_mute`, `audio_maxqframes` (graphics) | **Host-only** developer audio rows, profile-carried; the player's audio controls are retail's Audio page | same |
+| `mouse_ui_nav` (controller) | Controls → Input Types → **Mouse** (`input.mouse_support`) | P7 live arms (§16.4) |
+| `keyboard_support` (controller) | Controls → Input Types → **Keyboard** (`input.keyboard_support`) | P7 live arms (§16.4) |
+| Controller tab's bespoke UI (assign/reset, three tables, capture, per-table source kinds) | Controls → General Mapping and Gameplay Mapping (both branches, per-row Assign/Reset, table resets, listening dialog) | P7 live arms 09–15 and 17–36 (§16.4) |
+| `[nav]` app-window navigation scheme | **Obsolete app UI state**: the game navigates with its own menus | plan §14.5; preserved in the profile, read by nothing after P8b |
+
+The inventory's verdict: **no player-facing row loses its editor.** The six presentation/audio
+host rows (four presentation, two audio) and `present_letterbox` were never in-game preferences —
+`cvars.h` documents them as host rows with no descriptor, and their player-facing equivalents are
+retail's and our Video/Interface rows. P8a still verifies each destination in the build rather than
+trusting this table.
+
+### 17.2 The recovery path (P8a)
+
+`src/input/source_gates.h` already declares the seam (owner edit, 2026-10-18) and P8a finishes it:
+
+- `RecoveryNeeded(gates, pad_connected)` — true only when **both** host gates are off **and** no
+  pad is connected. A connected pad is a route, so it always disables recovery.
+- `RecoveryHold` — one fixed key, held for `kRecoveryHold` (2 s), fires exactly once; any release
+  or a poll where recovery is not needed starts over, so a key already down when the profile was
+  read cannot trigger it and a failed recovery needs a fresh hold.
+- The key is **F10** (`kRecoveryKey = "f10"`): not a default binding, not used by any retail page,
+  and readable through the window's key-event latch even while the keyboard gate is off — which is
+  the whole point.
+- The action changes **one stored switch**: `input.keyboard_support = true`, through the same
+  `settings::InputBindings()` (`StageBool` + `Commit`) the Controls rows use. It does not reset the
+  profile, does not touch `mouse_ui_nav`, and refuses (with a log line) when a command line or the
+  environment has locked the switch.
+- `src/ui/help_overlay.cpp` draws the notice **even when Settings Labels is off** (a navigation
+  problem is not optional help): the "hold F10" sentence while recovery is needed, and a short
+  confirmation after it acted.
+- Tests in `input_gates`: the needed matrix (each gate on, pad connected), the hold duration and
+  release-restart, exactly-once behaviour, the pad case, and the refused/locked case. The live arm
+  boots a scratch profile with `keyboard_support = false`, `mouse_ui_nav = false`, no pad, holds
+  F10, and asserts the log, the notice, the profile, and that a menu key works afterwards.
+
+This is the only exception to R1: ordinary menus and gameplay still follow the saved gates
+everywhere else.
+
+### 17.3 Prompt P8a — recovery and parity
+
+```text
+P8a — recovery and parity. Read docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+§14.4, §16.5 and §17 first. Do NOT remove the external executable, its target, its tests, the
+payload entry, or any installer file in this pass.
+
+1. Finish the recovery seam. Implement RecoveryNeeded and RecoveryHold in
+   src/input/source_gates.cpp to the contract in §17.2 (the declarations and comments are already
+   in src/input/source_gates.h). Add the status sentence(s) the caption needs. Keep it SDK-free
+   and thread-safe.
+2. Wire it into the filter. In src/input/remap.cpp, one per-poll observation on the raw keyboard
+   state (F10) while RecoveryNeeded(gates, physical.pad_connected); on a completed hold, commit
+   input.keyboard_support = true through settings::InputBindings() and log one `input recovery:`
+   line with the outcome. A refused commit (locked by CLI/env) must be logged and must not claim
+   success. Do not touch any other switch, and do not reset the profile.
+3. Say it on screen. src/ui/help_overlay.cpp draws the "hold F10" notice while recovery is needed
+   and a short confirmation after it acted, both even when Settings Labels is off. Reuse the
+   caption's existing drawing; do not add a second overlay.
+4. Tests. Extend tests/input_gates_tests.cpp with the needed matrix, the timing/release rule,
+   exactly-once, the pad case, and the locked/refused case. Run the full suite.
+5. Drive it live. Add the recovery arm to a tracked harness (extend
+   scripts/acceptance_controls.ps1 with -Recovery, or a sibling script): a scratch profile with
+   both gates off and no pad, F10 held, then a menu key; keep the log, the profile before/after
+   and a shot under out/gameplay-mapping/in-game/<label>/.
+6. Close P7's in-song arm. Drive a song, pause, Help & Options -> Controls -> Input Types and one
+   Assign page, Back to pause, resume. If the pause-record reroute faults, stop: report the fault,
+   do not paper over it, and leave the app-removal work to P8b.
+7. Verify §17.1 against the build. For every row, confirm the named screen/row exists (a
+   settings_screen test or a boot); fix the table where the build disagrees. Do not add in-game
+   rows for the host-only rows.
+8. Document. Add the P8a evidence section to this plan (§18, measurements with dates and evidence
+   paths), update docs/engine/input-flow.md (the recovery exception to R1),
+   docs/reference/known-issues.md (the recovery limit becomes resolved or narrower), and
+   docs/settings/status.md. Run python
+   .github/skills/documentation/scripts/check_docs.py and git diff --check.
+
+Acceptance: the recovery arm shows the notice, reopens the keyboard with one key, persists
+keyboard_support (or its default-erased absence) and leaves every other value alone; the in-song
+arm reaches Input Types and a bind page and returns to the song; every suite is green; §17.1 has
+no unverified row; the external executable is untouched.
+```
+
+### 17.4 Prompt P8b — retire the executable
+
+```text
+P8b — retire Controller Settings. Read the plan's §14.5, §14.6, §17 (including §17.1 and the P8a
+evidence in §18) first. P8b starts only when P8a's arms pass.
+
+1. Re-home what is shared, then delete the app. Keep tests/controller_settings_profile_tests.cpp
+   and tests/controller_settings_remap_tests.cpp (they test src/profile/, not the app): rename
+   them to game-owned names (profile_tests, profile_remap_tests), keep their checks, and register
+   them in the root CMakeLists.txt. Delete controller-settings/ in full (target, main.cpp, the
+   .rc, config/settings.toml, src/, tools/, README) and the app-only tests (block, general, help,
+   keys, launch, pad_nav, session), the app-only scripts (capture_controller_settings.ps1,
+   acceptance_controller_settings.ps1), and the root add_subdirectory(controller-settings).
+2. Installer and distribution. Remove the executable from the payload list and provenance
+   (installer/tools/make_payload.ps1, payload_provenance.ps1), the build/-ControllerSettings*
+   arguments (build.ps1), the kControllerSettingsExeName install entry, every Controller Settings
+   shortcut/task/launch option and its text (setup.iss), and the installer tests that assert them.
+   An upgrade must DELETE the installer-owned obsolete binary and shortcut ([InstallDelete],
+   narrow paths under the install folder only) while preserving profiles, paths.toml, saves and
+   the DLC library.
+3. Keep profiles working. launcher.toml remains the game's input profile (P1/P7 tables); the seven
+   host-only rows stay profile-carried and rb_blitz.toml/CLI remains their documented editor. No
+   migration, no second settings file, no rewrite of a user's file.
+4. Tests and build. Update the installer tests' expected executable/report text; run the release
+   build, the full debug suite, the installer preset build and its tests, and the ISCC compile.
+   Run every install leg the machine can run; say plainly which legs were not run.
+5. Document and close. Update README.md, installer/README.md, docs/settings/plan.md (Controller
+   Settings section becomes history; the live inventory is the in-game tree),
+   docs/settings/contracts.md (§8's allowlist wording), docs/settings/menu.md (Parts 1/3
+   supersession), docs/settings/status.md, docs/engine/toggles.md,
+   docs/reference/known-issues.md, docs/settings/README.md, and the skills/agent files that point
+   at controller-settings/. Then move this plan to the finished/ folder (same date-name) with the
+   documentation skill's move script, update docs/README.md, and run check_docs.py + git diff
+   --check.
+
+Acceptance: a clean build and a fresh install/upgrade/repair contain rb_blitz.exe and no settings
+executable or settings launch action; the game launches directly and every row in §17.1 is still
+reachable; an existing profile made by the app still loads with its General and gameplay tables,
+gates and native preset; no supported workflow starts a second process; the plan is in finished/
+with its evidence and the index points at it.
+```
+
+### 17.5 What the split deliberately leaves where it is
+
+- **No in-game rows for the host-only presentation/audio rows.** They never had a descriptor; the
+  player-facing equivalents are retail's Audio/Video rows and our Video/Interface rows (§17.1).
+  P8b keeps the profile carrying them and documents `rb_blitz.toml` as their editor.
+- **No installer change in P8a.** The executable keeps shipping until P8b, so a P8a build is not a
+  release candidate and makes no distribution claim.
+- **No new settings surface in P8b.** Retirement is a removal pass; a row that turns out to be
+  missing goes back to P8a's parity step rather than being added during the removal.
+
+## 18. P8a evidence — recovery and parity (2026-10-18)
+
+**P8a landed. P8b is the only remaining package and is not started.** The in-game recovery path
+works live, the in-song Controls route is driven for the first time (P7's largest residual), and
+every §17.1 row has a destination the build generates. No build, packaging or installer file
+changed: the external executable still ships until P8b.
+
+### 18.1 What landed
+
+| P8a item | Where it landed | Evidence |
+| --- | --- | --- |
+| The recovery rules | [src/input/source_gates.h](../../../src/input/source_gates.h)/[.cpp](../../../src/input/source_gates.cpp): `RecoveryNeeded` (both host gates closed **and** no pad - a pad is a route even though it is not a gate), `RecoveryHold` (rising-edge start, `kRecoveryHold` = 2000 ms, exactly one fire per complete hold, any release or un-needed poll restarts, a key already down when the watch starts cannot fire), and `RecoverKeyboard` (one `StageBool("input.keyboard_support", true)` + one `Commit`, returning `kRearmed`/`kNoStore`/`kRefused`/`kSaveFailed`) | `input_gates` suite, six new cases: the needed matrix, the hold's timing and once-only rule, release/un-needed restart, already-held keys (both the boot case and the gate-reopened-while-held case), the store outcomes, and that `f10` is readable and no shipped table binds it |
+| The observation and its notice | [src/input/remap.cpp](../../../src/input/remap.cpp), `TickInputRecovery`/`RecoveryNotice`, one mutex-guarded watch; called from the state filter **and** from the settings overlay's per-frame `OnDraw` ([src/ui/help_overlay.cpp](../../../src/ui/help_overlay.cpp)), which draws the sentence even with Settings Labels off | §18.2 (why the filter alone cannot work), §18.3 (the live arm) |
+| Harnesses | New [scripts/acceptance_recovery.ps1](../../../scripts/acceptance_recovery.ps1) and [scripts/acceptance_controls_in_song.ps1](../../../scripts/acceptance_controls_in_song.ps1); [scripts/drive_ui.ps1](../../../scripts/drive_ui.ps1) gained `key_f10` | §18.3 and §18.4 (both PASS with their step counts) |
+| Parity verification | Every §17.1 destination checked against the build's own generated definitions with `rb_blitz_settings_screen_tests.exe dump-def <name>` (23 screens and 21 named rows, 0 missing) | §18.5 |
+
+### 18.2 The filter alone cannot observe recovery, and the code says why
+
+`InputSystem::GetState` returns `X_ERROR_DEVICE_NOT_CONNECTED` **before** the state filter runs
+when no device contributes ([rexglue-sdk/src/input/input_system.cpp](../../../rexglue-sdk/src/input/input_system.cpp),
+`GetState`, the `if (!any) return …` ahead of `state_filter_`). The title's synthetic host device
+enumerates only while a host gate is open (`HostDeviceConnected`), and a recovery state is exactly
+"both gates closed and no pad". So an observation placed only in the filter would never run in the
+one state it exists for. `TickInputRecovery` therefore runs from both places: the filter (the
+normal per-poll path) and the overlay's per-frame draw (which always runs). Both call the same
+watch, whose edge rule makes the second caller a no-op rather than a double fire; the notice is
+read from the overlay, so the sentence and the observation cannot disagree.
+
+### 18.3 The recovery arm, driven live (2026-10-18)
+
+`pwsh -NoProfile -File scripts\acceptance_recovery.ps1 -Label p8a-recovery2` — **11 steps, 0
+failures** on the release build, base game, `--input_backend=none` (no pad driver at all) and
+`--no-settings_help_overlay` (Settings Labels off, which is the rule being proved). Evidence:
+`out/gameplay-mapping/in-game/p8a-recovery2/` (log, argv, profile before/after, OCR text,
+`recovery-lines.txt`, `screens.txt`) and `p8a-recovery2-shots/`. The same arm re-ran on the final
+binary as `p8a-recovery3` (11 steps, 0 failures) after the notice text was derived from
+`kRecoveryHold` instead of a literal.
+
+| Step | Measurement |
+| --- | --- |
+| Boot | `gameplay mapping: keyboard_support=off (config) mouse_ui_nav=off (config) …`; the profile on disk is `[settings] keyboard_support = false, mouse_ui_nav = false`; nothing enumerates |
+| Notice | The OCR of `02-notice.png` reads *"No input is available: Keyboard and MouSe support are 'bot / Holé 10 for 2 sec nds to turn Keyboard Support back on."* — the caption is drawn although the ordinary row captions are off. (OCR substitutes "F" as "Holé" and "Support" as "MouSe"; the assertions match the sentence's own words, not the glyphs.) |
+| The hold | `21:19:54.110 [warning] input recovery: no usable input - …; hold F10 for 2000 ms to reopen the keyboard`, then `21:20:23.142 [info] input recovery: F10 held for 2000 ms with no usable input; keyboard_support is on again (one switch saved through the Controls store; nothing else was changed)` |
+| The profile | `profile-03-after-recovery.toml` no longer carries `keyboard_support = false` (the value equals the compiled default, so the store erases the row) and still carries `mouse_ui_nav = false` |
+| The confirmation | The OCR of `03-recovered.png` reads *"Keyboard $upport is bafkl.on. / Typos as the othe switches."* — the same caption slot, with the key already released |
+| The keyboard works | `key_k` (General Mapping's K → A) reaches the guest: `content_pipeline: usable menu` appears, i.e. the title left "PRESS (A) TO START". This is **not** the legacy MnK emulation — that driver is not installed on a boot whose keyboard gate was closed — so it proves the reopened gate's own path: the synthetic host device enumerates again, the filter runs, and General Mapping's key defaults do the rest |
+| Alive | the process is still running at the end |
+
+One observed save behaviour, **pre-existing from P7 and not introduced here**: a save through
+`SaveProfile` re-renders the file's base keys, so the minimal scratch profile gains
+`[launcher]`/`[window]`/`[launch]` at their model defaults (the same bytes appear in P7's
+`out/gameplay-mapping/in-game/p7-live4/profile-13-after-tap.toml`). Every value the user had
+(`mouse_ui_nav = false`) survived; the added sections are defaults of the same model the external
+app wrote. P8b is where that renderer is either kept or narrowed, because it is the executable's
+file format.
+
+### 18.4 The in-song Controls arm, driven live (2026-10-18)
+
+`pwsh -NoProfile -File scripts\acceptance_controls_in_song.ps1 -Label p8a-in-song3` — **23 steps, 0
+failures**, base game, `--mnk_mode=1`, an empty DLC library, release build. Evidence:
+`out/gameplay-mapping/in-game/p8a-in-song3/` (log, argv, `screens.txt`, `capture-lines.txt`) and
+`p8a-in-song3-shots/`; the same arm re-ran on the final binary as `p8a-in-song4` (23 steps, 0
+failures).
+
+| Step | Measurement |
+| --- | --- |
+| Into a song | the P3/P7 route (title → song list → loading → `game_screen`); the pause shot OCRs as `GAME PAUSED` with rows Resume Game, Help & Options, Achievements, Restart, Quit Song, Main Menu, Exit Game |
+| Pause → Help & Options | row 1 (clicked by the host's own logged bounds) opens **our** `settings_pause_screen` - retail's `pause_options` case now jumps to the merged root's pause twin |
+| Root → Controls | row 1 (`pause_controls`) opens `settings_controls_pause_screen`; no focus-switch fault, which is the P5b failure mode the reroute had to avoid |
+| Input Types | opens `settings_input_types_pause_screen`; Back returns to the Controls page |
+| A bind page | Controls → General Mapping → A Button → Assign opens `settings_bind_general_a_pause_screen` and then `settings_listen_pause_screen` |
+| Cancel in-song | a 2 s hold of B leaves the dialog for the bind page (the row is not written) |
+| Back to the song | three Backs reach the in-song root, one more reaches `game_screen` with the pause panel still up, and B on `pause.lst` is retail's own resume: `screen=game_screen panel=game_panel` |
+| Faults | none - the log carries no `access violation`/`Unhandled guest`, and the process is alive afterwards |
+
+Two harness iterations preceded the pass and are kept as the measurement rather than deleted:
+`p8a-in-song` (one `lstick_down` tap can travel several rows, so it landed on Exit Game; and
+`key_b` is not a `drive_ui` name - B is `b`) and `p8a-in-song2` (the General Mapping branch needs
+**three** Backs from the bind page: it has no Controller page in between). Both left their own
+evidence directories.
+
+### 18.5 Parity verification (§17.1 against the build)
+
+Every destination the inventory names is a screen this build generates, and every row it names is
+declared on the page it says. The check dumps the product's own definitions with
+`rb_blitz_settings_screen_tests.exe dump-def <screen|panel>` (the panel body is where rows live)
+and asserts the name is present: **23 screens and 21 named rows, 0 missing** on the 2026-10-18
+build. The `settings_screen` suite independently pins that every panel and destination an authored
+tree names is one the payload provides and that every page has an in-song twin.
+
+| Inventory row | Destination confirmed |
+| --- | --- |
+| `launch.target` | `settings_general_screen` → row `settings_target` → `settings_target_screen` |
+| `user_data_root`, `dlc_root` | installer wizard only (no in-game row by design) |
+| `enhancements_dlc_cache` | `settings_dlc_screen` → `settings_dlc_cache` |
+| `dlc_scan_threads` | `settings_dlc_screen` → `settings_dlc_threads` |
+| `enhancements_menu_dlc_songs` | `settings_dlc_screen` → `settings_dlc_menu_songs` |
+| `enhancements_menu_dlc_song_count` | retired (P10); reported as ignored |
+| `enhancements_hide_menu_options` / `enhancements_hidden_menu_options` | `settings_interface_screen` → `settings_hide_items_screen` → `settings_main_menu_screen` (`settings_mm_master`, `settings_mm_dlc`, …) |
+| `enhancements_rename_mod_settings` | retired (P10, one fixed retail label) |
+| `enhancements_skip_offline_dialog` | `settings_hide_items_screen` → `settings_offline` |
+| `resolution_scale` | `settings_display_screen` → `settings_resolution` |
+| `fullscreen` | `settings_display_screen` → `settings_display` |
+| `vsync` | `settings_display_screen` → `settings_vsync` |
+| `gpu_backend` | `settings_video_screen` → `settings_renderer` |
+| `swap_post_effect`, `native_2x_msaa` | `settings_graphics_screen` → `settings_aa` → `settings_aa_screen` |
+| `anisotropic_override` | `settings_graphics_screen` → `settings_filtering` |
+| `present_letterbox` | no in-game row by design (the Interface row edits the payload's own `interface.letterbox`; the host cvar stays `rb_blitz.toml`/CLI) |
+| `present_safe_area_x/y`, `present_allow_overscan_cutoff`, `present_dither`, `audio_mute`, `audio_maxqframes` | host-only developer rows, profile-carried (`kHostOnlyCvarAllowlist`); the player-facing equivalents are the Interface/Video rows and retail's Audio page |
+| `monitor` | obsolete app-window geometry; the game fits its one window (`src/settings/window_policy.*`) |
+| `mouse_ui_nav`, `keyboard_support` | `settings_input_types_screen` → `input.mouse_support` / `input.keyboard_support` |
+| Controller tab's bespoke UI (three tables, capture, reset) | `settings_controls_screen` → `settings_general_mapping_screen` / `settings_gameplay_mapping_screen` (per-row Assign/Reset, table resets, listening dialog) |
+| `[nav]` app-window scheme | obsolete app UI state; preserved in the profile, read by nothing after P8b |
+
+### 18.6 Tests
+
+- `ctest --test-dir out/build/win-amd64-debug` (the Vulkan-off tree): **41/41 pass**, 2026-10-18.
+- `input_gates` grew from 151 to **276 checks** (the six recovery cases above).
+- The release build (`cmake --preset win-amd64-release` + `--build`) is green; it is the binary
+  both live arms ran.
+
+### 18.7 What P8a does not claim
+
+- **No physical pad.** The recovery's pad case ("a connected pad means no recovery") is a unit
+  case; no pad exists on this machine, so the live arm had to run with `--input_backend=none`.
+- **A locked switch refused live** is unit-tested and code-inspected (`kRefused` logs the reason
+  and claims nothing), not driven: it needs a `--no-keyboard_support` command line, which is
+  itself the lock.
+- **The in-song arm ran on the base game**, not the Ultimate payload; the screens and the pause
+  reroute are payload-independent, but an Ultimate in-song boot is not measured.
+- **A pad capture, a pad hold as the cancel gesture and stick-direction capture in-song** stay
+  unit-tested (no pad).
+- **P8b's packaging, installer and profile-format work is untouched** by this pass, as §17.5
+  requires.

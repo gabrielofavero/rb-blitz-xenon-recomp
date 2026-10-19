@@ -12,6 +12,8 @@
 #include "profile/gameplay_remap.h"
 #include "profile/remap.h"
 
+#include <chrono>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -62,6 +64,66 @@ class FakeDevices {
 };
 
 const SourceGates kOpen{true, true};
+
+// The recovery action's only collaborator: a store that records the one call it is allowed to
+// make. Every other operation counts as a violation, so the test pins "exactly one switch, one
+// commit, nothing else" rather than trusting the implementation's comment.
+class FakeStore final : public rb_blitz::settings::InputBindingStore {
+ public:
+  bool IsToken(std::string_view) const override { return true; }
+  bool Matches(std::string_view, bool) const override { return false; }
+  bool StageBool(std::string_view token, bool value, std::string* error) override {
+    ++stage_calls;
+    staged_token = std::string(token);
+    staged_value = value;
+    if (refuse) {
+      if (error != nullptr) {
+        *error = "this row is set on the command line, so the menu cannot change it";
+      }
+      return false;
+    }
+    staged = true;
+    return true;
+  }
+  bool StageReset(std::string_view, std::string*) override {
+    ++other_calls;
+    return false;
+  }
+  bool StageResetAll(std::string_view, std::string*) override {
+    ++other_calls;
+    return false;
+  }
+  bool Commit(std::string* error) override {
+    ++commit_calls;
+    if (fail_commit) {
+      if (error != nullptr) {
+        *error = "the profile could not be written";
+      }
+      return false;
+    }
+    return true;
+  }
+  bool BeginCapture(std::string_view, std::string*) override {
+    ++other_calls;
+    return false;
+  }
+  void CancelCapture() override { ++other_calls; }
+  bool CompleteCapture(std::string_view, const remap::Source&, std::string*) override {
+    ++other_calls;
+    return false;
+  }
+  std::string Describe(std::string_view) const override { return {}; }
+  std::string Summary() const override { return {}; }
+
+  int stage_calls = 0;
+  int commit_calls = 0;
+  int other_calls = 0;
+  bool staged = false;
+  bool refuse = false;
+  bool fail_commit = false;
+  std::string staged_token;
+  bool staged_value = false;
+};
 
 }  // namespace
 
@@ -464,6 +526,162 @@ int main() {
     edges.Observe(gameplay::Action::kPowerup, true);
     CHECK_EQ(edges.Drain(gameplay::Action::kPowerup, out, 2), std::size_t{1});
     CHECK_TRUE(out[0]);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // P8: the Controls recovery path (plan §14.4/§17.2).
+  // -------------------------------------------------------------------------------------------
+
+  BeginCase("recovery is needed only when no route exists at all");
+  {
+    // Both host gates closed and no pad: nothing can drive the menus.
+    CHECK_TRUE(RecoveryNeeded(SourceGates{false, false}, false));
+    // Either host gate open is a route.
+    CHECK_FALSE(RecoveryNeeded(SourceGates{true, false}, false));
+    CHECK_FALSE(RecoveryNeeded(SourceGates{false, true}, false));
+    CHECK_FALSE(RecoveryNeeded(SourceGates{true, true}, false));
+    // A pad is a route even though it is not a host gate, so it always disables recovery.
+    CHECK_FALSE(RecoveryNeeded(SourceGates{false, false}, true));
+    CHECK_FALSE(RecoveryNeeded(SourceGates{true, true}, true));
+  }
+
+  BeginCase("the recovery hold fires exactly once, on a complete hold");
+  {
+    using clock = std::chrono::steady_clock;
+    const clock::time_point t0 = clock::now();
+    RecoveryHold hold;
+    // A neutral poll first, then the press: the hold starts on the rising edge.
+    CHECK_FALSE(hold.Observe(true, false, t0));
+    CHECK_FALSE(hold.Observe(true, true, t0));
+    CHECK_TRUE(hold.Holding());
+    // 1.999 s is not the hold; the 2 s mark is, and it fires once.
+    CHECK_FALSE(hold.Observe(true, true, t0 + std::chrono::milliseconds{1999}));
+    CHECK_TRUE(hold.Observe(true, true, t0 + kRecoveryHold));
+    CHECK_FALSE(hold.Observe(true, true, t0 + kRecoveryHold + std::chrono::seconds{5}));
+    // Release, then a fresh hold: recovery can be asked for again.
+    CHECK_FALSE(hold.Observe(true, false, t0 + std::chrono::seconds{10}));
+    CHECK_FALSE(hold.Observe(true, true, t0 + std::chrono::seconds{11}));
+    CHECK_TRUE(hold.Observe(true, true, t0 + std::chrono::seconds{13}));
+  }
+
+  BeginCase("a release or a poll where recovery is not needed starts the hold over");
+  {
+    using clock = std::chrono::steady_clock;
+    const clock::time_point t0 = clock::now();
+    const auto ms = [](const long long value) { return std::chrono::milliseconds{value}; };
+    RecoveryHold hold;
+    CHECK_FALSE(hold.Observe(true, false, t0));
+    CHECK_FALSE(hold.Observe(true, true, t0));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(1500)));
+    // Release before the hold completes: the next hold starts from zero.
+    CHECK_FALSE(hold.Observe(true, false, t0 + ms(1600)));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(1700)));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(3200)));
+    CHECK_TRUE(hold.Observe(true, true, t0 + ms(3700)));
+    // A poll where recovery is not needed restarts it too, even while the key stays down: a
+    // switch that is closed again while F10 is still held must not count the old hold.
+    CHECK_FALSE(hold.Observe(true, false, t0 + ms(3800)));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(3900)));
+    CHECK_FALSE(hold.Observe(false, true, t0 + ms(4000)));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(5000)));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(7000)));
+    // The key has to come up and go down again.
+    CHECK_FALSE(hold.Observe(true, false, t0 + ms(7100)));
+    CHECK_FALSE(hold.Observe(true, true, t0 + ms(7200)));
+    CHECK_TRUE(hold.Observe(true, true, t0 + ms(9200)));
+  }
+
+  BeginCase("a key already held when the watch starts cannot recover");
+  {
+    using clock = std::chrono::steady_clock;
+    const clock::time_point t0 = clock::now();
+    const auto ms = [](const long long value) { return std::chrono::milliseconds{value}; };
+    // The very first observation is already a pressed key: the profile loaded with F10 down.
+    RecoveryHold already_down;
+    CHECK_FALSE(already_down.Observe(true, true, t0));
+    CHECK_FALSE(already_down.Observe(true, true, t0 + ms(3000)));
+    // Releasing it and pressing again is what arms the hold.
+    CHECK_FALSE(already_down.Observe(true, false, t0 + ms(3100)));
+    CHECK_FALSE(already_down.Observe(true, true, t0 + ms(3200)));
+    CHECK_TRUE(already_down.Observe(true, true, t0 + ms(5200)));
+
+    // The same rule for a key held across the moment recovery *becomes* needed: the player has
+    // to release it and press it again, or a held key from another window would recover by
+    // accident.
+    RecoveryHold held_across;
+    CHECK_FALSE(held_across.Observe(false, true, t0));
+    CHECK_FALSE(held_across.Observe(true, true, t0 + ms(100)));
+    CHECK_FALSE(held_across.Observe(true, true, t0 + ms(3000)));
+  }
+
+  BeginCase("the recovery action stages exactly the keyboard switch, once");
+  {
+    FakeStore store;
+    std::string why;
+    CHECK_TRUE(RecoverKeyboard(&store, &why) == RecoveryOutcome::kRearmed);
+    CHECK_EQ(store.stage_calls, 1);
+    CHECK_EQ(store.commit_calls, 1);
+    CHECK_EQ(store.other_calls, 0);  // no reset, no capture, no second switch
+    CHECK_TRUE(store.staged_token == "input.keyboard_support");
+    CHECK_TRUE(store.staged_value);
+    CHECK_TRUE(why.empty());
+
+    // A build with no store (a tool, or a boot that never installed one) is named, not claimed.
+    why.clear();
+    CHECK_TRUE(RecoverKeyboard(nullptr, &why) == RecoveryOutcome::kNoStore);
+    CHECK_FALSE(why.empty());
+
+    // A switch the store refuses (a command-line or environment lock) is not a recovery, and
+    // nothing is committed.
+    FakeStore locked;
+    locked.refuse = true;
+    why.clear();
+    CHECK_TRUE(RecoverKeyboard(&locked, &why) == RecoveryOutcome::kRefused);
+    CHECK_EQ(locked.stage_calls, 1);
+    CHECK_EQ(locked.commit_calls, 0);
+    CHECK_FALSE(why.empty());
+
+    // A save that fails after staging is reported, so the caller cannot claim success.
+    FakeStore unwritable;
+    unwritable.fail_commit = true;
+    why.clear();
+    CHECK_TRUE(RecoverKeyboard(&unwritable, &why) == RecoveryOutcome::kSaveFailed);
+    CHECK_EQ(unwritable.stage_calls, 1);
+    CHECK_EQ(unwritable.commit_calls, 1);
+    CHECK_FALSE(why.empty());
+  }
+
+  BeginCase("the recovery key is readable and is no shipped default binding");
+  {
+    // The profile's own spelling resolves to a key the host latch can read.
+    const std::optional<remap::Source> parsed =
+        remap::ParseSource("key:" + std::string(kRecoveryKey));
+    CHECK_TRUE(parsed.has_value());
+    CHECK_TRUE(parsed->kind == remap::SourceKind::kKey);
+    CHECK_TRUE(parsed->name == kRecoveryKey);
+    // No shipped table binds it: General Mapping's defaults and both gameplay tables alike. A
+    // recovery key that a binding already used could fire by accident.
+    for (const remap::Target target : remap::Targets()) {
+      const std::vector<remap::Source>* defaults = remap::DefaultSources(target);
+      if (defaults == nullptr) {
+        continue;
+      }
+      for (const remap::Source& source : *defaults) {
+        CHECK_FALSE(source.kind == remap::SourceKind::kKey && source.name == kRecoveryKey);
+      }
+    }
+    for (const gameplay::TableKind kind : gameplay::TableKinds()) {
+      const gameplay::Table table(kind);
+      for (const gameplay::Action action : gameplay::Actions()) {
+        const std::vector<remap::Source>* sources = table.Effective(action);
+        if (sources == nullptr) {
+          continue;
+        }
+        for (const remap::Source& source : *sources) {
+          CHECK_FALSE(source.kind == remap::SourceKind::kKey && source.name == kRecoveryKey);
+        }
+      }
+    }
   }
 
   return Finish();

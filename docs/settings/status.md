@@ -317,14 +317,44 @@ menu, so the external app is no longer the only place to change a binding:
 * **The profile keeps only differences**: a switch set back to its compiled default is dropped
   instead of written, so Custom Off leaves no `gameplay_mapping_controller` line.
 * **Retail's controller page is the Default Presets destination**, not a deleted screen, and the
-  in-song list's `Controls` row now jumps to the pause twin of this menu (unit-tested; not yet
-  driven — [known-issues.md](../reference/known-issues.md)).
+  in-song list's `Controls` row now jumps to the pause twin of this menu. The in-song route was
+  driven by P8a (below), not only unit-tested.
 
 Evidence: `rb_blitz_settings_screen_tests` 89,484 checks and `rb_blitz_input_bindings_tests` 80
 checks, 41/41 ctest; one tracked driven boot, 56 steps, 0 failures
-(`out/gameplay-mapping/in-game/p7-live4/`, `p7-live4-shots/`). What this does **not** do: retire
+(`out/gameplay-mapping/in-game/p7-live4/`, `p7-live4-shots/`). What P7 did **not** do: retire
 the executable, move the remaining non-input settings, drive the in-song page or a pad, or
 recover a saved profile with every source already off (plan §16.5). Those are P8's.
+
+#### Recovery, the in-song route, and parity (P8a, 2026-10-18)
+
+P8a landed the three remaining in-game pieces (plan §18); the executable and packaging are still
+P8b's, and no build, installer or payload file changed here. A profile that leaves no usable route
+(Keyboard and Mouse both off, no pad) now says so on the caption and reopens the keyboard on
+**one 2 s hold of F10** — the single exception to the "off blocks that device everywhere" rule,
+changing exactly one stored switch. The notice is drawn even with Settings Labels off, and the
+observation runs from the settings overlay as well as the input filter, because the filter does
+not run while no device enumerates. The in-song Controls route is measured: a paused song reaches
+pause → Help & Options → Controls → Input Types and a General Mapping bind page, the listening
+dialog's hold-to-cancel works there, and the route returns to the pause panel and resumes with no
+guest fault. The parity inventory is verified against the build (plan §17.1/§18.5): every
+external-app row has an in-game destination or a written retirement.
+
+The executable keeps shipping until **P8b**, which then removes
+`rb_blitz_controller_settings.exe`, its target, tests, scripts, payload entry and installer
+shortcuts. The four presentation and two audio host rows stay
+profile-carried with `rb_blitz.toml`/CLI as their documented editor; `present_letterbox` is a
+developer cvar only, and `monitor` is obsolete window geometry (the game fits its one window from
+the system DPI and the primary display). The seven-row profile allowlist is in
+`src/settings/cvars.h`.
+
+Evidence: `scripts/acceptance_recovery.ps1` (11 steps, 0 failures; `p8a-recovery2` and the
+final-binary re-run `p8a-recovery3`) and `scripts/acceptance_controls_in_song.ps1` (23 steps, 0
+failures; `p8a-in-song3` and `p8a-in-song4`), all under `out/gameplay-mapping/in-game/`;
+`input_gates` 276 checks; 41/41 ctest. **Still open:** a physical
+pad (capture, hold-to-cancel, stick directions, and the recovery's pad-connected arm), an in-song
+page on the Ultimate payload, and a live refusal of a switch locked by the command line
+([known-issues.md](../reference/known-issues.md)).
 
 #### Boot speed and one frozen picture (owner report, 2026-10-13, later)
 

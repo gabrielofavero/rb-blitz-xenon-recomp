@@ -219,4 +219,68 @@ void ActionEdges::Clear() {
   held_.fill(false);
 }
 
+// ---------------------------------------------------------------------------------------------
+// P8: the Controls recovery path (plan §14.4/§17.2).
+// ---------------------------------------------------------------------------------------------
+
+bool RecoveryNeeded(const SourceGates& gates, const bool pad_connected) {
+  return !gates.keyboard && !gates.mouse && !pad_connected;
+}
+
+bool RecoveryHold::Observe(const bool needed, const bool key_down,
+                           const std::chrono::steady_clock::time_point now) {
+  if (!needed) {
+    // The route exists (or exists again): nothing to recover, and the next need starts over.
+    holding_ = false;
+    done_ = false;
+    was_down_ = key_down;
+    return false;
+  }
+  const bool rising = key_down && !was_down_;
+  was_down_ = key_down;
+  if (!key_down) {
+    // Any release starts over: a fresh attempt needs a fresh hold, and a recovery that fired
+    // cannot fire again until the key comes up.
+    holding_ = false;
+    done_ = false;
+    return false;
+  }
+  if (rising) {
+    holding_ = true;
+    since_ = now;
+    return false;
+  }
+  if (holding_ && !done_ && now - since_ >= kRecoveryHold) {
+    done_ = true;
+    return true;
+  }
+  return false;
+}
+
+RecoveryOutcome RecoverKeyboard(settings::InputBindingStore* store, std::string* why) {
+  if (store == nullptr) {
+    if (why != nullptr) {
+      *why = "the Controls store is not installed in this build";
+    }
+    return RecoveryOutcome::kNoStore;
+  }
+  std::string error;
+  // The token is the row grammar's own spelling (src/profile/input_rows.h): the recovery edit is
+  // the same row the Controls menu's Keyboard switch writes, so a boot can tell them apart only by
+  // its log line, never by where the value landed.
+  if (!store->StageBool("input.keyboard_support", true, &error)) {
+    if (why != nullptr) {
+      *why = error.empty() ? "the store refused the switch" : error;
+    }
+    return RecoveryOutcome::kRefused;
+  }
+  if (!store->Commit(&error)) {
+    if (why != nullptr) {
+      *why = error.empty() ? "the save failed" : error;
+    }
+    return RecoveryOutcome::kSaveFailed;
+  }
+  return RecoveryOutcome::kRearmed;
+}
+
 }  // namespace rb_blitz::input

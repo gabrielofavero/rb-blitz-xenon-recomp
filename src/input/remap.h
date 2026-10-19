@@ -31,6 +31,8 @@
 
 #pragma once
 
+#include <string>
+
 #include <rex/runtime.h>
 
 namespace rb_blitz::input {
@@ -64,6 +66,23 @@ bool KeyboardSupportEnabled();
 // action instead of delivering a late press or a release the guest never asked for (plan D5).
 // Safe from any thread; the poll that sees it invalidates under its own lock.
 void InvalidateGameplayInput();
+
+// P8: the Controls recovery path (plan §14.4, §17.2). A profile can leave the menu with no usable
+// input at all - both host gates off and no pad - and then ordinary input cannot reach the row
+// that would fix it. While (and only while) no route exists, one fixed key (`kRecoveryKey`) held
+// for `kRecoveryHold` reopens the keyboard gate through the same store the Controls rows write.
+//
+// One observation per call; safe from the UI thread and from the guest's state filter, and both
+// call it. The filter alone would not do: `InputSystem::GetState` returns "not connected" before
+// the filter runs when no device enumerates, which is exactly the recovery state (the synthetic
+// host device enumerates only while a host gate is open). The overlay draws every frame, so the
+// observation happens there too.
+void TickInputRecovery();
+
+// What the help caption should say about recovery right now: the "hold F10" sentence while the
+// profile leaves no usable route, a short confirmation for a while after the key reopened it, and
+// empty otherwise. Drawn even with Settings Labels off (a navigation problem is not optional help).
+std::string RecoveryNotice();
 
 // Reads the profile's `[remap]` table and filters every pad state the guest asks for.
 // Installed the same way mouse_ui is - by wrapping RuntimeConfig::input_factory - because that is

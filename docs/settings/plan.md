@@ -280,6 +280,15 @@ Main Menu details:
 
 ### 3.6 Retired interface and Controller Settings
 
+> **Status 2026-10-18: the game owns the live inventory; the external app is on its way out.**
+> P7 moved the input surface inside Help & Options → Controls, and the remaining external-utility
+> work is split into **P8a** (recovery and parity) and **P8b** (retire
+> `rb_blitz_controller_settings.exe`) by [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+> §17. Its §17.1 is the row-by-row inventory of every row this table used to own; the decisions
+> below remain the authority it cites — in particular no new rows for the Presentation category,
+> the audio host rows, or the forced monitor, and the retired rename/pool-size rows. P8a changes
+> no packaging; P8b removes the app after P8a's arms pass.
+
 | Old surface | New disposition |
 | --- | --- |
 | Advanced Settings main-menu row | Retired. The merged Help & Options screen is the only entry point; P5's row, its locale entry, and the hide-list protection for it go with it. |
@@ -295,7 +304,9 @@ Main Menu details:
 
 Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
 
-Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_controller_settings.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
+**Superseded by P7/P8 (2026-10-18).** The functionality this paragraph protects now lives in Help & Options → Controls ([gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §14, §16): Input Types, General Mapping, both gameplay tables, capture, resets and the native preset page. What the in-game menu deliberately does **not** reproduce is the app window's own navigation rebinding and its `[nav]` scheme — obsolete app UI state — and Guide stays prohibited. The recovery exception P8a builds is the in-game replacement for the app's safe-mode path (that plan §17.2).
+
+Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_controller_settings.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings. **The filename rule ends with P8b:** the executable is removed, its shortcuts and launch actions with it, and the name survives only as the legacy portable marker and profile environment variable (`docs/settings/contracts.md` §8).
 
 The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new Controller Settings General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
 
@@ -840,7 +851,7 @@ If P4's Variant B hook turns out not to take effect, the storage/installer/menu 
 | New native menu code, the merged root screen, and its list resource | P5b. P6 uses provider extension points, not edits to P5b's menu file in parallel. |
 | Ultimate adapter and exact-file routing | P6; coordinate VFS dispatch hooks centrally. |
 | `installer/setup.iss`, installer helper, pins/template labels, installer tests | P7. P9 must not repurpose installer helpers without agreement. |
-| `controller-settings/`, `src/input/remap.*`, controller parts of `src/profile/` | P8 after P3 has finished migration/profile changes. |
+| `controller-settings/`, `src/input/remap.*`, controller parts of `src/profile/` | P8b (retirement) after P3's migration/profile changes; the recovery/parity half is P8a and touches no app file (gameplay-mapping plan §17). |
 | `src/ui/menu_options.*`, `src/hooks/menu_filter.*`, `src/hooks/shell_music.*`, relevant enhancements | P10, respecting the pre-existing staged song-cache implementation. |
 | New restart code | P9; early executable bootstrap wired by coordinator. |
 

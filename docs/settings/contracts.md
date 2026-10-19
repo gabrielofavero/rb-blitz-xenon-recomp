@@ -571,6 +571,15 @@ Refresh Song Library.
 
 ## 8. Runtime controller allowlist (frozen)
 
+> **Status 2026-10-18: the app is being retired; the allowlist stays.** P7 moved the rows this
+> section is about into Help & Options → Controls, and P8b (gameplay-mapping plan §17) removes
+> `rb_blitz_controller_settings.exe` and its packaging. The allowlist and the profile's `[remap]`,
+> `[nav]` and gameplay tables remain **frozen for compatibility** — an existing `launcher.toml`
+> must keep loading byte-for-byte — but after P8b nothing but the game itself writes the input
+> rows. `[nav]` becomes read-by-nothing preservation data (the app window it described is gone);
+> the seven host-only presentation/audio rows stay profile-carried with `rb_blitz.toml`/CLI as
+> their editor (plan §17.1).
+
 Today `ApplyProfileSettings` (`src/profile/profile_apply.cpp`) applies **every** `[settings]`
 row from `launcher.toml` at the config rank. After migration that would leave retired native fields
 active. Frozen:

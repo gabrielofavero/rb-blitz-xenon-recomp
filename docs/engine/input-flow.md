@@ -393,8 +393,48 @@ being bound (plan §14.3). Twenty seconds without an input closes the page; an u
 captures nothing and re-waits for neutral; a completed capture is saved through the store, and a
 save failure is posted as the overlay's text and leaves the effective mapping as it was.
 
-**What this pass did not drive:** the in-song variant of the dialog and the Controls menu, a pad
-capture, and the Gameplay Mapping → Controller toggle inside a song (plan §16.5).
+**What this pass did not drive:** a pad capture and the Gameplay Mapping → Controller toggle
+inside a song (plan §16.5). The **in-song variant of the dialog and the Controls menu** was
+closed by P8a (§ below): a paused song drives pause → Help & Options → Controls → Input Types and
+a bind page → the dialog's hold-to-cancel → back to the pause panel → resume, with no guest fault
+(`out/gameplay-mapping/in-game/p8a-in-song3/`, plan §18.4).
+
+## The recovery path, and why it has two observation points (P8a, 2026-10-18)
+
+One input state has no in-game way out: a saved profile with **both host gates closed and no pad
+connected**. Every ordinary source is inert there, so the Controls rows cannot be reached. P8a's
+recovery path is the only exception to R1 ([src/input/source_gates.h](../../src/input/source_gates.h),
+`RecoveryNeeded`/`RecoveryHold`/`RecoverKeyboard`, and
+[src/input/remap.cpp](../../src/input/remap.cpp), `TickInputRecovery`):
+
+* **Needed** means both gates off *and* no physical pad. A pad is a route even though it is not a
+  host gate, so plugging one in disables recovery.
+* **F10** (`kRecoveryKey`, the profile's spelling of the name) held for **2 s** fires once. The
+  hold starts on a rising edge, so a key already down when the profile is read cannot trigger it,
+  and any release or a poll where recovery is no longer needed starts over.
+* The action is one edit through the same store the Controls rows use:
+  `input.keyboard_support = true`, committed once. Nothing else is written, and a switch locked by
+  a command-line/environment value is refused and logged rather than reported as success.
+* The caption says so **even with Settings Labels off** - a navigation problem is not optional
+  help. While recovery is needed it reads "No input is available … Hold F10 for 2 seconds …";
+  after it acts, a short confirmation points at Input Types.
+
+**Why the state filter alone is not enough (measured from the SDK source).**
+`InputSystem::GetState` returns `X_ERROR_DEVICE_NOT_CONNECTED` *before* calling the state filter
+when no device contributes (`rexglue-sdk/src/input/input_system.cpp`, `GetState`), and the title's
+synthetic host device enumerates only while a host gate is open. A profile with both gates closed
+and no pad therefore never runs the filter. `TickInputRecovery` is called from the filter *and*
+from the settings overlay's per-frame `OnDraw`, which always runs; both share one edge-guarded
+watch, so the second caller cannot double-fire.
+
+**Live acceptance, 2026-10-18** (`scripts/acceptance_recovery.ps1 -Label p8a-recovery2`): 11
+steps, 0 failures, `--input_backend=none`, Settings Labels off. The boot logs the need
+(`input recovery: no usable input … hold F10 for 2000 ms`), the caption OCRs with the sentence on
+screen, one 2.6 s hold logs `F10 held for 2000 ms … keyboard_support is on again`, the profile
+loses `keyboard_support = false` and keeps `mouse_ui_nav = false`, and a menu key then reaches
+the guest (`content_pipeline: usable menu`) through General Mapping's own key defaults - the
+legacy MnK emulation is not installed on that boot, so this is the reopened gate's own path.
+Evidence: `out/gameplay-mapping/in-game/p8a-recovery2/`; plan §18.3.
 
 ## Checks
 

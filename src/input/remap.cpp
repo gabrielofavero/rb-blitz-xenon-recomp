@@ -17,6 +17,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -314,6 +315,26 @@ bool SourceDownThunk(void* context, const Source& source) {
   return SourceHeld(view->physical, view->gates, source);
 }
 
+// P8: the recovery watch (remap.h). One state machine, observed from both the state filter and
+// the settings overlay's per-frame draw, so the observation also happens in the one state where
+// the filter never runs (no device enumerates, so `GetState` answers "not connected" before the
+// filter). The mutex is all the two call sites share; nothing is held across the commit.
+struct RecoveryWatch {
+  std::mutex mutex;
+  RecoveryHold hold;
+  bool needed = false;
+  std::chrono::steady_clock::time_point confirmed_until{};
+};
+RecoveryWatch g_recovery;
+
+// How long the caption keeps saying that the keyboard was reopened. It outlasts the key's own
+// release by a comfortable margin, so the confirmation is read after the hold ended.
+constexpr std::chrono::seconds kRecoveryConfirmFor{8};
+
+// The display spelling of `kRecoveryKey`; the sentence a player reads, so it is not the profile's
+// lowercase name.
+constexpr char kRecoveryKeyLabel[] = "F10";
+
 }  // namespace
 
 bool KeyboardSupportEnabled() { return REXCVAR_GET(keyboard_support); }
@@ -324,6 +345,70 @@ void InvalidateGameplayInput() {
   // on its next frame, so a press or release from the old context can never arrive late - and a
   // held track action cannot keep repeating across a pause, a screen change or a focus loss.
   gameplay_input::NoteBoundary();
+}
+
+void TickInputRecovery() {
+  const SourceGates gates{KeyboardSupportEnabled(), MouseSupportEnabled()};
+  // The normal path costs two cvar reads and nothing else: the pad is sampled only while both
+  // gates are closed, which is the one configuration that can need recovery.
+  const bool needed =
+      (!gates.keyboard && !gates.mouse) ? RecoveryNeeded(gates, SamplePhysicalPad(nullptr)) : false;
+  // The recovery key is read from the raw latch, never through a gated source evaluation: the
+  // gate this path exists to reopen is the one that would otherwise hide the key. Focus is part
+  // of it because the latch is fed by window key events - an unfocused window hears nothing.
+  const bool key_down = needed && HostInputFocused() && HostKeyDown(kRecoveryKey);
+  bool fire = false;
+  bool announce = false;
+  {
+    std::lock_guard lock(g_recovery.mutex);
+    announce = needed && !g_recovery.needed;
+    g_recovery.needed = needed;
+    fire = g_recovery.hold.Observe(needed, key_down, std::chrono::steady_clock::now());
+  }
+  if (announce) {
+    REXLOG_WARN(
+        "input recovery: no usable input - Keyboard and Mouse support are both off and no pad is "
+        "connected; hold {} for {} ms to reopen the keyboard",
+        kRecoveryKeyLabel, static_cast<long long>(kRecoveryHold.count()));
+  }
+  if (!fire) {
+    return;
+  }
+  std::string why;
+  const RecoveryOutcome outcome = RecoverKeyboard(settings::InputBindings(), &why);
+  if (outcome == RecoveryOutcome::kRearmed) {
+    {
+      std::lock_guard lock(g_recovery.mutex);
+      g_recovery.confirmed_until = std::chrono::steady_clock::now() + kRecoveryConfirmFor;
+    }
+    REXLOG_INFO(
+        "input recovery: {} held for {} ms with no usable input; keyboard_support is on again "
+        "(one switch saved through the Controls store; nothing else was changed)",
+        kRecoveryKeyLabel, static_cast<long long>(kRecoveryHold.count()));
+  } else {
+    // A locked switch (command line or environment) or an unwritable profile. Logged, never
+    // reported as success, and the notice keeps asking for the hold once the key is released.
+    REXLOG_WARN("input recovery: {} held, but the keyboard gate was not reopened: {}",
+                kRecoveryKeyLabel, why);
+  }
+}
+
+std::string RecoveryNotice() {
+  std::lock_guard lock(g_recovery.mutex);
+  if (g_recovery.needed) {
+    std::string text = "No input is available: Keyboard and Mouse support are both off and no ";
+    text += "controller is connected. Hold ";
+    text += kRecoveryKeyLabel;
+    text += " for ";
+    text += std::to_string(std::chrono::duration_cast<std::chrono::seconds>(kRecoveryHold).count());
+    text += " seconds to turn Keyboard Support back on.";
+    return text;
+  }
+  if (std::chrono::steady_clock::now() < g_recovery.confirmed_until) {
+    return "Keyboard Support is back on. Help & Options > Controls > Input Types has the other "
+           "switches.";
+  }
+  return {};
 }
 
 GameplaySwitches ReadGameplaySwitches() {
@@ -369,6 +454,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
         ->SetStateFilter([context](uint32_t user_index,
                                              rex::input::X_INPUT_STATE& state) {
           namespace remap = rb_blitz::profile::remap;
+          // P8: the Controls recovery path observes one host-wide key once per poll (plan
+          // §17.2). It is also observed by the settings overlay, because this filter does not
+          // run at all when no device enumerates - see remap.h.
+          if (IsGameplayUser(user_index)) {
+            TickInputRecovery();
+          }
           // P7: one snapshot for the whole poll; see InstallPadRemap.
           const std::shared_ptr<const EffectiveInput> config = CurrentInput();
           const bool has_table = config->profile_present;
