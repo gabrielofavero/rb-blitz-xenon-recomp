@@ -23,8 +23,21 @@ bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);
 // locale record here rather than left to the in-flight menu_filter relabel, which cannot reach a
 // record spanning more than two archive reads (measured 2026-10-15: with a provider installed the
 // 87 KB English locale sits across three read blocks and the relabel was silently refused).
-bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);
-// The same row's *action*, built into the payload's own copy of the splash record
+bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);// The recompilation project's credit line, inserted into the credits DTA the title loads. The
+// DTA is the list the credits screen renders (`credits_file` in `config/gen/sync_keep.dtb`
+// points at it): the retail file carries the official sections starting with "Core Development
+// Team", and the Ultimate payload's own copy starts with its "Rock Band Blitz Ultimate 2.0
+// Development Team" heading followed by one "Only Dev" row.
+//
+// Default (retail file): a "Recompilation Project" heading and a "Developer" / "Gabriel Fávero"
+// row are inserted before the first official section, separated from it by one blank row.
+// Ultimate (the payload's file): the Ultimate heading is renamed to "Recompilation Project &
+// Ultimate 2.0 Mod" and its one row becomes two - "Recompilation Developer" / "Gabriel Fávero"
+// and "Ultimate 2.0 Developer" / "Synchrony".
+//
+// A file whose first non-empty section is not one of those two headings is left alone (false):
+// a mod release may change what its credits say, and that must not turn into a boot failure.
+bool AddRecompilationCredits(std::vector<ui::dtb::Node>* roots, bool ultimate, std::string* why);// The same row's *action*, built into the payload's own copy of the splash record
 // (`ui/splash/gen/splash.dtb`; the in-flight twin is menu_filter's `TapRefreshCache`). Two sibling
 // statements - the title's connect/discovery screen, then the `file_exists` the host answers by
 // re-scanning - with no byte budget: the payload's record may grow, so both always fit and nothing

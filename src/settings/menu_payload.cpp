@@ -33,6 +33,112 @@ bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_acti
       menu_options::kDlcRowLabel, menu_options::kDlcRowRefreshLabel, &why);
 }
 
+namespace {
+
+// The two credit sections the project prefixes, and the rows it puts there (owner request,
+// 2026-10-19). The retail DTA and the Ultimate payload's own DTA are told apart by the heading
+// of their first section; a file whose heading is neither is a different document and is left
+// alone.
+constexpr std::string_view kRetailCreditsHeading = "Core Development Team";
+constexpr std::string_view kUltimateCreditsHeading =
+    "Rock Band Blitz Ultimate 2.0 Development Team";
+constexpr std::string_view kRecompilationHeading = "Recompilation Project";
+constexpr std::string_view kRecompilationUltimateHeading =
+    "Recompilation Project & Ultimate 2.0 Mod";
+constexpr std::string_view kDeveloperRole = "Developer";
+constexpr std::string_view kRecompilationDeveloperRole = "Recompilation Developer";
+constexpr std::string_view kUltimateDeveloperRole = "Ultimate 2.0 Developer";
+constexpr std::string_view kRecompilationName = "Gabriel Fávero";
+constexpr std::string_view kUltimateName = "Synchrony";
+
+bool IsArrayWithSymbol(const Node& node, std::string_view symbol) {
+  return node.tag == ui::dtb::kArray && !node.kids.empty() &&
+         node.kids[0].tag == ui::dtb::kSymbol &&
+         std::string_view(node.kids[0].text) == symbol;
+}
+
+bool HeadingIs(const Node& node, std::string_view heading) {
+  return IsArrayWithSymbol(node, "heading") && node.kids.size() >= 2 &&
+         node.kids[1].tag == ui::dtb::kString &&
+         std::string_view(node.kids[1].text) == heading;
+}
+
+bool TitleNameIs(const Node& node, std::string_view role, std::string_view name) {
+  return IsArrayWithSymbol(node, "title_name") && node.kids.size() >= 3 &&
+         node.kids[1].tag == ui::dtb::kString &&
+         std::string_view(node.kids[1].text) == role && node.kids[2].tag == ui::dtb::kString &&
+         std::string_view(node.kids[2].text) == name;
+}
+
+Node HeadingNode(std::string_view heading) {
+  return Node::Array({Node::Symbol("heading"), Node::String(heading)});
+}
+
+Node TitleNameNode(std::string_view role, std::string_view name) {
+  return Node::Array({Node::Symbol("title_name"), Node::String(role), Node::String(name)});
+}
+
+// The first non-empty root, i.e. the first rendered section. The leading roots of both shipped
+// files are blank spacer rows.
+size_t FirstSection(const std::vector<Node>& roots) {
+  for (size_t i = 0; i < roots.size(); ++i) {
+    if (roots[i].tag == ui::dtb::kArray && !roots[i].kids.empty()) return i;
+  }
+  return roots.size();
+}
+
+}  // namespace
+
+bool AddRecompilationCredits(std::vector<Node>* roots, bool ultimate, std::string* why) {
+  if (roots == nullptr) {
+    if (why) *why = "no roots";
+    return false;
+  }
+  const size_t first = FirstSection(*roots);
+  if (first == roots->size()) {
+    if (why) *why = "the credits DTA carries no sections";
+    return false;
+  }
+  if (!ultimate) {
+    if (!HeadingIs((*roots)[first], kRetailCreditsHeading)) {
+      if (why) *why = "the first credits section is not the retail game's";
+      return false;
+    }
+    // The section goes where the official credits begin, after the file's leading blank rows,
+    // and one blank row separates it from "Core Development Team".
+    const std::vector<Node> added = {
+        HeadingNode(kRecompilationHeading),
+        TitleNameNode(kDeveloperRole, kRecompilationName),
+        Node::Array({}),
+    };
+    roots->insert(roots->begin() + static_cast<std::ptrdiff_t>(first), added.begin(),
+                  added.end());
+    return true;
+  }
+
+  if (!HeadingIs((*roots)[first], kUltimateCreditsHeading)) {
+    if (why) *why = "the first credits section is not the Ultimate payload's";
+    return false;
+  }
+  // The Ultimate payload's file has exactly one row after that heading: "Only Dev"/"Synchrony".
+  // Check it before changing anything, so a newer payload whose row moved is left untouched
+  // rather than half-rewritten.
+  size_t row = first + 1;
+  while (row < roots->size() && !IsArrayWithSymbol((*roots)[row], "title_name")) ++row;
+  if (row == roots->size() || !TitleNameIs((*roots)[row], "Only Dev", kUltimateName)) {
+    if (why) *why = "the Ultimate credits section does not carry its one 'Only Dev' row";
+    return false;
+  }
+  (*roots)[first].kids[1].text = std::string(kRecompilationUltimateHeading);
+  const std::vector<Node> rows = {
+      TitleNameNode(kRecompilationDeveloperRole, kRecompilationName),
+      TitleNameNode(kUltimateDeveloperRole, kUltimateName),
+  };
+  roots->erase(roots->begin() + static_cast<std::ptrdiff_t>(row));
+  roots->insert(roots->begin() + static_cast<std::ptrdiff_t>(row), rows.begin(), rows.end());
+  return true;
+}
+
 // The refresh row's action as the payload's copy of the splash record carries it. The two
 // statements and their order are menu_options.h's (`kRefreshRowDiscoverScreen`,
 // `kRefreshSentinelPath`), shared with the byte-budgeted in-flight edit so the two can never
@@ -178,6 +284,31 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       }
       return true;
     })) return false;
+  }
+  // The recompilation project's credit line, added to the credits DTA the title loads. The
+  // record is replaced under its own path in the generated archive, which the overlay prefers,
+  // so neither the retail archive nor the Ultimate payload is touched. Which file is the
+  // effective one is decided by what is installed: the Ultimate payload ships its own credits
+  // DTA, while the base game's `config/gen/sync_keep.dtb` names the locale record.
+  {
+    std::vector<uint8_t> credits_bytes;
+    std::vector<Node> credits_roots;
+    ui::dtb::RootHeader credits_header;
+    std::string probe;
+    const bool ultimate_credits = read("ulti/gen/credits.dtb", &credits_bytes, &probe);
+    const std::string credits_path =
+        ultimate_credits ? "ulti/gen/credits.dtb" : "ui/locale/gen/locale_credits_keep.dtb";
+    std::string why;
+    if (ultimate_credits || read(credits_path, &credits_bytes, &why)) {
+      if (!ui::dtb::Parse(credits_bytes.data(), credits_bytes.size(), &credits_roots,
+                          &credits_header, &why)) {
+        // Not fatal: a boot that cannot parse the credits DTA has bigger problems than the
+        // project's credit line, and this payload is not the thing that should refuse it.
+        credits_roots.clear();
+      } else if (AddRecompilationCredits(&credits_roots, ultimate_credits, &why)) {
+        built[credits_path] = ui::dtb::Compile(credits_roots, credits_header);
+      }
+    }
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];

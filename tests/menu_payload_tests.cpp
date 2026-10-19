@@ -301,6 +301,77 @@ int main() {
                                      Node::Symbol("demo_screen")})})})};
     CHECK_FALSE(rb_blitz::settings::SetRefreshRowAction(&other, true));
   }
+  BeginCase("the recompilation credit line is inserted before the retail credits");
+  {
+    using rb_blitz::ui::dtb::Node;
+    std::vector<Node> roots;
+    for (int i = 0; i < 3; ++i) roots.push_back(Node::Array({}));
+    roots.push_back(
+        Node::Array({Node::Symbol("heading"), Node::String("Core Development Team")}));
+    roots.push_back(Node::Array({Node::Symbol("title_name"), Node::String("Project Lead"),
+                                 Node::String("Matthew Nordhaus")}));
+
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, false, &why));
+    // Three spacers, the new heading + row + blank, then the official section untouched.
+    CHECK_EQ(roots.size(), 8u);
+    CheckStrEq(roots[3].kids[0].text, "heading");
+    CheckStrEq(roots[3].kids[1].text, "Recompilation Project");
+    CheckStrEq(roots[4].kids[0].text, "title_name");
+    CheckStrEq(roots[4].kids[1].text, "Developer");
+    CheckStrEq(roots[4].kids[2].text, "Gabriel Fávero");
+    CHECK_EQ(roots[5].kids.size(), 0u);
+    CheckStrEq(roots[6].kids[1].text, "Core Development Team");
+
+    // The edited roots compile to a DTA the project's own parser reads back.
+    const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(roots);
+    std::vector<Node> reparsed;
+    rb_blitz::ui::dtb::RootHeader header;
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &reparsed, &header, &why));
+    CHECK_EQ(reparsed.size(), roots.size());
+
+    // A different document is left alone rather than rewritten.
+    std::vector<Node> other{
+        Node::Array({Node::Symbol("heading"), Node::String("Some Other Team")})};
+    CHECK_FALSE(rb_blitz::settings::AddRecompilationCredits(&other, false, &why));
+    CHECK_EQ(other.size(), 1u);
+  }
+  BeginCase("the recompilation credit line renames the Ultimate section and splits its row");
+  {
+    using rb_blitz::ui::dtb::Node;
+    const auto fixture = [] {
+      std::vector<Node> roots;
+      for (int i = 0; i < 2; ++i) roots.push_back(Node::Array({}));
+      roots.push_back(Node::Array(
+          {Node::Symbol("heading"), Node::String("Rock Band Blitz Ultimate 2.0 Development Team")}));
+      roots.push_back(Node::Array(
+          {Node::Symbol("title_name"), Node::String("Only Dev"), Node::String("Synchrony")}));
+      for (int i = 0; i < 2; ++i) roots.push_back(Node::Array({}));
+      roots.push_back(
+          Node::Array({Node::Symbol("heading"), Node::String("Core Development Team")}));
+      return roots;
+    };
+
+    std::vector<Node> roots = fixture();
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, true, &why));
+    // One row became two, so the file grew by one root.
+    CHECK_EQ(roots.size(), 8u);
+    CheckStrEq(roots[2].kids[1].text, "Recompilation Project & Ultimate 2.0 Mod");
+    CheckStrEq(roots[3].kids[1].text, "Recompilation Developer");
+    CheckStrEq(roots[3].kids[2].text, "Gabriel Fávero");
+    CheckStrEq(roots[4].kids[1].text, "Ultimate 2.0 Developer");
+    CheckStrEq(roots[4].kids[2].text, "Synchrony");
+    // The official section after the 16 blank rows keeps its place.
+    CheckStrEq(roots[7].kids[1].text, "Core Development Team");
+
+    // A newer payload whose one row does not match is left untouched, including its heading.
+    std::vector<Node> moved = fixture();
+    moved[3].kids[1].text = "Someone Else";
+    CHECK_FALSE(rb_blitz::settings::AddRecompilationCredits(&moved, true, &why));
+    CheckStrEq(moved[2].kids[1].text, "Rock Band Blitz Ultimate 2.0 Development Team");
+    CHECK_EQ(moved.size(), fixture().size());
+  }
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();
