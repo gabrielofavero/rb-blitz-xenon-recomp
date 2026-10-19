@@ -266,10 +266,13 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     // The demo (trial) target is offered by name: the recorded trial-boot fault is a separate
     // matter and no longer a reason to omit the choice (owner decision, 2026-10-13). Trial still
     // routes through the same translation as always - `--license_mask=0` and no Ultimate mode.
+    // The page title already says TARGET, so the options do not repeat the game's name (owner
+    // request, 2026-10-19): \"Ultimate\" and \"Demo\" are the labels, and the base target keeps the
+    // one full name the page needs.
     configuration.choices["general.target"] = {{"common", "Rock Band Blitz"}};
     if (provider.payload_present)
-      configuration.choices["general.target"].emplace_back("ultimate", "Rock Band Blitz Ultimate");
-    configuration.choices["general.target"].emplace_back("demo", "Rock Band Blitz Demo");
+      configuration.choices["general.target"].emplace_back("ultimate", "Ultimate");
+    configuration.choices["general.target"].emplace_back("demo", "Demo");
     if (provider.Active() && boot->service()->store().document().values.contains(SettingId::kUnlockAll))
       configuration.boot_booleans["unlockall"] = boot->service()->EffectiveValue(SettingId::kUnlockAll).boolean;
     // The two DLC rows the owner asked for (2026-10-14): R9's own setting is visible again, and the
@@ -279,8 +282,11 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     if (!menu_music_on) {
       configuration.disabled["general.play_current_song"] = "Needs DLC Menu Songs";
     } else if (!menu_music_pool) {
-      configuration.disabled["general.dlc_menu_songs"] = "No DLC songs found";
-      configuration.disabled["general.play_current_song"] = "No DLC songs found";
+      // The pool is empty because no library directory was configured (or it yielded nothing).
+      // The two truncated texts the player saw were "No DLC songs found", which also overran the
+      // row's 28-character line; these say the same thing and fit.
+      configuration.disabled["general.dlc_menu_songs"] = "No DLC Dir";
+      configuration.disabled["general.play_current_song"] = "Disabled";
     }
     configuration.play_current_song = play_current_row;
     configuration.menu_music_songs = menu_music_songs;

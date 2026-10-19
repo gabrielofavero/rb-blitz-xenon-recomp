@@ -421,7 +421,7 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 114u);  // thirty-seven pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 114u);  // fifty-seven pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
@@ -449,8 +449,8 @@ void TestMergedRootShape() {
     }
     return words.size();
   };
-  const char* order[] = {"settings_general", "controls", "calibration", "audio_video_options",
-                         "settings_gameplay", "settings_interface"};
+  const char* order[] = {"tutorial", "calibration", "settings_general", "controls",
+                         "audio_video_options", "settings_gameplay"};
   for (size_t i = 0; i + 1 < 6; ++i) {
     CHECK_TRUE(at(order[i]) < words.size());
     CHECK_TRUE(at(order[i]) < at(order[i + 1]));
@@ -684,6 +684,60 @@ void TestPanelLoadEdit() {
   CHECK_EQ(bare.size(), 1u);
 }
 
+void TestPanelEnterAppend() {
+  BeginCase("a retail panel's enter is appended to last, and a missing panel is refused");
+
+  // The retail Audio page's own enter is `{enter {do {this populate_menu} ...}}`: a block whose
+  // first child is the `enter` symbol. The edit appends after that child because the panel's own
+  // enter is what fills the scene; the appended statements need the loaded objects.
+  std::vector<dtb::Node> nodes = {Cmd(
+      {Sym("new"), Sym("UIPanel"), Sym("av_options_panel"),
+       Arr({Sym("file"), Str("av_options.milo")}),
+       Arr({Sym("enter"), Cmd({Sym("do"), Cmd({Var("this"), Sym("populate_menu")})})})})};
+  std::string reason;
+  const std::vector<dtb::Node> statements = {
+      Cmd({Sym("checkbox.lst"), Sym("set"), Sym("local_xfm"), Var("rbbz_audio_xfm")}),
+      Cmd({Sym("header.lbl"), Sym("set"), Sym("text_token"),
+           Sym("settings_title_audio")})};
+  CHECK_TRUE(AppendPanelEnterStatements(&nodes, "av_options_panel", statements, &reason));
+  CHECK_TRUE(reason.empty());
+
+  dtb::Node* enter = nullptr;
+  for (dtb::Node& member : nodes[0].kids) {
+    if (member.tag == dtb::kArray && !member.kids.empty() && HasText(member.kids[0], "enter")) {
+      enter = &member;
+      break;
+    }
+  }
+  CHECK_TRUE(enter != nullptr);
+  if (enter != nullptr) {
+    CHECK_EQ(enter->kids.size(), 4u);  // `enter`, retail's own `{do ...}`, the two appended
+    CHECK_TRUE(HasText(enter->kids[1], "populate_menu"));
+    CHECK_TRUE(HasText(enter->kids[2], "checkbox.lst"));
+    CHECK_TRUE(HasText(enter->kids[3], "header.lbl"));
+  }
+
+  // The edited tree still compiles and reparses.
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+
+  // Refuses, and changes nothing, when the panel is absent or its `enter` member is missing.
+  std::vector<dtb::Node> other = {Cmd({Sym("new"), Sym("UIPanel"), Sym("other_panel"),
+                                       Arr({Sym("file"), Str("other.milo")})})};
+  reason.clear();
+  CHECK_FALSE(AppendPanelEnterStatements(&other, "av_options_panel", statements, &reason));
+  CHECK_TRUE(!reason.empty());
+  CHECK_EQ(other.size(), 1u);
+  CHECK_EQ(other[0].kids.size(), 4u);
+
+  std::vector<dtb::Node> no_enter = {Cmd({Sym("new"), Sym("UIPanel"), Sym("av_options_panel"),
+                                          Arr({Sym("file"), Str("av_options.milo")})})};
+  reason.clear();
+  CHECK_FALSE(AppendPanelEnterStatements(&no_enter, "av_options_panel", statements, &reason));
+  CHECK_TRUE(!reason.empty());
+  CHECK_EQ(no_enter[0].kids.size(), 4u);
+}
+
 void TestSplashReroute() {
   BeginCase("the main-menu row is re-pointed at the merged root, keeping its symbol");
 
@@ -898,15 +952,15 @@ void TestInSongContext() {
   const std::vector<std::string> five = PauseRootRows(false);
   CHECK_EQ(six.size(), 6u);
   CHECK_EQ(five.size(), 5u);
-  CHECK_TRUE(six[0] == "settings_general");
-  CHECK_TRUE(six[1] == "pause_controls");
-  CHECK_TRUE(six[2] == "calibration");
-  CHECK_TRUE(six[3] == "audio_video_options");
-  CHECK_TRUE(six[4] == "settings_gameplay");
-  CHECK_TRUE(six[5] == "settings_interface");
+  CHECK_TRUE(six[0] == "pause_tutorial");
+  CHECK_TRUE(six[1] == "calibration");
+  CHECK_TRUE(six[2] == "settings_general");
+  CHECK_TRUE(six[3] == "pause_controls");
+  CHECK_TRUE(six[4] == "audio_video_options");
+  CHECK_TRUE(six[5] == "settings_gameplay");
   // A base install must not be offered a dead row: only the provider row moves.
   CHECK_TRUE(std::find(five.begin(), five.end(), "settings_gameplay") == five.end());
-  CHECK_TRUE(five[4] == "settings_interface");
+  CHECK_TRUE(five[4] == "audio_video_options");
 
   // A row of ours in song jumps to its twin and points that twin's Back at whoever sent us.
   const dtb::Node body = Cmd({InSongRowBody("settings_general_screen")});
@@ -1011,11 +1065,10 @@ void TestPauseMergeEdits() {
   CHECK_TRUE(std::find(words.begin(), words.end(), "file_exists") != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), kProviderQuery) != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), "settings_general") != words.end());
-  CHECK_TRUE(std::find(words.begin(), words.end(), "settings_interface") != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), "settings_gameplay") != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), "pause_controls") != words.end());
   // Retail's five are still named (both branches carry the ones that survive), and the rows retail
-  // had but the merge folds into General are gone from the *list*.
+  // had but the merge moves under General are gone from the *list*.
   CHECK_TRUE(std::find(words.begin(), words.end(), "pause_tutorial") != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), "credits") != words.end());
 
@@ -1024,13 +1077,12 @@ void TestPauseMergeEdits() {
   CHECK_FALSE(MergePauseListRows(&nodes, &reason));
   CHECK_TRUE(!reason.empty());
 
-  // The cases our three rows need. Each is appended to the switch that already dispatches retail's
+  // The cases our two rows need. Each is appended to the switch that already dispatches retail's
   // rows, so it runs in the pause panel's own context - the context retail's `pause_controls` and
   // `credits` cases jump from, which is the one that works.
-  const char* rows[] = {"settings_general", "settings_gameplay", "settings_interface"};
-  const char* screens[] = {"settings_general_screen", "settings_gameplay_screen",
-                           "settings_interface_screen"};
-  for (size_t i = 0; i < 3; ++i) {
+  const char* rows[] = {"settings_general", "settings_gameplay"};
+  const char* screens[] = {"settings_general_screen", "settings_gameplay_screen"};
+  for (size_t i = 0; i < 2; ++i) {
     CHECK_TRUE(AddPauseSwitchCase(&nodes, rows[i], InSongRowBody(screens[i]), &reason));
     CHECK_TRUE(reason.empty());
   }
@@ -1804,7 +1856,10 @@ void TestLabels() {
   // acronyms, which are the game's own words for these things ("HUD", "FXAA").
   int checked = 0;
   for (const auto& label : labels) {
-    if (label.first.rfind("settings_mm_", 0) == 0 || label.second == "HUD" ||
+    // The page titles are the scene's own display text and are deliberately uppercase, like the
+    // retail header they replace; the Main Menu mirror and the acronyms are the other exceptions.
+    if (label.first.rfind("settings_mm_", 0) == 0 ||
+        label.first.rfind("settings_title_", 0) == 0 || label.second == "HUD" ||
         label.second == "FXAA") {
       continue;
     }
@@ -1835,8 +1890,13 @@ void TestLabels() {
   }
   CHECK_TRUE(dof_on);
 
-  // No orphan label: everything the table produces is drawn by some row.
+  // No orphan label: everything the table produces is drawn by some row. The one exception is
+  // `settings_title_audio`, which is written into retail's `av_options.dtb` (the Audio route) and
+  // therefore never appears in our own definition tree.
   for (const auto& label : labels) {
+    if (label.first == "settings_title_audio") {
+      continue;
+    }
     CHECK_TRUE(std::find(symbols.begin(), symbols.end(), label.first) != symbols.end());
   }
 
@@ -2699,12 +2759,60 @@ void TestConfirmationPagesAreCaptionFree() {
   CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
 }
 
-// Interface -> Settings Labels (owner request, 2026-10-14): a direct On/Off row on the Interface
-// page, defaulting to On, with its two locale spellings. The *schema*, *store*, *cvar* and *live
-// apply* halves are pinned by their own suites (`settings_hot_apply`, `settings_service`); this is
-// the row half, which lives in this table.
+// Gameplay -> HUD (owner request, 2026-10-19): the page is three rows, and its five element
+// switches live one level down as Visible/Hidden rows so neither page exceeds the six-row budget.
+void TestHudShapeAndVisibilityLabels() {
+  BeginCase("HUD is a three-row page with a five-row elements submenu");
+
+  const std::vector<dtb::Node> roots = DefinitionRoots();
+  const auto has_symbol = [&roots](const char* symbol) {
+    for (const dtb::Node& root : roots) {
+      if (HasSymbol(root, symbol)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  CHECK_TRUE(has_symbol("settings_hud_elements_screen"));
+  CHECK_TRUE(has_symbol("settings_hud_streak_on"));
+  CHECK_TRUE(has_symbol("settings_hud_input_on"));
+  CHECK_TRUE(has_symbol("settings_hud_hide_on"));
+  CHECK_TRUE(has_symbol("settings_hud_gold_on"));
+  CHECK_TRUE(has_symbol("settings_hud_progress_on"));
+  CHECK_TRUE(has_symbol("settings_hud_timer_on"));
+  CHECK_TRUE(has_symbol("settings_hud_pb_on"));
+
+  const std::vector<std::pair<std::string, std::string>> labels = Labels();
+  const auto label_for = [&labels](const std::string& key) {
+    for (const auto& item : labels) {
+      if (item.first == key) {
+        return item.second;
+      }
+    }
+    return std::string();
+  };
+  // The false state of `hide_hud` is the visible one; the other five are visibility variables that
+  // are true when the element is shown.
+  CHECK_TRUE(label_for("settings_hud_hide_on") == "All HUD Elements: Hidden");
+  CHECK_TRUE(label_for("settings_hud_hide_off") == "All HUD Elements: Visible");
+  CHECK_TRUE(label_for("settings_hud_gold_on") == "Gold Star Progress: Visible");
+  CHECK_TRUE(label_for("settings_hud_gold_off") == "Gold Star Progress: Hidden");
+  CHECK_TRUE(label_for("settings_hud_progress_on") == "Song Progress Bar: Visible");
+  CHECK_TRUE(label_for("settings_hud_timer_on") == "Timer: Visible");
+  CHECK_TRUE(label_for("settings_hud_pb_on") == "Personal Best: Visible");
+  CHECK_TRUE(label_for("settings_hud_streak_on") == "Note Streak: On");
+  CHECK_TRUE(label_for("settings_hud_input_on") == "Input Viewer: On");
+  // The Interface page's offline row uses the same Visible/Hidden spelling with the shorter label.
+  CHECK_TRUE(label_for("settings_offline_on") == "Offline Prompts: Hidden");
+  CHECK_TRUE(label_for("settings_offline_off") == "Offline Prompts: Visible");
+}
+
+// General -> Interface -> Help & Options Labels (owner request, 2026-10-14; renamed 2026-10-19):
+// a direct On/Off row, defaulting to On, with its two locale spellings. The *schema*, *store*,
+// *cvar* and *live apply* halves are pinned by their own suites (`settings_hot_apply`,
+// `settings_service`); this is the row half, which lives in this table.
 void TestSettingsLabelsRow() {
-  BeginCase("Interface carries the Settings Labels row, with On/Off labels");
+  BeginCase("Interface carries the Help & Options Labels row, with On/Off labels");
 
   const std::vector<dtb::Node> roots = DefinitionRoots();
   const auto has = [&roots](const char* symbol) {
@@ -2729,8 +2837,8 @@ void TestSettingsLabelsRow() {
     }
     return std::string();
   };
-  CHECK_TRUE(label_for("settings_labels_on") == "Settings Labels: On");
-  CHECK_TRUE(label_for("settings_labels_off") == "Settings Labels: Off");
+  CHECK_TRUE(label_for("settings_labels_on") == "Help & Options Labels: On");
+  CHECK_TRUE(label_for("settings_labels_off") == "Help & Options Labels: Off");
 
   // The caption the row itself shows explains what the switch does; it must exist like every other
   // row's.
@@ -2858,6 +2966,7 @@ int main(int argc, char** argv) {
   TestScreenBackTargets();
   TestRequestPathsParse();
   TestPanelLoadEdit();
+  TestPanelEnterAppend();
   TestSplashReroute();
   TestPlayCurrentSongRow();
   TestPauseReroute();
@@ -2882,6 +2991,7 @@ int main(int argc, char** argv) {
   TestHelpTopicsResolve();
   TestConfirmationPagesAreCaptionFree();
   TestSaveErrorSaysWhy();
+  TestHudShapeAndVisibilityLabels();
   TestSettingsLabelsRow();
   TestAchievementActionWording();
   return Finish();

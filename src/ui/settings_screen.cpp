@@ -309,8 +309,9 @@ struct Row {
   std::string screen;
   std::string member;
   std::string label;
-  // The `_off` spelling's text when it says more than the label (`Reset: Default`,
-  // `Default Presets: Disabled`). Empty means the ordinary label.
+  // The `_on` / `_off` spelling's text when it says more than the label (`Hidden`, `Visible`,
+  // `Reset: Default`). Empty means the ordinary `label: On` / `label: Off`.
+  std::string on_label;
   std::string off_label;
   // The `rbbz-settings/` write a Controls row performs (capture, capture-cancel, reset, reset-all).
   std::string path;
@@ -343,6 +344,13 @@ struct PanelSpec {
   // a refused value that wears that text sends the player looking in the wrong place (measured on
   // an installed copy, 2026-10-14).
   std::vector<std::pair<std::string, std::string>> message_by_reason;
+  // The title drawn by the scene's `header.lbl` while this page is open, and the locale key that
+  // carries it. Empty leaves the scene's own title alone (the confirmation scene has no header
+  // label of ours). The key is assigned from the panel name once, before the in-song copy is made,
+  // so both contexts share one token and no page's own name (e.g. an action called Pause) can be
+  // mistaken for the `_pause` twin suffix.
+  std::string title;
+  std::string title_key;
 };
 
 Row BoolRow(const char* symbol, const char* setting, const char* label, const char* description,
@@ -354,6 +362,26 @@ Row BoolRow(const char* symbol, const char* setting, const char* label, const ch
   row.label = label;
   row.description = description;
   row.provider_only = provider_only;
+  return row;
+}
+
+// A row whose two states name a visibility rather than On/Off. `_on` is the setting true state
+// (the main-menu row is hidden), so it draws "Hidden"; `_off` draws "Visible".
+Row VisibilityRow(const char* symbol, const char* setting, const char* label,
+                  const char* description, bool provider_only = false) {
+  Row row = BoolRow(symbol, setting, label, description, provider_only);
+  row.on_label = std::string(label) + ": Hidden";
+  row.off_label = std::string(label) + ": Visible";
+  return row;
+}
+
+// The same pair for a provider variable whose true state means *shown* (the HUD element rows),
+// so `_on` draws "Visible" and `_off` draws "Hidden".
+Row ElementVisibilityRow(const char* symbol, const char* setting, const char* label,
+                         const char* description, bool provider_only = false) {
+  Row row = BoolRow(symbol, setting, label, description, provider_only);
+  row.on_label = std::string(label) + ": Visible";
+  row.off_label = std::string(label) + ": Hidden";
   return row;
 }
 
@@ -527,6 +555,59 @@ std::vector<Choice> Choices(std::initializer_list<const char*> tokensAndLabels) 
   return out;
 }
 
+// Defined with the generator below; declared here because the title keys are built before it.
+std::string SymbolToken(std::string_view token);
+
+std::string UpperAscii(std::string text) {
+  for (char& c : text) {
+    if (c >= 'a' && c <= 'z') {
+      c = static_cast<char>(c - 'a' + 'A');
+    }
+  }
+  return text;
+}
+
+// The title each page draws in the scene's `header.lbl`. Retail's own pages (How to Play,
+// Calibration, Credits, Audio) keep their own titles; every page of ours names itself here, so a
+// player who enters a submenu sees where they are instead of the root's title.
+void ApplyDefaultTitle(PanelSpec* panel) {
+  static const std::map<std::string, std::string> kTitles{
+      {"settings_panel", "HELP & OPTIONS"},
+      {"settings_controls_panel", "CONTROLS"},
+      {"settings_input_types_panel", "INPUT TYPES"},
+      {"settings_general_mapping_panel", "GENERAL MAPPING"},
+      {"settings_gameplay_mapping_panel", "GAMEPLAY MAPPING"},
+      {"settings_gameplay_controller_panel", "CONTROLLER"},
+      {"settings_gameplay_keyboard_mouse_panel", "KEYBOARD & MOUSE"},
+      {"settings_controller_actions_panel", "CUSTOM MAPPING"},
+      {"settings_keyboard_mouse_actions_panel", "CUSTOM MAPPING"},
+      {"settings_listen_panel", "ASSIGN INPUT"},
+      {"settings_general_panel", "GENERAL"},
+      {"settings_target_panel", "TARGET"},
+      {"settings_dlc_panel", "DOWNLOADABLE CONTENT"},
+      {"settings_achievements_panel", "ACHIEVEMENTS & UNLOCKS"},
+      {"settings_interface_panel", "INTERFACE"},
+      {"settings_main_menu_panel", "MAIN MENU"},
+      {"settings_hud_panel", "HUD"},
+      {"settings_hud_elements_panel", "HUD ELEMENTS"},
+      {"settings_av_panel", "AUDIO/VIDEO"},
+      {"settings_video_panel", "VIDEO"},
+      {"settings_display_panel", "DISPLAY"},
+      {"settings_graphics_panel", "GRAPHICS"},
+      {"settings_aa_panel", "ANTI-ALIASING"},
+      {"settings_gameplay_panel", "GAMEPLAY"},
+      {"settings_tracks_panel", "TRACKS & GEMS"},
+      {"settings_plots_panel", "PLOTS & SKYBOXES"},
+  };
+  if (panel == nullptr || !panel->title.empty()) {
+    return;
+  }
+  const auto found = kTitles.find(panel->name);
+  if (found != kTitles.end()) {
+    panel->title = found->second;
+  }
+}
+
 // The panels a main-menu screen carries besides the settings panel, and the ones an in-song screen
 // carries. Both are the retail sets for the matching context (compare `options_screen` with
 // `av_options_pause_screen`).
@@ -569,21 +650,22 @@ std::vector<PanelSpec> AllPanels() {
   // main menu uses for its entries. The Main Menu mirror panel is the deliberate exception: it lists
   // the menu's own rows, so it mirrors the menu's own spelling ("PLAY", "EXIT GAME").
 
-  // 0. The merged root: six rows, the retail three at their retail positions.
+  // 0. The merged root: six rows (five on a base install), in the owner's order. How to Play and
+  // Calibration are retail's own pages; General, Controls, Audio/Video and Gameplay are ours.
   out.push_back(PanelSpec{kRootPanel, kRootScreen, "splash_screen", MenuPanels(),
                           {
-                              SubmenuRow("settings_general", "settings_general_screen", "General",
-                                         "Target, downloadable content, achievements, and the game's own pages."),
-                              SubmenuRow("controls", "settings_controls_screen", "",
-                                         "Choose the devices and the controller mappings that play the game."),
+                              RouteRow("tutorial", "tutorials_screen", "back_screen", "",
+                                       "Watch the game's how-to-play tutorials."),
                               RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
                                        "Line up the audio and video so notes hit in time with the music."),
+                              SubmenuRow("settings_general", "settings_general_screen", "General",
+                                         "Target, interface, downloadable content, achievements, and credits."),
+                              SubmenuRow("controls", "settings_controls_screen", "",
+                                         "Choose the devices and the controller mappings that play the game."),
                               SubmenuRow("audio_video_options", "settings_av_screen", "",
-                                         "Video, graphics, and audio settings."),
+                                         "Audio, video, and graphics settings."),
                               SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay",
-                                         "Gameplay changes provided by the Ultimate mod.", true),
-                              SubmenuRow("settings_interface", "settings_interface_screen",
-                                         "Interface", "HUD, letterboxing, and hidden main-menu entries."),
+                                         "Camera, HUD, tracks, and scenery options from the Ultimate mod.", true),
                           }});
 
   // ----------------------------------------------------------------------------------------------
@@ -646,19 +728,22 @@ std::vector<PanelSpec> AllPanels() {
       const std::string token = profile::GeneralBindingToken(target);
       const std::string symbol = profile::InputRowSymbol(token);
       const std::string screen = symbol + "_screen";
+      const std::string label = std::string(profile::remap::TargetLabel(target));
       const std::string assign = symbol + "_assign";
       const std::string reset = symbol + "_reset";
-      out.push_back(PanelSpec{symbol + "_panel", screen, "settings_general_mapping_screen",
-                              MenuPanels(),
-                              {
-                                  CaptureRow(assign.c_str(), Path("capture", token, "-").c_str(),
-                                             "settings_listen_screen", "Assign",
-                                             "Press the input you want to add to this control."),
-                                  StateActionRow(reset.c_str(), token.c_str(),
-                                                 Path("bind-reset", token, "-").c_str(), "Reset",
-                                                 "Reset: Default",
-                                                 "Remove this control's custom inputs and restore its default."),
-                              }});
+      PanelSpec page{symbol + "_panel", screen, "settings_general_mapping_screen",
+                     MenuPanels(),
+                     {
+                         CaptureRow(assign.c_str(), Path("capture", token, "-").c_str(),
+                                    "settings_listen_screen", "Assign",
+                                    "Press the input you want to add to this control."),
+                         StateActionRow(reset.c_str(), token.c_str(),
+                                        Path("bind-reset", token, "-").c_str(), "Reset",
+                                        "Reset: Default",
+                                        "Remove this control's custom inputs and restore its default."),
+                     }};
+      page.title = label;
+      out.push_back(std::move(page));
     }
   }
 
@@ -729,18 +814,21 @@ std::vector<PanelSpec> AllPanels() {
       const std::string token = profile::GameplayBindingToken(kind, action);
       const std::string symbol = profile::InputRowSymbol(token);
       const std::string screen = symbol + "_screen";
+      const std::string label = std::string(profile::gameplay_remap::ActionLabel(action));
       const std::string assign = symbol + "_assign";
       const std::string reset = symbol + "_reset";
-      out.push_back(PanelSpec{symbol + "_panel", screen, actions_screen, MenuPanels(),
-                              {
-                                  CaptureRow(assign.c_str(), Path("capture", token, "-").c_str(),
-                                             "settings_listen_screen", "Assign",
-                                             "Press the input you want to add to this action."),
-                                  StateActionRow(reset.c_str(), token.c_str(),
-                                                 Path("bind-reset", token, "-").c_str(), "Reset",
-                                                 "Reset: Default",
-                                                 "Remove this action's custom inputs and restore its default."),
-                              }});
+      PanelSpec page{symbol + "_panel", screen, actions_screen, MenuPanels(),
+                     {
+                         CaptureRow(assign.c_str(), Path("capture", token, "-").c_str(),
+                                    "settings_listen_screen", "Assign",
+                                    "Press the input you want to add to this action."),
+                         StateActionRow(reset.c_str(), token.c_str(),
+                                        Path("bind-reset", token, "-").c_str(), "Reset",
+                                        "Reset: Default",
+                                        "Remove this action's custom inputs and restore its default."),
+                     }};
+      page.title = label;
+      out.push_back(std::move(page));
     }
   }
 
@@ -760,20 +848,20 @@ std::vector<PanelSpec> AllPanels() {
                                       "for the page to close itself."),
                           }});
 
-  // 1. General: the four rows the plan puts here, plus the two retail screens it adopts.
+  // 1. General: the edition, the interface page, downloadable content, achievements, and credits.
   out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen,
                           MenuPanels(),
                           {
                               SubmenuRow("settings_target", "settings_target_screen", "Target",
                                          "Choose which edition starts: Rock Band Blitz, Ultimate, or the Demo."),
+                              SubmenuRow("settings_interface", "settings_interface_screen", "Interface",
+                                         "Main-menu visibility and the settings caption."),
                               SubmenuRow("settings_dlc", "settings_dlc_screen",
                                          "Downloadable Content",
                                          "Scanning and caching options for your downloadable-content library."),
                               SubmenuRow("settings_achievements", "settings_achievements_screen",
                                          "Achievements & Unlocks",
                                          "Unlock the game's content and its online-only achievements.", true),
-                              RouteRow("tutorial", "tutorials_screen", "back_screen", "",
-                                       "Watch the game's how-to-play tutorials."),
                               RouteRow("credits", "credits_screen", "back_screen", "",
                                        "View the game's credits."),
                           }});
@@ -840,15 +928,15 @@ std::vector<PanelSpec> AllPanels() {
                                         "Grant the achievements that normally need online play.", true),
                           }});
 
-  // 3. Audio / Video: the Video group is ours, the Audio group is retail's own page (its rows are
+  // 3. Audio / Video: Audio first, then Video. The Audio page is retail's own page (its rows are
   // console-backed through ConsoleSaveData, and re-implementing them is neither P5b's job nor
   // honest - `av_options_screen` is the page that owns them).
   out.push_back(PanelSpec{"settings_av_panel", "settings_av_screen", kRootScreen, MenuPanels(),
                           {
-                              SubmenuRow("settings_video", "settings_video_screen", "Video",
-                                         "Display, resolution, graphics, and renderer options."),
                               RouteRow("settings_audio", "av_options_screen", "back_screen",
                                        "Audio", "Volume options plus overscan and bass boost."),
+                              SubmenuRow("settings_video", "settings_video_screen", "Video",
+                                         "Display, resolution, graphics, and renderer options."),
                           }});
 
   // 3a. Video: three entries - the two groups and the backend. Retail's own Overscan row stays on
@@ -922,8 +1010,8 @@ std::vector<PanelSpec> AllPanels() {
                           }});
 
   // 4. Gameplay (provider only; the root row that appears with it is what makes the root six):
-  // four entries, with the track/gem rows moved into a submenu of their own so the page stays a
-  // page rather than a list of everything the provider can do.
+  // five entries, with the HUD page moved here from Interface and the track/gem rows kept in a
+  // submenu so the page stays a page rather than a list of everything the provider can do.
   out.push_back(PanelSpec{"settings_gameplay_panel", "settings_gameplay_screen", kRootScreen,
                           MenuPanels(),
                           {
@@ -939,6 +1027,8 @@ std::vector<PanelSpec> AllPanels() {
                                                  "130", "130%", "135", "135%", "140", "140%",
                                                  "145", "145%", "150", "150%"}),
                                         true, "i:"),
+                              SubmenuRow("settings_hud", "settings_hud_screen", "HUD",
+                                         "Choose which heads-up displays appear during play.", true),
                               SubmenuRow("settings_tracks_menu", "settings_tracks_screen",
                                          "Tracks & Gems",
                                          "Note, gem, and track appearance options.", true),
@@ -995,94 +1085,82 @@ std::vector<PanelSpec> AllPanels() {
                                         true),
                           }});
 
-  // 5. Interface.
-  out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen", kRootScreen,
-                          MenuPanels(),
+  // 5. Interface: the main menu's own visibility page and the caption overlay's switch. The HUD
+  // rows live under Gameplay now; the old 4:3 letterboxing row is gone because it fights the HUD
+  // repositioning that non-16:9 frames rely on.
+  out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen",
+                          "settings_general_screen", MenuPanels(),
                           {
-                              BoolRow("settings_letterbox", "interface.letterbox",
-                                      "4:3 Letterboxing",
-                                      "Add black bars when a 4:3 picture is shown on a widescreen display.",
-                                      true),
-                              SubmenuRow("settings_hud", "settings_hud_screen", "HUD",
-                                         "Choose which heads-up displays appear during play.", true),
-                              SubmenuRow("settings_hide_items", "settings_hide_items_screen",
-                                         "Hide Items", "Hide entries on the main menu."),
+                              SubmenuRow("settings_main_menu", "settings_main_menu_screen",
+                                         "Main Menu",
+                                         "Choose which main-menu entries are visible."),
+                              VisibilityRow("settings_offline", "interface.hide_offline_prompts",
+                                            "Offline Prompts",
+                                            "Show or hide the pop-ups shown while playing offline."),
                               // The caption overlay's own switch (owner request, 2026-10-14). It is
-                              // a direct row rather than a submenu: On/Off is the whole choice, and
-                              // the page is four rows with it (the six-row budget is not in play).
-                              // It is the surface's second `hot` row - flipping it hides or shows the
+                              // the surface's second `hot` row - flipping it hides or shows the
                               // caption on the next frame, with no restart prompt.
                               BoolRow("settings_labels", "interface.settings_labels",
-                                      "Settings Labels",
+                                      "Help & Options Labels",
                                       "Show a description of the highlighted row at the bottom of the screen."),
                           }});
 
-  // 5a. HUD: the provider's seven fields, original spellings preserved (`show_steak`).
+  // 5a. HUD: the element visibility page, then the two provider switches that read On/Off. The
+  // HUD page itself is three rows, so it stays inside the six-row budget, and the element page is
+  // five; the original spellings are preserved (`show_steak`).
   out.push_back(PanelSpec{"settings_hud_panel", "settings_hud_screen",
-                          "settings_interface_screen", MenuPanels(),
+                          "settings_gameplay_screen", MenuPanels(),
                           {
-                              BoolRow("settings_hud_hide", "interface.hide_hud", "Hide HUD",
-                                      "Hide every on-screen display during play.", true),
-                              BoolRow("settings_hud_gold", "interface.goldprogress",
-                                      "Gold Star Progress",
-                                      "Show progress toward the gold-star goal.", true),
-                              BoolRow("settings_hud_progress", "interface.progressbar",
-                                      "Song Progress Bar", "Show the song progress bar.", true),
-                              BoolRow("settings_hud_timer", "interface.show_timer", "Timer",
-                                      "Show the elapsed song time.", true),
-                              BoolRow("settings_hud_pb", "interface.show_pb",
-                                      "Personal Best Progress",
-                                      "Show progress toward your personal best score.", true),
+                              SubmenuRow("settings_hud_elements", "settings_hud_elements_screen",
+                                         "HUD Elements",
+                                         "Choose which heads-up displays appear during play.", true),
                               BoolRow("settings_hud_streak", "interface.show_steak", "Note Streak",
                                       "Show the current note streak counter.", true),
                               BoolRow("settings_hud_input", "interface.input_viewer",
                                       "Input Viewer", "Show a live view of your controller input.",
                                       true),
                           }});
-
-  // 5b. Hide Items.
-  out.push_back(PanelSpec{"settings_hide_items_panel", "settings_hide_items_screen",
-                          "settings_interface_screen", MenuPanels(),
+  out.push_back(PanelSpec{"settings_hud_elements_panel", "settings_hud_elements_screen",
+                          "settings_hud_screen", MenuPanels(),
                           {
-                              BoolRow("settings_offline", "interface.hide_offline_prompts",
-                                      "Offline Mode Prompts",
-                                      "Suppress the pop-ups shown while playing offline."),
-                              BoolSubmenuRow("settings_main_menu", "interface.hide_main_menu",
-                                             "settings_main_menu_screen", "Main Menu",
-                                             "Choose which entries are hidden on the main menu."),
+                              VisibilityRow("settings_hud_hide", "interface.hide_hud",
+                                            "All HUD Elements",
+                                            "Hide every on-screen display during play.", true),
+                              ElementVisibilityRow("settings_hud_gold", "interface.goldprogress",
+                                                   "Gold Star Progress",
+                                                   "Show progress toward the gold-star goal.", true),
+                              ElementVisibilityRow("settings_hud_progress", "interface.progressbar",
+                                                   "Song Progress Bar",
+                                                   "Show the song progress bar.", true),
+                              ElementVisibilityRow("settings_hud_timer", "interface.show_timer",
+                                                   "Timer", "Show the elapsed song time.", true),
+                              ElementVisibilityRow("settings_hud_pb", "interface.show_pb",
+                                                   "Personal Best",
+                                                   "Show progress toward your personal best score.", true),
                           }});
 
-  // 5b-i. Main Menu: the master plus every actual row, by stable token. `splash_options` is the
-  // merged entry itself and is present but inert on purpose - hiding it would remove the only way
-  // back into settings (plan §3.5).
+  // 5b. Main Menu: one visibility row per hideable entry. There is no master switch: each row is
+  // its own Visible/Hidden state. PLAY, HELP & OPTIONS and EXIT GAME are absent because the menu
+  // keeps them visible by design; `mod_settings` is absent because its pages are all inside this
+  // surface now; and Play Current Song follows its Downloadable Content setting instead of a row.
   out.push_back(PanelSpec{"settings_main_menu_panel", "settings_main_menu_screen",
-                          "settings_hide_items_screen", MenuPanels(),
+                          "settings_interface_screen", MenuPanels(),
                           {
-                              BoolRow("settings_mm_master", "interface.hide_main_menu",
-                                      "Hide Selected Rows",
-                                      "Master switch: when on, the rows below choose what is hidden."),
-                              BoolRow("settings_mm_start", "interface.hidden_main_menu.splash_start",
-                                      "PLAY",
-                                      "Hide the main menu's PLAY entry when the master switch is on."),
-                              BoolRow("settings_mm_leaderboard",
-                                      "interface.hidden_main_menu.splash_leaderboard",
-                                      "LEADERBOARDS",
-                                      "Hide the main menu's LEADERBOARDS entry when the master switch is on."),
-                              BoolRow("settings_mm_achievements",
-                                      "interface.hidden_main_menu.splash_achievements",
-                                      "ACHIEVEMENTS",
-                                      "Hide the main menu's ACHIEVEMENTS entry when the master switch is on."),
-                              InfoRow("settings_mm_options", "HELP & OPTIONS",
-                                      "This is the entry you are using, so it cannot be hidden."),
-                              BoolRow("settings_mm_upgrade",
-                                      "interface.hidden_main_menu.splash_upgrade", "UPGRADE",
-                                      "Hide the main menu's UPGRADE entry when the master switch is on."),
-                              BoolRow("settings_mm_dlc", "interface.hidden_main_menu.splash_dlc",
-                                      "DOWNLOAD CONTENT",
-                                      "Hide the main menu's DOWNLOAD CONTENT entry when the master switch is on."),
-                              BoolRow("settings_mm_exit", "interface.hidden_main_menu.splash_exit",
-                                      "EXIT GAME",
-                                      "Hide the main menu's EXIT GAME entry when the master switch is on."),
+                              VisibilityRow("settings_mm_leaderboard",
+                                            "interface.hidden_main_menu.splash_leaderboard",
+                                            "LEADERBOARDS",
+                                            "Show or hide the main menu's LEADERBOARDS entry."),
+                              VisibilityRow("settings_mm_achievements",
+                                            "interface.hidden_main_menu.splash_achievements",
+                                            "ACHIEVEMENTS",
+                                            "Show or hide the main menu's ACHIEVEMENTS entry."),
+                              VisibilityRow("settings_mm_upgrade",
+                                            "interface.hidden_main_menu.splash_upgrade", "UPGRADE",
+                                            "Show or hide the main menu's UPGRADE entry."),
+                              VisibilityRow("settings_mm_dlc",
+                                            "interface.hidden_main_menu.splash_dlc",
+                                            "DOWNLOAD CONTENT",
+                                            "Show or hide the main menu's DOWNLOAD CONTENT entry."),
                           }});
 
   // The confirmation scene is copied from the installation under our own name, as with the menu.
@@ -1115,20 +1193,29 @@ std::vector<PanelSpec> AllPanels() {
 
   for (auto& panel : out) {
     if (panel.name == "settings_main_menu_panel" && !g_configuration.menu_rows.empty()) {
-      panel.rows.resize(1);
+      std::vector<Row> live;
       size_t index = 0;
       for (const auto& [token, label] : g_configuration.menu_rows) {
+        // The menu keeps these visible, so they are not offered. `mod_settings` is gone from the
+        // menu itself (all of its pages are inside this surface), and the Play Current Song row
+        // follows the Downloadable Content setting rather than a visibility toggle.
+        if (token == std::string(kMainMenuRow) || token == "splash_start" ||
+            token == "splash_exit" || token == kProviderMenuRow || token == kPlayCurrentRow) {
+          continue;
+        }
         const std::string symbol = "settings_mm_live_" + std::to_string(index++);
         // The live mirror follows the installed menu, so the caption is derived from the row's
         // own label rather than a token table: a menu this record does not know still gets text.
         const std::string description =
-            token == "splash_options"
-                ? std::string("This is the entry you are using, so it cannot be hidden.")
-                : "Hide the main menu's " + label + " entry when the master switch is on.";
-        panel.rows.push_back(token == "splash_options"
-            ? InfoRow(symbol.c_str(), label.c_str(), description.c_str())
-            : BoolRow(symbol.c_str(), ("interface.hidden_main_menu." + token).c_str(), label.c_str(),
-                      description.c_str()));
+            "Show or hide the main menu's " + label + " entry.";
+        live.push_back(VisibilityRow(symbol.c_str(),
+                                     ("interface.hidden_main_menu." + token).c_str(),
+                                     label.c_str(), description.c_str()));
+      }
+      // An effective menu with nothing hideable keeps the static fallback rows rather than an
+      // empty, unfocusable page.
+      if (!live.empty()) {
+        panel.rows = std::move(live);
       }
     }
     std::erase_if(panel.rows, [](Row& row) {
@@ -1166,6 +1253,12 @@ std::vector<PanelSpec> AllPanels() {
       }
       return false;
     });
+  }
+  for (PanelSpec& panel : out) {
+    ApplyDefaultTitle(&panel);
+    if (!panel.title.empty()) {
+      panel.title_key = "settings_title_" + SymbolToken(panel.name);
+    }
   }
   return out;
 }
@@ -1464,8 +1557,20 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       return Arr({Sym(symbol), Write(Path("invoke", row.setting, "-"))});
     case Kind::kInfo:
       return Arr({Sym(symbol), Cmd({Var("this"), Sym("populate_menu")})});
-    case Kind::kRoute:
-      return Arr({Sym(symbol), EnterRetail(row.screen, row.member)});
+    case Kind::kRoute: {
+      Node body = EnterRetail(row.screen, row.member);
+      // The Audio page is retail's own scene, drawn with its own list at a lower offset. Capture
+      // the merged list's transform while *our* scene is still current; the retail panel's
+      // `{enter}` (edited at payload-build time) applies it and renames its header to AUDIO. The
+      // application cannot live here: before `{ui goto_screen ...}` runs, the retail scene is not
+      // loaded yet, so `{av_options_panel find ...}` finds nothing (measured 2026-10-19).
+      if (row.screen == "av_options_screen" || row.screen == "av_options_pause_screen") {
+        body.kids.insert(body.kids.begin() + 1,
+                         Cmd({Sym("set"), Var("rbbz_audio_xfm"),
+                              Cmd({Sym(kList), Sym("get"), Sym("local_xfm")})}));
+      }
+      return Arr({Sym(symbol), std::move(body)});
+    }
     case Kind::kClose:
       return Arr({Sym(symbol), Leave()});
     case Kind::kRestart:
@@ -1670,6 +1775,13 @@ Node PanelDefinition(const PanelSpec& panel) {
         {Sym("if"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.failed",
                                                        "t:" + reason))}),
          Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(token)})}));
+  }
+  // The page's own title. The scene's `header.lbl` is a UILabel, so it is editable text (and a
+  // locale token), not a baked-in texture: every page of ours renames it as it is entered. Retail's
+  // own pages keep their own title, and the confirmation scene has no header label of ours.
+  if (!panel.title_key.empty()) {
+    enter.kids.push_back(Cmd({Sym("header.lbl"), Sym("set"), Sym("text_token"),
+                              Sym(panel.title_key)}));
   }
   // The open-time caption (owner request, 2026-10-13): entering a page places the highlight on its
   // first visible row, so the overlay is told which row that is. Emitted here rather than inside
@@ -1893,11 +2005,13 @@ std::string HelpTextFor(const std::string_view symbol) {
   if (symbol.empty()) {
     return {};
   }
-  // The in-song pause list spells the Controls row with retail's own symbol (`pause_controls`);
-  // it opens our Controls page now (the payload re-points that case), so it gets the same text
-  // the main-menu row has.
+  // The in-song pause list spells two rows with retail's own symbols (`pause_tutorial`,
+  // `pause_controls`); they open the same pages the main-menu rows do, so they get the same text.
   if (symbol == "pause_controls") {
     return HelpTextFor("controls");
+  }
+  if (symbol == "pause_tutorial") {
+    return HelpTextFor("tutorial");
   }
   // First match wins; the in-song twins duplicate the main-menu rows' symbols on purpose (one
   // symbol set feeds one label table in two contexts), and their texts are copied with the rows.
@@ -2026,17 +2140,17 @@ std::vector<std::string> ScreenNames() {
 }
 
 std::vector<std::string> PauseRootRows(const bool provider_active) {
-  // The merged root's own order (plan §3), in the **in-song spellings**: retail's pause switch
-  // dispatches `pause_controls` (its in-song name for the Controls page; the main-menu page spells
-  // the same row `controls`), so reusing retail's case is what keeps that row working without a
-  // new body. `settings_gameplay` is dropped on a boot whose provider gate answers false - the same
-  // rule the root panel applies to itself, applied here to the list retail's pause panel fills.
-  std::vector<std::string> rows{"settings_general", "pause_controls", "calibration",
-                                "audio_video_options"};
+  // The merged root's own order, in the **in-song spellings**: retail's pause switch dispatches
+  // `pause_tutorial` and `pause_controls` (its in-song names for How to Play and Controls; the
+  // main-menu page spells the same rows `tutorial` and `controls`), so reusing retail's cases is
+  // what keeps those rows working without new bodies. `settings_gameplay` is dropped on a boot
+  // whose provider gate answers false - the same rule the root panel applies to itself, applied
+  // here to the list retail's pause panel fills.
+  std::vector<std::string> rows{"pause_tutorial", "calibration", "settings_general",
+                                "pause_controls", "audio_video_options"};
   if (provider_active) {
     rows.push_back("settings_gameplay");
   }
-  rows.push_back("settings_interface");
   return rows;
 }
 
@@ -2519,9 +2633,10 @@ std::vector<std::pair<std::string, std::string>> Labels() {
       }
       if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu) {
         // "On"/"Off", not the main menu's capitals: every state suffix of this surface reads the
-        // way its row label does (owner decision, 2026-10-13).
-        add(row.symbol + "_on", row.label + ": On");
-        add(row.symbol + "_off", row.label + ": Off");
+        // way its row label does (owner decision, 2026-10-13). A visibility row overrides both
+        // halves with "Hidden"/"Visible".
+        add(row.symbol + "_on", row.on_label.empty() ? row.label + ": On" : row.on_label);
+        add(row.symbol + "_off", row.off_label.empty() ? row.label + ": Off" : row.off_label);
       } else if (row.kind == Kind::kStateSubmenu) {
         // A binding row's pair: whether the row is the player's or the compiled default.
         add(row.symbol + "_on", row.label + ": Custom");
@@ -2537,6 +2652,16 @@ std::vector<std::pair<std::string, std::string>> Labels() {
       } else {
         add(row.symbol, row.label);
       }
+    }
+  }
+  // The retail Audio page is reached through our route row rather than declared by a PanelSpec, so
+  // its title is the one page title that is not derived from the table above.
+  add("settings_title_audio", "AUDIO");
+  // Every page title, derived from the same table: the key is stable per page name and the in-song
+  // twin shares it, because both contexts draw the same words.
+  for (const PanelSpec& panel : AllPanels()) {
+    if (!panel.title_key.empty()) {
+      add(panel.title_key, UpperAscii(panel.title));
     }
   }
   // The Play Current Song entry is not a row of this surface, so its label is not derived from the
@@ -2583,6 +2708,64 @@ bool AddPanelLoad(std::vector<dtb::Node>* nodes, std::string_view panel_name, st
   }
   anchor.parent->kids.insert(anchor.parent->kids.begin() + static_cast<ptrdiff_t>(anchor.index),
                              Cmd({Sym(panel_name), Sym("load")}));
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
+// Appends to a retail panel's `{enter ...}` member. The panel definition is a `{new UIPanel <name>
+// ...}` command; its `enter` member is a block whose first child is the `enter` symbol. Statements
+// are appended at the end of that block, so the panel's own enter - which is what loads/fills the
+// scene - has already run. See the header for why the pre-goto placement does not work.
+bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view panel_name,
+                                const std::vector<dtb::Node>& statements, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr || panel_name.empty()) {
+    return refuse("nothing to edit");
+  }
+  if (statements.empty()) {
+    return refuse("no statements to append");
+  }
+  // The panel definition is usually a root, and `FindBlock` starts at a node's *children*, so test
+  // the root itself before searching inside it. (A root that is the panel command is the normal
+  // case for `av_options.dtb`; searching only children made this edit refuse every real record.)
+  const auto is_panel = [&](const Node& node) {
+    return node.tag == dtb::kCommand && node.kids.size() >= 3 &&
+           IsSymbol(node.kids[0], "new") && IsSymbol(node.kids[1], "UIPanel") &&
+           IsSymbol(node.kids[2], panel_name);
+  };
+  Node* definition = nullptr;
+  for (Node& root : *nodes) {
+    if (is_panel(root)) {
+      definition = &root;
+      break;
+    }
+    Hit hit;
+    FindBlock(&root, is_panel, &hit);
+    if (hit.found && hit.parent != nullptr && hit.index < hit.parent->kids.size()) {
+      definition = &hit.parent->kids[hit.index];
+      break;
+    }
+  }
+  if (definition == nullptr) {
+    return refuse("no {new UIPanel <name> ...} definition for that panel");
+  }
+  Node* enter = nullptr;
+  for (Node& member : definition->kids) {
+    if ((member.tag == dtb::kArray || member.tag == dtb::kCommand) && !member.kids.empty() &&
+        IsSymbol(member.kids[0], "enter")) {
+      enter = &member;
+      break;
+    }
+  }
+  if (enter == nullptr) {
+    return refuse("the panel has no {enter ...} member to append to");
+  }
+  for (const Node& statement : statements) {
+    enter->kids.push_back(statement);
+  }
   if (reason != nullptr) reason->clear();
   return true;
 }

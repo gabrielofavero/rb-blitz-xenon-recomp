@@ -510,15 +510,15 @@ void Configure() {
   g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
   g_settings.refresh_row_on = REXCVAR_GET(enhancements_refresh_music_library);
 
-  // P10: the hide decision is the §3.5 rule, not a branch - master off hides nothing, an empty
-  // selection is a *deliberate* empty (the old fallback re-hid the compiled defaults, which is the
-  // defect the plan names), and the protected merged entry is refused by name. The selection is
-  // "explicit" when it differs from the compiled default string: an absent setting keeps the
-  // defaults, anything the player (or a config) wrote - including nothing at all - is theirs.
+  // P10: the hide decision is the §3.5 rule, not a branch. The in-game page now edits each
+  // main-menu entry's visibility directly, so an explicit selection is authoritative even though
+  // the old `hide_main_menu` master is no longer drawn: the master stays in the file for backward
+  // compatibility, but a selection the player made - including an explicitly empty one - is what
+  // applies. An untouched config keeps the old "nothing hidden" default.
   const std::string configured_rows = REXCVAR_GET(enhancements_hidden_menu_options);
   rb_blitz::settings::menu_compat::HideRequest request;
-  request.master = g_settings.hide_rows;
   request.selection_explicit = configured_rows != menu_options::kDefaultRows;
+  request.master = g_settings.hide_rows || request.selection_explicit;
   request.selected = menu_options::ParseRowNames(configured_rows);
   request.defaults = menu_options::ParseRowNames(menu_options::kDefaultRows);
   request.refresh_row_owns_refresh = g_settings.tap_refresh_row;

@@ -139,21 +139,25 @@ Generated partition numbers may change. Recover the owning file through `generat
 
 **Status of the two entries after P5b, and after P7.** The main-menu entry reaches the merged root and is verified in a boot. The **in-song entry is still retail's own page**: retail's in-song Help & Options is not a screen jump but a focus switch to a second list inside the pause panel, and re-pointing that row at our screen faults the guest (`read of guest 0x00000024`, four arms — [in-game-settings-merged-menu.md](menu.md) §3). The shipped payload therefore leaves that focus switch pristine; the merge of that inline list (its five symbols and its dispatch) is the next experiment, and the plan's §3 tree describes the in-song page as it will be once that lands. **Since P7 (2026-10-18)** the one retail-row edit the payload makes is the existing `pause_controls` *jump* case, re-pointed at the pause twin of the Controls menu; the focus switch itself is untouched ([menu.md](menu.md) §3.3).
 
-**Root rows, in order.** Six with Ultimate installed; `Gameplay` is omitted when it has no available rows, so a base-only install shows five.
+**Root rows, in order (2026-10-19).** Six with Ultimate installed; `Gameplay` is omitted when it has no available rows, so a base-only install shows five. The 2026-10-19 overhaul moved how-to-play and calibration back to the root and folded the former `Interface` root page into `General`.
 
 | # | Root row | Interaction | Contents |
 | --- | --- | --- | --- |
-| 0 | General | Submenu | Target, Downloadable Content, Achievements & Unlocks, How to Play, Credits |
-| 1 | Controls | Submenu (P7, 2026-10-18) | In-game Controls menu: Input Types, General Mapping, Gameplay Mapping (§3.2). Retail's controller preset page moved beneath Gameplay Mapping → Controller → Default Presets |
-| 2 | Calibration | Retail wizard | Unchanged retail calibration |
-| 3 | Audio / Video | Submenu | Video group, Audio group |
-| 4 | Gameplay | Submenu (Ultimate rows only) | Precision/wiggles/camera/speed/DoF, Plots & Skyboxes, Gems |
-| 5 | Interface | Submenu | 4:3 Letterboxing, HUD, Hide Items, Settings Labels |
+| 0 | How to Play | Retail screen | Retail's tutorials page, unchanged |
+| 1 | Calibration | Retail wizard | Unchanged retail calibration |
+| 2 | General | Submenu | Target, Interface, Downloadable Content, Achievements & Unlocks, Credits |
+| 3 | Controls | Submenu (P7, 2026-10-18) | In-game Controls menu: Input Types, General Mapping, Gameplay Mapping (§3.2). Retail's controller preset page moved beneath Gameplay Mapping → Controller → Default Presets |
+| 4 | Audio / Video | Submenu | Audio group first, then Video group |
+| 5 | Gameplay | Submenu (Ultimate rows only) | Camera Angle, Game Speed, HUD, Tracks & Gems, Plots & Skyboxes |
 
-Two properties of that ordering are deliberate:
+**Superseded 2026-10-19:** the earlier root was `General, Controls, Calibration, Audio/Video, Gameplay, Interface`, with How to Play and Credits inside General and Interface holding the letterbox/HUD/hide rows. The current order is the owner's tree: `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`.
 
-- **The retail rows keep their positions.** Retail's list is `How to Play, Controls, Calibration, Audio/Video, Credits`; the merged list keeps `Controls`, `Calibration` and `Audio/Video` at indices 1, 2 and 3, so the route-driven acceptance scripts (`New-UiHelpRoute 1|2|3`) still land on the same screens. `General` takes the old `How to Play` slot and `Gameplay` takes the old `Credits` slot, so only the row-0 and row-4 needles change. **Since P7 (2026-10-18) index 1 is a submenu of ours, not retail's page** — the index and the route survive, the destination does not: a script that expects retail's controller page at index 1 must now walk Controls → Gameplay Mapping → Controller → Default Presets.
+Two properties of the ordering are deliberate:
+
+- **The retail pages remain retail's own.** How to Play and Calibration are retail screens at the root; the merged root no longer has to keep retail's old indices. The route-driven acceptance scripts that counted rows must be updated to the new order (How to Play = 0, Calibration = 1, General = 2, Controls = 3, Audio/Video = 4, Gameplay = 5).
 - **Visibility is not a fixed row count.** Base = 5 rows, Ultimate = 6. Never ship a dead Ultimate row on a base install, and never leave an empty group behind as an unfocusable row.
+
+**Page titles (2026-10-19).** The scene's `header.lbl` is a `UILabel`, not a texture: it carries a locale token and every page of ours sets `text_token` on entry. The root reads `HELP & OPTIONS`; each submenu reads its own name (`GENERAL`, `TARGET`, `AUDIO/VIDEO`, `VIDEO`, `HUD`, `HUD ELEMENTS`, …). Retail's How to Play, Calibration and Credits pages keep their own titles. The retail Audio page is retitled `AUDIO` by the `Audio` route and its list is moved onto the merged list's transform, so its four console-backed rows line up with the rest of the surface.
 
 No settings screen depends on Guide.
 
@@ -161,11 +165,12 @@ Ultimate visibility uses three facts, not a directory boolean: payload installed
 
 ### 3.1 General
 
-Five rows — the same size as the retail help list that already renders here, so no new visible-slot assumption is needed at this level.
+Five rows — the same size as the retail help list that already renders here, so no new visible-slot assumption is needed at this level. Interface moved here on 2026-10-19; How to Play and Credits no longer live here (How to Play is a root row, Credits remains below).
 
 | Row | Interaction | Ownership / implementation |
 | --- | --- | --- |
-| Target | Submenu | Native setting: Rock Band Blitz / Rock Band Blitz Ultimate when installed / existing Trial target subject to the trial gate below. Maps to `ultimate_mode` and `license_mask` inside the game, before Ultimate configuration. |
+| Target | Submenu | Native setting: Rock Band Blitz / Ultimate / Demo. The choice rows draw only the target name (`Rock Band Blitz`, `Ultimate`, `Demo`), because the page title already says TARGET. Maps to `ultimate_mode` and `license_mask` inside the game, before Ultimate configuration. |
+| Interface | Submenu | Main-menu visibility and the caption overlay (§3.5). |
 | Downloadable Content | Submenu | Always present. |
 | ↳ Cache DLC Library | Boolean | `enhancements_dlc_cache`; current default **true** (2026-10-13). The main menu's *Refresh Music Library* row is its visible control; the press re-runs the title's own discovery pass ([main-menu.md](../engine/main-menu.md) §7.1). |
 | ↳ Refresh Music Library | Boolean | `general.refresh_music_library`; **shipped 2026-10-15**, default **true**; shows the main menu's *Refresh Music Library* entry. Off hides that row - with the hide master on or off and whatever the hide selection says - so a player can remove the entry without editing Interface ▸ Hide Items; the library is then re-scanned at boot when its fingerprint changed ([menu_compat.cpp](../../src/settings/menu_compat.cpp), [main-menu.md](../engine/main-menu.md) §7.1). Needs the row above. |
@@ -175,7 +180,6 @@ Five rows — the same size as the retail help list that already renders here, s
 | Achievements & Unlocks | Submenu | Ultimate provider only. |
 | ↳ Unlock All | Boolean | Ultimate `unlockall`; existing row is a reboot-tagged boolean, **not** the earn-achievements command. Investigate actual consumers and supply persistence missing from the original saved-vars list. |
 | ↳ Unlock Online Achievements | Action | Invoke the existing accomplishment action once after a confirmation. It is not a stored boolean. Test with disposable save data. Wording changed to exactly **Unlock Online Achievements** (owner request, 2026-10-14, R7): it was `Unlock Online Only Achievements`, which was also over the row line's 28-character budget (the new label is 26, so the row keeps its value drawn). |
-| How to Play | Retail screen | Relocated from the retail root into General; the retail page itself is unchanged. |
 | Credits | Retail screen | Relocated from the retail root into General; the retail page itself is unchanged. |
 
 Target details:
@@ -189,7 +193,7 @@ Target details:
 
 ### 3.2 Controls and Calibration
 
-**Superseded 2026-10-18 by P7 for the Controls half.** Calibration is still retail's wizard at root index 2 and nothing about it changed. Controls is no longer retail's page: root index 1 opens an in-game **Controls** menu of our own
+**Superseded 2026-10-18 by P7 for the Controls half; root indices updated 2026-10-19.** Calibration is still retail's wizard at root index 1 and nothing about it changed. Controls is no longer retail's page: root index 3 opens an in-game **Controls** menu of our own
 ([gameplay-input-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §14.1 and §16), with this inventory:
 
 | Controls row | Kind | Contents |
@@ -206,21 +210,23 @@ Their routing must survive the merge, because these are the two rows users reach
 
 ### 3.3 Audio / Video
 
-The retail page keeps its root position (index 3) and gains the graphics rows inside a **Video** group. Retail's own rows on this page are console-backed through `ConsoleSaveData` (overscan, and the audio rows); do not reimplement them, and do not break their autosave path (`docs/history/bringup-log.md`, local-save work).
+**Superseded 2026-10-19:** the loop is now `Audio` first, then `Video`; the Video group remains ours, and the Audio group is retail's console-backed page. The Audio route retitles that page to `AUDIO` and copies the merged list's `local_xfm` onto `checkbox.lst`, intended to make its four rows line up with every other page. **That correction is implemented but not yet boot-verified**; the owner's capture that reported the `AUDIO/VIDEO` title and the row offset predates it. Retail's own rows are console-backed through `ConsoleSaveData` (overscan, and the audio rows); do not reimplement them, and do not break their autosave path (`docs/history/bringup-log.md`, local-save work).
 
 | Row | Interaction | Mapping |
 | --- | --- | --- |
-| Video | Submenu | New group. |
+| Audio | Retail page | Retail's `av_options_screen`, unchanged in behaviour, retitled `AUDIO` and aligned to the merged list. |
+| ↳ Active Track Boost | Retail row | Console-backed; preserve the existing setter and its autosave. |
+| ↳ Sound Effects Volume | Retail row | Console-backed; preserve the existing setter and its autosave. |
+| ↳ Bass Boost | Retail row | Console-backed; already covered by the local-save persistence work. |
+| ↳ Overscan | Retail row | Stays on retail's Audio page (the page also owns the video checkbox); it is not duplicated in Video. |
+| Video | Submenu | Our group. |
 | ↳ Resolution | Horizontal select | Full `WIDTHxHEIGHT` labels from primary-monitor modes intersected with modes the implemented render path supports. Exact render dimensions are required. See §7. |
 | ↳ V-Sync | Boolean | `vsync`; retain 60 Hz guest timing policy. |
 | ↳ Renderer | Horizontal select | Built backends intersected with runtime usable backends. Stable values such as `d3d12`, `vulkan`; never persist list positions. **Not in the owner's tree** — see §3.7. Drawn only when at least two backends are usable (owner decision, 2026-10-14): one entry means a plugin built with a single backend or a machine with no Vulkan loader, and the row is omitted rather than shown as a single-choice select — the boot log names what was offered instead. |
 | ↳ Anti-aliasing | Boolean with submenu | None / Native (2x when proven for this backend/title) / FXAA / FXAA Extreme. Parent displays Off for None and On for another choice. |
 | ↳ A. Filtering | Horizontal select | Native, None, 1x, 2x, 4x, 8x, 16x, limited to backend/device capability. |
-| ↳ Overscan | Retail row | The owner's tree puts retail's Overscan here, where its framing belongs. Confirm the retail page still renders correctly with the row moved; if it does not, leave it on the Audio page and record the deviation. |
-| Audio | Submenu | The retail Audio/Video page's audio rows, unchanged in behaviour. |
-| ↳ Active Track Boost | Retail row | Console-backed; preserve the existing setter and its autosave. |
-| ↳ Sound Effects Volume | Retail row | Console-backed; preserve the existing setter and its autosave. |
-| ↳ Bass Boost | Retail row | Console-backed; already covered by the local-save persistence work. |
+
+The Renderer row is hidden when the boot offers fewer than two backends (owner decision, 2026-10-14; re-affirmed 2026-10-19). A one-backend build or a machine without a Vulkan loader has nothing to choose, so the row is omitted rather than drawn as a single-choice select; the boot log still names what was offered.
 
 The stored `[graphics]` table in `settings.toml` keeps its name and shape: the file layout is a storage contract, not a menu layout. Only the menu presentation moves this group under Audio/Video.
 
@@ -239,43 +245,39 @@ Filtering translation is established in SDK source: Native = -1, None = 0, 1x = 
 
 ### 3.4 Gameplay
 
-This group is Ultimate-only and disappears when it has no available rows — which is why the root is 5 rows on a base install and 6 with Ultimate. Note that this list has **eight** top-level rows (seven rows plus the Plots & Skyboxes submenu), so it is the list that most needs the visible-slot/scroll proof of §5.2 rather than an assumption about a "5-element cap".
+This group is Ultimate-only and disappears when it has no available rows — which is why the root is 5 rows on a base install and 6 with Ultimate. **2026-10-19:** the page is five rows and stays inside the six-row budget: Camera Angle, Game Speed, HUD, Tracks & Gems, Plots & Skyboxes. Precision Mode, Disable Random Track Wiggles and the gem choice live in Tracks & Gems; Depth of Field lives in Video → Graphics.
 
 | Row | Interaction | Observed provider binding |
 | --- | --- | --- |
-| Precision Mode | Boolean | `freq_ms` |
-| Disable Random Track Wiggles | Boolean | `disable_random_wiggles` |
 | Camera Angle | Horizontal select | `camera_angle`: 0 Default, 1 High, 2 Low |
 | Game Speed | Horizontal select | `speedmod`: 1.00 to 1.50 in 0.05 increments in this payload; show 100%–150%. Avoid floating-point step accumulation. |
-| Disable Depth of Field | Boolean | `disable_dof` |
+| HUD | Submenu | HUD Elements, Note Streak, Input Viewer (see below). |
+| Tracks & Gems | Submenu | Precision Mode (`freq_ms`), Disable Random Track Wiggles (`disable_random_wiggles`), Gems (`gems`: observed `default`, `freq`, `amp2003`, `amp2016`, `monkey`, `ulti`, `x`, `bolt`; provider inventory remains authoritative). |
 | Plots & Skyboxes | Submenu | New parent group. |
 | ↳ Disable Plots | Boolean | `disable_plots`, restart-tagged by provider |
 | ↳ Force Plot | Boolean with submenu | `forceplot`, false/off or a plot symbol; obtain choices from the installed compatible provider; restart-tagged |
 | ↳ Force Skybox | Boolean with submenu | `which_skybox`: default, none, or installed custom skybox choice; restart-tagged |
-| Gems | Horizontal select | `gems`: observed `default`, `freq`, `amp2003`, `amp2016`, `monkey`, `ulti`, `x`, `bolt`; provider inventory remains authoritative |
 
 Do not infer that selecting "No skybox" means the forcing feature is off: the observed provider uses index 0 as default/off and another index to force no skybox. Likewise, disabling plots and selecting a forced plot need a defined precedence: keep the selected plot but make it inactive while Disable Plots is true; test actual provider behavior before adding a different rule.
 
-### 3.5 Interface
+### 3.5 Interface (now General → Interface)
+
+**2026-10-19:** the Interface page is no longer a root row; it lives under General and has three rows. The 4:3 Letterboxing row is removed because it conflicts with the HUD repositioning that non-16:9 frames use. HUD moved to Gameplay.
 
 | Row | Interaction | Ownership / implementation |
 | --- | --- | --- |
-| 4:3 Letterboxing | Boolean | Ultimate `letterbox`. This is separate from the removed SDK Presentation category's `present_letterbox`. |
-| HUD | Submenu | Ultimate provider. Preserve all original HUD rows listed below. |
-| Hide Items | Submenu | Always present. |
-| Settings Labels | Boolean | `interface.settings_labels`; **shipped 2026-10-14** (R4), default **true**. The caption overlay's own switch: it is written to `settings_help_overlay` at the config rank ([src/settings/cvars.cpp](../../src/settings/cvars.cpp), [src/settings/boot.cpp](../../src/settings/boot.cpp)) and applied live through the P9 seam ([src/hooks/hot_apply_runtime.cpp](../../src/hooks/hot_apply_runtime.cpp)), so flipping it hides or shows the caption on the next draw with no restart prompt. It is the surface's second `hot` row and the only one of the two an ordinary player will reach. |
-| ↳ Offline Mode Prompts | Boolean | `enhancements_skip_offline_dialog`; true means hide; default true. |
-| ↳ Main Menu | Boolean with submenu | Native hide master plus a complete per-row list. Replace the free-form CSV editor. |
+| Main Menu | Submenu | One per-entry visibility row; no master switch. `interface.hidden_main_menu.<token>` is the selection; a row's true state draws `Hidden` and false draws `Visible`. |
+| Offline Prompts | Boolean with Visible/Hidden states | `interface.hide_offline_prompts` / `enhancements_skip_offline_dialog`; true means hidden; default true. The shorter label keeps the state inside the 28-character line. |
+| Help & Options Labels | Boolean | `interface.settings_labels`; **shipped 2026-10-14** (R4), default **true**; renamed from "Settings Labels" on 2026-10-19. The caption overlay's own switch: it is written to `settings_help_overlay` at the config rank ([src/settings/cvars.cpp](../../src/settings/cvars.cpp), [src/settings/boot.cpp](../../src/settings/boot.cpp)) and applied live through the P9 seam ([src/hooks/hot_apply_runtime.cpp](../../src/hooks/hot_apply_runtime.cpp)), so flipping it hides or shows the caption on the next draw with no restart prompt. It is the surface's second `hot` row and the only one of the two an ordinary player will reach. |
 
-HUD inventory: Hide HUD (`hide_hud`), gold-star progress (`goldprogress`), song progress bar (`progressbar`), timer (`show_timer`), personal-best progress (`show_pb`), note streak (`show_steak`, **original spelling**), and input viewer (`input_viewer`). Use the provider's localized labels where available; do not reduce HUD to one toggle.
+HUD (now Gameplay → HUD): the page is three rows (`HUD Elements`, `Note Streak`, `Input Viewer`), and **HUD Elements** is a five-row submenu: `All HUD Elements` (`hide_hud`, true = hidden), `Gold Star Progress` (`goldprogress`), `Song Progress Bar` (`progressbar`), `Timer` (`show_timer`) and `Personal Best` (`show_pb`), all drawing `Visible`/`Hidden`; the two switches outside it keep `On`/`Off` (`show_steak` — **original spelling** — and `input_viewer`). This keeps both pages inside the six-row budget without dropping a provider row.
 
-Main Menu details:
+Main Menu details (2026-10-19):
 
-- List all actual rows by stable token and current localized name: `splash_start`, `splash_leaderboard`, `splash_achievements`, `splash_options`, `splash_upgrade` when applicable, `splash_dlc`, `splash_exit`, and compatible mod-added rows. Identify rows from the actual effective menu, including conditional availability, rather than hardcoding a list of only online options. `splash_options` is the merged settings entry; hide the others, never it.
+- Every hideable row is its own `Visible`/`Hidden` row. There is no master switch and no "Hide Selected Rows" page; the state is the selection itself. An untouched config hides nothing; any explicit selection (including empty) is authoritative ([src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp)).
+- The list includes only entries that may be hidden: `splash_leaderboard`, `splash_achievements`, `splash_upgrade` when applicable, `splash_dlc`, and compatible mod-added rows. `splash_start` (PLAY), `splash_options` (HELP & OPTIONS) and `splash_exit` (EXIT GAME) are absent because the menu keeps them visible; `mod_settings` is absent because all of its pages are inside this surface; `splash_play_current` is absent because the Downloadable Content setting controls whether that entry exists.
 - Old Ultimate `mod_settings` is routed into the merged screen on a supported integration; do not leave two settings entry points with conflicting ownership. Unsupported-mod fallback is an explicit exception.
-- Preserve current non-graphics defaults: hide master false; its default selected list contains the old offline rows. Turning the master on uses that list. The user's "leave as default the ones offline" is implemented as the default checked selection, not an unrequested change to the master default.
 - Show the merged settings entry (`splash_options`, the retail HELP & OPTIONS row, and the same screen from the in-song pause menu) as visible and non-hideable in version one, with a brief explanation. This is a deliberate recovery constraint on "list everything": users must not remove their sole configuration entry. Ensure an OS close path remains usable if Exit Game is hidden.
-- Off disables filtering while preserving checked choices. On with an empty selected list hides nothing. Existing `HideRows` treats an empty CSV as the default list; add an explicit empty-selection representation so it cannot unexpectedly hide rows.
 - `splash_dlc` means Refresh Song Library while the cache feature is active. Default offline filtering must leave that useful action visible. An explicit user choice may hide it, and so may the Downloadable Content page's own *Refresh Music Library* row (`general.refresh_music_library`, added 2026-10-15) - which is the "alternate native action under Downloadable Content" this bullet asks for, as a switch rather than a second implementation. Do not create a second cache-refresh implementation.
 
 ### 3.6 Retired interface and Controller Settings

@@ -213,10 +213,11 @@ std::string PausePanel(std::string_view panel);
 std::string InSongDestination(std::string_view screen);
 
 // The rows the pause panel's own in-song Help & Options page is filled with, in the merged root's
-// order. The **same six symbols** the main-menu root uses (`settings_general`, `controls`,
-// `calibration`, `audio_video_options`, `settings_gameplay`, `settings_interface`), so one symbol
-// set feeds one label table in two contexts - and `provider_active` false drops `settings_gameplay`,
-// because a base install must never be offered a dead row (plan §3).
+// order: `pause_tutorial` (How to Play), `calibration`, `settings_general`, `pause_controls`
+// (Controls), `audio_video_options`, and `settings_gameplay` only when the provider is active. The
+// two retail spellings are reused so retail's own cases dispatch the same pages, and
+// `provider_active` false drops `settings_gameplay` because a base install must never be offered a
+// dead row (plan §3).
 std::vector<std::string> PauseRootRows(bool provider_active);
 
 // Rewrites the array `pause_panel`'s `{enter}` hands to its inline `options.lst`, so the in-song
@@ -284,6 +285,15 @@ const MenuConfiguration& CurrentMenuConfiguration();
 // `options_panel` and its siblings, before the first screen is shown. Idempotent, and refuses
 // (with a reason, without touching `nodes`) when the init block cannot be found.
 bool AddPanelLoad(std::vector<dtb::Node>* nodes, std::string_view panel_name, std::string* reason);
+
+// Appends `statements` to the **end** of a retail panel's `{enter ...}` member. This is the only
+// way to touch a retail scene's objects: the panel's scene is loaded (and its own enter has run)
+// before the appended statements execute, whereas a statement emitted *before* `{ui goto_screen
+// ...}` runs against the old scene and silently does nothing. Used for the retail Audio page,
+// whose header and list need a post-entry correction; refuses (with a reason, leaving `nodes`
+// untouched) when the panel or its `enter` member cannot be found.
+bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view panel_name,
+                                const std::vector<dtb::Node>& statements, std::string* reason);
 
 // ------------------------------------------------------------------------------------------------
 // The labels, the requests, and the locale edit

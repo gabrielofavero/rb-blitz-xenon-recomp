@@ -144,6 +144,19 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return screen::RerouteRow(&roots, "pause_controls",
             {Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
                              Node::Symbol("settings_controls_pause_screen")})}, error);
+      }) || !edit("ui/av_options/gen/av_options.dtb", [&](auto& roots) {
+        // The retail Audio page is reachable from our A/V page as "Audio", but its own scene still
+        // draws the AUDIO/VIDEO title and places its four rows at retail's lower offset. Both are
+        // corrected on entry: by the time the panel's `{enter}` runs, its scene is loaded and the
+        // objects exist. The transform was captured by our route row into `$rbbz_audio_xfm`.
+        const std::vector<Node> statements = {
+            Node::Command({Node::Symbol("checkbox.lst"), Node::Symbol("set"),
+                           Node::Symbol("local_xfm"), Node::Var("rbbz_audio_xfm")}),
+            Node::Command({Node::Symbol("header.lbl"), Node::Symbol("set"),
+                           Node::Symbol("text_token"),
+                           Node::Symbol("settings_title_audio")}),
+        };
+        return screen::AppendPanelEnterStatements(&roots, "av_options_panel", statements, error);
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {

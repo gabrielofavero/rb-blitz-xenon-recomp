@@ -31,6 +31,19 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 > controller page. It opens the in-game Controls menu (§3.3 below), and retail's page moved under
 > Gameplay Mapping → Controller → Default Presets; the pause record's `pause_controls` case is
 > re-pointed at the pause twin of that menu.
+>
+> **Current-state correction (2026-10-19, the owner's surface overhaul):** the root is now
+> `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; **Interface is no longer a root
+> row** and lives under General with `Main Menu`, `Offline Prompts` and `Help & Options Labels`. HUD
+> moved under Gameplay. `4:3 Letterboxing` is removed (it fights the non-16:9 HUD repositioning), and
+> the Main Menu page is a set of per-entry `Visible`/`Hidden` rows with no master. The scene's
+> `header.lbl` is a **UILabel**, so every page of ours retitles itself on entry. The retail Audio page
+> is retitled `AUDIO` and its list is moved onto the merged list's transform by an appended
+> `av_options_panel` enter statement; that correction is implemented but **not yet boot-verified**
+> (the owner's capture that reported the `AUDIO/VIDEO` title and the row offset predates it).
+> Owner-driven manual captures on 2026-10-19 confirmed the titles and the tree; the automated `drive_ui` route did not land the
+> main-menu entry in the same pass (it sends a stick key while the list was taking arrows), so the
+> screenshots for this correction are manual and the row below is a note, not a harness boot.
 
 Status: **executed for the main-menu entry**, one measured engine constraint left open for the in-song
 entry. Evidence is real boots against the pinned retail image (§4); every "measured" line names its log and
@@ -211,7 +224,8 @@ driven with `scripts/drive_ui.ps1` through `out/_swap/p5b/run.ps1 -Route <r>`. P
 
 | Proof | Route | Evidence | Result |
 | --- | --- | --- | --- |
-| Base install shows **five** rows, no dead `Gameplay` | `baseroot` | `baseroot.log`, `shots-baseroot/00-root.png` | `General / Controls / Calibration / Audio/Video / Interface`, General selected |
+| **2026-10-19 tree and titles** | manual (owner) | owner's 2026-10-19 captures: root, INTERFACE, DLC rows, AUDIO/VIDEO | root is `How to Play / Calibration / General / Controls / Audio/Video / Gameplay`; INTERFACE reads `Main Menu / Offline Prompts: Hidden|Visible / Help & Options Labels: On`; Audio/Video reads `Audio / Video`; the Audio page is retitled `AUDIO`. **Not a harness boot** — see the 2026-10-19 correction above. |
+| Base install shows **five** rows, no dead `Gameplay` (superseded layout) | `baseroot` | `baseroot.log`, `shots-baseroot/00-root.png` | Old root `General / Controls / Calibration / Audio/Video / Interface`, General selected |
 | Down and up walk the list and **clamp at both ends** | `baseroot` | `shots-baseroot/01..05-clamp.png`, `06..10-up-clamp.png` | INTERFACE stays selected through the 5th down; GENERAL the same going up |
 | B leaves the merged root to the **screen it came from** | `baseroot` | `shots-baseroot/11-back-menu.png` | the main menu (not `credits`) — the P1 defect is gone |
 | A child row enters a retail screen and B returns | `nav` | `shots-nav/04-confirm.png`, `05-back.png` | Audio/Video opens the retail VIDEO/AUDIO page; B lands back on the merged root |
