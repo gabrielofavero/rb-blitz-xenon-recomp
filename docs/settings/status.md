@@ -63,7 +63,9 @@ Part 1 wherever they disagree.
   strip, is **absent** on the calibration wizard and on every informational/confirmation page, and has
   its own row — **Interface → Settings Labels**, default On — which applies **live**, with no restart
   prompt. Seen by eye on a running screen on that date: 1280x720 and this machine's 21:9 primary
-  (2560x1080 render, 2354x993 client).
+  (2560x1080 render, 2354x993 client). Since **2026-10-19** a mouse hover publishes the same caption
+  from the engine's `SCROLL_MSG` (see "Mouse hover publishes the row caption" below), so pointing at a
+  row updates the description without a click.
 - **DLC cache, status text and loading progress (P6 of the installed-game review, 2026-10-14)**: the
   host cache now names its hit/miss reason and per-phase timings, validates its body with a checksum,
   replaces itself atomically and refuses to persist a partial scan; a **real** hit is what makes the
@@ -545,6 +547,31 @@ exercised on this machine (all three candidates exist); it is a `REXLOG_WARN` pl
 the same derived size, pinned by inspection rather than by a run. The save-error confirmation is
 generated but was not driven (producing a real write failure on demand is its own experiment). The
 reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
+
+##### Mouse hover publishes the row caption (measured 2026-10-19)
+
+The native mouse hover changed the selected row by calling `UIList::SetSelected` and then
+`ScrollStart`/`ScrollComplete` directly, so the generated panel's `move_up`/`move_down` methods - the
+only place a caption was published - never ran. The highlight followed the pointer while the overlay
+kept the departed row's description: hovering **Calibration** left *Watch the game's how-to-play
+tutorials.* on screen over it.
+
+The fix is the engine's own selection-scroll notification. Every ordinary panel now carries a
+`SCROLL_MSG` member (`ScrollHelpCases` in [settings_screen.cpp](../../src/ui/settings_screen.cpp))
+whose switch maps `{options.lst selected_sym}` to the row's canonical help symbol. Retail's
+`powerup_select_panel` updates its description from the same message and `selected_sym`
+(`out/_swap/powerup_select.tree.txt`, decoded 2026-10-19), and the host's hover already calls
+`ScrollStart`. The restart/save-error/achievements pages carry no member, so a scroll there cannot
+put a description over their message. `rb_blitz_settings_screen_tests` pins one `SCROLL_MSG` table per
+ordinary page, none on the six suppressed pages, and one `HelpWrite` per selectable symbol (107,654
+checks, exit 0).
+
+Measured against the release build, base install, isolated `--user_data_root`, at the merged root:
+hovering **Calibration** changed the caption to *Line up the audio and video so notes hit in time
+with the music.*, hovering **Audio/Video** to *Audio, video, and graphics settings.*, and on General
+hovering **Interface** to *Main-menu visibility and the settings caption.* - each without a click.
+Evidence: `out/live-scrollmsg/scrollmsg-hover-calibration.png`,
+`scrollmsg-hover-av.png` and `scrollmsg-hover-interface.png`.
 
 
 #### How the test tree stands after the Vulkan preset change (measured 2026-10-13, later)

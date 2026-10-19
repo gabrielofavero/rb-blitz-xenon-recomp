@@ -187,7 +187,8 @@ std::vector<Node> ButtonCases(const bool root, const bool pause) {
 // panel's own button table reported every press as a button action and never once as `SELECT_MSG`
 // (docs/settings/architecture.md (part 1, the bridge) §12.2), so driving the rows from the message the
 // engine demonstrably sends is the honest design. `on_select_msg` is still defined, because the
-// *selection change* message is a different one and the retail panels use it for the move sound.
+// *selection change* message is a different one and the retail panels use it for the move sound;
+// `SCROLL_MSG` (see `ScrollHelpCases`) is where that change publishes the caption.
 
 // `{switch action <cases...>}` - the panel's button table, extras first.
 // `{switch action <extras...> <shared cases...>}` - the panel's button table. Extra cases come
@@ -1617,6 +1618,31 @@ Node SelectRowCases(const PanelSpec& panel) {
   return Arr({Sym("select_row"), Cmd(std::move(kids))});
 }
 
+// `{SCROLL_MSG {switch {options.lst selected_sym} <row> <help write> ...}}` - the caption of the
+// row a selection scroll has just reached.
+//
+// **Why this member exists (measured 2026-10-19).** The native mouse hover changes the selected
+// row by calling `UIList::SetSelected` and then `ScrollStart`/`ScrollComplete` directly
+// (src/input/native_menu.cpp), so the panel's `move_up` / `move_down` methods - the only place a
+// caption used to be published - never run, and the overlay kept showing the row the pointer had
+// left. `SCROLL_MSG` is the engine's own notification for that scroll: retail's
+// `powerup_select_panel` updates its description from exactly this message and `selected_sym`
+// (decoded in out/_swap/powerup_select.tree.txt), and `ScrollStart` is what the host's hover
+// already calls. The caption therefore has one source for controller, keyboard and mouse selection
+// alike, and a mouse move can never lag it.
+//
+// A page that suppresses captions (the confirmation/error panels, see `SuppressesHelp`) gets no
+// member at all, so a scroll there cannot put a description over its own message.
+std::vector<Node> ScrollHelpCases(const PanelSpec& panel) {
+  std::vector<Node> kids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
+  for (const Row& row : panel.rows) {
+    for (const std::string& symbol : RowSymbols(row)) {
+      kids.push_back(Arr({Sym(symbol), HelpWrite(row.symbol)}));
+    }
+  }
+  return kids;
+}
+
 // Left/Right on a select row walk its choices, and nowhere else: a nested switch on the selected
 // symbol keeps the arrows from doing anything on a row that has no direction. Like Confirm, each
 // press commits: the arrow is the other way to make the same one-step change, so it must be as
@@ -1807,19 +1833,23 @@ Node PanelDefinition(const PanelSpec& panel) {
 
   const bool pause = g_emitting_pause;  // captured before the table is built
   const bool root = panel.screen == kRootScreen || panel.screen == kRootPauseScreen;
-  return Panel(panel.name, panel.scene,
-               {
-                   PopulateMenu(panel),
-                   // The panel's own navigation, and why it is not the engine's: see above.
-                   MoveMember(panel, "move_up", false),
-                   MoveMember(panel, "move_down", true),
-                   std::move(enter),
-                   GetFocusMember(),
-                   Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})}),
-                   Arr({Sym("on_select_msg"), Cmd({Sym("shell_sfx"), Sym("play_select")})}),
-                   SelectRowCases(panel),
-                   Arr({Sym("BUTTON_DOWN_MSG"), ButtonTable(std::move(extras), root, pause)}),
-               });
+  std::vector<Node> members = {
+      PopulateMenu(panel),
+      // The panel's own navigation, and why it is not the engine's: see above.
+      MoveMember(panel, "move_up", false),
+      MoveMember(panel, "move_down", true),
+      std::move(enter),
+      GetFocusMember(),
+      Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})}),
+      Arr({Sym("on_select_msg"), Cmd({Sym("shell_sfx"), Sym("play_select")})}),
+  };
+  if (!SuppressesHelp(panel)) {
+    // `ScrollHelpCases` is the whole `{switch {options.lst selected_sym} ...}` body.
+    members.push_back(Arr({Sym("SCROLL_MSG"), Cmd(ScrollHelpCases(panel))}));
+  }
+  members.push_back(SelectRowCases(panel));
+  members.push_back(Arr({Sym("BUTTON_DOWN_MSG"), ButtonTable(std::move(extras), root, pause)}));
+  return Panel(panel.name, panel.scene, std::move(members));
 }
 
 Node ScreenDefinition(const PanelSpec& panel) {

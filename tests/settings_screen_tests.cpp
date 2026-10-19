@@ -1464,7 +1464,9 @@ void TestButtonTableIsOneSwitch() {
     // Every other switch on the same symbol is a navigation table. They may only live in
     // `move_up` / `move_down` - one per direction, one per provider state - or in the panel's own
     // Left/Right cases; a panel whose rows have no direction must carry none at all, or the arrows
-    // would act on a row with nothing to move through.
+    // would act on a row with nothing to move through. The `SCROLL_MSG` table (2026-10-19) is the
+    // third allowed home: it is the handler that publishes the caption when a selection scrolls,
+    // including the host's mouse hover, and a suppressed page carries none.
     std::vector<const dtb::Node*> all;
     CollectRowTables(root, &all);
     int in_moves = 0;
@@ -1477,7 +1479,22 @@ void TestButtonTableIsOneSwitch() {
         in_moves += static_cast<int>(inside.size());
       }
     }
-    const size_t extra = all.size() - 1u - static_cast<size_t>(in_moves);
+    std::vector<const dtb::Node*> scroll_members;
+    CollectMembers(root, "SCROLL_MSG", &scroll_members);
+    int in_scroll = 0;
+    for (const dtb::Node* scroll : scroll_members) {
+      std::vector<const dtb::Node*> inside;
+      CollectRowTables(*scroll, &inside);
+      in_scroll += static_cast<int>(inside.size());
+    }
+    const std::string panel_name =
+        (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
+    const bool suppressed = panel_name.rfind("settings_restart", 0) == 0 ||
+                            panel_name.rfind("settings_save_error", 0) == 0 ||
+                            panel_name.rfind("settings_achievements_confirm", 0) == 0;
+    CHECK_EQ(in_scroll, suppressed ? 0 : 1);
+    const size_t extra =
+        all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
   CHECK_EQ(row_tables, 114);  // one row table per panel, in both contexts
@@ -2462,12 +2479,14 @@ bool IsHelpPath(const std::string& text, std::string* symbol) {
 }
 
 void TestHelpEventsInTheDefinition() {
-  BeginCase("the definition publishes a caption on entry and every move, and the hide on leave");
+  BeginCase("the definition publishes a caption on entry, every move and every scroll, and the hide "
+            "on leave");
 
   const std::vector<dtb::Node> roots = DefinitionRoots();
   int panels = 0;
   int enters = 0;
   int moves = 0;
+  int scrolls = 0;
   int clears = 0;
   for (const dtb::Node& root : roots) {
     std::vector<const dtb::Node*> rows;
@@ -2531,6 +2550,63 @@ void TestHelpEventsInTheDefinition() {
       ++enters;
     }
 
+    // The scroll notification (measured 2026-10-19). The engine calls `SCROLL_MSG` when a
+    // selection scrolls - including the native mouse hover, which calls `UIList::ScrollStart`
+    // directly and never runs `move_up`/`move_down`. Retail's `powerup_select_panel` updates its
+    // description from exactly this message and `selected_sym` (out/_swap/powerup_select.tree.txt),
+    // so every selectable symbol must name its row's caption here too; a suppressed page carries
+    // no member at all, which is what keeps a scroll from putting text over its own message.
+    std::vector<const dtb::Node*> scroll_members;
+    CollectMembers(root, "SCROLL_MSG", &scroll_members);
+    if (suppressed) {
+      CHECK_TRUE(scroll_members.empty());
+    } else {
+      CHECK_EQ(scroll_members.size(), 1u);
+      std::vector<const dtb::Node*> scroll_tables;
+      CollectRowTables(*scroll_members.front(), &scroll_tables);
+      CHECK_EQ(scroll_tables.size(), 1u);
+      std::vector<const dtb::Node*> row_tables;
+      CollectRowTables(*rows.front(), &row_tables);
+      CHECK_EQ(row_tables.size(), 1u);
+      const auto case_symbols = [](const dtb::Node& table) {
+        std::vector<std::string> out;
+        for (size_t i = 2; i < table.kids.size(); ++i) {
+          const dtb::Node& kase = table.kids[i];
+          if (kase.tag == dtb::kArray && !kase.kids.empty() && kase.kids[0].tag == dtb::kSymbol) {
+            out.push_back(kase.kids[0].text);
+          }
+        }
+        return out;
+      };
+      const std::vector<std::string> scroll_cases = case_symbols(*scroll_tables.front());
+      const std::vector<std::string> select_cases = case_symbols(*row_tables.front());
+      CHECK_TRUE(!scroll_cases.empty());
+      CHECK_EQ(scroll_cases.size(), select_cases.size());
+      for (const std::string& symbol : select_cases) {
+        CHECK_TRUE(std::find(scroll_cases.begin(), scroll_cases.end(), symbol) !=
+                   scroll_cases.end());
+      }
+      for (const dtb::Node& kase : scroll_tables.front()->kids) {
+        if (kase.tag != dtb::kArray || kase.kids.empty() || kase.kids[0].tag != dtb::kSymbol) {
+          continue;
+        }
+        std::vector<std::string> texts;
+        CollectText(kase, &texts);
+        int writes = 0;
+        for (const std::string& text : texts) {
+          std::string symbol;
+          if (!IsHelpPath(text, &symbol)) {
+            continue;
+          }
+          ++writes;
+          CHECK_TRUE(symbol != "-");
+          CHECK_TRUE(!HelpTextFor(symbol).empty());
+        }
+        CHECK_EQ(writes, 1);
+      }
+      ++scrolls;
+    }
+
     // Move tables: every case that moves the selection also publishes the caption of the row it
     // moves to, in the same statement - so the overlay names the row the highlight just reached.
     for (const char* name : {"move_up", "move_down"}) {
@@ -2586,9 +2662,10 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 114);      // every page, in both contexts
-  CHECK_EQ(enters, panels);  // every page tells the overlay where the highlight starts
-  CHECK_TRUE(moves > 100);   // the unclamped direction cases, across the surface
+  CHECK_EQ(panels, 114);        // every page, in both contexts
+  CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
+  CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
+  CHECK_EQ(scrolls, panels - 6);  // every ordinary page, not the three suppressed twins
   CHECK_TRUE(clears >= panels);
 }
 

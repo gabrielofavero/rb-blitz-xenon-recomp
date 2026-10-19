@@ -58,7 +58,13 @@ participate in hit testing and cannot select neighboring songs.
 
 Hover preserves UIListState's first visible row (+48, list +224), then sends both
 scroll and scroll-complete notifications. It neither recenters the viewport nor
-steps through intervening choices. Powerup submenus retain native A/B semantics:
+steps through intervening choices. Those notifications are also what lets a hovered
+Help & Options row describe itself: the generated panels publish the highlighted
+row's caption from `SCROLL_MSG` and `selected_sym` - the same message retail's
+`powerup_select_panel` uses to update its description - so pointing at a row moves
+the caption without a click or a directional press (measured 2026-10-19,
+`out/live-scrollmsg/scrollmsg-hover-calibration.png`, `scrollmsg-hover-av.png` and
+`scrollmsg-hover-interface.png`). Powerup submenus retain native A/B semantics:
 click a category to open it, click a choice to equip it, or right-click to go back.
 The open wheel's category keeps its highlight even when the pointer leaves it —
 opening the wheel moves focus to it, so only the wheel's own frame is ever stripped
