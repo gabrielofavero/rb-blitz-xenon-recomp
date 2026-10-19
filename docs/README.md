@@ -124,6 +124,7 @@ budget, and the row-text budget — are a skill:
 | [`plans/todo/2026-10-10-shader-cache-findings.md`](plans/todo/2026-10-10-shader-cache-findings.md) | Shader-stutter findings and implementation plan: preload completion, pipeline coverage, preparation before playback, and distribution. |
 | [`plans/todo/2026-10-13-load-guard-findings.md`](plans/todo/2026-10-13-load-guard-findings.md) | Song Load Guard feasibility, with [`load-guard-prompts.md`](plans/todo/2026-10-13-load-guard-prompts.md) for implementation. |
 | [`plans/todo/2026-10-13-rhythmverse-store-plan.md`](plans/todo/2026-10-13-rhythmverse-store-plan.md) | Wiring the RhythmVerse customs catalogue into the retail store: research complete, no code yet. |
+| [`plans/todo/2026-10-19-resolution-scale-expansion-plan.md`](plans/todo/2026-10-19-resolution-scale-expansion-plan.md) | Enable the six requested ultrawide/32:9 sizes and 4:3 as a first-class shape, with display-driven offers and a diagnostic downscale override for validation on a smaller panel. |
 
 ### History
 
