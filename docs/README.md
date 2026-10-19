@@ -126,6 +126,7 @@ budget, and the row-text budget — are a skill:
 | [`plans/todo/2026-10-13-rhythmverse-store-plan.md`](plans/todo/2026-10-13-rhythmverse-store-plan.md) | Wiring the RhythmVerse customs catalogue into the retail store: research complete, no code yet. |
 | [`plans/todo/2026-10-19-resolution-scale-expansion-plan.md`](plans/todo/2026-10-19-resolution-scale-expansion-plan.md) | Enable the six requested ultrawide/32:9 sizes and 4:3 as a first-class shape, with display-driven offers and a diagnostic downscale override for validation on a smaller panel. |
 | [`plans/todo/2026-10-19-button-layout-hotswap-plan.md`](plans/todo/2026-10-19-button-layout-hotswap-plan.md) | Button glyphs and controller art as replaceable scheme packages: a live texture override, in-game selection, keyboard/controller auto-switch, and an optional PS3 `.pkg` import. Planning only. |
+| [`plans/todo/2026-10-19-interface-gameplay-mapping-restructure-plan.md`](plans/todo/2026-10-19-interface-gameplay-mapping-restructure-plan.md) | Interface Mapping versus always-on Gameplay Mapping: preset-aware controller defaults, inferred Custom, 3→1 listening countdown, row-level binding text, and new Mouse & Keyboard defaults. Planning only. |
 
 ### History
 
