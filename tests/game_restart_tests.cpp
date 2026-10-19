@@ -5,7 +5,7 @@
 //
 //   * the handoff token: the fixed shape, the bound, and every refusal (a wrong version, a
 //     truncated token, a zero pid or nonce, an unknown target, a token from the future);
-//   * the command line: the quoting rule Controller Settings already uses, and the allowlist rebuild -
+//   * the command line: the quoting rule the launcher established (and the app's Play used), and the allowlist rebuild -
 //     what survives a restart, and the one-shot arguments that must not;
 //   * the state machine: exactly-once, the stale revision, the "nothing saved yet" case, a child
 //     creation failure that leaves the parent running, and a second request that is refused;
@@ -13,7 +13,7 @@
 //     waits for its parent's *verified identity*, the identity-mismatch case, the timeout that
 //     refuses to start beside a living parent, and a failed spawn.
 //
-// The test executable doubles as the child: argv[0] is what Controller Settings spawns, so the process
+// The test executable doubles as the child: argv[0] is what the restart coordinator spawns, so the process
 // legs need no fixture binary and no shell.
 
 #include <chrono>

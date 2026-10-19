@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // Unit tests for the gameplay-mapping configuration (src/profile/gameplay_remap.h, P1 of
-// docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md).
+// docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md).
 //
 // P1's verify list, as cases:
 //
@@ -339,7 +339,7 @@ void TestUnknownAndInvalid() {
       TableKind::kController, Rows({"first_note=pad:x", "turbo=pad:y", "swing=pad:b"}));
   CHECK_EQ(table.BoundCount(), 1u);
   CHECK_TRUE(table.Bindings(Action::kFirstNote) != nullptr);
-  // Not a diagnostic: it is a newer Controller Settings's row, which this build must not report as
+  // Not a diagnostic: it is a row a newer build wrote, which this build must not report as
   // an error, only leave alone.
   CHECK_TRUE(table.Rejected().empty());
   const std::vector<ProfileSetting> written = table.ToRows();

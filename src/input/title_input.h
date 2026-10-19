@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The input system this title runs on, and the physical pad it can read before anything is
-// merged or synthesized (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, D1/D2;
+// merged or synthesized (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D1/D2;
 // P2).
 //
 // Two things differ from the SDK's own CreateDefaultInputSystem:

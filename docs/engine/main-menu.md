@@ -621,8 +621,8 @@ and the split-read rule refused the file silently.
 | the refresh itself (R7) | [src/hooks/dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp) (the guest's file calls), [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp) (`RefreshConfigured`, `PublishPendingRefresh`, `CacheServedThisBoot`, `ContentItemCount`), [src/fs/refresh_state.h](../../src/fs/refresh_state.h) (one at a time, published once) |
 | the discovery screen's progress bar (R7) | [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp), [src/hooks/content_progress.h](../../src/hooks/content_progress.h) |
 | the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
-| Controller Settings rows | [controller-settings/config/settings.toml](../../controller-settings/config/settings.toml) (the *Interface* tab's "Main menu" group, and R3's own row in its "Startup" group) |
-| the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/controller_settings_launch_tests.cpp](../../tests/controller_settings_launch_tests.cpp) (R3's argv) |
+| the settings rows | [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) (Interface → Hide Items → Main Menu, and R3's own row under Interface) |
+| the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/settings_screen_tests.cpp](../../tests/settings_screen_tests.cpp) |
 | the harness | [scripts/ui_states.ps1](../../scripts/ui_states.ps1) (the `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob and the `offline-prompt` state), [scripts/observe_ui.ps1](../../scripts/observe_ui.ps1) (`-SkipOfflinePrompts`) |
 
 ### 10. Open

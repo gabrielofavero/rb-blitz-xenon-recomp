@@ -243,17 +243,16 @@ codegen target during the build.
 
 The Windows presets configure `REXGLUE_USE_VULKAN=ON` next to the SDK's Windows default
 `REXGLUE_USE_D3D12=ON`, because the SDK's own default is **OFF on Windows** — a tree configured by
-hand without it silently ships a `rexgpu-xenos.dll` that has no Vulkan backend, and then every
-*Renderer* row in the product (Controller Settings' and the game's) has only one choice to offer. The
+hand without it silently ships a `rexgpu-xenos.dll` that has no Vulkan backend, and then the
+game's *Renderer* row has only one choice to offer. The
 configure prints what it settled on, so the answer is in the first twenty lines of the log:
 
 ```
 --   Graphics: D3D12=ON Vulkan=ON
 ```
 
-That single pair of variables decides three things that must agree: what the GPU plugin contains,
-what Controller Settings' *Renderer* row offers (`--backends=` in [controller-settings/CMakeLists.txt](../../controller-settings/CMakeLists.txt)),
-and what the game's own in-game *Renderer* row offers (`RBBLITZ_BACKENDS` in
+That single pair of variables decides two things that must agree: what the GPU plugin contains,
+and what the game's in-game *Renderer* row offers (`RBBLITZ_BACKENDS` in
 [CMakeLists.txt](../../CMakeLists.txt) → the capability probe in
 [src/settings/boot.cpp](../../src/settings/boot.cpp)). At run time Vulkan is additionally probed: the
 SDK opens `vulkan-1.dll` with `LoadLibrary` rather than linking it, so a machine without a Vulkan
@@ -326,10 +325,10 @@ cmake --build --preset win-amd64-release --target rb_blitz    # skip unrelated t
 cmake --build --preset win-amd64-release -- -v                # show full command lines
 ```
 
-Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll`,
-`rexgpu-xenos.dll`, and Controller Settings, `rb_blitz_controller_settings.exe`, beside them (D1 of
-[plans/launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md), which is what the installer's
-payload snapshot reads).
+Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll` and
+`rexgpu-xenos.dll` beside it. (The tree used to build a second executable, the settings
+application; it retired on 2026-10-19 and the payload snapshot now reads the game alone —
+see [the retired settings application](#the-retired-settings-application).)
 
 The two DLLs are **copies**: the SDK builds them into its own staging directory
 (`rexglue-sdk/out/win-amd64\`) and `rexglue_setup_target` refreshes the ones beside
@@ -822,132 +821,34 @@ overlay owns the pointer, and the foreground requirement above) are in
 pitches, the pulse widths, the letterbox mapping — are in
 [bringup-log.md](../history/bringup-log.md), in the "Mouse navigation" sections.
 
-### Controller Settings — `rb_blitz_controller_settings.exe`
+### The retired settings application
 
-Controller Settings is the second executable this tree builds: the settings window that appears
-before the game and the shortcut the installer's finish page points at
-([controller-settings/README.md](../../controller-settings/README.md) is its description; the plan is
-[plans/launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md)). It sits beside `rb_blitz.exe` in the
-build directory and needs the same `.toml` and DLLs, so start it the same way — from the
-build directory, pointing at the game root and at a profile of your own:
+This tree used to build a second executable, `rb_blitz_controller_settings.exe`, as the
+pre-game settings window. It retired on 2026-10-19: every player setting it edited is an
+in-game Help & Options row (General, Controls, Audio/Video, Interface, Gameplay), and the
+installer now ships `rb_blitz.exe` alone
+([gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §19 has the
+retirement record). There is nothing to build or start beside the game.
 
-```powershell
-cd out\build\win-amd64-release
-.\rb_blitz_controller_settings.exe --game_data_root=..\..\..\game `
-    --launcher_profile=..\..\..\out\my-launcher.toml
-```
-
-`--launcher_profile` is step 1 of the order Controller Settings and the game share, so naming one
-keeps a run away from `%APPDATA%\rb_blitz\launcher.toml` — which is what the harnesses
-below do. What Controller Settings decided is also readable without a window: `--dump-layout`,
-`--dump-display`, `--dump-profile`, `--dump-general`, `--dump-prefill`
-and `--print-command` each write their report to a file and exit, so Controller Settings' own
-output is the first thing to reach for on a build machine that has no display to look at.
-
-**Its unit tests** are the same kind of host test as the game's — dependency-free, no
-window, no game image, a couple of seconds — and CTest names them after the module they
-cover:
+Two of its host suites tested modules the game owns, so they kept their checks under
+game-owned names; the rest went with the application:
 
 | CTest name | Target | What it covers |
 | --- | --- | --- |
-| `controller_settings_profile` | `rb_blitz_controller_settings_profile_tests` | D2's profile format: the parse, the patch-in-place writer, what a save preserves, and the path resolution order |
-| `controller_settings_general` | `rb_blitz_controller_settings_general_tests` | the General tab's decidable half: D5's four Ultimate states, and the path rules a row validates against |
-| `controller_settings_session` | `rb_blitz_controller_settings_session_tests` | B4's write path — save, dirty, reset, import/export, moving the settings folder — and D4's first-run prefill |
-| `controller_settings_remap` | `rb_blitz_controller_settings_remap_tests` | the `[remap]` vocabulary: the grammar, the serialiser, the round trip |
-| `controller_settings_launch` | `rb_blitz_controller_settings_launch_tests` | Contract 3: the argv the game is started with, the pre-spawn readiness check, and B7's failure sentence |
-| `controller_settings_nav` | `rb_blitz_controller_settings_nav_tests` | A3's pad rules (deadzone, repeat, binding table), A2's walk from a ring entry to the row the bar names, and A5's keys — the chord grammar, the defaults, the chord-before-bare-key rule, the repeat rule, the `[nav]` round trip, and the focus ring's scaling |
+| `profile` | `rb_blitz_profile_tests` | the controller profile's format: the parse, the patch-in-place writer, what a save preserves, and the path resolution order (was `controller_settings_profile`) |
+| `profile_remap` | `rb_blitz_profile_remap_tests` | the `[remap]` vocabulary: the grammar, the serialiser, the round trip (was `controller_settings_remap`) |
 
 ```powershell
 cmake --build --preset win-amd64-debug
-ctest --test-dir out\build\win-amd64-debug -R Controller Settings --output-on-failure
+ctest --test-dir out\build\win-amd64-debug -R "profile|profile_remap" --output-on-failure
 ```
 
-`win-amd64-debug` is the preset whose tree is configured with tests here
-(`out\build\win-amd64-release` was configured with `BUILD_TESTING=OFF`, which is why its
-CTest list is a leftover); the same run carries the game's own tests, so
-`ctest --test-dir out\build\win-amd64-debug -N` lists the seven below beside them.
-
-**The captures** are [scripts/capture_controller_settings.ps1](../../scripts/capture_controller_settings.ps1): it
-writes a fixture profile, runs the headless reports above, then starts Controller Settings on
-that profile and drives it with synthetic keys, capturing the client area
-(`capture_window.ps1 -ClientArea`) and measuring crops against each other with
-`frame_diff.ps1`. What it asserts is what text cannot: a press moves the ring on, a
-press that leaves a row rewrites the bar's help line, a tab switch changes the
-body and coming back returns to it, and a session with no input at all changes nothing.
-It also asserts the window's own title — Controller Settings' name and the release version, and
-no tab — from the OS (`MainWindowTitle`) and from `--dump-display`, which is where the
-version a release stamped is checkable without a screenshot.
-A row that offers a choice is one row with one option per choice, so a few presses beside
-the launch target's three choices are a 0% help diff by design — those numbers are
-in the summary rather than asserted on.
-
-One Controller Settings behaviour shows up in the trace as a line no press made, and the walk tolerates
-it rather than being written around it: the ring adopts the row under the pointer when the
-pointer moves *inside the window*, and the window is maximized a moment after it is shown, so
-with the pointer resting over a row the ring lands there before the first key is sent. The
-presses are therefore read off the *end* of the trace.
-
-```powershell
-.\scripts\capture_controller_settings.ps1                 # headless + keyboard + pad + the three legs
-.\scripts\capture_controller_settings.ps1 -SkipWindow     # the headless assertions alone
-.\scripts\capture_controller_settings.ps1 -SkipScale      # everything but the four-scale leg (the slowest)
-```
-
-Frames, crops, every `--focus-log` trace and `summary.json` land in
-`out\controller-settings-capture\`; the run prints one line per check and exits non-zero if any
-failed. It needs an interactive desktop (the window is captured from the screen, and the
-Controller Settings's window has to own the foreground before a key is sent), while `-SkipWindow`
-does not. The pad leg uses A3's virtual pad, so a controller is not required — and
-`--no-gamepad` is what keeps one that happens to be plugged in out of the keyboard leg's
-counts.
-
-Three legs beyond the pictures, one per thing only a running Controller Settings can be asked, each
-skippable on its own (`-SkipWalkthrough`, `-SkipScale`, `-SkipSafeMode`):
-
-| Leg | What it drives | What it asserts |
-| --- | --- | --- |
-| `walkthrough` | `Home` and a fixed budget of `Down` on each tab, then one read of the trace | every row of every tab's ring is reached, the ring wraps back to the first row, and the General tab's own blocks — B4's and the bottom bar's row — are in the ring at all. A lap that could not reach a row is what "never traps focus" would look like |
-| `scale` | the same leg at `--ui-scale=1.0`, `1.5`, `2.0` (the machine's own scale is the fourth step, which the keyboard leg already runs) | at every step the crops the harness computes out of that scale still land where the claims are: no input is a still picture, a press moves the ring's own region, and leaving the first row rewrites the help strip |
-| `safe-mode` | a profile that carries a legacy `[nav]` keys table, and a file that does not parse at all | the legacy table is readable and locks nothing out — Controller Settings' keys are fixed, so a file cannot take the movement keys away, and the keys still move the ring; a file that does not parse is refused (`writable: no`) without `--safe-mode`, and replaceable by a save with it; and safe mode leaves the file byte for byte as it was |
-
-The `scale` leg is the slow one — it starts three more launchers and takes ~40 captures —
-which is why it has its own switch rather than being folded into the keyboard leg.
-
-**The installed end to end run** is
-[scripts/acceptance_controller_settings.ps1](../../scripts/acceptance_controller_settings.ps1): it silent-installs the
-built setup into `out\controller-settings-acceptance\app`, writes a profile per leg, asserts the command
-line `--print-command` prints *before* starting anything, then boots the game and reads the
-log the game writes. Four legs, so that the payload, the licence and the save folder each
-have a run that differs from the others by one thing:
-
-| Leg | What it is | The lines it has to show |
-| --- | --- | --- |
-| `retail` | before the mod is installed: the payload's folder is not on disk | `ultimate: off, booting the retail game data`, `license_mask = 1 (default; …)` |
-| `ultimate` | after the install's own `rb_blitz_setup_helper.exe install-ultimate` (B8's command, folder source, no download) | `ultimate: payload …`, the content-device patch, the overlay, `d: => \Device\BlitzOverlay` |
-| `demo` | the XBLA trial | `--license_mask=0` on the command line and `license_mask = 0 (configured)` |
-| `save` | a `--user_data_root` override under `out\`, isolated the way `acceptance_persistence.ps1` isolates one | the log's `User data:` line, and the title's files under that folder |
-
-Every leg also has to show the install's own game folder as the booted root (checked by the
-hash of the `default.xex` it ran), the DLC folder the profile named, and the pad rebinding
-that only the profile can supply.
-
-```powershell
-.\scripts\acceptance_controller_settings.ps1                  # install, then all four legs
-.\scripts\acceptance_controller_settings.ps1 -Only retail,demo  # one or two of them
-.\scripts\acceptance_controller_settings.ps1 -SkipInstall       # reuse the install already there
-```
-
-Exit 0 means every leg booted, closed cleanly and showed what its target implies; 1 means a
-check failed; 2 means nothing was measured — no installer, no dump, or no Controller Settings in the
-install (renaming `rb_blitz_controller_settings.exe` away is the documented way to see that one). The
-evidence — the install, a profile and a printed command line per leg, the game's own log per
-leg, `summary.json` — lands in `out\controller-settings-acceptance\`. It needs no controller, no clicks
-and no capture, but it boots the game, so it needs a GPU; the controller path stays manual
-([launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md) §6.2). What it asserts are the rows Contract 3
-passes (`--key=value`), because that is how Controller Settings' settings reach the game — the
-profile is read by the game for `[remap]` and is *not* loaded as a config file, which is
-measured in [launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md) §11 together with what follows from
-it.
+The application's own capture and installed-acceptance scripts
+(`capture_controller_settings.ps1`, `acceptance_controller_settings.ps1`) were removed with it.
+The in-game Controls surface is driven by
+[scripts/acceptance_controls.ps1](../../scripts/acceptance_controls.ps1),
+[scripts/acceptance_controls_in_song.ps1](../../scripts/acceptance_controls_in_song.ps1) and the
+recovery arm [scripts/acceptance_recovery.ps1](../../scripts/acceptance_recovery.ps1).
 
 ## 5. What a good run looks like (B-009, music)
 

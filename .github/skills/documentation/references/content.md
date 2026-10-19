@@ -42,7 +42,7 @@ the script/format details, what was measured with evidence, where the code that 
 conclusion lives, and an explicit **Open** section. The document a toggle row points at must contain
 the addresses; that is the contract between `toggles.md` and these files.
 
-Do not put: host-side Controller Settings or installer behaviour; a plan for the fix.
+Do not put: host-side settings-application or installer behaviour; a plan for the fix.
 
 ## Program documents (`docs/settings/`)
 

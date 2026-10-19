@@ -4,9 +4,10 @@
 The alt icon is the repository's own colour art desaturated to greyscale, keeping
 the alpha channel untouched. It is derived from `assets/icon/blitz.ico` and
 `assets/icon/blitz.png`, which are the app's own artwork, so unlike the installer's
-side image it is committed: Controller Settings ships the mono `.ico` as its exe icon, so a
-Controller Settings window and a game window are told apart in the taskbar and Alt-Tab list
-without a second piece of art to license.
+side image it is committed: the repository also carries the mono `.ico` as a
+second, desaturated app icon (the retired Controller Settings window used it, and it is
+kept for any future second surface), so two windows of this project can be told apart
+in the taskbar and Alt-Tab list without a second piece of art to license.
 
 Only the colour is removed: the alpha channel, the frame sizes of an `.ico` and the
 image dimensions of a `.png` all come through unchanged.

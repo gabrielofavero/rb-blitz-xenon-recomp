@@ -4,7 +4,7 @@ Snapshots the recompiled build into installer/out/payload, with a manifest.
 
 .DESCRIPTION
 The installer places exactly the files of the recompiled build that the game
-needs to run: the game's executable and its Controller Settings, the two runtime DLLs the
+needs to run: the game's executable, the two runtime DLLs the
 game loads, and the Microsoft Visual C++ runtime DLLs the binaries import.
 Nothing else is quoted from the build tree - in particular rb_blitz.toml is a
 developer profile, not a shipped file, and the *.pdb / *d.dll files there belong
@@ -21,10 +21,6 @@ back (see src/install.cpp VerifyPayloadTree).
 
 .PARAMETER SourceDir
 Build tree to snapshot. Defaults to out\build\win-amd64-release in this checkout.
-
-.PARAMETER ControllerSettingsDir
-Directory holding rb_blitz_controller_settings.exe, when it was not built beside rb_blitz.exe.
-Defaults to SourceDir, which is where the game's build tree puts it (D1).
 
 .PARAMETER PayloadDir
 Where to write the snapshot. Defaults to installer\out\payload.
@@ -58,7 +54,6 @@ powershell -ExecutionPolicy Bypass -File installer\tools\make_payload.ps1 -Clean
 [CmdletBinding()]
 param(
     [string] $SourceDir,
-    [string] $ControllerSettingsDir,
     [string] $PayloadDir,
     [string] $CrtDir,
     [string] $Version,
@@ -82,7 +77,6 @@ $installerDir = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $installerDir
 
 if (-not $SourceDir) { $SourceDir = Join-Path $repoRoot 'out\build\win-amd64-release' }
-if (-not $ControllerSettingsDir) { $ControllerSettingsDir = $SourceDir }
 if (-not $PayloadDir) { $PayloadDir = Join-Path $installerDir 'out\payload' }
 if (-not $ZipPath) { $ZipPath = Join-Path $installerDir 'out\payload.zip' }
 
@@ -168,12 +162,10 @@ if (-not $CrtDir -or -not (Test-Path -LiteralPath $CrtDir)) {
 
 # name -> directory it comes from. The runtime DLLs are the ones the binaries
 # import (checked below); the rest of Machine.VC143.CRT is for other languages
-# and for WinRT/ConcRT, which nothing here uses. Controller Settings is the second
-# executable of the game's build tree (D1) and sits beside rb_blitz.exe in it.
+# and for WinRT/ConcRT, which nothing here uses.
 $payloadBackends = Get-PayloadBackends -BuildDir $SourceDir
 $wanted = [ordered]@{
     'rb_blitz.exe'             = $SourceDir
-    'rb_blitz_controller_settings.exe'    = $ControllerSettingsDir
     'rexruntime.dll'           = $SourceDir
     'rexgpu-xenos.dll'         = $SourceDir
     'msvcp140.dll'             = $CrtDir

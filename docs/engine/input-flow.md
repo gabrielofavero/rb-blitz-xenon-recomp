@@ -1,6 +1,6 @@
 # Native menu mouse (R6)
 
-`mouse_ui_nav=true` enables the menu cursor (default on; Controller Settings' Controller →
+`mouse_ui_nav=true` enables the menu cursor (default on; the in-game Controls →
 Mouse support setting). Hover selects a native list row directly. Left click emits
 A, right click emits B, and wheel detents step non-scrolled lists (left/right for
 horizontal lists like the powerup rows). A vertical list that draws a scroll rail —
@@ -174,7 +174,7 @@ applied on the window thread through SDL.
 
 ## Source gates and physical provenance (P2, 2026-10-18)
 
-P2 of [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+P2 of [the gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
 turns the two device switches into real gates and gives every mapping evaluator one physical
 snapshot to read. The code is `src/input/source_gates.{h,cpp}` (the rules, SDK-free),
 `src/input/title_input.{h,cpp}` (the title's input system), and the state filter in
@@ -183,8 +183,9 @@ snapshot to read. The code is `src/input/source_gates.{h,cpp}` (the rules, SDK-f
 **The two device gates are read at poll time.** `keyboard_support` off blocks every keyboard path:
 General Mapping's `key:` sources, both gameplay tables' `key:` sources, and the SDK's legacy
 keyboard emulation (below). `mouse_ui_nav` off blocks every mouse path: the native pointer, both
-gameplay tables' `mouse:` sources, and General Mapping's `mouse:` sources. Neither gate disables
-Controller Settings' own `[nav]` keys or capture - the utility is a separate process. The two
+gameplay tables' `mouse:` sources, and General Mapping's `mouse:` sources. All of these are in-game
+rows now (Controls → Input Types); the external settings application that once edited them retired
+on 2026-10-19. The two
 gameplay switches (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) are *routing*
 selectors, not device gates: off never removes a device from the menus.
 
@@ -279,7 +280,7 @@ Direct gameplay dispatch below).
 
 ## Direct gameplay dispatch (P3, 2026-10-18)
 
-P3 of [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+P3 of [the gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
 turns a gameplay table's held action into the title's own gameplay dispatch. The code is
 [src/hooks/gameplay_input.{h,cpp}](../../src/hooks/gameplay_input.cpp) (the guest adapter) and the
 poll/overlay half in [src/input/remap.cpp](../../src/input/remap.cpp); the SDK-free rules
@@ -358,7 +359,7 @@ Release build, `scripts/probe_gameplay.ps1`, default tables (Keyboard + Mouse on
 
 ## In-game edits and the capture dialog (P7, 2026-10-18)
 
-P7 of [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+P7 of [the gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
 moves the settings surface into the game: the Controls menu edits the profile through the settings
 bridge and the change reaches the next poll. The code is
 [src/input/input_store.cpp](../../src/input/input_store.cpp) (the store),
@@ -480,8 +481,10 @@ These local validation artifacts are ignored by Git. The test instance was left
 paused after the checks.
 
 The native mouse executable passes 152 assertions. CTest passes all seven relevant
-suites: `native_mouse`, `controller_settings_remap`, `controller_settings_launch`, `controller_settings_nav`,
-`settings_service`, `settings_store` and `settings_migration`.
+suites: `native_mouse`, `profile_remap`, `profile`, `input_gates`,
+`settings_service`, `settings_store` and `settings_migration`. (The two profile suites were
+`controller_settings_remap`/`controller_settings_profile` until the application retired on 2026-10-19;
+the launch/nav suites went with it.)
 
 ### Live acceptance, 2026-10-16 — click delivery
 

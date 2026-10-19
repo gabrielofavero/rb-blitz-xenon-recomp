@@ -4,7 +4,7 @@
 # defined behaviour when that storage is missing or corrupt. Every case runs the
 # title against a *fresh* --user_data_root under out/, so what is checked is our
 # storage layer and not whatever the machine's Documents\rb_blitz happens to
-# hold. That isolation only works because Controller Settings' data-root overrides are
+# hold. That isolation only works because the profile's data-root overrides are
 # honoured now (they used to be discarded silently - see docs/history/bringup-log.md,
 # 2026-09-20, and the regression test tests/path_policy_tests.cpp).
 #

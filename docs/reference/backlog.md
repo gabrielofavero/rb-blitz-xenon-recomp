@@ -38,6 +38,12 @@ that name an action.
 
 ## 3. Controller Settings — the one active design
 
+> **Superseded, 2026-10-19.** The settings application this section tracks was retired (P8b,
+> [gameplay-input-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
+> §17.4/§19). Its rows now live in the in-game settings store and its input profile is the game's
+> own `launcher.toml`; the two scripts named below no longer exist. The items are kept as the
+> record of the launcher plan's open work, not as work in progress.
+
 - [ ] [plans/launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md) — Controller Settings that owns the
       installed game's settings (General/Graphics/Controller; the Experimental tab is
       withdrawn, D14), ships in the installer payload beside `rb_blitz.exe` and launches

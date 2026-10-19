@@ -391,9 +391,8 @@ bool ParseUpdateManifest(std::string_view text, UpdateManifest* out, std::string
   manifest.payload_commit = Lower(ReadString(root, "payload_commit"));
 
   // Only a manifest that pins a download to install from has to be complete. The
-  // Controller Settings reads the same file to decide whether to offer an update at all, and
-  // treats the absence of a payload source as "nothing to offer" rather than as a
-  // reason to say something.
+  // retired settings application treated the absence of a payload source as "nothing
+  // to offer" rather than as a reason to say something.
   if (!manifest.payload_url.empty() &&
       (!IsSha256Hex(manifest.payload_sha256) || manifest.payload_size == 0)) {
     SetError(error, "update.toml pins a payload url without a 64-character sha256 and a size");

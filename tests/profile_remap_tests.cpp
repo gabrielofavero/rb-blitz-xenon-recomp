@@ -7,7 +7,7 @@
 //
 //   1. the grammar is total: every control round-trips through the text the profile writes, and
 //      text this build does not understand is refused rather than guessed at
-//   2. a table survives the profile's own format, including a row a newer Controller Settings wrote
+//   2. a table survives the profile's own format, including a row a newer build wrote
 //   3. a stock control passes through, a bound one is rewritten, and several sources for one
 //      control are a list rather than a priority
 //   4. every binding reads the pad as it was, so a swap is a swap and not a chain

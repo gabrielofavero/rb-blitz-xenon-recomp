@@ -25,7 +25,8 @@ The two hard numbers below are measured, not conventions: **6 rows visible per p
 
 - The guest bridge/transport, the store, the service, migration, hot-apply → `../../../docs/settings/architecture.md`,
   `../../../docs/settings/contracts.md`.
-- Controller Settings, the standalone app → `../../../controller-settings/README.md`.
+- The retired standalone settings application → `docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md`
+  §17-§19 (the retirement record). Every setting is an in-game Help & Options row now.
 - Installer pages → `docs/settings/menu.md` part 4.
 - The general rules for writing the docs a change owes → the `documentation` skill.
 

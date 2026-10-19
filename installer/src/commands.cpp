@@ -620,7 +620,7 @@ int CommandProbeArchive(const std::vector<std::string>& args) {
 
 // --- the update channel ---------------------------------------------------
 
-// Fetches update.toml - the release manifest Controller Settings's update check reads and
+// Fetches update.toml - the release manifest the updater reads and installs from.
 // the updater installs from - and reports what it says. The file is kept at
 // --dest so the updater can hand the same bytes to its stages, and the values are
 // reported even when the manifest turns out to be unusable, because the wizard

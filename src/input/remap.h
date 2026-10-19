@@ -38,7 +38,7 @@
 namespace rb_blitz::input {
 
 // The switches that decide where a physical input goes (plan D2/D6,
-// docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md). Read at poll time from the
+// docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md). Read at poll time from the
 // cvars Controller Settings' profile feeds, so the input filter, the menu generator and the
 // settings preview observe one effective value per switch rather than three readings of a file.
 //

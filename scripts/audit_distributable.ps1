@@ -15,7 +15,8 @@
 # The checks, and what each would catch:
 #
 #   1 inventory     the payload is exactly the allow-list make_payload.ps1 defines (the
-#                   executable, the two SDK DLLs, the four CRT DLLs) plus
+#                   executable, the two SDK DLLs, the four CRT DLLs, and the Vulkan
+#                   loader when the build offers Vulkan) plus
 #                   payload-manifest.toml, and every file matches the manifest's size and
 #                   hash. Catches a stray rb_blitz.toml, a .pdb, a logs\ directory, or a
 #                   file nobody meant to ship.
@@ -190,6 +191,16 @@ if ($allowed.Count -eq 0) {
     exit 2
 }
 $allowed += "payload-manifest.toml"
+
+# vulkan-1.dll is added to $wanted dynamically when the build offers Vulkan (the SDK opens
+# it with LoadLibrary, so it is never an import and the literal list cannot name it). It is
+# allowed exactly when the snapshot's manifest records a Vulkan build; build.ps1 already
+# refuses a snapshot that offers Vulkan without shipping the loader.
+$payloadManifest = Join-Path $PayloadDir "payload-manifest.toml"
+if ((Test-Path -LiteralPath $payloadManifest) -and
+    ((Get-Content -LiteralPath $payloadManifest -Raw) -match '(?m)^\s*backends\s*=\s*"[^"]*vulkan')) {
+    $allowed += "vulkan-1.dll"
+}
 
 if ($payloadFiles.Count -eq 0) {
     Add-Check "inventory" "skip" "no payload at $PayloadDir (build it with installer\tools\make_payload.ps1)" "" @()

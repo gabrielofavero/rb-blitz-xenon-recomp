@@ -19,7 +19,7 @@ whose exit code is the answer - and the one thing it found.
 | `symbols` | every payload PE, for a COFF symbol table and `.debug` sections, plus any guest-address label that ships as a string | a build that stops stripping, which is how a name from somebody else's symbol database would travel |
 | `machine-paths` | the payload, the helper, the setup executable and the generated config, for the build machine | the path of the developer's disk shipping inside the product |
 | `tracked-tree` | `git ls-files` | game data or a binary artefact being committed into a repository anybody can clone |
-| `cover art` | the committed app art under `assets\icon\` — `blitz.ico` (compiled into the game and the setup by their `.rc` files), `blitz-mono.ico` (Controller Settings' exe icon, the black-and-white alt) and `blitz.png` (the wizard badge; `blitz-mono.png` is the alt's companion) — and the wizard's large image, which `tools\make_art.ps1` *generates* on the build machine into `assets\installer\` | an unlicensed cover image entering the tree or the payload. The ladder is a build product because the artwork is not ours to license ([D11](../plans/finished/2026-09-27-launcher-plan.md)), which is also why absence is a supported configuration rather than a build failure; Controller Settings has no cover art yet either (A4 owes the same rule) |
+| `cover art` | the committed app art under `assets\icon\` — `blitz.ico` (compiled into the game and the setup by their `.rc` files), `blitz.png` (the wizard badge; `blitz-mono.png` is the alt's companion; `blitz-mono.ico` is the retired settings application's exe icon, kept) — and the wizard's large image, which `tools\make_art.ps1` *generates* on the build machine into `assets\installer\` | an unlicensed cover image entering the tree or the payload. The ladder is a build product because the artwork is not ours to license ([D11](../plans/finished/2026-09-27-launcher-plan.md)), which is also why absence is a supported configuration rather than a build failure |
 | `helper reuse` | the installer's helper, which compiles `src\util\sha256.cpp` and `src\util\game_fingerprint.cpp` **from the emulator tree**, against the checks that apply to a shipped binary — `credentials` and `machine-paths` scan `installer\out\generated\*` and `installer\out\dist\*.exe`, not only the payload | a credential or a build-machine path riding along in code that is shared with the game, and the rules the installer enforces drifting from the ones the runtime enforces. Note that `symbols` looks at the payload's own PEs only: the helper's symbol story is its Release build, not a check |
 
 Evidence lands in `out/distributable-audit/` - one text file per check with the matches
@@ -29,11 +29,12 @@ failed, 2 the audit could not measure what it needs (a missing `llvm-readobj`, o
 
 ## What the payload is
 
-The installer places a recompiled build and nothing else: `rb_blitz.exe` and Controller Settings
-that owns its settings, `rb_blitz_controller_settings.exe`, the two SDK DLLs the game loads
-(`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the executables
-import, plus `payload-manifest.toml`, which records their sizes and digests so the
-helper can hash what it placed before it reports success. The list lives in one place,
+The installer places a recompiled build and nothing else: `rb_blitz.exe`, the two SDK DLLs the
+game loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the
+executable imports, plus `payload-manifest.toml`, which records their sizes and digests so the
+helper can hash what it placed before it reports success. One executable is the whole payload
+since the external settings application retired on 2026-10-19 (gameplay-mapping plan §19);
+the list lives in one place,
 `$wanted` in [`installer/tools/make_payload.ps1`](../../installer/tools/make_payload.ps1),
 and the script re-derives the DLL imports from the binaries it copies, so a build that
 starts needing another DLL fails while the snapshot is made instead of on a user's

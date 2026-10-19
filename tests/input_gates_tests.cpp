@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The source gates, the physical snapshot and the gameplay edges
-// (src/input/source_gates.h; P2 of docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md).
+// (src/input/source_gates.h; P2 of docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md).
 // Dependency-free like the remap suites: no pad, no window, no SDL, no boot - the device side is
 // the plain data a sampler hands in.
 

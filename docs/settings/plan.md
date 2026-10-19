@@ -56,15 +56,15 @@ Evidence labels used here: **source** = inspected implementation; **decoded** = 
 
 | Area | Read these locations first | What is established |
 | --- | --- | --- |
-| Controller Settings rows | [settings.toml](../../controller-settings/config/settings.toml), [schema_view.cpp](../../controller-settings/src/schema_view.cpp), [shell.cpp](../../controller-settings/src/shell.cpp) | Schema generates rows; controller remapping and navigation also have bespoke UI outside the schema. |
-| Direct launch | [profile_apply.cpp](../../src/profile/profile_apply.cpp), [rb_blitz_app.h](../../src/rb_blitz_app.h), [game_launch.cpp](../../controller-settings/src/game_launch.cpp) | Profile application occurs in `OnConfigurePaths`; target translation currently happens in `BuildLaunchCommand`. |
+| In-game rows | [settings_screen.cpp](../../src/ui/settings_screen.cpp), [schema.cpp](../../src/settings/schema.cpp), [settings_payload.cpp](../../src/hooks/settings_payload.cpp) | Schema generates the settings inventory; controller remapping and navigation have bespoke in-game pages outside the schema (Controls, built by P7). The external application that once hosted them retired on 2026-10-19. |
+| Direct launch | [profile_apply.cpp](../../src/profile/profile_apply.cpp), [rb_blitz_app.h](../../src/rb_blitz_app.h), [migration.cpp](../../src/settings/migration.cpp) | Profile application occurs in `OnConfigurePaths`; the stored target reaches the boot through migration, not a launch-command builder. |
 | Config precedence | [0013 SDK patch](../../patches/rexglue-sdk/0013-cvar-config-source.patch), [cvar.h](../../rexglue-sdk/include/rex/cvar.h), [rex_app.cpp](../../rexglue-sdk/src/ui/rex_app.cpp) | Defaults < config < environment < CLI < runtime. Later equal-rank config writes win. Profile loads before `rb_blitz.toml`. |
 | Profile storage | [profile.h](../../src/profile/profile.h), [profile.cpp](../../src/profile/profile.cpp), [profile_path.cpp](../../src/profile/profile_path.cpp) | Preserves comments/unknown fields; refuses malformed files; supports explicit file, environment, settings-directory pointer, portable marker, app-data fallback. Writer is not atomic. |
-| Installer | [setup.iss](../../installer/setup.iss), [commands.cpp](../../installer/src/commands.cpp), [install.cpp](../../installer/src/install.cpp), [embed_config.cpp](../../installer/tools/embed_config.cpp) | `wpSelectDir`, finish radios, shortcut tasks, helper commands, manifests, and generated shortcut terminology all need coordinated changes. |
+| Installer | [setup.iss](../../installer/setup.iss), [commands.cpp](../../installer/src/commands.cpp), [install.cpp](../../installer/src/install.cpp), [embed_config.cpp](../../installer/tools/embed_config.cpp) | `wpSelectDir`, finish choices, shortcut tasks, helper commands, manifests, and generated shortcut terminology all need coordinated changes. |
 | Retail menu transforms | [menu_options.cpp](../../src/ui/menu_options.cpp), [menu_filter.cpp](../../src/hooks/menu_filter.cpp), [main-menu-flow.md](../engine/main-menu.md) | Grammar, byte-neutral edits, conditional-node handling, split reads, and retail checksum correction already exist. |
 | Guest-to-host precedent | [dlc_refresh.cpp](../../src/hooks/dlc_refresh.cpp), [shell_music.cpp](../../src/hooks/shell_music.cpp) | `songcache:/rbbz_dlc_refresh` reaches host file imports; `d:/` queries may be answered entirely inside the ARK layer. Publication happens on a guest menu frame. |
 | Ultimate activation | [ultimate.cpp](../../src/hooks/ultimate.cpp), [ultimate_plan.h](../../src/hooks/ultimate_plan.h), [payload_overlay.cpp](../../src/fs/payload_overlay.cpp) | Auto/off/force modes, separate or merged payloads, read-only overlay, three compatibility patch bits. Header existence alone is not sufficient proof of working settings objects. |
-| Input | [controller_tab.cpp](../../controller-settings/src/controller_tab.cpp), [remap.cpp](../../src/profile/remap.cpp), [input/remap.cpp](../../src/input/remap.cpp), [pad_nav.cpp](../../controller-settings/src/pad_nav.cpp) | Guide is in the 17-target vocabulary and capture path. Controller functionality cannot be inventoried solely from schema rows. |
+| Input | [settings_screen.cpp](../../src/ui/settings_screen.cpp), [remap.cpp](../../src/profile/remap.cpp), [input/remap.cpp](../../src/input/remap.cpp), [input_capture.cpp](../../src/input/input_capture.cpp) | Guide is out of the vocabulary; the Controls pages own Input Types and all three mapping tables, and the listening dialog owns capture. |
 | Graphics | [texture/cache.cpp](../../rexglue-sdk/src/graphics/pipeline/texture/cache.cpp), [video_mode_util.h](../../rexglue-sdk/include/rex/graphics/video_mode_util.h), [window_sdl.cpp](../../rexglue-sdk/src/ui/window_sdl.cpp), [graphics_system.cpp](../../rexglue-sdk/src/graphics/graphics_system.cpp) | Integer scaling, guest mode vs window size, borderless fullscreen, backend selection, native MSAA, and FXAA are separate mechanisms. |
 | Save/restart | [local_save.cpp](../../src/hooks/local_save.cpp), [fs/local_save.h](../../src/fs/local_save.h), [rex_app.cpp](../../rexglue-sdk/src/ui/rex_app.cpp) | Existing guest serialization and durable-file techniques are useful; normal window close hard-exits. |
 
@@ -125,7 +125,7 @@ Generated partition numbers may change. Recover the owning file through `generat
 | **P5b** | [in-game-settings-merged-menu.md](menu.md); `src/ui/settings_screen.*` (rebuilt for the merge), 10,460 checks in ctest `settings_screen`, the payload generator in `out/_swap/p5b/make_payload.py` | **Executed for the main-menu entry.** One owned root screen with its own list resource (`settings_menu.milo`); five rows on a base install and six with the provider gate active; walk/clamp/scroll on an eight-row list; Back returns to the entry screen; the old Advanced Settings row, its screen and its locale entry are gone; installed retail records byte-identical after every boot. **One item open:** the in-song row cannot leave the pause list (measured, four arms) - see §3.1 of the handoff and §13 below |
 | **P6** | [in-game-settings-ultimate-adapter.md](architecture.md); `src/settings/ultimate_adapter.*`, the overlay's settings side (`src/fs/overlay_merge.h`, `payload_overlay.*`), the bridge's provider ends; 786 checks in ctest `ultimate_adapter` + `ultimate_adapter_payload` | **Executed.** The installed payload is inspected through its own ark index and its own definitions (6/6 required records, 8 panels, 21 persisted names, 16 defaults, 3 choice inventories) and shape-checked by name; its own file (`GAME:/ulti_settings.dta`) is redirected into user storage and **now actually writable** (measured before this pass: it existed nowhere, because the game mount is read-only); the provider's values are seeded into the store and the boot log records the guest's own open of the redirected record; every provider row carries `restart` with an empty evidence string. **Open:** the achievements action (§6.1), the combined payload's shadowed records, and `forceplot`/`which_skybox`'s screen tokens |
 | P7 | [in-game-settings-installer.md](menu.md); `installer/src/paths.*`, three helper commands, the wizard's install-folder page | The three locations are one page and one `paths.toml` file; shortcuts unchecked, finish default = the game, Controller Settings terminology. 406 installer checks green, ISCC compiles, silent install/reinstall/refusal/uninstall run for real |
-| P8 | [in-game-settings-controller-settings.md](menu.md); `controller-settings/`, `src/profile/remap.*`, `src/input/remap.cpp`, `src/settings/cvars.h` | **Executed.** The reduced Controller Settings surface behind `--controller-only`, Guide removed from the vocabulary and cleared from every input path, the session's rebase-onto-disk save, and the controller-only profile allowlist |
+| P8 | [in-game-settings-controller-settings.md](menu.md); `controller-settings/` (retired 2026-10-19), `src/profile/remap.*`, `src/input/remap.cpp`, `src/settings/cvars.h` | **Executed.** The reduced settings surface behind `--controller-only`, Guide removed from the vocabulary and cleared from every input path, the session's rebase-onto-disk save, and the controller-only profile allowlist. The surface itself was later replaced by P7's in-game Controls menu and the application removed by P8b |
 | P9 | [in-game-settings-hot-apply-restart.md](architecture.md); `src/settings/hot_apply.*`, `src/hooks/hot_apply_runtime.*`, `src/platform/game_restart.*`, the strategy column in `src/settings/schema.cpp` | **Host half executed.** Every row carries its §5.5 strategy in the schema; `graphics.vsync` is `hot` on R7's measured live effect and is applied to a running boot (log lines in `out/_swap/p9/`); the restart coordinator (handoff token, argument allowlist, exactly-once request, spawn, verified-identity wait) and its bootstrap are written and measured against real child processes; 33/33 ctest. **Open:** the authored restart prompt (§8's native dialog), the Target row's soft restart, and the coordinator's `src/main.cpp` wiring - §6 of the handoff |
 | P10 | [in-game-settings-menu-compat.md](menu.md); `src/settings/menu_compat.{h,cpp}`, `menu_options::MenuInventory`, the hide decision in `src/hooks/menu_filter.cpp`, the fixed pool in `src/hooks/shell_music.cpp` | **Executed.** The §3.5 hide matrix is a decision function with tests (master off, absent selection, *explicitly empty*, custom, the protected merged entry refused by name, the refresh row kept while R7 owns it and reported when an explicit choice hides it); the Hide Main Menu list is fed from the effective menu (a new inventory walker, conditional rows included); the pool is fixed at 50 with the retired size reported as ignored; the rename is scoped to the mod's key; 34/34 ctest and five boot arms in `out/_swap/p10/`. **Open:** Controller Settings rows' removal (P8/P11), the alternate in-menu refresh action, and the descriptor-list boot wiring (P11) |
 
@@ -190,7 +190,7 @@ Target details:
 ### 3.2 Controls and Calibration
 
 **Superseded 2026-10-18 by P7 for the Controls half.** Calibration is still retail's wizard at root index 2 and nothing about it changed. Controls is no longer retail's page: root index 1 opens an in-game **Controls** menu of our own
-([gameplay-input-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §14.1 and §16), with this inventory:
+([gameplay-input-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §14.1 and §16), with this inventory:
 
 | Controls row | Kind | Contents |
 | --- | --- | --- |
@@ -280,14 +280,14 @@ Main Menu details:
 
 ### 3.6 Retired interface and Controller Settings
 
-> **Status 2026-10-18: the game owns the live inventory; the external app is on its way out.**
-> P7 moved the input surface inside Help & Options → Controls, and the remaining external-utility
-> work is split into **P8a** (recovery and parity) and **P8b** (retire
-> `rb_blitz_controller_settings.exe`) by [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
-> §17. Its §17.1 is the row-by-row inventory of every row this table used to own; the decisions
-> below remain the authority it cites — in particular no new rows for the Presentation category,
-> the audio host rows, or the forced monitor, and the retired rename/pool-size rows. P8a changes
-> no packaging; P8b removes the app after P8a's arms pass.
+> **Status 2026-10-19: the game owns the live inventory; the external app is gone.**
+> P7 moved the input surface inside Help & Options → Controls, P8a built the recovery path and
+> measured the in-song route, and **P8b retired `rb_blitz_controller_settings.exe`**: its target,
+> tests, scripts, payload entry and installer shortcuts were removed, and every player setting is an
+> in-game row ([gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
+> §17-§19). Its §17.1 is the row-by-row inventory of every row this table used to own; the decisions
+> below remain the record it cites — in particular no new rows for the Presentation category,
+> the audio host rows, or the forced monitor, and the retired rename/pool-size rows.
 
 | Old surface | New disposition |
 | --- | --- |
@@ -302,11 +302,11 @@ Main Menu details:
 | Guide pass-through | Remove checkbox, remap target/source, capture, and project hotkey behavior. Ignore legacy Guide bindings with a migration diagnostic; enforce no Guide delivery even after remapping. |
 | Fullscreen row, absent from requested menu | Keep normal fullscreen default and existing window hotkeys; no extra menu category. Preserve a valid user's prior window preference if supported by the internal setting. |
 
-Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
+Controller Settings kept the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
 
-**Superseded by P7/P8 (2026-10-18).** The functionality this paragraph protects now lives in Help & Options → Controls ([gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §14, §16): Input Types, General Mapping, both gameplay tables, capture, resets and the native preset page. What the in-game menu deliberately does **not** reproduce is the app window's own navigation rebinding and its `[nav]` scheme — obsolete app UI state — and Guide stays prohibited. The recovery exception P8a builds is the in-game replacement for the app's safe-mode path (that plan §17.2).
+**Superseded by P7/P8 (2026-10-18/19).** The functionality this paragraph protects now lives in Help & Options → Controls ([gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §14, §16): Input Types, General Mapping, both gameplay tables, capture, resets and the native preset page. What the in-game menu deliberately does **not** reproduce is the app window's own navigation rebinding and its `[nav]` scheme — obsolete app UI state — and Guide stays prohibited. The recovery exception P8a built is the in-game replacement for the app's safe-mode path (that plan §17.2).
 
-Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_controller_settings.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings. **The filename rule ends with P8b:** the executable is removed, its shortcuts and launch actions with it, and the name survives only as the legacy portable marker and profile environment variable (`docs/settings/contracts.md` §8).
+Only controller settings were editable in that application. Save, Reset, Close, and an optional Play Game convenience action were compatible with that role; the game never required opening it. Its executable name survives only as the legacy portable marker and profile environment variable (`docs/settings/contracts.md` §8); **P8b removed the executable, its shortcuts and its launch actions on 2026-10-19.**
 
 The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new Controller Settings General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
 
@@ -322,11 +322,13 @@ this section's prompt copy, and [`../plans/finished/2026-10-14-controller-settin
 | **Visible-slot behaviour** | 5 is retail's *list size*, not a proven cap — the payload already appends a 6th row and the pause list draws 7–8, and Gameplay has 8 rows internally. | Prove it once in P5b (§5.2) rather than designing around an assumed limit. |
 | **Achievement action placement** | `Achievements & Unlocks` sits under General, but `unlockall` (provider-persisted) and the one-shot action next to it have different persistence rules. | Keep both in the same submenu; the persistence difference is internal. |
 
-Controller Settings keeps the **entire existing controller functionality** except Guide: mouse support, input backend if available in this build, pad/keyboard/mouse bindings, triggers, resets/presets, navigation rebinding, safe-mode recovery, device navigation, and help. Inventory actual UI code before deleting schema groups. Preserve functionality even if an older README calls it unbuilt.
-
-Only controller settings are editable in this application. Save, Reset, Close, and an optional Play Game convenience action are compatible with that role; the game must never require opening it. Keep the executable filename `rb_blitz_controller_settings.exe` for this release to avoid breaking existing shortcuts, while updating titles, shortcut labels, installer text, resource descriptions, logs shown to users, and documentation to Controller Settings.
-
-The old Update and Install Ultimate workflows must not disappear accidentally during UI deletion. Move their user-facing entry points to the existing installer/updater workflow and document it. Version one does not add an in-game downloader or a new Controller Settings General tab. Reuse existing helpers without requiring Controller Settings to run before the game.
+> **Superseded by P7/P8b (2026-10-18/19), and by
+> [`../plans/finished/2026-10-14-controller-settings-rename.md`](../plans/finished/2026-10-14-controller-settings-rename.md)
+> before that.** These prompt paragraphs asked an implementation to keep the then-name and the
+> application's controller surface. The rename landed on 2026-10-14, P7 moved every input setting
+> into Help & Options → Controls on 2026-10-18, and P8b removed the executable on 2026-10-19. What
+> survives of this prompt: Guide stays prohibited, the `[nav]` scheme is obsolete app UI state, and
+> `launcher.toml` keeps its name as the game's input profile.
 
 > **Superseded 2026-10-14** by
 > [`../plans/finished/2026-10-14-controller-settings-rename.md`](../plans/finished/2026-10-14-controller-settings-rename.md).
@@ -445,7 +447,7 @@ Migration is idempotent, staged, backed up, and owns only known fields. It must 
 8. Preserve opaque unknown tables, comments, and future keys. Version markers commit only after all required outputs are durable. Cross-file writes are not magically atomic: keep enough migration state to recover if `paths.toml` succeeds and `settings.toml` fails, or vice versa.
 9. Preserve existing valid choices as manual. A missing field uses its default/recommendation. A field equal to the historical default is not reliable evidence that the user never chose it; avoid resetting it solely on value equality.
 
-Normal configuration errors must not turn into permanent boot loops. Retain a last-known-good graphics record and an explicit development/recovery startup option that can bypass a bad graphics preference without deleting files. Document the manual recovery route because the external graphics Controller Settings is going away.
+Normal configuration errors must not turn into permanent boot loops. Retain a last-known-good graphics record and an explicit development/recovery startup option that can bypass a bad graphics preference without deleting files. Document the manual recovery route; the external graphics settings application has gone (P8b), so the in-game Audio/Video page and `rb_blitz.toml` are the only routes.
 
 ### 4.4 Durable saves and concurrent writers
 
@@ -463,7 +465,7 @@ For controller vs native settings, separate files avoid routine contention. Migr
 
 ### 5.1 Architecture
 
-"Host/client" here means the C++ runtime and emulated guest engine within one process. No network server, IPC service, or running Controller Settings is needed.
+"Host/client" here means the C++ runtime and emulated guest engine within one process. No network server, IPC service, or running settings process is needed.
 
 ```mermaid
 flowchart LR
@@ -500,7 +502,7 @@ Suggested new modules, with public names frozen before parallel implementation:
 | `src/fs/settings_overlay.*` | Exact virtual authored resources and narrowly redirected mutable settings file; only if the spike chooses this route. |
 | `src/platform/game_restart.*` | Structured process launch context, wait-for-parent bootstrap, exactly-once restart request. |
 
-Do not put all behavior in `rb_blitz_app.h`, copy Controller Settings' ImGui shell into a guest overlay, or make gameplay hooks depend on ImGui. The requested UI is native and follows Ultimate's layout.
+Do not put all behavior in `rb_blitz_app.h`, copy the retired application's ImGui shell into a guest overlay, or make gameplay hooks depend on ImGui. The requested UI is native and follows Ultimate's layout.
 
 ### 5.2 How to add a menu without shipping mod/game content
 
@@ -851,7 +853,7 @@ If P4's Variant B hook turns out not to take effect, the storage/installer/menu 
 | New native menu code, the merged root screen, and its list resource | P5b. P6 uses provider extension points, not edits to P5b's menu file in parallel. |
 | Ultimate adapter and exact-file routing | P6; coordinate VFS dispatch hooks centrally. |
 | `installer/setup.iss`, installer helper, pins/template labels, installer tests | P7. P9 must not repurpose installer helpers without agreement. |
-| `controller-settings/`, `src/input/remap.*`, controller parts of `src/profile/` | P8b (retirement) after P3's migration/profile changes; the recovery/parity half is P8a and touches no app file (gameplay-mapping plan §17). |
+| `controller-settings/` (retired 2026-10-19), `src/input/remap.*`, controller parts of `src/profile/` | P8b removed the app; the recovery/parity half was P8a and touched no app file (gameplay-mapping plan §17). |
 | `src/ui/menu_options.*`, `src/hooks/menu_filter.*`, `src/hooks/shell_music.*`, relevant enhancements | P10, respecting the pre-existing staged song-cache implementation. |
 | New restart code | P9; early executable bootstrap wired by coordinator. |
 

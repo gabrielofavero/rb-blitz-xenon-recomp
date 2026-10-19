@@ -37,7 +37,7 @@ namespace fs = std::filesystem;
 //   <temp>/rb_blitz-path-policy                its parent
 //
 // The directories are created for real, so weakly_canonical() resolves them the way
-// it resolves Controller Settings's actual path rather than lexically by accident.
+// it resolves the install's actual path rather than lexically by accident.
 struct Scratch {
   fs::path base;
   fs::path root;

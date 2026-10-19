@@ -177,7 +177,7 @@ int main() {
     CHECK_TRUE(ResolvePayloadRoot(absolute.string(), game) == absolute);
 
     // A relative value is resolved, never left dangling: the answer is not a function
-    // of the working directory, so it cannot depend on where Controller Settings was started.
+    // of the working directory, so it cannot depend on where the game was started.
     std::error_code ec;
     const fs::path cwd = fs::current_path(ec);
     const fs::path before = ResolvePayloadRoot("extra/payload", game);

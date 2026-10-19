@@ -39,7 +39,7 @@ docs/
 | `plan.md` | the master plan: requirements, the row-by-row menu specification, storage and precedence, the package sequence P0–P12 | new packages, scope changes |
 | `contracts.md` | frozen interfaces (P0). Changes are a decision, not an edit | new frozen shapes, marked as decisions |
 | `architecture.md` | how it is built: parts 1–6 (bridge, panel API, storage, boot wiring, Ultimate adapter, hot apply) | a new part when a new mechanism lands |
-| `menu.md` | the player-visible surfaces: parts 1–4 (merged menu, menu compatibility, Controller Settings, installer) | a new part per surface |
+| `menu.md` | the player-visible surfaces: parts 1–4 (merged menu, menu compatibility, the retired settings application's history, installer) | a new part per surface |
 | `graphics.md` | resolution and graphics: parts 1–3 (resolution, capability policy, custom resolutions) | a new part, or extend the owning one |
 | `status.md` | **the live tracker**: what ships, the punch list, the numbered open-item ledger, verification state | rewrite in place; keep the numbers |
 

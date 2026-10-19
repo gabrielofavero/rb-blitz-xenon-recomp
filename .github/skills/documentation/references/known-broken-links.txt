@@ -12,11 +12,31 @@
 # (2) Documents that this repo never had: the older plans name them because they came from an earlier
 # tree (see "Known stale references" in docs/README.md).
 #
+# (3) Files deleted from the tree when the external Controller Settings executable retired
+# (2026-10-19, gameplay-mapping plan §19). The finished plan's §1-§15 tables and the customization
+# plan cite them as the 2026-10-17/18 source review, so the citations stay and are listed here
+# rather than rewritten: a measurement's link is part of the measurement. A path named in prose
+# (a code span, not a link) is not checked and needs no line here.
+#
 # Delete a line when its reference is fixed.
 
 src/input/ui_nav.h
 src/input/nav_detect.h
 tests/ui_nav_tests.cpp
+
+controller-settings/CMakeLists.txt
+controller-settings/config/settings.toml
+controller-settings/src/controller_tab.cpp
+controller-settings/src/shell.cpp
+controller-settings/src/profile_session.cpp
+controller-settings/src/controller_block.h
+controller-settings/src/controller_block.cpp
+controller-settings/src/binding_table.h
+controller-settings/src/binding_table.cpp
+controller-settings/src/binding_text.h
+controller-settings/src/binding_text.cpp
+scripts/capture_controller_settings.ps1
+scripts/acceptance_controller_settings.ps1
 
 # (2) never written, named by the finished plans and the porting notes
 docs/engine/content-flow.md

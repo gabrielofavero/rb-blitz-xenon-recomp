@@ -51,7 +51,7 @@ param(
     # metadata file (build hash, capture hash, OCR text) are written here.
     [string]$BaselineDir,
     # Whether the game is allowed to skip the title's two offline dialogs (R3, on by
-    # default in the game and in Controller Settings). 0 drives the dialogs, which is what
+    # default in the game). 0 drives the dialogs, which is what
     # the offline-prompt state needs; either answer also chooses the route in
     # ui_states.ps1, because a route that accepts once too often opens a menu row
     # instead of stopping at the menu.

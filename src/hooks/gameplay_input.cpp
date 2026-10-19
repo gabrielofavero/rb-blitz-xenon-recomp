@@ -3,7 +3,7 @@
 //
 // P3 of the gameplay-mapping plan: the guest adapter that dispatches a gameplay table's actions
 // into the title's own validated boundary
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, D4/D5).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D4/D5).
 //
 // The seam table (P0, plan §10.2):
 //

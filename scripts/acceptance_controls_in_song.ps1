@@ -1,4 +1,4 @@
-# In-song Controls acceptance (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+# In-song Controls acceptance (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
 # §14.1/§16.5, P8a).
 #
 # P7 built the in-song twins of the whole Controls tree and re-pointed retail's own `pause_controls`

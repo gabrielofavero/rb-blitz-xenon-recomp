@@ -123,7 +123,7 @@ These are **analysis names, not `[functions]` entries**: nothing was renamed and
 They are listed because the gameplay-input plan and
 [gameplay_probe.cpp](../../src/diag/gameplay_probe.cpp) cite them, and a citation needs a table.
 Evidence is the live P0 arms recorded in
-[plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+[plans/finished/2026-10-17-gameplay-input-mapping-plan.md](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
 §10.2–§10.6 unless the row says static.
 
 | Guest address | Name | Evidence | Confidence |

@@ -1,5 +1,5 @@
 # Controls acceptance: the in-game settings surface the external Controller Settings
-# executable used to provide (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+# executable used to provide (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
 # §14, P7).
 #
 # One boot drives the whole hierarchy the plan asks for and keeps the screenshot it decided on:

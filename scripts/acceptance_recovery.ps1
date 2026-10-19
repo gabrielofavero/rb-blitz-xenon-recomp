@@ -1,4 +1,4 @@
-# Controls recovery acceptance (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+# Controls recovery acceptance (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
 # §14.4/§17.2, P8a).
 #
 # A saved profile can leave the menu with no usable input at all: both host gates off and no pad

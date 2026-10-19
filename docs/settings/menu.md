@@ -431,13 +431,15 @@ pwsh -NoProfile -File out\_swap\p10\run.ps1 -Label poollgcy  -SongCount 64
 
 ## Part 3 — Controller Settings + the Guide prohibition (was `docs/plans/in-game-settings-controller-settings.md`, P8)
 
-> **Superseded for the live product (2026-10-18).** The in-game Help & Options → Controls menu
+> **Superseded for the live product (2026-10-18), and the application itself removed (2026-10-19).**
+> The in-game Help & Options → Controls menu
 > replaces this application's controller surface (Part 1 §3.3 and
-> [the gameplay-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §16),
-> and **P8b** retires `rb_blitz_controller_settings.exe` and its packaging after **P8a**'s
-> recovery/parity pass (same plan §17). The Guide prohibition and the schema notes below remain
-> true of the game's own input path; the parts that describe the app, its window, `--controller-only`,
-> `--dump-layout`, its shortcuts and its update plumbing are history as of that removal.
+> [the gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §16), and
+> **P8b removed `rb_blitz_controller_settings.exe`**, its target, tests, scripts, payload entry and
+> installer shortcuts on 2026-10-19 (same plan §17-§19). The Guide prohibition and the vocabulary
+> notes below remain true of the game's own input path; the parts that describe the app, its window,
+> `--controller-only`, `--dump-layout`, its shortcuts and its update plumbing are history as of that
+> removal.
 
 Status: **executed** (host tests green, runtime evidence captured). The **full surface is still the default
 surface**: the reduced one exists behind `--controller-only`, and the cutover is P11's per `contracts.md`

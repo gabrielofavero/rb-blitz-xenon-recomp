@@ -1073,7 +1073,6 @@ static void TestPayloadAndFinalize() {
     std::string_view text;
   };
   const Entry entries[] = {{kRuntimeExeName, "not really the runtime"},
-                           {kControllerSettingsExeName, "not really Controller Settings"},
                            {"rb_blitz.toml", "[backend]\n"},
                            {"rexruntime.dll", "not really a dll"}};
 
@@ -1119,17 +1118,15 @@ static void TestPayloadAndFinalize() {
   const fs::path progress_file = g_root / "install/progress.txt";
   ComponentResult payload;
   CHECK_TRUE(InstallPayload(source, app, embedded, ProgressSink{progress_file}, &payload, &error));
-  CHECK_EQ(payload.files, 4u);
+  CHECK_EQ(payload.files, 3u);
   CHECK_EQ(payload.bytes, total);
   CHECK_TRUE(payload.fingerprints_matched);
   CHECK_FALSE(payload.version.empty());
   CHECK_CONTAINS(payload.source, "folder");
-  // The payload carries both executables (R3): the game and its Controller Settings.
-  CHECK_EQ(payload.executables.size(), 2u);
+  // The payload carries one executable since Controller Settings retired (2026-10-19).
+  CHECK_EQ(payload.executables.size(), 1u);
   CHECK_STR_EQ(payload.executables[0], kRuntimeExeName);
-  CHECK_STR_EQ(payload.executables[1], kControllerSettingsExeName);
   CHECK_TRUE(FileExists(app / kRuntimeExeName));
-  CHECK_TRUE(FileExists(app / kControllerSettingsExeName));
   CHECK_TRUE(FileExists(app / "rexruntime.dll"));
   CHECK_TRUE(FileExists(app / kPayloadManifestName));
   CHECK_TRUE(FileExists(app / "rb_blitz.toml"));
@@ -1143,7 +1140,7 @@ static void TestPayloadAndFinalize() {
 
   ComponentResult verify;
   CHECK_TRUE(VerifyPayload(app, embedded, &verify, &error));
-  CHECK_EQ(verify.files, 4u);
+  CHECK_EQ(verify.files, 3u);
   CHECK_TRUE(verify.fingerprints_matched);
 
   WriteText(app / kRuntimeExeName, "tampered");
@@ -1151,16 +1148,15 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(error, "does not match");
   WriteText(app / kRuntimeExeName, entries[0].text);
 
-  BeginCase("an install whose manifest lists a missing Controller Settings fails loudly");
+  BeginCase("an install whose manifest lists a missing file fails loudly");
 
-  // Controller Settings travels in the payload (P0.5/D1). A folder that still has the
-  // game but lost rb_blitz_controller_settings.exe must fail verification and name the file
-  // rather than install "successfully" into Controller Settings-less state.
-  fs::remove(app / kControllerSettingsExeName);
+  // Verification is manifest-driven: a folder that lost a file the manifest names must fail
+  // and name the file rather than install "successfully" into that state.
+  fs::remove(app / "rexruntime.dll");
   CHECK_FALSE(VerifyPayload(app, embedded, &verify, &error));
   CHECK_CONTAINS(error, "does not match");
-  CHECK_CONTAINS(error, kControllerSettingsExeName);
-  WriteText(app / kControllerSettingsExeName, entries[1].text);
+  CHECK_CONTAINS(error, "rexruntime.dll");
+  WriteText(app / "rexruntime.dll", entries[2].text);
   CHECK_TRUE(VerifyPayload(app, embedded, &verify, &error));
 
   BeginCase("a payload zip installs the same way a folder does");
@@ -1183,11 +1179,10 @@ static void TestPayloadAndFinalize() {
   zip_source.path = payload_zip;
   ComponentResult from_zip;
   CHECK_TRUE(InstallPayload(zip_source, zip_app, embedded, ProgressSink{}, &from_zip, &error));
-  CHECK_EQ(from_zip.files, 4u);
+  CHECK_EQ(from_zip.files, 3u);
   CHECK_EQ(from_zip.bytes, total);
   CHECK_CONTAINS(from_zip.source, "archive");
   CHECK_TRUE(FileExists(zip_app / kRuntimeExeName));
-  CHECK_TRUE(FileExists(zip_app / kControllerSettingsExeName));
   CHECK_TRUE(FileExists(zip_app / "rexruntime.dll"));
   CHECK_TRUE(FileExists(zip_app / kPayloadManifestName));
   CHECK_FALSE(DirectoryExists(StagingRoot(zip_app)));
@@ -1218,11 +1213,11 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(manifest_text, "1.0.0-test");
   CHECK_CONTAINS(manifest_text, "payload_commit = \"" + std::string(kStandInCommit) + "\"");
   // The manifest names the executables the payload laid down, so a support reader
-  // can see Controller Settings was installed (R3/D1).
-  CHECK_CONTAINS(manifest_text, "executables = [\"rb_blitz.exe\", \"rb_blitz_controller_settings.exe\"]");
-  // The fields Controller Settings' first-run prefill reads (controller-settings/src/prefill.cpp): the game
-  // folder the manifest records, and the game-data section it can fall back to. A support report
-  // also needs the install folder and the versions.
+  // can see the game was installed.
+  CHECK_CONTAINS(manifest_text, "executables = [\"rb_blitz.exe\"]");
+  // The fields a support reader uses: the game folder the manifest records, and the
+  // game-data section it can fall back to. A support report also needs the install
+  // folder and the versions.
   CHECK_CONTAINS(manifest_text, "installer_version = \"1.0.0-test\"");
   CHECK_CONTAINS(manifest_text, "directory = " + EscapedTomlString(app.string()));
   CHECK_CONTAINS(manifest_text, "game_directory = " + EscapedTomlString(game_root.string()));
@@ -1239,7 +1234,7 @@ static void TestPayloadAndFinalize() {
   CHECK_CONTAINS(report_text, "an extracted folder");
   CHECK_CONTAINS(report_text, "test entry");
   CHECK_CONTAINS(report_text, "Commit     : " + std::string(kStandInCommit));
-  CHECK_CONTAINS(report_text, "Executables: rb_blitz.exe, rb_blitz_controller_settings.exe");
+  CHECK_CONTAINS(report_text, "Executables: rb_blitz.exe");
   // The report's header and its game-data section, which is what a person reads instead of the
   // manifest's tables.
   CHECK_CONTAINS(report_text, "Folder     : " + app.string());
@@ -1274,7 +1269,6 @@ static void TestPayloadAndFinalize() {
   // The manifest is the only record of a downloaded payload, so the payload
   // files go too and are not left behind for the uninstaller to find.
   CHECK_FALSE(FileExists(app / kRuntimeExeName));
-  CHECK_FALSE(FileExists(app / kControllerSettingsExeName));
   CHECK_FALSE(FileExists(app / "rexruntime.dll"));
   CHECK_FALSE(removed.empty());
 
@@ -1401,7 +1395,7 @@ static void TestUltimate() {
 // not say what went wrong".
 // The release manifest, and the command that fetches it (D19). The file the
 // repository generates is cross-checked against the pins it came from - drift
-// between them would make Controller Settings offer an update that cannot be installed, or
+// between them would make an update point at a build that cannot be installed, or
 // miss the one that can.
 static void TestUpdateManifest() {
   BeginCase("the generated update manifest matches the pins it came from");
@@ -1574,7 +1568,7 @@ std::string ValidateSummary(const fs::path& install, const fs::path& summary,
 std::string Utf8(const fs::path& path) { return Narrow(path.lexically_normal().native()); }
 
 // The environment variable the game's own profile resolution reads. A machine
-// running these tests may have it set (someone testing Controller Settings), so it is
+// running these tests may have it set (someone testing an older settings application), so it is
 // cleared for the cases that resolve a profile and put back afterwards.
 class ScopedEnv {
  public:
@@ -1895,7 +1889,7 @@ static void TestLocations() {
   CHECK_STR_EQ(unicode_file.paths.user_data_root, Utf8(unicode_saves));
 
   // --- the legacy profile as a prefill source ---------------------------
-  BeginCase("the old Controller Settings's folders are read, never written");
+  BeginCase("the legacy settings profile's folders are read, never written");
 
   const ScopedEnv no_override("RBBLITZ_CONTROLLER_SETTINGS_PROFILE", "");
   const fs::path old_install = FreshDir("legacy/install");
@@ -1922,7 +1916,8 @@ static void TestLocations() {
   CHECK_STR_EQ(legacy.dlc_dir, "D:\\Old DLC");
 
   // The portable marker beside the executable wins over the user's own profile,
-  // because that is where Controller Settings itself looked.
+  // because that is where the settings application itself looked (the marker name is a
+  // compatibility name the game still honours).
   WriteText(old_install / "rb_blitz_controller_settings.portable", "");
   WriteText(old_install / "launcher.toml",
             "schema_version = 1\n\n[settings]\nuser_data_root = \"E:\\\\Portable Saves\"\n");
@@ -2048,13 +2043,26 @@ static void TestWizardScript() {
   // A reinstall has to show the folder page: the locations are asked there.
   CHECK_CONTAINS(script, "DisableDirPage=no");
 
-  BeginCase("the wizard defaults to the game and says Controller Settings");
+  BeginCase("the wizard defaults to the game and offers no settings application");
 
-  CHECK_CONTAINS(script, "RunAtEndController = 'controller';");
   CHECK_CONTAINS(script, "gRunAtEnd := RunAtEndGame;");
-  CHECK_CONTAINS(script, "Controller Settings");
+  // The finish page's controller choice retired with the executable (2026-10-19); the
+  // parameter list shrank to the game and "none".
+  CHECK_FALSE(script.find("RunAtEndController") != std::string::npos);
+  CHECK_FALSE(script.find("Open Controller Settings") != std::string::npos);
   CHECK_CONTAINS(script, "DLCDIR");
   CHECK_CONTAINS(script, "SAVEDIR");
+
+  BeginCase("an upgrade removes the retired settings executable and its shortcuts");
+
+  // P8b (2026-10-19): the executable an older release installed is not in this build any
+  // more, so an upgrade has to take the installer-owned copy away. The delete list is
+  // exact paths only - the profiles, paths.toml and the game data are never named here.
+  CHECK_CONTAINS(script, "[InstallDelete]");
+  CHECK_CONTAINS(script, "#define ObsoleteControllerSettingsExeName \"rb_blitz_controller_settings.exe\"");
+  CHECK_CONTAINS(script, "Type: files; Name: \"{app}\\{#ObsoleteControllerSettingsExeName}\"");
+  CHECK_CONTAINS(script, "ObsoleteControllerSettingsShortcutName}.lnk\"");
+  CHECK_FALSE(script.find("[InstallDelete]\nType: files; Name: \"{app}\\*\"") != std::string::npos);
 
   BeginCase("the folder page is the only place the two files are written");
 

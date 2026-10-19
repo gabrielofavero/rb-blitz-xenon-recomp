@@ -8,6 +8,13 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **The external settings application is gone (P8b, 2026-10-19).** `rb_blitz_controller_settings.exe`,
+  its target, sources, schema, tests, capture/acceptance scripts and payload entry were removed;
+  the installer ships `rb_blitz.exe` alone, a fresh/upgrade/repair install has no settings
+  executable or *Open Controller Settings* action, and an upgrade deletes the installer-owned binary
+  and the two obsolete shortcuts. Every player setting it edited is an in-game Help & Options row;
+  the two shared host suites kept their checks as `profile` and `profile_remap`. The gameplay-mapping
+  plan's §19 has the evidence and its §17.1 inventory says where each external row went.
 - **The feature is wired through the real boot and the guest UI**: settings load in
   `OnConfigurePaths` before the GPU plugin, title data and guest rendering, the renderer is chosen
   before the plugin loads, and VSync/filtering/anti-aliasing/resolution scale apply in `OnPreSetup` —
@@ -60,10 +67,12 @@ Part 1 wherever they disagree.
   the same run wrote a 16-byte stub with **0 packages** in it, so a host hit says nothing about it.
   Contract, limits and the trial table: [dlc.md](../guides/dlc.md) §4.4 and the review plan's P6
   record ([installed-game-fix-prompts.md](../plans/finished/2026-10-14-installed-game-fix-prompts.md)).
-- **Verifiably broken/open: the in-song entry** — a screen of ours cannot list the in-song panels
-  (`pause_panel`, `game_fade_out_panel`, `game_panel`); any such screen faults the guest with
-  `read of guest 0x00000024`, and Back fails on the same limitation. It is item 13 below and the only
-  open item blocking gate G1b.
+- **The in-song entry is measured now (P8a, 2026-10-18).** The pause panel's `pause_controls` row
+  jumps to the pause twin of the in-game Controls menu, which lists no in-song panel and therefore
+  does not hit the `read of guest 0x00000024` construct-order fault; a paused song drives pause →
+  Help & Options → Controls → Input Types and a bind page → hold-to-cancel → back to the pause panel
+  → resume, with no guest fault (`out/gameplay-mapping/in-game/p8a-in-song3/`). Item 13 below is
+  closed by that measurement.
 - **Verifiably open: the interactive acceptance matrix has not been re-run** since the punch list, so
   items 2, 3, 6/7 and 10 are asserted by tests and the payload's records, not by a person looking at
   the screen.
@@ -106,9 +115,10 @@ Part 1 wherever they disagree.
   safe mode all ran; older statements, including item 11 below, are wrong).
 - **The next three things to do**: (a) drive the merged menu once after the punch list (A
   advance/wrap, On/Off in every language, Borderless) — the restart prompt's leave path is measured
-  now (the P3 bullet above), its in-song twin is not; (b) the in-song
-  entry (item 13) — merge into the pause panel's inline list and build the pause-context child
-  screens; (c) make a preset that can build a test again, so 38/38 is reproducible from the presets.
+  now (the P3 bullet above); (b) the hardware-only arms: a physical pad's capture and
+  hold-to-cancel, stick directions, the recovery's pad-connected case, and an in-song page on the
+  Ultimate payload ([known-issues.md](../reference/known-issues.md)); (c) make a preset that can
+  build a test again, so the suite count is reproducible from the presets.
 
 ## Part 1 — Current status and remaining work (was `docs/plans/in-game-settings-remaining-work.md`)
 
@@ -171,15 +181,14 @@ game-side and Controller Settings-side consequences listed after them:
    one no longer interrupts the player mid-edit, and leaving with nothing pending does not ask.
 4. **Target lists the demo by name.** "Rock Band Blitz Demo" is a choice again
    ([settings_payload.cpp](../../src/hooks/settings_payload.cpp)); the recorded trial-boot fault is a
-   separate matter, and Controller Settings' radio says the same thing now
-   ([general_tab.cpp](../../controller-settings/src/general_tab.cpp)). **Fixed 2026-10-18:** the
+   separate matter, and the external application's radio said the same thing until it retired. **Fixed 2026-10-18:** the
    Ultimate choice had disappeared from that row, because `ultimate::Configure` derived the provider
    root from `ultimate_mode` and the boot applies the stored target as that cvar — so a profile whose
    target was "Rock Band Blitz" inspected the game root, found no payload, and stopped offering the
    one control that selects Ultimate. The payload is now inspected where it lives, and the mode only
    decides whether it is applied; a fresh profile lists all three choices.
 5. **The DLC page and the refresh action.** *Cache DLC Library* reads `On`/`Off` instead of the
-   "Externally configured" marker it used to show — Controller Settings' `--enhancements_dlc_cache` row
+   "Externally configured" marker it used to show — the external application's `--enhancements_dlc_cache` row
    outranked it, which made it read-only, and the cutover below removed that flag; *Refresh
    Downloadable Content* left the settings tree to become **Refresh Music Library** on the main menu.
    **Superseded 2026-10-14:** *DLC Menu Songs* was retired here (the pool always took what the library
@@ -213,7 +222,7 @@ Two things were missing and both are in:
   choice.
 * The game's row had hardcoded one backend (`"not probed: the one backend this project ships"`); the
   boot now builds one probe per `RBBLITZ_BACKENDS` entry ([CMakeLists.txt](../../CMakeLists.txt), the
-  same switches the plugin and Controller Settings' `--backends=` read) and checks for `vulkan-1.dll` at run
+  same switches the plugin reads) and checks for `vulkan-1.dll` at run
   time. d3d12 stays the active/fallback entry — Vulkan is offered, not recommended — and a missing
   loader means the row is not offered and `--gpu_backend=vulkan` / a stored `vulkan` choice refuses
   and boots D3D12.
@@ -252,7 +261,7 @@ The row rule is kept on its own merits:
 Items 4 and 10 are only honest if the in-game rows own their settings, so on the owner's decision
 ("Controller Settings stops passing game-owned settings; only paths/target/profile/controller flow"):
 
-* `kGameOwnedRows` ([game_launch.cpp](../../controller-settings/src/game_launch.cpp)) — sixteen keys from
+* `kGameOwnedRows` (the retired application's `game_launch.cpp`) — sixteen keys from
   `enhancements_dlc_cache`/`dlc_scan_threads` through `resolution_scale`, `fullscreen`, `vsync`,
   `gpu_backend`, `swap_post_effect`, `native_2x_msaa`, `anisotropic_override` and `present_letterbox`
   — no longer travels on the command line (the tabs still write them to the profile), and the target
@@ -263,33 +272,39 @@ Items 4 and 10 are only honest if the in-game rows own their settings, so on the
   ([profile_apply.cpp](../../src/profile/profile_apply.cpp)): the game applies the controller rows and
   the host-only host rows (monitor, safe areas, dither, overscan cutoff, two audio rows — no
   in-game descriptor) and logs the rest as inert preservation data. Removing those tabs is P8's.
-* [capture_controller_settings.ps1](../../scripts/capture_controller_settings.ps1) and
-  [acceptance_controller_settings.ps1](../../scripts/acceptance_controller_settings.ps1) assert the exact command line, and
-  each leg deletes its fixture's `<profile stem>.game-settings.toml` first (the Ultimate leg's licence
-  line reads `(configured)`).
+* The retired application's `capture_controller_settings.ps1` and
+  `acceptance_controller_settings.ps1` asserted its exact command line, and each leg deleted its
+  fixture's `<profile stem>.game-settings.toml` first (the Ultimate leg's licence line read
+  `(configured)`). Both scripts went with the application on 2026-10-19; the in-game surface is
+  driven by `scripts/acceptance_controls.ps1`.
 
 #### Gameplay Mapping tables on the Controller tab (P4, 2026-10-18)
 
-The Controller tab now draws the two gameplay tables P1's profile stored
-([gameplay-input-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §4/§15):
+> **Superseded 2026-10-18 by P7, and removed 2026-10-19 by P8b.** This was the external
+> application's tab; the live surface is Help & Options → Controls
+> ([`settings_screen.cpp`](../../src/ui/settings_screen.cpp)), whose rules P7/P8a measured. The
+> record below is kept for its measurements; its file names now live only in git history.
 
-* **Three tables, one renderer.** General Mapping and both gameplay tables are drawn by
-  [binding_table.cpp](../../controller-settings/src/binding_table.cpp); each gameplay table owns one
+The Controller tab drew the two gameplay tables P1's profile stored
+([gameplay-input-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §4/§15):
+
+* **Three tables, one renderer.** General Mapping and both gameplay tables were drawn by
+  `binding_table.cpp`; each gameplay table owned one
   input type (`pad:` for Controller, `key:`/`mouse:` for Keyboard + Mouse) and refuses the other at
   capture and at parse. One capture session is shared by all three tables.
 * **Each switch hides its own table**, both switches stay focusable while their table is hidden, and
-  the tab reports a layout change so the shell rebuilds the ring
-  ([controller_block.cpp](../../controller-settings/src/controller_block.cpp)); a hidden table
-  contributes no focus entries. The focus trace now records a ring-size change.
+  the tab reported a layout change so the shell rebuilt the ring
+  (`controller_block.cpp`); a hidden table
+  contributed no focus entries. The focus trace now records a ring-size change.
 * **A binding whose device is off stays listed and is crossed out** in the Keyboard + Mouse table
-  ([binding_text.cpp](../../controller-settings/src/binding_text.cpp)), and the utility's own
-  navigation and capture still work with Keyboard Support or Mouse Support off (R9).
+  (`binding_text.cpp`), and the utility's own
+  navigation and capture still worked with Keyboard Support or Mouse Support off (R9).
 * **The two `?` buttons are focus entries** opening persistent help pages; the shell owns Escape
   while one is up, so Escape closes the page and a second Escape leaves.
 * **`--dump-layout` names the block**: `block  <n> rows, Controller on/off, Keyboard + Mouse
-  on/off` and one `block row` line per row, so a harness can check which table is visible without a
-  window. [capture_controller_settings.ps1](../../scripts/capture_controller_settings.ps1)'s
-  headless leg asserts it (20/20 on 2026-10-18).
+  on/off` and one `block row` line per row, so a harness could check which table is visible without a
+  window. The retired `capture_controller_settings.ps1`
+  headless leg asserted it (20/20 on 2026-10-18).
 
 Evidence: `controller_settings_nav` 2,838 checks and 40/40 ctest; the live matrix under
 `out/_swap/p4/` (four switch combinations, both device-support arms, the help page, a wrong-kind
@@ -340,7 +355,7 @@ dialog's hold-to-cancel works there, and the route returns to the pause panel an
 guest fault. The parity inventory is verified against the build (plan §17.1/§18.5): every
 external-app row has an in-game destination or a written retirement.
 
-The executable keeps shipping until **P8b**, which then removes
+The executable kept shipping until **P8b** (2026-10-19, below), which removed
 `rb_blitz_controller_settings.exe`, its target, tests, scripts, payload entry and installer
 shortcuts. The four presentation and two audio host rows stay
 profile-carried with `rb_blitz.toml`/CLI as their documented editor; `present_letterbox` is a
@@ -355,6 +370,43 @@ failures; `p8a-in-song3` and `p8a-in-song4`), all under `out/gameplay-mapping/in
 pad (capture, hold-to-cancel, stick directions, and the recovery's pad-connected arm), an in-song
 page on the Ultimate payload, and a live refusal of a switch locked by the command line
 ([known-issues.md](../reference/known-issues.md)).
+
+#### Retiring the executable (P8b, 2026-10-19)
+
+P8b removed the external settings application and finished its acceptance obligations (plan §19).
+The deliverable is now one executable:
+
+* **Build.** `controller-settings/` is gone — target, `main.cpp`, the `.rc`, `config/settings.toml`,
+  `src/`, `tools/` and `README.md` — and so is `add_subdirectory(controller-settings)` in the root
+  `CMakeLists.txt`. The two app-only test targets (`controller_settings_general`,
+  `controller_settings_session`) and the app-only scripts (`capture_controller_settings.ps1`,
+  `acceptance_controller_settings.ps1`) went with it. The two suites that test game code kept their
+  checks under game-owned names: `profile` (`rb_blitz_profile_tests`) and `profile_remap`
+  (`rb_blitz_profile_remap_tests`).
+* **Installer and payload.** `make_payload.ps1` and `payload_provenance.ps1` list `rb_blitz.exe`
+  and the DLLs only; `build.ps1` lost `-SkipControllerSettings`/`-ControllerSettingsTarget` and its
+  Controller Settings step; `install.h` expects one payload executable; `setup.iss` lost the
+  executable define, the *Open Controller Settings* finish-page radio and the
+  `RUNATEND=controller`/`launcher` values. **An upgrade removes** the installer-owned
+  `rb_blitz_controller_settings.exe` and the *Rock Band Blitz Controller Settings* Start-menu/
+  desktop shortcuts through a narrow `[InstallDelete]`; profiles, `paths.toml`, saves and game data
+  are not touched.
+* **Profiles still work.** `launcher.toml` remains the game's input profile (the P1/P7 tables), and
+  the legacy path/portable-marker names stay honoured (`docs/settings/contracts.md` §8). The seven
+  host-only rows stay profile-carried with `rb_blitz.toml`/CLI as their documented editor.
+
+Evidence (2026-10-19): `ctest --test-dir out/build/win-amd64-debug` **37/37 pass** (41/41 before
+the pass: four app-only suites removed, two renamed); the release tree configures and builds
+`rb_blitz.exe` with no settings target; `ctest --preset installer-release` **419 checks, 0 failed**;
+a fresh payload snapshot is **8 files / 59.0 MiB** with no settings executable and
+`install-manifest.toml` says `executables = ["rb_blitz.exe"]`; `installer/build.ps1` produced
+`RockBandBlitzSetup-0.1.0.exe` (24,134,728 bytes); a silent install into a scratch folder exited
+0 with no settings binary, a reinstall over a folder that held one removed it, and the installed
+game booted to `settings_boot: presented menu frame` with the input store live
+(`out/p8b-install/`); `/RUNATEND=controller` is refused (exit 7, nothing installed);
+`scripts/audit_distributable.ps1` is **7/7 pass**. The plan's §19 has the full table and,
+plainly, the two legs not run on this machine (a photographed finish page and a hand-created
+pre-2026-10-14 shortcut pair).
 
 #### Boot speed and one frozen picture (owner report, 2026-10-13, later)
 
@@ -537,15 +589,20 @@ reproducer is `out/_swap/p4/run.ps1 -Label captions|labels-off|achievements`.
 
 #### P5b — the merge into Help & Options
 
-13. **The in-song entry (§2).** §3.3's order: (a) narrow the panel-set limitation with one variant
-    hosting retail's `controller_config_panel` beside the in-song panels; (b) then Back —
-    `{ui pop_screen}` if the panels can be hosted, otherwise Cancel calling the resume retail's own
-    `pause_panel` calls (`{game_screen resume}`); (c) only then re-point `pause_options` in the
-    shipped payload. *`menu.md` §3.2, §3.3*.
-14. **The in-song child pages are unverified** — General/Interface/etc. inside a song have never been
-    seen on screen; they inherit whatever (a) decides. *same doc, §3.3*.
-15. **G1b's other half is only partly proven for the *in-song* context** — "Back reaches the correct
-    entry screen from both entries" is measured for the main menu only. *`plan.md` §10.4*.
+13. **The in-song entry (§2). — CLOSED 2026-10-18 by P8a.** The shipped route does not build a
+    screen that lists the in-song panels at all: retail's `pause_controls` case jumps to the pause
+    twin of the in-game Controls menu (`src/settings/menu_payload.cpp`), which hosts no
+    `pause_panel`/`game_panel` and therefore never hits the construct-order fault. A paused song was
+    driven to Input Types, a bind page, hold-to-cancel, back to the pause panel and resume
+    (`scripts/acceptance_controls_in_song.ps1`, 23 steps, `out/gameplay-mapping/in-game/p8a-in-song3/`).
+    The original order below is kept as the research record; (a) and (b) were not needed.
+    *`menu.md` §3.2, §3.3; gameplay-mapping plan §18.4*.
+14. **The in-song child pages are unverified — CLOSED for Controls (P8a).** Controls → Input Types
+    and a General Mapping bind page were seen on screen inside a song; the *other* categories'
+    in-song pages (General/Interface/etc.) are still only unit-tested. *same doc, §3.3*.
+15. **G1b's other half is only partly proven for the *in-song* context — CLOSED for Controls
+    (P8a).** Back from the in-song Controls pages reaches the pause panel and B resumes the song
+    (`panel=game_panel`); the main menu's own route was already measured. *`plan.md` §10.4*.
 
 #### P6 — Ultimate adapter and saved settings
 

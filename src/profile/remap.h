@@ -90,7 +90,7 @@ std::string_view TargetLabel(Target target);
 // targets: a stick direction is a person's thumb travel rather than one of the 16 controls the
 // guest's button field carries, so no binding can make it a control of its own. The title's own
 // controller presets bind the guest's stick-direction buttons (kPad 16-23), which is why the
-// gameplay tables need to name them (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+// gameplay tables need to name them (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
 // §10.4, O8), and why `Apply` answers them from the pad's axes.
 //
 // The spelling is the direction, not the axis: `lstick_up`, `rstick_left`, and so on - the same

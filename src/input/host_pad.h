@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // A host-authored pad press for the in-game Controls surface
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §14.3, P7).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14.3, P7).
 //
 // The listening dialog has to leave itself when a capture succeeds, and the plan wants that
 // without the player pressing anything. The native pointer's queue is not usable for it: that

@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The stable row vocabulary of the in-game Controls surface
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §14, P7).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14, P7).
 //
 // One row is one token, exactly the way a settings row is `<category>.<id>` on the guest channel.
 // The token is what the generated DTA writes, what the bridge parses, what the input store reads

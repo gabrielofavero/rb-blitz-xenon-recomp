@@ -19,7 +19,7 @@
 # the Visual C++ runtime DLLs and the Vulkan loader - comes from directories the build tree
 # does not own, so those are checked for presence rather than by content.
 function Get-PayloadTreeFiles {
-    return @('rb_blitz.exe', 'rb_blitz_controller_settings.exe', 'rexruntime.dll', 'rexgpu-xenos.dll')
+    return @('rb_blitz.exe', 'rexruntime.dll', 'rexgpu-xenos.dll')
 }
 
 # The graphics backends a build tree was configured with, in the order the Renderer row offers
@@ -97,7 +97,6 @@ function Test-PayloadSnapshotCurrent {
     param(
         [Parameter(Mandatory = $true)][string] $PayloadDir,
         [Parameter(Mandatory = $true)][string] $SourceDir,
-        [string] $ControllerSettingsDir,
         [Parameter(Mandatory = $true)][string[]] $ExpectedBackends,
         [string] $ExpectedCommit = ''
     )
@@ -149,11 +148,7 @@ function Test-PayloadSnapshotCurrent {
     $tree_files = Get-PayloadTreeFiles
     foreach ($entry in $manifest.Entries) {
         if ($tree_files -notcontains $entry.Path) { continue }
-        $root = $SourceDir
-        if ($entry.Path -eq 'rb_blitz_controller_settings.exe' -and $ControllerSettingsDir) {
-            $root = $ControllerSettingsDir
-        }
-        $source = Join-Path $root $entry.Path
+        $source = Join-Path $SourceDir $entry.Path
         if (-not (Test-Path -LiteralPath $source)) {
             $reasons += "the build tree has no $($entry.Path)"
             continue

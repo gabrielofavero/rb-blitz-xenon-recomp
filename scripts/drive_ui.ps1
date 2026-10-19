@@ -139,7 +139,7 @@ $vkMap = @{
     # Spare letters, for runs that rebind a control to a plain key (a D-pad
     # direction's default bind is Shift+arrow, which a single vk cannot send).
     # J/K/D/S are the Keyboard + Mouse gameplay table's own defaults
-    # (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §11), so
+    # (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §11), so
     # the P2 source-trace arm can press actions the table binds.
     "key_g"        = 0x47   # G
     "key_h"        = 0x48   # H

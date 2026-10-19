@@ -33,7 +33,7 @@ repository; **frozen** = a decision made here, binding on P1–P12.
 | Worktree | **clean** — `git status --porcelain` returns nothing |
 | Staged/unstaged work | **none** — the song-cache work the parent plan describes as "staged" is now committed (see `fd4b436`, `3f99544`, `7219e8b`, `1e40765`) |
 | Stashes | none |
-| `controller-settings/out/generated/settings_table.h` | present (generated, gitignored) — Controller Settings schema has been built at least once in this checkout |
+| `controller-settings/out/generated/settings_table.h` | absent — the application that generated it retired on 2026-10-19 (P8b); this row is the 2026-10-10 baseline record |
 
 `git log --oneline -5`:
 
@@ -80,6 +80,11 @@ checkout is moved or copied, delete and reconfigure rather than building into th
 `menu_options`, `ultimate_plan`, `toolchain`, `controller_settings_profile`, `controller_settings_general`,
 `controller_settings_session`, `controller_settings_remap`, `controller_settings_update`, `controller_settings_launch`, `controller_settings_nav`.
 
+**Renamed/removed since this baseline:** the two suites that test game code kept their checks as
+`profile` and `profile_remap`; `controller_settings_general`, `controller_settings_session`,
+`controller_settings_launch` and `controller_settings_nav` went with the application on 2026-10-19
+(P8b), as did the already-retired `controller_settings_update`.
+
 The installer helper's `installer` test lives in the separate `installer/` preset tree and is **not**
 part of the 22. Registering a new test is a change to a **shared file** (§9) and is the
 coordinator's edit, not a worker's.
@@ -87,6 +92,12 @@ coordinator's edit, not a worker's.
 ---
 
 ## 2. Controller-UI inventory outside `settings.toml` (measured)
+
+> **Superseded 2026-10-19 (P8b).** This inventory described the external settings application and
+> its shared modules. The application has been removed; the live inventory is the in-game Help &
+> Options tree in [`settings_screen.cpp`](../../src/ui/settings_screen.cpp) and the gameplay-mapping
+> plan's §17.1 row-by-row table. The section is kept as the 2026-10-10 measurement, including the
+> Guide prohibition that still holds for the game's own input path.
 
 P8 must keep the *complete* non-Guide controller functionality, so the inventory below is the
 authoritative list of what "Controller Settings" owns. It is deliberately wider than the schema:
@@ -571,14 +582,15 @@ Refresh Song Library.
 
 ## 8. Runtime controller allowlist (frozen)
 
-> **Status 2026-10-18: the app is being retired; the allowlist stays.** P7 moved the rows this
-> section is about into Help & Options → Controls, and P8b (gameplay-mapping plan §17) removes
-> `rb_blitz_controller_settings.exe` and its packaging. The allowlist and the profile's `[remap]`,
-> `[nav]` and gameplay tables remain **frozen for compatibility** — an existing `launcher.toml`
-> must keep loading byte-for-byte — but after P8b nothing but the game itself writes the input
-> rows. `[nav]` becomes read-by-nothing preservation data (the app window it described is gone);
-> the seven host-only presentation/audio rows stay profile-carried with `rb_blitz.toml`/CLI as
-> their editor (plan §17.1).
+> **Status 2026-10-19: the app is gone; the allowlist stays.** P7 moved the rows this
+> section is about into Help & Options → Controls, and P8b retired
+> `rb_blitz_controller_settings.exe`, its target and its packaging
+> ([gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §17-§19).
+> The allowlist and the profile's `[remap]`, `[nav]` and gameplay tables remain **frozen for
+> compatibility** — an existing `launcher.toml` must keep loading byte-for-byte — and the game
+> itself is now the only writer of the input rows. `[nav]` is read-by-nothing preservation data
+> (the app window it described is gone); the seven host-only presentation/audio rows stay
+> profile-carried with `rb_blitz.toml`/CLI as their editor (plan §17.1).
 
 Today `ApplyProfileSettings` (`src/profile/profile_apply.cpp`) applies **every** `[settings]`
 row from `launcher.toml` at the config rank. After migration that would leave retired native fields
@@ -597,11 +609,11 @@ inline constexpr std::string_view kControllerCvarAllowlist[] = {
 ```
 
 The three gameplay-mapping rows joined the frozen list on 2026-10-18 with P1 of
-[the gameplay-input-mapping plan](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md)
+[the gameplay-input-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md)
 (its §D2/D6 supersede this section's earlier two-entry spelling for the switches that plan adds).
-Controller Settings writes them, and a game started on its own has no other way to read them; the
-allowlist is what makes a standalone boot see the same values as a *Launch Game* boot. None of them
-had a consumer before P2/P3, so the change added configuration, not behaviour.
+The in-game Controls store writes them, and a game started on its own has no other way to read
+them; the allowlist is what makes a standalone boot see the same values as a boot from the game's
+menu. None of them had a consumer before P2/P3, so the change added configuration, not behaviour.
 
 `guide_button` and `keybind_guide` are **excluded** by design (§2.3). The `[remap]`, `[nav]`,
 `[gameplay_remap_controller]` and `[gameplay_remap_keyboard_mouse]` tables, window geometry, and the
@@ -625,7 +637,7 @@ config/environment/CLI overrides still win over the profile.
 | New native menu code and schema | P5 |
 | Ultimate adapter and exact-file routing | P6 (VFS dispatch hooks coordinated centrally) |
 | `installer/setup.iss`, installer helper, pins/template labels, installer tests | P7 (P9 must not repurpose installer helpers) |
-| `controller-settings/`, `src/input/remap.*`, controller parts of `src/profile/` | P8, after P3 migration is done |
+| `controller-settings/` (retired 2026-10-19), `src/input/remap.*`, controller parts of `src/profile/` | P8 completed the app's retirement; the recovery/parity half was P8a |
 | `src/ui/menu_options.*`, `src/hooks/menu_filter.*`, `src/hooks/shell_music.*`, relevant enhancements | P10 (respect the committed song-cache work) |
 | New restart code + early bootstrap wiring | P9 (bootstrap wired by coordinator) |
 
@@ -640,6 +652,10 @@ config/environment/CLI overrides still win over the profile.
   the committed song-cache work.
 
 ### 9.3 Development gate (retain Controller Settings until G4)
+
+> **Closed 2026-10-19.** The gate held the external application as the default product surface
+> until G4; P7 moved every input setting into Help & Options → Controls on 2026-10-18, and P8b
+> removed the application on 2026-10-19. The bullets below are the historical gate text.
 
 - The full surface (all tabs and rows) and the existing `settings.toml` schema stay the **default**
   product surface until G4. Do **not** delete Controller Settings settings UI before the coordinator approves

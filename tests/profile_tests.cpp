@@ -4,8 +4,8 @@
 // Host tests for the profile (src/profile/profile.{h,cpp}) and its path
 // resolution (src/profile/profile_path.{h,cpp}). No SDK, no boot - see tests/check.h.
 //
-// What is pinned here is the pair of promises the module makes to Controller Settings and to
-// the game (docs/plans/finished/2026-09-27-launcher-plan.md P0.3, D2):
+// What is pinned here is the pair of promises the module makes to the game's in-game settings and to
+// its input configuration (docs/plans/finished/2026-09-27-launcher-plan.md P0.3, D2):
 //
 //   * the file's location has one order - explicit path, environment, portable marker,
 //     roaming app data - and an install folder is never a candidate without the marker;

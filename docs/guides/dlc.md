@@ -75,11 +75,12 @@ the same way:
 --dlc_library="D:\Songs"               # one or more folders, ';'-separated
 ```
 
-Controller Settings offers the same two shapes for its *DLC location* row: the
+The in-game **DLC Location** row (`general.dlc_root`, `docs/settings/plan.md` §3) and the
+installer's DLC-folder field accept the same two shapes as the runtime: the
 `dlc_layout` rule accepts a structured `<title_id>/<content_type>/<package>` folder
 **and** a flat library of loose containers, because a folder that is not the layout
-is what the runtime above reads as a library
-([controller-settings/src/path_validate.cpp](../../controller-settings/src/path_validate.cpp)).
+is what the runtime above reads as a library. The rule lives in the game's path code
+(`src/settings/paths.cpp`), not in the retired settings application.
 
 - Each container is read for **its own** title id and content type —
   `XContentMetadata::execution_info.title_id` and

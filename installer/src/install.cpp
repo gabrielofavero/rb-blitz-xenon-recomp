@@ -719,9 +719,9 @@ bool VerifyPayloadTree(const fs::path& root, const Pins& pins, std::string_view 
     result.bytes += check.actual_size;
   }
   // The payload's entry points, as the manifest names them, so the install
-  // manifest and the report can say which programs were laid down (R3). A
-  // manifest that does not carry Controller Settings is recorded as such rather than
-  // failing here: verification is what the manifest says it is.
+  // manifest and the report can say which programs were laid down. A manifest that
+  // names no executable is recorded as such rather than failing here: verification is
+  // what the manifest says it is.
   for (const std::string_view exe : kPayloadExecutables) {
     const bool named = std::any_of(
         print.files.begin(), print.files.end(),

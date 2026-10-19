@@ -22,7 +22,6 @@
 // Layout of an installed {app} directory:
 //
 //   {app}/rb_blitz.exe                 payload, copied by Inno Setup [Files]
-//   {app}/rb_blitz_controller_settings.exe        payload, Controller Settings (D1)
 //   {app}/payload-manifest.toml        payload, hashes of the files above
 //   {app}/game/default.xex             imported dump
 //   {app}/game/gen/main_xbox*.ark
@@ -56,15 +55,14 @@ inline constexpr std::string_view kInstallManifestName = "install-manifest.toml"
 inline constexpr std::string_view kInstallReportName = "install-report.txt";
 inline constexpr std::string_view kInstallLogName = "install.log";
 inline constexpr std::string_view kRuntimeExeName = "rb_blitz.exe";
-inline constexpr std::string_view kControllerSettingsExeName = "rb_blitz_controller_settings.exe";
 inline constexpr std::string_view kHelperExeName = "rb_blitz_setup_helper.exe";
 
-// The programs the recompiled payload is expected to carry: the game and its
-// Controller Settings (docs/plans/finished/2026-09-27-launcher-plan.md R3, Contract 4). Verification itself
-// stays manifest-driven - Controller Settings hashes like every other [[files]] entry -
-// but recording the names here lets the install manifest and the report say
-// which executables the folder received.
-inline constexpr std::string_view kPayloadExecutables[] = {kRuntimeExeName, kControllerSettingsExeName};
+// The programs the recompiled payload is expected to carry. One, since Controller Settings
+// retired on 2026-10-19 (gameplay-mapping plan §19): the game owns every setting, so the
+// payload is one executable. Verification itself stays manifest-driven - the game hashes like
+// every other [[files]] entry - but recording the names here lets the install manifest and
+// the report say which executables the folder received.
+inline constexpr std::string_view kPayloadExecutables[] = {kRuntimeExeName};
 
 // The roles in config/game_fingerprints.toml that identify a Rock Band Blitz
 // dump. All three are mandatory: the archive trio is what proves the user has

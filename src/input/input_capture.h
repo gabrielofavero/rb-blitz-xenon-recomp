@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The in-game binding capture's seam (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+// The in-game binding capture's seam (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
 // §14.3, P7).
 //
 // The generated Controls menu arms a capture with a `rbbz-settings/capture/<token>/-` write and

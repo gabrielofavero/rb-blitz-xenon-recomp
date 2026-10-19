@@ -3,7 +3,7 @@
 //
 // P3 of the gameplay-mapping plan: the guest adapter that turns a gameplay table's held action
 // into the title's own gameplay dispatch
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, D4/D5; evidence in §10).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D4/D5; evidence in §10).
 //
 // Two halves, and the split is the whole design:
 //

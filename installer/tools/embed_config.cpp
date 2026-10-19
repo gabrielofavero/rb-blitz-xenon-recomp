@@ -7,7 +7,7 @@
 //                                literals, for rb_blitz_setup_helper.exe
 //   generated/pins.iss           the same pins as Inno Setup preprocessor
 //                                defines, for setup.iss
-//   generated/update.toml        the release manifest Controller Settings checks and an
+//   generated/update.toml        the release manifest the updater reads and installs from
 //                                updater installs from (installer/README.md,
 //                                section "Updating")
 //
@@ -626,7 +626,7 @@ int main(int argc, char** argv) {
   EmitIsppString(ispp, "UltimateReleaseUrl", ultimate->String("release_url"));
   EmitIsppString(ispp, "UltimateDestinationDir", ultimate->String("destination_dir"));
   ispp << "\n";
-  ispp << "// The update channel (docs/plans/finished/2026-09-27-launcher-plan.md D19): where Controller Settings\n";
+  ispp << "// The update channel (docs/plans/finished/2026-09-27-launcher-plan.md D19): where the dormant updater\n";
   ispp << "// looks, the folder under the user's local application data the updater is\n";
   ispp << "// placed in, and whether this release needs the user's game files again.\n";
   EmitIsppString(ispp, "UpdateManifestUrl", update->String("manifest_url"));
@@ -641,8 +641,9 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // update.toml: the file the release publishes for Controller Settings' check and for the
-  // updater that installs the newer build. Everything in it is already in the pins,
+  // update.toml: the file a release would publish for the update path and for the
+  // updater that installs the newer build (its only reader since the settings
+  // application retired on 2026-10-19). Everything in it is already in the pins,
   // so it is written here rather than by hand - a second copy of the version would be
   // a second answer to "which release is this".
   //

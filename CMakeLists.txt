@@ -213,9 +213,8 @@ rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 
 # Which graphics backends the GPU plugin was compiled with, in the order the in-game *Renderer*
 # row should offer them. The same two variables decide what `rexgpu-xenos.dll` contains (the SDK
-# reads them itself) and what Controller Settings offers (`--backends=` in controller-settings/CMakeLists.txt), so
-# passing them on as one string keeps the three in step: the row can never offer a backend the
-# plugin does not have, and it never hides one it does. The boot reads this in
+# reads them itself), so passing them on as one string keeps the two in step: the row can never
+# offer a backend the plugin does not have, and it never hides one it does. The boot reads this in
 # src/settings/boot.cpp (every backend gets a capability probe of its own).
 set(RBBLITZ_BACKENDS "")
 if(REXGLUE_USE_D3D12)
@@ -577,52 +576,29 @@ if(BUILD_TESTING)
     add_test(NAME toolchain
              COMMAND rb_blitz_toolchain_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # Controller Settings profile: path resolution and the reader/writer (P0.3). SDK-free, so it
-    # runs without booting anything, and compiled from src/ because the game executable
-    # reads the same file (D1).
-    add_executable(rb_blitz_controller_settings_profile_tests
-        tests/controller_settings_profile_tests.cpp
+    # The controller profile: path resolution and the reader/writer the game's own input
+    # configuration uses (docs/settings/contracts.md §2). SDK-free, so it runs without booting
+    # anything. The suite was P0.3's `controller_settings_profile` until the external settings
+    # executable retired (gameplay-mapping plan §19); the checks are unchanged.
+    add_executable(rb_blitz_profile_tests
+        tests/profile_tests.cpp
         src/profile/profile.cpp
         src/profile/profile_path.cpp
     )
-    target_include_directories(rb_blitz_controller_settings_profile_tests PRIVATE src)
-    add_test(NAME controller_settings_profile COMMAND rb_blitz_controller_settings_profile_tests)
-
-    # The General tab's decidable half (B1): D5's four Ultimate states from directory
-    # fixtures, the launch-target fallback, where the game is detected, and the schema's
-    # `validate` rules. Dependency-free like the profile tests, and compiled from
-    # controller-settings/src because Controller Settings is what puts them on screen.
-    add_executable(rb_blitz_controller_settings_general_tests
-        tests/controller_settings_general_tests.cpp
-        controller-settings/src/path_validate.cpp
-        controller-settings/src/ultimate_state.cpp
-    )
-    target_include_directories(rb_blitz_controller_settings_general_tests PRIVATE src controller-settings/src)
-    add_test(NAME controller_settings_general COMMAND rb_blitz_controller_settings_general_tests)
-
-    # B4's write path: the session on top of the profile module, plus the reader for the game's
-    # own file that the precedence badge is decided from.
-    add_executable(rb_blitz_controller_settings_session_tests
-        tests/controller_settings_session_tests.cpp
-        controller-settings/src/game_config.cpp
-        controller-settings/src/prefill.cpp
-        controller-settings/src/profile_session.cpp
-        src/profile/profile.cpp
-        src/profile/profile_path.cpp
-    )
-    target_include_directories(rb_blitz_controller_settings_session_tests PRIVATE src controller-settings/src)
-    add_test(NAME controller_settings_session COMMAND rb_blitz_controller_settings_session_tests)
+    target_include_directories(rb_blitz_profile_tests PRIVATE src)
+    add_test(NAME profile COMMAND rb_blitz_profile_tests)
 
     # D16's vocabulary: the `[remap]` grammar, what the profile round-trips, and the rewrite
     # itself. Dependency-free like the profile tests - no pad, no window, no SDL - because the
-    # device side is only the callback the game hands the rewrite (src/input/remap.cpp).
-    add_executable(rb_blitz_controller_settings_remap_tests
-        tests/controller_settings_remap_tests.cpp
+    # device side is only the callback the game hands the rewrite (src/input/remap.cpp). Renamed
+    # from `controller_settings_remap` when the external executable retired; same checks.
+    add_executable(rb_blitz_profile_remap_tests
+        tests/profile_remap_tests.cpp
         src/profile/profile.cpp
         src/profile/remap.cpp
     )
-    target_include_directories(rb_blitz_controller_settings_remap_tests PRIVATE src)
-    add_test(NAME controller_settings_remap COMMAND rb_blitz_controller_settings_remap_tests)
+    target_include_directories(rb_blitz_profile_remap_tests PRIVATE src)
+    add_test(NAME profile_remap COMMAND rb_blitz_profile_remap_tests)
 
     # P1 of the gameplay-mapping plan: the two gameplay tables, their per-table source kinds,
     # their compiled defaults and the profile storage all three tables share. Dependency-free like
@@ -820,7 +796,6 @@ if(BUILD_TESTING)
     add_test(NAME menu_compat COMMAND rb_blitz_menu_compat_tests)
 endif()
 
-# Controller Settings (docs/plans/finished/2026-09-27-launcher-plan.md D1): a second executable in this build tree,
-# next to rb_blitz.exe, so a release always ships both. It carries its own settings
-# schema, which is compiled and validated at build time.
-add_subdirectory(controller-settings)
+# Controller Settings used to be a second executable in this build tree (launcher plan D1). It
+# retired on 2026-10-19: every player setting it edited is an in-game Help & Options row, so the
+# build produces rb_blitz.exe only (gameplay-mapping plan §19).

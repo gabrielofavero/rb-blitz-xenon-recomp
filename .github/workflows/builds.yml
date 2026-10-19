@@ -62,7 +62,7 @@ jobs:
           pwsh -File scripts\repair_flat_symlinks.ps1
           pwsh -File scripts\apply_sdk_patches.ps1
 
-      - name: Build the game and Controller Settings
+      - name: Build the game
         run: |
           cmake --preset win-amd64-release
           cmake --build --preset win-amd64-release

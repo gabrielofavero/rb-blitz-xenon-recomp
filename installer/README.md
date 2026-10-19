@@ -46,7 +46,7 @@ machine lets it open the window unattended.
 
 | It contains | It never contains |
 | --- | --- |
-| The recompiled build (`rb_blitz.exe` and its Controller Settings) and the runtime DLLs the game loads | Any game code, archive, music or key |
+| The recompiled build (`rb_blitz.exe`) and the runtime DLLs the game loads | Any game code, archive, music or key |
 | The wizard, its images and the helper that does the file work | Rock Band Blitz Ultimate, in any form |
 | — | Anything read from the machine it is built on |
 
@@ -69,7 +69,7 @@ build machine's path in it — and [`../docs/guides/ultimate-compat.md`](../docs
 | Shortcuts | Which of the two shortcuts to create — both are the game ([details below](#shortcuts)). |
 | Ready to install | The destination, the answers, and the commit this build is, for a last look before anything is written. |
 | Progress | One bar across four stages (build, game data, mod, finishing). The first line names the stage and how far it has got ("Installing Rock Band Blitz Ultimate  (71%)"), the second what the helper is doing inside it ("adding the mod's songs and modes…"), which is what the stage's own sentence says until the helper has reported. Cancel asks for confirmation while a stage runs. |
-| Finish | A three-way choice — launch the game, open Controller Settings, or do nothing ([details below](#the-finish-page)). |
+| Finish | A two-way choice — launch the game, or do nothing ([details below](#the-finish-page)). |
 
 The licence has no page: nothing in this wizard is agreed to, so the GPL-2.0 text
 is not shown on the way past. It ships with the sources, and the installer is
@@ -84,8 +84,9 @@ Inno Setup already knows where it is), no shortcuts, no Ultimate pages, no summa
 puts the payload the *release manifest* names in place instead of one of its own.
 
 **Nothing starts it any more.** It was Controller Settings' *Update* control that ran it, and
-that control was removed with D19's update check on 2026-10-15: installing a release is now
-downloading the release's setup executable and running it. The updater
+that control was removed with D19's update check on 2026-10-15; the executable itself retired
+on 2026-10-19 (gameplay-mapping plan §19). Installing a release is now downloading the release's
+setup executable and running it. The updater
 is still built and still placed under the user's local application data, so the machinery stays
 working and tested for whatever the release model decides to do with it next; the manifest it
 reads is no longer published (see [below](#the-manifest-is-no-longer-published)).
@@ -95,33 +96,27 @@ reads is no longer published (see [below](#the-manifest-is-no-longer-published))
 Two shortcuts, one per `[Tasks]` entry, so the wizard's Shortcuts page is the one
 place that decides what is created and in what form a silent install can change
 it. Both are the game, and both keep their `--game_data_root="{app}\game"`
-argument: the game has to stay runnable on its own, without Controller Settings
-(Contract 4).
+argument: the game is runnable on its own, and it owns every player setting in
+the in-game Help & Options menu.
 
 | Task | Where | Shortcut | Default |
 | --- | --- | --- | --- |
 | `startmenu` | Start menu | **Rock Band Blitz** — the game, with `--game_data_root="{app}\game"` | unchecked, interactive and silent |
 | `desktopicon` | Desktop | **Rock Band Blitz** — the game | unchecked |
 
-Controller Settings gets none (2026-10-14). The wizard installs one program for the
-user to run, and a second Start-menu entry for the settings application read as a
-second program beside it; that narrows D9, which named both
-([`../docs/plans/finished/2026-09-27-launcher-plan.md`](../docs/plans/finished/2026-09-27-launcher-plan.md)).
-The finish page still offers *Open Controller Settings* and the application is in the
-install folder, so a direct Start-menu or desktop entry is the one thing a user who
-wants it creates by hand. The two parameters that asked for its desktop icon
-(`/LAUNCHERICON=1`, `/CONTROLLERICON=1`) are gone with the task they named: a script
-that still passes one gets no shortcut and no error, which is what it would have got
-from the page anyway.
+There is one program. The external settings application a 2026-10-14-and-earlier
+release shipped has retired (gameplay-mapping plan §19), so an upgrade removes its
+executable and the Start-menu/desktop entries called **Rock Band Blitz Controller
+Settings** through `[InstallDelete]`; see [Uninstall](#uninstall). The two parameters
+that once asked for its desktop icon (`/LAUNCHERICON=1`, `/CONTROLLERICON=1`) are gone
+with the task they named: a script that still passes one gets no shortcut and no
+error, which is what it would have got from the page anyway.
 
 Nothing is created unless the user asks: the wizard's page starts from no answer,
 the `[Tasks]` declarations carry `Flags: unchecked` so a silent install starts from
 no answer too, and `UsePreviousTasks=no` keeps an earlier install's choice from
 reappearing on a reinstall. `/TASKS=startmenu` (or `/MERGETASKS`) is what opts a
 shortcut back in, and it is the only thing that does.
-
-The executable keeps the filename `rb_blitz_controller_settings.exe`: shortcuts an
-earlier release created point at it, and renaming it would break them.
 
 ### A game that is already installed
 
@@ -146,13 +141,12 @@ The last page asks what to do when the wizard closes, with the game preselected:
 
 | Choice | What it starts |
 | --- | --- |
-| **Launch Rock Band Blitz** | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads the settings file on its own, so it still follows the target the install left behind. It is named once rather than "… Ultimate" when the mod is installed: the install folder is the same game either way. |
-| **Open Controller Settings** | `rb_blitz_controller_settings.exe`, which finds the game beside itself. |
+| **Launch Rock Band Blitz** | The game, with `--game_data_root="{app}\game"` — the same command its own shortcut carries. The game reads its settings and input profile on its own, so it still follows the target the install left behind. It is named once rather than "… Ultimate" when the mod is installed: the install folder is the same game either way. |
 | **Do nothing** | Nothing; the wizard just closes. |
 
-The game is the interactive default: the install exists to be played, and Controller
-Settings has its own shortcut. An update is different — it came back to the
-application that asked, so it returns there when it is done.
+The game is the interactive default: the install exists to be played, and it owns
+its own settings. An update is different: the updater always launches the game when
+it is done.
 
 The old single `Launch Rock Band Blitz` checkbox is gone: Inno Setup's `[Run]`
 entries are checkboxes, not a choice, and only one of them could be the post-install
@@ -160,16 +154,15 @@ action. The wizard has no test harness, so this page is checked by hand rather t
 implied to be covered:
 
 1. Install with **Launch Rock Band Blitz** selected — the game starts.
-2. Install with **Open Controller Settings** selected — the utility window opens.
-3. Install with **Do nothing** selected — nothing starts.
-4. `/VERYSILENT` with no `/RUNATEND` — nothing starts; `/VERYSILENT /RUNATEND=game`
+2. Install with **Do nothing** selected — nothing starts.
+3. `/VERYSILENT` with no `/RUNATEND` — nothing starts; `/VERYSILENT /RUNATEND=game`
    — the game starts.
 
 A failed install never starts anything.
 
 A copy of everything the helper did is left next to the game:
 
-* `install-manifest.toml` — machine-readable, and the record Controller Settings reads. It
+* `install-manifest.toml` — machine-readable, the support record. It
   carries `schema_version`, an `[install]` table (`installed_at`, `installer_version`,
   `helper_version`, `payload_commit`, `directory`, `game_directory`, `windows_build`,
   `architecture`), a `[payload]` component table (version, source, file and byte counts,
@@ -178,10 +171,9 @@ A copy of everything the helper did is left next to the game:
   two folders the folder page asked for (`file`, and `dlc_root`/`save_root` — or
   `dlc_default`/`save_default` when the answer was the game's own, which only a silent
   install can still give by passing an empty `/DLCDIR`/`/SAVEDIR`), and, when the mod
-  was installed, an `[ultimate]` table. Controller Settings' first-run prefill reads
-  `[install] game_directory` and `[game_data] ultimate_installed` from it, and
-  `payload_commit` is the build a bug report names (`launcher-plan` D4). An update,
-  which has no folder page, writes no `[paths]` table: it answered nothing.
+  was installed, an `[ultimate]` table. `payload_commit` is the build a bug report
+  names (`launcher-plan` D4). An update, which has no folder page, writes no `[paths]`
+  table: it answered nothing.
 * `install-report.txt` — the same, for a human, with the helper's log appended.
 
 ## Layout
@@ -194,11 +186,11 @@ A copy of everything the helper did is left next to the game:
 | `src/paths.cpp` | The two folders: reading `paths.toml` for the folder page's prefill, checking the answers, and committing them. The file format itself comes from the game (`src/settings/paths.cpp`, compiled in), so the installer cannot write a file the game reads differently. |
 | `config/pins.toml` | The only file that names the outside world: version, URLs, sizes, hashes. |
 | `config/ultimate_fingerprints.toml` | What the mod's files hash to, in the same schema as `../config/game_fingerprints.toml`. |
-| `tools/make_payload.ps1` | Snapshots a recompiled build — the game, its Controller Settings and the DLLs they need — into `out/payload` (and optionally `out/payload.zip`), recording the snapshot's provenance in the manifest. |
+| `tools/make_payload.ps1` | Snapshots a recompiled build — the game and the DLLs it needs — into `out/payload` (and optionally `out/payload.zip`), recording the snapshot's provenance in the manifest. |
 | `tools/payload_provenance.ps1` | The provenance checks the two scripts share: which backends a build tree was configured with, how to read the manifest back, and whether a snapshot is really the tree it claims to be a copy of. `build.ps1` decides with it whether an existing snapshot may be reused. |
 | `tools/make_art.ps1` | Downloads the optional side wizard image into the repository's `assets/installer/`. |
 | `tools/embed_config.cpp` | Compiles `config/pins.toml` + both fingerprint files into `out/generated/embedded_config.h` and `out/generated/pins.iss`, and generates `out/generated/update.toml` — the manifest the dormant updater would install from. It also derives `AppVerName` from the payload version (falling back to the [installer] version), which is what the wizard's title shows. |
-| `build.ps1` | The build entry point: Controller Settings, the payload, the helper, the tests, the images, the updater, and the setup executable, all from this checkout. |
+| `build.ps1` | The build entry point: the payload, the helper, the tests, the images, the updater, and the setup executable, all from this checkout. |
 | `tests/installer_tests.cpp` | The helper's test suite (`ctest`), dependency-free and game-data-free. |
 | `out/` | Build output. Nothing in it is committed. |
 
@@ -220,26 +212,24 @@ powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 
 That one command:
 
-1. builds `rb_blitz_controller_settings.exe` in the game's build tree (skip it with
-   `-SkipControllerSettings`, or point at one built elsewhere with `-ControllerSettingsTarget`);
-2. snapshots the recompiled build — the game, its Controller Settings and the DLLs they
-   need — into `installer\out\payload`, after checking an existing snapshot against the
+1. snapshots the recompiled build — the game and the DLLs it needs — into
+   `installer\out\payload`, after checking an existing snapshot against the
    build tree it claims to be a copy of (see [The payload allow-list](#the-payload-allow-list));
    `-RefreshPayload` rebuilds it anyway, and `-SkipPayload` keeps it as it is, deliberately;
-3. generates the embedded config from `config\pins.toml`, resolving the
+2. generates the embedded config from `config\pins.toml`, resolving the
    `[payload] commit` pin to a real commit on the way;
-4. builds the helper with the `installer-release` preset (clang++) and stages it
+3. builds the helper with the `installer-release` preset (clang++) and stages it
    next to `pins.iss` in `out\generated`;
-5. runs the helper's test suite;
-6. refreshes the optional side wizard image;
-7. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
+4. runs the helper's test suite;
+5. refreshes the optional side wizard image;
+6. compiles `setup.iss` with ISCC and prints the setup exe's size and SHA-256.
 
 Result: `installer\out\dist\RockBandBlitzSetup-<version>.exe`, named after the
 version in `config\pins.toml`, recording the commit the `[payload] commit` pin
 resolves to (`HEAD` — the checkout being built — by default; `-PayloadCommit <40 hex
 digits>` records another one). Use
 `-Preset installer-release-msvc` from a Visual Studio developer prompt, and
-`-SkipArt`, `-SkipTests`, `-SkipControllerSettings`, `-ControllerSettingsTarget`, `-SkipPayload`,
+`-SkipArt`, `-SkipTests`, `-SkipPayload`,
 `-SkipSetup`, `-IsccPath` as needed — `Get-Help .\build.ps1 -Full` documents all
 of them.
 
@@ -344,11 +334,12 @@ id in `pins.toml`, or pass `-PayloadCommit`.
 
 ## Updating
 
-**There is no update check any more.** Controller Settings used to ask for a release
+**There is no update check any more.** The settings application used to ask for a release
 manifest on every start, offer an update, and run an updater that installed the build
 the manifest named (D19 of [2026-09-27-launcher-plan.md](../docs/plans/finished/2026-09-27-launcher-plan.md)). That was
-removed on 2026-10-15, and with it went the control, the prompt,
-the manifest URL compiled into the executable, and the two modules behind them.
+removed on 2026-10-15, and the application itself retired on 2026-10-19 (gameplay-mapping
+plan §19), taking the prompt, the manifest URL it compiled in and the two modules behind it
+with them.
 
 What replacing an install means now:
 
@@ -376,11 +367,12 @@ what may ship there, and a second copy of an installer in it would be one more f
 What the updater does, when something runs it: fetch a release manifest over the URL pinned in
 `config/pins.toml`, install the payload it names, import the game data *or* keep the one that is
 there according to `requires_game_data`, write the manifest and the report with the **new**
-version and commit, and open Controller Settings again.
+version and commit, and launch the game again.
 
 **Nothing runs it**, and that is a deliberate, recorded state rather than an oversight:
 
-* its only caller was Controller Settings' *Update* control, which no longer exists;
+* its only caller was Controller Settings' *Update* control, which no longer exists, and the
+  executable itself retired on 2026-10-19 (gameplay-mapping plan §19);
 * the manifest it fetches (`update.toml`) is **no longer published**: a release is one file,
   and the manifest would be a second one. A machine that ran it today would fetch a 404 and
   say so.
@@ -411,7 +403,7 @@ second one. What it was, for whoever picks the updater up again:
 
 | Reader | Keys it uses | What it decided |
 | --- | --- | --- |
-| Controller Settings (removed) | `version`, `requires_game_data`, `payload_url` | whether a newer release exists, whether it was worth asking about, and whether accepting it would ask for the game files |
+| Controller Settings (removed 2026-10-19) | `version`, `requires_game_data`, `payload_url` | whether a newer release exists, whether it was worth asking about, and whether accepting it would ask for the game files |
 | the updater | `payload_version`, `payload_url`, `payload_sha256`, `payload_size`, `payload_commit` | what to install, from where, and what it must hash to |
 
 `schema_version` is the manifest's own shape — `1` today, `kUpdateManifestSchemaVersion` in
@@ -431,7 +423,7 @@ One file, parsed at build time, embedded into both halves:
 | `[installer]` | `name`, `short_name`, `version`, `publisher`, URLs, `default_dir_name`, `min_windows_build` | Everything the wizard's own resources need. `name` titles the wizard, `short_name` is the program Add/Remove Programs lists, and `publisher` is the author rather than the project; `default_dir_name` is appended to the folder the user picks; `min_windows_build` is `10.0.17763` because the runtime and its DLLs are x86-64-v2. Values may be UTF-8 — the generated `pins.iss` is, and Inno Setup reads it as UTF-8 — so an accented name arrives intact; a byte that is not valid UTF-8 is refused at build time instead. |
 | `[payload]` | `version`, `url`, `sha256`, `size`, `commit` | `version`, `url`, `sha256` and `size` are empty in the repository: a pin that does not exist yet fails with "no payload source configured" instead of downloading nothing, and `-PayloadUrl`/`-PayloadSha256`/`-PayloadSize` fill them in for a build that downloads at install time. `commit` is the exception — it ships as `HEAD`, which `build.ps1` resolves to the checkout's commit before the pins are compiled in, so that every install can tell which build it is: see "Recording which build this is". |
 | `[ultimate]` | `version`, `url`, `sha256`, `size`, repository/release URLs, `archive_prefix`, `destination_dir` | The Ultimate release the wizard offers and the helper downloads. |
-| `[update]` | `manifest_url`, `dir_name`, `requires_game_data` | The update channel: where Controller Settings checks, the folder under the user's local application data the updater is placed in, and whether this release's payload needs the game data re-derived from the user's files. See "Updating". `manifest_url` may be empty (a build with no release channel, which then checks nothing), `dir_name` may not. |
+| `[update]` | `manifest_url`, `dir_name`, `requires_game_data` | The update channel: where a check would ask, the folder under the user's local application data the updater is placed in, and whether this release's payload needs the game data re-derived from the user's files. See "Updating". `manifest_url` may be empty (a build with no release channel, which then checks nothing), `dir_name` may not. |
 
 `tools/embed_config.cpp` also compiles `config/ultimate_fingerprints.toml` and
 `../config/game_fingerprints.toml`, and the helper reuses `src/util/sha256.cpp`
@@ -463,7 +455,6 @@ offers the user-supplied zip and folder.
 | File | Why |
 | --- | --- |
 | `rb_blitz.exe` | The game. |
-| `rb_blitz_controller_settings.exe` | Controller Settings (D1), built beside the game in the same build tree. |
 | `rexruntime.dll`, `rexgpu-xenos.dll` | Runtime DLLs the executable loads. |
 | `msvcp140.dll`, `msvcp140_atomic_wait.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | The Visual C++ runtime the binaries import. |
 | `vulkan-1.dll` | The Khronos Vulkan loader — only when the build offers Vulkan (see below). It is *opened at run time*, never imported, so nothing else would reveal its absence. |
@@ -479,8 +470,8 @@ back, and the helper hashes every file it placed before it reports success.
 The script also prints the payload's **renderer backends** (`payload renderer backends: d3d12,
 vulkan`), read from the build tree's `CMakeCache.txt`, and warns when Vulkan is missing: the SDK's
 own Windows default for `REXGLUE_USE_VULKAN` is OFF, so a hand-configured tree ships a
-`rexgpu-xenos.dll` with one backend and both *Renderer* rows (Controller Settings' and the game's) then
-offer one choice, which has already been mistaken for a bug once. The Windows presets configure it
+`rexgpu-xenos.dll` with one backend and the game's *Renderer* row then
+offers one choice, which has already been mistaken for a bug once. The Windows presets configure it
 ON ([build-and-run.md](../docs/guides/build-and-run.md)), and the game additionally probes the loader
 before offering the backend (`src/settings/boot.cpp`).
 
@@ -501,7 +492,7 @@ about to embed before reusing it:
 | --- | --- |
 | the manifest's `backends` against `CMakeCache.txt` in the build tree | rebuild |
 | the manifest's `commit` against the commit this build resolved, when both name one | rebuild |
-| every file the tree owns, byte for byte: `rb_blitz.exe`, `rb_blitz_controller_settings.exe`, `rexruntime.dll`, `rexgpu-xenos.dll` | rebuild |
+| every file the tree owns, byte for byte: `rb_blitz.exe`, `rexruntime.dll`, `rexgpu-xenos.dll` | rebuild |
 | `vulkan-1.dll` listed, when the tree offers Vulkan at all | rebuild |
 
 So a snapshot that records no provenance (every one written before 2026-10-14), or one built for
@@ -590,14 +581,14 @@ Setup's own switches.
 | `/GAMEMETHOD` | `package` (default), `folder`, `installed` | Where the game data comes from. |
 | `/GAMEFOLDER` | folder | With `folder`: the extract root, or any folder above it. |
 | `/GAMEPACKAGE` | file | With `package`: the Xbox 360 container file. |
-| `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` is read, then the old Controller Settings profile, then the default under the user's Documents; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
+| `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` is read, then the legacy settings profile, then the default under the user's Documents; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
 | `/SAVEDIR` | folder | Where the saves go. Same rule as `/DLCDIR`; its default is `Documents\Rock Band Blitz\Saved Games`, and empty means the game's own save root under the user's Documents. |
 | `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder` | Whether and how to install the mod. |
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
 | `/TASKS` | `startmenu,desktopicon` (Inno Setup) | Which shortcuts to create. Nothing is created without this: the declarations are unchecked and a silent install starts from no answer. |
 | `/MERGETASKS` | `startmenu` (Inno Setup) | The additive form of the same thing; `!name` takes one away, which is already the default. |
-| `/RUNATEND` | `game` (wizard default), `controller`, `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. `Controller Settings` is accepted as the older spelling of `controller`. |
+| `/RUNATEND` | `game` (wizard default), `none` | What to start when the install finishes. A silent install defaults to `none` — it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. The retired `controller`/`launcher` spellings are refused rather than ignored: there is no settings application to start. |
 | `/DIR` | folder | Install folder (Inno Setup). |
 | `/CURRENTUSER` | — | Install under the current user's own profile instead of machine-wide. The default is machine-wide (`/ALLUSERS`), because that is the mode whose default folder is `C:\Program Files`; an unattended run that cannot answer an elevation prompt has to pass this. |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | — | Usual unattended switches (Inno Setup). |
@@ -636,20 +627,17 @@ commands are:
 | `import-game` | Extract the game data from a package, or copy it from a folder, then verify the fingerprints. |
 | `install-ultimate` | The mod, from the pin, a zip, a folder or a URL. |
 | `verify-game` | Independent check of the finished game folder. |
-| `read-paths` | Read an installation's `paths.toml` and the legacy Controller Settings profile beside it, for the folder page's prefill. Read-only. |
+| `read-paths` | Read an installation's `paths.toml` and the legacy settings profile beside it, for the folder page's prefill. Read-only. |
 | `validate-paths` | Check the three locations before the install starts: refuse a save folder inside the read-only game data, say what a DLC folder is, create and probe the save folder. `--no-touch` reports the same things without creating anything, which is what the check that runs while the folder page is merely shown uses. |
 | `write-paths` | Commit the two folders to `paths.toml` — transactionally, keeping every other key, comment and hand edit in the file. |
 | `finalize` | Write `install-manifest.toml` and `install-report.txt`. |
 | `uninstall-cleanup` | Remove what the helper wrote, `--keep-game-data` to keep the import. |
 | `version` | Print the versions it was built with. |
 
-**The helper has two callers.** The wizard uses every command above. The **Controller Settings**
-also invokes it, but with exactly three commands (`launcher-plan` §4.6, B8):
-`install-ultimate` (its *Install Ultimate* action), and `verify-payload` /
-`verify-game` (its *Verify installation* action). All three are read-only checks
-apart from the mod install, which never takes administrator rights and never
-bundles the mod; importing game data or re-placing the payload stays the
-wizard's job, and Controller Settings points at the installer for those.
+**The wizard is the helper's only caller.** Controller Settings used to invoke three commands
+(`install-ultimate`, `verify-payload`, `verify-game`) from its own actions; that application
+retired on 2026-10-19 (gameplay-mapping plan §19), and the mod is installed by this wizard or by
+copying its files into `<game root>\ultimate` ([ultimate-compat.md](../docs/guides/ultimate-compat.md)).
 
 Two properties matter for reliability:
 
@@ -674,8 +662,9 @@ install folder. It asks one question — "Delete the imported Rock Band Blitz ga
 data as well?" — and the imported data is only deleted if the user answers yes:
 several hundred megabytes the user may well want to keep, for example to reinstall
 later without the disc or the package again. A silent uninstall keeps it. The
-mod's `ultimate\` folder lives inside the game data and follows it. Controller Settings
-(`rb_blitz_controller_settings.exe`) travels in the payload and is removed with it;
+mod's `ultimate\` folder lives inside the game data and follows it. The
+controller-settings executable an earlier release shipped is removed by an upgrade's
+`[InstallDelete]` (see [Shortcuts](#shortcuts)) and by this uninstaller;
 `launcher.toml` and `paths.toml` — the user's own settings, and the two folders
 they chose — are deliberately left behind: like the game data, they are not the
 installer's to delete, and a reinstall finds them again.
@@ -707,7 +696,7 @@ The page is prefilled in this order, and the first answer that exists wins:
 | --- | --- |
 | 1 | `/DLCDIR` or `/SAVEDIR` on the command line — a silent install's answers |
 | 2 | the installation's own `paths.toml`, when it parses |
-| 3 | the legacy Controller Settings profile (`%APPDATA%\rb_blitz\launcher.toml`, or beside a portable install), the file the old Controller Settings wrote — its `[settings] user_data_root`/`dlc_root`, or the older `[launch] user_data_dir`/`dlc_dir` |
+| 3 | the legacy settings profile (`%APPDATA%\rb_blitz\launcher.toml`, or beside a portable install), the file the game's input configuration uses — its `[settings] user_data_root`/`dlc_root`, or the older `[launch] user_data_dir`/`dlc_dir` |
 | 4 | the installer's own default, a folder under the user's Documents: `Documents\Rock Band Blitz\Downloaded Content` and `Documents\Rock Band Blitz\Saved Games` |
 
 Rung 4 is a folder rather than an empty field since 2026-10-14, and it is what makes

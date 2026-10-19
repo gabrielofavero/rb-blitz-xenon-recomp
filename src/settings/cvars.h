@@ -27,7 +27,7 @@ namespace rb_blitz::settings {
 // `guide_button` and `keybind_guide` are excluded by design (contracts §2.3).
 //
 // The three gameplay-mapping switches joined on 2026-10-18 with P1 of
-// docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md (D2/D6): Controller Settings
+// docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md (D2/D6): Controller Settings
 // writes them, and a boot that was not started by Controller Settings has to read them too.
 inline constexpr std::string_view kControllerCvarAllowlist[] = {
     "mouse_ui_nav",                        // controller-owned; Controller Settings writes it

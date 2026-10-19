@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The source gates and the physical snapshot every mapping evaluator reads
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, D1/D2/D5; P2).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D1/D2/D5; P2).
 //
 // One poll of the physical layer, classified by source kind:
 //

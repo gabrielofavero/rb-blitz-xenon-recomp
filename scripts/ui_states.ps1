@@ -26,7 +26,7 @@ $script:UiClampUp = @()
 for ($i = 0; $i -lt 8; $i++) { $script:UiClampUp += "key:lstick_up" }
 
 # Whether the run is driving a build that skips the title's two offline dialogs
-# (R3, on by default in the game and in Controller Settings). The title raises both before
+# (R3, on by default in the game). The title raises both before
 # it draws its menu, so a route that accepts one time too many does not stop at the
 # menu - it accepts whatever row the menu's own accept opens. Scripts that launch the
 # game put their answer in the environment before dot-sourcing this file, because the

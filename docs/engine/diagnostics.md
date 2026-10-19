@@ -86,7 +86,7 @@ Three facts fall straight out of it, none guessed: `lr=0x82768E08` on `hv_decryp
 ### The gameplay-seam probe (P0, 2026-10-18)
 
 [gameplay_probe.cpp](../../src/diag/gameplay_probe.cpp) is a separate, narrow instrument for the
-controller-to-action seam of [plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md](../plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md) §10. It hooks the guest controller
+controller-to-action seam of [plans/finished/2026-10-17-gameplay-input-mapping-plan.md](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §10. It hooks the guest controller
 factory, `ButtonDown`/`ButtonUp`, the button→action lookup, the action dispatch and release, the
 per-frame `JoypadController` update, and `Game::update_controls`; it logs each in the release
 `core` log instead of the trace ring. The cvars are registered here because they are not

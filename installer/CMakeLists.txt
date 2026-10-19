@@ -43,8 +43,8 @@ target_compile_features(rb_blitz_embed_config PRIVATE cxx_std_20)
 
 set(RBBLITZ_EMBEDDED_CONFIG "${RBBLITZ_INSTALLER_GENERATED}/embedded_config.h")
 set(RBBLITZ_ISPP_PINS "${RBBLITZ_INSTALLER_GENERATED}/pins.iss")
-# The release manifest: published as the asset `update.toml` (Controller Settings's update
-# check reads it, and the updater installs the payload it names), and read by
+# The release manifest: generated as `update.toml` (the retired settings application's
+# update check read it, and the dormant updater installs the payload it names), and read by
 # installer/build.ps1, which prints it in the list of what a release has to publish.
 set(RBBLITZ_UPDATE_MANIFEST "${RBBLITZ_INSTALLER_GENERATED}/update.toml")
 

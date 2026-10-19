@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The in-game owner of the controller profile's binding rows
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §14.2/§14.4, P7).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14.2/§14.4, P7).
 //
 // One writer, one file. The rows the Controls menu edits are the rows Controller Settings already
 // writes into `launcher.toml`:

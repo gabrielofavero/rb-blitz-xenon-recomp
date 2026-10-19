@@ -1,12 +1,12 @@
 # General and Gameplay Mapping
 
-**Status: in progress, 2026-10-18. P0-P4 have landed (§10, §11, §12, §13, §15) and so have P7
-(§16) and P8a (§18). P5 and P6 are cancelled by the 2026-10-18 change of course: the external
-Controller Settings executable is an interim development tool, not a delivery milestone, so its
-native-category hiding and its integrated acceptance are not built. P8 is split into **P8a**
-(recovery and parity) and **P8b** (retire the executable) — §17 — and P8a has now landed: the
-recovery path, the in-song Controls arm and the parity verification are measured (§18), and
-**P8b is the next and only remaining package.** P0 remains the prerequisite investigation.
+**Status: finished, 2026-10-19. Every package that was to ship has shipped.** P0-P4 landed
+(§10, §11, §12, §13, §15), P5 and P6 are cancelled by the 2026-10-18 change of course (§6.1),
+P7 landed (§16), P8a landed (§18) and **P8b landed on 2026-10-19 (§19)** — the external
+Controller Settings executable is gone, every player setting is an in-game Help & Options row,
+and `rb_blitz.exe` is the only program the build and the installer produce. The plan is kept
+in `finished/` because its measurements and its §17.1 parity inventory are the record of how
+the retirement was decided and verified.
 Sections 1-8 describe the requested behaviour and the P0-P4 evidence unless explicitly
 qualified; §14 defines the in-game menu, capture, apply, and retirement contracts that supersede
 the external-utility parts of §4, §5, §6.1 and §7.
@@ -106,7 +106,7 @@ implementation owners; function names identify the inspected portions.
 | Native category | [src/ui/settings_screen.cpp](../../../src/ui/settings_screen.cpp), `AllPanels`, routes `controls` to `controller_config_screen`. `PauseRootRows` and `MergePauseListRows` populate the paused game's inline list using `pause_controls`. Hiding only the main-menu row is incomplete. P5's planned hiding was cancelled on 2026-10-18; P7 replaces the route with Controls. Until P7 lands the category stays visible even while the Controller switch bypasses its preset — an interim development state that must not be released (§14.2). |
 | Menu configuration | [settings_screen.h](../../../src/ui/settings_screen.h), `MenuConfiguration`, and [settings_payload.cpp](../../../src/hooks/settings_payload.cpp) already pass boot configuration into menu generation. Carry the effective Controller switch through this seam rather than modifying the user's installed menu files; the Keyboard + Mouse switch does not affect menu visibility. P5's sole use of this seam is cancelled; P7 builds the replacement route through it instead. |
 | Preset forcing is not a solution | [src/enhancements.cpp](../../../src/enhancements.cpp) declares `enhancements_force_controller_scheme` / `enhancements_controller_scheme`, explicitly marked not implemented. Neither disables native interpretation or provides direct actions. |
-| Prior rules this supersedes | [controller-settings/config/settings.toml](../../../controller-settings/config/settings.toml) line 652 says "Keyboard support is always on and is not a setting (R13)", and [docs/plans/finished/2026-09-27-launcher-plan.md](../finished/2026-09-27-launcher-plan.md) R13 binds it. [docs/engine/toggles.md](../../engine/toggles.md) line 72 calls the mouse "hidden and inactive during gameplay"; [docs/reference/known-issues.md](../../reference/known-issues.md) line 23 says clicks and wheel are "disabled during gameplay and restored on pause"; [input-flow.md](../../engine/input-flow.md) says raw mouse sources are suppressed "including during gameplay". This plan supersedes those current-state statements. The finished plan is not edited; the live documents and schema text are the ones to update. |
+| Prior rules this supersedes | [controller-settings/config/settings.toml](../../../controller-settings/config/settings.toml) line 652 says "Keyboard support is always on and is not a setting (R13)", and [docs/plans/finished/2026-09-27-launcher-plan.md](2026-09-27-launcher-plan.md) R13 binds it. [docs/engine/toggles.md](../../engine/toggles.md) line 72 calls the mouse "hidden and inactive during gameplay"; [docs/reference/known-issues.md](../../reference/known-issues.md) line 23 says clicks and wheel are "disabled during gameplay and restored on pause"; [input-flow.md](../../engine/input-flow.md) says raw mouse sources are suppressed "including during gameplay". This plan supersedes those current-state statements. The finished plan is not edited; the live documents and schema text are the ones to update. |
 | Build registration | The game's source list is `RBBLITZ_SOURCES` in [CMakeLists.txt](../../../CMakeLists.txt); [controller-settings/CMakeLists.txt](../../../controller-settings/CMakeLists.txt) compiles `src/profile/profile.cpp`, `profile_path.cpp` and `remap.cpp` directly, and [installer/CMakeLists.txt](../../../installer/CMakeLists.txt) compiles `profile.cpp`/`profile_path.cpp` too. A new `src/profile/gameplay_remap.*` must be registered in the game and Controller Settings targets; keep `Profile` a storage-only row table so the installer's copy needs no new dependency. |
 | In-game settings spec | [docs/settings/plan.md](../../settings/plan.md) §3.2 and its row-position statement say the Controls page keeps its inventory and "nothing about them changes". P5's conditional removal is cancelled; P7 replaces that inventory with the nested Controls menu (§14.1), so the owning spec, not only `menu.md`, must record the replacement when P7 lands. |
 
@@ -573,27 +573,25 @@ device-support arms, the hidden rows and Save. The Controller switch still defau
 shipping behaviour is unchanged.
 P5/P6 status (2026-10-18): **cancelled by the change of course** — no build hides the native
 category; P7's Controls menu replaces it and disables Default Presets while Controller Custom is
-On, and P8 owns the integrated acceptance and documentation. P7 has since landed (§16) and P8a
-has landed (§18); P8b is next.
+On, and P8 owns the integrated acceptance and documentation. P7 landed (§16), P8a landed (§18)
+and P8b **landed on 2026-10-19 (§19)**: nothing in this plan remains to build.
 
 ### 6.2 Remaining delivery — in-game controls, recovery, and executable retirement (P7-P8b)
 
-This is now the only remaining milestone. P7 delivered the in-game Controls menu (§16); **P8 is
-delivered as two packages (§17)**: P8a finishes the recovery surface and the parity inventory
-without touching the build or packaging, and P8b removes the executable after that parity passes.
-P7 also absorbed P5's user-visible intent: Controls always stays visible, and Default Presets is
-disabled while Controller Custom is On — no build hides the category.
+This was the last milestone, and all of it is delivered: P7 built the in-game Controls menu
+(§16), P8a finished the recovery surface and the parity inventory (§18), and P8b removed the
+executable (§19). P7 also absorbed P5's user-visible intent: Controls always stays visible, and
+Default Presets is disabled while Controller Custom is On — no build hides the category.
 
 | Package | Work and likely owners | Completion evidence |
 | --- | --- | --- |
 | P7. Move settings and mappings into the game — **landed 2026-10-18 (§16)** | Implement §14's nested Controls menu in both main-menu and paused Help & Options, including Input Types, General Mapping, both Gameplay Mapping branches, native Default Presets, per-row Assign/Reset, table resets, help, and the pause-frame listening dialog. Reuse shared profile/source/capture logic and extend the settings service/bridge for binding edits and safe runtime application. | Generated menu and service tests plus live base/Ultimate main-menu and pause routes; capture, reset, disabled states, safe apply, persistence, native-preset preservation. The external executable remains available until P8b. |
 | P8a. Recovery and parity (§17) — **landed 2026-10-18 (§18)** | Finish the in-game recovery path for a saved profile with no usable route (the `RecoveryNeeded`/`RecoveryHold` seam started in `src/input/source_gates.h`), wire it into the filter and the caption, test it, and drive it live. Close P7's remaining live arm (the in-song Controls entry), verify the §17.1 parity inventory row by row against the build, and classify every host-only app row. No build, packaging, or installer change. Owners: `src/input/`, `src/ui/help_overlay.cpp`, `scripts/acceptance_controls.ps1` (or a second tracked harness), the docs §18 names. | The recovery arm passes live (a profile with both host gates off and no pad reopens the keyboard on one held key, changes one stored switch, and says so); the in-song route reaches Input Types and a bind page and returns to the song; §17.1 has no row without a destination or a written classification; all suites green; `check_docs.py` clean. |
-| P8b. Retire Controller Settings and finish acceptance (§17) | After P8a parity, remove the external executable target and obsolete app-only UI, launch entry points, packaging requirements and shortcuts; move any still-shared code/schema/tests to their owning game modules first (`tests/controller_settings_profile_tests.cpp` and `controller_settings_remap_tests.cpp` keep their checks under game-owned names). Preserve existing profiles and configuration precedence. Update installer upgrade/repair behavior, scripts, and live documentation; run §14's migration and release matrix. | A clean build/install/upgrade/repair launches the game directly with all settings available in game, retains existing user configuration, and neither requires nor ships `rb_blitz_controller_settings.exe`. No supported setting workflow starts a second settings process. Evidence lives under `out/gameplay-mapping/in-game/`; old utility acceptance is replaced by equivalent in-game checks. |
+| P8b. Retire Controller Settings and finish acceptance (§17) — **landed 2026-10-19 (§19)** | After P8a parity, remove the external executable target and obsolete app-only UI, launch entry points, packaging requirements and shortcuts; move any still-shared code/schema/tests to their owning game modules first (`tests/controller_settings_profile_tests.cpp` and `controller_settings_remap_tests.cpp` keep their checks under game-owned names). Preserve existing profiles and configuration precedence. Update installer upgrade/repair behavior, scripts, and live documentation; run §14's migration and release matrix. | A clean build/install/upgrade/repair launches the game directly with all settings available in game, retains existing user configuration, and neither requires nor ships `rb_blitz_controller_settings.exe`. No supported setting workflow starts a second settings process. Evidence lives under `out/gameplay-mapping/in-game/` and `out/p8b-install/`; old utility acceptance is replaced by equivalent in-game checks. |
 
-Order: **P4 -> P7 -> P8a -> P8b**. P5 and P6 are cancelled, not prerequisites. P7 has **landed**
-on 2026-10-18 (§16) and P8a has **landed** on 2026-10-18 (§18); **P8b is the only remaining
-package** and is **not started**. The executable keeps working until P8b: P8a changed no
-packaging.
+Order: **P4 -> P7 -> P8a -> P8b**. P5 and P6 are cancelled, not prerequisites. P7 **landed**
+on 2026-10-18 (§16), P8a on 2026-10-18 (§18) and P8b on 2026-10-19 (§19). **All three are
+delivered; the plan is finished.**
 
 ## 7. Validation and release criteria
 
@@ -1453,8 +1451,9 @@ Settings Labels off.
 
 ### 14.5 Retire the executable only after parity (P8)
 
-**P8 is split into P8a (recovery and parity) and P8b (this retirement) — §17.** P8a changes no
-build, packaging, or installer file; P8b is this section, and it starts only after P8a's arms pass.
+**P8 was split into P8a (recovery and parity) and P8b (this retirement) — §17, and both landed:
+P8a built the recovery path and verified the inventory (§18), P8b removed the executable (§19).**
+P8a changed no build, packaging, or installer file; P8b did all of that in one pass.
 
 The P7 parity inventory maps each supported external setting/action to its in-game destination
 and acceptance evidence. Include input toggles, all three mapping tables, capture, resets, help,
@@ -1828,7 +1827,7 @@ everywhere else.
 ### 17.3 Prompt P8a — recovery and parity
 
 ```text
-P8a — recovery and parity. Read docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md
+P8a — recovery and parity. Read docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
 §14.4, §16.5 and §17 first. Do NOT remove the external executable, its target, its tests, the
 payload entry, or any installer file in this pass.
 
@@ -1922,10 +1921,10 @@ with its evidence and the index points at it.
 
 ## 18. P8a evidence — recovery and parity (2026-10-18)
 
-**P8a landed. P8b is the only remaining package and is not started.** The in-game recovery path
+**P8a landed, and P8b followed on 2026-10-19 (§19).** The in-game recovery path
 works live, the in-song Controls route is driven for the first time (P7's largest residual), and
 every §17.1 row has a destination the build generates. No build, packaging or installer file
-changed: the external executable still ships until P8b.
+changed in this pass: the external executable still shipped until P8b did the removal.
 
 ### 18.1 What landed
 
@@ -2054,3 +2053,90 @@ tree names is one the payload provides and that every page has an in-song twin.
   unit-tested (no pad).
 - **P8b's packaging, installer and profile-format work is untouched** by this pass, as §17.5
   requires.
+
+## 19. P8b evidence — retiring the executable (2026-10-19)
+
+**P8b landed. The plan is finished.** The external Controller Settings executable, its target,
+its schema, its tests and its two harnesses are gone; the build and the installer produce, verify
+and launch `rb_blitz.exe` alone, and every player setting is an in-game Help & Options row. This
+section records what changed, the measurements taken on this machine, and — plainly — the legs
+that were not run.
+
+### 19.1 What landed
+
+| P8b item | Where it landed | Evidence |
+| --- | --- | --- |
+| The two shared suites keep their checks under game-owned names | `git mv tests/controller_settings_profile_tests.cpp tests/profile_tests.cpp`; `git mv tests/controller_settings_remap_tests.cpp tests/profile_remap_tests.cpp`. Registered in the root `CMakeLists.txt` as `profile` (`rb_blitz_profile_tests`) and `profile_remap` (`rb_blitz_profile_remap_tests`); the checks are unchanged | `ctest -N` lists both; both pass in 37/37 (§19.2) |
+| The application deleted | `controller-settings/` in full (target, `main.cpp`, the `.rc`, `config/settings.toml`, `src/`, `tools/`, `README.md`), the app-only tests (`controller_settings_block`, `_general`, `_help`, `_keys`, `_launch`, `_pad_nav`, `_session`), the app-only scripts (`capture_controller_settings.ps1`, `acceptance_controller_settings.ps1`), and `add_subdirectory(controller-settings)` | `git status` shows 57 tracked files deleted from `controller-settings/`; the release tree no longer has the target (§19.2) |
+| The payload is one executable | `installer/tools/make_payload.ps1`'s `$wanted` lost its entry and `-ControllerSettingsDir`; `payload_provenance.ps1`'s `Get-PayloadTreeFiles` lost it too and `Test-PayloadSnapshotCurrent` lost the directory parameter; `installer/src/install.h`'s `kPayloadExecutables` is `{kRuntimeExeName}` | a fresh snapshot is 8 files / 59.0 MiB (§19.3) and the install manifest says `executables = ["rb_blitz.exe"]` (§19.4) |
+| The installer stops offering/launching it | `setup.iss` lost `ControllerSettingsExeName`, the *Open Controller Settings* finish radio and its handler, and the `RUNATEND=controller`/`launcher` values; the finish page is `Launch Rock Band Blitz` / `Do nothing`; `build.ps1` lost `-SkipControllerSettings`/`-ControllerSettingsTarget` and the app build step (the steps renumbered 1-4) | `installer/build.ps1` ran end to end: updater and setup compiled, `RockBandBlitzSetup-0.1.0.exe` = 24,134,728 bytes, sha256 `139eb6977ea7ec74ccc7ed40a1a8a2fdccce43a269549f21a589645dadefcbad` (§19.3) |
+| An upgrade removes the obsolete binary and shortcuts | a narrow `[InstallDelete]` (exact paths only): `{app}\rb_blitz_controller_settings.exe` and the `Rock Band Blitz Controller Settings` Start-menu/desktop `.lnk`s; `[UninstallDelete]` names the same binary for an install that is uninstalled without upgrading | driven live: a stale copy in the install folder is gone after a reinstall (§19.4); `installer_tests` asserts the section and the exact paths |
+| Profiles keep working | `launcher.toml` remains the game's input profile (P1/P7 tables); `RBBLITZ_CONTROLLER_SETTINGS_PROFILE`, `settings_dir.txt` and the `rb_blitz_controller_settings.portable` marker stay honoured in `src/profile/profile_path.{h,cpp}`; the host-only rows stay in `kHostOnlyCvarAllowlist` | `profile`/`profile_remap`/`settings_migration` tests pass; the installer's legacy-profile prefill test is unchanged and passes |
+| Documentation | `README.md`, `installer/README.md` and `installer/README.md`'s options, `docs/settings/{plan,contracts,menu,README}.md`, `docs/settings/status.md`, `docs/engine/{toggles,input-flow,main-menu}.md`, `docs/reference/known-issues.md`, `docs/guides/{build-and-run,distributable,dlc}.md`, `.github/copilot-instructions.md`, the in-game-settings skill, the CI step name and the distribution audit | `check_docs.py` 0 errors (§19.6) |
+
+### 19.2 Build and test
+
+| Command | Result |
+| --- | --- |
+| `cmake --build out/build/win-amd64-debug` (the Vulkan-off, `BUILD_TESTING=ON` tree) | green |
+| `ctest --test-dir out/build/win-amd64-debug` | **37/37 pass** in 21.92 s, 2026-10-19 (41/41 before P8b: four app-only tests removed, two renamed) |
+| `cmake --preset win-amd64-release` + `cmake --build --preset win-amd64-release` | green; `rb_blitz.exe` linked; no settings target remains in the tree's build files |
+| `cmake --build --preset installer-release` + `ctest --preset installer-release` | **419 checks, 0 failed** (the new upgrade-cleanup case included) |
+
+### 19.3 The payload and the product
+
+`installer/tools/make_payload.ps1 -Clean` wrote **8 files, 59.0 MiB**: `rb_blitz.exe`,
+`rexruntime.dll`, `rexgpu-xenos.dll`, the four Visual C++ runtime DLLs and `vulkan-1.dll`, plus
+`payload-manifest.toml`. There is no `rb_blitz_controller_settings.exe` in the list and none in
+the snapshot.
+
+`installer/build.ps1` then built the updater (6,096,182 bytes) and the setup executable:
+`installer/out/dist/RockBandBlitzSetup-0.1.0.exe`, **24,134,728 bytes** (23.0 MiB), sha256
+`139eb6977ea7ec74ccc7ed40a1a8a2fdccce43a269549f21a589645dadefcbad`, commit
+`d120dbfd00b06500ee08239b9afef7c149b1e5bc` — rebuilt once more after the last `setup.iss`
+edit, so the published artifact matches the sources in the tree. `scripts/audit_distributable.ps1` is **7/7 pass**:
+inventory "9 files, allow-list exactly, manifest agrees", no retail or mod data, no credential,
+no symbol table, no build-machine path in 17 shipped files, 356 tracked files checked. Its
+allow-list parser now admits `vulkan-1.dll` exactly when the snapshot's manifest records a
+Vulkan build — the loader is added to `$wanted` dynamically, so the literal list never named it
+and the audit previously failed on every Vulkan payload.
+
+### 19.4 Install, upgrade and launch, driven live
+
+All under `out/p8b-install/` (gitignored), 2026-10-19:
+
+| Arm | Measurement |
+| --- | --- |
+| **Fresh install** | `RockBandBlitzSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /DIR=<app> /GAMEMETHOD=folder /GAMEFOLDER=<checkout>\game /ULTIMATESOURCE=none /RUNATEND=none` exited **0**. The installed folder holds `rb_blitz.exe`, the DLLs, the helper, `payload-manifest.toml`, `paths.toml`, the manifests and the uninstaller — **no `rb_blitz_controller_settings.exe`**. `install-manifest.toml` line 19: `executables = ["rb_blitz.exe"]` |
+| **Upgrade over a pre-P8b folder** | a dummy `rb_blitz_controller_settings.exe` was placed in the installed folder and the same setup was run again; it exited **0**, the stale binary was **gone** (the `[InstallDelete]` entry), and the manifest again listed one executable. The user's `paths.toml`/`launcher.toml` were not touched |
+| **The installed game launches directly** | the installed `rb_blitz.exe` booted with `--game_data_root=<app>\game`, a scratch `--launcher_profile` and `--input_backend=none`: the log carries `gameplay mapping: keyboard_support=on (default) mouse_ui_nav=on (default) gameplay_mapping_controller=off (default) gameplay_mapping_keyboard_mouse=on (default)` and `gameplay mapping: direct dispatch on (plan P3)`, and ends with `settings_boot: presented menu frame; graphics marked last-known-good` at 10:39:26 — the game and its input store run from the install folder with no second process |
+| **The retired value is refused** | the same silent install with `/RUNATEND=controller` exited **7** and created no install folder: `RunAtEndProblem` refuses the value in `PrepareToInstall`, and the wizard's own parameter list says `game`/`none` |
+
+### 19.5 What P8b does not claim
+
+- **The wizard's finish page was not photographed.** The silent leg above proves the parameter
+  path (`/RUNATEND` validates `game`/`none`, refuses `controller`) and the script compiles with
+  two radios; no interactive install was driven to look at them. `installer_tests` pins the
+  script's shape, not a window.
+- **The obsolete shortcut deletion was not driven live.** The dummy-binary arm proves the
+  `[InstallDelete]` mechanism in the install folder; the two `.lnk` entries point at the exact
+  pre-2026-10-14 names and were not re-created by hand in this pass. A machine that installed
+  before 2026-10-14 and never since is the only one that can carry them.
+- **No full song was played from the installed copy.** The boot reached the menu frame and the
+  input store's log lines; the gameplay arms remain P0/P3/P7/P8a's, whose binary is the same
+  game build.
+- **A physical pad still has no live arm on this machine** (P0/P2/P3/P8a's residual).
+- **The audit's `vulkan-1.dll` rule is new here.** It is the fix for a pre-existing audit
+  failure on every Vulkan payload, not a P8b regression; the 7/7 run is the measurement.
+- **The plan's §1-§18 links to `controller-settings/` files.** Those files are gone, so the
+  historical links are listed in
+  [`.github/skills/documentation/references/known-broken-links.txt`](../../../.github/skills/documentation/references/known-broken-links.txt)
+  rather than rewritten: the tables are the 2026-10-17/18 source review, and deleting a path
+  from a measurement would lose what the review was of.
+
+### 19.6 Documentation
+
+`python .github/skills/documentation/scripts/check_docs.py` → **0 errors**, 2026-10-19 (the
+known-broken allowlist carries the retired paths). The plan moved from `plans/in-progress/` to
+`plans/finished/` with `git mv` and `move_docs.py` re-pointed every reference (the docs skill's
+procedure), and `docs/README.md`'s Plans table names it as finished.

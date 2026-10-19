@@ -954,7 +954,7 @@ fourth arm that named only the video mode read `display=2354x993` while asking f
   3.556) still falls back to a 16:9 size. That is unmeasured rather than stretched, and the offer set
   never names a size the render path cannot make.
 - `window_resizable=false` is verified as "the window style carries no `WS_THICKFRAME` and no
-  `WS_MAXIMIZEBOX`", not by driving a drag. The separate Controller Settings utility builds its own SDL
+  `WS_MAXIMIZEBOX`", not by driving a drag. The separate Controller Settings utility built its own SDL
   window (`controller-settings/main.cpp`) and never reads the cvar.
 - The in-game **3D and HUD** half is unchanged by this section, and stays open at §9.4.
 

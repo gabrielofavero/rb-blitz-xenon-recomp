@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The one published input configuration the title's poll reads
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §14.4, P7).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14.4, P7).
 //
 // Until P7 the bindings were read once, when the input system was built (remap.cpp's
 // `InstallPadRemap`), and the plan's D7 made that a launch-scoped policy. §14.4 replaces it: a

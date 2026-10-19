@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// P7's host-side tests (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §14):
+// P7's host-side tests (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14):
 // the `input.*` row grammar, the listening session's rules (release first, wrong kind keeps
 // listening, cancel, timeout), and the store's one-writer save against a real temporary profile.
 //

@@ -37,7 +37,7 @@
 #include "profile/profile_apply.h"
 #include "profile/remap.h"
 
-// P1 of docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md: the switches D2/D6
+// P1 of docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md: the switches D2/D6
 // define. Controller Settings writes them through its profile (the allowlist in
 // src/settings/cvars.h), so a boot nobody launched through Controller Settings has to read them
 // from here; the compiled defaults match the schema rows' own defaults.

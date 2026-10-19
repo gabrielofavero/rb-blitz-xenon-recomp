@@ -3,7 +3,7 @@
 //
 // Gameplay mapping: the vocabulary and the two binding tables that bind physical inputs straight
 // to the title's six gameplay actions
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md, D1/D6).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D1/D6).
 //
 // The plan splits Gameplay Mapping into two independent tables because the two input types are
 // different questions. Each table names the same six actions and accepts only its own sources:

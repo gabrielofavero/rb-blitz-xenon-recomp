@@ -30,8 +30,9 @@ upstream, or supplied by the user, while the installer runs. See README.md.
 
 RockBandBlitzUpdater.exe (this same wizard with /DUpdaterMode=1, placed under the
 user's local application data by the setup executable) is still built. Nothing calls
-it: Controller Settings stopped checking for updates on 2026-10-15. See README.md,
-section "Updating".
+it: its only caller, Controller Settings' Update control, retired with that
+executable on 2026-10-19 (gameplay-mapping plan §19). See README.md, section
+"Updating".
 
 .PARAMETER PayloadUrl
 Download the recompiled build from this URL at install time instead of embedding
@@ -79,17 +80,6 @@ installer-release-msvc uses cl.exe from a Visual Studio developer prompt.
 .PARAMETER SkipTests
 Do not run the installer helper's test suite.
 
-.PARAMETER SkipControllerSettings
-Do not build rb_blitz_controller_settings.exe before the payload step. Use when it has
-already been built, or when the payload is downloaded at install time - which
-skips the step on its own.
-
-.PARAMETER ControllerSettingsTarget
-The rb_blitz_controller_settings.exe to package, when it is not where the game's build tree
-puts it (<SourceDir>\rb_blitz_controller_settings.exe, D1). Passing it means Controller Settings is
-already built: the build step is skipped and the directory holding it is what the
-payload snapshot reads.
-
 .PARAMETER SkipPayload
 Keep an existing payload snapshot exactly as it is, whatever it holds. Use with
 -PayloadUrl, or when the snapshot was made deliberately by tools\make_payload.ps1:
@@ -126,8 +116,6 @@ param(
     [string] $IsccPath,
     [string] $Preset = 'installer-release',
     [switch] $SkipTests,
-    [switch] $SkipControllerSettings,
-    [string] $ControllerSettingsTarget,
     [switch] $SkipPayload,
     [switch] $RefreshPayload,
     [switch] $SkipArt,
@@ -296,42 +284,7 @@ function Resolve-PayloadCommit {
 }
 
 # --------------------------------------------------------------------------
-# 1. Controller Settings
-# --------------------------------------------------------------------------
-# Controller Settings is the second executable of the recompiled build (docs/plans/
-# launcher-plan.md D1) and the payload carries it (P0.5), so it has to exist
-# before the snapshot is taken. A tree that was never built with Controller Settings in
-# it fails here or, if this step is skipped, at make_payload.ps1 - which names the
-# missing input instead of quietly shipping a payload without Controller Settings.
-Write-Step 'Controller Settings'
-
-if (-not $ControllerSettingsTarget) { $ControllerSettingsTarget = Join-Path $SourceDir 'rb_blitz_controller_settings.exe' }
-
-if ($SkipControllerSettings) {
-    Write-Host '   skipped : -SkipControllerSettings'
-} elseif ($PayloadUrl) {
-    Write-Host '   skipped : the payload is downloaded at install time (-PayloadUrl)'
-} elseif ($PSBoundParameters.ContainsKey('ControllerSettingsTarget')) {
-    if (-not (Test-Path -LiteralPath $ControllerSettingsTarget)) {
-        throw "-ControllerSettingsTarget was given but $ControllerSettingsTarget does not exist."
-    }
-    Write-Host "   used    : $ControllerSettingsTarget (not rebuilt)"
-} else {
-    if (-not (Test-Path -LiteralPath $SourceDir)) {
-        throw ("no recompiled build tree to build Controller Settings in: $SourceDir does not exist. Build " +
-               'the emulator first (see docs/guides/build-and-run.md), pass -ControllerSettingsTarget for Controller Settings ' +
-               'built elsewhere, or pass -PayloadUrl to download the build at install time instead.')
-    }
-    $settingsArgs = @('--build', $SourceDir, '--target', 'rb_blitz_controller_settings')
-    Invoke-Native -Exe 'cmake' -Arguments $settingsArgs -What 'cmake --build --target rb_blitz_controller_settings'
-    if (-not (Test-Path -LiteralPath $ControllerSettingsTarget)) {
-        throw "Controller Settings build reported success but $ControllerSettingsTarget is missing."
-    }
-    Write-Host "   built   : $ControllerSettingsTarget"
-}
-
-# --------------------------------------------------------------------------
-# 2. the payload
+# 1. the payload
 # --------------------------------------------------------------------------
 Write-Step 'Payload'
 
@@ -383,7 +336,6 @@ if ($PayloadUrl) {
     Write-Host "   url     : $PayloadUrl"
     Write-Host "   sha256  : $(if ($PayloadSha256) { $PayloadSha256.ToLowerInvariant() } else { '(unverified)' })"
 } else {
-    $controllerSettingsDir = Split-Path -Parent $ControllerSettingsTarget
     $treeBackends = Get-PayloadBackends -BuildDir $SourceDir
     $haveSnapshot = Test-Path -LiteralPath $payloadManifest
 
@@ -395,7 +347,6 @@ if ($PayloadUrl) {
     $stale = @()
     if ($haveSnapshot) {
         $stale = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
-                    -ControllerSettingsDir $controllerSettingsDir `
                     -ExpectedBackends $treeBackends -ExpectedCommit $payloadCommit)
     }
 
@@ -426,14 +377,13 @@ if ($PayloadUrl) {
         Write-Host "   mode    : embedded in the setup executable"
         Write-Host "   snapshot: rebuilding from $SourceDir"
         $nativeArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makePayload,
-                        '-SourceDir', $SourceDir, '-ControllerSettingsDir', $controllerSettingsDir,
+                        '-SourceDir', $SourceDir,
                         '-PayloadDir', $PayloadDir, '-Commit', $payloadCommit, '-Clean')
         Invoke-Native -Exe 'powershell.exe' -Arguments $nativeArgs -What 'make_payload.ps1'
 
-        # A snapshot that does not describe the tree it was just taken from is a bug in the
-        # packaging half, and embedding it would hide it until after the install.
+        # A snapshot that does not describe the tree it was just taken from is a bug in
+        # the packaging half, and embedding it would hide it until after the install.
         $problems = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
-                        -ControllerSettingsDir $controllerSettingsDir `
                         -ExpectedBackends $treeBackends -ExpectedCommit $payloadCommit)
         if ($problems.Count -gt 0) {
             throw ("the payload snapshot does not match the build tree it was taken from:`n  " +
@@ -458,7 +408,7 @@ if ($PayloadUrl) {
 Write-Host "   commit  : $(if ($payloadCommit) { $payloadCommit } else { 'not recorded' })"
 
 # --------------------------------------------------------------------------
-# 3. the helper and its tests
+# 2. the helper and its tests
 # --------------------------------------------------------------------------
 Write-Step 'Configuring and building the helper'
 
@@ -506,7 +456,7 @@ if ($SkipSetup) {
 }
 
 # --------------------------------------------------------------------------
-# 4. the optional side wizard image
+# 3. the optional side wizard image
 # --------------------------------------------------------------------------
 if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
     Write-Step 'Wizard image (optional)'
@@ -521,7 +471,7 @@ if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
 }
 
 # --------------------------------------------------------------------------
-# 5. the updater, and the setup executable that carries it
+# 4. the updater, and the setup executable that carries it
 # --------------------------------------------------------------------------
 Write-Step 'Compiling the updater'
 
@@ -536,10 +486,10 @@ $setupBaseName = "RockBandBlitzSetup-$appVersion"
 # The updater is this same wizard built with /DUpdaterMode=1: it carries no payload
 # (it installs the build the release manifest names) and drops the pages it has no
 # question about. The setup executable embeds it and puts it under the user's local
-# application data. Nothing runs it since Controller Settings stopped checking for
-# updates (2026-10-15) - it is built so the machinery stays working and tested, not
-# because a release path needs it today. It is compiled *first*, because the setup's
-# [Files] entry reads the file at compile time.
+# application data. Nothing runs it since Controller Settings retired (2026-10-19) -
+# it is built so the machinery stays working and tested, not because a release path
+# needs it today. It is compiled *first*, because the setup's [Files] entry reads the
+# file at compile time.
 $updaterBaseName = 'RockBandBlitzUpdater'
 $updaterExe = Join-Path $generatedDir "$updaterBaseName.exe"
 $updaterArgs = @('/Q',

@@ -19,7 +19,8 @@
 ;
 ;   the updater - the same wizard with the payload taken from the release
 ;   manifest instead of its own build, and with the pages it has no question
-;   about removed. Controller Settings runs it when the user accepts an update, so it
+;   about removed. Nothing starts it since Controller Settings retired
+;   (2026-10-19); it is built so the update machinery stays working, and it
 ;   never carries a payload and never touches the install folder's shortcuts.
 ;
 ; The directories below can be overridden from the command line so a release can
@@ -58,13 +59,18 @@
 ; payload manifest, which the helper reads back at the end of the install.
 #define HelperExeName "rb_blitz_setup_helper.exe"
 #define GameExeName "rb_blitz.exe"
-#define ControllerSettingsExeName "rb_blitz_controller_settings.exe"
 #define GameDirName "game"
+
+; The settings executable an earlier release installed. This build does not ship
+; it any more (its player settings are in-game Help & Options rows), so
+; [InstallDelete] takes the installer-owned copy and the shortcuts an older
+; release could have created; nothing else in the install folder is touched.
+#define ObsoleteControllerSettingsExeName "rb_blitz_controller_settings.exe"
 
 ; The updater the setup executable places under the user's local application data
 ; (see "Updating" in README.md). build.ps1 compiles it from this same script with
 ; /DUpdaterMode=1 before the setup, so the setup can embed it - a build without it
-; is refused below rather than shipping Controller Settings whose Update button cannot work.
+; is refused below rather than shipping an update path that cannot work.
 #ifndef UpdaterExeName
   #define UpdaterExeName "RockBandBlitzUpdater.exe"
 #endif
@@ -76,6 +82,13 @@
   #error pins.iss is missing from the generated directory: run build.ps1 (or the helper build) first.
 #endif
 #include GeneratedDirPath + "pins.iss"
+
+; The shortcut an earlier release could have created for the settings application
+; ([InstallDelete]). It is named after the program plus its own suffix, so the
+; same AppShortName the game's shortcut uses keeps the pair distinguishable in a
+; Start-menu list. Defined here rather than above because AppShortName comes from
+; pins.iss (measured: ISCC refuses an undeclared identifier at the use site).
+#define ObsoleteControllerSettingsShortcutName AppShortName + " Controller Settings"
 
 #if !FileExists(GeneratedDirPath + HelperExeName)
   #error the helper is missing from the generated directory: build.ps1 copies it there.
@@ -102,10 +115,9 @@
 
 ; Only the game is given a shortcut (owner decision, 2026-10-14): the wizard
 ; installs one program for the user to run, and a second Start-menu entry for the
-; settings application read as a second program beside it. This narrows D9, which
-; named Controller Settings' shortcuts; the executable keeps the filename
-; rb_blitz_controller_settings.exe, because shortcuts an earlier release created
-; point at it and Controller Settings is what starts it again.
+; settings application read as a second program beside it. The settings
+; executable is gone from this release too (2026-10-19), so a shortcut that an
+; older release created is removed by [InstallDelete] rather than re-pointed.
 
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
@@ -144,12 +156,12 @@ DisableDirPage=no
 ; declared defaults below are unchecked for the same reason. An explicit
 ; /TASKS or /MERGETASKS still decides.
 UsePreviousTasks=no
-; An administrative install, because that is the mode autopf resolves to Program
-; Files in: the default destination is C:\Program Files\Rock Band Blitz, where a
+; An administrative install, because that is the mode autopf resolves to the system
+; programs folder in: the default destination is the Rock Band Blitz folder there, where a
 ; game belongs, and the setup, the uninstaller and the updater ask for the
 ; elevation the files there need. /CURRENTUSER is still honoured and installs under
 ; the user's own profile instead, which is what an unattended run that may not
-; elevate has to pass (scripts\acceptance_controller_settings.ps1 does).
+; elevate has to pass.
 ;
 ; Nothing the *game* writes lives in the install folder: the DLC library and the
 ; saved games are asked for on the folder page and default to the user's Documents,
@@ -224,9 +236,9 @@ DiskSpaceMBLabel=The game data you provide is not counted here; the free space i
 ; Two shortcuts, both the game, and neither label says who it is for: the game is
 ; the only program this wizard offers to run, so "for the game" would only raise
 ; the question of what the other one was. The two icon parameters that used to ask
-; for Controller Settings' desktop icon (/LAUNCHERICON, /CONTROLLERICON) are gone
-; with the task they named; a script that still passes one gets no shortcut and no
-; error, which is what it would have got from the page anyway.
+; for the settings application's desktop icon (/LAUNCHERICON, /CONTROLLERICON) are
+; gone with the task they named; a script that still passes one gets no shortcut
+; and no error, which is what it would have got from the page anyway.
 ;
 ; The updater has no shortcuts page and creates none: the install it is updating
 ; already has whatever the user asked for, and re-creating a shortcut the user has
@@ -253,9 +265,9 @@ Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: onlyifdo
 #endif
 #ifndef UpdaterMode
 ; The updater, under the user's local application data rather than in the install
-; folder: Controller Settings looks for it there, and the install folder is the game's own
-; (the payload audit lists what may ship in it). It is small - a wizard with no
-; payload in it - and [UninstallDelete] takes it away again.
+; folder: the install folder is the game's own (the payload audit lists what may
+; ship in it). It is small - a wizard with no payload in it - and
+; [UninstallDelete] takes it away again.
 Source: "{#UpdaterExePath}"; DestDir: "{localappdata}\{#UpdateDirName}\update"; Flags: ignoreversion
   #if PayloadHasDownload == 0
 ; The recompiled build and its runtime DLLs, straight into the install folder.
@@ -268,17 +280,24 @@ Source: "{#PayloadDirPath}*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 [Icons]
 ; The two shortcuts, each behind the [Tasks] entry the Shortcuts page shows. Both
 ; are the game, and both keep their --game_data_root argument: the game has to stay
-; runnable without Controller Settings (Contract 4), which - with the shortcut it
-; no longer gets - leaves its own folder as the only way to start the settings
-; application besides the finish page.
+; runnable on its own, and it reads its own input profile (the game's settings live
+; in Help & Options, not in a second program).
 #ifndef UpdaterMode
 Name: "{autoprograms}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: startmenu
 Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Parameters: "--game_data_root=""{app}\{#GameDirName}"""; WorkingDir: "{app}"; Tasks: desktopicon
 #endif
 
-; D8 replaced the single postinstall [Run] entry with the finish page's three-way
+[InstallDelete]
+; An upgrade removes the settings executable and the shortcuts only an older
+; installer created. Both entries are exact paths this installer owned; profiles,
+; paths.toml, saves and the game data are never touched by this section.
+Type: files; Name: "{app}\{#ObsoleteControllerSettingsExeName}"
+Type: files; Name: "{autoprograms}\{#ObsoleteControllerSettingsShortcutName}.lnk"
+Type: files; Name: "{autodesktop}\{#ObsoleteControllerSettingsShortcutName}.lnk"
+
+; D8 replaced the single postinstall [Run] entry with the finish page's two-way
 ; choice (see [Code] below): Inno can run at most one entry with a checkbox, and
-; the wizard now asks open game / open Controller Settings / do nothing.
+; the wizard now asks launch the game / do nothing.
 
 [UninstallDelete]
 ; Files the helper wrote that Inno Setup never saw: the ones it downloaded, the
@@ -286,12 +305,13 @@ Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Paramet
 ; by the uninstaller, so these entries only cost a failed delete.
 Type: files; Name: "{app}\{#HelperExeName}"
 Type: files; Name: "{app}\{#GameExeName}"
-; Controller Settings travels in the payload (see tools/make_payload.ps1) and is deleted
-; with the rest of it. launcher.toml and paths.toml are deliberately not listed:
-; they are the user's own settings - and the two folders the user chose - and they
-; survive an uninstall, like the game data (Contract 4). The helper's own cleanup
-; keeps them for the same reason.
-Type: files; Name: "{app}\{#ControllerSettingsExeName}"
+; The settings executable an earlier release installed is listed in [InstallDelete]
+; so an upgrade removes it; this entry covers an install that is uninstalled
+; without ever being upgraded. launcher.toml and paths.toml are deliberately not
+; listed: they are the user's own settings - and the two folders the user chose -
+; and they survive an uninstall, like the game data (Contract 4). The helper's own
+; cleanup keeps them for the same reason.
+Type: files; Name: "{app}\{#ObsoleteControllerSettingsExeName}"
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\payload-manifest.toml"
 Type: files; Name: "{app}\install-manifest.toml"
@@ -301,9 +321,9 @@ Type: files; Name: "{app}\install.log"
 Type: filesandordirs; Name: "{app}\.staging"
 Type: filesandordirs; Name: "{app}\{#GameDirName}\.staging"
 ; The updater the setup placed under the user's local application data, and the
-; folder it lives in. It is outside the install folder on purpose (D19): the
-; Controller Settings runs it, and a second copy of an installer inside the game's own
-; directory would be one more file the payload audit has to allow.
+; folder it lives in. It is outside the install folder on purpose (D19): a second
+; copy of an installer inside the game's own directory would be one more file the
+; payload audit has to allow.
 Type: filesandordirs; Name: "{localappdata}\{#UpdateDirName}\update"
 Type: dirifempty; Name: "{app}"
 
@@ -354,9 +374,9 @@ const
 
   { The updater: a second build of this script (/DUpdaterMode=1) that carries no
     payload and installs the build the release manifest names. The setup executable
-    puts it under the user's local application data. Controller Settings links none of
-    this any more - it has no update check and never starts the updater (docs/settings/plan.md
-    §3.6) - so the folder is the updater's own and nobody else reads it. }
+    puts it under the user's local application data. Nothing starts it since
+    Controller Settings retired (2026-10-19) - it is the update machinery's own
+    entry point now - so the folder is the updater's own and nobody else reads it. }
   UpdaterDirName = '{#UpdateDirName}';
   UpdaterLeafDir = 'update';
   UpdateManifestRel = 'rbblitz-update.toml';
@@ -396,12 +416,10 @@ const
   ParamAbsent = '@absent@';
 
   { D8: what the finish page can do. Strings rather than indexes, because the same
-    values are what /RUNATEND accepts on a silent install (README.md). The
-    application a user sees is now Controller Settings; 'launcher' stays accepted
-    because it is the spelling older scripts and shortcut builders pass. }
+    values are what /RUNATEND accepts on a silent install (README.md).'game' and
+    'none' are the two answers since Controller Settings retired: there is no
+    settings application left to open. }
   RunAtEndGame = 'game';
-  RunAtEndController = 'controller';
-  RunAtEndLauncher = 'launcher';
   RunAtEndNothing = 'none';
 
   { Page indexes. }
@@ -426,8 +444,8 @@ const
   PayloadSizeBytes = {#PayloadSize};
   PayloadIsDownload = {#PayloadHasDownload};
   UltimateArchiveBytes = {#UltimateSize};
-  { The release manifest Controller Settings checks and the updater installs from. Empty in
-    a build that has no release channel, which the updater then says out loud. }
+  { The release manifest the updater installs from. Empty in a build that has no
+    release channel, which the updater then says out loud. }
   UpdateManifestUrl = '{#UpdateManifestUrl}';
 
 var
@@ -523,7 +541,6 @@ var
   gUpdatePayloadSize: Int64;
 
   EndGameRadio: TNewRadioButton;
-  EndControllerRadio: TNewRadioButton;
   EndNothingRadio: TNewRadioButton;
 
 // --- small helpers --------------------------------------------------------
@@ -637,11 +654,10 @@ begin
   Result := ExpandConstant('{param:SAVEDIR|' + ParamAbsent + '}') <> ParamAbsent;
 end;
 
-// D8: the finish page's three-way choice. The game is the interactive default - the
-// install exists to be played, and Controller Settings is one click away in the
-// Start menu - and a silent install does nothing unless /RUNATEND asks for one, as
-// the old skipifsilent [Run] entry did. The radios set gRunAtEnd; DeinitializeSetup
-// runs it after the wizard closes.
+// D8: the finish page's two-way choice. The game is the interactive default - the
+// install exists to be played - and a silent install does nothing unless /RUNATEND
+// asks for one, as the old skipifsilent [Run] entry did. The radios set gRunAtEnd;
+// DeinitializeSetup runs it after the wizard closes.
 function ParamRunAtEnd: String;
 begin
   Result := Lowercase(Trim(ExpandConstant('{param:RUNATEND|}')));
@@ -651,20 +667,15 @@ procedure ResolveRunAtEnd;
 var
   requested: String;
 begin
-  // An update ends where it started: Controller Settings is what asked the user, and
-  // coming back to it - one release newer - is what the user agreed to. The three
-  // finish-page radios are not shown for it either (CurPageChanged), so this is the
-  // only thing that decides.
+  // An update ends at the game's own folder: the user asked for a new build, and
+  // launching it is the one thing left to do. The finish-page radios are not shown
+  // for it either (CurPageChanged), so this is the only thing that decides.
   if gUpdater then
   begin
-    gRunAtEnd := RunAtEndController;
+    gRunAtEnd := RunAtEndGame;
     Exit;
   end;
   requested := ParamRunAtEnd;
-  // 'launcher' is what this value was called before the application became
-  // Controller Settings; a script that still passes it gets what it asked for.
-  if requested = RunAtEndLauncher then
-    requested := RunAtEndController;
   if requested <> '' then
     gRunAtEnd := requested
   else if WizardSilent then
@@ -676,20 +687,14 @@ end;
 function RunAtEndProblem: String;
 begin
   Result := '';
-  if (gRunAtEnd <> RunAtEndGame) and (gRunAtEnd <> RunAtEndController) and
-     (gRunAtEnd <> RunAtEndNothing) then
-    Result := RunAtEndParam + ' must be ' + RunAtEndGame + ', ' + RunAtEndController + ' or ' +
+  if (gRunAtEnd <> RunAtEndGame) and (gRunAtEnd <> RunAtEndNothing) then
+    Result := RunAtEndParam + ' must be ' + RunAtEndGame + ' or ' +
               RunAtEndNothing + ', not ''' + gRunAtEnd + '''.';
 end;
 
 procedure EndGameRadioClick(Sender: TObject);
 begin
   gRunAtEnd := RunAtEndGame;
-end;
-
-procedure EndControllerRadioClick(Sender: TObject);
-begin
-  gRunAtEnd := RunAtEndController;
 end;
 
 procedure EndNothingRadioClick(Sender: TObject);
@@ -701,7 +706,7 @@ end;
 // placed under it when the page is shown rather than at start-up. They read top
 // to bottom in the order they are listed here, and the game is named once: with
 // the mod installed the install folder is still the same game, so "Launch
-// Rock Band Blitz" is the honest caption for both.
+// Rock Band Blitz" is the honest caption for it.
 procedure LayoutFinishChoices;
 var
   top, step, left, width: Integer;
@@ -711,19 +716,14 @@ begin  left := WizardForm.FinishedLabel.Left;
   top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(8);
 
   EndGameRadio.Caption := 'Launch {#AppShortName}';
-  EndControllerRadio.Caption := 'Open Controller Settings';
   EndNothingRadio.Caption := 'Do nothing';
 
   EndGameRadio.Left := left;
   EndGameRadio.Top := top;
   EndGameRadio.Width := width;
   EndGameRadio.Height := step;
-  EndControllerRadio.Left := left;
-  EndControllerRadio.Top := top + step;
-  EndControllerRadio.Width := width;
-  EndControllerRadio.Height := step;
   EndNothingRadio.Left := left;
-  EndNothingRadio.Top := top + step * 2;
+  EndNothingRadio.Top := top + step;
   EndNothingRadio.Width := width;
   EndNothingRadio.Height := step;
 end;
@@ -888,7 +888,7 @@ end;
 //
 // Failing here ends Setup: the updater has no payload of its own, so there is
 // nothing it could install without the manifest, and saying so is the only honest
-// answer. Controller Settings' Update button is still there, so the user can try again.
+// answer, and the updater can be run again from the release page.
 function FetchUpdateManifest: Boolean;
 var
   reason: String;
@@ -2074,10 +2074,10 @@ begin
   // Both answers decide which pages exist for this run, so it is fetched before the
   // first one is shown.
   gUpdater := True;
-  // The updater has no finish page: it came back to Controller Settings, so it
-  // returns there when it is done. ResolveRunAtEnd says the same thing - this is
-  // only the state before it runs.
-  gRunAtEnd := RunAtEndController;
+  // The updater has no finish page: it installs a new build over an existing
+  // install, so it returns to the game when it is done. ResolveRunAtEnd says the
+  // same thing - this is only the state before it runs.
+  gRunAtEnd := RunAtEndGame;
   if not FetchUpdateManifest then
   begin
     Result := False;
@@ -2210,7 +2210,7 @@ begin
   UpdateUltimatePicker;
   LayoutSelectDirHeader;
   LayoutLocationFields;
-  // The page the folder starts on, and whatever paths.toml or the user's old Controller Settings
+  // The page the folder starts on, and whatever paths.toml or the user's input
   // profile already say about the other two. A silent install has no page to change
   // them on, so this is also what it will write.
   PrefillLocations;
@@ -2221,17 +2221,13 @@ begin
   // A silent install has no page to ask on, so this is also what it creates.
   ApplyTaskDefaults;
 
-  // D8: the finish page's choice. The [Run] entry is gone; these three radios
+  // D8: the finish page's choice. The [Run] entry is gone; these two radios
   // replace it, and DeinitializeSetup runs whichever is selected. RunList is
   // hidden because it would otherwise list the [Run] entries that no longer
   // exist.
   EndGameRadio := TNewRadioButton.Create(WizardForm);
   EndGameRadio.Parent := WizardForm.FinishedPage;
   EndGameRadio.OnClick := @EndGameRadioClick;
-
-  EndControllerRadio := TNewRadioButton.Create(WizardForm);
-  EndControllerRadio.Parent := WizardForm.FinishedPage;
-  EndControllerRadio.OnClick := @EndControllerRadioClick;
 
   EndNothingRadio := TNewRadioButton.Create(WizardForm);
   EndNothingRadio.Parent := WizardForm.FinishedPage;
@@ -2551,7 +2547,7 @@ begin
       SuppressibleMsgBox('The new build could not be installed:' + kCrLf + kCrLf + gFailureText +
                          kCrLf + kCrLf +
                          'Nothing was changed. Check your internet connection and run the ' +
-                         'update again from Controller Settings.', mbError, MB_OK, IDOK);
+                         'updater again.', mbError, MB_OK, IDOK);
       Exit;
     end;
     NoteSource(gStageSummaryFile, 'source', 'version', gPayloadSource, gPayloadVersion);
@@ -2866,21 +2862,19 @@ begin
   if gUpdater or gFailed or WizardSilent then
   begin
     EndGameRadio.Visible := False;
-    EndControllerRadio.Visible := False;
     EndNothingRadio.Visible := False;
     Exit;
   end;
   gFinishReached := True;
   LayoutFinishChoices;
   EndGameRadio.Checked := gRunAtEnd = RunAtEndGame;
-  EndControllerRadio.Checked := gRunAtEnd = RunAtEndController;
   EndNothingRadio.Checked := gRunAtEnd = RunAtEndNothing;
 end;
 
 // D8: the chosen action, after the wizard has closed. The game is started with
-// the same argument its shortcut carries, and it reads Controller Settings' profile on
-// its own (Contract 3), so this honours the target the install left behind
-// without a second process; Controller Settings' entry is Controller Settings itself.
+// the same argument its shortcut carries, and it reads its own settings and input
+// profile (Contract 3), so this honours the target the install left behind without
+// a second process.
 procedure DeinitializeSetup;
 var
   exePath, parameters: String;
@@ -2896,11 +2890,6 @@ begin
   begin
     exePath := ExpandConstant('{app}\{#GameExeName}');
     parameters := '--game_data_root=' + QuoteArg(ExpandConstant('{app}\{#GameDirName}'));
-  end
-  else if gRunAtEnd = RunAtEndController then
-  begin
-    exePath := ExpandConstant('{app}\{#ControllerSettingsExeName}');
-    parameters := '';
   end
   else
     Exit;

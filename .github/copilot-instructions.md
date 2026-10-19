@@ -1,8 +1,8 @@
 # rb-blitz-xenon-recomp — project instructions
 
 Static recompilation of Rock Band Blitz (Xbox 360) with ReXGlue: the guest runs as generated C++
-(`generated/default/`), the host is our own code in `src/`, and the controller-settings/installer are separate
-targets in the same build tree. Documentation is part of the change — source comments cite it by
+(`generated/default/`), the host is our own code in `src/`, and the installer is a separate
+target in the same build tree. Documentation is part of the change — source comments cite it by
 section, so paths and section numbers are an interface.
 
 ## Documentation
@@ -53,6 +53,6 @@ python .github/skills/documentation/scripts/check_docs.py
 - **Gates.** The toolchain record (`config/toolchain.toml`) and the game-data fingerprint
   (`game/default.xex`) are deliberate gates; see `docs/guides/toolchain.md` and
   `docs/guides/build-and-run.md` before relaxing one.
-- **Never commit** build output (`out/`, `installer/out/`, `controller-settings/out/`), dumped game data
+- **Never commit** build output (`out/`, `installer/out/`), dumped game data
   (`game/`, `assets/game/`), or anything machine-specific.
 - Do not commit, push or deploy without the owner's explicit approval.

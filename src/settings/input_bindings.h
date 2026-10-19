@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The seam between the settings channel and the in-game Controls rows
-// (docs/plans/in-progress/2026-10-17-gameplay-input-mapping-plan.md §14.4, P7).
+// (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14.4, P7).
 //
 // The store itself lives in src/input/input_store.cpp: it owns the controller profile's
 // `[remap]` and both gameplay tables, writes them through the profile module's surgical save, and
