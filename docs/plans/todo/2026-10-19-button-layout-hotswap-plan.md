@@ -68,9 +68,11 @@ keyboard-to-pad emulation:
 
 - `src/input/source_gates.h` — `PhysicalInput` (raw pad, key state, mouse buttons, focus) and
   `SourceHeld`; `src/input/title_input.h` — `SamplePhysicalPad` reads the physical drivers only.
-- `src/profile/remap.h` — the 16 targets and the compiled defaults. The default keyboard mapping is
-  relevant to the keyboard sheet: `K`=A, `L`=B, `J`=X, `I`=Y, `Q`=LB, `E`=RB, `V`=LS, `N`=RS,
-  `W/A/S/D`=D-pad, `Backspace`=Back, `Return`=Start; triggers have no keyboard default.
+- `src/profile/remap.h` — the 16 targets and the compiled defaults. The default keyboard mapping
+  is relevant to the keyboard sheet: `Return`/`A`=A, `Escape`/`B`=B, `X`=X, `Y`=Y, `W/A/S/D` or
+  the arrow keys=D-pad, `Space`=Start, `Backspace`=Back; LB/RB/LS/RS are pad-only and the triggers have
+  no keyboard default. The keys are interface-oriented because Gameplay Mapping's Keyboard + Mouse
+  table is on by default (2026-10-19).
 - There is **no last-device tracker** yet; the source gates decide whether a device may act, not
   which device last acted.
 
@@ -201,17 +203,20 @@ For the **keyboard** sheet (`schemes/keyboard/buttons.png`), paint the compiled 
 
 | Slot | Key to draw | Slot | Key to draw |
 | --- | --- | --- | --- |
-| `confirm_a` | `K` | `back_b` | `L` |
-| `x` | `J` | `y` | `I` |
-| `lb` | `Q` | `rb` | `E` |
-| `ls` | `V` | `rs` | `N` |
-| `start` | `Enter` | `back` | `Backspace` |
-| `dpad_up` | `W` | `dpad_down` | `S` |
-| `dpad_left` | `A` | `dpad_right` | `D` |
+| `confirm_a` | `Enter` / `A` | `back_b` | `Esc` / `B` |
+| `x` | `X` | `y` | `Y` |
+| `lb` | (pad only) | `rb` | (pad only) |
+| `ls` | (pad only) | `rs` | (pad only) |
+| `start` | `Space` | `back` | `Backspace` |
+| `dpad_up` | `W` / `↑` | `dpad_down` | `S` / `↓` |
+| `dpad_left` | `A` / `←` | `dpad_right` | `D` / `→` |
 | `lt` | (unbound by default) | `rt` | (unbound by default) |
 
 `lt`/`rt` have no compiled keyboard default; paint a neutral trigger icon or a short label, and let
-the player's General Mapping decide. D12 records that a rebind does not update the sheet.
+the player's General Mapping decide. A two-key slot (`confirm_a`, `back_b` and the four D-pad
+slots) draws both spellings separated by `/`; the compact forms above fit the 85 px cell.
+LB/RB/LS/RS are pad-only defaults, so their cells show the pad control rather than a key. D12
+records that a rebind does not update the sheet.
 
 ### 4.3 `scheme.toml`
 

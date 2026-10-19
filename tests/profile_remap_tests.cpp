@@ -25,6 +25,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <sstream>
 #include <string>
@@ -551,18 +552,60 @@ void TestProfileKeepsTheTable() {
 }  // namespace
 
 void TestDefaultsGiveTheKeyboardAPad() {
-  BeginCase("D16: every digital control has a default pad-plus-keyboard binding");
+  BeginCase("D16: every digital control has a default pad binding, and the keyboard half is "
+            "interface-oriented");
 
-  // A control with no row still has a binding: its own pad control plus a keyboard key. The pad
-  // source reads the state before any rewriting, so the pad keeps working exactly as it did.
-  const std::vector<Source>* a = DefaultSources(Target::kA);
-  CHECK_TRUE(a != nullptr);
-  if (a != nullptr) {
-    CHECK_EQ(a->size(), 2u);
-    CHECK_TRUE((*a)[0] == (Source{SourceKind::kPad, "a"}));
-    CHECK_TRUE((*a)[1] == (Source{SourceKind::kKey, "K"}));
+  // A control with no row still has a binding: its own pad control plus the keys a menu user
+  // reaches for. The pad source reads the state before any rewriting, so the pad keeps working
+  // exactly as it did.
+  const auto expect = [](Target target, std::initializer_list<const char*> keys) {
+    const std::vector<Source>* sources = DefaultSources(target);
+    CHECK_TRUE(sources != nullptr);
+    if (sources == nullptr) {
+      return;
+    }
+    CHECK_EQ(sources->size(), keys.size() + 1);
+    if (sources->empty()) {
+      return;
+    }
+    CHECK_TRUE((*sources)[0] == (Source{SourceKind::kPad, std::string(TargetName(target))}));
+    std::size_t index = 1;
+    for (const char* key : keys) {
+      if (index < sources->size()) {
+        CHECK_TRUE((*sources)[index] == (Source{SourceKind::kKey, key}));
+      }
+      ++index;
+    }
+  };
+
+  expect(Target::kA, {"Return", "A"});
+  expect(Target::kB, {"Escape", "B"});
+  expect(Target::kX, {"X"});
+  expect(Target::kY, {"Y"});
+  expect(Target::kBack, {"Backspace"});
+  expect(Target::kStart, {"Space"});
+  expect(Target::kDpadUp, {"W", "Up"});
+  expect(Target::kDpadDown, {"S", "Down"});
+  expect(Target::kDpadLeft, {"A", "Left"});
+  expect(Target::kDpadRight, {"D", "Right"});
+
+  // The shoulders and stick clicks keep the pad's own control and have no keyboard stand-in: the
+  // interface has nothing for them to do, so a key would only be a collision waiting to happen.
+  for (const Target target : {Target::kLeftShoulder, Target::kRightShoulder, Target::kLeftThumb,
+                              Target::kRightThumb}) {
+    const std::vector<Source>* sources = DefaultSources(target);
+    CHECK_TRUE(sources != nullptr);
+    if (sources == nullptr) {
+      continue;
+    }
+    CHECK_EQ(sources->size(), 1u);
+    if (!sources->empty()) {
+      CHECK_TRUE((*sources)[0] == (Source{SourceKind::kPad, std::string(TargetName(target))}));
+    }
   }
-  // The analog triggers have no default and keep the pad's own reporting.
+
+  // The analog triggers have no default and keep the pad's own reporting, so their travel is not
+  // turned into a full-scale press.
   CHECK_TRUE(DefaultSources(Target::kLeftTrigger) == nullptr);
   CHECK_TRUE(DefaultSources(Target::kRightTrigger) == nullptr);
 
@@ -573,12 +616,33 @@ void TestDefaultsGiveTheKeyboardAPad() {
   CHECK_TRUE(bound.Effective(Target::kA) != nullptr);
   CHECK_EQ(bound.Effective(Target::kA)->size(), 1u);
 
-  // The keyboard key reaches the guest even though the profile never named it: this is what makes
-  // a keyboard a complete stand-in for the pad.
+  // Enter reaches the guest as A even though the profile never named it: this is what makes a
+  // keyboard a complete stand-in for the pad.
   FakeDevice device;
-  device.down = {Source{SourceKind::kKey, "K"}};
+  device.down = {Source{SourceKind::kKey, "Return"}};
   const PadState none;
   CHECK_EQ(Run(empty, none, &device).buttons & TargetBit(Target::kA), TargetBit(Target::kA));
+
+  // The letter keys spell the face buttons, Space is Start, Backspace is Back and the arrow keys
+  // are the D-pad. The A key is also D-pad left (WASD and the arrows share the direction), so one
+  // press sets both bits - that is the requested layout, pinned here rather than discovered.
+  device.down = {Source{SourceKind::kKey, "A"}};
+  const uint16_t letter_a = Run(empty, none, &device).buttons;
+  CHECK_EQ(letter_a & TargetBit(Target::kA), TargetBit(Target::kA));
+  CHECK_EQ(letter_a & TargetBit(Target::kDpadLeft), TargetBit(Target::kDpadLeft));
+
+  device.down = {Source{SourceKind::kKey, "Space"}};
+  CHECK_EQ(Run(empty, none, &device).buttons & TargetBit(Target::kStart),
+           TargetBit(Target::kStart));
+
+  device.down = {Source{SourceKind::kKey, "Escape"}};
+  CHECK_EQ(Run(empty, none, &device).buttons & TargetBit(Target::kB), TargetBit(Target::kB));
+  device.down = {Source{SourceKind::kKey, "B"}};
+  CHECK_EQ(Run(empty, none, &device).buttons & TargetBit(Target::kB), TargetBit(Target::kB));
+
+  device.down = {Source{SourceKind::kKey, "Left"}};
+  CHECK_EQ(Run(empty, none, &device).buttons & TargetBit(Target::kDpadLeft),
+           TargetBit(Target::kDpadLeft));
 
   // And with nothing pressed the pad is exactly as the pad reported it: the defaults are the
   // identity for a pad user, triggers and all.

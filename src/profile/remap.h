@@ -20,9 +20,10 @@
 //     way anyway; the eight stick directions are the one addition (`PadDirection`), because the
 //     title's own presets bind them and a pad source has to be able to name them.
 //   * A target with no row in `[remap]` has the binding this module ships for it (`DefaultSources`):
-//     the pad's own control plus a keyboard key, so a keyboard is a complete stand-in for the
-//     pad without the profile having to say so. The two analog triggers have no default: a
-//     keyboard cannot stand in for a trigger's travel.
+//     the pad's own control plus the keyboard keys the interface uses (Enter/A, Escape, X, Y,
+//     WASD and the arrows, Space, Backspace), so a keyboard is a complete stand-in for the pad
+//     without the profile having to say so. The shoulders and stick clicks are pad-only, and the
+//     two analog triggers have no default: a keyboard cannot stand in for a trigger's travel.
 //   * A target with a row binds to a comma-separated list, and an empty list means nothing presses
 //     it at all.
 //
@@ -238,11 +239,13 @@ struct Binding {
   std::vector<Source> sources;
 };
 
-// The binding a control has when the profile says nothing about it: the pad's own control plus a
-// keyboard key chosen to mirror the pad on a keyboard for this game (the left hand on the D-pad's
-// WASD, the right hand on the face buttons' IJKL diamond, and Q/E, Z/C, V/N and Backspace/Return
-// around them). Empty - nullptr - for the analog triggers, which are left to the pad. The sources
-// read `state` before any rewriting, so a default is the identity for a pad user.
+// The binding a control has when the profile says nothing about it: the pad's own control plus
+// the keyboard keys the interface uses (2026-10-19). Gameplay Mapping's Keyboard + Mouse table is
+// on by default, so General Mapping's keys are the menu's: Enter/A confirm, Escape backs out, X
+// and Y keep their letters, Space is Start, Backspace is Back, and the D-pad answers to WASD and
+// the arrow keys. The shoulders and stick clicks are pad-only; the analog triggers are empty -
+// nullptr - and left to the pad. The sources read `state` before any rewriting, so a default is
+// the identity for a pad user.
 const std::vector<Source>* DefaultSources(Target target);
 
 // The `[remap]` table of the profile.

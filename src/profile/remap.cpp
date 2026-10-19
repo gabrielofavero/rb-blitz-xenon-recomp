@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 #include <utility>
 
 namespace rb_blitz::profile::remap {
@@ -313,33 +314,49 @@ bool TargetIsTrigger(Target target) {
 const std::vector<Source>* DefaultSources(Target target) {
   // One entry per target, indexed by the enum's own value, so adding a target without a default is
   // a compile-time-visible hole rather than a silent one. A control listed here answers to its own
-  // pad control *and* a keyboard key; the pad source reads the state before any rewriting, so the
-  // pad keeps working exactly as it did.
+  // pad control *and* the keyboard keys the interface uses; the pad source reads the state before
+  // any rewriting, so the pad keeps working exactly as it did.
+  //
+  // The keyboard half is interface-oriented on purpose (2026-10-19). Gameplay Mapping's
+  // Keyboard + Mouse table is on by default, so in play those keys are the gameplay table's
+  // business; General Mapping's keys are what navigating the title's menus costs. Confirm is
+  // Enter (with the letter key spelling the face button), Back is Escape, Start is Space and
+  // Back is Backspace; the D-pad answers to WASD and to the arrow keys, because both are what a
+  // person reaches for in a menu.
   static const std::array<std::optional<std::vector<Source>>, kTargetCount> kDefaults = [] {
     std::array<std::optional<std::vector<Source>>, kTargetCount> all;
-    const auto set = [&all](Target control, const char* key) {
+    const auto set = [&all](Target control, std::initializer_list<const char*> keys) {
       std::vector<Source> sources;
       sources.push_back(Source{SourceKind::kPad, std::string(TargetName(control))});
-      sources.push_back(Source{SourceKind::kKey, key});
+      for (const char* key : keys) {
+        sources.push_back(Source{SourceKind::kKey, key});
+      }
       all[static_cast<std::size_t>(control)] = std::move(sources);
     };
-    // The D-pad mirrors WASD for the left hand; the four face buttons mirror the pad's diamond on
-    // IJKL (I north, J west, K south, L east) for the right.
-    set(Target::kDpadUp, "W");
-    set(Target::kDpadDown, "S");
-    set(Target::kDpadLeft, "A");
-    set(Target::kDpadRight, "D");
-    set(Target::kY, "I");
-    set(Target::kX, "J");
-    set(Target::kA, "K");
-    set(Target::kB, "L");
-    set(Target::kLeftShoulder, "Q");
-    set(Target::kRightShoulder, "E");
-    set(Target::kLeftThumb, "V");
-    set(Target::kRightThumb, "N");
-    set(Target::kBack, "Backspace");
-    set(Target::kStart, "Return");
-    // The triggers are deliberately absent: a keyboard cannot stand in for a trigger's travel.
+    // Pad-only: the interface has no shoulder or stick-click action, so those controls keep
+    // working on the pad and have no keyboard stand-in.
+    const auto pad_only = [&all](Target control) {
+      all[static_cast<std::size_t>(control)] =
+          std::vector<Source>{Source{SourceKind::kPad, std::string(TargetName(control))}};
+    };
+    // The D-pad mirrors WASD for the left hand and the arrow keys for the right; the face
+    // buttons use Enter and their own letters, which is how a keyboard talks to a menu.
+    set(Target::kDpadUp, {"W", "Up"});
+    set(Target::kDpadDown, {"S", "Down"});
+    set(Target::kDpadLeft, {"A", "Left"});
+    set(Target::kDpadRight, {"D", "Right"});
+    set(Target::kA, {"Return", "A"});
+    set(Target::kB, {"Escape", "B"});
+    set(Target::kX, {"X"});
+    set(Target::kY, {"Y"});
+    pad_only(Target::kLeftShoulder);
+    pad_only(Target::kRightShoulder);
+    pad_only(Target::kLeftThumb);
+    pad_only(Target::kRightThumb);
+    set(Target::kBack, {"Backspace"});
+    set(Target::kStart, {"Space"});
+    // The triggers are deliberately absent: a keyboard cannot stand in for a trigger's travel,
+    // and the pad's analog bytes are left exactly as the pad reported them.
     return all;
   }();
   const auto& slot = kDefaults[static_cast<std::size_t>(target)];

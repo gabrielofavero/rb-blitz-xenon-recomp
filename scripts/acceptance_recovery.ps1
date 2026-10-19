@@ -189,10 +189,10 @@ try {
     # it intact ("Keyboard $upport is bac140n." is the substituted part).
     Assert-True ($confirm -match '(?i)switch') '03-confirm' "the caption confirms the reopen: '$($confirm.Trim())'"
 
-    # A menu key now reaches the guest. It is General Mapping's own K -> A, because the legacy MnK
-    # driver was never installed on this boot: the reopened gate brings the synthetic host device
-    # back, the state filter runs, and the key path does the rest.
-    Drive @('key:key_k', 'wait:6', 'shot:04-menu.png')
+    # A menu key now reaches the guest. It is General Mapping's own Enter -> A, because the legacy
+    # MnK driver was never installed on this boot: the reopened gate brings the synthetic host
+    # device back, the state filter runs, and the key path does the rest.
+    Drive @('key:key_enter', 'wait:6', 'shot:04-menu.png')
     $menu = Wait-LogPattern 'content_pipeline: usable menu' $MenuTimeoutSec '04-menu-key'
     if (-not $menu) {
         # A slower boot still proves the key arrived if the guest left the title screen.

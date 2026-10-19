@@ -334,6 +334,23 @@ menu, so the external app is no longer the only place to change a binding:
 * **Retail's controller page is the Default Presets destination**, not a deleted screen, and the
   in-song list's `Controls` row now jumps to the pause twin of this menu. The in-song route was
   driven by P8a (below), not only unit-tested.
+* **The compiled keyboard defaults are interface-oriented (2026-10-19).** Gameplay Mapping's
+  Keyboard + Mouse table is on by default, so General Mapping's keys are what drives the menus:
+  A = `key:Return` or `key:A`, B = `key:Escape` or `key:B`, X = `key:X`, Y = `key:Y`,
+  Start = `key:Space`, Back = `key:Backspace`, and the D-pad is both `W/A/S/D` and the arrow
+  keys. The shoulders and
+  stick clicks keep their pad control with no keyboard stand-in; the analog triggers stay
+  pad-only. The table is `DefaultSources` in [src/profile/remap.cpp](../../src/profile/remap.cpp),
+  and [tests/profile_remap_tests.cpp](../../tests/profile_remap_tests.cpp) pins every row -
+  including that the A key sets both A and D-pad left, a consequence of the requested WASD
+  layout. A profile that already holds a `[remap]` row still wins over these defaults. Live
+  check: `scripts/acceptance_recovery.ps1 -Label default-keys-2026-10-19` (11 steps, 0 failures,
+  `out/gameplay-mapping/in-game/default-keys-2026-10-19/`) reopens a closed keyboard gate with
+  F10 and drives the title with `key_enter`, which reaches A through General Mapping; the other
+  rows are pinned by the unit test. One harness caveat: with the legacy `mnk_mode` emulation on
+  (the acceptance scripts pass it), that driver still maps Space to A and Return to Start, so a
+  key can raise both its General Mapping target and the emulation's own; normal boots have
+  `mnk_mode=false`.
 
 Evidence: `rb_blitz_settings_screen_tests` 89,484 checks and `rb_blitz_input_bindings_tests` 80
 checks, 41/41 ctest; one tracked driven boot, 56 steps, 0 failures

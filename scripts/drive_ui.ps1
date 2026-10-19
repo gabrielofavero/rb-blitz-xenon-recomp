@@ -143,11 +143,13 @@ $vkMap = @{
     # the P2 source-trace arm can press actions the table binds.
     "key_g"        = 0x47   # G
     "key_h"        = 0x48   # H
+    "key_a"        = 0x41   # A  (General Mapping's A button; also D-pad left)
+    "key_enter"    = 0x0D   # Enter (General Mapping's A button)
     "key_n"        = 0x4E   # N
     "key_m"        = 0x4D   # M
     "key_j"        = 0x4A   # J  (Second Note)
-    "key_k"        = 0x4B   # K  (Move Lane Right; General Mapping's A button)
-    "key_d"        = 0x44   # D  (Move Lane Left)
+    "key_k"        = 0x4B   # K  (Move Lane Right)
+    "key_d"        = 0x44   # D  (Move Lane Left; General Mapping's D-pad right)
     "key_s"        = 0x53   # S  (Second Note; General Mapping's D-pad down)
     "key_f10"      = 0x79   # F10 (the Controls recovery key, plan §17.2)
 }
