@@ -599,6 +599,15 @@ Measurements this phase added (all 2026-10-20):
 Not in P0, deliberately: no live request from the game, no UI, no settings, no download; the
 transport has no caller until P3/P5.
 
+**P0 verification (2026-10-20, same day).** The debug tree builds and links the game with the new
+sources (`src/store/store_http.cpp` and `rhythmverse_client.cpp` compile into `rb_blitz.exe` and
+`winhttp` links), full `ctest` is **38/38**, and the manual live probe
+(`rb_blitz_store_client_tests --live-list`, evidence `out/_swap/rv_p0_live.txt`) answers **HTTP 200,
+8,546 bytes, 7 headers**, one eligible `rb3xbox` record ("Bush - The People That We Love"). The probe
+found one real defect before any caller existed: `WinHttpConnect` needs a null-terminated host name,
+and the component `WinHttpCrackUrl` returns points into the URL buffer — so the call failed with
+`12005 ERROR_WINHTTP_INVALID_URL` until the host was copied into its own string.
+
 ### P1 — the store opens without Xbox LIVE
 
 - Add the `rbbz_rhythmverse` option and dispatch case through the existing payload composition,

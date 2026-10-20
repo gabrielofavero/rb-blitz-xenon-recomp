@@ -193,9 +193,12 @@ HttpResponse Perform(std::string_view url, std::string_view body, bool post,
   if (components.lpszExtraInfo != nullptr && components.dwExtraInfoLength != 0) {
     object.append(components.lpszExtraInfo, components.dwExtraInfoLength);
   }
+  // WinHttpConnect wants a null-terminated server name; the component points into the URL buffer,
+  // where the host name is followed by '/', not by a terminator (measured: WinHttpConnect then fails
+  // with 12005 ERROR_WINHTTP_INVALID_URL).
+  const std::wstring host(components.lpszHostName, components.dwHostNameLength);
 
-  InternetHandle connection(
-      WinHttpConnect(session.get(), components.lpszHostName, components.nPort, 0));
+  InternetHandle connection(WinHttpConnect(session.get(), host.c_str(), components.nPort, 0));
   if (!connection) {
     return Fail(std::move(response), Win32Error("WinHttpConnect"));
   }
