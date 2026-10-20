@@ -138,14 +138,20 @@ the guest's own strings, and no log line names them.
 
 | Cvar | Default | What it does |
 | --- | --- | --- |
-| `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. |
+| `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. The filter also matches any path ending in `store.dtb`, so the netcache definition itself is covered. |
 | `store_local_server_root` | "" | Rewrites `config/gen/store.dtb`'s `netcache_init` at boot so the store's default server is a *local* (host-file) one rooted at this guest-relative directory. Empty leaves the record as shipped. Requires a restart (it is built into the generated payload). |
 
 The observation point is [fs::PayloadOverlayDevice](../../src/fs/payload_overlay.cpp), not the SDK:
 every `game:`/`d:` path resolves through that device, so the hook is a single function pointer that
-costs a null check when off, and the paths arrive overlay-relative (`ui/store/...`). Records read
-from an `.ark` are *not* seen (the VFS reads the ark part, not the record), which is exactly right:
-the probe is for the loose files a served store needs.
+costs a null check when off, and the paths arrive overlay-relative (`ui/store/...`).
+
+**What a silent probe does *not* prove (measured 2026-10-20).** Records read from an `.ark` are
+never seen: the guest mounts the ark part and reads records out of it **by offset**, so no path is
+resolved for them at all. A trace-level boot of this title is 30 `NtCreateFile` lines in total — the
+two ark headers + parts and a handful of special files — and no `ui/store/**` or `dlc_store/**` path
+ever appears; the store's own UI records are in that invisible class. The probe is therefore
+right about *loose files a served store needs* and must not be read as "the guest asked for nothing":
+for that question the noisy export log is the instrument below.
 
 `scripts/probe_store.ps1` drives the whole measurement in one boot: title → main menu → a chosen row
 → the store → optionally its first menu row, keeping a screenshot and OCR of the menu, the *selected*
@@ -153,6 +159,13 @@ row, the store and the return, plus the store-probe census and the run's log
 (`out/_swap/store-probe/<stamp>/`). `-MenuOnly` stops at the menu, `-LocalRoot ""` is the control
 leg (retail server), and `-StoreRow` is a parameter because the menu's rows depend on three settings
 — run `-MenuOnly` first and read `menu.txt`.
+
+**Naming the exports a screen calls.** `-LogLevel trace -Noisy` (that is `--log_noisy=1`) turns on
+the SDK's kernel-import logging, which prints one line per export call (`[NtCreateFile] path=…`,
+`[XamInputGetState] …`, `[Xe…]`) with the guest path or arguments. It is how P2 found that the
+store's request is followed by no file, content or socket call at all (plan §5/P2 record) — a
+question the path probe could not answer. Two cautions: the log grows to ~50 MB per boot, and the
+per-frame input/swap lines dominate, so census them by export name before reading order.
 
 The metadata writer's half of the measurement is `rb_blitz_store_payload_tests dump-menu <dtb>` and
 `dump-strings <dtb>`: extract a boot's generated payload (`scripts/hmx_ark.py extract --hdr

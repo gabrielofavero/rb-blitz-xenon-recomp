@@ -39,6 +39,9 @@ param(
     # its metadata (`dlc_top_<a>_<b>.dta`), so the local-server question is only answered with it.
     [switch]$EnterStore,
     [string]$LogLevel = "debug",
+    # Turns on the SDK's noisy kernel-import logging (the `log_noisy` cvar), which is what makes a
+    # trace-level run name the exports the guest calls after the store is entered.
+    [switch]$Noisy,
     [int]$BootTimeoutSec = 180,
     [int]$ScreenTimeoutSec = 45,
     [int]$SettleAfterPressSec = 10,
@@ -153,6 +156,7 @@ $arguments = @(
     "--store_trace=1"
 )
 if ($LocalRoot -ne "") { $arguments += "--store_local_server_root=$LocalRoot" }
+if ($Noisy) { $arguments += "--log_noisy=1" }
 
 Write-Host "probe_store: launching $exe"
 Write-Host "  args: $($arguments -join ' ')"

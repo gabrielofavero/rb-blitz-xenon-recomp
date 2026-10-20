@@ -27,6 +27,13 @@ namespace rb_blitz::store {
 namespace {
 
 bool IsStorePath(std::string_view path) {
+  // `config/gen/store.dtb` is the netcache definition itself (`netcache_init`): whether the guest
+  // opens it, and through which device, is the first question the P2 gate has to answer - a record
+  // nobody reads cannot be pointed at a local server. The UI's own `ui/store/gen/store.dtb` carries
+  // the same name, and the suffix test catches both without naming every directory.
+  if (path.size() >= 9 && path.substr(path.size() - 9) == "store.dtb") {
+    return true;
+  }
   if (path.find("ui/store") != std::string_view::npos ||
       path.find("dlc_store") != std::string_view::npos ||
       path.find("dlc_top") != std::string_view::npos ||

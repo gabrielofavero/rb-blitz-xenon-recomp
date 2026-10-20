@@ -1,12 +1,13 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0, P6 and P1 landed
-2026-10-20** (client/transport; the six settings rows and the live snapshot; the main-menu entry and
-its live gate), and P2's instruments landed the same day with two menu defects found and fixed by
-its first boots. P1's browser acceptance is met on one boot (row drawn, store opens, B returns) and
-still owes the multi-boot/toggle matrix; P2's request path is not yet observed, so the A/B gate is
-open (§5/P2 record). Audio preview is decided: the API returns no preview asset (§3.3), so v1
-shows none.
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0, P6, P1 and P2
+landed 2026-10-20** (client/transport; the six settings rows and the live snapshot; the main-menu
+entry and its live gate; P2's instruments plus its A/B decision). P1's browser acceptance is met on
+one boot (row drawn, store opens, B returns) and still owes the multi-boot/toggle matrix. **P2 chose
+A narrowed to the fetch seam** (§5/P2 record): the retail UI and its DTA request are measured
+working offline, and the native fetch that should follow the request does nothing observable — no
+file, no content call, no socket — so serving metadata waits on one hook, not on a schema guess.
+Audio preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
@@ -732,26 +733,106 @@ central **LOADING**, and stays on LOADING: no `store-probe` line follows — the
 or opens a single `ui/store` path, in the front screen *or* after its first menu row was accepted.
 It is waiting on data it has not asked the file system for.
 
-**What that means for the gate (the honest part).** A is neither proven nor disproven by this pass:
+**What that meant for the gate at the first pass (kept; its conclusion is superseded below).** A was
+neither proven nor disproven by that pass:
 
 - The **door** is real: an offline entry reaches the retail store screens, so the UI half of A needs
   no Xbox LIVE state (measured, above).
-- The **data half** is unmeasured: nothing requested a metadata file, so the `local` path mapping,
-  the schema, and the parser's reaction are all still unknowns. The likely reason is that the
-  netcache's request is issued through the panel's commerce/request state machine before any file
-  fetch, and that state never advances offline — the plan's OQ3. The next measurement is therefore
-  *not* another schema guess: it is to instrument the request itself (the `store_panel request` /
-  `NetCacheMgr` path: a probe point on the guest functions, or a host hook at the XNC/socket layer
-  where a `live`-server attempt would have to appear) and to confirm whether the generated
+- The **data half** was unmeasured: nothing requested a metadata file, so the `local` path mapping,
+  the schema, and the parser's reaction were all unknowns. The guess was that the netcache's request
+  is issued through the panel's commerce/request state machine before any file fetch, and that state
+  never advances offline — the plan's OQ3. The next measurement was therefore *not* another schema
+  guess: it was to instrument the request itself and to confirm whether the generated
   `config/gen/store.dtb` is the record the panel read at all.
+  *(Superseded the same day by the second pass: the DTA **does** issue the request, and the native
+  side does nothing observable after it. The block is after the request, not before it.)*
 - Deliverables 4 (loaded-DLC metadata source) and 5 (price/icon hide path) are untouched. The
   price surface is visible in the measured screen (`ALL PRICES ARE IN MICROSOFT® POINTS` is drawn
   even with no offers), so it is a real target for P3, not a hypothetical.
 
-Status: **P2 is not exited**; it is paused with its instruments landed and its first two findings
-fixed. The A/B decision stays open with a documented preference for A until the request is observed.
+**Second pass, same day — the request is issued and the native fetch is inert. P2's decision.**
+
+Two boots under `scripts/probe_store.ps1`, both with `--store_trace=1
+--store_local_server_root=ui/store/remote_metadata/`: `out/_swap/store-probe/20261020-142448` (the
+control leg, on the profile as it stands — master off) and `…-142749` (the measured leg, with
+`general.rhythmverse = true` written into `settings.toml` for that boot and restored afterwards, and
+with `--log_level=trace --log_noisy=1`; the script grew `-Noisy` for it).
+
+- **The route is stable and P1's baked presence behaves as documented.** With the master off the
+  fifth row is EXIT GAME (its accept raised the exit confirmation and B returned to the title);
+  with it on the fifth row is RHYTHMVERSE CUSTOMS and it opens the store. The store drew MUSIC
+  STORE / MESSAGES / RECOMMENDED / YOUR SONGS / BACK / HELP & OPTIONS / ALL PRICES ARE IN
+  MICROSOFT® POINTS. The capture taken right after entry had **no** LOADING; the one taken after
+  accepting the first row did — so in this boot the loading state follows the accept, i.e. the
+  request is what turns it on.
+- **The DTA asks, and the loading state is the panel's own.** `out/_swap/store.tree.txt`'s
+  SELECT_MSG branch is `{if {store_panel user_can_do_input} && {this has_menus}}` →
+  `{store_panel set_source {sprintf menu_%s {provider get_string ix}} TRUE}` →
+  `{store_panel request {provider get_string ix} TRUE}` → `{store_panel update_loading_status …}`.
+  A LOADING on screen is therefore an *in-progress request*, not an idle menu.
+- **Nothing follows the request.** Trace census while `store_menu_screen` was up (90 s, log lines
+  251400–327070): `XamInputGetState` 28,742, `[XE_SWAP]` 2,031, `NtReadFile` 272,
+  `xeRtlNtStatusToDosError` 136 — **and no other export at all**. `XamContent*` does not appear, and
+  `NetDll_*`/`XNet*` do not appear anywhere in the 48 MB boot. The only XAM call at entry is
+  `__imp__XamBackgroundDownloadSetMode` — a **STUB** — twice: 14:29:24.966 (the screen line is
+  14:29:24.975) and 14:29:58.763 (leaving).
+- **No store file is opened, and a path probe cannot see this class of record.** The whole boot
+  carries 30 `NtCreateFile` lines, all of them the two ark headers + parts (`d:\gen\main_xbox.hdr`,
+  `d:\gen\main_xbox_0.ark`, `d:\gen\patch_xbox.hdr`, `d:\gen\patch_xbox_0.ark`) plus a handful of
+  special files (`game:\scores`, `game:\screenshots\_keepme`, `game:\ulti_settings.dta`,
+  `globaloptions:`, `menumusic4:\songs\…mogg`, `songcache:`). `config/gen/store.dtb` is opened
+  **nowhere** — not at boot, not at the store — and neither is any `ui/store/**` or `dlc_store/**`
+  path. The UI's own records arrive from the mounted arks **by offset**, which is exactly why R5's
+  hide decision needs the in-flight read edit (first pass, above) and why the path observer stays
+  silent for them. The probe's filter now also catches `*store.dtb`, so this absence is measured
+  rather than filtered away.
+- **Content enumeration is a boot-time operation here:** `XamContentAggregateCreateEnumerator` added
+  1,773 items at 14:28:16 (the DLC library), 68 s before the store existed. The store itself makes
+  no content call.
+
+**Decision: A, narrowed to the fetch seam. Not B.**
+
+- A's UI half is measured working offline: navigation, the panel, the list widgets, the art
+  pipeline and the DTA's own request all run. What is missing is the native step *behind* `request`
+  — measured inert, above — so A now means "retail UI + retail DTA + one replaced fetch entry",
+  not "serve files to the retail netcache and let it work".
+- B (replace the panel/provider methods) is rejected: it would rebuild a surface that is measured
+  working, and its own first step — locating the native store entry points — is identical to A's.
+- The rejected reading of A (rewrite `netcache_init`, serve `dlc_store/**` files) is disproven as a
+  *sufficient* route, because the panel never reaches a file fetch to be served. It is not disproven
+  as a *data format*: once the fetch entry is ours, the netcache's request names and the DTA reader
+  are still the retail ones this plan already mapped, and the writer skeleton below targets exactly
+  them.
+
+Landed with the decision (`store_metadata`, **29 checks**; full `ctest` **40/40**):
+
+- `src/store/store_metadata.{h,cpp}` — the request model the plan measured (`dlc_top_%s_%s.dta`,
+  `dlc_store/%s/%s/offers/%s/`, `dlc_store/%s/%s/related/%s.dta`, source id `menu_<id>`) and the
+  **writer skeleton** P2's exit asks for: `BuildFrontMenuRecord` emits a compiled DTA carrying the
+  owner's two menus (Recent, Search), refuses an empty menu or a nameless/unlabelled entry, and
+  keeps the record's field names in one place because they are still a guess. `tests/
+  store_metadata_tests.cpp` pins the names, the refusals and the compile→parse round trip — never
+  the retail parser, which no boot has reached.
+- The writer is **not** wired into the payload: with the fetch seam missing there is no caller, and
+  a served record nobody reads is worse than none (it would look like progress in a boot log).
+
+**P3 step 0 (the next measurement, named so it is not rediscovered):** locate the native fetch
+entry behind `store_panel request`. The cheapest route is the DTA method table for the
+`store_panel` object — the symbol strings (`request`, `set_source`, `user_can_do_input`,
+`has_menus`, …) sit in one table in the decrypted image, and the handler words next to them are the
+functions to hook. The hook then answers from `BuildFrontMenuRecord` and the parser's reaction is
+observable for the first time — which is also when the schema stops being a guess.
+
+Status: **P2 is exited (2026-10-20)** with the decision above. Remaining P2 deliverables 4
+(loaded-DLC metadata source) and 5 (price/icon hide path) move into P3, whose exit needs them.
 
 ### P3 — first light: "Recent" list with real data + art
+
+P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
+entry behind `store_panel request` (nothing can be served or observed before it); **deliverable 4**,
+the loaded-DLC title/artist source the Downloaded state needs; and **deliverable 5**, the price/icon
+hide path. The writer skeleton (`src/store/store_metadata.*`) is where the record's shape changes
+once the parser can be fed one.
 
 - Generate the store front menu with **Recent** (and a placeholder **Search** entry) and offer
   records for page 1 of `/api/rb3xbox/songfiles/list` (25 API records; unsupported links/formats/
