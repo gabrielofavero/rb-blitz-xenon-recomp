@@ -617,7 +617,7 @@ them; the allowlist is what makes a standalone boot see the same values as a boo
 menu. None of them had a consumer before P2/P3, so the change added configuration, not behaviour.
 
 **2026-10-20: the two gameplay switches left the list.** P2 of
-[the interface/gameplay mapping restructure plan](../plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md)
+[the interface/gameplay mapping restructure plan](../plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md)
 (D3/D15) made `gameplay_mapping_controller` and `gameplay_mapping_keyboard_mouse` stop selecting
 anything: the Mouse & Keyboard table is always active in a song and the Controller table acts when
 it has a custom row. The cvars are no longer defined, so the allowlist names only

@@ -370,8 +370,10 @@ menu, so the external app is no longer the only place to change a binding:
   `Right Click`. Live: `scripts/acceptance_binding_rows.ps1 -Label p1-h` (24 steps, 0 failures,
   `out/interface-mapping/p1-rows/p1-h/`).
 * **The listening dialog is a screen** (`settings_listen_screen`): a capture waits for neutral,
-  a tap of the candidate binds it on release, a hold past 700 ms cancels, a wrong-kind press
-  names the kind and keeps listening, and the dialog leaves by a host Back pulse. A completed
+  then counts **3, 2, 1** and leaves the row untouched if nothing is pressed (P5, 2026-10-20,
+  replacing the 700 ms hold-to-cancel and the 20-second timeout). A valid press binds on its own
+  frame - release not required - a wrong-kind press names the kind and the count keeps running
+  beside it, and the dialog leaves by a host Back pulse either way. A completed
   capture is saved through the profile (`launcher.toml`, the same tables P1 froze) and applied on
   the next poll: the switches are live, not launch-scoped.
 * **Gameplay Mapping is always on (P2, 2026-10-20).** The two `gameplay_mapping_*` cvars are
@@ -428,6 +430,17 @@ menu, so the external app is no longer the only place to change a binding:
   A profile keeps an empty section header it already knew (`[gameplay_remap_keyboard_mouse]`
   survives a reset the way an empty `[remap]` does), so the arm asserts the captured value is
   gone rather than the section.
+* **The listening dialog counts 3, 2, 1 (P5, 2026-10-20).** The 700 ms hold-to-cancel and the
+  20-second timeout are gone: after the press that opened the page is released, the caption shows
+  `Closing in 3` and counts down once per second. A valid press binds on its own frame (no release
+  wait), a wrong-kind press prints its sentence while the count keeps running, and zero closes the
+  page with the row untouched. The hold oracle (`Observation::still_held`) and its two helpers were
+  deleted with the gesture. Live: `scripts/acceptance_controls.ps1 -Label p5-controls-b` (103
+  steps, 0 failures, `out/gameplay-mapping/in-game/p5-controls-b/`),
+  `acceptance_controls_in_song.ps1 -Label p5-in-song` (23 steps) and
+  `acceptance_binding_rows.ps1 -Label p5-rows` (26 steps). The Controls arm proves the countdown
+  leaves the row untouched, a key binds, a wrong kind does not, and a wheel detent (a press with
+  no release) binds and appends.
 * **The profile keeps only differences**: a switch set back to its compiled default is dropped
   instead of written (the two device gates are the only switches left; `gameplay_mapping_*` is no
   longer written at all).

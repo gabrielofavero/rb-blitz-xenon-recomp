@@ -598,7 +598,7 @@ void TestExplicitValues() {
   CHECK_STR_EQ(loaded.profile.FindSetting("mouse_ui_nav")->value, "false");
 }
 
-// P2 of docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md: the
+// P2 of docs/plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md: the
 // four retail presets (§2.1, decoded from config/gen/beatmatch_controller.dtb), the table that
 // follows one, and "custom" inferred from the rows rather than a switch.
 void TestControllerPresets() {

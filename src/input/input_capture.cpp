@@ -17,27 +17,21 @@ using profile::remap::PadState;
 using profile::remap::Source;
 using profile::remap::SourceKind;
 
-// A capture that has not seen an input for this long leaves the dialog rather than leaving the
-// game with no navigation. Twenty seconds is longer than a person needs to pick a button and
-// short enough that a forgotten dialog cannot absorb the next menu press.
-constexpr auto kTimeout = std::chrono::seconds(20);
+// A capture that has reached the listening window counts 3, 2, 1 once per second and then leaves
+// the dialog (restructure plan D11). There is no other timeout and no cancel gesture: the
+// countdown is the only way out, so it must not be delayed by anything a player does inside it.
 
 struct Session {
   bool armed = false;
   CaptureTarget target;
   bool waiting_neutral = true;
   std::string message;
-  std::chrono::steady_clock::time_point armed_at{};
+  // When the countdown started: the first neutral frame after `Arm`. Until then the session is
+  // still waiting for the press that opened the page to be released, and no count runs.
+  std::chrono::steady_clock::time_point counting_since{};
   bool have_previous = false;
   PadState previous_pad;
   uint32_t previous_mouse = 0;
-  // The candidate press, waiting for its release. A hold past `kHoldToCancel` turns it into the
-  // dialog's cancel gesture instead of a binding - including a press of the wrong kind, so the
-  // gesture is available even when nothing on this page can accept the device.
-  bool have_pending = false;
-  bool pending_allowed = true;
-  Source pending;
-  std::chrono::steady_clock::time_point pending_since{};
 };
 
 std::mutex& Mutex() {
@@ -145,6 +139,15 @@ const char* KindName(const SourceKind kind) {
   return "an input";
 }
 
+// The seconds still on the countdown, rounded up so the dialog reads 3, 2, 1 and then leaves.
+int SecondsLeft(const Session& session) {
+  const auto left = kCountdown - (std::chrono::steady_clock::now() - session.counting_since);
+  if (left <= std::chrono::seconds::zero()) {
+    return 0;
+  }
+  return static_cast<int>(std::chrono::ceil<std::chrono::seconds>(left).count());
+}
+
 }  // namespace
 
 void Arm(const CaptureTarget& target) {
@@ -154,12 +157,10 @@ void Arm(const CaptureTarget& target) {
   session.target = target;
   session.waiting_neutral = true;
   session.message.clear();
-  session.armed_at = std::chrono::steady_clock::now();
+  session.counting_since = std::chrono::steady_clock::now();
   session.have_previous = false;
   session.previous_pad = {};
   session.previous_mouse = 0;
-  session.have_pending = false;
-  session.pending = {};
 }
 
 void Cancel() {
@@ -168,8 +169,6 @@ void Cancel() {
   session.armed = false;
   session.message.clear();
   session.have_previous = false;
-  session.have_pending = false;
-  session.pending_allowed = true;
 }
 
 bool Armed() {
@@ -182,12 +181,6 @@ Tick Observe(const Observation& observation) {
   std::lock_guard lock(Mutex());
   Session& session = State();
   if (!session.armed) {
-    return tick;
-  }
-  if (std::chrono::steady_clock::now() - session.armed_at > kTimeout) {
-    session.armed = false;
-    session.message.clear();
-    tick.leave = true;
     return tick;
   }
   // A background window captures nothing: the device gates already make the inputs inert, and a
@@ -208,42 +201,23 @@ Tick Observe(const Observation& observation) {
   session.previous_mouse = observation.mouse_buttons;
   session.have_previous = true;
 
-  // A pending candidate answers first: its release binds it (or confirms the wrong-kind feedback),
-  // a long hold is the cancel gesture. This runs before the new-press pass so a candidate's own
-  // release frame (which carries no new press) still completes it.
-  if (session.have_pending) {
-    const auto held_for = std::chrono::steady_clock::now() - session.pending_since;
-    if (observation.still_held && observation.still_held(session.pending) &&
-        held_for >= kHoldToCancel) {
-      session.armed = false;
-      session.have_pending = false;
-      session.message.clear();
-      tick.leave = true;
-      tick.cancelled = true;
-      return tick;
-    }
-    const bool released = !observation.still_held || !observation.still_held(session.pending);
-    if (released) {
-      session.have_pending = false;
-      if (session.pending_allowed) {
-        tick.captured = Result{session.target.token, session.pending};
-        session.armed = false;
-        session.message.clear();
-      } else {
-        // A wrong-kind tap is feedback, not a binding: the sentence stays up and the session waits
-        // for everything to be released before it listens again.
-        session.waiting_neutral = true;
-      }
-    }
-    return tick;
-  }
-
   const bool any_held = observation.any_key_down || observation.mouse_buttons != 0 ||
                         PadAnyHeld(observation.pad);
   if (session.waiting_neutral) {
-    if (!any_held) {
-      session.waiting_neutral = false;
+    if (any_held) {
+      return tick;
     }
+    // Everything that opened the page is released: the listening window starts now.
+    session.waiting_neutral = false;
+    session.counting_since = std::chrono::steady_clock::now();
+    return tick;
+  }
+  // D11: the countdown is the dialog's only way out, so it is answered before this frame's
+  // presses - a press that arrives after zero leaves the row untouched.
+  if (std::chrono::steady_clock::now() - session.counting_since >= kCountdown) {
+    session.armed = false;
+    session.message.clear();
+    tick.leave = true;
     return tick;
   }
   if (presses.empty()) {
@@ -259,29 +233,14 @@ Tick Observe(const Observation& observation) {
     }
   }
   if (accepted == nullptr) {
+    // Feedback, not a binding - and deliberately not a pause: D11 keeps the count running, so the
+    // dialog still closes itself on time and the player is never stuck on this page.
     session.message = std::string("That is ") + KindName(presses.front().kind) + "; this row takes " +
                       AllowedKindText(session.target.allowed) + ".";
-    // The press is still a gesture: holding it cancels the dialog, releasing it keeps listening.
-    // That is what makes the cancel available even when every device is the wrong kind here.
-    if (observation.still_held) {
-      session.pending = presses.front();
-      session.pending_since = std::chrono::steady_clock::now();
-      session.have_pending = true;
-      session.pending_allowed = false;
-      return tick;
-    }
-    session.waiting_neutral = true;
     return tick;
   }
-  // With device levels the capture waits for the release, so a hold can still cancel; without
-  // them the press is the answer (the caller can only report edges).
-  if (observation.still_held) {
-    session.pending = *accepted;
-    session.pending_since = std::chrono::steady_clock::now();
-    session.have_pending = true;
-    session.pending_allowed = true;
-    return tick;
-  }
+  // D11: a valid press is the answer. The binding decision does not wait for a release - which is
+  // also why the dialog leaves through the host Back pulse in the same poll.
   tick.captured = Result{session.target.token, *accepted};
   session.armed = false;
   session.message.clear();
@@ -294,20 +253,16 @@ std::string StatusText() {
   if (!session.armed) {
     return {};
   }
-  if (session.have_pending) {
-    if (!session.pending_allowed) {
-      return session.message + " Hold it to cancel.";
-    }
-    return std::string("Release to bind it; hold it for a moment to cancel.");
-  }
-  if (!session.message.empty()) {
-    return session.message;
-  }
   if (session.waiting_neutral) {
     return "Listening: release the input you used to open this page.";
   }
-  return "Listening for " + AllowedKindText(session.target.allowed) +
-         ". Tap an input to bind it, hold it to cancel.";
+  // D11: the remaining seconds are the live state, so they are drawn beside a wrong-kind sentence
+  // too - the count must be readable whatever the player just pressed.
+  const std::string countdown = "Closing in " + std::to_string(SecondsLeft(session)) + ".";
+  if (!session.message.empty()) {
+    return session.message + " " + countdown;
+  }
+  return "Listening for " + AllowedKindText(session.target.allowed) + ". " + countdown;
 }
 
 void PostStatusMessage(std::string message) {
@@ -329,43 +284,6 @@ std::string AllowedKindText(const std::vector<SourceKind>& allowed) {
     return mouse ? "a keyboard key or mouse button" : "a keyboard key";
   }
   return "a pad control, keyboard key, or mouse button";
-}
-
-bool PadSourceHeld(const PadState& pad, const std::string_view name) {
-  for (const profile::remap::Target target : profile::remap::Targets()) {
-    if (profile::remap::TargetName(target) != name) {
-      continue;
-    }
-    if (profile::remap::TargetIsTrigger(target)) {
-      return TriggerDown(pad, target);
-    }
-    const uint16_t bit = profile::remap::TargetBit(target);
-    return bit != 0 && (pad.buttons & bit) != 0;
-  }
-  for (const profile::remap::PadDirection direction : profile::remap::PadDirections()) {
-    if (profile::remap::PadDirectionName(direction) == name) {
-      return profile::remap::DirectionPressed(pad, direction);
-    }
-  }
-  return false;
-}
-
-bool MouseSourceHeld(const uint32_t mouse_buttons, const std::string_view name) {
-  struct MouseName {
-    uint32_t mask;
-    const char* name;
-  };
-  constexpr MouseName kMouse[] = {
-      {mouse_button::kLeft, "left"},   {mouse_button::kRight, "right"},
-      {mouse_button::kMiddle, "middle"}, {mouse_button::kX1, "x1"},
-      {mouse_button::kX2, "x2"},
-  };
-  for (const MouseName& button : kMouse) {
-    if (name == button.name) {
-      return (mouse_buttons & button.mask) != 0;
-    }
-  }
-  return false;
 }
 
 }  // namespace rb_blitz::input::capture

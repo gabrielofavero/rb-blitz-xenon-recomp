@@ -58,7 +58,7 @@ void PublishInput(std::shared_ptr<EffectiveInput> input);
 std::shared_ptr<EffectiveInput> CopyCurrentInput();
 
 // The retail controller preset the title's own Controller Presets page last selected (P2 of
-// docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md, D4).
+// docs/plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md, D4).
 //
 // It is observed - not read from the profile - because the preset lives in the guest's controller
 // configuration, and the title's preset page is the only thing that writes it: the song's

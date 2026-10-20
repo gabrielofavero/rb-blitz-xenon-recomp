@@ -2,7 +2,8 @@
 //
 // P7's host-side tests (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §14):
 // the `input.*` row grammar, the listening session's rules (release first, wrong kind keeps
-// listening, cancel, timeout), and the store's one-writer save against a real temporary profile.
+// listening, the 3-second countdown), and the store's one-writer save against a real temporary
+// profile.
 //
 // SDK-free and SDL-free: the capture is fed plain frames and the store reads and writes the
 // profile module's own document, exactly as the game's write hook does.
@@ -103,10 +104,12 @@ void TestCaptureWrongKind() {
   CHECK_FALSE(tick.captured.has_value());
   CHECK_TRUE(capture::StatusText().find("pad") != std::string::npos);
 
-  // Behind the message the session waits for neutral again; the pad press after that lands.
-  capture::Observation release = Frame();
-  tick = capture::Observe(release);
-  CHECK_FALSE(tick.captured.has_value());
+  // D11: the wrong-kind press neither pauses nor resets the count - the countdown's seconds are
+  // still drawn beside the sentence.
+  CHECK_TRUE(capture::StatusText().find("Closing in") != std::string::npos);
+
+  // A pad press on the very next frame lands: the wrong-kind press does not send the session back
+  // to waiting for neutral.
   capture::Observation pad = Frame();
   pad.pad.buttons = 0x0010;  // Start
   tick = capture::Observe(pad);
@@ -126,92 +129,63 @@ void TestCaptureCancelAndTimeout() {
   CHECK_FALSE(capture::Observe(key).captured.has_value());
 }
 
-void TestCaptureWrongKindHoldsToCancel() {
-  rb_blitz::test::BeginCase("capture: holding a wrong-kind input is the cancel gesture");
-  bool held = true;
-  capture::Arm({"input.controller.first_note", {rb_blitz::profile::remap::SourceKind::kPad}});
-  capture::Observation neutral = Frame();
-  neutral.still_held = [&held](const rb_blitz::profile::remap::Source&) { return held; };
-  CHECK_FALSE(capture::Observe(neutral).captured.has_value());
-  // A key is the wrong kind here, but its press still starts the hold timer: a player whose
-  // controller is missing must be able to leave the page (plan §14.3's cancel gesture).
+void TestCaptureCountdown() {
+  rb_blitz::test::BeginCase("capture: the 3-second countdown is the only way out");
+  capture::Arm({"input.general.a", {rb_blitz::profile::remap::SourceKind::kPad}});
+  // The activation press does not start the clock; neither does holding it.
+  capture::Observation activation = Frame();
+  activation.pad.buttons = 0x1000;  // A
+  CHECK_FALSE(capture::Observe(activation).captured.has_value());
+  CHECK_TRUE(capture::StatusText().find("release") != std::string::npos);
+
+  // The neutral frame starts the listening window at 3.
+  CHECK_FALSE(capture::Observe(Frame()).captured.has_value());
+  CHECK_TRUE(capture::StatusText().find("Closing in 3") != std::string::npos);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  CHECK_TRUE(capture::StatusText().find("Closing in 2") != std::string::npos);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  CHECK_TRUE(capture::StatusText().find("Closing in 1") != std::string::npos);
+
+  // A wrong-kind press inside the window is feedback only: the count keeps running beside it.
   capture::Observation wrong = Frame();
   wrong.any_key_down = true;
   wrong.new_keys.push_back("G");
-  wrong.still_held = [&held](const rb_blitz::profile::remap::Source&) { return held; };
   capture::Tick tick = capture::Observe(wrong);
   CHECK_FALSE(tick.captured.has_value());
-  CHECK_TRUE(tick.leave == false);
-  std::this_thread::sleep_for(capture::kHoldToCancel + std::chrono::milliseconds(50));
-  tick = capture::Observe(wrong);
+  CHECK_TRUE(capture::StatusText().find("keyboard key") != std::string::npos);
+  CHECK_TRUE(capture::StatusText().find("Closing in 1") != std::string::npos);
+
+  // Three seconds after neutral, the next observation leaves the dialog with nothing bound.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  tick = capture::Observe(Frame());
+  CHECK_FALSE(tick.captured.has_value());
   CHECK_TRUE(tick.leave);
-  CHECK_TRUE(tick.cancelled);
   CHECK_FALSE(capture::Armed());
+  CHECK_TRUE(capture::StatusText().empty());
+  capture::Cancel();
 }
 
-// The live filter can answer "is that source still down?", and with that answer a capture waits
-// for the release: a tap binds the control, a hold past capture::kHoldToCancel cancels the dialog
-// (plan §14.3's unambiguous cancel gesture - which is what keeps Back and Escape assignable).
-void TestCaptureHoldToCancel() {
-  rb_blitz::test::BeginCase("capture: a release binds, a long hold cancels");
-  bool held = true;
-  auto oracle = [&held](const rb_blitz::profile::remap::Source&) { return held; };
-
+// D11: the binding decision does not wait for a release. A press is the answer on its own frame,
+// which is also what makes a hold harmless: it binds rather than cancelling.
+void TestCaptureBindsImmediately() {
+  rb_blitz::test::BeginCase("capture: a valid press binds on its own frame, no release needed");
   capture::Arm({"input.general.b", {rb_blitz::profile::remap::SourceKind::kPad}});
   capture::Observation activation = Frame();
   activation.pad.buttons = 0x1000;  // A, the press that opened the page
-  activation.still_held = oracle;
   CHECK_FALSE(capture::Observe(activation).captured.has_value());
-  capture::Observation neutral = Frame();
-  neutral.still_held = oracle;
-  held = false;
-  CHECK_FALSE(capture::Observe(neutral).captured.has_value());
+  CHECK_FALSE(capture::Observe(Frame()).captured.has_value());  // neutral starts the count
 
-  // The press itself is not the answer while the oracle still says "down".
-  held = true;
+  // B is still held on the frame it arrives; it is the answer anyway.
   capture::Observation press = Frame();
-  press.pad.buttons = 0x2000;  // B
-  press.still_held = oracle;
-  capture::Tick tick = capture::Observe(press);
-  CHECK_FALSE(tick.captured.has_value());
-  CHECK_TRUE(capture::Armed());
-  CHECK_TRUE(capture::StatusText().find("Release") != std::string::npos);
-
-  // Released before the threshold: that was a tap, so it binds.
-  held = false;
-  capture::Observation release = Frame();
-  release.still_held = oracle;
-  tick = capture::Observe(release);
+  press.pad.buttons = 0x2000;
+  const capture::Tick tick = capture::Observe(press);
   CHECK_TRUE(tick.captured.has_value());
   CHECK_TRUE(tick.captured->source.name == "b");
-  CHECK_FALSE(tick.cancelled);
+  CHECK_FALSE(tick.leave);
   CHECK_FALSE(capture::Armed());
 
-  // Held past it: the dialog leaves with nothing bound.
-  capture::Arm({"input.general.b", {rb_blitz::profile::remap::SourceKind::kPad}});
-  capture::Cancel();
-  capture::Arm({"input.general.b", {rb_blitz::profile::remap::SourceKind::kPad}});
-  capture::Observation quiet = Frame();
-  quiet.still_held = oracle;
-  held = false;
-  capture::Observe(quiet);
-  held = true;
-  capture::Observation down = Frame();
-  down.pad.buttons = 0x2000;
-  down.still_held = oracle;
-  CHECK_FALSE(capture::Observe(down).captured.has_value());
-  std::this_thread::sleep_for(capture::kHoldToCancel + std::chrono::milliseconds(120));
-  capture::Observation still_down = Frame();
-  still_down.pad.buttons = 0x2000;
-  still_down.still_held = oracle;
-  tick = capture::Observe(still_down);
-  CHECK_FALSE(tick.captured.has_value());
-  CHECK_TRUE(tick.leave);
-  CHECK_TRUE(tick.cancelled);
-  CHECK_FALSE(capture::Armed());
-  // Nothing is left armed, so the next press is not swallowed by a dead session.
-  held = false;
-  CHECK_FALSE(capture::Observe(Frame()).captured.has_value());
+  // The still-held B in the next frame is not a second capture.
+  CHECK_FALSE(capture::Observe(press).captured.has_value());
   capture::Cancel();
 }
 
@@ -510,8 +484,8 @@ int main() {
   TestCaptureReleasesFirst();
   TestCaptureWrongKind();
   TestCaptureCancelAndTimeout();
-  TestCaptureWrongKindHoldsToCancel();
-  TestCaptureHoldToCancel();
+  TestCaptureCountdown();
+  TestCaptureBindsImmediately();
   TestStoreResetAndSave();
   TestResetAllCoversHiddenTargets();
   TestStoreSwitchAndRecovery();

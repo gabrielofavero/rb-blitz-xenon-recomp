@@ -286,8 +286,8 @@ enum class Kind {
   // suffix, and why a table's reset works whether or not the table is custom.
   kPathAction,
   // One-shot Controls rows: `path` is a `rbbz-settings/` write. `kCapture` arms the listening
-  // session and enters the dialog. The dialog is left by the capture itself (the hold gesture or
-  // the timeout), so no row writes the bridge's `capture-cancel` op.
+  // session and enters the dialog. The dialog is left by the capture itself (a valid press, or
+  // the countdown's zero), so no row writes the bridge's `capture-cancel` op.
   kCapture,
   kChoose,       // one-shot choice: set `setting` to the row's own token, commit, leave
   kAction,       // one-shot action: invoke `setting`
@@ -935,15 +935,15 @@ std::vector<PanelSpec> AllPanels() {
   //
   // The page carries no pressable Cancel row on purpose: while a capture is armed the guest is
   // handed a neutral pad, so a press could not reach a row here - and a press that did reach one
-  // would be the very input the player is binding. The cancel gesture is therefore the hold
-  // (capture::kHoldToCancel, drawn by the caption): a tap of Back or Escape binds it, a held one
-  // cancels, which is the only rule that keeps both controls assignable (plan §14.3).
+  // would be the very input the player is binding. There is no cancel gesture either: the live
+  // caption counts 3, 2, 1 (restructure plan D11) and the page closes itself, which is what keeps
+  // Back and Escape assignable - a tap of either binds it.
   out.push_back(PanelSpec{"settings_listen_panel", "settings_listen_screen",
                           "settings_controls_screen", MenuPanels(),
                           {
                               InfoRow("settings_listen_status", "Listening for input",
-                                      "Tap the input you want to bind. Hold it to cancel, or wait "
-                                      "for the page to close itself."),
+                                      "Press the input you want to bind. The page closes itself "
+                                      "after a short countdown."),
                           }});
 
   // 1. General: the edition, the interface page, downloadable content, achievements, and credits.

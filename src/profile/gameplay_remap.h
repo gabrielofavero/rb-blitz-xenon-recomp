@@ -38,7 +38,7 @@
 // reproduces the Mouse & Keyboard defaults the restructure plan's D12 lists. They are *not* read
 // back from the saved native preset at run time: a table with no custom row follows the preset
 // the title's own Controller Presets page selected (P2 of
-// docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md), and the
+// docs/plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md), and the
 // compiled default is what a build with no observed preset reports.
 
 #pragma once

@@ -194,7 +194,7 @@ rows now (Controls → Input Types); the external settings application that once
 on 2026-10-19. The two
 gameplay switches (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) that used to
 be *routing* selectors were **retired on 2026-10-20** by P2 of
-[the restructure plan](../plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md)
+[the restructure plan](../plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md)
 (D3): the Mouse & Keyboard table is always active in a song, the Controller table is active
 exactly when it has a custom row, and "custom" is inferred from the table's own rows (see
 § Gameplay routing is always on, below).
@@ -431,20 +431,26 @@ prepared for a disabled device) and the dialog's Back is a host pad pulse
 (`PulseHostPad(0x2000)`: a bit for two polls) rather than a synthetic key, so it cannot become a
 binding and is not gated by Mouse Support.
 
-**The gesture is a hold, on every kind.** A candidate binds on release; holding it past
-`kHoldToCancel` (700 ms) cancels. A **wrong-kind** press (a key into the Controller table) prints
-which kind the row takes and starts the same timer, so the dialog can always be left on a
-keyboard-only machine — a wrong-kind tap still only reports the kind. The page has no pressable
-Cancel row: while armed, a press could not reach one, and a press that did would be the very input
-being bound (plan §14.3). Twenty seconds without an input closes the page; an unfocused window
-captures nothing and re-waits for neutral; a completed capture is saved through the store, and a
-save failure is posted as the overlay's text and leaves the effective mapping as it was.
+**The listening window is a 3-second countdown (P5, 2026-10-20).** After the press that opened
+the dialog is released (the neutral frame), the dialog counts **3, 2, 1** once per second and then
+leaves with the row untouched. A valid press is captured **on its own frame** - the binding
+decision does not wait for a release, so a tap and a hold both bind - and the dialog leaves through
+the host Back pulse. A **wrong-kind** press (a key into the Controller table) prints which kind the
+row takes and the count keeps running beside it: it is feedback, never a pause or a reset, so the
+page still closes itself on time. There is no hold-to-cancel gesture and no separate 20-second
+timeout (the countdown replaced both); the page has no pressable Cancel row either, because while
+armed a press could not reach one and a press that did would be the very input being bound. The
+remaining seconds are drawn by `capture::StatusText()` in the caption. An unfocused window captures
+nothing and re-waits for neutral; a completed capture is saved through the store, and a save
+failure is posted as the overlay's text and leaves the effective mapping as it was.
 
 **What this pass did not drive:** a pad capture and the Gameplay Mapping → Controller toggle
 inside a song (plan §16.5). The **in-song variant of the dialog and the Controls menu** was
 closed by P8a (§ below): a paused song drives pause → Help & Options → Controls → Input Types and
 a bind page → the dialog's hold-to-cancel → back to the pause panel → resume, with no guest fault
-(`out/gameplay-mapping/in-game/p8a-in-song3/`, plan §18.4).
+(`out/gameplay-mapping/in-game/p8a-in-song3/`, plan §18.4). The hold gesture recorded in that arm
+was replaced by P5's countdown; the in-song arm was re-run on the countdown (P5 record in the
+restructure plan).
 
 ## The recovery path, and why it has two observation points (P8a, 2026-10-18)
 

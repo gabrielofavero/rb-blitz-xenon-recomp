@@ -9,9 +9,9 @@
 #   * Interface Mapping (P3 of the interface/gameplay mapping restructure plan) -> Confirm -> an
 #     Assign page -> the listening dialog -> a keyboard tap binds the row and the profile on disk
 #     grows the source;
-#   * the same dialog again, held instead of tapped, cancels and writes nothing - that is the
-#     dialog's own cancel gesture (capture::kHoldToCancel), and it is why B and Escape stay
-#     assignable: a tap of either binds it, a hold of it cancels;
+#   * the same dialog again, left alone, closes itself after the 3-second countdown and writes
+#     nothing (restructure plan D11): there is no cancel gesture any more, so a tap of B or Escape
+#     binds it and a hold binds it too;
 #   * Interface Mapping -> Navigation and Music Library Options open their own groups, bind a row
 #     each; Reset All then restores every row (all 16 targets, the seven the page hides included)
 #     in one press and leaves no `[remap]` row behind;
@@ -116,7 +116,7 @@ function Get-RowTable {
 }
 
 function ClickRow {
-    param([int]$Index, [string]$Tag)
+    param([int]$Index, [string]$Tag, [double]$Wait = -1)
     $script:steps += 1
     $hit = $null
     for ($i = 0; $i -lt 10 -and -not $hit; $i++) {
@@ -129,8 +129,11 @@ function ClickRow {
     }
     $x = [math]::Round((($hit[1] + $hit[3]) / 2), 4)
     $y = [math]::Round((($hit[2] + $hit[4]) / 2), 4)
+    # A Capture row opens a dialog that closes itself after 3 s (P5), so a step that must act
+    # inside it settles for less than $StepSeconds.
+    $settle = if ($Wait -ge 0) { $Wait } else { $StepSeconds }
     Write-Host ("  {0}: row {1} at {2},{3}" -f $Tag, $Index, $x, $y)
-    Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$StepSeconds", "shot:$Tag.png")
+    Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$settle", "shot:$Tag.png")
 }
 
 # The screen the host last named. Every step asserts on this rather than on pixels.
@@ -276,9 +279,11 @@ try {
     ClickRow 1 '09-confirm-row'
     Assert-Screen 'settings_bind_general_a_screen' '09-confirm-row' | Out-Null
     Drive @('shot:10-confirm-rows.png')
-    ClickRow 0 '11-assign'
+    # P5: the dialog closes itself after 3 s, so every Assign click settles for less than that and
+    # the press that binds is sent inside the window.
+    ClickRow 0 '11-assign' -Wait 0.4
     Assert-Screen 'settings_listen_screen' '11-assign' | Out-Null
-    Drive @('shot:12-listening.png', 'key:key_g', "wait:$StepSeconds", 'shot:13-bound.png')
+    Drive @('shot:12-listening.png', 'key:key_g', "wait:2", 'shot:13-bound.png')
     Assert-Screen 'settings_bind_general_a_screen' '13-bound' | Out-Null
     Assert-Profile 'key:g' $true '13-bound' 'profile-13-after-tap.toml'
 
@@ -292,12 +297,14 @@ try {
     ClickRow 1 '13b-confirm-row-again'
     Assert-Screen 'settings_bind_general_a_screen' '13b-confirm-row-again' | Out-Null
 
-    # --- the cancel gesture ------------------------------------------------------------------
-    ClickRow 0 '14-assign-again'
+    # --- the countdown (P5) ------------------------------------------------------------------
+    ClickRow 0 '14-assign-again' -Wait 0.4
     Assert-Screen 'settings_listen_screen' '14-assign-again' | Out-Null
-    Drive @('hold:key_g:2', "wait:$StepSeconds", 'shot:15-cancelled.png')
-    Assert-Screen 'settings_bind_general_a_screen' '15-cancelled' | Out-Null
-    Assert-Same (Join-Path $outDir 'profile-13-after-tap.toml') '15-cancelled'
+    # Three seconds of silence close the dialog and write nothing (D11); the profile snapshot from
+    # the previous capture is the control. (Holding G here would now BIND it.)
+    Drive @('shot:14a-countdown.png', "wait:$StepSeconds", 'shot:15-countdown-left.png')
+    Assert-Screen 'settings_bind_general_a_screen' '15-countdown-left' | Out-Null
+    Assert-Same (Join-Path $outDir 'profile-13-after-tap.toml') '15-countdown-left'
 
     # --- the two Interface Mapping groups and Reset All (P3) ----------------------------------
     Drive @('key:b', "wait:$StepSeconds", 'shot:15a-back-interface.png')
@@ -307,9 +314,9 @@ try {
     Assert-RowText 'settings_interface_navigation_screen' 'input.general.dpad_up = Up: D-pad Up, W, Arrow Up' '15b-navigation'
     ClickRow 0 '15c-up-row'
     Assert-Screen 'settings_bind_general_dpad_up_screen' '15c-up-row' | Out-Null
-    ClickRow 0 '15d-assign-up'
+    ClickRow 0 '15d-assign-up' -Wait 0.4
     Assert-Screen 'settings_listen_screen' '15d-assign-up' | Out-Null
-    Drive @('key:key_j', "wait:$StepSeconds", 'shot:15e-up-bound.png')
+    Drive @('key:key_j', "wait:2", 'shot:15e-up-bound.png')
     Assert-Screen 'settings_bind_general_dpad_up_screen' '15e-up-bound' | Out-Null
     Assert-Profile 'key:j' $true '15e-up-bound' 'profile-15e-after-up-tap.toml'
     # One Back is the bind page's own ``leave``: it returns to whoever sent it, which is Navigation
@@ -358,14 +365,19 @@ try {
     # --- a key into the Controller table is the wrong kind ------------------------------------
     ClickRow 0 '26-first-note'
     Assert-Screen 'settings_bind_controller_first_note_screen' '26-first-note' | Out-Null
-    ClickRow 0 '27-assign-controller'
+    # P5: the dialog closes itself after 3 seconds, so the Assign click settles for less than that
+    # and the wrong-kind press is sent inside the window.
+    ClickRow 0 '27-assign-controller' -Wait 0.4
     Assert-Screen 'settings_listen_screen' '27-assign-controller' | Out-Null
     Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outDir 'profile-27-before-wrong-kind.toml')
-    Drive @('shot:28-listening-controller.png', 'key:key_g', "wait:$StepSeconds", 'shot:29-wrong-kind.png')
+    Drive @('shot:28-listening-controller.png', 'key:key_g', 'shot:29-wrong-kind.png')
     Assert-Screen 'settings_listen_screen' '29-wrong-kind' | Out-Null
     Assert-Same (Join-Path $outDir 'profile-27-before-wrong-kind.toml') '29-wrong-kind'
-    Drive @('hold:key_g:2', "wait:$StepSeconds", 'shot:30-left-by-hold.png')
-    Assert-Screen 'settings_bind_controller_first_note_screen' '30-left-by-hold' | Out-Null
+    # P5/D11: the wrong kind is feedback only - the countdown keeps running and leaves the row
+    # untouched when it reaches zero.
+    Drive @('wait:4', 'shot:30-countdown-left.png')
+    Assert-Screen 'settings_bind_controller_first_note_screen' '30-countdown-left' | Out-Null
+    Assert-Same (Join-Path $outDir 'profile-27-before-wrong-kind.toml') '30-countdown-left'
 
     # --- the Mouse & Keyboard table accepts it -----------------------------------------------
     # Four Backs: the bind page returns to the group that lists it (Notes), that to the Controller
@@ -382,9 +394,10 @@ try {
     Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: Q, Right Click' '34-notes-km'
     ClickRow 0 '35-first-note-km'
     Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '35-first-note-km' | Out-Null
-    ClickRow 0 '36-assign-km'
+    ClickRow 0 '36-assign-km' -Wait 0.4
     Assert-Screen 'settings_listen_screen' '36-assign-km' | Out-Null
-    Drive @('shot:37-listening-km.png', 'key:key_g', "wait:$StepSeconds", 'shot:38-bound-km.png')
+    # P5/D11: the press itself is the answer - no release wait - and the dialog leaves at once.
+    Drive @('shot:37-listening-km.png', 'key:key_g', "wait:2", 'shot:38-bound-km.png')
     Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '38-bound-km' | Out-Null
     Assert-Profile 'key:g' $true '38-bound-km' 'profile-38-after-km-tap.toml'
     Assert-Profile 'gameplay_remap_keyboard_mouse' $true '38-bound-km' ''
@@ -392,6 +405,19 @@ try {
     Drive @('key:b', "wait:$StepSeconds", 'shot:39-notes-after-capture.png')
     Assert-Screen 'settings_keyboard_mouse_notes_screen' '39-notes-after-capture' | Out-Null
     Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: G' '39-notes-after-capture'
+
+    # P5/D11: a wheel detent is a press with no release, and it binds on the frame it arrives.
+    # The row is already custom, so this is also D8's append case (`G, Scroll Up`).
+    ClickRow 0 '39a-first-note-again' -Wait 0.4
+    Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '39a-first-note-again' | Out-Null
+    ClickRow 0 '39b-assign-wheel' -Wait 0.4
+    Assert-Screen 'settings_listen_screen' '39b-assign-wheel' | Out-Null
+    Drive @('shot:39c-listening-wheel.png', 'wheel:1', "wait:2", 'shot:39d-wheel-bound.png')
+    Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '39d-wheel-bound' | Out-Null
+    Assert-Profile 'wheel_up' $true '39d-wheel-bound' 'profile-39d-after-wheel.toml'
+    Drive @('key:b', "wait:$StepSeconds", 'shot:39e-notes-wheel.png')
+    Assert-Screen 'settings_keyboard_mouse_notes_screen' '39e-notes-wheel' | Out-Null
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: G, Scroll Up' '39e-notes-wheel'
 
     # P4/D9: the table's plain Reset All removes the custom row and the row falls back to its
     # default pair - the check the old disabled-when-uncustomised Reset All row could not make.
@@ -403,6 +429,7 @@ try {
     # All the same way), so the proof is that the captured row's value is gone - and the row text
     # below shows the default pair again.
     Assert-Profile 'key:g' $false '41-reset-all-km' 'profile-41-after-reset-all.toml'
+    Assert-Profile 'wheel_up' $false '41-reset-all-km' ''
     ClickRow 0 '42-notes-again'
     Assert-Screen 'settings_keyboard_mouse_notes_screen' '42-notes-again' | Out-Null
     Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: Q, Right Click' '42-notes-again'

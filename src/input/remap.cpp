@@ -489,22 +489,6 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             observation.mouse_buttons = physical.mouse_buttons;
             observation.wheel_detents = physical.wheel_detents;
             observation.pad = physical.pad;
-            // The hold rule's oracle, from the levels this poll already has: a tap of Back or
-            // Escape binds it, a long hold of either cancels the dialog (so both stay bindable,
-            // which a "B cancels" rule could not offer - plan §14.3).
-            const profile::remap::PadState pad_now = physical.pad;
-            const uint32_t mouse_now = physical.mouse_buttons;
-            observation.still_held = [pad_now, mouse_now](const profile::remap::Source& source) {
-              switch (source.kind) {
-                case profile::remap::SourceKind::kPad:
-                  return capture::PadSourceHeld(pad_now, source.name);
-                case profile::remap::SourceKind::kMouse:
-                  return capture::MouseSourceHeld(mouse_now, source.name);
-                case profile::remap::SourceKind::kKey:
-                  return HostKeyDown(source.name);
-              }
-              return false;
-            };
             const capture::Tick tick = capture::Observe(observation);
             if (tick.captured.has_value()) {
               settings::InputBindingStore* store = settings::InputBindings();
@@ -519,8 +503,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
                                                         : why));
               }
             } else if (tick.leave) {
-              // The cancel gesture and the timeout leave the same way; the row is untouched
-              // because nothing was ever staged.
+              // The 3-second countdown expired (D11). The row is untouched because nothing was
+              // ever staged, and the dialog leaves the same way a capture does.
               PulseHostPad(0x2000);
             }
           }

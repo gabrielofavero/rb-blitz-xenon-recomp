@@ -1,6 +1,6 @@
 # Interface and Gameplay Mapping restructure
 
-**Status: in progress, 2026-10-20. P1–P4 landed (below); P5 not started.**
+**Status: complete, 2026-10-20. P1–P5 landed (below).**
 
 This plan restructures the in-game Controls surface so that **Interface Mapping** owns only the
 interface, **Gameplay Mapping** is always active, and controller gameplay follows the selected
@@ -528,6 +528,49 @@ so the Controller table's custom-row path is proven by unit tests rather than by
   `docs/reference/known-issues.md` (hold-to-cancel superseded, switch removal, any preset-detection
   limitation).
 - Add the plan row to `docs/plans/todo/README.md` and `docs/README.md`.
+
+#### P5 — landed (2026-10-20)
+
+**What shipped.**
+
+- `src/input/input_capture.{h,cpp}`: the listening window is `kCountdown` (3 s). The session waits
+  for a neutral frame after `Arm`, then counts 3, 2, 1 once per second; a valid press is captured
+  **on its own frame** (no release wait) and a wrong-kind press posts its sentence while the count
+  keeps running; zero leaves the dialog with the row untouched. `kHoldToCancel`, the 20-second
+  timeout, the pending-candidate state and `Tick::cancelled` are gone, and with them
+  `Observation::still_held` and the `PadSourceHeld`/`MouseSourceHeld` oracle. `StatusText()` draws
+  `Closing in N.` beside the listening phrase or the wrong-kind sentence.
+- `src/input/remap.cpp`: the capture observation no longer builds the hold oracle; the expiry
+  leaves through the same host Back pulse as a capture.
+- `src/ui/settings_screen.cpp`: the listening row's caption says the page closes itself after a
+  short countdown (no hold wording).
+- Tests: `TestCaptureCountdown` (3 → 2 → 1; a wrong-kind press does not reset the count; zero
+  leaves untouched) and `TestCaptureBindsImmediately` (a press binds on its own frame, and a
+  still-held source is not captured twice) replace the two hold tests. The wrong-kind case now
+  presses the pad on the very next frame, proving the session never re-waits for neutral.
+- Harness: every Assign click settles for 0.4 s (`ClickRow -Wait`) so the press lands inside the
+  window; the Controls arm proves 3 s of silence leaves the row untouched, a key binds, the wrong
+  kind does not, and a wheel detent (a press with no release) binds and appends.
+
+**Measured (2026-10-20).**
+
+- `rb_blitz_input_bindings_tests` = **163 checks, 0 failures**; `rb_blitz_settings_screen_tests` =
+  **95,705**; full `ctest` = **37/37**.
+- `scripts/acceptance_controls.ps1 -Label p5-controls-b` = **103 steps, 0 failures**
+  (`out/gameplay-mapping/in-game/p5-controls-b/`): the dialog read `Closing in 2` on entry and
+  `That is a keyboard key; this row takes a pad control. Closing in 1.` on the wrong-kind press,
+  then left by itself with the profile byte-identical; `key:g` bound First Note on the press,
+  `wheel:1` appended `Scroll Up`, and Reset All removed both.
+- `scripts/acceptance_controls_in_song.ps1 -Label p5-in-song` = **23 steps, 0 failures** (the
+  dialog waits out the countdown, the pause and resume are clean);
+  `scripts/acceptance_binding_rows.ps1 -Label p5-rows` = **26 steps, 0 failures**.
+- The first arm (`p5-controls`) failed at the first Assign for the expected reason: a `ClickRow`
+  settle of 4 s outlived the 3 s dialog, so the assert read the bind page. Every Assign step now
+  passes `-Wait 0.4`; that run is kept as the record of the wrong assumption.
+
+**Carried.** The plan is complete: P1–P5 landed. The physical-pad arms remain unmeasured on this
+machine (no pad), and a mouse *button* (as opposed to the wheel) is not driven live by a harness
+that only clicks rows — both are unit-tested. The plan moves to `docs/plans/finished/`.
 
 ## 5. Acceptance matrix
 

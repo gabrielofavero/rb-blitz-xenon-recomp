@@ -106,7 +106,7 @@ function Get-RowTable {
 }
 
 function ClickRow {
-    param([int]$Index, [string]$Tag)
+    param([int]$Index, [string]$Tag, [double]$Wait = -1)
     $script:steps += 1
     $hit = $null
     for ($i = 0; $i -lt 10 -and -not $hit; $i++) {
@@ -119,8 +119,11 @@ function ClickRow {
     }
     $x = [math]::Round((($hit[1] + $hit[3]) / 2), 4)
     $y = [math]::Round((($hit[2] + $hit[4]) / 2), 4)
+    # A Capture row opens a dialog that closes itself after 3 s (P5), so the Assign click settles
+    # for less than that.
+    $settle = if ($Wait -ge 0) { $Wait } else { $StepSeconds }
     Write-Host ("  {0}: row {1} at {2},{3}" -f $Tag, $Index, $x, $y)
-    Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$StepSeconds", "shot:$Tag.png")
+    Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$settle", "shot:$Tag.png")
 }
 
 function Get-Screen {
@@ -232,9 +235,9 @@ try {
     # --- a capture changes the row's text ----------------------------------------------------
     ClickRow 1 '06-confirm-row'
     Assert-Screen 'settings_bind_general_a_screen' '06-confirm-row' | Out-Null
-    ClickRow 0 '07-assign'
+    ClickRow 0 '07-assign' -Wait 0.4
     Assert-Screen 'settings_listen_screen' '07-assign' | Out-Null
-    Drive @('shot:08-listening.png', 'key:key_j', "wait:$StepSeconds", 'shot:09-bound.png')
+    Drive @('shot:08-listening.png', 'key:key_j', "wait:2", 'shot:09-bound.png')
     Assert-Screen 'settings_bind_general_a_screen' '09-bound' | Out-Null
     Assert-Profile 'key:j' $true '09-bound' 'profile-09-after-tap.toml'
     # One Back returns to the page that owns the row: no relaunch, no root re-entry.

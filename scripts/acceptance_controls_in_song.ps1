@@ -6,8 +6,9 @@
 # that residual:
 #
 #   pause -> HELP & OPTIONS (retail's `pause_options` row) -> our in-song root -> Controls ->
-#   Input Types -> Back -> General Mapping -> A Button -> Assign (the listening dialog) -> hold to
-#   cancel -> Back to the root -> Back to the pause panel -> resume to the song.
+#   Input Types -> Back -> Interface Mapping -> Confirm -> Assign (the listening dialog) -> wait
+#   out the 3-second countdown -> Back to the root -> Back to the pause panel -> resume to the
+#   song.
 #
 # Every step asserts on the host's `native_mouse: screen=` trace, so a wrong row or a fault is a
 # named failure rather than a screenshot to interpret. A guest fault is fatal for the arm: the plan
@@ -103,7 +104,7 @@ function Get-RowTable {
 }
 
 function ClickRow {
-    param([int]$Index, [string]$Tag)
+    param([int]$Index, [string]$Tag, [double]$Wait = -1)
     $script:steps += 1
     $hit = $null
     for ($i = 0; $i -lt 10 -and -not $hit; $i++) {
@@ -116,8 +117,11 @@ function ClickRow {
     }
     $x = [math]::Round((($hit[1] + $hit[3]) / 2), 4)
     $y = [math]::Round((($hit[2] + $hit[4]) / 2), 4)
+    # A Capture row opens a dialog that closes itself after 3 s (P5), so a step that must act
+    # inside it settles for less than $StepSeconds.
+    $settle = if ($Wait -ge 0) { $Wait } else { $StepSeconds }
     Write-Host ("  {0}: row {1} at {2},{3}" -f $Tag, $Index, $x, $y)
-    Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$StepSeconds", "shot:$Tag.png")
+    Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$settle", "shot:$Tag.png")
 }
 
 function Assert-Screen {
@@ -216,11 +220,12 @@ try {
     # P3: Navigation (0), Confirm (1), Go Back (2), Music Library Options (3), Reset All (4).
     ClickRow 1 '11-confirm-row'
     Assert-Screen 'settings_bind_general_a_pause_screen' '11-confirm-row' | Out-Null
-    ClickRow 0 '12-listening'
+    ClickRow 0 '12-listening' -Wait 0.4
     Assert-Screen 'settings_listen_pause_screen' '12-listening' | Out-Null
-    # The cancel gesture: a 2 s hold of any key (B included - a tap of it would bind it).
-    Drive @('hold:b:2', "wait:$StepSeconds", 'shot:13-cancelled.png')
-    Assert-Screen 'settings_bind_general_a_pause_screen' '13-cancelled' | Out-Null
+    # P5/D11: there is no hold-to-cancel gesture any more - the dialog counts 3, 2, 1 and closes
+    # itself, leaving the row untouched. (A tap of B would now BIND B.)
+    Drive @('shot:12-listening-dialog.png', 'wait:4', 'shot:13-left-by-countdown.png')
+    Assert-Screen 'settings_bind_general_a_pause_screen' '13-left-by-countdown' | Out-Null
 
     # Back out: bind page -> Interface Mapping -> Controls -> in-song root (three levels).
     Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds",

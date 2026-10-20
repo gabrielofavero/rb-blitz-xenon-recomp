@@ -45,7 +45,7 @@ namespace rb_blitz::input {
 // `keyboard_support` and `mouse_ui_nav` are the only switches left: they are source gates, and off
 // means that device drives nothing. Gameplay Mapping's two routing switches
 // (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) are retired by P2 of
-// docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md (D3): the
+// docs/plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md (D3): the
 // Mouse & Keyboard table is always active while playing, and the Controller table is active when
 // it has a custom row - the native preset drives the pad otherwise (D4). Custom is inferred from
 // the table; an old profile key is left in the file and decides nothing.
