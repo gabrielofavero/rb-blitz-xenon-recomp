@@ -1561,14 +1561,19 @@ Node RowCase(const Row& row, const std::string_view symbol) {
     case Kind::kRoute: {
       Node body = EnterRetail(row.screen, row.member);
       // The Audio page is retail's own scene, drawn with its own list at a lower offset. Capture
-      // the merged list's transform while *our* scene is still current; the retail panel's
+      // the merged list's position while *our* scene is still current; the retail panel's
       // `{enter}` (edited at payload-build time) applies it and renames its header to AUDIO. The
       // application cannot live here: before `{ui goto_screen ...}` runs, the retail scene is not
       // loaded yet, so `{av_options_panel find ...}` finds nothing (measured 2026-10-19).
       if (row.screen == "av_options_screen" || row.screen == "av_options_pause_screen") {
+        // The translation messages are `get_local_pos`/`set_local_pos` (guest 0x821F0A88 /
+        // 0x821F1678, three float arguments each). The earlier `local_xfm` property spelling did
+        // not move the list; copying this position puts the Audio page's first row where every
+        // other page's first row is (measured: the retail list is authored one row pitch lower,
+        // 63 px at 993 client height, out/audio-fix/probe1 vs probe2).
         body.kids.insert(body.kids.begin() + 1,
-                         Cmd({Sym("set"), Var("rbbz_audio_xfm"),
-                              Cmd({Sym(kList), Sym("get"), Sym("local_xfm")})}));
+                         Cmd({Sym(kList), Sym("get_local_pos"), Var("rbbz_audio_x"),
+                              Var("rbbz_audio_y"), Var("rbbz_audio_z")}));
       }
       return Arr({Sym(symbol), std::move(body)});
     }
@@ -2779,6 +2784,16 @@ bool AddPanelLoad(std::vector<dtb::Node>* nodes, std::string_view panel_name, st
 // ...}` command; its `enter` member is a block whose first child is the `enter` symbol. Statements
 // are appended at the end of that block, so the panel's own enter - which is what loads/fills the
 // scene - has already run. See the header for why the pre-goto placement does not work.
+std::vector<Node> AudioPageEnterStatements() {
+  return {
+      Node::Command({Node::Symbol("checkbox.lst"), Node::Symbol("set_local_pos"),
+                     Node::Var("rbbz_audio_x"), Node::Var("rbbz_audio_y"),
+                     Node::Var("rbbz_audio_z")}),
+      Node::Command({Node::Symbol("header.lbl"), Node::Symbol("set"),
+                     Node::Symbol("text_token"), Node::Symbol("settings_title_audio")}),
+  };
+}
+
 bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view panel_name,
                                 const std::vector<dtb::Node>& statements, std::string* reason) {
   auto refuse = [reason](const char* why) {

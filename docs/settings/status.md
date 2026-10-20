@@ -15,11 +15,13 @@ Part 1 wherever they disagree.
   4:3 Letterboxing row is removed, the Main Menu page has one `Visible`/`Hidden` row per hideable
   entry with no master, and Target draws `Rock Band Blitz / Ultimate / Demo`. The scene's `header.lbl`
   is a `UILabel`, so each page of ours sets its title token on entry; the retail Audio page is
-  retitled `AUDIO` and its list is moved onto the merged list's transform. **The Audio correction is
-  implemented but not yet boot-verified** - the owner's capture that reported the `AUDIO/VIDEO`
-  title and the row offset predates it. **Evidence:** the owner's manual captures of 2026-10-19 and
-  `rb_blitz_settings_screen_tests` (103,535 checks); the automated route did not land the main-menu
-  entry in this pass, so the captures are manual (see [menu.md](menu.md) Part 1).
+  retitled `AUDIO` and its list is moved onto the merged list's position (`get_local_pos` /
+  `set_local_pos`). **The Audio correction is boot-verified (2026-10-19)**: the first row occupies
+  the parent page's own band (y=368..427 at 993 client height) and Overscan stays On
+  (`out/audio-fix/probe3/`); the earlier `local_xfm` spelling did not move the list, and the
+  owner's capture from it showed Overscan off on entry.
+  **Evidence:** the owner's manual captures of 2026-10-19, the probe boots, and
+  `rb_blitz_settings_screen_tests` (107,708 checks; see [menu.md](menu.md) Part 1).
 - **The external settings application is gone (P8b, 2026-10-19).** `rb_blitz_controller_settings.exe`,
   its target, sources, schema, tests, capture/acceptance scripts and payload entry were removed;
   the installer ships `rb_blitz.exe` alone, a fresh/upgrade/repair install has no settings

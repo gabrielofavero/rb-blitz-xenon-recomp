@@ -295,6 +295,14 @@ bool AddPanelLoad(std::vector<dtb::Node>* nodes, std::string_view panel_name, st
 bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view panel_name,
                                 const std::vector<dtb::Node>& statements, std::string* reason);
 
+// The statements appended to retail `av_options_panel`'s `{enter}`: apply the list position the
+// Audio route row captured (`rbbz_audio_x/y/z`), then rename the header. The route row runs in
+// *our* scene, before the retail scene is loaded, so it can only capture; the application belongs
+// here. The translation messages are `get_local_pos`/`set_local_pos` (guest 0x821F0A88 /
+// 0x821F1678, three float arguments); the earlier `local_xfm` spelling did not move the list, and
+// the owner's capture from it showed Overscan off on entry (measured 2026-10-19, out/audio-fix/probe3).
+std::vector<dtb::Node> AudioPageEnterStatements();
+
 // ------------------------------------------------------------------------------------------------
 // The labels, the requests, and the locale edit
 // ------------------------------------------------------------------------------------------------

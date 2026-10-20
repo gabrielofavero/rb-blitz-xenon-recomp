@@ -698,10 +698,8 @@ void TestPanelEnterAppend() {
        Arr({Sym("file"), Str("av_options.milo")}),
        Arr({Sym("enter"), Cmd({Sym("do"), Cmd({Var("this"), Sym("populate_menu")})})})})};
   std::string reason;
-  const std::vector<dtb::Node> statements = {
-      Cmd({Sym("checkbox.lst"), Sym("set"), Sym("local_xfm"), Var("rbbz_audio_xfm")}),
-      Cmd({Sym("header.lbl"), Sym("set"), Sym("text_token"),
-           Sym("settings_title_audio")})};
+  const std::vector<dtb::Node> statements = AudioPageEnterStatements();
+  CHECK_EQ(statements.size(), 2u);
   CHECK_TRUE(AppendPanelEnterStatements(&nodes, "av_options_panel", statements, &reason));
   CHECK_TRUE(reason.empty());
 
@@ -2045,6 +2043,32 @@ std::vector<dtb::Node> InSongRootsOnly() {
   return std::vector<dtb::Node>(roots.begin() + roots.size() / 2, roots.end());
 }
 
+// The Audio page is retail's own screen, so the merged list's position has to travel with the
+// route: the row case captures it from *our* scene (the retail one is not loaded yet) and the
+// payload's appended `{enter}` statement applies it to `checkbox.lst`. The `local_xfm` property
+// spelling did not move the list; the owner's capture from it showed Overscan off on entry. This
+// test pins the message pair and the two halves' shared variable names.
+void TestAudioRouteCapturesListPosition() {
+  BeginCase("the Audio route captures the merged list position with get_local_pos");
+  const std::vector<dtb::Node> nodes = DefinitionRoots();
+  const std::vector<std::string> body = CaseWords(nodes, "settings_audio");
+  CHECK_TRUE(std::find(body.begin(), body.end(), "av_options_screen") != body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), "back_screen") != body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), "get_local_pos") != body.end());
+  CHECK_TRUE(std::find(body.begin(), body.end(), "local_xfm") == body.end());
+
+  const std::vector<dtb::Node> statements = AudioPageEnterStatements();
+  CHECK_EQ(statements.size(), 2u);
+  if (statements.size() == 2u) {
+    CHECK_EQ(statements[0].kids.size(), 5u);
+    CHECK_TRUE(statements[0].kids[0].text == "checkbox.lst");
+    CHECK_TRUE(statements[0].kids[1].text == "set_local_pos");
+    CHECK_TRUE(statements[0].kids[2].text == "rbbz_audio_x");
+    CHECK_TRUE(statements[1].kids[0].text == "header.lbl");
+    CHECK_TRUE(statements[1].kids[1].text == "set");
+  }
+}
+
 // Appends the definition's roots to a **retail** record. This is the measured delivery site
 // (docs/settings/architecture.md (part 1, the bridge) §12.3): the same panel declarations open when
 // they ride inside a retail record and crash the guest with `write of guest 0x00000200` when they
@@ -3102,6 +3126,7 @@ int main(int argc, char** argv) {
   TestRequestPathsParse();
   TestPanelLoadEdit();
   TestPanelEnterAppend();
+  TestAudioRouteCapturesListPosition();
   TestSplashReroute();
   TestPlayCurrentSongRow();
   TestPauseReroute();

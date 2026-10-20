@@ -38,12 +38,12 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 > moved under Gameplay. `4:3 Letterboxing` is removed (it fights the non-16:9 HUD repositioning), and
 > the Main Menu page is a set of per-entry `Visible`/`Hidden` rows with no master. The scene's
 > `header.lbl` is a **UILabel**, so every page of ours retitles itself on entry. The retail Audio page
-> is retitled `AUDIO` and its list is moved onto the merged list's transform by an appended
-> `av_options_panel` enter statement; that correction is implemented but **not yet boot-verified**
-> (the owner's capture that reported the `AUDIO/VIDEO` title and the row offset predates it).
-> Owner-driven manual captures on 2026-10-19 confirmed the titles and the tree; the automated `drive_ui` route did not land the
-> main-menu entry in the same pass (it sends a stick key while the list was taking arrows), so the
-> screenshots for this correction are manual and the row below is a note, not a harness boot.
+> is retitled `AUDIO` and its list is moved onto the merged list's position with
+> `get_local_pos`/`set_local_pos` by an appended `av_options_panel` enter statement; boot-verified
+> 2026-10-19 (`out/audio-fix/probe3/`), where the first row occupies the parent page's own band
+> (y=368..427 at 993 client height) and Overscan stays On. The earlier `local_xfm` spelling did not
+> move the list, and the owner's capture from it showed Overscan off on entry.
+> Owner-driven manual captures on 2026-10-19 confirmed the titles and the tree.
 
 Status: **executed for the main-menu entry**, one measured engine constraint left open for the in-song
 entry. Evidence is real boots against the pinned retail image (§4); every "measured" line names its log and
@@ -225,6 +225,7 @@ driven with `scripts/drive_ui.ps1` through `out/_swap/p5b/run.ps1 -Route <r>`. P
 | Proof | Route | Evidence | Result |
 | --- | --- | --- | --- |
 | **2026-10-19 tree and titles** | manual (owner) | owner's 2026-10-19 captures: root, INTERFACE, DLC rows, AUDIO/VIDEO | root is `How to Play / Calibration / General / Controls / Audio/Video / Gameplay`; INTERFACE reads `Main Menu / Offline Prompts: Hidden|Visible / Help & Options Labels: On`; Audio/Video reads `Audio / Video`; the Audio page is retitled `AUDIO`. **Not a harness boot** — see the 2026-10-19 correction above. |
+| **Audio page alignment + overscan** (2026-10-19) | `probe` | `out/audio-fix/probe3/shots/02-av.png` (parent), `03-audio-mouse.png` and `04-audio-key.png` (Audio page) | Both entries draw the Audio page's first row in the parent page's own band (y=368..427 at 993 client height) and read `Overscan: On`; `probe1`/`probe2` measured the one-row pitch (63 px) and the `get_local_pos`/`set_local_pos` pair. |
 | Base install shows **five** rows, no dead `Gameplay` (superseded layout) | `baseroot` | `baseroot.log`, `shots-baseroot/00-root.png` | Old root `General / Controls / Calibration / Audio/Video / Interface`, General selected |
 | Down and up walk the list and **clamp at both ends** | `baseroot` | `shots-baseroot/01..05-clamp.png`, `06..10-up-clamp.png` | INTERFACE stays selected through the 5th down; GENERAL the same going up |
 | B leaves the merged root to the **screen it came from** | `baseroot` | `shots-baseroot/11-back-menu.png` | the main menu (not `credits`) — the P1 defect is gone |
