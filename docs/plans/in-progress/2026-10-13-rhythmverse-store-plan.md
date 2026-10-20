@@ -867,6 +867,33 @@ before the compare, or the `sub_8274ED98`/`sub_8274E710` pair it calls first dec
 next step is a breakpoint-style dump of the three values *inside* the original body (a hook on
 `sub_8274ED98` reporting its return), not another schema guess.
 
+**P3 gate successor (2026-10-20, same day; supersedes the "next measurement" above).** The answer
+was the address, not a missing hook: `lis r11,-32123` is `0x8285` (65536 - 32123 = 33413), so the
+state word is `0x82853D4C`; the first run forced `0x828A3D4C`, an unrelated cell. With the
+corrected address forced to 2, boot `rb_blitz_055.log` (17:10:11-17:11:04; the entry was driven by
+the P4 search diagnostic's `enter` statements, but the request is the retail
+`request_index_if_needed` path) reaches the builder and the cache:
+
+```text
+store-probe: index request reached; this+52=0x0 this+56=0x0 state=0 (forced to 2: yes)
+store-probe: cache request 'dlc_store/europe/dlc_top_xbox_eng.dta' (manager 0x400019a0)
+store-probe: request 'dlc_store/europe/dlc_top_xbox_eng.dta' (input '/dlc_top_xbox_eng.dta', flag 1)
+```
+
+The measured substitutions are **region `europe`, platform `xbox`, locale `eng`** (not the earlier
+`xbox`/`en` guess). The file cache `sub_8235A240` is reached and opens no store path in that boot,
+so **record delivery is P3's remaining step**. Two practical notes: `scripts/probe_store.ps1` must
+have its `-StoreRow` re-read with `-MenuOnly` after a main-menu change (the row moved from 4 to 3
+when Play Current Song was hidden), and a probe report can name another boot's log when two sessions
+run at once — match the log by its launch time, not by "newest".
+
+`src/store/store_metadata.*` now carries the measured constants and writes the shapes read out of
+the consumers: the front menu is `(submenus ("/<locale>/<id>/" ...))` (`sub_8275D4E0` +
+`sub_8275CBD8`), a menu is `(offers_populated TRUE sorted TRUE offers (...))` (`sub_8274F610`), each
+offer keys the plan §2.4 fields, and an empty page is valid. `tests/store_metadata_tests.cpp` is
+**50 checks**; `store_payload` stays **84**. The keys are not yet proven against the retail parser,
+which needs the delivery step.
+
 Landed with this record: `store::AddStoreEntryBypass` (+ tests), the `sub_8274FB60` request hook and
 the `sub_82753010` gate hook in `src/store/store_probe.cpp` (pass-through; they log and force only
 while `store_trace` is on). `store_payload` is **84 checks**; full `ctest` **40/40**.
