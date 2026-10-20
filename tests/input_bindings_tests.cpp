@@ -273,6 +273,47 @@ void TestStoreResetAndSave() {
   CHECK_FALSE(store->Matches("input.reset.general", true));
 }
 
+// P3 (interface/gameplay mapping restructure plan, D2): the Interface page draws nine rows, but
+// Reset All is still the whole `[remap]` table's reset - all sixteen targets, the seven the page
+// no longer shows included. This is the store half; the settings-surface suite pins the single
+// `bind-reset-all/input.reset.general` path the row writes.
+void TestResetAllCoversHiddenTargets() {
+  rb_blitz::test::BeginCase("store: Reset All restores all sixteen interface targets");
+  const auto dir = ScratchDir();
+  const auto path = dir / "launcher.toml";
+  rb_blitz::profile::Profile profile;
+  for (const auto target : rb_blitz::profile::remap::Targets()) {
+    profile.remap.push_back({std::string(rb_blitz::profile::remap::TargetName(target)), "pad:a",
+                             rb_blitz::profile::ValueStyle::kBasic});
+  }
+  std::string error;
+  CHECK_TRUE(rb_blitz::profile::SaveProfile(path, profile, &error));
+  rb_blitz::input::InputStoreOptions options;
+  options.keyboard_support = true;
+  options.mouse_support = true;
+  auto store = rb_blitz::input::InputStore::Load(path, rb_blitz::profile::LoadProfile(path), options);
+  CHECK_TRUE(store != nullptr);
+  if (store == nullptr) {
+    return;
+  }
+  CHECK_TRUE(store->Matches("input.reset.general", true));
+  // Every target is bound, including the seven the page does not draw.
+  CHECK_TRUE(store->Matches("input.general.a", true));
+  CHECK_TRUE(store->Matches("input.general.x", true));
+  CHECK_TRUE(store->Matches("input.general.left_shoulder", true));
+  CHECK_TRUE(store->Matches("input.general.right_trigger", true));
+  CHECK_TRUE(store->Matches("input.general.left_thumb", true));
+  CHECK_TRUE(store->StageResetAll("input.reset.general", &error));
+  CHECK_TRUE(store->Commit(&error));
+  for (const auto target : rb_blitz::profile::remap::Targets()) {
+    CHECK_FALSE(store->Matches(rb_blitz::profile::GeneralBindingToken(target), true));
+  }
+  CHECK_FALSE(store->Matches("input.reset.general", true));
+  // The profile on disk holds no `[remap]` rows at all - the reset reached the hidden controls,
+  // not only the nine rows the page lists.
+  CHECK_TRUE(rb_blitz::profile::LoadProfile(path).profile.remap.empty());
+}
+
 void TestStoreSwitchAndRecovery() {
   rb_blitz::test::BeginCase("store: switches save, locks and the last-route rule refuse");
   const auto dir = ScratchDir();
@@ -437,6 +478,29 @@ void TestRowDisplayText() {
              "First Note: (no inputs)");
   // A token that is not a binding row has no line at all.
   CHECK_TRUE(rb_blitz::profile::BindingRowText(InputRowToken{}, &list).empty());
+
+  // P3 (interface/gameplay mapping restructure plan): Interface Mapping names the pad controls
+  // after what the interface does, and the token behind the row does not change. The drawn row,
+  // the overlay's replacement line and the help caption all read this one spelling.
+  using rb_blitz::profile::remap::Target;
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kA) == "Confirm");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kB) == "Go Back");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kY) == "Shortcuts");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kBack) == "Sort");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kStart) == "Search");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kDpadUp) == "Up");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kDpadDown) == "Down");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kDpadLeft) == "Left");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kDpadRight) == "Right");
+  // The seven controls the page hides keep the pad's own name (D2).
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kLeftShoulder) == "Left bumper");
+  CHECK_TRUE(rb_blitz::profile::InterfaceTargetLabel(Target::kX) == "X");
+  const InputRowToken confirm_row = rb_blitz::profile::ParseInputRowToken("input.general.a");
+  CHECK_TRUE(rb_blitz::profile::BindingRowText(confirm_row, &list) ==
+             "Confirm: Q, Right Click");
+  // The token is still the target's own: a profile written before the rename binds the same row.
+  CHECK_TRUE(confirm_row.kind == InputRowKind::kGeneralBinding);
+  CHECK_TRUE(confirm_row.name == "a");
 }
 
 }  // namespace
@@ -449,6 +513,7 @@ int main() {
   TestCaptureWrongKindHoldsToCancel();
   TestCaptureHoldToCancel();
   TestStoreResetAndSave();
+  TestResetAllCoversHiddenTargets();
   TestStoreSwitchAndRecovery();
   TestLegacyCustomKeysAreInert();
   TestStoreCaptureAssignment();

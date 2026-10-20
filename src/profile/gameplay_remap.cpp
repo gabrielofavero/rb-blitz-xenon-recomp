@@ -36,7 +36,9 @@ struct TableInfo {
 
 constexpr std::array<TableInfo, kTableKindCount> kTableInfo{{
     {TableKind::kController, "gameplay_remap_controller", "Controller"},
-    {TableKind::kKeyboardMouse, "gameplay_remap_keyboard_mouse", "Keyboard + Mouse"},
+    // The settings surface's own spelling (P4 of the interface/gameplay restructure plan, D6);
+    // the section name above is the profile's and does not move.
+    {TableKind::kKeyboardMouse, "gameplay_remap_keyboard_mouse", "Mouse & Keyboard"},
 }};
 
 static_assert(kActionInfo.size() == kActionCount,

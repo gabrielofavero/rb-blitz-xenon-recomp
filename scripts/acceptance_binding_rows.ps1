@@ -211,7 +211,7 @@ try {
     Start-Sleep -Seconds 1
     Drive @('shot:01-menu.png')
 
-    # --- HELP & OPTIONS -> Controls -> General Mapping ---------------------------------------
+    # --- HELP & OPTIONS -> Controls -> Interface Mapping --------------------------------------
     # The merged root's order is tutorial, calibration, General, Controls, Audio/Video, Gameplay:
     # Controls is row 3. Asserting the destination after every press is what makes a reordered
     # root a named failure rather than a wrong page that still "works".
@@ -219,27 +219,28 @@ try {
     Assert-Screen 'settings_screen' '02-help-and-options' | Out-Null
     ClickRow 3 '03-controls'
     Assert-Screen 'settings_controls_screen' '03-controls' | Out-Null
-    ClickRow 1 '04-general-mapping'
-    Assert-Screen 'settings_general_mapping_screen' '04-general-mapping' | Out-Null
-    Drive @("wait:$StepSeconds", 'shot:05-general-rows.png')
-    # The seeded two-source row reads its own list, and a default row names every source. The
-    # wrapped list draws only the rows around the selection, so the default probe is one of those.
-    Assert-RowText 'settings_general_mapping_screen' 'input.general.a = A: G, H' '05-general-rows'
-    Assert-RowText 'settings_general_mapping_screen' 'input.general.left_shoulder = Left bumper: LB' '05-general-rows'
+    ClickRow 1 '04-interface-mapping'
+    Assert-Screen 'settings_interface_mapping_screen' '04-interface-mapping' | Out-Null
+    Drive @("wait:$StepSeconds", 'shot:05-interface-rows.png')
+    # The seeded two-source row reads its own list under P3's own name for the target (`Confirm`
+    # is the A row), and a default row names every source. The wrapped list draws only the rows
+    # around the selection, so the default probe is one of those.
+    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: G, H' '05-interface-rows'
+    Assert-RowText 'settings_interface_mapping_screen' 'input.general.b = Go Back: B, Escape, B' '05-interface-rows'
     Copy-Item -LiteralPath $log -Destination (Join-Path $outDir 'game-before-capture.log')
 
     # --- a capture changes the row's text ----------------------------------------------------
-    ClickRow 0 '06-a-row'
-    Assert-Screen 'settings_bind_general_a_screen' '06-a-row' | Out-Null
+    ClickRow 1 '06-confirm-row'
+    Assert-Screen 'settings_bind_general_a_screen' '06-confirm-row' | Out-Null
     ClickRow 0 '07-assign'
     Assert-Screen 'settings_listen_screen' '07-assign' | Out-Null
     Drive @('shot:08-listening.png', 'key:key_j', "wait:$StepSeconds", 'shot:09-bound.png')
     Assert-Screen 'settings_bind_general_a_screen' '09-bound' | Out-Null
     Assert-Profile 'key:j' $true '09-bound' 'profile-09-after-tap.toml'
     # One Back returns to the page that owns the row: no relaunch, no root re-entry.
-    Drive @('key:b', "wait:$StepSeconds", 'shot:10-general-rows-after.png')
-    Assert-Screen 'settings_general_mapping_screen' '10-general-rows-after' | Out-Null
-    Assert-RowText 'settings_general_mapping_screen' 'input.general.a = A: G, H, J' '10-general-rows-after'
+    Drive @('key:b', "wait:$StepSeconds", 'shot:10-interface-rows-after.png')
+    Assert-Screen 'settings_interface_mapping_screen' '10-interface-rows-after' | Out-Null
+    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: G, H, J' '10-interface-rows-after'
 
     # --- a list too long for the row ---------------------------------------------------------
     Drive @('key:b', "wait:$StepSeconds", 'shot:11-back-controls.png')
@@ -248,11 +249,14 @@ try {
     Assert-Screen 'settings_gameplay_mapping_screen' '12-gameplay-mapping' | Out-Null
     ClickRow 0 '13-controller'
     Assert-Screen 'settings_gameplay_controller_screen' '13-controller' | Out-Null
-    # P2 removed the Custom switch: the page is [Controller Presets, Custom Mapping].
+    # P4: Custom Mapping lists the three groups (Notes, Move Lane, Pause & Power-up) and Reset All;
+    # First Note lives one level down, under Notes.
     ClickRow 1 '14-custom-mapping'
     Assert-Screen 'settings_controller_actions_screen' '14-custom-mapping' | Out-Null
-    Drive @("wait:$StepSeconds", 'shot:15-controller-actions.png')
-    Assert-RowText 'settings_controller_actions_screen' 'input.controller.first_note = Multiple' '15-controller-actions'
+    ClickRow 0 '15-notes'
+    Assert-Screen 'settings_controller_notes_screen' '15-notes' | Out-Null
+    Drive @("wait:$StepSeconds", 'shot:16-controller-actions.png')
+    Assert-RowText 'settings_controller_notes_screen' 'input.controller.first_note = Multiple' '16-controller-actions'
 } catch {
     $script:failures += $_.Exception.Message
     Write-Host ("  !! run stopped: {0}" -f $_.Exception.Message)

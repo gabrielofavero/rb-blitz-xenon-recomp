@@ -4,20 +4,27 @@
 #
 # One boot drives the whole hierarchy the plan asks for and keeps the screenshot it decided on:
 #
-#   * HELP & OPTIONS -> Controls -> the three pages (Input Types, General Mapping, Gameplay
+#   * HELP & OPTIONS -> Controls -> the three pages (Input Types, Interface Mapping, Gameplay
 #     Mapping), each named by the screen the host logs, not by a sleep;
-#   * General Mapping -> A Button -> Assign -> the listening dialog -> a keyboard tap binds the
-#     row and the profile on disk grows the source;
+#   * Interface Mapping (P3 of the interface/gameplay mapping restructure plan) -> Confirm -> an
+#     Assign page -> the listening dialog -> a keyboard tap binds the row and the profile on disk
+#     grows the source;
 #   * the same dialog again, held instead of tapped, cancels and writes nothing - that is the
 #     dialog's own cancel gesture (capture::kHoldToCancel), and it is why B and Escape stay
 #     assignable: a tap of either binds it, a hold of it cancels;
-#   * Gameplay Mapping -> Controller now has two rows (P2 of the interface/gameplay mapping
-#     restructure plan): the title's own Controller Presets page, which always opens, and Custom
-#     Mapping. The two Custom switches are gone; a table is custom when it has a binding row;
+#   * Interface Mapping -> Navigation and Music Library Options open their own groups, bind a row
+#     each; Reset All then restores every row (all 16 targets, the seven the page hides included)
+#     in one press and leaves no `[remap]` row behind;
+#   * Gameplay Mapping (P4) -> Controller: Controller Presets (the title's own page, which always
+#     opens - there is no Custom switch above it) and Custom Mapping, which lists the three groups
+#     (Notes, Move Lane, Pause & Power-up) and a plain Reset All;
 #   * a key pressed into the Controller table is refused by kind and the dialog keeps listening,
 #     then leaves on the hold;
-#   * Gameplay Mapping -> Mouse & Keyboard -> Custom Mapping -> First Note accepts the same key
-#     and persists it in its own table.
+#   * Gameplay Mapping -> Mouse & Keyboard lists the same groups directly (D6; no Custom Mapping
+#     level); Notes -> First Note accepts the same key, persists it in its own table, and the row
+#     reads the captured key;
+#   * that table's plain Reset All then removes the custom row and the row falls back to its
+#     default pair (D9).
 #
 # Every press is a click on the row the host logs (native_mouse: row=<n> bounds=...), so a step
 # names the row it wants instead of counting taps - this title's lists wrap, and a tap count that
@@ -252,22 +259,23 @@ try {
     Assert-Screen 'settings_input_types_screen' '04-input-types' | Out-Null
     Drive @('key:b', "wait:$StepSeconds", 'shot:05-back-controls.png')
 
-    ClickRow 1 '06-general-mapping'
-    Assert-Screen 'settings_general_mapping_screen' '06-general-mapping' | Out-Null
-    # P1: the row itself names the defaults, not a "Default" state word. The left bumper is the
-    # unambiguous one (pad "A" and key "A" would both read "A").
-    Assert-RowText 'settings_general_mapping_screen' 'input.general.left_shoulder = Left bumper: LB' '06-general-mapping'
+    ClickRow 1 '06-interface-mapping'
+    Assert-Screen 'settings_interface_mapping_screen' '06-interface-mapping' | Out-Null
+    # P3: the page names the interface's actions, not the pad's plastic (`Confirm` is the A
+    # target's row), and P1's overlay draws the row's own list over the label.
+    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: A, Enter, A' '06-interface-mapping'
     Drive @('key:b', "wait:$StepSeconds")
     ClickRow 2 '07-gameplay-mapping'
     Assert-Screen 'settings_gameplay_mapping_screen' '07-gameplay-mapping' | Out-Null
     Drive @('key:b', "wait:$StepSeconds")
 
     # --- a binding that binds ----------------------------------------------------------------
-    ClickRow 1 '08-general-mapping'
-    Assert-Screen 'settings_general_mapping_screen' '08-general-mapping' | Out-Null
-    ClickRow 0 '09-a-button'
-    Assert-Screen 'settings_bind_general_a_screen' '09-a-button' | Out-Null
-    Drive @('shot:10-a-button-rows.png')
+    ClickRow 1 '08-interface-mapping'
+    Assert-Screen 'settings_interface_mapping_screen' '08-interface-mapping' | Out-Null
+    # P3: Navigation (0), Confirm (1), Go Back (2), Music Library Options (3), Reset All (4).
+    ClickRow 1 '09-confirm-row'
+    Assert-Screen 'settings_bind_general_a_screen' '09-confirm-row' | Out-Null
+    Drive @('shot:10-confirm-rows.png')
     ClickRow 0 '11-assign'
     Assert-Screen 'settings_listen_screen' '11-assign' | Out-Null
     Drive @('shot:12-listening.png', 'key:key_g', "wait:$StepSeconds", 'shot:13-bound.png')
@@ -276,13 +284,13 @@ try {
 
     # P1: the page behind the bind page draws the captured source in the row without a relaunch -
     # the row text is read from the published snapshot every frame, not baked when the page opened.
-    # P2/D8: the FIRST Assign on a default row REPLACES the default list, so the row reads `A: G`
-    # rather than the default's three sources plus the captured one.
-    Drive @('key:b', "wait:$StepSeconds", 'shot:13a-general-row-after-capture.png')
-    Assert-Screen 'settings_general_mapping_screen' '13a-general-row-after-capture' | Out-Null
-    Assert-RowText 'settings_general_mapping_screen' 'input.general.a = A: G' '13a-general-row-after-capture'
-    ClickRow 0 '13b-a-button-again'
-    Assert-Screen 'settings_bind_general_a_screen' '13b-a-button-again' | Out-Null
+    # P2/D8: the FIRST Assign on a default row REPLACES the default list, so the row reads
+    # `Confirm: G` rather than the default's three sources plus the captured one.
+    Drive @('key:b', "wait:$StepSeconds", 'shot:13a-interface-row-after-capture.png')
+    Assert-Screen 'settings_interface_mapping_screen' '13a-interface-row-after-capture' | Out-Null
+    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: G' '13a-interface-row-after-capture'
+    ClickRow 1 '13b-confirm-row-again'
+    Assert-Screen 'settings_bind_general_a_screen' '13b-confirm-row-again' | Out-Null
 
     # --- the cancel gesture ------------------------------------------------------------------
     ClickRow 0 '14-assign-again'
@@ -291,64 +299,123 @@ try {
     Assert-Screen 'settings_bind_general_a_screen' '15-cancelled' | Out-Null
     Assert-Same (Join-Path $outDir 'profile-13-after-tap.toml') '15-cancelled'
 
+    # --- the two Interface Mapping groups and Reset All (P3) ----------------------------------
+    Drive @('key:b', "wait:$StepSeconds", 'shot:15a-back-interface.png')
+    Assert-Screen 'settings_interface_mapping_screen' '15a-back-interface' | Out-Null
+    ClickRow 0 '15b-navigation'
+    Assert-Screen 'settings_interface_navigation_screen' '15b-navigation' | Out-Null
+    Assert-RowText 'settings_interface_navigation_screen' 'input.general.dpad_up = Up: D-pad Up, W, Arrow Up' '15b-navigation'
+    ClickRow 0 '15c-up-row'
+    Assert-Screen 'settings_bind_general_dpad_up_screen' '15c-up-row' | Out-Null
+    ClickRow 0 '15d-assign-up'
+    Assert-Screen 'settings_listen_screen' '15d-assign-up' | Out-Null
+    Drive @('key:key_j', "wait:$StepSeconds", 'shot:15e-up-bound.png')
+    Assert-Screen 'settings_bind_general_dpad_up_screen' '15e-up-bound' | Out-Null
+    Assert-Profile 'key:j' $true '15e-up-bound' 'profile-15e-after-up-tap.toml'
+    # One Back is the bind page's own ``leave``: it returns to whoever sent it, which is Navigation
+    # (the page that lists the Up row), not the Interface Mapping page above it.
+    Drive @('key:b', "wait:$StepSeconds", 'shot:15f-navigation-rows.png')
+    Assert-Screen 'settings_interface_navigation_screen' '15f-navigation-rows' | Out-Null
+    Assert-RowText 'settings_interface_navigation_screen' 'input.general.dpad_up = Up: J' '15f-navigation-rows'
+    Drive @('key:b', "wait:$StepSeconds", 'shot:15g-back-interface.png')
+    Assert-Screen 'settings_interface_mapping_screen' '15g-back-interface' | Out-Null
+    ClickRow 3 '15h-music-library'
+    Assert-Screen 'settings_interface_music_library_screen' '15h-music-library' | Out-Null
+    Assert-RowText 'settings_interface_music_library_screen' 'input.general.start = Search: Start, Space' '15h-music-library'
+    Drive @('key:b', "wait:$StepSeconds", 'shot:15i-back-interface.png')
+    Assert-Screen 'settings_interface_mapping_screen' '15i-back-interface' | Out-Null
+    # D9 + D2: one plain `Reset All` press restores every row - the two captures above and the
+    # seven targets this page does not draw - and removes the `[remap]` rows from the profile.
+    ClickRow 4 '15j-reset-all'
+    Assert-Screen 'settings_interface_mapping_screen' '15j-reset-all' | Out-Null
+    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: A, Enter, A' '15j-reset-all'
+    Assert-Profile 'key:j' $false '15j-reset-all' 'profile-15j-after-reset-all.toml'
+
     # --- the Controller table's own pages ----------------------------------------------------
-    Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'shot:16-back-controls.png')
+    # Reset All left us on the Interface Mapping page, so one Back is the Controls page.
+    Drive @('key:b', "wait:$StepSeconds", 'shot:16-back-controls.png')
     ClickRow 2 '17-gameplay-mapping'
     Assert-Screen 'settings_gameplay_mapping_screen' '17-gameplay-mapping' | Out-Null
+    # P4: two input types; Controller = Controller Presets (0) + Custom Mapping (1).
     ClickRow 0 '18-controller-page'
     Assert-Screen 'settings_gameplay_controller_screen' '18-controller-page' | Out-Null
     Drive @('shot:19-controller-rows.png')
-    # P2: the preset page is always available (D5) - it is a plain retail route now, and it must
-    # open on the first press with no Custom switch above it.
+    # P4/D5: the preset page is always available - a plain retail route, no Custom switch above it.
     ClickRow 0 '20-controller-presets'
     Assert-Screen 'controller_config_screen' '20-controller-presets' | Out-Null
     Drive @('key:b', "wait:$StepSeconds", 'shot:21-back-from-presets.png')
     Assert-Screen 'settings_gameplay_controller_screen' '21-back-from-presets' | Out-Null
 
-    # --- a key into the Controller table is the wrong kind ------------------------------------
+    # P4/D7/D9: Custom Mapping is Notes (0), Move Lane (1), Pause & Power-up (2), Reset All (3).
     ClickRow 1 '23-controller-mapping'
     Assert-Screen 'settings_controller_actions_screen' '23-controller-mapping' | Out-Null
+    Drive @('shot:24-controller-groups.png')
+    ClickRow 0 '25-notes'
+    Assert-Screen 'settings_controller_notes_screen' '25-notes' | Out-Null
     # P1: a list too long for the row reads `Multiple` (the owner's allowance) instead of
     # overflowing; the Controller default for First Note is eight stick/D-pad directions.
-    Assert-RowText 'settings_controller_actions_screen' 'input.controller.first_note = Multiple' '23-controller-mapping'
-    ClickRow 0 '24-first-note'
-    Assert-Screen 'settings_bind_controller_first_note_screen' '24-first-note' | Out-Null
-    ClickRow 0 '25-assign-controller'
-    Assert-Screen 'settings_listen_screen' '25-assign-controller' | Out-Null
-    Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outDir 'profile-25-before-wrong-kind.toml')
-    Drive @('shot:26-listening-controller.png', 'key:key_g', "wait:$StepSeconds", 'shot:27-wrong-kind.png')
-    Assert-Screen 'settings_listen_screen' '27-wrong-kind' | Out-Null
-    Assert-Same (Join-Path $outDir 'profile-25-before-wrong-kind.toml') '27-wrong-kind'
-    Drive @('hold:key_g:2', "wait:$StepSeconds", 'shot:28-left-by-hold.png')
-    Assert-Screen 'settings_bind_controller_first_note_screen' '28-left-by-hold' | Out-Null
+    Assert-RowText 'settings_controller_notes_screen' 'input.controller.first_note = Multiple' '25-notes'
+    # --- a key into the Controller table is the wrong kind ------------------------------------
+    ClickRow 0 '26-first-note'
+    Assert-Screen 'settings_bind_controller_first_note_screen' '26-first-note' | Out-Null
+    ClickRow 0 '27-assign-controller'
+    Assert-Screen 'settings_listen_screen' '27-assign-controller' | Out-Null
+    Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outDir 'profile-27-before-wrong-kind.toml')
+    Drive @('shot:28-listening-controller.png', 'key:key_g', "wait:$StepSeconds", 'shot:29-wrong-kind.png')
+    Assert-Screen 'settings_listen_screen' '29-wrong-kind' | Out-Null
+    Assert-Same (Join-Path $outDir 'profile-27-before-wrong-kind.toml') '29-wrong-kind'
+    Drive @('hold:key_g:2', "wait:$StepSeconds", 'shot:30-left-by-hold.png')
+    Assert-Screen 'settings_bind_controller_first_note_screen' '30-left-by-hold' | Out-Null
 
-    # --- the Keyboard & Mouse table accepts it ------------------------------------------------
-    # Three Backs: the bind page returns to the Controller actions page, that to the Controller
-    # page, and that to the Gameplay Mapping page where the sibling Keyboard & Mouse row lives.
-    Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'shot:29-back-gameplay.png')
-    ClickRow 1 '30-keyboard-mouse'
-    Assert-Screen 'settings_gameplay_keyboard_mouse_screen' '30-keyboard-mouse' | Out-Null
-    Drive @('shot:31-keyboard-mouse-rows.png')
-    # P2: the page enters its rows directly - one row, Custom Mapping.
-    ClickRow 0 '32-keyboard-mouse-mapping'
-    Assert-Screen 'settings_keyboard_mouse_actions_screen' '32-keyboard-mouse-mapping' | Out-Null
-    ClickRow 0 '33-first-note-km'
-    Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '33-first-note-km' | Out-Null
-    ClickRow 0 '34-assign-km'
-    Assert-Screen 'settings_listen_screen' '34-assign-km' | Out-Null
-    Drive @('shot:35-listening-km.png', 'key:key_g', "wait:$StepSeconds", 'shot:36-bound-km.png')
-    Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '36-bound-km' | Out-Null
-    Assert-Profile 'key:g' $true '36-bound-km' 'profile-36-after-km-tap.toml'
-    Assert-Profile 'gameplay_remap_keyboard_mouse' $true '36-bound-km' ''
+    # --- the Mouse & Keyboard table accepts it -----------------------------------------------
+    # Four Backs: the bind page returns to the group that lists it (Notes), that to the Controller
+    # Custom Mapping page, that to the Controller page, and that to Gameplay Mapping.
+    Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'shot:31-back-gameplay.png')
+    Assert-Screen 'settings_gameplay_mapping_screen' '31-back-gameplay' | Out-Null
+    ClickRow 1 '32-keyboard-mouse'
+    Assert-Screen 'settings_gameplay_keyboard_mouse_screen' '32-keyboard-mouse' | Out-Null
+    # P4/D6: the same three groups and Reset All, entered directly - there is no Custom Mapping
+    # level here and no Custom switch to turn on first.
+    Drive @('shot:33-keyboard-mouse-groups.png')
+    ClickRow 0 '34-notes-km'
+    Assert-Screen 'settings_keyboard_mouse_notes_screen' '34-notes-km' | Out-Null
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: Q, Right Click' '34-notes-km'
+    ClickRow 0 '35-first-note-km'
+    Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '35-first-note-km' | Out-Null
+    ClickRow 0 '36-assign-km'
+    Assert-Screen 'settings_listen_screen' '36-assign-km' | Out-Null
+    Drive @('shot:37-listening-km.png', 'key:key_g', "wait:$StepSeconds", 'shot:38-bound-km.png')
+    Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '38-bound-km' | Out-Null
+    Assert-Profile 'key:g' $true '38-bound-km' 'profile-38-after-km-tap.toml'
+    Assert-Profile 'gameplay_remap_keyboard_mouse' $true '38-bound-km' ''
+    # D8: the first Assign replaced the default pair, so the group's row now reads the captured key.
+    Drive @('key:b', "wait:$StepSeconds", 'shot:39-notes-after-capture.png')
+    Assert-Screen 'settings_keyboard_mouse_notes_screen' '39-notes-after-capture' | Out-Null
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: G' '39-notes-after-capture'
+
+    # P4/D9: the table's plain Reset All removes the custom row and the row falls back to its
+    # default pair - the check the old disabled-when-uncustomised Reset All row could not make.
+    Drive @('key:b', "wait:$StepSeconds", 'shot:40-back-groups.png')
+    Assert-Screen 'settings_gameplay_keyboard_mouse_screen' '40-back-groups' | Out-Null
+    ClickRow 3 '41-reset-all-km'
+    Assert-Screen 'settings_gameplay_keyboard_mouse_screen' '41-reset-all-km' | Out-Null
+    # The profile keeps a section header it already knew (an empty `[remap]` survived P3's Reset
+    # All the same way), so the proof is that the captured row's value is gone - and the row text
+    # below shows the default pair again.
+    Assert-Profile 'key:g' $false '41-reset-all-km' 'profile-41-after-reset-all.toml'
+    ClickRow 0 '42-notes-again'
+    Assert-Screen 'settings_keyboard_mouse_notes_screen' '42-notes-again' | Out-Null
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: Q, Right Click' '42-notes-again'
 
     # Back out to the Controls page and then to the main menu: every level's Back is its own.
-    Drive @('key:b', "wait:$StepSeconds", 'shot:37-back-actions.png')
-    Drive @('key:b', "wait:$StepSeconds", 'shot:38-back-keyboard-mouse.png')
-    Drive @('key:b', "wait:$StepSeconds", 'shot:39-back-gameplay.png')
-    Drive @('key:b', "wait:$StepSeconds", 'shot:40-back-controls.png')
-    Assert-Screen 'settings_controls_screen' '40-back-controls' | Out-Null
-    Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'shot:41-back-menu.png')
-    Assert-Screen 'splash_screen' '41-back-menu' | Out-Null
+    Drive @('key:b', "wait:$StepSeconds", 'shot:43-back-groups.png')
+    Assert-Screen 'settings_gameplay_keyboard_mouse_screen' '43-back-groups' | Out-Null
+    Drive @('key:b', "wait:$StepSeconds", 'shot:44-back-gameplay.png')
+    Assert-Screen 'settings_gameplay_mapping_screen' '44-back-gameplay' | Out-Null
+    Drive @('key:b', "wait:$StepSeconds", 'shot:45-back-controls.png')
+    Assert-Screen 'settings_controls_screen' '45-back-controls' | Out-Null
+    Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds", 'shot:46-back-menu.png')
+    Assert-Screen 'splash_screen' '46-back-menu' | Out-Null
 } catch {
     $script:failures += $_.Exception.Message
     Write-Host ("  !! run stopped: {0}" -f $_.Exception.Message)
@@ -360,7 +427,7 @@ try {
 
 # The bridge's own record of what the guest asked for, kept beside the shots.
 if (Test-Path $log) {
-    Select-String -Path $log -Pattern 'settings_bridge: (capture|bind-reset|set|commit)' -ErrorAction SilentlyContinue |
+    Select-String -Path $log -Pattern 'settings_bridge: (capture|bind[-_]reset|set|commit)' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'bridge-lines.txt')
     Select-String -Path $log -Pattern 'native_mouse: screen=' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'screens.txt')

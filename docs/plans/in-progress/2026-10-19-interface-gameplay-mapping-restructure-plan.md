@@ -1,6 +1,6 @@
 # Interface and Gameplay Mapping restructure
 
-**Status: in progress, 2026-10-20. P1 and P2 landed (below); P3–P5 not started.**
+**Status: in progress, 2026-10-20. P1–P4 landed (below); P5 not started.**
 
 This plan restructures the in-game Controls surface so that **Interface Mapping** owns only the
 interface, **Gameplay Mapping** is always active, and controller gameplay follows the selected
@@ -289,11 +289,11 @@ existing `keyboard_support`/`mouse_ui_nav` lines.
   row is index 3 today (How to Play, Calibration, General, Controls, Audio/Video), and the script
   still clicked 1.
 
-**Carried into P3-P5.** The page trees themselves (Interface Mapping's Navigation / Confirm /
-Go Back / Music Library Options; the three gameplay submenus) and D9/D10's row presentation are
-P3/P4's; the listening dialog still holds to cancel (P5); a preset changed on retail's page and
-then carried into a song is unmeasured (the slot's meaning is P0's measurement); the physical-pad
-arms remain unmeasured on this machine.
+**Carried into P4-P5.** The three gameplay submenus and `Controller Presets`/`Mouse & Keyboard`
+renames are P4's (P3 landed the Interface tree and D9's plain Reset All); the listening dialog
+still holds to cancel (P5); a preset changed on retail's page and then carried into a song is
+unmeasured (the slot's meaning is P0's measurement); the physical-pad arms remain unmeasured on
+this machine.
 
 ### P3 — Interface Mapping tree
 
@@ -331,6 +331,68 @@ Controls
 **Tests / acceptance:** `tests/settings_screen_tests.cpp` (row order, titles, symbols, labels,
 6-row budget, back targets), `scripts/acceptance_controls.ps1` and
 `scripts/acceptance_controls_in_song.ps1` (new route names and labels; no Custom switch).
+
+#### P3 — landed (2026-10-20)
+
+**What shipped.**
+
+- `src/ui/settings_screen.cpp`: `General Mapping` is rebuilt as **Interface Mapping**
+  (`settings_interface_mapping_panel/_screen`, title `INTERFACE MAPPING`), five rows in D1's
+  order - `Navigation` (`settings_interface_navigation_*`), `Confirm` (target A), `Go Back`
+  (target B), `Music Library Options` (`settings_interface_music_library_*`) and `Reset All`. The
+  two groups are pages of their own: Navigation draws Up/Down/Left/Right and Music Library Options
+  draws Search/Shortcuts/Sort. Nine Assign/Reset child pages replace the old sixteen, and each
+  child returns to the page that lists its row.
+- `src/profile/input_rows.{h,cpp}`: `InterfaceTargetLabel` is the page's one naming table
+  (`A` → `Confirm`, `B` → `Go Back`, Start → `Search`, Y → `Shortcuts`, Back → `Sort`, the D-pad →
+  `Up`/`Down`/`Left`/`Right`; the seven hidden targets keep `TargetLabel`). `BindingRowLabel`
+  answers from it, so the drawn row, P1's replacement line and the help caption cannot disagree.
+  The `[remap]` tokens did not move (`input.general.a` is still target A).
+- `Kind::kPathAction` + `PathActionRow`: `Reset All` is a single symbol that writes
+  `bind-reset-all/input.reset.general` and commits (D9), so it never draws `Reset All: Nothing`.
+  The per-row `Reset` keeps its `Reset: Default` pair.
+- `RequestPaths` gained the path-action branch; the seven hidden targets contribute no
+  capture/reset path at all, and `Reset All` still resets all sixteen (D2) because the store's
+  table reset is unchanged.
+- `src/input/source_gates.{h,cpp}` + `src/input/remap.cpp`: `CollectGameplayConsumed` now takes a
+  caller-owned latch (`carry`) that survives the context change - a source a gameplay table took
+  is dropped only at its physical release. **This is a defect the live arm found, not a P2
+  leftover that was assumed safe**: P2's per-poll set emptied the moment the pause menu became the
+  context, and P3's first in-song run reproduced the pause bouncing (panel at T+22 ms, release
+  after it). `remap.cpp` keeps one latch per input thread.
+
+**Measured (2026-10-20).**
+
+- Unit: `settings_screen` (91,982 checks; new `TestInterfaceMappingTreeAfterP3` for the row order,
+  titles, labels, hidden-target paths, the single Reset All path and the in-song twin),
+  `input_bindings` (164 checks; the `InterfaceTargetLabel` spellings and
+  `TestResetAllCoversHiddenTargets`, which seeds all 16 targets and proves `Reset All` empties the
+  profile's `[remap]`), `input_gates` (285 checks; the D14 pause case and the latch case).
+  `ctest` 37/37.
+- Live, all on one final release binary:
+  `acceptance_controls.ps1 -Label p3-final-controls` = **78 steps, 0 failures**
+  (`out/gameplay-mapping/in-game/p3-final-controls/`): Interface Mapping reads
+  `Confirm: A, Enter, A` and `Go Back: B, Escape, B`, a tap on `Confirm` gives `Confirm: G`,
+  `Navigation` reads `Up: D-pad Up, W, Arrow Up`, its tap gives `Up: J`, `Music Library Options`
+  reads `Search: Start, Space`, and one `Reset All` press (`settings_bridge: bind_reset_all
+  'input.reset.general' -> ok (staged (controller profile))`, then `commit -> ok (committed)`)
+  puts `Confirm: A, Enter, A` back; `profile-15j-after-reset-all.toml` holds an empty `[remap]`.
+  `acceptance_controls_in_song.ps1 -Label p3-final-in-song` = **23 steps, 0 failures**
+  (`.../p3-final-in-song/`): the paused song opens
+  `settings_interface_mapping_pause_screen` (same `Confirm`/`Go Back` rows, `live-preset=Preset
+  1`), the pause holds, the cancel gesture and the resume are clean, no guest fault (D14).
+  `acceptance_binding_rows.ps1 -Label p3-final-rows` = **24 steps, 0 failures**
+  (`out/interface-mapping/p1-rows/p3-final-rows/`): the seeded `[remap] a` row reads
+  `Confirm: G, H`, a J capture grows it to `Confirm: G, H, J` one Back later.
+- Harness: the Controls arm gained the two-group route and the Reset All proof; the in-song arm's
+  Interface Mapping row is index 1 (`Confirm`) and its back-out now counts the right level; the
+  bridge-lines filter matches `bind_reset_all` as well as `bind-reset`.
+
+**Carried.** `RouteGatedRow`/`input.custom_*` had no remaining user after P2 and stay gone. The
+`Default Presets` → `Controller Presets` rename, the `Mouse & Keyboard` rename and the six-action
+submenus are P4's; the hold-to-cancel listening dialog is P5's. P3 changed only the Interface
+tree, so P4's page count expectations still describe the current Gameplay subtree. The physical-pad
+arms remain unmeasured on this machine.
 
 ### P4 — Gameplay Mapping tree
 
@@ -382,6 +444,58 @@ Gameplay Mapping
 **Tests / acceptance:** `tests/settings_screen_tests.cpp` (tree, titles, no custom tokens, row
 labels, 6-row budget), `scripts/acceptance_controls.ps1` (both branches, presets row always opens,
 submenus, reset), `docs/settings/plan.md` §3.
+
+#### P4 — landed (2026-10-20)
+
+**What shipped.**
+
+- `src/ui/settings_screen.cpp`: the gameplay tree in §P4's shape. `Gameplay Mapping` is two rows;
+  `Controller` is `Controller Presets` (retail's `controller_config_screen`, a plain `RouteRow`)
+  + `Custom Mapping` (`settings_controller_actions_panel`). Both tables' groups pages are
+  `Notes`, `Move Lane`, `Pause & Power-up` and a `PathActionRow` `Reset All`; each group draws two
+  `StateSubmenuRow` actions. The Mouse & Keyboard page *is* its groups page (the
+  `settings_keyboard_mouse_actions_*` level is gone). The 12 Assign/Reset children kept their
+  names and now return to the group that lists them. Titles: `CONTROLLER`, `MOUSE & KEYBOARD`,
+  `CUSTOM MAPPING`, `NOTES`, `MOVE LANE`, `PAUSE & POWER-UP`.
+- `src/profile/gameplay_remap.cpp`: `TableKindLabel(kKeyboardMouse)` reads `Mouse & Keyboard`
+  (D6); the `[gameplay_remap_keyboard_mouse]` section name did not move.
+- Captions say what the always-on model means: Controller Presets is available whatever the table
+  holds, and a custom action plays where the preset would; Mouse & Keyboard is always active in a
+  song. Every new caption is inside `kMaxHelpTextChars` (one first draft was 138 and the
+  `TestHelpTextsCoverEveryRow` check caught it).
+- Tests: `TestGameplayPagesAfterP2` became `TestGameplayMappingTreeAfterP4` (both tables' page
+  order, the six groups and their actions, the two plain resets, titles, `Pause & Power-up`,
+  `Power-up` bind-page title, `TableKindLabel`/section split, retired symbols); `TestScreenBindingRows`
+  now answers per group and nothing on the groups pages. Page counts moved 104 → 114 /
+  52 → 57 per context (other cancels 102 → 112).
+- Harnesses: `acceptance_controls.ps1` walks Controller → Custom Mapping → Notes → First Note
+  (wrong-kind refusal, hold cancel) and Mouse & Keyboard → Notes → First Note (capture, row text
+  `First Note: G`, then the plain `Reset All` restoring `Q, Right Click`);
+  `acceptance_binding_rows.ps1` gained the Notes level; `acceptance_controls_in_song.ps1` needed
+  no change (it never leaves Input Types/Interface Mapping) and was re-run anyway.
+
+**Measured (2026-10-20).**
+
+- `rb_blitz_settings_screen_tests` = **95,705 checks, 0 failures**; full `ctest` = **37/37**.
+- `scripts/acceptance_controls.ps1 -Label p4-controls-b` = **93 steps, 0 failures**
+  (`out/gameplay-mapping/in-game/p4-controls-b/`, shots in `p4-controls-b-shots/`): the
+  Controller page draws `Controller Presets` / `Custom Mapping`, the preset page opens on the
+  first press, `Custom Mapping` draws four rows, Notes draws `Multiple` for the default First
+  Note, a key is refused by kind and the hold leaves, the Mouse & Keyboard page draws the same
+  four rows without a Custom Mapping level, its Notes row reads `First Note: Q, Right Click`, a
+  `G` capture persists and reads back as `First Note: G`, and `Reset All` (row 3) removes the
+  captured value and the row falls back to the default pair.
+- `scripts/acceptance_controls_in_song.ps1 -Label p4-in-song` = **23 steps, 0 failures**;
+  `scripts/acceptance_binding_rows.ps1 -Label p4-rows` = **26 steps, 0 failures**
+  (`out/interface-mapping/p1-rows/p4-rows/`).
+- The first Controls arm (`p4-controls`) failed one assertion only: a profile keeps a section
+  header it already knew, so `[gameplay_remap_keyboard_mouse]` survives its own Reset All as an
+  empty section (an empty `[remap]` does the same after P3's Reset All). The arm now asserts the
+  captured value is gone; `p4-controls` is kept as the record of that mistaken assertion.
+
+**Carried.** P5's listening countdown is the only part of the plan left; the hold still leaves
+the dialog. A pad control still cannot be captured by the acceptance harness (it only sends keys),
+so the Controller table's custom-row path is proven by unit tests rather than by a live capture.
 
 ### P5 — Listening countdown, acceptance, and docs
 

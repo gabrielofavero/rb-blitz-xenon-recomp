@@ -231,13 +231,13 @@ held when the listener attached.
   mouse-only configuration stays connected with no pad attached. It is synthetic, so the SDK parks
   it past every physical ordinal, it contributes no pad state of its own, and rumble ignores it.
 
-**General Mapping's `key:`/`mouse:` context rule.** Keys drive the menus, and play too while both
-gameplay switches are off; mouse sources are gameplay-only (the native pointer owns menu mouse).
-While either gameplay switch is on, gameplay is the direct tables' business and General Mapping's
-key/mouse sources stop at the menu. The direct tables themselves act only while playing and only
-while their own switch is on. P3's dispatch (§ Direct gameplay dispatch below) is what makes the
-routing real; the sequencing guard remains as `kGameplayDispatchReady`, which is `true` in this
-build and holds both switches' routing off again if a future build needs to.
+**Interface Mapping's `key:`/`mouse:` context rule (P2/P3).** Menus are the interface's: its
+`key:` sources drive them, and its `mouse:` sources do not (the native pointer owns menu mouse).
+In a song the direct tables own keys and mouse unconditionally, so Interface Mapping's emulation
+stops at the menu. The direct tables themselves act only while playing and only while they are
+routed: the Mouse & Keyboard table whenever a song is current, the Controller table only when it
+has a custom row (P2's always-on routing, § Gameplay routing is always on). P3's dispatch (§
+Direct gameplay dispatch below) is what makes the routing real.
 
 **Boundaries.** Every held action is dropped without an edge - not released into the guest late -
 when the window loses focus, the guest screen or focus changes, input enters or leaves gameplay,
@@ -305,12 +305,15 @@ Consequences worth knowing:
 
 - General Mapping's `key:`/`mouse:` emulation now stops at every menu boundary: in a song the
   direct tables own keys and mouse unconditionally (`GeneralSourceAllowed`).
-- **A press a gameplay table is holding is not echoed into General Mapping**
+- **A press a gameplay table is holding is not echoed into Interface Mapping**
   (`CollectGameplayConsumed`). Measured 2026-10-20: Escape pauses from the Mouse & Keyboard
   table, the pause menu it opens *is* the menu context, and the same still-held Escape then
-  became Interface Mapping's Back and resumed the game it had just paused. The collector
-  suppresses the source until it is released, and it collects nothing outside a song - a menu
-  click or key is never "the tables'".
+  became Interface Mapping's Back and resumed the game it had just paused. The collector keeps a
+  per-input-thread latch: a source is added while a table holds it in a song and is dropped only
+  when the physical source is released. The latch has to outlive the context change - P3's
+  in-song arm measured the pause panel appearing 22 ms after the Escape press, with the release
+  after it, and the earlier per-poll set let exactly that window through. A menu key no table
+  ever took is never added, so the title's A press is untouched.
 - The Mouse & Keyboard defaults are the restructure plan's D12 list: First Note `Q` + right
   click, Second Note `W` + left click, Move Right `Arrow Right` + scroll up, Move Left
   `Arrow Left` + scroll down, Power-up `Space` + middle click, Pause `Escape`. A wheel detent

@@ -211,17 +211,18 @@ try {
     Drive @('key:b', "wait:$StepSeconds", 'shot:09-back-controls.png')
     Assert-Screen 'settings_controls_pause_screen' '09-back-controls' | Out-Null
 
-    ClickRow 1 '10-general'
-    Assert-Screen 'settings_general_mapping_pause_screen' '10-general' | Out-Null
-    ClickRow 0 '11-a-button'
-    Assert-Screen 'settings_bind_general_a_pause_screen' '11-a-button' | Out-Null
+    ClickRow 1 '10-interface-mapping'
+    Assert-Screen 'settings_interface_mapping_pause_screen' '10-interface-mapping' | Out-Null
+    # P3: Navigation (0), Confirm (1), Go Back (2), Music Library Options (3), Reset All (4).
+    ClickRow 1 '11-confirm-row'
+    Assert-Screen 'settings_bind_general_a_pause_screen' '11-confirm-row' | Out-Null
     ClickRow 0 '12-listening'
     Assert-Screen 'settings_listen_pause_screen' '12-listening' | Out-Null
     # The cancel gesture: a 2 s hold of any key (B included - a tap of it would bind it).
     Drive @('hold:b:2', "wait:$StepSeconds", 'shot:13-cancelled.png')
     Assert-Screen 'settings_bind_general_a_pause_screen' '13-cancelled' | Out-Null
 
-    # Back out: bind page -> General Mapping -> Controls -> in-song root (three levels).
+    # Back out: bind page -> Interface Mapping -> Controls -> in-song root (three levels).
     Drive @('key:b', "wait:$StepSeconds", 'key:b', "wait:$StepSeconds",
            'key:b', "wait:$StepSeconds", 'shot:14-back-root.png')
     Assert-Screen 'settings_pause_screen' '14-back-root' | Out-Null

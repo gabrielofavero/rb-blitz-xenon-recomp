@@ -237,10 +237,36 @@ InputRowToken ParseInputRowSymbol(const std::string_view symbol) {
   return {};
 }
 
+std::string InterfaceTargetLabel(const remap::Target target) {
+  // D1's vocabulary. The three music-library names say what the song list does with the button
+  // rather than naming the pad's button, and the two face buttons read as the menu actions they
+  // perform - `Confirm`/`Go Back` is also what keeps a player from confusing B with Back/Select.
+  switch (target) {
+    case remap::Target::kA: return "Confirm";
+    case remap::Target::kB: return "Go Back";
+    case remap::Target::kY: return "Shortcuts";
+    case remap::Target::kBack: return "Sort";
+    case remap::Target::kStart: return "Search";
+    case remap::Target::kDpadUp: return "Up";
+    case remap::Target::kDpadDown: return "Down";
+    case remap::Target::kDpadLeft: return "Left";
+    case remap::Target::kDpadRight: return "Right";
+    case remap::Target::kX:
+    case remap::Target::kLeftShoulder:
+    case remap::Target::kRightShoulder:
+    case remap::Target::kLeftTrigger:
+    case remap::Target::kRightTrigger:
+    case remap::Target::kLeftThumb:
+    case remap::Target::kRightThumb:
+      break;
+  }
+  return std::string(remap::TargetLabel(target));
+}
+
 std::string BindingRowLabel(const InputRowToken& token) {  switch (token.kind) {
     case InputRowKind::kGeneralBinding: {
       const auto target = remap::ParseTarget(token.name);
-      return target.has_value() ? std::string(remap::TargetLabel(*target)) : token.name;
+      return target.has_value() ? InterfaceTargetLabel(*target) : token.name;
     }
     case InputRowKind::kControllerBinding:
     case InputRowKind::kKeyboardMouseBinding: {

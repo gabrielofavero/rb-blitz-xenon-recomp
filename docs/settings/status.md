@@ -350,11 +350,13 @@ The input surface is in the game now (plan §16). Help & Options → Controls op
 menu, so the external app is no longer the only place to change a binding:
 
 * **Controls** → `Input Types` (Controller: Always on; Keyboard `keyboard_support`; Mouse
-  `mouse_support`), `General Mapping` (16 controls, each with an Assign/Reset child page and the
-  binding line in the row — see the next bullet — plus a table-level Reset All) and `Gameplay
-  Mapping` (P2, 2026-10-20: Controller = Default Presets — retail's page, always available — and
-  Custom Mapping; the Keyboard & Mouse page enters Custom Mapping directly, its rename to "Mouse &
-  Keyboard" is P4's; six actions and Reset All in each table; the Custom switches are gone).
+  `mouse_support`), `Interface Mapping` (P3, 2026-10-20: the interface's nine rows in three
+  groups — `Navigation` (Up/Down/Left/Right), `Confirm`, `Go Back`, `Music Library Options`
+  (Search/Shortcuts/Sort) and a plain `Reset All`; each row has an Assign/Reset child page and
+  draws its binding line in place — see the next bullet) and `Gameplay Mapping` (P4, 2026-10-20:
+  `Controller` = Controller Presets — retail's page, always available — and Custom Mapping;
+  `Mouse & Keyboard` lists the same three groups and Reset All directly; the two Custom switches
+  are gone since P2).
 * **A binding row draws its inputs in place (P1, 2026-10-19).** The list's own text is a locale
   entry baked at boot, so the host draws the line over the guest's label: `<row>: <inputs>`
   (`A: G, H`, `First Note: Q, Right Click`), with `Multiple` when the list does not fit the row's
@@ -386,10 +388,50 @@ menu, so the external app is no longer the only place to change a binding:
   `out/gameplay-mapping/p2-2026-10-20/` (boot lines), `out/gameplay-mapping/in-game/p2-in-song-2026-10-20d/`
   (paused song, live preset line) and `out/gameplay-mapping/in-game/p2-controls-2026-10-20b/`
   (Controls tree, 57 steps).
+* **Interface Mapping owns the interface (P3, 2026-10-20).** `General Mapping` is rebuilt as
+  `Interface Mapping`: five rows on the top page (`Navigation`, `Confirm` → A, `Go Back` → B,
+  `Music Library Options`, `Reset All`), four in `Navigation` (the D-pad's Up/Down/Left/Right) and
+  three in `Music Library Options` (Search → Start, Shortcuts → Y, Sort → Back). The `[remap]`
+  tokens did not move (`input.general.a` is `Confirm`), so an existing profile binds the same
+  controls; the seven targets the page no longer shows (X, the shoulders, the triggers, the two
+  stick clicks) keep their compiled defaults and are still reset by `Reset All`, which now draws
+  as a plain action with no `: Nothing` state. The row labels, the overlay's replacement line and
+  the help caption read one spelling ([`InterfaceTargetLabel`](../../src/profile/input_rows.h)).
+  Live: `scripts/acceptance_controls.ps1 -Label p3-final-controls` (78 steps, 0 failures,
+  `out/gameplay-mapping/in-game/p3-final-controls/`), `scripts/acceptance_controls_in_song.ps1
+  -Label p3-final-in-song` (23 steps, 0 failures, `.../p3-final-in-song/`) and
+  `scripts/acceptance_binding_rows.ps1 -Label p3-final-rows` (24 steps, 0 failures,
+  `out/interface-mapping/p1-rows/p3-final-rows/`).
+* **A consumed source stays consumed until it is released (P3, 2026-10-20).** P2's per-poll set
+  emptied the moment the context became a menu, so a key that opened the menu while still down
+  could be read by Interface Mapping: the P3 in-song arm reproduced the pause bouncing (the panel
+  appeared 22 ms after the Escape press, the release landed after it). `CollectGameplayConsumed`
+  now takes a caller-owned latch - a source a gameplay table took survives the context change
+  until it is physically released - which is what makes a pause stay paused
+  (`out/gameplay-mapping/in-game/p3-final-in-song/`; the pre-fix bouncing run is preserved as
+  `p3-in-song-2026-10-20/`).
+* **Gameplay Mapping is two tables of three groups (P4, 2026-10-20).** `Controller` keeps the
+  game's own page as `Controller Presets` - always available, no Custom switch above it - beside
+  `Custom Mapping`; `Mouse & Keyboard` enters the same groups directly, so the extra `Custom
+  Mapping` level and the `Default Presets` name are gone. Both tables draw `Notes` (First Note,
+  Second Note), `Move Lane` (Move Right, Move Left) and `Pause & Power-up` (Pause, Power-up) over
+  a plain `Reset All`, so no page is wider than four rows and every action keeps its Assign/Reset
+  child - which now returns to the group that lists it, not to the top of the table. The
+  `gameplay_remap_*` tokens did not move, `TableKindLabel` reads `Mouse & Keyboard`, and the
+  retired `settings_keyboard_mouse_actions_*` pages are gone. Live:
+  `scripts/acceptance_controls.ps1 -Label p4-controls-b` (93 steps, 0 failures,
+  `out/gameplay-mapping/in-game/p4-controls-b/`), `acceptance_controls_in_song.ps1 -Label
+  p4-in-song` (23 steps, 0 failures) and `acceptance_binding_rows.ps1 -Label p4-rows` (26 steps,
+  0 failures, `out/interface-mapping/p1-rows/p4-rows/`). The Controls arm proves both branches,
+  the always-available preset page, the three groups, the wrong-kind refusal, a Mouse & Keyboard
+  capture read back in the row, and that table's plain Reset All restoring the default pair.
+  A profile keeps an empty section header it already knew (`[gameplay_remap_keyboard_mouse]`
+  survives a reset the way an empty `[remap]` does), so the arm asserts the captured value is
+  gone rather than the section.
 * **The profile keeps only differences**: a switch set back to its compiled default is dropped
   instead of written (the two device gates are the only switches left; `gameplay_mapping_*` is no
   longer written at all).
-* **Retail's controller page is the Default Presets destination**, not a deleted screen, and the
+* **Retail's controller page is the Controller Presets destination**, not a deleted screen, and the
   in-song list's `Controls` row now jumps to the pause twin of this menu. The in-song route was
   driven by P8a (below), not only unit-tested.
 * **The compiled keyboard defaults are interface-oriented (2026-10-19).** Gameplay Mapping's

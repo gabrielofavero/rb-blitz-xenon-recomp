@@ -12,6 +12,7 @@
 #include "profile/gameplay_remap.h"
 #include "profile/remap.h"
 
+#include <algorithm>
 #include <chrono>
 #include <optional>
 #include <set>
@@ -377,6 +378,38 @@ int main() {
     CHECK_FALSE((GameplayRouting{controller.Custom(), true}).controller);
   }
 
+  BeginCase("paused: the interface tables answer and the gameplay tables stop");
+  {
+    // D14 (interface/gameplay mapping restructure plan, P3): a paused song is the *menu* context.
+    // Whatever the Controller table holds, both gameplay tables are inactive there and the
+    // interface's keys are allowed - which is what lets the pause panel's Back work with keys.
+    // A gameplay press that is still down is the *latch* case below.
+    const GameplayRouting any_table{true, true};
+    CHECK_FALSE(TableActive(any_table, gameplay::TableKind::kController, false));
+    CHECK_FALSE(TableActive(any_table, gameplay::TableKind::kKeyboardMouse, false));
+    FakeDevices devices;
+    devices.KeyDown("Escape");
+    gameplay::Table controller(gameplay::TableKind::kController);
+    controller.Set(gameplay::Action::kPause, {Key("Escape")});
+    gameplay::Table keyboard_mouse(gameplay::TableKind::kKeyboardMouse);
+    std::vector<remap::Source> carry;
+    std::vector<remap::Source> consumed;
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, any_table, false, controller,
+                            keyboard_mouse, &carry, &consumed);
+    CHECK_TRUE(consumed.empty());
+    CHECK_TRUE(GeneralSourceAllowed(kOpen, false, remap::SourceKind::kKey));
+    // The interface's Back is still a binding while paused - the pause panel's own way out.
+    const remap::Table general = remap::Table::FromRows({});
+    const std::vector<remap::Source>* back = general.Effective(remap::Target::kB);
+    CHECK_TRUE(back != nullptr);
+    if (back != nullptr) {
+      CHECK_TRUE(std::any_of(back->begin(), back->end(), [](const remap::Source& source) {
+        return source.kind == remap::SourceKind::kKey && source.name == "Escape";
+      }));
+    }
+    devices.KeyUp("Escape");
+  }
+
   BeginCase("a press a gameplay table is holding is not echoed into General Mapping");
   {
     // Measured 2026-10-20 (P2): Escape pauses from the Mouse & Keyboard table, and the pause menu
@@ -386,18 +419,21 @@ int main() {
     devices.KeyDown("Escape");
     gameplay::Table keyboard_mouse(gameplay::TableKind::kKeyboardMouse);
     gameplay::Table controller(gameplay::TableKind::kController);
+    std::vector<remap::Source> carry;
     std::vector<remap::Source> consumed;
 
     // In a song the Mouse & Keyboard table is active, so its Pause binding is consumed ...
     CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, true,
-                            controller, keyboard_mouse, &consumed);
+                            controller, keyboard_mouse, &carry, &consumed);
     CHECK_EQ(consumed.size(), 1u);
     if (!consumed.empty()) {
       CHECK_TRUE(consumed.front() == Key("Escape"));
     }
-    // ... and in a menu nothing is, which is what keeps the same key working as Back there.
+    // ... and in a menu nothing NEW is taken with a fresh latch, which is what keeps a menu key
+    // usable there.
+    std::vector<remap::Source> menu_carry;
     CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, false,
-                            controller, keyboard_mouse, &consumed);
+                            controller, keyboard_mouse, &menu_carry, &consumed);
     CHECK_TRUE(consumed.empty());
     // A pad source is never collected: the Controller table's overlay removes its bits instead.
     devices.KeyUp("Escape");
@@ -405,11 +441,46 @@ int main() {
     devices.pad_connected = true;
     gameplay::Table custom_controller(gameplay::TableKind::kController);
     custom_controller.Set(gameplay::Action::kPowerup, {Pad("x")});
+    std::vector<remap::Source> pad_carry;
     CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{true, true}, true,
-                            custom_controller, keyboard_mouse, &consumed);
+                            custom_controller, keyboard_mouse, &pad_carry, &consumed);
     for (const remap::Source& source : consumed) {
       CHECK_TRUE(source.kind != remap::SourceKind::kPad);
     }
+  }
+
+  BeginCase("a source a gameplay table took stays taken until it is released");
+  {
+    // P3 re-measured the P2 defect live: Escape paused the song and the pause panel appeared
+    // 22 ms later, *between the key's down and its up*. The old per-poll set emptied the moment
+    // the context became a menu, so the still-held Escape reached Interface Mapping's Back and
+    // the game resumed. The latch ends at the release instead of at the context change.
+    FakeDevices devices;
+    devices.KeyDown("Escape");
+    gameplay::Table keyboard_mouse(gameplay::TableKind::kKeyboardMouse);
+    gameplay::Table controller(gameplay::TableKind::kController);
+    std::vector<remap::Source> carry;
+    std::vector<remap::Source> consumed;
+
+    // The song takes the key ...
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, true,
+                            controller, keyboard_mouse, &carry, &consumed);
+    CHECK_EQ(consumed.size(), 1u);
+    // ... the pause menu opens with the key still down: still taken, so the menu cannot read it.
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, false,
+                            controller, keyboard_mouse, &carry, &consumed);
+    CHECK_EQ(consumed.size(), 1u);
+    // The release ends the latch: the same key is the interface's again, in the same menu.
+    devices.KeyUp("Escape");
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, false,
+                            controller, keyboard_mouse, &carry, &consumed);
+    CHECK_TRUE(consumed.empty());
+    // A menu key no table ever took is never carried, even while it stays down.
+    devices.KeyDown("space");
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, false,
+                            controller, keyboard_mouse, &carry, &consumed);
+    CHECK_TRUE(consumed.empty());
+    devices.KeyUp("space");
   }
 
   BeginCase("General Mapping's key/mouse sources follow the gates and the context");

@@ -65,12 +65,24 @@ is removed from this file, not from the log.
   (`Reset All`), which is what makes the table not custom again.
 
 - **A press a gameplay table is holding cannot act as an interface binding until it is released**
-  (found and fixed with P2, 2026-10-20). Measured: Escape pauses from the Mouse & Keyboard table,
-  the pause menu it opens is the menu context, and the same still-held Escape then became
-  Interface Mapping's `Go Back` and resumed the game it had just paused. `CollectGameplayConsumed`
-  hands General Mapping the sources an active table is holding, and `SourceDownThunk` refuses
-  them, so the key only works as Back after a release and a fresh press. This is deliberate and
-  applies to every shared key (`Q`, `W`, `Escape`, the arrows, `Space`).
+  (found with P2 and completed by P3, 2026-10-20). Measured: Escape pauses from the Mouse &
+  Keyboard table, the pause menu it opens is the menu context, and the same still-held Escape then
+  became Interface Mapping's `Go Back` and resumed the game it had just paused.
+  `CollectGameplayConsumed` keeps a per-input-thread latch of the sources an active table has
+  taken, and `SourceDownThunk` refuses them; the latch ends at the physical release, not at the
+  context change. P2's first version ended it per poll, and P3's in-song arm caught the hole live:
+  the pause panel appeared **22 ms** after the press, with the release landing after it, and the
+  song resumed (`out/gameplay-mapping/in-game/p3-in-song-2026-10-20/`; the fixed run is
+  `p3-final-in-song/` in the same folder). This is deliberate and applies to every shared key
+  (`Q`, `W`, `Escape`, the arrows, `Space`).
+
+- **Interface Mapping hides seven `[remap]` targets** (P3 of the restructure plan, 2026-10-20,
+  D2). The page owns the interface's nine actions (`Navigation`'s four directions, `Confirm`,
+  `Go Back`, `Search`, `Shortcuts`, `Sort`) and does not draw X, the shoulders, the triggers or
+  the two stick clicks. Those seven keep their compiled defaults (and a `[remap]` row for one of
+  them in an existing profile still applies), and `Reset All` resets all sixteen - it is the
+  table's reset, not the page's. Hiding them is the decision, not an unfinished page: a
+  per-target row for every pad control was the 16-row list this page replaced.
 
 - **In the listening dialog, holding a binding cancels instead of assigning it, and the dialog
   refuses to bind what you press first** (plan §14.3, P7, 2026-10-18). A capture waits for every

@@ -465,9 +465,14 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // before the gameplay tables are evaluated, so the collector runs here: a press that
           // belongs to a gameplay action must not also become a General Mapping target when the
           // context flips mid-hold (the Escape that pauses vs Interface Mapping's Back).
+          //
+          // The latch is per input thread and per poll: `CollectGameplayConsumed` keeps a source
+          // taken until it is released, so a menu that opens between the key's down and its up
+          // (the pause panel, measured 22 ms apart) cannot receive the same key as a menu row.
+          static thread_local std::vector<Source> gameplay_consumed;
           std::vector<Source> consumed;
           CollectGameplayConsumed(physical, gates, routing, gameplay, config->controller,
-                                  config->keyboard_mouse, &consumed);
+                                  config->keyboard_mouse, &gameplay_consumed, &consumed);
           // P7: the listening dialog. The raw frame is consumed every poll so the key serial stays
           // current; while a capture is armed the guest is handed a neutral pad below, which is
           // what keeps the candidate press from navigating the menu it is being bound in. The

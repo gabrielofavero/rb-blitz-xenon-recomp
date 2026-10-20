@@ -127,16 +127,25 @@ bool TableActive(GameplayRouting routing, profile::gameplay_remap::TableKind kin
 bool GeneralSourceAllowed(const SourceGates& gates, bool gameplay,
                           profile::remap::SourceKind kind);
 
-// Every key or mouse source an ACTIVE gameplay table is holding this poll. General Mapping must
-// not act on one of them even after the context changes: the press belongs to the table. Measured
-// 2026-10-20 (P2): Escape pauses from the Mouse & Keyboard table, and the pause menu it opens is
-// the menu context - so the same still-held Escape became Interface Mapping's Back and backed
-// straight out of the pause it had just caused. A pad source is not collected: the Controller
-// table's own pad overlay removes its bits from the delivered state.
+// Every key or mouse source an ACTIVE gameplay table is holding this poll, plus the ones it took
+// before the context changed and that are still down. General Mapping must not act on one of
+// them: the press belongs to the table. Measured 2026-10-20 (P2): Escape pauses from the Mouse &
+// Keyboard table, and the pause menu it opens is the menu context - so the same still-held Escape
+// became Interface Mapping's Back and backed straight out of the pause it had just caused. A pad
+// source is not collected: the Controller table's own pad overlay removes its bits from the
+// delivered state.
+//
+// `carry` is the caller's per-input-filter latch, and it is what makes the rule survive the
+// context change: a poll first drops everything it carries that is no longer physically held,
+// then (while `gameplay`) adds what an active table holds, and answers that set through `out`.
+// A source therefore stays taken until it is released - the pause panel opening between the key's
+// down and its up (22 ms, re-measured in P3) can no longer leak it. A menu key no table ever took
+// is never added, so the title's A press is untouched.
 void CollectGameplayConsumed(const PhysicalInput& input, const SourceGates& gates,
                              GameplayRouting routing, bool gameplay,
                              const profile::gameplay_remap::Table& controller,
                              const profile::gameplay_remap::Table& keyboard_mouse,
+                             std::vector<profile::remap::Source>* carry,
                              std::vector<profile::remap::Source>* out);
 
 // One action's held state, with the edges a dispatcher consumes. `Observe` is one poll:

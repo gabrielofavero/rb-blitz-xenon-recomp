@@ -6,6 +6,7 @@
 
 #include "input/source_gates.h"
 
+#include <algorithm>
 #include <optional>
 #include <vector>
 
@@ -123,30 +124,41 @@ bool GeneralSourceAllowed(const SourceGates& gates, const bool gameplay, const S
 void CollectGameplayConsumed(const PhysicalInput& input, const SourceGates& gates,
                              const GameplayRouting routing, const bool gameplay,
                              const Table& controller, const Table& keyboard_mouse,
-                             std::vector<Source>* out) {
+                             std::vector<Source>* carry, std::vector<Source>* out) {
   if (out == nullptr) {
     return;
   }
   out->clear();
-  if (!gameplay) {
-    // A menu: no table acts, so nothing of the player's is the tables'. This is what keeps the
-    // key that opens a menu usable inside it (the Keyboard + Mouse defaults would otherwise
-    // consume Space, Q, W, Escape and the arrow keys from every menu).
+  if (carry == nullptr) {
     return;
   }
-  const auto collect = [&](const Table& table, const bool active) {
-    if (!active) {
-      return;
-    }
-    for (const Action action : profile::gameplay_remap::Actions()) {
-      const Source* held = HeldSource(input, gates, table, action);
-      if (held != nullptr && held->kind != SourceKind::kPad) {
-        out->push_back(*held);
+  // 1. A carried source survives only while it is still physically held. Doing this *before* the
+  //    gameplay question is what makes the latch end at the release rather than at the context
+  //    change, and a release that happens in a menu still counts (the devices are read the same
+  //    way in both contexts).
+  std::erase_if(*carry, [&](const Source& source) {
+    return !SourceHeld(input, gates, source);
+  });
+  // 2. In a menu no table acts, so nothing new is taken - this is what keeps a menu key usable
+  //    inside the menu it opens. In a song the active tables' held sources join the latch.
+  if (gameplay) {
+    const auto collect = [&](const Table& table, const bool active) {
+      if (!active) {
+        return;
       }
-    }
-  };
-  collect(controller, routing.controller);
-  collect(keyboard_mouse, routing.keyboard_mouse);
+      for (const Action action : profile::gameplay_remap::Actions()) {
+        const Source* held = HeldSource(input, gates, table, action);
+        if (held != nullptr && held->kind != SourceKind::kPad &&
+            std::find(carry->begin(), carry->end(), *held) == carry->end()) {
+          carry->push_back(*held);
+        }
+      }
+    };
+    collect(controller, routing.controller);
+    collect(keyboard_mouse, routing.keyboard_mouse);
+  }
+  // 3. What the latch holds is what General Mapping must leave alone this poll.
+  *out = *carry;
 }
 
 ActionHold::Edge ActionHold::Observe(bool held_now) {

@@ -29,8 +29,8 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 >
 > **Current-state correction (2026-10-18, P7):** root index 1 (`Controls`) is no longer retail's
 > controller page. It opens the in-game Controls menu (§3.3 below), and retail's page moved under
-> Gameplay Mapping → Controller → Default Presets; the pause record's `pause_controls` case is
-> re-pointed at the pause twin of that menu.
+> Gameplay Mapping → Controller → Controller Presets (renamed from `Default Presets` by P4,
+> 2026-10-20); the pause record's `pause_controls` case is re-pointed at the pause twin of that menu.
 >
 > **Current-state correction (2026-10-19, the owner's surface overhaul):** the root is now
 > `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; **Interface is no longer a root
@@ -150,7 +150,7 @@ context's own Controls screen keeps the shape the guest already accepted:
 That screen and its children are the in-song twins `settings_screen.cpp` builds for every page of
 ours (`InSongPanels()`: pause panel set, `_pause_screen` names, back targets mapped to the same
 context), so the whole nested Controls menu exists in song with its Back chain returning through
-Default Presets → Controller → Gameplay Mapping → Controls → the pause list. The main-menu root's
+Controller Presets → Controller → Gameplay Mapping → Controls → the pause list. The main-menu root's
 `controls` row opens the same tree with `settings_controls_screen`.
 
 **What is measured and what is not.** The screen definitions, the twins and the reroute target are
