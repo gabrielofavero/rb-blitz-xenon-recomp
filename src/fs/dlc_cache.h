@@ -130,6 +130,12 @@ inline bool CollectTreeEntries(const std::vector<std::filesystem::path>& roots,
         // ScanDlcLibraries refuses to follow one.
         const bool symlink = entry.is_symlink(entry_ec);
         if (entry_ec) { *reason = entry.path().string() + ": " + entry_ec.message(); return false; }
+        // The store's staging directory is not part of the library's identity: a
+        // download in flight must not change the fingerprint (which would discard the
+        // cache on every byte written) and a partial package must not be hashed in.
+        if (IsStoreStagingEntryName(Utf8FileName(entry.path()))) {
+          continue;
+        }
         if (!symlink) {
           pending.emplace_back(root_index, entry.path());
         }

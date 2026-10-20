@@ -45,8 +45,13 @@
 #include "input/remap.h"
 #include "profile/input_rows.h"
 #include "settings/input_bindings.h"
+#include "store/store_search.h"
 #include "ui/help_topics.h"
 #include "ui/settings_screen.h"
+
+// `store::SearchStatusText()` is read every frame by the draw below; the namespace alias keeps the
+// call readable beside the other status sources.
+namespace store_ns = rb_blitz::store;
 
 REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
                     "Show a short description of the highlighted row at the bottom of the screen "
@@ -360,14 +365,24 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // usable input).
     const std::string recovery_status = input::RecoveryNotice();
     const bool recovering = !recovery_status.empty();
-    if (recovering) {
+    // RhythmVerse plan P4: the search's field and its progress are input feedback too - the key
+    // pages draw static labels, so the only place the typed query can appear is here. It outranks
+    // every caption while the search surface is open (or a request is in flight), and it is drawn
+    // with Settings Labels off for the same reason a capture is: a field a player cannot read is
+    // an input problem, not optional help.
+    const std::string search_status = store_ns::SearchStatusText();
+    const bool searching = !search_status.empty();
+    if (searching) {
+      text = search_status;
+    } else if (recovering) {
       text = recovery_status;
     } else if (capturing) {
       text = capture_status;
     }
     // Off is invisible, not "drawn and empty", and the cvar is re-read here so the toggle is
     // live - the probe overlay's rule, and what makes Interface -> Settings Labels a `hot` row.
-    if (text.empty() || (!capturing && !recovering && !REXCVAR_GET(settings_help_overlay))) {
+    if (text.empty() ||
+        (!capturing && !recovering && !searching && !REXCVAR_GET(settings_help_overlay))) {
       return;
     }
 

@@ -805,27 +805,37 @@ std::optional<ListingPage> ParseListing(std::string_view json, std::string* erro
   const Json* songs = Member(*data, "songs");
   if (songs != nullptr) {
     if (!songs->is_array()) {
-      if (error != nullptr) {
-        *error = "data.songs is not an array";
+      // Measured 2026-10-20 against the live API: a search with no matches answers
+      // `{"records":{"total_filtered":0,"returned":0},"songs":false}` — a JSON `false`, not `[]`.
+      // An empty result is a state of the query, not a broken response (the plan's §P4 rule: it
+      // "must use the corresponding UI state, not be reported as a network failure"), so a
+      // falsey `songs` is read as zero songs whenever the API's own record count agrees. Any
+      // other non-array shape is still refused.
+      const bool empty_marker = (songs->is_boolean() && !songs->get<bool>()) || songs->is_null();
+      if (!empty_marker || page.returned != 0) {
+        if (error != nullptr) {
+          *error = "data.songs is not an array";
+        }
+        return std::nullopt;
       }
-      return std::nullopt;
-    }
-    page.songs.reserve(songs->size());
-    for (const Json& entry : *songs) {
-      if (!entry.is_object()) {
-        continue;
+    } else {
+      page.songs.reserve(songs->size());
+      for (const Json& entry : *songs) {
+        if (!entry.is_object()) {
+          continue;
+        }
+        SongFile song = ParseSong(entry);
+        if (song.file_id.empty() && song.title.empty()) {
+          // An entry with neither an identity nor a title cannot be shown or matched; the plan's
+          // rule is that a missing optional field must not crash the client (§3 "Parse these
+          // documented variations deliberately"). It is dropped, not fatal.
+          continue;
+        }
+        page.songs.push_back(std::move(song));
       }
-      SongFile song = ParseSong(entry);
-      if (song.file_id.empty() && song.title.empty()) {
-        // An entry with neither an identity nor a title cannot be shown or matched; the plan's rule
-        // is that a missing optional field must not crash the client (§3 "Parse these documented
-        // variations deliberately"). It is dropped, not fatal.
-        continue;
+      if (page.returned == 0) {
+        page.returned = static_cast<int>(page.songs.size());
       }
-      page.songs.push_back(std::move(song));
-    }
-    if (page.returned == 0) {
-      page.returned = static_cast<int>(page.songs.size());
     }
   }
   return page;

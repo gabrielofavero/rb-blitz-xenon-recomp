@@ -85,6 +85,7 @@
 #include "settings/boot.h"
 #include "platform/game_restart.h"
 #include "store/store_probe.h"
+#include "store/store_search_service.h"
 #include "ui/help_overlay.h"
 #include "util/sha256.h"
 
@@ -343,6 +344,10 @@ class RbBlitzApp : public rex::ReXApp {
     // is built, because the probe is what names the paths that build result is measured against.
     // It reads its cvar once here, on this host thread; the observer itself runs on guest threads.
     rb_blitz::store::InstallPathProbe();
+    // P4 of the RhythmVerse store plan: the search's worker and its one HTTP path. Started here,
+    // on the host thread before the guest exists, because the guest's `write_file` hook only posts
+    // work - the request itself never runs on a guest thread (project rule).
+    rb_blitz::store::InstallSearchTransport();
     rb_blitz::settings::InstallMenuPayload(runtime());
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest

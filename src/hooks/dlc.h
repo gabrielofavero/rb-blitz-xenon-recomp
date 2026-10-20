@@ -43,6 +43,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 // Only one refresh runs at a time: a second ask while the scan is in flight is logged and
 // ignored, so a trigger that fires more than once cannot queue a second scan.
 void RefreshConfigured();
+// P5 of the RhythmVerse store plan: the same library scan and publish, asked for by a verified
+// store install. It deliberately ignores the R7 cache gate (an install is not a cache feature)
+// and does not wait: the boot's resolved flat roots are re-walked on a worker and the result is
+// handed over by PublishPendingRefresh() on a guest thread. A structured root is not covered -
+// its package list is captured at boot - so an install into one is discovered by the next boot.
+void RefreshAfterStoreInstall();
 // Serializes the restart barrier with refresh worker creation and waits for cache writes.
 void DrainRefreshForRestart();
 

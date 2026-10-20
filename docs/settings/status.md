@@ -18,6 +18,25 @@ Part 1 wherever they disagree.
   labels, defaults and both contexts; `rb_blitz_store_client_tests` pins the row → snapshot mapping
   (a commit bumps the generation, an equal commit does not). No store worker exists yet (P1/P3), so
   "Off makes no request" is structural until one does.
+- **RhythmVerse search is typed on an authored keyboard (2026-10-20, RhythmVerse plan P4).** There
+  is no retail keyboard to reuse — all 131 compiled DTA records were decoded and the only entry
+  point is `rbworld_link_panel show_keyboard`, a *native* method of the Rock Central e-mail panel —
+  so the query is typed on ten authored pages per context in the house row style: the root is
+  `Done / Letters / Numbers 0-5 / Numbers 6-9 / Space / More Keys`, with a letters index, five
+  letter pages, two number pages and a `More Keys` page (`Backspace / Clear / Cancel`); every
+  character page returns to the root, so one query can mix letters, digits and a space. Each key is
+  a row that writes `rbbz-store/search/key/<token>` (never the text in a path), and each page's
+  caption names the character it adds ("Add 'B' to the search. Search by artist or song title, one
+  at a time."). The field is read on the Help & Options caption bar — `Search: bush`,
+  `Searching for "bush"...`, `15 matches for "bush". Press Done to open the store.`, and the
+  no-match `Try just the artist name or just the song title.` — and drawn **even with Settings
+  Labels off**, because a field a player cannot read is an input problem, not optional help. With
+  `store_search_diagnostic` on, the main menu's **RhythmVerse Customs** row jumps straight to the
+  keys. **Evidence:** `rb_blitz_store_search_tests` (283 checks),
+  `rb_blitz_settings_screen_tests` (page order, the six-row budget, the write path of every key),
+  and a boot whose strip was OCRd (`scripts/probe_search.ps1`,
+  `out/_swap/search-probe/20261020-174624`). The matches are **not drawn in the store's own list
+  yet** — that list is P3's front menu.
 - **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
   `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
   (`Main Menu`, `Offline Prompts`, `Help & Options Labels`); HUD moved under Gameplay and is split into

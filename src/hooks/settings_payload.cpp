@@ -19,6 +19,7 @@
 #include "settings/store.h"
 #include "settings/schema.h"
 #include "store/store_probe.h"
+#include "store/store_search_service.h"
 #include "ui/settings_screen.h"
 #include "platform/game_restart.h"
 #include "ui/menu_options.h"
@@ -337,6 +338,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     configuration.rhythmverse_row = rhythmverse_setting;
     // P2's data-layer spike (RhythmVerse plan §5/P2): empty is the ordinary boot.
     configuration.store_local_server_root = std::string(store::LocalServerRoot());
+    configuration.store_search_diagnostic = store::SearchDiagnostic();
     if (!configuration.store_local_server_root.empty()) {
       REXLOG_INFO("settings_menu: the P2 store probe points netcache at the local server '{}'",
                   configuration.store_local_server_root);

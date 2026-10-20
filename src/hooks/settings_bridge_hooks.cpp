@@ -65,6 +65,8 @@
 #include "settings/input_bindings.h"
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
+#include "store/store_download_service.h"
+#include "store/store_search.h"
 #include "store/store_settings.h"
 
 // The two builtins the channel rides on and the node -> string helper the originals use. The
@@ -650,6 +652,22 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     WriteResultCell(base, ctx.r3.u32, store_answer ? 1u : 0u);
     return true;
   }
+  // P5's download state predicates (`rbbz-store/state/<job>/<state>`,
+  // `progress/<job>/at-least/<bucket>`, `error/<job>/<token>`) are the same one-bit read. They
+  // are answered here for the same reason: the store owns them, not the settings channel.
+  bool download_answer = false;
+  if (::rb_blitz::store::AnswerDownloadQuery(path, &download_answer)) {
+    WriteResultCell(base, ctx.r3.u32, download_answer ? 1u : 0u);
+    return true;
+  }
+  // P4's search predicates (`rbbz-store/search/open|ready|state/<token>|count/at-least/<n>`) are
+  // the authored key pages' read half - the same one-bit channel again, answered with the settings
+  // channel off for the same reason.
+  bool search_answer = false;
+  if (::rb_blitz::store::AnswerSearchQuery(path, &search_answer)) {
+    WriteResultCell(base, ctx.r3.u32, search_answer ? 1u : 0u);
+    return true;
+  }
   if (!g_enabled || g_forward_only) {
     return false;
   }
@@ -663,10 +681,34 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
 }
 
 bool TakeWrite(PPCContext& ctx, uint8_t* base) {
+  const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  // P4's search keys (`rbbz-store/search/open|done|cancel|key/<token>|text/<hex>`) come first
+  // because the download handler below claims the *whole* `rbbz-store/` prefix: it answers `true`
+  // for anything it cannot parse as a job command ("refusing a malformed write"), which would
+  // otherwise swallow every key press. This parser answers `false` for a `download/...` path, so
+  // P5's commands still reach it unchanged.
+  std::string search_why;
+  if (::rb_blitz::store::HandleStoreSearchWrite(path, &search_why)) {
+    // One line per key the guest sends: the measurement's evidence that a press reached the host,
+    // and the only way to tell a dropped press from a refused one.
+    if (search_why.empty()) {
+      REXLOG_INFO("store_search: '{}'", path);
+    } else {
+      REXLOG_INFO("store_search: '{}' {}", path, search_why);
+    }
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
+  // P5's download commands (`rbbz-store/download/start|cancel|again/<job>`) are the store's, not
+  // the settings channel's, so they are consumed before the settings gate - the same ordering the
+  // store's read queries use above.
+  if (::rb_blitz::store::HandleDownloadWrite(path)) {
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
   if (!g_enabled || g_forward_only) {
     return false;
   }
-  const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
   if (!IsNamespacedPath(path)) {
     return false;
   }

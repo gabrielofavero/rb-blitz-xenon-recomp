@@ -93,7 +93,14 @@ constexpr SettingId kRowsThatMustStayRestart[] = {
 };
 
 // The hot set, by name, so a promotion is a deliberate edit to this list and not a side effect.
-constexpr SettingId kRowsThatMustBeHot[] = {SettingId::kVsync, SettingId::kSettingsLabels};
+// The six RhythmVerse rows joined it on 2026-10-20 (RhythmVerse plan P6): the store's applier
+// replaces the in-process settings snapshot its workers read before every request, which is a
+// live effect with its own evidence in `src/settings/schema.cpp`.
+constexpr SettingId kRowsThatMustBeHot[] = {
+    SettingId::kVsync,          SettingId::kSettingsLabels,  SettingId::kRhythmVerse,
+    SettingId::kRhythmVerseGuitar, SettingId::kRhythmVerseBass, SettingId::kRhythmVerseDrums,
+    SettingId::kRhythmVerseVocals, SettingId::kRhythmVerseKeys,
+};
 
 void StrategyTableIsComplete() {
   test::BeginCase("strategy: every row carries a §5.5 classification");
@@ -122,10 +129,10 @@ void StrategyTableIsComplete() {
              descriptor.strategy == ApplicationStrategy::kRestart);
   }
 
-  // Exactly two rows are hot today, and each is hot because a boot measured the effect, not
+  // Exactly eight rows are hot today, and each is hot because a boot measured the effect, not
   // because its cvar was tagged reloadable (see src/settings/schema.cpp). A future session that
   // promotes another row must also record its evidence, and this expectation moves with it.
-  CHECK_EQ(hot, 2);
+  CHECK_EQ(hot, 8);
   for (const SettingId id : kRowsThatMustBeHot) {
     const rb_blitz::settings::schema::SchemaRow* row = rb_blitz::settings::schema::FindRow(id);
     CHECK_TRUE(row != nullptr);

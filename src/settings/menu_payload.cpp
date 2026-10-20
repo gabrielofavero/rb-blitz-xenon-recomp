@@ -378,9 +378,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (definition == nullptr) ui_why = "the store record carries no netcache_init";
       note("the store's netcache-init rewrite was refused: " + ui_why);
     }
-    // The panel starts its first request only from its own `on_init_commerce_success` callback,
-    // which needs a native commerce session; the same spike switch drives that callback from the
-    // store screen's `enter` method so the request path can be measured offline.
+  }
+  // The retail store screen's `enter` member: P2/P3's commerce bypass, only under the local-server
+  // spike above. The panel starts its first request only from its own `on_init_commerce_success`
+  // callback, which needs a native commerce session, so the spike drives that callback from the
+  // store screen's `enter`. (P4's search measurement used to append its jump here as well; it now
+  // routes from the RhythmVerse main-menu row instead - a jump issued from this screen re-delivers
+  // every later press to the page that just became current, measured 2026-10-20.)
+  if (!local_store_root.empty()) {
     std::vector<uint8_t> store_ui_bytes;
     std::vector<Node> store_ui_roots;
     ui::dtb::RootHeader store_ui_header;

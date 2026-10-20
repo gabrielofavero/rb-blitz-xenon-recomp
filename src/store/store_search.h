@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// rb_blitz - ReXGlue Recompiled Project
+//
+// P4 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// §1.5, §5/P4): the search's *data* half - the typed query, its transport across the guest
+// bridge, the request it becomes, and the answer it accepts.
+//
+// Three measured facts decide the shape of this file (all recorded in the plan):
+//
+//   * **there is no retail keyboard to borrow.** All 131 compiled DTA records of the main ark were
+//     scanned (2026-10-20, `out/_swap/scan_dtb_tokens.py`): the only `show_keyboard` in the title
+//     is `rbworld_link_panel`'s native method for the Rock Central e-mail field. So the query is
+//     authored - `src/ui/settings_screen.cpp` builds the key pages - and the host owns the buffer.
+//   * **the DTA cannot carry a typed string.** A script can concatenate constants and format
+//     integers, but it cannot build a CRC-32 (`src/hooks/settings_bridge.h`) and its text-form
+//     token alphabet has no spaces. Characters therefore do not travel as text in a path at all:
+//     the guest sends one *key token* per press (`rbbz-store/search/key/<token>`), and the host
+//     composes the UTF-8 string. A whole-string spelling (`rbbz-store/search/text/<hex>`) exists
+//     for a caller that can build bytes; it is the bounded UTF-8 transport the plan asks for -
+//     hex keeps spaces, slashes, quotes and accented bytes inside a token-safe alphabet.
+//   * **one query field, one value, never a concatenation.** The API matches artist OR title
+//     (owner point §1.5), so this module has no API that takes two names, and the strings it
+//     returns say so at the two moments a player meets the rule: on entry and after no matches.
+//
+// SDK-free on purpose: every rule here is a decision over plain data, so
+// tests/store_search_tests.cpp walks the whole matrix without a boot, a network or a package.
+// The worker that actually performs the request lives in src/store/store_search_service.cpp and
+// is reached through `SetSubmitSink`, which is how this file stays linkable from a test.
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "store/rhythmverse_client.h"
+
+namespace rb_blitz::store {
+
+// The namespace of the store's own guest channel, beside `rbbz-settings/` and `rbbz-play/`.
+// P5 (the download pipeline) adds its job ops under the same prefix; every parser here therefore
+// distinguishes "not ours" from "ours and refused" instead of swallowing the namespace.
+inline constexpr char kStoreNamespace[] = "rbbz-store/";
+
+// The query's own bounds: the API's minimum is 3 code points, the field stops at 64, and the
+// buffer refuses more rather than truncating a name the player is still typing.
+std::size_t CodePointCount(std::string_view utf8);
+
+// The typed query. UTF-8 throughout: a whole code point is one backspace, and an invalid sequence
+// is refused rather than stored (the API's own field is UTF-8, and a broken string cannot match).
+class SearchText {
+ public:
+  enum class Edit { kOk, kFull, kRejected };
+
+  // One key token: a..z, 0..9, and the five spelling keys below. Unknown tokens are `kRejected`.
+  Edit AppendKeyToken(std::string_view token);
+  // The whole-string transport: trimmed, then validated (length, control characters, UTF-8).
+  bool Set(std::string_view utf8);
+  // Removes one code point from the end. False when the field was already empty.
+  bool Backspace();
+  void Clear();
+
+  const std::string& text() const { return text_; }
+  std::size_t length() const { return CodePointCount(text_); }
+  // The API's own rule: at least `kMinSearchChars` code points.
+  bool ready() const { return length() >= static_cast<std::size_t>(kMinSearchChars); }
+
+ private:
+  std::string text_;
+};
+
+// The key tokens the DTA's pages send. Kept in one place so the authoring side
+// (src/ui/settings_screen.cpp) and this parser cannot drift.
+inline constexpr char kKeySpace[] = "space";
+inline constexpr char kKeyApostrophe[] = "apostrophe";
+inline constexpr char kKeyDash[] = "dash";
+inline constexpr char kKeyPeriod[] = "period";
+inline constexpr char kKeyBackspace[] = "backspace";
+inline constexpr char kKeyClear[] = "clear";
+inline constexpr char kKeyDone[] = "done";
+inline constexpr char kKeyCancel[] = "cancel";
+
+// The code point a spelling key stands for; empty for the four action keys.
+std::string_view KeyTokenText(std::string_view token);
+
+// --- The write channel (guest -> host) --------------------------------------------------------
+
+enum class StoreOp {
+  kNone,
+  kSearchOpen,    // the key pages were entered: the session opens and shows its guidance
+  kSearchKey,     // one typed key; `token` names it
+  kSearchText,    // a whole query; `text` carries it (bounded UTF-8, from the hex form)
+  kSearchDone,    // submit the query
+  kSearchCancel,  // leave the search: invalidate in-flight work and clear the field
+};
+
+enum class StoreParse {
+  kNotOurs,   // not in `rbbz-store/` - the caller forwards the write untouched
+  kAccepted,  // ours, well-formed, applied
+  kRefused,   // ours, malformed - answered (never forwarded), with `why` for the log
+};
+
+// Grammar (every segment is token-safe; the query never appears in the path):
+//
+//   path = "rbbz-store/search/" action
+//   action = "open" | "done" | "cancel"
+//          | "key/" <key>                 (a..z, 0..9, space, apostrophe, dash, period,
+//                                          backspace, clear)
+//          | "text/" <hex-bytes>          (UTF-8, 2 hex digits per byte, at most 4x the field)
+//
+// Anything else in the namespace is `kNotOurs`, not a refusal: P5's job ops share the prefix and
+// must not be eaten by this parser.
+StoreParse ParseStoreWrite(std::string_view path, StoreOp* op, std::string* token, std::string* text,
+                           std::string* why);
+
+// Applies one parsed write. Returns false (and fills `why`) when the op could not be applied -
+// an unknown key token, or a submit the session refused (the field is too short, the master
+// switch is off). A false answer is still *handled*: the write is ours and must not be forwarded.
+bool ApplyStoreWrite(StoreOp op, std::string_view token, std::string_view text, std::string* why);
+
+// The guest hook's single entry point: parse, apply, and answer "is this path ours?" so the
+// `write_file` hook knows whether to forward. A refusal is ours too (it is never forwarded - a
+// name in `rbbz-store/` is a name no content file can have). P5's download commands reach their
+// own parser first; this one answers `false` for them because it only accepts `search/`.
+// `why` receives the reason a refusal or an unapplied command gives, for the hook's log.
+bool HandleStoreSearchWrite(std::string_view path, std::string* why);
+
+// --- The one-bit read channel (host -> guest) -------------------------------------------------
+
+// Answers the DTA's membership queries on `file_exists`; false means "not a search query", so the
+// caller keeps trying the other namespaces.
+//
+//   rbbz-store/search/open                  the key pages are the current surface
+//   rbbz-store/search/ready                 the field holds at least `kMinSearchChars` code points
+//   rbbz-store/search/state/<token>         editing | searching | results | empty | failed |
+//                                           disabled
+//   rbbz-store/search/count/at-least/<n>    the result count is at least n (0..99)
+bool AnswerSearchQuery(std::string_view path, bool* answer);
+
+// --- The session -------------------------------------------------------------------------------
+
+enum class SearchState {
+  kIdle,       // the pages are not open
+  kEditing,    // open, nothing submitted (or the field was edited after an answer)
+  kTooShort,   // a submit refused by the API's own 3-character rule
+  kSearching,  // a request is in flight
+  kResults,    // the last answer held at least one eligible offer
+  kNoResults,  // the last answer held none - the state the retry guidance belongs to
+  kFailed,     // the last request failed (network, parse, HTTP status)
+  kDisabled,   // the master switch is off; no request is made and none is accepted
+};
+
+std::string_view SearchStateToken(SearchState state);
+
+// One eligible offer: the API record plus the direct link `DecideOffer` accepted. The download
+// pipeline (P5) resolves the package from the same URL; the offer list is what P3's record
+// writer turns into `dlc_store/**` entries.
+struct SearchOffer {
+  SongFile song;
+  std::string download_url;
+};
+
+// The answer to `Submit`: either a request to hand to a worker, or the reason there is none.
+struct SearchSubmit {
+  bool started = false;
+  std::uint64_t generation = 0;
+  RequestSpec request;
+  std::string why;
+  SearchState state = SearchState::kIdle;
+};
+
+// Opens the key pages: the session shows its guidance and accepts keys. Safe to call repeatedly
+// (every page of the keyboard opens it).
+void SearchOpen();
+// Leaves the surface: cancels in-flight work. The field is kept, so re-entering shows the query
+// that was being typed.
+void SearchClose();
+// The whole "cancel" path the plan's exit asks about: leave, invalidate, and clear the field.
+void SearchCancel();
+
+// One key token from the DTA (`ApplyStoreWrite` routes here). Unknown tokens are refused.
+bool SearchApplyKey(std::string_view token);
+// The whole-string transport. Trims; refuses control characters, invalid UTF-8, or a field longer
+// than `kMaxSearchChars`.
+bool SearchSetText(std::string_view utf8);
+
+// Validates the field and, when it may be sent, bumps the generation and answers the request the
+// worker should perform. Refusals are states, not exceptions: too short, the master off.
+SearchSubmit SearchSubmitQuery();
+
+// The worker's two answers. `Accept` drops a stale generation (a newer submit, a cancel, or a
+// settings commit since the request went out) instead of overwriting the current answer.
+bool SearchAccept(std::uint64_t generation, const ListingPage& page);
+bool SearchFail(std::uint64_t generation, std::string reason);
+
+// A copy of everything a caller needs: the state, the field, and the eligible offers in the API's
+// order (newest first). `status` is the caption line the overlay draws.
+struct SearchSnapshot {
+  SearchState state = SearchState::kIdle;
+  std::string text;
+  std::vector<SearchOffer> offers;
+  std::uint64_t generation = 0;
+  std::string status;
+};
+SearchSnapshot SearchCurrent();
+std::string SearchStatusText();
+
+// The worker seam: `store_search_service.cpp` installs the transport at boot
+// (`InstallSearchTransport`), and a test simply leaves it unset - a submit then reports
+// "no transport" instead of pretending a request happened.
+using SubmitSink = std::function<void(std::uint64_t, const RequestSpec&)>;
+void SetSubmitSink(SubmitSink sink);
+
+// The one filter rule, shared with Recent: the cheap eligibility predicate (`DecideOffer`) plus
+// the instrument filter. Exposed so P3's record writer and the tests apply the same functions.
+std::vector<SearchOffer> ShapeOffers(const ListingPage& page, const InstrumentFilter& filter);
+
+// --- The strings ------------------------------------------------------------------------------
+
+// The plan's wording, shared with the key pages' captions and pinned by the tests.
+inline constexpr char kSearchGuidance[] =
+    "Search by artist or song title, one at a time.";
+inline constexpr char kSearchTooShort[] =
+    "Type at least 3 characters. Search by artist or song title, one at a time.";
+inline constexpr char kSearchRetryHint[] =
+    "Try just the artist name or just the song title.";
+inline constexpr char kSearchDisabled[] =
+    "RhythmVerse is switched off. Turn it on in Help & Options, Downloadable Content.";
+
+}  // namespace rb_blitz::store

@@ -51,6 +51,33 @@ inline bool IsContentRootName(const std::string_view name) {
   return true;
 }
 
+// The RhythmVerse store's staging directory (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// §5/P5): a download is written to `<resolved_dlc_root>/.rbbz-store-staging/` and renamed
+// into the library only after its bytes, its length and its STFS identity have passed
+// validation. A dot prefix or a `.part` suffix alone does **not** make a half-written
+// file invisible: the scanners read magic, not names, and a partial `CON ` would
+// otherwise be enumerated and mounted. So every walk that can enumerate content - the
+// flat library walk, the cache fingerprint and the structured scan - skips this exact
+// directory by name. The comparison is case-insensitive because the host that created
+// it is Windows.
+inline constexpr std::string_view kStoreStagingDirName = ".rbbz-store-staging";
+
+inline bool IsStoreStagingEntryName(const std::string_view name) {
+  if (name.size() != kStoreStagingDirName.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < name.size(); ++i) {
+    char c = name[i];
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+    if (c != kStoreStagingDirName[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // One package found under the DLC root: the STFS container itself, or an extracted
 // directory. `file_name` is what the guest receives from the enumerator and hands
 // back to open the item, so it has to stay exactly the directory entry's name.
@@ -231,6 +258,11 @@ inline std::vector<std::filesystem::path> ChildContentDirectories(
     if (!entry.is_directory(ec) || ec) {
       result->rejected.push_back({RelativeEntry(dlc_root, entry.path()),
                                   "not a directory: expected <" + std::string(level) + ">"});
+      continue;
+    }
+    // The store's staging directory is ours, not a misplaced content level: it is
+    // skipped silently rather than reported as a bad title_id/content_type name.
+    if (IsStoreStagingEntryName(entry.path().filename().string())) {
       continue;
     }
     if (!IsContentRootName(entry.path().filename().string())) {

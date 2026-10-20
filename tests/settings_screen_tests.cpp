@@ -426,11 +426,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 118u);  // fifty-nine pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 138u);  // sixty-nine pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 118u);
+  CHECK_EQ(screens.size(), 138u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -496,8 +496,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 59);
-  CHECK_EQ(in_song, 59);
+  CHECK_EQ(main_menu, 69);
+  CHECK_EQ(in_song, 69);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -558,7 +558,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 59);  // one per page, the root included
+  CHECK_EQ(in_song, 69);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -1104,7 +1104,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 59u);
+  CHECK_EQ(menu_screens.size(), 69u);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1124,7 +1124,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 59);
+  CHECK_EQ(in_song_panels, 69);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1375,7 +1375,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 118);                   // every panel, in both contexts
+  CHECK_EQ(fills, 138);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1460,7 +1460,10 @@ void TestEveryDestinationExists() {
       "av_options_pause_screen",
       "controller_config_pause_screen",
       "pause_confirm_quit_song_screen",
-      "confirm_exit_game_screen"};
+      "confirm_exit_game_screen",
+      // RhythmVerse plan P4: the authored search keys declare the retail store screen as their
+      // static back target, because the store is the surface that opens them.
+      "store_menu_screen"};
   const std::vector<std::string> retail_panels = {"game_panel",
                                                   "pause_panel",
                                                   "game_fade_out_panel",
@@ -1519,7 +1522,7 @@ void TestEveryDestinationExists() {
       }
     }
   }
-  CHECK_EQ(screens, 118);
+  CHECK_EQ(screens, 138);
   // Every row that enters a screen of ours contributes one `{ui goto_screen <name>}`; the count is
   // reported rather than guessed at, because a change of row kind moves it.
   std::printf("         %d screen(s), %d goto_screen target(s), all known\n", screens, targets);
@@ -1568,7 +1571,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 118);  // every panel, in both contexts
+  CHECK_EQ(tables, 138);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1621,7 +1624,7 @@ void TestButtonTableIsOneSwitch() {
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 118);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 138);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1721,9 +1724,9 @@ void TestRestartPromptOnlyOnLeave() {
     CHECK_FALSE(HasText(root, "commit.restart_required"));
     CHECK_FALSE(HasText(root, "rbbz-settings/cancel/-/-"));
   }
-  CHECK_EQ(panels, 118);
+  CHECK_EQ(panels, 138);
   CHECK_EQ(root_cancels, 2);
-  CHECK_EQ(other_cancels, 116);
+  CHECK_EQ(other_cancels, 136);
 }
 
 // A `{<receiver> set <member> <value>}` call, with the value node kept so a test can say what the
@@ -2001,7 +2004,9 @@ void TestLabels() {
     // retail header they replace; the Main Menu mirror and the acronyms are the other exceptions.
     if (label.first.rfind("settings_mm_", 0) == 0 ||
         label.first.rfind("settings_title_", 0) == 0 || label.second == "HUD" ||
-        label.second == "FXAA") {
+        label.second == "FXAA" ||
+        // RhythmVerse plan P4: a key of the search keyboard draws its character and nothing else.
+        label.first.rfind("settings_rv_key_", 0) == 0) {
       continue;
     }
     ++checked;
@@ -2812,7 +2817,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 118);        // every page, in both contexts
+  CHECK_EQ(panels, 138);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
   CHECK_EQ(scrolls, panels - 6);  // every ordinary page, not the three suppressed twins
@@ -2982,7 +2987,7 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 118);         // the whole surface, in both contexts
+  CHECK_EQ(panels, 138);         // the whole surface, in both contexts
   CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
 }
 
@@ -3760,6 +3765,150 @@ void TestRhythmVerseRow() {
   ConfigureMenu(MenuConfiguration{});
 }
 
+void TestRhythmVerseSearchPages() {
+  BeginCase("the search key pages: six-row pages, one store write per key, and a store entry");
+
+  // The plan's P4 shape, pinned as the table it is: a root page of destinations and five control
+  // keys, one page per character group, and every character key a `rbbz-store/search/key/<token>`
+  // write. A page longer than six rows would scroll invisibly (in-game-settings skill §2).
+  const std::vector<std::string> root = PanelRowSymbols(kSearchPanel);
+  const std::vector<std::string> expected_root = {
+      "settings_rv_key_done", "settings_rv_search_letters", "settings_rv_search_digits_low",
+      "settings_rv_search_digits_high", "settings_rv_key_space", "settings_rv_search_more"};
+  CHECK_TRUE(root == expected_root);
+
+  const std::vector<std::string> pages = {
+      "settings_rhythmverse_search_panel",       "settings_rhythmverse_search_letters_panel",
+      "settings_rhythmverse_search_af_panel",    "settings_rhythmverse_search_gl_panel",
+      "settings_rhythmverse_search_mr_panel",    "settings_rhythmverse_search_sx_panel",
+      "settings_rhythmverse_search_yz_panel",    "settings_rhythmverse_search_digits_low_panel",
+      "settings_rhythmverse_search_digits_high_panel", "settings_rhythmverse_search_more_panel"};
+  const std::vector<std::string> panels = PanelNames();
+  const std::vector<std::string> screens = ScreenNames();
+  for (const std::string& page : pages) {
+    const std::vector<std::string> rows = PanelRowSymbols(page);
+    CHECK_TRUE(!rows.empty());
+    CHECK_TRUE(rows.size() <= 6u);
+    // The in-song twin exists too: the surface's convention, even though the store is only ever
+    // reached from the main-menu context.
+    CHECK_TRUE(std::find(panels.begin(), panels.end(), PausePanel(page)) != panels.end());
+  }
+  // Every search screen exists, and the root returns to the retail store screen that opens it.
+  bool root_screen = false;
+  for (const dtb::Node& node : DefinitionRoots()) {
+    ScreenFacts facts;
+    if (!ReadScreenFacts(node, &facts)) {
+      continue;
+    }
+    if (facts.name == kSearchScreen) {
+      root_screen = true;
+      CHECK_TRUE(facts.back == kSearchRetailBack);
+      CHECK_TRUE(facts.focus == kSearchPanel);
+    }
+  }
+  CHECK_TRUE(root_screen);
+
+  // The write each key performs, and the two control writes. A character key writes its own token;
+  // Done submits; Cancel clears; open is emitted by every page's `{enter}`.
+  const std::vector<std::pair<std::string, std::string>> expected_writes = {
+      {"settings_rv_key_space", "rbbz-store/search/key/space"},
+      {"settings_rv_key_backspace", "rbbz-store/search/key/backspace"},
+      {"settings_rv_key_clear", "rbbz-store/search/key/clear"},
+      {"settings_rv_key_done", "rbbz-store/search/done"},
+      {"settings_rv_key_cancel", "rbbz-store/search/cancel"},
+      {"settings_rv_key_a", "rbbz-store/search/key/a"},
+      {"settings_rv_key_f", "rbbz-store/search/key/f"},
+      {"settings_rv_key_y", "rbbz-store/search/key/y"},
+      {"settings_rv_key_z", "rbbz-store/search/key/z"},
+      {"settings_rv_key_apostrophe", "rbbz-store/search/key/apostrophe"},
+      {"settings_rv_key_dash", "rbbz-store/search/key/dash"},
+      {"settings_rv_key_period", "rbbz-store/search/key/period"},
+      {"settings_rv_key_0", "rbbz-store/search/key/0"},
+      {"settings_rv_key_9", "rbbz-store/search/key/9"},
+  };
+  for (const auto& [symbol, path] : expected_writes) {
+    bool found = false;
+    for (const dtb::Node& node : DefinitionRoots()) {
+      if (HasText(node, path)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      std::printf("         %s does not write %s\n", symbol.c_str(), path.c_str());
+    }
+    CHECK_TRUE(found);
+  }
+
+  // The root page opens the host's field on entry, which is what makes the caption show the query
+  // being typed; the in-song twin does the same (one table, two contexts).
+  int opens = 0;
+  for (const dtb::Node& root_node : DefinitionRoots()) {
+    if (HasText(root_node, "rbbz-store/search/open")) {
+      ++opens;
+    }
+  }
+  CHECK_TRUE(opens >= 2);
+
+  // The measurement entry is the RhythmVerse main-menu row itself: with the diagnostic on, its
+  // case jumps into the keys instead of the store. Pinned here because it is what a boot uses to
+  // reach the pages before P3's front menu serves the store's own Search row.
+  {
+    const auto splash_fixture = [] {
+      const std::vector<dtb::Node> rows = {Sym("splash_start"), Sym("splash_leaderboard"),
+                                           Sym("splash_achievements"), Sym("splash_options"),
+                                           Sym("splash_dlc"), Sym("splash_exit")};
+      const Node enter =
+          Cmd({Sym("do"), Cmd({Var("options_array"), Cmd({Sym("array"), Arr(rows)})}),
+               Cmd({Sym("start.lst"), Sym("set_data"), Var("options_array")})});
+      const Node dlc_case = Arr({Sym("splash_dlc"), Cmd({Sym("ui"), Sym("goto_screen"),
+                                                         Sym("store_menu_screen")})});
+      const Node start_case = Arr({Sym("splash_start"), Cmd({Var("this"), Sym("goto_main_hub")})});
+      const Node exit_case = Arr(
+          {Sym("splash_exit"), Cmd({Sym("ui"), Sym("goto_screen"), Sym("confirm_exit_game_screen")})});
+      const Node table = Cmd({Sym("switch"), Cmd({Sym("start.lst"), Sym("selected_sym")}),
+                             start_case, dlc_case, exit_case});
+      return std::vector<dtb::Node>{Cmd({Sym("new"), Sym("UIPanel"), Sym("splash_panel"),
+                                        Arr({Sym("file"), Str("splash.milo")}),
+                                        Arr({Sym("enter"), enter}),
+                                        Arr({Sym("SELECT_MSG"), table})})};
+    };
+    MenuConfiguration config;
+    config.rhythmverse_row = true;
+    config.store_search_diagnostic = true;
+    ConfigureMenu(config);
+    std::vector<dtb::Node> nodes = splash_fixture();
+    std::string why;
+    const bool added = AddRhythmVerseRow(&nodes, &why);
+    if (!added) {
+      std::printf("         the search-entry fixture was refused: %s\n", why.c_str());
+    }
+    CHECK_TRUE(added);
+    // The fixture's shipped `splash_dlc` case still names the store; the *new* row's case names the
+    // key pages, and `kSearchScreen` appears nowhere in the fixture, so its presence is the proof.
+    CHECK_TRUE(HasSymbol(nodes.front(), kSearchScreen));
+    ConfigureMenu(MenuConfiguration{});
+  }
+
+  // Titles and labels exist for every page and key (the locale is what the list draws).
+  std::vector<std::string> keys;
+  std::vector<std::string> titles;
+  for (const auto& label : Labels()) {
+    keys.push_back(label.first);
+    titles.push_back(label.second);
+  }
+  CHECK_TRUE(std::find(keys.begin(), keys.end(), "settings_title_settings_rhythmverse_search_panel") !=
+             keys.end());
+  CHECK_TRUE(std::find(keys.begin(), keys.end(), "settings_rv_key_a") != keys.end());
+  CHECK_TRUE(std::find(keys.begin(), keys.end(), "settings_rv_key_done") != keys.end());
+  CHECK_TRUE(std::find(keys.begin(), keys.end(), "settings_rv_search_letters") != keys.end());
+  // The authored guidance is a caption, so the player can read the one-at-a-time rule on any key;
+  // each key's caption also names the character the press will add.
+  const std::string caption = HelpTextFor("settings_rv_key_a");
+  CHECK_TRUE(caption.find("one at a time") != std::string::npos);
+  CHECK_TRUE(caption.find("'A'") != std::string::npos);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -3800,6 +3949,7 @@ int main(int argc, char** argv) {
   TestDownloadContentVisibilityAndNoDlc();
   TestRhythmVerseRows();
   TestRhythmVerseRow();
+  TestRhythmVerseSearchPages();
   TestPauseReroute();
   TestInSongContext();
   TestPauseMergeEdits();

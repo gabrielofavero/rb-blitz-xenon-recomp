@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -17,6 +18,7 @@
 #include "profile/gameplay_remap.h"
 #include "profile/input_rows.h"
 #include "profile/remap.h"
+#include "store/store_search.h"
 
 namespace rb_blitz::ui::screen {
 namespace {
@@ -86,6 +88,22 @@ std::string Path(const std::string_view op, const std::string_view setting,
 // choice spellings, because the caption describes the row and not its current value.
 Node HelpWrite(const std::string_view symbol) {
   return Write(Path("help", symbol.empty() ? "-" : symbol, "-"));
+}
+
+// ------------------------------------------------------------------------------------------------
+// The RhythmVerse search keys (plan P4)
+// ------------------------------------------------------------------------------------------------
+//
+// A key press is a `rbbz-store/search/key/<token>` write: the guest never carries the typed string
+// (a DTA script cannot build one - src/store/store_search.h records the measurement), so the host
+// composes the query from these tokens and the page's own caption reports it back. `open` is
+// written by every key page's `{enter}` so the host knows its field is the current surface.
+std::string StorePath(const std::string_view action) {
+  return std::string(store::kStoreNamespace) + "search/" + std::string(action);
+}
+
+Node StoreKeyWrite(const std::string_view token) {
+  return Write(StorePath(std::string("key/") + std::string(token)));
 }
 
 // `{ui goto_screen {{ui current_screen} get back_screen}}` - how a panel hosted by more than one
@@ -289,6 +307,11 @@ enum class Kind {
   // session and enters the dialog. The dialog is left by the capture itself (a valid press, or
   // the countdown's zero), so no row writes the bridge's `capture-cancel` op.
   kCapture,
+  // RhythmVerse plan P4: one typed key. `path` is a `rbbz-store/search/...` write and nothing is
+  // committed - the store is not a settings transaction. `kStoreKeyLeave` writes and then leaves
+  // the surface (Cancel), which is the one key whose meaning is also navigation.
+  kStoreKey,
+  kStoreKeyLeave,
   kChoose,       // one-shot choice: set `setting` to the row's own token, commit, leave
   kAction,       // one-shot action: invoke `setting`
   kInfo,         // a row that is present but deliberately does nothing (the protected entry)
@@ -353,6 +376,9 @@ struct PanelSpec {
   // mistaken for the `_pause` twin suffix.
   std::string title;
   std::string title_key;
+  // A RhythmVerse search page (plan P4): `{enter}` opens the host's search field, so the caption
+  // shows the guidance (or the query being typed) as soon as the page is reached.
+  bool opens_search = false;
 };
 
 Row BoolRow(const char* symbol, const char* setting, const char* label, const char* description,
@@ -528,6 +554,39 @@ Row PathActionRow(const char* symbol, const char* path, const char* label,
   return row;
 }
 
+// RhythmVerse plan P4: one key of the authored search keyboard. The press writes the key token to
+// the store's own channel (`src/store/store_search.h`), which is why there is no commit: a search
+// field is not a settings transaction, and the store's worker performs the request it enables.
+Row StoreKeyRow(const char* symbol, const std::string& token, const char* label,
+                const char* description) {
+  Row row;
+  row.symbol = symbol;
+  row.kind = Kind::kStoreKey;
+  row.path = StorePath("key/" + token);
+  row.label = label;
+  row.description = description;
+  return row;
+}
+
+// The one key that is also navigation: Cancel writes the store's cancel op (which invalidates
+// in-flight work and clears the field) and then leaves, exactly as the plan's cancel path asks.
+Row StoreKeyLeaveRow(const char* symbol, const std::string& action, const char* label,
+                     const char* description) {
+  Row row = StoreKeyRow(symbol, "", label, description);
+  row.kind = Kind::kStoreKeyLeave;
+  row.path = StorePath(action);
+  return row;
+}
+
+// A store action that is not a character: Done submits the field, Clear empties it. Its path is
+// `rbbz-store/search/<action>`, so it must not go through the `key/<token>` spelling above.
+Row StoreActionRow(const char* symbol, const std::string& action, const char* label,
+                   const char* description) {
+  Row row = StoreKeyRow(symbol, "", label, description);
+  row.path = StorePath(action);
+  return row;
+}
+
 // A gated retail route used to live here (`Default Presets` while Controller Custom was off).
 // P2 of the interface/gameplay mapping restructure plan removes the Custom switches, so the row
 // is a plain `RouteRow` now: the preset page is always available.
@@ -596,6 +655,16 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_dlc_panel", "DOWNLOADABLE CONTENT"},
       {"settings_dlc_menu_panel", "DLC MENU MUSIC"},
       {"settings_rhythmverse_filter_panel", "RHYTHMVERSE SONG FILTER"},
+      {"settings_rhythmverse_search_panel", "RHYTHMVERSE SEARCH"},
+      {"settings_rhythmverse_search_letters_panel", "LETTERS"},
+      {"settings_rhythmverse_search_af_panel", "LETTERS A-F"},
+      {"settings_rhythmverse_search_gl_panel", "LETTERS G-L"},
+      {"settings_rhythmverse_search_mr_panel", "LETTERS M-R"},
+      {"settings_rhythmverse_search_sx_panel", "LETTERS S-X"},
+      {"settings_rhythmverse_search_yz_panel", "LETTERS Y-Z"},
+      {"settings_rhythmverse_search_digits_low_panel", "NUMBERS 0-5"},
+      {"settings_rhythmverse_search_digits_high_panel", "NUMBERS 6-9"},
+      {"settings_rhythmverse_search_more_panel", "MORE KEYS"},
       {"settings_achievements_panel", "ACHIEVEMENTS & UNLOCKS"},
       {"settings_interface_panel", "INTERFACE"},
       {"settings_main_menu_panel", "MAIN MENU"},
@@ -1059,6 +1128,129 @@ std::vector<PanelSpec> AllPanels() {
                                       "Only list customs that have a keys chart."),
                           }});
 
+  // 1b-iii. The RhythmVerse search keys (plan P4). There is no retail keyboard to borrow - all 131
+  // compiled DTA records of the main ark were scanned on 2026-10-20 and the only `show_keyboard`
+  // belongs to `rbworld_link_panel`, the Rock Central e-mail field - so the entry is authored here.
+  //
+  // The shape is the six-row budget applied twice: a root page (letters, two number pages, space,
+  // backspace, "Done & Clear") and one page per group of six characters. Every key writes a
+  // `rbbz-store/search/key/<token>` request; the host owns the query and reports it in the caption
+  // (src/store/store_search.h). None of these pages is reached from a settings row - the store's
+  // Search entry opens the root (plan P3), and `store_search_diagnostic` opens it for a
+  // measurement boot.
+  {
+    PanelSpec search{"settings_rhythmverse_search_panel", "settings_rhythmverse_search_screen",
+                     kSearchRetailBack, MenuPanels(),
+                     {
+                         // Done first, because the root is where every Back from a letter page
+                         // lands: a search is finished with two presses (Back, Done) whatever was
+                         // typed, and the selection resets to row 0 on entry.
+                         StoreActionRow("settings_rv_key_done", store::kKeyDone, "Done",
+                                        "Search the catalogue for what you typed."),
+                         SubmenuRow("settings_rv_search_letters",
+                                    "settings_rhythmverse_search_letters_screen", "Letters",
+                                    "Choose a letter to add to your search."),
+                         SubmenuRow("settings_rv_search_digits_low",
+                                    "settings_rhythmverse_search_digits_low_screen", "Numbers 0-5",
+                                    "Choose a number to add to your search."),
+                         SubmenuRow("settings_rv_search_digits_high",
+                                    "settings_rhythmverse_search_digits_high_screen", "Numbers 6-9",
+                                    "Choose a number to add to your search."),
+                         StoreKeyRow("settings_rv_key_space", store::kKeySpace, "Space",
+                                     "Add a space to your search."),
+                         SubmenuRow("settings_rv_search_more",
+                                    "settings_rhythmverse_search_more_screen", "More Keys",
+                                    "Backspace, clear the field, or leave the search."),
+                     }};
+    search.opens_search = true;
+    out.push_back(std::move(search));
+  }
+  {
+    PanelSpec letters{"settings_rhythmverse_search_letters_panel",
+                      "settings_rhythmverse_search_letters_screen",
+                      "settings_rhythmverse_search_screen", MenuPanels(),
+                      {
+                          SubmenuRow("settings_rv_search_af",
+                                     "settings_rhythmverse_search_af_screen", "Letters A-F",
+                                     "Letters A to F. Choose a letter to add to your search."),
+                          SubmenuRow("settings_rv_search_gl",
+                                     "settings_rhythmverse_search_gl_screen", "Letters G-L",
+                                     "Letters G to L. Choose a letter to add to your search."),
+                          SubmenuRow("settings_rv_search_mr",
+                                     "settings_rhythmverse_search_mr_screen", "Letters M-R",
+                                     "Letters M to R. Choose a letter to add to your search."),
+                          SubmenuRow("settings_rv_search_sx",
+                                     "settings_rhythmverse_search_sx_screen", "Letters S-X",
+                                     "Letters S to X. Choose a letter to add to your search."),
+                          SubmenuRow("settings_rv_search_yz",
+                                     "settings_rhythmverse_search_yz_screen",
+                                     "Letters Y-Z and Symbols",
+                                     "Letters Y and Z, plus apostrophe, dash and full stop."),
+                      }};
+    letters.opens_search = true;
+    out.push_back(std::move(letters));
+  }
+  // One page per character group. Each row's symbol is the key token (`settings_rv_key_a`), so a
+  // caption or a test can name one key without depending on which page it sits on. The caption
+  // names the key under the cursor - the overlay's only way to say which letter a press will add,
+  // since the row itself draws just the character.
+  const auto key_page = [&out](const char* panel, const char* screen, const char* back,
+                               std::initializer_list<std::pair<const char*, const char*>> keys) {
+    PanelSpec page{panel, screen, back, MenuPanels(), {}};
+    for (const auto& [token, label] : keys) {
+      const std::string symbol = std::string("settings_rv_key_") + token;
+      std::string description = "Add '";
+      description += label;
+      description +=
+          "' to the search. Search by artist or song title, one at a time.";
+      page.rows.push_back(StoreKeyRow(symbol.c_str(), token, label, description.c_str()));
+    }
+    page.opens_search = true;
+    out.push_back(std::move(page));
+  };
+  // Every character page returns to the *root*, not to the letters index: Back is the first half of
+  // "finish the search", and the root's first row is Done.
+  key_page("settings_rhythmverse_search_af_panel", "settings_rhythmverse_search_af_screen",
+           "settings_rhythmverse_search_screen",
+           {{"a", "A"}, {"b", "B"}, {"c", "C"}, {"d", "D"}, {"e", "E"}, {"f", "F"}});
+  key_page("settings_rhythmverse_search_gl_panel", "settings_rhythmverse_search_gl_screen",
+           "settings_rhythmverse_search_screen",
+           {{"g", "G"}, {"h", "H"}, {"i", "I"}, {"j", "J"}, {"k", "K"}, {"l", "L"}});
+  key_page("settings_rhythmverse_search_mr_panel", "settings_rhythmverse_search_mr_screen",
+           "settings_rhythmverse_search_screen",
+           {{"m", "M"}, {"n", "N"}, {"o", "O"}, {"p", "P"}, {"q", "Q"}, {"r", "R"}});
+  key_page("settings_rhythmverse_search_sx_panel", "settings_rhythmverse_search_sx_screen",
+           "settings_rhythmverse_search_screen",
+           {{"s", "S"}, {"t", "T"}, {"u", "U"}, {"v", "V"}, {"w", "W"}, {"x", "X"}});
+  key_page("settings_rhythmverse_search_yz_panel", "settings_rhythmverse_search_yz_screen",
+           "settings_rhythmverse_search_screen",
+           {{"y", "Y"},
+            {"z", "Z"},
+            {store::kKeyApostrophe, "'"},
+            {store::kKeyDash, "-"},
+            {store::kKeyPeriod, "."}});
+  key_page("settings_rhythmverse_search_digits_low_panel",
+           "settings_rhythmverse_search_digits_low_screen", "settings_rhythmverse_search_screen",
+           {{"0", "0"}, {"1", "1"}, {"2", "2"}, {"3", "3"}, {"4", "4"}, {"5", "5"}});
+  key_page("settings_rhythmverse_search_digits_high_panel",
+           "settings_rhythmverse_search_digits_high_screen", "settings_rhythmverse_search_screen",
+           {{"6", "6"}, {"7", "7"}, {"8", "8"}, {"9", "9"}});
+  {
+    PanelSpec more{"settings_rhythmverse_search_more_panel",
+                   "settings_rhythmverse_search_more_screen",
+                   "settings_rhythmverse_search_screen", MenuPanels(),
+                   {
+                       StoreKeyRow("settings_rv_key_backspace", store::kKeyBackspace,
+                                   "Backspace", "Remove the last character of your search."),
+                       StoreKeyRow("settings_rv_key_clear", store::kKeyClear, "Clear",
+                                   "Empty the search field."),
+                       StoreKeyLeaveRow("settings_rv_key_cancel", "cancel",
+                                        "Cancel", "Leave the search and start over next time."),
+                   }};
+    more.opens_search = true;
+    out.push_back(std::move(more));
+  }
+
   // 1c. Achievements & Unlocks (provider only).
   out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen",
                           "settings_general_screen", MenuPanels(),
@@ -1479,7 +1671,15 @@ std::vector<PanelSpec> InSongPanels() {
   for (PanelSpec& panel : out) {
     panel.name = PausePanel(panel.name);
     panel.screen = PauseScreen(panel.screen);
-    panel.back = panel.back == "splash_screen" ? std::string("game_screen") : PauseScreen(panel.back);
+    // "splash_screen" is the main-menu context's way out; every other back target of ours is a
+    // page of ours and has an in-song twin. A *retail* screen keeps its name: the store screen is
+    // only ever entered from the main menu, so a `store_menu_pause_screen` would be a name no
+    // record declares (measured by `TestEveryDestinationExists` when the rule did suffix it).
+    if (panel.back == "splash_screen") {
+      panel.back = "game_screen";
+    } else if (panel.back.rfind("settings_", 0) == 0) {
+      panel.back = PauseScreen(panel.back);
+    }
     panel.scene = panel.message.empty() ? kPauseSceneName : "../pause/settings_confirmation_pause.milo";
     panel.panels = PausePanels();
     for (Row& row : panel.rows) {
@@ -1732,6 +1932,12 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       // the rows that reset restore their own states in place.
       return Arr({Sym(symbol), Write(row.path), Write(Path("commit", "-", "-")),
                   CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+    case Kind::kStoreKey:
+      // P4: one key of the search keyboard. Nothing is committed and nothing repopulates - the
+      // host's session holds the field, and its status is the overlay's caption.
+      return Arr({Sym(symbol), Write(row.path)});
+    case Kind::kStoreKeyLeave:
+      return Arr({Sym(symbol), Write(row.path), Leave()});
     case Kind::kCapture:
       return Arr({Sym(symbol), Write(row.path), EnterScreen(row.screen)});
     case Kind::kChoose:
@@ -1981,6 +2187,13 @@ Node PanelDefinition(const PanelSpec& panel) {
   Node enter = EnterExit();
   if (!panel.message.empty())
     enter.kids.push_back(Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(panel.message)}));
+  // RhythmVerse plan P4: a search key page tells the host its field is the current surface. The
+  // write is what makes the overlay show the guidance (or the query being typed) instead of the
+  // row caption, and it is repeated per page because every page of the keyboard is reachable from
+  // every other one.
+  if (panel.opens_search) {
+    enter.kids.push_back(Write(StorePath("open")));
+  }
   // A reason-specific message is asked for once per entry: the queries are one-bit reads on the
   // same channel the rows already use, and the panel's own default stays in place when none of
   // them matches (an older host, or a failure the panel was not told about).
@@ -2871,9 +3084,19 @@ bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   // The store without Xbox LIVE: the retail gate is `is_participating_user_online`, and this row
   // deliberately asks the host instead. The one condition is the store's own master switch, read
   // live at press time so switching it off stops the press without a restart.
+  //
+  // P4's measurement switch (`store_search_diagnostic`) sends the same press into the authored key
+  // pages instead, so the search can be driven without P3's front menu serving the store's Search
+  // row. It is also the cleaner surface for that measurement: a jump issued from the retail store
+  // screen's `enter` (the first attempt) delivers every later press twice, because the press that
+  // enters a page is re-delivered to the page that has just become current - measured 2026-10-20,
+  // one A press logged as two `search/key/a` writes in the same millisecond and one Down moved two
+  // rows. Entered from the main menu like every settings page, the same pages behave.
+  const std::string destination =
+      g_configuration.store_search_diagnostic ? std::string(kSearchScreen) : "store_menu_screen";
   const std::vector<Node> body{
       Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(kStoreEnabledQuery)}),
-           Cmd({Sym("ui"), Sym("goto_screen"), Sym("store_menu_screen")})})};
+           Cmd({Sym("ui"), Sym("goto_screen"), Sym(destination)})})};
   return AddMainMenuSwitchCase(nodes, kRhythmVerseRow, body, reason);
 }
 
@@ -3122,6 +3345,12 @@ std::vector<Node> AudioPageEnterStatements() {
   };
 }
 
+// P4's earlier measurement entry (a `{ui goto_screen <search>}` appended to the *retail store
+// screen's* `{enter}`) is retired: a jump issued from that screen re-delivers every later press to
+// the page that has just become current (measured 2026-10-20 - two `search/key/a` writes in one
+// frame, one Down moving two rows). `store_search_diagnostic` now routes the RhythmVerse main-menu
+// row straight at the keys instead, which behaves like every other page of the surface.
+
 bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view panel_name,
                                 const std::vector<dtb::Node>& statements, std::string* reason) {
   auto refuse = [reason](const char* why) {
@@ -3134,12 +3363,15 @@ bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view 
   if (statements.empty()) {
     return refuse("no statements to append");
   }
-  // The panel definition is usually a root, and `FindBlock` starts at a node's *children*, so test
-  // the root itself before searching inside it. (A root that is the panel command is the normal
-  // case for `av_options.dtb`; searching only children made this edit refuse every real record.)
+  // The definition is usually a root, and `FindBlock` starts at a node's *children*, so test
+  // the root itself before searching inside it. (A root that is the definition command is the
+  // normal case for `av_options.dtb`; searching only children made this edit refuse every real
+  // record.) Both kinds are accepted: a UIPanel (the retail Audio page) and a UIScreen (the
+  // retail store screen, whose `enter` is where the search measurement hooks in).
   const auto is_panel = [&](const Node& node) {
     return node.tag == dtb::kCommand && node.kids.size() >= 3 &&
-           IsSymbol(node.kids[0], "new") && IsSymbol(node.kids[1], "UIPanel") &&
+           IsSymbol(node.kids[0], "new") &&
+           (IsSymbol(node.kids[1], "UIPanel") || IsSymbol(node.kids[1], "UIScreen")) &&
            IsSymbol(node.kids[2], panel_name);
   };
   Node* definition = nullptr;
@@ -3156,7 +3388,7 @@ bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view 
     }
   }
   if (definition == nullptr) {
-    return refuse("no {new UIPanel <name> ...} definition for that panel");
+    return refuse("no {new UIPanel|UIScreen <name> ...} definition for that panel");
   }
   Node* enter = nullptr;
   for (Node& member : definition->kids) {

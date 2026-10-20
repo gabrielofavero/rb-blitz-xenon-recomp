@@ -4,7 +4,12 @@ Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0
 landed 2026-10-20**, and **P3's serial half (step 0) landed the same day**: the request chain is
 mapped (`sub_827501F0` → `sub_82753010` → `sub_8274FB60` → the file cache), both entries are
 hooked, and the store's own DTA record is proven editable — the panel still issues no request
-offline, so the data lane starts at the gate (§5/P3 step 0 record). P1's browser acceptance is met
+offline, so the data lane starts at the gate (§5/P3 step 0 record). **P5's pipeline landed the same
+day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
+starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
+by exactly one line of its exit:** the field, the authored keys, the request, the answer and the
+two authored sentences are boot-measured, but the **matches are only held, not yet drawn** — the
+list they belong in is P3's front menu (§5/P4 record). P1's browser acceptance is met
 on one boot (row drawn, store opens, B returns) and still owes the multi-boot/toggle matrix. Audio
 preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
@@ -946,6 +951,155 @@ and **deliverable 5**, the price/icon hide path. The writer skeleton
   catalogue entries; multi-word names survive intact; a combined artist/title query exercises
   the documented limitation and retry guidance. Verify cancel paths and no regressions in P3.
 
+**P4 record (2026-10-20) — the field, the keys and the request are landed; the results still wait
+for P3's browser.**
+
+*Investigation (measured).* All **131** compiled DTA records of `main_xbox_0.ark` were decoded and
+scanned for `keyboard`/`search` (`out/_swap/scan_dtb_tokens.py`): the title has exactly one
+keyboard entry point — `rbworld_link.dtb`'s `{rbworld_link_panel show_keyboard}`, a *native* method
+of the Rock Central e-mail panel that answers to that panel's own `VirtualKeyboardResultMsg`
+handler. There is no generic keyboard screen record to route into, and no store search UI anywhere
+(the plan's earlier finding stands), so the plan's option 2 applies: the keys are **authored** in
+the house row style.
+
+*Landed, tested without a boot (`store_search`, **283 checks**):*
+
+- `src/store/store_search.{h,cpp}` — the field, the transport grammar, the request and the answer.
+  The query is UTF-8 and bounded (3..64 code points, the API's own minimum/maximum; one code point
+  is one backspace; invalid UTF-8 and control characters are refused). **The query never travels in
+  a path**: a DTA script cannot build a CRC-32 or concatenate a runtime string, so the guest sends
+  one key token per press (`rbbz-store/search/key/<token>`) and the host composes the text; a
+  whole-string spelling (`rbbz-store/search/text/<hex>`) carries spaces, slashes, quotes and
+  accented bytes inside a token-safe alphabet for a caller that can build bytes. `open`, `done`
+  and `cancel` complete the grammar, and **`rbbz-store/download/...` is `kNotOurs`** so P5's job
+  commands keep their own parser.
+- The **session**: `Submit` validates through P0's builder (a too-short field is the API's own
+  rule, not a second one), bumps a generation and answers the `RequestSpec`; `Accept`/`Fail` drop a
+  stale answer — a newer submit, an edit, a cancel, **a settings commit (the filter is part of the
+  query)** and the master switched off all move the generation on, so a late response cannot
+  overwrite the current one. The five statuses (`editing`, `searching`, `results`, `empty`,
+  `failed`) carry the plan's two sentences verbatim: **"Search by artist or song title, one at a
+  time."** on entry and **"Try just the artist name or just the song title."** after no matches.
+- `ShapeOffers` applies the **same** `DecideOffer` + `PassesInstrumentFilter` pair Recent will use,
+  keeps the API's order and the per-file offers, and resolves each direct link once.
+- `src/store/store_search_service.{h,cpp}` — the transport: one worker thread, `store_http`'s
+  `PostForm` (redirects never followed), `ParseListing`, and one log line per answer
+  (`store_search: N record(s) answered, M eligible offer(s), state ...`). Installed at boot beside
+  `InstallPathProbe` (`rb_blitz_app.h`).
+- `src/hooks/settings_bridge_hooks.cpp` — the two call sites (`file_exists` predicates,
+  `write_file` commands), before the settings gate so they work with the channel off, and **ahead
+  of P5's download handler**, which claims the whole `rbbz-store/` prefix for any path it cannot
+  parse ("refusing a malformed write") and would otherwise swallow every key press.
+- `src/ui/settings_screen.{h,cpp}` — the authored key pages: ten pages per context, each inside the
+  six-row budget. The **root** is `Done / Letters / Numbers 0-5 / Numbers 6-9 / Space / More Keys`
+  (Done first: it is the one row a player who read the seeded or last-used field needs);
+  `Letters` is an index of `Letters A-F / G-L / M-R / S-X / Y-Z and Symbols`; the five letter
+  pages, the two number pages and `More Keys` (`Backspace / Clear / Cancel`) complete the set.
+  Every key is a `kStoreKey` row writing its own token; **Done** submits *and* leaves
+  (`kStoreKeyLeave`); Cancel writes `cancel` and leaves. Every character page's back target is the
+  **root**, not the index it came from, so a query can mix letters, digits and a space without
+  walking back down; every page's `{enter}` writes `open`, so the host re-shows its field.
+- `src/ui/help_overlay.cpp` — the **search strip**: the caption bar draws `Search: <field>` /
+  `Searching for "<field>"...` / `N matches...` / the retry guidance while the keys are open (or a
+  request is in flight), outranking row captions and drawn even with Settings Labels off — a field
+  a player cannot read is an input problem, not optional help, the same rule the binding capture
+  follows.
+- `src/ui/settings_screen.cpp` + `src/settings/menu_payload.cpp` — the measurement route:
+  `AddRhythmVerseRow`'s destination becomes the keys screen while `store_search_diagnostic` is on
+  (i.e. the retail **RhythmVerse Customs** main-menu row jumps straight to the keys), so the search
+  is drivable before P3's front menu owns a Search row. The first cut appended the jump to the
+  retail store screen's `{enter}`, which needed `AppendPanelEnterStatements` to accept a `UIScreen`
+  definition as well as a `UIPanel` one (the first boot refused by name: `no {new UIPanel <name>
+  ...} definition for that panel`). That edit was then **retired** — it only fired once the store
+  screen was already open, which is the one place P3 will change — and the `UIScreen` widening kept.
+- `scripts/probe_search.ps1` — one boot that types a query on the keys and OCRs the strip.
+- `src/store/rhythmverse_client.cpp` — one widening the live API forced (§"Measured" below): a
+  query with **no matches** answers HTTP 200 with `{"records":{"total_filtered":0,"returned":0},
+  "songs":false}` — a JSON **boolean** where every matched answer carries an array. `ParseListing`
+  now reads a falsey `songs` with a zero record count as *zero songs*, not a parse failure, so the
+  plan's own rule ("an actual empty result ... must use the corresponding UI state, not be reported
+  as a network failure") holds. Any other non-array shape — and a falsey `songs` with a non-zero
+  count — is still refused, and `tests/store_search_tests.cpp` pins both sides.
+
+*Measured in boots (`out/_swap/search-probe/…`, `scripts/probe_search.ps1`).* Everything below is an
+OCR of a capture or a log line, not an expectation:
+
+- **The keys render and the field is readable.** `out/_swap/search-probe/20261020-174624`: the
+  captured page OCRs as `DONE LETTERS NUMBERS 0-5 NUMBERS 6-9 SPACE MORE KEYS` with
+  `SEARCH: BUSH` on the caption bar and `SELECT BACK` in the footer — the authored rows, the
+  retail frame and the strip in one shot (`keys.png`, `typed.png`).
+- **Key presses reach the field.** The earlier unseeded boot typed on the letters page and the
+  strip read `Search: 025`, then `Search: 02555` — one write per press, one character per write.
+- **The API's own minimum is enforced in-game.** With the field short, Done was answered and
+  refused: `store_search: 'rbbz-store/search/done' answered but not applied: Type at least 3
+  characters. Search by artist or song title, one at a time.` (`rb_blitz_059.log`, 17:39:30 and
+  17:39:32 — the second line is the same press delivered twice, see the limits).
+- **Done → request → answer, in the game.** The seeded boot (field `bush`, one Done) logs
+  `store_search: 25 record(s) answered, 15 eligible offer(s), state results (current)` and the
+  next capture's strip reads `15 MATCHES FOR "BUSH". PRESS DONE TO OPEN THE STORE.`
+  (`answer.png`). The offers are the API's order, resolved to direct links.
+- **A newer query invalidates an older answer, in the wild.** That same boot pressed Done twice
+  (two generations). The first answer was logged `state searching (stale, dropped)` and the
+  second `state results (current)`: the drop is the generation rule, not a second code path.
+- **The request is what the plan asked for.** `store_search_tests --live-search` sends one `text`
+  value with no split or concatenation: `kate bush` → `2 record(s) returned, 2 eligible offer(s)`;
+  `dreamers` → 6 returned, **5** eligible (a title-only query); `bush` → 25 returned, **15**
+  eligible. The instrument predicates are the settings snapshot's, so the counts already reflect
+  the filter.
+- **The no-match answer is a UI state, not an error.** The live API answers zero matches with
+  HTTP 200 and `"songs":false` (a JSON boolean, 239 bytes) — the first arm through this path
+  logged `the answer could not be read: data.songs is not an array` and would have shown a
+  *failure*. After the parse widening a boot with the field seeded to `zzzzqqq`
+  (`out/_swap/search-probe/20261020-175302`) logs `0 record(s) answered, 0 eligible offer(s), state
+  empty (current)` and the strip OCRs as **`NO MATCHES FOR "ZZZZQQQ". TRY JUST THE ARTIST NAME OR
+  JUST THE SONG TITLE.`** — the plan's second sentence, verbatim, in the game.
+- **The field is drawn while the keys are open** in that same capture (`SEARCH: ZZZZQQQ` beside
+  `DONE LETTERS NUMBERS 0-5 NUMBERS 6-9 SPACE MORE KEYS`), so the strip and the rows coexist on
+  the root page.
+- **The combined query does what the plan says it does.** `kate bush` finds 2 offers
+  (including *Army Dreamers*); `kate bush army` — the same entry, artist plus title in one field —
+  returns **0 records**, so the limitation is real, reachable from the field, and lands on the
+  no-match sentence with the retry guidance rather than on an error.
+- **The suite is green:** `store_search` **283 checks**, `store_client` 378, `settings_screen`
+  137,057, `settings_hot_apply` 310, full `ctest` **42/42**. Two gate repairs were needed on the way
+  and are recorded because they were **not** introduced here: `rb_blitz_menu_payload_tests` never
+  listed `src/store/store_payload.cpp`, so it linked only while nothing in `menu_payload.cpp`
+  reached the store section — it does now, and the source is listed; and
+  `settings_hot_apply`'s "exactly two hot rows" pin was stale against `src/settings/schema.cpp`,
+  which carries eight (the six RhythmVerse rows joined V-Sync and Settings Labels in P6), so the
+  pin and its named list moved with the table.
+
+*Honest limits.*
+
+- **The matches are not drawn anywhere yet.** P4 ends with the offers *answered and held*
+  (`SearchSnapshot::offers`, already filtered and URL-resolved); replacing the browser list is
+  P3's front menu, which is why the strip summarises the count instead of pretending to list it.
+  Until P3 lands, "results replace the browser list" is a data-level claim only.
+- **Typing is rows, not a keyboard.** A physical keyboard is not wired into the field: the guest
+  has no text input the host can hand characters to on these pages, so a 6-letter query is six
+  presses through the index. The whole-string `text/<hex>` spelling exists for a caller that can
+  build bytes, and `store_search_seed` exists so a boot can exercise Done without the index.
+- **One press can arrive twice.** Measured: a single A press produced two identical
+  `search/key/<t>` writes **in the same millisecond**, `lstick_down` moved two rows, and `key:b`
+  arrived as Confirm. The host treats an identical command inside 50 ms as the same press (a
+  different key, or the same one after a cancel, is a new press), which is why the field does not
+  double up — but the *navigation* quirk is not fixable from this lane, so the harness either
+  over-shoots or the probe picks its row by index. The live proof therefore seeds the field and
+  presses Done once.
+- **Cancel and Clear were verified on the host, not on the sheet.** `SearchCancel()` is pinned by
+  tests (it clears the field, moves the generation on, empties the strip and stops in-flight
+  answers being applied), and the `Cancel` row writes `rbbz-store/search/cancel`, but the harness
+  could not be driven to that row reliably enough to OCR the result. The write paths themselves
+  are pinned by the settings test, which reads every key's path out of the built pages.
+- **Back is asymmetric on purpose.** A character page's back returns to the **root**, so one query
+  can mix letters, digits and a space without walking back down the index; the root's back goes to
+  the store screen (`store_menu_screen`), which a diagnostic boot never opens — so in that boot the
+  root's back lands on the screen P3 is building.
+- **Combined queries are a documented limitation, not a bug.** The field is one `text`: a player
+  who types `kate bush army` sends exactly that, the API matches it as a single string and answers
+  **zero records** (measured above). The no-match sentence carries the plan's own retry guidance,
+  which is the intended outcome, not a failure state.
+
 ### P5 — download pipeline
 
 - Host `store_download` implements **all of §3.1**, using the offer's validated URL held by the
@@ -987,6 +1141,71 @@ and **deliverable 5**, the price/icon hide path. The writer skeleton
   restart; downloaded/manual songs match on a later visit. Archive, redirect, cancellation,
   truncation and simultaneous library refresh cases leave no visible partial package. Failed
   transfers leave no receipt/Downloaded state. Verify flat and structured roots and cache On/Off.
+
+**P5 record (2026-10-20) — the pipeline is built and tested hermetically; no boot has driven it
+yet.** Landed as four SDK-free modules plus one Windows transport, wired to the boot and to the
+guest bridge:
+
+- `src/store/store_download.{h,cpp}` — the policy core: the job token (`j` + 16 hex of the file
+  id's SHA-256, never the opaque id), the bridge grammar, the error vocabulary and retry decision,
+  and `TransferPackage`, which applies §3.1 end to end: hop-limited redirects resolved through
+  `ResolveDownloadUrl` (off-site, scheme-relative and credentialed targets refused), response-head
+  refusal (archive MIME/`Content-Disposition`, text/HTML/JSON pages, non-identity
+  `Content-Encoding`, an oversize `Content-Length`), streaming prefix classification (only `CON `/
+  `LIVE`/`PIRS` proceeds; ZIP/RAR/7z/HTML are named refusals), the 512 MiB ceiling, the
+  API/`Content-Length`/received cross-check, and the completed file's own STFS identity (RB3's
+  title id; the content type is recorded, not policed, because a dumped library presents saved-game
+  packages).
+- `src/store/store_install.{h,cpp}` — staging under `<resolved_dlc_root>/.rbbz-store-staging/`,
+  `rv_<32 hex>.con` (39 bytes; a collision adds `~<n>` and still fits the guest's 42-byte field),
+  the layout rule (structured root → `45410914/00000002/`; flat root → a loose container; an absent
+  root is created flat, never with a title-ID level), and no silent overwrite of a user package.
+- `src/store/store_download_service.{h,cpp}` — the offer registry (`RegisterOffer`, the P3
+  contract: the host holds the URL, the guest only ever sends a token), one worker with a bounded
+  queue (8), idempotent start/again/cancel, master Off refusing a start and cancelling a running
+  transfer at the next chunk (the snapshot is read per chunk, so the commit is live), specific
+  disk-full/read-only/storage errors, receipts at `<user_data_root>/store/downloads.tsv`
+  (transfer history only, never ownership), and the post-install refresh callback.
+- `src/store/store_transfer_winhttp.cpp` — the streaming transport: redirects never followed,
+  transparent content decoding disabled, 64 KiB chunks. `store_http.cpp` stays the small-body
+  catalogue transport.
+- Scanner exclusion, as P5's first deliverable asked: `fs::kStoreStagingDirName` is skipped by the
+  flat library walk, the cache fingerprint and the structured scan (silently — a staging directory
+  is not a misplaced title level), so a partial `CON ` can never be enumerated and a transfer in
+  flight cannot invalidate the cache on every byte.
+- Wiring: `dlc::Configure` publishes this boot's resolved DLC root and measured layout, the
+  receipt path and `WinHttpTransfer()`; `dlc::RefreshAfterStoreInstall()` re-walks the flat roots
+  **without** the R7 cache gate (an install is not a cache feature) and hands the result to the
+  existing guest-thread publish; `DrainRefreshForRestart` stops downloads first. The bridge hook
+  answers `rbbz-store/state|progress|error/...` reads and `rbbz-store/download/start|cancel|again/...`
+  writes before the settings gate, like P1's gate query.
+
+Tests: ctest **`store_download`**, 206 checks — token and grammar, retry/backoff, staging and
+commit (including the collision name), the full transfer matrix (happy path, 302 → same-site, 302
+→ off-site/scheme-relative, ZIP/HTML/wrong-title/short-header, MIME and disposition refusals,
+length mismatch, truncation, ceiling, unknown length, 404/429/network, master-Off and cancel
+mid-body), the service (install, idempotent start, Download Again, queued cancel, master Off
+refusal, unknown token), and the scanner/fingerprint exclusion. Full `ctest` is **42/42** on the
+debug tree (the count includes P4's `store_search`, in the working tree at the time), and
+`rb_blitz.exe` links with the new sources. One real defect fell out of the
+suite: a cancel of a **queued** job logged while holding the service mutex — `LogLine` takes the
+same mutex — which deadlocked the worker; the log is now outside the lock.
+
+Honest limits — P5's exit is **not** met yet:
+
+- No boot has downloaded anything. Nothing registers offers yet (the catalogue worker is P3's
+  post-step-0 lane) and no DTA button case starts a job (P3/P4 own the store screens), so "a
+  verified direct package is playable after the proven refresh or explicitly required restart" is
+  unmeasured. The service reports a verified install as installed and pending discovery; the list
+  must show **restart required** until OQ6's guest-discovery half is proven.
+- §3.1 step 4's "readable song metadata" is only the STFS header identity; mounting the package
+  and reading `songs/songs.dta` before commit is still owed.
+- The §3.2 matching index stays P3's loaded-library work; a receipt never makes a song
+  "Downloaded", and a failed transfer leaves none.
+- Structured roots are not rescanned after an install (their package list is captured at boot);
+  the next boot discovers them.
+- The service's static destructor joins the worker, so a process that exits mid-transfer can wait
+  up to the transport's receive timeout.
 
 ### P6 — RhythmVerse settings in General → Downloadable Content
 

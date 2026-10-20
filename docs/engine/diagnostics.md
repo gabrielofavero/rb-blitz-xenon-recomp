@@ -140,6 +140,8 @@ the guest's own strings, and no log line names them.
 | --- | --- | --- |
 | `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. The filter also matches any path ending in `store.dtb`, so the netcache definition itself is covered. |
 | `store_local_server_root` | "" | Rewrites `config/gen/store.dtb`'s `netcache_init` at boot so the store's default server is a *local* (host-file) one rooted at this guest-relative directory. Empty leaves the record as shipped. Requires a restart (it is built into the generated payload). |
+| `store_search_diagnostic` | off | RhythmVerse plan P4: sends the **RhythmVerse Customs** main-menu row straight into the authored key pages instead of the store, so the search can be driven without P3's front menu serving the store's Search row. Requires a restart. |
+| `store_search_seed` | "" | Seeds the search field with this text at boot, so one Done press exercises the real request and answer (`scripts/probe_search.ps1 -Seed <text>`). Empty leaves the field empty. Requires a restart. |
 
 The observation point is [fs::PayloadOverlayDevice](../../src/fs/payload_overlay.cpp), not the SDK:
 every `game:`/`d:` path resolves through that device, so the hook is a single function pointer that

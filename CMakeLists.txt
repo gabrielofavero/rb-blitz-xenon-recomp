@@ -193,11 +193,21 @@ set(RBBLITZ_SOURCES
     src/store/store_payload.cpp
     src/store/store_probe.cpp
     src/store/store_metadata.cpp
+    # P5: the download pipeline's policy core (SDK-free), the staging/commit rules and the job
+    # service behind the `rbbz-store/download/` bridge commands. The streaming transport is
+    # Windows-only and appended below, like store_http.cpp.
+    src/store/store_download.cpp
+    src/store/store_install.cpp
+    src/store/store_download_service.cpp
+    # P4: the search's field, request and answer (SDK-free) plus the worker that performs it.
+    # The worker is Windows-only (it includes store_http.h) and is appended below.
+    src/store/store_search.cpp
 )
 
 if(WIN32)
     # WinHTTP lives behind one file so the policy stays testable without a network.
-    list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp)
+    list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
+         src/store/store_search_service.cpp)
 endif()
 
 if(WIN32)
@@ -564,6 +574,10 @@ if(BUILD_TESTING)
         src/profile/input_rows.cpp
         src/profile/remap.cpp
         src/profile/gameplay_remap.cpp
+        # The retail store screen's payload edits (`FindNetcacheInit`, `PointNetcacheAtLocalServer`,
+        # `PointUiNetcacheAtLocalServer`, `AddStoreEntryBypass`) live here; without it the target
+        # links only while nothing in menu_payload.cpp reaches that section.
+        src/store/store_payload.cpp
     )
     target_include_directories(rb_blitz_menu_payload_tests PRIVATE src)
     add_test(NAME menu_payload COMMAND rb_blitz_menu_payload_tests)
@@ -867,6 +881,46 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_store_metadata_tests PRIVATE src)
     add_test(NAME store_metadata COMMAND rb_blitz_store_metadata_tests)
+
+    # P5 of the RhythmVerse store plan: the download pipeline. SDK-free and hermetic - the
+    # transfer is a fake and the destination is a temporary folder - so the redirect/archive/
+    # length/identity policy, the staging and commit rules, the bridge grammar and the job
+    # service's queue/cancel/receipt/refresh behaviour all run without a boot or a network.
+    add_executable(rb_blitz_store_download_tests
+        tests/store_download_tests.cpp
+        src/store/store_download.cpp
+        src/store/store_install.cpp
+        src/store/store_download_service.cpp
+        src/store/store_settings.cpp
+        src/store/rhythmverse_client.cpp
+        src/util/sha256.cpp
+    )
+    target_include_directories(rb_blitz_store_download_tests PRIVATE
+        src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    add_test(NAME store_download COMMAND rb_blitz_store_download_tests)
+
+    # P4 of the RhythmVerse store plan (src/store/store_search.h): the typed field (UTF-8, bounded,
+    # one code point per backspace), the key-token transport, the request it becomes, the answer it
+    # accepts and the one-bit replies. SDK-free and hermetic: the transport is a submit sink the
+    # test counts, so a case can "perform" a request without a socket. The authored key pages are
+    # pinned by `settings_screen`, which links the whole surface.
+    add_executable(rb_blitz_store_search_tests
+        tests/store_search_tests.cpp
+        src/store/store_search.cpp
+        src/store/store_settings.cpp
+        src/store/rhythmverse_client.cpp
+    )
+    target_include_directories(rb_blitz_store_search_tests PRIVATE
+        src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    if(WIN32)
+        # The manual `--live-search` arm is the only ctest-adjacent code that touches the network;
+        # the suite itself never sends a request (store_client's `--live-list` has the same rule).
+        target_sources(rb_blitz_store_search_tests PRIVATE src/store/store_http.cpp)
+        target_link_libraries(rb_blitz_store_search_tests PRIVATE winhttp)
+    endif()
+    add_test(NAME store_search COMMAND rb_blitz_store_search_tests)
 endif()
 
 # Controller Settings used to be a second executable in this build tree (launcher plan D1). It

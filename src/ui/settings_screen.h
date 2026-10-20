@@ -113,6 +113,10 @@ struct MenuConfiguration {
   // shipped. The measurement, not a feature: what the store asks for becomes a file open the
   // probe can name.
   std::string store_local_server_root;
+  // P4's measurement switch: when true the payload appends the jump into the authored search key
+  // pages to the retail store's own `enter`, so a boot can drive the whole search before P3's
+  // front menu serves the store's Search row. Off in every ordinary boot.
+  bool store_search_diagnostic = false;
   // False when the boot found no DLC at all. The Play Current Song row is then not drawn: a row
   // that exists must work, and with no library there is nothing it could ever start.
   bool has_dlc_library = true;
@@ -186,6 +190,24 @@ inline constexpr char kStoreEnabledQuery[] = "rbbz-store/enabled";
 // The probe namespace the row asks the host through (`file_exists`):
 // `rbbz-play/current/<pool index>`, parsed by src/hooks/menu_music_pool.h.
 inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
+
+// ------------------------------------------------------------------------------------------------
+// The RhythmVerse search keys (RhythmVerse plan P4)
+// ------------------------------------------------------------------------------------------------
+// The retail title has no keyboard to borrow: all 131 compiled DTA records of the main ark were
+// scanned (2026-10-20, out/_swap/scan_dtb_tokens.py) and the only `show_keyboard` in the game is
+// `rbworld_link_panel`'s native method for the Rock Central e-mail field, which belongs to that
+// panel and answers to nobody else. The key entry is therefore authored here, in the same row
+// style as the rest of this surface, and the *host* owns the query (src/store/store_search.h).
+//
+// The pages exist without a settings row pointing at them: the store's own "Search" entry opens
+// the root once P3's front menu serves it, and the P4 measurement switch opens it for a boot
+// (`store_search_diagnostic`, the P2/P3 precedent of a measurement, not a feature). The root's
+// static back target is the retail store screen because that is the surface which opens it.
+inline constexpr char kSearchPanel[] = "settings_rhythmverse_search_panel";
+inline constexpr char kSearchScreen[] = "settings_rhythmverse_search_screen";
+inline constexpr char kSearchRetailBack[] = "store_menu_screen";
+
 
 // The installed Ultimate payload's own settings entry, which the merged surface **removes**: every
 // page it opened is reachable from Help & Options now, so a second button for the same thing is one
@@ -365,6 +387,10 @@ bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view 
 // 0x821F1678, three float arguments); the earlier `local_xfm` spelling did not move the list, and
 // the owner's capture from it showed Overscan off on entry (measured 2026-10-19, out/audio-fix/probe3).
 std::vector<dtb::Node> AudioPageEnterStatements();
+
+// The statement an earlier P4 measurement appended to the retail store screen's `{enter}`. Retired
+// (a jump from that screen re-delivers presses to the newly current page); `store_search_diagnostic`
+// routes the RhythmVerse main-menu row at the keys instead - see `AddRhythmVerseRow`.
 
 // ------------------------------------------------------------------------------------------------
 // The labels, the requests, and the locale edit

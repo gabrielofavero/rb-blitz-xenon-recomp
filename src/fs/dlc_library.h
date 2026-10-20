@@ -405,6 +405,13 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
       const auto status = entry.status(ec);
       if (ec) { events.push_back({false, 0, entry.path().generic_string()}); continue; }
       if (std::filesystem::is_directory(status)) {
+        // P5 of the RhythmVerse store plan: a package is staged in
+        // `.rbbz-store-staging/` while it is being downloaded, and a partial `CON `
+        // must never be enumerated - the scan reads magic, not names, so the
+        // directory is skipped by name here as well as in the cache fingerprint.
+        if (IsStoreStagingEntryName(Utf8FileName(entry.path()))) {
+          continue;
+        }
         if (!entry.is_symlink(ec)) {
           pending.push_back(entry.path());
         }

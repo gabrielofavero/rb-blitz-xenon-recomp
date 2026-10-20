@@ -89,6 +89,10 @@
 #include "fs/dlc_cached_library.h"
 #include <chrono>
 #include "fs/refresh_state.h"
+#include "store/store_download_service.h"
+#if defined(_WIN32)
+#include "store/store_transfer.h"
+#endif
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 REXCVAR_DECLARE(bool, enhancements_dlc_cache);
@@ -390,6 +394,31 @@ RefreshScan ScanLibraryForRefresh() {
   return scan;
 }
 
+// The refresh's worker half, shared by R7's in-game row and the store's post-install refresh.
+// The caller holds g_refresh_worker_mutex and has already won fs::RefreshState::Begin().
+void StartRefreshWorker(const char* why) {
+  if (g_refresh_worker.thread.joinable()) {
+    g_refresh_worker.thread.join();
+  }
+  REXLOG_INFO("dlc: {} asked for a refresh; scanning {} library root(s) on a worker thread so "
+              "the frame keeps drawing",
+              why, g_library_roots.size());
+  g_refresh_worker.thread = std::thread([] {
+    RefreshScan scan = ScanLibraryForRefresh();
+    const std::size_t count = scan.items.size();
+    {
+      std::lock_guard<std::mutex> lock(g_refresh_payload_mutex);
+      g_refresh_items = std::move(scan.items);
+      g_refresh_paths = std::move(scan.paths);
+      g_refresh_count = count;
+    }
+    g_refresh_state.Finish();
+    REXLOG_INFO("dlc: the refresh finished ({} package(s)); the running title's library is "
+                "handed over on the next menu frame",
+                count);
+  });
+}
+
 }  // namespace
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
@@ -475,6 +504,30 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   g_force_content_type = force_content_type;
   g_scan_threads = REXCVAR_GET(dlc_scan_threads);
   g_cache_path = cache_path;
+
+  // P5 of the RhythmVerse store plan: the store's download destination is this boot's resolved
+  // DLC root, and its layout is the one the boot measured - a structured root gets
+  // 45410914/00000002/, a flat one gets a loose container, and an absent root is created as a
+  // flat library (never with a title-ID level, which would reclassify it). Nothing is created
+  // here; the first install does that.
+  {
+    store::DownloadConfig downloads;
+    downloads.layout.destination_root = root;
+    downloads.layout.structured = structured;
+    downloads.receipt_path = runtime->user_data_root() / "store" / "downloads.tsv";
+#if defined(_WIN32)
+    downloads.transfer = store::WinHttpTransfer();
+#endif
+    downloads.refresh = [] { RefreshAfterStoreInstall(); };
+    downloads.log = [](std::string_view line, bool warning) {
+      if (warning) {
+        REXLOG_WARN("{}", line);
+      } else {
+        REXLOG_INFO("{}", line);
+      }
+    };
+    store::ConfigureDownloads(std::move(downloads));
+  }
 
   const fs::LibraryScanResult library =
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
@@ -622,34 +675,40 @@ void RefreshConfigured() {
     } else {
       // The previous worker finished before Begin() above succeeded, so this joins an idle
       // thread rather than waiting for work.
-      if (g_refresh_worker.thread.joinable()) {
-        g_refresh_worker.thread.join();
-      }
-
-      REXLOG_INFO("dlc: refresh asked for; scanning {} library root(s) on a worker thread so "
-                  "the frame keeps drawing",
-                  g_library_roots.size());
-      g_refresh_worker.thread = std::thread([] {
-        RefreshScan scan = ScanLibraryForRefresh();
-        const std::size_t count = scan.items.size();
-        {
-          std::lock_guard<std::mutex> lock(g_refresh_payload_mutex);
-          g_refresh_items = std::move(scan.items);
-          g_refresh_paths = std::move(scan.paths);
-          g_refresh_count = count;
-        }
-        g_refresh_state.Finish();
-        REXLOG_INFO("dlc: the refresh finished ({} package(s)); the running title's library is "
-                    "handed over on the next menu frame",
-                    count);
-      });
+      StartRefreshWorker("the main menu's refresh row");
     }
   }
   // The press waits (bounded) for the scan: see WaitForRefreshToLand below.
   WaitForRefreshToLand();
 }
 
+// P5's half of OQ6: a verified store install changed a flat library, so the host scans it and
+// hands the result to the content manager exactly as R7's row does - but *without* the R7 cache
+// gate, because the store's install is not a cache feature. The guest's own discovery is still
+// not started from here (the store says a restart is required until that path is proven); what
+// this guarantees is that a later menu-boundary publish and the next boot both see the package.
+void RefreshAfterStoreInstall() {
+  std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
+  if (g_restarting || g_runtime == nullptr) {
+    return;
+  }
+  if (g_library_roots.empty()) {
+    REXLOG_INFO("dlc: the store installed a package but no flat library is configured, so no "
+                "host rescan is owed; a structured root's package list is captured at boot and "
+                "the next boot is what lists it");
+    return;
+  }
+  if (!g_refresh_state.Begin()) {
+    REXLOG_INFO("dlc: a refresh is already running; the store's install rides it");
+    return;
+  }
+  StartRefreshWorker("the store's install");
+}
+
 void DrainRefreshForRestart() {
+  // P5: a restart must not race a download into the library. The service cancels the transfer
+  // and joins its worker before the refresh barrier below.
+  store::StopDownloads();
   std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
   g_restarting = true;
   if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
