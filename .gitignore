@@ -38,6 +38,11 @@
 *.log
 *.dmp
 
+# Local maintenance: prunes oversized GitHub Copilot Chat sessions in
+# %APPDATA%\Code\...\workspaceStorage that make the editor lag. Machine-specific
+# by nature, so it is never committed.
+/prune.ps1
+
 # Disposable scratch for the harnesses and asset probes (`out/_swap/*/run.ps1` builds an
 # empty DLC root here; scripts/hmx_milo.py dumps decompressed milo chunks here). A dumped
 # chunk is retail content byte for byte, so nothing in this directory is ever committed.

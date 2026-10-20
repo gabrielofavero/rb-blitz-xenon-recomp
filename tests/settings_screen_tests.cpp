@@ -41,6 +41,9 @@
 #include "check.h"
 
 #include "hooks/settings_bridge.h"
+#include "profile/gameplay_remap.h"
+#include "profile/input_rows.h"
+#include "profile/remap.h"
 #include "ui/dtb_author.h"
 #include "ui/help_topics.h"
 #include "ui/settings_screen.h"
@@ -3011,6 +3014,61 @@ void TestRendererRowVisibility() {
   CHECK_TRUE(has_renderer_row());
 }
 
+// P1 (interface/gameplay mapping restructure plan): the settings overlay draws a binding row's
+// own line from the row's index. That mapping leans on one invariant - a binding page draws one
+// symbol per row, so the drawn index is the page-row index - and this case pins it, plus the two
+// contexts and the pages that must answer nothing.
+void TestScreenBindingRows() {
+  BeginCase("binding rows: each Controls page names its rows in list order");
+
+  const auto general = ScreenBindingRows("settings_general_mapping_screen");
+  CHECK_EQ(general.size(), rb_blitz::profile::remap::kTargetCount + 1);
+  if (general.size() == rb_blitz::profile::remap::kTargetCount + 1) {
+    for (size_t i = 0; i < rb_blitz::profile::remap::kTargetCount; ++i) {
+      CHECK_TRUE(general[i] == rb_blitz::profile::GeneralBindingToken(
+                                   rb_blitz::profile::remap::Targets()[i]));
+    }
+    CHECK_TRUE(general.back().empty());  // Reset All is not a binding row
+  }
+
+  const auto controller = ScreenBindingRows("settings_controller_actions_screen");
+  CHECK_EQ(controller.size(), rb_blitz::profile::gameplay_remap::kActionCount + 1);
+  if (controller.size() == rb_blitz::profile::gameplay_remap::kActionCount + 1) {
+    for (size_t i = 0; i < rb_blitz::profile::gameplay_remap::kActionCount; ++i) {
+      CHECK_TRUE(controller[i] ==
+                 rb_blitz::profile::GameplayBindingToken(
+                     rb_blitz::profile::gameplay_remap::TableKind::kController,
+                     rb_blitz::profile::gameplay_remap::Actions()[i]));
+    }
+    CHECK_TRUE(controller.back().empty());
+  }
+
+  const auto keyboard_mouse = ScreenBindingRows("settings_keyboard_mouse_actions_screen");
+  CHECK_EQ(keyboard_mouse.size(), rb_blitz::profile::gameplay_remap::kActionCount + 1);
+  if (keyboard_mouse.size() == rb_blitz::profile::gameplay_remap::kActionCount + 1) {
+    for (size_t i = 0; i < rb_blitz::profile::gameplay_remap::kActionCount; ++i) {
+      CHECK_TRUE(keyboard_mouse[i] ==
+                 rb_blitz::profile::GameplayBindingToken(
+                     rb_blitz::profile::gameplay_remap::TableKind::kKeyboardMouse,
+                     rb_blitz::profile::gameplay_remap::Actions()[i]));
+    }
+    CHECK_TRUE(keyboard_mouse.back().empty());
+  }
+
+  // The in-song twins answer the same rows: one page tree, two contexts.
+  CHECK_TRUE(ScreenBindingRows("settings_general_mapping_pause_screen") == general);
+  CHECK_TRUE(ScreenBindingRows("settings_controller_actions_pause_screen") == controller);
+  CHECK_TRUE(ScreenBindingRows("settings_keyboard_mouse_actions_pause_screen") == keyboard_mouse);
+
+  // A page with no binding row, an Assign/Reset page (its rows are actions) and an unknown screen
+  // all answer nothing, so the overlay draws nothing there.
+  CHECK_TRUE(ScreenBindingRows("settings_input_types_screen").empty());
+  CHECK_TRUE(ScreenBindingRows("settings_bind_general_a_screen").empty());
+  CHECK_TRUE(ScreenBindingRows("settings_listen_screen").empty());
+  CHECK_TRUE(ScreenBindingRows("splash_screen").empty());
+  CHECK_TRUE(ScreenBindingRows("").empty());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -3061,6 +3119,7 @@ int main(int argc, char** argv) {
   TestInvertedBoolRow();
   TestProviderRowRemoval();
   TestRendererRowVisibility();
+  TestScreenBindingRows();
   TestLocaleOverrides();
   TestLabels();
   TestHelpTextsCoverEveryRow();

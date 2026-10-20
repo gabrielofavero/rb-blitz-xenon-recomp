@@ -97,4 +97,31 @@ InputRowToken ParseInputRowSymbol(std::string_view symbol);
 // gameplay action's ("First Note").
 std::string BindingRowLabel(const InputRowToken& token);
 
+// ------------------------------------------------------------------------------------------------
+// The display spelling (P1 of the interface/gameplay mapping restructure plan, 2026-10-19)
+// ------------------------------------------------------------------------------------------------
+//
+// A binding row draws the inputs it currently holds, not a `Default`/`Custom` state: the owner
+// asked for `First Note: A` in the row itself. The profile grammar (`pad:a`, `key:Return`) is for
+// files; these functions turn a row into the words a person reads, and they are the only place
+// that spelling lives, so the overlay, the help caption and a test cannot disagree.
+//
+// The display names are deliberately *not* `TargetLabel`/`PadDirectionName`: a row has one line,
+// so a pad control reads "LB", "L3" or "D-pad Right" there while the settings label can afford
+// "Left bumper"/"Left stick". Key names are SDL's own, title-cased for a row ("q" -> "Q", "right"
+// -> "Arrow Right"), and a name this build does not know is passed through unchanged rather than
+// guessed at.
+
+// One source as a row draws it: "A", "Right Click", "Arrow Right", "L-Stick Up".
+std::string SourceDisplayName(const remap::Source& source);
+
+// A whole binding list as a row draws it: "Q, Right Click". Empty for an empty list.
+std::string BindingListText(const std::vector<remap::Source>& sources);
+
+// The row's own line: "<label>: <list>", or "<label>: (no inputs)" when the row binds nothing.
+// `sources` null means there is no effective binding at all (the analog triggers' pad
+// pass-through) and reads the same way. Empty when the token is not a binding row.
+std::string BindingRowText(const InputRowToken& token,
+                           const std::vector<remap::Source>* sources);
+
 }  // namespace rb_blitz::profile

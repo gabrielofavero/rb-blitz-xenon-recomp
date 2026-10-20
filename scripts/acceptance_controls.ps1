@@ -173,6 +173,31 @@ function Assert-Same {
     Write-Host "  ${Tag}: the profile is byte-identical"
 }
 
+# P1: the binding-row line the host overlay drew for a page. The overlay logs the whole set once
+# per change (`help_overlay: binding rows <screen>: <token> = <text> | ...`), so a step can assert
+# on the words the player sees instead of on pixels; the screenshots beside it are the visual
+# record. The line is also the state after an in-page capture, which is what makes "the row updates
+# without re-entering the page" measurable rather than a claim.
+function Get-RowText {
+    param([string]$Screen)
+    $line = Select-String -Path $log -Pattern "help_overlay: binding rows $Screen" -ErrorAction SilentlyContinue |
+        Select-Object -Last 1
+    if (-not $line) { return '' }
+    return $line.Line
+}
+
+function Assert-RowText {
+    param([string]$Screen, [string]$Needle, [string]$Tag)
+    $script:steps += 1
+    $text = Get-RowText $Screen
+    if ($text -notlike "*$Needle*") {
+        $script:failures += "${Tag}: the row text of ${Screen} lacks '$Needle' (log: '$text')"
+        Write-Host ("  !! {0}: row text lacks '{1}'" -f $Tag, $Needle)
+        return
+    }
+    Write-Host ("  {0}: row text has '{1}'" -f $Tag, $Needle)
+}
+
 $process = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $exeArgs
 $process.Id | Set-Content (Join-Path $outDir 'pid.txt')
 
@@ -218,7 +243,8 @@ try {
     # --- the hierarchy -----------------------------------------------------------------------
     ClickRow 3 '02-help-and-options'
     Assert-Screen 'settings_screen' '02-help-and-options' | Out-Null
-    ClickRow 1 '03-controls'
+    # The merged root's order is tutorial, calibration, General, Controls, Audio/Video, Gameplay.
+    ClickRow 3 '03-controls'
     Assert-Screen 'settings_controls_screen' '03-controls' | Out-Null
 
     ClickRow 0 '04-input-types'
@@ -227,6 +253,9 @@ try {
 
     ClickRow 1 '06-general-mapping'
     Assert-Screen 'settings_general_mapping_screen' '06-general-mapping' | Out-Null
+    # P1: the row itself names the defaults, not a "Default" state word. The left bumper is the
+    # unambiguous one (pad "A" and key "A" would both read "A").
+    Assert-RowText 'settings_general_mapping_screen' 'input.general.left_shoulder = Left bumper: LB' '06-general-mapping'
     Drive @('key:b', "wait:$StepSeconds")
     ClickRow 2 '07-gameplay-mapping'
     Assert-Screen 'settings_gameplay_mapping_screen' '07-gameplay-mapping' | Out-Null
@@ -243,6 +272,14 @@ try {
     Drive @('shot:12-listening.png', 'key:key_g', "wait:$StepSeconds", 'shot:13-bound.png')
     Assert-Screen 'settings_bind_general_a_screen' '13-bound' | Out-Null
     Assert-Profile 'key:g' $true '13-bound' 'profile-13-after-tap.toml'
+
+    # P1: the page behind the bind page draws the captured source in the row without a relaunch -
+    # the row text is read from the published snapshot every frame, not baked when the page opened.
+    Drive @('key:b', "wait:$StepSeconds", 'shot:13a-general-row-after-capture.png')
+    Assert-Screen 'settings_general_mapping_screen' '13a-general-row-after-capture' | Out-Null
+    Assert-RowText 'settings_general_mapping_screen' 'input.general.a = A: A, Enter, A, G' '13a-general-row-after-capture'
+    ClickRow 0 '13b-a-button-again'
+    Assert-Screen 'settings_bind_general_a_screen' '13b-a-button-again' | Out-Null
 
     # --- the cancel gesture ------------------------------------------------------------------
     ClickRow 0 '14-assign-again'
@@ -274,6 +311,9 @@ try {
     # --- a key into the Controller table is the wrong kind ------------------------------------
     ClickRow 2 '23-controller-mapping'
     Assert-Screen 'settings_controller_actions_screen' '23-controller-mapping' | Out-Null
+    # P1: a list too long for the row reads `Multiple` (the owner's allowance) instead of
+    # overflowing; the Controller default for First Note is eight stick/D-pad directions.
+    Assert-RowText 'settings_controller_actions_screen' 'input.controller.first_note = Multiple' '23-controller-mapping'
     ClickRow 0 '24-first-note'
     Assert-Screen 'settings_bind_controller_first_note_screen' '24-first-note' | Out-Null
     ClickRow 0 '25-assign-controller'
@@ -326,6 +366,9 @@ if (Test-Path $log) {
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'bridge-lines.txt')
     Select-String -Path $log -Pattern 'native_mouse: screen=' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'screens.txt')
+    # P1: what each binding page drew, in order, as the evidence behind the row screenshots.
+    Select-String -Path $log -Pattern 'help_overlay: binding rows ' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'binding-rows.txt')
 }
 Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outDir 'profile-final.toml')
 

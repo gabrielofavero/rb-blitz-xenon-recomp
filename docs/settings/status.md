@@ -334,10 +334,23 @@ The input surface is in the game now (plan §16). Help & Options → Controls op
 menu, so the external app is no longer the only place to change a binding:
 
 * **Controls** → `Input Types` (Controller: Always on; Keyboard `keyboard_support`; Mouse
-  `mouse_support`), `General Mapping` (16 controls, each drawing `Default`/`Custom` plus its
-  bindings, with an Assign/Reset child page and a table-level Reset All) and `Gameplay Mapping`
-  (Controller: Default Presets — retail's page, disabled while Custom is On — Custom, Custom
-  Mapping; Keyboard & Mouse: Custom, Custom Mapping; six actions and Reset All in each table).
+  `mouse_support`), `General Mapping` (16 controls, each with an Assign/Reset child page and the
+  binding line in the row — see the next bullet — plus a table-level Reset All) and `Gameplay
+  Mapping` (Controller: Default Presets — retail's page, disabled while Custom is On — Custom,
+  Custom Mapping; Keyboard & Mouse: Custom, Custom Mapping; six actions and Reset All in each
+  table).
+* **A binding row draws its inputs in place (P1, 2026-10-19).** The list's own text is a locale
+  entry baked at boot, so the host draws the line over the guest's label: `<row>: <inputs>`
+  (`A: G, H`, `First Note: Q, Right Click`), with `Multiple` when the list does not fit the row's
+  width and the guest's line covered by an opaque box. The row identity comes from the page tree
+  ([`ScreenBindingRows`](../../src/ui/settings_screen.h)), the values from the published input
+  snapshot, and the geometry from the guest's own draw
+  ([`VisibleMenuRows`](../../src/input/native_menu.h)) - so a capture shows in the row the moment
+  the store publishes, with no relaunch and no root re-entry. The display spellings live with the
+  row grammar ([`profile/input_rows.h`](../../src/profile/input_rows.h)): `pad:left_thumb` reads
+  `L3`, `key:Return` reads `Enter`, `key:right` reads `Arrow Right`, `mouse:right` reads
+  `Right Click`. Live: `scripts/acceptance_binding_rows.ps1 -Label p1-h` (24 steps, 0 failures,
+  `out/interface-mapping/p1-rows/p1-h/`).
 * **The listening dialog is a screen** (`settings_listen_screen`): a capture waits for neutral,
   a tap of the candidate binds it on release, a hold past 700 ms cancels, a wrong-kind press
   names the kind and keeps listening, and the dialog leaves by a host Back pulse. A completed

@@ -349,6 +349,21 @@ std::string HelpTextFor(std::string_view symbol);
 // reachable without being in here, and the test proves each has text by looking it up.
 std::vector<std::string> HelpSymbols();
 
+// ------------------------------------------------------------------------------------------------
+// The binding rows a page lists (P1 of the interface/gameplay mapping restructure plan)
+// ------------------------------------------------------------------------------------------------
+//
+// A page lists its rows in `PanelSpec::rows` order and every binding row contributes exactly one
+// symbol to the list (`_on`/`_off` are adjacent and one is dropped), so a drawn row's logical index
+// is its page-row index. This returns the token each index addresses, in draw order, with an empty
+// string for a row that is not a binding (`Reset All`, a submenu, an Assign/Reset page). Empty for
+// any screen this surface does not define.
+//
+// Both contexts resolve: the in-song twin's screen name answers the same rows. The mapping is the
+// row's *identity*, not its value - the overlay asks the effective binding for the value every
+// frame, so a capture shows in the row without re-entering the page.
+std::vector<std::string> ScreenBindingRows(std::string_view screen);
+
 // Appends `<key>` -> `<text>` to a locale definition, the shape every locale file in this title
 // uses (an array of exactly two elements). Refuses when the key already exists, so a shadow copy
 // built twice cannot drift.

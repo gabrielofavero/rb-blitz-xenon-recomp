@@ -1,6 +1,6 @@
 # Interface and Gameplay Mapping restructure
 
-**Status: planning, 2026-10-19. No code has been changed by this document.**
+**Status: in progress, 2026-10-19. P1 landed (below); P2–P5 not started.**
 
 This plan restructures the in-game Controls surface so that **Interface Mapping** owns only the
 interface, **Gameplay Mapping** is always active, and controller gameplay follows the selected
@@ -113,6 +113,67 @@ in the list. The current help caption can show the bindings, but the requirement
 **Semantics:** the summary is the *effective* row: a preset/compiled default when no custom row
 exists, the custom list when one does. The base label stays the action's own name (`First Note`,
 `Search`, …), and the suffix is `: <list>`.
+
+#### P1 — landed (2026-10-19)
+
+**What shipped.**
+
+- `profile::SourceDisplayName`, `BindingListText` and `BindingRowText`
+  ([input_rows.h](../../../src/profile/input_rows.h)): the display spelling of one source
+  (`pad:left_shoulder` → `LB`, `pad:left_thumb` → `L3`, `pad:lstick_up` → `L-Stick Up`,
+  `key:Return` → `Enter`, `key:right` → `Arrow Right`, `mouse:right` → `Right Click`), the joined
+  list, and the complete `Label: list` line. The profile grammar is unchanged.
+- `ui::screen::ScreenBindingRows(screen)` ([settings_screen.h](../../../src/ui/settings_screen.h)):
+  each Controls page's rows as `input.*` tokens in list order, both contexts, with an empty
+  string for a row that is not a binding and no answer at all for any other screen. It leans on
+  the page invariant the tests now pin: a binding page draws exactly one symbol per row.
+- `input::MenuRowGeometry` / `VisibleMenuRows` ([native_menu.h](../../../src/input/native_menu.h)):
+  the focused list's visible rows, each with its **label box** (the guest's rendered text
+  rectangle) and its **cell** (the row's full clickable width). Published from the same capture
+  the mouse hit test uses and cleared at every screen/focus boundary. The capture now runs
+  regardless of the mouse preference, so a pad-only machine gets the row text too.
+- `MenuPresentedRect` / `MenuPointToWindow` ([native_menu.h](../../../src/input/native_menu.h)):
+  the presenter rectangle `MenuPointer` inverts, now also inverted the other way, so a normalized
+  guest row lands in the drawer's `DisplaySize` coordinates at every resolution and with
+  letterboxing or overscan.
+- The overlay ([help_overlay.cpp](../../../src/ui/help_overlay.cpp)) draws the line centred over
+  the guest label, with an opaque cover, and logs
+  `help_overlay: binding rows <screen>: <token> = <line> | ...` once per change plus one
+  `help_overlay: row text fit ...` geometry line per page.
+
+**Measured (2026-10-19; evidence `out/interface-mapping/p1-rows/p1-h/`, screenshots
+`p1-h-shots/`).**
+
+- The guest's label rectangle **is** its rendered text rectangle: `A: Custom` projects to
+  162.1 px while its glyphs occupy 167 px at `display=2354x993`. That makes the label box both
+  the cover and (with the row cell) the fit budget.
+- A row's full width is only carried on frames where the highlight mesh is drawn (the label box
+  alone is 162 px against a 624 px row), so the snapshot keeps the widest cell seen for the page
+  rather than the latest one. Reading the capture's moved-from `result.rows` instead of its
+  `geometry.rows` silently paired nothing (`p1-f`); the fit line now names both boxes.
+- The drawer renders the caption face below the size it is asked for (the legacy atlas path), and
+  the label box's height is the guest's tight text box (39.8 px here). Asking for the label height
+  and scaling by the face's own `GetFontSize()` answer puts the line on the guest's height
+  (`size=29.7`).
+- `Multiple`: the Controller table's First Note default (eight stick/D-pad directions) reports
+  `input.controller.first_note = Multiple`; the lane and power-up rows fit their lists.
+- Capture: a seeded `[remap] a = 'key:g, key:h'` row read `A: G, H`; a tap of J in the listening
+  dialog made the page behind it read `A: G, H, J`, with no relaunch and no root re-entry.
+- The earlier arms are kept as the record of what failed: `p1-a` (a narrower centred box left the
+  guest's tail visible), `p1-b`/`p1-c` (label height mistaken for the em; the row's true width
+  unknown), `p1-d` (guest width estimated through the caption face: 80 px against 167 px),
+  `p1-g` (alpha 236 let the guest text ghost through the cover).
+
+**Acceptance.** `scripts/acceptance_binding_rows.ps1` (new, tracked) — 24 steps, 0 failures,
+evidence above. The P1 steps were added to `scripts/acceptance_controls.ps1` too, whose route was
+re-pointed at the current root order (Controls is root row 3); that harness now runs 62 steps, 0
+failures (`out/gameplay-mapping/in-game/p1-rows-2026-10-19b/`). Host suites: 37/37 `ctest`
+(`input_bindings`, `settings_screen` and `native_mouse` extended).
+
+**Carried.** A replacement line wider than the guest's label box grows the cover up to the row's
+cell (the fit test bounds it); no live fixture exercises that width yet. The row text is drawn for
+the page that owns the focused list only — retail's controller-preset page and the listening
+dialog are different screens and draw nothing.
 
 ### P2 — Input model and defaults
 

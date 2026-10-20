@@ -328,6 +328,44 @@ void TestStoreCaptureAssignment() {
              std::string::npos);
 }
 
+// P1 (interface/gameplay restructure plan): a binding row draws its inputs as words, over the
+// guest's own label. The grammar (`pad:a`) stays a file spelling; the row reads "A".
+void TestRowDisplayText() {
+  rb_blitz::test::BeginCase("binding rows: display names and the row line");
+  const auto name = [](const char* text) {
+    return rb_blitz::profile::SourceDisplayName(Source(text));
+  };
+  CHECK_TRUE(name("pad:a") == "A");
+  CHECK_TRUE(name("pad:left_shoulder") == "LB");
+  CHECK_TRUE(name("pad:left_thumb") == "L3");
+  CHECK_TRUE(name("pad:dpad_right") == "D-pad Right");
+  CHECK_TRUE(name("pad:lstick_up") == "L-Stick Up");
+  CHECK_TRUE(name("key:q") == "Q");
+  CHECK_TRUE(name("key:Return") == "Enter");
+  CHECK_TRUE(name("key:right") == "Arrow Right");
+  CHECK_TRUE(name("key:space") == "Space");
+  CHECK_TRUE(name("key:F1") == "F1");
+  CHECK_TRUE(name("mouse:right") == "Right Click");
+  CHECK_TRUE(name("mouse:middle") == "Middle Click");
+
+  const std::vector<rb_blitz::profile::remap::Source> list = {Source("key:q"),
+                                                              Source("mouse:right")};
+  CHECK_TRUE(rb_blitz::profile::BindingListText(list) == "Q, Right Click");
+  const InputRowToken first_note =
+      rb_blitz::profile::ParseInputRowToken("input.keyboard_mouse.first_note");
+  CHECK_TRUE(rb_blitz::profile::BindingRowText(first_note, &list) ==
+             "First Note: Q, Right Click");
+  // A row with no effective binding (the analog triggers' pad pass-through) and an explicit empty
+  // list both say so, rather than drawing a trailing colon.
+  CHECK_TRUE(rb_blitz::profile::BindingRowText(first_note, nullptr) ==
+             "First Note: (no inputs)");
+  const std::vector<rb_blitz::profile::remap::Source> empty;
+  CHECK_TRUE(rb_blitz::profile::BindingRowText(first_note, &empty) ==
+             "First Note: (no inputs)");
+  // A token that is not a binding row has no line at all.
+  CHECK_TRUE(rb_blitz::profile::BindingRowText(InputRowToken{}, &list).empty());
+}
+
 }  // namespace
 
 int main() {
@@ -340,6 +378,7 @@ int main() {
   TestStoreResetAndSave();
   TestStoreSwitchAndRecovery();
   TestStoreCaptureAssignment();
+  TestRowDisplayText();
   std::printf("%s: %d check(s), %d failure(s)\n",
               rb_blitz::test::g_failures == 0 ? "PASS" : "FAIL", rb_blitz::test::g_checks,
               rb_blitz::test::g_failures);

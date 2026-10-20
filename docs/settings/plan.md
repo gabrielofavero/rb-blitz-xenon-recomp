@@ -199,7 +199,7 @@ Target details:
 | Controls row | Kind | Contents |
 | --- | --- | --- |
 | Input Types | Submenu | `Controller: Always on` (information row, not a toggle), `Keyboard` (`keyboard_support`), `Mouse` (`mouse_support`) |
-| General Mapping | Submenu | One row per non-Guide controller control (16), each drawing `<control>: Default` or `<control>: Custom` with the bindings as its caption; Assign/Reset child page per row; `Reset All` for the table |
+| General Mapping | Submenu | One row per non-Guide controller control (16), each drawing the inputs it currently holds (`A: Enter, A`, `First Note: Q, Right Click`; `Multiple` when the list is too wide for the row, P1 2026-10-19); Assign/Reset child page per row; `Reset All` for the table |
 | Gameplay Mapping | Submenu | `Controller` page: `Default Presets` (retail's page, disabled while Custom is On), `Custom: On/Off` (`gameplay_mapping_controller`), `Custom Mapping` (six actions + `Reset All`); `Keyboard & Mouse` page: `Custom: On/Off` (`gameplay_mapping_keyboard_mouse`), `Custom Mapping` (six actions + `Reset All`) |
 
 The six actions in both gameplay tables are First Note, Second Note, Move Lane Right, Move Lane Left, Powerup and Pause. Every Assign child opens the one shared listening dialog (`settings_listen_screen`); every Reset child removes that row's override. Retail's controller inventory is not deleted — it is the **Default Presets** destination, so a player who turns Controller Custom off still reaches it in two more presses.

@@ -4,6 +4,8 @@
 
 #include "profile/input_rows.h"
 
+#include <map>
+
 namespace rb_blitz::profile {
 namespace {
 
@@ -16,6 +18,84 @@ std::string Join(std::string_view prefix, std::string_view name) {
   std::string out(prefix);
   out += name;
   return out;
+}
+
+// Case-folded copy for the display-name tables: a profile written by hand may spell a key in any
+// case, and the row must read the same either way.
+std::string LowerAscii(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    out.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c);
+  }
+  return out;
+}
+
+// The pad controls and stick directions as a row draws them. One line, so the short spellings a
+// pad itself prints win over the settings label's prose ("LB", "L3", "D-pad Right").
+std::string PadDisplayName(std::string_view name) {
+  static const std::map<std::string_view, std::string_view, std::less<>> kNames = {
+      {"a", "A"},
+      {"b", "B"},
+      {"x", "X"},
+      {"y", "Y"},
+      {"left_shoulder", "LB"},
+      {"right_shoulder", "RB"},
+      {"left_trigger", "LT"},
+      {"right_trigger", "RT"},
+      {"back", "Back"},
+      {"start", "Start"},
+      {"left_thumb", "L3"},
+      {"right_thumb", "R3"},
+      {"dpad_up", "D-pad Up"},
+      {"dpad_down", "D-pad Down"},
+      {"dpad_left", "D-pad Left"},
+      {"dpad_right", "D-pad Right"},
+      {"lstick_up", "L-Stick Up"},
+      {"lstick_down", "L-Stick Down"},
+      {"lstick_left", "L-Stick Left"},
+      {"lstick_right", "L-Stick Right"},
+      {"rstick_up", "R-Stick Up"},
+      {"rstick_down", "R-Stick Down"},
+      {"rstick_left", "R-Stick Left"},
+      {"rstick_right", "R-Stick Right"},
+  };
+  const auto found = kNames.find(name);
+  return found == kNames.end() ? std::string(name) : std::string(found->second);
+}
+
+// The keys a row shows with their own word: SDL's scancode names are already readable ("F1",
+// "Semicolon"), but the names that collide with a direction or a menu action read better spelled
+// out ("Right" -> "Arrow Right", "Return" -> "Enter").
+std::string KeyDisplayName(std::string_view name) {
+  static const std::map<std::string, std::string> kNames = {
+      {"return", "Enter"},      {"enter", "Enter"},       {"escape", "Escape"},
+      {"backspace", "Backspace"}, {"space", "Space"},     {"tab", "Tab"},
+      {"delete", "Delete"},     {"insert", "Insert"},     {"home", "Home"},
+      {"end", "End"},           {"pageup", "Page Up"},    {"pagedown", "Page Down"},
+      {"up", "Arrow Up"},       {"down", "Arrow Down"},   {"left", "Arrow Left"},
+      {"right", "Arrow Right"}, {"left shift", "L Shift"}, {"right shift", "R Shift"},
+      {"left ctrl", "L Ctrl"},  {"right ctrl", "R Ctrl"}, {"left alt", "L Alt"},
+      {"right alt", "R Alt"},
+  };
+  const std::string lower = LowerAscii(name);
+  if (const auto found = kNames.find(lower); found != kNames.end()) {
+    return found->second;
+  }
+  // A letter or digit key: one upper-case character reads better in a row.
+  if (name.size() == 1 && name[0] >= 'a' && name[0] <= 'z') {
+    return std::string(1, static_cast<char>(name[0] - 'a' + 'A'));
+  }
+  return std::string(name);
+}
+
+std::string MouseDisplayName(std::string_view name) {
+  if (name == "left") return "Left Click";
+  if (name == "right") return "Right Click";
+  if (name == "middle") return "Middle Click";
+  if (name == "x1") return "Mouse 4";
+  if (name == "x2") return "Mouse 5";
+  return std::string(name);
 }
 
 }  // namespace
@@ -177,6 +257,42 @@ std::string BindingRowLabel(const InputRowToken& token) {  switch (token.kind) {
     }
     default: return {};
   }
+}
+
+std::string SourceDisplayName(const remap::Source& source) {
+  switch (source.kind) {
+    case remap::SourceKind::kPad: return PadDisplayName(source.name);
+    case remap::SourceKind::kKey: return KeyDisplayName(source.name);
+    case remap::SourceKind::kMouse: return MouseDisplayName(source.name);
+  }
+  return std::string(source.name);
+}
+
+std::string BindingListText(const std::vector<remap::Source>& sources) {
+  std::string text;
+  for (const remap::Source& source : sources) {
+    if (!text.empty()) {
+      text += ", ";
+    }
+    text += SourceDisplayName(source);
+  }
+  return text;
+}
+
+std::string BindingRowText(const InputRowToken& token,
+                           const std::vector<remap::Source>* sources) {
+  const std::string label = BindingRowLabel(token);
+  if (label.empty()) {
+    return {};
+  }
+  std::string text = label;
+  text += ": ";
+  if (sources == nullptr || sources->empty()) {
+    text += "(no inputs)";
+  } else {
+    text += BindingListText(*sources);
+  }
+  return text;
 }
 
 }  // namespace rb_blitz::profile

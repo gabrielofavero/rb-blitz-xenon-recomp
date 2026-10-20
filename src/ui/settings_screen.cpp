@@ -2067,6 +2067,39 @@ std::vector<std::string> HelpSymbols() {
   return out;
 }
 
+std::vector<std::string> ScreenBindingRows(const std::string_view screen) {
+  if (screen.empty()) {
+    return {};
+  }
+  // The page tree is fixed for the process and a binding row never depends on the boot's
+  // configuration (the one configuration-dependent row, Play Current Song, is not a binding), so
+  // the mapping is built once and the overlay's per-frame ask is a lookup. A page that has no
+  // binding row at all is deliberately absent: an empty answer means "draw nothing there".
+  static const std::map<std::string, std::vector<std::string>> kPages = [] {
+    std::map<std::string, std::vector<std::string>> pages;
+    for (const std::vector<PanelSpec>& context : {AllPanels(), InSongPanels()}) {
+      for (const PanelSpec& panel : context) {
+        std::vector<std::string> rows;
+        bool any = false;
+        for (const Row& row : panel.rows) {
+          std::string token;
+          if (row.kind == Kind::kStateSubmenu && profile::ParseInputRowToken(row.setting).valid()) {
+            token = row.setting;
+            any = true;
+          }
+          rows.push_back(std::move(token));
+        }
+        if (any) {
+          pages.emplace(panel.screen, std::move(rows));
+        }
+      }
+    }
+    return pages;
+  }();
+  const auto found = kPages.find(std::string(screen));
+  return found == kPages.end() ? std::vector<std::string>{} : found->second;
+}
+
 std::string PauseScreen(std::string_view screen) {
   constexpr std::string_view kSuffix = "_screen";
   if (screen.size() > kSuffix.size() &&

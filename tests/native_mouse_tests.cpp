@@ -18,6 +18,29 @@ int main() {
   p = MenuPointer(1280, 0, 2560, 720, 16, 9, true, true, 90, 90);
   CHECK_TRUE(std::abs(p.y - .05f) < .001f);
   CHECK_FALSE(std::isfinite(MenuPointer(0, 0, 0, 0, 16, 9, true, false, 90, 90).x));
+
+  // The overlay's forward mapping is the pointer's inverse for the same presenter rectangle: it
+  // is how a row the guest drew lands in the window coordinates the host draws in.
+  {
+    const auto round_trip = [](float x, float y, int w, int h, int aw, int ah, bool letterbox,
+                               bool overscan) {
+      const MenuPoint guest = MenuPointer(x, y, w, h, aw, ah, letterbox, overscan, 90, 90);
+      return MenuPointToWindow(guest, w, h, aw, ah, letterbox, overscan, 90, 90);
+    };
+    auto back = round_trip(1280, 360, 2560, 720, 16, 9, true, false);
+    CHECK_TRUE(std::abs(back.x - 1280) <= 1.0f && std::abs(back.y - 360) <= 1.0f);
+    back = round_trip(200, 120, 2560, 1080, 21, 9, true, false);
+    CHECK_TRUE(std::abs(back.x - 200) <= 1.0f && std::abs(back.y - 120) <= 1.0f);
+    // A stretched (non-letterboxed) frame still round-trips: the rectangle is wider than the
+    // guest's aspect, and both directions use that same rectangle.
+    back = round_trip(640, 360, 2560, 720, 16, 9, false, false);
+    CHECK_TRUE(std::abs(back.x - 640) <= 1.0f && std::abs(back.y - 360) <= 1.0f);
+    // The frame's own (0,0) is the presented rectangle's top-left, not the window's: a 16:9 frame
+    // in a 2560x720 window is pillarboxed, so the guest's corner sits at x = 640.
+    const MenuPoint corner = MenuPointToWindow({0, 0}, 2560, 720, 16, 9, true, false, 90, 90);
+    CHECK_TRUE(corner.x == 640.0f && corner.y == 0.0f);
+    CHECK_FALSE(std::isfinite(MenuPointToWindow({.5f, .5f}, 0, 0, 16, 9, true, false, 90, 90).x));
+  }
   BeginCase("native geometry selects distant rows directly and rejects disabled/outside rows");
   MenuBounds bounds{.2f, .1f, .8f, .9f};
   std::vector<MenuRow> rows{{{.5f,.2f}, 0, true}, {{.5f,.5f}, 7, false}, {{.5f,.8f}, 25, true}};

@@ -14,10 +14,14 @@
 namespace rb_blitz::input {
 
 struct MenuPoint { float x = 0, y = 0; };
-// Invert the presenter's centered aspect/overscan rectangle in physical pixels.
-inline MenuPoint MenuPointer(float x, float y, int w, int h, int aspect_w, int aspect_h,
-                             bool letterbox, bool overscan, int safe_x, int safe_y) {
-  if (w <= 0 || h <= 0 || aspect_w <= 0 || aspect_h <= 0) return {NAN, NAN};
+// The presented rectangle inside a `w` x `h` frame: the part of the window the guest's frame
+// occupies once the presenter has applied the video mode's aspect and (optionally) the overscan
+// safe area. MenuPointer and MenuPointToWindow share it, so a pointer and an overlay drawn from
+// the same guest coordinates can never disagree about where the guest's frame is.
+struct MenuPresentRect { int width = 0, height = 0; };
+inline MenuPresentRect MenuPresentedRect(int w, int h, int aspect_w, int aspect_h,
+                                         bool letterbox, bool overscan, int safe_x, int safe_y) {
+  if (w <= 0 || h <= 0 || aspect_w <= 0 || aspect_h <= 0) return {};
   auto scale = [](int value, int numerator, int denominator) {
     return int((int64_t(value) * numerator + denominator / 2) / denominator);
   };
@@ -37,7 +41,28 @@ inline MenuPoint MenuPointer(float x, float y, int w, int h, int aspect_w, int a
       if (letterbox) ph = scale(w * 100, aspect_h, aspect_w * safe);
     }
   }
-  return {(x - (w - pw) / 2) / pw, (y - (h - ph) / 2) / ph};
+  return {pw, ph};
+}
+// Invert the presenter's centered aspect/overscan rectangle in physical pixels.
+inline MenuPoint MenuPointer(float x, float y, int w, int h, int aspect_w, int aspect_h,
+                             bool letterbox, bool overscan, int safe_x, int safe_y) {
+  const MenuPresentRect rect =
+      MenuPresentedRect(w, h, aspect_w, aspect_h, letterbox, overscan, safe_x, safe_y);
+  if (rect.width <= 0 || rect.height <= 0) return {NAN, NAN};
+  return {(x - (w - rect.width) / 2) / rect.width,
+          (y - (h - rect.height) / 2) / rect.height};
+}
+// The forward mapping, for a host overlay that draws *over* the guest's own UI: the window point
+// a normalized guest point lands on, in whatever units the caller passes as `w`/`h` (ImGui's
+// `DisplaySize`, so the result is usable with a draw list directly). Same rectangle as
+// MenuPointer; `MenuPointer(MenuPointToWindow(p, ...), ...)` returns `p` within a pixel.
+inline MenuPoint MenuPointToWindow(MenuPoint point, int w, int h, int aspect_w, int aspect_h,
+                                   bool letterbox, bool overscan, int safe_x, int safe_y) {
+  const MenuPresentRect rect =
+      MenuPresentedRect(w, h, aspect_w, aspect_h, letterbox, overscan, safe_x, safe_y);
+  if (rect.width <= 0 || rect.height <= 0) return {NAN, NAN};
+  return {point.x * float(rect.width) + (w - rect.width) * .5f,
+          point.y * float(rect.height) + (h - rect.height) * .5f};
 }
 struct MenuBounds {
   float left = 0, top = 0, right = 0, bottom = 0;
@@ -313,6 +338,23 @@ uint32_t CurrentScreen();
 uint32_t CurrentFocus();
 uint32_t FocusedListDrawn();
 bool MenuAvailable();
+
+// One row the focused list last drew: its logical index (the same index the mouse hit test and
+// `UIListState::Selected` use) and the two rectangles the draw measured - `label`, the row's own
+// text, and `cell`, the row's full clickable slot. Normalized through the camera, the coordinate
+// space MenuPointer maps into; MenuPointToWindow turns them into window coordinates.
+struct MenuRowGeometry {
+  int index = -1;
+  MenuBounds label;
+  MenuBounds cell;
+};
+
+// The visible rows of the focused list, in draw order, and the screen that owned it (the guest
+// object's own name, e.g. `settings_general_mapping_screen`). False when no menu list is drawn -
+// a song, a transition, or before the first draw - and then the caller must draw nothing rather
+// than a stale page's rows. The settings overlay (src/ui/help_overlay.cpp) reads this once per
+// UI frame; the snapshot is replaced by the draw and cleared at every screen/focus boundary.
+bool VisibleMenuRows(std::string* screen_name, std::vector<MenuRowGeometry>* rows);
 // A live song: the screen is `game_screen` and the focused panel is not the pause panel
 // (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on
 // the title, the loading screens and while paused.
