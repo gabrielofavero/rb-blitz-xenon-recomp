@@ -170,6 +170,18 @@ re-pointed at the current root order (Controls is root row 3); that harness now 
 failures (`out/gameplay-mapping/in-game/p1-rows-2026-10-19b/`). Host suites: 37/37 `ctest`
 (`input_bindings`, `settings_screen` and `native_mouse` extended).
 
+**Re-verified 2026-10-20.** The record above was re-run on `4b5d059` (the Audio-page refactor
+that followed P1) with no code change: `scripts/acceptance_binding_rows.ps1 -Label
+p1-rows-2026-10-20` = 24 steps, 0 failures, evidence in
+`out/interface-mapping/p1-rows/p1-rows-2026-10-20/` and its `-shots/` directory — `A: G, H`
+and `Left bumper: LB` on the General Mapping page, a tap of J in the listening dialog grew the
+row to `A: G, H, J` one Back later, and the Controller table shows `Multiple` on First Note and
+Second Note while the lane, power-up and pause rows draw their lists. Host suites 37/37
+`ctest`; `check_docs.py` 0 errors / 47 known warnings. The release build was rebuilt first
+(the Audio refactor touched `settings_screen.cpp`); building the debug test tree clobbers the
+release tree's SDK objects, so re-run `cmake --preset win-amd64-release` before the next
+release build.
+
 **Carried.** A replacement line wider than the guest's label box grows the cover up to the row's
 cell (the fit test bounds it); no live fixture exercises that width yet. The row text is drawn for
 the page that owns the focused list only — retail's controller-preset page and the listening
