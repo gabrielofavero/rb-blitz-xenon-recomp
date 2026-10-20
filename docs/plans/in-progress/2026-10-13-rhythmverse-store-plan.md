@@ -1,13 +1,12 @@
 # RhythmVerse in-store integration — research + implementation plan
 
 Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0, P6, P1 and P2
-landed 2026-10-20** (client/transport; the six settings rows and the live snapshot; the main-menu
-entry and its live gate; P2's instruments plus its A/B decision). P1's browser acceptance is met on
-one boot (row drawn, store opens, B returns) and still owes the multi-boot/toggle matrix. **P2 chose
-A narrowed to the fetch seam** (§5/P2 record): the retail UI and its DTA request are measured
-working offline, and the native fetch that should follow the request does nothing observable — no
-file, no content call, no socket — so serving metadata waits on one hook, not on a schema guess.
-Audio preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
+landed 2026-10-20**, and **P3's serial half (step 0) landed the same day**: the request chain is
+mapped (`sub_827501F0` → `sub_82753010` → `sub_8274FB60` → the file cache), both entries are
+hooked, and the store's own DTA record is proven editable — the panel still issues no request
+offline, so the data lane starts at the gate (§5/P3 step 0 record). P1's browser acceptance is met
+on one boot (row drawn, store opens, B returns) and still owes the multi-boot/toggle matrix. Audio
+preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
@@ -817,22 +816,66 @@ Landed with the decision (`store_metadata`, **29 checks**; full `ctest` **40/40*
   a served record nobody reads is worse than none (it would look like progress in a boot log).
 
 **P3 step 0 (the next measurement, named so it is not rediscovered):** locate the native fetch
-entry behind `store_panel request`. The cheapest route is the DTA method table for the
-`store_panel` object — the symbol strings (`request`, `set_source`, `user_can_do_input`,
-`has_menus`, …) sit in one table in the decrypted image, and the handler words next to them are the
-functions to hook. The hook then answers from `BuildFrontMenuRecord` and the parser's reaction is
-observable for the first time — which is also when the schema stops being a guess.
+entry behind `store_panel request`. *(Landed later the same day — see the P3 step 0 record below:
+the entry is `sub_8274FB60`, reached from the panel's `Handle` and from `sub_82753010`, and both are
+hooked.)*
 
 Status: **P2 is exited (2026-10-20)** with the decision above. Remaining P2 deliverables 4
 (loaded-DLC metadata source) and 5 (price/icon hide path) move into P3, whose exit needs them.
 
 ### P3 — first light: "Recent" list with real data + art
 
+**P3 step 0 record (2026-10-20) — the request chain is mapped, and the store's own DTA is editable.**
+This is the serial half of P3; the data lane (schema, offers, art) starts here.
+
+The native chain, read out of the decrypted image (`out/_swap/blitz_image.bin`, base 0x82000000 —
+confirmed by the one pointer to `./ui/store/gen/store.dtb` at 0x82001060) and the recompiled
+sources:
+
+| Step | Where | What |
+| --- | --- | --- |
+| method dispatch | `sub_827501F0` | `BandStorePanel::Handle(Symbol, DataArray*)`; the `request` branch reads the menu symbol from argument 0 and the bool from argument 1 |
+| request builder | `sub_8274FB60` | formats the metadata path (`"/%s%s"` at 0x82103138, `"?pid=%s"` at 0x82103130), stores it at `this+148`, calls the file cache `sub_8235A240(manager, &path)` |
+| index request | `sub_82753010` (reached from `sub_82753B20`'s `request_index_if_needed` branch) | returns early when `*(this+52) != *(this+56)`; then returns unless `*(0x828A3D20+44) == 2`; then calls `sub_8274FB60` |
+| the callback that should start it | DTA `on_init_commerce_success` in `ui/store/gen/store.dtb` | `{this request_index_if_needed}` then a `has_menus` check that sets the loading visual state |
+
+Measured in boots (`out/_swap/store-probe/20261020-15{1718,2008,2327,2622,2933}`):
+
+1. **The retail panel never requests.** With the store open and its first row accepted, no
+   `store-probe: request` line appears: `sub_8274FB60` is never reached. The screen sits on its
+   loading state because the DTA's select branch is gated by `{store_panel has_menus}`, and the
+   menus only ever arrive from the callback above.
+2. **The callback only fires on a commerce session, and offline there is none.** Entering the store
+   calls `__imp__XamBackgroundDownloadSetMode` (a STUB) and nothing else.
+3. **The store's DTA is ours to edit, and it runs.** The payload now appends
+   `{store_panel on_init_commerce_success}` to `store_menu_screen`'s `enter` method
+   (`store::AddStoreEntryBypass`). Proven by a one-boot swap of that command for
+   `{ui goto_screen splash_screen}`: entering the store jumped to splash and B returned to the
+   title — so the generated `ui/store/gen/store.dtb` really is the record the guest executes. The
+   bypass itself then reaches `request_index_if_needed` (the gate hook logs it), and the index
+   path still declines: `this+52 == this+56 == 0` (so its "already loaded" test passes), the state
+   word reads **0**, and forcing it to 2 through the read-only page protection (the same
+   unprotect-write `ultimate.cpp` uses) does not produce a request either.
+4. `ui/gen/ui.dtb`'s manager init is now also rewritable: the `{find syscfg store netcache_init}`
+   argument is replaced with the record's own rewritten definition (`store::PointUiNetcacheAtLocalServer`).
+   Delivery of that record is **unproven** (a `{notify …}` marker produced no log line; `notify` may
+   be a ship-build no-op), unlike the store DTA above.
+
+**Next measurement (the top of P3's data lane):** why `sub_82753010` still does not call the request
+builder after the state word is forced. Either the compared word is refreshed from another cell
+before the compare, or the `sub_8274ED98`/`sub_8274E710` pair it calls first declines. The cheapest
+next step is a breakpoint-style dump of the three values *inside* the original body (a hook on
+`sub_8274ED98` reporting its return), not another schema guess.
+
+Landed with this record: `store::AddStoreEntryBypass` (+ tests), the `sub_8274FB60` request hook and
+the `sub_82753010` gate hook in `src/store/store_probe.cpp` (pass-through; they log and force only
+while `store_trace` is on). `store_payload` is **84 checks**; full `ctest` **40/40**.
+
 P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
-entry behind `store_panel request` (nothing can be served or observed before it); **deliverable 4**,
-the loaded-DLC title/artist source the Downloaded state needs; and **deliverable 5**, the price/icon
-hide path. The writer skeleton (`src/store/store_metadata.*`) is where the record's shape changes
-once the parser can be fed one.
+entry behind `store_panel request` (nothing can be served or observed before it) — **done, see the
+record above**; **deliverable 4**, the loaded-DLC title/artist source the Downloaded state needs;
+and **deliverable 5**, the price/icon hide path. The writer skeleton
+(`src/store/store_metadata.*`) is where the record's shape changes once the parser can be fed one.
 
 - Generate the store front menu with **Recent** (and a placeholder **Search** entry) and offer
   records for page 1 of `/api/rb3xbox/songfiles/list` (25 API records; unsupported links/formats/

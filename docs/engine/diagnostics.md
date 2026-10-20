@@ -167,6 +167,22 @@ store's request is followed by no file, content or socket call at all (plan §5/
 question the path probe could not answer. Two cautions: the log grows to ~50 MB per boot, and the
 per-frame input/swap lines dominate, so census them by export name before reading order.
 
+**The store's native chain (P3 step 0, 2026-10-20).** [store_probe.cpp](../../src/store/store_probe.cpp)
+now also hooks two guest functions, both pass-throughs that only report (and, for the gate, force a
+value) while `store_trace` is on:
+
+| Function | What it proves |
+| --- | --- |
+| `sub_8274FB60` | the panel's request builder — formats the metadata path and hands it to the file cache. A `store-probe: request '<path>' (menu symbol …, flag …)` line is the request list P2 could not observe from the file side. |
+| `sub_82753010` | `request_index_if_needed`'s body: reports `this+52`, `this+56` and the state word at `0x828A3D20+44`, then forces that word to 2 through the heap's protect API (the image's data section is read-only; a plain store does nothing). |
+
+**Proving a generated DTA record is the one the guest runs** — a path probe cannot, because records
+come out of the ark by offset. The method that worked: make the edit do something visible. The
+payload's `store_menu_screen.enter` gained `{store_panel on_init_commerce_success}`; swapping it for
+`{ui goto_screen splash_screen}` for one boot made entering the store jump to splash, which proved
+the record executes. `{notify "…"}` is *not* a usable marker (no log line, probably a ship-build
+no-op).
+
 The metadata writer's half of the measurement is `rb_blitz_store_payload_tests dump-menu <dtb>` and
 `dump-strings <dtb>`: extract a boot's generated payload (`scripts/hmx_ark.py extract --hdr
 <profile>/cache/settings-menu/<pid>/gen/patch_xbox.hdr`) and these print the option array the guest

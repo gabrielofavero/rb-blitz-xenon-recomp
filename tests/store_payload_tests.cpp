@@ -246,6 +246,273 @@ void TestRewrittenRecordSurvivesCompileAndParse() {
 
 }  // namespace
 
+// The boot-time shape `ui/gen/ui.dtb` carries around the netcache manager: a `set`, the manager's
+// `init` with the syscfg lookup, and its `load` (decoded in out/_swap/ui.tree.txt).
+std::vector<Node> UiInitRecord() {
+  return {
+      Node::Command({Symbol("set"), Node::Var("first_screen"), Symbol("splash_screen")}),
+      Node::Command({Symbol("net_cache_mgr"), Symbol("init"),
+                     Node::Command({Symbol("find"), Node::Var("syscfg"), Symbol("store"),
+                                    Symbol("netcache_init")})}),
+      Node::Command({Symbol("net_cache_mgr"), Symbol("load"),
+                     Symbol("kNetCacheMgrCacheSizeLarge")}),
+  };
+}
+
+const Node* FindNetCacheInitCommand(const Node& node) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+      node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "net_cache_mgr" &&
+      node.kids[1].text == "init") {
+    return &node;
+  }
+  for (const Node& kid : node.kids) {
+    if (const Node* found = FindNetCacheInitCommand(kid)) return found;
+  }
+  return nullptr;
+}
+
+// True when the tree still carries a symbol `name` anywhere.
+bool HasSymbol(const Node& node, std::string_view name) {
+  if (node.tag == rb_blitz::ui::dtb::kSymbol && node.text == name) return true;
+  for (const Node& kid : node.kids) {
+    if (HasSymbol(kid, name)) return true;
+  }
+  return false;
+}
+
+void TestUiInitGetsTheRewrittenDefinition() {
+  BeginCase("the ui init is handed the record's own rewritten definition");
+
+  // The definition comes from the record the boot already rewrote, so the manager's argument has
+  // the shipped shape by construction (a hand-built literal crashed the guest on 2026-10-20).
+  std::vector<Node> store = NetcacheRecord();
+  std::string why;
+  CHECK_TRUE(PointNetcacheAtLocalServer(&store, "rbbz-store/", &why));
+  const Node* definition = rb_blitz::store::FindNetcacheInit(store);
+  CHECK_TRUE(definition != nullptr);
+  if (definition == nullptr) return;
+
+  std::vector<Node> record = UiInitRecord();
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::PointUiNetcacheAtLocalServer(&record, *definition, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* init = nullptr;
+  for (const Node& root : record) {
+    init = FindNetCacheInitCommand(root);
+    if (init != nullptr) break;
+  }
+  CHECK_TRUE(init != nullptr);
+  if (init == nullptr || init->kids.size() < 3) return;
+
+  const Node& argument = init->kids[2];
+  CHECK_TRUE(argument.tag == rb_blitz::ui::dtb::kArray);
+  if (argument.kids.empty()) return;
+  CHECK_STR_EQ(argument.kids[0].text, "netcache_init");
+
+  // The whole shipped definition comes through, not a two-field skeleton: the filter and the
+  // reconnect delay the record carries are part of what the native manager reads.
+  CHECK_TRUE(HasSymbol(argument, "xlsp_filter"));
+  CHECK_TRUE(HasSymbol(argument, "ms_between_reconn_store"));
+  std::vector<size_t> locals;
+  CollectLocalCounts(argument, &locals);
+  CHECK_EQ(locals.size(), 2u);  // both platform branches, as the record carries them
+  for (size_t count : locals) CHECK_EQ(count, 1u);
+  std::vector<std::string> defaults;
+  CollectDefaults(argument, &defaults);
+  CHECK_EQ(defaults.size(), 2u);
+  for (const std::string& name : defaults) CHECK_STR_EQ(name, "local");
+
+  size_t root_matches = 0;
+  std::vector<const Node*> stack = {&argument};
+  while (!stack.empty()) {
+    const Node* node = stack.back();
+    stack.pop_back();
+    if (IsLocalServer(*node, "rbbz-store/")) ++root_matches;
+    for (const Node& kid : node->kids) stack.push_back(&kid);
+  }
+  CHECK_EQ(root_matches, 2u);
+
+  // The shipped lookup is gone, and the rest of the record - the `set`, the marker and the `load` -
+  // survives. The marker is what proves a boot loaded this record: records come out of the ark by
+  // offset, so no path probe can see the read.
+  bool saw_set = false;
+  bool saw_load = false;
+  bool saw_find = false;
+  size_t markers = 0;
+  std::vector<const Node*> nodes;
+  for (const Node& root : record) nodes.push_back(&root);
+  while (!nodes.empty()) {
+    const Node* node = nodes.back();
+    nodes.pop_back();
+    if (node->tag == rb_blitz::ui::dtb::kSymbol) {
+      if (node->text == "set") saw_set = true;
+      if (node->text == "kNetCacheMgrCacheSizeLarge") saw_load = true;
+      if (node->text == "find") saw_find = true;
+      if (node->text == "notify") ++markers;
+    }
+    for (const Node& kid : node->kids) nodes.push_back(&kid);
+  }
+  CHECK_TRUE(saw_set);
+  CHECK_TRUE(saw_load);
+  CHECK_FALSE(saw_find);
+  CHECK_EQ(markers, size_t{1});
+  CHECK_EQ(record.size(), size_t{4});  // set, notify, init, load
+}
+
+void TestUiInitRefusals() {
+  BeginCase("a refused ui rewrite leaves the record exactly as it was");
+
+  std::vector<Node> store = NetcacheRecord();
+  std::string why;
+  CHECK_TRUE(PointNetcacheAtLocalServer(&store, "rbbz-store/", &why));
+  const Node* definition = rb_blitz::store::FindNetcacheInit(store);
+  CHECK_TRUE(definition != nullptr);
+  if (definition == nullptr) return;
+
+  // No `net_cache_mgr init`: the record is not the UI init.
+  std::vector<Node> other = {Node::Command({Symbol("set"), Node::Var("first_screen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> before = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::PointUiNetcacheAtLocalServer(&other, *definition, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(other, before));
+
+  // A definition that is not `netcache_init` is refused before any edit.
+  std::vector<Node> record = UiInitRecord();
+  const std::vector<Node> untouched = record;
+  const Node not_a_definition = Node::Array({Symbol("servers"), Node::Array({Symbol("live")})});
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::PointUiNetcacheAtLocalServer(&record, not_a_definition, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(record, untouched));
+  CHECK_EQ(record.size(), size_t{3});  // no marker was inserted by the refusal
+}
+
+void TestUiInitSurvivesCompileAndParse() {
+  BeginCase("the rewritten ui record survives compile and parse");
+
+  std::vector<Node> store = NetcacheRecord();
+  std::string why;
+  CHECK_TRUE(PointNetcacheAtLocalServer(&store, "rbbz-store/", &why));
+  const Node* definition = rb_blitz::store::FindNetcacheInit(store);
+  CHECK_TRUE(definition != nullptr);
+  if (definition == nullptr) return;
+  std::vector<Node> record = UiInitRecord();
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::PointUiNetcacheAtLocalServer(&record, *definition, &why));
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  CHECK_FALSE(bytes.empty());
+
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  const Node* init = nullptr;
+  for (const Node& root : parsed) {
+    init = FindNetCacheInitCommand(root);
+    if (init != nullptr) break;
+  }
+  CHECK_TRUE(init != nullptr);
+  if (init == nullptr || init->kids.size() < 3) return;
+  CHECK_STR_EQ(init->kids[2].kids.empty() ? std::string() : init->kids[2].kids[0].text,
+               "netcache_init");
+}
+
+// The store screen's own shape (out/_swap/store.tree.txt): a `new UIScreen` command with its
+// method definitions as arrays, the `enter` one holding the retail commands.
+std::vector<Node> StoreUiRecord() {
+  return {
+      Node::Command({
+          Symbol("new"), Symbol("UIScreen"), Symbol("store_menu_screen"),
+          Node::Array({Symbol("panels"), Symbol("background_panel"), Symbol("store_panel")}),
+          Node::Array({Symbol("enter"),
+                       Node::Command({Symbol("background_panel"), Symbol("jump_to_header"),
+                                      Node::Property({Symbol("header_index")})}),
+                       Node::Command({Symbol("update_participating_user_presence"),
+                                      Symbol("CONTEXT_PRESENCE_RP_BROWSING_STORE")})}),
+          Node::Array({Symbol("hide_upsell"),
+                       Node::Command({Symbol("upsell_panel"), Symbol("set_showing"),
+                                      Symbol("FALSE")})}),
+      }),
+  };
+}
+
+const Node* FindEnterMethod(const Node& node) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 4 &&
+      node.kids[0].text == "new" && node.kids[2].text == "store_menu_screen") {
+    for (const Node& kid : node.kids) {
+      if (kid.tag == rb_blitz::ui::dtb::kArray && !kid.kids.empty() && kid.kids[0].text == "enter") {
+        return &kid;
+      }
+    }
+  }
+  for (const Node& kid : node.kids) {
+    if (const Node* found = FindEnterMethod(kid)) return found;
+  }
+  return nullptr;
+}
+
+bool DrivesCommerceCallback(const Node& node) {
+  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 2 &&
+         node.kids[0].text == "store_panel" && node.kids[1].text == "on_init_commerce_success";
+}
+
+void TestStoreEntryBypass() {
+  BeginCase("the store screen drives the commerce callback on enter");
+
+  std::vector<Node> record = StoreUiRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddStoreEntryBypass(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* enter = FindEnterMethod(record[0]);
+  CHECK_TRUE(enter != nullptr);
+  if (enter == nullptr) return;
+  CHECK_EQ(enter->kids.size(), size_t{4});  // the method name, the two retail commands, ours
+  CHECK_STR_EQ(enter->kids[0].text, "enter");
+  CHECK_TRUE(DrivesCommerceCallback(enter->kids[3]));
+
+  // The retail commands are untouched and the screen's other methods survive.
+  CHECK_EQ(record[0].kids.size(), size_t{6});
+  CHECK_STR_EQ(record[0].kids[5].kids[0].text, "hide_upsell");
+
+  // A second pass is refused, not doubled.
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AddStoreEntryBypass(&record, &why));
+  CHECK_FALSE(why.empty());
+}
+
+void TestStoreEntryBypassRefusal() {
+  BeginCase("a record without the store screen is refused untouched");
+
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"), Symbol("splash_screen"),
+                                            Node::Array({Symbol("panels"), Symbol("background_panel")})})};
+  const std::vector<Node> before = other;
+  std::string why;
+  CHECK_FALSE(rb_blitz::store::AddStoreEntryBypass(&other, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(other, before));
+}
+
+void TestStoreEntryBypassSurvivesCompileAndParse() {
+  BeginCase("the bypassed store record survives compile and parse");
+
+  std::vector<Node> record = StoreUiRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddStoreEntryBypass(&record, &why));
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  const Node* enter = parsed.empty() ? nullptr : FindEnterMethod(parsed[0]);
+  CHECK_TRUE(enter != nullptr);
+  if (enter == nullptr || enter->kids.size() < 3) return;
+  CHECK_TRUE(DrivesCommerceCallback(enter->kids.back()));
+}
+
 // `dump-menu <file.dtb>`: prints the row symbols of the main menu's option array and the case
 // names of its dispatch switch. This is the *measurement* half of the row edits: a boot's payload
 // can be extracted from its generated ark (scripts/hmx_ark.py extract) and checked here, which is
@@ -340,5 +607,11 @@ int main(int argc, char** argv) {
   TestRewriteReplacesExistingLocal();
   TestRefusalsLeaveTheTreeAlone();
   TestRewrittenRecordSurvivesCompileAndParse();
+  TestUiInitGetsTheRewrittenDefinition();
+  TestUiInitRefusals();
+  TestUiInitSurvivesCompileAndParse();
+  TestStoreEntryBypass();
+  TestStoreEntryBypassRefusal();
+  TestStoreEntryBypassSurvivesCompileAndParse();
   return rb_blitz::test::Finish();
 }

@@ -361,6 +361,38 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     } else {
       note("the store's local-server rewrite was refused: " + why);
     }
+    // The manager is created once, at boot, from a definition it looks up in the engine's syscfg
+    // (`{net_cache_mgr init {find syscfg store netcache_init}}`). That lookup is unmeasured, so the
+    // same switch also hands the manager the record's own rewritten definition — the shipped
+    // shape by construction, not a literal that guesses what the native manager reads.
+    const ui::dtb::Node* definition = store::FindNetcacheInit(store_roots);
+    std::vector<uint8_t> ui_bytes;
+    std::vector<Node> ui_roots;
+    ui::dtb::RootHeader ui_header;
+    std::string ui_why;
+    if (definition != nullptr && read("ui/gen/ui.dtb", &ui_bytes, &ui_why) &&
+        ui::dtb::Parse(ui_bytes.data(), ui_bytes.size(), &ui_roots, &ui_header, &ui_why) &&
+        store::PointUiNetcacheAtLocalServer(&ui_roots, *definition, &ui_why)) {
+      built["ui/gen/ui.dtb"] = ui::dtb::Compile(ui_roots, ui_header);
+    } else {
+      if (definition == nullptr) ui_why = "the store record carries no netcache_init";
+      note("the store's netcache-init rewrite was refused: " + ui_why);
+    }
+    // The panel starts its first request only from its own `on_init_commerce_success` callback,
+    // which needs a native commerce session; the same spike switch drives that callback from the
+    // store screen's `enter` method so the request path can be measured offline.
+    std::vector<uint8_t> store_ui_bytes;
+    std::vector<Node> store_ui_roots;
+    ui::dtb::RootHeader store_ui_header;
+    std::string store_ui_why;
+    if (read("ui/store/gen/store.dtb", &store_ui_bytes, &store_ui_why) &&
+        ui::dtb::Parse(store_ui_bytes.data(), store_ui_bytes.size(), &store_ui_roots,
+                       &store_ui_header, &store_ui_why) &&
+        store::AddStoreEntryBypass(&store_ui_roots, &store_ui_why)) {
+      built["ui/store/gen/store.dtb"] = ui::dtb::Compile(store_ui_roots, store_ui_header);
+    } else {
+      note("the store's commerce-bypass edit was refused: " + store_ui_why);
+    }
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];

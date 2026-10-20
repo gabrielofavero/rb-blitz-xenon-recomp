@@ -51,4 +51,38 @@ inline constexpr char kNetcacheInitName[] = "netcache_init";
 bool PointNetcacheAtLocalServer(std::vector<ui::dtb::Node>* roots, std::string_view server_root,
                                 std::string* why);
 
+// The `netcache_init` definition inside a parsed `config/gen/store.dtb`, or null. Used to hand the
+// same definition to the manager through `ui/gen/ui.dtb` (below), so the manager's argument has the
+// shipped shape by construction.
+const ui::dtb::Node* FindNetcacheInit(const std::vector<ui::dtb::Node>& roots);
+
+// `ui/gen/ui.dtb` creates the netcache manager once, at boot, with a definition it looks up in the
+// engine's syscfg:
+//
+//   {net_cache_mgr init {find syscfg store netcache_init}}
+//
+// The lookup is unmeasured (measured 2026-10-20: the store's `request` is issued and the manager
+// then performs no file, content or socket call at all — so whether `syscfg.store` is populated in
+// this build is not known), so this rewrite replaces the argument with `definition` — normally the
+// record's own rewritten `netcache_init`, never a hand-built one, because a literal that differs
+// from the shipped shape is a guess about what the native manager reads.
+//
+// Returns false and fills `why` when the record carries no `net_cache_mgr init` command or when
+// `definition` is not a `netcache_init` array — again before any edit, so a refusal leaves the tree
+// as it was.
+bool PointUiNetcacheAtLocalServer(std::vector<ui::dtb::Node>* ui_roots,
+                                  const ui::dtb::Node& definition, std::string* why);
+
+// P3 step 0's second half. The panel starts its first request only from its own DTA callback
+// `on_init_commerce_success`, which fires when a native commerce session is created — a session
+// an offline boot never gets (measured 2026-10-20: no `store-probe: request` line is ever printed,
+// and the screen sits on its loading visual state). The callback's own body is harmless to run
+// (`{this request_index_if_needed}` then a `has_menus` check that sets the visual state), so this
+// rewrite appends `{store_panel on_init_commerce_success}` to `store_menu_screen`'s `enter`
+// method and lets the retail DTA do the rest.
+//
+// Returns false and fills `why` when the record carries no `store_menu_screen` with an `enter`
+// method — before any edit.
+bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
+
 }  // namespace rb_blitz::store
