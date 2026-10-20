@@ -37,6 +37,24 @@ bool IsDirectory(const Entry* entry) {
   return entry != nullptr && (entry->attributes() & kFileAttributeDirectory) != 0;
 }
 
+// The store probe's hook (src/store/store_probe.h). A plain pointer, read without a lock: it is
+// installed once before the guest starts and never changed again, and a null pointer is the
+// off state every ordinary boot runs.
+StorePathObserver g_store_path_observer = nullptr;
+
+}  // namespace
+
+void SetStorePathObserver(StorePathObserver observer) { g_store_path_observer = observer; }
+
+namespace {
+
+void ObserveStorePath(std::string_view relative_path, bool open, uint32_t desired_access,
+                      int32_t status) {
+  if (g_store_path_observer != nullptr) {
+    g_store_path_observer(relative_path, open, desired_access, status);
+  }
+}
+
 }  // namespace
 
 PayloadOverlayDevice::PayloadOverlayDevice(std::string_view mount_path,
@@ -148,7 +166,9 @@ Entry* PayloadOverlayDevice::ResolvePath(std::string_view path) {
   if (path.empty()) {
     return root_entry_.get();
   }
-  return root_entry_->ResolvePath(path);
+  Entry* resolved = root_entry_->ResolvePath(path);
+  ObserveStorePath(path, /*open=*/false, 0, resolved != nullptr ? 0 : -1);
+  return resolved;
 }
 
 const std::string& PayloadOverlayDevice::name() const { return BaseDevice()->name(); }
@@ -328,9 +348,11 @@ X_STATUS PayloadOverlayEntry::Open(uint32_t desired_access, File** out_file) {
   // X_STATUS_ACCESS_DENIED - the same answer vanilla gives for game/.
   Entry* backing = HandleBacking();
   if (backing == nullptr) {
+    ObserveStorePath(path_, /*open=*/true, desired_access, X_STATUS_NO_SUCH_FILE);
     return X_STATUS_NO_SUCH_FILE;
   }
   const X_STATUS result = backing->Open(desired_access, out_file);
+  ObserveStorePath(path_, /*open=*/true, desired_access, static_cast<int32_t>(result));
   // The redirected settings record is the one record whose *guest-side* open is worth a line: it is
   // the only observable proof that a call the guest made on `GAME:/ulti_settings.dta` reached the
   // player's own storage instead of the read-only game mount, and it happens a handful of times per

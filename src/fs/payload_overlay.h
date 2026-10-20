@@ -57,6 +57,17 @@ struct OverlayStats {
 class PayloadOverlayDevice;
 class PayloadOverlayEntry;
 
+// An optional observer over the guest's *resolutions and opens* on the game root — the one device
+// every `game:` / `d:` path goes through. It exists for the store probe (src/store/store_probe.h,
+// RhythmVerse plan P2): the retail store's catalogue requests are only visible from here, because
+// the names they use are otherwise the guest's own strings. Null (the default) costs one
+// function-pointer check per call; the observer runs on guest threads and must not touch the cvar
+// registry. `relative_path` is overlay-relative (`ui/store/...`); `open` is false for a directory
+// resolution and true for an entry open, and `status` is the open's result.
+using StorePathObserver = void (*)(std::string_view relative_path, bool open,
+                                   uint32_t desired_access, int32_t status);
+void SetStorePathObserver(StorePathObserver observer);
+
 class PayloadOverlayDevice final : public rex::filesystem::Device {
  public:
   // `payload_root` is read-only by construction. `base_read_only` mirrors how the game

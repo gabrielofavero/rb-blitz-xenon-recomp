@@ -2,8 +2,11 @@
 
 Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0, P6 and P1 landed
 2026-10-20** (client/transport; the six settings rows and the live snapshot; the main-menu entry and
-its live gate). P1's browser acceptance (a boot driving the store screen) is still open; P2 is next.
-Audio preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
+its live gate), and P2's instruments landed the same day with two menu defects found and fixed by
+its first boots. P1's browser acceptance is met on one boot (row drawn, store opens, B returns) and
+still owes the multi-boot/toggle matrix; P2's request path is not yet observed, so the A/B gate is
+open (§5/P2 record). Audio preview is decided: the API returns no preview asset (§3.3), so v1
+shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
@@ -641,16 +644,25 @@ present, case asks the gate and enters `store_menu_screen`, a second pass refuse
 reparses) and `store_client` pins the query answers (`enabled`, `instrument/<token>`, unknown paths
 refused); full `ctest` is **38/38** and the game target links.
 
-Honest limits — P1's exit is **not** met yet:
+Honest limits — P1's exit is partly met:
 
 - **The row's presence is baked at boot.** The exit asks for "the master toggles availability
   without restart"; the *press* is live (the case re-reads the gate), the *row* is not: records are
   generated once per boot, so turning the store off leaves the row drawn until the next start, and
   turning it on needs a restart to appear. A live presence needs a menu-rebuild path (the settings
   screen repopulates its own lists after a commit; the main menu's records are compiled at boot).
-- **No boot has been driven yet.** The browser acceptance below (`store_menu_screen` draws, B
-  returns, ≥5 boots, cache On/Off, store On/Off, Ultimate present/absent, Refresh Music Library's
-  sentinel) is still the open proof; nothing in this pass has run the store screen itself.
+- **The browser acceptance was run on one boot on 2026-10-20 (see the P2 record below)**: the row
+  is drawn, the press opens `store_menu_screen`, and B returns to the main menu. Two defects had to
+  be fixed for that to be true, and both are recorded there: the row's placement (a row appended
+  after `splash_dlc` is selectable but off the visible page) and the R5 hide decision (its in-flight
+  edit is not delivered for this record, which is what pushed the row off the page).
+- Not yet exercised: ≥5 boots, cache On/Off, store On/Off after a restart, Ultimate absent, and
+  Refresh Music Library's sentinel in the same run.
+- **Open P1 defect found by the measurement**: the store entry is drawn *last*, after EXIT GAME,
+  because the only selectable position is the retail store row's own (`splash_dlc` follows
+  `splash_exit` in the shipped array) and inserting before `splash_exit` produced a row whose label
+  drew and whose navigation was skipped. Placing it above EXIT needs a runtime reorder, not a
+  different insert index; see P7.
 
 ### P2 — instrument the data layer (DECISION GATE: A vs B)
 
@@ -666,6 +678,78 @@ Honest limits — P1's exit is **not** met yet:
   path. Record guest addresses/signatures only after verifying them against Blitz.
 - Exit: a written A/B decision with evidence; if A is chosen, a skeleton of the metadata writer;
   if B, the hook inventory (which methods, which addresses, which signatures).
+
+**P2 record (2026-10-20) — the instruments, the first two boots, and a decision that is *not* yet
+evidence-backed for A.**
+
+Landed, and tested without a boot (`store_payload`, **32 checks**; full `ctest` **39/39**):
+
+- `src/store/store_payload.{h,cpp}`: rewrites `config/gen/store.dtb`'s `netcache_init` so every
+  `servers` table gains (or replaces) a `local` entry rooted at a caller-chosen guest path and every
+  `default_server` selects `local`. It rewrites *all* the platform branches rather than guessing
+  which `#ifdef` the guest evaluates, keeps the rest of the record (`groupings`, `dummy_upsell_offer`,
+  PS3 terms) untouched, and refuses (leaving the tree byte-identical — pinned by a test) when the
+  record has no `netcache_init`, no `default_server`, or the root is empty.
+- `src/store/store_probe.{h,cpp}`: the two measurement switches, `store_trace` and
+  `store_local_server_root`; the trace is a single function-pointer observer installed on
+  `fs::PayloadOverlayDevice`, the one device every `game:`/`d:` path resolves through, so an open
+  costs one null check when off.
+- `scripts/probe_store.ps1`: one boot, title → main menu → N rows → the store → (optionally) its
+  first menu row, with a screenshot and OCR of the menu, the *selected* row, the store and the
+  return, a store-probe census, and the log copied beside it (`out/_swap/store-probe/<stamp>/`).
+- `tests/store_payload_tests.cpp` also carries `dump-menu <dtb>` and `dump-strings <dtb>`, which is
+  how a boot's generated record was checked against the guest's: the harness extracted
+  `cache/settings-menu/<pid>/gen/patch_xbox.hdr` with `scripts/hmx_ark.py` and dumped it.
+
+**Measured, boot 1–2 (`out/_swap/store-probe/20261020-132416`, `…-133319`):**
+
+- P1's row was authored into the generated record — `dump-menu` shows
+  `… splash_exit splash_dlc rbbz_rhythmverse` — and the locale carries `rbbz_rhythmverse =
+  "RhythmVerse Customs"`, yet the menu did not draw it. The row *was* selectable: six taps past the
+  first row, A opened `store_menu_screen`. So: authored, functional, and seventh of six visible
+  rows. Two separate defects, both now fixed:
+  1. **R5's hide decision is not delivered by the in-flight edit.** The boot warns that the edit at
+     ark offset 16041952 (that is `ui/splash/gen/splash.dtb`) "reaches into the first 14368 byte(s),
+     which this read does not carry and the guest has already copied; it was not delivered" — so
+     LEADERBOARDS and ACHIEVEMENTS were still drawn even though the log said `hid 3 row(s)`. The
+     decision is now **baked into the generated record** (`ui::screen::HideMenuRows`, carried
+     through `BuildMenuRecords` from `menu_filter::HiddenRows()`); the in-flight edit stays as the
+     fallback for a boot with no payload.
+  2. **A row inserted before `splash_exit` is drawn and skipped by navigation.** With the row placed
+     above EXIT the menu read PLAY / PLAY CURRENT SONG / HELP & OPTIONS / RHYTHMVERSE CUSTOMS / EXIT
+     GAME, but three and four taps both landed the highlight on EXIT GAME. The only *selectable*
+     position measured is the retail store row's own: appended after `splash_dlc`, i.e. last.
+- `settings_menu`'s P1 boot line now says *requested*, and every optional authoring refusal is
+  reported (`BuildMenuRecords`'s new `notes`, logged at warn) — before that, a refused row and a
+  built row printed the same sentence.
+
+**Measured, boot 3–4 (`…-134915`, `…-135143`):** with the fixes and the store's master switch on,
+the menu reads **PLAY / PLAY CURRENT SONG / HELP & OPTIONS / EXIT GAME / RHYTHMVERSE CUSTOMS**, the
+fifth row opens the retail store, and B returns to the same menu (screenshots + OCR in the
+evidence directory). That is P1's browser half on one boot. The store draws **MUSIC STORE /
+RECOMMENDED / YOUR SONGS / BACK / HELP & OPTIONS / ALL PRICES ARE IN MICROSOFT® POINTS** over a
+central **LOADING**, and stays on LOADING: no `store-probe` line follows — the store never resolves
+or opens a single `ui/store` path, in the front screen *or* after its first menu row was accepted.
+It is waiting on data it has not asked the file system for.
+
+**What that means for the gate (the honest part).** A is neither proven nor disproven by this pass:
+
+- The **door** is real: an offline entry reaches the retail store screens, so the UI half of A needs
+  no Xbox LIVE state (measured, above).
+- The **data half** is unmeasured: nothing requested a metadata file, so the `local` path mapping,
+  the schema, and the parser's reaction are all still unknowns. The likely reason is that the
+  netcache's request is issued through the panel's commerce/request state machine before any file
+  fetch, and that state never advances offline — the plan's OQ3. The next measurement is therefore
+  *not* another schema guess: it is to instrument the request itself (the `store_panel request` /
+  `NetCacheMgr` path: a probe point on the guest functions, or a host hook at the XNC/socket layer
+  where a `live`-server attempt would have to appear) and to confirm whether the generated
+  `config/gen/store.dtb` is the record the panel read at all.
+- Deliverables 4 (loaded-DLC metadata source) and 5 (price/icon hide path) are untouched. The
+  price surface is visible in the measured screen (`ALL PRICES ARE IN MICROSOFT® POINTS` is drawn
+  even with no offers), so it is a real target for P3, not a hypothetical.
+
+Status: **P2 is not exited**; it is paused with its instruments landed and its first two findings
+fixed. The A/B decision stays open with a documented preference for A until the request is observed.
 
 ### P3 — first light: "Recent" list with real data + art
 

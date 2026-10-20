@@ -12,9 +12,18 @@ using RecordReader = std::function<bool(const std::string&, std::vector<uint8_t>
 using MenuRecords = std::map<std::string, std::vector<uint8_t>>;
 
 // Read through the mounted archive view, so provider edits survive the extension.
+//
+// `notes`, when given, receives one line per *optional* edit that was requested and refused - a
+// main-menu row, the store's server rewrite, the credit line - with the authoring side's own
+// reason. An optional refusal is not a boot failure, but it is a difference from what the boot
+// configured, and the log is the only place that can say so: the caller's boot line knows the
+// request, not the outcome (measured 2026-10-20: P1's row was reported "built" while the menu did
+// not draw it).
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider = false,
-                      bool cached_dlc_list = false, bool refresh_row_active = false);
+                      bool cached_dlc_list = false, bool refresh_row_active = false,
+                      std::vector<std::string>* notes = nullptr,
+                      const std::vector<std::string>& hidden_menu_rows = {});
 // Applied to the complete generated locale record, before it is archived. This
 // path has no split-read length constraint and serves both installed providers.
 bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);

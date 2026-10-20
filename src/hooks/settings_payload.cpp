@@ -18,6 +18,7 @@
 #include "settings/menu_payload.h"
 #include "settings/store.h"
 #include "settings/schema.h"
+#include "store/store_probe.h"
 #include "ui/settings_screen.h"
 #include "platform/game_restart.h"
 #include "ui/menu_options.h"
@@ -198,7 +199,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     rhythmverse_setting = boot->service()->EffectiveValue(SettingId::kRhythmVerse).boolean;
   }
   REXLOG_INFO("settings_menu: the RhythmVerse Customs entry is {}",
-              rhythmverse_setting ? "built after the store rows"
+              rhythmverse_setting ? "requested (its setting is on; a refusal is logged below)"
                                   : "off (its setting is off)");
   REXLOG_INFO("settings_menu: \"DLC Menu Songs\" is {}; {} menu-music song(s); the Play Current "
               "Song entry is {}",
@@ -334,6 +335,12 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     }
     configuration.play_current_song = play_current_row;
     configuration.rhythmverse_row = rhythmverse_setting;
+    // P2's data-layer spike (RhythmVerse plan §5/P2): empty is the ordinary boot.
+    configuration.store_local_server_root = std::string(store::LocalServerRoot());
+    if (!configuration.store_local_server_root.empty()) {
+      REXLOG_INFO("settings_menu: the P2 store probe points netcache at the local server '{}'",
+                  configuration.store_local_server_root);
+    }
     configuration.menu_music_songs = menu_music_songs;
     configuration.download_content_row = download_content_row;
     configuration.download_content_row_available = download_content_row_available;
@@ -344,9 +351,17 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     ui::screen::ConfigureMenu(std::move(configuration));
   }
   MenuRecords records;
+  std::vector<std::string> build_notes;
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), dlc::CacheServedThisBoot(),
-                        dlc_cache_on && refresh_row_on)) return fail();
+                        dlc_cache_on && refresh_row_on, &build_notes, menu_filter::HiddenRows()))
+    return fail();
+  // What the boot asked for and the authoring side refused. Not fatal - the menu it produced is
+  // still a menu - but each line is a difference between the configuration and what the guest
+  // sees, so it is said rather than inferred from a later screenshot.
+  for (const std::string& line : build_notes) {
+    REXLOG_WARN("settings_menu: {}", line);
+  }
   const bool recomp_credits =
       records.contains("ulti/gen/credits.dtb") ||
       records.contains("ui/locale/gen/locale_credits_keep.dtb");

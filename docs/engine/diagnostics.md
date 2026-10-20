@@ -11,7 +11,8 @@ Two runtime instruments. **The probe** reports *in what order the guest reached 
 - **Observer.** `scripts/observe_ui.ps1` over five existing scripts, with **one table** of state names, routes and needles in `scripts/ui_states.ps1`; run `-ListStates`, or `-State <name> [-Ocr] [-BaselineDir <dir>] [-Compare <dir>]` (here with `powershell -NoProfile -ExecutionPolicy Bypass -File ...`).
 - **Observer — output.** One JSON report on stdout and a PNG capture; a set goes to `out/observations/baseline/<build>/` (PNG + JSON per state, plus `summary.json`).
 - **Observer — limits.** A pixel diff is evidence only against a same-build baseline; animated screens have no settled frame (OCR controls, the diff corroborates); `-MaxDiffPercent` (default **1.0**) covers settled states only.
-- **Cost.** A capture run measured **46 s**; a compare run **154 s**, mostly `frame_diff.ps1`'s per-pixel PowerShell loop — a research tool, not a `ctest` target.
+- **Store probe.** `--store_trace=1` logs the store paths the guest asks the game root for (`src/store/store_probe.cpp`), and `--store_local_server_root=<dir>` points the retail store's netcache at a local server for one boot; `scripts/probe_store.ps1` drives and captures the whole measurement (§ Part 1, "The store probe").
+- **Cost.** A capture run measured **46 s**; a compare run **154 s**, mostly `frame_diff.ps1`'s per-pixel PowerShell loop — a research tool, not a `ctest` target. A `probe_store` boot measured **~2 min** end to end (title, menu, store, return, log census) on this machine.
 
 ## Sources
 
@@ -127,6 +128,37 @@ driver `out/_swap/p0/run.ps1` carries the later switches that have not been fold
 3. Run with `--probe_trace=1 --probe_trace_path=<file>`, and read the file.
 
 **A caution about hot points.** `CheckHmxHeader` is entered ~65 times a second while the title music plays, so a point on a per-frame or per-packet function fills a small ring in seconds. That is what `probe_trace_capacity` is for; it is also why the tag census, not the raw order alone, is the first thing to read.
+
+### The store probe (P2, 2026-10-20)
+
+[store_probe.cpp](../../src/store/store_probe.cpp) is the RhythmVerse store plan's data-layer
+instrument (§5/P2). It answers a narrower question than the trace ring: **which store paths does the
+guest ask the game root for, and does the read succeed** — the offer/metadata names are otherwise
+the guest's own strings, and no log line names them.
+
+| Cvar | Default | What it does |
+| --- | --- | --- |
+| `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. |
+| `store_local_server_root` | "" | Rewrites `config/gen/store.dtb`'s `netcache_init` at boot so the store's default server is a *local* (host-file) one rooted at this guest-relative directory. Empty leaves the record as shipped. Requires a restart (it is built into the generated payload). |
+
+The observation point is [fs::PayloadOverlayDevice](../../src/fs/payload_overlay.cpp), not the SDK:
+every `game:`/`d:` path resolves through that device, so the hook is a single function pointer that
+costs a null check when off, and the paths arrive overlay-relative (`ui/store/...`). Records read
+from an `.ark` are *not* seen (the VFS reads the ark part, not the record), which is exactly right:
+the probe is for the loose files a served store needs.
+
+`scripts/probe_store.ps1` drives the whole measurement in one boot: title → main menu → a chosen row
+→ the store → optionally its first menu row, keeping a screenshot and OCR of the menu, the *selected*
+row, the store and the return, plus the store-probe census and the run's log
+(`out/_swap/store-probe/<stamp>/`). `-MenuOnly` stops at the menu, `-LocalRoot ""` is the control
+leg (retail server), and `-StoreRow` is a parameter because the menu's rows depend on three settings
+— run `-MenuOnly` first and read `menu.txt`.
+
+The metadata writer's half of the measurement is `rb_blitz_store_payload_tests dump-menu <dtb>` and
+`dump-strings <dtb>`: extract a boot's generated payload (`scripts/hmx_ark.py extract --hdr
+<profile>/cache/settings-menu/<pid>/gen/patch_xbox.hdr`) and these print the option array the guest
+will load and the locale keys it will look up. That is how "the row was authored" was told apart from
+"the row is in the record the guest reads" on 2026-10-20.
 
 ## Part 2 — Observing a UI state (was `docs/engine/observing.md`)
 

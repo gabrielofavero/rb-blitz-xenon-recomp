@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include "store/store_payload.h"
 #include "ui/settings_screen.h"
 #include "ui/menu_options.h"
 
@@ -191,9 +192,14 @@ bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_act
 
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
-                      bool cached_dlc_list, bool refresh_row_active) {
+                      bool cached_dlc_list, bool refresh_row_active,
+                      std::vector<std::string>* notes,
+                      const std::vector<std::string>& hidden_menu_rows) {
   namespace screen = ui::screen;
   MenuRecords built;
+  auto note = [notes](std::string line) {
+    if (notes != nullptr) notes->push_back(std::move(line));
+  };
   auto edit = [&](const std::string& path, auto transform) {
     std::vector<uint8_t> bytes;
     std::vector<Node> roots;
@@ -234,7 +240,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         // replace with the refresh body.
         if (screen::CurrentMenuConfiguration().download_content_row) {
           std::string why;
-          screen::AddDownloadContentRow(&roots, &why);
+          if (!screen::AddDownloadContentRow(&roots, &why)) {
+            note("the Download Content row was refused: " + why);
+          }
         }
         SetRefreshRowAction(&roots, refresh_row_active);
         // The Play Current Song entry (owner feature, 2026-10-14), when the boot configured it:
@@ -244,14 +252,28 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         // SDK-free menu_payload test; settings_payload.cpp reports the configuration it passed in.)
         if (screen::CurrentMenuConfiguration().play_current_song) {
           std::string why;
-          screen::AddPlayCurrentSongRow(&roots, &why);
+          if (!screen::AddPlayCurrentSongRow(&roots, &why)) {
+            note("the Play Current Song row was refused: " + why);
+          }
         }
         // The RhythmVerse Customs entry (plan P1): built only when the store's master switch was on
         // for this boot, so a store the player turned off never draws a row that would refuse the
         // press. A refusal here is not fatal - the row simply is not there.
         if (screen::CurrentMenuConfiguration().rhythmverse_row) {
           std::string why;
-          screen::AddRhythmVerseRow(&roots, &why);
+          if (!screen::AddRhythmVerseRow(&roots, &why)) {
+            note("the RhythmVerse Customs row was refused: " + why);
+          }
+        }
+        // The R5 hide decision, baked into the record this payload generates. The in-flight twin
+        // (menu_filter::HideRows) cannot deliver it for this file when it spans two ark reads
+        // (measured 2026-10-20), and the rows it was meant to hide are what pushed the store entry
+        // off the visible page. Applied last, so the anchors above still find the shipped rows.
+        if (!hidden_menu_rows.empty()) {
+          std::string why;
+          if (!screen::HideMenuRows(&roots, hidden_menu_rows, &why)) {
+            note("hiding the main-menu rows was refused: " + why);
+          }
         }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
@@ -318,6 +340,26 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       } else if (AddRecompilationCredits(&credits_roots, ultimate_credits, &why)) {
         built[credits_path] = ui::dtb::Compile(credits_roots, credits_header);
       }
+    }
+  }
+  // P2's local-server spike (RhythmVerse plan §5/P2): with a root configured, the retail
+  // store's netcache definition is rewritten to fetch its metadata from a local (host-file)
+  // server (src/store/store_payload.h). Not fatal in either direction: a boot that cannot read or
+  // rewrite the record keeps the retail server, which is exactly the behaviour every ordinary
+  // boot has, and the reason is reported by the caller's log.
+  const std::string& local_store_root = screen::CurrentMenuConfiguration().store_local_server_root;
+  if (!local_store_root.empty()) {
+    std::vector<uint8_t> store_bytes;
+    std::vector<Node> store_roots;
+    ui::dtb::RootHeader store_header;
+    std::string why;
+    if (read("config/gen/store.dtb", &store_bytes, &why) &&
+        ui::dtb::Parse(store_bytes.data(), store_bytes.size(), &store_roots, &store_header,
+                       &why) &&
+        store::PointNetcacheAtLocalServer(&store_roots, local_store_root, &why)) {
+      built["config/gen/store.dtb"] = ui::dtb::Compile(store_roots, store_header);
+    } else {
+      note("the store's local-server rewrite was refused: " + why);
     }
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;

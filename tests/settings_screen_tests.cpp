@@ -3632,14 +3632,39 @@ void TestRhythmVerseRows() {
   CHECK_TRUE(menu_title);
 }
 
+// The symbols of every main-menu option array, for the hide decision's test: whether a row the R5
+// list names is still there, and whether the store entry survived the removal.
+void CollectRowSymbols(const dtb::Node& node, bool* has_hidden, bool* has_store) {
+  if (node.tag == dtb::kArray) {
+    bool has_start = false;
+    bool has_exit = false;
+    for (const dtb::Node& kid : node.kids) {
+      has_start = has_start || (kid.tag == dtb::kSymbol && kid.text == "splash_start");
+      has_exit = has_exit || (kid.tag == dtb::kSymbol && kid.text == "splash_exit");
+    }
+    if (has_start && has_exit) {
+      for (const dtb::Node& kid : node.kids) {
+        if (kid.tag != dtb::kSymbol) continue;
+        if (kid.text == "splash_dlc" || kid.text == "splash_leaderboard" ||
+            kid.text == "splash_achievements")
+          *has_hidden = true;
+        if (kid.text == kRhythmVerseRow) *has_store = true;
+      }
+    }
+  }
+  for (const dtb::Node& kid : node.kids) CollectRowSymbols(kid, has_hidden, has_store);
+}
+
 void TestRhythmVerseRow() {
   BeginCase("the RhythmVerse Customs row: built only when configured, and gated at press time");
 
   // The retail splash shape the edits are aimed at: an option array with both anchors and one
-  // `splash_dlc` case in the panel's row table.
+  // `splash_dlc` case in the panel's row table. The two rows R5 hides by default are in it too, so
+  // the baked hide decision has something to remove.
   const auto fixture = [] {
-    const std::vector<dtb::Node> rows = {Sym("splash_start"), Sym("splash_dlc"),
-                                         Sym("splash_exit")};
+    const std::vector<dtb::Node> rows = {Sym("splash_start"), Sym("splash_leaderboard"),
+                                         Sym("splash_achievements"), Sym("splash_options"),
+                                         Sym("splash_dlc"), Sym("splash_exit")};
     const Node enter =
         Cmd({Sym("do"), Cmd({Var("options_array"), Cmd({Sym("array"), Arr(rows)})}),
              Cmd({Sym("start.lst"), Sym("set_data"), Var("options_array")})});
@@ -3663,7 +3688,8 @@ void TestRhythmVerseRow() {
   CHECK_FALSE(AddRhythmVerseRow(&refused, &why));
   CHECK_TRUE(!why.empty());
 
-  // On: the row follows `splash_dlc`, its case asks the host gate and enters the retail store.
+  // On: the row follows `splash_dlc` - the retail store row's own position, and the only one
+  // measured selectable - and its case asks the host gate and enters the retail store.
   MenuConfiguration config;
   config.rhythmverse_row = true;
   ConfigureMenu(config);
@@ -3715,6 +3741,20 @@ void TestRhythmVerseRow() {
   // A second pass refuses (the row is already there), and the record still compiles.
   CHECK_FALSE(AddRhythmVerseRow(&nodes, &why));
   std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+
+  // The R5 hide decision is baked into the same record: the rows it names leave the option array,
+  // every other row (including the store entry just inserted) stays, and a second pass finds
+  // nothing left to hide rather than touching the tree.
+  const std::vector<std::string> hidden = {"splash_leaderboard", "splash_achievements",
+                                           "splash_dlc"};
+  CHECK_TRUE(HideMenuRows(&nodes, hidden, &why));
+  bool still_hidden = false;
+  bool store_survives = false;
+  for (const Node& root : nodes) CollectRowSymbols(root, &still_hidden, &store_survives);
+  CHECK_FALSE(still_hidden);
+  CHECK_TRUE(store_survives);
+  CHECK_TRUE(HideMenuRows(&nodes, hidden, &why) == false);  // nothing left to hide is a refusal
   CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
 
   ConfigureMenu(MenuConfiguration{});

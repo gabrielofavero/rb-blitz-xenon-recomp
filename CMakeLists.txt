@@ -186,6 +186,11 @@ set(RBBLITZ_SOURCES
     # P6: the store's settings as its workers read them (an immutable snapshot) and the hot applier's
     # row -> snapshot mapping. SDK-free; the runtime applier is src/hooks/hot_apply_runtime.cpp.
     src/store/store_settings.cpp
+    # P2's data-layer instrument: the `netcache_init` rewrite that points the retail store at a
+    # local (host-file) server (SDK-free, so its own suite covers it), and the path probe that names
+    # the store records the guest resolves and opens.
+    src/store/store_payload.cpp
+    src/store/store_probe.cpp
 )
 
 if(WIN32)
@@ -836,6 +841,18 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME store_client
              COMMAND rb_blitz_store_client_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # P2 of the RhythmVerse store plan (src/store/store_payload.h): the `netcache_init` rewrite that
+    # points the retail store at a local (host-file) server. SDK-free; the round-trip case compiles
+    # and parses the record with the project's own DTA writer, so it links that module too.
+    add_executable(rb_blitz_store_payload_tests
+        tests/store_payload_tests.cpp
+        src/store/store_payload.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_store_payload_tests PRIVATE src)
+    add_test(NAME store_payload COMMAND rb_blitz_store_payload_tests)
 endif()
 
 # Controller Settings used to be a second executable in this build tree (launcher plan D1). It

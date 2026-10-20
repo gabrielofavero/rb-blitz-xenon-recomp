@@ -573,6 +573,8 @@ void Configure() {
   }
 }
 
+const std::vector<std::string>& HiddenRows() { return g_settings.rows; }
+
 }  // namespace rb_blitz::menu_filter
 
 extern "C" REX_FUNC(__imp__NtReadFile) {

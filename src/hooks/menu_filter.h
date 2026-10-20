@@ -38,6 +38,8 @@
 
 #pragma once
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace rb_blitz::menu_filter {
 
@@ -48,5 +50,11 @@ namespace rb_blitz::menu_filter {
 // read.
 void Configure();
 void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t after[20]);
+
+// The rows the R5 decision hides on this boot, as `Configure()` resolved them. Read after
+// `Configure()` (the boot calls it before the payload is built) and only on the host thread: the
+// payload builder needs the same list to bake into the record it generates, because the in-flight
+// edit cannot deliver it to a splash record that spans two ark reads (measured 2026-10-20).
+const std::vector<std::string>& HiddenRows();
 
 }  // namespace rb_blitz::menu_filter

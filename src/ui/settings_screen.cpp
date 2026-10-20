@@ -2712,6 +2712,10 @@ bool InsertMenuRow(std::vector<dtb::Node>* nodes, const std::string_view after_r
   return true;
 }
 
+// A "before another row" insertion was tried for the store entry and removed again: it produced a
+// row whose label drew and whose navigation the list skipped (measured 2026-10-20; see
+// AddRhythmVerseRow). The position that works is the retail store row's own, after `splash_dlc`.
+
 // ------------------------------------------------------------------------------------------------
 // The "Play Current Song" entry (owner feature, 2026-10-14)
 // ------------------------------------------------------------------------------------------------
@@ -2849,8 +2853,12 @@ bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   if (!g_configuration.rhythmverse_row) {
     return refuse("the RhythmVerse setting is off");
   }
-  // The store entries sit together at the menu's bottom, where the retail DOWNLOAD CONTENT row was.
-  // When this boot built the restored row it is the anchor; otherwise the shipped symbol is.
+  // The retail array lists `splash_dlc` last, after `splash_exit`; the store entry is appended in
+  // that same place, and it is the only position measured to be *selectable*: inserted before
+  // `splash_exit` instead, the row drew its label and the list skipped it while navigating
+  // (measured 2026-10-20, both a 3-down and a 4-down route landed on EXIT GAME while the highlight
+  // shot showed the row on screen). With R5's hidden rows baked into this record (HideMenuRows),
+  // the entry is also on the visible page - the seventh row that was off it is what put it there.
   const char* anchor = "splash_dlc";
   Hit hit;
   FindInRoots(nodes, [](const Node& node) { return IsSymbol(node, kDownloadContentRow); }, &hit);
@@ -2867,6 +2875,45 @@ bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason) {
       Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(kStoreEnabledQuery)}),
            Cmd({Sym("ui"), Sym("goto_screen"), Sym("store_menu_screen")})})};
   return AddMainMenuSwitchCase(nodes, kRhythmVerseRow, body, reason);
+}
+
+// Removes the named rows from every main-menu option array - the same decision
+// `menu_filter::HideRows` makes in the retail bytes, applied to the record this payload generates.
+// It has to be here as well as there: the in-flight edit is refused for the splash record when it
+// spans two ark reads and the guest has already copied the first half (measured 2026-10-20: the
+// boot warned that an edit at ark offset 16041952 reached into 14368 bytes it did not carry and
+// "was not delivered"), and with that edit missing the menu still draws the rows the player hid -
+// which is what pushed P1's seventh row off the visible page.
+bool HideMenuRows(std::vector<dtb::Node>* nodes, const std::vector<std::string>& rows,
+                  std::string* reason) {
+  auto refuse = [reason](std::string why) {
+    if (reason != nullptr) *reason = std::move(why);
+    return false;
+  };
+  if (nodes == nullptr) {
+    return refuse("nothing to edit");
+  }
+  if (rows.empty()) {
+    if (reason != nullptr) reason->clear();
+    return true;
+  }
+  size_t removed = 0;
+  for (const std::string& row : rows) {
+    if (row.empty()) {
+      continue;
+    }
+    for (dtb::Node& root : *nodes) {
+      if (RemoveFromOptionArrays(&root, row)) {
+        ++removed;
+        break;
+      }
+    }
+  }
+  if (removed == 0) {
+    return refuse("none of the named rows are in the option list");
+  }
+  if (reason != nullptr) reason->clear();
+  return true;
 }
 
 const MenuConfiguration& CurrentMenuConfiguration() { return g_configuration; }

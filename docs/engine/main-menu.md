@@ -544,13 +544,34 @@ one-bit query the host answers from the store's settings snapshot
 works even on a boot that turns the settings channel off). R7's `splash_dlc` refresh keeps its own
 row, action and label untouched.
 
-**Limits [static + unit-tested, not yet booted].** The menu record is baked once per boot, so the
-master switch's *presence* effect is a next-start matter: off stops a press immediately (the case
-re-reads the gate on every entry) but the row stays drawn until the next boot, and turning the store
-on needs a restart for the row to appear. The browser acceptance (the store screen drawing, B
-returning, cache/store/Ultimate arms) is not measured yet; `rb_blitz_settings_screen_tests` pins the
-insertion, the label, the gate and the refusal, and `rb_blitz_store_client_tests` pins the query
-answers.
+**Limits.** The menu record is baked once per boot, so the master switch's *presence* effect is a
+next-start matter: off stops a press immediately (the case re-reads the gate on every entry) but the
+row stays drawn until the next boot, and turning the store on needs a restart for the row to appear.
+
+**Measured 2026-10-20, and the two defects that measurement found** (boots under
+`out/_swap/store-probe/`, plan §5/P2 record). With the master on: the menu reads **PLAY / PLAY
+CURRENT SONG / HELP & OPTIONS / EXIT GAME / RHYTHMVERSE CUSTOMS**, the entry opens the retail
+`store_menu_screen` (MUSIC STORE / RECOMMENDED / YOUR SONGS … `LOADING`), and B returns to the same
+menu. Two things had to be fixed before that sentence was true:
+
+1. **The row is last, after EXIT GAME, on purpose.** Appended after `splash_dlc` (the retail store
+   row's own position in the shipped option array, which follows `splash_exit`) it is selectable;
+   inserted before `splash_exit` it drew its label and the list's navigation skipped it (3 and 4
+   taps both landed the highlight on EXIT GAME). Moving it above EXIT needs a runtime reorder, not
+   another insert index — recorded for P7.
+2. **R5's hide decision has to be baked into the generated record.** The in-flight edit logs
+   `hid 3 row(s)` and is then not delivered: `an edit to a file spanning two reads (ark offset
+   16041952) reaches into the first 14368 byte(s), which this read does not carry and the guest has
+   already copied`. With LEADERBOARDS and ACHIEVEMENTS still drawn, a new row is pushed off the
+   visible page (measured: the seventh row dispatched the store and was not on screen). The decision
+   now also rides the generated payload (`ui::screen::HideMenuRows`, fed by
+   `menu_filter::HiddenRows()`), where there is no byte budget; the in-flight edit stays as the
+   fallback for a boot that builds no payload.
+
+**Not yet measured**: ≥5 consecutive boots, cache On/Off, store On/Off after a restart, Ultimate
+absent, and Refresh Music Library's sentinel in the same run. `rb_blitz_settings_screen_tests` pins
+the insertion (after the store row), the baked hide decision, the label, the gate, the refusal and a
+reparse; `rb_blitz_store_client_tests` pins the query answers.
 
 ### 8. Evidence
 

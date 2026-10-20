@@ -107,6 +107,12 @@ struct MenuConfiguration {
   // when the store's master switch was on. Its case re-checks the live gate, so switching the
   // store off stops the press without a restart.
   bool rhythmverse_row = false;
+  // The P2 data-layer spike (RhythmVerse plan §5/P2): when non-empty, the boot rewrites
+  // `config/gen/store.dtb` so the retail store's netcache fetches from a local (host-file) server
+  // rooted here (src/store/store_payload.h). Empty - every ordinary boot - leaves the record as
+  // shipped. The measurement, not a feature: what the store asks for becomes a file open the
+  // probe can name.
+  std::string store_local_server_root;
   // False when the boot found no DLC at all. The Play Current Song row is then not drawn: a row
   // that exists must work, and with no library there is nothing it could ever start.
   bool has_dlc_library = true;
@@ -323,9 +329,16 @@ bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason);
 // Adds the RhythmVerse Customs entry (RhythmVerse plan P1): `kRhythmVerseRow` right after the
 // restored Download Content row when the boot built it, otherwise after the shipped `splash_dlc`,
 // plus a case whose body enters `store_menu_screen` only while `kStoreEnabledQuery` answers true -
-// no Xbox LIVE check and no Marketplace call anywhere in it. Refuses when the boot did not
+// no Xbox LIVE check and no Marketplace call anywhere in it. The anchor is the retail store row's
+// own position, which is the only one measured *selectable*: inserted before `splash_exit` the row
+// drew its label and the list's navigation skipped it (2026-10-20). Refuses when the boot did not
 // configure the row, or when the record has no option array to insert into.
 bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason);
+
+// Removes the named rows from every main-menu option array: the R5 hide decision applied to the
+// record this payload generates (see the definition for why the in-flight edit alone is not enough).
+bool HideMenuRows(std::vector<dtb::Node>* nodes, const std::vector<std::string>& rows,
+                  std::string* reason);
 
 // The current menu configuration, for the authoring functions that read it (the play row's pool).
 const MenuConfiguration& CurrentMenuConfiguration();
