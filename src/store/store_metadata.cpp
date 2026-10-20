@@ -15,8 +15,19 @@ Node Text(std::string_view text) { return Node::String(text); }
 
 }  // namespace
 
-std::string FrontMenuRecordPath(std::string_view platform, std::string_view locale) {
-  return "dlc_top_" + std::string(platform) + "_" + std::string(locale) + ".dta";
+std::string FrontMenuRecordPath(std::string_view region, std::string_view platform,
+                                std::string_view locale) {
+  return "dlc_store/" + std::string(region) + "/dlc_top_" + std::string(platform) + "_" +
+         std::string(locale) + ".dta";
+}
+
+std::string MenuProviderPath(std::string_view locale, std::string_view name) {
+  return "/" + std::string(locale) + "/" + std::string(name) + "/";
+}
+
+std::string MenuRecordPath(std::string_view region, std::string_view locale,
+                           std::string_view name) {
+  return "dlc_store/" + std::string(region) + MenuProviderPath(locale, name);
 }
 
 std::string OfferDirectory(std::string_view platform, std::string_view locale,
@@ -55,25 +66,73 @@ std::vector<uint8_t> BuildFrontMenuRecord(const FrontMenu& menu, std::string* wh
       return {};
     }
   }
-  std::vector<Node> menus;
-  menus.push_back(Symbol("menus"));
-  std::vector<Node> rows;
+  // `(submenus ("/<locale>/<id>/" ...))`: the array `sub_8275D4E0` keeps on the panel and
+  // `sub_8275CBD8` compares each entry against `/<locale>/<name>/`.
+  std::vector<Node> entries;
   for (const FrontMenuEntry& entry : menu.entries) {
-    rows.push_back(Node::Array({
-        Node::Array({Symbol("id"), Text(entry.id)}),
-        Node::Array({Symbol("label"), Text(entry.label)}),
-    }));
+    entries.push_back(Text(MenuProviderPath(menu.locale, entry.id)));
   }
-  menus.push_back(Node::Array(std::move(rows)));
-  // The `menus` table is moved in after the fixed fields rather than written inline: a braced list
-  // cannot hold a vector where a Node is expected, and a copy of the table is not needed.
+  std::vector<Node> root{
+      Node::Array({Symbol("submenus"), Node::Array(std::move(entries))})};
+  return ui::dtb::Compile(root);
+}
+
+std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::string* why) {
+  for (const Offer& offer : offers) {
+    if (offer.name.empty()) {
+      if (why) *why = "an offer has an empty name";
+      return {};
+    }
+  }
+  // A DTA map is symbol/value alternation (`(name "X" artist "Y" ...)`), which is the shape the
+  // native `get_data`/`has_data` lookups read. A key with an unknown/empty value is omitted (the
+  // scripts treat a missing key as "no data", which is how the preview and rank UI hide
+  // themselves).
+  std::vector<Node> rows;
+  for (const Offer& offer : offers) {
+    std::vector<Node> fields;
+    auto add_text = [&fields](std::string_view key, const std::string& value) {
+      if (value.empty()) return;
+      fields.push_back(Symbol(key));
+      fields.push_back(Text(value));
+    };
+    fields.push_back(Symbol("name"));
+    fields.push_back(Text(offer.name));
+    add_text("artist", offer.artist);
+    add_text("album", offer.album);
+    add_text("genre", offer.genre);
+    if (offer.year_released != 0) {
+      fields.push_back(Symbol("year_released"));
+      fields.push_back(Node::Int(offer.year_released));
+    }
+    add_text("preview_art", offer.preview_art);
+    // The per-part ranks (`rank <part>` in the decoded scripts; OQ4 has not settled whether the
+    // retail key is `rank` with a sub-map or `rank_<part>`). One `rank` key with a part/value map
+    // keeps every part in one place, which is the shape the plan's field mapping describes.
+    const struct {
+      const char* part;
+      int value;
+    } ranks[] = {{"guitar", offer.rank_guitar}, {"drum", offer.rank_drum},
+                 {"bass", offer.rank_bass},     {"vocals", offer.rank_vocals},
+                 {"keys", offer.rank_keys}};
+    std::vector<Node> rank_map;
+    for (const auto& rank : ranks) {
+      if (rank.value == 0) continue;
+      rank_map.push_back(Symbol(rank.part));
+      rank_map.push_back(Node::Int(rank.value));
+    }
+    if (!rank_map.empty()) {
+      fields.push_back(Symbol("rank"));
+      fields.push_back(Node::Array(std::move(rank_map)));
+    }
+    rows.push_back(Node::Array(std::move(fields)));
+  }
+  // The root map `sub_8274F610` reads: `offers_populated`, `sorted`, `offers`.
   std::vector<Node> root_kids{
-      Symbol("front_menu"),
-      Node::Array({Symbol("version"), Node::Int(kFrontMenuVersion)}),
-      Node::Array({Symbol("platform"), Text(menu.platform)}),
-      Node::Array({Symbol("locale"), Text(menu.locale)}),
+      Symbol("offers_populated"), Symbol("TRUE"),
+      Symbol("sorted"),           Symbol("TRUE"),
+      Symbol("offers"),           Node::Array(std::move(rows)),
   };
-  root_kids.push_back(Node::Array(std::move(menus)));
   std::vector<Node> root{Node::Array(std::move(root_kids))};
   return ui::dtb::Compile(root);
 }

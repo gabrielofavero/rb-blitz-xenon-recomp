@@ -173,8 +173,28 @@ value) while `store_trace` is on:
 
 | Function | What it proves |
 | --- | --- |
-| `sub_8274FB60` | the panel's request builder — formats the metadata path and hands it to the file cache. A `store-probe: request '<path>' (menu symbol …, flag …)` line is the request list P2 could not observe from the file side. |
-| `sub_82753010` | `request_index_if_needed`'s body: reports `this+52`, `this+56` and the state word at `0x828A3D20+44`, then forces that word to 2 through the heap's protect API (the image's data section is read-only; a plain store does nothing). |
+| `sub_8274FB60` | the panel's request builder — formats the metadata path and hands it to the file cache. A `store-probe: request '<path>' (input '<provider>', flag …)` line is the request list P2 could not observe from the file side. |
+| `sub_82753010` | `request_index_if_needed`'s body: reports `this+52`, `this+56` and the state word at `0x82853D20+44`, then forces that word to 2 through the heap's protect API (the image's data section is read-only; a plain store does nothing). |
+| `sub_8235A240` | the file-cache entry the builder hands the path to: `store-probe: cache request '<path>' (manager <ptr>)`. It separates "the panel asked" from "the cache looked". |
+
+**Correction (2026-10-20, supersedes the first P3 step-0 run):** that run reported the state word
+at `0x828A3D20+44` and forced it there, and no request followed. The address was decoded wrong —
+`lis r11,-32123` is `0x8285` (65536 - 32123 = 33413 = `0x8285`), so the word is at `0x82853D4C`.
+With the corrected address a boot (`rb_blitz_055.log`, 17:10:11-17:11:04; the store entry was
+driven by the P4 search diagnostic's `enter` statements, but the request itself is the retail
+`request_index_if_needed` path) reaches the builder and the cache:
+
+```text
+store-probe: index request reached; this+52=0x0 this+56=0x0 state=0 (forced to 2: yes)
+store-probe: cache request 'dlc_store/europe/dlc_top_xbox_eng.dta' (manager 0x400019a0)
+store-probe: request 'dlc_store/europe/dlc_top_xbox_eng.dta' (input '/dlc_top_xbox_eng.dta', flag 1)
+```
+
+Two facts follow: the measured substitutions are **region `europe`, platform `xbox`, locale
+`eng`** (not the plan's earlier `xbox`/`en` guess), and the request reaches `sub_8235A240` — the
+single fetch entry P2's decision A narrowed to. What is still missing is the file open: the same
+boot carries no `store-probe: open`/`resolve` line for that path, so the cache did not read a
+local file in that run.
 
 **Proving a generated DTA record is the one the guest runs** — a path probe cannot, because records
 come out of the ark by offset. The method that worked: make the edit do something visible. The

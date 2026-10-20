@@ -165,7 +165,7 @@ void LogGate(uint32_t vector_begin, uint32_t vector_end, uint32_t before, bool f
 
 // One line per distinct requested path per boot, like the observer above: the panel re-requests
 // the same menu on every visit, and the list is the evidence.
-void LogRequest(const std::string& path, uint32_t menu_symbol, uint32_t flag) {
+void LogRequest(const std::string& path, const std::string& input, uint32_t flag) {
   static std::mutex mutex;
   static std::set<std::string> seen;
   const std::string key = path.empty() ? std::string("<unreadable>") : path;
@@ -175,7 +175,22 @@ void LogRequest(const std::string& path, uint32_t menu_symbol, uint32_t flag) {
       return;
     }
   }
-  REXLOG_INFO("store-probe: request '{}' (menu symbol {:#x}, flag {})", key, menu_symbol, flag);
+  REXLOG_INFO("store-probe: request '{}' (input '{}', flag {})", key, input, flag);
+}
+
+// The file-cache entry: the manager and the exact path it was handed. Distinct from the request
+// line because a request can be de-duplicated or refused before the cache ever sees it.
+void LogCache(uint32_t manager, const std::string& path) {
+  static std::mutex mutex;
+  static std::set<std::string> seen;
+  const std::string key = path.empty() ? std::string("<unreadable>") : path;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (seen.size() >= kMaxDistinctPaths || !seen.insert(key).second) {
+      return;
+    }
+  }
+  REXLOG_INFO("store-probe: cache request '{}' (manager {:#x})", key, manager);
 }
 
 }  // namespace
@@ -196,11 +211,12 @@ std::string LocalServerRoot() { return REXCVAR_GET(store_local_server_root); }
 // P3 step 0: the request entry.
 //
 // 0x8274FB60 is what `{store_panel request <menu> TRUE}` reaches. It formats the metadata path
-// from the menu symbol (`sub_8274E450` with the record's `"/%s%s"`, optionally `"?pid=%s"`),
+// from the provider string (`sub_8274E450` with the record's `"/%s%s"`, optionally `"?pid=%s"`),
 // stores it at `this + 148`, and hands it to the file cache (`sub_8235A240(manager, &path)`).
-// The dispatch that calls it is `sub_827501F0` — object `Handle(Symbol, DataArray*)`, where the
-// `request` branch reads the menu symbol out of argument 0 and the bool out of argument 1
-// (measured 2026-10-20, `out/_swap/blitz_image.bin` + the recompiled sources).
+// The dispatch that calls it is `sub_827501F0` - object `Handle(Symbol, DataArray*)`, where the
+// `request` branch reads the provider string out of argument 0 and the bool out of argument 1
+// (measured 2026-10-20, `out/_swap/blitz_image.bin` + the recompiled sources). The index-request
+// path (`sub_82753010` -> `sub_8274E710`) also calls it, with its own generated string.
 //
 // The hook is a pass-through: the request still runs exactly as retail wrote it, and the probe
 // only reports the path once per distinct value while `store_trace` is on. It exists because the
@@ -209,18 +225,40 @@ std::string LocalServerRoot() { return REXCVAR_GET(store_local_server_root); }
 REX_EXTERN(__imp__sub_8274FB60);
 REX_HOOK_RAW(sub_8274FB60) {
   const uint32_t object = ctx.r3.u32;
-  const uint32_t menu_symbol = ctx.r4.u32;
+  const uint32_t input_string = ctx.r4.u32;
   const uint32_t flag = ctx.r5.u32;
+  // The argument is a `String` by value: its character buffer is at +4 (`sub_82459130` writes the
+  // vtable at +0, and `sub_8235A240` reads +4 as the path). The first P3 hook read r4 as a menu
+  // symbol and reported the path as unreadable; this is the same object the DTA's `request`
+  // branch passes (`{sprintf menu_%s ...}` is the source id, this is the provider string).
+  const std::string input = rb_blitz::store::TraceEnabled() && input_string != 0
+                                ? rb_blitz::store::GuestCString(
+                                      base, rb_blitz::store::GuestU32(base, input_string + 4), 240)
+                                : std::string();
   __imp__sub_8274FB60(ctx, base);
   if (!rb_blitz::store::TraceEnabled()) {
     return;
   }
-  // `this + 148` is the request path the function just assigned (a String whose first word is the
-  // character buffer). A missing or unprintable one is reported as the symbol alone.
-  const uint32_t string_pointer = rb_blitz::store::GuestU32(base, object + 148);
-  const std::string path =
-      string_pointer != 0 ? rb_blitz::store::GuestCString(base, string_pointer, 240) : std::string();
-  rb_blitz::store::LogRequest(path, menu_symbol, flag);
+  // `this + 148` is the request path the function just assigned - a `String` stored inline, so its
+  // character buffer is the second word.
+  const std::string path = rb_blitz::store::GuestCString(
+      base, rb_blitz::store::GuestU32(base, object + 148 + 4), 240);
+  rb_blitz::store::LogRequest(path, input, flag);
+}
+
+// The file cache the builder hands the path to. Its first argument is the manager, the second the
+// path `String`; logging here separates "the panel asked" from "the cache looked" - the question
+// P3's data lane starts from.
+REX_EXTERN(__imp__sub_8235A240);
+REX_HOOK_RAW(sub_8235A240) {
+  const uint32_t manager = ctx.r3.u32;
+  const uint32_t path_string = ctx.r4.u32;
+  if (rb_blitz::store::TraceEnabled() && path_string != 0) {
+    const std::string path = rb_blitz::store::GuestCString(
+        base, rb_blitz::store::GuestU32(base, path_string + 4), 240);
+    rb_blitz::store::LogCache(manager, path);
+  }
+  __imp__sub_8235A240(ctx, base);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -237,7 +275,11 @@ REX_HOOK_RAW(sub_8274FB60) {
 REX_EXTERN(__imp__sub_82753010);
 REX_HOOK_RAW(sub_82753010) {
   if (rb_blitz::store::TraceEnabled()) {
-    constexpr uint32_t kStateField = 0x828A3D20u + 44u;
+    // `lis r11,-32123` is 0x8285, not 0x828A: 65536 - 32123 = 33413 = 0x8285, and `addi r11,r11,
+    // 15648` (0x3D20) makes the base 0x82853D20. The first P3 run forced 0x828A3D4C, which is not
+    // this function's word - corrected 2026-10-20 after the generated body
+    // (generated/default/rb_blitz_recomp.64.cpp, sub_82753010) was decoded again.
+    constexpr uint32_t kStateField = 0x82853D20u + 44u;
     const uint32_t before = rb_blitz::store::GuestU32(base, kStateField);
     const uint32_t vector_begin =
         rb_blitz::store::GuestU32(base, ctx.r3.u32 + 52);
