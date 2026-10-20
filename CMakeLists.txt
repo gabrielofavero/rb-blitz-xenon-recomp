@@ -179,7 +179,16 @@ set(RBBLITZ_SOURCES
     src/ui/help_topics.cpp
     src/ui/help_overlay.cpp
     src/hooks/help_observer.cpp
+    # P0 of the RhythmVerse store plan: the catalogue client and its URL/byte policy (SDK-free) plus
+    # the WinHTTP transport seam the store's worker threads will use. Nothing in the game calls the
+    # transport yet; P0's proof is the hermetic `store_client` suite plus its manual `--live-list` arm.
+    src/store/rhythmverse_client.cpp
 )
+
+if(WIN32)
+    # WinHTTP lives behind one file so the policy stays testable without a network.
+    list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp)
+endif()
 
 if(WIN32)
     # rb_blitz.rc carries the Windows resources (assets/icon/blitz.ico) and the WIN32
@@ -210,6 +219,15 @@ else()
 endif()
 
 rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
+
+# P0 of the RhythmVerse store plan: its JSON dependency is the copy the SDK tree already vendors
+# (inja's single-header nlohmann 3.11.3, MIT) - no new third-party code is added to the project - and
+# the transport links WinHTTP (src/store/store_http.cpp is the only file that includes it).
+target_include_directories(rb_blitz PRIVATE
+    "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+if(WIN32)
+    target_link_libraries(rb_blitz PRIVATE winhttp)
+endif()
 
 # Which graphics backends the GPU plugin was compiled with, in the order the in-game *Renderer*
 # row should offer them. The same two variables decide what `rexgpu-xenos.dll` contains (the SDK
@@ -794,6 +812,26 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_menu_compat_tests PRIVATE src)
     add_test(NAME menu_compat COMMAND rb_blitz_menu_compat_tests)
+
+    # P0 of the RhythmVerse store plan (src/store/rhythmverse_client.h): the request body, the
+    # response model over the committed captures, the direct-link/archive/length policy and the
+    # artist/title matcher. SDK-free and hermetic; the fixtures are tracked under
+    # docs/rythmverse-responses/, so the suite needs the project dir rather than a game install.
+    add_executable(rb_blitz_store_client_tests
+        tests/store_client_tests.cpp
+        src/store/rhythmverse_client.cpp
+    )
+    target_include_directories(rb_blitz_store_client_tests PRIVATE
+        src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    if(WIN32)
+        # The manual `--live-list` probe is the only ctest-adjacent code that touches the network;
+        # the suite itself never sends a request.
+        target_sources(rb_blitz_store_client_tests PRIVATE src/store/store_http.cpp)
+        target_link_libraries(rb_blitz_store_client_tests PRIVATE winhttp)
+    endif()
+    add_test(NAME store_client
+             COMMAND rb_blitz_store_client_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
 # Controller Settings used to be a second executable in this build tree (launcher plan D1). It

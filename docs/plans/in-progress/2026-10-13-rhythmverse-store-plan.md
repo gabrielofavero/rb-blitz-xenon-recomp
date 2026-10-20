@@ -1,6 +1,8 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14. Status: **plan only — implementation and runtime probes pending.**
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0 (API client, URL/byte
+policy, `store_http`) underway; P1–P8 not started.** Audio preview is decided: the API returns no
+preview asset (§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
@@ -126,6 +128,10 @@ captures in `docs/rythmverse-responses/{list,search}.json`.
 9. **All customs are free**: hide monetary values, points/currency icons, balances, and purchase
    prompts. Use **Download**, **Downloaded**, and explicit **Download Again** actions. No zero-price
    placeholder and no `XamShowMarketplace*UI` call in the RhythmVerse path.
+10. **Audio preview (owner update, 2026-10-20)**: the retail store previews a song on hover. Wire the
+    preview only if the API returns a preview asset — it does not: both preview fields are YouTube
+    web pages (§3.3). V1 therefore ships **no audio preview**, and no YouTube/browser path exists to
+    fake one.
 
 ---
 
@@ -350,6 +356,8 @@ must prove the browser, details and any retained recommendation area show no mon
 | Auth | none for list/search/download |
 | Response | `{status:"success", data:{records:{total_filtered, returned}, pagination:{page, records}, songs:[{data, file}]}}` |
 | Fields we consume | `file.file_id, file_name, gameformat, file_artist, file_title, file_album, file_year, file_album_track_number, file_song_length, file_genre, size, downloads, album_art, download_url, diff_*, rank_*` (+ `data.album_art` fallback) |
+| Preview fields (kept, never fetched) | `file.file_preview` and `data.song_preview` are YouTube web pages; there is no audio asset. Parsed onto the offer model for evidence and classification only — §3.3. |
+| Form keys | Sent percent-encoded (`instrument%5B%5D=guitar`, `sort%5B0%5D%5Bsort_by%5D=update_date`); measured 2026-10-20 with `records=1` — HTTP 200, `status=success`, one `rb3xbox` record (`out/_swap/rv_p0_encoded.json`). Literal brackets also work, but the encoded spelling is what the client emits. |
 | Download | `file.download_url` is a candidate, not proof of a raw package. Apply §3.1. The scoped `rb3xbox` route also returns external links (Dropbox observed on 2026-10-14). |
 | Search rule | a too-short query returns `{"status":"error","error":{"message":"You need to provide a text at least 3 characters long"}}` |
 | Search matching | Artist alone OR song title alone; combining both in `text` fails to find the intended result (owner-reported, 2026-10-14; not independently re-probed). This is not a one-word restriction. |
@@ -439,6 +447,36 @@ from the verified install result; do not claim the song is already playable. A r
 this pending state and transfer history, but stale receipts never establish loaded ownership after
 deletion or a root change. No per-row filesystem scan and no guest-memory reads from HTTP workers.
 
+### 3.3 Preview audio — measured 2026-10-20: the API returns no audio asset (decision)
+
+The retail store previews a song on hover (§2.6). Owner rule (2026-10-20): implement the preview only
+if the API returns something usable; otherwise ship without it.
+
+| Field | Content | Count |
+| --- | --- | --- |
+| `file.file_preview` | `https://www.youtube.com/embed/<id>` | 14/25 in `list.json`, 4/8 in `search.json` |
+| `data.song_preview` | `https://www.youtube.com/watch?v=<id>` / `https://youtu.be/<id>` | 0/25 in `list.json`, 4/8 in `search.json` |
+| `file.audio_type` | `single` / `partial` / `full` — a chart description, not an asset | every song |
+
+Both preview fields are **web pages**, never an audio stream or file. A probe of one song page
+(`https://rhythmverse.co/songfile/38a4dcc61d324e7883c9a393a7086bb9`, HTTP 200, 171,707 bytes,
+`out/_swap/rv_songfile.html`) contains exactly one preview element — the YouTube
+`<iframe id="ytplayer">` — and no `<audio>`, `.mogg`, `.mp3` or `.ogg` reference. The site previews by
+embedding YouTube, so there is no RhythmVerse-hosted preview asset to fetch.
+
+Decision:
+
+- V1 ships **no audio preview**. Offers carry no `preview_audio`, which is exactly what hides the retail
+  preview UI (§2.5: preview buttons are hidden when `!{offer has_data preview_audio}`). No YouTube link
+  is opened, embedded or launched — §1.4 and §7 already forbid a browser and off-site fetches.
+- The raw `file_preview` / `song_preview` strings are still parsed and kept on the offer model, so the
+  measurement stays visible and a future API revision fails a test: `tests/store_client_tests.cpp`
+  classifies every preview URL in the committed fixtures as a web page and pins
+  `kApiSuppliesPreviewAudio == false`.
+- If the API ever returns a direct audio file, the retail seam is `store_preview_mgr` +
+  `preview_audio` + `{offer get_data [preview_audio]}` (§2.6). That is a separate feature with its own
+  URL and format/size validation — an audio preview is not a package — not a silent fallback.
+
 ---
 
 ## 4. Architecture options and the recommendation
@@ -516,8 +554,8 @@ menu gate and client are connected. P2 includes the loaded-DLC metadata probe ne
   Preserve unknown optional fields; handle null ranks, opaque IDs and numeric pagination strings.
   Verify multiple `instrument[]` fields enforce the required instruments; tier 0 must not be
   confused with absence. Pin all-Off behavior and reject stale responses after filter changes.
-- Host transport: port the launcher's WinHTTP pattern (`controller-settings/src/updater.cpp` —
-  RAII handles and timeouts, **not unrestricted redirects**) into `store_http` for the game exe. All
+- Host transport: port the installer's WinHTTP pattern (`installer/src/download.cpp` — RAII handles
+  and timeouts, **not unrestricted redirects**) into `store_http` for the game exe. All
   network calls on host worker threads; never touch the cvar registry or guest state from them
   (project rule).
 - Fixtures: `docs/rythmverse-responses/{list,search}.json` plus a checked successful scoped response
@@ -528,6 +566,38 @@ menu gate and client are connected. P2 includes the loaded-DLC metadata probe ne
   web pages, off-site, credentials/lookalike hosts, scheme-relative, uppercase host, encoded archive
   suffix), redirect policy, absent/zero/mismatched lengths and error mapping.
 - Exit: ctest green; no game-code changes.
+
+**P0 record (2026-10-20).** Landed as `src/store/rhythmverse_client.{h,cpp}` (SDK-free: request
+builder, listing model/parser, URL policy, offer predicate, transfer validators, matcher),
+`src/store/store_http.{h,cpp}` (the single WinHTTP file: `WINHTTP_OPTION_REDIRECT_POLICY_NEVER`, RAII
+handles, timeouts, automatic proxy with a default-proxy fallback, a 4 MiB body ceiling) and
+`tests/store_client_tests.cpp` (ctest `store_client`, **330 checks**). The JSON dependency is the
+nlohmann 3.11.3 single header the SDK tree already vendors
+(`rexglue-sdk/thirdparty/inja/third_party/include`), so no third-party code was added; the game
+target links `winhttp`. Nothing calls the transport yet — P0's exit is the green suite, not a live
+request.
+
+Measurements this phase added (all 2026-10-20):
+
+- **Encoded form keys are accepted**: `instrument%5B%5D=guitar`, `sort%5B0%5D%5Bsort_by%5D=…` with
+  `records=1` answered HTTP 200, `status=success`, one `rb3xbox` record
+  (`out/_swap/rv_p0_encoded.json`); the client emits that spelling.
+- **The chart predicate is `>= 1`, not `>= 0`**: every authored part in the captures is a tier 1..6,
+  absence is `-1` (the pro parts) or a missing field, and **keys exist only in the `data` copy**,
+  where `0` is the "not authored" spelling (21 of 25 entries). `SongFile::HasChart` treats `-1`, `0`
+  and a missing field as absence — the "tier 0" the prompt warned about never appears as an authored
+  tier in these captures.
+- **`file_song_length` is seconds** (276 for a 4:36 song), so the model names it
+  `song_length_seconds`; reading it as milliseconds would make every duration 1000x wrong.
+- **`zippata`/`pacchetto` are not an archive signal**: both are 0 on every entry, including the `rv`
+  records whose files are ZIPs. Archive rejection stays the name + response-bytes policy of §3.1.
+- Fixture facts the suite pins: `list.json` = 25 records / 17 `rb3xbox` / 14 YouTube preview pages;
+  `search.json` = 8 records / 6 `rb3xbox` / 8 preview pages; 17 of 17 list entries and 5 of 6 search
+  entries are eligible (the sixth is `http://dingorb.com/?id=…` — not HTTPS, not the site —
+  `kNotDirectFile`).
+
+Not in P0, deliberately: no live request from the game, no UI, no settings, no download; the
+transport has no caller until P3/P5.
 
 ### P1 — the store opens without Xbox LIVE
 
@@ -755,7 +825,8 @@ menu gate and client are connected. P2 includes the loaded-DLC metadata probe ne
 ## 7. Non-goals (v1)
 
 No Xbox LIVE/Rock Central restoration, no purchases/entitlement checks, no preview audio
-(the captured data supplies none; omit preview fields), no retail categories/grouping,
+(measured 2026-10-20: both preview fields are YouTube web pages, not assets — §3.3; the retail preview
+UI is hidden by omitting `preview_audio`), no retail categories/grouping,
 no PS3 paths, no account features, no writes into the retail game data, no songcache write-back,
 no browser integration, **no archive extraction**, and **no off-site download links** (including
 redirect targets). Recognizing manually installed loaded DLC is a v1 requirement, not a non-goal.
@@ -776,6 +847,8 @@ redirect targets). Recognizing manually installed loaded DLC is a v1 requirement
 | `out/_swap/rv_review_20261014.body`, `rv_review_20261014.headers.txt` | successful 2026-10-14 scoped list request (`records=1`, no sort/instrument fields); `rb3xbox` result with external Dropbox URL, opaque dotted ID, zero size and null ranks |
 | `out/_swap/rv_review_20261014_recent.json`, `rv_review_20261014_recent.headers.txt` | successful scoped Recent request, default four instruments, update-date descending, 25 records; all `rb3xbox`, 23 root-relative direct-file links |
 | `out/_swap/rvp_list_rb3xbox.json` | failed earlier probe: HTML 404, **not** a JSON success fixture |
+| `out/_swap/rv_songfile.html` | 2026-10-20 song-page probe (HTTP 200, 171,707 bytes): the only preview is a YouTube `<iframe>`; no audio asset (§3.3) |
+| `out/_swap/rv_p0_encoded.json` | 2026-10-20 list probe with percent-encoded form keys: HTTP 200, `status=success`, 1 `rb3xbox` record |
 | §2.11 code-reference table | current menu ownership, settings schema/panels, bridge limitations, SDK package reader, HTTP redirects, filename limits and refresh gaps checked on 2026-10-14 |
 | image string offsets | `BandStorePanel` 0x3A078; `is_store_offer` 0x3D308; `has_created_commerce_session` 0x87B00; `load_art` 0x87BC0; `netcache_init` 0x8E6EC; `get_store_offer` 0x105248; `set_target_store_offer_id` 0x105270; `dlc_store` 0x102D00; `/dlc_top_%s_%s.dta` 0x102D58; `dlc_store/%s/%s/offers/%s/` 0x105088; `dlc_store/%s/%s/related/%s.dta` 0x104740; `Xis_participating_user_online` 0x13FBB |
 | imports (checkout) | `__imp__XamShowMarketplaceUI` 0x827F6544, `…NuiMarketplaceUI` 0x827F65B4, `…MarketplaceDownloadItemsUI` 0x827F6774 |

@@ -120,8 +120,10 @@ that name an action.
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
 packaging and auto-update, symbol-name campaigns, and mod APIs. DLC packages do load
-([dlc.md](../guides/dlc.md)) — what is still undefined is everything around them, from a store UI
-to custom-song content that no content API ever enumerated.
+([dlc.md](../guides/dlc.md)) — the store UI around them, and custom-song content that no content
+API ever enumerated, are the subject of the in-progress
+[RhythmVerse store plan](../plans/in-progress/2026-10-13-rhythmverse-store-plan.md) (P0 underway
+2026-10-20; nothing of it has shipped yet).
 
 Dropped for now, their documents deleted with them: in-game host Audio/Video settings,
 the per-device button-mapping layer (its remap half lives on in Controller Settings plan), and
