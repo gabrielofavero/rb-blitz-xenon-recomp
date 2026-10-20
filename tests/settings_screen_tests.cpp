@@ -899,6 +899,127 @@ void TestPlayCurrentSongRow() {
   }
 }
 
+void TestDownloadContentRow() {
+  BeginCase("the restored Download Content row clones the shipped action and stays off by default");
+
+  // A splash record carrying the shipped `splash_dlc` case, which SplashFixture deliberately does
+  // not (it is the refresh row's host, and the fixture stays minimal).
+  const auto fixture = [] {
+    const std::vector<dtb::Node> rows = {Sym("splash_start"), Sym("splash_dlc"),
+                                         Sym("splash_exit")};
+    const Node enter =
+        Cmd({Sym("do"), Cmd({Var("options_array"), Cmd({Sym("array"), Arr(rows)})}),
+             Cmd({Sym("start.lst"), Sym("set_data"), Var("options_array")})});
+    const Node start_case = Arr({Sym("splash_start"), Cmd({Var("this"), Sym("goto_main_hub")})});
+    const Node dlc_case = Arr({Sym("splash_dlc"), Cmd({Sym("if_else"), Sym("online"),
+                                                       Sym("store"), Sym("popup")})});
+    const Node exit_case = Arr(
+        {Sym("splash_exit"), Cmd({Sym("ui"), Sym("goto_screen"), Sym("confirm_exit_game_screen")})});
+    const Node table = Cmd({Sym("switch"), Cmd({Sym("start.lst"), Sym("selected_sym")}),
+                           start_case, dlc_case, exit_case});
+    return std::vector<dtb::Node>{Cmd({Sym("new"), Sym("UIPanel"), Sym("splash_panel"),
+                                      Arr({Sym("file"), Str("splash.milo")}),
+                                      Arr({Sym("enter"), enter}),
+                                      Arr({Sym("SELECT_MSG"), table})})};
+  };
+
+  // The visibility switch's compiled default is hidden, so an untouched boot refuses the edit.
+  std::vector<dtb::Node> off = fixture();
+  std::string reason;
+  CHECK_FALSE(AddDownloadContentRow(&off, &reason));
+  CHECK_TRUE(!reason.empty());
+  CHECK_TRUE(!HasSymbol(off[0], kDownloadContentRow));
+
+  MenuConfiguration configuration;
+  configuration.download_content_row = true;
+  ConfigureMenu(configuration);
+
+  std::vector<dtb::Node> nodes = fixture();
+  CHECK_TRUE(AddDownloadContentRow(&nodes, &reason));
+  CHECK_TRUE(reason.empty());
+
+  // The option array: the restored row directly after the retail row it is cloned from, with the
+  // rest of retail's order untouched.
+  const dtb::Node* array = FindOptionArray(nodes[0]);
+  CHECK_TRUE(array != nullptr);
+  if (array != nullptr) {
+    CHECK_EQ(array->kids.size(), 4u);
+    CHECK_TRUE(array->kids[0].text == "splash_start");
+    CHECK_TRUE(array->kids[1].text == "splash_dlc");
+    CHECK_TRUE(array->kids[2].text == kDownloadContentRow);
+    CHECK_TRUE(array->kids.back().text == "splash_exit");
+  }
+
+  // The case is the shipped action verbatim: the store branch, not the refresh sentinel.
+  const std::vector<std::string> body = CaseWords(nodes, kDownloadContentRow);
+  for (const char* word : {"if_else", "online", "store", "popup"}) {
+    CHECK_TRUE(std::find(body.begin(), body.end(), word) != body.end());
+  }
+  CHECK_TRUE(std::find(body.begin(), body.end(), "rbbz_dlc_refresh") == body.end());
+
+  // The label exists exactly while the row does.
+  bool labelled = false;
+  for (const auto& label : Labels()) {
+    if (label.first == kDownloadContentRow) {
+      labelled = true;
+      CHECK_TRUE(label.second == kDownloadContentLabel);
+    }
+  }
+  CHECK_TRUE(labelled);
+
+  // A second pass refuses, and the record still compiles and reparses.
+  std::string again;
+  CHECK_FALSE(AddDownloadContentRow(&nodes, &again));
+  CHECK_TRUE(!again.empty());
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+
+  ConfigureMenu(MenuConfiguration{});
+  for (const auto& label : Labels()) {
+    CHECK_TRUE(label.first != kDownloadContentRow);
+  }
+}
+
+void TestDownloadContentVisibilityAndNoDlc() {
+  BeginCase("download-content visibility follows the cache and a boot with no DLC hides Play "
+            "Current Song");
+
+  const auto has_symbol = [](const std::string& name) {
+    for (const dtb::Node& root : DefinitionRoots()) {
+      if (HasSymbol(root, name)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // While R7 owns `splash_dlc`, the live Main Menu mirror offers the restored row's own switch.
+  MenuConfiguration configuration;
+  configuration.download_content_row = true;
+  configuration.download_content_row_available = true;
+  configuration.menu_rows = {{"splash_start", "PLAY"}, {"splash_dlc", "REFRESH MUSIC LIBRARY"},
+                             {"splash_exit", "EXIT GAME"}};
+  ConfigureMenu(configuration);
+  CHECK_TRUE(has_symbol("settings_mm_download_content_on"));
+  // With a library present the Play Current Song row is drawn (it may still be disabled).
+  CHECK_TRUE(has_symbol("settings_play_current_on"));
+
+  // With no DLC the Play Current Song row is hidden rather than disabled.
+  configuration.has_dlc_library = false;
+  ConfigureMenu(configuration);
+  CHECK_TRUE(has_symbol("settings_mm_download_content_on"));
+  CHECK_FALSE(has_symbol("settings_play_current_on"));
+  CHECK_FALSE(has_symbol("settings_play_current_off"));
+
+  // With the cache off the retail row is the Download Content entry itself, so the extra switch
+  // is not offered.
+  configuration.download_content_row_available = false;
+  ConfigureMenu(configuration);
+  CHECK_FALSE(has_symbol("settings_mm_download_content_on"));
+
+  ConfigureMenu(MenuConfiguration{});
+}
+
 void TestPauseReroute() {
   BeginCase("the in-song pause row keeps retail's own focus switch, and the record is left alone");
 
@@ -3129,6 +3250,8 @@ int main(int argc, char** argv) {
   TestAudioRouteCapturesListPosition();
   TestSplashReroute();
   TestPlayCurrentSongRow();
+  TestDownloadContentRow();
+  TestDownloadContentVisibilityAndNoDlc();
   TestPauseReroute();
   TestInSongContext();
   TestPauseMergeEdits();

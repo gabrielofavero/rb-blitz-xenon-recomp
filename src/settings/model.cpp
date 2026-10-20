@@ -66,6 +66,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "input_viewer";
     case SettingId::kSettingsLabels:
       return "settings_labels";
+    case SettingId::kHideDownloadContent:
+      return "hide_download_content";
     case SettingId::kPrecisionMode:
       return "precision_mode";
     case SettingId::kDisableRandomWiggles:

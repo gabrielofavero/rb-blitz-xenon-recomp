@@ -1162,6 +1162,14 @@ std::vector<PanelSpec> AllPanels() {
                                             "interface.hidden_main_menu.splash_dlc",
                                             "DOWNLOAD CONTENT",
                                             "Show or hide the main menu's DOWNLOAD CONTENT entry."),
+                              // The retail Download Content entry R7's refresh took over, restored
+                              // as a row of its own (owner request, 2026-10-20). Hidden by default;
+                              // the static fallback is shown only when the menu inventory is empty,
+                              // so the live list below normally provides this row instead.
+                              VisibilityRow("settings_mm_download_content",
+                                            "interface.hide_download_content",
+                                            "DOWNLOAD CONTENT",
+                                            "Show or hide the main menu's DOWNLOAD CONTENT entry."),
                           }});
 
   // The confirmation scene is copied from the installation under our own name, as with the menu.
@@ -1193,33 +1201,67 @@ std::vector<PanelSpec> AllPanels() {
                          "settings_achievements_message"});
 
   for (auto& panel : out) {
-    if (panel.name == "settings_main_menu_panel" && !g_configuration.menu_rows.empty()) {
-      std::vector<Row> live;
-      size_t index = 0;
-      for (const auto& [token, label] : g_configuration.menu_rows) {
-        // The menu keeps these visible, so they are not offered. `mod_settings` is gone from the
-        // menu itself (all of its pages are inside this surface), and the Play Current Song row
-        // follows the Downloadable Content setting rather than a visibility toggle.
-        if (token == std::string(kMainMenuRow) || token == "splash_start" ||
-            token == "splash_exit" || token == kProviderMenuRow || token == kPlayCurrentRow) {
-          continue;
+    if (panel.name == "settings_main_menu_panel") {
+      if (!g_configuration.download_content_row_available) {
+        // The restored row exists only while R7 owns `splash_dlc`; with the cache off that retail
+        // row is the Download Content entry itself and the live list already offers it.
+        std::erase_if(panel.rows, [](const Row& row) {
+          return row.setting == "interface.hide_download_content";
+        });
+      } else {
+        // The static fallback lists the retail row under its shipped name; while R7 owns it the
+        // row is the library refresh, which is the identity the live list gives it too.
+        for (Row& row : panel.rows) {
+          if (row.setting == "interface.hidden_main_menu.splash_dlc") {
+            row.label = "REFRESH MUSIC LIBRARY";
+            row.on_label = "REFRESH MUSIC LIBRARY: Hidden";
+            row.off_label = "REFRESH MUSIC LIBRARY: Visible";
+          }
         }
-        const std::string symbol = "settings_mm_live_" + std::to_string(index++);
-        // The live mirror follows the installed menu, so the caption is derived from the row's
-        // own label rather than a token table: a menu this record does not know still gets text.
-        const std::string description =
-            "Show or hide the main menu's " + label + " entry.";
-        live.push_back(VisibilityRow(symbol.c_str(),
-                                     ("interface.hidden_main_menu." + token).c_str(),
-                                     label.c_str(), description.c_str()));
       }
-      // An effective menu with nothing hideable keeps the static fallback rows rather than an
-      // empty, unfocusable page.
-      if (!live.empty()) {
-        panel.rows = std::move(live);
+      if (!g_configuration.menu_rows.empty()) {
+        std::vector<Row> live;
+        size_t index = 0;
+        for (const auto& [token, label] : g_configuration.menu_rows) {
+          // The menu keeps these visible, so they are not offered. `mod_settings` is gone from the
+          // menu itself (all of its pages are inside this surface), and the Play Current Song row
+          // follows the Downloadable Content setting rather than a visibility toggle.
+          if (token == std::string(kMainMenuRow) || token == "splash_start" ||
+              token == "splash_exit" || token == kProviderMenuRow || token == kPlayCurrentRow) {
+            continue;
+          }
+          const std::string symbol = "settings_mm_live_" + std::to_string(index++);
+          // The live mirror follows the installed menu, so the caption is derived from the row's
+          // own label rather than a token table: a menu this record does not know still gets text.
+          const std::string description =
+              "Show or hide the main menu's " + label + " entry.";
+          live.push_back(VisibilityRow(symbol.c_str(),
+                                       ("interface.hidden_main_menu." + token).c_str(),
+                                       label.c_str(), description.c_str()));
+          // The restored Download Content row sits where the retail menu drew it: right after the
+          // row R7 took over (`splash_dlc`), whose label above is the refresh name while the cache
+          // owns it. Its own switch is the feature's, so it is not part of the hide list.
+          if (token == "splash_dlc" && g_configuration.download_content_row_available) {
+            live.push_back(VisibilityRow("settings_mm_download_content",
+                                         "interface.hide_download_content",
+                                         "DOWNLOAD CONTENT",
+                                         "Show or hide the main menu's DOWNLOAD CONTENT entry."));
+          }
+        }
+        // An effective menu with nothing hideable keeps the static fallback rows rather than an
+        // empty, unfocusable page.
+        if (!live.empty()) {
+          panel.rows = std::move(live);
+        }
       }
     }
     std::erase_if(panel.rows, [](Row& row) {
+      // The Play Current Song row is hidden, not disabled, on a boot that found no DLC at all
+      // (owner request, 2026-10-20): a row that exists must work, and there is nothing for it to
+      // start. With a library present it stays, drawing the DLC Menu Songs reason when needed.
+      if (row.setting == "general.play_current_song" && !g_configuration.has_dlc_library) {
+        return true;
+      }
       if (row.setting == "general.unlock_online_achievements") {
         row.kind = Kind::kSubmenu;
         row.screen = "settings_achievements_confirm_screen";
@@ -2597,6 +2639,50 @@ bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason) {
                                PlayCurrentSongBody(g_configuration.menu_music_songs), reason);
 }
 
+bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr) {
+    return refuse("nothing to edit");
+  }
+  if (!g_configuration.download_content_row) {
+    return refuse("the Download Content row is off");
+  }
+  // The shipped action, exactly as the retail record carries it. The option array also lists
+  // `splash_dlc` as a bare symbol, so the case is told apart by its second element being a
+  // statement rather than another row name.
+  Hit hit;
+  FindInRoots(
+      nodes,
+      [](const Node& node) {
+        if (node.tag != dtb::kArray || node.kids.size() < 2 ||
+            node.kids[0].tag != dtb::kSymbol || node.kids[0].text != "splash_dlc") {
+          return false;
+        }
+        const auto tag = node.kids[1].tag;
+        return tag == dtb::kCommand || tag == dtb::kArray || tag == dtb::kProperty;
+      },
+      &hit);
+  if (!hit.found || hit.parent == nullptr) {
+    return refuse("the splash record carries no downloadable-content case to restore");
+  }
+  // Copy before the tree is edited: InsertMenuRow reallocates the option array.
+  const Node shipped = hit.parent->kids[hit.index];
+  std::vector<Node> body(shipped.kids.begin() + 1, shipped.kids.end());
+  if (body.empty()) {
+    return refuse("the downloadable-content case carries no action");
+  }
+  // The row first - a refusal there leaves the record untouched - and then its case. RerouteRow
+  // (called by menu_payload after this) can then take `splash_dlc` over for R7 without the retail
+  // action being lost.
+  if (!InsertMenuRow(nodes, "splash_dlc", kDownloadContentRow, reason)) {
+    return false;
+  }
+  return AddMainMenuSwitchCase(nodes, kDownloadContentRow, body, reason);
+}
+
 const MenuConfiguration& CurrentMenuConfiguration() { return g_configuration; }
 
 bool AddLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
@@ -2738,6 +2824,11 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   // no string for a row no menu has.
   if (g_configuration.play_current_song && !g_configuration.menu_music_songs.empty()) {
     add(kPlayCurrentRow, kPlayCurrentLabel);
+  }
+  // The restored Download Content entry (owner request, 2026-10-20) is the same kind of key: added
+  // only on the boot that builds the main-menu row.
+  if (g_configuration.download_content_row) {
+    add(kDownloadContentRow, kDownloadContentLabel);
   }
   return out;
 }

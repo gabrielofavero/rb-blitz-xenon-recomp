@@ -122,9 +122,11 @@ std::vector<SchemaRow> BuildTable() {
   // TapRefreshCache while R7 is on, so it is a feature toggle of its own - a player who does not
   // want the entry can remove it here instead of digging into Interface -> Hidden Items. It is a
   // restart row like the other menu-shaping ones: the row list is baked when the menu's records
-  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale.
+  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale. Off by default (owner
+  // request, 2026-10-20): the cache still works, but the main menu does not grow a refresh entry
+  // unless the player asks for it.
   rows.push_back(Row(Make(SettingId::kRefreshMusicLibrary, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
                      {"general", "refresh_music_library"}, "dlc", "Refresh Music Library",
                      "Show the main menu entry that re-scans your DLC folders."));
   {
@@ -145,7 +147,9 @@ std::vector<SchemaRow> BuildTable() {
                      "Play songs from your DLC library as the main menu's background music."));
   // `general.play_current_song`: the main menu's second entry exists only while this row is on and
   // the menu really has a DLC track playing (owner feature, 2026-10-14). It is consumed at boot, so
-  // it is a restart row like the rest of the menu-shaping ones.
+  // it is a restart row like the rest of the menu-shaping ones. On by default, like the cache row
+  // (owner request, 2026-10-20); a boot that found no DLC at all does not draw the row at all
+  // (`src/hooks/settings_payload.cpp`), because there is nothing it could ever start.
   rows.push_back(Row(Make(SettingId::kPlayCurrentSong, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "play_current_song"}, "dlc", "Play Current Song",
@@ -254,6 +258,16 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "settings_labels"}, "", "Settings Labels",
                      "Show a description of the highlighted row at the bottom of the screen."));
+  // The main menu's Download Content row (owner request, 2026-10-20). R7's refresh took the row
+  // over (`splash_dlc`), so the retail entry lost its label and action; the payload now restores
+  // it as a row of its own. This switch is its visibility, and `true` means hidden: a fresh
+  // install does not offer a store entry that only ever worked online. The row is only offered
+  // while the cache owns `splash_dlc` (src/hooks/settings_payload.cpp), because with the cache off
+  // that retail row is the Download Content entry itself.
+  rows.push_back(Row(Make(SettingId::kHideDownloadContent, Category::kInterface, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"interface", "hide_download_content"}, "hide_items", "Download Content",
+                     "Show the main menu's Download Content entry."));
   {
     Descriptor d = Make(SettingId::kHideMainMenu, Category::kInterface, Provider::kNative,
                         WidgetKind::kBooleanWithSubmenu, ValueKind::kBool, BoolValue(false));
@@ -384,6 +398,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kFiltering, ApplicationStrategy::kRestart, ""},
     // Interface
     {SettingId::kLetterbox, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHideDownloadContent, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideOfflinePrompts, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHiddenMainMenu, ApplicationStrategy::kRestart, ""},

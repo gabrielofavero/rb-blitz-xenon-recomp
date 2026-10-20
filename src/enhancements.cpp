@@ -104,10 +104,12 @@ REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, true, "Enhancements",
 // removing it used to mean digging into Interface -> Hidden Items. This cvar is the carrier of
 // the in-game "Refresh Music Library" row on the Downloadable Content page; with it off, the
 // menu's row is hidden and the library is only re-scanned when its fingerprint changes at boot.
-REXCVAR_DEFINE_BOOL(enhancements_refresh_music_library, true, "Enhancements",
+// Off by default (owner request, 2026-10-20): the cache remains on, but the main menu does not
+// grow a refresh entry unless the player enables it.
+REXCVAR_DEFINE_BOOL(enhancements_refresh_music_library, false, "Enhancements",
                     "R7's refresh entry: show the main menu's Refresh Music Library row, which "
-                    "re-scans the DLC folders and re-runs the discovery pass. On by default. "
-                    "Off hides the row; the boot's own scan is unaffected (a changed library is "
+                    "re-scans the DLC folders and re-runs the discovery pass. Off by default. "
+                    "On shows the row; the boot's own scan is unaffected (a changed library is "
                     "always re-read). Needs enhancements_dlc_cache.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -211,7 +213,7 @@ constexpr std::array<ToggleRow, 11> kToggles{{
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R7, R9 and R10 "
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R7's cache, R9 and R10 "
               "(docs/engine/toggles.md)",
               kToggles.size());
   for (const ToggleRow& row : kToggles) {

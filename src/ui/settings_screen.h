@@ -96,6 +96,16 @@ struct MenuConfiguration {
   // states the settings screen reports as unavailable on its own row.
   bool play_current_song = false;
   std::vector<std::string> menu_music_songs;
+  // The restored Download Content row (owner request, 2026-10-20). `download_content_row` is true
+  // when this boot builds the row (the visibility setting says visible *and* R7 owns
+  // `splash_dlc`, so the retail row's label and action are free); `download_content_row_available`
+  // says whether the visibility switch is offered at all - it is meaningful only while R7 owns
+  // `splash_dlc`, because with the cache off that retail row is the Download Content entry.
+  bool download_content_row = false;
+  bool download_content_row_available = false;
+  // False when the boot found no DLC at all. The Play Current Song row is then not drawn: a row
+  // that exists must work, and with no library there is nothing it could ever start.
+  bool has_dlc_library = true;
 };
 void ConfigureMenu(MenuConfiguration configuration);
 
@@ -146,6 +156,13 @@ inline constexpr char kRetiredRow[] = "advanced_settings";
 // `splash_start`, so it is the second of the option array, and dispatched by a case of its own.
 inline constexpr char kPlayCurrentRow[] = "splash_play_current";
 inline constexpr char kPlayCurrentLabel[] = "Play Current Song";
+
+// The restored main menu "Download Content" entry (owner request, 2026-10-20). R7's refresh took
+// the retail row over (`splash_dlc` now performs the library refresh), so this row is a clone of
+// the shipped `splash_dlc` case under a symbol of its own: the same action, the same label, and a
+// visibility switch (`interface.hide_download_content`) whose default is hidden.
+inline constexpr char kDownloadContentRow[] = "splash_dlc_store";
+inline constexpr char kDownloadContentLabel[] = "Download Content";
 // The probe namespace the row asks the host through (`file_exists`):
 // `rbbz-play/current/<pool index>`, parsed by src/hooks/menu_music_pool.h.
 inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
@@ -276,6 +293,13 @@ bool RemoveRow(std::vector<dtb::Node>* nodes, std::string_view row, std::string*
 // untouched, when the record has no option array bearing `splash_start`, when the row is already
 // there (a second pass), or when the pool is empty - the caller decides what an empty pool means.
 bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason);
+
+// Adds the restored "Download Content" entry: `kDownloadContentRow` right after `splash_dlc` in
+// the option array, plus a case that carries a copy of the shipped `splash_dlc` action. Must run
+// before `SetRefreshRowAction` (src/settings/menu_payload.cpp) reroutes that shipped case, because
+// the clone is the only place the retail action survives. Refuses when the visibility setting is
+// off, when the record has no `splash_dlc` case, or when the row is already there.
+bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason);
 
 // The current menu configuration, for the authoring functions that read it (the play row's pool).
 const MenuConfiguration& CurrentMenuConfiguration();

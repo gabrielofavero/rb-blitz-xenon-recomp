@@ -421,15 +421,26 @@ down before the block and the rotation's next song starts on the first menu fram
 §4 has the mechanism and the measurement, and `out/_swap/menu-run/music3` is the arm.
 
 **The entry's own switch (2026-10-15).** Help & Options → Downloadable Content → *Refresh Music
-Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, default On)
-removes that row from the menu. It is a property of the feature rather than of the hide list: off
-hides `splash_dlc` with the hide master on **or** off and whatever the Interface ▸ Hide Items
-selection says, it does not raise the hide list's "the refresh lost its row" warning (that warning
-is for a player who hid it *by accident*), and the payload's own locale stops repainting the row
-(`refresh_row_active` follows `enhancements_dlc_cache && enhancements_refresh_music_library`). The
-boot's scan is untouched by the switch — a library whose tree changed is still re-read at the next
-boot — and with `enhancements_dlc_cache` off the row is the title's own online entry again, over
-which this switch has no say ([dlc.md](../guides/dlc.md) §4.1).
+Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, **off by
+default since 2026-10-20**) shows that row on the menu. On, it is a property of the feature rather
+than of the hide list: off hides `splash_dlc` with the hide master on **or** off and whatever the
+Interface ▸ Hide Items selection says, it does not raise the hide list's "the refresh lost its row"
+warning (that warning is for a player who hid it *by accident*), and the payload's own locale stops
+repainting the row (`refresh_row_active` follows `enhancements_dlc_cache &&
+enhancements_refresh_music_library`). The boot's scan is untouched by the switch — a library whose
+tree changed is still re-read at the next boot — and with `enhancements_dlc_cache` off the row is
+the title's own online entry again, over which this switch has no say ([dlc.md](../guides/dlc.md)
+§4.1).
+
+**The restored Download Content row (2026-10-20).** Because R7 repurposes `splash_dlc`, the retail
+row's shipped label and action were no longer reachable. The payload now clones that shipped case
+into `splash_dlc_store` (the row right after `splash_dlc` in the option array) and gives it the
+*Download Content* locale entry, but only on a boot whose `interface.hide_download_content` row is
+set to *Visible*. That row is on Interface → Main Menu and defaults to **Hidden**: a fresh install
+does not offer an entry that only ever worked online, and the player can turn it back on one page
+away. With the cache off the retail `splash_dlc` row is the Download Content entry itself, so the
+separate switch is not offered. The clone copies the case verbatim, so its action is still the
+title's own online-store branch — the refresh sentinel belongs to `splash_dlc` alone.
 
 ### 7.2 The Play Current Song row (2026-10-14)
 
@@ -439,10 +450,12 @@ screen the game's own flow uses with `unlockall`, where the player picks power-u
 SONG — and on the offline base target it goes straight to the loading screen, exactly as the song
 list's own Confirm does. On by default (`general.play_current_song`, "Play Current Song" on Help &
 Options → Downloadable Content), and *built only by a boot that has a pool*: with the DLC music off,
-or a library that yielded no song, the settings row reads unavailable and the menu entry is absent —
-a row that exists must work. **The landing is now measured (2026-10-15):** press → the song the menu
-is playing is resolved → `loading_screen` → the game's first screen → `game_screen`, with the visible
-song matching the audible one; the arms are in
+or a library that yielded no song, the menu entry is absent — a row that exists must work. **A boot
+that found no DLC at all hides the settings row itself (owner request, 2026-10-20)** rather than
+drawing it disabled, because there is nothing it could ever start; with a library present but the
+DLC music off, the row stays and reads `Needs DLC Menu Songs`. **The landing is now measured
+(2026-10-15):** press → the song the menu is playing is resolved → `loading_screen` → the game's
+first screen → `game_screen`, with the visible song matching the audible one; the arms are in
 [play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) §Evidence.
 
 **The two halves.**

@@ -147,7 +147,7 @@ many threads read it (§4.1).
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
 | `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
-| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | on | The main menu's refresh entry's own switch: the visible row is Help & Options → Downloadable Content → *Refresh Music Library* (`general.refresh_music_library`). Off hides that menu row; the boot's scan is unaffected. Only meaningful with the cache on (§4.1). Changing it needs a relaunch. |
+| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | off (2026-10-20) | The main menu's refresh entry's own switch: the visible row is Help & Options → Downloadable Content → *Refresh Music Library* (`general.refresh_music_library`). On shows that menu row; off hides it, and the boot's scan is unaffected. Only meaningful with the cache on (§4.1). Changing it needs a relaunch. The retail *Download Content* entry is restored as a separate row, hidden by default (`interface.hide_download_content`). |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Music Library* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
@@ -362,12 +362,19 @@ yet, so its own discovery reads it and extends its own cache.
 
 Since 2026-10-15 that entry has a switch of its own: Help & Options → Downloadable Content →
 *Refresh Music Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`,
-default On). Off hides the menu row — with the hide master on or off, and whatever the Interface ▸
-Hide Items selection says, because the row is this feature's own entry rather than one of the
-retail rows that list governs — and the payload stops repainting it. Nothing else changes: a
-library whose tree changed is still re-scanned at the next boot, and `--refresh_dlc_cache` still
-forces one. With the cache off the row is the title's own online entry and this switch says
-nothing about it.
+**off by default since 2026-10-20**). On shows the menu row; off hides it - with the hide master on or
+off, and whatever the Interface ▸ Hide Items selection says, because the row is this feature's own
+entry rather than one of the retail rows that list governs - and the payload stops repainting it.
+Nothing else changes: a library whose tree changed is still re-scanned at the next boot, and
+`--refresh_dlc_cache` still forces one. With the cache off the row is the title's own online entry and
+this switch says nothing about it.
+
+The retail **Download Content** row is restored as its own entry (owner request, 2026-10-20). R7 had
+repurposed `splash_dlc` for the refresh, which took the retail label and action away; the payload now
+clones that shipped case under `splash_dlc_store` whenever `interface.hide_download_content` is set to
+*Visible*. The switch is on Interface → Main Menu and defaults to **Hidden**, so a fresh install keeps
+the online-store entry out of the menu while it remains one toggle away. With the cache off the retail
+`splash_dlc` row *is* `Download Content`, so the extra switch is not offered.
 
 **The refresh runs on a worker, and since 2026-10-15 the press rides it.** Reading every
 container is the same per-file cost the cold boot pays, so an in-game refresh of the

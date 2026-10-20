@@ -53,6 +53,14 @@ Part 1 wherever they disagree.
 - **Vulkan is selectable now** (`REXGLUE_USE_VULKAN=ON` in the Windows presets; Renderer offers
   `D3D12, VULKAN` with d3d12 still the active/fallback entry), the payload ships `vulkan-1.dll` by
   owner decision, and a missing loader is refused on both sides.
+- **Refresh row defaults off; Download Content restored (2026-10-20)** — the owner asked for three
+  adjustments. `general.refresh_music_library` now defaults **off** (so a fresh install has no
+  refresh row; the cache itself stays on), the retail *Download Content* main-menu entry is restored
+  as `splash_dlc_store` behind `interface.hide_download_content` (**default Hidden**, offered on
+  Interface → Main Menu), and *Play Current Song* stays on by default but its settings row is hidden
+  when the boot found no DLC at all. `src/hooks/settings_payload.cpp` reads the catalog from
+  `dlc::LibraryPackagePaths()`; the row clone is built in `src/ui/settings_screen.cpp` before
+  `SetRefreshRowAction` reroutes `splash_dlc`.
 - **Boot speed (2026-10-13)**: the wait is the DLC discovery, not the A/V load; the defaults now cache
   the library, zero `deferred_overlapped_delay_ms` and free the frame rate, so the walk is ~0.3 s and
   2,804 items enumerate in 39 s (was ~6 minutes). Its *pacing* half — put the frame rate back at the
@@ -207,6 +215,12 @@ game-side and Controller Settings-side consequences listed after them:
    "Externally configured" marker it used to show — the external application's `--enhancements_dlc_cache` row
    outranked it, which made it read-only, and the cutover below removed that flag; *Refresh
    Downloadable Content* left the settings tree to become **Refresh Music Library** on the main menu.
+   **Superseded 2026-10-20:** the refresh entry's own row defaults **off** now, and the retail
+   *Download Content* entry was restored as a separate row (`splash_dlc_store`) behind an
+   Interface → Main Menu switch that defaults Hidden, so a fresh install has neither the refresh
+   row nor the store row until the player asks for one. *Play Current Song* stays on by default and
+   is hidden entirely when the boot found no DLC. The 2026-10-14 note below still describes the DLC
+   Menu Songs revival.
    **Superseded 2026-10-14:** *DLC Menu Songs* was retired here (the pool always took what the library
    yielded) and is a **visible row again** — `general.dlc_menu_songs`, on by default, carrying
    `enhancements_menu_dlc_songs` (the owner asked for the R9 toggle in-game, and the *Play Current

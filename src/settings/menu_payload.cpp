@@ -228,6 +228,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         // for a mounted record (measured: the press ran the title's own store body while every
         // read that carried the row was rewritten). A record without that case is not an error -
         // the in-flight edit is still armed for the retail copy.
+        //
+        // The restored Download Content row (owner request, 2026-10-20) must be cloned *before*
+        // that call: it copies the shipped `splash_dlc` action verbatim, which R7 is about to
+        // replace with the refresh body.
+        if (screen::CurrentMenuConfiguration().download_content_row) {
+          std::string why;
+          screen::AddDownloadContentRow(&roots, &why);
+        }
         SetRefreshRowAction(&roots, refresh_row_active);
         // The Play Current Song entry (owner feature, 2026-10-14), when the boot configured it:
         // the row right after PLAY, and the case that starts the song the menu is playing. A boot

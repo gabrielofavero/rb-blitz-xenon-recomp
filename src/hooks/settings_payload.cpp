@@ -142,7 +142,9 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   menu_labels["splash_options"] = "HELP & OPTIONS";
   // With R7 on, the downloadable-content row performs the library refresh and is drawn as such
   // (`SetRefreshRowLabel` builds the label into the locale records below, for the main menu, and
-  // the hide-list label mirrors what the menu really says).
+  // the hide-list label mirrors what the menu really says). The row's identity is the refresh
+  // whenever the cache owns it, even with the refresh entry switched off: what that switch does
+  // is take the row away, not hand its name back to the store entry.
   const bool dlc_cache_on =
       rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true";
   // The refresh entry has a switch of its own (owner request, 2026-10-15): with it off, the row
@@ -150,9 +152,20 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   // belongs to are decided by the same answer.
   const bool refresh_row_on =
       rex::cvar::GetFlagByName("enhancements_refresh_music_library") == "true";
-  if (dlc_cache_on && refresh_row_on) {
+  if (dlc_cache_on) {
     menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
   }
+  // The restored Download Content row (owner request, 2026-10-20). Its visibility setting is a
+  // normal row (`interface.hide_download_content`, true means hidden), and the row that backs it is
+  // only offered while the cache owns `splash_dlc`: with the cache off that retail row *is* the
+  // Download Content entry, so a second one would be a duplicate.
+  bool hide_download_content = true;
+  if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
+    hide_download_content =
+        boot->service()->EffectiveValue(SettingId::kHideDownloadContent).boolean;
+  }
+  const bool download_content_row_available = dlc_cache_on;
+  const bool download_content_row = download_content_row_available && !hide_download_content;
 
   // The menu-music state, settled before anything that lists the menu's rows (owner feature,
   // 2026-10-14). `shell_music::Configure` has already run - it is called earlier in
@@ -164,6 +177,11 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   const bool menu_music_on = rb_blitz::shell_music::MenuMusicEnabled();
   const bool menu_music_pool = rb_blitz::shell_music::HasPool();
   const std::vector<std::string> menu_music_songs = rb_blitz::shell_music::PoolSongNames();
+  // Whether the boot found any DLC at all. This is the "no DLC during loading" answer the owner
+  // asked for on 2026-10-20: the Play Current Song row is hidden (not disabled) when it is false,
+  // because there is nothing the row could start - and the main-menu entry is absent for the same
+  // reason (`menu_music_pool` is false without packages).
+  const bool has_dlc_library = !rb_blitz::dlc::LibraryPackagePaths().empty();
   bool play_current_setting = true;
   if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
     play_current_setting =
@@ -173,9 +191,21 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   REXLOG_INFO("settings_menu: \"DLC Menu Songs\" is {}; {} menu-music song(s); the Play Current "
               "Song entry is {}",
               menu_music_on ? "on" : "off", menu_music_songs.size(),
-              play_current_row ? "built as the menu's second row"
-                               : (play_current_setting ? "not built (no DLC song is playing)"
-                                                       : "off (its setting is off)"));
+              !has_dlc_library
+                  ? "hidden (no DLC is loaded)"
+                  : (play_current_row
+                         ? "built as the menu's second row"
+                         : (play_current_setting ? "not built (no DLC song is playing)"
+                                                 : "off (its setting is off)")));
+  REXLOG_INFO("settings_menu: the restored Download Content row is {} (download_content_row={}, "
+              "visibility={})",
+              download_content_row ? "built after splash_dlc"
+                                   : (download_content_row_available
+                                          ? "not built (its visibility row says hidden)"
+                                          : "not built (the cache is off, so splash_dlc is the "
+                                            "Download Content entry itself)"),
+              download_content_row ? "true" : "false",
+              hide_download_content ? "hidden" : "visible");
 
   if (read("ui/splash/gen/splash.dtb", &bytes, &error)) {
     const auto inventory = menu_options::MenuInventory(bytes.data(), bytes.size());
@@ -278,7 +308,9 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     // The two DLC rows the owner asked for (2026-10-14): R9's own setting is visible again, and the
     // Play Current Song row is wired to it - and to the pool, because a menu whose background music
     // is the title's own has no song to start. Both states are said on the row itself (the settings
-    // screen draws a disabled row as `<label>: <reason>`), so nothing here is a silent no-op.
+    // screen draws a disabled row as `<label>: <reason>`), so nothing here is a silent no-op. With
+    // no DLC at all the Play Current Song row is erased by the settings screen (owner request,
+    // 2026-10-20); the reasons below still describe the DLC Menu Songs row in that boot.
     if (!menu_music_on) {
       configuration.disabled["general.play_current_song"] = "Needs DLC Menu Songs";
     } else if (!menu_music_pool) {
@@ -290,6 +322,9 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     }
     configuration.play_current_song = play_current_row;
     configuration.menu_music_songs = menu_music_songs;
+    configuration.download_content_row = download_content_row;
+    configuration.download_content_row_available = download_content_row_available;
+    configuration.has_dlc_library = has_dlc_library;
     for (const auto& row : schema::MenuRows()) {
       configuration.menu_rows.emplace_back(row.token, row.label);
     }

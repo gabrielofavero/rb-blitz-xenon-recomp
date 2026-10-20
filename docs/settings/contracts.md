@@ -576,7 +576,10 @@ The old free-form CSV (`enhancements_hidden_menu_options`, where empty meant "th
 cannot express "empty". The new representation **must** distinguish absent from present-empty so an
 explicit empty selection cannot unexpectedly hide rows. `Advanced Settings` is always in the list
 and non-hideable in v1; `splash_dlc` stays visible under the default offline filter because it is
-Refresh Song Library.
+Refresh Song Library. **Changed 2026-10-20:** the refresh entry's own row defaults **off**, so
+`splash_dlc` is hidden by default; the retail *Download Content* entry is restored as
+`splash_dlc_store`, behind `interface.hide_download_content` (default Hidden). The absent/present
+rule above is unchanged.
 
 ---
 
