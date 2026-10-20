@@ -2838,8 +2838,38 @@ bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   return AddMainMenuSwitchCase(nodes, kDownloadContentRow, body, reason);
 }
 
-const MenuConfiguration& CurrentMenuConfiguration() { return g_configuration; }
+bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr) {
+    return refuse("nothing to edit");
+  }
+  if (!g_configuration.rhythmverse_row) {
+    return refuse("the RhythmVerse setting is off");
+  }
+  // The store entries sit together at the menu's bottom, where the retail DOWNLOAD CONTENT row was.
+  // When this boot built the restored row it is the anchor; otherwise the shipped symbol is.
+  const char* anchor = "splash_dlc";
+  Hit hit;
+  FindInRoots(nodes, [](const Node& node) { return IsSymbol(node, kDownloadContentRow); }, &hit);
+  if (hit.found) {
+    anchor = kDownloadContentRow;
+  }
+  if (!InsertMenuRow(nodes, anchor, kRhythmVerseRow, reason)) {
+    return false;
+  }
+  // The store without Xbox LIVE: the retail gate is `is_participating_user_online`, and this row
+  // deliberately asks the host instead. The one condition is the store's own master switch, read
+  // live at press time so switching it off stops the press without a restart.
+  const std::vector<Node> body{
+      Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(kStoreEnabledQuery)}),
+           Cmd({Sym("ui"), Sym("goto_screen"), Sym("store_menu_screen")})})};
+  return AddMainMenuSwitchCase(nodes, kRhythmVerseRow, body, reason);
+}
 
+const MenuConfiguration& CurrentMenuConfiguration() { return g_configuration; }
 bool AddLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view key,
                     const std::string_view text, std::string* reason) {
   auto refuse = [reason](const char* why) {
@@ -2984,6 +3014,11 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   // only on the boot that builds the main-menu row.
   if (g_configuration.download_content_row) {
     add(kDownloadContentRow, kDownloadContentLabel);
+  }
+  // The RhythmVerse Customs entry (plan P1) is the same kind of key: only the boot that builds the
+  // row carries its string.
+  if (g_configuration.rhythmverse_row) {
+    add(kRhythmVerseRow, kRhythmVerseLabel);
   }
   return out;
 }

@@ -3632,6 +3632,94 @@ void TestRhythmVerseRows() {
   CHECK_TRUE(menu_title);
 }
 
+void TestRhythmVerseRow() {
+  BeginCase("the RhythmVerse Customs row: built only when configured, and gated at press time");
+
+  // The retail splash shape the edits are aimed at: an option array with both anchors and one
+  // `splash_dlc` case in the panel's row table.
+  const auto fixture = [] {
+    const std::vector<dtb::Node> rows = {Sym("splash_start"), Sym("splash_dlc"),
+                                         Sym("splash_exit")};
+    const Node enter =
+        Cmd({Sym("do"), Cmd({Var("options_array"), Cmd({Sym("array"), Arr(rows)})}),
+             Cmd({Sym("start.lst"), Sym("set_data"), Var("options_array")})});
+    const Node dlc_case = Arr({Sym("splash_dlc"), Cmd({Sym("if_else"), Sym("online"),
+                                                       Sym("store"), Sym("popup")})});
+    const Node start_case = Arr({Sym("splash_start"), Cmd({Var("this"), Sym("goto_main_hub")})});
+    const Node exit_case = Arr(
+        {Sym("splash_exit"), Cmd({Sym("ui"), Sym("goto_screen"), Sym("confirm_exit_game_screen")})});
+    const Node table = Cmd({Sym("switch"), Cmd({Sym("start.lst"), Sym("selected_sym")}),
+                           start_case, dlc_case, exit_case});
+    return std::vector<dtb::Node>{Cmd({Sym("new"), Sym("UIPanel"), Sym("splash_panel"),
+                                      Arr({Sym("file"), Str("splash.milo")}),
+                                      Arr({Sym("enter"), enter}),
+                                      Arr({Sym("SELECT_MSG"), table})})};
+  };
+
+  // Off: refused, record untouched.
+  ConfigureMenu(MenuConfiguration{});
+  std::vector<dtb::Node> refused = fixture();
+  std::string why;
+  CHECK_FALSE(AddRhythmVerseRow(&refused, &why));
+  CHECK_TRUE(!why.empty());
+
+  // On: the row follows `splash_dlc`, its case asks the host gate and enters the retail store.
+  MenuConfiguration config;
+  config.rhythmverse_row = true;
+  ConfigureMenu(config);
+  std::vector<dtb::Node> nodes = fixture();
+  CHECK_TRUE(AddRhythmVerseRow(&nodes, &why));
+
+  bool row_in_array = false;
+  bool follows_dlc = false;
+  bool asks_gate = false;
+  bool enters_store = false;
+  const auto visit = [&](auto&& self, const Node& node) -> void {
+    if (node.text == kStoreEnabledQuery) asks_gate = true;
+    if (node.tag == dtb::kSymbol && node.text == "store_menu_screen") enters_store = true;
+    if (node.tag == dtb::kArray && node.kids.size() >= 3) {
+      bool has_start = false;
+      bool has_exit = false;
+      for (const Node& kid : node.kids) {
+        has_start = has_start || (kid.tag == dtb::kSymbol && kid.text == "splash_start");
+        has_exit = has_exit || (kid.tag == dtb::kSymbol && kid.text == "splash_exit");
+      }
+      if (has_start && has_exit) {
+        for (size_t i = 0; i < node.kids.size(); ++i) {
+          if (node.kids[i].tag == dtb::kSymbol && node.kids[i].text == kRhythmVerseRow) {
+            row_in_array = true;
+            follows_dlc = i > 0 && node.kids[i - 1].tag == dtb::kSymbol &&
+                          node.kids[i - 1].text == "splash_dlc";
+          }
+        }
+      }
+    }
+    for (const Node& kid : node.kids) self(self, kid);
+  };
+  for (const Node& root : nodes) visit(visit, root);
+  CHECK_TRUE(row_in_array);
+  CHECK_TRUE(follows_dlc);
+  CHECK_TRUE(asks_gate);
+  CHECK_TRUE(enters_store);
+
+  // The label the menu draws for the row's symbol exists only on the boot that built it.
+  bool labelled = false;
+  for (const auto& label : Labels()) {
+    if (label.first == kRhythmVerseRow) {
+      labelled = true;
+      CHECK_TRUE(label.second == kRhythmVerseLabel);
+    }
+  }
+  CHECK_TRUE(labelled);
+
+  // A second pass refuses (the row is already there), and the record still compiles.
+  CHECK_FALSE(AddRhythmVerseRow(&nodes, &why));
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+
+  ConfigureMenu(MenuConfiguration{});
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -3671,6 +3759,7 @@ int main(int argc, char** argv) {
   TestDownloadContentRow();
   TestDownloadContentVisibilityAndNoDlc();
   TestRhythmVerseRows();
+  TestRhythmVerseRow();
   TestPauseReroute();
   TestInSongContext();
   TestPauseMergeEdits();

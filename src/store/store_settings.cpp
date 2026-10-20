@@ -105,4 +105,27 @@ bool ApplyCommittedRow(settings::SettingId id, const settings::Value& value, std
   return true;
 }
 
+bool AnswerStoreQuery(std::string_view path, bool* answer) {
+  constexpr std::string_view kPrefix = "rbbz-store/";
+  if (!path.starts_with(kPrefix) || answer == nullptr) {
+    return false;
+  }
+  const std::string_view rest = path.substr(kPrefix.size());
+  const SettingsSnapshot snapshot = Settings();
+  if (rest == "enabled") {
+    *answer = snapshot->enabled;
+    return true;
+  }
+  constexpr std::string_view kInstrument = "instrument/";
+  if (rest.starts_with(kInstrument)) {
+    const std::optional<Instrument> instrument = InstrumentFromToken(rest.substr(kInstrument.size()));
+    if (!instrument) {
+      return false;
+    }
+    *answer = snapshot->instruments.Allows(*instrument);
+    return true;
+  }
+  return false;
+}
+
 }  // namespace rb_blitz::store

@@ -103,6 +103,10 @@ struct MenuConfiguration {
   // `splash_dlc`, because with the cache off that retail row is the Download Content entry.
   bool download_content_row = false;
   bool download_content_row_available = false;
+  // The RhythmVerse Customs entry (RhythmVerse plan P1): true when the boot builds the row, i.e.
+  // when the store's master switch was on. Its case re-checks the live gate, so switching the
+  // store off stops the press without a restart.
+  bool rhythmverse_row = false;
   // False when the boot found no DLC at all. The Play Current Song row is then not drawn: a row
   // that exists must work, and with no library there is nothing it could ever start.
   bool has_dlc_library = true;
@@ -163,6 +167,16 @@ inline constexpr char kPlayCurrentLabel[] = "Play Current Song";
 // visibility switch (`interface.hide_download_content`) whose default is hidden.
 inline constexpr char kDownloadContentRow[] = "splash_dlc_store";
 inline constexpr char kDownloadContentLabel[] = "Download Content";
+
+// The RhythmVerse Customs entry (RhythmVerse plan P1). A main menu row of our own, built only while
+// the store's master switch is on, so the store is reachable without Xbox LIVE and without taking
+// `splash_dlc` away from R7's refresh. The case re-checks the live one-bit gate below, because the
+// switch is a `hot` row: turning the store off stops the press on the next menu entry.
+inline constexpr char kRhythmVerseRow[] = "rbbz_rhythmverse";
+inline constexpr char kRhythmVerseLabel[] = "RhythmVerse Customs";
+// Answered by the host from the store's settings snapshot (src/store/store_settings.h); true means
+// the master switch is on. `rbbz-store/instrument/<token>` answers the five filter leaves.
+inline constexpr char kStoreEnabledQuery[] = "rbbz-store/enabled";
 // The probe namespace the row asks the host through (`file_exists`):
 // `rbbz-play/current/<pool index>`, parsed by src/hooks/menu_music_pool.h.
 inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
@@ -305,6 +319,13 @@ bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason);
 // the clone is the only place the retail action survives. Refuses when the visibility setting is
 // off, when the record has no `splash_dlc` case, or when the row is already there.
 bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason);
+
+// Adds the RhythmVerse Customs entry (RhythmVerse plan P1): `kRhythmVerseRow` right after the
+// restored Download Content row when the boot built it, otherwise after the shipped `splash_dlc`,
+// plus a case whose body enters `store_menu_screen` only while `kStoreEnabledQuery` answers true -
+// no Xbox LIVE check and no Marketplace call anywhere in it. Refuses when the boot did not
+// configure the row, or when the record has no option array to insert into.
+bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason);
 
 // The current menu configuration, for the authoring functions that read it (the play row's pool).
 const MenuConfiguration& CurrentMenuConfiguration();

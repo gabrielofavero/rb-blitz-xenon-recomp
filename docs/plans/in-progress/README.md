@@ -15,7 +15,9 @@ RhythmVerse customs catalogue inside the retail DOWNLOAD CONTENT store. Research
 implementation order is P0 → P6 → P1 → P2 → P3 → P4 → P5 → P7 → P8. **P0 landed 2026-10-20** (the
 SDK-free API client, its URL/byte policy and `store_http`, with the 330-check `store_client` suite and
 a live probe) and **P6 landed the same day** (the six settings rows under General ▸ Downloadable
-Content, the in-process settings snapshot and the hot applier); **P1 is next.** Audio preview is
+Content, the in-process settings snapshot and the hot applier), followed by **P1** (the RhythmVerse
+Customs main-menu entry, gated by the host's one-bit store query). **P1's browser acceptance (a boot
+driving the store screen) is still open; P2 is next.** Audio preview is
 decided: the API returns no preview asset (§3.3), so v1 shows none.
 
 The most recent plan before this one,

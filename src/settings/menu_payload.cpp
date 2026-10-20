@@ -246,6 +246,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           std::string why;
           screen::AddPlayCurrentSongRow(&roots, &why);
         }
+        // The RhythmVerse Customs entry (plan P1): built only when the store's master switch was on
+        // for this boot, so a store the player turned off never draws a row that would refuse the
+        // press. A refusal here is not fatal - the row simply is not there.
+        if (screen::CurrentMenuConfiguration().rhythmverse_row) {
+          std::string why;
+          screen::AddRhythmVerseRow(&roots, &why);
+        }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
         if (!screen::RerouteRow(&roots, screen::kPauseMenuRow,

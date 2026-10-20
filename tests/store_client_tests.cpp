@@ -824,11 +824,25 @@ void TestStoreSettings() {
   CHECK_TRUE(IsStoreSetting(settings::SettingId::kRhythmVerseKeys));
   CHECK_FALSE(IsStoreSetting(settings::SettingId::kVsync));
 
+  // The DTA's one-bit probes answer from the same snapshot (plan P1's menu gate).
+  bool answer = false;
+  CHECK_TRUE(AnswerStoreQuery("rbbz-store/enabled", &answer));
+  CHECK_TRUE(answer);
+  CHECK_TRUE(AnswerStoreQuery("rbbz-store/instrument/guitar", &answer));
+  CHECK_FALSE(answer);  // the case above turned the guitar leaf off
+  CHECK_TRUE(AnswerStoreQuery("rbbz-store/instrument/keys", &answer));
+  CHECK_TRUE(answer);
+  CHECK_FALSE(AnswerStoreQuery("rbbz-store/instrument/bassoon", &answer));
+  CHECK_FALSE(AnswerStoreQuery("rbbz-settings/enabled", &answer));
+  CHECK_FALSE(AnswerStoreQuery("rbbz-store/", &answer));
+
   // Leave the process as it was found.
   PublishSettings(StoreSettings{});
   CHECK_FALSE(Settings()->enabled);
   CHECK_TRUE(Settings()->instruments.guitar);
   CHECK_FALSE(Settings()->instruments.keys);
+  CHECK_TRUE(AnswerStoreQuery("rbbz-store/enabled", &answer));
+  CHECK_FALSE(answer);
 }
 
 }  // namespace

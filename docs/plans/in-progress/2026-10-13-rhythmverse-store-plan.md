@@ -1,9 +1,9 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0 (API client, URL/byte
-policy, `store_http`) and P6 (the six settings rows and the live snapshot) landed 2026-10-20; P1 is
-next; P2–P5 and P7–P8 are not started.** Audio preview is decided: the API returns no preview asset
-(§3.3), so v1 shows none.
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0, P6 and P1 landed
+2026-10-20** (client/transport; the six settings rows and the live snapshot; the main-menu entry and
+its live gate). P1's browser acceptance (a boot driving the store screen) is still open; P2 is next.
+Audio preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
@@ -626,6 +626,31 @@ and the component `WinHttpCrackUrl` returns points into the URL buffer — so th
 - Exit: store opens in ≥5 consecutive boots; the master toggles availability without restart;
   Refresh Music Library still dispatches its sentinel. Exercise cache On/Off, store On/Off and
   Ultimate present/absent. Control records outside the intended edits remain unchanged.
+
+**P1 record (2026-10-20).** The main menu now carries **RhythmVerse Customs** (`rbbz_rhythmverse`),
+built by `ui::screen::AddRhythmVerseRow` and composed by `src/settings/menu_payload.cpp` after the
+restored Download Content row (after `splash_dlc` when that row is absent). Its case contains no
+online check and no Marketplace call: it enters the retail `store_menu_screen` only while
+`rbbz-store/enabled` answers true, a one-bit query the host answers from the store's settings
+snapshot (`store::AnswerStoreQuery`, hooked in `settings_bridge_hooks.cpp` beside the play probes, so
+it works even with the settings channel off). The row and its label exist only on a boot whose
+master switch was on.
+
+Measured: `settings_screen` pins the insertion (right after `splash_dlc`, refused when off, label
+present, case asks the gate and enters `store_menu_screen`, a second pass refused, the record
+reparses) and `store_client` pins the query answers (`enabled`, `instrument/<token>`, unknown paths
+refused); full `ctest` is **38/38** and the game target links.
+
+Honest limits — P1's exit is **not** met yet:
+
+- **The row's presence is baked at boot.** The exit asks for "the master toggles availability
+  without restart"; the *press* is live (the case re-reads the gate), the *row* is not: records are
+  generated once per boot, so turning the store off leaves the row drawn until the next start, and
+  turning it on needs a restart to appear. A live presence needs a menu-rebuild path (the settings
+  screen repopulates its own lists after a commit; the main menu's records are compiled at boot).
+- **No boot has been driven yet.** The browser acceptance below (`store_menu_screen` draws, B
+  returns, ≥5 boots, cache On/Off, store On/Off, Ultimate present/absent, Refresh Music Library's
+  sentinel) is still the open proof; nothing in this pass has run the store screen itself.
 
 ### P2 — instrument the data layer (DECISION GATE: A vs B)
 

@@ -57,4 +57,12 @@ bool ApplyRowToSettings(settings::SettingId id, const settings::Value& value, St
 // The hot applier's single entry point: load, apply, publish. `error` explains a refusal.
 bool ApplyCommittedRow(settings::SettingId id, const settings::Value& value, std::string* error);
 
+// Answers the DTA's one-bit store queries, which ride the guest's `file_exists` builtin:
+//
+//   rbbz-store/enabled              the master switch
+//   rbbz-store/instrument/<token>   one filter leaf (`guitar`, `bass`, `drums`, `vocals`, `keys`)
+//
+// Returns false (and leaves `answer` alone) for any other path, so the caller can forward the call.
+bool AnswerStoreQuery(std::string_view path, bool* answer);
+
 }  // namespace rb_blitz::store

@@ -65,6 +65,7 @@
 #include "settings/input_bindings.h"
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
+#include "store/store_settings.h"
 
 // The two builtins the channel rides on and the node -> string helper the originals use. The
 // originals are the __imp__ aliases; the strong definitions below replace the call sites.
@@ -639,6 +640,14 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
   bool play_answer = false;
   if (::rb_blitz::shell_music::AnswerPlayQuery(path, &play_answer)) {
     WriteResultCell(base, ctx.r3.u32, play_answer ? 1u : 0u);
+    return true;
+  }
+  // The RhythmVerse store's own one-bit queries (plan P1) ride this builtin too, and are answered
+  // even on a boot that turns the settings channel off: they ask the host store rather than the
+  // settings store, and the main menu's entry depends on them (src/store/store_settings.h).
+  bool store_answer = false;
+  if (::rb_blitz::store::AnswerStoreQuery(path, &store_answer)) {
+    WriteResultCell(base, ctx.r3.u32, store_answer ? 1u : 0u);
     return true;
   }
   if (!g_enabled || g_forward_only) {

@@ -188,6 +188,18 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
         boot->service()->EffectiveValue(SettingId::kPlayCurrentSong).boolean;
   }
   const bool play_current_row = play_current_setting && menu_music_pool;
+  // The RhythmVerse Customs entry (RhythmVerse plan P1): the store's master switch, read from the
+  // service that loaded `settings.toml`. Its own hot applier keeps the store's snapshot current, but
+  // the menu record is built once per boot, so the row's *presence* follows the boot value: switching
+  // it off stops a press immediately (the case re-checks the live gate) and removes the row on the
+  // next start, which the settings status records as P1's honest limitation.
+  bool rhythmverse_setting = false;
+  if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
+    rhythmverse_setting = boot->service()->EffectiveValue(SettingId::kRhythmVerse).boolean;
+  }
+  REXLOG_INFO("settings_menu: the RhythmVerse Customs entry is {}",
+              rhythmverse_setting ? "built after the store rows"
+                                  : "off (its setting is off)");
   REXLOG_INFO("settings_menu: \"DLC Menu Songs\" is {}; {} menu-music song(s); the Play Current "
               "Song entry is {}",
               menu_music_on ? "on" : "off", menu_music_songs.size(),
@@ -321,6 +333,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
       configuration.disabled["general.play_current_song"] = "Disabled";
     }
     configuration.play_current_song = play_current_row;
+    configuration.rhythmverse_row = rhythmverse_setting;
     configuration.menu_music_songs = menu_music_songs;
     configuration.download_content_row = download_content_row;
     configuration.download_content_row_available = download_content_row_available;

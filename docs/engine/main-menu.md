@@ -525,6 +525,33 @@ does not claim to have touched ([known-issues.md](../reference/known-issues.md))
 On an unavailable press the `settings_play_unavailable` page remains; arms and captures are in
 [play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) §Evidence.
 
+### 7.3 The RhythmVerse Customs row (2026-10-20)
+
+**The feature.** The main menu's second store entry, and the way into the retail
+`store_menu_screen` without Xbox LIVE: the retail row's own case is gated by
+`{user_mgr is_participating_user_online}`, which offline always answers false. The row is built only
+while `general.rhythmverse` was on at boot; its label is `RhythmVerse Customs`
+(`rbbz_rhythmverse`, a locale entry of its own on that boot only).
+
+**The edit.** `ui::screen::AddRhythmVerseRow` ([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp))
+inserts the symbol into the option array directly after the restored *Download Content* row when
+that boot built it, otherwise after `splash_dlc`, and appends a case to the main menu's own
+`{switch {start.lst selected_sym} ...}` table. The case has **no online check and no Marketplace
+call**: it enters `store_menu_screen` only while `{file_exists "rbbz-store/enabled"}` answers true — a
+one-bit query the host answers from the store's settings snapshot
+([src/store/store_settings.h](../../src/store/store_settings.h), hooked in
+[settings_bridge_hooks.cpp](../../src/hooks/settings_bridge_hooks.cpp) beside the play probes, so it
+works even on a boot that turns the settings channel off). R7's `splash_dlc` refresh keeps its own
+row, action and label untouched.
+
+**Limits [static + unit-tested, not yet booted].** The menu record is baked once per boot, so the
+master switch's *presence* effect is a next-start matter: off stops a press immediately (the case
+re-reads the gate on every entry) but the row stays drawn until the next boot, and turning the store
+on needs a restart for the row to appear. The browser acceptance (the store screen drawing, B
+returning, cache/store/Ultimate arms) is not measured yet; `rb_blitz_settings_screen_tests` pins the
+insertion, the label, the gate and the refusal, and `rb_blitz_store_client_tests` pins the query
+answers.
+
 ### 8. Evidence
 
 **The ark-side bed** (`scripts/hide-test.ps1`: the payload's entry edited before boot) — alive, no
