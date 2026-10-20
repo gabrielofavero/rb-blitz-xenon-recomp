@@ -278,12 +278,9 @@ enum class Kind {
   //
   //   kStateSubmenu  the pair is "Custom"/"Default" and Confirm enters `screen` (a binding row);
   //   kStateAction   the `_on` spelling writes `path` and commits (Reset / Reset All); an `_off`
-  //                  press is inert, which is the disabled row the plan asks for;
-  //   kRouteGated    the `_on` spelling enters the retail screen (Default Presets while the
-  //                  Controller table is not custom).
+  //                  press is inert, which is the disabled row the plan asks for.
   kStateSubmenu,
   kStateAction,
-  kRouteGated,
   // One-shot Controls rows: `path` is a `rbbz-settings/` write. `kCapture` arms the listening
   // session and enters the dialog. The dialog is left by the capture itself (the hold gesture or
   // the timeout), so no row writes the bridge's `capture-cancel` op.
@@ -513,24 +510,9 @@ Row StateActionRow(const char* symbol, const char* setting, const char* path, co
   return row;
 }
 
-// A gated retail route: the `_on` spelling (the one drawn as available) enters the screen; the
-// `_off` spelling is present but inert. `inverted` reads the label-on state from a false setting,
-// exactly as InvertedBoolRow does (`Default Presets` is available while Custom is off).
-Row RouteGatedRow(const char* symbol, const char* screen, const char* member, const char* setting,
-                  const char* label, const char* off_label, const char* description,
-                  bool inverted = false) {
-  Row row;
-  row.symbol = symbol;
-  row.kind = Kind::kRouteGated;
-  row.screen = screen;
-  row.member = member;
-  row.setting = setting;
-  row.label = label;
-  row.off_label = off_label != nullptr ? off_label : label;
-  row.description = description;
-  row.inverted = inverted;
-  return row;
-}
+// A gated retail route used to live here (`Default Presets` while Controller Custom was off).
+// P2 of the interface/gameplay mapping restructure plan removes the Custom switches, so the row
+// is a plain `RouteRow` now: the preset page is always available.
 
 // The Assign row: arm the capture for `path` (a `capture/<token>/-` write) and enter the shared
 // listening dialog. The dialog sets its own back target when entered, so every binding row can
@@ -763,13 +745,10 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_gameplay_controller_screen", "settings_gameplay_mapping_screen",
                           MenuPanels(),
                           {
-                              RouteGatedRow("settings_default_presets", "controller_config_screen",
-                                            "back_screen", "input.custom_controller",
-                                            "Default Presets", "Default Presets: Disabled",
-                                            "The game's own controller presets. Turn Custom off to use them.",
-                                            true),
-                              BoolRow("settings_custom_controller", "input.custom_controller", "Custom",
-                                      "Use the custom Controller mapping instead of the saved preset."),
+                              RouteRow("settings_default_presets", "controller_config_screen",
+                                       "back_screen", "Default Presets",
+                                       "The game's own controller presets. With no custom row "
+                                       "the selected preset plays; a custom row overrides it."),
                               SubmenuRow("settings_controller_mapping",
                                          "settings_controller_actions_screen", "Custom Mapping",
                                          "Assign the six gameplay actions to pad controls."),
@@ -778,9 +757,6 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_gameplay_keyboard_mouse_screen",
                           "settings_gameplay_mapping_screen", MenuPanels(),
                           {
-                              BoolRow("settings_custom_keyboard_mouse", "input.custom_keyboard_mouse",
-                                      "Custom",
-                                      "Use the custom Keyboard & Mouse mapping for gameplay."),
                               SubmenuRow("settings_keyboard_mouse_mapping",
                                          "settings_keyboard_mouse_actions_screen", "Custom Mapping",
                                          "Assign the six gameplay actions to keys and mouse buttons."),
@@ -1396,7 +1372,6 @@ std::vector<std::string> RowSymbols(const Row& row) {
     case Kind::kBoolSubmenu:
     case Kind::kStateSubmenu:
     case Kind::kStateAction:
-    case Kind::kRouteGated:
       return {row.symbol + "_on", row.symbol + "_off"};
     case Kind::kSelect: {
       std::vector<std::string> out;
@@ -1490,8 +1465,7 @@ Node PopulateMenu(const PanelSpec& panel) {
 
   for (const Row& row : panel.rows) {
     if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu ||
-        row.kind == Kind::kStateSubmenu || row.kind == Kind::kStateAction ||
-        row.kind == Kind::kRouteGated) {
+        row.kind == Kind::kStateSubmenu || row.kind == Kind::kStateAction) {
       const std::string on = row.symbol + "_on";
       const std::string off = row.symbol + "_off";
       // The pair keeps its usual meaning (`_on` = the row reads On); an inverted row's setting is
@@ -1586,11 +1560,6 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       return Arr({Sym(symbol), Write(row.path), Write(Path("commit", "-", "-")),
                   CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
-    case Kind::kRouteGated:
-      if (symbol != std::string(row.symbol) + "_on") {
-        return Arr({Sym(symbol), Cmd({Var("this"), Sym("populate_menu")})});
-      }
-      return Arr({Sym(symbol), EnterRetail(row.screen, row.member)});
     case Kind::kCapture:
       return Arr({Sym(symbol), Write(row.path), EnterScreen(row.screen)});
     case Kind::kChoose:
@@ -2048,7 +2017,6 @@ std::vector<std::string> RequestPaths() {
         case Kind::kBoolSubmenu:
         case Kind::kStateSubmenu:
         case Kind::kStateAction:
-        case Kind::kRouteGated:
           add(QueryPath(row));
           if (row.inverted) add(Path("snapshot", row.setting, "b:0"));
           add(SetPath(row, "b:1"));
@@ -2796,7 +2764,7 @@ std::vector<std::pair<std::string, std::string>> Labels() {
         add(row.symbol + "_on", row.label + ": Custom");
         add(row.symbol + "_off", row.off_label.empty() ? row.label + ": Default"
                                                         : row.off_label);
-      } else if (row.kind == Kind::kStateAction || row.kind == Kind::kRouteGated) {
+      } else if (row.kind == Kind::kStateAction) {
         add(row.symbol + "_on", row.label);
         add(row.symbol + "_off", row.off_label.empty() ? row.label : row.off_label);
       } else if (row.kind == Kind::kSelect) {

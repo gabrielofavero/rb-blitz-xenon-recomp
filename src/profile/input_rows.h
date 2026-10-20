@@ -10,14 +10,17 @@
 //
 //   input.keyboard_support          a switch (the profile's `[settings]` row of the same name)
 //   input.mouse_support             a switch (`mouse_ui_nav`)
-//   input.custom_controller         a switch (`gameplay_mapping_controller`)
-//   input.custom_keyboard_mouse     a switch (`gameplay_mapping_keyboard_mouse`)
 //   input.general.<target>          one `[remap]` control (`input.general.a`)
 //   input.controller.<action>       one `[gameplay_remap_controller]` action
 //   input.keyboard_mouse.<action>   one `[gameplay_remap_keyboard_mouse]` action
 //   input.reset.general             Reset All of `[remap]`
 //   input.reset.controller          Reset All of the Controller gameplay table
-//   input.reset.keyboard_mouse      Reset All of the Keyboard & Mouse gameplay table
+//   input.reset.keyboard_mouse      Reset All of the Mouse & Keyboard gameplay table
+//
+// The two `input.custom_*` switches are gone (P2 of the interface/gameplay mapping restructure
+// plan, D3): a gameplay table is custom exactly when it has a binding row, and the surface says
+// so by the rows it shows. An old profile's `gameplay_mapping_*` key is left in the file and has
+// no token any more.
 //
 // The three table prefixes deliberately match `gameplay_remap::TableKindSection`'s vocabulary
 // (`controller`, `keyboard_mouse`) so a log line and a menu token cannot disagree about which
@@ -42,8 +45,6 @@ enum class InputRowKind : uint8_t {
   kNone = 0,
   kKeyboardSupport,
   kMouseSupport,
-  kCustomController,
-  kCustomKeyboardMouse,
   kGeneralBinding,
   kControllerBinding,
   kKeyboardMouseBinding,
@@ -112,7 +113,7 @@ std::string BindingRowLabel(const InputRowToken& token);
 // -> "Arrow Right"), and a name this build does not know is passed through unchanged rather than
 // guessed at.
 
-// One source as a row draws it: "A", "Right Click", "Arrow Right", "L-Stick Up".
+// One source as a row draws it: "A", "Right Click", "Scroll Up", "Arrow Right", "L-Stick Up".
 std::string SourceDisplayName(const remap::Source& source);
 
 // A whole binding list as a row draws it: "Q, Right Click". Empty for an empty list.

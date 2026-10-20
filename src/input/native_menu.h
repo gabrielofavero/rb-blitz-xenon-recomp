@@ -301,6 +301,9 @@ void MouseMenuFocus(bool focused);
 // the game window's own focus, not the pointer's availability (an ImGui overlay taking the
 // pointer must not stop the keyboard from playing).
 uint32_t HostMouseButtons();
+// The wheel detents seen since the previous call: positive away from the player (`wheel_up`),
+// negative toward (`wheel_down`). Consumes them, so exactly one poll sees each detent.
+int32_t HostTakeMouseWheel();
 bool HostInputFocused();
 // SDL's own keyboard-focus answer, as the window thread last saw it. `HostInputFocused` is the
 // game window's Win32 focus (tracked from the window listener); this is what SDL's keyboard state

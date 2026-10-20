@@ -233,16 +233,14 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       }
       // P7: the Controls switches are kept by the input store (they are the controller profile's
       // `[settings]` rows). A binding row is never set through `set`: Assign goes through the
-      // capture op, Reset through `bind-reset`.
+      // capture op, Reset through `bind-reset`. Only the two device gates are switches now (P2 of
+      // the interface/gameplay mapping restructure plan, D3); the retired `input.custom_*` tokens
+      // no longer parse, so they fall through to the binding-row refusal below.
       if (input_store_ != nullptr && input_store_->IsToken(request.setting)) {
         if (profile::ParseInputRowToken(request.setting).kind ==
-            profile::InputRowKind::kKeyboardSupport ||
+                profile::InputRowKind::kKeyboardSupport ||
             profile::ParseInputRowToken(request.setting).kind ==
-                profile::InputRowKind::kMouseSupport ||
-            profile::ParseInputRowToken(request.setting).kind ==
-                profile::InputRowKind::kCustomController ||
-            profile::ParseInputRowToken(request.setting).kind ==
-                profile::InputRowKind::kCustomKeyboardMouse) {
+                profile::InputRowKind::kMouseSupport) {
           if (request.value.kind != bridge::ValueKind::kBool) {
             status = Status::kInvalid;
             response.message = "a switch takes a boolean";

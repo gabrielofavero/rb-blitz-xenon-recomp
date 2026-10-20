@@ -3163,6 +3163,46 @@ void TestRendererRowVisibility() {
 // own line from the row's index. That mapping leans on one invariant - a binding page draws one
 // symbol per row, so the drawn index is the page-row index - and this case pins it, plus the two
 // contexts and the pages that must answer nothing.
+// P2 (interface/gameplay mapping restructure plan): the two Custom switches are gone, so the
+// surface must not write the retired rows and the Controller page must be [Controller Presets,
+// Custom Mapping]. The preset page is a retail route now, always available (D5).
+void TestGameplayPagesAfterP2() {
+  BeginCase("gameplay pages: no custom switches, and the preset page is always available");
+
+  const std::vector<std::string> paths = RequestPaths();
+  for (const std::string& path : paths) {
+    CHECK_TRUE(path.find("input.custom_controller") == std::string::npos);
+    CHECK_TRUE(path.find("input.custom_keyboard_mouse") == std::string::npos);
+  }
+  // The table-wide resets survive: they are how a custom table goes back to the preset.
+  bool reset_controller = false;
+  bool reset_keyboard_mouse = false;
+  for (const std::string& path : paths) {
+    reset_controller = reset_controller || path.find("input.reset.controller") != std::string::npos;
+    reset_keyboard_mouse =
+        reset_keyboard_mouse || path.find("input.reset.keyboard_mouse") != std::string::npos;
+  }
+  CHECK_TRUE(reset_controller);
+  CHECK_TRUE(reset_keyboard_mouse);
+
+  bool preset_row = false;
+  bool controller_mapping_row = false;
+  bool keyboard_mouse_mapping_row = false;
+  bool retired_custom_row = false;
+  for (const std::string& symbol : HelpSymbols()) {
+    preset_row = preset_row || symbol == "settings_default_presets";
+    controller_mapping_row = controller_mapping_row || symbol == "settings_controller_mapping";
+    keyboard_mouse_mapping_row =
+        keyboard_mouse_mapping_row || symbol == "settings_keyboard_mouse_mapping";
+    retired_custom_row = retired_custom_row || symbol == "settings_custom_controller" ||
+                         symbol == "settings_custom_keyboard_mouse";
+  }
+  CHECK_TRUE(preset_row);
+  CHECK_TRUE(controller_mapping_row);
+  CHECK_TRUE(keyboard_mouse_mapping_row);
+  CHECK_FALSE(retired_custom_row);
+}
+
 void TestScreenBindingRows() {
   BeginCase("binding rows: each Controls page names its rows in list order");
 
@@ -3268,6 +3308,7 @@ int main(int argc, char** argv) {
   TestProviderRowRemoval();
   TestRendererRowVisibility();
   TestScreenBindingRows();
+  TestGameplayPagesAfterP2();
   TestLocaleOverrides();
   TestLabels();
   TestHelpTextsCoverEveryRow();

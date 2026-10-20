@@ -189,6 +189,29 @@ void TestVocabulary() {
   CHECK_STR_EQ(FormatSource(*ParseSource("key:space")), "key:space");
   CHECK_STR_EQ(FormatSource(*ParseSource("mouse:left")), "mouse:left");
 
+  BeginCase("P2: the wheel detents are mouse sources, round-tripped and classified");
+
+  // `mouse:wheel_up`/`mouse:wheel_down` join the mouse grammar (restructure plan D12): a detent
+  // is a source the row can name, the display renames it, and the direction is what the sampler
+  // reads. An unknown device prefix is still refused.
+  for (const char* name : {"wheel_up", "wheel_down"}) {
+    const auto source = ParseSource(std::string("mouse:") + name);
+    CHECK_TRUE(source.has_value());
+    CHECK_TRUE(source->kind == SourceKind::kMouse);
+    CHECK_STR_EQ(FormatSource(*source), std::string("mouse:") + name);
+    CHECK_TRUE(IsMouseWheelSource(name));
+  }
+  CHECK_EQ(MouseWheelDirection("wheel_up"), 1);
+  CHECK_EQ(MouseWheelDirection("wheel_down"), -1);
+  CHECK_EQ(MouseWheelDirection("left"), 0);
+  CHECK_FALSE(IsMouseWheelSource("left"));
+  CHECK_FALSE(ParseSource("mouse:wheel_left").has_value());
+  // A list mixing a detent with keys and buttons parses whole.
+  const auto list = ParseSourceList("mouse:wheel_down, key:Q");
+  CHECK_TRUE(list.has_value());
+  CHECK_EQ(list->size(), 2u);
+  CHECK_STR_EQ(FormatSourceList(*list), "mouse:wheel_down, key:Q");
+
   BeginCase("D16: the grammar refuses what it does not understand, in every half");
 
   CHECK_FALSE(ParseTarget("a ").has_value());

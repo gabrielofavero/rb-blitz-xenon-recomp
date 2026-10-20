@@ -39,6 +39,11 @@ namespace {
 // main-thread calls, so the sampler must not ask SDL itself - it reads these instead.
 std::atomic<uint32_t> g_mouse_buttons{0};
 std::atomic<bool> g_window_focused{false};
+// The wheel detents seen since the guest-side sampler last consumed them (P2 of the
+// interface/gameplay mapping plan): positive away from the player, negative toward. Recorded
+// whether or not Mouse Support is on, exactly like `g_mouse_buttons` - the sampler applies the
+// gates, and a capture must be able to bind a detent while the device is disabled.
+std::atomic<int32_t> g_wheel_detents{0};
 // SDL's own answer to "does a window have keyboard focus", sampled on the main thread (SDL
 // documents the query as main-thread only). Kept beside `g_window_focused` because the two can
 // disagree, and a sampler that sees no keys has to be able to tell that case apart.
@@ -260,6 +265,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     if (!window_) return;
     window_->RemoveInputListener(this); window_->RemoveListener(this);
     window_ = nullptr; g_mouse_buttons = 0; g_window_focused = false; ClearKeys();
+    g_wheel_detents = 0;
     MouseMenuFocus(false);
   }
   void OnClosing(rex::ui::UIEvent&) override { Detach(); }
@@ -270,6 +276,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     g_mouse_buttons = 0;
     g_window_focused = false;
     ClearKeys();
+    g_wheel_detents = 0;
     MouseMenuFocus(false);
   }
   void OnGotFocus(rex::ui::UISetupEvent&) override { g_window_focused = true; MouseMenuFocus(true); }
@@ -369,6 +376,14 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     e.set_handled(true);
   }
   void OnMouseWheel(rex::ui::MouseEvent& e) override {
+    // Device state first, gate second: the sampler applies the gates, and a capture binds a
+    // detent while Mouse Support is off.
+    const float scroll = e.scroll_y();
+    if (scroll > 0.0f) {
+      g_wheel_detents.fetch_add(1, std::memory_order_relaxed);
+    } else if (scroll < 0.0f) {
+      g_wheel_detents.fetch_add(-1, std::memory_order_relaxed);
+    }
     if (!MouseSupportEnabled()) return;
     // The point rides the detent: the guest re-catches the row that lands under it when the
     // scroll settles (MouseScrollFollow in native_menu.h).
@@ -383,6 +398,9 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
 }
 
 uint32_t HostMouseButtons() { return g_mouse_buttons.load(std::memory_order_relaxed); }
+int32_t HostTakeMouseWheel() {
+  return g_wheel_detents.exchange(0, std::memory_order_relaxed);
+}
 bool HostInputFocused() { return g_window_focused.load(std::memory_order_relaxed); }
 bool HostSdlKeyboardFocused() {
   return g_sdl_keyboard_focused.load(std::memory_order_relaxed);

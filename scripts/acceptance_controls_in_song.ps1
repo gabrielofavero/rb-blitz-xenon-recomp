@@ -182,8 +182,10 @@ try {
              'key:a', 'wait:20', 'shot:04-gameplay.png'))
     Assert-Screen 'game_screen' '04-gameplay' | Out-Null
 
-    # Pause: the game's own pause path (the same one a pad's Start reaches).
-    Drive @('key:start', "wait:$StepSeconds", 'shot:05-pause.png')
+    # Pause: the game's own pause path, reached through the Mouse & Keyboard table's default.
+    # P2 of the interface/gameplay mapping restructure plan moved that default from Return to
+    # Escape (D12), and the table is always active in a song, so Escape is what pauses now.
+    Drive @('key:esc', "wait:$StepSeconds", 'shot:05-pause.png')
     Assert-Screen 'game_screen' '05-paused' | Out-Null
     $script:steps += 1
     if (-not (Select-String -Path $log -Pattern 'panel=pause_panel' -ErrorAction SilentlyContinue)) {
@@ -199,8 +201,9 @@ try {
     ClickRow 1 '06-pause-root'
     Assert-Screen 'settings_pause_screen' '06-pause-root' | Out-Null
 
-    # The in-song root's rows: settings_general (0), pause_controls (1), calibration (2), ...
-    ClickRow 1 '07-controls'
+    # The in-song root's rows, in the merged root's current order (screenshot 06-pause-root.png):
+    # How to Play (0), Calibration (1), General (2), Controls (3), Audio/Video (4).
+    ClickRow 3 '07-controls'
     Assert-Screen 'settings_controls_pause_screen' '07-controls' | Out-Null
 
     ClickRow 0 '08-input-types'

@@ -248,7 +248,8 @@ try {
     Assert-Screen 'settings_gameplay_mapping_screen' '12-gameplay-mapping' | Out-Null
     ClickRow 0 '13-controller'
     Assert-Screen 'settings_gameplay_controller_screen' '13-controller' | Out-Null
-    ClickRow 2 '14-custom-mapping'
+    # P2 removed the Custom switch: the page is [Controller Presets, Custom Mapping].
+    ClickRow 1 '14-custom-mapping'
     Assert-Screen 'settings_controller_actions_screen' '14-custom-mapping' | Out-Null
     Drive @("wait:$StepSeconds", 'shot:15-controller-actions.png')
     Assert-RowText 'settings_controller_actions_screen' 'input.controller.first_note = Multiple' '15-controller-actions'

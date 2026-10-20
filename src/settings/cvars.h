@@ -26,15 +26,15 @@ namespace rb_blitz::settings {
 // migration is complete. Everything else in its [settings] table is inert preservation data.
 // `guide_button` and `keybind_guide` are excluded by design (contracts §2.3).
 //
-// The three gameplay-mapping switches joined on 2026-10-18 with P1 of
-// docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md (D2/D6): Controller Settings
-// writes them, and a boot that was not started by Controller Settings has to read them too.
+// The gameplay-mapping switches that joined on 2026-10-18 (P1 of
+// docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D2/D6) were retired on
+// 2026-10-20 (P2 of the interface/gameplay mapping restructure plan, D3): custom is inferred from
+// each binding table, so `gameplay_mapping_controller` / `gameplay_mapping_keyboard_mouse` are no
+// longer applied to any cvar. An old profile keeps the keys untouched.
 inline constexpr std::string_view kControllerCvarAllowlist[] = {
     "mouse_ui_nav",                        // controller-owned; Controller Settings writes it
     "input_backend",                       // hand-edit only (no schema row); kept for the XInput path
     "keyboard_support",                    // Controller Settings' Keyboard support row
-    "gameplay_mapping_controller",         // Controller Gameplay Mapping switch
-    "gameplay_mapping_keyboard_mouse",     // Keyboard + Mouse Gameplay Mapping switch
 };
 inline constexpr std::size_t kControllerCvarAllowlistCount =
     sizeof(kControllerCvarAllowlist) / sizeof(kControllerCvarAllowlist[0]);

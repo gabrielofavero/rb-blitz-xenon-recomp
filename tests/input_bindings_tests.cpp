@@ -255,8 +255,6 @@ void TestStoreResetAndSave() {
   rb_blitz::input::InputStoreOptions options;
   options.keyboard_support = true;
   options.mouse_support = true;
-  options.custom_controller = false;
-  options.custom_keyboard_mouse = true;
   auto store = rb_blitz::input::InputStore::Load(path, WriteFixture(path), options);
   CHECK_TRUE(store->Matches("input.general.a", true));
   CHECK_TRUE(store->Matches("input.reset.general", true));
@@ -290,12 +288,12 @@ void TestStoreSwitchAndRecovery() {
   CHECK_TRUE(error.find("no usable input") != std::string::npos);
   CHECK_TRUE(store->keyboard_support());
 
-  // The Controller page's custom switch saves and is queryable before and after.
-  CHECK_TRUE(store->StageBool("input.custom_controller", true, &error));
-  CHECK_TRUE(store->Matches("input.custom_controller", true));
-  CHECK_TRUE(store->Commit(&error));
-  CHECK_TRUE(store->Matches("input.custom_controller", true));
-  CHECK_TRUE(Slurp(path).find("gameplay_mapping_controller = true") != std::string::npos);
+  // The two gameplay switches are retired (restructure plan D3): the tokens do not exist, so a
+  // menu cannot stage them and nothing writes them back.
+  CHECK_FALSE(store->IsToken("input.custom_controller"));
+  CHECK_FALSE(store->IsToken("input.custom_keyboard_mouse"));
+  CHECK_FALSE(store->StageBool("input.custom_controller", true, &error));
+  CHECK_TRUE(store->IsToken("input.keyboard_support"));
 
   rb_blitz::input::InputStoreOptions locked = options;
   locked.keyboard_locked = true;
@@ -303,6 +301,81 @@ void TestStoreSwitchAndRecovery() {
                                                  locked);
   CHECK_FALSE(other->StageBool("input.keyboard_support", false, &error));
   CHECK_TRUE(error.find("command line") != std::string::npos);
+}
+
+// D15: an old profile's `gameplay_mapping_*` row is read as a value the profile holds, preserved
+// byte for byte, and never consulted for routing. Custom is the table's own fact.
+void TestLegacyCustomKeysAreInert() {
+  rb_blitz::test::BeginCase("store: a legacy gameplay_mapping switch is preserved and decides nothing");
+  const auto dir = ScratchDir();
+  const auto path = dir / "launcher.toml";
+  rb_blitz::profile::ProfileLoadResult load = WriteFixture(path);
+  load.profile.settings.push_back(
+      {"gameplay_mapping_controller", "true", rb_blitz::profile::ValueStyle::kBare});
+  load.profile.settings.push_back(
+      {"gameplay_mapping_keyboard_mouse", "false", rb_blitz::profile::ValueStyle::kBare});
+  std::string error;
+  CHECK_TRUE(rb_blitz::profile::SaveProfile(path, load.profile, &error));
+
+  rb_blitz::input::InputStoreOptions options;
+  auto store = rb_blitz::input::InputStore::Load(path, rb_blitz::profile::LoadProfile(path), options);
+  // The fixture has one Controller row, so the table is custom regardless of the old `true`.
+  CHECK_TRUE(store->controller_custom());
+  // And a fresh profile with no gameplay rows is not custom although the key says true.
+  const auto empty_path = dir / "empty.toml";
+  rb_blitz::profile::Profile empty;
+  empty.settings = {{"gameplay_mapping_controller", "true", rb_blitz::profile::ValueStyle::kBare}};
+  CHECK_TRUE(rb_blitz::profile::SaveProfile(empty_path, empty, &error));
+  auto plain = rb_blitz::input::InputStore::Load(empty_path, rb_blitz::profile::LoadProfile(empty_path),
+                                                 options);
+  CHECK_FALSE(plain->controller_custom());
+  CHECK_TRUE(plain->StageResetAll("input.reset.controller", &error));
+  CHECK_TRUE(plain->Commit(&error));
+  // The key survives a save this store made: user data is not deleted (D15).
+  CHECK_TRUE(Slurp(empty_path).find("gameplay_mapping_controller = true") != std::string::npos);
+}
+
+void TestFirstAssignReplacesAndAppends() {
+  rb_blitz::test::BeginCase("store: first Assign replaces a default, the next one appends, Reset restores");
+  const auto dir = ScratchDir();
+  const auto path = dir / "launcher.toml";
+  rb_blitz::input::InputStoreOptions options;
+  auto store = rb_blitz::input::InputStore::Load(path, WriteFixture(path), options);
+  std::string error;
+  // The fixture has no `second_note` row, so that action holds its default (W + left click).
+  CHECK_FALSE(store->Matches("input.keyboard_mouse.second_note", true));
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("W, Left Click") !=
+             std::string::npos);
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Click to Replace") !=
+             std::string::npos);
+
+  // First Assign: the default list is replaced, not extended (D8).
+  CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:Z"), &error));
+  const std::string once = Slurp(path);
+  CHECK_TRUE(once.find("second_note = \"key:Z\"") != std::string::npos);
+  CHECK_TRUE(once.find("wheel") == std::string::npos);
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Custom binding") !=
+             std::string::npos);
+
+  // Second Assign on the now-custom row appends, and a duplicate is still one press.
+  CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:X"), &error));
+  CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:X"), &error));
+  const std::string twice = Slurp(path);
+  CHECK_TRUE(twice.find("second_note = \"key:Z, key:X\"") != std::string::npos);
+
+  // Reset drops the row and the default's caption comes back.
+  CHECK_TRUE(store->StageReset("input.keyboard_mouse.second_note", &error));
+  CHECK_TRUE(store->Commit(&error));
+  CHECK_TRUE(Slurp(path).find("second_note") == std::string::npos);
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Default binding") !=
+             std::string::npos);
+
+  // A wheel detent binds like any other mouse source, and it persists in the grammar.
+  CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.move_lane_right",
+                                    Source("mouse:wheel_up"), &error));
+  CHECK_TRUE(Slurp(path).find("move_lane_right = \"mouse:wheel_up\"") != std::string::npos);
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.move_lane_right").find("Scroll Up") !=
+             std::string::npos);
 }
 
 void TestStoreCaptureAssignment() {
@@ -323,8 +396,8 @@ void TestStoreCaptureAssignment() {
   // A key is refused by the Controller table, and the profile is untouched.
   CHECK_FALSE(store->CompleteCapture("input.controller.first_note", Source("key:J"), &error));
   CHECK_TRUE(error.find("does not take") != std::string::npos);
-  // The caption describes the row's real list.
-  CHECK_TRUE(store->Describe("settings_bind_controller_first_note").find("pad:a, pad:b") !=
+  // The caption describes the row's real list, in the display spelling the row uses (A, B).
+  CHECK_TRUE(store->Describe("settings_bind_controller_first_note").find("A, B") !=
              std::string::npos);
 }
 
@@ -377,7 +450,9 @@ int main() {
   TestCaptureHoldToCancel();
   TestStoreResetAndSave();
   TestStoreSwitchAndRecovery();
+  TestLegacyCustomKeysAreInert();
   TestStoreCaptureAssignment();
+  TestFirstAssignReplacesAndAppends();
   TestRowDisplayText();
   std::printf("%s: %d check(s), %d failure(s)\n",
               rb_blitz::test::g_failures == 0 ? "PASS" : "FAIL", rb_blitz::test::g_checks,

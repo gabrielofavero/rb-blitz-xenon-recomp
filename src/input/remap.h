@@ -37,22 +37,21 @@
 
 namespace rb_blitz::input {
 
-// The switches that decide where a physical input goes (plan D2/D6,
+// The device gates that decide what a physical input may reach (plan D2,
 // docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md). Read at poll time from the
-// cvars Controller Settings' profile feeds, so the input filter, the menu generator and the
-// settings preview observe one effective value per switch rather than three readings of a file.
+// cvars the profile feeds, so the input filter, the menu generator and the settings preview
+// observe one effective value per gate rather than three readings of a file.
 //
-// `keyboard_support` and `mouse_ui_nav` are *source gates*: off means that device drives nothing.
-// The two gameplay switches are routing selectors: off keeps the device usable everywhere else and
-// only stops that table's direct actions. P2 (2026-10-18) made the gates real and evaluates both
-// tables' sources and edges every poll (src/input/source_gates.h); P3 dispatches them through the
-// title's own action boundary (src/hooks/gameplay_input.h), and the filter applies the pad overlay
-// that keeps the bypassed native preset and the direct Pause honest.
+// `keyboard_support` and `mouse_ui_nav` are the only switches left: they are source gates, and off
+// means that device drives nothing. Gameplay Mapping's two routing switches
+// (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) are retired by P2 of
+// docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md (D3): the
+// Mouse & Keyboard table is always active while playing, and the Controller table is active when
+// it has a custom row - the native preset drives the pad otherwise (D4). Custom is inferred from
+// the table; an old profile key is left in the file and decides nothing.
 struct GameplaySwitches {
-  bool keyboard_support = true;          // `keyboard_support`
-  bool mouse_support = true;             // `mouse_ui_nav` - the existing Mouse Support row
-  bool controller_mapping = false;       // `gameplay_mapping_controller`
-  bool keyboard_mouse_mapping = true;    // `gameplay_mapping_keyboard_mouse`
+  bool keyboard_support = true;  // `keyboard_support`
+  bool mouse_support = true;     // `mouse_ui_nav` - the existing Mouse Support row
 };
 
 GameplaySwitches ReadGameplaySwitches();

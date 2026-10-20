@@ -37,6 +37,7 @@
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
 
+#include "hooks/gameplay_input.h"
 #include "hooks/settings_bridge.h"
 #include "input/effective_input.h"
 #include "input/input_capture.h"
@@ -173,6 +174,21 @@ void DrawBindingRows(ImGuiIO& io) {
   if (!input::VisibleMenuRows(&screen, &rows)) {
     finish("(no menu list)");
     return;
+  }
+  // P2's measurement, kept as a permanent evidence line: while one of our pages is open, does the
+  // live song controller still carry the selected preset? A value here means the surface can name
+  // the selection immediately, even before the next song; `none` means it can only show the last
+  // preset a song observed (the restructure plan's open question 1).
+  if (screen.starts_with("settings_")) {
+    static std::string last_preset_line;
+    const int live = gameplay_input::LiveControllerPreset();
+    std::string line = screen + " live-preset=";
+    line += live < 0 ? std::string("none (no song controller)")
+                     : profile::gameplay_remap::PresetLabel(live);
+    if (line != last_preset_line) {
+      REXLOG_INFO("help_overlay: settings page {}", line);
+      last_preset_line = line;
+    }
   }
   const std::vector<std::string> tokens = ui::screen::ScreenBindingRows(screen);
   if (tokens.empty()) {

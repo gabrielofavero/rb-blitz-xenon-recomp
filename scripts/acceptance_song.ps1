@@ -162,19 +162,21 @@ function Get-LogMarkerTimes([string]$Text, [string]$Pattern) {
 # The log cannot answer this one: a pause does not touch the playback
 # controller the song's envelope is read from (measured: the only
 # XMPSetPlaybackController lines in a paused run are the pair that brackets the
-# whole song), so the pause menu is the evidence there is. Start opens it and
-# Start releases it — the menu opens on "Resume Game" — and the release is the
-# text leaving the screen again, which gameplay (unreadable by OCR) satisfies
-# and a still-open menu does not. Taking the pause mid-song and releasing it
+# the whole song), so the pause menu is the evidence there is. Escape opens it and Escape
+# releases it (the Mouse & Keyboard Pause default since P2/D12) — the menu opens on "Resume
+# Game" — and the release is the text leaving the screen again, which gameplay (unreadable by
+# OCR) satisfies and a still-open menu does not. Taking the pause mid-song and releasing it
 # before the song's own stop marker is what makes it a pause *during* the song;
 # the caller checks that ordering against the envelope it was waiting for.
 function Invoke-PauseRoute([string]$Tag, [System.Collections.ArrayList]$Notes) {
     $result = [ordered]@{ Paused = $false; Resumed = $false; PauseSec = 0; Taken = $null; Released = $null }
-    Invoke-Actions @("key:start")
+    # P2/D12: the Mouse & Keyboard Pause default is Escape now, and that table is always active in
+    # a song - Return no longer pauses.
+    Invoke-Actions @("key:esc")
     $result.Taken = Get-Date
     $text = Wait-ForScreen (Shot "$Tag-paused.png") "GAME PAUSED" 20 "${Tag}: pause menu"
     if (-not $text.Contains("GAME PAUSED")) {
-        $Notes.Add("a Start during the song did not open the pause menu (screen text: $text)") | Out-Null
+        $Notes.Add("an Escape during the song did not open the pause menu (screen text: $text)") | Out-Null
         return [pscustomobject]$result
     }
     $result.Paused = $true
@@ -183,7 +185,7 @@ function Invoke-PauseRoute([string]$Tag, [System.Collections.ArrayList]$Notes) {
     # screen swallows an A, so press the key and re-check rather than assume one
     # press is enough.
     for ($i = 1; $i -le 3; $i++) {
-        Invoke-Actions @("key:start")
+        Invoke-Actions @("key:esc")
         $deadline = (Get-Date).AddSeconds(15)
         $left = $false
         while ((Get-Date) -lt $deadline) {

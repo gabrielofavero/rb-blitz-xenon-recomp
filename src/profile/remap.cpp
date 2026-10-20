@@ -122,7 +122,8 @@ std::string_view PrefixForKind(SourceKind kind) {
 }
 
 bool IsKnownMouseName(std::string_view name) {
-  return name == "left" || name == "right" || name == "middle" || name == "x1" || name == "x2";
+  return name == "left" || name == "right" || name == "middle" || name == "x1" ||
+         name == "x2" || IsMouseWheelSource(name);
 }
 
 // A key name is SDL's, which this module deliberately does not link: Controller Settings gets one from
@@ -380,6 +381,20 @@ bool PadSourceHeld(const PadState& state, std::string_view name) {
     return DirectionPressed(state, *direction);
   }
   return false;
+}
+
+bool IsMouseWheelSource(const std::string_view name) {
+  return name == kMouseWheelUp || name == kMouseWheelDown;
+}
+
+int MouseWheelDirection(const std::string_view name) {
+  if (name == kMouseWheelUp) {
+    return 1;
+  }
+  if (name == kMouseWheelDown) {
+    return -1;
+  }
+  return 0;
 }
 
 std::optional<Source> ParseSource(std::string_view text) { return ParseOneSource(text); }

@@ -44,6 +44,7 @@
 #include <rex/system/xmemory.h>
 
 #include "diag/gameplay_probe.h"
+#include "input/effective_input.h"
 #include "input/native_menu.h"
 #include "input/source_gates.h"
 
@@ -108,6 +109,9 @@ const char* BmActionName(int32_t action) {
 // The controller the game built for the song. One title, one player: the factory runs once per
 // song and the destructor clears it, so a song end can never leave a stale pointer armed.
 std::atomic<uint32_t> g_controller{0};
+// The guest image base the controller pointer is read through (P2's preset observation). Kept
+// beside the pointer so a reader outside a hook can still resolve it.
+std::atomic<uint8_t*> g_base{nullptr};
 std::atomic<int> g_tick{0};
 
 // The dispatcher's own state. The filter thread publishes, the guest seam consumes; a lock is the
@@ -278,6 +282,15 @@ bool NativeActionsSuppressed() {
   return state.controller_active;
 }
 
+int LiveControllerPreset() {
+  const uint32_t controller = detail::g_controller.load(std::memory_order_relaxed);
+  uint8_t* base = detail::g_base.load(std::memory_order_relaxed);
+  if (controller == 0 || base == nullptr) {
+    return -1;
+  }
+  return static_cast<int>(detail::LoadBe32(base, controller + 80));
+}
+
 }  // namespace rb_blitz::gameplay_input
 
 // ---------------------------------------------------------------------------------------------
@@ -296,6 +309,7 @@ REX_HOOK_RAW(sub_82435EB0) {
   using rb_blitz::gameplay_input::detail::State;
   rb_blitz::gameplay_input::detail::g_controller.store(controller,
                                                        std::memory_order_relaxed);
+  rb_blitz::gameplay_input::detail::g_base.store(base, std::memory_order_relaxed);
   rb_blitz::gameplay_input::detail::g_tick.store(0, std::memory_order_relaxed);
   {
     Dispatcher& state = State();
@@ -304,11 +318,20 @@ REX_HOOK_RAW(sub_82435EB0) {
     state.edges.Clear();
     state.release_all = false;
   }
+  // P2: the retail preset this controller was built with. `+80` is the preset-index slot the P0
+  // probe measured (src/diag/gameplay_probe.cpp:388); reading it here is what lets a Controller
+  // table without a custom row follow the player's selection instead of a frozen preset 0. The
+  // read happens before the first gameplay poll of the song, and the store's publish stamps it, so
+  // the very first dispatch already uses the right preset.
+  const int preset =
+      static_cast<int>(rb_blitz::gameplay_input::detail::LoadBe32(base, controller + 80));
+  rb_blitz::input::ObserveControllerPreset(preset);
   const uint32_t vtable = rb_blitz::gameplay_input::detail::LoadBe32(base, controller);
   REXLOG_INFO(
-      "gameplay input: song controller {:#x} (vtable {:#x}); a gameplay table whose switch is "
-      "on drives the six actions from the next poll",
-      controller, vtable);
+      "gameplay input: song controller {:#x} (vtable {:#x}), controller preset {} observed; "
+      "the Mouse & Keyboard table drives gameplay and the Controller table acts only if it has "
+      "a custom row",
+      controller, vtable, rb_blitz::profile::gameplay_remap::PresetLabel(preset));
   rb_blitz::diag::gameplay_probe::ControllerCreated(controller, config, vtable);
 }
 
@@ -319,6 +342,7 @@ REX_HOOK_RAW(sub_82443C20) {
           controller) {
     rb_blitz::diag::gameplay_probe::ControllerDestroyed(controller);
     rb_blitz::gameplay_input::detail::g_controller.store(0, std::memory_order_relaxed);
+    rb_blitz::gameplay_input::detail::g_base.store(nullptr, std::memory_order_relaxed);
     // The controller's own held-action state dies with it, so there is nothing to release.
     rb_blitz::gameplay_input::detail::Dispatcher& state =
         rb_blitz::gameplay_input::detail::State();

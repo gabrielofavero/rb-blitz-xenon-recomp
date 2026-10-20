@@ -192,8 +192,12 @@ keyboard emulation (below). `mouse_ui_nav` off blocks every mouse path: the nati
 gameplay tables' `mouse:` sources, and General Mapping's `mouse:` sources. All of these are in-game
 rows now (Controls → Input Types); the external settings application that once edited them retired
 on 2026-10-19. The two
-gameplay switches (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) are *routing*
-selectors, not device gates: off never removes a device from the menus.
+gameplay switches (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`) that used to
+be *routing* selectors were **retired on 2026-10-20** by P2 of
+[the restructure plan](../plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md)
+(D3): the Mouse & Keyboard table is always active in a song, the Controller table is active
+exactly when it has a custom row, and "custom" is inferred from the table's own rows (see
+§ Gameplay routing is always on, below).
 
 **One physical snapshot per poll.** The state filter runs on the guest input thread and builds:
 a pad from the SDK's *physical* drivers only (`SamplePhysicalPad`), the keyboard from the
@@ -283,6 +287,39 @@ Direct gameplay dispatch below).
 - Every arm ran with no physical pad (`pad_connected=off`), so the controller table's side is
   unit-tested rather than live-measured on this machine.
 
+
+## Gameplay routing is always on (P2 of the restructure plan, 2026-10-20)
+
+The two routing switches are gone (`gameplay_mapping_controller`, `gameplay_mapping_keyboard_mouse`;
+see § Source gates) and `GameplayRouting` is derived from the tables themselves every poll: the
+**Mouse & Keyboard** table is active whenever a song is current, and the **Controller** table is
+active only when it has a custom row (`Table::Custom()`, i.e. `BoundCount() > 0`). With no custom
+row the native preset drives the pad untouched (D4); with one, the direct table bypasses the
+preset and every action without a custom row uses the sources of the preset the title's own
+Controller Presets page selected (D4). That preset is observed from the song controller's `+80`
+slot in the `NewController` hook and published into the snapshot
+(`input::ObserveControllerPreset`), so the first dispatch of the song already follows it. Custom
+is never read from a profile switch: an old `gameplay_mapping_*` key is preserved and inert (D15).
+
+Consequences worth knowing:
+
+- General Mapping's `key:`/`mouse:` emulation now stops at every menu boundary: in a song the
+  direct tables own keys and mouse unconditionally (`GeneralSourceAllowed`).
+- **A press a gameplay table is holding is not echoed into General Mapping**
+  (`CollectGameplayConsumed`). Measured 2026-10-20: Escape pauses from the Mouse & Keyboard
+  table, the pause menu it opens *is* the menu context, and the same still-held Escape then
+  became Interface Mapping's Back and resumed the game it had just paused. The collector
+  suppresses the source until it is released, and it collects nothing outside a song - a menu
+  click or key is never "the tables'".
+- The Mouse & Keyboard defaults are the restructure plan's D12 list: First Note `Q` + right
+  click, Second Note `W` + left click, Move Right `Arrow Right` + scroll up, Move Left
+  `Arrow Left` + scroll down, Power-up `Space` + middle click, Pause `Escape`. A wheel detent
+  (`mouse:wheel_up`/`mouse:wheel_down`) is an event, not a level: `HostTakeMouseWheel` consumes
+  the detents once per poll, the source reads as down for that poll, and the action hold turns it
+  into one press and one release.
+- A binding row's first Assign **replaces** its default list (later Assigns append); the row
+  caption says `Default binding from Preset N. Click to Replace.` or `Custom binding. Click to
+  add an input.`
 
 ## Direct gameplay dispatch (P3, 2026-10-18)
 

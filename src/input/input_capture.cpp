@@ -114,6 +114,13 @@ std::vector<Source> Presses(const Observation& now, const PadState& before, cons
       out.push_back({SourceKind::kMouse, button.name});
     }
   }
+  // A detent is its own press, and it can never be held: the session captures it on this frame
+  // (the `still_held` oracle answers false for a wheel name, as no mask matches it).
+  if (now.wheel_detents > 0) {
+    out.push_back({SourceKind::kMouse, std::string(profile::remap::kMouseWheelUp)});
+  } else if (now.wheel_detents < 0) {
+    out.push_back({SourceKind::kMouse, std::string(profile::remap::kMouseWheelDown)});
+  }
   for (const std::string& key : keys) {
     out.push_back({SourceKind::kKey, key});
   }

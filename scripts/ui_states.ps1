@@ -145,8 +145,8 @@ $script:UiStates["in-song"] = @{
     Settled = $false
 }
 $script:UiStates["pause"] = @{
-    Needle = ""; Settle = 4; Note = "START during a song"
-    Route  = (New-UiMenuState 0) + @("key:a", "wait:5", "key:a", "wait:10", "key:start", "wait:3")
+    Needle = ""; Settle = 4; Note = "ESCAPE during a song (the Mouse & Keyboard Pause default, P2/D12)"
+    Route  = (New-UiMenuState 0) + @("key:a", "wait:5", "key:a", "wait:10", "key:esc", "wait:3")
     # 56.03 % between two same-build runs whose OCR both read 'GAME PAUSED', so the
     # menu was right both times and what differs is the live scene behind it.
     Settled = $false

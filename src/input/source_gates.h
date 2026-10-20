@@ -77,6 +77,10 @@ struct PhysicalInput {
   profile::remap::PadState pad;
   // `SDL_GetMouseState()`'s mask bits (mouse_button above). Zero while unfocused.
   uint32_t mouse_buttons = 0;
+  // The wheel detents seen since the previous poll: positive away from the player (`wheel_up`),
+  // negative toward (`wheel_down`). A detent is an event, so a wheel source is held for exactly
+  // the poll that carries it and reads as a press followed by a release.
+  int32_t wheel_detents = 0;
   // Answers a key by the name the profile spells, from the sampler's own state. Absent means no
   // keyboard is supplied at all, which is also what a test with no keys passes.
   std::function<bool(std::string_view)> key_down;
@@ -104,25 +108,36 @@ bool ActionHeld(const PhysicalInput& input, const SourceGates& gates,
                 const profile::gameplay_remap::Table& table,
                 profile::gameplay_remap::Action action);
 
-// The two gameplay switches as routing selectors (D2): off stops that table's direct actions and
-// nothing else. `TableActive` is the one place "may this table act" is decided - a table acts only
-// while playing and only while its own switch is on.
+// The two tables as routing selectors (D2, restructured by P2 of the interface/gameplay mapping
+// plan): the Mouse & Keyboard table is **always** active while playing, and the Controller table
+// is active only when it has a custom row - with no custom row the native preset keeps driving
+// the pad (D4). `TableActive` is the one place "may this table act" is decided.
 struct GameplayRouting {
-  bool controller = false;
-  bool keyboard_mouse = true;
+  bool controller = false;    // the Controller table has a custom row
+  bool keyboard_mouse = true;  // always on while playing
   bool operator==(const GameplayRouting&) const = default;
 };
 bool TableActive(GameplayRouting routing, profile::gameplay_remap::TableKind kind,
                  bool gameplay);
 
 // Whether a General Mapping (`[remap]`) `key:` or `mouse:` source may act now. Key sources drive
-// the menus, and play too while both gameplay switches are off (the native preset's keyboard
-// path); mouse sources are gameplay-only, because the native pointer owns the mouse in every
-// menu. While either gameplay switch is on, gameplay is the direct tables' business and General
-// Mapping's key/mouse sources stop at the menu (R4). `kPad` is answered by the rewrite's own pad
-// state, not here - a caller passing it gets false.
-bool GeneralSourceAllowed(const SourceGates& gates, bool gameplay, bool keyboard_mouse_mapping,
-                          bool controller_mapping, profile::remap::SourceKind kind);
+// the menus; in gameplay the direct tables own keys and the mouse, so General Mapping stops at
+// the menu (R4/D3). `kPad` is answered by the rewrite's own pad state, not here - a caller passing
+// it gets false.
+bool GeneralSourceAllowed(const SourceGates& gates, bool gameplay,
+                          profile::remap::SourceKind kind);
+
+// Every key or mouse source an ACTIVE gameplay table is holding this poll. General Mapping must
+// not act on one of them even after the context changes: the press belongs to the table. Measured
+// 2026-10-20 (P2): Escape pauses from the Mouse & Keyboard table, and the pause menu it opens is
+// the menu context - so the same still-held Escape became Interface Mapping's Back and backed
+// straight out of the pause it had just caused. A pad source is not collected: the Controller
+// table's own pad overlay removes its bits from the delivered state.
+void CollectGameplayConsumed(const PhysicalInput& input, const SourceGates& gates,
+                             GameplayRouting routing, bool gameplay,
+                             const profile::gameplay_remap::Table& controller,
+                             const profile::gameplay_remap::Table& keyboard_mouse,
+                             std::vector<profile::remap::Source>* out);
 
 // One action's held state, with the edges a dispatcher consumes. `Observe` is one poll:
 //   * `pressed` on the poll the action becomes held,

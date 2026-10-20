@@ -44,6 +44,7 @@ class FakeDevices {
     input.pad_connected = pad_connected;
     input.pad = pad;
     input.mouse_buttons = mouse_buttons;
+    input.wheel_detents = wheel_detents;
     input.key_down = [this](std::string_view name) {
       return keys_.count(std::string(name)) != 0;
     };
@@ -58,6 +59,7 @@ class FakeDevices {
   bool pad_connected = false;
   remap::PadState pad;
   uint32_t mouse_buttons = 0;
+  int32_t wheel_detents = 0;
 
  private:
   std::set<std::string> keys_;
@@ -204,6 +206,37 @@ int main() {
     CHECK_FALSE(remap::PadSourceHeld(neutral, "lstick_left"));
   }
 
+  BeginCase("a wheel detent is a one-poll source, up and down, gated like a mouse button");
+  {
+    FakeDevices devices;
+    devices.wheel_detents = 1;
+    CHECK_TRUE(SourceHeld(devices.Snapshot(), kOpen, Mouse("wheel_up")));
+    CHECK_FALSE(SourceHeld(devices.Snapshot(), kOpen, Mouse("wheel_down")));
+    devices.wheel_detents = -1;
+    CHECK_TRUE(SourceHeld(devices.Snapshot(), kOpen, Mouse("wheel_down")));
+    CHECK_FALSE(SourceHeld(devices.Snapshot(), kOpen, Mouse("wheel_up")));
+    // The device gate and the focus rule apply to a detent exactly as they do to a click.
+    const SourceGates mouse_off{true, false};
+    CHECK_FALSE(SourceHeld(devices.Snapshot(), mouse_off, Mouse("wheel_down")));
+    devices.focused = false;
+    CHECK_FALSE(SourceHeld(devices.Snapshot(), kOpen, Mouse("wheel_down")));
+    CHECK_FALSE(SourceHeld(devices.Snapshot(), kOpen, Mouse("scroll")));
+
+    // One detent becomes one press and one release through the hold the tables use.
+    devices.focused = true;
+    gameplay::Table table(gameplay::TableKind::kKeyboardMouse);
+    table.Set(gameplay::Action::kMoveLaneRight, {Mouse("wheel_up")});
+    ActionHold hold;
+    devices.wheel_detents = 1;
+    const bool pressed = ActionHeld(devices.Snapshot(), kOpen, table, gameplay::Action::kMoveLaneRight);
+    CHECK_TRUE(pressed);
+    CHECK_TRUE(hold.Observe(pressed).pressed);
+    devices.wheel_detents = 0;
+    const bool still = ActionHeld(devices.Snapshot(), kOpen, table, gameplay::Action::kMoveLaneRight);
+    CHECK_FALSE(still);
+    CHECK_TRUE(hold.Observe(still).released);
+  }
+
   BeginCase("each gameplay table fires only its own source kinds");
   {
     FakeDevices devices;
@@ -233,18 +266,18 @@ int main() {
   BeginCase("one source on two actions fires both, and a second source keeps the action held");
   {
     FakeDevices devices;
-    devices.KeyDown("J");
+    devices.KeyDown("W");
     devices.pad.buttons = remap::TargetBit(remap::Target::kA);
     devices.pad_connected = true;
 
-    // The shipped keyboard defaults put J on Second Note, and the controller defaults put A there
-    // too: pressed together, one action, either released, still held.
+    // The Mouse & Keyboard defaults put W on Second Note (D12), and the controller preset puts A
+    // there too: pressed together, one action, either released, still held.
     gameplay::Table keyboard_mouse(gameplay::TableKind::kKeyboardMouse);
     gameplay::Table controller(gameplay::TableKind::kController);
     CHECK_TRUE(
         ActionHeld(devices.Snapshot(), kOpen, keyboard_mouse, gameplay::Action::kSecondNote));
     CHECK_TRUE(ActionHeld(devices.Snapshot(), kOpen, controller, gameplay::Action::kSecondNote));
-    devices.KeyUp("J");
+    devices.KeyUp("W");
     CHECK_FALSE(
         ActionHeld(devices.Snapshot(), kOpen, keyboard_mouse, gameplay::Action::kSecondNote));
     CHECK_TRUE(ActionHeld(devices.Snapshot(), kOpen, controller, gameplay::Action::kSecondNote));
@@ -322,44 +355,80 @@ int main() {
     CHECK_TRUE(hold.Observe(true).pressed);  // and pressing again presses
   }
 
-  BeginCase("a table acts only while playing and only while its own switch is on");
+  BeginCase("a table acts only while playing, and the controller table only when it is custom");
   {
-    const GameplayRouting both_on{true, true};
-    const GameplayRouting controller_only{true, false};
-    const GameplayRouting keyboard_only{false, true};
-    const GameplayRouting both_off{false, false};
-    for (const GameplayRouting routing : {both_on, controller_only, keyboard_only, both_off}) {
+    // D3/D4: the Mouse & Keyboard table is always routed in a song; the Controller table is
+    // routed only when it has a custom row (with no row the native preset drives the pad).
+    const GameplayRouting controller_custom{true, true};
+    const GameplayRouting preset_only{false, true};
+    for (const GameplayRouting routing : {controller_custom, preset_only}) {
       CHECK_FALSE(TableActive(routing, gameplay::TableKind::kController, false));
       CHECK_FALSE(TableActive(routing, gameplay::TableKind::kKeyboardMouse, false));
+      CHECK_TRUE(TableActive(routing, gameplay::TableKind::kKeyboardMouse, true));
     }
-    CHECK_TRUE(TableActive(both_on, gameplay::TableKind::kController, true));
-    CHECK_TRUE(TableActive(both_on, gameplay::TableKind::kKeyboardMouse, true));
-    CHECK_TRUE(TableActive(controller_only, gameplay::TableKind::kController, true));
-    CHECK_FALSE(TableActive(controller_only, gameplay::TableKind::kKeyboardMouse, true));
-    CHECK_FALSE(TableActive(keyboard_only, gameplay::TableKind::kController, true));
-    CHECK_TRUE(TableActive(keyboard_only, gameplay::TableKind::kKeyboardMouse, true));
-    CHECK_FALSE(TableActive(both_off, gameplay::TableKind::kController, true));
-    CHECK_FALSE(TableActive(both_off, gameplay::TableKind::kKeyboardMouse, true));
+    CHECK_TRUE(TableActive(controller_custom, gameplay::TableKind::kController, true));
+    CHECK_FALSE(TableActive(preset_only, gameplay::TableKind::kController, true));
+    // The routing the filter builds comes from the table itself, not from a stored switch.
+    gameplay::Table controller(gameplay::TableKind::kController);
+    CHECK_FALSE((GameplayRouting{controller.Custom(), true}).controller);
+    controller.Set(gameplay::Action::kFirstNote, {Pad("a")});
+    CHECK_TRUE((GameplayRouting{controller.Custom(), true}).controller);
+    controller.ResetAll();
+    CHECK_FALSE((GameplayRouting{controller.Custom(), true}).controller);
+  }
+
+  BeginCase("a press a gameplay table is holding is not echoed into General Mapping");
+  {
+    // Measured 2026-10-20 (P2): Escape pauses from the Mouse & Keyboard table, and the pause menu
+    // it opens is the menu context - the same still-held Escape then became Interface Mapping's
+    // Back and resumed the game. The collector is what the filter hands General Mapping.
+    FakeDevices devices;
+    devices.KeyDown("Escape");
+    gameplay::Table keyboard_mouse(gameplay::TableKind::kKeyboardMouse);
+    gameplay::Table controller(gameplay::TableKind::kController);
+    std::vector<remap::Source> consumed;
+
+    // In a song the Mouse & Keyboard table is active, so its Pause binding is consumed ...
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, true,
+                            controller, keyboard_mouse, &consumed);
+    CHECK_EQ(consumed.size(), 1u);
+    if (!consumed.empty()) {
+      CHECK_TRUE(consumed.front() == Key("Escape"));
+    }
+    // ... and in a menu nothing is, which is what keeps the same key working as Back there.
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{false, true}, false,
+                            controller, keyboard_mouse, &consumed);
+    CHECK_TRUE(consumed.empty());
+    // A pad source is never collected: the Controller table's overlay removes its bits instead.
+    devices.KeyUp("Escape");
+    devices.pad.buttons = remap::TargetBit(remap::Target::kX);
+    devices.pad_connected = true;
+    gameplay::Table custom_controller(gameplay::TableKind::kController);
+    custom_controller.Set(gameplay::Action::kPowerup, {Pad("x")});
+    CollectGameplayConsumed(devices.Snapshot(), kOpen, GameplayRouting{true, true}, true,
+                            custom_controller, keyboard_mouse, &consumed);
+    for (const remap::Source& source : consumed) {
+      CHECK_TRUE(source.kind != remap::SourceKind::kPad);
+    }
   }
 
   BeginCase("General Mapping's key/mouse sources follow the gates and the context");
   {
     // Menus: keys drive the UI, the native pointer owns the mouse.
-    CHECK_TRUE(GeneralSourceAllowed(kOpen, false, false, false, remap::SourceKind::kKey));
-    CHECK_FALSE(GeneralSourceAllowed(kOpen, false, false, false, remap::SourceKind::kMouse));
-    // Playing with both gameplay switches off: General Mapping feeds the native preset.
-    CHECK_TRUE(GeneralSourceAllowed(kOpen, true, false, false, remap::SourceKind::kKey));
-    CHECK_TRUE(GeneralSourceAllowed(kOpen, true, false, false, remap::SourceKind::kMouse));
-    // Playing with either direct table on: gameplay is the tables' business.
-    CHECK_FALSE(GeneralSourceAllowed(kOpen, true, true, false, remap::SourceKind::kKey));
-    CHECK_FALSE(GeneralSourceAllowed(kOpen, true, false, true, remap::SourceKind::kKey));
-    CHECK_FALSE(GeneralSourceAllowed(kOpen, true, true, false, remap::SourceKind::kMouse));
+    CHECK_TRUE(GeneralSourceAllowed(kOpen, false, remap::SourceKind::kKey));
+    CHECK_FALSE(GeneralSourceAllowed(kOpen, false, remap::SourceKind::kMouse));
+    // Playing: the direct tables own keys and mouse, so General Mapping stops at the menu. The
+    // Mouse & Keyboard table is always active, so this cannot be conditional (D3).
+    CHECK_FALSE(GeneralSourceAllowed(kOpen, true, remap::SourceKind::kKey));
+    CHECK_FALSE(GeneralSourceAllowed(kOpen, true, remap::SourceKind::kMouse));
     // A pad source is the rewrite's own; a closed gate stops its device everywhere.
-    CHECK_FALSE(GeneralSourceAllowed(kOpen, false, false, false, remap::SourceKind::kPad));
-    CHECK_FALSE(GeneralSourceAllowed({false, true}, false, false, false, remap::SourceKind::kKey));
-    CHECK_FALSE(
-        GeneralSourceAllowed({true, false}, true, false, false, remap::SourceKind::kMouse));
-    CHECK_TRUE(GeneralSourceAllowed({true, false}, false, false, false, remap::SourceKind::kKey));
+    CHECK_FALSE(GeneralSourceAllowed(kOpen, false, remap::SourceKind::kPad));
+    CHECK_FALSE(GeneralSourceAllowed((SourceGates{false, true}), false,
+                                     remap::SourceKind::kKey));
+    CHECK_FALSE(GeneralSourceAllowed((SourceGates{true, false}), true,
+                                     remap::SourceKind::kMouse));
+    CHECK_TRUE(GeneralSourceAllowed((SourceGates{true, false}), false,
+                                    remap::SourceKind::kKey));
   }
 
   BeginCase("host actions belong to player one, and the synthetic device keeps a host connected");

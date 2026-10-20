@@ -22,9 +22,9 @@ struct ActionInfo {
 constexpr std::array<ActionInfo, kActionCount> kActionInfo{{
     {Action::kFirstNote, "first_note", "First Note"},
     {Action::kSecondNote, "second_note", "Second Note"},
-    {Action::kMoveLaneRight, "move_lane_right", "Move Lane Right"},
-    {Action::kMoveLaneLeft, "move_lane_left", "Move Lane Left"},
-    {Action::kPowerup, "powerup", "Powerup"},
+    {Action::kMoveLaneRight, "move_lane_right", "Move Right"},
+    {Action::kMoveLaneLeft, "move_lane_left", "Move Left"},
+    {Action::kPowerup, "powerup", "Power-up"},
     {Action::kPause, "pause", "Pause"},
 }};
 
@@ -70,71 +70,102 @@ remap::Source Key(std::string_view name) {
   return remap::Source{remap::SourceKind::kKey, std::string(name)};
 }
 
-// The controller defaults: the native preset the P0 arms measured live (plan §10.4 O3). Preset 0
-// resolves LT/LB to TrackDown, RT/RB to TrackUp, X to UsePowerUp, any LStick/D-pad direction to
-// Lane0 and A or any RStick direction to Lane1; Start is the game-screen Pause path. Each action
-// names every physical input the preset accepted for it, because the preset treats all four
-// directions of a stick as the same action and the bindings have to reproduce that rather than
-// pick one.
-std::vector<remap::Source> ControllerDefault(Action action) {
-  switch (action) {
-    case Action::kFirstNote:
-      return {Pad("lstick_up"), Pad("lstick_down"), Pad("lstick_left"), Pad("lstick_right"),
-              Pad("dpad_up"),   Pad("dpad_down"),   Pad("dpad_left"),   Pad("dpad_right")};
-    case Action::kSecondNote:
-      return {Pad("a"),          Pad("rstick_up"),  Pad("rstick_down"),
-              Pad("rstick_left"), Pad("rstick_right")};
-    case Action::kMoveLaneRight:
-      return {Pad("right_trigger"), Pad("right_shoulder")};
-    case Action::kMoveLaneLeft:
-      return {Pad("left_trigger"), Pad("left_shoulder")};
-    case Action::kPowerup:
-      return {Pad("x")};
-    case Action::kPause:
-      return {Pad("start")};
-  }
-  return {};
+remap::Source Mouse(std::string_view name) {
+  return remap::Source{remap::SourceKind::kMouse, std::string(name)};
 }
 
-// The keyboard/mouse defaults: the title's shipped keyboard preset 0 (plan §10.4 O3), with Pause
-// on the key General Mapping already treats as Start. Mouse buttons are deliberately absent - a
-// click during a song should not strike a note until the user binds one.
+using ActionTable = std::array<std::vector<remap::Source>, kActionCount>;
+
+// One retail controller preset (restructure plan §2.1). Preset 0 is the scheme the P0 live arms
+// measured; the other three are the shipped alternatives, decoded from
+// `config/gen/beatmatch_controller.dtb` on 2026-10-17. Each action names every physical input its
+// preset accepts, because a preset treats all four directions of a stick as the same action and
+// the bindings have to reproduce that rather than pick one. `Start` is not a `kBMAction` in the
+// preset: it is the game-screen Pause path, which the direct table's overlay carries.
+const std::array<ActionTable, kControllerPresetCount>& PresetTables() {
+  static const std::array<ActionTable, kControllerPresetCount> presets = [] {
+    std::array<ActionTable, kControllerPresetCount> all;
+    // Preset 0: L-stick/L-stick all and D-pad all strike the first note; A and R-stick the
+    // second; the triggers and shoulders move lanes; X powers up.
+    all[0][static_cast<std::size_t>(Action::kFirstNote)] = {
+        Pad("lstick_up"), Pad("lstick_down"), Pad("lstick_left"), Pad("lstick_right"),
+        Pad("dpad_up"),   Pad("dpad_down"),   Pad("dpad_left"),   Pad("dpad_right")};
+    all[0][static_cast<std::size_t>(Action::kSecondNote)] = {
+        Pad("a"), Pad("rstick_up"), Pad("rstick_down"), Pad("rstick_left"),
+        Pad("rstick_right")};
+    all[0][static_cast<std::size_t>(Action::kMoveLaneRight)] = {Pad("right_trigger"),
+                                                                Pad("right_shoulder")};
+    all[0][static_cast<std::size_t>(Action::kMoveLaneLeft)] = {Pad("left_trigger"),
+                                                               Pad("left_shoulder")};
+    all[0][static_cast<std::size_t>(Action::kPowerup)] = {Pad("x")};
+    all[0][static_cast<std::size_t>(Action::kPause)] = {Pad("start")};
+
+    // Preset 1: notes on the shoulders/triggers, lanes on the sticks' horizontal directions.
+    all[1][static_cast<std::size_t>(Action::kFirstNote)] = {Pad("left_trigger"),
+                                                            Pad("left_shoulder")};
+    all[1][static_cast<std::size_t>(Action::kSecondNote)] = {Pad("right_trigger"),
+                                                             Pad("right_shoulder")};
+    all[1][static_cast<std::size_t>(Action::kMoveLaneRight)] = {
+        Pad("lstick_right"), Pad("rstick_right"), Pad("dpad_right")};
+    all[1][static_cast<std::size_t>(Action::kMoveLaneLeft)] = {
+        Pad("lstick_left"), Pad("rstick_left"), Pad("dpad_left")};
+    all[1][static_cast<std::size_t>(Action::kPowerup)] = {Pad("x")};
+    all[1][static_cast<std::size_t>(Action::kPause)] = {Pad("start")};
+
+    // Preset 2: one control per action.
+    all[2][static_cast<std::size_t>(Action::kFirstNote)] = {Pad("left_shoulder")};
+    all[2][static_cast<std::size_t>(Action::kSecondNote)] = {Pad("right_shoulder")};
+    all[2][static_cast<std::size_t>(Action::kMoveLaneRight)] = {Pad("right_trigger")};
+    all[2][static_cast<std::size_t>(Action::kMoveLaneLeft)] = {Pad("left_trigger")};
+    all[2][static_cast<std::size_t>(Action::kPowerup)] = {Pad("x")};
+    all[2][static_cast<std::size_t>(Action::kPause)] = {Pad("start")};
+
+    // Preset 3: face buttons for the notes, sticks/D-pad for the lanes, three power-up inputs.
+    all[3][static_cast<std::size_t>(Action::kFirstNote)] = {Pad("a")};
+    all[3][static_cast<std::size_t>(Action::kSecondNote)] = {Pad("b")};
+    all[3][static_cast<std::size_t>(Action::kMoveLaneRight)] = {Pad("lstick_right"),
+                                                                Pad("dpad_right")};
+    all[3][static_cast<std::size_t>(Action::kMoveLaneLeft)] = {Pad("lstick_left"),
+                                                               Pad("dpad_left")};
+    all[3][static_cast<std::size_t>(Action::kPowerup)] = {Pad("x"), Pad("left_shoulder"),
+                                                          Pad("left_trigger")};
+    all[3][static_cast<std::size_t>(Action::kPause)] = {Pad("start")};
+    return all;
+  }();
+  return presets;
+}
+
+// The Mouse & Keyboard defaults (restructure plan D12): a note on each hand's home row, the lane
+// changes on the arrow keys with a wheel detent each, power-up on Space and the middle click, and
+// Pause on Escape. These replace the shipped keyboard preset the earlier package froze; a click
+// or a detent during a song is now a binding by default.
 std::vector<remap::Source> KeyboardMouseDefault(Action action) {
   switch (action) {
     case Action::kFirstNote:
-      return {Key("1"), Key("7"), Key("A"), Key("F"), Key("L")};
+      return {Key("Q"), Mouse("right")};
     case Action::kSecondNote:
-      return {Key("2"), Key("8"), Key("S"), Key("J"), Key("Semicolon")};
+      return {Key("W"), Mouse("left")};
     case Action::kMoveLaneRight:
-      return {Key("Right"), Key("K"), Key("X"), Key("Period")};
+      return {Key("Right"), Mouse("wheel_up")};
     case Action::kMoveLaneLeft:
-      return {Key("Left"), Key("D"), Key("Z"), Key("Comma")};
+      return {Key("Left"), Mouse("wheel_down")};
     case Action::kPowerup:
-      return {Key("Space")};
+      return {Key("Space"), Mouse("middle")};
     case Action::kPause:
-      return {Key("Return")};
+      return {Key("Escape")};
   }
   return {};
 }
 
-using DefaultTable = std::array<std::vector<remap::Source>, kActionCount>;
-
-const DefaultTable& DefaultsFor(TableKind kind) {
-  static const DefaultTable controller = [] {
-    DefaultTable all;
-    for (const ActionInfo& info : kActionInfo) {
-      all[static_cast<std::size_t>(info.action)] = ControllerDefault(info.action);
-    }
-    return all;
-  }();
-  static const DefaultTable keyboard_mouse = [] {
-    DefaultTable all;
+const ActionTable& DefaultsFor(const TableKind kind) {
+  static const ActionTable keyboard_mouse = [] {
+    ActionTable all;
     for (const ActionInfo& info : kActionInfo) {
       all[static_cast<std::size_t>(info.action)] = KeyboardMouseDefault(info.action);
     }
     return all;
   }();
-  return kind == TableKind::kController ? controller : keyboard_mouse;
+  return keyboard_mouse;
 }
 
 // The sentence a refused row is kept with. It names the source that does not belong here and the
@@ -235,8 +266,23 @@ bool AcceptsSource(TableKind kind, const remap::Source& source) {
   return AcceptsSourceKind(kind, source.kind);
 }
 
-const std::vector<remap::Source>* DefaultSources(TableKind kind, Action action) {
+const std::vector<remap::Source>* DefaultSources(const TableKind kind, const Action action) {
+  if (kind == TableKind::kController) {
+    return PresetSources(0, action);
+  }
   return &DefaultsFor(kind)[static_cast<std::size_t>(action)];
+}
+
+const std::vector<remap::Source>* PresetSources(const int preset, const Action action) {
+  const int clamped =
+      preset >= 0 && preset < kControllerPresetCount ? preset : 0;
+  return &PresetTables()[static_cast<std::size_t>(clamped)][static_cast<std::size_t>(action)];
+}
+
+std::string PresetLabel(const int preset) {
+  const int clamped =
+      preset >= 0 && preset < kControllerPresetCount ? preset : 0;
+  return "Preset " + std::to_string(clamped + 1);
 }
 
 Table Table::FromRows(TableKind kind, const std::vector<ProfileSetting>& rows) {
@@ -310,11 +356,20 @@ const std::vector<remap::Source>* Table::Bindings(Action action) const {
   return nullptr;
 }
 
-const std::vector<remap::Source>* Table::Effective(Action action) const {
+const std::vector<remap::Source>* Table::Effective(const Action action) const {
   if (const std::vector<remap::Source>* bound = Bindings(action)) {
     return bound;
   }
+  // The Controller table follows the retail preset the player selected (D4); the Mouse & Keyboard
+  // table has no preset and answers its compiled default.
+  if (kind_ == TableKind::kController) {
+    return PresetSources(preset_, action);
+  }
   return DefaultSources(kind_, action);
+}
+
+void Table::SetControllerPreset(const int preset) {
+  preset_ = preset >= 0 && preset < kControllerPresetCount ? preset : 0;
 }
 
 bool Table::IsDisabled(Action action) const {

@@ -24,13 +24,9 @@ using profile::remap::Target;
 
 constexpr char kKeyboardKey[] = "keyboard_support";
 constexpr char kMouseKey[] = "mouse_ui_nav";
-constexpr char kCustomControllerKey[] = "gameplay_mapping_controller";
-constexpr char kCustomKeyboardMouseKey[] = "gameplay_mapping_keyboard_mouse";
 
 constexpr bool kKeyboardDefault = true;
 constexpr bool kMouseDefault = true;
-constexpr bool kCustomControllerDefault = false;
-constexpr bool kCustomKeyboardMouseDefault = true;
 
 std::optional<bool> StoredBool(const profile::Profile& profile, const std::string_view key) {
   const profile::ProfileSetting* row = profile.FindSetting(key);
@@ -76,12 +72,8 @@ InputStore::InputStore(std::filesystem::path path, profile::ProfileLoadResult lo
   // environment value outrank the file exactly as it does everywhere else.
   keyboard_support_ = options_.keyboard_support;
   mouse_support_ = options_.mouse_support;
-  custom_controller_ = options_.custom_controller;
-  custom_keyboard_mouse_ = options_.custom_keyboard_mouse;
   running_keyboard_ = keyboard_support_;
   running_mouse_ = mouse_support_;
-  running_custom_controller_ = custom_controller_;
-  running_custom_keyboard_mouse_ = custom_keyboard_mouse_;
 }
 
 std::unique_ptr<InputStore> InputStore::Load(const std::filesystem::path& path,
@@ -135,8 +127,6 @@ bool InputStore::CurrentSwitch(const InputRowKind kind) const {
   switch (kind) {
     case InputRowKind::kKeyboardSupport: return keyboard_support_;
     case InputRowKind::kMouseSupport: return mouse_support_;
-    case InputRowKind::kCustomController: return custom_controller_;
-    case InputRowKind::kCustomKeyboardMouse: return custom_keyboard_mouse_;
     default: return false;
   }
 }
@@ -145,8 +135,6 @@ bool InputStore::Locked(const InputRowKind kind) const {
   switch (kind) {
     case InputRowKind::kKeyboardSupport: return options_.keyboard_locked;
     case InputRowKind::kMouseSupport: return options_.mouse_locked;
-    case InputRowKind::kCustomController: return options_.custom_controller_locked;
-    case InputRowKind::kCustomKeyboardMouse: return options_.custom_keyboard_mouse_locked;
     default: return false;
   }
 }
@@ -176,8 +164,6 @@ bool InputStore::SetSwitch(const InputRowKind kind, const bool value, std::strin
   switch (kind) {
     case InputRowKind::kKeyboardSupport: keyboard_support_ = value; break;
     case InputRowKind::kMouseSupport: mouse_support_ = value; break;
-    case InputRowKind::kCustomController: custom_controller_ = value; break;
-    case InputRowKind::kCustomKeyboardMouse: custom_keyboard_mouse_ = value; break;
     default: return false;
   }
   staged_switches_.insert(kind);
@@ -316,8 +302,6 @@ bool InputStore::Matches(const std::string_view token, const bool value) const {
   switch (row.kind) {
     case InputRowKind::kKeyboardSupport:
     case InputRowKind::kMouseSupport:
-    case InputRowKind::kCustomController:
-    case InputRowKind::kCustomKeyboardMouse:
       return CurrentSwitch(row.kind) == value;
     case InputRowKind::kGeneralBinding:
     case InputRowKind::kControllerBinding:
@@ -337,9 +321,7 @@ bool InputStore::Matches(const std::string_view token, const bool value) const {
 
 bool InputStore::StageBool(const std::string_view token, const bool value, std::string* error) {
   const InputRowToken row = profile::ParseInputRowToken(token);
-  if (row.kind != InputRowKind::kKeyboardSupport && row.kind != InputRowKind::kMouseSupport &&
-      row.kind != InputRowKind::kCustomController &&
-      row.kind != InputRowKind::kCustomKeyboardMouse) {
+  if (row.kind != InputRowKind::kKeyboardSupport && row.kind != InputRowKind::kMouseSupport) {
     if (error != nullptr) {
       *error = "that is not a switch row";
     }
@@ -466,14 +448,6 @@ bool InputStore::ApplyToProfile(profile::Profile* profile, std::string* error) c
       case InputRowKind::kMouseSupport:
         WriteBoolRow(profile, kMouseKey, mouse_support_, kMouseDefault);
         break;
-      case InputRowKind::kCustomController:
-        WriteBoolRow(profile, kCustomControllerKey, custom_controller_,
-                     kCustomControllerDefault);
-        break;
-      case InputRowKind::kCustomKeyboardMouse:
-        WriteBoolRow(profile, kCustomKeyboardMouseKey, custom_keyboard_mouse_,
-                     kCustomKeyboardMouseDefault);
-        break;
       default:
         break;
     }
@@ -547,8 +521,6 @@ bool InputStore::Commit(std::string* error) {
   };
   apply(kKeyboardKey, keyboard_support_, running_keyboard_);
   apply(kMouseKey, mouse_support_, running_mouse_);
-  apply(kCustomControllerKey, custom_controller_, running_custom_controller_);
-  apply(kCustomKeyboardMouseKey, custom_keyboard_mouse_, running_custom_keyboard_mouse_);
 
   staged_rows_.clear();
   staged_switches_.clear();
@@ -609,9 +581,17 @@ bool InputStore::CompleteCapture(const std::string_view token, const Source& sou
     }
     return false;
   }
-  const std::vector<Source>* before = EffectiveSources(row);
-  const std::optional<std::vector<Source>> previous =
-      before == nullptr ? std::nullopt : std::optional<std::vector<Source>>(*before);
+  // D8: the first Assign on a row that still holds its default REPLACES the default list; later
+  // Assigns append. Starting from the effective list would turn the default's five or eight
+  // sources into a custom row nobody asked for. `previous` is the stored list only, so a failed
+  // save restores exactly what the profile held.
+  const bool was_custom = IsBound(row);
+  std::optional<std::vector<Source>> previous;
+  if (was_custom) {
+    if (const std::vector<Source>* stored = EffectiveSources(row); stored != nullptr) {
+      previous = *stored;
+    }
+  }
   std::vector<Source> next = previous.value_or(std::vector<Source>{});
   if (std::none_of(next.begin(), next.end(),
                    [&source](const Source& candidate) { return SameSource(candidate, source); })) {
@@ -653,10 +633,19 @@ std::string InputStore::Describe(const std::string_view token) const {
   if (sources == nullptr || sources->empty()) {
     text += "(no inputs)";
   } else {
-    text += profile::remap::FormatSourceList(*sources);
+    text += profile::BindingListText(*sources);
   }
-  text += IsBound(row) ? " (custom)." : " (compiled default).";
-  text += " Assign adds an input; Reset restores the default.";
+  text += ". ";
+  // D8's caption: what a press on Assign does to this row, and where a default comes from.
+  if (IsBound(row)) {
+    text += "Custom binding. Click to add an input.";
+  } else if (row.kind == InputRowKind::kControllerBinding) {
+    text += "Default binding from " +
+            profile::gameplay_remap::PresetLabel(ObservedControllerPreset()) +
+            ". Click to Replace.";
+  } else {
+    text += "Default binding. Click to Replace.";
+  }
   return text;
 }
 
@@ -666,17 +655,23 @@ std::string InputStore::Summary() const {
   out += keyboard_support_ ? "on" : "off";
   out += " mouse_ui_nav=";
   out += mouse_support_ ? "on" : "off";
-  out += " custom_controller=";
-  out += custom_controller_ ? "on" : "off";
-  out += " custom_keyboard_mouse=";
-  out += custom_keyboard_mouse_ ? "on" : "off";
+  out += "; controller preset=";
+  const int preset = ObservedControllerPreset();
+  if (preset < 0) {
+    out += "not observed yet (preset 1 until a song starts)";
+  } else {
+    out += profile::gameplay_remap::PresetLabel(preset);
+  }
   out += "; [remap] ";
   out += std::to_string(general_.BoundCount());
   out += " row(s); [gameplay_remap_controller] ";
   out += std::to_string(controller_.BoundCount());
-  out += " row(s); [gameplay_remap_keyboard_mouse] ";
+  out += " row(s) (";
+  out += controller_.Custom() ? "custom: the direct table drives the pad" :
+                                "no custom row: the native preset drives";
+  out += "); [gameplay_remap_keyboard_mouse] ";
   out += std::to_string(keyboard_mouse_.BoundCount());
-  out += " row(s)";
+  out += " row(s) (always on while playing)";
   return out;
 }
 
@@ -684,6 +679,10 @@ void InputStore::Publish() {
   auto snapshot = std::make_shared<EffectiveInput>();
   snapshot->general = general_;
   snapshot->controller = controller_;
+  // D4: a table without a custom row follows the preset the title's own preset page selected.
+  // The observed value is boot-wide (src/input/effective_input.h), so a later publish must stamp
+  // it too or a commit would silently fall back to preset 0.
+  snapshot->controller.SetControllerPreset(ObservedControllerPreset());
   snapshot->keyboard_mouse = keyboard_mouse_;
   snapshot->profile_present = file_present_ || usable_;
   PublishInput(std::move(snapshot));

@@ -205,6 +205,17 @@ inline bool TriggerPressed(uint8_t value) { return value > kTriggerThreshold; }
 // never disagree about when `pad:a` is down.
 bool PadSourceHeld(const PadState& state, std::string_view name);
 
+// The two wheel detents a `mouse:` source can name (`mouse:wheel_up`, `mouse:wheel_down`). A
+// detent is an *event*, not a held button: the physical sample carries the detents seen since
+// the previous poll, and a wheel source is down for exactly that poll - which turns one detent
+// into one press and the following poll into its release (P2 of the interface/gameplay mapping
+// restructure plan, D12).
+inline constexpr std::string_view kMouseWheelUp = "wheel_up";
+inline constexpr std::string_view kMouseWheelDown = "wheel_down";
+bool IsMouseWheelSource(std::string_view name);
+// +1 for `wheel_up` (away from the player), -1 for `wheel_down`, 0 for any other name.
+int MouseWheelDirection(std::string_view name);
+
 // One physical input a binding can come from.
 enum class SourceKind { kPad, kKey, kMouse };
 

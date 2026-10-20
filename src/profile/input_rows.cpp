@@ -95,6 +95,8 @@ std::string MouseDisplayName(std::string_view name) {
   if (name == "middle") return "Middle Click";
   if (name == "x1") return "Mouse 4";
   if (name == "x2") return "Mouse 5";
+  if (name == remap::kMouseWheelUp) return "Scroll Up";
+  if (name == remap::kMouseWheelDown) return "Scroll Down";
   return std::string(name);
 }
 
@@ -112,14 +114,6 @@ InputRowToken ParseInputRowToken(const std::string_view token) {
   }
   if (token == "input.mouse_support") {
     out.kind = InputRowKind::kMouseSupport;
-    return out;
-  }
-  if (token == "input.custom_controller") {
-    out.kind = InputRowKind::kCustomController;
-    return out;
-  }
-  if (token == "input.custom_keyboard_mouse") {
-    out.kind = InputRowKind::kCustomKeyboardMouse;
     return out;
   }
   if (token == "input.reset.general") {
@@ -165,8 +159,6 @@ std::string_view InputSwitchToken(const InputRowKind kind) {
   switch (kind) {
     case InputRowKind::kKeyboardSupport: return "input.keyboard_support";
     case InputRowKind::kMouseSupport: return "input.mouse_support";
-    case InputRowKind::kCustomController: return "input.custom_controller";
-    case InputRowKind::kCustomKeyboardMouse: return "input.custom_keyboard_mouse";
     default: return {};
   }
 }

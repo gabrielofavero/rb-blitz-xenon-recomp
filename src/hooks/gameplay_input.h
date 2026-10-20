@@ -76,4 +76,11 @@ void NoteBoundary();
 // Controller table is routing gameplay input; read by the boundary hooks on the guest thread.
 bool NativeActionsSuppressed();
 
+// The retail preset the LIVE song controller carries (`+80`, the slot the P0 probe measured), or
+// -1 when no song controller exists or the value cannot be read. The settings overlay logs this
+// while a Controls page is open: it answers the restructure plan's P2 open question - whether the
+// open settings page can name the selection before the next song starts. Never calls into the
+// guest; safe from the UI thread.
+int LiveControllerPreset();
+
 }  // namespace rb_blitz::gameplay_input

@@ -57,6 +57,10 @@ struct Observation {
   // spells (`space`, `f1`, `w`).
   std::vector<std::string> new_keys;
   uint32_t mouse_buttons = 0;
+  // The wheel detents since the previous frame: positive up, negative down. A detent is an
+  // event, so it is bindable as `mouse:wheel_up` / `mouse:wheel_down` and can never be held:
+  // the session captures it on the frame it arrives, without waiting for a release.
+  int32_t wheel_detents = 0;
   profile::remap::PadState pad;
   // Whether a candidate source is still physically held, answered from the device levels the
   // caller already samples (`PadSourceHeld`/`MouseSourceHeld` and the keyboard's own latch).

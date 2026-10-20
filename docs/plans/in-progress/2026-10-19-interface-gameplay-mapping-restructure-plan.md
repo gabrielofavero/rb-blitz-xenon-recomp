@@ -1,6 +1,6 @@
 # Interface and Gameplay Mapping restructure
 
-**Status: in progress, 2026-10-19. P1 landed (below); P2–P5 not started.**
+**Status: in progress, 2026-10-20. P1 and P2 landed (below); P3–P5 not started.**
 
 This plan restructures the in-game Controls surface so that **Interface Mapping** owns only the
 interface, **Gameplay Mapping** is always active, and controller gameplay follows the selected
@@ -223,6 +223,78 @@ second adds, reset, wheel capture), `tests/settings_bridge_tests.cpp` (old switc
 **Boot evidence:** one line naming the active preset and whether each table is custom; keep the
 existing `keyboard_support`/`mouse_ui_nav` lines.
 
+#### P2 — landed (2026-10-20)
+
+**What shipped.**
+
+- `profile::gameplay_remap`: the four retail presets (`PresetSources(preset, action)`,
+  `PresetLabel`), `Table::SetControllerPreset/Preset/Custom()` and a preset-aware `Effective`
+  (`src/profile/gameplay_remap.{h,cpp}`). `ActionLabel` now says `Power-up` (D13) and the Move Lane
+  labels are `Move Right`/`Move Left`.
+- `remap`: `mouse:wheel_up` / `mouse:wheel_down` are known mouse names with a direction
+  (`IsMouseWheelSource`, `MouseWheelDirection`); nothing else about the grammar changed.
+- `input::remap`: the two `gameplay_mapping_*` cvars and their allowlist entries are gone;
+  `GameplaySwitches` keeps only the two device gates, and `GameplayRouting` is derived per poll
+  (`controller = config->controller.Custom()`, `keyboard_mouse = true`). `direct_routing` is now
+  `gameplay`, so a song always sees the physical pad and the direct tables own keys/mouse
+  (`GeneralSourceAllowed` refuses them there unconditionally).
+- `input::effective_input`: `ObserveControllerPreset`/`ObservedControllerPreset` - the retail
+  preset is observed from the song controller's `+80` slot at `NewController`
+  (`src/hooks/gameplay_input.cpp`) and stamped into every published snapshot.
+- Wheel sampling: the window listener latches detents (`HostTakeMouseWheel`), the sampler consumes
+  them once per poll into `PhysicalInput.wheel_detents`, and the capture sees them
+  (`Observation.wheel_detents`) as an instant press.
+- `input::InputStore`: the custom switch tokens are gone (`InputRowKind`, `ParseInputRowToken`,
+  `InputSwitchToken`, `StageBool`, `Matches`, `Summary`), `CompleteCapture` **replaces** a default
+  row on the first Assign (D8), `Describe` speaks D8's captions, and `Summary` names the preset and
+  each table's custom-ness.
+- `profile::input_rows`: the two `input.custom_*` tokens are gone and the wheel reads `Scroll Up` /
+  `Scroll Down`.
+- Settings surface (minimal, P4 owns the tree): the Controller page is `Default Presets` (a plain
+  retail route, always available) + `Custom Mapping`; the Keyboard & Mouse page enters
+  `Custom Mapping` directly (its rename to `Mouse & Keyboard` is P4's); `Kind::kRouteGated` is
+  removed.
+- Harnesses: `acceptance_controls.ps1` drops the three Custom-switch steps and checks that the
+  preset page opens; `acceptance_binding_rows.ps1` and `acceptance_controls_in_song.ps1` are
+  re-pointed at the new row indices; the in-song pause key moves from Return to Escape
+  (`acceptance_song.ps1`, `probe_gameplay.ps1`, `ui_states.ps1`).
+
+**Measured (2026-10-20).**
+
+- Model, boot lines: `out/gameplay-mapping/p2-2026-10-20/`. A profile whose only gameplay key is
+  the retired `gameplay_mapping_controller = true` reports
+  `[gameplay_remap_controller] 0 row(s) (no custom row: the native preset drives)`; a profile with
+  one row reports `(custom: the direct table drives the pad)`; both boots print
+  `gameplay mapping: routing is always on (restructure plan D3)` and only the two device gates.
+- Preset observation: `gameplay input: song controller …, controller preset Preset 1 observed`.
+  **Open question 1 is answered**: a paused song's Controls pages read the live value
+  (`help_overlay: settings page … live-preset=Preset 1`, every page, same run), so a caption can
+  name the selection while a song is current. Before any song there is no controller, and the page
+  can only show the last observed value (`controller preset=not observed yet` in the boot line) -
+  recorded in `known-issues.md`.
+- **A defect the new defaults exposed, found and fixed:** Escape pauses from the Mouse & Keyboard
+  table, the pause menu it opens is the menu context, and the same still-held Escape then became
+  Interface Mapping's `Go Back` - the game resumed 26 ms after it paused (`p2-in-song-2026-10-20`,
+  trace `out/_swap/p2-pause/pause-trace/`). `CollectGameplayConsumed` + `SourceDownThunk` now
+  suppress a source an active gameplay table is holding until it is released (unit case in
+  `input_gates`).
+- Live arms: `acceptance_controls.ps1 -Label p2-controls-2026-10-20b` = **57 steps, 0 failures**
+  (`out/gameplay-mapping/in-game/p2-controls-2026-10-20b/`); `acceptance_controls_in_song.ps1
+  -Label p2-in-song-2026-10-20d` = **23 steps, 0 failures**
+  (`out/gameplay-mapping/in-game/p2-in-song-2026-10-20d/`, paused Controls path intact - D14);
+  `acceptance_binding_rows.ps1 -Label p2-rows-2026-10-20b` = **24 steps, 0 failures**
+  (`out/interface-mapping/p1-rows/p2-rows-2026-10-20b/`). `ctest` 37/37 (`gameplay_remap`,
+  `profile_remap`, `input_gates`, `input_bindings`, `settings_screen` extended).
+- The in-song harness's route needed one fix that is **not** P2's: the in-song root's `Controls`
+  row is index 3 today (How to Play, Calibration, General, Controls, Audio/Video), and the script
+  still clicked 1.
+
+**Carried into P3-P5.** The page trees themselves (Interface Mapping's Navigation / Confirm /
+Go Back / Music Library Options; the three gameplay submenus) and D9/D10's row presentation are
+P3/P4's; the listening dialog still holds to cancel (P5); a preset changed on retail's page and
+then carried into a song is unmeasured (the slot's meaning is P0's measurement); the physical-pad
+arms remain unmeasured on this machine.
+
 ### P3 — Interface Mapping tree
 
 **Page tree.**
@@ -366,10 +438,14 @@ submenus, reset), `docs/settings/plan.md` §3.
 
 ## 6. Open questions and unproven items
 
-1. **Preset reading before a song.** The controller object's preset slot is measured at song start;
-   reading the selected preset while the settings page is open is **unproven**. P2 must measure it.
-   If it cannot be read there, the caption uses the last observed preset and the plan records that
-   limitation rather than guessing.
+1. **Preset reading before a song. Answered by P2 (2026-10-20).** The preset lives at the song
+   controller's `+80` slot and is observed at `NewController`; while a song is paused the Controls
+   pages read the **live** value every frame (`help_overlay: settings page … live-preset=Preset 1`,
+   `out/gameplay-mapping/in-game/p2-in-song-2026-10-20d/`). Before any song there is no controller
+   to read, so the page shows the last observed value and the boot line says `not observed yet`;
+   a selection made on retail's page is therefore reflected from the next song, which is also when
+   retail applies it. Carried: no boot has changed the selection and then started a song to watch
+   the value move.
 2. **Row overlay alignment.** The host overlay must align with the guest list at every supported
    resolution and with both the main-menu and pause scenes. P1 measures this before P3/P4 depend on
    it. A failed measurement stops the prompt; the fallback is the locale-lookup hook, not a static

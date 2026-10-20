@@ -57,4 +57,17 @@ void PublishInput(std::shared_ptr<EffectiveInput> input);
 // A copy of the current snapshot, for a caller that wants to edit it before publishing.
 std::shared_ptr<EffectiveInput> CopyCurrentInput();
 
+// The retail controller preset the title's own Controller Presets page last selected (P2 of
+// docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md, D4).
+//
+// It is observed - not read from the profile - because the preset lives in the guest's controller
+// configuration, and the title's preset page is the only thing that writes it: the song's
+// controller object carries the index at `+80` when `NewController` creates it
+// (src/hooks/gameplay_input.cpp). Publishing it re-stamps the current snapshot's Controller table
+// so the next poll evaluates the preset's sources for every action without a custom row; 0..3 are
+// the shipped presets, any other value is ignored, and nothing observed yet reads as 0.
+void ObserveControllerPreset(int preset);
+// The last observed preset, or -1 when this boot has not created a song controller yet.
+int ObservedControllerPreset();
+
 }  // namespace rb_blitz::input

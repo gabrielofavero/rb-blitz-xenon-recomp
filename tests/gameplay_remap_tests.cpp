@@ -212,24 +212,32 @@ void TestVocabulary() {
   CHECK_TRUE(HasSource(controller(Action::kPowerup), remap::SourceKind::kPad, "x"));
   CHECK_TRUE(HasSource(controller(Action::kPause), remap::SourceKind::kPad, "start"));
 
-  BeginCase("P1: the keyboard defaults reproduce the shipped keyboard preset, with no mouse binding");
+  BeginCase("P2: the Mouse & Keyboard defaults are the restructure plan's D12 list");
 
-  // Plan §10.4 O3: 1/7/a/f/l, 2/8/s/j/;, arrows/k/x/., arrows/d/z/,, Space, and Start's own key.
+  // Q + right click, W + left click, the arrow keys with a wheel detent each, Space + middle
+  // click, Escape. These replace the shipped keyboard preset; a click or detent is a binding by
+  // default now.
   const auto keyboard = [](Action action) {
     return DefaultSources(TableKind::kKeyboardMouse, action);
   };
-  CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kKey, "1"));
-  CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kKey, "L"));
-  CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kKey, "Semicolon"));
+  CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kKey, "Q"));
+  CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kMouse, "right"));
+  CHECK_EQ(keyboard(Action::kFirstNote)->size(), 2u);
+  CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kKey, "W"));
+  CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kMouse, "left"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kKey, "Right"));
-  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kKey, "Period"));
-  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneLeft), remap::SourceKind::kKey, "Comma"));
+  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kMouse, "wheel_up"));
+  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneLeft), remap::SourceKind::kKey, "Left"));
+  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneLeft), remap::SourceKind::kMouse,
+                       "wheel_down"));
   CHECK_TRUE(HasSource(keyboard(Action::kPowerup), remap::SourceKind::kKey, "Space"));
-  CHECK_TRUE(HasSource(keyboard(Action::kPause), remap::SourceKind::kKey, "Return"));
-  // A click during a song must not strike a note until the user binds one (plan D6).
+  CHECK_TRUE(HasSource(keyboard(Action::kPowerup), remap::SourceKind::kMouse, "middle"));
+  CHECK_TRUE(HasSource(keyboard(Action::kPause), remap::SourceKind::kKey, "Escape"));
+  CHECK_EQ(keyboard(Action::kPause)->size(), 1u);
+  // The shipped preset's letter keys are gone, not merely joined.
   for (const Action action : Actions()) {
     for (const remap::Source& source : *keyboard(action)) {
-      CHECK_TRUE(source.kind != remap::SourceKind::kMouse);
+      CHECK_TRUE(source.name != "1" && source.name != "Semicolon" && source.name != "Period");
     }
   }
 }
@@ -548,11 +556,14 @@ void TestProfileStorage() {
 }
 
 void TestSwitchesAreAppliedByABoot() {
-  BeginCase("P1: the three switches are in the runtime allowlist and survive the narrowing");
+  BeginCase("P2: the device gates are in the runtime allowlist; the retired switches are not");
 
   CHECK_TRUE(rb_blitz::settings::IsControllerCvar("keyboard_support"));
-  CHECK_TRUE(rb_blitz::settings::IsControllerCvar("gameplay_mapping_controller"));
-  CHECK_TRUE(rb_blitz::settings::IsControllerCvar("gameplay_mapping_keyboard_mouse"));
+  CHECK_TRUE(rb_blitz::settings::IsControllerCvar("mouse_ui_nav"));
+  // Retired by the restructure plan's D3: custom is inferred from each table, so an old profile's
+  // row is preservation data, not a cvar a boot applies.
+  CHECK_FALSE(rb_blitz::settings::IsControllerCvar("gameplay_mapping_controller"));
+  CHECK_FALSE(rb_blitz::settings::IsControllerCvar("gameplay_mapping_keyboard_mouse"));
   // Guide stays out of it (§2.3), and a retired game row is not a controller row.
   CHECK_FALSE(rb_blitz::settings::IsControllerCvar("guide_button"));
   CHECK_FALSE(rb_blitz::settings::IsControllerCvar("keybind_guide"));
@@ -562,7 +573,7 @@ void TestSwitchesAreAppliedByABoot() {
        "gameplay_mapping_keyboard_mouse=true", "fullscreen=false"});
   const std::vector<ProfileSetting> kept =
       rb_blitz::settings::ProfileRowsTheGameApplies(rows);
-  CHECK_EQ(kept.size(), 4u);
+  CHECK_EQ(kept.size(), 2u);
   for (const ProfileSetting& row : kept) {
     CHECK_TRUE(rb_blitz::settings::IsControllerCvar(row.key));
   }
@@ -571,23 +582,116 @@ void TestSwitchesAreAppliedByABoot() {
 void TestExplicitValues() {
   BeginCase("P1: an explicit false is a value, not the absence of one");
 
-  // The profile records what differs from the compiled defaults; these two switches' defaults are
-  // `keyboard_support = true` and `gameplay_mapping_controller = false`, so both of those rows are
-  // real edits and must come back as `false` rather than as "no opinion".
+  // The profile records what differs from the compiled defaults; `keyboard_support` and
+  // `mouse_ui_nav` both default to true, so an explicit false is a real edit and must come back
+  // as `false` rather than as "no opinion".
   Scratch scratch;
   Profile profile;
   profile.Set("keyboard_support", "false");
-  profile.Set("gameplay_mapping_controller", "false");
-  profile.Set("gameplay_mapping_keyboard_mouse", "true");
+  profile.Set("mouse_ui_nav", "false");
   const fs::path path = scratch.Write("switches.toml", Compose(profile));
   const ProfileLoadResult loaded = LoadProfile(path);
   CHECK_TRUE(loaded.status == ProfileStatus::kOk);
   CHECK_TRUE(loaded.profile.FindSetting("keyboard_support") != nullptr);
   CHECK_STR_EQ(loaded.profile.FindSetting("keyboard_support")->value, "false");
-  CHECK_TRUE(loaded.profile.FindSetting("gameplay_mapping_controller") != nullptr);
-  CHECK_STR_EQ(loaded.profile.FindSetting("gameplay_mapping_controller")->value, "false");
-  CHECK_TRUE(loaded.profile.FindSetting("gameplay_mapping_keyboard_mouse") != nullptr);
-  CHECK_STR_EQ(loaded.profile.FindSetting("gameplay_mapping_keyboard_mouse")->value, "true");
+  CHECK_TRUE(loaded.profile.FindSetting("mouse_ui_nav") != nullptr);
+  CHECK_STR_EQ(loaded.profile.FindSetting("mouse_ui_nav")->value, "false");
+}
+
+// P2 of docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md: the
+// four retail presets (§2.1, decoded from config/gen/beatmatch_controller.dtb), the table that
+// follows one, and "custom" inferred from the rows rather than a switch.
+void TestControllerPresets() {
+  BeginCase("P2: the four retail controller presets map the six actions as §2.1 records");
+
+  const auto preset = [](int index, Action action) { return PresetSources(index, action); };
+  // Preset 0 (what the P0 arms measured live).
+  for (const char* direction : {"lstick_up", "lstick_down", "lstick_left", "lstick_right",
+                                "dpad_up", "dpad_down", "dpad_left", "dpad_right"}) {
+    CHECK_TRUE(HasSource(preset(0, Action::kFirstNote), remap::SourceKind::kPad, direction));
+  }
+  CHECK_TRUE(HasSource(preset(0, Action::kSecondNote), remap::SourceKind::kPad, "a"));
+  CHECK_TRUE(HasSource(preset(0, Action::kSecondNote), remap::SourceKind::kPad, "rstick_left"));
+  CHECK_TRUE(HasSource(preset(0, Action::kMoveLaneRight), remap::SourceKind::kPad,
+                       "right_trigger"));
+  CHECK_TRUE(HasSource(preset(0, Action::kMoveLaneLeft), remap::SourceKind::kPad, "left_trigger"));
+  // Preset 1: notes on the triggers/shoulders, lanes on the horizontal stick/D-pad directions.
+  CHECK_TRUE(HasSource(preset(1, Action::kFirstNote), remap::SourceKind::kPad, "left_trigger"));
+  CHECK_TRUE(HasSource(preset(1, Action::kFirstNote), remap::SourceKind::kPad, "left_shoulder"));
+  CHECK_TRUE(HasSource(preset(1, Action::kSecondNote), remap::SourceKind::kPad, "right_trigger"));
+  CHECK_TRUE(HasSource(preset(1, Action::kSecondNote), remap::SourceKind::kPad, "right_shoulder"));
+  CHECK_TRUE(HasSource(preset(1, Action::kMoveLaneRight), remap::SourceKind::kPad,
+                       "lstick_right"));
+  CHECK_TRUE(HasSource(preset(1, Action::kMoveLaneRight), remap::SourceKind::kPad,
+                       "rstick_right"));
+  CHECK_TRUE(HasSource(preset(1, Action::kMoveLaneRight), remap::SourceKind::kPad, "dpad_right"));
+  CHECK_TRUE(HasSource(preset(1, Action::kMoveLaneLeft), remap::SourceKind::kPad, "lstick_left"));
+  CHECK_TRUE(HasSource(preset(1, Action::kMoveLaneLeft), remap::SourceKind::kPad, "rstick_left"));
+  CHECK_TRUE(HasSource(preset(1, Action::kMoveLaneLeft), remap::SourceKind::kPad, "dpad_left"));
+  // Preset 2: one control per action.
+  CHECK_EQ(preset(2, Action::kFirstNote)->size(), 1u);
+  CHECK_TRUE(HasSource(preset(2, Action::kFirstNote), remap::SourceKind::kPad, "left_shoulder"));
+  CHECK_TRUE(HasSource(preset(2, Action::kSecondNote), remap::SourceKind::kPad, "right_shoulder"));
+  CHECK_TRUE(HasSource(preset(2, Action::kMoveLaneRight), remap::SourceKind::kPad,
+                       "right_trigger"));
+  CHECK_TRUE(HasSource(preset(2, Action::kMoveLaneLeft), remap::SourceKind::kPad, "left_trigger"));
+  // Preset 3: face buttons for the notes, three power-up inputs.
+  CHECK_TRUE(HasSource(preset(3, Action::kFirstNote), remap::SourceKind::kPad, "a"));
+  CHECK_TRUE(HasSource(preset(3, Action::kSecondNote), remap::SourceKind::kPad, "b"));
+  CHECK_TRUE(HasSource(preset(3, Action::kMoveLaneRight), remap::SourceKind::kPad, "lstick_right"));
+  CHECK_TRUE(HasSource(preset(3, Action::kMoveLaneRight), remap::SourceKind::kPad, "dpad_right"));
+  CHECK_TRUE(HasSource(preset(3, Action::kMoveLaneLeft), remap::SourceKind::kPad, "dpad_left"));
+  CHECK_TRUE(HasSource(preset(3, Action::kPowerup), remap::SourceKind::kPad, "x"));
+  CHECK_TRUE(HasSource(preset(3, Action::kPowerup), remap::SourceKind::kPad, "left_shoulder"));
+  CHECK_TRUE(HasSource(preset(3, Action::kPowerup), remap::SourceKind::kPad, "left_trigger"));
+  // Every preset keeps Start as the pause path and only ever names pad sources.
+  for (int index = 0; index < kControllerPresetCount; ++index) {
+    CHECK_TRUE(HasSource(preset(index, Action::kPause), remap::SourceKind::kPad, "start"));
+    for (const Action action : Actions()) {
+      for (const remap::Source& source : *preset(index, action)) {
+        CHECK_TRUE(source.kind == remap::SourceKind::kPad);
+      }
+    }
+  }
+  // An index this build does not know reads as preset 0 rather than as "no binding at all".
+  CHECK_TRUE(preset(-1, Action::kFirstNote) == preset(0, Action::kFirstNote));
+  CHECK_TRUE(preset(9, Action::kFirstNote) == preset(0, Action::kFirstNote));
+  CHECK_STR_EQ(PresetLabel(0), "Preset 1");
+  CHECK_STR_EQ(PresetLabel(3), "Preset 4");
+  CHECK_STR_EQ(PresetLabel(7), "Preset 1");
+
+  BeginCase("P2: a Controller table without a custom row follows the selected preset");
+
+  Table table(TableKind::kController);
+  CHECK_FALSE(table.Custom());
+  for (const Action action : Actions()) {
+    CHECK_TRUE(table.Effective(action) == PresetSources(0, action));
+  }
+  table.SetControllerPreset(2);
+  CHECK_EQ(table.Preset(), 2);
+  for (const Action action : Actions()) {
+    CHECK_TRUE(table.Effective(action) == PresetSources(2, action));
+  }
+  // One custom row changes only that action: the rest still follow the preset (D4).
+  table.Set(Action::kFirstNote, {remap::Source{remap::SourceKind::kPad, "b"}});
+  CHECK_TRUE(table.Custom());
+  CHECK_TRUE(table.Effective(Action::kFirstNote) == table.Bindings(Action::kFirstNote));
+  CHECK_TRUE(table.Effective(Action::kSecondNote) == PresetSources(2, Action::kSecondNote));
+  // Reset returns the action to the preset, and Reset All returns the table to it entirely.
+  table.Reset(Action::kFirstNote);
+  CHECK_FALSE(table.Custom());
+  table.Set(Action::kPause, {});
+  CHECK_TRUE(table.Custom());
+  table.ResetAll();
+  CHECK_FALSE(table.Custom());
+  CHECK_TRUE(table.Effective(Action::kPause) == PresetSources(2, Action::kPause));
+  // An out-of-range preset reads as 0, and the other table ignores the preset entirely.
+  table.SetControllerPreset(42);
+  CHECK_EQ(table.Preset(), 0);
+  Table keyboard_mouse(TableKind::kKeyboardMouse);
+  keyboard_mouse.SetControllerPreset(3);
+  CHECK_TRUE(keyboard_mouse.Effective(Action::kFirstNote) ==
+             DefaultSources(TableKind::kKeyboardMouse, Action::kFirstNote));
 }
 
 }  // namespace
@@ -599,6 +703,7 @@ int main() {
   TestUnknownAndInvalid();
   TestEditsAndIndependence();
   TestProfileStorage();
+  TestControllerPresets();
   TestSwitchesAreAppliedByABoot();
   TestExplicitValues();
   return Finish();

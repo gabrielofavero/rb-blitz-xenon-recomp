@@ -670,11 +670,13 @@ void Configure() {
   g_enabled = REXCVAR_GET(settings_bridge);
   g_forward_only = REXCVAR_GET(settings_bridge_forward_only);
 
-  // P7: one writer for the controller profile. The four switches are read from the cvars here -
-  // the boot applied the profile at config rank before this point, so an explicit command-line or
-  // environment value has already won - and a row whose value came from either of those stays
+  // P7: one writer for the controller profile. The two device gates are read from the cvars here
+  // - the boot applied the profile at config rank before this point, so an explicit command-line
+  // or environment value has already won - and a row whose value came from either of those stays
   // read-only in the menu. The store publishes the initial binding snapshot before the input
-  // system is created, so the first poll reads the profile's tables rather than a default.
+  // system is created, so the first poll reads the profile's tables rather than a default. The
+  // old `gameplay_mapping_*` switches are not read at all (restructure plan D3): custom is
+  // inferred from the tables.
   {
     const auto effective_bool = [](const char* name, const bool compiled_default) {
       const std::string text = rex::cvar::GetFlagByName(name);
@@ -689,12 +691,8 @@ void Configure() {
     ::rb_blitz::input::InputStoreOptions options;
     options.keyboard_support = effective_bool("keyboard_support", true);
     options.mouse_support = effective_bool("mouse_ui_nav", true);
-    options.custom_controller = effective_bool("gameplay_mapping_controller", false);
-    options.custom_keyboard_mouse = effective_bool("gameplay_mapping_keyboard_mouse", true);
     options.keyboard_locked = locked("keyboard_support");
     options.mouse_locked = locked("mouse_ui_nav");
-    options.custom_controller_locked = locked("gameplay_mapping_controller");
-    options.custom_keyboard_mouse_locked = locked("gameplay_mapping_keyboard_mouse");
     options.apply_switch = [](std::string_view name, const bool value, std::string* error) {
       const std::string text = value ? "true" : "false";
       bool ok = false;

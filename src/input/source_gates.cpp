@@ -57,6 +57,11 @@ bool SourceHeld(const PhysicalInput& input, const SourceGates& gates, const Sour
       if (!gates.mouse) {
         return false;
       }
+      const int wheel = profile::remap::MouseWheelDirection(source.name);
+      if (wheel != 0) {
+        // A detent is not a level: it is down for the poll that carries it.
+        return wheel > 0 ? input.wheel_detents > 0 : input.wheel_detents < 0;
+      }
       const uint32_t mask = MouseMaskFor(source.name);
       return mask != 0 && (input.mouse_buttons & mask) != 0;
     }
@@ -95,8 +100,7 @@ bool TableActive(GameplayRouting routing, profile::gameplay_remap::TableKind kin
                                                                  : routing.keyboard_mouse;
 }
 
-bool GeneralSourceAllowed(const SourceGates& gates, bool gameplay, bool keyboard_mouse_mapping,
-                          bool controller_mapping, SourceKind kind) {
+bool GeneralSourceAllowed(const SourceGates& gates, const bool gameplay, const SourceKind kind) {
   if (kind == SourceKind::kPad) {
     return false;
   }
@@ -111,10 +115,38 @@ bool GeneralSourceAllowed(const SourceGates& gates, bool gameplay, bool keyboard
     // Mapping exactly as it always has.
     return kind == SourceKind::kKey;
   }
-  // Playing: while either direct table is on, gameplay input is its business and General
-  // Mapping's keyboard/mouse emulation stops at the menu (R4). With both off, General Mapping
-  // feeds the native preset as before.
-  return !(keyboard_mouse_mapping || controller_mapping);
+  // Playing: the direct tables own keys and mouse, so General Mapping's emulation stops at the
+  // menu. The Mouse & Keyboard table is always active (D3), which makes this unconditional.
+  return false;
+}
+
+void CollectGameplayConsumed(const PhysicalInput& input, const SourceGates& gates,
+                             const GameplayRouting routing, const bool gameplay,
+                             const Table& controller, const Table& keyboard_mouse,
+                             std::vector<Source>* out) {
+  if (out == nullptr) {
+    return;
+  }
+  out->clear();
+  if (!gameplay) {
+    // A menu: no table acts, so nothing of the player's is the tables'. This is what keeps the
+    // key that opens a menu usable inside it (the Keyboard + Mouse defaults would otherwise
+    // consume Space, Q, W, Escape and the arrow keys from every menu).
+    return;
+  }
+  const auto collect = [&](const Table& table, const bool active) {
+    if (!active) {
+      return;
+    }
+    for (const Action action : profile::gameplay_remap::Actions()) {
+      const Source* held = HeldSource(input, gates, table, action);
+      if (held != nullptr && held->kind != SourceKind::kPad) {
+        out->push_back(*held);
+      }
+    }
+  };
+  collect(controller, routing.controller);
+  collect(keyboard_mouse, routing.keyboard_mouse);
 }
 
 ActionHold::Edge ActionHold::Observe(bool held_now) {

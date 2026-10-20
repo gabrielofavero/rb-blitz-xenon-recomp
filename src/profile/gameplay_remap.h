@@ -33,10 +33,13 @@
 // device or dispatches an action - P2/P3 own the device sampling and the guest dispatch; this
 // module is only the configuration both of them read.
 //
-// The defaults are frozen from P0's evidence (plan §10.4 O3): the pad table reproduces the native
-// preset 0 the live arms measured, and the keyboard table reproduces the title's shipped keyboard
-// preset 0. They are *not* read back from the saved native preset at run time: enabling the
-// controller table must not follow a preset the user later edits (R5).
+// The defaults are frozen from P0's evidence (plan §10.4 O3): the controller table's compiled
+// default reproduces retail preset 0, which the live arms measured, and the keyboard table
+// reproduces the Mouse & Keyboard defaults the restructure plan's D12 lists. They are *not* read
+// back from the saved native preset at run time: a table with no custom row follows the preset
+// the title's own Controller Presets page selected (P2 of
+// docs/plans/in-progress/2026-10-19-interface-gameplay-mapping-restructure-plan.md), and the
+// compiled default is what a build with no observed preset reports.
 
 #pragma once
 
@@ -81,7 +84,7 @@ std::string_view ActionLabel(Action action);
 std::optional<Action> ParseAction(std::string_view name);
 
 // Which of the two tables a binding belongs to. The section name is the profile's table header;
-// the label is the switch's own name in Controller Settings.
+// the label is the input type's own name in the settings surface.
 enum class TableKind : uint8_t { kController, kKeyboardMouse };
 
 inline constexpr std::size_t kTableKindCount = 2;
@@ -96,11 +99,23 @@ std::optional<TableKind> ParseTableKindSection(std::string_view section);
 bool AcceptsSourceKind(TableKind kind, remap::SourceKind source_kind);
 bool AcceptsSource(TableKind kind, const remap::Source& source);
 
-// What the table ships with: the pad scheme the title's preset 0 uses (every direction, so a
-// thumb roll and a D-pad press both count) and the title's keyboard preset 0 (mouse bindings are
-// deliberately opt-in - a click during a song should not strike a note by default). Never nullptr:
-// every action has a default in both tables.
+// What the table ships with: retail preset 0 for the controller and the Mouse & Keyboard defaults
+// for the other table. Never nullptr: every action has a default in both tables.
 const std::vector<remap::Source>* DefaultSources(TableKind kind, Action action);
+
+// The title's own four controller presets (`config/gen/beatmatch_controller.dtb`, decoded
+// 2026-10-17 into out/_swap/p0/defs/beatmatch_controller.txt). The controller table follows the
+// preset the player selected on retail's Controller Presets page whenever it has no custom row
+// (restructure plan D4); with a custom row the direct table bypasses the native preset and every
+// unmodified action still uses this preset's sources.
+inline constexpr int kControllerPresetCount = 4;
+
+// What `preset` binds `action` to, in the project's `pad:` spellings. A preset outside 0..3 is
+// read as 0, which is the compiled default the live arms measured.
+const std::vector<remap::Source>* PresetSources(int preset, Action action);
+
+// The name a person reads for a preset in a caption ("Preset 1" for 0).
+std::string PresetLabel(int preset);
 
 // One action's binding, as `[gameplay_remap_*]` spells it.
 struct Binding {
@@ -128,11 +143,22 @@ class Table {
   TableKind kind() const { return kind_; }
 
   // The action's sources, or nullptr when the profile has no row for it - which means the
-  // compiled default. An empty list is a real binding: it means the action is off.
+  // effective default below. An empty list is a real binding: it means the action is off.
   const std::vector<remap::Source>* Bindings(Action action) const;
 
-  // What actually fires `action`: the row the user bound, or the compiled default. Never nullptr.
+  // What actually fires `action`: the row the user bound; otherwise the selected controller
+  // preset for the Controller table, or the Mouse & Keyboard compiled default for the other.
+  // Never nullptr.
   const std::vector<remap::Source>* Effective(Action action) const;
+
+  // The retail controller preset this table follows for actions without a custom row. Only the
+  // Controller table has one; the other table ignores it. Out-of-range input is read as 0.
+  void SetControllerPreset(int preset);
+  int Preset() const { return preset_; }
+
+  // True when the table has any custom row, which is what the settings surface calls "custom"
+  // (restructure plan D3: inferred, never a switch of its own).
+  bool Custom() const { return BoundCount() > 0; }
 
   bool IsBound(Action action) const { return Bindings(action) != nullptr; }
   // True when the action has a row that binds nothing.
@@ -163,6 +189,8 @@ class Table {
 
  private:
   TableKind kind_ = TableKind::kController;
+  // The retail preset the Controller table follows while an action has no custom row.
+  int preset_ = 0;
   std::vector<Binding> bindings_;
   // Kept verbatim, never applied: a row this build does not understand at all.
   std::vector<ProfileSetting> unknown_;

@@ -352,9 +352,9 @@ menu, so the external app is no longer the only place to change a binding:
 * **Controls** → `Input Types` (Controller: Always on; Keyboard `keyboard_support`; Mouse
   `mouse_support`), `General Mapping` (16 controls, each with an Assign/Reset child page and the
   binding line in the row — see the next bullet — plus a table-level Reset All) and `Gameplay
-  Mapping` (Controller: Default Presets — retail's page, disabled while Custom is On — Custom,
-  Custom Mapping; Keyboard & Mouse: Custom, Custom Mapping; six actions and Reset All in each
-  table).
+  Mapping` (P2, 2026-10-20: Controller = Default Presets — retail's page, always available — and
+  Custom Mapping; the Keyboard & Mouse page enters Custom Mapping directly, its rename to "Mouse &
+  Keyboard" is P4's; six actions and Reset All in each table; the Custom switches are gone).
 * **A binding row draws its inputs in place (P1, 2026-10-19).** The list's own text is a locale
   entry baked at boot, so the host draws the line over the guest's label: `<row>: <inputs>`
   (`A: G, H`, `First Note: Q, Right Click`), with `Multiple` when the list does not fit the row's
@@ -372,8 +372,23 @@ menu, so the external app is no longer the only place to change a binding:
   names the kind and keeps listening, and the dialog leaves by a host Back pulse. A completed
   capture is saved through the profile (`launcher.toml`, the same tables P1 froze) and applied on
   the next poll: the switches are live, not launch-scoped.
+* **Gameplay Mapping is always on (P2, 2026-10-20).** The two `gameplay_mapping_*` cvars are
+  retired (the allowlist no longer names them; an old profile's rows are preserved and inert).
+  The Mouse & Keyboard table drives gameplay whenever a song is current, and the Controller table
+  acts exactly when it has a custom row - with none, the title's native preset drives the pad, and
+  with one, unmodified actions follow the preset the player selected on retail's Controller
+  Presets page (observed from the song controller's `+80` slot at `NewController`). The Mouse &
+  Keyboard defaults are the restructure plan's D12 list (Q/right click, W/left click, arrows +
+  wheel detents, Space/middle click, Escape), a wheel detent is a one-poll press, the first
+  Assign on a default row **replaces** it (`Default binding from Preset N. Click to Replace.`),
+  and a key a gameplay table is holding is not echoed into Interface Mapping until it is
+  released (the Escape that paused no longer resumes the game it just paused). Evidence:
+  `out/gameplay-mapping/p2-2026-10-20/` (boot lines), `out/gameplay-mapping/in-game/p2-in-song-2026-10-20d/`
+  (paused song, live preset line) and `out/gameplay-mapping/in-game/p2-controls-2026-10-20b/`
+  (Controls tree, 57 steps).
 * **The profile keeps only differences**: a switch set back to its compiled default is dropped
-  instead of written, so Custom Off leaves no `gameplay_mapping_controller` line.
+  instead of written (the two device gates are the only switches left; `gameplay_mapping_*` is no
+  longer written at all).
 * **Retail's controller page is the Default Presets destination**, not a deleted screen, and the
   in-song list's `Controls` row now jumps to the pause twin of this menu. The in-song route was
   driven by P8a (below), not only unit-tested.

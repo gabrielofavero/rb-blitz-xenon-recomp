@@ -244,7 +244,7 @@ try {
                       'hold:key_n:0.4', 'wait:1', 'hold:key_m:0.4', 'wait:1',
                       "shot:09-dpad.png")
     }
-    if ($Pause) { $actions += @('key:start', 'wait:3', 'shot:05-pause.png', 'key:start', 'wait:3', 'shot:11-resume.png') }
+    if ($Pause) { $actions += @('key:esc', 'wait:3', 'shot:05-pause.png', 'key:esc', 'wait:3', 'shot:11-resume.png') }
     if ($LongTrack) {
         # The controller's own repeat starts about 5 s after a track press (P0's `track` arm), so
         # the hold has to outlast that; the release must then stop it (sub_824367E0 clears the

@@ -11,11 +11,12 @@
 #   * the same dialog again, held instead of tapped, cancels and writes nothing - that is the
 #     dialog's own cancel gesture (capture::kHoldToCancel), and it is why B and Escape stay
 #     assignable: a tap of either binds it, a hold of it cancels;
-#   * Gameplay Mapping -> Controller -> Custom toggles the custom table on, and Default Presets
-#     (the title's own preset page one row above) then refuses to open while Custom is On;
+#   * Gameplay Mapping -> Controller now has two rows (P2 of the interface/gameplay mapping
+#     restructure plan): the title's own Controller Presets page, which always opens, and Custom
+#     Mapping. The two Custom switches are gone; a table is custom when it has a binding row;
 #   * a key pressed into the Controller table is refused by kind and the dialog keeps listening,
 #     then leaves on the hold;
-#   * Gameplay Mapping -> Keyboard & Mouse -> Custom Mapping -> First Note accepts the same key
+#   * Gameplay Mapping -> Mouse & Keyboard -> Custom Mapping -> First Note accepts the same key
 #     and persists it in its own table.
 #
 # Every press is a click on the row the host logs (native_mouse: row=<n> bounds=...), so a step
@@ -275,9 +276,11 @@ try {
 
     # P1: the page behind the bind page draws the captured source in the row without a relaunch -
     # the row text is read from the published snapshot every frame, not baked when the page opened.
+    # P2/D8: the FIRST Assign on a default row REPLACES the default list, so the row reads `A: G`
+    # rather than the default's three sources plus the captured one.
     Drive @('key:b', "wait:$StepSeconds", 'shot:13a-general-row-after-capture.png')
     Assert-Screen 'settings_general_mapping_screen' '13a-general-row-after-capture' | Out-Null
-    Assert-RowText 'settings_general_mapping_screen' 'input.general.a = A: A, Enter, A, G' '13a-general-row-after-capture'
+    Assert-RowText 'settings_general_mapping_screen' 'input.general.a = A: G' '13a-general-row-after-capture'
     ClickRow 0 '13b-a-button-again'
     Assert-Screen 'settings_bind_general_a_screen' '13b-a-button-again' | Out-Null
 
@@ -295,21 +298,15 @@ try {
     ClickRow 0 '18-controller-page'
     Assert-Screen 'settings_gameplay_controller_screen' '18-controller-page' | Out-Null
     Drive @('shot:19-controller-rows.png')
-    # Custom on: the row is a boolean, so one press writes b:1 and commits.
-    ClickRow 1 '20-custom-on'
-    Assert-Screen 'settings_gameplay_controller_screen' '20-custom-on' | Out-Null
-    Assert-Profile 'gameplay_mapping_controller = true' $true '20-custom-on' 'profile-20-custom-on.toml'
-    # Default Presets is one row up and must refuse while Custom is On.
-    ClickRow 0 '21-default-presets'
-    Assert-Screen 'settings_gameplay_controller_screen' '21-default-presets' | Out-Null
-    # Custom off: false is the compiled default, so the store drops the row instead of writing a
-    # value that says nothing (the profile records only what differs from the defaults).
-    ClickRow 1 '22-custom-off'
-    Assert-Screen 'settings_gameplay_controller_screen' '22-custom-off' | Out-Null
-    Assert-Profile 'gameplay_mapping_controller' $false '22-custom-off' 'profile-22-custom-off.toml'
+    # P2: the preset page is always available (D5) - it is a plain retail route now, and it must
+    # open on the first press with no Custom switch above it.
+    ClickRow 0 '20-controller-presets'
+    Assert-Screen 'controller_config_screen' '20-controller-presets' | Out-Null
+    Drive @('key:b', "wait:$StepSeconds", 'shot:21-back-from-presets.png')
+    Assert-Screen 'settings_gameplay_controller_screen' '21-back-from-presets' | Out-Null
 
     # --- a key into the Controller table is the wrong kind ------------------------------------
-    ClickRow 2 '23-controller-mapping'
+    ClickRow 1 '23-controller-mapping'
     Assert-Screen 'settings_controller_actions_screen' '23-controller-mapping' | Out-Null
     # P1: a list too long for the row reads `Multiple` (the owner's allowance) instead of
     # overflowing; the Controller default for First Note is eight stick/D-pad directions.
@@ -332,7 +329,8 @@ try {
     ClickRow 1 '30-keyboard-mouse'
     Assert-Screen 'settings_gameplay_keyboard_mouse_screen' '30-keyboard-mouse' | Out-Null
     Drive @('shot:31-keyboard-mouse-rows.png')
-    ClickRow 1 '32-keyboard-mouse-mapping'
+    # P2: the page enters its rows directly - one row, Custom Mapping.
+    ClickRow 0 '32-keyboard-mouse-mapping'
     Assert-Screen 'settings_keyboard_mouse_actions_screen' '32-keyboard-mouse-mapping' | Out-Null
     ClickRow 0 '33-first-note-km'
     Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '33-first-note-km' | Out-Null

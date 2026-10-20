@@ -7,11 +7,14 @@
 // One writer, one file. The rows the Controls menu edits are the rows Controller Settings already
 // writes into `launcher.toml`:
 //
-//   [settings]                       keyboard_support, mouse_ui_nav,
-//                                    gameplay_mapping_controller, gameplay_mapping_keyboard_mouse
-//   [remap]                          General Mapping (the 16 non-Guide controls)
+//   [settings]                       keyboard_support, mouse_ui_nav
+//   [remap]                          Interface Mapping (the 16 non-Guide controls)
 //   [gameplay_remap_controller]      the Controller gameplay table
-//   [gameplay_remap_keyboard_mouse]  the Keyboard & Mouse gameplay table
+//   [gameplay_remap_keyboard_mouse]  the Mouse & Keyboard gameplay table
+//
+// The two `gameplay_mapping_*` switches are no longer written or read as routing (P2 of the
+// interface/gameplay mapping restructure plan, D3/D15): custom is inferred from each table, an old
+// profile key is preserved untouched, and nothing consults it.
 //
 // A save is the profile module's own surgical write (unknown keys, comments and unrelated tables
 // survive) and it is **re-based**: the file is re-read first and only the rows this session
@@ -40,6 +43,7 @@
 #include <string_view>
 #include <vector>
 
+#include "input/effective_input.h"
 #include "profile/gameplay_remap.h"
 #include "profile/input_rows.h"
 #include "profile/profile.h"
@@ -54,15 +58,11 @@ struct InputStoreOptions {
   // rank. A command-line or environment value therefore arrives here already winning.
   bool keyboard_support = true;
   bool mouse_support = true;
-  bool custom_controller = false;
-  bool custom_keyboard_mouse = true;
 
   // True when the effective value came from the command line or the environment: the precedence
   // contract makes such a row read-only in the UI, and an edit would be a save that cannot land.
   bool keyboard_locked = false;
   bool mouse_locked = false;
-  bool custom_controller_locked = false;
-  bool custom_keyboard_mouse_locked = false;
 
   // Writes one switch to the running process (the boot performs it on a host thread and reads it
   // back). Empty means "save only, applies at the next launch" - a test or a tool.
@@ -103,8 +103,11 @@ class InputStore final : public settings::InputBindingStore {
   // State for the tests and the boot log.
   bool keyboard_support() const { return keyboard_support_; }
   bool mouse_support() const { return mouse_support_; }
-  bool custom_controller() const { return custom_controller_; }
-  bool custom_keyboard_mouse() const { return custom_keyboard_mouse_; }
+  // "Custom" is inferred per table (D3); these are what the surface and a boot line read.
+  bool controller_custom() const { return controller_.Custom(); }
+  bool keyboard_mouse_custom() const { return keyboard_mouse_.Custom(); }
+  // The retail preset the Controller table follows for unmodified actions (D4).
+  int controller_preset() const { return ObservedControllerPreset(); }
   bool dirty() const { return dirty_; }
   bool usable() const { return usable_; }
   const std::filesystem::path& path() const { return path_; }
@@ -145,19 +148,15 @@ class InputStore final : public settings::InputBindingStore {
 
   bool keyboard_support_ = true;
   bool mouse_support_ = true;
-  bool custom_controller_ = false;
-  bool custom_keyboard_mouse_ = true;
 
   InputStoreOptions options_;
   bool dirty_ = false;
   std::map<std::string, std::optional<std::vector<profile::remap::Source>>> staged_rows_;
   std::set<profile::InputRowKind> staged_switches_;
   std::set<TableSel> staged_reset_all_;
-  // The table values last applied to the process, so a commit only writes what moved.
+  // The gate values last applied to the process, so a commit only writes what moved.
   bool running_keyboard_ = true;
   bool running_mouse_ = true;
-  bool running_custom_controller_ = false;
-  bool running_custom_keyboard_mouse_ = true;
 };
 
 }  // namespace rb_blitz::input
