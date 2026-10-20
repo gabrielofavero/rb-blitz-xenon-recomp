@@ -154,6 +154,33 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "play_current_song"}, "dlc", "Play Current Song",
                      "Add an entry that starts the song the main menu is playing."));
+  // RhythmVerse store (plan P6). The master is a plain boolean in the `dlc` group; the instrument
+  // filter is a submenu of its own (no SettingId), so its five leaves carry their own group. The
+  // master defaults **off**: the store only makes network requests after a deliberate opt-in.
+  rows.push_back(Row(Make(SettingId::kRhythmVerse, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"general", "rhythmverse"}, "dlc", "RhythmVerse",
+                     "Browse the RhythmVerse customs catalogue in the store and download songs."));
+  rows.push_back(Row(Make(SettingId::kRhythmVerseGuitar, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "rhythmverse_guitar"}, "rhythmverse", "Guitar",
+                     "Only list songs that have a guitar chart."));
+  rows.push_back(Row(Make(SettingId::kRhythmVerseBass, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "rhythmverse_bass"}, "rhythmverse", "Bass",
+                     "Only list songs that have a bass chart."));
+  rows.push_back(Row(Make(SettingId::kRhythmVerseDrums, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "rhythmverse_drums"}, "rhythmverse", "Drums",
+                     "Only list songs that have a drum chart."));
+  rows.push_back(Row(Make(SettingId::kRhythmVerseVocals, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "rhythmverse_vocals"}, "rhythmverse", "Vocals",
+                     "Only list songs that have a vocal chart."));
+  rows.push_back(Row(Make(SettingId::kRhythmVerseKeys, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"general", "rhythmverse_keys"}, "rhythmverse", "Keys",
+                     "Only list songs that have a keys chart."));
   rows.push_back(ProviderRow(Make(SettingId::kUnlockAll, Category::kGeneral, Provider::kUltimate,
                                   WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                              "achievements", "Unlock All",
@@ -377,6 +404,28 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
     // Consumed by the boot that builds the menu payload, for the same reason.
     {SettingId::kPlayCurrentSong, ApplicationStrategy::kRestart, ""},
+    // RhythmVerse store (plan P6). Nothing in the guest reads these rows: the store's own workers
+    // read the snapshot below, and the applier replaces it in-process, so a commit is effective for
+    // the next request with no restart. The behaviour is measured by the `store_client` suite
+    // (a committed row bumps the snapshot generation and the next read sees the new value).
+    {SettingId::kRhythmVerse, ApplicationStrategy::kHot,
+     "the applier replaces the store's in-process snapshot; `store_client` observes the generation "
+     "change after a commit (no guest state involved)"},
+    {SettingId::kRhythmVerseGuitar, ApplicationStrategy::kHot,
+     "the applier replaces the store's in-process snapshot; `store_client` observes the filter "
+     "change after a commit"},
+    {SettingId::kRhythmVerseBass, ApplicationStrategy::kHot,
+     "the applier replaces the store's in-process snapshot; `store_client` observes the filter "
+     "change after a commit"},
+    {SettingId::kRhythmVerseDrums, ApplicationStrategy::kHot,
+     "the applier replaces the store's in-process snapshot; `store_client` observes the filter "
+     "change after a commit"},
+    {SettingId::kRhythmVerseVocals, ApplicationStrategy::kHot,
+     "the applier replaces the store's in-process snapshot; `store_client` observes the filter "
+     "change after a commit"},
+    {SettingId::kRhythmVerseKeys, ApplicationStrategy::kHot,
+     "the applier replaces the store's in-process snapshot; `store_client` observes the filter "
+     "change after a commit"},
     {SettingId::kUnlockAll, ApplicationStrategy::kRestart, ""},
     {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics

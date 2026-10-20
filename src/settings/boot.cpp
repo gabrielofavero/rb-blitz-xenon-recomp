@@ -38,6 +38,7 @@
 #include "settings/cvars.h"
 #include "settings/hot_apply.h"
 #include "settings/schema.h"
+#include "store/store_settings.h"
 #include "settings/window_policy.h"
 
 REXCVAR_DEFINE_BOOL(settings_safe_graphics, false, "Settings",
@@ -364,6 +365,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           "defaults and the explicit sources apply, and the file is untouched");
     }
   }
+  SeedStoreSettings();
 
   // --- capabilities -------------------------------------------------------------------------
   // What the boot can answer honestly today, and what it cannot: the display probe answers with the
@@ -697,6 +699,32 @@ bool SettingsBoot::WriteWindowCvar(const std::string& name, const std::string& v
   // this handle policy, rather than a line whose absence has to be read as success.
   REXLOG_INFO("settings_boot: window policy: {} = {}", name, value);
   return true;
+}
+
+void SettingsBoot::SeedStoreSettings() {
+  // The workers of the RhythmVerse store never read the settings store or a cvar registry: they read
+  // an immutable snapshot (src/store/store_settings.h). The hot applier keeps it current while the
+  // game runs; this is the other half - a value the player committed in an earlier session reaches
+  // the snapshot before anything can ask for a catalogue page.
+  if (!service_) {
+    REXLOG_INFO("settings_boot: no settings store; the RhythmVerse snapshot stays at its defaults");
+    return;
+  }
+  store::StoreSettings settings;
+  settings.enabled = service_->EffectiveValue(SettingId::kRhythmVerse).boolean;
+  settings.instruments.guitar = service_->EffectiveValue(SettingId::kRhythmVerseGuitar).boolean;
+  settings.instruments.bass = service_->EffectiveValue(SettingId::kRhythmVerseBass).boolean;
+  settings.instruments.drums = service_->EffectiveValue(SettingId::kRhythmVerseDrums).boolean;
+  settings.instruments.vocals = service_->EffectiveValue(SettingId::kRhythmVerseVocals).boolean;
+  settings.instruments.keys = service_->EffectiveValue(SettingId::kRhythmVerseKeys).boolean;
+  const std::uint64_t generation = store::PublishSettings(settings);
+  REXLOG_INFO(
+      "settings_boot: RhythmVerse {}; filter guitar={} bass={} drums={} vocals={} keys={} "
+      "(store settings snapshot generation {})",
+      settings.enabled ? "on" : "off", settings.instruments.guitar ? "on" : "off",
+      settings.instruments.bass ? "on" : "off", settings.instruments.drums ? "on" : "off",
+      settings.instruments.vocals ? "on" : "off", settings.instruments.keys ? "on" : "off",
+      generation);
 }
 
 void SettingsBoot::ApplyWindowPolicy() {

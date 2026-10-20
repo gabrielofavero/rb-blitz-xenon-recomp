@@ -68,6 +68,18 @@ std::string_view SettingIdToken(SettingId id) {
       return "settings_labels";
     case SettingId::kHideDownloadContent:
       return "hide_download_content";
+    case SettingId::kRhythmVerse:
+      return "rhythmverse";
+    case SettingId::kRhythmVerseGuitar:
+      return "rhythmverse_guitar";
+    case SettingId::kRhythmVerseBass:
+      return "rhythmverse_bass";
+    case SettingId::kRhythmVerseDrums:
+      return "rhythmverse_drums";
+    case SettingId::kRhythmVerseVocals:
+      return "rhythmverse_vocals";
+    case SettingId::kRhythmVerseKeys:
+      return "rhythmverse_keys";
     case SettingId::kPrecisionMode:
       return "precision_mode";
     case SettingId::kDisableRandomWiggles:

@@ -594,6 +594,8 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_general_panel", "GENERAL"},
       {"settings_target_panel", "TARGET"},
       {"settings_dlc_panel", "DOWNLOADABLE CONTENT"},
+      {"settings_dlc_menu_panel", "DLC MENU MUSIC"},
+      {"settings_rhythmverse_filter_panel", "RHYTHMVERSE SONG FILTER"},
       {"settings_achievements_panel", "ACHIEVEMENTS & UNLOCKS"},
       {"settings_interface_panel", "INTERFACE"},
       {"settings_main_menu_panel", "MAIN MENU"},
@@ -982,6 +984,11 @@ std::vector<PanelSpec> AllPanels() {
                           }});
 
   // 1b. Downloadable Content.
+  //
+  // Six rows is the page budget (the in-game-settings skill §2), and the RhythmVerse pair below is
+  // what brought the page to seven. The two menu-music rows therefore moved into their own submenu
+  // rather than letting the page scroll invisibly: they are one subject (the main menu's music and
+  // the entry that starts it), and the player still reaches both in one press.
   out.push_back(PanelSpec{"settings_dlc_panel", "settings_dlc_screen", "settings_general_screen",
                           MenuPanels(),
                           {
@@ -1000,10 +1007,31 @@ std::vector<PanelSpec> AllPanels() {
                                         "How many threads scan your packages. More threads scan faster.",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
-                              // R9's own row, revived (owner request, 2026-10-14) - and the row the
-                              // Play Current Song entry is wired to: with this off there is no
-                              // background DLC song to start, so the row below reads unavailable and
-                              // the main-menu entry is not built at all (see
+                              // The RhythmVerse store (plan P6). Off by default: the store makes no
+                              // network request until the player asks for it. The filter page is a
+                              // plain submenu - it holds no value of its own - and it stays
+                              // reachable while the master is off, because its five rows are the
+                              // next thing a player wants after switching the store on.
+                              BoolRow("settings_rhythmverse", "general.rhythmverse", "RhythmVerse",
+                                      "Browse the RhythmVerse customs catalogue in the store and download songs."),
+                              SubmenuRow("settings_rhythmverse_filter",
+                                         "settings_rhythmverse_filter_screen",
+                                         "RhythmVerse Song Filter",
+                                         "Choose which instruments a custom must have to be listed."),
+                              SubmenuRow("settings_dlc_menu", "settings_dlc_menu_screen",
+                                         "DLC Menu Music",
+                                         "The main menu's DLC background music and its Play Current Song entry."),
+                          }});
+
+  // 1b-i. DLC Menu Music: R9's own row (owner request, 2026-10-14) and the Play Current Song entry.
+  // The two are one subject, and their order here is the order they had on the Downloadable Content
+  // page before the RhythmVerse pair joined it: menu music first, the entry that starts it second.
+  out.push_back(PanelSpec{"settings_dlc_menu_panel", "settings_dlc_menu_screen", "settings_dlc_screen",
+                          MenuPanels(),
+                          {
+                              // R9's own row - and the row Play Current Song is wired to: with this
+                              // off there is no background DLC song to start, so the row below reads
+                              // unavailable and the main-menu entry is not built at all (see
                               // src/hooks/settings_payload.cpp).
                               BoolRow("settings_dlc_menu_songs", "general.dlc_menu_songs",
                                       "DLC Menu Songs",
@@ -1011,6 +1039,24 @@ std::vector<PanelSpec> AllPanels() {
                               BoolRow("settings_play_current", "general.play_current_song",
                                       "Play Current Song",
                                       "Add a main menu entry that starts the song playing in the background."),
+                          }});
+
+  // 1b-ii. RhythmVerse Song Filter (plan P6 §1.6): one boolean per instrument, On = that chart is
+  // required, Off = no condition, so all five off means no instrument constraint at all. The labels
+  // are the instrument names a player already reads on the retail surfaces.
+  out.push_back(PanelSpec{"settings_rhythmverse_filter_panel",
+                          "settings_rhythmverse_filter_screen", "settings_dlc_screen", MenuPanels(),
+                          {
+                              BoolRow("settings_rv_guitar", "general.rhythmverse_guitar", "Guitar",
+                                      "Only list customs that have a guitar chart."),
+                              BoolRow("settings_rv_bass", "general.rhythmverse_bass", "Bass",
+                                      "Only list customs that have a bass chart."),
+                              BoolRow("settings_rv_drums", "general.rhythmverse_drums", "Drums",
+                                      "Only list customs that have a drum chart."),
+                              BoolRow("settings_rv_vocals", "general.rhythmverse_vocals", "Vocals",
+                                      "Only list customs that have a vocal chart."),
+                              BoolRow("settings_rv_keys", "general.rhythmverse_keys", "Keys",
+                                      "Only list customs that have a keys chart."),
                           }});
 
   // 1c. Achievements & Unlocks (provider only).
@@ -2340,6 +2386,20 @@ std::vector<std::string> ScreenNames() {
     for (const PanelSpec& panel : context) {
       out.push_back(panel.screen);
     }
+  }
+  return out;
+}
+
+std::vector<std::string> PanelRowSymbols(std::string_view panel) {
+  std::vector<std::string> out;
+  for (const PanelSpec& candidate : AllPanels()) {
+    if (candidate.name != panel) {
+      continue;
+    }
+    for (const Row& row : candidate.rows) {
+      out.push_back(row.symbol);
+    }
+    return out;
   }
   return out;
 }

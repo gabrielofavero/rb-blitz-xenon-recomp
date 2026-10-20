@@ -8,6 +8,16 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **The RhythmVerse store's settings are in the game (2026-10-20, RhythmVerse plan P6).** Under
+  **General ▸ Downloadable Content**: `RhythmVerse` (default **Off**) and `RhythmVerse Song Filter`, a
+  submenu of five instrument booleans (Guitar/Bass/Drums/Vocals On, Keys Off; On = that chart is
+  required, Off = no condition, all off = no constraint). The two menu-music rows moved under a
+  `DLC Menu Music` submenu so the page stays at the six-row budget. The six rows are `hot`: the
+  applier replaces the store's in-process settings snapshot, which its workers will read before every
+  request. **Evidence:** `rb_blitz_settings_screen_tests` (103,269 checks) pins the page order,
+  labels, defaults and both contexts; `rb_blitz_store_client_tests` pins the row → snapshot mapping
+  (a commit bumps the generation, an equal commit does not). No store worker exists yet (P1/P3), so
+  "Off makes no request" is structural until one does.
 - **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
   `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
   (`Main Menu`, `Offline Prompts`, `Help & Options Labels`); HUD moved under Gameplay and is split into

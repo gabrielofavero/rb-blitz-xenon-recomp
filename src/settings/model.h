@@ -74,6 +74,16 @@ enum class SettingId : uint16_t {
   kForcePlot = 66,
   kForceSkybox = 67,
   kGems = 68,
+  // RhythmVerse store (plan P6, docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md §1.6).
+  // A block of their own, appended: ids are stable and never reused. The master is the store's only
+  // switch; the five leaves are the instrument filter (On = the chart is required, Off = no
+  // condition, all Off = no instrument constraint).
+  kRhythmVerse = 80,
+  kRhythmVerseGuitar = 81,
+  kRhythmVerseBass = 82,
+  kRhythmVerseDrums = 83,
+  kRhythmVerseVocals = 84,
+  kRhythmVerseKeys = 85,
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

@@ -13,6 +13,7 @@
 #include <rex/logging.h>
 
 #include "settings/schema.h"
+#include "store/store_settings.h"
 
 namespace rb_blitz::settings {
 namespace {
@@ -33,6 +34,33 @@ constexpr HotRow kHotRows[] = {
     // next frame; the row is `kHot` in the schema for that measured reason.
     {SettingId::kSettingsLabels, "interface.settings_labels", "settings_help_overlay"},
 };
+
+// The RhythmVerse store's rows (plan P6). They write no cvar: their consumer is the store's own
+// snapshot (src/store/store_settings.h), which the workers read before every request. The write is
+// therefore a host-side swap of an immutable value - no guest state, no cvar registry - and the
+// next catalogue request sees it.
+struct StoreRow {
+  SettingId id;
+  const char* token;
+};
+
+constexpr StoreRow kStoreRows[] = {
+    {SettingId::kRhythmVerse, "general.rhythmverse"},
+    {SettingId::kRhythmVerseGuitar, "general.rhythmverse_guitar"},
+    {SettingId::kRhythmVerseBass, "general.rhythmverse_bass"},
+    {SettingId::kRhythmVerseDrums, "general.rhythmverse_drums"},
+    {SettingId::kRhythmVerseVocals, "general.rhythmverse_vocals"},
+    {SettingId::kRhythmVerseKeys, "general.rhythmverse_keys"},
+};
+
+const StoreRow* FindStoreRow(SettingId id) {
+  for (const StoreRow& row : kStoreRows) {
+    if (row.id == id) {
+      return &row;
+    }
+  }
+  return nullptr;
+}
 
 constexpr char kCvarError[] = "the applier has no cvar for this row";
 
@@ -75,6 +103,9 @@ bool WriteCvar(const std::string& name, const std::string& text, std::string* er
 class CvarHotApplier : public HotApplier {
  public:
   bool Knows(SettingId id) const override {
+    if (FindStoreRow(id) != nullptr) {
+      return true;
+    }
     for (const HotRow& row : kHotRows) {
       if (row.id == id) {
         return true;
@@ -84,6 +115,17 @@ class CvarHotApplier : public HotApplier {
   }
 
   bool Apply(SettingId id, const Value& value, std::string* error) override {
+    if (const StoreRow* store_row = FindStoreRow(id)) {
+      // Host-side only: the snapshot is immutable and swapped under a mutex, so this is safe on the
+      // thread the commit arrives on and needs no worker thread of its own.
+      if (!store::ApplyCommittedRow(id, value, error)) {
+        return false;
+      }
+      REXLOG_INFO("hot_apply: {} = {}, applied to the store's settings snapshot", store_row->token,
+                  value.boolean ? "true" : "false");
+      return true;
+    }
+
     const HotRow* row = nullptr;
     for (const HotRow& candidate : kHotRows) {
       if (candidate.id == id) {
@@ -131,6 +173,11 @@ SettingId IdForToken(std::string_view token) {
 }
 
 std::string_view HotRowToken(SettingId id) {
+  for (const StoreRow& row : kStoreRows) {
+    if (row.id == id) {
+      return row.token;
+    }
+  }
   for (const HotRow& row : kHotRows) {
     if (row.id == id) {
       return row.token;
@@ -149,6 +196,13 @@ std::string HotApplierSummary() {
     out += " -> cvar '";
     out += row.cvar;
     out += "'";
+  }
+  for (const StoreRow& row : kStoreRows) {
+    if (!out.empty()) {
+      out += ", ";
+    }
+    out += row.token;
+    out += " -> store snapshot";
   }
   return out.empty() ? std::string("none") : out;
 }

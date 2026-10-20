@@ -199,6 +199,11 @@ std::vector<std::string> PanelNames();
 // The screen names, in declaration order. The two contexts of each screen are adjacent.
 std::vector<std::string> ScreenNames();
 
+// The row symbols a panel draws, in the order it draws them (the main-menu context). Empty when no
+// panel has that name. Pure, so tests can pin a page's order and its six-row budget without
+// parsing the generated DTA.
+std::vector<std::string> PanelRowSymbols(std::string_view panel);
+
 // ------------------------------------------------------------------------------------------------
 // The in-song context (P5b-r2)
 // ------------------------------------------------------------------------------------------------

@@ -168,6 +168,10 @@ class SettingsBoot {
   // Called once, from BeforeGraphicsSetup: make the *window* and the presenter follow the effective
   // render size (src/settings/window_policy.h).
   void ApplyWindowPolicy();
+  // Publishes the six RhythmVerse rows into the store's in-process settings snapshot
+  // (src/store/store_settings.h). The hot applier keeps it current afterwards; this is what makes a
+  // persisted value survive a restart, since the workers never read the settings store themselves.
+  void SeedStoreSettings();
   // True when an explicit source (environment / command line) already owns this cvar, so the stored
   // row must not be written over it.
   bool ExplicitlyOwned(const std::string& name, SettingId id);

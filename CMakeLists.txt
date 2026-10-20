@@ -183,6 +183,9 @@ set(RBBLITZ_SOURCES
     # the WinHTTP transport seam the store's worker threads will use. Nothing in the game calls the
     # transport yet; P0's proof is the hermetic `store_client` suite plus its manual `--live-list` arm.
     src/store/rhythmverse_client.cpp
+    # P6: the store's settings as its workers read them (an immutable snapshot) and the hot applier's
+    # row -> snapshot mapping. SDK-free; the runtime applier is src/hooks/hot_apply_runtime.cpp.
+    src/store/store_settings.cpp
 )
 
 if(WIN32)
@@ -820,6 +823,7 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_store_client_tests
         tests/store_client_tests.cpp
         src/store/rhythmverse_client.cpp
+        src/store/store_settings.cpp
     )
     target_include_directories(rb_blitz_store_client_tests PRIVATE
         src

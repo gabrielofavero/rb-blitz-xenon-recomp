@@ -26,6 +26,7 @@
 
 #include "check.h"
 #include "store/rhythmverse_client.h"
+#include "store/store_settings.h"
 
 #ifdef _WIN32
 #include "store/store_http.h"
@@ -35,6 +36,10 @@ namespace test = rb_blitz::test;
 namespace fs = std::filesystem;
 
 using namespace rb_blitz::store;
+
+// The store's settings rows live in the settings model; the alias keeps the two namespaces apart
+// because `store::Settings` is a function, not a namespace.
+namespace settings = rb_blitz::settings;
 
 namespace {
 
@@ -759,6 +764,73 @@ void TestMatching() {
   CHECK_FALSE(SameSong(empty, empty));
 }
 
+// --- Settings (P6) ---------------------------------------------------------------------------------
+
+void TestStoreSettings() {
+  test::BeginCase("settings: the six rows map onto the store's snapshot, live and idempotently");
+
+  // Defaults: the store is off, the instrument filter is the owner's set (keys off).
+  const StoreSettings defaults;
+  CHECK_FALSE(defaults.enabled);
+  CHECK_TRUE(defaults.instruments.guitar);
+  CHECK_TRUE(defaults.instruments.bass);
+  CHECK_TRUE(defaults.instruments.drums);
+  CHECK_TRUE(defaults.instruments.vocals);
+  CHECK_FALSE(defaults.instruments.keys);
+
+  const std::uint64_t base = PublishSettings(defaults);  // normalise before the assertions
+  CHECK_TRUE(Settings() != nullptr);
+  CHECK_FALSE(Settings()->enabled);
+
+  settings::Value on;
+  on.kind = settings::ValueKind::kBool;
+  on.boolean = true;
+  std::string error;
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, on, &error));
+  CHECK_TRUE(error.empty());
+  CHECK_TRUE(Settings()->enabled);
+  CHECK_TRUE(SettingsGeneration() > base);
+
+  // An equal commit changes nothing and keeps the generation, so a repeated commit cannot
+  // invalidate a worker's cache.
+  const std::uint64_t after_on = SettingsGeneration();
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, on, &error));
+  CHECK_EQ(SettingsGeneration(), after_on);
+
+  // Each leaf reaches its own field and nothing else.
+  settings::Value off;
+  off.kind = settings::ValueKind::kBool;
+  off.boolean = false;
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerseGuitar, off, &error));
+  CHECK_FALSE(Settings()->instruments.guitar);
+  CHECK_TRUE(Settings()->instruments.bass);
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerseKeys, on, &error));
+  CHECK_TRUE(Settings()->instruments.keys);
+  CHECK_TRUE(Settings()->enabled);  // the master is unaffected by a leaf
+
+  // A row that is not ours, and a value of the wrong kind, are refused and change nothing.
+  const std::uint64_t before_refusals = SettingsGeneration();
+  CHECK_FALSE(ApplyCommittedRow(settings::SettingId::kVsync, on, &error));
+  CHECK_TRUE(!error.empty());
+  settings::Value number;
+  number.kind = settings::ValueKind::kInt;
+  number.integer = 1;
+  CHECK_FALSE(ApplyCommittedRow(settings::SettingId::kRhythmVerseKeys, number, &error));
+  CHECK_TRUE(!error.empty());
+  CHECK_EQ(SettingsGeneration(), before_refusals);
+
+  CHECK_FALSE(ApplyRowToSettings(settings::SettingId::kRhythmVerse, on, nullptr));
+  CHECK_TRUE(IsStoreSetting(settings::SettingId::kRhythmVerse));
+  CHECK_TRUE(IsStoreSetting(settings::SettingId::kRhythmVerseKeys));
+  CHECK_FALSE(IsStoreSetting(settings::SettingId::kVsync));
+
+  // Leave the process as it was found.
+  PublishSettings(StoreSettings{});
+  CHECK_FALSE(Settings()->enabled);
+  CHECK_TRUE(Settings()->instruments.guitar);
+  CHECK_FALSE(Settings()->instruments.keys);
+}
+
 }  // namespace
 
 #ifdef _WIN32
@@ -844,6 +916,7 @@ int main(int argc, char** argv) {
   TestFixtureEligibility(project_dir);
   TestOfferDecisions();
   TestInstrumentFilter();
+  TestStoreSettings();
   TestMatching();
 
   return test::Finish();

@@ -1,8 +1,9 @@
 # RhythmVerse in-store integration — research + implementation plan
 
 Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0 (API client, URL/byte
-policy, `store_http`) underway; P1–P8 not started.** Audio preview is decided: the API returns no
-preview asset (§3.3), so v1 shows none.
+policy, `store_http`) and P6 (the six settings rows and the live snapshot) landed 2026-10-20; P1 is
+next; P2–P5 and P7–P8 are not started.** Audio preview is decided: the API returns no preview asset
+(§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
@@ -745,7 +746,31 @@ and the component `WinHttpCrackUrl` returns points into the URL buffer — so th
 - Exit: exact text/order/defaults, Back behavior, request bodies and persistence pass; master Off
   makes zero store requests, On works without restart, all-Off filter behavior is covered, and
   the existing settings/menu tests still pass.
+**P6 record (2026-10-20).** Six native rows, ids **80–85** and tokens `general.rhythmverse`,
+`general.rhythmverse_{guitar,bass,drums,vocals,keys}` (appended; nothing renumbered). Defaults are the
+owner's: master **off**, G/B/D/V **on**, Keys **off**. The master sits in the `dlc` group, the five
+leaves in a `rhythmverse` group; the filter is a plain submenu with no `SettingId`.
 
+- **The page was reorganised to keep its six-row budget** (in-game-settings skill §2): the
+  Downloadable Content page is now `Cache DLC Library`, `Refresh Music Library`, `DLC Scan Threads`,
+  `RhythmVerse`, `RhythmVerse Song Filter`, `DLC Menu Music` — the last being a new submenu that
+  holds `DLC Menu Songs` and `Play Current Song`, which were two rows of the page before (a seventh
+  row would have scrolled invisibly, and no scroll element is drawn). Both new pages get the
+  in-song twin automatically (`InSongPanels`), so a paused song reaches them too.
+- **Live apply**: `src/store/store_settings.{h,cpp}` holds the store's settings as an **immutable
+  snapshot** (generation 1 = compiled defaults; an equal publish keeps the generation), and
+  `src/hooks/hot_apply_runtime.cpp` applies a committed row to it — no cvar, no guest state — so the
+  six rows are `kHot` with that observed behaviour as their evidence. Workers will read the snapshot
+  and never the settings store or a cvar registry (project rule).
+- **Tests**: `settings_screen` grew `TestRhythmVerseRows` (page order for all three pages, both
+  contexts, exact labels, the 28-character line budget, and the two new panels' in-song twins) and
+  its pinned page counts moved 57 → **59** per context (114 → **118**, non-root cancels 112 →
+  **116**); `store_client` grew the row → snapshot cases (live generation bump, no-op on an equal
+  commit, wrong-kind and foreign-row refusals). Full `ctest` is **38/38**.
+- **Not done in P6**: nothing consumes the snapshot yet — P1 builds the menu gate and P3 the
+  catalogue worker — so "master Off makes zero store requests" is structural (the snapshot is the
+  only input a worker will have) rather than yet measured; no boot was driven to read the new page.
+  The plan's P6 wording also owed `store_http`'s request bodies, which P0 already built and tested.
 ### P7 — polish
 
 - Chunking: preserve API-page position separately from visible eligible entries. Do not stop at
