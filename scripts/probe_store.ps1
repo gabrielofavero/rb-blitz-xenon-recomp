@@ -23,6 +23,8 @@
 # Usage (execution policy is Restricted on this machine):
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -MenuOnly
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -StoreRow 5
+#   # a served page, then the A press on its first song (the details screen)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -StoreRow 3 -EnterStore -PageRow 0 -OfferRow 0
 #   # control leg: retail server, no local rewrite, trace still on
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -StoreRow 5 -LocalRoot ""
 param(
@@ -47,6 +49,10 @@ param(
     # binds Start to Help & Options, so a boot that lands there instead of the page says the press
     # arrived as Start - which is a binding question, not a store one.
     [string]$PageKey = "key:a",
+    # After the page opens, move this many rows down and accept once more: that is the A press on a
+    # song, which is what opens the details screen (`store_info_screen`). -1 leaves the route as it
+    # was. The page's rows are the served offers, so 0 is the newest one.
+    [int]$OfferRow = -1,
     [string]$LogLevel = "debug",
     # Turns on the SDK's noisy kernel-import logging (the `log_noisy` cvar), which is what makes a
     # trace-level run name the exports the guest calls after the store is entered.
@@ -241,6 +247,18 @@ try {
             Start-Sleep -Seconds $SettleAfterPressSec
             Capture-To (Join-Path $capDir "page-late.png")
             $verdict.page_late_text = Get-ScreenText (Join-Path $capDir "page-late.png")
+            if ($OfferRow -ge 0) {
+                $offerRoute = @()
+                for ($d = 0; $d -lt $OfferRow; $d++) { $offerRoute += @("key:lstick_down", "wait:1") }
+                if ($offerRoute.Count -gt 0) { Invoke-Actions $offerRoute }
+                Invoke-Actions @($PageKey)
+                Start-Sleep -Seconds 2
+                Capture-To (Join-Path $capDir "offer.png")
+                $verdict.offer_text = Get-ScreenText (Join-Path $capDir "offer.png")
+                Start-Sleep -Seconds $SettleAfterPressSec
+                Capture-To (Join-Path $capDir "offer-late.png")
+                $verdict.offer_late_text = Get-ScreenText (Join-Path $capDir "offer-late.png")
+            }
         }
         # B returns to the menu (P1's acceptance asks for exactly this).
         Invoke-Actions @("key:b", "wait:4")
@@ -306,6 +324,14 @@ if (-not $MenuOnly) {
         $report += ""
         $report += "--- store, row $PageRow opened, settle (OCR) ---"
         $report += $verdict.page_late_text
+        if ($OfferRow -ge 0) {
+            $report += ""
+            $report += "--- offer row $OfferRow opened, +2 s (OCR) ---"
+            $report += $verdict.offer_text
+            $report += ""
+            $report += "--- offer row $OfferRow opened, settle (OCR) ---"
+            $report += $verdict.offer_late_text
+        }
     }
     $report += ""
     $report += "--- after B (OCR) ---"

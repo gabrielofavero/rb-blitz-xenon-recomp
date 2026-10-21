@@ -415,6 +415,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (!store::HideStorePriceChrome(&store_ui_roots, &why)) {
         note("hiding the store's price footer was refused: " + why);
       }
+      why.clear();
+      // The details panel's `get_data (rank <part>)` is a two-component path the offer walk cannot
+      // resolve (store_payload.h), so its loop reads the record's single-component `rank_<part>`
+      // keys instead.
+      if (!store::UnrollOfferRanks(&store_ui_roots, &why)) {
+        note("unrolling the details panel's difficulty read was refused: " + why);
+      }
       built["ui/store/gen/store.dtb"] = ui::dtb::Compile(store_ui_roots, store_ui_header);
     } else {
       note("the store's screen record could not be read: " + store_ui_why);
@@ -433,6 +440,16 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       why.clear();
       if (!store::AlwaysShowOfferDetails(&info_roots, &why)) {
         note("opening the details page for a free offer was refused: " + why);
+      }
+      why.clear();
+      if (!store::HidePreviewButton(&info_roots, &why)) {
+        note("hiding the details page's preview row was refused: " + why);
+      }
+      why.clear();
+      // The native `set_offer` enumeration reports an error for a served offer, so the browser's A
+      // press populates the details screen directly (store_payload.h).
+      if (!store::ShowOfferDetailsDirectly(&info_roots, &why)) {
+        note("the details page's direct route was refused: " + why);
       }
       built["ui/store/gen/store_info.dtb"] = ui::dtb::Compile(info_roots, info_header);
     } else {

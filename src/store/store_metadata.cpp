@@ -10,8 +10,9 @@ namespace {
 
 using ui::dtb::Node;
 
-// See store_metadata.h: off until the null the symbol form reaches in the list draw is named.
-bool g_type_symbol = false;
+// See store_metadata.h: the symbol form is what the retail provider's row label compares against,
+// and it is the shipped default. `store_offer_type_symbol=0` selects the string spelling.
+bool g_type_symbol = true;
 
 Node Symbol(std::string_view name) { return Node::Symbol(name); }
 Node Text(std::string_view text) { return Node::String(text); }
@@ -69,6 +70,11 @@ bool ValidateOffers(const std::vector<Offer>& offers, std::string* why) {
 // *missing* part hands `{song_mgr rank_tier <null> <part>}` a null to dereference (measured
 // 2026-10-21: the page's parse returns, then the guest faults on `read of guest 0x00000000` as the
 // browser opens).
+//
+// This is the retail-shaped nested map. The details panel in *this* build reads the single-component
+// `rank_<part>` keys instead (see `ExtraIntKeys`), because its `(rank <part>)` path cannot resolve
+// against any five-part map; the nested map stays because it is the record shape the retail schema
+// and the `by_difficulty` grouping describe, and `store_payload`'s unroll only changes the panel.
 std::vector<std::pair<const char*, int>> OfferRanks(const Offer& offer) {
   return {{"guitar", offer.rank_guitar},
           {"drum", offer.rank_drum},
@@ -95,11 +101,9 @@ std::vector<std::pair<const char*, int>> OfferRanks(const Offer& offer) {
 // the null read the page faulted on once it carried offers (boots 103-109; an empty page, boot 108,
 // went through untouched). An empty string is a value; a missing key is not.
 //
-// `preview_audio` and `preview_art` are the exception, and they are NOT here: both are read *behind*
-// `has_data`, which an empty string satisfies - and then the preview manager is handed an empty file
-// name and the art loader an empty path (`store_browser_panel.refresh` -> `play_preview_file_if_cached`,
-// `store_details_panel.refresh` -> `store_panel load_art`). A free custom has neither, so both keys are
-// written only when they have a value, which is exactly what hides the retail preview UI (§2.5).
+// `preview_audio` is written as an empty string for the same reason (see `Offer::preview_audio`),
+// and `preview_art` only when it has a value: both are read *behind* `has_data` by the details
+// panel, and an empty string there would be "present" and send the art loader after an empty path.
 std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offer) {
   std::string first_char;
   if (!offer.name.empty()) {
@@ -113,13 +117,35 @@ std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offe
           {"subgenre", std::string()},
           {"album_link", std::string()},
           {"pack_link", std::string()},
-          {"pack_name", std::string()}};
+          {"pack_name", std::string()},
+          // Empty, never absent: `refresh_buttons` reads it for every song before it checks
+          // `has_data` (see the Offer member). No preview asset exists (§3.3), so it is "".
+          {"preview_audio", offer.preview_audio}};
 }
 
 // The integer keys the same scripts read: `review` is formatted by `{"sprintf" "review_%i" ...}`
-// (a grouping token, not a score) and `rating` is a star count. Zero where the catalogue has none.
-std::vector<std::pair<const char*, int>> ExtraIntKeys() {
-  return {{"review", 0}, {"rating", 0}};
+// (a grouping token, not a score). Zero where the catalogue has none.
+//
+// `rating` is deliberately **not** written: both details panels read it behind `has_data` and draw
+// `{sprintf "rating_%i" ...}` as a locale token, so a written 0 showed the literal text `RATING_0`
+// on the A press (measured 2026-10-21); an absent key hides the whole rating group instead.
+//
+// The `rank_<part>` keys are what the details panel is unrolled onto (store_payload.h's
+// `UnrollOfferRanks`). Measured 2026-10-21 by decoding the offer's `get_data` (`sub_82453928` ->
+// `sub_824538A8` -> the path walk `sub_824534A8`): each path component is interned and then
+// `sub_823FAE00` looks for a pair whose FIRST element equals it, so a two-component `(rank <part>)`
+// asks the `rank` pair for a child whose first element is the part - a five-part map cannot answer
+// that for more than one part, the lookup returns nothing, and the walk dereferences the null
+// (`read of guest 0x00000000`, reproduced in boot `rb_blitz_165.log`). A single-component key goes
+// through the same lookup the offer's `name` already answers, so the panel's loop is rewritten onto
+// `(rank_guitar)` ... `(rank_keys)` instead of `(rank guitar)`.
+std::vector<std::pair<const char*, int>> ExtraIntKeys(const Offer& offer) {
+  return {{"review", 0},
+          {"rank_guitar", offer.rank_guitar},
+          {"rank_drum", offer.rank_drum},
+          {"rank_bass", offer.rank_bass},
+          {"rank_vocals", offer.rank_vocals},
+          {"rank_keys", offer.rank_keys}};
 }
 
 }  // namespace
@@ -237,7 +263,7 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
     for (const auto& extra : ExtraTextKeys(offer)) {
       fields.push_back(pair(extra.first, extra.second));
     }
-    for (const auto& extra : ExtraIntKeys()) {
+    for (const auto& extra : ExtraIntKeys(offer)) {
       fields.push_back(Node::Array({Symbol(extra.first), Node::Int(extra.second)}));
     }
     std::vector<Node> rank_pairs;
@@ -327,7 +353,7 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why) {
     for (const auto& extra : ExtraTextKeys(offer)) {
       out += pair_text(extra.first, extra.second);
     }
-    for (const auto& extra : ExtraIntKeys()) {
+    for (const auto& extra : ExtraIntKeys(offer)) {
       out += "    (" + std::string(extra.first) + " " + std::to_string(extra.second) + ")\n";
     }
     if (offer.downloaded) {

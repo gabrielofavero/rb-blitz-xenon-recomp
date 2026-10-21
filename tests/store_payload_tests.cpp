@@ -824,12 +824,358 @@ void TestOfferDetailsGuard() {
   CHECK_TRUE(TreeUnchanged(other, untouched));
 }
 
+void TestEveryUnavailableGuard() {
+  BeginCase("every is_completely_unavailable guard answers false");
+
+  // Both panels the shipped record carries; `store_offer_fetch_panel` comes first in document
+  // order, which is why a first-match-only edit left the browser's own guard in place. The enum
+  // panel wraps its guard in a `{do}` (its `on_enum_finished` binds `offer` first).
+  const auto guarded_panel = [](const char* type, const char* name, bool wrapped) {
+    Node guard = Node::Command({Symbol("if_else"),
+                                Node::Command({Node::Var("offer"),
+                                               Symbol("is_completely_unavailable")}),
+                                Node::Command({Symbol("ui"), Symbol("goto_screen"),
+                                               Symbol("store_info_unavailable_screen")}),
+                                Node::Command({Symbol("ui"), Symbol("goto_screen"),
+                                               Symbol("store_info_screen")})});
+    std::vector<Node> method{Symbol("on_enum_finished")};
+    if (wrapped) {
+      method.push_back(Node::Command({Symbol("do"), std::move(guard)}));
+    } else {
+      method.push_back(std::move(guard));
+    }
+    return Node::Command(
+        {Symbol("new"), Symbol(type), Symbol(name), Node::Array(std::move(method))});
+  };
+  std::vector<Node> record = {
+      guarded_panel("StoreOfferFetchPanel", "store_offer_fetch_panel", false),
+      guarded_panel("StoreInfoEnumPanel", "store_info_enum_panel", true),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AlwaysShowOfferDetails(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* fetch = FindNamedMethodNode(record[0], "store_offer_fetch_panel", "on_enum_finished");
+  const Node* method =
+      FindNamedMethodNode(record[1], "store_info_enum_panel", "on_enum_finished");
+  CHECK_TRUE(fetch != nullptr && method != nullptr);
+  if (fetch == nullptr || method == nullptr) return;
+  // Both guards test the literal FALSE; the else branch (the details screen) is untouched.
+  CHECK_STR_EQ(fetch->kids[1].kids[1].text, "FALSE");
+  CHECK_STR_EQ(fetch->kids[1].kids[3].kids[2].text, "store_info_screen");
+  CHECK_STR_EQ(method->kids[1].kids[1].kids[1].text, "FALSE");
+  CHECK_STR_EQ(method->kids[1].kids[1].kids[3].kids[2].text, "store_info_screen");
+}
+
+void TestOfferDetailsDirect() {
+  BeginCase("the browser's A press populates the details screen directly");
+
+  std::vector<Node> record = {
+      Node::Command(
+          {Symbol("new"), Symbol("StoreInfoEnumPanel"), Symbol("store_info_enum_panel"),
+           Node::Array(
+               {Symbol("enum_and_show_offer"), Node::Array({Node::Var("offer")}),
+                Node::Command({Symbol("ui"), Symbol("goto_screen"),
+                               Symbol("store_info_enum_screen")}),
+                Node::Command({Symbol("this"), Symbol("set"), Symbol("in_offer"),
+                               Node::Var("offer")}),
+                Node::Command({Symbol("this"), Symbol("set"), Symbol("b_enum_only"),
+                               Symbol("TRUE")})})}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::ShowOfferDetailsDirectly(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* method =
+      FindNamedMethodNode(record[0], "store_info_enum_panel", "enum_and_show_offer");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+  // Name + the parameter list survive; the body is exactly the retail success branch.
+  CHECK_EQ(method->kids.size(), size_t{3});
+  const Node& body = method->kids[2];
+  CHECK_STR_EQ(body.kids[0].text, "do");
+  CHECK_EQ(body.kids.size(), size_t{5});
+  CHECK_STR_EQ(body.kids[1].kids[0].text, "store_info_panel");
+  CHECK_STR_EQ(body.kids[1].kids[1].text, "clear_data");
+  CHECK_STR_EQ(body.kids[2].kids[1].text, "set");
+  CHECK_STR_EQ(body.kids[2].kids[2].text, "cur_offer");
+  CHECK_STR_EQ(body.kids[2].kids[3].text, "offer");
+  CHECK_STR_EQ(body.kids[3].kids[0].text, "store_details_panel");
+  CHECK_STR_EQ(body.kids[3].kids[1].text, "refresh");
+  CHECK_STR_EQ(body.kids[4].kids[0].text, "ui");
+  CHECK_STR_EQ(body.kids[4].kids[1].text, "goto_screen");
+  CHECK_STR_EQ(body.kids[4].kids[2].text, "store_info_screen");
+
+  // Idempotent.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::ShowOfferDetailsDirectly(&record, &why));
+  const Node* again =
+      FindNamedMethodNode(record[0], "store_info_enum_panel", "enum_and_show_offer");
+  CHECK_TRUE(again != nullptr && again->kids.size() == size_t{3});
+
+  // Compile and parse round trip.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+  if (!parsed.empty()) {
+    const Node* back =
+        FindNamedMethodNode(parsed[0], "store_info_enum_panel", "enum_and_show_offer");
+    CHECK_TRUE(back != nullptr && back->kids.size() == size_t{3});
+  }
+
+  // A record without the panel is refused before any edit.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::ShowOfferDetailsDirectly(&other, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
+void TestRankLoopUnrolled() {
+  BeginCase("the details panel reads the single-component rank keys");
+
+  // The measured shape of `store_details_panel.refresh`'s difficulty block (`store.dtb`, dumped
+  // 2026-10-21): `{if_else {== {offer offer_type} song} {do {foreach part (guitar drum vocals bass
+  // keys) {do (rank {offer get_data (rank part)}) ...}}} ...}`.
+  const auto block = []() {
+    return Node::Command(
+        {Symbol("do"),
+         Node::Array({Node::Var("rank"),
+                      Node::Command({Node::Var("offer"), Symbol("get_data"),
+                                     Node::Array({Symbol("rank"), Node::Var("part")})})}),
+         Node::Array({Node::Var("tier"),
+                      Node::Command({Symbol("song_mgr"), Symbol("rank_tier"),
+                                     Node::Var("rank"), Node::Var("part")})}),
+         Node::Array({Node::Var("idd"),
+                      Node::Command({Symbol("sprintf"), Node::String("diff_%s"),
+                                     Node::Var("part")})}),
+         Node::Command({Node::Var("this"), Symbol("set_inst_difficulty"),
+                        Node::Var("idd"), Node::Var("tier"), Symbol("TRUE")})});
+  };
+  std::vector<Node> record = {
+      Node::Command(
+          {Symbol("new"), Symbol("HeldButtonPanel"), Symbol("store_details_panel"),
+           Node::Array(
+               {Symbol("refresh"), Node::Array({Node::Var("offer")}),
+                Node::Command(
+                    {Symbol("if_else"),
+                     Node::Command({Symbol("=="),
+                                    Node::Command({Node::Var("offer"), Symbol("offer_type")}),
+                                    Symbol("song")}),
+                     Node::Command({Symbol("do"),
+                                    Node::Command({Symbol("foreach"), Node::Var("part"),
+                                                   Node::Array({Symbol("guitar"), Symbol("drum"),
+                                                                Symbol("vocals"), Symbol("bass"),
+                                                                Symbol("keys")}),
+                                                   block()})}),
+                     Node::Command({Node::Var("this"), Symbol("set_inst_difficulty"),
+                                    Node::String(""), Node::Int(-1), Symbol("FALSE")})})})}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::UnrollOfferRanks(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* method = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+  // The `foreach` is gone; in its place one `{do ...}` with five blocks, each reading a single
+  // `rank_<part>` key and passing the part itself to `rank_tier`/`sprintf`.
+  const Node& ifelse = method->kids[2];
+  const Node& then_branch = ifelse.kids[2];
+  const Node& loop = then_branch.kids[1];
+  CHECK_STR_EQ(loop.kids[0].text, "do");
+  CHECK_EQ(loop.kids.size(), size_t{6});  // do + five blocks
+  static const char* const kParts[] = {"guitar", "drum", "vocals", "bass", "keys"};
+  for (size_t i = 0; i < 5; ++i) {
+    const Node& one = loop.kids[i + 1];
+    CHECK_STR_EQ(one.kids[0].text, "do");
+    // (rank {offer get_data (rank_<part>)}) - a ONE-element path.
+    const Node& path = one.kids[1].kids[1].kids[2];
+    CHECK_EQ(path.kids.size(), size_t{1});
+    CHECK_STR_EQ(path.kids[0].text, std::string("rank_") + kParts[i]);
+    // (tier {song_mgr rank_tier rank <part>})
+    CHECK_STR_EQ(one.kids[2].kids[1].kids[3].text, kParts[i]);
+    // (idd {sprintf "diff_%s" <part>})
+    CHECK_STR_EQ(one.kids[3].kids[1].kids[2].text, kParts[i]);
+  }
+
+  // No two-component `(rank <part>)` read is left anywhere in the method.
+  const auto has_rank_pair = [](const Node& node, const auto& self) -> bool {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+        node.kids[1].text == "get_data") {
+      const Node& path = node.kids[2];
+      if (path.tag == rb_blitz::ui::dtb::kArray && path.kids.size() == 2 &&
+          path.kids[0].text == "rank") {
+        return true;
+      }
+    }
+    for (const Node& kid : node.kids) {
+      if (self(kid, self)) return true;
+    }
+    return false;
+  };
+  CHECK_FALSE(has_rank_pair(*method, has_rank_pair));
+
+  // Idempotent.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::UnrollOfferRanks(&record, &why));
+  const Node* again = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
+  CHECK_TRUE(again != nullptr && again->kids[2].kids[2].kids[1].kids.size() == size_t{6});
+
+  // Compile and parse round trip.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+
+  // A record without the details panel is refused untouched.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::UnrollOfferRanks(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+
+  // A foreach that is not the difficulty loop is refused too (nothing is rewritten by accident).
+  std::vector<Node> not_ranks = {
+      Node::Command(
+          {Symbol("new"), Symbol("HeldButtonPanel"), Symbol("store_details_panel"),
+           Node::Array({Symbol("refresh"),
+                        Node::Command({Symbol("foreach"), Symbol("row"),
+                                       Node::Array({Symbol("a"), Symbol("b")}),
+                                       Node::Command({Symbol("this"), Symbol("draw"),
+                                                      Symbol("row")})})})}),
+  };
+  const std::vector<Node> not_ranks_untouched = not_ranks;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::UnrollOfferRanks(&not_ranks, &why));
+  CHECK_TRUE(TreeUnchanged(not_ranks, not_ranks_untouched));
+}
+
+// `store-edit <file.dtb> store|info`: run the P3 store-record transforms against a real shipped
+// record and print the refusal reason, plus the method the transform looked at. This is the
+// measurement half of those edits - the payload applies them to whatever `ui/store/gen/*.dtb` the
+// boot mounts, and a refusal there is a note in the log that names a reason but not the record's
+// own shape.
+void PrintNode(const Node& node, int depth) {
+  std::printf("%*s[0x%02x] %s\n", depth * 2, "", node.tag, node.text.c_str());
+  if (depth >= 10) return;
+  for (const Node& kid : node.kids) PrintNode(kid, depth + 1);
+}
+
+int StoreEdit(const char* path, const char* which) {
+  std::ifstream stream(path, std::ios::binary);
+  if (!stream) {
+    std::printf("store-edit: cannot read %s\n", path);
+    return 1;
+  }
+  const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),
+                                   std::istreambuf_iterator<char>());
+  std::vector<Node> roots;
+  rb_blitz::ui::dtb::RootHeader header;
+  std::string error;
+  if (!rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &error)) {
+    std::printf("store-edit: %s does not parse: %s\n", path, error.c_str());
+    return 1;
+  }
+  const std::string mode = which;
+  std::string why;
+  bool ok = false;
+  if (mode == "store") {
+    ok = rb_blitz::store::UnrollOfferRanks(&roots, &why);
+  } else {
+    ok = rb_blitz::store::ShowOfferDetailsDirectly(&roots, &why);
+    std::printf("store-edit: details route -> %s (%s)\n", ok ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool preview = rb_blitz::store::HidePreviewButton(&roots, &why);
+    std::printf("store-edit: preview row -> %s (%s)\n", preview ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && preview;
+  }
+  std::printf("store-edit: %s -> %s\n", mode.c_str(), ok ? "edited" : "refused");
+  const Node* method = nullptr;
+  for (const Node& root : roots) {
+    method = mode == "store"
+                 ? FindNamedMethodNode(root, "store_details_panel", "refresh")
+                 : FindNamedMethodNode(root, "store_info_enum_panel", "enum_and_show_offer");
+    if (method != nullptr) break;
+  }
+  if (method != nullptr) {
+    std::printf("store-edit: method shape:\n");
+    PrintNode(*method, 0);
+  } else {
+    std::printf("store-edit: method not found in %zu root(s)\n", roots.size());
+  }
+  return ok ? 0 : 1;
+}
+
+void TestPreviewButtonHidden() {
+  BeginCase("the details page never offers a preview it cannot play");
+
+  // `refresh_buttons`' measured shape: build `buttons`, insert Exit, then the preview row inside
+  // the `has_data preview_audio` block (which an empty string satisfies).
+  const auto insert = [](const char* row) {
+    return Node::Command({Symbol("insert_elem"), Symbol("buttons"), Node::Int(0), Symbol(row)});
+  };
+  std::vector<Node> record = {
+      Node::Command(
+          {Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+           Node::Array(
+               {Symbol("refresh_buttons"), Node::Array({Node::Var("init")}),
+                Node::Command({Symbol("do"), insert("exit"),
+                               Node::Command({Symbol("if"),
+                                              Node::Command({Symbol("offer"), Symbol("has_data"),
+                                                             Symbol("preview_audio")}),
+                                              Node::Command({Symbol("do"),
+                                                             insert("store_preview_audio")})})})})}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::HidePreviewButton(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* method =
+      FindNamedMethodNode(record[0], "store_info_panel", "refresh_buttons");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+  // The Exit row stays; the preview row is gone.
+  bool exit_row = false;
+  bool preview_row = false;
+  const auto scan = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+        node.kids[0].text == "insert_elem") {
+      if (node.kids.back().text == "exit") exit_row = true;
+      if (node.kids.back().text == "store_preview_audio") preview_row = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan(*method, scan);
+  CHECK_TRUE(exit_row);
+  CHECK_FALSE(preview_row);
+
+  // Idempotent, and a record without the panel is refused untouched.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::HidePreviewButton(&record, &why));
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::HidePreviewButton(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
 int main(int argc, char** argv) {
   if (argc >= 3 && std::strcmp(argv[1], "dump-menu") == 0) {
     return DumpMenu(argv[2]);
   }
   if (argc >= 3 && std::strcmp(argv[1], "dump-strings") == 0) {
     return DumpStrings(argv[2]);
+  }
+  if (argc >= 4 && std::strcmp(argv[1], "store-edit") == 0) {
+    return StoreEdit(argv[2], argv[3]);
   }
   TestRewriteAddsLocalServer();
   TestRewriteReplacesExistingLocal();
@@ -845,5 +1191,9 @@ int main(int argc, char** argv) {
   TestStoreInfoPriceChrome();
   TestStoreHeading();
   TestOfferDetailsGuard();
+  TestEveryUnavailableGuard();
+  TestOfferDetailsDirect();
+  TestPreviewButtonHidden();
+  TestRankLoopUnrolled();
   return rb_blitz::test::Finish();
 }

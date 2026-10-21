@@ -117,7 +117,17 @@ struct Offer {
   int year_released = 0;
   // A path the art loader can fetch (`store_panel load_art <path> this`); empty hides the art.
   std::string preview_art;
-  // `rank <part>` values the tier display reads; 0 is omitted and the UI shows unknown.
+  // The preview audio file name (`store_preview_mgr`). RhythmVerse supplies none (§3.3), but the
+  // key must still exist: `store_info_panel.refresh_buttons` reads `get_data (preview_audio)`
+  // **unconditionally** for a song, and a missing key makes the offer walk dereference null
+  // (measured 2026-10-21, the A press on a served offer). Retail's own offers always carry it.
+  std::string preview_audio;
+  // The per-part rank the store's difficulty display reads. Each value is written twice: inside the
+  // retail-shaped `(rank ((guitar N) ...))` map, and as a single-component `(rank_guitar N)` key.
+  // The second spelling is the one the details panel reads in this build - its `get_data (rank
+  // <part>)` is a two-component path the offer walk cannot resolve (store_payload.h's
+  // `UnrollOfferRanks` has the measurement). 0 means "unknown" and is written as 0, not omitted:
+  // a missing part hands `song_mgr rank_tier` a null.
   int rank_guitar = 0;
   int rank_drum = 0;
   int rank_bass = 0;
@@ -171,18 +181,19 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why);
 // log.
 inline constexpr uint32_t kFrontMenuVersion = 2;
 
-// The node kind of the offer's `type` key. It is a **measurement switch**, not a preference:
+// The node kind of the offer's `type` key:
 //
 //   * as a **symbol** (`(type song)`) the retail provider answers the row label - measured 2026-10-21,
 //     `StoreOfferProvider::Text` (`sub_8275A230`) reads every one of our titles through
 //     `get_data("name")` (`store-probe: offer name exit '<title>'`), because it compares
 //     `get_data("type")` against the interned symbol `song` (`sub_822D1CE0`);
-//   * but that same boot then dies on `read of guest 0x00000000` while the list draws (three passes
-//     of 24 titles, then the fault), so the symbol form is **off by default** until that null is
-//     named. With it off (a string node, the shipped `dummy_upsell_offer`'s own spelling) the browser
-//     opens with blank rows, which is the behaviour boots 112-120 measured.
+//   * as a **string** (the shipped `dummy_upsell_offer`'s spelling) the provider falls through to
+//     its empty answer and every row draws blank - the pre-P3 behaviour.
 //
-// `store_offer_type_symbol` (src/store/store_fetch.cpp) sets it once per boot on the host thread.
+// The symbol form is the shipped default. It used to fault while the list drew, and that null was
+// the details panel's `(rank <part>)` read - not the label - which the payload now unrolls onto the
+// record's `rank_<part>` keys (store_payload.h). `store_offer_type_symbol` (src/store/store_fetch.cpp)
+// can still select the string form for a boot.
 void SetOfferTypeSymbol(bool symbol);
 
 }  // namespace rb_blitz::store

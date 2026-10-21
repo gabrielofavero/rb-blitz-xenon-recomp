@@ -371,19 +371,19 @@ bool HideStoreInfoPriceChrome(std::vector<ui::dtb::Node>* store_info_roots, std:
 
 namespace {
 
-// The `if_else` whose test is `{<receiver> is_completely_unavailable}`.
-Node* FindUnavailableGuard(Node& node) {
+// The `if_else` whose test is `{<receiver> is_completely_unavailable}`, collected from every panel
+// the record defines (both `store_info_enum_panel` and `store_offer_fetch_panel` carry one).
+void CollectUnavailableGuards(Node& node, std::vector<Node*>* guards) {
   if (node.tag == ui::dtb::kCommand && node.kids.size() >= 2 && IsSymbol(node.kids[0], "if_else")) {
     const Node& test = node.kids[1];
     if (test.tag == ui::dtb::kCommand && test.kids.size() >= 2 &&
         IsSymbol(test.kids[1], "is_completely_unavailable")) {
-      return &node;
+      guards->push_back(&node);
     }
   }
   for (Node& kid : node.kids) {
-    if (Node* found = FindUnavailableGuard(kid)) return found;
+    CollectUnavailableGuards(kid, guards);
   }
-  return nullptr;
 }
 
 // An `if_else` whose test is the literal `FALSE` - the shape this edit leaves behind.
@@ -398,6 +398,26 @@ bool HasFalseGuard(const Node& node) {
   return false;
 }
 
+// `{<receiver> <method> <args...>}` anywhere in the method. A receiver is spelled `this`, an object
+// name or a variable, so only the names are compared.
+bool HasCommand(const Node& node, std::string_view receiver, std::string_view method) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 2 && node.kids[0].text == receiver &&
+      node.kids[1].text == method) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasCommand(kid, receiver, method)) return true;
+  }
+  return false;
+}
+
+// A local variable's name. The compiled stream spells parameters and locals as `kVar` nodes ($name),
+// not symbols - measured on the shipped records, where `offer`, `part`, `rank`, `tier`, `idd` and
+// `this` all parse as 0x02 - so a scan that only understood symbols would never see them.
+bool IsVariable(const Node& node, std::string_view name) {
+  return (node.tag == ui::dtb::kVar || node.tag == ui::dtb::kSymbol) && node.text == name;
+}
+
 }  // namespace
 
 bool AlwaysShowOfferDetails(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
@@ -410,28 +430,263 @@ bool AlwaysShowOfferDetails(std::vector<ui::dtb::Node>* store_info_roots, std::s
   if (store_info_roots == nullptr) {
     return refuse("no record roots");
   }
+  std::vector<Node*> guards;
+  for (Node& root : *store_info_roots) {
+    CollectUnavailableGuards(root, &guards);
+  }
+  if (guards.empty()) {
+    // Already rewritten? Then the guards test the literal `FALSE`, which is the state this edit
+    // leaves behind - an idempotent second pass, not a refusal.
+    for (const Node& root : *store_info_roots) {
+      if (HasFalseGuard(root)) {
+        if (why != nullptr) why->clear();
+        return true;
+      }
+    }
+    return refuse("the record carries no is_completely_unavailable guard");
+  }
+  // `{if_else FALSE <then> <else>}`: the else branch (the details screen) always runs.
+  for (Node* guard : guards) {
+    guard->kids[1] = Node::Symbol("FALSE");
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+bool ShowOfferDetailsDirectly(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
   Node* method = nullptr;
   for (Node& root : *store_info_roots) {
-    method = FindNamedMethod(root, "store_info_enum_panel", "on_enum_finished");
+    method = FindNamedMethod(root, "store_info_enum_panel", "enum_and_show_offer");
     if (method != nullptr) {
       break;
     }
   }
   if (method == nullptr) {
-    return refuse("the record carries no store_info_enum_panel on_enum_finished method");
+    return refuse("the record carries no store_info_enum_panel enum_and_show_offer method");
   }
-  Node* guard = FindUnavailableGuard(*method);
-  if (guard == nullptr) {
-    // Already rewritten? Then the method's `if_else` tests the literal `FALSE`, which is the state
-    // this edit leaves behind - an idempotent second pass, not a refusal.
-    if (HasFalseGuard(*method)) {
+  // The rewritten body is exactly the retail `on_enum_finished` else branch; its marker is the
+  // direct jump to the details screen plus the populate commands.
+  if (HasCommand(*method, "ui", "goto_screen") &&
+      HasCommand(*method, "store_info_panel", "clear_data")) {
+    if (why != nullptr) why->clear();
+    return true;
+  }
+  if (method->kids.size() < 2 || method->kids[1].tag != ui::dtb::kArray ||
+      method->kids[1].kids.size() != 1 || !IsVariable(method->kids[1].kids[0], "offer")) {
+    return refuse("enum_and_show_offer does not take a single `offer` argument");
+  }
+  // Keep the name and the parameter list; drop the retail body (which went through
+  // `store_info_enum_screen` and the native enumeration).
+  method->kids.resize(2);
+  method->kids.push_back(
+      Node::Command({Node::Symbol("do"),
+                     Node::Command({Node::Symbol("store_info_panel"), Node::Symbol("clear_data")}),
+                     Node::Command({Node::Symbol("store_info_panel"), Node::Symbol("set"),
+                                    Node::Symbol("cur_offer"), Node::Var("offer")}),
+                     Node::Command({Node::Symbol("store_details_panel"), Node::Symbol("refresh"),
+                                    Node::Var("offer")}),
+                     Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                                    Node::Symbol("store_info_screen")})}));
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
+// `{insert_elem <list> <pos> <row>}` for the preview row, anywhere in the method.
+bool IsPreviewRowInsert(const Node& node) {
+  if (node.tag != ui::dtb::kCommand || node.kids.size() < 3 || !IsSymbol(node.kids[0], "insert_elem")) {
+    return false;
+  }
+  return node.kids.back().text == "store_preview_audio";
+}
+
+// Removes every preview-row insertion, at any depth.
+void StripPreviewInsertions(Node& node) {
+  for (Node& kid : node.kids) {
+    StripPreviewInsertions(kid);
+  }
+  node.kids.erase(std::remove_if(node.kids.begin(), node.kids.end(), IsPreviewRowInsert),
+                  node.kids.end());
+}
+
+}  // namespace
+
+bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* method = nullptr;
+  for (Node& root : *store_info_roots) {
+    method = FindNamedMethod(root, "store_info_panel", "refresh_buttons");
+    if (method != nullptr) {
+      break;
+    }
+  }
+  if (method == nullptr) {
+    return refuse("the record carries no store_info_panel refresh_buttons method");
+  }
+  StripPreviewInsertions(*method);
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+// and the body. `owner` is the vector that holds it, which is what the rewrite swaps.
+struct ForeachLocation {
+  std::vector<Node>* owner = nullptr;
+  size_t index = 0;
+};
+
+bool FindForeach(Node& node, ForeachLocation* out) {
+  for (size_t i = 0; i < node.kids.size(); ++i) {
+    Node& kid = node.kids[i];
+    if (kid.tag == ui::dtb::kCommand && kid.kids.size() >= 4 && IsSymbol(kid.kids[0], "foreach")) {
+      out->owner = &node.kids;
+      out->index = i;
+      return true;
+    }
+    if (FindForeach(kid, out)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsRankPartList(const Node& node) {
+  if (node.tag != ui::dtb::kArray || node.kids.size() != 5) {
+    return false;
+  }
+  static const char* const kParts[] = {"guitar", "drum", "vocals", "bass", "keys"};
+  for (size_t i = 0; i < 5; ++i) {
+    if (!IsSymbol(node.kids[i], kParts[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// `{<receiver> get_data (rank <var>)}` - the two-component read this rewrite replaces.
+bool ReadsRankPath(const Node& node, std::string_view var) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+      IsSymbol(node.kids[1], "get_data")) {
+    const Node& path = node.kids[2];
+    if (path.tag == ui::dtb::kArray && path.kids.size() == 2 && IsSymbol(path.kids[0], "rank") &&
+        IsVariable(path.kids[1], var)) {
+      return true;
+    }
+  }
+  for (const Node& kid : node.kids) {
+    if (ReadsRankPath(kid, var)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// `{<receiver> get_data (<rank_...>)}` - the single-component read this rewrite leaves behind.
+bool ReadsSingleRank(const Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+      IsSymbol(node.kids[1], "get_data")) {
+    const Node& path = node.kids[2];
+    if (path.tag == ui::dtb::kArray && path.kids.size() == 1 &&
+        path.kids[0].tag == ui::dtb::kSymbol && path.kids[0].text.rfind("rank_", 0) == 0) {
+      return true;
+    }
+  }
+  for (const Node& kid : node.kids) {
+    if (ReadsSingleRank(kid)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// One unrolled loop body, in the exact statement shape the retail record carries
+// (`store.dtb`'s `store_details_panel.refresh`, dumped 2026-10-21): a `{do}` binding `$rank`,
+// `$tier` and `$idd`, then the panel call. The receiver (`offer`/`this`), the binding names and the
+// values they are passed are **variables**; the keys and the tokens are symbols, exactly as the
+// shipped record spells them.
+Node RankBlock(std::string_view part) {
+  const std::string key = "rank_" + std::string(part);
+  return Node::Command(
+      {Node::Symbol("do"),
+       Node::Array({Node::Var("rank"),
+                    Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
+                                   Node::Array({Node::Symbol(key)})})}),
+       Node::Array({Node::Var("tier"),
+                    Node::Command({Node::Symbol("song_mgr"), Node::Symbol("rank_tier"),
+                                   Node::Var("rank"), Node::Symbol(part)})}),
+       Node::Array({Node::Var("idd"),
+                    Node::Command({Node::Symbol("sprintf"), Node::String("diff_%s"),
+                                   Node::Symbol(part)})}),
+       Node::Command({Node::Var("this"), Node::Symbol("set_inst_difficulty"),
+                      Node::Var("idd"), Node::Var("tier"), Node::Symbol("TRUE")})});
+}
+
+}  // namespace
+
+bool UnrollOfferRanks(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* method = nullptr;
+  for (Node& root : *store_ui_roots) {
+    method = FindNamedMethod(root, "store_details_panel", "refresh");
+    if (method != nullptr) {
+      break;
+    }
+  }
+  if (method == nullptr) {
+    return refuse("the record carries no store_details_panel refresh method");
+  }
+  ForeachLocation loop;
+  if (!FindForeach(*method, &loop)) {
+    // Already unrolled? The single-component reads are the state this edit leaves behind.
+    if (ReadsSingleRank(*method)) {
       if (why != nullptr) why->clear();
       return true;
     }
-    return refuse("on_enum_finished carries no is_completely_unavailable guard");
+    return refuse("store_details_panel refresh carries no foreach loop");
   }
-  // `{if_else FALSE <then> <else>}`: the else branch (the details screen) always runs.
-  guard->kids[1] = Node::Symbol("FALSE");
+  Node& command = (*loop.owner)[loop.index];
+  const std::string var = (command.kids[1].tag == ui::dtb::kVar ||
+                           command.kids[1].tag == ui::dtb::kSymbol)
+                              ? command.kids[1].text
+                              : std::string();
+  if (var.empty() || !IsRankPartList(command.kids[2]) || !ReadsRankPath(command.kids[3], var)) {
+    return refuse("the foreach is not the difficulty loop (no `(rank <part>)` read)");
+  }
+  std::vector<Node> blocks;
+  for (const char* part : {"guitar", "drum", "vocals", "bass", "keys"}) {
+    blocks.push_back(RankBlock(part));
+  }
+  Node replacement = Node::Command({Node::Symbol("do")});
+  for (Node& block : blocks) {
+    replacement.kids.push_back(std::move(block));
+  }
+  (*loop.owner)[loop.index] = std::move(replacement);
   if (why != nullptr) why->clear();
   return true;
 }

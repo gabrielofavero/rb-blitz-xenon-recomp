@@ -131,9 +131,11 @@ void TestMenuText() {
   // Each offer is one list of pairs on its own line, under the `offers` root.
   CHECK_TRUE(Contains(text, "(offers\n"));
   CHECK_TRUE(Contains(text, "(name \"The People That We Love\")"));
-  // `type` defaults to a **string** - the shipped `dummy_upsell_offer`'s spelling. The symbol form
-  // is the measurement switch `store_offer_type_symbol` (store_metadata.h), pinned below.
-  CHECK_TRUE(Contains(text, "(type \"song\")"));
+  // `type` defaults to a **symbol** - what the retail provider compares to answer a row's label
+  // (store_metadata.h). The string form is the shipped `dummy_upsell_offer`'s spelling and is
+  // pinned below through the measurement switch.
+  CHECK_TRUE(Contains(text, "(type song)"));
+  CHECK_FALSE(Contains(text, "(type \"song\")"));
   CHECK_TRUE(Contains(text, "(offer_type song)"));
   CHECK_TRUE(Contains(text, "(artist \"Bush\")"));
   CHECK_TRUE(Contains(text, "(year_released 2001)"));
@@ -141,14 +143,25 @@ void TestMenuText() {
   // part is present even at 0 - the details panel loops all five and a missing one is a null that
   // `rank_tier` dereferences (boot 112 had the browser open only once all five were written).
   CHECK_TRUE(Contains(text, "(rank ((guitar 3)(drum 1)(bass 0)(vocals 0)(keys 0)))"));
+  // The same five values as **single-component** keys. The details panel's `(rank <part>)` read is
+  // a two-component path the offer walk cannot resolve (measured 2026-10-21; store_payload.h's
+  // `UnrollOfferRanks`), so the payload unrolls the loop onto these, which use the same lookup the
+  // offer's `name` already answers.
+  CHECK_TRUE(Contains(text, "(rank_guitar 3)"));
+  CHECK_TRUE(Contains(text, "(rank_drum 1)"));
+  CHECK_TRUE(Contains(text, "(rank_bass 0)"));
+  CHECK_TRUE(Contains(text, "(rank_vocals 0)"));
+  CHECK_TRUE(Contains(text, "(rank_keys 0)"));
   // Every other key the retail scripts read through `get_data` is present even when it is empty -
   // the browser's groupings do not guard with `has_data`, and an absent key is a null there.
   CHECK_TRUE(Contains(text, "(release_date_str \"\")"));
   CHECK_TRUE(Contains(text, "(first_char \"T\")"));
-  // The two preview keys are the exception: `has_data` is true for an empty string, and the preview
-  // manager/art loader then get an empty path. A free custom writes neither, which also hides the
-  // retail preview UI.
-  CHECK_FALSE(Contains(text, "(preview_audio"));
+  // `preview_audio` is present but empty: RhythmVerse has no preview asset (§3.3), yet
+  // `refresh_buttons` reads the key unconditionally for a song and a missing one makes the offer
+  // walk dereference null (measured 2026-10-21, the A press on a served offer). `preview_art`
+  // stays absent when empty, because its reader is guarded by `has_data` and an empty path would
+  // be handed to the art loader.
+  CHECK_TRUE(Contains(text, "(preview_audio \"\")"));
   CHECK_FALSE(Contains(text, "(preview_art"));
   // `is_available` is deliberately absent: `purchase_allowed` needs it, so no price block and no
   // Buy Now row is ever built, and writing it FALSE made `{offer is_completely_unavailable}` answer
@@ -179,15 +192,14 @@ void TestMenuText() {
   const std::string preview = BuildMenuText(with_preview, &why);
   CHECK_TRUE(Contains(preview, "(preview_art \"dlc_store/xbox/eng/offers/7/art\")"));
 
-  // The measurement switch: as a symbol, `type` is what the retail provider compares against to
-  // answer a row's label (`sub_8275A230` -> `sub_822D1CE0`). Left off by default because the list
-  // then faults while drawing (see the header comment).
-  rb_blitz::store::SetOfferTypeSymbol(true);
-  why.clear();
-  const std::string symbol = BuildMenuText(offers, &why);
-  CHECK_TRUE(Contains(symbol, "(type song)"));
-  CHECK_FALSE(Contains(symbol, "(type \"song\")"));
+  // The measurement switch: off is the shipped `dummy_upsell_offer`'s string spelling, which the
+  // provider never matches (every row draws blank).
   rb_blitz::store::SetOfferTypeSymbol(false);
+  why.clear();
+  const std::string string_form = BuildMenuText(offers, &why);
+  CHECK_TRUE(Contains(string_form, "(type \"song\")"));
+  CHECK_FALSE(Contains(string_form, "(type song)"));
+  rb_blitz::store::SetOfferTypeSymbol(true);
 }
 
 void TestTextQuoting() {

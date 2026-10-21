@@ -17,11 +17,15 @@ the **Downloaded matcher** is built (its index reads every loaded package's `son
 the offers the library already holds), the details page's cost labels and its
 `is_completely_unavailable` guard are edited in the payload, and the browser's blank rows were
 traced to the offer's **string-typed `type` key** (the retail provider compares it against the
-symbol `song`; with the symbol served it answers all 24 titles - but the list then faults while
-drawing, so that form ships behind a default-off switch and the rows stay blank). **Two P3 exit
-items remain open**: the row labels (the draw-time null) and A reaching `store_info_screen` (the
-native offer panel reports `enum_error` for a data-only offer); **album art** is also open (serving
-it needs a runtime PNG→texture encoder).
+symbol `song`; with the symbol served it answers all 24 titles - but the list then faulted while
+drawing, so that form shipped behind a default-off switch and the rows stayed blank). **P3 is
+exited 2026-10-21**: the draw-time null is the details panel's two-component `(rank <part>)` read,
+which no five-part rank map can satisfy (the walk matches each component against a pair's *first*
+element); the record now carries `rank_<part>` keys and the payload unrolls the panel's loop onto
+them, the symbol `type` and the delivery are on by default, the browser draws all 24 titles, and A
+opens `store_info_screen` with the offer's own data (§5/P3 exit record, boot
+`out/_swap/store-probe/20261021-190304`). **Album art** remains open (serving it needs a runtime
+PNG→texture encoder).
 **P5's pipeline landed the same
 day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
 starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
@@ -1224,6 +1228,66 @@ stays **off**, because the fault is still open.
   `{genre.lbl set text_token ...}` / `{album.mat set diffuse_tex cover_art_none.tex}` sequence and
   completes (`rb_blitz_145.log`), so the fault needs the provider to answer a row's text - the label
   path and the offer's `get_data` share the offer object.
+
+**P3 exit record (2026-10-21, evening) - the labels draw and A opens the details screen; P3 is
+exited.** The old `rb_blitz.map` was from 2026-10-12, so every earlier stack was resolved against a
+stale map and the offsets (not the names) were noise. Re-linking with `LINKER:/MAP:` (a temporary
+cache option, removed afterwards) and re-running the same boot put the fault at
+**`sub_824534A8 +0x31d`** - the offer's data-path walk, reached from `sub_82453928` (the offer's
+message handler) via `sub_8275C6C0` and the DTA evaluator (`rb_blitz_165.log`).
+
+- **Why no five-part rank map can work.** `sub_824534A8` interns each path component and calls
+  `sub_823FAE00`, which walks the current map's elements and compares each element's **first child's
+  value** with that component (`lwz r10,0(element); lwz r8,0(r10); lwz r8,0(r8); cmpw r8,key`).
+  The first component (`rank`) matches the record's `(rank <value>)` pair and the walk continues
+  **inside that pair**; a second component can then only match a value array whose first element is
+  that part - so `(rank guitar)` would work for one part and every other part returns nothing. The
+  walk's tail (`loc_82453540`) then dereferences the missing answer when the caller passed no
+  default: exactly the `read of guest 0x00000000`. This also explains why the details page drew
+  `artist`/`genre` (single-component reads, the same path as `get_data("name")`) and died at the
+  rank loop, and why an **absent** key is just as fatal: `preview_audio` had to become a key.
+- **What landed** (`src/store/store_metadata.*`, `src/store/store_payload.*`,
+  `src/settings/menu_payload.cpp`, `src/store/store_fetch.cpp`):
+  - the offer record carries single-component `(rank_guitar N)` ... `(rank_keys N)` keys next to the
+    retail-shaped `(rank ((guitar N) ...))` map;
+  - `store::UnrollOfferRanks` rewrites `store.dtb`'s `store_details_panel.refresh`: the
+    `{foreach part (guitar drum vocals bass keys) ... (rank part) ...}` block becomes five explicit
+    blocks reading `(rank_<part>)`, spelled exactly as the shipped record spells its statements
+    (`kVar` for `$offer`/`$rank`/`$tier`/`$idd`/`$this`, symbols for keys and tokens). A scan for
+    the loop first; a refusal leaves the record byte-identical;
+  - `store::ShowOfferDetailsDirectly` replaces `store_info_enum_panel.enum_and_show_offer` with the
+    body retail itself runs on success (`clear_data`, `set cur_offer offer`, `store_details_panel
+    refresh`, `goto store_info_screen`), so the A press no longer goes through the native
+    enumeration that answered `enum_error`. `store::AlwaysShowOfferDetails` now rewrites **every**
+    `is_completely_unavailable` guard - the first cut edited only the first match in document
+    order, which is `store_offer_fetch_panel`'s, not the browser's;
+  - the record writes `preview_audio` as an empty string (its reader in `refresh_buttons` is
+    unconditional) and no longer writes `rating` (both details panels read it behind `has_data`
+    and draw `rating_0` as a literal token - boot `out/_swap/store-probe/20261021-185501` read
+    `RATING_0`). `store::HidePreviewButton` removes the now-dead `store_preview_audio` row insert;
+  - `store_offer_type_symbol` and `store_fetch_deliver` now default **on**: the symbol is what the
+    provider matches, and without the delivery the store has nothing to draw. Serving itself is
+    gated on the master switch, so a stock boot is untouched.
+- **Measured on screen with the shipped defaults only** (`--store_trace=1 --dlc_root=<empty>`, no
+  diagnostic switches; `out/_swap/store-probe/20261021-190304`): the main menu carries RHYTHMVERSE
+  CUSTOMS, the store heading reads RHYTHMVERSE, Recent draws **all 24 titles**
+  (`BUILDING A MYSTERY`, `BEEN THERE. DONE THAT`, ...), the details band reads
+  `SARAH MCLACHLAN / POP-ROCK`, and A opens the details screen
+  (`RHYTHMVERSE BUILDING A MYSTERY SARAH MCLACHLAN POP-ROCK ... SELECT EXIT BACK`) with **no**
+  rating token, **no** preview row, **no** price/Buy Now chrome and **zero** fault lines in the
+  boot log. B returns to the browser, then to the store menu.
+- **Tests**: `store_serve` **85** checks (the `rank_<part>` keys, `preview_audio` present-empty,
+  no `rating`, both `type` spellings), `store_payload` **204** (every-guard rewrite, the direct
+  details route, the preview-row removal, the loop unroll with its idempotency and both refusals),
+  `store_metadata` 50, `store_library` 26; full `ctest` **44/44** in `out/build/win-amd64-debug`.
+  `rb_blitz_store_payload_tests store-edit <dtb> store|info` is the diagnostic half: it runs the
+  transforms against a shipped record and prints the refusal reason and the method's node tree,
+  which is how the `kVar` spelling was found.
+- **P3 exit**: Recent shows the newest eligible `rb3xbox` offers with **title, artist and genre**,
+  empty pages work, A opens the details screen, RhythmVerse is visible, and no price/currency/Buy
+  Now UI appears. **Not done**: album art (needs a runtime PNG→texture encoder), the Downloaded
+  matcher has not been read against a real library, the difficulty display reads `NO PART` where the
+  catalogue publishes no rank, and page 2+ is not requested (one page of 24 offers is shown).
 
 P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
 entry behind `store_panel request` (nothing can be served or observed before it) — **done, see the

@@ -107,9 +107,54 @@ bool HideStoreInfoPriceChrome(std::vector<ui::dtb::Node>* store_info_roots, std:
 // model. `store_info_enum_panel.on_enum_finished` opens `store_info_screen` only when
 // `{offer is_completely_unavailable}` is false, and measured 2026-10-21 the A press on a served
 // offer landed on `store_info_unavailable_screen` instead. This replaces that guard's test with
-// `FALSE` (the else branch - the details screen - always runs). Refused, before any edit, when the
-// panel's `on_enum_finished` does not carry the `if_else` whose test reads the key.
+// `FALSE` (the else branch - the details screen - always runs) in **every** panel that carries it
+// (`store_info_enum_panel` and `store_offer_fetch_panel` both do; the first cut edited only the
+// first match, which in document order is the fetch panel, so the browser's own guard survived).
+// Refused, before any edit, when no such guard exists in the record at all.
 bool AlwaysShowOfferDetails(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// The browser's A press hands the offer to `store_info_enum_panel.enum_and_show_offer`, which
+// switches to `store_info_enum_screen` and lets the native `set_offer` enumerate it. For a served
+// offer that enumeration reports an error and the press ends on `store_info_unavailable_screen`
+// (measured 2026-10-21: the popup survives `AlwaysShowOfferDetails`). This rewrite replaces the
+// method's body with the body the retail panel itself runs when its enumeration succeeds - the
+// `on_enum_finished` else branch, verbatim - so the details screen is populated directly:
+//
+//   {do {store_info_panel clear_data}
+//       {store_info_panel set cur_offer offer}
+//       {store_details_panel refresh offer}
+//       {ui goto_screen store_info_screen}}
+//
+// `set_return_target` still runs before it (the browser's own case), so Back keeps its target.
+// Idempotent; refused, before any edit, when the panel or the method is missing.
+bool ShowOfferDetailsDirectly(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// The details page's Preview Audio row is built from `refresh_buttons`' own preview block, and its
+// gate is `{&& is_song {offer has_data preview_audio} {is_allowed_to_preview_offer offer}}`. The
+// record must carry `preview_audio` (its previous statement reads it unconditionally, and an absent
+// key is a null read - see `Offer::preview_audio`), but an empty string satisfies `has_data`, so the
+// row appeared on a served offer with nothing behind it (measured 2026-10-21). This removes the
+// `store_preview_audio` insertion from `store_info_panel.refresh_buttons`; the rest of the method
+// (which hands the preview manager an empty file name, a no-op) is left as retail wrote it.
+// Idempotent; refused, before any edit, when the method is missing.
+bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// The details panel's difficulty read is `{offer get_data (rank <part>)}` -
+// `store.dtb`'s `store_details_panel.refresh`, `{foreach part (guitar drum vocals bass keys)}`.
+// That is a **two-component** path, and the offer's `get_data` walk cannot resolve it against any
+// five-part rank map: measured 2026-10-21 by decoding the walk (`sub_82453928` -> `sub_824538A8` ->
+// `sub_824534A8`), each component is interned and `sub_823FAE00` matches it against the FIRST
+// element of a pair, so the second component asks the `rank` pair for a child whose first element
+// is the part. A map can answer that for one part; for the rest the lookup returns nothing and the
+// walk dereferences the null (boot `rb_blitz_165.log`: `read of guest 0x00000000` at the walk,
+// stack `sub_824534A8` <- `sub_82453928` <- `sub_8275C6C0` <- the DTA evaluator).
+//
+// The offer record carries single-component `(rank_<part> N)` keys for exactly this reason, and
+// this rewrite unrolls the loop onto them - five explicit `{do ("rank" {offer get_data
+// (rank_guitar)}) ...}` blocks in the measured statement shape - so the panel's difficulty display
+// keeps working. Idempotent; refused, before any edit, when `store_details_panel.refresh` has no
+// `(rank <part>)` loop and no unrolled block.
+bool UnrollOfferRanks(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 
 // The store heading is retail's own locale entry `store` ("MUSIC STORE"); the owner's attribution
 // requirement (§1.8) is met by a store that names its source. Replaces the entry's value whatever

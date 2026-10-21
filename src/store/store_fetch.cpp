@@ -25,17 +25,20 @@ REXCVAR_DEFINE_STRING(store_serve_dir, "", "Diagnostics",
                       "dlc_store/europe/dlc_top_xbox_eng.dta); empty uses the built-in records")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(store_fetch_deliver, false, "Diagnostics",
+REXCVAR_DEFINE_BOOL(store_fetch_deliver, true, "Diagnostics",
                     "Deliver a served store record to the panel through the retail notification "
-                    "(the file cache's own `file_req_complete` call); off, the record is only put "
-                    "into the manager's loaded-file container and the retail notify never runs")
+                    "(the file cache's own `file_req_complete` call). On by default because the store "
+                    "has nothing to show otherwise: offline the cache's request body never notifies. "
+                    "Only a record this module actually serves is affected, and serving itself is "
+                    "gated on the RhythmVerse master switch, so a stock boot is untouched")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(store_offer_type_symbol, false, "Diagnostics",
+REXCVAR_DEFINE_BOOL(store_offer_type_symbol, true, "Diagnostics",
                     "Serve each offer's `type` as a DTA symbol (`(type song)`) instead of a string. "
                     "The symbol form is what makes the retail provider answer the browser's row "
-                    "labels - measured 2026-10-21, every title is read - but the list then faults on "
-                    "`read of guest 0x00000000` while drawing, so it stays off until that null is named")
+                    "labels (measured 2026-10-21); the null read that used to follow the labels was "
+                    "the details panel's `(rank <part>)` path, now unrolled onto `rank_<part>` keys "
+                    "by the payload (store_payload.h). Off is the pre-P3 blank-row behaviour.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace rb_blitz::store {
