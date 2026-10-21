@@ -11,6 +11,11 @@ namespace rb_blitz::shell_music {
 struct SongMetadata {
   std::string key;     // the song manager's Symbol, preserving case
   std::string stream;  // (song (name ...)), without .mogg
+  // The display identity (RhythmVerse store plan §3.2): `(song (title ...))` and
+  // `(song (artist ...))`. Empty when the record does not carry them; the menu-music pool never
+  // reads them, the store's Downloaded matcher compares exactly these two strings.
+  std::string title;
+  std::string artist;
 };
 
 // Bounded, read-only metadata parsing. Invalid input returns no partial records.

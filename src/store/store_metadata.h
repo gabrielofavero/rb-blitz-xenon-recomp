@@ -123,6 +123,12 @@ struct Offer {
   int rank_bass = 0;
   int rank_vocals = 0;
   int rank_keys = 0;
+  // True when the song is already in the loaded DLC library (plan §3.2). It is written as the
+  // offer's `is_purchased` key, which is what the retail scripts read as the Downloaded state:
+  // `refresh_buttons` inserts `store_download_again` for a purchased offer and nothing but Exit
+  // otherwise, and `purchase_allowed` (and with it the price chrome) needs `is_available`, which
+  // a free custom never sets. A receipt never sets this flag - only the loaded library does.
+  bool downloaded = false;
 };
 
 // The menu record shape `sub_8274F610` reads:
@@ -164,5 +170,19 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why);
 // parser has been observed; it exists so a served record can be told apart from an older one in a
 // log.
 inline constexpr uint32_t kFrontMenuVersion = 2;
+
+// The node kind of the offer's `type` key. It is a **measurement switch**, not a preference:
+//
+//   * as a **symbol** (`(type song)`) the retail provider answers the row label - measured 2026-10-21,
+//     `StoreOfferProvider::Text` (`sub_8275A230`) reads every one of our titles through
+//     `get_data("name")` (`store-probe: offer name exit '<title>'`), because it compares
+//     `get_data("type")` against the interned symbol `song` (`sub_822D1CE0`);
+//   * but that same boot then dies on `read of guest 0x00000000` while the list draws (three passes
+//     of 24 titles, then the fault), so the symbol form is **off by default** until that null is
+//     named. With it off (a string node, the shipped `dummy_upsell_offer`'s own spelling) the browser
+//     opens with blank rows, which is the behaviour boots 112-120 measured.
+//
+// `store_offer_type_symbol` (src/store/store_fetch.cpp) sets it once per boot on the host thread.
+void SetOfferTypeSymbol(bool symbol);
 
 }  // namespace rb_blitz::store

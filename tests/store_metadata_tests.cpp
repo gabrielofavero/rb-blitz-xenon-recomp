@@ -87,11 +87,16 @@ const Node* RootArray(const std::vector<Node>& roots, std::string_view name) {
 }
 
 // The string value of an offer map's key, or empty.
+//
+// An offer body is an array of **pair arrays** - `((name "One Week") (artist "...") ...)` - the
+// convention `store.dtb`'s own `dummy_upsell_offer` demonstrates and both writers emit (the text
+// form writes one `(key value)` per line).
 std::string OfferField(const Node& offer, std::string_view key) {
-  for (size_t i = 0; i + 1 < offer.kids.size(); ++i) {
-    if (offer.kids[i].tag != rb_blitz::ui::dtb::kSymbol || offer.kids[i].text != key) continue;
-    if (offer.kids[i + 1].tag != rb_blitz::ui::dtb::kString) continue;
-    return offer.kids[i + 1].text;
+  for (const Node& field : offer.kids) {
+    if (field.tag != rb_blitz::ui::dtb::kArray || field.kids.size() < 2) continue;
+    if (field.kids[0].tag != rb_blitz::ui::dtb::kSymbol || field.kids[0].text != key) continue;
+    if (field.kids[1].tag != rb_blitz::ui::dtb::kString) continue;
+    return field.kids[1].text;
   }
   return {};
 }
@@ -214,17 +219,18 @@ void TestMenuRecordRoundTrip() {
   CHECK_STR_EQ(OfferField(offer, "preview_art"), "dlc_store/xbox/eng/offers/42/art");
   bool year_ok = false;
   bool rank_ok = false;
-  for (size_t i = 0; i + 1 < offer.kids.size(); ++i) {
-    if (offer.kids[i].tag != rb_blitz::ui::dtb::kSymbol) continue;
-    if (offer.kids[i].text == "year_released" &&
-        offer.kids[i + 1].tag == rb_blitz::ui::dtb::kInt && offer.kids[i + 1].scalar == 1998) {
+  for (const Node& field : offer.kids) {
+    if (field.tag != rb_blitz::ui::dtb::kArray || field.kids.size() < 2) continue;
+    if (field.kids[0].tag != rb_blitz::ui::dtb::kSymbol) continue;
+    if (field.kids[0].text == "year_released" &&
+        field.kids[1].tag == rb_blitz::ui::dtb::kInt && field.kids[1].scalar == 1998) {
       year_ok = true;
     }
-    if (offer.kids[i].text == "rank" && offer.kids[i + 1].tag == rb_blitz::ui::dtb::kArray) {
-      const std::vector<Node>& ranks = offer.kids[i + 1].kids;
-      for (size_t j = 0; j + 1 < ranks.size(); ++j) {
-        if (ranks[j].text == "guitar" && ranks[j + 1].tag == rb_blitz::ui::dtb::kInt &&
-            ranks[j + 1].scalar == 3) {
+    if (field.kids[0].text == "rank" && field.kids[1].tag == rb_blitz::ui::dtb::kArray) {
+      for (const Node& rank : field.kids[1].kids) {
+        if (rank.tag != rb_blitz::ui::dtb::kArray || rank.kids.size() < 2) continue;
+        if (rank.kids[0].text == "guitar" && rank.kids[1].tag == rb_blitz::ui::dtb::kInt &&
+            rank.kids[1].scalar == 3) {
           rank_ok = true;
         }
       }

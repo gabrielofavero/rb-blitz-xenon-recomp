@@ -596,6 +596,234 @@ int DumpStrings(const char* path) {
   return 0;
 }
 
+// The panel's own shape (`out/_swap/store.typed.txt`): `(enter ... #ifdef HX_PS3 ... #else ...
+// #endif)`, where the Xbox branch is what shows the "ALL PRICES ARE IN MICROSOFT(R) POINTS" footer.
+std::vector<Node> StorePanelRecord() {
+  return {
+      Node::Command({
+          Symbol("new"), Symbol("BandStorePanel"), Symbol("store_panel"),
+          Node::Array({Symbol("file"), Node::String("store.milo")}),
+          Node::Array({Symbol("enter"),
+                       Node::Command({Symbol("this"), Symbol("show_loading_thinger"),
+                                      Symbol("FALSE")}),
+                       Node::Ifdef("HX_PS3"),
+                       Node::Command({Symbol("microsoft.lbl"), Symbol("set_showing"),
+                                      Symbol("FALSE")}),
+                       Node::Endif()}),
+      }),
+  };
+}
+
+const Node* FindNamedMethodNode(const Node& node, const char* object, const char* method) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 4 &&
+      node.kids[0].text == "new" && node.kids[2].text == object) {
+    for (const Node& kid : node.kids) {
+      if (kid.tag == rb_blitz::ui::dtb::kArray && !kid.kids.empty() && kid.kids[0].text == method) {
+        return &kid;
+      }
+    }
+  }
+  for (const Node& kid : node.kids) {
+    if (const Node* found = FindNamedMethodNode(kid, object, method)) return found;
+  }
+  return nullptr;
+}
+
+bool ShowsCost(const Node& node) {
+  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+         (node.kids[0].text == "cost.lbl" || node.kids[0].text == "cost_ps3.lbl") &&
+         node.kids[1].text == "set_showing" && node.kids[2].text == "TRUE";
+}
+
+size_t CountShowsCost(const Node& node) {
+  size_t count = ShowsCost(node) ? 1 : 0;
+  for (const Node& kid : node.kids) count += CountShowsCost(kid);
+  return count;
+}
+
+void TestStorePriceFooter() {
+  BeginCase("the store footer's price text is hidden on every store screen");
+
+  std::vector<Node> record = StorePanelRecord();
+  const size_t before = record[0].kids.size();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::HideStorePriceChrome(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* enter = FindNamedMethodNode(record[0], "store_panel", "enter");
+  CHECK_TRUE(enter != nullptr);
+  if (enter == nullptr) return;
+  CHECK_EQ(enter->kids.size(), size_t{6});  // name, show_loading, ifdef, ps3 branch, endif, ours
+  CHECK_STR_EQ(enter->kids.back().kids[0].text, "microsoft.lbl");
+  CHECK_STR_EQ(enter->kids.back().kids[1].text, "set_showing");
+  CHECK_STR_EQ(enter->kids.back().kids[2].text, "FALSE");
+  // The `#ifdef` block is untouched: the label is hidden after it, not by rewriting the branch.
+  CHECK_EQ(enter->kids[2].tag, rb_blitz::ui::dtb::kIfdef);
+  CHECK_STR_EQ(enter->kids[3].kids[2].text, "FALSE");
+  CHECK_EQ(record[0].kids.size(), before);  // only the method grew
+
+  // Idempotent: a second pass finds its own statement and adds nothing.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::HideStorePriceChrome(&record, &why));
+  const Node* again = FindNamedMethodNode(record[0], "store_panel", "enter");
+  CHECK_TRUE(again != nullptr && again->kids.size() == size_t{6});
+
+  // A record without the panel is refused before any edit.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::HideStorePriceChrome(&other, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
+void TestStoreInfoPriceChrome() {
+  BeginCase("the details page's cost labels are never shown");
+
+  // `refresh_panel`'s measured shape: hide both, then re-show one under `purchase_allowed`.
+  std::vector<Node> record = {
+      Node::Command({
+          Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+          Node::Array({Symbol("file"), Node::String("store_info.milo")}),
+          Node::Array({Symbol("refresh_panel"),
+                       Node::Command({Symbol("cost_ps3.lbl"), Symbol("set_showing"),
+                                      Symbol("FALSE")}),
+                       Node::Command({Symbol("cost.lbl"), Symbol("set_showing"),
+                                      Symbol("FALSE")}),
+                       Node::Command({Symbol("if"),
+                                      Node::Command({Symbol("this"), Symbol("purchase_allowed"),
+                                                     Symbol("offer")}),
+                                      Node::Command({Symbol("cost.lbl"), Symbol("set_offer_cost"),
+                                                     Symbol("offer")}),
+                                      Node::Command({Symbol("cost.lbl"), Symbol("set_showing"),
+                                                     Symbol("TRUE")})})}),
+      }),
+  };
+  CHECK_EQ(CountShowsCost(record[0]), size_t{1});
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::HideStoreInfoPriceChrome(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  CHECK_EQ(CountShowsCost(record[0]), size_t{0});
+  const Node* panel = FindNamedMethodNode(record[0], "store_info_panel", "refresh_panel");
+  CHECK_TRUE(panel != nullptr);
+  if (panel == nullptr) return;
+  // The two closing hides are the method's last statements.
+  CHECK_EQ(panel->kids.size(), size_t{6});  // name, the two retail hides, the `if`, two ours
+  CHECK_STR_EQ(panel->kids[4].kids[0].text, "cost.lbl");
+  CHECK_STR_EQ(panel->kids[5].kids[0].text, "cost_ps3.lbl");
+  CHECK_STR_EQ(panel->kids[5].kids[2].text, "FALSE");
+  // `set_offer_cost` itself stays (it writes a label nobody shows); the `if` keeps its test.
+  CHECK_STR_EQ(panel->kids[3].kids[0].text, "if");
+
+  // Compile and parse round trip: the edited record is still a record the guest can read.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+  if (!parsed.empty()) CHECK_EQ(CountShowsCost(parsed[0]), size_t{0});
+
+  // A record without the details panel is refused before any edit.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::HideStoreInfoPriceChrome(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
+void TestStoreHeading() {
+  BeginCase("the store heading names the catalogue it shows");
+
+  std::vector<Node> locale = {
+      Node::Array({Symbol("store"), Node::String("MUSIC STORE")}),
+      Node::Array({Symbol("store_browse"), Node::String("BROWSE")}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::SetStoreHeading(&locale, rb_blitz::store::kStoreHeadingText, &why));
+  CHECK_STR_EQ(locale[0].kids[1].text, rb_blitz::store::kStoreHeadingText);
+  // Every other entry is untouched.
+  CHECK_STR_EQ(locale[1].kids[1].text, "BROWSE");
+  // Idempotent.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::SetStoreHeading(&locale, rb_blitz::store::kStoreHeadingText, &why));
+  CHECK_STR_EQ(locale[0].kids[1].text, rb_blitz::store::kStoreHeadingText);
+
+  // A translated heading is replaced too: it is retail's text, not ours.
+  std::vector<Node> translated = {
+      Node::Array({Symbol("store"), Node::String("MUSIKLADEN")}),
+  };
+  why.clear();
+  CHECK_TRUE(
+      rb_blitz::store::SetStoreHeading(&translated, rb_blitz::store::kStoreHeadingText, &why));
+  CHECK_STR_EQ(translated[0].kids[1].text, rb_blitz::store::kStoreHeadingText);
+
+  // A locale without the key is refused.
+  std::vector<Node> missing = {Node::Array({Symbol("other"), Node::String("X")})};
+  const std::vector<Node> untouched = missing;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::SetStoreHeading(&missing, "X", &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(missing, untouched));
+}
+
+void TestOfferDetailsGuard() {
+  BeginCase("a free offer always opens the details screen");
+
+  std::vector<Node> record = {
+      Node::Command({
+          Symbol("new"), Symbol("StoreInfoEnumPanel"), Symbol("store_info_enum_panel"),
+          Node::Array({Symbol("file"), Node::String("store_info_enum.milo")}),
+          Node::Array({Symbol("on_enum_finished"),
+                       Node::Command({Symbol("do"),
+                                      Node::Array({Symbol("offer"),
+                                                   Node::Command({Symbol("this"),
+                                                                  Symbol("get_single_offer")})}),
+                                      Node::Command({Symbol("if_else"),
+                                                     Node::Command({Symbol("offer"),
+                                                                    Symbol("is_completely_unavailable")}),
+                                                     Node::Command({Symbol("do"),
+                                                                    Node::Command({
+                                                                        Symbol("ui"), Symbol("goto_screen"),
+                                                                        Symbol("store_info_unavailable_screen")})}),
+                                                     Node::Command({Symbol("do"),
+                                                                    Node::Command({Symbol("ui"),
+                                                                                   Symbol("goto_screen"),
+                                                                                   Symbol("store_info_screen")})})})})}),
+      }),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AlwaysShowOfferDetails(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  // The guard's test is now the literal FALSE, and the details branch is untouched.
+  const Node* method = FindNamedMethodNode(record[0], "store_info_enum_panel", "on_enum_finished");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+  bool found = false;
+  for (const Node& kid : method->kids) {
+    if (kid.tag != rb_blitz::ui::dtb::kCommand || kid.kids.size() < 3) continue;
+    for (const Node& statement : kid.kids) {
+      if (statement.tag != rb_blitz::ui::dtb::kCommand || statement.kids.size() < 4) continue;
+      if (statement.kids[0].text != "if_else") continue;
+      found = true;
+      CHECK_STR_EQ(statement.kids[1].text, "FALSE");
+      CHECK_STR_EQ(statement.kids[3].kids[1].kids[2].text, "store_info_screen");
+    }
+  }
+  CHECK_TRUE(found);
+
+  // Idempotent, and a record without the panel is refused untouched.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::AlwaysShowOfferDetails(&record, &why));
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AlwaysShowOfferDetails(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
 int main(int argc, char** argv) {
   if (argc >= 3 && std::strcmp(argv[1], "dump-menu") == 0) {
     return DumpMenu(argv[2]);
@@ -613,5 +841,9 @@ int main(int argc, char** argv) {
   TestStoreEntryBypass();
   TestStoreEntryBypassRefusal();
   TestStoreEntryBypassSurvivesCompileAndParse();
+  TestStorePriceFooter();
+  TestStoreInfoPriceChrome();
+  TestStoreHeading();
+  TestOfferDetailsGuard();
   return rb_blitz::test::Finish();
 }

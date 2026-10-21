@@ -306,6 +306,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         std::string why;
         screen::ReplaceLocaleEntry(&roots, entry.key, entry.from, entry.to, &why);
       }
+      // The store's heading (RhythmVerse plan P3 §1.8): with the store on, its title names the
+      // catalogue it shows instead of retail's "MUSIC STORE". Replaced whatever the locale says,
+      // because a translated heading is still retail's, not ours.
+      if (screen::CurrentMenuConfiguration().rhythmverse_row) {
+        std::string why;
+        if (!store::SetStoreHeading(&roots, store::kStoreHeadingText, &why)) {
+          note("the store heading was refused: " + why);
+        }
+      }
       for (const auto& [key, text] : screen::Labels()) {
         std::string why;
         if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
@@ -379,24 +388,55 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       note("the store's netcache-init rewrite was refused: " + ui_why);
     }
   }
-  // The retail store screen's `enter` member: P2/P3's commerce bypass, only under the local-server
-  // spike above. The panel starts its first request only from its own `on_init_commerce_success`
-  // callback, which needs a native commerce session, so the spike drives that callback from the
-  // store screen's `enter`. (P4's search measurement used to append its jump here as well; it now
-  // routes from the RhythmVerse main-menu row instead - a jump issued from this screen re-delivers
-  // every later press to the page that just became current, measured 2026-10-20.)
-  if (!local_store_root.empty()) {
+  // P3's data lane (RhythmVerse plan §5/P3). With the store's master switch on, the retail store's
+  // own DTA records are edited so the retail screens can show our catalogue:
+  //
+  //   * `store.dtb` - the commerce bypass (the panel starts its first request only from its own
+  //     `on_init_commerce_success`, which offline never fires) and the price footer, which retail
+  //     shows on the Xbox branch of the panel's `enter` (§2.12).
+  //   * `store_info.dtb` - the details page's two cost labels.
+  //
+  // Both are refusals-not-errors: a boot that cannot read a record keeps retail's behaviour and
+  // the reason is reported. The P2 spike's netcache rewrite above stays gated on its own cvar and
+  // is independent of these.
+  if (screen::CurrentMenuConfiguration().rhythmverse_row) {
     std::vector<uint8_t> store_ui_bytes;
     std::vector<Node> store_ui_roots;
     ui::dtb::RootHeader store_ui_header;
     std::string store_ui_why;
     if (read("ui/store/gen/store.dtb", &store_ui_bytes, &store_ui_why) &&
         ui::dtb::Parse(store_ui_bytes.data(), store_ui_bytes.size(), &store_ui_roots,
-                       &store_ui_header, &store_ui_why) &&
-        store::AddStoreEntryBypass(&store_ui_roots, &store_ui_why)) {
+                       &store_ui_header, &store_ui_why)) {
+      std::string why;
+      if (!store::AddStoreEntryBypass(&store_ui_roots, &why)) {
+        note("the store's commerce-bypass edit was refused: " + why);
+      }
+      why.clear();
+      if (!store::HideStorePriceChrome(&store_ui_roots, &why)) {
+        note("hiding the store's price footer was refused: " + why);
+      }
       built["ui/store/gen/store.dtb"] = ui::dtb::Compile(store_ui_roots, store_ui_header);
     } else {
-      note("the store's commerce-bypass edit was refused: " + store_ui_why);
+      note("the store's screen record could not be read: " + store_ui_why);
+    }
+    std::vector<uint8_t> info_bytes;
+    std::vector<Node> info_roots;
+    ui::dtb::RootHeader info_header;
+    std::string info_why;
+    if (read("ui/store/gen/store_info.dtb", &info_bytes, &info_why) &&
+        ui::dtb::Parse(info_bytes.data(), info_bytes.size(), &info_roots, &info_header,
+                       &info_why)) {
+      std::string why;
+      if (!store::HideStoreInfoPriceChrome(&info_roots, &why)) {
+        note("hiding the details page's price was refused: " + why);
+      }
+      why.clear();
+      if (!store::AlwaysShowOfferDetails(&info_roots, &why)) {
+        note("opening the details page for a free offer was refused: " + why);
+      }
+      built["ui/store/gen/store_info.dtb"] = ui::dtb::Compile(info_roots, info_header);
+    } else {
+      note("the store's details record could not be read: " + info_why);
     }
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;

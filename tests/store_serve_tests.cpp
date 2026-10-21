@@ -29,7 +29,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-
 namespace {
 
 using namespace rb_blitz::test;
@@ -129,27 +128,40 @@ void TestMenuText() {
   // `sorted` is the name `refresh_list` reads back as `{store_panel sort_name}`; empty means "no
   // grouping", which is the plain list Recent asks for.
   CHECK_TRUE(Contains(text, "(sorted \"\")"));
-  CHECK_TRUE(Contains(text, "offers ("));
+  // Each offer is one list of pairs on its own line, under the `offers` root.
+  CHECK_TRUE(Contains(text, "(offers\n"));
   CHECK_TRUE(Contains(text, "(name \"The People That We Love\")"));
+  // `type` defaults to a **string** - the shipped `dummy_upsell_offer`'s spelling. The symbol form
+  // is the measurement switch `store_offer_type_symbol` (store_metadata.h), pinned below.
   CHECK_TRUE(Contains(text, "(type \"song\")"));
+  CHECK_TRUE(Contains(text, "(offer_type song)"));
   CHECK_TRUE(Contains(text, "(artist \"Bush\")"));
   CHECK_TRUE(Contains(text, "(year_released 2001)"));
   // One pair per field, and `rank` two levels deep: `get_data (rank guitar)` walks into it. Every
   // part is present even at 0 - the details panel loops all five and a missing one is a null that
   // `rank_tier` dereferences (boot 112 had the browser open only once all five were written).
   CHECK_TRUE(Contains(text, "(rank ((guitar 3)(drum 1)(bass 0)(vocals 0)(keys 0)))"));
-  // Every key the retail scripts read through `get_data` is present even when it is empty - the
-  // browser's groupings do not guard with `has_data`, and an absent key is a null there.
-  CHECK_TRUE(Contains(text, "(preview_audio \"\")"));
-  CHECK_TRUE(Contains(text, "(preview_art \"\")"));
+  // Every other key the retail scripts read through `get_data` is present even when it is empty -
+  // the browser's groupings do not guard with `has_data`, and an absent key is a null there.
   CHECK_TRUE(Contains(text, "(release_date_str \"\")"));
   CHECK_TRUE(Contains(text, "(first_char \"T\")"));
+  // The two preview keys are the exception: `has_data` is true for an empty string, and the preview
+  // manager/art loader then get an empty path. A free custom writes neither, which also hides the
+  // retail preview UI.
+  CHECK_FALSE(Contains(text, "(preview_audio"));
+  CHECK_FALSE(Contains(text, "(preview_art"));
+  // `is_available` is deliberately absent: `purchase_allowed` needs it, so no price block and no
+  // Buy Now row is ever built, and writing it FALSE made `{offer is_completely_unavailable}` answer
+  // true (measured 2026-10-21: the A press landed on the unavailable screen).
+  CHECK_FALSE(Contains(text, "is_available"));
+  // Not downloaded: no `is_purchased` key at all (absent is falsey).
+  CHECK_FALSE(Contains(text, "is_purchased"));
 
   // A page with no offers is valid (P3's exit requires empty/filtered-only pages to work).
   why.clear();
   const std::string empty = BuildMenuText({}, &why);
   CHECK_TRUE(why.empty());
-  CHECK_TRUE(Contains(empty, "offers ("));
+  CHECK_TRUE(Contains(empty, "(offers\n"));
   CHECK_FALSE(Contains(empty, "(name"));
 
   // A nameless offer is refused before anything is written.
@@ -158,6 +170,24 @@ void TestMenuText() {
   why.clear();
   CHECK_TRUE(BuildMenuText(nameless, &why).empty());
   CHECK_TRUE(Contains(why, "empty name"));
+
+  // A preview path that exists is written, which is what would show the retail preview UI.
+  std::vector<Offer> with_preview(1);
+  with_preview[0].name = "Army Dreamers";
+  with_preview[0].preview_art = "dlc_store/xbox/eng/offers/7/art";
+  why.clear();
+  const std::string preview = BuildMenuText(with_preview, &why);
+  CHECK_TRUE(Contains(preview, "(preview_art \"dlc_store/xbox/eng/offers/7/art\")"));
+
+  // The measurement switch: as a symbol, `type` is what the retail provider compares against to
+  // answer a row's label (`sub_8275A230` -> `sub_822D1CE0`). Left off by default because the list
+  // then faults while drawing (see the header comment).
+  rb_blitz::store::SetOfferTypeSymbol(true);
+  why.clear();
+  const std::string symbol = BuildMenuText(offers, &why);
+  CHECK_TRUE(Contains(symbol, "(type song)"));
+  CHECK_FALSE(Contains(symbol, "(type \"song\")"));
+  rb_blitz::store::SetOfferTypeSymbol(false);
 }
 
 void TestTextQuoting() {
@@ -169,6 +199,47 @@ void TestTextQuoting() {
   const std::string text = BuildMenuText(offers, &why);
   CHECK_TRUE(Contains(text, "name \"Say \\\"Hello\\\"\""));
   CHECK_TRUE(Contains(text, "artist \"Back\\\\Slash\""));
+}
+
+// The Downloaded mark (plan §3.2): the serving policy asks the installed predicate once per offer
+// and writes the record key the retail scripts read as `{offer is_purchased}`. A page never claims
+// a song is downloaded without the predicate saying so - with none installed every offer is
+// unmarked, which is what a boot before the index lands looks like.
+void TestDownloadedMark() {
+  BeginCase("the Downloaded mark comes from the installed predicate, never from the page");
+  std::vector<Offer> offers(2);
+  offers[0].name = "The People That We Love";
+  offers[0].artist = "Bush";
+  offers[1].name = "Army Dreamers";
+  offers[1].artist = "Kate Bush";
+  rb_blitz::store::SetOfferSource([offers] { return offers; });
+
+  // No predicate: both offers are unmarked and the record carries no `is_purchased` at all.
+  rb_blitz::store::SetDownloadedPredicate({});
+  CHECK_FALSE(rb_blitz::store::IsDownloadedOffer(offers[0]));
+  std::string why;
+  const std::string unmarked = BuildMenuText(rb_blitz::store::OffersForPage(), &why);
+  CHECK_FALSE(Contains(unmarked, "is_purchased"));
+
+  // The predicate marks exactly one of the two.
+  rb_blitz::store::SetDownloadedPredicate(
+      [](const Offer& offer) { return offer.name == "Army Dreamers"; });
+  CHECK_FALSE(rb_blitz::store::IsDownloadedOffer(offers[0]));
+  CHECK_TRUE(rb_blitz::store::IsDownloadedOffer(offers[1]));
+  const std::string marked = BuildMenuText(rb_blitz::store::OffersForPage(), &why);
+  CHECK_TRUE(Contains(marked, "(is_purchased TRUE)"));
+  // One occurrence only: the marked offer's. The other offer's body must stay unmarked (a page
+  // that marks everything would make every song look installed).
+  const size_t first = marked.find("(is_purchased TRUE)");
+  CHECK_TRUE(first != std::string::npos);
+  CHECK_TRUE(marked.find("(is_purchased TRUE)", first + 1) == std::string::npos);
+  // Every offer still carries the free-path signal: `is_available` is absent, so `purchase_allowed`
+  // stays false and neither a price nor a Buy Now button is built.
+  CHECK_FALSE(Contains(marked, "is_available"));
+
+  // The source and predicate are per boot; leave nothing behind for a later case.
+  rb_blitz::store::SetDownloadedPredicate({});
+  rb_blitz::store::SetOfferSource({});
 }
 
 void TestServedFile() {
@@ -256,6 +327,7 @@ int main() {
   TestFrontMenuRefusals();
   TestMenuText();
   TestTextQuoting();
+  TestDownloadedMark();
   TestServedFile();
   TestRecordChoice();
   TestMenuPaths();

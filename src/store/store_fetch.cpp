@@ -14,6 +14,7 @@
 #include <rex/system/xmemory.h>
 
 #include "store/store_catalogue.h"
+#include "store/store_library.h"
 #include "store/store_serve.h"
 #include "store/store_probe.h"
 #include "store/store_settings.h"
@@ -28,6 +29,13 @@ REXCVAR_DEFINE_BOOL(store_fetch_deliver, false, "Diagnostics",
                     "Deliver a served store record to the panel through the retail notification "
                     "(the file cache's own `file_req_complete` call); off, the record is only put "
                     "into the manager's loaded-file container and the retail notify never runs")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_BOOL(store_offer_type_symbol, false, "Diagnostics",
+                    "Serve each offer's `type` as a DTA symbol (`(type song)`) instead of a string. "
+                    "The symbol form is what makes the retail provider answer the browser's row "
+                    "labels - measured 2026-10-21, every title is read - but the list then faults on "
+                    "`read of guest 0x00000000` while drawing, so it stays off until that null is named")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace rb_blitz::store {
@@ -145,10 +153,15 @@ void LogOnce(const std::string& path, const std::string& line) {
 void InstallStoreFetch() {
   g_serve_dir = REXCVAR_GET(store_serve_dir);
   g_deliver = REXCVAR_GET(store_fetch_deliver);
+  // The offer record's `type` node kind (store_metadata.h): read here because the writers are
+  // SDK-free and a guest thread must not touch the cvar registry.
+  SetOfferTypeSymbol(REXCVAR_GET(store_offer_type_symbol));
   g_on = true;
   REXLOG_INFO("store_fetch: serving the store's records from {} (delivery {})",
               g_serve_dir.empty() ? "the built-in records" : ("'" + g_serve_dir + "' first"),
               g_deliver ? "on" : "off");
+  REXLOG_INFO("store_fetch: the offer `type` is served as a {}",
+              REXCVAR_GET(store_offer_type_symbol) ? "symbol" : "string (labels stay blank)");
 }
 
 bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
@@ -173,6 +186,13 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
     RequestCatalogueRefresh("the store opened");
   } else if (IsMenuRecordPath(path)) {
     RequestCatalogueRefresh("a menu page was asked for");
+  }
+  // The Downloaded mark's index touches every package, so it is built while the player is still on
+  // the front menu rather than when a page is asked for; it is a no-op while the published index
+  // still describes the library. Until it lands a page carries no mark, which is "unknown", never
+  // a negative claim (plan §3.2).
+  if (IsFrontMenuPath(path) || IsMenuRecordPath(path)) {
+    RequestLibraryRefresh("the store asked for a page");
   }
   const ServedRecord record = RecordForRequest(path, g_serve_dir);
   if (record.bytes.empty()) {

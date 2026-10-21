@@ -50,6 +50,7 @@
 
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
+#include "fs/dlc_song_metadata.h"
 #include "settings/menu_compat.h"
 #include "settings/boot.h"
 
@@ -262,44 +263,14 @@ std::vector<std::string> FindSongStreams(rex::filesystem::Device& device) {
 }
 
 std::vector<rb_blitz::shell_music::SongMetadata> FindSongMetadata(rex::filesystem::Device& device) {
-  for (const char* path : {"\\songs\\songs.dta", "\\songs\\songs.dtb", "\\songs\\gen\\songs.dtb"}) {
-    auto* entry = device.ResolvePath(path);
-    if (!entry || entry->size() == 0 || entry->size() > 2 * 1024 * 1024) continue;
-    rex::filesystem::File* file = nullptr;
-    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file) continue;
-    std::vector<uint8_t> bytes(static_cast<size_t>(entry->size()));
-    size_t read = 0;
-    const auto status = file->ReadSync(bytes, 0, &read);
-    file->Destroy();
-    if (status != 0 || read != bytes.size()) continue;
-    std::string error;
-    auto songs = rb_blitz::shell_music::ReadSongMetadata(bytes,
-        std::string_view(path).ends_with(".dtb"), &error);
-    if (!songs.empty()) return songs;
-    if (!error.empty()) REXLOG_WARN("shell_music: cannot read {}: {}", path, error);
-  }
-  return {};
+  return rb_blitz::fs::ReadDeviceSongMetadata(device);
 }
 
 // The package as a read-only guest device: an STFS container mounted where it lies, or
 // an already-extracted package directory. Null when the SDK will not mount it.
-std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_path,
-                                                      const std::filesystem::path& package,
-                                                      std::error_code& ec) {
-  if (std::filesystem::is_directory(package, ec)) {
-    auto device =
-        std::make_unique<rex::filesystem::HostPathDevice>(mount_path, package, /*read_only=*/true);
-    if (!device->Initialize()) {
-      return nullptr;
-    }
-    return device;
-  }
-  auto device = std::make_unique<rex::filesystem::StfsContainerDevice>(mount_path, package);
-  if (!device->Initialize()) {
-    return nullptr;
-  }
-  return device;
-}
+// (The reader itself is shared with the store's Downloaded matcher; see
+// src/fs/dlc_song_metadata.h.)
+using rb_blitz::fs::MountPackage;
 
 // The next song to play: the next song of the rotation, which hears every pooled song before it
 // repeats one and never hands back the song that just played. Also records which index that is,

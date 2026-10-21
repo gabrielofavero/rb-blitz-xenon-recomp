@@ -22,6 +22,7 @@ namespace fs = std::filesystem;
 // when a menu page is answered.
 std::mutex g_source_mutex;
 OfferSource g_offer_source;
+DownloadedPredicate g_downloaded_predicate;
 
 // A record bigger than this is not one of ours: the retail front menu and a 25-offer page are a
 // few kilobytes. The cap keeps a misnamed file from being copied into the guest heap whole.
@@ -80,6 +81,31 @@ std::vector<Offer> CatalogueOffers() {
   return source();
 }
 
+void SetDownloadedPredicate(DownloadedPredicate predicate) {
+  std::lock_guard<std::mutex> lock(g_source_mutex);
+  g_downloaded_predicate = std::move(predicate);
+}
+
+bool IsDownloadedOffer(const Offer& offer) {
+  DownloadedPredicate predicate;
+  {
+    std::lock_guard<std::mutex> lock(g_source_mutex);
+    predicate = g_downloaded_predicate;
+  }
+  if (!predicate) {
+    return false;
+  }
+  return predicate(offer);
+}
+
+std::vector<Offer> OffersForPage() {
+  std::vector<Offer> offers = CatalogueOffers();
+  for (Offer& offer : offers) {
+    offer.downloaded = IsDownloadedOffer(offer);
+  }
+  return offers;
+}
+
 std::string ReadServedRecord(std::string_view dir, std::string_view path, std::string* why) {
   if (dir.empty()) {
     if (why) *why = "no serve directory";
@@ -133,7 +159,7 @@ std::string BuiltinRecord(std::string_view path, std::string* why) {
   // DTA already handles (`on_offers_populated` with zero offers refreshes the menu instead of
   // opening the browser), and an honest answer rather than a fabricated list.
   if (IsMenuRecordPath(path)) {
-    return BuildMenuText(CatalogueOffers(), why);
+    return BuildMenuText(OffersForPage(), why);
   }
   if (why) *why = "no built-in record for this path";
   return {};

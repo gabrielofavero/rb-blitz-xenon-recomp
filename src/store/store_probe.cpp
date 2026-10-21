@@ -7,6 +7,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <windows.h>
 #include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/logging.h>
@@ -67,24 +68,65 @@ std::atomic<bool> g_trace_on{false};
 // step in store_fetch.cpp, both on guest threads.
 std::atomic<uint32_t> g_panel{0};
 
-// A big-endian u32 out of guest memory, or 0 when the address is not mapped.
-uint32_t GuestU32(uint8_t* base, const uint32_t addr) {
-  const uint8_t* p = rex::memory::GuestPtr<const uint8_t*>(base, addr);
-  if (p == nullptr) {
+// `rex::memory::GuestPtr` does no validation - it is base + address - so a null pointer, a small
+// integer or a host pointer handed to a log line faults the guest instead of reporting it. Every
+// read below is gated on the address landing in a *committed* region of a guest heap.
+//
+// Measured 2026-10-21: `LookupHeap` alone is not enough. The system heap is registered as a
+// virtual range starting at 0, so `LookupHeap(5)` answers and the read then faults; `QuerySize`
+// is what actually says whether pages back the address.
+bool GuestMapped(const uint32_t addr, const uint32_t length = 4) {
+  if (addr < 0x10000) {
+    return false;
+  }
+  auto* memory = REX_KERNEL_MEMORY();
+  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
+  if (heap == nullptr) {
+    return false;
+  }
+  uint32_t size = 0;
+  return heap->QuerySize(addr, &size) && size >= length;
+}
+
+// How many bytes from `addr` stay inside its committed region; 0 when unbacked.
+uint32_t GuestSpan(const uint32_t addr) {
+  if (addr < 0x10000) {
     return 0;
   }
+  auto* memory = REX_KERNEL_MEMORY();
+  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
+  if (heap == nullptr) {
+    return 0;
+  }
+  uint32_t base = addr;
+  uint32_t size = 0;
+  if (!heap->QuerySize(addr, &size) || size == 0) {
+    return 0;
+  }
+  return size > addr - base ? size - (addr - base) : size;
+}
+
+// A big-endian u32 out of guest memory, or 0 when the address is not mapped.
+uint32_t GuestU32(uint8_t* base, const uint32_t addr) {
+  if (!GuestMapped(addr, 4)) {
+    return 0;
+  }
+  const uint8_t* p = rex::memory::GuestPtr<const uint8_t*>(base, addr);
   return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
 }
 
 // A bounded, printable guest string. Anything outside the path alphabet stops the read: a wrong
 // pointer is far more likely than a path with control characters, and this runs on every request.
 std::string GuestCString(uint8_t* base, const uint32_t addr, const size_t max_length) {
-  const char* text = rex::memory::GuestPtr<const char*>(base, addr);
-  if (text == nullptr) {
+  const uint32_t span = GuestSpan(addr);
+  if (span == 0) {
     return {};
   }
+  const char* text = rex::memory::GuestPtr<const char*>(base, addr);
   std::string out;
-  for (size_t i = 0; i < max_length; ++i) {
+  for (size_t i = 0; i < max_length && i < span; ++i) {
+    // The heap is mapped in chunks, so a negative-looking byte is the only warning available for a
+    // pointer that walked out of its object; stop there rather than reading further.
     const unsigned char c = static_cast<unsigned char>(text[i]);
     if (c == 0) {
       break;
@@ -177,12 +219,80 @@ void LogCache(uint32_t manager, const std::string& path) {
   REXLOG_INFO("store-probe: cache request '{}' (manager {:#x})", key, manager);
 }
 
+// The first-chance log of a guest fault (installed by InstallPathProbe while `store_trace` is on).
+// It never handles the exception - the SDK's own handler still decides what happens, this only
+// records where the guest was. The host addresses are resolved against `rb_blitz.map` (see
+// out/_swap/map_lookup.py), which is how a bare `read of guest 0x00000000` becomes a function name.
+//
+// Measured 2026-10-21: this is what the store's two open P3 faults needed. The SDK's line names the
+// address and the thread and nothing else, and both faults are null reads inside UI code that runs
+// several guest frames below the last hook that can log.
+LONG CALLBACK LogFault(EXCEPTION_POINTERS* info) {
+  static std::atomic<int> seen{0};
+  static std::atomic<int> entries{0};
+  if (!g_trace_on.load(std::memory_order_relaxed) || info == nullptr ||
+      info->ExceptionRecord == nullptr ||
+      info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  if (entries.fetch_add(1, std::memory_order_relaxed) < 3) {
+    REXLOG_INFO("store-probe: vector handler entered, access violation of {:#x}",
+                static_cast<unsigned long long>(
+                    static_cast<uintptr_t>(info->ExceptionRecord->ExceptionInformation[1])));
+  }
+  const EXCEPTION_RECORD* record = info->ExceptionRecord;
+  // The reported address is a *host* address: the guest's zero page is `virtual_membase + 0`, which
+  // is why the first version of this handler saw 0x100000000 and filtered the fault out. The SDK's
+  // own line translates it (`HostToGuestVirtual`), and so does this.
+  auto* memory = REX_KERNEL_MEMORY();
+  uintptr_t address = static_cast<uintptr_t>(record->ExceptionInformation[1]);
+  if (memory != nullptr && address >= reinterpret_cast<uintptr_t>(memory->virtual_membase()) &&
+      address < reinterpret_cast<uintptr_t>(memory->physical_membase())) {
+    address = memory->HostToGuestVirtual(reinterpret_cast<const void*>(address));
+  }
+  // Only guests: a new thread's stack probe writes its guard page, and that is a host write, not a
+  // guest fault. A guest object read past its own null pointer lands near zero (the store's faults
+  // are `0x0`, `0x5` and `0x44`), so the near-null range is the whole of what this looks for.
+  const bool guest = address < 0x100000u;
+  if (!guest || seen.fetch_add(1, std::memory_order_relaxed) >= 64) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  const bool write = record->ExceptionInformation[0] != 0;
+  std::string frames;
+  void* stack[24] = {};
+  const USHORT count = RtlCaptureStackBackTrace(1, 24, stack, nullptr);
+  for (USHORT i = 0; i < count; ++i) {
+    char text[24];
+    std::snprintf(text, sizeof(text), " %#llx", static_cast<unsigned long long>(
+                                                  reinterpret_cast<uintptr_t>(stack[i])));
+    frames += text;
+  }
+  REXLOG_ERROR("store-probe: fault {} of {:#010x} at rip {:#x}, frames:{}", write ? "write" : "read",
+               static_cast<unsigned>(address),
+               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(record->ExceptionAddress)),
+               frames);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
 }  // namespace
 
 void InstallPathProbe() {
   const bool on = REXCVAR_GET(store_trace);
   g_trace_on.store(on, std::memory_order_relaxed);
   fs::SetStorePathObserver(on ? &Observe : nullptr);
+  if (on) {
+    // A guest null read ends the boot with one line that names the address and nothing else. The
+    // handler turns it into a host backtrace, which `out/_swap/map_lookup.py` resolves against
+    // `rb_blitz.map` to the recompiled `sub_XXXXXXXX` that faulted - the store's remaining P3
+    // faults both surfaced as `read of guest 0x00000000` (docs/reference/known-issues.md).
+    const PVOID handle = AddVectoredExceptionHandler(1, &LogFault);
+    auto* memory = REX_KERNEL_MEMORY();
+    REXLOG_INFO("store-probe: fault logger {}; module base {:#x}; guest window [{:#x}, {:#x})",
+                handle != nullptr ? "installed" : "NOT installed",
+                reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)),
+                memory != nullptr ? reinterpret_cast<uintptr_t>(memory->virtual_membase()) : 0,
+                memory != nullptr ? reinterpret_cast<uintptr_t>(memory->physical_membase()) : 0);
+  }
   REXLOG_INFO("store-probe: path trace {}; the local server root is '{}'", on ? "on" : "off",
               LocalServerRoot());
 }
@@ -512,6 +622,8 @@ REX_HOOK_RAW(sub_82753288) {
   if (trace) REXLOG_INFO("store-probe: panel update exit");
 }
 
+// Where the guest reads address 0, once the `store_trace` fault logger's backtrace is resolved
+// against `rb_blitz.map` with the module base it logs.
 // ---------------------------------------------------------------------------------------------
 // P3 step 0: the readiness gate.
 //
@@ -523,6 +635,55 @@ REX_HOOK_RAW(sub_82753288) {
 //
 // The hook writes 2 before the original runs - a forced state, which is exactly what a diagnostic
 // is for - and reports the decision once. With `store_trace` off it is a pure pass-through.
+// ---------------------------------------------------------------------------------------------
+// P3's row labels: the offer provider's `Text` (`sub_8275A230`) and the name lookup it uses.
+//
+// `StoreOfferProvider` answers a row's label only when `get_data("type")` equals the interned
+// symbol `song`/`pack` (`sub_822D1CE0`); the body then hands `sub_82453090(offer)`'s answer to the
+// label. The first boot with `(type song)` faulted on `read of guest 0x00000000` right after the
+// page's parse returned, so these two hooks name the step instead of guessing: the provider's own
+// vtable is the gate (any other list provider is skipped), and every line is behind `store_trace`.
+REX_EXTERN(__imp__sub_8275A230);
+REX_HOOK_RAW(sub_8275A230) {
+  constexpr uint32_t kStoreOfferProviderVtable = 0x82105EB4u;
+  const bool trace = rb_blitz::store::TraceEnabled();
+  const uint32_t self = ctx.r3.u32;
+  const bool ours = trace && self != 0 && rb_blitz::store::GuestU32(base, self) ==
+                                         kStoreOfferProviderVtable;
+  if (ours) {
+    const uint32_t label = ctx.r6.u32;
+    REXLOG_INFO("store-probe: provider text enter this={:#x} index={} label='{}'", self,
+                ctx.r5.u32,
+                label != 0
+                    ? rb_blitz::store::GuestCString(base, rb_blitz::store::GuestU32(base, label + 116), 40)
+                    : std::string());
+  }
+  __imp__sub_8275A230(ctx, base);
+  if (ours) {
+    const uint32_t out = ctx.r7.u32;
+    REXLOG_INFO("store-probe: provider text exit out='{}'",
+                out != 0
+                    ? rb_blitz::store::GuestCString(base, rb_blitz::store::GuestU32(base, out + 116), 80)
+                    : std::string());
+  }
+}
+
+// `sub_82453090(offer)`: `get_data("name")` as a C string - the value the `song` label is set
+// from. Logged because a null here is exactly the fault the first `(type song)` boot showed.
+REX_EXTERN(__imp__sub_82453090);
+REX_HOOK_RAW(sub_82453090) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) {
+    REXLOG_INFO("store-probe: offer name enter offer={:#x}", ctx.r3.u32);
+  }
+  __imp__sub_82453090(ctx, base);
+  if (trace) {
+    REXLOG_INFO("store-probe: offer name exit '{}'",
+                ctx.r3.u32 != 0 ? rb_blitz::store::GuestCString(base, ctx.r3.u32, 96)
+                                : std::string("<null>"));
+  }
+}
+
 REX_EXTERN(__imp__sub_82753010);
 REX_HOOK_RAW(sub_82753010) {
   if (rb_blitz::store::TraceEnabled()) {

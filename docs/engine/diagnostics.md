@@ -146,6 +146,7 @@ the guest's own strings, and no log line names them.
 | `store_fetch_deliver` | off | P3's delivery half: leaving the file cache's readiness word (`manager + 44`) set after a served record makes retail's **own** request body take its "already loaded" branch and send the `file_req_complete` message (`sub_8235A0F8`) itself - one delivery per request, every layout below it the engine's. Off, the word stays as the boot found it and the body takes its fetch branch, exactly as retail does offline. Measured on: the store draws the served front menu's rows (RECENT, SEARCH), a row press asks for `dlc_store/<region>/<locale>/<name>/`, and the served page opens the retail browser with the details panel reading the offer's own artist and genre. Requires a restart. |
 | `store_catalogue_off` | off | Turns the store catalogue fetch off: a menu page is then served **empty** (the shape the retail DTA handles by refreshing the menu), which is the control leg for "is this page the catalogue's or the writer's?". Off means the catalogue runs. Requires a restart. |
 | `store_catalogue_ttl_seconds` | 300 | How long a fetched catalogue page is held before a new store visit refetches it. A failed fetch backs off for 30 s. The fetch runs on its own thread, so a store visit never blocks the guest. Requires a restart. |
+| `store_offer_type_symbol` | off | Serves each offer's `type` as a DTA **symbol** (`(type song)`) instead of a string. The symbol is what the retail provider compares `get_data("type")` against (`sub_8275A230` -> `sub_822D1CE0`) to answer a browser row's label, and with it on the log shows every title being read (`store-probe: offer name exit '<title>'`) - but the guest then reads address 0 (measured 2026-10-21; the fault logger below puts it inside the offer's own message handler, in the `(rank <part>)` data walk), so it stays off and the rows draw blank. Requires a restart. |
 
 The observation point is [fs::PayloadOverlayDevice](../../src/fs/payload_overlay.cpp), not the SDK:
 every `game:`/`d:` path resolves through that device, so the hook is a single function pointer that
@@ -172,6 +173,29 @@ the SDK's kernel-import logging, which prints one line per export call (`[NtCrea
 store's request is followed by no file, content or socket call at all (plan §5/P2 record) — a
 question the path probe could not answer. Two cautions: the log grows to ~50 MB per boot, and the
 per-frame input/swap lines dominate, so census them by export name before reading order.
+
+**Naming a guest fault (2026-10-21).** The SDK reports an unhandled guest access violation as one
+line - `read of guest 0x00000000 (host 0x100000000) on thread 0x…` - and nothing else, which is not
+enough to find the code. While `store_trace` is on, [store_probe.cpp](../../src/store/store_probe.cpp)
+installs a **first-chance vectored exception handler** that logs the faulting `rip`, the translated
+guest address and the first 24 host frames, together with the module base:
+
+```
+store-probe: fault read of 0x00000000 at rip 0x7ff605bf70dd, frames: 0x7ff8c3aa7faa …
+store-probe: fault logger installed; module base 0x7ff6058f0000; guest window [0x100000000, 0x200000000)
+```
+
+The handler only observes: it returns `EXCEPTION_CONTINUE_SEARCH`, so the SDK's own decision is
+unchanged. Resolve the frames with `python scripts/map_lookup.py --base <module base> <frames…>`, which
+rebases them onto `rb_blitz.map` (the build writes it beside the executable; the binary itself has no
+symbols) and prints the generated function that contains each one — `--keep all` widens it to the C++
+symbols, and the unwind funclets next to every generated function are always skipped. Two things it
+taught, worth knowing before reading a stack: the addresses are **host** addresses (a guest zero read
+is `virtual_membase + 0`), and a new thread's stack probe writes its guard page, which is an access
+violation the filter has to drop — the near-null addresses are the guest's.
+
+The same script also takes a bare map address (no `--base`), which is what an address read straight
+out of `rb_blitz.map` needs.
 
 **The store's native chain (P3 step 0, 2026-10-20).** [store_probe.cpp](../../src/store/store_probe.cpp)
 now also hooks two guest functions, both pass-throughs that only report (and, for the gate, force a

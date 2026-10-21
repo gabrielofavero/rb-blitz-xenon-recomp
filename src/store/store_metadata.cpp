@@ -10,6 +10,9 @@ namespace {
 
 using ui::dtb::Node;
 
+// See store_metadata.h: off until the null the symbol form reaches in the list draw is named.
+bool g_type_symbol = false;
+
 Node Symbol(std::string_view name) { return Node::Symbol(name); }
 Node Text(std::string_view text) { return Node::String(text); }
 
@@ -91,6 +94,12 @@ std::vector<std::pair<const char*, int>> OfferRanks(const Offer& offer) {
 // None of those reads is guarded by `has_data`, so an *absent* key hands the DTA a null - which is
 // the null read the page faulted on once it carried offers (boots 103-109; an empty page, boot 108,
 // went through untouched). An empty string is a value; a missing key is not.
+//
+// `preview_audio` and `preview_art` are the exception, and they are NOT here: both are read *behind*
+// `has_data`, which an empty string satisfies - and then the preview manager is handed an empty file
+// name and the art loader an empty path (`store_browser_panel.refresh` -> `play_preview_file_if_cached`,
+// `store_details_panel.refresh` -> `store_panel load_art`). A free custom has neither, so both keys are
+// written only when they have a value, which is exactly what hides the retail preview UI (§2.5).
 std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offer) {
   std::string first_char;
   if (!offer.name.empty()) {
@@ -102,7 +111,6 @@ std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offe
           {"author", std::string()},
           {"label", std::string()},
           {"subgenre", std::string()},
-          {"preview_audio", std::string()},
           {"album_link", std::string()},
           {"pack_link", std::string()},
           {"pack_name", std::string()}};
@@ -115,6 +123,8 @@ std::vector<std::pair<const char*, int>> ExtraIntKeys() {
 }
 
 }  // namespace
+
+void SetOfferTypeSymbol(bool symbol) { g_type_symbol = symbol; }
 
 std::string FrontMenuRecordPath(std::string_view region, std::string_view platform,
                                 std::string_view locale) {
@@ -207,10 +217,11 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
     std::vector<Node> fields{pair("name", offer.name)};
     // The details panel asks `{offer offer_type}` and compares it to `song`/`pack`/`album`, but the
     // *record* key the shipped scripts write is `type` - `store.dtb`'s own example is
-    // `("dummy_upsell_offer" ("type" "song") ("name" {"localize" "unknown_song"}))` - so the accessor
-    // reads `type`, and an offer that only carries `offer_type` answers null. Both keys are written:
-    // the accessor's and the one the DTA spells.
-    fields.push_back(Node::Array({Symbol("type"), Text("song")}));
+    // `("dummy_upsell_offer" ("type" "song") ("name" {"localize" "unknown_song"}))`. The node kind
+    // is the measurement switch in store_metadata.h: a symbol is what the provider compares against
+    // to answer a row's label, a string is the shipped spelling.
+    fields.push_back(Node::Array(
+        {Symbol("type"), g_type_symbol ? Symbol("song") : Text("song")}));
     fields.push_back(Node::Array({Symbol("offer_type"), Symbol("song")}));
     // Every field is emitted even when it is empty: `process_offers` reads all of them, and a
     // missing key hands it a null to further down (boot 103).
@@ -218,7 +229,11 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
     fields.push_back(pair("album", offer.album));
     fields.push_back(pair("genre", offer.genre));
     fields.push_back(Node::Array({Symbol("year_released"), Node::Int(offer.year_released)}));
-    fields.push_back(pair("preview_art", offer.preview_art));
+    // Only when it has a value: an empty `preview_art` is "present" to `has_data` and would send the
+    // art loader after an empty path (see ExtraTextKeys).
+    if (!offer.preview_art.empty()) {
+      fields.push_back(pair("preview_art", offer.preview_art));
+    }
     for (const auto& extra : ExtraTextKeys(offer)) {
       fields.push_back(pair(extra.first, extra.second));
     }
@@ -230,9 +245,15 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
       rank_pairs.push_back(Node::Array({Symbol(part.first), Node::Int(part.second)}));
     }
     fields.push_back(Node::Array({Symbol("rank"), Node::Array(std::move(rank_pairs))}));
+    // The Downloaded state (plan §3.2), as the key the retail scripts read it from. Written only
+    // when true: an absent key is falsey, and a receipt never sets it - only the loaded library.
+    if (offer.downloaded) {
+      fields.push_back(Node::Array({Symbol("is_purchased"), Symbol("TRUE")}));
+    }
     rows.push_back(Node::Array(std::move(fields)));
   }
-  // The root `sub_8274F610` reads: three pairs, `offers_populated`, `sorted` and `offers`.
+  // The root `sub_8274F610` reads: three pairs, `offers_populated`, `sorted` and `offers`, and one
+  // **root array**, which is the same map the text writer emits.
   //
   // `sorted` is the **sort name** the browser reads back as `{store_panel sort_name}`, not a boolean
   // and not an index list: `refresh_list` compares it with "" and, when it is empty, calls
@@ -240,12 +261,12 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
   // index list there answers nothing, so `build_list` produced a list with no rows - which is what
   // boots 112-117 showed (the browser open, its row band drawn, every row blank). Recent has no
   // grouping of its own, so it writes the empty name.
-  std::vector<Node> root{
-      Node::Array({Symbol("offers_populated"), Symbol("TRUE")}),
-      Node::Array({Symbol("sorted"), Text("")}),
-      Node::Array({Symbol("offers"), Node::Array(std::move(rows))}),
-  };
-  return ui::dtb::Compile(root);
+  // One root array with flat key/value pairs - the convention `BuildFrontMenuRecord` writes and
+  // the suite reads (`(offers_populated TRUE sorted "" offers (...))`). `ui::dtb::Compile`
+  // serializes every top-level node as its own root, so the map must be a single node.
+  return ui::dtb::Compile({Node::Array({Symbol("offers_populated"), Symbol("TRUE"),
+                                        Symbol("sorted"), Text(""), Symbol("offers"),
+                                        Node::Array(std::move(rows))})});
 }
 
 std::string BuildFrontMenuText(const FrontMenu& menu, std::string* why) {
@@ -290,19 +311,35 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why) {
   for (const Offer& offer : offers) {
     out += "  (\n";
     out += pair_text("name", offer.name);
-    out += pair_text("type", "song");
+    // See store_metadata.h: a symbol makes the provider answer the row's label, a string is the
+    // shipped spelling. `store_offer_type_symbol` decides which one is served.
+    out += g_type_symbol ? "    (type song)\n" : "    (type \"song\")\n";
     out += "    (offer_type song)\n";
     out += pair_text("artist", offer.artist);
     out += pair_text("album", offer.album);
     out += pair_text("genre", offer.genre);
     out += "    (year_released " + std::to_string(offer.year_released) + ")\n";
-    out += pair_text("preview_art", offer.preview_art);
+    // Only when it has a value: `has_data preview_art` is true for an empty string too, and the art
+    // loader would then be handed an empty path (`store_details_panel.refresh`).
+    if (!offer.preview_art.empty()) {
+      out += pair_text("preview_art", offer.preview_art);
+    }
     for (const auto& extra : ExtraTextKeys(offer)) {
       out += pair_text(extra.first, extra.second);
     }
     for (const auto& extra : ExtraIntKeys()) {
       out += "    (" + std::string(extra.first) + " " + std::to_string(extra.second) + ")\n";
     }
+    if (offer.downloaded) {
+      // The Downloaded state (plan §3.2): `refresh_buttons` reads `{offer is_purchased}` and shows
+      // the Download Again row for it. Absent = falsey.
+      out += "    (is_purchased TRUE)\n";
+    }
+    // `is_available` is deliberately not written: `purchase_allowed` needs it (so an absent key
+    // keeps the price block and the Buy Now row from being built), and writing it FALSE made the
+    // details path answer `{offer is_completely_unavailable}` true - measured 2026-10-21, the A
+    // press landed on `store_info_unavailable_screen` with it and on retail's offer enumeration
+    // without it.
     const std::vector<std::pair<const char*, int>> parts = OfferRanks(offer);
     out += "    (rank (";
     for (const auto& part : parts) {

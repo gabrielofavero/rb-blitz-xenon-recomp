@@ -86,6 +86,7 @@
 #include "platform/game_restart.h"
 #include "store/store_fetch.h"
 #include "store/store_catalogue.h"
+#include "store/store_library.h"
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
@@ -357,6 +358,9 @@ class RbBlitzApp : public rex::ReXApp {
     // P3's catalogue: the offers a menu page is answered with. Its worker is started here for the
     // same reason, and the serving policy reads only its snapshot (src/store/store_catalogue.h).
     rb_blitz::store::InstallStoreCatalogue();
+    // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
+    // thread is started here; the serving policy asks only the published snapshot.
+    rb_blitz::store::InstallStoreLibrary();
     rb_blitz::settings::InstallMenuPayload(runtime());
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest

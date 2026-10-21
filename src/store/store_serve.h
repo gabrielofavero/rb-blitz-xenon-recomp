@@ -56,6 +56,20 @@ void SetOfferSource(OfferSource source);
 // A copy of the offers the installed source answers with, or none when no source is installed.
 std::vector<Offer> CatalogueOffers();
 
+// The Downloaded matcher (plan §3.2). The serving policy asks it once per offer when a menu page is
+// written, so the record carries `is_purchased` for the songs the loaded DLC library already holds.
+// The index itself lives in `src/store/store_library.cpp` (it needs the package reader) and is
+// installed once per boot; this module stays SDK-free and a test can install its own predicate.
+using DownloadedPredicate = std::function<bool(const Offer&)>;
+void SetDownloadedPredicate(DownloadedPredicate predicate);
+
+// True when the installed predicate says the song is in the loaded library. False with no
+// predicate installed, which is the honest answer for a boot that never built the index.
+bool IsDownloadedOffer(const Offer& offer);
+
+// The catalogue offers with the Downloaded flag resolved. `BuiltinRecord` writes this shape.
+std::vector<Offer> OffersForPage();
+
 // The answer to one request. `bytes` empty means "we have nothing for this path": the retail
 // fetch then runs exactly as it does today (and does nothing offline). `source` is the log token
 // that says where the bytes came from, so a boot's evidence names the branch.

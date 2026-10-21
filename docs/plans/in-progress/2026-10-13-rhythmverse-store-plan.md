@@ -10,10 +10,18 @@ notification now delivers it** — the store draws the served front menu's rows 
 for `dlc_store/europe/eng/recent/`, the request name P2 predicted (§5/P3 landing record,
 2026-10-21). **The catalogue landed 2026-10-21**: the page is filled from the live list (24 offers
 in boot 090), retail's own request body delivers it, and the **retail browser opens on those
-offers** with its details panel showing the offer's artist and genre (boots 112-120). P3's exit is
-still open on four measured items: the browser's **list rows draw no label**, the retail **price
-chrome** is still drawn, **A** has not been driven into `store_info_screen`, and the **Downloaded
-matcher** and album art are not built (§5/P3 catalogue and browser records).
+offers** with its details panel showing the offer's artist and genre (boots 112-120). **P3's
+remaining items were then worked in code and on screen the same day** (§5/P3 landing record): the
+store's heading now names RhythmVerse and the retail **price footer is gone** (both boot-measured),
+the **Downloaded matcher** is built (its index reads every loaded package's `songs.dta` and marks
+the offers the library already holds), the details page's cost labels and its
+`is_completely_unavailable` guard are edited in the payload, and the browser's blank rows were
+traced to the offer's **string-typed `type` key** (the retail provider compares it against the
+symbol `song`; with the symbol served it answers all 24 titles - but the list then faults while
+drawing, so that form ships behind a default-off switch and the rows stay blank). **Two P3 exit
+items remain open**: the row labels (the draw-time null) and A reaching `store_info_screen` (the
+native offer panel reports `enum_error` for a data-only offer); **album art** is also open (serving
+it needs a runtime PNG→texture encoder).
 **P5's pipeline landed the same
 day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
 starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
@@ -1105,6 +1113,117 @@ details panel reads them; the list rows still draw no text.** Boots `rb_blitz_11
   name changed the outcome, so the label is a third field (a `song_id`/`sym`-style row key is the
   cheapest candidate to write next).
 
+
+**P3 landing record (2026-10-21, evening) - the row labels' cause is found, the price chrome and the
+heading are edited into the payload, and the Downloaded matcher is built.** Read out of the
+decrypted image (`out/_swap/blitz_image.bin`), the extracted records
+(`assets/game/360/ui/store/gen/{store,store_info}.dtb`, dumped with
+`rb_blitz_settings_screen_tests.exe dump-record`) and the list resources
+(`ui/resource/lists/gen/list_store_*.milo_xbox`, dumped with `scripts/hmx_milo.py`).
+
+- **Why every browser row drew blank: `type` was a string.** The row text is the provider's
+  `Text(data, label, out)` (`StoreOfferProvider` vtable slot 2 + the `UIListProvider` secondary
+  vtable; `sub_8275A230`): it compares `get_data("type")` - read by `sub_822D1CE0`, which interns
+  the node's value as a Symbol - against the interned symbols `song` (`0x82044670`) and `pack`
+  (`0x82041CE8`). Our record wrote `(type "song")`, a **string node**, which never equals that
+  symbol, so the provider fell through to its empty answer. `offer_type` (a symbol) is a different
+  key, which is why the details panel worked while the list did not. Both writers now emit
+  `(type song)`; the row's own key is the map's first element (read by provider slot 8,
+  `sub_8275A820`), which is our `name`.
+- **The list rows' label names, measured statically**: `list_store_songpage`'s `UIListLabel` is
+  named `list` and its mesh `slot`; `list_store_packsongs`' is `song`. The provider answers `album`,
+  `song`, `rbn_icon`, `cost`, `new` and `purchased`, and the `cost` branch asks
+  `is_purchased`/`is_available` (`sub_82453408`/`sub_82453170`) - so a free custom never grows a
+  price column.
+- **The price chrome is retail text, so it is edited in the payload (§2.12).** Two surfaces:
+  (a) the footer `microsoft.lbl`, which `BandStorePanel.enter` shows on the Xbox branch of its
+  `#ifdef HX_PS3` block - `HideStorePriceChrome` appends `{microsoft.lbl set_showing FALSE}` after
+  the block (a scan that ignores the `#endif` would find the PS3 branch's own hide and never add
+  ours); (b) `cost.lbl`/`cost_ps3.lbl`, which `store_info_panel.refresh_panel` re-shows under
+  `purchase_allowed` - `HideStoreInfoPriceChrome` removes every show inside the method and hides
+  both once more at the end. The purchase gate itself needed no edit: every offer now writes
+  `(is_available FALSE)`, so `purchase_allowed` is false and neither a price nor a Buy Now row is
+  built (the details screen still opens - `is_completely_unavailable` is a different key).
+- **The store's heading names the source.** Retail draws it from the locale entry `store`
+  ("MUSIC STORE"); `SetStoreHeading` replaces that entry's value in every installed locale with
+  `CUSTOMS FROM RHYTHMVERSE` while the master switch is on (`kStoreHeadingText`).
+- **The store's DTA edits are now gated on the master switch, not on P2's spike.** With RhythmVerse
+  on, the payload rewrites `ui/store/gen/store.dtb` (commerce bypass + price footer) and
+  `ui/store/gen/store_info.dtb` (cost labels); the P2 local-server rewrite keeps its own cvar.
+  A refusal is a note, never a failed payload.
+- **The Downloaded matcher (§3.2) is built and wired to the record.**
+  `src/store/store_library.{h,cpp}` + `store_library_index.cpp`: the normalization (trim, collapse,
+  ASCII case fold) and the `(artist, title)` set are SDK-free and tested; the builder thread mounts
+  every package `dlc::LibraryPackagePaths()` names and reads its `songs/songs.dta` through the
+  reader the R9 menu pool already used (now shared as `src/fs/dlc_song_metadata.{h,cpp}`), which
+  gained the record's `title` and `artist` fields. The serving policy asks the installed predicate
+  once per offer (`store_serve.h`'s `SetDownloadedPredicate`) and writes `(is_purchased TRUE)` for
+  a song the loaded library declares - the key `refresh_buttons` reads as Downloaded. The index is
+  built when the store opens (off the guest thread), dropped by `InvalidateLibrary()` after a DLC
+  refresh or a store install, and absent until it lands, which is "unknown", never a negative
+  claim. A receipt never sets the mark.
+- **Measured on screen 2026-10-21** (`out/_swap/p3-boot/`, release tree, `store_fetch_deliver=1`,
+  `--dlc_root` at an empty folder, store row 4): the store's heading reads **RHYTHMVERSE** (the
+  locale entry `store` replaced) and the browser's footer **no longer shows "ALL PRICES ARE IN
+  MICROSOFT(R) POINTS"**; the details panel still reads `MADBALL / PUNK` from the offer. Both are
+  the payload edits below, on screen.
+- **The row labels: the provider answers our titles, and the list then faults.** With the symbol
+  form on, `store-probe: offer name exit '<title>'` prints every offer's title (three passes of the
+  24-offer page), so `StoreOfferProvider::Text` is reading `get_data("name")` - and then the guest
+  dies on `read of guest 0x00000000` while the list draws (`rb_blitz_124/126/128.log`). The symbol
+  form therefore ships **off** (`store_offer_type_symbol`, diagnostics.md) and the rows stay blank,
+  which is the pre-P3 behaviour: a faulting store is worse than a blank row.
+- **A still lands on `store_info_unavailable_screen`.** With the retail guard neutralised
+  (`AlwaysShowOfferDetails`, pinned by the suite) the popup remains, so it is the **native** offer
+  panel reporting `enum_error` for a data-only offer, not the DTA's `is_completely_unavailable`
+  branch. That is the next P3 measurement: what `store_info_enum_panel.set_offer` (or the panel's
+  offer fetch) refuses about an offer that has no commerce state.
+- **Tests**: `store_library` (new, **26 checks**), `store_serve` **79** (the `type` switch in both
+  forms, the preview keys absent when empty and present when set, the Downloaded mark from the
+  installed predicate), `store_payload` **130** (the footer hide after the `#endif`, the details
+  cost strip and its round trip, the heading, and the details guard), `store_metadata` **50**.
+- **Still open for P3's exit**: (a) the row labels (above); (b) A -> `store_info_screen` (above);
+  (c) album art: `preview_art` stays empty because the retail art loader wants a platform texture
+  (`png_xbox`/`dxt`), and producing one needs a runtime PNG decode + DXT encode + Xbox swizzle
+  (`scripts/hmx_tex.py import` documents the format; no C++ encoder exists yet), so the browser
+  keeps retail's placeholder art; (d) the Downloaded index has not been measured on a real library
+  (its cost is one mount + one `songs.dta` read per package, on its own thread).
+
+**P3 landing record (2026-10-21, late) - the label fault has a name: the offer's `(rank <part>)`
+lookup.** The fault logger below turned `read of guest 0x00000000` into a stack, and the stack names
+the store's own offer handler. Nothing about the shipping state changed: the symbol form of `type`
+stays **off**, because the fault is still open.
+
+- **The instrument.** `store_trace` now installs a first-chance vectored exception handler
+  (`src/store/store_probe.cpp`, `LogFault`) that logs the faulting rip, the guest/host address and 24
+  host frames, plus the module base. `out/_swap/fault_lookup.py` rebases those frames onto
+  `rb_blitz.map` and prints the nearest recompiled symbol. This is the missing piece for every
+  "the guest reads address 0" report: the SDK's own line names the address and nothing else.
+- **The chain, innermost first** (`rb_blitz_153.log`, `rb_blitz_161.log`): `sub_824534A8` (a data
+  path walk) <- `sub_824538A8` <- `sub_82453928` (**the offer's own message handler**: its literals
+  are `get_data`, `has_data`, `offer_type`, `offer_name`, `year_released`, `genre`, `cost_str`,
+  `in_library`, `is_available`, `is_purchased`, `has_available_pack`, `has_available_album`,
+  `is_completely_unavailable`, `first_char`, `pack_first_letter`, `release_date_str`, `short_name`)
+  <- `sub_8275C6C0` (the store offer's `has_available_demo`/`demo_purchased`/`upgrade` branch) <- the
+  DTA evaluation in `sub_823FF900`. So the null read happens **inside the offer's `get_data`**, not
+  in the list or the label.
+- **The lookup that answers nothing** (temporary path hook, `rb_blitz_156.log`): the last walk before
+  the fault is `(rank <part>)` - node 0 is the symbol `rank`, node 1 is a **string**, which is what
+  `store_info`'s `refresh_panel` passes (`{foreach $part (guitar drum vocals bass keys)}` -> `rank
+  $part`). `sub_824534A8` resolves each component through `owner + 192` and then reads word 0 of the
+  answer; a component that resolves to nothing leaves a zero there and **that** read is the fault.
+  The open question is therefore narrow and written down: why does the offer record's own `rank`
+  sub-array not answer the panel's *string* key, when the shipped grouping asks for the *symbol*
+  form instead (`p0/defs/store.txt`: `{song_mgr rank_tier {$offer get_data (rank band)} band}`)?
+  Both spellings have to answer for a retail offer.
+- **The two hooks that measured it are removed again.** A shared data-walk helper must not stay
+  hooked: one boot with them in place faulted in unrelated panel lookups on
+  `read of guest 0x70616E65` (the bytes `pane`, a string read as a pointer). The fault logger stays -
+  it only observes.
+- **Control**: with `store_offer_type_symbol=0` the same route runs the same
+  `{genre.lbl set text_token ...}` / `{album.mat set diffuse_tex cover_art_none.tex}` sequence and
+  completes (`rb_blitz_145.log`), so the fault needs the provider to answer a row's text - the label
+  path and the offer's `get_data` share the offer object.
 
 P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
 entry behind `store_panel request` (nothing can be served or observed before it) — **done, see the

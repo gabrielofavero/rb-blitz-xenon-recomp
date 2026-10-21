@@ -3,7 +3,9 @@
 
 #include "store/store_payload.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <utility>
 
 namespace rb_blitz::store {
 namespace {
@@ -260,6 +262,203 @@ bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string
   enter->kids.push_back(
       Node::Command({Node::Symbol("store_panel"), Node::Symbol("on_init_commerce_success")}));
   return true;
+}
+
+namespace {
+
+// `{<label> set_showing TRUE}` / `{<label> set_showing 1}` on one of the store's cost labels.
+bool IsCostShow(const Node& node) {
+  if (node.tag != ui::dtb::kCommand || node.kids.size() < 3) {
+    return false;
+  }
+  if (!IsSymbol(node.kids[0], "cost.lbl") && !IsSymbol(node.kids[0], "cost_ps3.lbl")) {
+    return false;
+  }
+  if (!IsSymbol(node.kids[1], "set_showing")) {
+    return false;
+  }
+  const Node& value = node.kids[2];
+  return (value.tag == ui::dtb::kSymbol && value.text == "TRUE") ||
+         (value.tag == ui::dtb::kInt && value.scalar != 0);
+}
+
+// Removes every cost-showing statement at any depth of the method, then hides both labels once more
+// so a body that re-shows them through a branch this pass did not recognise still ends hidden.
+void StripCostShows(Node& node) {
+  for (Node& kid : node.kids) {
+    StripCostShows(kid);
+  }
+  node.kids.erase(std::remove_if(node.kids.begin(), node.kids.end(), IsCostShow),
+                  node.kids.end());
+}
+
+}  // namespace
+
+bool HideStorePriceChrome(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* enter = nullptr;
+  for (Node& root : *store_ui_roots) {
+    enter = FindNamedMethod(root, "store_panel", "enter");
+    if (enter != nullptr) {
+      break;
+    }
+  }
+  if (enter == nullptr) {
+    return refuse("the record carries no store_panel enter method");
+  }
+  // The shipped `enter` carries `#ifdef HX_PS3 {microsoft.lbl set_showing FALSE} #else {microsoft.lbl
+  // set_showing TRUE} #endif`, so a scan for the command anywhere in the method would find the
+  // PS3 branch's own hide and conclude it was already rewritten. Only a statement **after** the
+  // last `#endif` is ours.
+  size_t start = 1;  // the method's own name is kid 0
+  for (size_t i = 0; i < enter->kids.size(); ++i) {
+    if (enter->kids[i].tag == ui::dtb::kEndif) {
+      start = i + 1;
+    }
+  }
+  for (size_t i = start; i < enter->kids.size(); ++i) {
+    const Node& kid = enter->kids[i];
+    if (kid.tag == ui::dtb::kCommand && kid.kids.size() >= 3 &&
+        IsSymbol(kid.kids[0], "microsoft.lbl") && IsSymbol(kid.kids[1], "set_showing") &&
+        IsSymbol(kid.kids[2], "FALSE")) {
+      if (why != nullptr) why->clear();  // already rewritten; an idempotent second pass
+      return true;
+    }
+  }
+  // Appended after the shipped `#ifdef HX_PS3` block, which is what shows the label on this build.
+  enter->kids.push_back(Node::Command({Node::Symbol("microsoft.lbl"),
+                                       Node::Symbol("set_showing"), Node::Symbol("FALSE")}));
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+bool HideStoreInfoPriceChrome(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* panel = nullptr;
+  for (Node& root : *store_info_roots) {
+    panel = FindNamedMethod(root, "store_info_panel", "refresh_panel");
+    if (panel != nullptr) {
+      break;
+    }
+  }
+  if (panel == nullptr) {
+    return refuse("the record carries no store_info_panel refresh_panel method");
+  }
+  StripCostShows(*panel);
+  panel->kids.push_back(Node::Command(
+      {Node::Symbol("cost.lbl"), Node::Symbol("set_showing"), Node::Symbol("FALSE")}));
+  panel->kids.push_back(Node::Command(
+      {Node::Symbol("cost_ps3.lbl"), Node::Symbol("set_showing"), Node::Symbol("FALSE")}));
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
+// The `if_else` whose test is `{<receiver> is_completely_unavailable}`.
+Node* FindUnavailableGuard(Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 2 && IsSymbol(node.kids[0], "if_else")) {
+    const Node& test = node.kids[1];
+    if (test.tag == ui::dtb::kCommand && test.kids.size() >= 2 &&
+        IsSymbol(test.kids[1], "is_completely_unavailable")) {
+      return &node;
+    }
+  }
+  for (Node& kid : node.kids) {
+    if (Node* found = FindUnavailableGuard(kid)) return found;
+  }
+  return nullptr;
+}
+
+// An `if_else` whose test is the literal `FALSE` - the shape this edit leaves behind.
+bool HasFalseGuard(const Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 2 && IsSymbol(node.kids[0], "if_else") &&
+      IsSymbol(node.kids[1], "FALSE")) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasFalseGuard(kid)) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+bool AlwaysShowOfferDetails(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* method = nullptr;
+  for (Node& root : *store_info_roots) {
+    method = FindNamedMethod(root, "store_info_enum_panel", "on_enum_finished");
+    if (method != nullptr) {
+      break;
+    }
+  }
+  if (method == nullptr) {
+    return refuse("the record carries no store_info_enum_panel on_enum_finished method");
+  }
+  Node* guard = FindUnavailableGuard(*method);
+  if (guard == nullptr) {
+    // Already rewritten? Then the method's `if_else` tests the literal `FALSE`, which is the state
+    // this edit leaves behind - an idempotent second pass, not a refusal.
+    if (HasFalseGuard(*method)) {
+      if (why != nullptr) why->clear();
+      return true;
+    }
+    return refuse("on_enum_finished carries no is_completely_unavailable guard");
+  }
+  // `{if_else FALSE <then> <else>}`: the else branch (the details screen) always runs.
+  guard->kids[1] = Node::Symbol("FALSE");
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+bool SetStoreHeading(std::vector<ui::dtb::Node>* locale_roots, std::string_view heading,
+                     std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (locale_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  if (heading.empty()) {
+    return refuse("the heading is empty");
+  }
+  for (Node& root : *locale_roots) {
+    if (root.tag == ui::dtb::kArray && root.kids.size() >= 2 && IsSymbol(root.kids[0], "store") &&
+        root.kids[1].tag == ui::dtb::kString) {
+      root.kids[1].text = std::string(heading);
+      if (why != nullptr) why->clear();
+      return true;
+    }
+  }
+  return refuse("the locale has no `store` entry");
 }
 
 }  // namespace rb_blitz::store

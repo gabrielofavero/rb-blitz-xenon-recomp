@@ -90,6 +90,7 @@
 #include <chrono>
 #include "fs/refresh_state.h"
 #include "store/store_download_service.h"
+#include "store/store_library.h"
 #if defined(_WIN32)
 #include "store/store_transfer.h"
 #endif
@@ -644,6 +645,9 @@ void PublishPendingRefresh() {
   content_manager->set_extra_content_library(std::move(items));
   g_content_count = g_structured_paths.size() + count;
   g_package_paths = std::move(paths);
+  // The list just changed, so the store's Downloaded index (§3.2) is stale: drop it rather than
+  // letting a page keep marking songs the library no longer (or newly) holds.
+  rb_blitz::store::InvalidateLibrary();
   // After the list is in place, never before: everything that waits on a refresh waits for
   // this to clear.
   g_refresh_publishing.store(false);

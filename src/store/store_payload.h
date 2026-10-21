@@ -84,5 +84,38 @@ bool PointUiNetcacheAtLocalServer(std::vector<ui::dtb::Node>* ui_roots,
 // Returns false and fills `why` when the record carries no `store_menu_screen` with an `enter`
 // method — before any edit.
 bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
+// P3's free-download seam (plan §2.12). Retail draws its price chrome in two places, both of them
+// text the scripts show and no data we could supply hides:
+//
+//   * the store's footer, "ALL PRICES ARE IN MICROSOFT(R) POINTS" (`microsoft.lbl`, shown on the
+//     Xbox branch of `BandStorePanel.enter`);
+//   * the details page's `cost.lbl`/`cost_ps3.lbl`, which `store_info_panel.refresh_panel` re-shows
+//     whenever `purchase_allowed` is true.
+//
+// RhythmVerse customs are free, so this appends `{microsoft.lbl set_showing FALSE}` to the panel's
+// `enter` (which every store screen runs, because the panel is a member of all three) and returns
+// false when that method is missing - before any edit.
+bool HideStorePriceChrome(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 
+// The same seam on the details record (`ui/store/gen/store_info.dtb`): every command that shows a
+// cost label is removed from `store_info_panel.refresh_panel`, and both labels are hidden once more
+// at the end of the method. The purchase button needs no edit: `purchase_allowed` needs
+// `{offer is_available}`, which a free custom never sets - see `Offer::downloaded`.
+bool HideStoreInfoPriceChrome(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// A free custom is never "completely unavailable": that state only exists in the retail purchase
+// model. `store_info_enum_panel.on_enum_finished` opens `store_info_screen` only when
+// `{offer is_completely_unavailable}` is false, and measured 2026-10-21 the A press on a served
+// offer landed on `store_info_unavailable_screen` instead. This replaces that guard's test with
+// `FALSE` (the else branch - the details screen - always runs). Refused, before any edit, when the
+// panel's `on_enum_finished` does not carry the `if_else` whose test reads the key.
+bool AlwaysShowOfferDetails(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// The store heading is retail's own locale entry `store` ("MUSIC STORE"); the owner's attribution
+// requirement (§1.8) is met by a store that names its source. Replaces the entry's value whatever
+// the locale currently says, because a translated heading is still retail's, not ours. Returns
+// false and fills `why` when the locale does not carry the key.
+inline constexpr char kStoreHeadingText[] = "RHYTHMVERSE";
+bool SetStoreHeading(std::vector<ui::dtb::Node>* locale_roots, std::string_view heading,
+                     std::string* why);
 }  // namespace rb_blitz::store

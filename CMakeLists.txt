@@ -207,6 +207,11 @@ set(RBBLITZ_SOURCES
     # P4: the search's field, request and answer (SDK-free) plus the worker that performs it.
     # The worker is Windows-only (it includes store_http.h) and is appended below.
     src/store/store_search.cpp
+    # P3's Downloaded mark (plan §3.2): the SDK-free (artist, title) index, the builder that reads
+    # every loaded package's songs.dta, and the shared package reader the menu-music pool also uses.
+    src/store/store_library_index.cpp
+    src/store/store_library.cpp
+    src/fs/dlc_song_metadata.cpp
 )
 
 if(WIN32)
@@ -899,6 +904,16 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_store_serve_tests PRIVATE src)
     add_test(NAME store_serve COMMAND rb_blitz_store_serve_tests)
+
+    # P3's Downloaded matcher (src/store/store_library.h): the field normalization and the
+    # (artist, title) index. Hermetic and SDK-free - the package reader is the builder's half and
+    # needs the SDK, while everything the mark decides is in this tuple comparison.
+    add_executable(rb_blitz_store_library_tests
+        tests/store_library_tests.cpp
+        src/store/store_library_index.cpp
+    )
+    target_include_directories(rb_blitz_store_library_tests PRIVATE src)
+    add_test(NAME store_library COMMAND rb_blitz_store_library_tests)
 
     # P5 of the RhythmVerse store plan: the download pipeline. SDK-free and hermetic - the
     # transfer is a fake and the destination is a temporary folder - so the redirect/archive/

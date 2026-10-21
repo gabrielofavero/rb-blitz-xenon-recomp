@@ -113,8 +113,16 @@ std::vector<SongMetadata> ReadSongMetadata(std::span<const uint8_t> bytes, bool 
     if (record.tag != ui::dtb::kArray || record.kids.empty() || record.kids[0].text.empty()) continue;
     const Node* song = Field(record, "song");
     const Node* name = song ? Field(*song, "name") : nullptr;
-    if (name && !name->kids[1].text.empty())
-      songs.push_back({record.kids[0].text, name->kids[1].text});
+    if (name && !name->kids[1].text.empty()) {
+      SongMetadata entry;
+      entry.key = record.kids[0].text;
+      entry.stream = name->kids[1].text;
+      // The display identity the store matches on (§3.2). A record without them keeps empties,
+      // which the matcher refuses rather than guessing.
+      if (const Node* title = Field(*song, "title")) entry.title = title->kids[1].text;
+      if (const Node* artist = Field(*song, "artist")) entry.artist = artist->kids[1].text;
+      songs.push_back(std::move(entry));
+    }
   }
   return songs;
 }
