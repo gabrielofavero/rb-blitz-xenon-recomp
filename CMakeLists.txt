@@ -212,7 +212,7 @@ set(RBBLITZ_SOURCES
 if(WIN32)
     # WinHTTP lives behind one file so the policy stays testable without a network.
     list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
-         src/store/store_search_service.cpp)
+         src/store/store_search_service.cpp src/store/store_catalogue.cpp)
 endif()
 
 if(WIN32)

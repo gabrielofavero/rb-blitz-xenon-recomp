@@ -63,6 +63,10 @@ constexpr size_t kMaxDistinctPaths = 512;
 // read the cvar registry (project rule).
 std::atomic<bool> g_trace_on{false};
 
+// The store panel `sub_8274FB60` was last called on. Written by that hook, read by the delivery
+// step in store_fetch.cpp, both on guest threads.
+std::atomic<uint32_t> g_panel{0};
+
 // A big-endian u32 out of guest memory, or 0 when the address is not mapped.
 uint32_t GuestU32(uint8_t* base, const uint32_t addr) {
   const uint8_t* p = rex::memory::GuestPtr<const uint8_t*>(base, addr);
@@ -131,27 +135,6 @@ void WriteGuestU32(uint8_t* base, const uint32_t addr, const uint32_t value) {
   p[3] = uint8_t(value & 0xFF);
 }
 
-// The image's data section is mapped read-only (`XexModule::Load` protects code and read-only data
-// with kMemoryProtectRead), so a plain store to a global there does nothing. This is the same
-// unprotect-write-restore the ultimate patches use (src/hooks/ultimate.cpp).
-bool WriteGuestU32Protected(uint8_t* base, const uint32_t addr, const uint32_t value) {
-  auto* memory = REX_KERNEL_MEMORY();
-  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
-  if (heap == nullptr) {
-    return false;
-  }
-  uint32_t old_protect = 0;
-  if (!heap->Protect(addr, sizeof(uint32_t),
-                     rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite,
-                     &old_protect)) {
-    return false;
-  }
-  WriteGuestU32(base, addr, value);
-  heap->Protect(addr, sizeof(uint32_t),
-                old_protect != 0 ? old_protect : rex::memory::kMemoryProtectRead);
-  return true;
-}
-
 // Reports the readiness word and the two vector words once per boot. `sub_82753010` returns early
 // when `*(this+52) != *(this+56)` (its own "already loaded" test) *before* it reads the state word,
 // so the three values together say which of the two early exits the boot took.
@@ -209,6 +192,35 @@ std::string LocalServerRoot() { return REXCVAR_GET(store_local_server_root); }
 // The same switch, for the fetch hook, which must not read the cvar registry from a guest thread.
 bool TraceEnabled() { return g_trace_on.load(std::memory_order_relaxed); }
 
+void RememberPanel(uint32_t panel) {
+  if (panel != 0) {
+    g_panel.store(panel, std::memory_order_relaxed);
+  }
+}
+
+uint32_t Panel() { return g_panel.load(std::memory_order_relaxed); }
+
+// The image's data section is mapped read-only (`XexModule::Load` protects code and read-only data
+// with kMemoryProtectRead), so a plain store to a global there does nothing. This is the same
+// unprotect-write-restore the ultimate patches use (src/hooks/ultimate.cpp).
+bool WriteGuestU32Protected(uint8_t* base, const uint32_t addr, const uint32_t value) {
+  auto* memory = REX_KERNEL_MEMORY();
+  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
+  if (heap == nullptr) {
+    return false;
+  }
+  uint32_t old_protect = 0;
+  if (!heap->Protect(addr, sizeof(uint32_t),
+                     rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite,
+                     &old_protect)) {
+    return false;
+  }
+  WriteGuestU32(base, addr, value);
+  heap->Protect(addr, sizeof(uint32_t),
+                old_protect != 0 ? old_protect : rex::memory::kMemoryProtectRead);
+  return true;
+}
+
 // A short hex listing of the words at a guest address, for logs that have to show a layout the
 // code has not been proven to use yet. Unmapped words read as 0.
 std::string GuestWords(uint8_t* base, uint32_t addr, int count) {
@@ -244,6 +256,10 @@ REX_HOOK_RAW(sub_8274FB60) {
   const uint32_t object = ctx.r3.u32;
   const uint32_t input_string = ctx.r4.u32;
   const uint32_t flag = ctx.r5.u32;
+  // The panel itself: the front-menu builder is a method of this same object (`this + 52` is its
+  // menu list, `this + 148` the request path this function writes). Recorded unconditionally
+  // because the delivery step needs it whatever the trace switch says.
+  rb_blitz::store::RememberPanel(object);
   // The argument is a `String` by value: its character buffer is at +4 (`sub_82459130` writes the
   // vtable at +0, and `sub_8235A240` reads +4 as the path). The first P3 hook read r4 as a menu
   // symbol and reported the path as unreadable; this is the same object the DTA's `request`
@@ -278,8 +294,13 @@ REX_HOOK_RAW(sub_8235A240) {
         base, rb_blitz::store::GuestU32(base, path_string + 4), 240);
     rb_blitz::store::LogCache(manager, path);
   }
-  rb_blitz::store::ServeStoreRequest(ctx, base, path_string);
+  const bool served = rb_blitz::store::ServeStoreRequest(ctx, base, path_string);
   __imp__sub_8235A240(ctx, base);
+  if (served) {
+    // The request has registered its client by now, which is the state the retail notify needs:
+    // `sub_8235A240`'s loaded branch appends the client and immediately calls `sub_8235A0F8`.
+    rb_blitz::store::DeliverStoreRecord(ctx, base, manager, path_string);
+  }
   if (path_string != 0 && rb_blitz::store::TraceEnabled()) {
     const std::string path = rb_blitz::store::GuestCString(
         base, rb_blitz::store::GuestU32(base, path_string + 4), 240);
@@ -313,11 +334,16 @@ REX_HOOK_RAW(sub_827501F0) {
 // ---------------------------------------------------------------------------------------------
 // P3's data lane: the front-menu builder chain, entered once per served record.
 //
-// `sub_827537C0(panel, DataArray, source)` allocates the 72-byte menu object (`sub_8275D5B8`),
-// stores it on the panel and reads its entry count; `sub_8275D5B8` copies the source string and
-// parses the array (`sub_8275D4E0`). The call faults on `read of guest 0x00000004`, so each of the
-// three is logged at entry and exit: the last entry without its exit names the function the fault
-// is in, which no stack trace does on this emulator.
+// `sub_827537C0(panel, const DataArray* record, const char* source)` allocates the 72-byte menu
+// object (`sub_8275D5B8`), pushes it into the panel's menu list (`sub_821F73B8` on `panel + 52`, a
+// `std::vector<FrontMenu*>` whose begin/end/cap are `+52/+56/+60`) and finishes with the panel's
+// own update (`sub_82753288`). The second argument is the insert's **parsed array**
+// (`file + 68`): `sub_8275D5B8` stores it at `menu + 60` and `sub_8275D4E0` looks `submenus` up in
+// it (`sub_823FAE00`), which a raw text pointer cannot answer - handing it text faults inside the
+// parse (`read of 0x28737566`, `"(suf"` of `(submenus` read as a pointer).
+//
+// The four calls are logged at entry and exit: the last entry without its exit names the function
+// a fault is in, which no stack trace does on this emulator.
 REX_EXTERN(__imp__sub_827537C0);
 REX_HOOK_RAW(sub_827537C0) {
   const bool trace = rb_blitz::store::TraceEnabled();
@@ -336,14 +362,154 @@ REX_HOOK_RAW(sub_8275D5B8) {
   if (trace) REXLOG_INFO("store-probe: menu ctor exit");
 }
 
+// The retail `file_req_complete` helper, the caller the delivery has to satisfy. `sub_827538B8(out,
+// panel, message)` walks the message's record array and bails at four named checks before it calls
+// the builder: the node at +24 must convert, +16 must be an array, that array must carry
+// `submenus`, and the panel's menu list must be empty. Logging the nodes at entry is what turns
+// "the panel drew its own rows" into "which of the four refused our record".
+REX_EXTERN(__imp__sub_827538B8);
+REX_HOOK_RAW(sub_827538B8) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) {
+    const uint32_t message = ctx.r5.u32;
+    const uint32_t array = message != 0 ? rb_blitz::store::GuestU32(base, message + 4) : 0;
+    REXLOG_INFO("store-probe: file-complete enter out={:#x} panel={:#x} message={:#x}[{}] "
+                "array={:#x}",
+                ctx.r3.u32, ctx.r4.u32, message,
+                message != 0 ? rb_blitz::store::GuestWords(base, message, 4) : std::string(),
+                array);
+    if (array != 0) {
+      // The array is `{elements, ?, count, refs}` and its nodes are 8 bytes `{value, type}`
+      // (`sub_823FAE00` walks them with an 8-byte stride); the helper reads nodes 2..5.
+      const uint32_t elements = rb_blitz::store::GuestU32(base, array);
+      REXLOG_INFO("store-probe: file-complete array words={} elements={:#x}",
+                  rb_blitz::store::GuestWords(base, array, 4), elements);
+      for (int i = 0; i < 6; ++i) {
+        const uint32_t node = elements + static_cast<uint32_t>(i) * 8;
+        REXLOG_INFO("store-probe: file-complete node {} value={:#x} type={}", i,
+                    rb_blitz::store::GuestU32(base, node),
+                    rb_blitz::store::GuestU32(base, node + 4));
+      }
+    }
+  }
+  __imp__sub_827538B8(ctx, base);
+  if (trace) {
+    REXLOG_INFO("store-probe: file-complete exit (out words {})",
+                rb_blitz::store::GuestWords(base, ctx.r3.u32, 3));
+  }
+}
+
+// The offers parser (`sub_8274F610(out, panel, message)`), the branch the panel uses for a row's
+// page. It reads `offers_populated`, `sorted` and `offers` out of the record the message carries;
+// logging the record's own top-level keys is what says whether the writer and the reader agree on
+// the map convention (`sub_823FAE00` matches a sub-array whose first node is the key).
+//
+// Hooking `sub_823FAE00` itself was tried and is wrong: resolving the key from inside a lookup means
+// calling a guest function (`sub_823F9538`) while the DTA engine is mid-evaluation, which is
+// re-entrant and left boots faulting on a string read as a pointer (`read of guest 0x75706461`).
+REX_EXTERN(__imp__sub_8274F610);
+REX_EXTERN(__imp__sub_823F9538);
+REX_HOOK_RAW(sub_8274F610) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  const uint32_t message = ctx.r5.u32;
+  const uint32_t array = message != 0 ? rb_blitz::store::GuestU32(base, message + 4) : 0;
+  // The array is the shape a page's delivery would need if the notification ever had to be replayed
+  // (see `DeliverStoreRecord`); the retail body sends it, so this hook only reports.
+  if (trace) {
+    const uint32_t elements = array != 0 ? rb_blitz::store::GuestU32(base, array) : 0;
+    // The record is the second node of the message's array (the same slot the menu helper reads).
+    const uint32_t record = elements != 0 ? rb_blitz::store::GuestU32(base, elements + 16) : 0;
+    REXLOG_INFO("store-probe: offers parse panel={:#x} message={:#x}[{}] record={:#x}", ctx.r4.u32,
+                message, message != 0 ? rb_blitz::store::GuestWords(base, message, 2) : std::string(),
+                record);
+    if (record != 0) {
+      const uint32_t items = rb_blitz::store::GuestU32(base, record);
+      const uint32_t count = (rb_blitz::store::GuestU32(base, record + 8) >> 16) & 0xFFFF;
+      REXLOG_INFO("store-probe: offers record count={} words={}", count,
+                  rb_blitz::store::GuestWords(base, record, 4));
+      for (uint32_t i = 0; i < count && i < 5; ++i) {
+        const uint32_t node = items + i * 8;
+        const uint32_t value = rb_blitz::store::GuestU32(base, node);
+        const uint32_t type = rb_blitz::store::GuestU32(base, node + 4);
+        std::string key;
+        if (type == 16 && value != 0) {
+          const uint32_t inner = rb_blitz::store::GuestU32(base, value);
+          if (inner != 0) {
+            PPCContext call = ctx;
+            call.r3.u64 = inner;
+            __imp__sub_823F9538(call, base);
+            key = rb_blitz::store::GuestCString(base, call.r3.u32, 40);
+          }
+        }
+        REXLOG_INFO("store-probe: offers record node {} type={} key='{}'", i, type, key);
+      }
+    }
+  }
+  __imp__sub_8274F610(ctx, base);
+  if (trace) {
+    // A fault inside the parser leaves no exit line, which is what separates "the record is wrong"
+    // from "the DTA's `process_offers` is reading a key the writer does not emit".
+    const uint32_t panel = ctx.r4.u32 != 0 ? ctx.r4.u32 - 204 : 0;
+    REXLOG_INFO("store-probe: offers parse returned panel={:#x} out={} record={:#x}", ctx.r4.u32,
+                ctx.r3.u32 != 0 ? rb_blitz::store::GuestWords(base, ctx.r3.u32, 4) : std::string(),
+                array != 0 ? rb_blitz::store::GuestU32(base, array) : 0);
+    // The panel's own state after the parse: `num_offers` and the offer vector live somewhere in
+    // here, and dumping the words is what lets a later reader find them without another boot.
+    if (panel != 0) {
+      REXLOG_INFO("store-probe: panel words={}", rb_blitz::store::GuestWords(base, panel, 32));
+    }
+  }
+}
+
 REX_EXTERN(__imp__sub_8275D4E0);
 REX_HOOK_RAW(sub_8275D4E0) {
   const bool trace = rb_blitz::store::TraceEnabled();
   if (trace) {
-    REXLOG_INFO("store-probe: menu parse enter obj={:#x} array={:#x}", ctx.r3.u32, ctx.r4.u32);
+    REXLOG_INFO("store-probe: menu parse enter obj={:#x} array={:#x} words={}", ctx.r3.u32,
+                ctx.r4.u32, ctx.r4.u32 != 0 ? rb_blitz::store::GuestWords(base, ctx.r4.u32, 4)
+                                            : std::string());
   }
   __imp__sub_8275D4E0(ctx, base);
-  if (trace) REXLOG_INFO("store-probe: menu parse exit");
+  if (trace) {
+    REXLOG_INFO("store-probe: menu parse exit menus={} submenus={:#x} name={:#x}",
+                rb_blitz::store::GuestWords(base, ctx.r3.u32 + 60, 3),
+                rb_blitz::store::GuestU32(base, ctx.r3.u32 + 64),
+                rb_blitz::store::GuestU32(base, ctx.r3.u32 + 68));
+  }
+}
+
+// The two steps inside the parse: the `submenus` value is stored by `sub_8240F3D8` (a ref
+// assignment on `menu + 64`) and then walked by `sub_8275CBD8`, which finds the current menu by
+// name. The last entry without its exit is the step a fault is in.
+REX_EXTERN(__imp__sub_8240F3D8);
+REX_HOOK_RAW(sub_8240F3D8) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) REXLOG_INFO("store-probe: submenus store enter dest={:#x} value={:#x}", ctx.r3.u32,
+                         ctx.r4.u32);
+  __imp__sub_8240F3D8(ctx, base);
+  if (trace) REXLOG_INFO("store-probe: submenus store exit");
+}
+
+REX_EXTERN(__imp__sub_8275CBD8);
+REX_HOOK_RAW(sub_8275CBD8) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) {
+    REXLOG_INFO("store-probe: submenu walk enter menu={:#x} value={:#x} statics={}", ctx.r3.u32,
+                ctx.r5.u32, rb_blitz::store::GuestWords(base, 0x82106B00u, 2));
+  }
+  __imp__sub_8275CBD8(ctx, base);
+  if (trace) REXLOG_INFO("store-probe: submenu walk exit");
+}
+
+// The panel's own update, the builder's last step (`sub_82753288(panel)`). It is the one call after
+// the menu is stored, so an entry without its exit names it as the fault's home.
+REX_EXTERN(__imp__sub_82753288);
+REX_HOOK_RAW(sub_82753288) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) REXLOG_INFO("store-probe: panel update enter panel={:#x} menus={}", ctx.r3.u32,
+                         rb_blitz::store::GuestWords(base, ctx.r3.u32 + 52, 3));
+  __imp__sub_82753288(ctx, base);
+  if (trace) REXLOG_INFO("store-probe: panel update exit");
 }
 
 // ---------------------------------------------------------------------------------------------

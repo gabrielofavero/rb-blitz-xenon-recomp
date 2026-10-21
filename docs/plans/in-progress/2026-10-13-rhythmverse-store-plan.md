@@ -1,12 +1,20 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0, P6, P1 and P2
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21. Status: **in progress — P0, P6, P1 and P2
 landed 2026-10-20**, and **P3's serial half (step 0) landed the same day**: the request chain is
 mapped (`sub_827501F0` → `sub_82753010` → `sub_8274FB60` → the file cache), both entries are
 hooked, and the store's own DTA record is proven editable — the panel still issues no request
 offline, so the data lane starts at the gate (§5/P3 step 0 record). **P3's data lane then reached
-the file cache**: a served record is inserted and parsed by the retail DTA reader, and delivery
-stops at the panel's notification (§5/P3 delivery record, 2026-10-20 evening). **P5's pipeline landed the same
+the file cache**: a served record is inserted and parsed by the retail DTA reader, and **the retail
+notification now delivers it** — the store draws the served front menu's rows and a row press asks
+for `dlc_store/europe/eng/recent/`, the request name P2 predicted (§5/P3 landing record,
+2026-10-21). **The catalogue landed 2026-10-21**: the page is filled from the live list (24 offers
+in boot 090), retail's own request body delivers it, and the **retail browser opens on those
+offers** with its details panel showing the offer's artist and genre (boots 112-120). P3's exit is
+still open on four measured items: the browser's **list rows draw no label**, the retail **price
+chrome** is still drawn, **A** has not been driven into `store_info_screen`, and the **Downloaded
+matcher** and album art are not built (§5/P3 catalogue and browser records).
+**P5's pipeline landed the same
 day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
 starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
 by exactly one line of its exit:** the field, the authored keys, the request, the answer and the
@@ -936,15 +944,167 @@ the decrypted image (`out/_swap/blitz_image.bin`, RTTI resolved with the new
   `src/store/store_metadata.{h,cpp}` (`BuildFrontMenuText`/`BuildMenuText`), the guest half in
   `src/store/store_fetch.{h,cpp}` (insert only by default), `scripts/probe_store.ps1 -Extra`, the
   cvars `store_serve_dir` and `store_fetch_deliver` (both documented in
-  `docs/engine/diagnostics.md`), and ctest **`store_serve` = 50 checks** (full suite **43/43**).
+  `docs/engine/diagnostics.md`), and ctest **`store_serve` = 50 checks** (full suite **43/43**; the
+  count is 61 after the landing record below).
 - **Next measurement, named so it is not rediscovered**: find the code that turns a loaded file into
   the message `sub_8235A0F8` delivers - the download completion in `rb_blitz_recomp.23.cpp` builds
   the same shape - and reproduce it verbatim instead of calling the client callback with the file
   object; or locate the state the retail notification establishes before it calls the builder.
 
+**P3 landing record (2026-10-21) — the front menu is delivered: the retail store draws RECENT and
+SEARCH, and pressing one asks for the request name P2 predicted.** Boots
+`out/_swap/store-probe/20261020-2139…2202` (`rb_blitz_079…088.log`), same instruments as above.
+
+- **A `.dta` record is TEXT.** The insert's type-3 branch (`sub_82468138`) parses it with the
+  engine's own text reader: `sub_82418878` builds the root array and `sub_82417BF8` is its
+  tokenizer (`sub_82423FD8` is `GetToken`; the tokens it special-cases are 20/22/23/24 =
+  `#define`/`#merge`/`#ifdef`/`#autorun`). Measured: the same record served as compiled DTB parsed
+  to a single stray symbol node (`{0x8200BA88, type 5}`), the text form to the `submenus` map. The
+  earlier "compile it" reading is superseded, and so is the writer choice that came from it.
+- **The delivery that works is the retail notification, not a builder call.** After the request has
+  registered its client, the hook calls `sub_8235A0F8(cache, &request_path, 1)` - the exact call
+  `sub_8235A240`'s "already loaded" branch makes - with the manager's readiness word
+  (`manager + 44`) forced to 1 for the call and restored after it (`WriteGuestU32Protected`, now
+  public in `src/store/store_probe.h`). Every layer below that call is the engine's own, so the
+  message layout (`file_req_complete`, vt `0x82102DC4`) never has to be reproduced by hand.
+- **The message, measured** (`rb_blitz_085.log`): `{vt, array}` with
+  `[int, {type 5}, {type 16 = the record's DataArray}, int, {type 18 = the source path}, int]`; the
+  panel's helper `sub_827538B8` reads nodes 2..5 and refuses a record whose
+  `sub_823FAE00(record, Sym("submenus"))` finds nothing.
+- **Front-menu record shape (measured, after two superseded attempts).** Each row is a
+  **three-element array** whose first element is the provider path -
+  `(submenus ("/eng/recent/" "Recent" TRUE) ...)` - because `sub_8275C968` reads a row as an array
+  and asks for `count > 2` with the third element non-null, and `sub_8275CBD8` compares the row's
+  first string against a provider name (its static default is `pro`). The record also carries
+  `(new_releases "<path>")`: `sub_8275D4E0` stores that lookup at `menu + 68`, and without it the
+  builder's last step faults `read of 0x44`. Bare quoted paths as rows, and a compiled DTB, both
+  fail - those are the two superseded attempts in the record above.
+- **Measured result**: the store's own screen OCRs as `MUSIC STORE … RECENT SEARCH …`
+  (`out/_swap/store-probe/20261020-2201xx`, boot `rb_blitz_088.log`; the panel's menu vector reads
+  `{0x4163B538, 0x4163B53C, 0x4163B53C}`), and pressing the row requests
+  **`dlc_store/europe/eng/recent/`** - the `MenuRecordPath(region, locale, name)` template P2's
+  writer predicted, now measured.
+- **Panel pointers, for whoever picks this up**: `sub_8274FB60`'s `this` is the primary panel
+  (vt `0x82102B24`); the client the cache registers is primary **+ 204** (vt `0x82102AC4`); the
+  menu vector the builder pushes into belongs to the object the retail handler passes as
+  `arg0 - 72`. That is why `Panel()`/`Panel() + 52` disagree with the builder's receiver, and why
+  the retail route - not a direct builder call - is the correct seam.
+- **The offers page** answers `dlc_store/<region>/<locale>/<name>/` with `BuildMenuText({})`: an
+  **empty** page, the shape P3's exit already requires to work, because the catalogue that fills it
+  is not wired yet. `IsMenuRecordPath` is the rule that separates a menu request from an offer or
+  related-record one.
+- Landed: `store::IsMenuRecordPath`, the offers page, the corrected text writer, the retail
+  notification behind `store_fetch_deliver` (still **off** by default), the two new hooks and the
+  public `WriteGuestU32Protected`, and ctest `store_serve` with the menu-path and offers-page cases
+  (**61 checks**; full suite **43/43** in `out/build/win-amd64-debug`).
+- **P3 exit still open**: Recent shows no offers (the catalogue is not wired), so title/artist/art,
+  the details screen, and the Downloaded matcher (§3.2) wait for the list to be filled. The next
+  step is one function - `BuiltinRecord`'s menu branch - fed by the P5 pipeline's snapshot, plus the
+  field mapping §5/P3 already names.
+- **Control leg**: with `store_fetch_deliver` off the record is still inserted and the request still
+  runs, and the store shows its own list with LOADING (`rb_blitz_089.log`) - no fault, no change to
+  the shipped behaviour. The insert's 72-byte file object reads
+  `{vt, …, path String@44, type 3@52, size 108@60, parsed array@68}`, which is the layout the
+  delivery depends on, now measured rather than inferred.
+
 Landed with this record: `store::AddStoreEntryBypass` (+ tests), the `sub_8274FB60` request hook and
 the `sub_82753010` gate hook in `src/store/store_probe.cpp` (pass-through; they log and force only
 while `store_trace` is on). `store_payload` is **84 checks**; full `ctest` **40/40**.
+
+**P3 catalogue record (2026-10-21) - the page is filled from the live RhythmVerse catalogue, and the
+retail offers parser reads it; the browser built from those offers still faults.** Boots
+`rb_blitz_097...110.log` (release tree, `out/build/win-amd64-release/logs/`), driven by
+`scripts/probe_store.ps1 -StoreRow 3 -PageRow 0` with `--store_fetch_deliver=1 --store_trace=true`.
+
+- **The delivery seam, corrected.** A menu page does **not** need a hand-built parser call: the file
+  cache's own `file_req_complete` reaches the panel's dispatcher `sub_827501F0`, whose branch at
+  `loc_8275088C` calls `sub_8274F610(out, client - 204, {vt = 0x82102DC4, array})` with **the
+  message's own array**, and the parser reads the record out of that array's node 2. Measured: the
+  front menu takes that branch at boot (its record has no `offers_populated`, so the parse is a
+  no-op), and with the page served through the same notification the parser reads
+  `offers_populated`/`sorted`/`offers` (`rb_blitz_110.log`).
+- **Two calls that look right and are not.** (1) Passing the record itself as the message payload
+  makes the parser read node 2 *of the record* - boots 097/098 showed it parsing the front menu's
+  keys. (2) Calling `sub_8235A0F8` for a page whose request the cache never registered makes
+  `sub_82468560` answer 0 and the notify reads through the null (boot 099). The fix that sticks is
+  smaller than either: `ServeStoreRequest` now leaves the manager's readiness word (`manager + 44`)
+  at 1 after the insert, so retail's own request body takes its "already loaded -> notify" branch
+  and the message, its array and every node below them are the engine's (boots 101 and later).
+- **The catalogue feeds the writer.** `src/store/store_catalogue.{h,cpp}` fetches page 1 of
+  `/api/rb3xbox/songfiles/list` on its own thread (TTL 300 s, 30 s failure backoff, single flight,
+  drops an answer whose settings generation changed), shapes it with the same `DecideOffer` pair
+  P4's search uses, and hands `Offer` records to `SetOfferSource`; `BuildMenuText` writes them. First
+  measured page: `page 1 -> 24 eligible offer(s) of 25 record(s)` (boot 090).
+- **Zero offers is a real, working page** (boot 108, `store_catalogue_off`): the parser returns, the
+  DTA's `process_offers` takes its `num_offers < 1` arm and refreshes the menu, and the store comes
+  back to `store_menu_screen` with no fault. That is the control leg for every offers question.
+- **The retail scripts are readable offline now.** `ui::dtb::Parse` (already in the tree for P1)
+  dumps a shipped `.dtb` back to DTA text; `ui/store/gen/store.dtb` holds the whole store UI and
+  answers questions that used to cost boots: `on_offers_populated` -> `process_offers` ->
+  `{if_else {>= {store_panel num_offers} 1} {ui goto_screen store_browser_screen}
+  {this refresh_current_menu}}`; the browser's `refresh_list` groups through
+  `{find syscfg store groupings sort_name}`, whose entries read `release_date_str`, `artist`,
+  `first_char`, `year_released`, `pack_first_letter`, `author`, `label`, `subgenre` and
+  `rank band` through `get_data`; and **Start** in the store menu is retail's own
+  `goto_screen options_screen`, not a harness artifact (boots 088-108 read that as one).
+- **The offer schema, still incomplete.** Every `get_data` key those groupings read is now emitted
+  (empty strings included, because those reads are not guarded by `has_data`), each offer carries
+  `type` as well as `offer_type` (the shipped `dummy_upsell_offer` writes `("type" "song")`), and
+  `sorted` is the display order (`(sorted (0 1 2 ...))`) instead of a boolean. With all of that the
+  guest still faults right after the parse returns (boot 110), so what remains is something the
+  native offer accessors read and the dump does not spell out - the shortest candidate list is the
+  rank tiering (`rank_tier` + `rank_tier_token` on `rank band`) and the browser provider's own
+  `build_list` contract. **Unproven:** the `type` key and the extra `get_data` keys landed after that
+  boot and are covered by `store_serve`'s writer cases only - the next boot has to confirm or refute
+  them. (The owner's profile is restored, so a store boot needs `[general] rhythmverse = true` in
+  `%APPDATA%\rb_blitz\settings.toml` for the duration again; boot 111 pressed the hidden store row's
+  old position and hit EXIT GAME instead.)
+- Landed and tested: `store_catalogue`, the corrected writers, `RememberMessageArray` (the message
+  array a page's parser call can reuse), the offers-page delivery, the parser's entry/exit/panel
+  diagnostics, `scripts/probe_store.ps1 -PageRow/-PageKey`, the catalogue cvars
+  (`store_catalogue_off`, `store_catalogue_ttl_seconds`) and the updated `store_serve` cases
+  (**61 checks**; full `ctest` **43/43** in `out/build/win-amd64-debug`).
+
+**P3 browser record (2026-10-21, later) - the retail browser opens on catalogue offers and its
+details panel reads them; the list rows still draw no text.** Boots `rb_blitz_112...120.log` plus
+`out/_swap/store-probe/20261021-105946` and `-111707` (release tree, `probe_store.ps1 -StoreRow 3
+-PageRow 0 -LocalRoot "" --store_fetch_deliver=1 --store_trace=true`).
+
+- **What unblocked the browser was the rank block, not the root shape.** Every offer must carry all
+  **five** rank parts - `(rank ((guitar 3)(drum 1)(bass 0)(vocals 0)(keys 0)))`. The details panel
+  loops `{foreach part (guitar drum vocals bass keys)}` with no `has_data` guard, so a part the
+  catalogue does not rank handed `{song_mgr rank_tier <null> <part>}` a null; boots 103-110 faulted
+  on `read of guest 0x00000000` there. With all five written, `process_offers` takes its
+  `num_offers >= 1` arm and `store_browser_screen` is entered (`help_observer: screen
+  'store_browser_screen'`, boots 112/117/120), **no fault**.
+- **Measured on screen** (`20261021-111707/page-late.png`): the browser's details panel shows the
+  offer's own data - `FOUR YEAR STRONG` (our `artist`) and `PUNK` (our `genre`) - over the retail
+  placeholder art (`cover_art_none.tex`), because `preview_art` is still empty (the art gap below).
+  So the record reaches the retail panels with real values.
+- **The list rows are blank** (crop of the same frame: the selected band has no text, and the rows
+  below it are empty). Two hypotheses were measured and are both dead ends: writing `name` as the
+  shipped `dummy_upsell_offer`'s localize command (`{"localize" "..."}`) faults the parser on a null
+  (boot 119), and making `sorted` empty (the browser's `refresh_list` treats an empty
+  `{store_panel sort_name}` as "no grouping", `build_list_no_grouping`) changes nothing (boot 120).
+  The list *does* hold the offers - `store_details_panel refresh` resolves `find_offer
+  {song.lst selected_sym}` to our offer - so what is missing is only the row's own label.
+- **Delivery happens exactly once, from the cache's own body.** `ServeStoreRequest` leaves
+  `manager + 44 = 1`, so retail's `sub_8235A240` takes its "already loaded -> notify" branch and
+  sends the `file_req_complete` message itself; `DeliverStoreRecord` no longer calls
+  `sub_8235A0F8` (the cvar now gates only the readiness write). Calling it as well delivered every
+  record twice, which re-entered the panel's screen transition.
+- **Hooking `sub_823FAE00` (the map lookup) is not a safe instrument**: resolving the key needs a
+  guest call (`sub_823F9538`) from inside the DTA engine's own evaluation, which is re-entrant and
+  left boots faulting on a string read as a pointer (`read of guest 0x75706461`, the four characters
+  of a command name). Removed; the note sits in `store_probe.cpp` so it is not retried.
+- **Still open for P3's exit**: the row labels; the retail price chrome (`ALL PRICES ARE IN
+  MICROSOFT(R) POINTS` in the browser's footer, §2.12's hide path); A opening the details screen
+  (the details *panel* is measured, the `store_info_screen` transition is not); the Downloaded
+  matcher (§3.2); and the art gap below. The next measurement for the labels is what the row widget
+  asks the offer for - the browser's provider is native, and neither `name`'s node type nor the sort
+  name changed the outcome, so the label is a third field (a `song_id`/`sym`-style row key is the
+  cheapest candidate to write next).
+
 
 P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
 entry behind `store_panel request` (nothing can be served or observed before it) — **done, see the

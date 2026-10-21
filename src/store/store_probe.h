@@ -31,6 +31,22 @@ void InstallPathProbe();
 // The same switch, for the hooks that cannot read the registry themselves.
 bool TraceEnabled();
 
+// The store panel the boot's last request came from: `sub_8274FB60`'s `this`, captured by the
+// request hook before the file cache is called. The panel's front-menu builder needs the same
+// object (`sub_827537C0(panel, array, source)` pushes the menu into `panel + 52`), and this is the
+// one place a boot hands it to us with no pointer arithmetic in between. 0 until the first request.
+void RememberPanel(uint32_t panel);
+uint32_t Panel();
+
+// A short hex listing of the words at a guest address, for diagnostics that have to show a layout
+// the code has not been proven to use yet. Unmapped words read as 0.
+std::string GuestWords(uint8_t* base, uint32_t addr, int count);
+
+// A big-endian write into guest memory that also lifts the page protection: the image's data
+// section is mapped read-only, so a plain store to a global there is silently dropped. Returns
+// false when the address is not in a known heap. The caller restores the word itself.
+bool WriteGuestU32Protected(uint8_t* base, uint32_t addr, uint32_t value);
+
 // The value of `store_local_server_root` as a P2 measurement switch: empty disables the rewrite.
 // Read on the host thread during the payload build.
 std::string LocalServerRoot();

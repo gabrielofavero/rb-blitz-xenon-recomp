@@ -6,7 +6,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #include "store/store_metadata.h"
 
@@ -14,6 +17,11 @@ namespace rb_blitz::store {
 namespace {
 
 namespace fs = std::filesystem;
+
+// The installed offer source (see store_serve.h). Written once at boot, read from the guest thread
+// when a menu page is answered.
+std::mutex g_source_mutex;
+OfferSource g_offer_source;
 
 // A record bigger than this is not one of ours: the retail front menu and a 25-offer page are a
 // few kilobytes. The cap keeps a misnamed file from being copied into the guest heap whole.
@@ -49,6 +57,27 @@ bool IsPlainRelativePath(std::string_view path) {
 bool IsStoreRequestPath(std::string_view path) {
   return path.size() > sizeof(kStoreRequestPrefix) - 1 &&
          path.compare(0, sizeof(kStoreRequestPrefix) - 1, kStoreRequestPrefix) == 0;
+}
+
+bool IsFrontMenuPath(std::string_view path) {
+  return path == FrontMenuRecordPath(kStoreRegion, kStorePlatform, kStoreLocale);
+}
+
+void SetOfferSource(OfferSource source) {
+  std::lock_guard<std::mutex> lock(g_source_mutex);
+  g_offer_source = std::move(source);
+}
+
+std::vector<Offer> CatalogueOffers() {
+  OfferSource source;
+  {
+    std::lock_guard<std::mutex> lock(g_source_mutex);
+    source = g_offer_source;
+  }
+  if (!source) {
+    return {};
+  }
+  return source();
 }
 
 std::string ReadServedRecord(std::string_view dir, std::string_view path, std::string* why) {
@@ -90,24 +119,52 @@ std::string ReadServedRecord(std::string_view dir, std::string_view path, std::s
 
 std::string BuiltinRecord(std::string_view path, std::string* why) {
   if (path == FrontMenuRecordPath(kStoreRegion, kStorePlatform, kStoreLocale)) {
-    const std::string text = BuildFrontMenuText(RhythmVerseFrontMenu(), why);
-    return text;
+    // Text, not the compiled writer: the insert's `.dta` branch hands the bytes to the engine's
+    // *text* reader (`sub_82418878` -> its tokenizer `sub_82417BF8`, which compares tokens against
+    // `#define`/`#merge`/`#ifdef`/`#autorun`). Measured 2026-10-20 evening: the same record as
+    // compiled DTB parsed to one stray symbol node, the text form to the `submenus` map.
+    return BuildFrontMenuText(RhythmVerseFrontMenu(), why);
+  }
+  // A menu row's own request, measured 2026-10-20 evening (`rb_blitz_088.log`): pressing the
+  // front menu's first row asked for `dlc_store/europe/eng/recent/`. The offers page is what that
+  // path answers (plan §5/P3: the same `/base + provider` builder, so the record is the menu
+  // record `BuildMenuText` writes). Its offers come from the installed catalogue source; with no
+  // source, or a catalogue that has not answered yet, the page is **empty** - a shape the retail
+  // DTA already handles (`on_offers_populated` with zero offers refreshes the menu instead of
+  // opening the browser), and an honest answer rather than a fabricated list.
+  if (IsMenuRecordPath(path)) {
+    return BuildMenuText(CatalogueOffers(), why);
   }
   if (why) *why = "no built-in record for this path";
   return {};
 }
 
+bool IsMenuRecordPath(std::string_view path) {
+  // `dlc_store/<region>/<locale>/<name>/` - the region/platform prefix is the request's own base
+  // and the trailing segment the provider the row named. Anything deeper belongs to an offer.
+  if (!IsStoreRequestPath(path) || path.back() != '/') {
+    return false;
+  }
+  const std::string_view rest = path.substr(sizeof(kStoreRequestPrefix) - 1);
+  int slashes = 0;
+  for (const char c : rest) {
+    if (c == '/') ++slashes;
+  }
+  return slashes == 3 && rest.find("offers/") == std::string_view::npos &&
+         rest.find("related/") == std::string_view::npos;
+}
+
 ServedRecord RecordForRequest(std::string_view path, std::string_view serve_dir) {
   ServedRecord record;
   std::string why;
-  record.text = ReadServedRecord(serve_dir, path, &why);
-  if (!record.text.empty()) {
+  record.bytes = ReadServedRecord(serve_dir, path, &why);
+  if (!record.bytes.empty()) {
     record.source = "file '" + std::string(serve_dir) + "/" + std::string(path) + "'";
     return record;
   }
   std::string builtin_why;
-  record.text = BuiltinRecord(path, &builtin_why);
-  if (!record.text.empty()) {
+  record.bytes = BuiltinRecord(path, &builtin_why);
+  if (!record.bytes.empty()) {
     record.source = "the built-in front menu";
     return record;
   }

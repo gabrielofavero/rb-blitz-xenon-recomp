@@ -20,9 +20,18 @@
 //     downloaded buffer and its length, and the function classifies the record by the path's
 //     extension (`.dta` is the text parser's type) before storing it.
 //
-// So serving a record is: put it in the container *before* the request runs, and let retail do the
-// rest. That also means the request path is the only thing we key on - no client list, no notify
-// call, no re-entrancy into the panel from here.
+// So serving a record is: put it in the container *before* the request runs, and then - once the
+// request has registered its client - run the retail notification, which is what turns the loaded
+// file into the panel's menu. Measured 2026-10-20 evening (`rb_blitz_088.log`): the panel then
+// draws the served front menu's rows and pressing one asks for `dlc_store/europe/eng/recent/`,
+// exactly the `MenuRecordPath` template.
+//
+// The notification is `sub_8235A0F8(cache, &request_path, 1)`, the same call the cache's own
+// "already loaded" branch makes. It builds the `file_req_complete` message from the loaded file
+// (`sub_82468560` -> `sub_82359438`) and dispatches it to every registered client, so the message
+// layout stays retail's business. The one obstacle is the manager's readiness word: the file lookup
+// answers only while `manager + 44 == 1`, which is 0 on a boot that never reached a server, so it
+// is set for the call and restored afterwards.
 
 #pragma once
 
@@ -40,5 +49,13 @@ void InstallStoreFetch();
 // guest `String` holding the request path. Returns true when a record was put into the manager's
 // loaded-file container.
 bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string);
+
+// Called from the same hook *after* the original ran, and only for a request that was served. It
+// does not send anything: the record is delivered by `sub_8235A240`'s **own** body, because
+// `ServeStoreRequest` leaves the cache's readiness word set and that body takes its "already loaded
+// -> notify" branch (`sub_8235A0F8`) by itself. This is the observation point - it logs the record
+// it delivered and the panel's menu list while `store_trace` is on. `cache` is the cache object
+// `sub_8235A240` was called on (its `this`). Does nothing unless `store_fetch_deliver` is on.
+void DeliverStoreRecord(PPCContext& ctx, uint8_t* base, uint32_t cache, uint32_t path_string);
 
 }  // namespace rb_blitz::store

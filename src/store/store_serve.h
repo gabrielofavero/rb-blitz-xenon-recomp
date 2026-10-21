@@ -22,8 +22,12 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include "store/store_metadata.h"
 
 namespace rb_blitz::store {
 
@@ -35,15 +39,37 @@ inline constexpr char kStoreRequestPrefix[] = "dlc_store/";
 // True for a request path the store's own catalogue owns.
 bool IsStoreRequestPath(std::string_view path);
 
-// The answer to one request. `text` empty means "we have nothing for this path": the retail fetch
-// then runs exactly as it does today (and does nothing offline). `source` is the log token that
-// says where the bytes came from, so a boot's evidence names the branch.
+// True for the front menu's own path (`dlc_store/<region>/dlc_top_<platform>_<locale>.dta`).
+bool IsFrontMenuPath(std::string_view path);
+
+// True for `dlc_store/<region>/<locale>/<name>/` - one front-menu row's offers page (measured
+// 2026-10-20: pressing the served front menu's first row asks for `dlc_store/europe/eng/recent/`).
+// Offer and related-record paths are deeper and are not menus.
+bool IsMenuRecordPath(std::string_view path);
+
+// The offers a menu page is answered with. Installed once per boot by the catalogue worker
+// (`src/store/store_catalogue.cpp`); a test that never installs one gets an empty page, which is a
+// valid record and keeps this module free of the network.
+using OfferSource = std::function<std::vector<Offer>()>;
+void SetOfferSource(OfferSource source);
+
+// A copy of the offers the installed source answers with, or none when no source is installed.
+std::vector<Offer> CatalogueOffers();
+
+// The answer to one request. `bytes` empty means "we have nothing for this path": the retail
+// fetch then runs exactly as it does today (and does nothing offline). `source` is the log token
+// that says where the bytes came from, so a boot's evidence names the branch.
+//
+// The bytes of a `.dta` record are **text**: the insert parses that type with the engine's own text
+// reader (`sub_82418878`, whose tokenizer `sub_82417BF8` compares tokens against `#define`,
+// `#merge`, `#ifdef` and `#autorun`). Measured 2026-10-20 evening: a compiled DTB served at the
+// same path parsed to one stray symbol node, while the text record parsed to the `submenus` map.
 struct ServedRecord {
-  std::string text;
+  std::string bytes;
   std::string source;
 };
 
-// The text of the host file named exactly `<dir>/<path>` (forward slashes in `path`). Empty when
+// The bytes of the host file named exactly `<dir>/<path>` (forward slashes in `path`). Empty when
 // `dir` is empty, the file does not exist or cannot be read, or `path` is not a plain relative path
 // - `..` segments, a leading `/`, a drive letter and a UNC prefix are all refused, because the
 // path is composed by the guest.

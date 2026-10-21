@@ -41,6 +41,8 @@
 #include <string_view>
 #include <vector>
 
+#include "store/rhythmverse_client.h"
+
 namespace rb_blitz::store {
 
 // The substitutions measured in the first request. Kept as constants so a different region or
@@ -133,6 +135,18 @@ struct Offer {
 // a nameless offer is refused. `next_chunk`/`previous_chunk`/`index_info` are deliberately absent:
 // they belong to paginated retail menus, and this writer serves one complete page.
 std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::string* why);
+
+// One catalogue record as the store's record model (P3's field mapping, plan §5/P3).
+//
+// The mapping is the plan's first cut, now anchored to the retail script that reads it:
+// `store_details_panel refresh` asks the offer for `genre`, `year_released`, `preview_art` and - for
+// a song - `rank <part>` per part with the part spelled `drum` (the API spells its own token
+// `drums`), then runs each rank through `song_mgr rank_tier`. That is why `rank_*` (the API's rank)
+// is passed and `diff_*` (a tier) never is (plan OQ4).
+//
+// `preview_art` stays empty: the art loader wants a platform texture record (P3's remaining art
+// step), and an absent key hides the art instead of drawing a broken one.
+Offer OfferFromSong(const SongFile& song);
 
 // The same two shapes in **text**, which is what the netcache serves. Measured 2026-10-20 in the
 // decrypted image: the loaded-file insert (`sub_824685E0`) classifies a request path by its

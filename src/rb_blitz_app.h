@@ -85,6 +85,7 @@
 #include "settings/boot.h"
 #include "platform/game_restart.h"
 #include "store/store_fetch.h"
+#include "store/store_catalogue.h"
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
@@ -353,6 +354,9 @@ class RbBlitzApp : public rex::ReXApp {
     // on the host thread before the guest exists, because the guest's `write_file` hook only posts
     // work - the request itself never runs on a guest thread (project rule).
     rb_blitz::store::InstallSearchTransport();
+    // P3's catalogue: the offers a menu page is answered with. Its worker is started here for the
+    // same reason, and the serving policy reads only its snapshot (src/store/store_catalogue.h).
+    rb_blitz::store::InstallStoreCatalogue();
     rb_blitz::settings::InstallMenuPayload(runtime());
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest

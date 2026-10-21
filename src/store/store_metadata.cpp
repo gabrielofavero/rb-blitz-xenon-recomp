@@ -60,6 +60,60 @@ bool ValidateOffers(const std::vector<Offer>& offers, std::string* why) {
   return true;
 }
 
+// Every part, in the retail display's order and with its own spelling (`drum`, not the API's
+// `drums`), with 0 where the catalogue has no rank. 0 is emitted rather than dropped: the details
+// panel loops all five parts unconditionally (`{foreach part (guitar drum vocals bass keys)}`), and a
+// *missing* part hands `{song_mgr rank_tier <null> <part>}` a null to dereference (measured
+// 2026-10-21: the page's parse returns, then the guest faults on `read of guest 0x00000000` as the
+// browser opens).
+std::vector<std::pair<const char*, int>> OfferRanks(const Offer& offer) {
+  return {{"guitar", offer.rank_guitar},
+          {"drum", offer.rank_drum},
+          {"bass", offer.rank_bass},
+          {"vocals", offer.rank_vocals},
+          {"keys", offer.rank_keys}};
+}
+
+// The offer keys the retail UI reads through `get_data` beyond the ones the `Offer` model carries,
+// with an empty value where the catalogue has none. Taken from the shipped scripts, dumped back to
+// DTA text with `ui::dtb::Parse` (`out/_swap/store-dta/`, 2026-10-21; `dtb_dump.cpp` there is the
+// throwaway renderer):
+//
+//   ui/store/gen/store.dtb, `groupings`  - the table the browser's `refresh_list` ->
+//       `{provider build_list {find syscfg store groupings sort_name}}` walks.
+//       `by_release_date` reads `release_date_str`, `by_artist` reads `artist`,
+//       `by_song_first_letter` reads `first_char`, `by_year_released` reads `year_released`,
+//       `by_pack_first_letter` reads `pack_first_letter`, `by_author`/`by_label`/`by_subgenre` read
+//       `author`/`label`/`subgenre`.
+//   ui/store/gen/store_info.dtb           - `preview_audio`, `album_link`, `pack_link`, `pack_name`,
+//       `rating`.
+//
+// None of those reads is guarded by `has_data`, so an *absent* key hands the DTA a null - which is
+// the null read the page faulted on once it carried offers (boots 103-109; an empty page, boot 108,
+// went through untouched). An empty string is a value; a missing key is not.
+std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offer) {
+  std::string first_char;
+  if (!offer.name.empty()) {
+    first_char.assign(1, offer.name.front());
+  }
+  return {{"release_date_str", std::string()},
+          {"first_char", first_char},
+          {"pack_first_letter", std::string()},
+          {"author", std::string()},
+          {"label", std::string()},
+          {"subgenre", std::string()},
+          {"preview_audio", std::string()},
+          {"album_link", std::string()},
+          {"pack_link", std::string()},
+          {"pack_name", std::string()}};
+}
+
+// The integer keys the same scripts read: `review` is formatted by `{"sprintf" "review_%i" ...}`
+// (a grouping token, not a score) and `rating` is a star count. Zero where the catalogue has none.
+std::vector<std::pair<const char*, int>> ExtraIntKeys() {
+  return {{"review", 0}, {"rating", 0}};
+}
+
 }  // namespace
 
 std::string FrontMenuRecordPath(std::string_view region, std::string_view platform,
@@ -91,6 +145,30 @@ std::string RelatedOfferPath(std::string_view platform, std::string_view locale,
 
 std::string MenuSourceId(std::string_view entry_id) { return "menu_" + std::string(entry_id); }
 
+Offer OfferFromSong(const SongFile& song) {
+  Offer offer;
+  // The site's `file_title` is the canonical title; `file_name` (the upload name) is the fallback
+  // when the record carries no title at all, and it is what the catalogue shows for such rows.
+  offer.name = song.title.empty() ? song.file_name : song.title;
+  offer.artist = song.artist;
+  offer.album = song.album;
+  offer.genre = song.genre;
+  offer.year_released = song.year.value_or(0);
+  // Empty on purpose: `load_art` expects a platform texture record, and an absent key makes the
+  // retail browser draw its own `cover_art_none.tex` instead of a broken image.
+  offer.preview_art.clear();
+  const auto rank = [&song](Instrument instrument) {
+    const int value = song.rank[static_cast<std::size_t>(instrument)].value_or(0);
+    return value > 0 ? value : 0;  // a missing or non-positive rank is "unknown", never a tier
+  };
+  offer.rank_guitar = rank(Instrument::kGuitar);
+  offer.rank_drum = rank(Instrument::kDrums);  // the retail part token is `drum`, the API's `drums`
+  offer.rank_bass = rank(Instrument::kBass);
+  offer.rank_vocals = rank(Instrument::kVocals);
+  offer.rank_keys = rank(Instrument::kKeys);
+  return offer;
+}
+
 FrontMenu RhythmVerseFrontMenu() {
   FrontMenu menu;
   menu.entries.push_back({"recent", "Recent"});
@@ -117,56 +195,56 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
   if (!ValidateOffers(offers, why)) {
     return {};
   }
-  // A DTA map is symbol/value alternation (`(name "X" artist "Y" ...)`), which is the shape the
-  // native `get_data`/`has_data` lookups read. A key with an unknown/empty value is omitted (the
-  // scripts treat a missing key as "no data", which is how the preview and rank UI hide
-  // themselves).
+  // Same shapes `BuildMenuText` writes, in the compiled form: the root is three pairs and every
+  // offer is a list of pairs. The engine's map convention (`sub_823FAE00`) is that a lookup matches a
+  // node that is itself an array whose first element is the key; the text parser produces exactly
+  // that from `(key value)`.
   std::vector<Node> rows;
   for (const Offer& offer : offers) {
-    std::vector<Node> fields;
-    auto add_text = [&fields](std::string_view key, const std::string& value) {
-      if (value.empty()) return;
-      fields.push_back(Symbol(key));
-      fields.push_back(Text(value));
+    const auto pair = [](std::string_view key, const std::string& value) {
+      return Node::Array({Symbol(key), Text(value)});
     };
-    fields.push_back(Symbol("name"));
-    fields.push_back(Text(offer.name));
-    add_text("artist", offer.artist);
-    add_text("album", offer.album);
-    add_text("genre", offer.genre);
-    if (offer.year_released != 0) {
-      fields.push_back(Symbol("year_released"));
-      fields.push_back(Node::Int(offer.year_released));
+    std::vector<Node> fields{pair("name", offer.name)};
+    // The details panel asks `{offer offer_type}` and compares it to `song`/`pack`/`album`, but the
+    // *record* key the shipped scripts write is `type` - `store.dtb`'s own example is
+    // `("dummy_upsell_offer" ("type" "song") ("name" {"localize" "unknown_song"}))` - so the accessor
+    // reads `type`, and an offer that only carries `offer_type` answers null. Both keys are written:
+    // the accessor's and the one the DTA spells.
+    fields.push_back(Node::Array({Symbol("type"), Text("song")}));
+    fields.push_back(Node::Array({Symbol("offer_type"), Symbol("song")}));
+    // Every field is emitted even when it is empty: `process_offers` reads all of them, and a
+    // missing key hands it a null to further down (boot 103).
+    fields.push_back(pair("artist", offer.artist));
+    fields.push_back(pair("album", offer.album));
+    fields.push_back(pair("genre", offer.genre));
+    fields.push_back(Node::Array({Symbol("year_released"), Node::Int(offer.year_released)}));
+    fields.push_back(pair("preview_art", offer.preview_art));
+    for (const auto& extra : ExtraTextKeys(offer)) {
+      fields.push_back(pair(extra.first, extra.second));
     }
-    add_text("preview_art", offer.preview_art);
-    // The per-part ranks (`rank <part>` in the decoded scripts; OQ4 has not settled whether the
-    // retail key is `rank` with a sub-map or `rank_<part>`). One `rank` key with a part/value map
-    // keeps every part in one place, which is the shape the plan's field mapping describes.
-    const struct {
-      const char* part;
-      int value;
-    } ranks[] = {{"guitar", offer.rank_guitar}, {"drum", offer.rank_drum},
-                 {"bass", offer.rank_bass},     {"vocals", offer.rank_vocals},
-                 {"keys", offer.rank_keys}};
-    std::vector<Node> rank_map;
-    for (const auto& rank : ranks) {
-      if (rank.value == 0) continue;
-      rank_map.push_back(Symbol(rank.part));
-      rank_map.push_back(Node::Int(rank.value));
+    for (const auto& extra : ExtraIntKeys()) {
+      fields.push_back(Node::Array({Symbol(extra.first), Node::Int(extra.second)}));
     }
-    if (!rank_map.empty()) {
-      fields.push_back(Symbol("rank"));
-      fields.push_back(Node::Array(std::move(rank_map)));
+    std::vector<Node> rank_pairs;
+    for (const auto& part : OfferRanks(offer)) {
+      rank_pairs.push_back(Node::Array({Symbol(part.first), Node::Int(part.second)}));
     }
+    fields.push_back(Node::Array({Symbol("rank"), Node::Array(std::move(rank_pairs))}));
     rows.push_back(Node::Array(std::move(fields)));
   }
-  // The root map `sub_8274F610` reads: `offers_populated`, `sorted`, `offers`.
-  std::vector<Node> root_kids{
-      Symbol("offers_populated"), Symbol("TRUE"),
-      Symbol("sorted"),           Symbol("TRUE"),
-      Symbol("offers"),           Node::Array(std::move(rows)),
+  // The root `sub_8274F610` reads: three pairs, `offers_populated`, `sorted` and `offers`.
+  //
+  // `sorted` is the **sort name** the browser reads back as `{store_panel sort_name}`, not a boolean
+  // and not an index list: `refresh_list` compares it with "" and, when it is empty, calls
+  // `build_list_no_grouping`; otherwise it looks the value up in the shipped `groupings` table. An
+  // index list there answers nothing, so `build_list` produced a list with no rows - which is what
+  // boots 112-117 showed (the browser open, its row band drawn, every row blank). Recent has no
+  // grouping of its own, so it writes the empty name.
+  std::vector<Node> root{
+      Node::Array({Symbol("offers_populated"), Symbol("TRUE")}),
+      Node::Array({Symbol("sorted"), Text("")}),
+      Node::Array({Symbol("offers"), Node::Array(std::move(rows))}),
   };
-  std::vector<Node> root{Node::Array(std::move(root_kids))};
   return ui::dtb::Compile(root);
 }
 
@@ -175,14 +253,22 @@ std::string BuildFrontMenuText(const FrontMenu& menu, std::string* why) {
     return {};
   }
   // A DTA text file is one map: `(key value key value ...)`. The panel looks `submenus` up by
-  // symbol (`sub_823FAE00(array, Sym("submenus"), 0)`), so the key carries no quotes and every
-  // entry is a String node - a quoted path, not a symbol.
+  // symbol (`sub_823FAE00(array, Sym("submenus"), 0)`), and each row is itself an **array whose
+  // first element is the provider path**: `sub_8275C968` reads an entry as an array and counts its
+  // elements (`> 2`, the third one tested non-null), and `sub_8275CBD8` compares the entry's first
+  // string against a provider name. A bare quoted path (the first shape) is a *string* node, which
+  // those two readers walk as if it were an array - measured 2026-10-20 evening, the builder's
+  // first call faulted on `read of 0x44` right after the entry walk.
   std::string out = "(submenus\n";
   for (const FrontMenuEntry& entry : menu.entries) {
-    out += "  ";
+    out += "  (";
     out += Quote(MenuProviderPath(menu.locale, entry.id));
-    out += "\n";
+    out += " ";
+    out += Quote(entry.label);
+    out += " TRUE)\n";
   }
+  out += ")\n(new_releases ";
+  out += Quote(MenuProviderPath(menu.locale, menu.entries.front().id));
   out += ")\n";
   return out;
 }
@@ -191,45 +277,45 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why) {
   if (!ValidateOffers(offers, why)) {
     return {};
   }
-  std::string out = "(offers_populated TRUE\n sorted TRUE\n offers (\n";
+  // The pair convention (see BuildMenuRecord): a lookup matches a sub-array whose first node is the
+  // key, so the root is three pairs and every offer is a list of pairs. `rank` is two levels -
+  // `(rank ((guitar 3) (drum 1)))` - because the details panel asks for `get_data (rank guitar)`.
+  // Measured 2026-10-21: the root pairs are read correctly (boot 101 logged `offers_populated`,
+  // `sorted`, `offers`), and a *flat* offer body made the parser fault on a null read while walking
+  // the offers, so each offer goes back to one pair per field.
+  std::string out = "(offers_populated TRUE)\n(sorted \"\")\n(offers\n";
+  const auto pair_text = [](std::string_view key, const std::string& value) {
+    return "    (" + std::string(key) + " " + Quote(value) + ")\n";
+  };
   for (const Offer& offer : offers) {
-    out += "  (name ";
-    out += Quote(offer.name);
-    auto add_text = [&out](std::string_view key, const std::string& value) {
-      if (value.empty()) return;
-      out += " ";
-      out += key;
-      out += " ";
-      out += Quote(value);
-    };
-    add_text("artist", offer.artist);
-    add_text("album", offer.album);
-    add_text("genre", offer.genre);
-    if (offer.year_released != 0) {
-      out += " year_released " + std::to_string(offer.year_released);
+    out += "  (\n";
+    out += pair_text("name", offer.name);
+    out += pair_text("type", "song");
+    out += "    (offer_type song)\n";
+    out += pair_text("artist", offer.artist);
+    out += pair_text("album", offer.album);
+    out += pair_text("genre", offer.genre);
+    out += "    (year_released " + std::to_string(offer.year_released) + ")\n";
+    out += pair_text("preview_art", offer.preview_art);
+    for (const auto& extra : ExtraTextKeys(offer)) {
+      out += pair_text(extra.first, extra.second);
     }
-    add_text("preview_art", offer.preview_art);
-    const struct {
-      const char* part;
-      int value;
-    } ranks[] = {{"guitar", offer.rank_guitar}, {"drum", offer.rank_drum},
-                 {"bass", offer.rank_bass},     {"vocals", offer.rank_vocals},
-                 {"keys", offer.rank_keys}};
-    bool opened_ranks = false;
-    for (const auto& rank : ranks) {
-      if (rank.value == 0) continue;
-      out += opened_ranks ? " " : " (rank ";
-      opened_ranks = true;
-      out += rank.part;
-      out += " ";
-      out += std::to_string(rank.value);
+    for (const auto& extra : ExtraIntKeys()) {
+      out += "    (" + std::string(extra.first) + " " + std::to_string(extra.second) + ")\n";
     }
-    if (opened_ranks) {
+    const std::vector<std::pair<const char*, int>> parts = OfferRanks(offer);
+    out += "    (rank (";
+    for (const auto& part : parts) {
+      out += "(";
+      out += part.first;
+      out += " ";
+      out += std::to_string(part.second);
       out += ")";
     }
-    out += ")\n";
+    out += "))\n";
+    out += "  )\n";
   }
-  out += " )\n)\n";
+  out += ")\n";
   return out;
 }
 

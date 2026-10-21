@@ -38,6 +38,15 @@ param(
     # One more accept inside the store, on its first menu row: that is where the panel requests
     # its metadata (`dlc_top_<a>_<b>.dta`), so the local-server question is only answered with it.
     [switch]$EnterStore,
+    # After entering the store, move this many rows down before accepting, and keep the screen that
+    # opens as `page-in`. -1 leaves the route as it was. The store's own rows are retail's
+    # (MESSAGES, RECOMMENDED, YOUR SONGS) followed by the served front menu's (RECENT, SEARCH), so
+    # the Recent page is row 3 on a build whose front menu is the two owner entries.
+    [int]$PageRow = -1,
+    # The drive_ui name of the key that opens the row (`key:a` is the pad's A). Retail's store also
+    # binds Start to Help & Options, so a boot that lands there instead of the page says the press
+    # arrived as Start - which is a binding question, not a store one.
+    [string]$PageKey = "key:a",
     [string]$LogLevel = "debug",
     # Turns on the SDK's noisy kernel-import logging (the `log_noisy` cvar), which is what makes a
     # trace-level run name the exports the guest calls after the store is entered.
@@ -211,11 +220,27 @@ try {
         Start-Sleep -Seconds $SettleAfterPressSec
         Capture-To (Join-Path $capDir "store.png")
         $verdict.store_text = Get-ScreenText (Join-Path $capDir "store.png")
-        if ($EnterStore) {
+        if ($EnterStore -and $PageRow -lt 0) {
             Invoke-Actions @("key:a", "wait:3")
             Start-Sleep -Seconds $SettleAfterPressSec
             Capture-To (Join-Path $capDir "store-in.png")
             $verdict.store_in_text = Get-ScreenText (Join-Path $capDir "store-in.png")
+        }
+        if ($PageRow -ge 0) {
+            # One tap per `wait:1`: a run of `lstick_down` without a pause between taps is dropped
+            # by the guest (measured 2026-10-12), and the row index is the point of the parameter.
+            $pageRoute = @()
+            for ($d = 0; $d -lt $PageRow; $d++) { $pageRoute += @("key:lstick_down", "wait:1") }
+            if ($pageRoute.Count -gt 0) { Invoke-Actions $pageRoute }
+            Capture-To (Join-Path $capDir "page.png")
+            $verdict.page_text = Get-ScreenText (Join-Path $capDir "page.png")
+            Invoke-Actions @($PageKey)
+            Start-Sleep -Seconds 2
+            Capture-To (Join-Path $capDir "page-in.png")
+            $verdict.page_in_text = Get-ScreenText (Join-Path $capDir "page-in.png")
+            Start-Sleep -Seconds $SettleAfterPressSec
+            Capture-To (Join-Path $capDir "page-late.png")
+            $verdict.page_late_text = Get-ScreenText (Join-Path $capDir "page-late.png")
         }
         # B returns to the menu (P1's acceptance asks for exactly this).
         Invoke-Actions @("key:b", "wait:4")
@@ -266,10 +291,21 @@ if (-not $MenuOnly) {
     $report += ""
     $report += "--- store (OCR) ---"
     $report += $verdict.store_text
-    if ($EnterStore) {
+    if ($EnterStore -and $PageRow -lt 0) {
         $report += ""
         $report += "--- store, first menu row entered (OCR) ---"
         $report += $verdict.store_in_text
+    }
+    if ($PageRow -ge 0) {
+        $report += ""
+        $report += "--- store, row $PageRow selected (OCR) ---"
+        $report += $verdict.page_text
+        $report += ""
+        $report += "--- store, row $PageRow opened, +2 s (OCR) ---"
+        $report += $verdict.page_in_text
+        $report += ""
+        $report += "--- store, row $PageRow opened, settle (OCR) ---"
+        $report += $verdict.page_late_text
     }
     $report += ""
     $report += "--- after B (OCR) ---"
