@@ -28,6 +28,9 @@ namespace rb_blitz::store {
 // the cvar registry).
 void InstallPathProbe();
 
+// The same switch, for the hooks that cannot read the registry themselves.
+bool TraceEnabled();
+
 // The value of `store_local_server_root` as a P2 measurement switch: empty disables the rewrite.
 // Read on the host thread during the payload build.
 std::string LocalServerRoot();

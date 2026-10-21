@@ -14,6 +14,7 @@
 #include <rex/system/xmemory.h>
 
 #include "fs/payload_overlay.h"
+#include "store/store_fetch.h"
 
 REXCVAR_DEFINE_BOOL(store_trace, false, "Diagnostics",
                     "Log the store paths the guest resolves and opens under the game root "
@@ -205,6 +206,22 @@ void InstallPathProbe() {
 
 std::string LocalServerRoot() { return REXCVAR_GET(store_local_server_root); }
 
+// The same switch, for the fetch hook, which must not read the cvar registry from a guest thread.
+bool TraceEnabled() { return g_trace_on.load(std::memory_order_relaxed); }
+
+// A short hex listing of the words at a guest address, for logs that have to show a layout the
+// code has not been proven to use yet. Unmapped words read as 0.
+std::string GuestWords(uint8_t* base, uint32_t addr, int count) {
+  std::string out;
+  char word[16];
+  for (int i = 0; i < count; ++i) {
+    std::snprintf(word, sizeof(word), "%s%08X", i == 0 ? "" : " ",
+                  GuestU32(base, addr + static_cast<uint32_t>(i) * 4));
+    out += word;
+  }
+  return out;
+}
+
 }  // namespace rb_blitz::store
 
 // ---------------------------------------------------------------------------------------------
@@ -248,7 +265,10 @@ REX_HOOK_RAW(sub_8274FB60) {
 
 // The file cache the builder hands the path to. Its first argument is the manager, the second the
 // path `String`; logging here separates "the panel asked" from "the cache looked" - the question
-// P3's data lane starts from.
+// P3's data lane starts from. The hook also *serves* the store's own records: a request whose path
+// the mod has bytes for is put into the manager's loaded-file container before the original runs,
+// which is what makes the retail request take its "already loaded" branch and notify the panel
+// (src/store/store_fetch.h has the measured chain).
 REX_EXTERN(__imp__sub_8235A240);
 REX_HOOK_RAW(sub_8235A240) {
   const uint32_t manager = ctx.r3.u32;
@@ -258,7 +278,72 @@ REX_HOOK_RAW(sub_8235A240) {
         base, rb_blitz::store::GuestU32(base, path_string + 4), 240);
     rb_blitz::store::LogCache(manager, path);
   }
+  rb_blitz::store::ServeStoreRequest(ctx, base, path_string);
   __imp__sub_8235A240(ctx, base);
+  if (path_string != 0 && rb_blitz::store::TraceEnabled()) {
+    const std::string path = rb_blitz::store::GuestCString(
+        base, rb_blitz::store::GuestU32(base, path_string + 4), 240);
+    REXLOG_INFO("store-probe: request '{}' returned to the panel", path);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// P3's data lane: what the file cache hands the panel when a record is ready.
+//
+// `sub_827501F0` is the panel's message dispatcher (`Handle`), and the second vtable the class
+// carries (0x82102ac4) has it in slot 5 - the callback the file cache invokes from
+// `sub_8235A0F8`. The served-record path crashes inside that callback, and the fault address is a
+// piece of the record text, so the message layout is what has to be measured rather than inferred:
+// this hook logs the four arguments and the first words of the value in r5, once per distinct
+// (r4, r5) pair, and then runs the original unchanged.
+REX_EXTERN(__imp__sub_827501F0);
+REX_HOOK_RAW(sub_827501F0) {
+  static std::atomic<int> logged{0};
+  if (rb_blitz::store::TraceEnabled() && ctx.r5.u32 != 0 &&
+      logged.load(std::memory_order_relaxed) < 60) {
+    logged.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t message = ctx.r5.u32;
+    const std::string words = rb_blitz::store::GuestWords(base, message, 6);
+    REXLOG_INFO("store-probe: panel dispatch out={:#x} this={:#x} message={:#x}[{}] arg6={:#x}",
+                ctx.r3.u32, ctx.r4.u32, message, words, ctx.r6.u32);
+  }
+  __imp__sub_827501F0(ctx, base);
+}
+
+// ---------------------------------------------------------------------------------------------
+// P3's data lane: the front-menu builder chain, entered once per served record.
+//
+// `sub_827537C0(panel, DataArray, source)` allocates the 72-byte menu object (`sub_8275D5B8`),
+// stores it on the panel and reads its entry count; `sub_8275D5B8` copies the source string and
+// parses the array (`sub_8275D4E0`). The call faults on `read of guest 0x00000004`, so each of the
+// three is logged at entry and exit: the last entry without its exit names the function the fault
+// is in, which no stack trace does on this emulator.
+REX_EXTERN(__imp__sub_827537C0);
+REX_HOOK_RAW(sub_827537C0) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) REXLOG_INFO("store-probe: builder enter this={:#x} array={:#x} source={:#x}",
+                         ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+  __imp__sub_827537C0(ctx, base);
+  if (trace) REXLOG_INFO("store-probe: builder exit");
+}
+
+REX_EXTERN(__imp__sub_8275D5B8);
+REX_HOOK_RAW(sub_8275D5B8) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) REXLOG_INFO("store-probe: menu ctor enter obj={:#x} array={:#x} source={:#x}",
+                         ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+  __imp__sub_8275D5B8(ctx, base);
+  if (trace) REXLOG_INFO("store-probe: menu ctor exit");
+}
+
+REX_EXTERN(__imp__sub_8275D4E0);
+REX_HOOK_RAW(sub_8275D4E0) {
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace) {
+    REXLOG_INFO("store-probe: menu parse enter obj={:#x} array={:#x}", ctx.r3.u32, ctx.r4.u32);
+  }
+  __imp__sub_8275D4E0(ctx, base);
+  if (trace) REXLOG_INFO("store-probe: menu parse exit");
 }
 
 // ---------------------------------------------------------------------------------------------

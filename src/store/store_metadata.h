@@ -134,6 +134,18 @@ struct Offer {
 // they belong to paginated retail menus, and this writer serves one complete page.
 std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::string* why);
 
+// The same two shapes in **text**, which is what the netcache serves. Measured 2026-10-20 in the
+// decrypted image: the loaded-file insert (`sub_824685E0`) classifies a request path by its
+// extension (`strncmp(extension, "dta", 3)`), and `.dta` is the text parser's type - so a served
+// record is DTA *text*, not a compiled `.dtb` stream. The compiled writers above stay for records
+// that go into an ark (the payload).
+//
+// Values are written in double quotes with `\` and `"` backslash-escaped. `BuildFrontMenuText`
+// refuses an empty menu or a nameless entry (the panel would draw nothing and never populate);
+// `BuildMenuText` accepts an empty offer list, which is a valid, empty page.
+std::string BuildFrontMenuText(const FrontMenu& menu, std::string* why);
+std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why);
+
 // The `version` value the front-menu writer emits. P3 bumps it if the schema changes once the
 // parser has been observed; it exists so a served record can be told apart from an older one in a
 // log.

@@ -43,6 +43,11 @@
 # by nature, so it is never committed.
 /prune.ps1
 
+# Local dev server: publishes a folder over HTTP and exposes it at a fixed Dev Tunnel URL
+# (the CloakCode extension's `devtunnel` CLI). Holds this machine's tunnel ID and the
+# account it is signed in with, so it is never committed.
+/serve.ps1
+
 # Disposable scratch for the harnesses and asset probes (`out/_swap/*/run.ps1` builds an
 # empty DLC root here; scripts/hmx_milo.py dumps decompressed milo chunks here). A dumped
 # chunk is retail content byte for byte, so nothing in this directory is ever committed.

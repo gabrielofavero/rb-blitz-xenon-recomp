@@ -193,6 +193,11 @@ set(RBBLITZ_SOURCES
     src/store/store_payload.cpp
     src/store/store_probe.cpp
     src/store/store_metadata.cpp
+    # P3's data lane: the store's own records are answered from the file cache's loaded-file
+    # container (the measured seam), so the policy that decides *what* to serve is SDK-free
+    # (store_serve.cpp) while the guest-side half that inserts it is not (store_fetch.cpp).
+    src/store/store_serve.cpp
+    src/store/store_fetch.cpp
     # P5: the download pipeline's policy core (SDK-free), the staging/commit rules and the job
     # service behind the `rbbz-store/download/` bridge commands. The streaming transport is
     # Windows-only and appended below, like store_http.cpp.
@@ -881,6 +886,19 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_store_metadata_tests PRIVATE src)
     add_test(NAME store_metadata COMMAND rb_blitz_store_metadata_tests)
+
+    # P3's data lane: the text record writers and the serving policy (src/store/store_serve.h).
+    # The netcache serves `.dta` as TEXT, so the records a boot is answered with are text - the
+    # suite pins the shapes, the refusals, the path rules and the file-over-builtin choice.
+    add_executable(rb_blitz_store_serve_tests
+        tests/store_serve_tests.cpp
+        src/store/store_serve.cpp
+        src/store/store_metadata.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_store_serve_tests PRIVATE src)
+    add_test(NAME store_serve COMMAND rb_blitz_store_serve_tests)
 
     # P5 of the RhythmVerse store plan: the download pipeline. SDK-free and hermetic - the
     # transfer is a fake and the destination is a temporary folder - so the redirect/archive/

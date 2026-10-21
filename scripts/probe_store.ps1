@@ -42,6 +42,10 @@ param(
     # Turns on the SDK's noisy kernel-import logging (the `log_noisy` cvar), which is what makes a
     # trace-level run name the exports the guest calls after the store is entered.
     [switch]$Noisy,
+    # Extra command-line switches, ';'-separated (the other acceptance scripts' spelling). The
+    # useful one here is a small DLC library: the boot waits for the content pipeline, so a
+    # 1,400-package root costs minutes before the title is even reachable.
+    [string]$Extra = "",
     [int]$BootTimeoutSec = 180,
     [int]$ScreenTimeoutSec = 45,
     [int]$SettleAfterPressSec = 10,
@@ -157,6 +161,7 @@ $arguments = @(
 )
 if ($LocalRoot -ne "") { $arguments += "--store_local_server_root=$LocalRoot" }
 if ($Noisy) { $arguments += "--log_noisy=1" }
+if ($Extra -ne "") { $arguments += ($Extra -split ";" | Where-Object { $_ -ne "" }) }
 
 Write-Host "probe_store: launching $exe"
 Write-Host "  args: $($arguments -join ' ')"

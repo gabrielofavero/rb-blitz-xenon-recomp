@@ -4,7 +4,9 @@ Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20. Status: **in progress — P0
 landed 2026-10-20**, and **P3's serial half (step 0) landed the same day**: the request chain is
 mapped (`sub_827501F0` → `sub_82753010` → `sub_8274FB60` → the file cache), both entries are
 hooked, and the store's own DTA record is proven editable — the panel still issues no request
-offline, so the data lane starts at the gate (§5/P3 step 0 record). **P5's pipeline landed the same
+offline, so the data lane starts at the gate (§5/P3 step 0 record). **P3's data lane then reached
+the file cache**: a served record is inserted and parsed by the retail DTA reader, and delivery
+stops at the panel's notification (§5/P3 delivery record, 2026-10-20 evening). **P5's pipeline landed the same
 day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
 starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
 by exactly one line of its exit:** the field, the authored keys, the request, the answer and the
@@ -48,8 +50,7 @@ captures in `docs/rythmverse-responses/{list,search}.json`.
    ```
 2. **Retail's entry gate is one DTA branch, but that row already has a new job.**
    `ui/splash/gen/splash.dtb`'s original `splash_dlc` case
-   is `{if_else {user_mgr is_participating_user_online} <enter store> {error_popup_panel show_popup
-   store_unavailable_not_online splash_panel}}`. In this checkout, R7's `TapRefreshCache` replaces
+   is `{if_else {user_mgr is_participating_user_online} <enter store> {error_popup_panel show_popup store_unavailable_not_online splash_panel}}`. In this checkout, R7's `TapRefreshCache` replaces
    that case with **Refresh Music Library**. Add a separate **RhythmVerse Customs** row/token;
    do not overwrite or relabel the refresh entry (§2.11). Whether the store fully enters without
    further commerce-state work remains a P1/P2 runtime check.
@@ -166,22 +167,20 @@ captures in `docs/rythmverse-responses/{list,search}.json`.
   a string bucket at image offset ~0x5CA00). The runtime imports `XamUserGetSigninState`,
   `XamUserGetSigninInfo`, `XamContentGetLicenseMask`.
 - `ui/gen/ui.dtb` init also preloads `store_browser_panel` and creates the netcache manager:
-  `{net_cache_mgr init {find syscfg store netcache_init}}` + `{net_cache_mgr load
-  kNetCacheMgrCacheSizeLarge}`.
+  `{net_cache_mgr init {find syscfg store netcache_init}}` + `{net_cache_mgr load kNetCacheMgrCacheSizeLarge}`.
 
 ### 2.2 Screens, panels, list resources
 
 Decoded from `store.dtb` / `store_info.dtb` and the ui/splash registries:
 
-| Screen | Panels | Notes |
-| --- | --- | --- |
-| `store_menu_screen` | background, shell_music, menu_cache, store_banner, store_menu, upsell, store_panel | `filter.lst` menu list; `header_index 2`; back = splash |
-| `store_browser_screen` | background, shell_music, menu_cache, **store_browser_panel** (`store_browser.milo`, `song.lst`), store_panel, **store_details_panel** (`store_details.milo`) | the offer list, chunked (`next_chunk`/`previous_chunk`), shortcuts, preview toggles |
-| `store_info_screen` | background, shell_music, menu_cache, store_banner, store_menu, **store_info_panel** (`store_info.milo`, `buttons.lst`), store_panel, store_details_panel, error_popup | single-offer detail; buy/download buttons |
-| `store_info_unavailable_screen` | — | retail error target (`enum_error` routes here) |
+| Screen                            | Panels                                                                                                                                                                          | Notes                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `store_menu_screen`             | background, shell_music, menu_cache, store_banner, store_menu, upsell, store_panel                                                                                              | `filter.lst` menu list; `header_index 2`; back = splash                             |
+| `store_browser_screen`          | background, shell_music, menu_cache, **store_browser_panel** (`store_browser.milo`, `song.lst`), store_panel, **store_details_panel** (`store_details.milo`)  | the offer list, chunked (`next_chunk`/`previous_chunk`), shortcuts, preview toggles |
+| `store_info_screen`             | background, shell_music, menu_cache, store_banner, store_menu, **store_info_panel** (`store_info.milo`, `buttons.lst`), store_panel, store_details_panel, error_popup | single-offer detail; buy/download buttons                                               |
+| `store_info_unavailable_screen` | —                                                                                                                                                                              | retail error target (`enum_error` routes here)                                        |
 
-Assets in the retail ark (`main_xbox.hdr`): `ui/store/gen/{store,store_main,store_menu,store_browser,
-store_info,store_details,store_info_enum,store_shortcut,album_art}.milo_xbox` +
+Assets in the retail ark (`main_xbox.hdr`): `ui/store/gen/{store,store_main,store_menu,store_browser, store_info,store_details,store_info_enum,store_shortcut,album_art}.milo_xbox` +
 `store.dtb`/`store_info.dtb`, list resources `list_store_frontmenu/menu/songpage/packsongs.milo_xbox`,
 and exactly ONE local metadata file: `ui/store/remote_metadata/iwannaholdyourhanddlc_prev.mogg`.
 The two script records are loaded from hardcoded paths in the image: `./ui/store/gen/store.dtb`
@@ -203,8 +202,7 @@ other record.
   `offers_populated`, `on_top_menu_populated`.
 - The panel also runs a **commerce session** (`has_created_commerce_session`,
   `has_aborted_commerce_session`, `is_creating_commerce_session`, `store/purchase`,
-  `show_offer_ui`) whose failure paths are visible in `store.dtb`: `notify "StorePanel Commerce
-  Session in an illegal state (kSessionAborted)."` / `fail "… (likely kSessionNone)."`.
+  `show_offer_ui`) whose failure paths are visible in `store.dtb`: `notify "StorePanel Commerce Session in an illegal state (kSessionAborted)."` / `fail "… (likely kSessionNone)."`.
 - Native classes behind it (RTTI in the image): `BandStorePanel`, `BandStoreOffer`,
   `BandStoreShortcutProvider`, `RndTexBlender`, plus `NetCacheMgr` / `NetCacheMgrXbox`.
 
@@ -217,8 +215,7 @@ properties): `name`, `artist`, `album` (also `offer_album_name`), `genre`, `year
 `offer_type` (song/pack/album), `is_available`, `is_purchased`, `in_library` (`store_in_library`),
 `is_completely_unavailable`, `has_available_pack`, `has_available_album`, `has_data`.
 
-Difficulty display: for parts `guitar drum vocals bass keys` the script builds `sprintf "diff_%s"
-<part>` and asks `song_mgr rank_tier rank <part>` — i.e. the record needs one numeric `rank` value
+Difficulty display: for parts `guitar drum vocals bass keys` the script builds `sprintf "diff_%s" <part>` and asks `song_mgr rank_tier rank <part>` — i.e. the record needs one numeric `rank` value
 per part; keep an eye on the singular `drum` token vs RhythmVerse's `rank_drums` (open question
 OQ4).
 
@@ -235,8 +232,7 @@ irrelevant for us since we only list flat (owner point 1).
 [store_view_pack]    (same with pack_link)
 ```
 
-Button visibility is data-driven: `purchase_allowed = {offer is_available} && !{offer_provider
-show_browser_purchased offer}`; `{offer is_purchased}` chooses "download again" vs "buy now";
+Button visibility is data-driven: `purchase_allowed = {offer is_available} && !{offer_provider show_browser_purchased offer}`; `{offer is_purchased}` chooses "download again" vs "buy now";
 preview buttons are hidden when `!{offer has_data preview_audio}` — **omitting preview data hides
 the preview UI cleanly** (useful: RhythmVerse has no preview audio).
 
@@ -319,20 +315,20 @@ devices, seen in boot logs) is Xbox-LIVE content plumbing we are **not** revivin
 These are existing code entry points, not claims that the store feature is already implemented.
 Repository links are relative to this plan; decoded retail evidence remains local under `out/`.
 
-| Work | Reference | What execution must account for |
-| --- | --- | --- |
-| Settings rows | [settings_screen.cpp](../../../src/ui/settings_screen.cpp), `AllPanels()`/`InSongPanels()`, `settings_dlc_panel`, `BoolRow`/`SubmenuRow` | Extend the existing DLC page and add the filter child, including its pause-context twin and Back target. A schema group alone does not generate these authored rows. |
-| Settings contract | [model.h](../../../src/settings/model.h), [model.cpp](../../../src/settings/model.cpp), [schema.cpp](../../../src/settings/schema.cpp), [hot_apply.h](../../../src/settings/hot_apply.h) | Allocate six unused stable IDs without renumbering; add tokens/defaults/storage mappings and a real live applier. Merely marking rows `kHot` falls back to restart when no applier handles them. |
-| Store/refresh collision | [menu_options.cpp](../../../src/ui/menu_options.cpp), `TapRefreshCache`; [menu_filter.cpp](../../../src/hooks/menu_filter.cpp), `PatchFile`/`Configure`; [menu_compat.h](../../../src/settings/menu_compat.h) | `splash_dlc` is the R7 refresh token and protected from the default offline hide set while it owns refresh. Use a distinct proposed `rbbz_rhythmverse` token; do not change that ownership. |
-| Authored menu/payload | [settings_screen.h](../../../src/ui/settings_screen.h), `RerouteRow`/`RemoveRow`/`AddLocaleEntry`; [menu_payload.cpp](../../../src/settings/menu_payload.cpp), `BuildMenuRecords`/`ExtendMenuArchive`; [settings_payload.cpp](../../../src/hooks/settings_payload.cpp) | `RerouteRow` only replaces an existing dispatch case. Add an idempotent main-menu insertion helper for both option and case, and compose edits into the existing mounted payload. On/Off needs runtime list repopulation, since records are built at boot. |
-| Guest bridge | [settings_bridge_hooks.cpp](../../../src/hooks/settings_bridge_hooks.cpp), `sub_8241DFB0` / `sub_8241DE48`; [settings_bridge.h](../../../src/hooks/settings_bridge.h) | Builtins `file_exists` and `write_file` are hooked already. Current readback is **one bit**, not arbitrary strings; state/progress need predicates or an explicitly implemented typed return extension. Search text also exceeds the current ASCII token grammar. |
-| DLC inventory | [dlc.h](../../../src/hooks/dlc.h), `LibraryPackagePaths`; [dlc.cpp](../../../src/hooks/dlc.cpp), `RebuildPackagePaths`/`ScanLibraryForRefresh` | Package paths cover configured structured + flat sources, but contain no song title/artist and are not a guest loaded-song list. Copy on the owning thread before worker use; add source coverage for normal content-manager installs if using this fallback. |
-| Package metadata fallback | [shell_music.cpp](../../../src/hooks/shell_music.cpp), `MountPackage`; [stfs_container_device.h](../../../rexglue-sdk/include/rex/filesystem/devices/stfs_container_device.h), `Initialize`/`ResolvePath`; [file.h](../../../rexglue-sdk/include/rex/filesystem/file.h), `ReadSync` | The project already mounts STFS and extracted packages read-only. Reuse that reader for `songs/songs.dta` rather than implementing an STFS extractor from scratch. A textual DTA parser and loaded-content association still need work. The menu-music pool itself is not the metadata index. |
-| Header validation/layout | [dlc_library.h](../../../src/fs/dlc_library.h), `ReadPackageIdentity`, `kMaxContentFileName`, `LibraryContentType`; [dlc_layout.h](../../../src/fs/dlc_layout.h), `HasStructuredLayout` | Scanner accepts `CON `, `LIVE`, `PIRS`; 4-byte magic alone is insufficient. Guest filenames have a **42-byte** limit. Flat libraries get aliases for long names; structured paths keep the actual filename. Use short generated install names, not artist/title filenames. |
-| Paths/refresh | [paths.cpp](../../../src/settings/paths.cpp), `ResolvePathValue`; [dlc.cpp](../../../src/hooks/dlc.cpp), `Configure`/`RefreshConfigured`/`PublishPendingRefresh`; [refresh_state.h](../../../src/fs/refresh_state.h) | Reuse the boot's resolved DLC destination. `paths.toml` relative paths and legacy cvar relative paths have different bases. Refresh is cache-toggle-gated, skips an empty flat-root list, and does not rebuild structured paths. Test cache On and Off. |
-| HTTP | [download.cpp](../../../installer/src/download.cpp), `InternetHandle`/`DownloadToFile`/`SplitUrl` | RAII handles, explicit timeouts and a proxy-aware access type are useful. Note the file's own reason for following GitHub's redirect: `WinHttpSetOption(..., WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS, ...)` for release assets. **Do not copy that policy** for RhythmVerse; validate each redirect manually. (This row used to cite `controller-settings/src/updater.cpp`, which was deleted on 2026-10-15 with D19's update check.) |
-| JSON dependency | [vendored json.hpp](../../../rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/json.hpp) | A JSON implementation already exists in the SDK tree. Verify the build target/include/license arrangement before adding another dependency; do not write a partial JSON parser. |
-| Existing regression suites | [settings_screen_tests.cpp](../../../tests/settings_screen_tests.cpp), [settings_hot_apply_tests.cpp](../../../tests/settings_hot_apply_tests.cpp), [menu_compat_tests.cpp](../../../tests/menu_compat_tests.cpp), [dlc_library_tests.cpp](../../../tests/dlc_library_tests.cpp), [dlc_layout_tests.cpp](../../../tests/dlc_layout_tests.cpp), [refresh_state_tests.cpp](../../../tests/refresh_state_tests.cpp) | Extend the relevant fixtures during implementation: exact menu defaults/navigation, live commit/cancel, refresh-row ownership, staging exclusion, layout preservation and publish-once refresh behavior. |
+| Work                       | Reference                                                                                                                                                                                                                                                                                                                                                                                                  | What execution must account for                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Settings rows              | [settings_screen.cpp](../../../src/ui/settings_screen.cpp), `AllPanels()`/`InSongPanels()`, `settings_dlc_panel`, `BoolRow`/`SubmenuRow`                                                                                                                                                                                                                                                          | Extend the existing DLC page and add the filter child, including its pause-context twin and Back target. A schema group alone does not generate these authored rows.                                                                                                                                                                                                                                                                          |
+| Settings contract          | [model.h](../../../src/settings/model.h), [model.cpp](../../../src/settings/model.cpp), [schema.cpp](../../../src/settings/schema.cpp), [hot_apply.h](../../../src/settings/hot_apply.h)                                                                                                                                                                                                                       | Allocate six unused stable IDs without renumbering; add tokens/defaults/storage mappings and a real live applier. Merely marking rows `kHot` falls back to restart when no applier handles them.                                                                                                                                                                                                                                            |
+| Store/refresh collision    | [menu_options.cpp](../../../src/ui/menu_options.cpp), `TapRefreshCache`; [menu_filter.cpp](../../../src/hooks/menu_filter.cpp), `PatchFile`/`Configure`; [menu_compat.h](../../../src/settings/menu_compat.h)                                                                                                                                                                                           | `splash_dlc` is the R7 refresh token and protected from the default offline hide set while it owns refresh. Use a distinct proposed `rbbz_rhythmverse` token; do not change that ownership.                                                                                                                                                                                                                                               |
+| Authored menu/payload      | [settings_screen.h](../../../src/ui/settings_screen.h), `RerouteRow`/`RemoveRow`/`AddLocaleEntry`; [menu_payload.cpp](../../../src/settings/menu_payload.cpp), `BuildMenuRecords`/`ExtendMenuArchive`; [settings_payload.cpp](../../../src/hooks/settings_payload.cpp)                                                                                                                              | `RerouteRow` only replaces an existing dispatch case. Add an idempotent main-menu insertion helper for both option and case, and compose edits into the existing mounted payload. On/Off needs runtime list repopulation, since records are built at boot.                                                                                                                                                                                  |
+| Guest bridge               | [settings_bridge_hooks.cpp](../../../src/hooks/settings_bridge_hooks.cpp), `sub_8241DFB0` / `sub_8241DE48`; [settings_bridge.h](../../../src/hooks/settings_bridge.h)                                                                                                                                                                                                                                    | Builtins `file_exists` and `write_file` are hooked already. Current readback is **one bit**, not arbitrary strings; state/progress need predicates or an explicitly implemented typed return extension. Search text also exceeds the current ASCII token grammar.                                                                                                                                                                   |
+| DLC inventory              | [dlc.h](../../../src/hooks/dlc.h), `LibraryPackagePaths`; [dlc.cpp](../../../src/hooks/dlc.cpp), `RebuildPackagePaths`/`ScanLibraryForRefresh`                                                                                                                                                                                                                                                         | Package paths cover configured structured + flat sources, but contain no song title/artist and are not a guest loaded-song list. Copy on the owning thread before worker use; add source coverage for normal content-manager installs if using this fallback.                                                                                                                                                                                 |
+| Package metadata fallback  | [shell_music.cpp](../../../src/hooks/shell_music.cpp), `MountPackage`; [stfs_container_device.h](../../../rexglue-sdk/include/rex/filesystem/devices/stfs_container_device.h), `Initialize`/`ResolvePath`; [file.h](../../../rexglue-sdk/include/rex/filesystem/file.h), `ReadSync`                                                                                                                   | The project already mounts STFS and extracted packages read-only. Reuse that reader for `songs/songs.dta` rather than implementing an STFS extractor from scratch. A textual DTA parser and loaded-content association still need work. The menu-music pool itself is not the metadata index.                                                                                                                                               |
+| Header validation/layout   | [dlc_library.h](../../../src/fs/dlc_library.h), `ReadPackageIdentity`, `kMaxContentFileName`, `LibraryContentType`; [dlc_layout.h](../../../src/fs/dlc_layout.h), `HasStructuredLayout`                                                                                                                                                                                                              | Scanner accepts `CON `, `LIVE`, `PIRS`; 4-byte magic alone is insufficient. Guest filenames have a **42-byte** limit. Flat libraries get aliases for long names; structured paths keep the actual filename. Use short generated install names, not artist/title filenames.                                                                                                                                                        |
+| Paths/refresh              | [paths.cpp](../../../src/settings/paths.cpp), `ResolvePathValue`; [dlc.cpp](../../../src/hooks/dlc.cpp), `Configure`/`RefreshConfigured`/`PublishPendingRefresh`; [refresh_state.h](../../../src/fs/refresh_state.h)                                                                                                                                                                                  | Reuse the boot's resolved DLC destination. `paths.toml` relative paths and legacy cvar relative paths have different bases. Refresh is cache-toggle-gated, skips an empty flat-root list, and does not rebuild structured paths. Test cache On and Off.                                                                                                                                                                                     |
+| HTTP                       | [download.cpp](../../../installer/src/download.cpp), `InternetHandle`/`DownloadToFile`/`SplitUrl`                                                                                                                                                                                                                                                                                                     | RAII handles, explicit timeouts and a proxy-aware access type are useful. Note the file's own reason for following GitHub's redirect: `WinHttpSetOption(..., WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS, ...)` for release assets. **Do not copy that policy** for RhythmVerse; validate each redirect manually. (This row used to cite `controller-settings/src/updater.cpp`, which was deleted on 2026-10-15 with D19's update check.) |
+| JSON dependency            | [vendored json.hpp](../../../rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/json.hpp)                                                                                                                                                                                                                                                                                                             | A JSON implementation already exists in the SDK tree. Verify the build target/include/license arrangement before adding another dependency; do not write a partial JSON parser.                                                                                                                                                                                                                                                               |
+| Existing regression suites | [settings_screen_tests.cpp](../../../tests/settings_screen_tests.cpp), [settings_hot_apply_tests.cpp](../../../tests/settings_hot_apply_tests.cpp), [menu_compat_tests.cpp](../../../tests/menu_compat_tests.cpp), [dlc_library_tests.cpp](../../../tests/dlc_library_tests.cpp), [dlc_layout_tests.cpp](../../../tests/dlc_layout_tests.cpp), [refresh_state_tests.cpp](../../../tests/refresh_state_tests.cpp) | Extend the relevant fixtures during implementation: exact menu defaults/navigation, live commit/cancel, refresh-row ownership, staging exclusion, layout preservation and publish-once refresh behavior.                                                                                                                                                                                                                                      |
 
 ### 2.12 Free-download UI: exact price seam
 
@@ -355,21 +351,21 @@ must prove the browser, details and any retained recommendation area show no mon
 
 ## 3. RhythmVerse API (2026-10-13 research; list route rechecked 2026-10-14)
 
-| Item | Value |
-| --- | --- |
-| List | `POST https://rhythmverse.co/api/rb3xbox/songfiles/list` |
-| Search | `POST https://rhythmverse.co/api/rb3xbox/songfiles/search/live` |
-| Body | `x-www-form-urlencoded` |
-| Fields | `instrument[]` (repeatable; `drums, guitar, bass, vocals, keys`), `sort[0][sort_by]=update_date`, `sort[0][sort_order]=DESC`, `data_type=full`, `text` (search only, ≥3 chars), `page`, `records` (site uses 25) |
-| Scoping | gameformat is the route token (`rb3xbox`); a `gameformat` body param is rejected. The generic `all` route returns mixed formats. |
-| Auth | none for list/search/download |
-| Response | `{status:"success", data:{records:{total_filtered, returned}, pagination:{page, records}, songs:[{data, file}]}}` |
-| Fields we consume | `file.file_id, file_name, gameformat, file_artist, file_title, file_album, file_year, file_album_track_number, file_song_length, file_genre, size, downloads, album_art, download_url, diff_*, rank_*` (+ `data.album_art` fallback) |
-| Preview fields (kept, never fetched) | `file.file_preview` and `data.song_preview` are YouTube web pages; there is no audio asset. Parsed onto the offer model for evidence and classification only — §3.3. |
-| Form keys | Sent percent-encoded (`instrument%5B%5D=guitar`, `sort%5B0%5D%5Bsort_by%5D=update_date`); measured 2026-10-20 with `records=1` — HTTP 200, `status=success`, one `rb3xbox` record (`out/_swap/rv_p0_encoded.json`). Literal brackets also work, but the encoded spelling is what the client emits. |
-| Download | `file.download_url` is a candidate, not proof of a raw package. Apply §3.1. The scoped `rb3xbox` route also returns external links (Dropbox observed on 2026-10-14). |
-| Search rule | a too-short query returns `{"status":"error","error":{"message":"You need to provide a text at least 3 characters long"}}` |
-| Search matching | Artist alone OR song title alone; combining both in `text` fails to find the intended result (owner-reported, 2026-10-14; not independently re-probed). This is not a one-word restriction. |
+| Item                                 | Value                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| List                                 | `POST https://rhythmverse.co/api/rb3xbox/songfiles/list`                                                                                                                                                                                                                                                      |
+| Search                               | `POST https://rhythmverse.co/api/rb3xbox/songfiles/search/live`                                                                                                                                                                                                                                               |
+| Body                                 | `x-www-form-urlencoded`                                                                                                                                                                                                                                                                                       |
+| Fields                               | `instrument[]` (repeatable; `drums, guitar, bass, vocals, keys`), `sort[0][sort_by]=update_date`, `sort[0][sort_order]=DESC`, `data_type=full`, `text` (search only, ≥3 chars), `page`, `records` (site uses 25)                                                                               |
+| Scoping                              | gameformat is the route token (`rb3xbox`); a `gameformat` body param is rejected. The generic `all` route returns mixed formats.                                                                                                                                                                          |
+| Auth                                 | none for list/search/download                                                                                                                                                                                                                                                                                   |
+| Response                             | `{status:"success", data:{records:{total_filtered, returned}, pagination:{page, records}, songs:[{data, file}]}}`                                                                                                                                                                                             |
+| Fields we consume                    | `file.file_id, file_name, gameformat, file_artist, file_title, file_album, file_year, file_album_track_number, file_song_length, file_genre, size, downloads, album_art, download_url, diff_*, rank_*` (+ `data.album_art` fallback)                                                                        |
+| Preview fields (kept, never fetched) | `file.file_preview` and `data.song_preview` are YouTube web pages; there is no audio asset. Parsed onto the offer model for evidence and classification only — §3.3.                                                                                                                                      |
+| Form keys                            | Sent percent-encoded (`instrument%5B%5D=guitar`, `sort%5B0%5D%5Bsort_by%5D=update_date`); measured 2026-10-20 with `records=1` — HTTP 200, `status=success`, one `rb3xbox` record (`out/_swap/rv_p0_encoded.json`). Literal brackets also work, but the encoded spelling is what the client emits. |
+| Download                             | `file.download_url` is a candidate, not proof of a raw package. Apply §3.1. The scoped `rb3xbox` route also returns external links (Dropbox observed on 2026-10-14).                                                                                                                                       |
+| Search rule                          | a too-short query returns `{"status":"error","error":{"message":"You need to provide a text at least 3 characters long"}}`                                                                                                                                                                                    |
+| Search matching                      | Artist alone OR song title alone; combining both in `text` fails to find the intended result (owner-reported, 2026-10-14; not independently re-probed). This is not a one-word restriction.                                                                                                                   |
 
 Review evidence: the owner's `list.json` contains 25 entries (17 `rb3xbox`, 8 `rv`); `search.json`
 contains 8 (6 `rb3xbox`, 2 `rv`). The ZIP entries in those captures are `rv`; they are useful
@@ -461,11 +457,11 @@ deletion or a root change. No per-row filesystem scan and no guest-memory reads 
 The retail store previews a song on hover (§2.6). Owner rule (2026-10-20): implement the preview only
 if the API returns something usable; otherwise ship without it.
 
-| Field | Content | Count |
-| --- | --- | --- |
-| `file.file_preview` | `https://www.youtube.com/embed/<id>` | 14/25 in `list.json`, 4/8 in `search.json` |
-| `data.song_preview` | `https://www.youtube.com/watch?v=<id>` / `https://youtu.be/<id>` | 0/25 in `list.json`, 4/8 in `search.json` |
-| `file.audio_type` | `single` / `partial` / `full` — a chart description, not an asset | every song |
+| Field                 | Content                                                                  | Count                                          |
+| --------------------- | ------------------------------------------------------------------------ | ---------------------------------------------- |
+| `file.file_preview` | `https://www.youtube.com/embed/<id>`                                   | 14/25 in `list.json`, 4/8 in `search.json` |
+| `data.song_preview` | `https://www.youtube.com/watch?v=<id>` / `https://youtu.be/<id>`     | 0/25 in `list.json`, 4/8 in `search.json`  |
+| `file.audio_type`   | `single` / `partial` / `full` — a chart description, not an asset | every song                                     |
 
 Both preview fields are **web pages**, never an audio stream or file. A probe of one song page
 (`https://rhythmverse.co/songfile/38a4dcc61d324e7883c9a393a7086bb9`, HTTP 200, 171,707 bytes,
@@ -534,17 +530,17 @@ P2 (instrumentation) is the decision gate; it is cheap and answers A-vs-B with m
 
 Seam table (the plan of record):
 
-| Component | First choice | Fallback |
-| --- | --- | --- |
-| Store opens | New `rbbz_rhythmverse` row/case, labelled RhythmVerse Customs and runtime-gated by the persisted enable setting; preserve `splash_dlc` refresh | store-context entry stub if commerce state prevents entry; never change global signin |
-| Menus ("Recent", "Search") | A: generated top-menu metadata | B: hook `get_menu_provider`/`request` |
-| Offer list + fields | A: generated offer records | B: hook provider `build_list` + offer `get_data` |
-| Album art | A: serve art files the same way (`load_art` path) | pre-convert + feed `album_tex`; last resort placeholder `no_art.tex` |
-| "Downloaded" | lazy loaded-DLC artist/title index (§3.2), adapted to `is_purchased`/`in_library` only as UI signals | package-metadata index over accepted DLC sources; still required in v1 |
-| Checkout/download | DTA patch of the two button cases + `rbbz-store/` bridge ops | hook `check_out`/`re_download` |
-| Free UI / attribution | guard `refresh_panel` cost block, author download states, RhythmVerse heading | provider/resource edits for prices rendered outside DTA |
-| Refresh after download | rescan host sources + publish + guest discovery (OQ6) | verified install plus restart-required message; manual refresh alone is not yet proven sufficient |
-| Enable + instrument filters | six native settings leaves under General → Downloadable Content; copied effective values for workers | — |
+| Component                   | First choice                                                                                                                                       | Fallback                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Store opens                 | New `rbbz_rhythmverse` row/case, labelled RhythmVerse Customs and runtime-gated by the persisted enable setting; preserve `splash_dlc` refresh | store-context entry stub if commerce state prevents entry; never change global signin             |
+| Menus ("Recent", "Search")  | A: generated top-menu metadata                                                                                                                     | B: hook `get_menu_provider`/`request`                                                         |
+| Offer list + fields         | A: generated offer records                                                                                                                         | B: hook provider `build_list` + offer `get_data`                                              |
+| Album art                   | A: serve art files the same way (`load_art` path)                                                                                                | pre-convert + feed `album_tex`; last resort placeholder `no_art.tex`                          |
+| "Downloaded"                | lazy loaded-DLC artist/title index (§3.2), adapted to `is_purchased`/`in_library` only as UI signals                                          | package-metadata index over accepted DLC sources; still required in v1                            |
+| Checkout/download           | DTA patch of the two button cases + `rbbz-store/` bridge ops                                                                                     | hook `check_out`/`re_download`                                                                |
+| Free UI / attribution       | guard `refresh_panel` cost block, author download states, RhythmVerse heading                                                                    | provider/resource edits for prices rendered outside DTA                                           |
+| Refresh after download      | rescan host sources + publish + guest discovery (OQ6)                                                                                              | verified install plus restart-required message; manual refresh alone is not yet proven sufficient |
+| Enable + instrument filters | six native settings leaves under General → Downloadable Content; copied effective values for workers                                              | —                                                                                                |
 
 ---
 
@@ -709,8 +705,7 @@ Landed, and tested without a boot (`store_payload`, **32 checks**; full `ctest` 
 **Measured, boot 1–2 (`out/_swap/store-probe/20261020-132416`, `…-133319`):**
 
 - P1's row was authored into the generated record — `dump-menu` shows
-  `… splash_exit splash_dlc rbbz_rhythmverse` — and the locale carries `rbbz_rhythmverse =
-  "RhythmVerse Customs"`, yet the menu did not draw it. The row *was* selectable: six taps past the
+  `… splash_exit splash_dlc rbbz_rhythmverse` — and the locale carries `rbbz_rhythmverse = "RhythmVerse Customs"`, yet the menu did not draw it. The row *was* selectable: six taps past the
   first row, A opened `store_menu_screen`. So: authored, functional, and seventh of six visible
   rows. Two separate defects, both now fixed:
   1. **R5's hide decision is not delivered by the in-flight edit.** The boot warns that the edit at
@@ -756,8 +751,7 @@ neither proven nor disproven by that pass:
 
 **Second pass, same day — the request is issued and the native fetch is inert. P2's decision.**
 
-Two boots under `scripts/probe_store.ps1`, both with `--store_trace=1
---store_local_server_root=ui/store/remote_metadata/`: `out/_swap/store-probe/20261020-142448` (the
+Two boots under `scripts/probe_store.ps1`, both with `--store_trace=1 --store_local_server_root=ui/store/remote_metadata/`: `out/_swap/store-probe/20261020-142448` (the
 control leg, on the profile as it stands — master off) and `…-142749` (the measured leg, with
 `general.rhythmverse = true` written into `settings.toml` for that boot and restored afterwards, and
 with `--log_level=trace --log_noisy=1`; the script grew `-Noisy` for it).
@@ -814,8 +808,7 @@ Landed with the decision (`store_metadata`, **29 checks**; full `ctest` **40/40*
   `dlc_store/%s/%s/offers/%s/`, `dlc_store/%s/%s/related/%s.dta`, source id `menu_<id>`) and the
   **writer skeleton** P2's exit asks for: `BuildFrontMenuRecord` emits a compiled DTA carrying the
   owner's two menus (Recent, Search), refuses an empty menu or a nameless/unlabelled entry, and
-  keeps the record's field names in one place because they are still a guess. `tests/
-  store_metadata_tests.cpp` pins the names, the refusals and the compile→parse round trip — never
+  keeps the record's field names in one place because they are still a guess. `tests/ store_metadata_tests.cpp` pins the names, the refusals and the compile→parse round trip — never
   the retail parser, which no boot has reached.
 - The writer is **not** wired into the payload: with the fetch seam missing there is no caller, and
   a served record nobody reads is worse than none (it would look like progress in a boot log).
@@ -837,12 +830,12 @@ The native chain, read out of the decrypted image (`out/_swap/blitz_image.bin`, 
 confirmed by the one pointer to `./ui/store/gen/store.dtb` at 0x82001060) and the recompiled
 sources:
 
-| Step | Where | What |
-| --- | --- | --- |
-| method dispatch | `sub_827501F0` | `BandStorePanel::Handle(Symbol, DataArray*)`; the `request` branch reads the menu symbol from argument 0 and the bool from argument 1 |
-| request builder | `sub_8274FB60` | formats the metadata path (`"/%s%s"` at 0x82103138, `"?pid=%s"` at 0x82103130), stores it at `this+148`, calls the file cache `sub_8235A240(manager, &path)` |
-| index request | `sub_82753010` (reached from `sub_82753B20`'s `request_index_if_needed` branch) | returns early when `*(this+52) != *(this+56)`; then returns unless `*(0x828A3D20+44) == 2`; then calls `sub_8274FB60` |
-| the callback that should start it | DTA `on_init_commerce_success` in `ui/store/gen/store.dtb` | `{this request_index_if_needed}` then a `has_menus` check that sets the loading visual state |
+| Step                              | Where                                                                                 | What                                                                                                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| method dispatch                   | `sub_827501F0`                                                                      | `BandStorePanel::Handle(Symbol, DataArray*)`; the `request` branch reads the menu symbol from argument 0 and the bool from argument 1                            |
+| request builder                   | `sub_8274FB60`                                                                      | formats the metadata path (`"/%s%s"` at 0x82103138, `"?pid=%s"` at 0x82103130), stores it at `this+148`, calls the file cache `sub_8235A240(manager, &path)` |
+| index request                     | `sub_82753010` (reached from `sub_82753B20`'s `request_index_if_needed` branch) | returns early when `*(this+52) != *(this+56)`; then returns unless `*(0x828A3D20+44) == 2`; then calls `sub_8274FB60`                                          |
+| the callback that should start it | DTA `on_init_commerce_success` in `ui/store/gen/store.dtb`                        | `{this request_index_if_needed}` then a `has_menus` check that sets the loading visual state                                                                     |
 
 Measured in boots (`out/_swap/store-probe/20261020-15{1718,2008,2327,2622,2933}`):
 
@@ -898,6 +891,56 @@ the consumers: the front menu is `(submenus ("/<locale>/<id>/" ...))` (`sub_8275
 offer keys the plan §2.4 fields, and an empty page is valid. `tests/store_metadata_tests.cpp` is
 **50 checks**; `store_payload` stays **84**. The keys are not yet proven against the retail parser,
 which needs the delivery step.
+
+**P3 delivery record (2026-10-20, evening) — the record reaches the cache and parses; the panel's
+notification is the remaining step.** Boots `out/_swap/store-probe/20261020-2037…-2120`, read out of
+the decrypted image (`out/_swap/blitz_image.bin`, RTTI resolved with the new
+`out/_swap/rtti_vtables.py`) and the recompiled sources:
+
+- **The fetch entry is two functions, not one.** `sub_8235A240(cache, &path, client)` asks
+  `sub_82468518(manager, path)` whether the path is *loaded*: that is a container lookup
+  (`sub_82474E68` -> `sub_82474E08`, an exact `strcmp` against each entry's path String at `+44`)
+  guarded by three words of the manager object, `+44 == 1`, `+48 == 0`, `+104 == 1`. Measured
+  offline (`store_fetch: … guard(44=0,48=0,104=1)`): `+44` is **0**, so the "already loaded" branch
+  never runs and the request always falls through to the submit path.
+- **`sub_824685E0(manager, path, data, size)` is the retail insert** (its other caller is the
+  download completion, which hands it the downloaded buffer and its length). It classifies a record
+  by the path's extension (`strncmp` against `dxt`/`png_xbox`/`dtz`/`dta`) and builds a 72-byte file
+  object (`sub_82468248`: vtable, path String at `+44`, type `+52`, data `+56`, size `+60`, the
+  **parsed DataArray at `+68`**). `.dta` is type 3, parsed eagerly by the text DTA reader
+  (`BufStream` `sub_824628A8` + `sub_82418940`) - so a served store record is DTA **text**.
+- **Measured working, without a fault**: the 46-byte front-menu record
+  `(submenus "/eng/recent/" "/eng/search/")` is inserted and parsed
+  (`store_fetch: served 'dlc_store/europe/dlc_top_xbox_eng.dta' … (46 byte(s), insert -> 0x…)`), and
+  a control boot with delivery off is stable: the record is served, the request returns to the
+  panel, and the store still waits on its loading state.
+- **The notification is what still blocks the data lane.** Forcing the manager's `+44` to 1 for the
+  request makes retail take its loaded branch, which calls `sub_8235A0F8` -> the client's vtable
+  slot 5. The client is the panel's secondary subobject (vtable `0x82102AC4`, slot 5 a thunk into
+  the message dispatcher `sub_827501F0`), and the dispatcher faults (`read of guest 0x656E742F`, a
+  piece of the record text): the object the cache passes is not the message shape the dispatcher
+  interns its symbol from. A retail message's first word points at a node array whose `+8` is a
+  symbol; the cache's result object carries a vtable in its second word (`0x8200BA88`).
+- **The direct route was measured too** (`store_fetch_deliver`): the panel's top-menu handler is
+  `sub_827538B8(out, panel, message)` -> `sub_827537C0(panel, DataArray, source)` -> `sub_8275D5B8`
+  (72-byte menu object) -> `sub_8275D4E0` (`submenus` parse). Called directly with the parsed array
+  and the dispatcher's own `this` (`client - *(client - 4)`), the constructor **and** its parse both
+  complete (`menu ctor enter/exit`, `menu parse enter/exit`), and the call then faults in the
+  menu-vector insert `sub_821F73B8(panel + 52, &menu)`: with the −204 base the vector is empty and
+  its growth path faults on `read of guest 0x00000004`, while with the unadjusted base `+52` is not
+  that vector and the insert writes the read-only image address `0x820009D4`. The panel's menu list
+  is therefore not reachable from that `this` alone; the missing piece is state the retail
+  notification sets up first.
+- **Landed and tested**: `src/store/store_serve.{h,cpp}` (which path is ours, the host-directory
+  override with a no-escape rule, the built-in record), the text writers in
+  `src/store/store_metadata.{h,cpp}` (`BuildFrontMenuText`/`BuildMenuText`), the guest half in
+  `src/store/store_fetch.{h,cpp}` (insert only by default), `scripts/probe_store.ps1 -Extra`, the
+  cvars `store_serve_dir` and `store_fetch_deliver` (both documented in
+  `docs/engine/diagnostics.md`), and ctest **`store_serve` = 50 checks** (full suite **43/43**).
+- **Next measurement, named so it is not rediscovered**: find the code that turns a loaded file into
+  the message `sub_8235A0F8` delivers - the download completion in `rb_blitz_recomp.23.cpp` builds
+  the same shape - and reproduce it verbatim instead of calling the client callback with the file
+  object; or locate the state the retail notification establishes before it calls the builder.
 
 Landed with this record: `store::AddStoreEntryBypass` (+ tests), the `sub_8274FB60` request hook and
 the `sub_82753010` gate hook in `src/store/store_probe.cpp` (pass-through; they log and force only
@@ -1009,13 +1052,11 @@ the house row style.
   (i.e. the retail **RhythmVerse Customs** main-menu row jumps straight to the keys), so the search
   is drivable before P3's front menu owns a Search row. The first cut appended the jump to the
   retail store screen's `{enter}`, which needed `AppendPanelEnterStatements` to accept a `UIScreen`
-  definition as well as a `UIPanel` one (the first boot refused by name: `no {new UIPanel <name>
-  ...} definition for that panel`). That edit was then **retired** — it only fired once the store
+  definition as well as a `UIPanel` one (the first boot refused by name: `no {new UIPanel <name> ...} definition for that panel`). That edit was then **retired** — it only fired once the store
   screen was already open, which is the one place P3 will change — and the `UIScreen` widening kept.
 - `scripts/probe_search.ps1` — one boot that types a query on the keys and OCRs the strip.
 - `src/store/rhythmverse_client.cpp` — one widening the live API forced (§"Measured" below): a
-  query with **no matches** answers HTTP 200 with `{"records":{"total_filtered":0,"returned":0},
-  "songs":false}` — a JSON **boolean** where every matched answer carries an array. `ParseListing`
+  query with **no matches** answers HTTP 200 with `{"records":{"total_filtered":0,"returned":0}, "songs":false}` — a JSON **boolean** where every matched answer carries an array. `ParseListing`
   now reads a falsey `songs` with a zero record count as *zero songs*, not a parse failure, so the
   plan's own rule ("an actual empty result ... must use the corresponding UI state, not be reported
   as a network failure") holds. Any other non-array shape — and a falsey `songs` with a non-zero
@@ -1031,8 +1072,7 @@ OCR of a capture or a log line, not an expectation:
 - **Key presses reach the field.** The earlier unseeded boot typed on the letters page and the
   strip read `Search: 025`, then `Search: 02555` — one write per press, one character per write.
 - **The API's own minimum is enforced in-game.** With the field short, Done was answered and
-  refused: `store_search: 'rbbz-store/search/done' answered but not applied: Type at least 3
-  characters. Search by artist or song title, one at a time.` (`rb_blitz_059.log`, 17:39:30 and
+  refused: `store_search: 'rbbz-store/search/done' answered but not applied: Type at least 3 characters. Search by artist or song title, one at a time.` (`rb_blitz_059.log`, 17:39:30 and
   17:39:32 — the second line is the same press delivered twice, see the limits).
 - **Done → request → answer, in the game.** The seeded boot (field `bush`, one Done) logs
   `store_search: 25 record(s) answered, 15 eligible offer(s), state results (current)` and the
@@ -1050,9 +1090,7 @@ OCR of a capture or a log line, not an expectation:
   HTTP 200 and `"songs":false` (a JSON boolean, 239 bytes) — the first arm through this path
   logged `the answer could not be read: data.songs is not an array` and would have shown a
   *failure*. After the parse widening a boot with the field seeded to `zzzzqqq`
-  (`out/_swap/search-probe/20261020-175302`) logs `0 record(s) answered, 0 eligible offer(s), state
-  empty (current)` and the strip OCRs as **`NO MATCHES FOR "ZZZZQQQ". TRY JUST THE ARTIST NAME OR
-  JUST THE SONG TITLE.`** — the plan's second sentence, verbatim, in the game.
+  (`out/_swap/search-probe/20261020-175302`) logs `0 record(s) answered, 0 eligible offer(s), state empty (current)` and the strip OCRs as **`NO MATCHES FOR "ZZZZQQQ". TRY JUST THE ARTIST NAME OR JUST THE SONG TITLE.`** — the plan's second sentence, verbatim, in the game.
 - **The field is drawn while the keys are open** in that same capture (`SEARCH: ZZZZQQQ` beside
   `DONE LETTERS NUMBERS 0-5 NUMBERS 6-9 SPACE MORE KEYS`), so the strip and the rows coexist on
   the root page.
@@ -1225,11 +1263,10 @@ Honest limits — P5's exit is **not** met yet:
 - Exit: exact text/order/defaults, Back behavior, request bodies and persistence pass; master Off
   makes zero store requests, On works without restart, all-Off filter behavior is covered, and
   the existing settings/menu tests still pass.
-**P6 record (2026-10-20).** Six native rows, ids **80–85** and tokens `general.rhythmverse`,
-`general.rhythmverse_{guitar,bass,drums,vocals,keys}` (appended; nothing renumbered). Defaults are the
-owner's: master **off**, G/B/D/V **on**, Keys **off**. The master sits in the `dlc` group, the five
-leaves in a `rhythmverse` group; the filter is a plain submenu with no `SettingId`.
-
+  **P6 record (2026-10-20).** Six native rows, ids **80–85** and tokens `general.rhythmverse`,
+  `general.rhythmverse_{guitar,bass,drums,vocals,keys}` (appended; nothing renumbered). Defaults are the
+  owner's: master **off**, G/B/D/V **on**, Keys **off**. The master sits in the `dlc` group, the five
+  leaves in a `rhythmverse` group; the filter is a plain submenu with no `SettingId`.
 - **The page was reorganised to keep its six-row budget** (in-game-settings skill §2): the
   Downloadable Content page is now `Cache DLC Library`, `Refresh Music Library`, `DLC Scan Threads`,
   `RhythmVerse`, `RhythmVerse Song Filter`, `DLC Menu Music` — the last being a new submenu that
@@ -1250,6 +1287,7 @@ leaves in a `rhythmverse` group; the filter is a plain submenu with no `SettingI
   catalogue worker — so "master Off makes zero store requests" is structural (the snapshot is the
   only input a worker will have) rather than yet measured; no boot was driven to read the new page.
   The plan's P6 wording also owed `store_http`'s request bodies, which P0 already built and tested.
+
 ### P7 — polish
 
 - Chunking: preserve API-page position separately from visible eligible entries. Do not stop at
@@ -1346,25 +1384,25 @@ redirect targets). Recognizing manually installed loaded DLC is a v1 requirement
 
 ## 8. Evidence index
 
-| File | What it is |
-| --- | --- |
-| `out/_swap/store.tree.txt` | decoded `ui/store/gen/store.dtb` (BandStorePanel, browser, previews, menus) |
-| `out/_swap/store_info.tree.txt` | decoded `ui/store/gen/store_info.dtb` (buttons, buy/download cases) |
-| `out/_swap/config_store.tree.txt` | decoded `config/gen/store.dtb` (servers incl. `local`, groupings) |
-| `out/_swap/splash.tree.txt` | decoded `ui/splash/gen/splash.dtb` (the gate, verbatim) |
-| `out/_swap/ui.tree.txt` | decoded `ui/gen/ui.dtb` (store panels preload, netcache init) |
-| `out/_swap/server_connect.tree.txt` | decoded `ui/net/gen/server_connect.dtb` (discovery/offline states) |
-| `out/_swap/mega_ls.txt` | STFS listing of the 803 MB RB3 DLC container (song layout reference) |
-| `out/_swap/dl_headers.txt`, `dl_probe.bin` | download probe: 200 OK, octet-stream, `CON ` magic, size match |
-| `docs/rythmverse-responses/list.json`, `search.json` | owner captures (fixtures for P0) |
-| `out/_swap/rv_review_20261014.body`, `rv_review_20261014.headers.txt` | successful 2026-10-14 scoped list request (`records=1`, no sort/instrument fields); `rb3xbox` result with external Dropbox URL, opaque dotted ID, zero size and null ranks |
-| `out/_swap/rv_review_20261014_recent.json`, `rv_review_20261014_recent.headers.txt` | successful scoped Recent request, default four instruments, update-date descending, 25 records; all `rb3xbox`, 23 root-relative direct-file links |
-| `out/_swap/rvp_list_rb3xbox.json` | failed earlier probe: HTML 404, **not** a JSON success fixture |
-| `out/_swap/rv_songfile.html` | 2026-10-20 song-page probe (HTTP 200, 171,707 bytes): the only preview is a YouTube `<iframe>`; no audio asset (§3.3) |
-| `out/_swap/rv_p0_encoded.json` | 2026-10-20 list probe with percent-encoded form keys: HTTP 200, `status=success`, 1 `rb3xbox` record |
-| §2.11 code-reference table | current menu ownership, settings schema/panels, bridge limitations, SDK package reader, HTTP redirects, filename limits and refresh gaps checked on 2026-10-14 |
-| image string offsets | `BandStorePanel` 0x3A078; `is_store_offer` 0x3D308; `has_created_commerce_session` 0x87B00; `load_art` 0x87BC0; `netcache_init` 0x8E6EC; `get_store_offer` 0x105248; `set_target_store_offer_id` 0x105270; `dlc_store` 0x102D00; `/dlc_top_%s_%s.dta` 0x102D58; `dlc_store/%s/%s/offers/%s/` 0x105088; `dlc_store/%s/%s/related/%s.dta` 0x104740; `Xis_participating_user_online` 0x13FBB |
-| imports (checkout) | `__imp__XamShowMarketplaceUI` 0x827F6544, `…NuiMarketplaceUI` 0x827F65B4, `…MarketplaceDownloadItemsUI` 0x827F6774 |
+| File                                                                                    | What it is                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `out/_swap/store.tree.txt`                                                            | decoded `ui/store/gen/store.dtb` (BandStorePanel, browser, previews, menus)                                                                                                                                                                                                                                                                                                                                     |
+| `out/_swap/store_info.tree.txt`                                                       | decoded `ui/store/gen/store_info.dtb` (buttons, buy/download cases)                                                                                                                                                                                                                                                                                                                                             |
+| `out/_swap/config_store.tree.txt`                                                     | decoded `config/gen/store.dtb` (servers incl. `local`, groupings)                                                                                                                                                                                                                                                                                                                                             |
+| `out/_swap/splash.tree.txt`                                                           | decoded `ui/splash/gen/splash.dtb` (the gate, verbatim)                                                                                                                                                                                                                                                                                                                                                         |
+| `out/_swap/ui.tree.txt`                                                               | decoded `ui/gen/ui.dtb` (store panels preload, netcache init)                                                                                                                                                                                                                                                                                                                                                   |
+| `out/_swap/server_connect.tree.txt`                                                   | decoded `ui/net/gen/server_connect.dtb` (discovery/offline states)                                                                                                                                                                                                                                                                                                                                              |
+| `out/_swap/mega_ls.txt`                                                               | STFS listing of the 803 MB RB3 DLC container (song layout reference)                                                                                                                                                                                                                                                                                                                                              |
+| `out/_swap/dl_headers.txt`, `dl_probe.bin`                                          | download probe: 200 OK, octet-stream, `CON ` magic, size match                                                                                                                                                                                                                                                                                                                                                  |
+| `docs/rythmverse-responses/list.json`, `search.json`                                | owner captures (fixtures for P0)                                                                                                                                                                                                                                                                                                                                                                                  |
+| `out/_swap/rv_review_20261014.body`, `rv_review_20261014.headers.txt`               | successful 2026-10-14 scoped list request (`records=1`, no sort/instrument fields); `rb3xbox` result with external Dropbox URL, opaque dotted ID, zero size and null ranks                                                                                                                                                                                                                                    |
+| `out/_swap/rv_review_20261014_recent.json`, `rv_review_20261014_recent.headers.txt` | successful scoped Recent request, default four instruments, update-date descending, 25 records; all `rb3xbox`, 23 root-relative direct-file links                                                                                                                                                                                                                                                               |
+| `out/_swap/rvp_list_rb3xbox.json`                                                     | failed earlier probe: HTML 404, **not** a JSON success fixture                                                                                                                                                                                                                                                                                                                                              |
+| `out/_swap/rv_songfile.html`                                                          | 2026-10-20 song-page probe (HTTP 200, 171,707 bytes): the only preview is a YouTube `<iframe>`; no audio asset (§3.3)                                                                                                                                                                                                                                                                                          |
+| `out/_swap/rv_p0_encoded.json`                                                        | 2026-10-20 list probe with percent-encoded form keys: HTTP 200, `status=success`, 1 `rb3xbox` record                                                                                                                                                                                                                                                                                                          |
+| §2.11 code-reference table                                                             | current menu ownership, settings schema/panels, bridge limitations, SDK package reader, HTTP redirects, filename limits and refresh gaps checked on 2026-10-14                                                                                                                                                                                                                                                    |
+| image string offsets                                                                    | `BandStorePanel` 0x3A078; `is_store_offer` 0x3D308; `has_created_commerce_session` 0x87B00; `load_art` 0x87BC0; `netcache_init` 0x8E6EC; `get_store_offer` 0x105248; `set_target_store_offer_id` 0x105270; `dlc_store` 0x102D00; `/dlc_top_%s_%s.dta` 0x102D58; `dlc_store/%s/%s/offers/%s/` 0x105088; `dlc_store/%s/%s/related/%s.dta` 0x104740; `Xis_participating_user_online` 0x13FBB |
+| imports (checkout)                                                                      | `__imp__XamShowMarketplaceUI` 0x827F6544, `…NuiMarketplaceUI` 0x827F65B4, `…MarketplaceDownloadItemsUI` 0x827F6774                                                                                                                                                                                                                                                                                        |
 
 ## Appendix A — request cheat sheet
 
