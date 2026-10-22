@@ -203,7 +203,8 @@ captures in `docs/rythmverse-responses/{list,search}.json`.
 
 > **Superseded 2026-10-22 by the owner pass (§9).** The settings pair moves into
 > `General ▸ Downloadable Content ▸ RhythmVerse` as that page's first row, and the filter is named
-> **Search Song Filter** (P9-3); the master now defaults **On** (P9-1) and a change to it asks for a
+> **Search Song Filter** (P9-3); the master now defaults **On** (P9-1) and stays hot only if the
+> main-menu row and the store's heading follow a commit live - otherwise a change to it asks for a
 > restart (P9-2); the **Customs from RhythmVerse** line of item 8 is removed (P9-6); and "Recent"
 > reads **Recently Added** (P9-5). Items 1-10 above otherwise stand as the 2026-10-14 requirement.
 
@@ -2386,7 +2387,7 @@ evidence of what shipped. Prompts are ordered so a later one does not have to un
 | # | Surface | The adjustment | Overrides |
 | --- | --- | --- | --- |
 | P9-1 | Settings | The master switch defaults **On** | the P6 record's "master off" |
-| P9-2 | Settings | A change to the master asks for a restart | P6 (all six rows `kHot`) |
+| P9-2 | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
 | P9-3 | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
 | P9-4 | Settings | New `Interface ▸ Music Library & Store ▸ Show Messages and Recommendations` (On) | — |
 | P9-5 | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
@@ -2452,22 +2453,49 @@ proves it instead of flipping it:
   (`store-credit.png` OCRs the front menu and no credit). **P9-6 deletes that line and its step**, so
   the fix belongs there rather than here. `ctest` is **47/47** with the two suites' new pins.
 
-### P9-2 — a master change asks for a restart
+### P9-2 — a master change: hot only if the menu row and the header follow it
 
-- **Do**: the master is `ApplicationStrategy::kHot` today (`src/settings/schema.cpp:411`) with a live
-  applier (`src/store/store_settings.cpp:61-74`). Make the **master** `kRestart`: the committed value
-  reaches the store at the next boot, and the surface's existing prompt — the authored
-  `settings_restart_now` / `settings_close` page (`src/ui/settings_screen.cpp:1500-1512`), opened when
-  the merged root is left (`docs/settings/architecture.md` part 6 §6.1) — offers `Restart now` /
-  `Close`. Keep the five instrument leaves hot: their live effect is measured (P7's cancellable walk,
-  the page cache keyed by the request body). The main-menu row's presence is already baked at boot
-  (§5/P1), which is exactly why a restart is the honest strategy for the master.
+- **The scope (owner pass, 2026-10-22)**: the master staying hot is the *preferred* answer, but it is
+  only honest if **everything the switch owns changes live too**. A hot master therefore owes the
+  main-menu **RhythmVerse Customs** row's presence **and** the store's heading, not just the
+  workers' snapshot. The heading's own live form is a later prompt's subject; this prompt owes the
+  rule that it cannot lag behind the switch. If both cannot be proven live, the master is **cold**
+  (`kRestart`).
+- **What already follows a commit**: the store's settings snapshot (`src/store/store_settings.cpp`,
+  the applier at `:61-74`), so the next catalogue/art/download/search request obeys the new value,
+  and the row's **press** (the case re-reads `rbbz-store/enabled` at press time, §5/P1). What does
+  **not** follow: what is *drawn* - the main-menu record is compiled once per boot (§5/P1's baked
+  presence) and the store's heading is a locale entry `SetStoreHeading` replaces in the payload
+  (`src/store/store_payload.cpp`).
+- **Route A — stay `kHot`** (only if it lands, measured): give the main-menu row a live presence the
+  way the settings screen repopulates its own list after a commit (`set_data` + `set_selected` on the
+  splash list from a host-side call, or a payload-authored gate the row's own `set_data` consults),
+  and make the heading follow the committed value in the same boot. Prove both on one boot: flip
+  RhythmVerse Off, leave Settings, the row is gone *and* the heading no longer claims RhythmVerse;
+  flip it On, both return - no restart. Because the heading's live change belongs to a later prompt,
+  Route A is **not** met until that prompt exists or this one proves the heading can be re-replaced
+  live; a stale heading over a hidden row is exactly the mismatch this scope forbids.
+- **Route B — `kRestart`** (the landing unless Route A is proven): make the **master** `kRestart`;
+  the committed value reaches the store at the next boot, and the surface's existing prompt - the
+  authored `settings_restart_now` / `settings_close` page
+  (`src/ui/settings_screen.cpp:1500-1512`), opened when the merged root is left
+  (`docs/settings/architecture.md` part 6 §6.1) - offers `Restart now` / `Close`. Keep the five
+  instrument leaves `kHot`: their live effect is measured (P7's cancellable walk, the page cache
+  keyed by the request body).
+- **Also bound to the master later**: P9-9's RhythmVerse tab and P9-10's hidden flow each add a
+  surface the switch owns. A hot master would owe those in the same boot as well, which is the
+  second reason Route B is the honest default today; say so in the record if Route B lands.
 - **Move with it**: the pinned hot-row list in `tests/settings_hot_apply_tests.cpp` (six store rows
   today), P6's "the six rows are `kHot`" sentence (supersede with a line naming this prompt), and
-  `docs/settings/menu.md`'s hot/restart column.
-- **Done when**: flipping the master and leaving Help & Options draws the prompt once; `Close`
-  leaves the store on its pre-change value and makes no request; `Restart now` relaunches and the new
-  value acts (row present/absent, prewarm done/not); flipping a filter leaf asks for nothing.
+  `docs/settings/menu.md`'s hot/restart column. Route A also owes a live-presence case (the built
+  menu plus the gate) beside the boot that shows the row appearing and disappearing.
+- **Done when** (Route A): flipping the master in Help & Options adds/removes the main-menu row in
+  the same boot, the store's heading agrees with it, no restart is asked for, and the suites are
+  green with the row-presence case pinned.
+  **Done when** (Route B): flipping the master and leaving Help & Options draws the prompt once;
+  `Close` leaves the store on its pre-change value and makes no request; `Restart now` relaunches
+  and the new value acts (row present/absent, prewarm done/not); flipping a filter leaf asks for
+  nothing. The record names which route landed and why.
 
 ### P9-3 — `Downloadable Content ▸ RhythmVerse` first, and a renamed filter
 
@@ -2631,6 +2659,42 @@ surface.)*
   `store_catalogue: fetching` at press time; a boot pointed at an unreachable host draws the popup
   once and afterwards no store row and no RhythmVerse tab; each of the three symptoms has a recorded
   cause or a recorded measurement that it is the environment.
+
+**P9-10 record (2026-10-22) — item 1 landed: the catalogue warms at boot; items 2–3 are open.**
+
+- **The symptom, measured — this is the owner's "sometimes do nothing".** Two consecutive boots
+  (`rb_blitz_233.log`, `rb_blitz_234.log`) pressed **Recent** `1.7 s` and `1.1 s` after the store's
+  front menu was served, and the page was answered **empty**: `store_fetch: served
+  'dlc_store/europe/eng/recent/' from the built-in front menu (46 byte(s) …)` — `BuildMenuText({})`,
+  no offers. Catalogue page 1 landed `1.0 s` / `1.9 s` **after** that press (`store_catalogue: page
+  1 -> 24 eligible offer(s) of 25 record(s)`), so the press was simply early. An empty page is the
+  shape the retail DTA already handles (`process_offers` with zero offers calls
+  `refresh_current_menu`), which from the player's seat is "Recent does nothing"; the caption
+  strip's loading sentence is the only sign, and the player in both logs left the store rather
+  than pressing again.
+- **Why it was late**: the first fetch started on the **front menu's serve**
+  (`src/store/store_fetch.cpp`, `RequestCatalogueRefresh("the store opened")`) — the same frame the
+  player starts pressing rows — and the site answers page 1 about 3 s later.
+- **Landed**: `RbBlitzApp::OnPostLoadXexImage` (`src/rb_blitz_app.h`) calls
+  `RequestCatalogueRefresh("the boot asked")` after the four store installations, so the walk starts
+  before the guest thread exists. Same worker and the same `store_catalogue_pages` budget, and
+  nothing is drawn: the strip only speaks inside `kCatalogueSurfaceWindow`, which starts when the
+  store is served a record, never at boot. Master off stays silent (`RequestCatalogueRefresh`'s own
+  gate), which is the Control leg's assertion.
+- **Measured** (`scripts/probe_store.ps1 -StoreRow 4 -PageRow 0 -OutDir out/_swap/p910-recent2`,
+  release tree, the owner's profile): `store_catalogue: fetching up to 4 page(s) (the boot asked)`
+  at 19:52:06.6, all four pages by 19:52:15.9 (`99 offer(s) for the Recent list`) while the title
+  was still on `server_connect_screen`; the store opened at 19:53:34.7 and Recent was served
+  **75,229 bytes** (the 99 offers, not the 46-byte empty page) with its art served beside it, and
+  `help_observer: screen 'store_browser_screen'` follows at 19:53:55.7 — the press opens the
+  browser. The press-time log carries **no** `store_catalogue: fetching`, which is this prompt's own
+  Done-when. A `-MenuOnly` boot (`out/_swap/p910-menu/20261022-194644`) shows the same warm-up with
+  the store never opened.
+- **Still open (items 2–3)**: no failure popup and no hidden flow when the catalogue cannot be
+  reached, and the three outcomes are not each reproduced with `store_trace`. Until item 2 lands an
+  unreachable site still answers the press with the empty page (the strip's failure sentence is what
+  the player sees), and a press inside the ~3 s a **cold** fetch needs — a boot whose prewarm failed
+  and whose backoff has expired, or a master turned on after boot — can still meet that empty page.
 
 ### P9-11 — Search uses the title's own keyboard; the authored keys retire
 

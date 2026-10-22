@@ -367,6 +367,18 @@ class RbBlitzApp : public rex::ReXApp {
     // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
     // thread is started here; the serving policy asks only the published snapshot.
     rb_blitz::store::InstallStoreLibrary();
+    // P9-10 of the RhythmVerse store plan (§9): warm Recently Added once per boot. Until this the
+    // first catalogue fetch started when the store *opened* (`store_fetch.cpp`'s front-menu serve),
+    // so a Recent press 1-2 s later asked for a page the site had not answered yet and was handed
+    // the **empty** page, which the retail DTA turns back into the front menu - "Recent does
+    // nothing" (measured 2026-10-22 in two consecutive boots: `dlc_store/europe/eng/recent/` served
+    // as 46 bytes 1.1 s / 1.7 s after the front menu, page 1 landing 1.0 s / 1.9 s *after* the
+    // press). Asked here, before the guest exists, page 1 is held before the title can even draw
+    // its menu. It is the same worker and the same budget (`store_catalogue_pages`), and nothing is
+    // drawn: the caption strip only speaks within its surface window, which starts when the store
+    // is served a record. With the master off this is a no-op - the store makes no request at all
+    // then (plan §1.6, and the acceptance Control leg pins that silence).
+    rb_blitz::store::RequestCatalogueRefresh("the boot asked");
     rb_blitz::settings::InstallMenuPayload(runtime());
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest
