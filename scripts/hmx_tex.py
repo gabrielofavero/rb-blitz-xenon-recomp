@@ -133,8 +133,17 @@ def mip_chain_size(block, width, height, levels):
 
 
 def unswap(data):
+    """Exchange the two bytes of every 16-bit word (its own inverse).
+
+    Measured 2026-10-21: the one-liner this replaces - `out[0::2], out[1::2] = data[0::2],
+    data[1::2]` - **copies** each half back onto itself and swaps nothing, so every exported image
+    came out with the right shapes and wrong colours (a 16-bit word swap only moves the DXT
+    endpoints; the index bits stay put). `export` of `default_album_art_keep.png_xbox` now renders
+    the silver "ROCK BAND BLITZ" cover instead of a magenta mess.
+    """
     out = bytearray(data)
-    out[0::2], out[1::2] = data[0::2], data[1::2]
+    out[0::2] = data[1::2]
+    out[1::2] = data[0::2]
     return bytes(out)
 
 

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "store/album_art.h"
 #include "store/store_metadata.h"
 
 namespace rb_blitz::store {
@@ -23,6 +24,7 @@ namespace fs = std::filesystem;
 std::mutex g_source_mutex;
 OfferSource g_offer_source;
 DownloadedPredicate g_downloaded_predicate;
+ArtPrefetch g_art_prefetch;
 
 // A record bigger than this is not one of ours: the retail front menu and a 25-offer page are a
 // few kilobytes. The cap keeps a misnamed file from being copied into the guest heap whole.
@@ -106,6 +108,46 @@ std::vector<Offer> OffersForPage() {
   return offers;
 }
 
+void SetArtPrefetch(ArtPrefetch prefetch) {
+  std::lock_guard<std::mutex> lock(g_source_mutex);
+  g_art_prefetch = std::move(prefetch);
+}
+
+namespace {
+
+// Started outside the source mutex: the prefetch is another module's worker, and holding this lock
+// across it would couple the two (the art cache has its own anyway).
+void StartArtPrefetch(const std::vector<Offer>& offers) {
+  ArtPrefetch prefetch;
+  {
+    std::lock_guard<std::mutex> lock(g_source_mutex);
+    prefetch = g_art_prefetch;
+  }
+  if (prefetch) {
+    prefetch(offers);
+  }
+}
+
+// Only advertise a cover the serving path can answer *now*. `load_art` is answered synchronously
+// out of the art cache (store_fetch.cpp), and the record this build compiles links the material
+// immediately after that call returns (store_payload.h, `LinkAlbumArt`) - so an offer whose cover
+// has not been encoded yet would link a texture the panel never loaded. Clearing the key is exactly
+// the shape of an offer with no art: the DTA's `{offer has_data preview_art}` test fails and retail's
+// own placeholder stays. `art_url` is host-only (never written into the record) and is kept, so a
+// later prefetch for this offer still resolves.
+void KeepOnlyHeldArt(std::vector<Offer>* offers) {
+  for (Offer& offer : *offers) {
+    if (offer.preview_art.empty()) {
+      continue;
+    }
+    if (!HasArtTexture(ArtKeyFromPath(offer.preview_art))) {
+      offer.preview_art.clear();
+    }
+  }
+}
+
+}  // namespace
+
 std::string ReadServedRecord(std::string_view dir, std::string_view path, std::string* why) {
   if (dir.empty()) {
     if (why) *why = "no serve directory";
@@ -159,7 +201,14 @@ std::string BuiltinRecord(std::string_view path, std::string* why) {
   // DTA already handles (`on_offers_populated` with zero offers refreshes the menu instead of
   // opening the browser), and an honest answer rather than a fabricated list.
   if (IsMenuRecordPath(path)) {
-    return BuildMenuText(OffersForPage(), why);
+    std::vector<Offer> offers = OffersForPage();
+    // The covers for this page, in the background: the panel asks for one about a second after it
+    // draws the list (`store_details_panel.refresh` -> `load_art`), and the catalogue's own page
+    // may have landed long after the front menu was served.
+    StartArtPrefetch(offers);
+    // Then drop the keys whose texture is not in hand yet (see KeepOnlyHeldArt).
+    KeepOnlyHeldArt(&offers);
+    return BuildMenuText(offers, why);
   }
   if (why) *why = "no built-in record for this path";
   return {};

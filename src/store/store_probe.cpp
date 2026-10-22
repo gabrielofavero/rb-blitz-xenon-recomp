@@ -419,6 +419,65 @@ REX_HOOK_RAW(sub_8235A240) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// P3's album art: the request entry `BandStorePanel::load_art` reaches.
+//
+// `sub_8274E760` (the panel's `load_art` handler) builds `request prefix + preview_art` and calls
+// `sub_824456A8(panel, path, callback)`, which hands the path to the netcache manager through
+// `sub_82469C28(manager, path, client, 1)`. The path is a **C string** there, not a `String` object
+// (measured 2026-10-21: `sub_824456A8` passes the chars word, and reading it as a `String` faults on
+// the path's own characters). That entry looks the path up in the manager's loaded-file container
+// itself (`sub_82474E08(manager + 76)`, the same container `sub_824685E0` inserts into) and, when it
+// is there, wraps it and calls the client - so a texture is served with one insert and no readiness
+// word, unlike the metadata request (store_fetch.h's ServeArtRequest).
+REX_EXTERN(__imp__sub_82469C28);
+REX_HOOK_RAW(sub_82469C28) {
+  const uint32_t path_string = ctx.r4.u32;
+  const bool served = rb_blitz::store::ServeArtRequest(ctx, base, path_string);
+  __imp__sub_82469C28(ctx, base);
+  if (served && path_string != 0 && rb_blitz::store::TraceEnabled()) {
+    const std::string path = rb_blitz::store::GuestCString(base, path_string, 240);
+    REXLOG_INFO("store-probe: art '{}' returned to the panel", path);
+  }
+}
+
+// The art completion (`sub_82445CD8`): the client callback `sub_82469C28` fires once the file is in
+// the container. It decodes the bytes (`RndBitmap::Load`), copies the bitmap into the panel's
+// texture (`panel + 100`) and only then messages `art_loaded` to the DTA object the request wrapped
+// (`panel + 104`), but *only* while that wrapper's state word (`+28`) is 1. Every one of those steps
+// can be a silent no-op, so a trace boot reports the state before the call, the texture's fields
+// after it, and whether the material's texture was ever the one we served.
+REX_EXTERN(__imp__sub_82445CD8);
+REX_HOOK_RAW(sub_82445CD8) {
+  const uint32_t panel = ctx.r4.u32;
+  const bool trace = rb_blitz::store::TraceEnabled();
+  if (trace && panel != 0) {
+    const uint32_t callback = rb_blitz::store::GuestU32(base, panel + 104);
+    const uint32_t texture = rb_blitz::store::GuestU32(base, panel + 100);
+    REXLOG_INFO("store-probe: art completion enter panel={:#x} texture={:#x} callback={:#x} "
+                "callback[28]={}",
+                panel, texture, callback,
+                callback != 0 ? rb_blitz::store::GuestU32(base, callback + 28) : 0u);
+  }
+  __imp__sub_82445CD8(ctx, base);
+  if (trace && panel != 0) {
+    // `RndTex`'s view (the object `panel + 100` points at): +84 the "has a bitmap" word, +88/+92 the
+    // dimensions, +96 the bpp code and +108 the number of extra levels `sub_821FC858` counted -
+    // exactly what `sub_8220CB98` writes when the decode succeeded. Nothing here says the pixels are
+    // right: a wrong cover is measured by dumping the served file (`store_art_dump_dir`) and decoding
+    // it offline.
+    const uint32_t texture = rb_blitz::store::GuestU32(base, panel + 100);
+    REXLOG_INFO("store-probe: art completion exit panel={:#x} texture={:#x} "
+                "has_bitmap={} width={} height={} bpp={} levels={}",
+                panel, texture,
+                texture != 0 ? rb_blitz::store::GuestU32(base, texture + 84) : 0u,
+                texture != 0 ? rb_blitz::store::GuestU32(base, texture + 88) : 0u,
+                texture != 0 ? rb_blitz::store::GuestU32(base, texture + 92) : 0u,
+                texture != 0 ? rb_blitz::store::GuestU32(base, texture + 96) : 0u,
+                texture != 0 ? rb_blitz::store::GuestU32(base, texture + 108) : 0u);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // P3's data lane: what the file cache hands the panel when a record is ready.
 //
 // `sub_827501F0` is the panel's message dispatcher (`Handle`), and the second vtable the class

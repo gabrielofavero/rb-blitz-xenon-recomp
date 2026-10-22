@@ -18,6 +18,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 
+#include "store/album_art_service.h"
 #include "store/rhythmverse_client.h"
 #include "store/store_http.h"
 #include "store/store_metadata.h"
@@ -164,6 +165,11 @@ void RunOne() {
   g_changed_at = Clock::now();
   REXLOG_INFO("store_catalogue: page 1 -> {} eligible offer(s) of {} record(s)", g_offers.size(),
               page->returned);
+  // The covers for the page that just landed. The player is still on the front menu - Recent is
+  // pressed seconds later - so most textures are encoded before a row is selected, which matters
+  // because the retail art loader asks once per selection and does not retry a path it already set
+  // (`album_art.h` has the DTA).
+  RequestAlbumArt(g_offers);
 }
 
 void Run() {

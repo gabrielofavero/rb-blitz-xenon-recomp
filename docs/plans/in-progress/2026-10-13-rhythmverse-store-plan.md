@@ -18,14 +18,15 @@ the offers the library already holds), the details page's cost labels and its
 `is_completely_unavailable` guard are edited in the payload, and the browser's blank rows were
 traced to the offer's **string-typed `type` key** (the retail provider compares it against the
 symbol `song`; with the symbol served it answers all 24 titles - but the list then faulted while
-drawing, so that form shipped behind a default-off switch and the rows stayed blank). **P3 is
-exited 2026-10-21**: the draw-time null is the details panel's two-component `(rank <part>)` read,
-which no five-part rank map can satisfy (the walk matches each component against a pair's *first*
-element); the record now carries `rank_<part>` keys and the payload unrolls the panel's loop onto
-them, the symbol `type` and the delivery are on by default, the browser draws all 24 titles, and A
-opens `store_info_screen` with the offer's own data (§5/P3 exit record, boot
-`out/_swap/store-probe/20261021-190304`). **Album art** remains open (serving it needs a runtime
-PNG→texture encoder).
+drawing, so that form shipped behind a default-off switch and the rows stayed blank). **P3's
+blocking items are exited 2026-10-21**: the draw-time null is the details panel's two-component
+`(rank <part>)` read, which no five-part rank map can satisfy (the walk matches each component
+against a pair's *first* element); the record now carries `rank_<part>` keys and the payload unrolls
+the panel's loop onto them, the symbol `type` and the delivery are on by default, the browser draws
+all 24 titles, and A opens `store_info_screen` with the offer's own data (§5/P3 exit record, boot
+`out/_swap/store-probe/20261021-190304`). The phase stays **open on its own `Exit:` line's
+`art`**: serving album art needs a runtime PNG→texture encoder, and the Downloaded matcher has not
+been read against a real library yet.
 **P5's pipeline landed the same
 day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
 starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
@@ -1229,8 +1230,8 @@ stays **off**, because the fault is still open.
   completes (`rb_blitz_145.log`), so the fault needs the provider to answer a row's text - the label
   path and the offer's `get_data` share the offer object.
 
-**P3 exit record (2026-10-21, evening) - the labels draw and A opens the details screen; P3 is
-exited.** The old `rb_blitz.map` was from 2026-10-12, so every earlier stack was resolved against a
+**P3 exit record (2026-10-21, evening) - the labels draw and A opens the details screen; P3's
+blocking items are exited.** The old `rb_blitz.map` was from 2026-10-12, so every earlier stack was resolved against a
 stale map and the offsets (not the names) were noise. Re-linking with `LINKER:/MAP:` (a temporary
 cache option, removed afterwards) and re-running the same boot put the fault at
 **`sub_824534A8 +0x31d`** - the offer's data-path walk, reached from `sub_82453928` (the offer's
@@ -1283,11 +1284,79 @@ message handler) via `sub_8275C6C0` and the DTA evaluator (`rb_blitz_165.log`).
   `rb_blitz_store_payload_tests store-edit <dtb> store|info` is the diagnostic half: it runs the
   transforms against a shipped record and prints the refusal reason and the method's node tree,
   which is how the `kVar` spelling was found.
-- **P3 exit**: Recent shows the newest eligible `rb3xbox` offers with **title, artist and genre**,
-  empty pages work, A opens the details screen, RhythmVerse is visible, and no price/currency/Buy
-  Now UI appears. **Not done**: album art (needs a runtime PNG→texture encoder), the Downloaded
-  matcher has not been read against a real library, the difficulty display reads `NO PART` where the
-  catalogue publishes no rank, and page 2+ is not requested (one page of 24 offers is shown).
+- **P3's blocking exit items**: Recent shows the newest eligible `rb3xbox` offers with **title,
+  artist and genre**, empty pages work, A opens the details screen, RhythmVerse is visible, and no
+  price/currency/Buy Now UI appears. **The phase's own `Exit:` line is not fully met, so P3 stays
+  open on two lines**: the `art` it asks for (album art needs a runtime PNG→texture encoder - the
+  `preview_art` key and the `store_panel load_art` seam are ready, the texture is not), and
+  "manually installed DLC and multi-song packs match without a store receipt" (the matcher is built
+  and wired, but no boot has read it against a real library). Also not done: the difficulty display
+  reads `NO PART` where the catalogue publishes no rank, and page 2+ is not requested (one page of
+  24 offers is shown).
+
+**P3 art record (2026-10-21, late evening) - album art draws, and the phase's last content exit is
+met.** A cover now goes catalogue → worker → platform texture → the retail `load_art` seam → the
+panel's material, on both the browser and the details screen (`out/_swap/store-probe/20261021-204913`:
+Sarah McLachlan's *Surfacing* cover over `BUILDING A MYSTERY / SARAH MCLACHLAN / POP-ROCK`).
+
+- **The chain, measured out of the image.** `store_details_panel.refresh` sets
+  `album.mat` to `cover_art_none.tex`, calls `{store_panel load_art <path> this}` and expects the
+  completion to send `art_loaded`, whose handler assigns `{store_panel album_tex}`. The request
+  entry is `sub_82469C28(manager, const char* path, client, 1)` - it performs the loaded-file lookup
+  itself (`sub_82474E08(manager + 76)`), so unlike the metadata request there is **no readiness word
+  and no delivery step**: an insert is all a served texture needs. The completion `sub_82445CD8`
+  decodes the bytes (`sub_821FE800` → `sub_821FD400`) and copies the bitmap into the panel's texture
+  through `sub_8220CB98(*(panel + 100), &bitmap, 0, 0)`.
+- **Two guest facts worth keeping.** (a) The request's path argument is a **C string**, not a
+  `String`: the details panel composes `global prefix (0x8285487C) + preview_art`, and all four call
+  sites pass the chars word. Reading it as a `String` dereferences its own characters and faults
+  (`read of guest 0x73746F72`, "stor" - boot `rb_blitz_172.log`). (b) The panel's prefix is
+  `dlc_store` **with no trailing slash**, so `preview_art` must begin with `/` or the request reads
+  `dlc_storeoffers/...` (`rb_blitz_173.log`).
+- **`art_loaded` never fires for us, so the material is linked in the record.** The completion
+  messages the DTA object only when its wrapper's state word is 1; measured with a served texture it
+  reads **2** (`store-probe: art completion enter ... callback[28]=2`), because our delivery is
+  synchronous inside `load_art` and retail's asynchronous completion is what would have set 1. The
+  texture was decoded and uploaded (256x256, `has_bitmap=1`) while the screen kept
+  `cover_art_none.tex`. `store::LinkAlbumArt` therefore appends
+  `{album.mat set diffuse_tex {store_panel album_tex}}` immediately **after** the `load_art` command in
+  `store_details_panel.refresh` - the same assignment the callback would have made, and a sibling
+  after it because a DTA command's arguments run before the next sibling. The serving policy keeps
+  the append safe: `KeepOnlyHeldArt` (store_serve.cpp) drops `preview_art` for any offer whose texture
+  is not encoded yet, so the DTA's `{offer has_data preview_art}` test fails and retail's placeholder
+  stays instead of a link to a texture the panel never loaded.
+- **The codec is ours and reusable** (`src/assets/texture_codec.{h,cpp}`, SDK-free): envelope
+  parse/write, DXT1 **and** DXT5 decode and encode, the 16-bit word swap, `ResizeRgba`, and
+  `BuildPlatformTexture`/`DecodePlatformTexture`. `src/store/album_art.{h,cpp}` holds the key and path
+  rules plus the two caches (`PublishArtTexture`/`ArtTextureForKey`, `PublishArtUrl`/`ArtUrlForKey`);
+  `src/store/album_art_service.cpp` is the Windows worker (WIC decode, box filter to 256x256, encode,
+  publish - 23 of 24 covers in ~13 s, ~300 ms each, one cover refused for exceeding the 2 MiB body
+  ceiling). `store_art` is a new suite of **112 checks** over the shipped envelopes, the codec round
+  trip, the resizer and the path rules.
+- **Covers ship as DXT1, not DXT5.** The first cut encoded DXT5 (format `0x1808`, 8 bpp, 87328
+  bytes) and the panel drew blocky noise with the right shapes and wrong colours. The file was not the
+  problem: dumped through the new `store_art_dump_dir`, unswapped and decoded as BC3 it matches the
+  downloaded cover to a mean absolute error of **0.8** per channel, and `scripts/hmx_tex.py export`
+  renders the exact artwork; a 1-mip variant and a mip-reversed variant drew just as wrong. A
+  **shipped** retail texture served through the same seam draws correctly in the same test
+  (`default_album_art_keep.png_xbox`, 512x512 DXT1 → the silver ROCK BAND BLITZ cover,
+  `out/_swap/store-probe/20261021-203850`). So the worker encodes DXT1 (43680 bytes at 256x256 with
+  mips to 16) - half the bytes for the same picture, and the format retail's own album art uses.
+  The DXT5 loss is recorded as an open known issue with its evidence, not guessed at.
+- **`scripts/hmx_tex.py` had a real bug, found by the same measurement**: `unswap` was
+  `out[0::2], out[1::2] = data[0::2], data[1::2]`, a **copy onto itself** that swaps nothing, so
+  every export showed correct shapes with wrong colours (a 16-bit word swap only moves the DXT
+  endpoints; the index bits stay put). Fixed, and `export` of `default_album_art_keep.png_xbox` now
+  renders the artwork as it is. Any earlier conclusion drawn from a `hmx_tex.py` export's colours -
+  including a texture-swap check - is suspect; the geometry was right, the palette was not.
+- **Tests and machinery**: `store_art` **112**, `store_serve` **94** (the art-advertised rule
+  through `BuiltinRecord` with `PublishArtTexture`), `store_payload` **227** (the append's sibling
+  position, the placeholder it leaves in place, idempotency, the two refusals, and a
+  compile/parse round trip); `store_metadata` 50, `store_library` 26; full `ctest` **45/45** in
+  `out/build/win-amd64-debug`.
+- **P3 state after this record**: art is done on screen. Left open in the phase: the Downloaded
+  matcher measured on a real library, page 2+ (the catalogue serves page 1), and the difficulty
+  display's `NO PART` where the catalogue publishes no rank.
 
 P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
 entry behind `store_panel request` (nothing can be served or observed before it) — **done, see the

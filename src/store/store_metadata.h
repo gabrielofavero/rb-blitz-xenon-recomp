@@ -116,7 +116,13 @@ struct Offer {
   // 0 means "unknown" and is omitted: a zero year is not a release date.
   int year_released = 0;
   // A path the art loader can fetch (`store_panel load_art <path> this`); empty hides the art.
+  // The panel composes `request prefix + this value`, so the value is `offers/<key>/cover_art.png_xbox`
+  // (src/store/album_art.h owns the spelling) and the bytes are answered by the serving policy.
   std::string preview_art;
+  // The catalogue's own `album_art` field (plan §1.3), as the API returned it. **Never written to a
+  // record**: it is the host's half of the pair whose guest half is `preview_art`, consumed by the
+  // art worker (src/store/album_art_service.h) to fetch and encode the texture.
+  std::string art_url;
   // The preview audio file name (`store_preview_mgr`). RhythmVerse supplies none (§3.3), but the
   // key must still exist: `store_info_panel.refresh_buttons` reads `get_data (preview_audio)`
   // **unconditionally** for a song, and a missing key makes the offer walk dereference null
@@ -160,8 +166,10 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
 // `drums`), then runs each rank through `song_mgr rank_tier`. That is why `rank_*` (the API's rank)
 // is passed and `diff_*` (a tier) never is (plan OQ4).
 //
-// `preview_art` stays empty: the art loader wants a platform texture record (P3's remaining art
-// step), and an absent key hides the art instead of drawing a broken one.
+// `preview_art` is the served texture's path when the API names an album-art cover and the art
+// worker can encode it (`AlbumArtEnabled`), empty otherwise - an absent key is what makes the retail
+// panel draw its own placeholder art instead of asking for a file nobody serves. `art_url` carries
+// the catalogue field to that worker and is never written to a record.
 Offer OfferFromSong(const SongFile& song);
 
 // The same two shapes in **text**, which is what the netcache serves. Measured 2026-10-20 in the

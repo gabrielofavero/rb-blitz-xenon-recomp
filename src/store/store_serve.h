@@ -70,6 +70,13 @@ bool IsDownloadedOffer(const Offer& offer);
 // The catalogue offers with the Downloaded flag resolved. `BuiltinRecord` writes this shape.
 std::vector<Offer> OffersForPage();
 
+// The album-art prefetch seam. `src/store/album_art_service.h` owns the worker that fetches and
+// encodes a cover; this module only reports which offers a page carries, so the fetch starts on the
+// first visit to a page the catalogue produced moments ago. Installed once per boot; a suite that
+// never installs one prefetches nothing, and this header stays SDK-free and free of the network.
+using ArtPrefetch = std::function<void(const std::vector<Offer>&)>;
+void SetArtPrefetch(ArtPrefetch prefetch);
+
 // The answer to one request. `bytes` empty means "we have nothing for this path": the retail
 // fetch then runs exactly as it does today (and does nothing offline). `source` is the log token
 // that says where the bytes came from, so a boot's evidence names the branch.

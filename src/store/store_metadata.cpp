@@ -3,6 +3,7 @@
 
 #include "store/store_metadata.h"
 
+#include "store/album_art.h"
 #include "ui/dtb_author.h"
 
 namespace rb_blitz::store {
@@ -190,9 +191,19 @@ Offer OfferFromSong(const SongFile& song) {
   offer.album = song.album;
   offer.genre = song.genre;
   offer.year_released = song.year.value_or(0);
-  // Empty on purpose: `load_art` expects a platform texture record, and an absent key makes the
-  // retail browser draw its own `cover_art_none.tex` instead of a broken image.
-  offer.preview_art.clear();
+  // Album art (plan §1.3): the API points at a cover on its own host. The record carries only the
+  // path the retail loader will ask for; the texture behind it is produced by the art worker
+  // (src/store/album_art_service.h) and served from the file cache. An empty field, a field that is
+  // not a RhythmVerse album-art path, or the art switch turned off leaves `preview_art` empty, which
+  // is what makes the retail panel draw its own placeholder instead of a broken image.
+  if (AlbumArtEnabled()) {
+    const std::string key = ArtKeyForSong(song.file_id, song.artist, offer.name);
+    const ResolvedUrl art = ResolveAlbumArtUrl(song.album_art);
+    if (!key.empty() && art.ok) {
+      offer.art_url = art.url;
+      offer.preview_art = ArtPathForKey(key);
+    }
+  }
   const auto rank = [&song](Instrument instrument) {
     const int value = song.rank[static_cast<std::size_t>(instrument)].value_or(0);
     return value > 0 ? value : 0;  // a missing or non-positive rank is "unknown", never a tier

@@ -212,12 +212,22 @@ set(RBBLITZ_SOURCES
     src/store/store_library_index.cpp
     src/store/store_library.cpp
     src/fs/dlc_song_metadata.cpp
+    # The engine's platform texture container and its DXT blocks (src/assets/texture_codec.h):
+    # the store's album art encodes with it now, and the button-layout plan's PS3 import and slot
+    # sheets decode with it next. SDK-free, so the suites cover it without a boot.
+    src/assets/texture_codec.cpp
+    # P3's album art, host half: the key/path/URL rules and the texture cache the guest's art
+    # request reads. The fetch and the image decode are Windows-only and appended below.
+    src/store/album_art.cpp
 )
 
 if(WIN32)
-    # WinHTTP lives behind one file so the policy stays testable without a network.
+    # WinHTTP lives behind one file so the policy stays testable without a network. Windows Imaging
+    # Component decodes the cover the API serves (src/store/album_art_service.cpp is the only file
+    # that uses it), which is why `windowscodecs`/`ole32` are linked below.
     list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
-         src/store/store_search_service.cpp src/store/store_catalogue.cpp)
+         src/store/store_search_service.cpp src/store/store_catalogue.cpp
+         src/store/album_art_service.cpp)
 endif()
 
 if(WIN32)
@@ -256,7 +266,7 @@ rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 target_include_directories(rb_blitz PRIVATE
     "${REXSDK_DIR}/thirdparty/inja/third_party/include")
 if(WIN32)
-    target_link_libraries(rb_blitz PRIVATE winhttp)
+    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32)
 endif()
 
 # Which graphics backends the GPU plugin was compiled with, in the order the in-game *Renderer*
@@ -886,10 +896,13 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_store_metadata_tests
         tests/store_metadata_tests.cpp
         src/store/store_metadata.cpp
+        src/store/album_art.cpp
+        src/store/rhythmverse_client.cpp
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
     )
-    target_include_directories(rb_blitz_store_metadata_tests PRIVATE src)
+    target_include_directories(rb_blitz_store_metadata_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     add_test(NAME store_metadata COMMAND rb_blitz_store_metadata_tests)
 
     # P3's data lane: the text record writers and the serving policy (src/store/store_serve.h).
@@ -899,11 +912,26 @@ if(BUILD_TESTING)
         tests/store_serve_tests.cpp
         src/store/store_serve.cpp
         src/store/store_metadata.cpp
+        src/store/album_art.cpp
+        src/store/rhythmverse_client.cpp
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
     )
-    target_include_directories(rb_blitz_store_serve_tests PRIVATE src)
+    target_include_directories(rb_blitz_store_serve_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     add_test(NAME store_serve COMMAND rb_blitz_store_serve_tests)
+
+    # P3's album art (src/assets/texture_codec.h + src/store/album_art.h): the platform texture
+    # container, the DXT1/DXT5 block codec, the resampler, the key/path rule, the URL policy and the
+    # texture cache. SDK-free and hermetic - the worker that fetches and decodes a cover needs
+    # Windows and a network, and everything it decides is pinned here.
+    add_executable(rb_blitz_store_art_tests
+        tests/store_art_tests.cpp
+        src/assets/texture_codec.cpp
+        src/store/album_art.cpp
+    )
+    target_include_directories(rb_blitz_store_art_tests PRIVATE src)
+    add_test(NAME store_art COMMAND rb_blitz_store_art_tests)
 
     # P3's Downloaded matcher (src/store/store_library.h): the field normalization and the
     # (artist, title) index. Hermetic and SDK-free - the package reader is the builder's half and

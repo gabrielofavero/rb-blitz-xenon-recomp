@@ -1087,6 +1087,13 @@ int StoreEdit(const char* path, const char* which) {
   bool ok = false;
   if (mode == "store") {
     ok = rb_blitz::store::UnrollOfferRanks(&roots, &why);
+    std::printf("store-edit: rank loop -> %s (%s)\n", ok ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool art = rb_blitz::store::LinkAlbumArt(&roots, &why);
+    std::printf("store-edit: album art -> %s (%s)\n", art ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && art;
   } else {
     ok = rb_blitz::store::ShowOfferDetailsDirectly(&roots, &why);
     std::printf("store-edit: details route -> %s (%s)\n", ok ? "edited" : "refused",
@@ -1167,6 +1174,135 @@ void TestPreviewButtonHidden() {
   CHECK_TRUE(TreeUnchanged(other, untouched));
 }
 
+void TestAlbumArtLinked() {
+  BeginCase("the details page links a served cover without the art_loaded message");
+
+  // `store_details_panel.refresh`' measured shape: the art block is the `unless` under
+  // `{if_else {&& {offer has_data preview_art} {is_allowed_to_preview_offer offer}} ...}`, and its
+  // last statement is `{store_panel load_art cur_preview_art this}`.
+  const auto art_block = [] {
+    return Node::Command(
+        {Symbol("unless"),
+         Node::Command({Symbol("=="), Node::Var("cur_preview_art"),
+                        Node::Command({Symbol("offer"), Symbol("get_data"),
+                                       Node::Array({Symbol("preview_art")})})}),
+         Node::Command({Symbol("set"), Node::Var("cur_preview_art"),
+                        Node::Command({Symbol("offer"), Symbol("get_data"),
+                                       Node::Array({Symbol("preview_art")})})}),
+         Node::Command(
+             {Symbol("album.mat"), Symbol("set"), Symbol("diffuse_tex"),
+              Symbol("cover_art_none.tex")}),
+         Node::Command({Symbol("store_panel"), Symbol("load_art"),
+                        Node::Var("cur_preview_art"), Symbol("this")})});
+  };
+  std::vector<Node> record = {
+      Node::Command(
+          {Symbol("new"), Symbol("HeldButtonPanel"), Symbol("store_details_panel"),
+           Node::Array({Symbol("refresh"), Node::Array({Node::Var("offer")}),
+                        Node::Command({Symbol("do"), art_block()})})}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::LinkAlbumArt(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* method = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+
+  // The append is a *sibling right after* `load_art`, inside the same `unless`: the DTA runs a
+  // command's arguments first, so a preceding sibling would read the texture before it is loaded.
+  const auto find_load_art = [](const Node& node, const auto& self, const Node** parent,
+                                size_t* index) -> bool {
+    for (size_t i = 0; i < node.kids.size(); ++i) {
+      const Node& kid = node.kids[i];
+      if (kid.tag == rb_blitz::ui::dtb::kCommand && kid.kids.size() >= 2 &&
+          kid.kids[0].text == "store_panel" && kid.kids[1].text == "load_art") {
+        *parent = &node;
+        *index = i;
+        return true;
+      }
+      if (self(kid, self, parent, index)) return true;
+    }
+    return false;
+  };
+  const Node* parent = nullptr;
+  size_t index = 0;
+  CHECK_TRUE(find_load_art(*method, find_load_art, &parent, &index));
+  if (parent == nullptr) return;
+  CHECK_TRUE(parent->kids.size() == index + 2);
+  if (parent->kids.size() < index + 2) return;
+  const Node& link = parent->kids[index + 1];
+  CHECK_TRUE(link.tag == rb_blitz::ui::dtb::kCommand);
+  CHECK_TRUE(link.kids.size() == 4);
+  if (link.kids.size() != 4) return;
+  CHECK_STR_EQ(link.kids[0].text, "album.mat");
+  CHECK_STR_EQ(link.kids[1].text, "set");
+  CHECK_STR_EQ(link.kids[2].text, "diffuse_tex");
+  CHECK_TRUE(link.kids[3].tag == rb_blitz::ui::dtb::kCommand);
+  CHECK_TRUE(link.kids[3].kids.size() == 2);
+  if (link.kids[3].kids.size() == 2) {
+    CHECK_STR_EQ(link.kids[3].kids[0].text, "store_panel");
+    CHECK_STR_EQ(link.kids[3].kids[1].text, "album_tex");
+  }
+
+  // The placeholder assignment retail wrote is still there - this append does not replace it.
+  bool placeholder = false;
+  const auto scan = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 4 &&
+        node.kids[0].text == "album.mat" && node.kids[3].text == "cover_art_none.tex") {
+      placeholder = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan(*method, scan);
+  CHECK_TRUE(placeholder);
+
+  // Idempotent: a second pass adds nothing.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::LinkAlbumArt(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  size_t links = 0;
+  const auto count = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 4 &&
+        node.kids[0].text == "album.mat" && node.kids[1].text == "set" &&
+        node.kids[3].tag == rb_blitz::ui::dtb::kCommand && node.kids[3].kids.size() == 2 &&
+        node.kids[3].kids[1].text == "album_tex") {
+      ++links;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  count(*method, count);
+  CHECK_TRUE(links == 1);
+
+  // Compile and parse round trip: the appended command is a shape the compiler accepts.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+
+  // A record without the panel is refused untouched.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::LinkAlbumArt(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+
+  // A `refresh` with no `load_art` call is refused untouched too - never a link to nothing.
+  std::vector<Node> no_art = {
+      Node::Command({Symbol("new"), Symbol("HeldButtonPanel"), Symbol("store_details_panel"),
+                     Node::Array({Symbol("refresh"), Node::Array({Node::Var("offer")}),
+                                  Node::Command({Symbol("do"), Symbol("NIL")})})}),
+  };
+  const std::vector<Node> no_art_untouched = no_art;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::LinkAlbumArt(&no_art, &why));
+  CHECK_TRUE(why.find("load_art") != std::string::npos);
+  CHECK_TRUE(TreeUnchanged(no_art, no_art_untouched));
+}
+
 int main(int argc, char** argv) {
   if (argc >= 3 && std::strcmp(argv[1], "dump-menu") == 0) {
     return DumpMenu(argv[2]);
@@ -1195,5 +1331,6 @@ int main(int argc, char** argv) {
   TestOfferDetailsDirect();
   TestPreviewButtonHidden();
   TestRankLoopUnrolled();
+  TestAlbumArtLinked();
   return rb_blitz::test::Finish();
 }

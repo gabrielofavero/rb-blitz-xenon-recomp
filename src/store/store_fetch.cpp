@@ -15,6 +15,7 @@
 
 #include "store/store_catalogue.h"
 #include "store/store_library.h"
+#include "store/album_art.h"
 #include "store/store_serve.h"
 #include "store/store_probe.h"
 #include "store/store_settings.h"
@@ -292,6 +293,76 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
                   GuestU32(base, file + 60), GuestU32(base, file + 68));
     }
   }
+  return true;
+}
+
+// The album-art request (`sub_82469C28`): the path arrives composed (`BandStorePanel::load_art`
+// prepends the panel's request prefix to the offer's `preview_art`) and as a **C string**, unlike
+// the metadata request's `String` object - measured 2026-10-21 at all four call sites of the entry
+// (`sub_824456A8` passes `*(String + 4)`, and the others load the chars word the same way). Reading
+// it as a `String` dereferences the path's own characters (`dlc_store/` + 4 = `0x73746F72`, "stor")
+// and faults, so this must stay a plain `GuestCString(path_string)`.
+//
+// The rule itself is positional from the end (`.../offers/<key>/cover_art.png_xbox`), so nothing
+// depends on the prefix. Unlike the metadata request there is no readiness word and no delivery step
+// of ours: this entry performs the loaded-file lookup itself, so an insert is all a served texture
+// needs. A miss asks the art worker for the key and answers false, which leaves the retail loader
+// exactly as it is offline - the panel keeps the placeholder art it already set.
+bool ServeArtRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
+  if (!g_on || path_string == 0) {
+    return false;
+  }
+  const std::string path = GuestCString(base, path_string, 240);
+  if (!IsArtRequestPath(path)) {
+    // A texture request that is not in our shape is worth one line while tracing: the panel's
+    // prefix is the one part of the composed path we do not control, and a wrong guess here would
+    // otherwise look exactly like "the art never loads".
+    if (TraceEnabled() && path.find(".png_xbox") != std::string::npos) {
+      LogOnce(path, "an art request this build does not answer '" + path + "'");
+    }
+    return false;
+  }
+  if (!Settings()->enabled) {
+    LogOnce(path, "not serving art for '" + path + "': RhythmVerse is off");
+    return false;
+  }
+  const std::string key = ArtKeyFromPath(path);
+  const std::string bytes = ArtTextureForKey(key);
+  if (bytes.empty()) {
+    // The panel asks once per selection and does not retry a path it has already set, so the fetch
+    // is started here as a last resort; the catalogue and the page writer normally got there first.
+    LogOnce(path, "no texture for '" + path + "' yet; asked the art worker");
+    RequestArtTexture(key);
+    return false;
+  }
+  const uint32_t manager = ctx.r3.u32;  // the netcache manager object the request was made on
+  if (manager == 0) {
+    LogOnce(path, "no texture for '" + path + "': the netcache manager is not up yet");
+    return false;
+  }
+  const uint32_t path_chars = path_string;
+  const uint32_t buffer = EnsureBuffer(ctx, base, bytes.size() + 1);
+  if (buffer == 0) {
+    LogOnce(path, "no texture for '" + path + "': the guest buffer allocation failed");
+    return false;
+  }
+  uint8_t* dest = rex::memory::GuestPtr<uint8_t*>(base, buffer);
+  if (dest == nullptr) {
+    LogOnce(path, "no texture for '" + path + "': the guest buffer is not mapped");
+    return false;
+  }
+  for (size_t i = 0; i < bytes.size(); ++i) {
+    dest[i] = static_cast<uint8_t>(bytes[i]);
+  }
+  dest[bytes.size()] = 0;
+  PPCContext call = ctx;
+  call.r3.u64 = manager;
+  call.r4.u64 = path_chars;
+  call.r5.u64 = buffer;
+  call.r6.u64 = static_cast<uint32_t>(bytes.size());
+  __imp__sub_824685E0(call, base);
+  LogOnce(path, "served art '" + path + "' (" + std::to_string(bytes.size()) +
+                    " byte(s), insert -> " + std::to_string(call.r3.u32) + ")");
   return true;
 }
 

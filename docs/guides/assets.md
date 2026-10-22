@@ -120,20 +120,59 @@ never a thing to delete) is in [engine/main-menu-flow.md](../engine/main-menu.md
 
 ## Textures
 
-A `*.png_xbox` / `*.bmp_xbox` entry is a 32-byte envelope followed by the mip chain:
+A `*.png_xbox` / `*.bmp_xbox` entry is a 32-byte envelope followed by the mip chain. The fields
+below were re-read on 2026-10-21 from **all 201** `*.png_xbox` files under `assets/game/360` (the
+previous table's "linear size of the chain" row was wrong: the field is a row pitch, and it fits
+every file while a chain size fits none):
 
 | Offset | Meaning |
 | --- | --- |
-| 0 | envelope version (1 or 2) |
-| 1–4 | per-file id (version 2 only) |
-| 5 | format word: `0x0804` = DXT1, `0x1808` = DXT5, `0x0824` = two-channel normal |
+| 0 | envelope version (`2` in 198 of the 201 files, `1` in three: `gem_ulti`, `gstar1`, `logo_anim`) |
+| 1–4 | per-asset id (version 2 only; opaque, **not** a checksum — identical pixels carry different ids) |
+| 5–6 | format word, little-endian u16: `0x0804` = DXT1, `0x1808` = DXT5, `0x2008` = two-channel normal |
+| 7–9 | zero (the format word's high byte repeats at 6, which is what makes the 4-byte read that follows look like a second word) |
 | 10 | mip level count − 1 |
-| 11, 13 | width, height |
-| 16 | linear size of the chain |
+| 11–12 | width, little-endian u16 |
+| 13–14 | height, little-endian u16 |
+| 15–16 | the largest mip's row pitch in bytes / 4, little-endian u16 |
+| 17–31 | zero |
+
+The pitch field is the one that pins the reading: `default_album_art_keep.png_xbox` (512×512 DXT1,
+6 mips) carries 256 = (512/4)·8/4, the 256×256 DXT1 song covers carry 128, the 64×64
+`ui_picture_keep` carries 32, and the 256×256 DXT5 `highlight_keep` carries 256 = (256/4)·16/4. The
+engine's loader reads exactly `height × pitch/4` as the largest mip's byte count, and every file's
+length agrees to the byte (`default_album_art_keep` = 32 + 512²…16² DXT1 = 174,752). Version 1 lays
+its dimensions out differently and only the engine reads those three files.
+
+`src/assets/texture_codec.h` is the same format in C++ (SDK-free, no third-party code): the envelope
+parser/writer, DXT1/DXT5 decode **and** encode, the 16-bit word swap, and a box-filtered resampler.
+The store's album art uses it at runtime (`src/store/album_art_service.cpp` decodes the API's cover
+with Windows Imaging Component and encodes a `.png_xbox`); the button-layout plan reuses it for the
+PS3 button sheet and the slot sheets. `tests/store_art_tests.cpp` pins the envelope fields against
+the measured values above, so a regression in either direction fails without a boot.
 
 The data itself is the usual DXT block layout with every 16-bit word byte-swapped — the
 Xbox 360 GPU reads it that way. [scripts/hmx_tex.py](../../scripts/hmx_tex.py) decodes and
 re-encodes that: pure-Python DXT1/DXT5 with mip generation, no third-party codecs.
+
+**Measured 2026-10-21: which formats this build actually draws.** DXT1 is safe: a shipped
+512×512 DXT1 texture served through the store's art seam draws exactly as its pixels say
+(`out/_swap/store-probe/20261021-203850`, the silver ROCK BAND BLITZ cover). A **generated** DXT5
+is not: the loader accepts the envelope (`width=256 height=256 bpp=8`) and the panel marks its
+texture loaded, but the picture is blocky noise with the right shapes and wrong colours, while the
+same file decoded offline is the source artwork to within 0.8 levels per channel
+(`out/_swap/store-probe/20261021-204913` for the DXT1 arm, the known-issues format row for the
+DXT5 evidence). So anything this project *generates* for the engine should be **DXT1** unless it
+needs alpha, and a DXT5 that draws wrongly is not a codec bug until it is decoded offline first.
+
+The way to check a texture the running game is serving (`store_art_dump_dir`, see
+[diagnostics.md](../engine/diagnostics.md)): it writes each encoded cover as `<key>.png_xbox` into a
+directory, and `export` turns that back into a PNG.
+
+```powershell
+python scripts\hmx_tex.py info   out\...\<key>.png_xbox     # envelope, format, mips, id
+python scripts\hmx_tex.py export out\...\<key>.png_xbox cover.png
+```
 
 ```powershell
 python scripts\hmx_tex.py info   assets\game\360\ui\image\gen\esrb_keep.bmp_xbox
@@ -146,6 +185,14 @@ python scripts\hmx_tex.py import art.png --template assets\game\360\ui\...\esrb_
 `.dds` export/import is bit-exact (the raw block data with a DDS header), so it is the
 lossless round trip; `.png` is for painting in an image editor and lands around 33–39 dB
 PSNR on round-tripped art. `swap` is `import` plus the archive write:
+
+> **Fixed 2026-10-21: the tool's byte swap did nothing, so earlier exports had wrong colours.**
+> `unswap` was written as `out[0::2], out[1::2] = data[0::2], data[1::2]`, which assigns each half
+> back onto itself — a 16-bit word swap moves only the DXT endpoints, never the index bits, so every
+> exported image had **the right shapes and the wrong palette** and nobody noticed. It now exchanges
+> the halves. `export assets/game/360/ui/image/gen/default_album_art_keep.png_xbox` renders the silver
+> ROCK BAND BLITZ cover, which the old code turned magenta. Any conclusion drawn from a
+> `hmx_tex.py` export's *colours* before that date should be re-checked; its geometry was fine.
 
 ```powershell
 # small overlay archive: gen\patch_xbox.hdr + _0.ark, the title's own patch-ark route

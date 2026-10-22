@@ -58,4 +58,14 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string);
 // `sub_8235A240` was called on (its `this`). Does nothing unless `store_fetch_deliver` is on.
 void DeliverStoreRecord(PPCContext& ctx, uint8_t* base, uint32_t cache, uint32_t path_string);
 
+// The album-art half, from the netcache entry `BandStorePanel::load_art` reaches
+// (`sub_8274E760` -> `sub_824456A8` -> `sub_82469C28(manager, path, client, 1)`). The path there is a
+// **C string** (every call site passes a `String`'s chars word), not a `String` object. That entry
+// performs the loaded-file lookup itself, with no readiness guard, so serving is the same insert
+// and nothing else: the original then takes its "already loaded" branch and calls the client.
+// `ctx.r3` is the manager, `ctx.r4` the path; returns true when a texture was inserted.
+// A path whose texture has not been encoded yet enqueues the key and answers false, which leaves
+// the retail loader exactly as it is offline (the panel keeps its placeholder art).
+bool ServeArtRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string);
+
 }  // namespace rb_blitz::store

@@ -422,6 +422,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (!store::UnrollOfferRanks(&store_ui_roots, &why)) {
         note("unrolling the details panel's difficulty read was refused: " + why);
       }
+      why.clear();
+      // The details panel's own `art_loaded` message never fires for our synchronous delivery, so
+      // the material is linked right after `load_art` returns (store_payload.h).
+      if (!store::LinkAlbumArt(&store_ui_roots, &why)) {
+        note("linking the details page's album art was refused: " + why);
+      }
       built["ui/store/gen/store.dtb"] = ui::dtb::Compile(store_ui_roots, store_ui_header);
     } else {
       note("the store's screen record could not be read: " + store_ui_why);

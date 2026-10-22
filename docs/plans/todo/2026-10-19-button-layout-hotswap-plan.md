@@ -509,6 +509,21 @@ graph TD
   mark the old "Can a UI texture be swapped today? **No**" claim as superseded, and name this plan
   as the successor. Move the format item in `docs/reference/backlog.md` to resolved/superseded.
 - Copy the evidence into `out/button-schemes/format-2026-10-19/` (already done) and cite it.
+- **Already landed, reuse it instead of starting over (2026-10-21):** `src/assets/texture_codec.h`
+  is the same format in C++ - the 32-byte platform envelope (parser and writer), DXT1/DXT5 decode
+  **and** encode, the 16-bit word swap and a box-filtered resampler, all SDK-free and pinned by
+  `tests/store_art_tests.cpp`. It arrived with the store's album art
+  (`src/store/album_art_service.cpp` decodes a cover with WIC and encodes a `.png_xbox` at runtime),
+  and it is exactly what P5's installer needs for the PS3 sheet (`DecodeDxt5` on the milo payload,
+  `BuildPlatformTexture` for the output) and what a host-side slot tool needs instead of a second
+  codec. The Python command above still matters for the *scene* half (finding the 23-byte record
+  and the `Glyph` table), which no C++ module reads yet.
+- **Encode DXT1 wherever alpha is not needed (measured 2026-10-21).** A DXT5 this codec produces is
+  a valid BC3 - it decodes to its source to within 0.8 levels per channel offline - but the engine
+  draws it as noise, while a DXT1 from the same code goes through the same serving path correctly
+  (`docs/guides/assets.md`, "which formats this build actually draws"). The button and slot sheets
+  are opaque, so `BuildPlatformTexture(..., TextureFormat::kDxt1, ...)` is both correct and half
+  the bytes; decod*ing* the retail PS3 DXT5 sheet stays DXT5, since that is what the file is.
 
 **Verify.** Re-running the command on the 360 and PS3 `buttons.milo_*` reproduces the two decoded
 sheets at the same 6×6 grid (the 360 sheet's 29 occupied cells and the PS3 sheet's own art); the two

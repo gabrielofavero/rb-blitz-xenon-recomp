@@ -547,6 +547,89 @@ bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 }
 
 namespace {
+
+// Where a `{<receiver> <method> ...}` command sits inside its parent's child list. The append below
+// wants the command's *sibling* position, not a copy of it.
+struct CommandLocation {
+  std::vector<Node>* owner = nullptr;
+  size_t index = 0;
+};
+
+bool FindReceiverCall(Node& node, std::string_view receiver, std::string_view method,
+                      CommandLocation* out) {
+  for (size_t i = 0; i < node.kids.size(); ++i) {
+    Node& kid = node.kids[i];
+    if (kid.tag == ui::dtb::kCommand && kid.kids.size() >= 2 && kid.kids[0].text == receiver &&
+        kid.kids[1].text == method) {
+      out->owner = &node.kids;
+      out->index = i;
+      return true;
+    }
+    if (FindReceiverCall(kid, receiver, method, out)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// This edit's own marker: `{album.mat set diffuse_tex {store_panel album_tex}}`, at any depth.
+bool HasAlbumLink(const Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 4 && node.kids[0].text == "album.mat" &&
+      node.kids[1].text == "set" && node.kids[2].text == "diffuse_tex") {
+    const Node& value = node.kids[3];
+    if (value.tag == ui::dtb::kCommand && value.kids.size() >= 2 &&
+        value.kids[0].text == "store_panel" && value.kids[1].text == "album_tex") {
+      return true;
+    }
+  }
+  for (const Node& kid : node.kids) {
+    if (HasAlbumLink(kid)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool LinkAlbumArt(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* method = nullptr;
+  for (Node& root : *store_ui_roots) {
+    method = FindNamedMethod(root, "store_details_panel", "refresh");
+    if (method != nullptr) {
+      break;
+    }
+  }
+  if (method == nullptr) {
+    return refuse("the record carries no store_details_panel refresh method");
+  }
+  if (HasAlbumLink(*method)) {
+    if (why != nullptr) why->clear();
+    return true;  // an idempotent second pass
+  }
+  CommandLocation call;
+  if (!FindReceiverCall(*method, "store_panel", "load_art", &call)) {
+    return refuse("store_details_panel refresh carries no store_panel load_art call");
+  }
+  Node link = Node::Command({Node::Symbol("album.mat"), Node::Symbol("set"),
+                             Node::Symbol("diffuse_tex"),
+                             Node::Command({Node::Symbol("store_panel"), Node::Symbol("album_tex")})});
+  call.owner->insert(call.owner->begin() + static_cast<std::ptrdiff_t>(call.index) + 1,
+                     std::move(link));
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
 // and the body. `owner` is the vector that holds it, which is what the rewrite swaps.
 struct ForeachLocation {
   std::vector<Node>* owner = nullptr;

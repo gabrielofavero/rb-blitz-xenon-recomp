@@ -139,6 +139,21 @@ bool ShowOfferDetailsDirectly(std::vector<ui::dtb::Node>* store_info_roots, std:
 // Idempotent; refused, before any edit, when the method is missing.
 bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
+// Album art, the last link in the chain. `store_details_panel.refresh` sets
+// `album.mat`'s texture to `cover_art_none.tex`, calls `{store_panel load_art <path> this}` and
+// expects the completion to message `art_loaded`, whose handler sets the material to
+// `{store_panel album_tex}`. Measured 2026-10-21 with a served texture: the file is inserted, the
+// panel decodes it and the texture object is filled (256x256 DXT5, `has_bitmap=1`), but the
+// completion skips the message - its guard reads the request object's state word and finds 2, not
+// the 1 an asynchronous download would have. Our delivery is synchronous (the insert happens inside
+// the request), so that guard can never be satisfied: this append runs the same assignment the
+// callback would have, right after `load_art` returns (boot `rb_blitz_176.log`).
+//
+// The serving policy only advertises `preview_art` for a texture it already holds, so the append
+// cannot link a stale cover: with no art the DTA never calls `load_art` (store_serve.cpp).
+// Idempotent; refused, before any edit, when `store_details_panel.refresh` has no `load_art` call.
+bool LinkAlbumArt(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
+
 // The details panel's difficulty read is `{offer get_data (rank <part>)}` -
 // `store.dtb`'s `store_details_panel.refresh`, `{foreach part (guitar drum vocals bass keys)}`.
 // That is a **two-component** path, and the offer's `get_data` walk cannot resolve it against any

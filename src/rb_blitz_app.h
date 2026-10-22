@@ -86,6 +86,7 @@
 #include "platform/game_restart.h"
 #include "store/store_fetch.h"
 #include "store/store_catalogue.h"
+#include "store/album_art_service.h"
 #include "store/store_library.h"
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
@@ -358,6 +359,11 @@ class RbBlitzApp : public rex::ReXApp {
     // P3's catalogue: the offers a menu page is answered with. Its worker is started here for the
     // same reason, and the serving policy reads only its snapshot (src/store/store_catalogue.h).
     rb_blitz::store::InstallStoreCatalogue();
+    // P3's album art: the cover worker that fetches the API's `album_art`, encodes the
+    // `.png_xbox` the retail art loader wants and publishes it for the guest's art request. Started
+    // before the catalogue so a page that lands during the same boot already has its prefetch seam
+    // installed (src/store/album_art_service.h).
+    rb_blitz::store::InstallAlbumArt();
     // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
     // thread is started here; the serving policy asks only the published snapshot.
     rb_blitz::store::InstallStoreLibrary();

@@ -22,6 +22,7 @@
 
 #include "check.h"
 
+#include "store/album_art.h"
 #include "store/store_metadata.h"
 #include "store/store_serve.h"
 
@@ -254,6 +255,48 @@ void TestDownloadedMark() {
   rb_blitz::store::SetOfferSource({});
 }
 
+// A cover is advertised only while its texture is in hand (store_serve.cpp, `KeepOnlyHeldArt`):
+// `load_art` is answered synchronously out of the art cache and the compiled record links the
+// material right after it returns (store_payload.h, `LinkAlbumArt`), so a key announced before the
+// worker has encoded it would link a texture the panel never loaded.
+void TestArtAdvertisedOnlyWhenHeld() {
+  BeginCase("a cover is only offered to the panel while the texture is in hand");
+  const std::string key = rb_blitz::store::ArtKeyForSong("file-id-42", "Bush", "The People That We Love");
+  CHECK_TRUE(!key.empty());
+  std::vector<Offer> offers(1);
+  offers[0].name = "The People That We Love";
+  offers[0].artist = "Bush";
+  offers[0].preview_art = rb_blitz::store::ArtPathForKey(key);
+  offers[0].art_url = "https://example.invalid/cover.jpg";
+  rb_blitz::store::SetOfferSource([offers] { return offers; });
+
+  // Nothing encoded yet: no `preview_art` key, so the retail panel draws its own placeholder.
+  // The record is built through `BuiltinRecord`, which is where the filter lives - the offers page
+  // a menu row asks for (`dlc_store/europe/eng/recent/`, measured 2026-10-20).
+  const std::string menu_path = "dlc_store/europe/eng/recent/";
+  CHECK_TRUE(IsMenuRecordPath(menu_path));
+  rb_blitz::store::ResetAlbumArtForTests();
+  CHECK_FALSE(rb_blitz::store::HasArtTexture(key));
+  std::string why;
+  const std::string bare = BuiltinRecord(menu_path, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_FALSE(Contains(bare, "(preview_art"));
+  // The offer itself is still listed - only the key is dropped.
+  CHECK_TRUE(Contains(bare, "(name \"The People That We Love\")"));
+
+  // Once the worker has published the bytes the key is announced, spelled as the path the panel
+  // will ask for (leading slash: the panel's own prefix is `dlc_store`, with no trailing slash).
+  rb_blitz::store::PublishArtTexture(key, std::string(16, '\0'));
+  CHECK_TRUE(rb_blitz::store::HasArtTexture(key));
+  const std::string held = BuiltinRecord(menu_path, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(Contains(held, "(preview_art \"/offers/" + key + "/cover_art.png_xbox\")"));
+
+  // Per boot: leave nothing behind for a later case.
+  rb_blitz::store::ResetAlbumArtForTests();
+  rb_blitz::store::SetOfferSource({});
+}
+
 void TestServedFile() {
   BeginCase("a serve directory answers by exact path and refuses escapes");
   const fs::path dir = fs::temp_directory_path() / "rbbz-store-serve-tests";
@@ -340,6 +383,7 @@ int main() {
   TestMenuText();
   TestTextQuoting();
   TestDownloadedMark();
+  TestArtAdvertisedOnlyWhenHeld();
   TestServedFile();
   TestRecordChoice();
   TestMenuPaths();
