@@ -9,18 +9,23 @@ Part 1 wherever they disagree.
 ## At a glance
 
 - **The RhythmVerse store's settings are in the game (2026-10-20, RhythmVerse plan P6).** Under
-  **General ▸ Downloadable Content**: `RhythmVerse` (default **Off**) and `RhythmVerse Song Filter`, a
+  **General ▸ Downloadable Content**: `RhythmVerse` (default **On** since the owner pass of
+  2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `RhythmVerse Song Filter`, a
   submenu of five instrument booleans (Guitar/Bass/Drums/Vocals On, Keys Off; On = that chart is
   required, Off = no condition, all off = no constraint). The two menu-music rows moved under a
   `DLC Menu Music` submenu so the page stays at the six-row budget. The six rows are `hot`: the
   applier replaces the store's in-process settings snapshot, which its workers will read before every
-  request. **Evidence:** `rb_blitz_settings_screen_tests` (103,269 checks) pins the page order,
-  labels, defaults and both contexts; `rb_blitz_store_client_tests` pins the row → snapshot mapping
-  (a commit bumps the generation, an equal commit does not). The workers read only that snapshot, so
-  Off makes no request by construction — and since 2026-10-22 that is **measured**: the acceptance
-  harness's control leg (`scripts/acceptance_store.ps1`, RhythmVerse plan §5/P8) boots with the
-  switch off and finds no `store_catalogue`/`store_fetch`/`store_library`/`store_download`/`store_search`
-  request line in the log, while the main menu's own refresh row still dispatches.
+  request. **Evidence:** `rb_blitz_settings_screen_tests` (136,641 checks) pins the page order,
+  labels and both contexts, and pins the master's compiled default to On against
+  `schema::FindRow(kRhythmVerse)`; `rb_blitz_store_client_tests` pins the row → snapshot mapping
+  (the snapshot's own default is On, a commit bumps the generation, an equal commit does not). The
+  workers read only that snapshot, so Off makes no request by construction — and since 2026-10-22
+  that is **measured**: the acceptance harness's control leg (`scripts/acceptance_store.ps1`,
+  RhythmVerse plan §5/P8) writes the switch off and finds no
+  `store_catalogue`/`store_fetch`/`store_library`/`store_download`/`store_search` request line in the
+  log, while the main menu's own refresh row still dispatches. The harness's Enable leg is what
+  proves the default: its profile never names the setting, the page draws `RhythmVerse: On`, the
+  boot adds no key to the profile, and the same boot's main menu already carries the store row.
 - **RhythmVerse search is typed on an authored keyboard (2026-10-20, RhythmVerse plan P4).** There
   is no retail keyboard to reuse — all 131 compiled DTA records were decoded and the only entry
   point is `rbworld_link_panel show_keyboard`, a *native* method of the Rock Central e-mail panel —

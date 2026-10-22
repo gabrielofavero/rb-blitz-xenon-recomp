@@ -2390,7 +2390,7 @@ evidence of what shipped. Prompts are ordered so a later one does not have to un
 | P9-3 | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
 | P9-4 | Settings | New `Interface ▸ Music Library & Store ▸ Show Messages and Recommendations` (On) | — |
 | P9-5 | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
-| P9-6 | Store menu | No `Customs from RhythmVerse` credit line | P7 |
+| P9-6 | Store menu | No `Customs from RhythmVerse` label when the store opens; RhythmVerse stays credited in **Credits** | P7's credit line (only) |
 | P9-7 | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
 | P9-8 | Store footer | Hide **Y View Item** where it does nothing | — |
 | P9-9 | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
@@ -2412,6 +2412,45 @@ evidence of what shipped. Prompts are ordered so a later one does not have to un
 - **Done when**: a profile with no `settings.toml` boots with the row On, the main menu draws the
   store row and the store serves offers; the control leg (master written off) still makes no store
   request; the suites are green.
+
+**P9-1 record (2026-10-22).** The default is On in both tables that must agree, and the harness now
+proves it instead of flipping it:
+
+- **Code**: `src/settings/schema.cpp`'s row compiles `BoolValue(true)` and `StoreSettings::enabled`
+  defaults `true` - one is what the page shows before a commit, the other what a worker reads before
+  one, so they can never disagree. `src/ui/settings_screen.cpp`'s page comment no longer promises
+  "off by default"; `Off` is still the switch that silences the store, because the workers ask
+  `StoreSettings::enabled` before every request (P8's control leg measures that silence).
+- **Pinned**: `settings_screen` reads the master's `compiled_default` through
+  `schema::FindRow(kRhythmVerse)` (its storage key is `[general] rhythmverse`; the target now links
+  `src/settings/model.cpp` + `schema.cpp` for that one assertion), and `store_client` asserts the
+  snapshot's own default plus a live **Off** commit and its idempotent repeat (the case used to
+  commit On, which the default now makes a no-op).
+- **The harness**: `Write-StoreSettings` takes a nullable value, and only the **Control** leg passes
+  `false`. The Enable leg's profile carries the fixture's other rows but never names `rhythmverse`;
+  the leg asserts the page draws `RhythmVerse: On`, that the boot added no `rhythmverse` line to the
+  profile (so the value really was the compiled default), and that the same boot's main menu already
+  carries the store row. The row press was removed - this prompt makes Control the only leg that
+  writes the value off - and `-RhythmVerseRow` went with it.
+- **Docs**: `settings/status.md`, `settings/plan.md`, `reference/backlog.md` and
+  `engine/diagnostics.md` now say On; diagnostics marks its 2026-10-22 measured Enable run as
+  predating the flip.
+- **Measured** (release binary). `scripts/acceptance_store.ps1 -Legs Enable -Label p9-1-enable`
+  (`out/store-acceptance/p9-1-enable/`) passes **8 of 8**: the page drew
+  `RHYTHMVERSE: ON` on a profile whose settings file never named the key, the file still had no
+  `rhythmverse` line afterwards (only `target = 'ultimate'`, written by migration), and the main menu
+  carried `HYTHMVERSE CUSTOM` - the Done-when's page and menu halves. `-Legs Control -Label
+  p9-1-control` passes **16 of 16**: no store row, six absence checks at 0 matches, the refresh row's
+  sentinel present. The same default profile then walked the **Store** leg (`-Legs Store -Label
+  p9-1-enable -Reuse`): **38 steps, 1 failure** - the store served `99 offer(s)`, the browser opened
+  on them, Search answered `15 eligible of 25`, a download installed
+  `rv_436f1b68360f1ad9be533437be169410.con` (4,927,488 bytes) and the refresh ran, so "the store
+  serves offers" with the switch never written is measured; the one failure is the credit strip's
+  step, and its cause is a timing window, not the switch: the front menu was noted at 19:30:11.5,
+  page 1 landed at 19:30:21.9 (10.4 s), and the credit is only drawn within
+  `kCatalogueCreditHold` (12 s) of the surface note, so the capture at ~19:30:25 found a blank strip
+  (`store-credit.png` OCRs the front menu and no credit). **P9-6 deletes that line and its step**, so
+  the fix belongs there rather than here. `ctest` is **47/47** with the two suites' new pins.
 
 ### P9-2 — a master change asks for a restart
 
@@ -2481,19 +2520,36 @@ evidence of what shipped. Prompts are ordered so a later one does not have to un
 - **Done when**: the front menu OCRs `RHYTHMVERSE / RECENTLY ADDED / SEARCH` with no digit beside
   either row, both rows still request their measured paths, and the browser opens on their offers.
 
-### P9-6 — remove the `Customs from RhythmVerse` credit line
+### P9-6 — no `Customs from RhythmVerse` label when the store opens; the credit stays in **Credits**
 
-- **Do**: delete the credit sentence — `src/store/store_catalogue_status.h:49` (`kStoreCreditText`)
-  and the `kFrontMenu` credit branch at `:117-118` in the `.cpp`, plus `kCatalogueCreditHold` if
-  nothing else reads it. The heading `RHYTHMVERSE` stays (`kStoreHeadingText`; `CUSTOMS FROM
+*(Owner correction, 2026-10-22: this prompt's first wording deleted the attribution outright, which
+is wrong — RhythmVerse stays credited. What goes is only the label the store loads on its own
+surface.)*
+
+- **Do**: remove the **caption-strip** credit sentence P7 added — `src/store/store_catalogue_status.h:49`
+  (`kStoreCreditText`) and the `kFrontMenu` credit branch at `:117-118` in the `.cpp`, plus
+  `kCatalogueCreditHold` and the `credit_hold` timing seam if nothing else reads them. This is the
+  line the owner sees drawn, like the Help & Options labels, the moment the **RhythmVerse Customs**
+  row opens the store. The heading `RHYTHMVERSE` stays (`kStoreHeadingText`; `CUSTOMS FROM
   RHYTHMVERSE` clips in the retail header, measured 2026-10-21). Loading, empty and offline
   sentences stay — they are the store's own words, not a credit.
+- **Do not remove the attribution.** RhythmVerse keeps its credit on the **Credits** page, and it is
+  already there: `AddRecompilationCredits`'s **Thanks To** section carries `{"Customs Store",
+  "RhythmVerse"}` (`src/settings/menu_payload.cpp:50`, `:71`) into both the retail credits record and
+  the Ultimate payload's, pinned by `menu_payload_tests.cpp` (`docs/settings/plan.md`'s Credits row).
+  This prompt edits nothing there; if the sentence itself is wanted on that page, `kStoreCreditText`
+  is reused by the credits table (one spelling, not two) rather than deleted. §1.8 is narrowed
+  accordingly: the attribution is the `RHYTHMVERSE` heading plus the **Credits** row, and the store
+  surface carries no separate credit line.
 - **Move with it**: `tests/store_catalogue_status_tests.cpp` (28 checks; the precedence
-  failure > empty > loading > credit becomes failure > empty > loading) and the credit capture step
-  in `scripts/acceptance_store.ps1:608-619`. P7's record keeps its measurement; the superseding line
-  is this prompt.
-- **Done when**: a store boot draws no credit line (the strip is silent on a full list), the three
-  remaining sentences still appear where their states are forced, and the suite is green.
+  failure > empty > loading > credit becomes failure > empty > loading, and the credit-hold timing
+  case goes with it), the credit capture/assert step in `scripts/acceptance_store.ps1:608-619` and
+  its header sentence at `:12`, and [`docs/engine/diagnostics.md`](../../engine/diagnostics.md)'s
+  "The store's own sentences (P7)" paragraph, which names the credit line and its 2026-10-22 capture.
+  P7's record keeps its measurement; the superseding line is this prompt.
+- **Done when**: a store boot draws no credit line on any store surface (front menu, browser,
+  details, return — the strip is silent on a full list), the **Credits** page still names RhythmVerse,
+  the three remaining sentences still appear where their states are forced, and the suite is green.
 
 ### P9-7 — the store's Start button opens **Search Filters**, and Back returns to the store
 

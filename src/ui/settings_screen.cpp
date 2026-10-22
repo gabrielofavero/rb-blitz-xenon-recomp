@@ -1078,9 +1078,10 @@ std::vector<PanelSpec> AllPanels() {
                                         "How many threads scan your packages. More threads scan faster.",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
-                              // The RhythmVerse store (plan P6). Off by default: the store makes no
-                              // network request until the player asks for it. The filter page is a
-                              // plain submenu - it holds no value of its own - and it stays
+                              // The RhythmVerse store (plan P6). On by default since the owner pass
+                              // of 2026-10-22 (plan §9/P9-1): Off is the switch that silences the
+                              // store, and the workers ask it before every request. The filter page
+                              // is a plain submenu - it holds no value of its own - and it stays
                               // reachable while the master is off, because its five rows are the
                               // next thing a player wants after switching the store on.
                               BoolRow("settings_rhythmverse", "general.rhythmverse", "RhythmVerse",

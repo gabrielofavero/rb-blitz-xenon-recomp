@@ -156,9 +156,11 @@ std::vector<SchemaRow> BuildTable() {
                      "Add an entry that starts the song the main menu is playing."));
   // RhythmVerse store (plan P6). The master is a plain boolean in the `dlc` group; the instrument
   // filter is a submenu of its own (no SettingId), so its five leaves carry their own group. The
-  // master defaults **off**: the store only makes network requests after a deliberate opt-in.
+  // master defaults **on** (owner pass, plan §9/P9-1, 2026-10-22): the store is a shipped feature,
+  // and Off is the switch that silences it - the workers still ask `StoreSettings::enabled` before
+  // they touch the network, so an Off commit makes no request (RhythmVerse plan §5/P8's control leg).
   rows.push_back(Row(Make(SettingId::kRhythmVerse, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "rhythmverse"}, "dlc", "RhythmVerse",
                      "Browse the RhythmVerse customs catalogue in the store and download songs."));
   rows.push_back(Row(Make(SettingId::kRhythmVerseGuitar, Category::kGeneral, Provider::kNative,

@@ -44,6 +44,7 @@
 #include "profile/gameplay_remap.h"
 #include "profile/input_rows.h"
 #include "profile/remap.h"
+#include "settings/schema.h"
 #include "ui/dtb_author.h"
 #include "ui/help_topics.h"
 #include "ui/settings_screen.h"
@@ -3635,6 +3636,19 @@ void TestRhythmVerseRows() {
   CHECK_TRUE(filter_title);
   CHECK_TRUE(guitar_on);
   CHECK_TRUE(menu_title);
+
+  // The compiled default (owner pass of 2026-10-22, RhythmVerse plan §9/P9-1): the master is **On**.
+  // `store_client` pins the store's own snapshot to the same value; one table is what the page shows
+  // before a commit and the other is what a worker reads before one, so the two must never disagree.
+  const rb_blitz::settings::schema::SchemaRow* master =
+      rb_blitz::settings::schema::FindRow(rb_blitz::settings::SettingId::kRhythmVerse);
+  CHECK_TRUE(master != nullptr);
+  if (master != nullptr) {
+    CHECK_TRUE(master->descriptor.value_kind == rb_blitz::settings::ValueKind::kBool);
+    CHECK_TRUE(master->descriptor.compiled_default.boolean);
+    CHECK_TRUE(master->storage.section == "general");
+    CHECK_TRUE(master->storage.key == "rhythmverse");
+  }
 }
 
 // The symbols of every main-menu option array, for the hide decision's test: whether a row the R5

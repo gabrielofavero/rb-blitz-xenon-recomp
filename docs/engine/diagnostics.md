@@ -242,7 +242,9 @@ every label check folds the whitespace out.
 
 **The closed-out run, 2026-10-22** (`out/store-acceptance/p8-final/`): **69 steps, 0 failures** over
 all four legs on one build. `Enable` reads the switch off, presses it, finds `rhythmverse = true` in
-the profile and reads it on; `Store` draws `RHYTHMVERSE` + `RECENT SEARCH` + the credit line, lists
+the profile and reads it on (the master was off by default then; the owner pass of plan §9/P9-1
+flipped that default and made the Enable leg assert it instead of pressing the row); `Store` draws
+`RHYTHMVERSE` + `RECENT SEARCH` + the credit line, lists
 `99 offer(s)`, opens the browser on them, answers a search (`15 MATCHES FOR "BUSH"`) and lists the
 result, opens the details page's `DOWNLOAD`, installs `rv_436f1b68360f1ad9be533437be169410.con`
 (4,927,488 bytes, one container in the flat root, empty staging, receipt `pending`, refresh logged)

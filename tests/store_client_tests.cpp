@@ -769,9 +769,10 @@ void TestMatching() {
 void TestStoreSettings() {
   test::BeginCase("settings: the six rows map onto the store's snapshot, live and idempotently");
 
-  // Defaults: the store is off, the instrument filter is the owner's set (keys off).
+  // Defaults: the store is **on** (owner pass of 2026-10-22, RhythmVerse plan §9/P9-1 - the master
+  // is a shipped switch, not an opt-in), and the instrument filter is the owner's set (keys off).
   const StoreSettings defaults;
-  CHECK_FALSE(defaults.enabled);
+  CHECK_TRUE(defaults.enabled);
   CHECK_TRUE(defaults.instruments.guitar);
   CHECK_TRUE(defaults.instruments.bass);
   CHECK_TRUE(defaults.instruments.drums);
@@ -780,33 +781,35 @@ void TestStoreSettings() {
 
   const std::uint64_t base = PublishSettings(defaults);  // normalise before the assertions
   CHECK_TRUE(Settings() != nullptr);
-  CHECK_FALSE(Settings()->enabled);
+  CHECK_TRUE(Settings()->enabled);
 
   settings::Value on;
   on.kind = settings::ValueKind::kBool;
   on.boolean = true;
+  settings::Value off;
+  off.kind = settings::ValueKind::kBool;
+  off.boolean = false;
   std::string error;
-  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, on, &error));
+  // A commit is live: switching the master off replaces the snapshot, which is the seam the
+  // control leg's silence rests on (Off means no catalogue, art, download or search request).
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, off, &error));
   CHECK_TRUE(error.empty());
-  CHECK_TRUE(Settings()->enabled);
+  CHECK_FALSE(Settings()->enabled);
   CHECK_TRUE(SettingsGeneration() > base);
 
   // An equal commit changes nothing and keeps the generation, so a repeated commit cannot
   // invalidate a worker's cache.
-  const std::uint64_t after_on = SettingsGeneration();
-  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, on, &error));
-  CHECK_EQ(SettingsGeneration(), after_on);
+  const std::uint64_t after_off = SettingsGeneration();
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, off, &error));
+  CHECK_EQ(SettingsGeneration(), after_off);
 
   // Each leaf reaches its own field and nothing else.
-  settings::Value off;
-  off.kind = settings::ValueKind::kBool;
-  off.boolean = false;
   CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerseGuitar, off, &error));
   CHECK_FALSE(Settings()->instruments.guitar);
   CHECK_TRUE(Settings()->instruments.bass);
   CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerseKeys, on, &error));
   CHECK_TRUE(Settings()->instruments.keys);
-  CHECK_TRUE(Settings()->enabled);  // the master is unaffected by a leaf
+  CHECK_FALSE(Settings()->enabled);  // the master is unaffected by a leaf
 
   // A row that is not ours, and a value of the wrong kind, are refused and change nothing.
   const std::uint64_t before_refusals = SettingsGeneration();
@@ -824,6 +827,10 @@ void TestStoreSettings() {
   CHECK_TRUE(IsStoreSetting(settings::SettingId::kRhythmVerseKeys));
   CHECK_FALSE(IsStoreSetting(settings::SettingId::kVsync));
 
+  // Back on, so the DTA's one-bit probes below answer from a store that is on.
+  CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, on, &error));
+  CHECK_TRUE(Settings()->enabled);
+
   // The DTA's one-bit probes answer from the same snapshot (plan P1's menu gate).
   bool answer = false;
   CHECK_TRUE(AnswerStoreQuery("rbbz-store/enabled", &answer));
@@ -836,13 +843,13 @@ void TestStoreSettings() {
   CHECK_FALSE(AnswerStoreQuery("rbbz-settings/enabled", &answer));
   CHECK_FALSE(AnswerStoreQuery("rbbz-store/", &answer));
 
-  // Leave the process as it was found.
+  // Leave the process at the compiled defaults (the store on, the owner's filter).
   PublishSettings(StoreSettings{});
-  CHECK_FALSE(Settings()->enabled);
+  CHECK_TRUE(Settings()->enabled);
   CHECK_TRUE(Settings()->instruments.guitar);
   CHECK_FALSE(Settings()->instruments.keys);
   CHECK_TRUE(AnswerStoreQuery("rbbz-store/enabled", &answer));
-  CHECK_FALSE(answer);
+  CHECK_TRUE(answer);
 }
 
 void TestChunking() {

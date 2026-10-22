@@ -26,11 +26,13 @@
 
 namespace rb_blitz::store {
 
-// The committed RhythmVerse settings. `enabled` is the master switch (default off: the store makes
-// no network request until the player asks for it); `instruments` is the filter the catalogue query
-// and the local guard both use (On = the chart is required, Off = no condition).
+// The committed RhythmVerse settings. `enabled` is the master switch (default **on** since the
+// owner pass of 2026-10-22, plan §9/P9-1 - it is the same value `schema.cpp` compiles, and the two
+// must never disagree; Off is the switch that silences the store, not an opt-in); `instruments` is
+// the filter the catalogue query and the local guard both use (On = the chart is required, Off = no
+// condition).
 struct StoreSettings {
-  bool enabled = false;
+  bool enabled = true;
   InstrumentFilter instruments;
 };
 

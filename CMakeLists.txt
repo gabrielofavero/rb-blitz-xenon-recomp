@@ -571,6 +571,10 @@ if(BUILD_TESTING)
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
         src/hooks/settings_bridge.cpp
+        # P9-1 (RhythmVerse plan §9): the suite pins the store's master switch to the schema's own
+        # compiled default, so the schema table is linked rather than re-spelled here.
+        src/settings/model.cpp
+        src/settings/schema.cpp
         # P7: the surface now emits the Controls rows, whose token grammar and labels live in the
         # profile's own vocabulary.
         src/profile/input_rows.cpp

@@ -3,11 +3,11 @@
 # The walk the plan asks for, in the order a player takes it, split into legs so each one can be
 # run and read on its own:
 #
-#   Enable  - a boot on a fresh profile (RhythmVerse off, the main menu's refresh row on):
-#             Help & Options > General > Downloadable Content > RhythmVerse switched **On through
-#             the UI**, then the committed value asserted in the profile the next boot reads. It is
-#             a separate boot because P1 measured that the main-menu row's *presence* is baked at
-#             boot - the press re-reads the gate live, the row does not exist until the next start.
+#   Enable  - a boot on a fresh profile whose settings file never names the master switch (the main
+#             menu's refresh row is on): Help & Options > General > Downloadable Content draws
+#             `RhythmVerse: On`, which is the shipped **default** (RhythmVerse plan §9/P9-1), the
+#             boot writes nothing for it, and the main menu already carries the store row. The
+#             Control leg is the only one that writes the value off.
 #   Store   - the row opens the retail store, the front menu draws RECENT / SEARCH and the
 #             `Customs from RhythmVerse` credit, Recent's page carries eligible offers (read from
 #             the log, not guessed) and the retail browser opens on them. Then Search runs a real
@@ -48,7 +48,8 @@ param(
     [string]$GameRoot,
     [string]$UltimateMode = '1',
     # Which legs to run. `Enable` must come first on a fresh evidence directory: it is the boot that
-    # turns the store on through the settings page.
+    # proves the store's shipped default (On) on the fixture the later legs then use. It no longer
+    # turns the store on - the switch is on unless someone writes it off.
     [ValidateSet('Enable', 'Store', 'Install', 'Control')]
     [string[]]$Legs = @('Enable', 'Store', 'Install', 'Control'),
     # A query the live catalogue answers with eligible offers. The API matches artist OR title,
@@ -63,7 +64,6 @@ param(
     # Calibration 1, then our General 2 (measured 2026-10-22 from `settings_screen.cpp`'s root).
     [int]$HelpGeneralRow = 2,
     [int]$GeneralDlcRow = 2,
-    [int]$RhythmVerseRow = 3,
     # The main menu's own refresh row, in the fixture's layout (the store row is appended after it).
     [int]$RefreshRow = 3,
     [int]$BootTimeoutSec = 240,
@@ -147,9 +147,14 @@ function Write-LauncherProfile([string]$Dir) {
 # menu is full and the store row - which is appended after the refresh row - is the seventh, i.e.
 # *selectable but off the visible page* (the P2 defect the plan records). Hiding them is the layout a
 # player who turned the offline rows off already has, and it puts every row on one page.
-function Write-StoreSettings([string]$Dir, [bool]$Enabled) {
+# `$RhythmVerse = $null` leaves the key out of the file entirely, which is how the Enable leg proves
+# the shipped default (On, plan §9/P9-1) instead of a value this script wrote: the page must draw On
+# from the compiled default, and the boot must not add the key. Only the Control leg passes `$false`.
+function Write-StoreSettings([string]$Dir, [System.Nullable[bool]]$RhythmVerse) {
     $lines = @('schema_version = 1', '', '[general]', 'refresh_music_library = true')
-    if ($Enabled) { $lines += 'rhythmverse = true' } else { $lines += 'rhythmverse = false' }
+    if ($null -ne $RhythmVerse) {
+        if ($RhythmVerse) { $lines += 'rhythmverse = true' } else { $lines += 'rhythmverse = false' }
+    }
     $lines += @('', '[interface]', 'hide_main_menu = true',
                 "hidden_main_menu = ['splash_leaderboard', 'splash_achievements']")
     Write-TextFile (Join-Path $Dir 'settings.toml') $lines
@@ -161,16 +166,18 @@ function Initialize-Fixtures([bool]$Fresh) {
         if ($Fresh -or -not (Test-Path -LiteralPath (Join-Path $dir 'launcher.toml'))) { Write-LauncherProfile $dir }
     }
     if ($Fresh) {
-        # The Enable leg is what turns the store on; the profile starts at the shipped default
-        # (off) so the toggle it performs is the one that makes the row exist.
-        Write-StoreSettings $profileDir $false
+        # P9-1 flipped the master to On, so the Enable leg proves the default rather than flipping
+        # the switch: its profile carries the other rows the fixture needs (the main menu's refresh
+        # row and the two hidden online rows) and never names `rhythmverse`. The Control leg is the
+        # only leg that writes the value off.
+        Write-StoreSettings $profileDir $null
         Write-StoreSettings $controlProfileDir $false
         # A fresh, empty DLC root: this leg must not depend on the owner's own library.
         foreach ($dir in @($dlcRoot, $controlDlc)) {
             Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
         }
     } elseif (-not (Test-Path -LiteralPath (Join-Path $profileDir 'settings.toml'))) {
-        Write-StoreSettings $profileDir $false
+        Write-StoreSettings $profileDir $null
     }
 }
 
@@ -536,6 +543,11 @@ function Invoke-EnableLeg {
     $proc = Start-Leg 'Enable' $profileDir $dlcRoot $BootTimeoutSec
     try {
         if (-not (Enter-MainMenu $BootTimeoutSec)) { return }
+        # The store is On by default (P9-1), so a profile that never named the setting already
+        # carries the row - the boot-level half of the default.
+        $menuText = Get-ScreenText 'menu.png'
+        Assert-Label $menuText @('CUST') 'enable: the main menu carries the store row on a default profile'
+
         $index = Open-ScreenByRow 'settings_screen' $HelpOptionsRow 'help-options'
         Add-Step 'enable: Help & Options opens' ($index -ge 0) "row $index"
         if ($index -lt 0) { return }
@@ -554,24 +566,15 @@ function Invoke-EnableLeg {
         Add-Step 'enable: Downloadable Content opens' $true "row $GeneralDlcRow"
 
         $before = Wait-ForScreen 'dlc-before.png' 'RHYTHMVERSE' $ScreenTimeoutSec 'dlc page rows'
-        Add-Step 'enable: the master switch reads Off before the press' ($before -match 'RHYTHMVERSE\s*:?\s*OFF') (($before -replace '\s+', ' ').Trim())
+        Add-Step 'enable: the master switch reads On with no committed value' ($before -match 'RHYTHMVERSE\s*:?\s*ON') (($before -replace '\s+', ' ').Trim())
+        Copy-Item -LiteralPath (Join-Path $profileDir 'settings.toml') -Destination (Join-Path $base 'profile-after-enable.toml') -Force
 
-        Add-Step 'enable: the RhythmVerse row is pressed' (ClickRow $RhythmVerseRow 'rhythmverse-on' -Wait 2) "row $RhythmVerseRow"
-        # The commit is what the next boot reads: the sidecar the launcher profile owns. Waiting on
-        # it rather than on a sleep is also what makes the page's redraw below a real observation.
-        $settingsPath = Join-Path $profileDir 'settings.toml'
-        $committed = $false
-        $deadline = (Get-Date).AddSeconds(30)
-        while (-not $committed -and (Get-Date) -lt $deadline) {
-            if ((Get-FileText $settingsPath) -match '(?m)^\s*rhythmverse\s*=\s*true') { $committed = $true; break }
-            Start-Sleep -Seconds 1
-        }
-        Copy-Item -LiteralPath $settingsPath -Destination (Join-Path $base 'profile-after-enable.toml') -Force
-        $settingsText = Get-FileText $settingsPath
-        Add-Step 'enable: the committed value is in the profile' $committed ($settingsText -replace "`r?`n", ' | ')
-
-        $after = Wait-ForScreen 'dlc-after.png' 'RHYTHMVERSE' 20 'dlc page after the press'
-        Add-Step 'enable: the page draws the switch as On' ($after -match 'RHYTHMVERSE\s*:?\s*ON') (($after -replace '\s+', ' ').Trim())
+        # A read must not become a write: the fixture's file never named the master, so an absent
+        # key after the boot is what makes the On above the *compiled default* rather than a value
+        # this boot committed. The Store leg is the behavioural half - the same profile, the switch
+        # untouched, and the store serves.
+        $settingsText = Get-FileText (Join-Path $profileDir 'settings.toml')
+        Add-Step 'enable: the boot did not commit the default into the profile' ($settingsText -notmatch '(?m)^\s*rhythmverse\s*=') ($settingsText -replace "`r?`n", ' | ')
 
         # Leave the page before the process ends, so the boot's own shutdown path runs.
         Drive @('key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2')
