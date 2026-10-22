@@ -51,7 +51,7 @@ inline bool IsContentRootName(const std::string_view name) {
   return true;
 }
 
-// The RhythmVerse store's staging directory (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// The RhythmVerse store's staging directory (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §5/P5): a download is written to `<resolved_dlc_root>/.rbbz-store-staging/` and renamed
 // into the library only after its bytes, its length and its STFS identity have passed
 // validation. A dot prefix or a `.part` suffix alone does **not** make a half-written

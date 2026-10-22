@@ -194,6 +194,36 @@ void TestSetText() {
 
 // --- The grammar ---------------------------------------------------------------------------------
 
+// Measured 2026-10-22 in the acceptance boot (`out/store-acceptance/p8-store/Store.log`): the seed
+// filled the field through the typing path, which also *opens* the surface - so `Search: bush` was
+// drawn over the store's own screens (the front menu and the browser) until a key page was entered
+// and left, and P7's credit line was never reachable. The seed is a field edit, not an entry: the
+// keys still show the seeded text when the player opens them, and the strip stays silent until
+// then.
+void TestSeedField() {
+  test::BeginCase("the diagnostic seed fills the field without opening the search surface");
+  ResetSession(true);
+  CHECK_TRUE(SearchSeedField("bush"));
+  CHECK_STR(SearchCurrent().text, "bush");
+  // The strip belongs to the surface (`StatusTextLocked`): nothing is drawn while the keys are shut.
+  CHECK_TRUE(SearchStatusText().empty());
+  // The keys open it, and the seeded field is what they show.
+  SearchOpen();
+  CHECK_STR(SearchStatusText(), "Search: bush");
+  SearchClose();
+  CHECK_TRUE(SearchStatusText().empty());
+  // The whole-string transport is typing, so it still opens the surface.
+  CHECK_TRUE(SearchSetText("kate"));
+  CHECK_STR(SearchStatusText(), "Search: kate");
+  // A seed the field refuses changes nothing, and a refused seed does not open the surface either.
+  SearchCancel();
+  CHECK_FALSE(SearchSeedField("bad\nquery"));
+  CHECK_FALSE(SearchSeedField(std::string(kMaxSearchChars + 1, 'a')));
+  CHECK_TRUE(SearchCurrent().text.empty());
+  CHECK_TRUE(SearchStatusText().empty());
+  SearchCancel();
+}
+
 void TestParseWrites() {
   test::BeginCase("the write grammar accepts the key pages and leaves P5's commands alone");
   StoreOp op = StoreOp::kNone;
@@ -860,6 +890,7 @@ int main(int argc, char** argv) {
   TestCodePoints();
   TestKeyTokens();
   TestSetText();
+  TestSeedField();
   TestParseWrites();
   TestWriteHandlerOwnsOnlySearch();
   TestDuplicatePressGuard();

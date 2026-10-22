@@ -16,6 +16,7 @@
 
 #include "fs/payload_overlay.h"
 #include "store/store_fetch.h"
+#include "store/store_settings.h"
 
 REXCVAR_DEFINE_BOOL(store_trace, false, "Diagnostics",
                     "Log the store paths the guest resolves and opens under the game root "
@@ -687,13 +688,20 @@ REX_HOOK_RAW(sub_82753288) {
 // P3 step 0: the readiness gate.
 //
 // `request_index_if_needed` is handled by 0x82753B20, whose branch calls 0x82753010, which returns
-// immediately unless `*(0x828A3D20 + 44) == 2` (measured 2026-10-20 in the recompiled sources).
-// That field is the panel's own state word, not the netcache definition: it stays below 2 on an
-// offline boot even when the manager has been handed a local definition, which is why neither the
-// file cache nor the request builder is ever reached.
+// immediately unless `*(0x82853D20 + 44) == 2` (measured 2026-10-20 in the recompiled sources; the
+// first cut read 0x828A3D20, a cell this function never touches). That field is the panel's own
+// state word, not the netcache definition: it stays below 2 on an offline boot even when the
+// manager has been handed a local definition, which is why neither the file cache nor the request
+// builder is ever reached.
 //
-// The hook writes 2 before the original runs - a forced state, which is exactly what a diagnostic
-// is for - and reports the decision once. With `store_trace` off it is a pure pass-through.
+// The hook writes 2 before the original runs. **Who it writes for changed 2026-10-22**: until then
+// only `store_trace` forced it, so every store boot that drew a catalogue was a boot with the
+// diagnostic switch on, and the first acceptance boot without one
+// (`out/store-acceptance/p8-store/Store.log`, 16:37) drew the store's heading and LOADING and made
+// no request at all. The word is therefore tied to the store's own master switch: RhythmVerse on
+// takes the retail request path, RhythmVerse off is a pure pass-through (which is the silence the
+// control leg measures), and `store_trace` still forces it for a diagnostic boot on a profile whose
+// switch is off.
 // ---------------------------------------------------------------------------------------------
 // P3's row labels: the offer provider's `Text` (`sub_8275A230`) and the name lookup it uses.
 //
@@ -745,17 +753,26 @@ REX_HOOK_RAW(sub_82453090) {
 
 REX_EXTERN(__imp__sub_82753010);
 REX_HOOK_RAW(sub_82753010) {
-  if (rb_blitz::store::TraceEnabled()) {
-    // `lis r11,-32123` is 0x8285, not 0x828A: 65536 - 32123 = 33413 = 0x8285, and `addi r11,r11,
-    // 15648` (0x3D20) makes the base 0x82853D20. The first P3 run forced 0x828A3D4C, which is not
-    // this function's word - corrected 2026-10-20 after the generated body
-    // (generated/default/rb_blitz_recomp.64.cpp, sub_82753010) was decoded again.
-    constexpr uint32_t kStateField = 0x82853D20u + 44u;
-    const uint32_t before = rb_blitz::store::GuestU32(base, kStateField);
-    const uint32_t vector_begin =
-        rb_blitz::store::GuestU32(base, ctx.r3.u32 + 52);
-    const uint32_t vector_end = rb_blitz::store::GuestU32(base, ctx.r3.u32 + 56);
-    const bool forced = rb_blitz::store::WriteGuestU32Protected(base, kStateField, 2);
+  // `lis r11,-32123` is 0x8285, not 0x828A: 65536 - 32123 = 33413 = 0x8285, and `addi r11,r11,
+  // 15648` (0x3D20) makes the base 0x82853D20. The first P3 run forced 0x828A3D4C, which is not
+  // this function's word - corrected 2026-10-20 after the generated body
+  // (generated/default/rb_blitz_recomp.64.cpp, sub_82753010) was decoded again.
+  constexpr uint32_t kStateField = 0x82853D20u + 44u;
+  const bool trace = rb_blitz::store::TraceEnabled();
+  uint32_t before = 0;
+  uint32_t vector_begin = 0;
+  uint32_t vector_end = 0;
+  if (trace) {
+    before = rb_blitz::store::GuestU32(base, kStateField);
+    vector_begin = rb_blitz::store::GuestU32(base, ctx.r3.u32 + 52);
+    vector_end = rb_blitz::store::GuestU32(base, ctx.r3.u32 + 56);
+  }
+  // The store's own switch decides, not the probe (see the comment above this hook): an offline
+  // panel never reaches state 2 on its own, so the write *is* the feature's entry.
+  const bool wanted = rb_blitz::store::Settings()->enabled || trace;
+  const bool forced =
+      wanted && rb_blitz::store::WriteGuestU32Protected(base, kStateField, 2);
+  if (trace) {
     rb_blitz::store::LogGate(vector_begin, vector_end, before, forced);
   }
   __imp__sub_82753010(ctx, base);

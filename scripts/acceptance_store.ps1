@@ -1,4 +1,4 @@
-# P8 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the store's acceptance.
+# P8 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the store's acceptance.
 #
 # The walk the plan asks for, in the order a player takes it, split into legs so each one can be
 # run and read on its own:
@@ -507,11 +507,14 @@ function Enter-MainMenu([int]$BootTimeout) {
     # 2026-10-22 could land on a row (measured: the first accept alone was swallowed, the second one
     # opened the menu).
     $presses = 0
-    $deadline = (Get-Date).AddSeconds(300)
+    # The leg's own budget, not a fixed 300 s: the boot that follows a library change runs the
+    # title's discovery pass first (measured 2026-10-22: 1 package, ~170 ms per batch, then the
+    # title owns the panel), and the Install leg is started with `-InstallBootTimeoutSec`.
+    $deadline = (Get-Date).AddSeconds([Math]::Max(300, $BootTimeout))
     while ((Get-Date) -lt $deadline) {
         Drive @('mouse:0.5:0.78', 'wait:1')
         if (Test-MenuUp) { break }
-        if ($presses -ge 8) { break }
+        if ($presses -ge 40) { break }
         $presses += 1
         Drive @('key:a', 'wait:12')
     }
@@ -583,9 +586,11 @@ function Invoke-StoreLeg {
     try {
         if (-not (Enter-MainMenu $BootTimeoutSec)) { return }
         $menuText = Get-ScreenText 'menu.png'
-        # The selected row's highlight eats the label's first letters (`HYTH VERSE CUSTOM` was the
-        # measured reading), so the check asks for the part that survives.
-        Assert-Label $menuText @('HYTH VERSE') 'store: the main menu carries the store row'
+        # The row is `RhythmVerse Customs`, but OCR reads it several ways depending on the
+        # highlight: `HYTH VERSE CUSTOM` and `RHYTHMVERSE CUSTOM` were both measured on 2026-10-22,
+        # and the Install leg's boot read it as `RHY HMVERSECUST M`. `CUST` is the part every
+        # measured reading keeps; the row's *behaviour* below is the real oracle.
+        Assert-Label $menuText @('CUST') 'store: the main menu carries the store row'
         Assert-Label $menuText @('MUSIC LIBR') 'store: the refresh row is still on the main menu'
 
         $index = Open-ScreenByRow 'store_menu_screen' $StoreRow 'store-entry'
@@ -595,10 +600,23 @@ function Invoke-StoreLeg {
         $storeText = Wait-ForScreen 'store.png' 'RECENT' $ScreenTimeoutSec 'the store front menu'
         Assert-Contains $storeText 'RECENT' 'store: the front menu draws Recent'
         Assert-Contains $storeText 'SEARCH' 'store: the front menu draws Search'
-        Assert-Label $storeText @('HYTH VERSE') 'store: the heading names RhythmVerse'
-        # P7 measured the strip on screen; its OCR fragments the credit line (`R USTOMS`), so the
-        # check asks for the tail of the word rather than a spelling the OCR may not produce.
-        Assert-Label $storeText @('USTOM') 'store: the credit strip reads "Customs from RhythmVerse"'
+        # The header draws the locale entry `store` with RhythmVerse's own name on it (P3's
+        # `SetStoreHeading`) and the OCR reads the whole word; it is the *menu row's* highlight that
+        # eats letters (`HYTH VERSE CUSTOM`), which is why only that check asks for a fragment
+        # (measured 2026-10-22).
+        Assert-Label $storeText @('RHYTHMVERSE') 'store: the heading names RhythmVerse'
+        # P7's credit line is outranked by the loading sentence while the catalogue holds no offer
+        # yet, and it is held for 12 s after the front menu is served - so it is read once the first
+        # page has landed, not on the entry capture (measured 2026-10-22: the entry capture reads
+        # `Loading the RhythmVerse catalogue...`). The OCR fragments the line, hence the tail.
+        $deadline = (Get-Date).AddSeconds($CatalogueWaitSec)
+        while ((Get-Date) -lt $deadline) {
+            Refresh-LogText
+            if ($script:logText -match 'store_catalogue: page \d+ -> ') { break }
+            Start-Sleep -Seconds 1
+        }
+        $creditText = Get-ScreenText 'store-credit.png'
+        Assert-Label $creditText @('USTOMS') 'store: the credit strip reads "Customs from RhythmVerse"'
 
         # The catalogue starts when the store opens; a page pressed before it is there is a working
         # empty page that returns to the menu, so the walk waits for the offers first.
@@ -615,17 +633,21 @@ function Invoke-StoreLeg {
 
         # Recent is the front menu's first row.
         Drive @('key:lstick_up', 'wait:1')
-        $servedBefore = Get-LogMatches 'store_fetch: the served page carries'
+        # `store_fetch: served '<path>' ...` is the shipping line (`LogOnce`, info). The per-page
+        # `the served page carries N offer(s), M of them marked Downloaded` line is **trace-only**
+        # (`store_fetch.cpp`), so a boot without `--store_trace` never writes it - which is what this
+        # leg booted on 2026-10-22 and waited 300 s for.
+        $servedBefore = Get-LogMatches "store_fetch: served '"
         Drive @('key:a', 'wait:4')
         $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
         while ((Get-Date) -lt $deadline) {
             Refresh-LogText
-            if ((Get-LogMatches 'store_fetch: the served page carries') -gt $servedBefore) { break }
+            if ((Get-LogMatches "store_fetch: served '") -gt $servedBefore) { break }
             Start-Sleep -Seconds 2
         }
         Start-Sleep -Seconds 3
         $browserText = Get-ScreenText 'browser.png'
-        Assert-Log 'store_fetch: the served page carries (\d+) offer\(s\)' 'store: the retail parser read the served page'
+        Assert-Log "store_fetch: served 'dlc_store/" 'store: the page was served to the retail parser'
         Add-Step 'store: the retail browser is the current screen' (Wait-ForScreenName 'store_browser_screen' 30 'Recent') (Get-Screen)
         Assert-Lacks $browserText 'MICROSOFT' 'store: no Microsoft Points chrome on the browser'
         Assert-Lacks $browserText 'BUY NOW' 'store: no Buy Now row on the browser'
@@ -637,7 +659,7 @@ function Invoke-StoreLeg {
         Drive @('key:lstick_up', 'wait:1', 'key:lstick_down', 'wait:1', 'key:a', 'wait:4')
         $keysText = Wait-ForScreen 'keys.png' 'LETTERS' $ScreenTimeoutSec 'the search keys'
         Assert-Contains $keysText 'LETTERS' 'store: the Search row opens the authored keys'
-        $pagesBefore = Get-LogMatches 'store_fetch: the served page carries'
+        $pagesBefore = Get-LogMatches "store_fetch: served '"
 
         Drive @('key:a', 'wait:2')
         $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
@@ -661,7 +683,7 @@ function Invoke-StoreLeg {
         $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
         while ((Get-Date) -lt $deadline) {
             Refresh-LogText
-            if ((Get-LogMatches 'store_fetch: the served page carries') -gt $pagesBefore) { break }
+            if ((Get-LogMatches "store_fetch: served '") -gt $pagesBefore) { break }
             Start-Sleep -Seconds 2
         }
         Start-Sleep -Seconds 3
@@ -747,6 +769,18 @@ function Invoke-StoreLeg {
 
 function Invoke-InstallLeg {
     if (-not $script:installedTitle) {
+        # The Store leg may have run in an earlier invocation (`-Legs Install -Reuse`), so the
+        # install line is read out of `Store.log` here rather than relying on the Store leg's own
+        # variables: it is the only place the *title* survives (the receipt keeps none by design).
+        $storeLog = Get-FileText (Join-Path $base 'Store.log')
+        $m = [regex]::Match($storeLog, "store_download: job (\w+) installed '([^']*)' (.+?) \((\d+) bytes, title (\d+)\)")
+        if ($m.Success) {
+            $script:installedTitle = $m.Groups[2].Value
+            $script:installedPath = $m.Groups[3].Value
+            $script:installedBytes = [int]$m.Groups[4].Value
+        }
+    }
+    if (-not $script:installedTitle) {
         Add-Step 'install: a downloaded title is known from the Store leg' $false 'no install line in Store.log'
         return
     }
@@ -755,11 +789,31 @@ function Invoke-InstallLeg {
     $proc = Start-Leg 'Install' $profileDir $dlcRoot $InstallBootTimeoutSec
     try {
         if (-not (Enter-MainMenu $InstallBootTimeoutSec)) { return }
-        Add-Step 'install: Play opens the song list' (ClickRow 0 'play')
-        $listText = Wait-ForScreen 'songs.png' 'YOUR SONGS' $InstallBootTimeoutSec 'the song list'
+        # The press is retried, and a keyboard accept follows the click: the generated payload lands
+        # around the first click (measured 2026-10-22: `menu_filter: patched a file ...` in the same
+        # millisecond as the click, with the panel reporting `available=false`), and a click sent
+        # into that window is dropped - the screen stayed on the main menu for six minutes.
+        $opened = $false
+        $listText = ''
+        for ($attempt = 0; $attempt -lt 4 -and -not $opened; $attempt++) {
+            ClickRow 0 'play' | Out-Null
+            $listText = Wait-ForScreen 'songs.png' 'YOUR SONGS' 25 'the song list'
+            if ($listText.Contains('YOUR SONGS')) { $opened = $true; break }
+            # Row 0 is drawn selected, so the accept key is the same press without the mouse.
+            Drive @('key:a', 'wait:5')
+            $listText = Get-ScreenText 'songs.png'
+            if ($listText.Contains('YOUR SONGS')) { $opened = $true; break }
+            Drive @('mouse:0.5:0.78', 'wait:2')
+        }
+        Add-Step 'install: Play opens the song list' $opened (Get-Screen)
+        if (-not $opened) { return }
         Assert-Contains $listText 'YOUR SONGS' 'install: the song list is drawn'
         Refresh-LogText
-        Assert-Log 'store_library: the loaded DLC library declares (\d+) song\(s\)' 'install: the loaded library declares songs'
+        # The discovery line, not the Downloaded matcher's: `store_library: the loaded DLC library
+        # declares N song(s)` belongs to the Store leg (the index is built when the store asks for
+        # a page - measured 2026-10-22, this boot never opens the store, so the line cannot exist).
+        # What this leg proves is that the title *presented* the installed package and listed it.
+        Assert-Log 'dlc: \d+ saved-game library package\(s\) presented as content type' 'install: the installed package is presented to the title'
 
         # The row is drawn as "Artist - Title"; a row too long for the column is truncated, so
         # every word of the title that is long enough to be a word is required, not the whole
@@ -782,7 +836,13 @@ function Invoke-ControlLeg {
     try {
         if (-not (Enter-MainMenu $BootTimeoutSec)) { return }
         $menuText = Get-ScreenText 'menu.png'
+        # Two spellings, because the row's OCR changes with the highlight: selected, the label
+        # loses its middle letters (`HYTH VERSE CUSTOM`); unselected it reads `RHYTHMVERSE CUSTOMS`
+        # (the fixture menus above were read that way on 2026-10-22). One negative check on either
+        # spelling can miss, so both are asserted.
         Assert-Lacks $menuText 'HYTH VERSE' 'control: the main menu has no store row while the feature is Off'
+        Assert-Lacks $menuText 'RHYTHMVERSE' 'control: the main menu draws no RhythmVerse label'
+        Assert-Lacks $menuText 'CUSTOMS' 'control: the main menu draws no Customs row'
         Assert-Label $menuText @('MUSIC LIBR') 'control: the refresh row is on the main menu'
 
         # Press the refresh row and follow its sentinel. The fixture's layout puts it at
@@ -814,6 +874,9 @@ function Invoke-ControlLeg {
         Assert-LogAbsent 'store_catalogue: fetching' 'control: the catalogue never fetched'
         Assert-LogAbsent "store_fetch: served '" 'control: no store record was served'
         Assert-LogAbsent 'store_fetch: the served page carries' 'control: no store page was served'
+        # The shipping line is the one a non-trace boot writes; both are checked so a control boot
+        # cannot pass on a missing trace line alone.
+        Assert-LogAbsent "store_fetch: served '" 'control: no store record was served'
         Assert-LogAbsent 'store_library: indexing' 'control: the Downloaded index was not built'
         Assert-LogAbsent 'store_download: start' 'control: no download was started'
         Assert-LogAbsent 'store_search: page ' 'control: no search page was requested'

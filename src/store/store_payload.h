@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P2 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the data-layer
+// P2 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the data-layer
 // decision gate. This is the *measurement* half — it points the retail store's netcache
 // at a local (host-file) server so the paths the store asks for become file opens this
 // project can see, instead of a request to a server that no longer exists.

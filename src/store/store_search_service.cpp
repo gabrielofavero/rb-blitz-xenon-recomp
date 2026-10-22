@@ -251,9 +251,11 @@ void InstallSearchTransport() {
   REXLOG_INFO("store_search: transport ready (one worker thread, {}, up to {} page(s) per search)",
               kSearchPath, SearchPageBudget());
   // The measurement's seed: a field already holding a query, so Done alone exercises the request.
+  // It fills the field without opening the surface - the strip belongs to the key pages, and a
+  // seeded boot drew `Search: <query>` over the store's own screens (measured 2026-10-22).
   const std::string seed = REXCVAR_GET(store_search_seed);
   if (!seed.empty()) {
-    if (SearchSetText(seed)) {
+    if (SearchSeedField(seed)) {
       REXLOG_INFO("store_search: the field was seeded with '{}'", seed);
     } else {
       REXLOG_WARN("store_search: the seed '{}' is not a usable query (UTF-8, 3..64 code points)",

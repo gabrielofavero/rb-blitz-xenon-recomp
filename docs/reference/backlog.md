@@ -121,14 +121,14 @@ Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
 packaging and auto-update, symbol-name campaigns, and mod APIs. DLC packages do load
 ([dlc.md](../guides/dlc.md)) - and the store UI around them and custom-song content no content API
-ever enumerated are **built**: the retail DOWNLOAD CONTENT screens are fed from the RhythmVerse
-customs catalogue, off by default behind General ▸ Downloadable Content ▸ RhythmVerse
-([in-progress plan](../plans/in-progress/2026-10-13-rhythmverse-store-plan.md), whose §5/P8 record
-holds the acceptance matrix and `scripts/acceptance_store.ps1`). Its last measurement is still owed:
-the harness's `Enable` and `Control` legs are green, and the end-to-end walk (Recent, Search,
-download, install, the song on the title's own list) stops at the store menu on this machine. What
-the plan deliberately leaves out stays out of scope: online services, purchases and entitlement,
-audio preview (the API serves none) and archive extraction.
+ever enumerated are **built and acceptance-measured**: the retail DOWNLOAD CONTENT screens are fed
+from the RhythmVerse customs catalogue, off by default behind General ▸ Downloadable Content ▸
+RhythmVerse ([finished plan](../plans/finished/2026-10-13-rhythmverse-store-plan.md), whose §5/P8
+record holds the acceptance matrix and `scripts/acceptance_store.ps1`; the closed-out run is
+`out/store-acceptance/p8-final/`, 69 steps and 0 failures — the switch, Recent, Search, a download,
+the install, the song on the title's own next-boot list, and the control boot's silence). What the
+plan deliberately leaves out stays out of scope: online services, purchases and entitlement, audio
+preview (the API serves none) and archive extraction.
 
 Dropped for now, their documents deleted with them: in-game host Audio/Video settings,
 the per-device button-mapping layer (its remap half lives on in Controller Settings plan), and

@@ -138,10 +138,10 @@ the guest's own strings, and no log line names them.
 
 | Cvar | Default | What it does |
 | --- | --- | --- |
-| `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. The filter also matches any path ending in `store.dtb`, so the netcache definition itself is covered. |
+| `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. The filter also matches any path ending in `store.dtb`, so the netcache definition itself is covered. **It no longer decides whether the store works** (2026-10-22): P3's hook used to force the panel's readiness word (`0x82853D4C`) only while this switch was on, so every store boot that drew a catalogue was a trace boot; the write is now tied to the RhythmVerse master switch, and this one only logs - plus forces it for a diagnostic boot whose profile has the switch off. |
 | `store_local_server_root` | "" | Rewrites `config/gen/store.dtb`'s `netcache_init` at boot so the store's default server is a *local* (host-file) one rooted at this guest-relative directory. Empty leaves the record as shipped. Requires a restart (it is built into the generated payload). |
 | `store_search_diagnostic` | off | RhythmVerse plan P4: sends the **RhythmVerse Customs** main-menu row straight into the authored key pages instead of the store. The shipping entry is the store's own **Search** row (2026-10-22), so this is only the measurement that drives the keys without a store visit. Requires a restart. |
-| `store_search_seed` | "" | Seeds the search field with this text at boot, so one Done press exercises the real request and answer (`scripts/probe_search.ps1 -Seed <text>`). Empty leaves the field empty. Requires a restart. |
+| `store_search_seed` | "" | Seeds the search field with this text at boot, so one Done press exercises the real request and answer (`scripts/probe_search.ps1 -Seed <text>`). Empty leaves the field empty. It fills the field **without opening the search surface** (2026-10-22): the seed used the typing path, which set the surface open, so a seeded boot drew `Search: <query>` over the store's own screens and the credit line never showed. Requires a restart. |
 | `store_serve_dir` | "" | RhythmVerse plan P3's data lane: a host directory whose files answer the store's own `dlc_store/**` netcache requests (a file named exactly like the requested path, e.g. `dlc_store/europe/dlc_top_xbox_eng.dta`). Empty uses the built-in records. A `.dta` record is **text** - the insert parses that type with the engine's own text reader - and is inserted into the manager's loaded-file container. Requires a restart. |
 | `store_fetch_deliver` | **on** | P3's delivery half: leaving the file cache's readiness word (`manager + 44`) set after a served record makes retail's **own** request body take its "already loaded" branch and send the `file_req_complete` message (`sub_8235A0F8`) itself - one delivery per request, every layout below it the engine's. Off, the word stays as the boot found it and the body takes its fetch branch, exactly as retail does offline. On by default since 2026-10-21: the store has nothing to show without it, and only records this module serves are affected (serving itself is gated on the RhythmVerse master switch), so a stock boot is untouched. Measured on: the store draws the served front menu's rows (RECENT, SEARCH), a row press asks for `dlc_store/<region>/<locale>/<name>/`, the served page opens the retail browser with all 24 titles drawn and the details panel reading the offer's own artist and genre, and A opens the details screen (`out/_swap/store-probe/20261021-190304`). Requires a restart. |
 | `store_catalogue_off` | off | Turns the store catalogue fetch off: a menu page is then served **empty** (the shape the retail DTA handles by refreshing the menu), which is the control leg for "is this page the catalogue's or the writer's?". Off means the catalogue runs. Requires a restart. |
@@ -233,10 +233,26 @@ APU/GPU chatter (4.7 MB in four minutes), and every line it asserts on is an inf
 (`RHYTHMVERSE: OFF` → press → `rhythmverse = true` in the profile → `RHYTHMVERSE: ON`), `Control`
 passes 13 of 13 (no store row on the menu, six absence checks at 0 matches, the refresh row's
 sentinel present), the store row opens the retail store (`native_mouse: screen=store_menu_screen`) -
-and the `Store` leg then finds the guest no longer logging on this machine, so its own assertions
-are the next thing to earn. Two other traps the harness encodes: `drive_ui.ps1` joins `-OutDir`
-against the repository root (pass it relative), and OCR hands back one line per drawn line
-(`EXIT GAME` arrives as two), which is why every label check folds the whitespace out.
+and the `Store` leg then finds the guest no longer logging on this machine. *(Superseded the same
+day: the store's silence there was a defect, not the machine - the panel's readiness word was
+written only under `store_trace` - and the close-out run below is all four legs green.)* Two other
+traps the harness encodes: `drive_ui.ps1` joins `-OutDir` against the repository root (pass it
+relative), and OCR hands back one line per drawn line (`EXIT GAME` arrives as two), which is why
+every label check folds the whitespace out.
+
+**The closed-out run, 2026-10-22** (`out/store-acceptance/p8-final/`): **69 steps, 0 failures** over
+all four legs on one build. `Enable` reads the switch off, presses it, finds `rhythmverse = true` in
+the profile and reads it on; `Store` draws `RHYTHMVERSE` + `RECENT SEARCH` + the credit line, lists
+`99 offer(s)`, opens the browser on them, answers a search (`15 MATCHES FOR "BUSH"`) and lists the
+result, opens the details page's `DOWNLOAD`, installs `rv_436f1b68360f1ad9be533437be169410.con`
+(4,927,488 bytes, one container in the flat root, empty staging, receipt `pending`, refresh logged)
+with no points/Buy Now chrome anywhere; `Install` finds the title on the next boot's own song list
+(`YOUR SONGS … BUSH THE PEOPLE THAT WE LOVE` after `dlc: 1 saved-game library package(s) presented
+as content type 00000002`); `Control` makes no store request at all and still dispatches the refresh
+row. The assertions that changed to get there are listed in the plan's §5/P8 close-out record - the
+row-label and heading needles, the credit line read after the first page lands, the shipping
+`store_fetch: served '<path>'` line instead of the trace-only per-page count, and the retried Play
+press in the `Install` leg.
 
 **Naming the exports a screen calls.** `-LogLevel trace -Noisy` (that is `--log_noisy=1`) turns on
 the SDK's kernel-import logging, which prints one line per export call (`[NtCreateFile] path=…`,

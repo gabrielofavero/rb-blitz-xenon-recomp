@@ -1,11 +1,14 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **in progress
-2026-10-22 — P0, P6, P1, P2, P3, P4, P5 and P7 landed; P8's acceptance harness is written and two of
-its four legs are green (the switch, and the control arm that measures the feature's silence), while
-the end-to-end walk - Recent, Search, download, install, the song on the title's own list - is the one
-thing the phase does not yet call measured**; §5 keeps one record per phase, and P8's record carries
-the harness, the matrix and the legs' own verdicts. The route there: **P0, P6, P1 and P2
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **finished
+2026-10-22 — P0, P6, P1, P2, P3, P4, P5, P7 and P8 all landed, and the acceptance harness is green
+in all four legs on one build (`out/store-acceptance/p8-final/`, **69 steps, 0 failures**): the
+switch is turned on through the UI, the store lists the catalogue, Search answers and lists, a
+download installs, the next boot's song list carries the song, and a boot with the feature off makes
+no store request at all. That last step cost two real defects, both found by the harness and fixed
+(§5/P8's close-out record): the panel's readiness word was written only under `store_trace`, and the
+search seed opened the search surface**; §5 keeps one record per phase, and P8's record carries the
+harness, the matrix and the legs' own verdicts. The route there: **P0, P6, P1 and P2
 landed 2026-10-20**, and **P3's serial half (step 0) landed the same day**: the request chain is
 mapped (`sub_827501F0` → `sub_82753010` → `sub_8274FB60` → the file cache), both entries are
 hooked, and the store's own DTA record is proven editable — the panel still issues no request
@@ -63,13 +66,15 @@ on one boot (row drawn, store opens, B returns) and the multi-boot/toggle matrix
 P8's: the same route now runs as four scripted legs, including the control leg that boots with the
 feature off. Audio
 preview is decided: the API returns no preview asset (§3.3), so v1 shows none. **P8, the last
-phase, landed 2026-10-22** (§5/P8 record): the acceptance harness, the phase's matrix and its docs.
+phase, landed 2026-10-22** (§5/P8 record): the acceptance harness, the phase's matrix and its docs -
+and, the same day, the run that closed the walk: **all four legs green on one build**, after the
+two defects that run found were fixed (§5/P8 close-out record).
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
 custom songs can be browsed, searched, and downloaded in-game, with instrument filters in the
 in-game settings.
 
 Related reading: [dlc.md](../../guides/dlc.md) (content pipeline),
-[song-cache-plan.md](../finished/2026-10-10-song-cache-plan.md) (R7, refresh),
+[song-cache-plan.md](2026-10-10-song-cache-plan.md) (R7, refresh),
 [settings/menu.md](../../settings/menu.md), [settings/architecture.md](../../settings/architecture.md),
 [known-issues.md](../../reference/known-issues.md) (the store is currently offline-only — this
 plan is the community-mod-style feature that known-issues.md explicitly assigns to "the community
@@ -2169,6 +2174,10 @@ release binary this record describes:
 | `Store` | **reached the retail store, then the guest stopped logging** | the main menu drew the store row and the refresh row beside it, `HYTH VERSE CUSTOM` was pressed at its logged bounds, and the log turned to `native_mouse: screen=store_menu_screen` (15:52:45, `Store.log`) - then nothing for the rest of the run: no catalogue fetch, no served record, no OCR-able screen. The same 4-core machine wedges on this emulator under load (the ringbuffer drop this record already lists, and the title's own "Loading Cached Content List" minutes); the probe boots that reached the same store menu did so with `--no-mouse_ui_nav` and no capture activity at all. **Not asserted:** the Recent list, Search, the details page, the download, the install and the return state |
 | `Install` | **not run** | it asserts the *song* the Store leg installed, and that leg never got as far as a download |
 
+*(Superseded for the `Store` and `Install` legs the same day: see the close-out record at the end of
+this section. The rows above are what this record measured, and they stay here as that record.)*
+
+
 The readiness the matrix above claims is therefore: the switch (Enable), the silence (Control), the
 fact that the retail store opens from the mod's row (Store, up to `store_menu_screen`), and every
 other row pinned hermetically by the suites named in it. The end-to-end walk - Recent, Search,
@@ -2191,7 +2200,8 @@ plan made stale - "Off makes no request is structural until a worker exists" (th
 the control leg measures the silence) and "the matches are not drawn in the store's own list yet"
 (P4 drew them) - and both now say what measures them. The plan stays in `plans/in-progress/` with
 this record: P8's harness is in place and two legs are green, while the end-to-end walk the phase
-owns is still unmeasured.
+owns is still unmeasured. *(Superseded the same day: the walk was measured - see the close-out record
+below - and the plan then moved to `plans/finished/`.)*
 
 **Honest limits of this record.** The matrix above says which rows are measured and which are only
 pinned hermetically; on top of those, three things the harness does not do: it seeds the search field
@@ -2200,6 +2210,74 @@ pinned hermetically; on top of those, three things the harness does not do: it s
 which is a normal player layout but not the shipped default; and the `Install` leg's boot can spend
 minutes on the title's "Loading Cached Content List" after the library changed, which is why its boot
 budget is 720 s (a timeout there is the environment, not the store - the log's `dlc:` lines say which).
+
+**P8 close-out record (2026-10-22) — all four legs green on one build, and the two defects the walk
+found.** `scripts/acceptance_store.ps1`, release binary, its own profile directories and an empty
+scratch DLC root, on `out/store-acceptance/p8-final/`: **69 steps, 0 failures**, legs
+`Enable, Store, Install, Control`.
+
+| Leg | Verdict | Its own evidence |
+| --- | --- | --- |
+| `Enable` | **PASS, every step** | the DLC page reads `RHYTHMVERSE: OFF`, the row is pressed, `rhythmverse = true` is in `settings.toml`, and the page then reads `RHYTHMVERSE: ON` |
+| `Store` | **PASS, every step** | heading `RHYTHMVERSE`, front menu `RECENT SEARCH`, the credit line (OCR `R USTOMS` … `M YTHMVERSE`), `99 offer(s)` from the catalogue; the served page opens the retail browser (`CUT THE CORD`, `COMING FOR YOU`, `SWEET SURRENDER`, …); Search → the authored keys → `15 MATCHES FOR "BUSH"` → the same row lists the fifteen offers; A → the details page `DOWNLOAD / EXIT` with no Buy Now, points or currency; the press installs `rv_436f1b68360f1ad9be533437be169410.con` (4,927,488 bytes) into the flat root, one container, empty staging, the receipt row `pending`, and the host's refresh runs and reports `1 package(s)`; the browser it returns to carries no chrome |
+| `Install` | **PASS** | the next boot: `dlc: 1 saved-game library package(s) presented as content type 00000002`, the song list draws `YOUR SONGS … BUSH THE PEOPLE THAT WE LOVE`, and the installed title is found on it (read out of the Store leg's install line) |
+| `Control` | **PASS, every step** | no store row, no `RHYTHMVERSE` label, no `CUSTOMS` row on the main menu, the Refresh Music Library row dispatches its sentinel, and `store_catalogue: fetching`, `store_fetch: served '`, `the served page carries`, `store_library: indexing`, `store_download: start` and `store_search: page` are all at **0 matches** |
+
+**Two real defects, both found by this run and fixed in `src/store/`:**
+
+1. **The store only worked with the diagnostic switch on.** The panel's readiness word
+   (`0x82853D4C`) was written **only while `store_trace` was on** — P3's `sub_82753010` hook forced
+   it as a diagnostic. Every boot that had ever drawn a catalogue was a probe boot with
+   `--store_trace=1`; the acceptance boot carries no switch, so `request_index_if_needed` returned
+   before the request builder, nothing was asked for, and the store sat on LOADING under its own
+   heading (`out/store-acceptance/p8-store/Store.log`, 16:37: `native_mouse:
+   screen=store_menu_screen` and then no store line for the rest of the run). The write is now tied
+   to **the store's own master switch** (`store::Settings()->enabled`): RhythmVerse on takes the
+   retail request path, RhythmVerse off is a pure pass-through, and `store_trace` still forces it
+   for a diagnostic boot on a profile whose switch is off.
+2. **The search seed opened the search surface.** `store_search_seed` filled the field through
+   `SearchSetText`, which is the *typing* path and sets `g_open`, so a seeded boot drew
+   `Search: bush` over the store's front menu and the browser and P7's credit line never appeared.
+   `SearchSeedField` fills the field without opening the surface; `store_search`'s `TestSeedField`
+   pins both sides (typing still opens it, the seed does not).
+
+**Harness fixes this walk forced** — each one a measured false negative, not a preference:
+
+- the store row is OCR'd at least three ways (`HYTH VERSE CUSTOM`, `RHYTHMVERSE CUSTOM`, `RHY
+  HMVERSECUST M`), so the row check asks for `CUST`; the **header** draws the word in full
+  (`RHYTHMVERSE`), which is what the heading check asks for;
+- the credit line is outranked by the loading sentence while the catalogue holds no offer, so it is
+  read once the first page has landed, not on the entry capture;
+- `store_fetch: the served page carries N offer(s)` is **trace-only**; the shipping line is
+  `store_fetch: served '<path>'`, which is what the leg asserts — waiting on the trace line cost a
+  300 s timeout;
+- the Install leg's Play press is retried, with a keyboard accept after it: the generated payload
+  patches the menu in the same millisecond as the first click (`menu_filter: patched a file …`, the
+  panel reporting `available=false`), and a click into that window is dropped — measured as six
+  minutes on the main menu;
+- the Install leg reads its title out of `Store.log` itself (the fallback lived in the Store leg, so
+  `-Legs Install -Reuse` could never find it);
+- `Enter-MainMenu` uses the leg's own boot budget (40 accepts) instead of a fixed 300 s, because the
+  boot that follows a library change runs the discovery pass first;
+- the Install leg asserts `dlc: N saved-game library package(s) presented as content type`; the
+  Downloaded matcher's line belongs to the Store leg, since the index is built only when the store
+  asks for a page;
+- the control leg asserts three row spellings (`HYTH VERSE`, `RHYTHMVERSE`, `CUSTOMS`), because a
+  single negative check on a fragment can miss a drawn row.
+
+**Environment, stated plainly.** This 4-core machine drops the GPU ringbuffer
+(`PRIMARY RINGBUFFER … still failing after 8 resync(s); dropping the rest of the ring`) on roughly
+one boot in three; four runs of this record died that way (the preserved attempts `-12`, `-13` and
+two `Store`/`Install` retries) and each was retried, never counted as a store result. The abandoned
+runs stay beside the evidence.
+
+**Tests**: `ctest` in `out/build/win-amd64-debug` is **47/47** (`store_search` grown by
+`TestSeedField`, **402 checks**), and the release preset builds and links `rb_blitz.exe`.
+
+**P8's `Exit:` line is met**: the harness enables the switch through the UI, walks Recent, Search,
+the details page and a download, asserts the install on disk, in the receipt and in the log, and
+finds the song on the title's own list on the next boot — with the control leg measuring the
+switch's silence in the same run.
 
 ---
 

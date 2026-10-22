@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// The store's Downloaded state (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md §3.2):
+// The store's Downloaded state (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md §3.2):
 // an artist + title index of the songs this boot's DLC library actually declares, so an offer the
 // player already has shows as Downloaded without a receipt and without owner-account state.
 //

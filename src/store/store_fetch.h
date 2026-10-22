@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3's data lane, the guest half (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P3's data lane, the guest half (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §5/P3): answer a store netcache request from src/store/store_serve.h.
 //
 // The measured chain (2026-10-20, `out/_swap/blitz_image.bin` + the recompiled sources):

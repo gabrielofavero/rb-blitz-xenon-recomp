@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P5 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P5 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §3.1, §5/P5): the download pipeline's policy core.
 //
 // Everything a download decides that can be decided without a network, a thread or a boot lives

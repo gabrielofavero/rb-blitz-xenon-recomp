@@ -408,6 +408,20 @@ bool SearchSetText(std::string_view utf8) {
   return true;
 }
 
+bool SearchSeedField(std::string_view utf8) {
+  const std::lock_guard<std::mutex> lock(g_mutex);
+  if (!g_text.Set(utf8)) {
+    return false;
+  }
+  InvalidateInFlightLocked();
+  g_offers.clear();
+  g_failure.clear();
+  g_show = false;
+  g_state = SearchState::kEditing;
+  // Deliberately not `g_open = true`: the field is seeded, the surface is not entered.
+  return true;
+}
+
 SearchSubmit SearchSubmitQuery() {
   const std::lock_guard<std::mutex> guard(g_mutex);
   SearchSubmit out;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P7 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P7 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §5/P7): the words the store draws about itself - the **credit line**, the **empty state** and the
 // **offline text** - and the one rule that decides which of them a player sees.
 //

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P4 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P4 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §1.5, §5/P4): the search's *data* half - the typed query, its transport across the guest
 // bridge, the request it becomes, and the answer it accepts.
 //
@@ -215,6 +215,13 @@ bool SearchApplyKey(std::string_view token);
 // The whole-string transport. Trims; refuses control characters, invalid UTF-8, or a field longer
 // than `kMaxSearchChars`.
 bool SearchSetText(std::string_view utf8);
+// The diagnostic seed's entry point (`store_search_seed`): fills the field exactly like
+// `SearchSetText` but does **not** open the surface. The strip belongs to the key pages
+// (`StatusTextLocked`), and a seed that opened it drew `Search: <query>` over the store's own
+// screens until a key page was entered and left - measured 2026-10-22 in the acceptance boot,
+// where that line covered the credit the store has to carry. The Search row still opens the keys,
+// which then show the seeded field, and Done still submits it.
+bool SearchSeedField(std::string_view utf8);
 
 // Validates the field and, when it may be sent, bumps the generation and answers the request the
   // worker should perform. Refusals are states, not exceptions: too short, the master off, and the

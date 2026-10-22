@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3's album art (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md §5/P3): the names,
+// P3's album art (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md §5/P3): the names,
 // the URL rule and the texture cache that sit between the offer record and the retail art loader.
 //
 // ## What the retail side does (measured 2026-10-21)
