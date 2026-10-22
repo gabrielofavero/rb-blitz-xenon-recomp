@@ -490,6 +490,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         note("hiding the details page's preview row was refused: " + why);
       }
       why.clear();
+      // `refresh_buttons` gates the Downloaded row on the offer's *native* `is_purchased`, which a
+      // data-only custom never has, so the gate is redirected to the record's own key
+      // (store_payload.h).
+      if (!store::UseDataForDownloadedRow(&info_roots, &why)) {
+        note("redirecting the details page's Downloaded row was refused: " + why);
+      }
+      why.clear();
       // The native `set_offer` enumeration reports an error for a served offer, so the browser's A
       // press populates the details screen directly (store_payload.h).
       if (!store::ShowOfferDetailsDirectly(&info_roots, &why)) {

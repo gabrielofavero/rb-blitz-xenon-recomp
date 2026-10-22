@@ -548,6 +548,91 @@ bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 
 namespace {
 
+// `{offer is_purchased}` - the **native** read. The offer object's own message handler answers
+// `is_purchased` from its commerce state, so a data key of that name is never consulted: measured
+// 2026-10-22 with the record carrying `(is_purchased TRUE)` (the trace line counted 2 of 99 marked)
+// the details page drew Exit alone (`out/_swap/store-probe/20261022-091435`). The handler is
+// `sub_82453928`, whose literals are the offer properties it answers itself (`get_data`,
+// `has_data`, `offer_type`, `year_released`, `genre`, `is_purchased`, ...).
+bool IsNativePurchasedRead(const Node& node) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() == 2 &&
+         node.kids[0].tag == ui::dtb::kVar && node.kids[0].text == "offer" &&
+         IsSymbol(node.kids[1], "is_purchased");
+}
+
+// The replacement is the **data** read retail's own method already uses for `preview_audio`
+// (`{offer get_data (preview_audio)}`): a one-component path, which the offer's walk resolves
+// (unlike the two-component `(rank <part>)` that `UnrollOfferDifficulty` had to replace).
+bool IsDataPurchasedRead(const Node& node) {
+  if (node.tag != ui::dtb::kCommand || node.kids.size() != 3) return false;
+  if (node.kids[0].tag != ui::dtb::kVar || node.kids[0].text != "offer") return false;
+  if (!IsSymbol(node.kids[1], "get_data")) return false;
+  const Node& path = node.kids[2];
+  return path.tag == ui::dtb::kArray && path.kids.size() == 1 &&
+         IsSymbol(path.kids[0], "is_purchased");
+}
+
+Node DataPurchasedRead() {
+  return Node::Command(
+      {Node::Var("offer"), Node::Symbol("get_data"), Node::Array({Node::Symbol("is_purchased")})});
+}
+
+size_t RewritePurchasedReads(Node& node) {
+  size_t rewritten = 0;
+  for (Node& kid : node.kids) {
+    if (IsNativePurchasedRead(kid)) {
+      kid = DataPurchasedRead();
+      ++rewritten;
+      continue;
+    }
+    rewritten += RewritePurchasedReads(kid);
+  }
+  return rewritten;
+}
+
+bool HasDataPurchasedRead(const Node& node) {
+  if (IsDataPurchasedRead(node)) return true;
+  for (const Node& kid : node.kids) {
+    if (HasDataPurchasedRead(kid)) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+bool UseDataForDownloadedRow(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* method = nullptr;
+  for (Node& root : *store_info_roots) {
+    method = FindNamedMethod(root, "store_info_panel", "refresh_buttons");
+    if (method != nullptr) {
+      break;
+    }
+  }
+  if (method == nullptr) {
+    return refuse("the record carries no store_info_panel refresh_buttons method");
+  }
+  if (HasDataPurchasedRead(*method)) {
+    if (why != nullptr) why->clear();  // already rewritten
+    return true;
+  }
+  if (RewritePurchasedReads(*method) == 0) {
+    return refuse("refresh_buttons has no `{offer is_purchased}` gate to redirect");
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
 // Where a `{<receiver> <method> ...}` command sits inside its parent's child list. The append below
 // wants the command's *sibling* position, not a copy of it.
 struct CommandLocation {

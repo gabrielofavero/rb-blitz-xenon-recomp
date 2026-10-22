@@ -267,32 +267,37 @@ void TestSongMapping() {
   CHECK_STR_EQ(offer.name, "The People That We Love");
   CHECK_STR_EQ(offer.artist, "Bush");
   CHECK_EQ(offer.year_released, 2001);
-  // The tier the difficulty meter draws, verbatim from the catalogue, and 0 for a part the song
-  // does not chart (the row then reads the locale's `no_part`).
-  CHECK_EQ(offer.diff_guitar, 4);
-  CHECK_EQ(offer.diff_drum, 3);
-  CHECK_EQ(offer.diff_bass, 3);
-  CHECK_EQ(offer.diff_vocals, 3);
+  // The value the difficulty meter draws, which is the catalogue's tier moved onto the meter's own
+  // scale: measured on screen 2026-10-22, the meter lights `id - 1` pips for id 1..6, so tier N is
+  // sent as N + 1 and tier 0 (a part the song does not chart) stays 0, which draws `no_part`.
+  CHECK_EQ(offer.diff_guitar, 5);
+  CHECK_EQ(offer.diff_drum, 4);
+  CHECK_EQ(offer.diff_bass, 4);
+  CHECK_EQ(offer.diff_vocals, 4);
   CHECK_EQ(offer.diff_keys, 0);
   // The rank is the retail schema's own value, a different number from the tier.
   CHECK_EQ(offer.rank_guitar, 221);
   CHECK_EQ(offer.rank_drum, 0);
 
-  // A tier outside the meter's scale is clamped, not passed on: the asset has five pips plus a
-  // devil icon, so 6 is the ceiling and a negative is "no part".
-  SongFile odd = song;
-  odd.difficulty[slot(rb_blitz::store::Instrument::kGuitar)] = 9;
-  odd.difficulty[slot(rb_blitz::store::Instrument::kDrums)] = -2;
-  const Offer clamped = OfferFromSong(odd);
-  CHECK_EQ(clamped.diff_guitar, 6);
-  CHECK_EQ(clamped.diff_drum, 0);
+  // The ends of the scale: the easiest chart draws one pip (it is not a missing part), an
+  // unplayable one (the API publishes 7) draws the five the meter has, and a negative is "no part".
+  SongFile edges = song;
+  edges.difficulty[slot(rb_blitz::store::Instrument::kGuitar)] = 1;
+  edges.difficulty[slot(rb_blitz::store::Instrument::kDrums)] = 6;
+  edges.difficulty[slot(rb_blitz::store::Instrument::kBass)] = 9;
+  edges.difficulty[slot(rb_blitz::store::Instrument::kVocals)] = -2;
+  const Offer shifted = OfferFromSong(edges);
+  CHECK_EQ(shifted.diff_guitar, 2);
+  CHECK_EQ(shifted.diff_drum, 6);
+  CHECK_EQ(shifted.diff_bass, 6);
+  CHECK_EQ(shifted.diff_vocals, 0);
 
   // Both writers carry the keys the payload reads (`(diff_<part>)`), and the compiled one as
   // integers.
   std::string why;
   const std::string text = BuildMenuText({offer}, &why);
   CHECK_TRUE(why.empty());
-  CHECK_TRUE(text.find("(diff_guitar 4)") != std::string::npos);
+  CHECK_TRUE(text.find("(diff_guitar 5)") != std::string::npos);
   CHECK_TRUE(text.find("(diff_keys 0)") != std::string::npos);
   CHECK_TRUE(text.find("(rank_guitar 221)") != std::string::npos);
   const std::vector<uint8_t> bytes = BuildMenuRecord({offer}, &why);
@@ -308,7 +313,7 @@ void TestSongMapping() {
     if (field.tag != rb_blitz::ui::dtb::kArray || field.kids.size() < 2) continue;
     if (field.kids[0].tag != rb_blitz::ui::dtb::kSymbol) continue;
     if (field.kids[0].text == "diff_guitar" && field.kids[1].tag == rb_blitz::ui::dtb::kInt &&
-        field.kids[1].scalar == 4) {
+        field.kids[1].scalar == 5) {
       diff_ok = true;
     }
   }

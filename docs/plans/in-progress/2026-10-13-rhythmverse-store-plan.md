@@ -24,9 +24,15 @@ blocking items are exited 2026-10-21**: the draw-time null is the details panel'
 against a pair's *first* element); the record now carries `rank_<part>` keys and the payload unrolls
 the panel's loop onto them, the symbol `type` and the delivery are on by default, the browser draws
 all 24 titles, and A opens `store_info_screen` with the offer's own data (§5/P3 exit record, boot
-`out/_swap/store-probe/20261021-190304`). The phase stays **open on its own `Exit:` line's
-`art`**: serving album art needs a runtime PNG→texture encoder, and the Downloaded matcher has not
-been read against a real library yet.
+`out/_swap/store-probe/20261021-190304`). **P3's `Exit:` line is met 2026-10-22**: album art draws
+from a runtime PNG→texture encoder (§5/P3 art record), the Downloaded matcher reads a real package
+and a real **multi-song pack** (25 songs from one package, `declares 25 song(s) across 21
+package(s)`), one visit carries four API pages (99 offers), the difficulty meter draws the
+catalogue's tier per part with `NO PART` only where it publishes 0, and a marked offer's details
+page draws retail's own **DOWNLOAD AGAIN** row (§5/P3 close-out record, boots
+`out/_swap/store-probe/20261022-084741`, `-090627`, `-091435`, `-100814`, `-101027`). The meter's two
+honest limits - no devil, no sixth pip - are in
+[known-issues.md](../../reference/known-issues.md).
 **P5's pipeline landed the same
 day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
 starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
@@ -1292,7 +1298,8 @@ message handler) via `sub_8275C6C0` and the DTA evaluator (`rb_blitz_165.log`).
   "manually installed DLC and multi-song packs match without a store receipt" (the matcher is built
   and wired, but no boot has read it against a real library). Also not done: the difficulty display
   reads `NO PART` where the catalogue publishes no rank, and page 2+ is not requested (one page of
-  24 offers is shown).
+  24 offers is shown). **Superseded 2026-10-22 by the P3 close-out record below**: the matcher reads
+  a real package, the list carries four API pages, and the meter draws the catalogue's difficulty.
 
 **P3 art record (2026-10-21, late evening) - album art draws, and the phase's last content exit is
 met.** A cover now goes catalogue → worker → platform texture → the retail `load_art` seam → the
@@ -1357,6 +1364,103 @@ Sarah McLachlan's *Surfacing* cover over `BUILDING A MYSTERY / SARAH MCLACHLAN /
 - **P3 state after this record**: art is done on screen. Left open in the phase: the Downloaded
   matcher measured on a real library, page 2+ (the catalogue serves page 1), and the difficulty
   display's `NO PART` where the catalogue publishes no rank.
+
+**P3 close-out record (2026-10-22) — the matcher reads a real package, the list carries four API
+pages, and the meter draws the catalogue's difficulty.** All three remaining items were finished
+against measurements, not assumptions.
+
+- **The Downloaded matcher: a real package was downloaded and read.** The test library is one
+  RhythmVerse package (`out/_swap/dlclib/45410914/00000002/775D9F4AD487454E82BE29DCF31CBCF9`,
+  5,419,008 bytes, "Sarah McLachlan - Building a Mystery v2.0"), and three boots read it as
+  **0 songs** while reporting no failure at all. Two causes, both fixed:
+  - **The file's shape.** Dumped out of the container (the STFS directory names `songs/songs.dta`,
+    1261 bytes; the text sits at offset 5,414,960), a CON's metadata is
+    `('o454039871_buildingamyster' ('name' "Building a Mystery") ('artist' "Sarah McLachlan")
+    ('song' ('name' "songs/o454.../o454...") ...))` — **no `(songs ...)` wrapper**, and the
+    display `name`/`artist` sit on the **record**, while the `song` node names only the stream.
+    `ReadSongMetadata` read `title`/`artist` from inside `song`, so the record parsed with two
+    empty fields, and `LoadedSongIndex::Add` refuses an empty artist or title *silently*. It now
+    falls back to the record's `title`, then the record's `name`, and to the record's `artist`;
+    the song node's own fields still win. `ReadDeviceSongMetadata` also warns when a parsed entry
+    is missing a field, because that silent refusal is what made three boots unreadable.
+  - **The lookup.** `Entry::ResolvePath("\\songs\\songs.dta")` answered null for a device that
+    plainly carries the file, so the reader now walks `Entry::children()` itself (case-insensitive)
+    and names the level it could not find.
+  - **Measured after the fix** (`out/_swap/store-probe/20261022-081144`):
+    `store_library: the loaded DLC library declares 1 song(s) across 1 package(s) (0 could not be
+    mounted) in 0 ms` and `store_fetch: the served page carries 99 offer(s), 1 of them marked
+    Downloaded` — the marked offer is row 1, "Building a Mystery", the song the package carries.
+    `menu_music_pool` grew a case built from the real CON text (**4504** checks).
+- **Page 2+: retail has no paging, so the catalogue accumulates pages into the one list.**
+  `song_select`'s PageUp/PageDown are `transition_to inbox_screen`/`song_select_screen`, not page
+  turns, so there is nothing to reimplement — the browser is one list and the store's job is to
+  fill it. `store_catalogue_pages` (default **4**, clamped 1..20) fetches that many API pages on
+  one visit, publishing the offers after each page so the list fills progressively, and stopping
+  early when the API reports no more pages. Measured: `page 1..4 -> 24,25,25,25 eligible offers
+  (99 total)` and `4 page(s) -> 99 offer(s) for the Recent list`; opening row **70** reached
+  **"Heart Full of Soul" / The Yardbirds**, which is API **page 4, index 16** — proof the list
+  carries page 2+ and not just the first page (`out/_swap/store-probe/20261022-082450`).
+- **The difficulty meter now draws the catalogue's tier.** Retail's details panel reads
+  `{offer get_data (rank <part>)}` and converts the *online rank* with `song_mgr rank_tier`, whose
+  thresholds this build does not have — which is why every part read `NO PART`. The catalogue
+  publishes the tier itself (`diff_drums`/`diff_guitar`/... 0..6, where 0 means the song does not
+  chart that part), so `UnrollOfferDifficulty` rewrites the panel's loop into five blocks that read
+  `(diff_<part>)` and hand the value to `set_inst_difficulty` unchanged; `Offer` carries the five
+  values and both record writers emit them.
+  - **The meter's own scale was measured, not assumed.** Its asset
+    (`ui/difficulty_meter/gen/diff_meter_all_inst.milo`) has five pips (`diff_1.mesh` ..
+    `diff_5.mesh`) plus `icon_devil.tex`, so the guess was "tier N draws N pips". Three offers with
+    known catalogue tiers say otherwise: `otro-dia-que-va` (5/4/3/3/0) drew **4/3/2/2/NO PART**,
+    `sylvia` (4/3/1/1/3) drew **3/2/0/0/2**, `heart-full-of-soul` (4/3/3/3/0) drew
+    **3/2/2/2/NO PART** — always `tier - 1`. A deliberate one-step shift
+    (`out/_swap/store-probe/20261022-083045`) lit **all five pips at id 6**, which fixes the meter's
+    scale at `0 = NO PART`, `1..6 = 0..5 pips`. `OfferFromSong` therefore sends
+    `tier == 0 ? 0 : min(tier + 1, 6)`: the easiest chart draws one pip instead of a row that reads
+    like a missing part, tier 6 and the API's 7 (an unplayable 2x-bass chart) draw the five the
+    meter has, and 0 still draws `NO PART`.
+  - **Cost, stated plainly**: the devil icon is never asked for — nothing tells us which value
+    draws it — and the meter cannot show a sixth pip. Both are written down in
+    `docs/reference/known-issues.md`.
+  - **Confirmed on the shipped binary** (`out/_swap/store-probe/20261022-084741`, release,
+    `--dlc_root=<test library> --store_trace=1`, no other switch): *Otro Día Que Va*
+    (catalogue 5/4/3/3/0) draws **5/4/3/3 pips and `NO PART` on the keys row**, and that boot also
+    reported `declares 1 song(s)`, `page 4 -> 25 ... (99 total)` and `1 of them marked Downloaded`.
+- **The last two halves of the `Exit:` line, closed the same day.**
+  - **Multi-song packs.** The retail library in `game/dlc` carries the RB Blitz soundtrack pack in
+    **one** package (803,606,528 bytes, `songs/songs.dta` plus 25 `.mogg` files), and a boot with it
+    reports `declares 25 song(s) across 21 package(s) (0 could not be mounted) in 29 ms`
+    (`out/_swap/store-probe/20261022-090627`) - one package, 25 (artist, title) pairs in the index.
+    The other 20 packages declare nothing (their own metadata layout is a separate question, not the
+    matcher's). A second RhythmVerse download (*Otro Día Que Va*, 16,080,896 bytes) then made the
+    plural case measurable too: `declares 2 song(s) across 2 package(s)` and `99 offer(s), 2 of them
+    marked Downloaded` (`-091435`).
+  - **The Downloaded affordance is on the page, and its cause was not what the plan assumed.** The
+    retail method was printed out of the shipped record rather than guessed at (a new read-only
+    mode, `rb_blitz_store_payload_tests store-edit <dtb> buttons`), and its row is inserted by
+    `{if_else {offer is_purchased} {insert_elem buttons 0 store_download_again}
+    {if {this purchase_allowed offer} {insert_elem buttons 0 store_buy_now}}}` - so it does **not**
+    depend on `purchase_allowed`, the gate this build keeps false. The problem is that
+    `is_purchased` is answered **natively** by the offer object's own message handler
+    (`sub_82453928`, whose literals are `get_data`, `has_data`, `offer_type`, `year_released`,
+    `genre`, `is_purchased`, ...) from a commerce state a data-only custom never has, so the
+    record's key was never read and the marked offer's page drew Exit alone (`-091435`).
+    `store::UseDataForDownloadedRow` redirects that one gate to the record's key
+    (`{offer get_data (is_purchased)}`, the same one-component data read retail itself uses for
+    `preview_audio`), and the key is now written on **every** offer as `(is_purchased 1)` /
+    `(is_purchased 0)`: `get_data` on a missing key walks a **null** - measured, `read of
+    0x00000000` on an unmarked offer's page (`-094505`) - which is the same trap the two-component
+    `(rank <part>)` read set. Measured after the fix: marked offer `OTRO DIA QUE VA / DOWNLOAD AGAIN
+    / EXIT` with **0** fault reads (`-101027`), unmarked offer `EXIT` only and no fault (`-100814`).
+- **Tests**: `store_metadata` **72** (the tier mapping's ends), `store_payload` **254** (the
+  Downloaded-row gate: native read gone, data read present, both rows kept, idempotency, and both
+  refusals), `store_serve` (the key on every offer, `1` for the marked one), `menu_music_pool`
+  **4504**, `menu_payload` 109; full `ctest` **45/45** in `out/build/win-amd64-debug`.
+- **P3 state after this record**: the phase's `Exit:` line is met and every item on it is measured.
+  Recent lists the catalogue with art, a part with no chart reads `NO PART` while the others show
+  the catalogue's difficulty, the list reaches past the first API page, an installed package is
+  marked **and shows Download Again**, and a multi-song package contributes every song it declares.
+  `known-issues.md` keeps the meter's two limits (no devil icon, no sixth pip), the native-property
+  trap and the DXT5 texture loss.
 
 P3 inherits three things from P2 (§5/P2 record): **step 0**, locating and hooking the native fetch
 entry behind `store_panel request` (nothing can be served or observed before it) — **done, see the

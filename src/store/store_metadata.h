@@ -137,25 +137,28 @@ struct Offer {
   int rank_bass = 0;
   int rank_vocals = 0;
   int rank_keys = 0;
-  // The catalogue's own difficulty **tier** per part (`diff_*` in the API, 0..6). This is what the
-  // store's difficulty meter draws, as `(diff_<part> N)` keys: the panel's
-  // `{this set_inst_difficulty <id> <tier> TRUE}` takes a tier, and measured 2026-10-21 the asset it
-  // drives has exactly five pips plus a devil icon (`ui/difficulty_meter/gen/diff_meter_all_inst.milo`:
-  // `diff_1.mesh` ... `diff_5.mesh`, `icon_devil.tex`) - the 0..6 scale the `diff_*` fields use,
-  // where 0 means the song has no chart for that part and the row reads `NO PART` (`no_part` in the
-  // locale). Retail's own path converts an *online rank* to a tier with `song_mgr rank_tier`, which
-  // needs thresholds this build does not have; the catalogue already publishes the tier, so the
-  // payload hands that through instead (store_payload.h's `UnrollOfferDifficulty`).
+  // The value the store's difficulty meter draws per part, written as `(diff_<part> N)` keys. The
+  // panel's `{this set_inst_difficulty <id> <tier> TRUE}` takes it unchanged, and the asset it
+  // drives has exactly five pips plus a devil icon
+  // (`ui/difficulty_meter/gen/diff_meter_all_inst.milo`: `diff_1.mesh` .. `diff_5.mesh`,
+  // `icon_devil.tex`). Measured on screen 2026-10-22, the meter lights `id - 1` pips: id 6 lights
+  // all five. So this field is **the meter's own scale**, not the catalogue's tier - 0 draws
+  // `NO PART` (`no_part` in the locale), and `OfferFromSong` maps the API's 1..6 tiers onto 2..6
+  // (the mapping and its three measurements are commented there). Retail's own path converts an
+  // *online rank* to a tier with `song_mgr rank_tier`, whose thresholds this build does not have;
+  // the catalogue publishes the tier itself, so the payload hands that through instead
+  // (store_payload.h's `UnrollOfferDifficulty`).
   int diff_guitar = 0;
   int diff_drum = 0;
   int diff_bass = 0;
   int diff_vocals = 0;
   int diff_keys = 0;
-  // True when the song is already in the loaded DLC library (plan §3.2). It is written as the
-  // offer's `is_purchased` key, which is what the retail scripts read as the Downloaded state:
-  // `refresh_buttons` inserts `store_download_again` for a purchased offer and nothing but Exit
-  // otherwise, and `purchase_allowed` (and with it the price chrome) needs `is_available`, which
-  // a free custom never sets. A receipt never sets this flag - only the loaded library does.
+  // True when the song is already in the loaded DLC library (plan §3.2). It is written on **every**
+  // offer as `(is_purchased 1)` / `(is_purchased 0)`, which the payload's rewrite of
+  // `store_info_panel.refresh_buttons` reads as `{offer get_data (is_purchased)}`: a present key is
+  // what makes the details page insert `store_download_again`, and a missing one walks a null (both
+  // measured 2026-10-22). Retail's own gate reads the offer's native `is_purchased` instead, which a
+  // data-only custom never has. A receipt never sets this flag - only the loaded library does.
   bool downloaded = false;
 };
 

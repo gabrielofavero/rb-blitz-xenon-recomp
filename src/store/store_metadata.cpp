@@ -225,12 +225,21 @@ Offer OfferFromSong(const SongFile& song) {
   offer.rank_bass = rank(Instrument::kBass);
   offer.rank_vocals = rank(Instrument::kVocals);
   offer.rank_keys = rank(Instrument::kKeys);
-  // The tier the difficulty meter draws, straight from the catalogue (0 = the song has no chart
-  // for that part). Values outside the meter's 0..6 scale are clamped rather than trusted: a 7
-  // would ask the panel for a sixth pip that does not exist.
+  // The value the difficulty meter draws, as `(diff_<part> N)` keys. The panel's
+  // `{this set_inst_difficulty <id> <tier> TRUE}` is passed straight through by the payload, and
+  // the meter lights `id - 1` pips for `id` 1..6 - measured on screen 2026-10-22 against three
+  // offers with known catalogue tiers: `otro-dia-que-va` (5/4/3/3/0) drew 4/3/2/2/NO PART,
+  // `sylvia` (4/3/1/1/3) drew 3/2/0/0/2, and `heart-full-of-soul` (4/3/3/3/0) drew 3/2/2/2/NO PART
+  // (`out/_swap/store-probe/20261022-081144`, `-082057`, `-082450`). A deliberate one-step shift
+  // (`out/_swap/store-probe/20261022-083045`) lit all five pips at id 6, so the meter's own scale
+  // is 0 = `NO PART`, 1..6 = 0..5 pips. The catalogue's tiers are 1..6, so the mapping below keeps
+  // tier 0 as `NO PART` and moves 1..6 onto 2..6: the easiest chart draws one pip instead of a row
+  // that reads like a missing part, and tier 6 (and the API's 7, an unplayable chart) draws the
+  // five the meter has. The devil icon is never asked for: nothing tells us which value draws it.
   const auto tier = [&song](Instrument instrument) {
     const int value = song.difficulty[static_cast<std::size_t>(instrument)].value_or(0);
-    return std::clamp(value, 0, 6);
+    if (value <= 0) return 0;
+    return std::min(value + 1, 6);
   };
   offer.diff_guitar = tier(Instrument::kGuitar);
   offer.diff_drum = tier(Instrument::kDrums);
@@ -309,7 +318,7 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
     // The Downloaded state (plan §3.2), as the key the retail scripts read it from. Written only
     // when true: an absent key is falsey, and a receipt never sets it - only the loaded library.
     if (offer.downloaded) {
-      fields.push_back(Node::Array({Symbol("is_purchased"), Symbol("TRUE")}));
+      fields.push_back(Node::Array({Symbol("is_purchased"), Node::Int(offer.downloaded ? 1 : 0)}));
     }
     rows.push_back(Node::Array(std::move(fields)));
   }
@@ -391,11 +400,15 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why) {
     for (const auto& extra : ExtraIntKeys(offer)) {
       out += "    (" + std::string(extra.first) + " " + std::to_string(extra.second) + ")\n";
     }
-    if (offer.downloaded) {
-      // The Downloaded state (plan §3.2): `refresh_buttons` reads `{offer is_purchased}` and shows
-      // the Download Again row for it. Absent = falsey.
-      out += "    (is_purchased TRUE)\n";
-    }
+    // The Downloaded state (plan §3.2). Retail's `store_info_panel.refresh_buttons` inserts
+    // `store_download_again` for it, but its own gate reads the offer's **native** `is_purchased`,
+    // which the payload redirects to this key (`store_payload.h`, `UseDataForDownloadedRow`).
+    //
+    // Written on **every** offer, as an int: a missing key makes that data read walk a null
+    // (measured 2026-10-22, `read of 0x00000000` on an unmarked offer's details page,
+    // `out/_swap/store-probe/20261022-094505`), and an int is the one value whose truth is not a
+    // spelling question - 1 shows the row, 0 leaves the page as retail draws it.
+    out += offer.downloaded ? "    (is_purchased 1)\n" : "    (is_purchased 0)\n";
     // `is_available` is deliberately not written: `purchase_allowed` needs it (so an absent key
     // keeps the price block and the Buy Now row from being built), and writing it FALSE made the
     // details path answer `{offer is_completely_unavailable}` true - measured 2026-10-21, the A

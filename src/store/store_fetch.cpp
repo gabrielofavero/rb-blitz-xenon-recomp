@@ -210,8 +210,8 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
     const std::string_view text(reinterpret_cast<const char*>(record.bytes.data()),
                                 record.bytes.size());
     std::size_t marked = 0;
-    for (std::size_t at = text.find("(is_purchased TRUE)"); at != std::string_view::npos;
-         at = text.find("(is_purchased TRUE)", at + 1)) {
+  for (std::size_t at = text.find("(is_purchased 1)"); at != std::string_view::npos;
+       at = text.find("(is_purchased 1)", at + 1)) {
       ++marked;
     }
     std::size_t offers = 0;

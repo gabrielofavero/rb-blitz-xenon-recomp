@@ -129,6 +129,22 @@ bool AlwaysShowOfferDetails(std::vector<ui::dtb::Node>* store_info_roots, std::s
 // Idempotent; refused, before any edit, when the panel or the method is missing.
 bool ShowOfferDetailsDirectly(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
+// The details page's Downloaded row. `store_info_panel.refresh_buttons` (printed out of the shipped
+// record 2026-10-22) inserts `store_download_again` under `{if_else {offer is_purchased}
+// {insert_elem buttons 0 store_download_again} {if {this purchase_allowed offer}
+// {insert_elem buttons 0 store_buy_now}}}` - so the row does **not** depend on `purchase_allowed`,
+// which is what this build keeps false. The gate itself is the problem: `is_purchased` is answered
+// **natively** by the offer object's own message handler (`sub_82453928`, whose literals include
+// `get_data`, `has_data`, `offer_type`, `year_released`, `genre`, `is_purchased`), from a commerce
+// state a data-only custom never has, so the record's `(is_purchased TRUE)` was ignored and a
+// marked offer's page drew Exit alone (measured 2026-10-22, `out/_swap/store-probe/20261022-091435`;
+// the same record counted as marked in the trace). This replaces that gate with the **data** read
+// retail itself uses for `preview_audio` - `{offer get_data (is_purchased)}` - which the offer walk
+// resolves like any other one-component key. An offer without the key reads a null, so its page is
+// unchanged (Exit only). Idempotent; refused, before any edit, when `refresh_buttons` is missing or
+// carries no such gate.
+bool UseDataForDownloadedRow(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
 // The details page's Preview Audio row is built from `refresh_buttons`' own preview block, and its
 // gate is `{&& is_song {offer has_data preview_audio} {is_allowed_to_preview_offer offer}}`. The
 // record must carry `preview_audio` (its previous statement reads it unconditionally, and an absent

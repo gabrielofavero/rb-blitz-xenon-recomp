@@ -168,8 +168,9 @@ void TestMenuText() {
   // Buy Now row is ever built, and writing it FALSE made `{offer is_completely_unavailable}` answer
   // true (measured 2026-10-21: the A press landed on the unavailable screen).
   CHECK_FALSE(Contains(text, "is_available"));
-  // Not downloaded: no `is_purchased` key at all (absent is falsey).
-  CHECK_FALSE(Contains(text, "is_purchased"));
+  // Not downloaded: the key is **present and 0**. The payload redirects `refresh_buttons`' gate to
+  // this key, and a missing one made that read walk a null (measured 2026-10-22).
+  CHECK_TRUE(Contains(text, "(is_purchased 0)"));
 
   // A page with no offers is valid (P3's exit requires empty/filtered-only pages to work).
   why.clear();
@@ -227,12 +228,14 @@ void TestDownloadedMark() {
   offers[1].artist = "Kate Bush";
   rb_blitz::store::SetOfferSource([offers] { return offers; });
 
-  // No predicate: both offers are unmarked and the record carries no `is_purchased` at all.
+  // No predicate: both offers are unmarked, and each body carries `(is_purchased 0)` rather than
+  // omitting the key.
   rb_blitz::store::SetDownloadedPredicate({});
   CHECK_FALSE(rb_blitz::store::IsDownloadedOffer(offers[0]));
   std::string why;
   const std::string unmarked = BuildMenuText(rb_blitz::store::OffersForPage(), &why);
-  CHECK_FALSE(Contains(unmarked, "is_purchased"));
+  CHECK_FALSE(Contains(unmarked, "(is_purchased 1)"));
+  CHECK_TRUE(Contains(unmarked, "(is_purchased 0)"));
 
   // The predicate marks exactly one of the two.
   rb_blitz::store::SetDownloadedPredicate(
@@ -240,12 +243,12 @@ void TestDownloadedMark() {
   CHECK_FALSE(rb_blitz::store::IsDownloadedOffer(offers[0]));
   CHECK_TRUE(rb_blitz::store::IsDownloadedOffer(offers[1]));
   const std::string marked = BuildMenuText(rb_blitz::store::OffersForPage(), &why);
-  CHECK_TRUE(Contains(marked, "(is_purchased TRUE)"));
+  CHECK_TRUE(Contains(marked, "(is_purchased 1)"));
   // One occurrence only: the marked offer's. The other offer's body must stay unmarked (a page
   // that marks everything would make every song look installed).
-  const size_t first = marked.find("(is_purchased TRUE)");
+  const size_t first = marked.find("(is_purchased 1)");
   CHECK_TRUE(first != std::string::npos);
-  CHECK_TRUE(marked.find("(is_purchased TRUE)", first + 1) == std::string::npos);
+  CHECK_TRUE(marked.find("(is_purchased 1)", first + 1) == std::string::npos);
   // Every offer still carries the free-path signal: `is_available` is absent, so `purchase_allowed`
   // stays false and neither a price nor a Buy Now button is built.
   CHECK_FALSE(Contains(marked, "is_available"));

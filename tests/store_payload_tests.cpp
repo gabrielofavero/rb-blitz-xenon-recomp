@@ -1093,6 +1093,23 @@ int StoreEdit(const char* path, const char* which) {
   const std::string mode = which;
   std::string why;
   bool ok = false;
+  if (mode == "buttons") {
+    // Read-only: the details page's own button logic, printed before anything edits it. This is
+    // how the Downloaded affordance was read out of the shipped record rather than guessed at
+    // (2026-10-22: the marked offer's page drew only Exit).
+    const Node* buttons = nullptr;
+    for (const Node& root : roots) {
+      buttons = FindNamedMethodNode(root, "store_info_panel", "refresh_buttons");
+      if (buttons != nullptr) break;
+    }
+    if (buttons == nullptr) {
+      std::printf("store-edit: refresh_buttons not found in %zu root(s)\n", roots.size());
+      return 1;
+    }
+    std::printf("store-edit: refresh_buttons shape:\n");
+    PrintNode(*buttons, 0);
+    return 0;
+  }
   if (mode == "store") {
     ok = rb_blitz::store::UnrollOfferDifficulty(&roots, &why);
     std::printf("store-edit: difficulty loop -> %s (%s)\n", ok ? "edited" : "refused",
@@ -1110,7 +1127,11 @@ int StoreEdit(const char* path, const char* which) {
     const bool preview = rb_blitz::store::HidePreviewButton(&roots, &why);
     std::printf("store-edit: preview row -> %s (%s)\n", preview ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && preview;
+    why.clear();
+    const bool purchased = rb_blitz::store::UseDataForDownloadedRow(&roots, &why);
+    std::printf("store-edit: downloaded row -> %s (%s)\n", purchased ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && preview && purchased;
   }
   std::printf("store-edit: %s -> %s\n", mode.c_str(), ok ? "edited" : "refused");
   const Node* method = nullptr;
@@ -1180,6 +1201,97 @@ void TestPreviewButtonHidden() {
   why.clear();
   CHECK_FALSE(rb_blitz::store::HidePreviewButton(&other, &why));
   CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
+void TestDownloadedRowGate() {
+  BeginCase("the Downloaded row reads the record instead of the offer's native commerce state");
+
+  // `refresh_buttons`' measured shape, from the shipped record (printed 2026-10-22): the purchased
+  // branch inserts `store_download_again`, and its gate is the *native* `{offer is_purchased}`.
+  const auto insert = [](const char* row) {
+    return Node::Command({Symbol("insert_elem"), Symbol("buttons"), Node::Int(0), Symbol(row)});
+  };
+  const auto native_gate = [] {
+    // The record spells the receiver as a **variable** (`[0x02] offer` in the dump), not a symbol.
+    return Node::Command({Node::Var("offer"), Symbol("is_purchased")});
+  };
+  std::vector<Node> record = {
+      Node::Command(
+          {Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+           Node::Array(
+               {Symbol("refresh_buttons"), Node::Array({Node::Var("init")}),
+                Node::Command({Symbol("do"), insert("exit"),
+                               Node::Command({Symbol("if_else"), native_gate(),
+                                              Node::Command({Symbol("do"),
+                                                             insert("store_download_again")}),
+                                              Node::Command({Symbol("if"),
+                                                             Node::Command({Symbol("this"),
+                                                                            Symbol("purchase_allowed"),
+                                                                            Node::Var("offer")}),
+                                                             Node::Command({Symbol("do"),
+                                                                            insert("store_buy_now")})})})})})}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::UseDataForDownloadedRow(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* method = FindNamedMethodNode(record[0], "store_info_panel", "refresh_buttons");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+
+  // The gate is now `{offer get_data (is_purchased)}`; the native read is gone and both rows stay.
+  bool native_read = false;
+  bool data_read = false;
+  bool again_row = false;
+  bool buy_row = false;
+  const auto scan = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 2 &&
+        node.kids[0].text == "offer" && node.kids[1].text == "is_purchased") {
+      native_read = true;
+    }
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+        node.kids[0].text == "offer" && node.kids[1].text == "get_data") {
+      const Node& path = node.kids[2];
+      if (path.tag == rb_blitz::ui::dtb::kArray && path.kids.size() == 1 &&
+          path.kids[0].text == "is_purchased") {
+        data_read = true;
+      }
+    }
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+        node.kids[0].text == "insert_elem") {
+      if (node.kids.back().text == "store_download_again") again_row = true;
+      if (node.kids.back().text == "store_buy_now") buy_row = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan(*method, scan);
+  CHECK_FALSE(native_read);
+  CHECK_TRUE(data_read);
+  CHECK_TRUE(again_row);
+  CHECK_TRUE(buy_row);
+
+  // Idempotent: a second run changes nothing and still reports success.
+  const std::vector<Node> after_first = record;
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::UseDataForDownloadedRow(&record, &why));
+  CHECK_TRUE(TreeUnchanged(record, after_first));
+
+  // A record without the panel, or a method with no such gate, is refused untouched.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::UseDataForDownloadedRow(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+
+  std::vector<Node> no_gate = {
+      Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                     Node::Array({Symbol("refresh_buttons"), Node::Array({Node::Var("init")}),
+                                  Node::Command({Symbol("do"), insert("exit")})})}),
+  };
+  const std::vector<Node> no_gate_untouched = no_gate;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::UseDataForDownloadedRow(&no_gate, &why));
+  CHECK_TRUE(TreeUnchanged(no_gate, no_gate_untouched));
 }
 
 void TestAlbumArtLinked() {
@@ -1338,6 +1450,7 @@ int main(int argc, char** argv) {
   TestEveryUnavailableGuard();
   TestOfferDetailsDirect();
   TestPreviewButtonHidden();
+  TestDownloadedRowGate();
   TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();
   return rb_blitz::test::Finish();
