@@ -367,7 +367,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   const bool recomp_credits =
       records.contains("ulti/gen/credits.dtb") ||
       records.contains("ui/locale/gen/locale_credits_keep.dtb");
-  REXLOG_INFO("settings_menu: recompilation credit line {}",
+  REXLOG_INFO("settings_menu: recompilation credits {}",
               recomp_credits ? "added to the credits DTA the title loads"
                              : "not added (the credits DTA was not recognised)");
   for (const auto& locale : locale_set) {

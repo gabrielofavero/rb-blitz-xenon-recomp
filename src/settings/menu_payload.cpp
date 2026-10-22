@@ -36,21 +36,40 @@ bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_acti
 
 namespace {
 
-// The two credit sections the project prefixes, and the rows it puts there (owner request,
-// 2026-10-19). The retail DTA and the Ultimate payload's own DTA are told apart by the heading
-// of their first section; a file whose heading is neither is a different document and is left
-// alone.
+// The credit sections the project prefixes, and the rows it puts there (owner request,
+// 2026-10-19; the third-party thanks added 2026-10-21). The retail DTA and the Ultimate
+// payload's own DTA are told apart by the heading of their first section; a file whose heading
+// is neither is a different document and is left alone.
 constexpr std::string_view kRetailCreditsHeading = "Core Development Team";
 constexpr std::string_view kUltimateCreditsHeading =
     "Rock Band Blitz Ultimate 2.0 Development Team";
 constexpr std::string_view kRecompilationHeading = "Recompilation Project";
 constexpr std::string_view kRecompilationUltimateHeading =
     "Recompilation Project & Ultimate 2.0 Mod";
+constexpr std::string_view kThanksHeading = "Thanks To";
 constexpr std::string_view kDeveloperRole = "Developer";
 constexpr std::string_view kRecompilationDeveloperRole = "Recompilation Developer";
 constexpr std::string_view kUltimateDeveloperRole = "Ultimate 2.0 Developer";
 constexpr std::string_view kRecompilationName = "Gabriel Fávero";
 constexpr std::string_view kUltimateName = "Synchrony";
+
+// Everything the build stands on, under its own heading (owner request, 2026-10-21): the
+// recompiler it runs on and the research behind it, the Rock Band 3 recompilation whose hooks
+// are ported here, and the catalogue and asset tools that carry the content it shows. One table,
+// read by both credit files, so the two cannot drift. Both columns stay well inside what the
+// retail screen already draws - its own longest role is 53 characters, its longest name 36.
+struct CreditRow {
+  std::string_view role;
+  std::string_view name;
+};
+constexpr CreditRow kThanksRows[] = {
+    {"Recompiler", "ReXGlue Team"},
+    {"Static Recompiler", "XenonRecomp"},
+    {"Emulation Research", "Xenia Project"},
+    {"Rock Band 3 Recomp", "band3_recomp"},
+    {"Customs Store", "RhythmVerse"},
+    {"Asset Tooling", "MiloLib"},
+};
 
 bool IsArrayWithSymbol(const Node& node, std::string_view symbol) {
   return node.tag == ui::dtb::kArray && !node.kids.empty() &&
@@ -77,6 +96,17 @@ Node HeadingNode(std::string_view heading) {
 
 Node TitleNameNode(std::string_view role, std::string_view name) {
   return Node::Array({Node::Symbol("title_name"), Node::String(role), Node::String(name)});
+}
+
+bool IsBlankRoot(const Node& node) { return node.tag == ui::dtb::kArray && node.kids.empty(); }
+
+// The third-party thanks' heading and rows. The caller appends the one blank row retail puts
+// between two sections - unless the section that follows already opens with blanks (the
+// Ultimate payload's file carries sixteen).
+std::vector<Node> ThanksSection() {
+  std::vector<Node> nodes{HeadingNode(kThanksHeading)};
+  for (const CreditRow& row : kThanksRows) nodes.push_back(TitleNameNode(row.role, row.name));
+  return nodes;
 }
 
 // The first non-empty root, i.e. the first rendered section. The leading roots of both shipped
@@ -106,12 +136,16 @@ bool AddRecompilationCredits(std::vector<Node>* roots, bool ultimate, std::strin
       return false;
     }
     // The section goes where the official credits begin, after the file's leading blank rows,
-    // and one blank row separates it from "Core Development Team".
-    const std::vector<Node> added = {
+    // and one blank row separates each section from the next: the project's own row, then the
+    // third-party thanks, then "Core Development Team".
+    std::vector<Node> added = {
         HeadingNode(kRecompilationHeading),
         TitleNameNode(kDeveloperRole, kRecompilationName),
         Node::Array({}),
     };
+    const std::vector<Node> thanks = ThanksSection();
+    added.insert(added.end(), thanks.begin(), thanks.end());
+    added.push_back(Node::Array({}));
     roots->insert(roots->begin() + static_cast<std::ptrdiff_t>(first), added.begin(),
                   added.end());
     return true;
@@ -131,10 +165,15 @@ bool AddRecompilationCredits(std::vector<Node>* roots, bool ultimate, std::strin
     return false;
   }
   (*roots)[first].kids[1].text = std::string(kRecompilationUltimateHeading);
-  const std::vector<Node> rows = {
+  // The two owner rows, then the same third-party thanks the retail file gets.
+  std::vector<Node> rows = {
       TitleNameNode(kRecompilationDeveloperRole, kRecompilationName),
       TitleNameNode(kUltimateDeveloperRole, kUltimateName),
+      Node::Array({}),
   };
+  const std::vector<Node> thanks = ThanksSection();
+  rows.insert(rows.end(), thanks.begin(), thanks.end());
+  if (row + 1 >= roots->size() || !IsBlankRoot((*roots)[row + 1])) rows.push_back(Node::Array({}));
   roots->erase(roots->begin() + static_cast<std::ptrdiff_t>(row));
   roots->insert(roots->begin() + static_cast<std::ptrdiff_t>(row), rows.begin(), rows.end());
   return true;

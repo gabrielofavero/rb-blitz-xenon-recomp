@@ -43,6 +43,46 @@ void CheckStrEq(const std::string& actual, const std::string& expected) {
   Fail(__FILE__, __LINE__, "expected \"" + expected + "\", got \"" + actual + "\"");
 }
 
+// The third-party thanks both credit files carry (owner request, 2026-10-21), as the credits
+// screen renders them: the role column's text, then the name column's.
+const std::vector<std::string> kThanksRows = {
+    "Recompiler|ReXGlue Team",   "Static Recompiler|XenonRecomp",
+    "Emulation Research|Xenia Project", "Rock Band 3 Recomp|band3_recomp",
+    "Customs Store|RhythmVerse", "Asset Tooling|MiloLib",
+};
+
+// The rows under one `heading` of a credits document, up to the next blank root - the shape
+// retail's own file uses to separate sections. A `title_name` row is "role|name".
+std::vector<std::string> SectionRows(const std::vector<rb_blitz::ui::dtb::Node>& roots,
+                                     const std::string& heading) {
+  std::vector<std::string> rows;
+  bool in_section = false;
+  for (const auto& root : roots) {
+    if (root.tag != rb_blitz::ui::dtb::kArray || root.kids.empty()) {
+      in_section = false;
+      continue;
+    }
+    if (root.kids[0].tag == rb_blitz::ui::dtb::kSymbol && root.kids[0].text == "heading") {
+      in_section = root.kids.size() >= 2 && root.kids[1].text == heading;
+      continue;
+    }
+    if (in_section && root.kids.size() >= 3 && root.kids[0].text == "title_name") {
+      rows.push_back(root.kids[1].text + "|" + root.kids[2].text);
+    }
+  }
+  return rows;
+}
+
+// Both credit files must name the same projects: one table in the implementation, one
+// expectation here.
+void CheckThanksRows(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
+  const std::vector<std::string> rows = SectionRows(roots, "Thanks To");
+  CHECK_EQ(rows.size(), kThanksRows.size());
+  for (size_t i = 0; i < rows.size() && i < kThanksRows.size(); ++i) {
+    CheckStrEq(rows[i], kThanksRows[i]);
+  }
+}
+
 // `mounted` describes the patch archive the boot already has: one part, one record that starts at 0.
 ArkIndex MountedIndex(size_t part_size) {
   ArkIndex index;
@@ -301,7 +341,7 @@ int main() {
                                      Node::Symbol("demo_screen")})})})};
     CHECK_FALSE(rb_blitz::settings::SetRefreshRowAction(&other, true));
   }
-  BeginCase("the recompilation credit line is inserted before the retail credits");
+  BeginCase("the recompilation credits are inserted before the retail credits");
   {
     using rb_blitz::ui::dtb::Node;
     std::vector<Node> roots;
@@ -313,15 +353,20 @@ int main() {
 
     std::string why;
     CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, false, &why));
-    // Three spacers, the new heading + row + blank, then the official section untouched.
-    CHECK_EQ(roots.size(), 8u);
+    // Three spacers, the project's heading + row, a blank, the thanks heading + its six rows, a
+    // blank, then the official section untouched.
+    CHECK_EQ(roots.size(), 16u);
     CheckStrEq(roots[3].kids[0].text, "heading");
     CheckStrEq(roots[3].kids[1].text, "Recompilation Project");
     CheckStrEq(roots[4].kids[0].text, "title_name");
     CheckStrEq(roots[4].kids[1].text, "Developer");
     CheckStrEq(roots[4].kids[2].text, "Gabriel Fávero");
     CHECK_EQ(roots[5].kids.size(), 0u);
-    CheckStrEq(roots[6].kids[1].text, "Core Development Team");
+    CheckStrEq(roots[6].kids[1].text, "Thanks To");
+    CheckThanksRows(roots);
+    CHECK_EQ(roots[13].kids.size(), 0u);
+    CheckStrEq(roots[14].kids[1].text, "Core Development Team");
+    CheckStrEq(roots[15].kids[2].text, "Matthew Nordhaus");
 
     // The edited roots compile to a DTA the project's own parser reads back.
     const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(roots);
@@ -336,7 +381,7 @@ int main() {
     CHECK_FALSE(rb_blitz::settings::AddRecompilationCredits(&other, false, &why));
     CHECK_EQ(other.size(), 1u);
   }
-  BeginCase("the recompilation credit line renames the Ultimate section and splits its row");
+  BeginCase("the recompilation credits rename the Ultimate section and split its row");
   {
     using rb_blitz::ui::dtb::Node;
     const auto fixture = [] {
@@ -355,15 +400,21 @@ int main() {
     std::vector<Node> roots = fixture();
     std::string why;
     CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, true, &why));
-    // One row became two, so the file grew by one root.
-    CHECK_EQ(roots.size(), 8u);
+    // The one row became two plus the thanks block, so the file grew by nine roots.
+    CHECK_EQ(roots.size(), 16u);
     CheckStrEq(roots[2].kids[1].text, "Recompilation Project & Ultimate 2.0 Mod");
     CheckStrEq(roots[3].kids[1].text, "Recompilation Developer");
     CheckStrEq(roots[3].kids[2].text, "Gabriel Fávero");
     CheckStrEq(roots[4].kids[1].text, "Ultimate 2.0 Developer");
     CheckStrEq(roots[4].kids[2].text, "Synchrony");
-    // The official section after the 16 blank rows keeps its place.
-    CheckStrEq(roots[7].kids[1].text, "Core Development Team");
+    CHECK_EQ(roots[5].kids.size(), 0u);
+    CheckStrEq(roots[6].kids[1].text, "Thanks To");
+    CheckThanksRows(roots);
+    // The payload's own blank run is not lengthened by the insertion, and the official section
+    // after it keeps its place.
+    CHECK_EQ(roots[13].kids.size(), 0u);
+    CHECK_EQ(roots[14].kids.size(), 0u);
+    CheckStrEq(roots[15].kids[1].text, "Core Development Team");
 
     // A newer payload whose one row does not match is left untouched, including its heading.
     std::vector<Node> moved = fixture();

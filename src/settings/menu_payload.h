@@ -39,10 +39,12 @@ bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_acti
 // Development Team" heading followed by one "Only Dev" row.
 //
 // Default (retail file): a "Recompilation Project" heading and a "Developer" / "Gabriel Fávero"
-// row are inserted before the first official section, separated from it by one blank row.
+// row are inserted before the first official section, then a "Thanks To" section naming what the
+// build stands on (ReXGlue, XenonRecomp, Xenia, band3_recomp, RhythmVerse, MiloLib - one table
+// in the implementation, so the two credit files cannot drift), separated from it by blank rows.
 // Ultimate (the payload's file): the Ultimate heading is renamed to "Recompilation Project &
 // Ultimate 2.0 Mod" and its one row becomes two - "Recompilation Developer" / "Gabriel Fávero"
-// and "Ultimate 2.0 Developer" / "Synchrony".
+// and "Ultimate 2.0 Developer" / "Synchrony" - followed by the same "Thanks To" section.
 //
 // A file whose first non-empty section is not one of those two headings is left alone (false):
 // a mod release may change what its credits say, and that must not turn into a boot failure.
