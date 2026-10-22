@@ -207,6 +207,11 @@ set(RBBLITZ_SOURCES
     # P4: the search's field, request and answer (SDK-free) plus the worker that performs it.
     # The worker is Windows-only (it includes store_http.h) and is appended below.
     src/store/store_search.cpp
+    # P7's polish: the in-memory page cache both workers share (TTL, bound, single flight) and the
+    # sentences the caption strip draws about the store (credit, loading, empty, offline). Both are
+    # SDK-free, so their suites walk them without a boot or a socket.
+    src/store/store_page_cache.cpp
+    src/store/store_catalogue_status.cpp
     # P3's Downloaded mark (plan §3.2): the SDK-free (artist, title) index, the builder that reads
     # every loaded package's songs.dta, and the shared package reader the menu-music pool also uses.
     src/store/store_library_index.cpp
@@ -982,6 +987,26 @@ if(BUILD_TESTING)
         target_link_libraries(rb_blitz_store_search_tests PRIVATE winhttp)
     endif()
     add_test(NAME store_search COMMAND rb_blitz_store_search_tests)
+
+    # P7 of the RhythmVerse store plan: the in-memory page cache both store workers share. SDK-free
+    # and hermetic - the TTL, the bound, the eviction order and single-flight run on plain data, and
+    # the clock is the real one with short windows.
+    add_executable(rb_blitz_store_page_cache_tests
+        tests/store_page_cache_tests.cpp
+        src/store/store_page_cache.cpp
+    )
+    target_include_directories(rb_blitz_store_page_cache_tests PRIVATE src)
+    add_test(NAME store_page_cache COMMAND rb_blitz_store_page_cache_tests)
+
+    # P7's store sentences (src/store/store_catalogue_status.h): the credit line, the loading line,
+    # the empty state and the offline text, with the precedence between them and the window that
+    # keeps them inside the store. SDK-free; the suite shrinks the two windows to prove expiry.
+    add_executable(rb_blitz_store_catalogue_status_tests
+        tests/store_catalogue_status_tests.cpp
+        src/store/store_catalogue_status.cpp
+    )
+    target_include_directories(rb_blitz_store_catalogue_status_tests PRIVATE src)
+    add_test(NAME store_catalogue_status COMMAND rb_blitz_store_catalogue_status_tests)
 endif()
 
 # Controller Settings used to be a second executable in this build tree (launcher plan D1). It

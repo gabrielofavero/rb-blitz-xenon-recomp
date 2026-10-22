@@ -28,6 +28,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 namespace {
@@ -61,6 +62,15 @@ void CheckStrEq(const std::string& actual, const std::string& expected) {
 
 bool Contains(const std::string& text, const std::string& needle) {
   return text.find(needle) != std::string::npos;
+}
+
+std::size_t CountOccurrences(const std::string& text, const std::string& needle) {
+  std::size_t count = 0;
+  for (std::size_t at = text.find(needle); at != std::string::npos;
+       at = text.find(needle, at + needle.size())) {
+    ++count;
+  }
+  return count;
 }
 
 void TestRequestPaths() {
@@ -377,6 +387,133 @@ void TestMenuPaths() {
   CHECK_FALSE(IsMenuRecordPath(""));
 }
 
+// P4's half of the serving policy: the search row's page answers the search's installed source, and
+// Recent keeps answering the catalogue - the two pages are the same *shape* (which is why the same
+// parser and the same browser consume both) but never the same list.
+void TestSearchPage() {
+  BeginCase("the search row's page carries the search's offers, Recent the catalogue's");
+  const std::string recent = rb_blitz::store::MenuRecordPath(rb_blitz::store::kStoreRegion,
+                                                            rb_blitz::store::kStoreLocale, "recent");
+  const std::string search = rb_blitz::store::MenuRecordPath(
+      rb_blitz::store::kStoreRegion, rb_blitz::store::kStoreLocale, rb_blitz::store::kSearchMenuId);
+  CHECK_TRUE(rb_blitz::store::IsSearchMenuPath(search));
+  CHECK_FALSE(rb_blitz::store::IsSearchMenuPath(recent));
+  CHECK_FALSE(rb_blitz::store::IsSearchMenuPath(FrontMenuRecordPath()));
+  // The front menu's own row names the page the panel will ask for.
+  std::string why;
+  const std::string front = BuiltinRecord(FrontMenuRecordPath(), &why);
+  CHECK_TRUE(Contains(front, std::string("\"/eng/") + rb_blitz::store::kSearchMenuId + "/\""));
+
+  const auto make = [](const char* name) {
+    Offer offer;
+    offer.name = name;
+    offer.artist = "An Artist";
+    offer.genre = "Rock";
+    return offer;
+  };
+  rb_blitz::store::SetOfferSource([&make] { return std::vector<Offer>{make("Recent Song")}; });
+  rb_blitz::store::SetSearchPageSource(
+      [&make] { return std::vector<Offer>{make("Searched Song")}; });
+
+  why.clear();
+  const std::string recent_page = BuiltinRecord(recent, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(Contains(recent_page, "(name \"Recent Song\")"));
+  CHECK_FALSE(Contains(recent_page, "Searched Song"));
+
+  why.clear();
+  const std::string search_page = BuiltinRecord(search, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(Contains(search_page, "(name \"Searched Song\")"));
+  CHECK_FALSE(Contains(search_page, "Recent Song"));
+  // The same record shape Recent's page has: the retail parser and browser consume both.
+  CHECK_TRUE(Contains(search_page, "offers_populated TRUE"));
+  CHECK_TRUE(Contains(search_page, "(rank ("));
+
+  // With no source installed (a boot that never reached the session, or a test) the page is empty
+  // and valid - the retail DTA answers zero offers by returning to its menu.
+  rb_blitz::store::SetSearchPageSource({});
+  why.clear();
+  const std::string empty = BuiltinRecord(search, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(Contains(empty, "offers_populated TRUE"));
+  CHECK_FALSE(Contains(empty, "(name"));
+
+  rb_blitz::store::SetOfferSource({});
+}
+
+// P5's half of the serving policy: every offer a page carries is an offer the download worker was
+// told about, so its row can be pressed. The registrar is a fake here - the real one is the
+// download service, installed at boot (src/hooks/dlc.cpp) - and what the test pins is the
+// *promise* between the two halves: a page and its jobs are written together, one token per offer.
+void TestDownloadJob() {
+  BeginCase("every served offer carries the job token the worker was given");
+  struct Registration {
+    std::string file_id;
+    std::string url;
+    std::string title;
+  };
+  std::vector<Registration> registered;
+  rb_blitz::store::SetOfferRegistrar(
+      [&registered](std::string_view file_id, std::string_view url,
+                    std::optional<std::int64_t> api_size, std::string_view title) {
+        registered.push_back(Registration{std::string(file_id), std::string(url),
+                                          std::string(title)});
+        CHECK_TRUE(api_size.has_value() && *api_size == 4096);
+        return "job-" + std::string(file_id);
+      });
+
+  std::vector<Offer> offers(2);
+  offers[0].name = "The People That We Love";
+  offers[0].artist = "Bush";
+  offers[0].file_id = "42";
+  offers[0].download_url = "https://example.invalid/download/42";
+  offers[0].size_bytes = 4096;
+  offers[1].name = "No Download Here";
+  offers[1].artist = "Nobody";  // no file id and no URL: the catalogue did not offer it
+  rb_blitz::store::SetOfferSource([offers] { return offers; });
+
+  const std::string menu_path = "dlc_store/europe/eng/recent/";
+  std::string why;
+  const std::string page = BuiltinRecord(menu_path, &why);
+  CHECK_TRUE(why.empty());
+  // The downloadable offer is registered once, with the resolved URL and the strip's title, and its
+  // record key carries the token the row will send.
+  CHECK_TRUE(registered.size() == 1);
+  if (registered.size() == 1) {
+    CHECK_STR_EQ(registered[0].file_id, std::string("42"));
+    CHECK_STR_EQ(registered[0].url, std::string("https://example.invalid/download/42"));
+    CHECK_STR_EQ(registered[0].title, std::string("Bush - The People That We Love"));
+  }
+  CHECK_TRUE(Contains(page, "(job \"job-42\")"));
+  // The key is written on **every** offer, empty or not: the details page reads it unconditionally
+  // and a missing key walks a null (Offer::job).
+  CHECK_TRUE(CountOccurrences(page, "(job ") == 2);
+  CHECK_TRUE(Contains(page, "(job \"\")"));
+
+  // The same is true of the search page, which has its own source.
+  rb_blitz::store::SetSearchPageSource([offers] { return offers; });
+  const std::string search = rb_blitz::store::MenuRecordPath(
+      rb_blitz::store::kStoreRegion, rb_blitz::store::kStoreLocale, rb_blitz::store::kSearchMenuId);
+  why.clear();
+  const std::string search_page = BuiltinRecord(search, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(Contains(search_page, "(job \"job-42\")"));
+
+  // No registrar (a test, or a boot before the download service is configured): the page is still
+  // served, its rows just carry no token - a press on such a row is refused by the worker rather
+  // than starting something nobody registered.
+  rb_blitz::store::SetOfferRegistrar({});
+  why.clear();
+  const std::string unregistered = BuiltinRecord(menu_path, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(CountOccurrences(unregistered, "(job ") == 2);
+  CHECK_FALSE(Contains(unregistered, "job-42"));
+
+  rb_blitz::store::SetSearchPageSource({});
+  rb_blitz::store::SetOfferSource({});
+}
+
 }  // namespace
 
 int main() {
@@ -386,9 +523,11 @@ int main() {
   TestMenuText();
   TestTextQuoting();
   TestDownloadedMark();
+  TestDownloadJob();
   TestArtAdvertisedOnlyWhenHeld();
   TestServedFile();
   TestRecordChoice();
   TestMenuPaths();
+  TestSearchPage();
   return rb_blitz::test::Finish();
 }

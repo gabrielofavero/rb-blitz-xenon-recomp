@@ -309,7 +309,9 @@ enum class Kind {
   kCapture,
   // RhythmVerse plan P4: one typed key. `path` is a `rbbz-store/search/...` write and nothing is
   // committed - the store is not a settings transaction. `kStoreKeyLeave` writes and then leaves
-  // the surface (Cancel), which is the one key whose meaning is also navigation.
+  // the surface (Cancel). Done deliberately does **not** leave: these panels receive one press as
+  // two (see the duplicate-press note in src/store/store_search.h), so a leaving Done would leave
+  // twice - the second delivery running the destination's own selection.
   kStoreKey,
   kStoreKeyLeave,
   kChoose,       // one-shot choice: set `setting` to the row's own token, commit, leave
@@ -568,8 +570,8 @@ Row StoreKeyRow(const char* symbol, const std::string& token, const char* label,
   return row;
 }
 
-// The one key that is also navigation: Cancel writes the store's cancel op (which invalidates
-// in-flight work and clears the field) and then leaves, exactly as the plan's cancel path asks.
+// The key that is also navigation: Cancel writes the store's cancel op (which invalidates in-flight
+// work and clears the field) and then leaves, exactly as the plan's cancel path asks.
 Row StoreKeyLeaveRow(const char* symbol, const std::string& action, const char* label,
                      const char* description) {
   Row row = StoreKeyRow(symbol, "", label, description);
@@ -1144,7 +1146,9 @@ std::vector<PanelSpec> AllPanels() {
                      {
                          // Done first, because the root is where every Back from a letter page
                          // lands: a search is finished with two presses (Back, Done) whatever was
-                         // typed, and the selection resets to row 0 on entry.
+                         // typed, and the selection resets to row 0 on entry. Done submits and
+                         // stays - the strip reports the request, its answer (or the reason it was
+                         // refused), and Back returns to the store to list the answer.
                          StoreActionRow("settings_rv_key_done", store::kKeyDone, "Done",
                                         "Search the catalogue for what you typed."),
                          SubmenuRow("settings_rv_search_letters",
@@ -2214,6 +2218,13 @@ Node PanelDefinition(const PanelSpec& panel) {
   // first visible row, so the overlay is told which row that is. Emitted here rather than inside
   // populate_menu because a commit re-runs populate and must not drag the caption back to row 0.
   enter.kids.push_back(EnterHelpWrite(panel));
+  // The exit member, shared by every panel; a search page adds its own dismissal to it - `enter`
+  // wrote `open`, so the exit is where the host is told the field is no longer the current surface
+  // (the field and the answer stay in the session: `leave` is not `cancel`).
+  Node exit_member = panel.opens_search
+                         ? Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")}),
+                                Write(StorePath("leave"))})
+                         : Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})});
   std::vector<Node> extras;
   extras.push_back(Arr({Sym("kAction_Up"), Cmd({Var("this"), Sym("move_up")})}));
   extras.push_back(Arr({Sym("kAction_Down"), Cmd({Var("this"), Sym("move_down")})}));
@@ -2241,7 +2252,7 @@ Node PanelDefinition(const PanelSpec& panel) {
       MoveMember(panel, "move_down", true),
       std::move(enter),
       GetFocusMember(),
-      Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})}),
+      std::move(exit_member),
       Arr({Sym("on_select_msg"), Cmd({Sym("shell_sfx"), Sym("play_select")})}),
   };
   if (!SuppressesHelp(panel)) {

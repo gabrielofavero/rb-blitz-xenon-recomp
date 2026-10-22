@@ -18,7 +18,9 @@
 
 #include "check.h"
 
+#include "store/store_metadata.h"
 #include "store/store_payload.h"
+#include "store/store_search.h"
 #include "ui/dtb_author.h"
 
 #include <string>
@@ -1064,8 +1066,179 @@ void TestDifficultyLoopUnrolled() {
   CHECK_TRUE(TreeUnchanged(not_ranks, not_ranks_untouched));
 }
 
-// `store-edit <file.dtb> store|info`: run the P3 store-record transforms against a real shipped
-// record and print the refusal reason, plus the method the transform looked at. This is the
+// The store menu's own panel, as the shipped record defines it (`out/_swap/store.tree.txt`):
+// `SELECT_MSG` carries the measured request body, and `exit` is retail's own listener teardown.
+std::vector<Node> StoreMenuPanelRecord() {
+  const Node request = Node::Command(
+      {Symbol("store_panel"), Symbol("request"),
+       Node::Command({Symbol("provider"), Symbol("get_string"), Node::Var("ix")}), Symbol("TRUE")});
+  const Node body = Node::Command({
+      Symbol("do"),
+      Node::Array({Node::Var("provider"),
+                   Node::Command({Symbol("this"), Symbol("get_menu_provider")})}),
+      Node::Array({Node::Var("ix"),
+                   Node::Command({Symbol("component"), Symbol("selected_pos")})}),
+      Node::Command(
+          {Symbol("store_panel"), Symbol("set_source"),
+           Node::Command({Symbol("symbol"),
+                          Node::Command({Symbol("sprintf"), Text("menu_%s"),
+                                         Node::Command({Symbol("provider"), Symbol("get_string"),
+                                                        Node::Var("ix")})})}),
+           Symbol("TRUE")}),
+      request,
+      Node::Command({Symbol("store_panel"), Symbol("update_loading_status")}),
+  });
+  const Node exit_member =
+      Node::Array({Symbol("exit"),
+                   Node::Command({Symbol("store_panel"), Symbol("set"),
+                                  Symbol("offer_status_listener"), Node::Int(0)}),
+                   Node::Command({Symbol("store_panel"), Symbol("remove_sink"),
+                                  Node::Var("this")})});
+  const Node condition = Node::Command(
+      {Symbol("&&"),
+       Node::Command({Symbol("store_panel"), Symbol("user_can_do_input")}),
+       Node::Command({Symbol("this"), Symbol("has_menus")})});
+  const Node select =
+      Node::Array({Symbol("SELECT_MSG"), Node::Command({Symbol("if"), condition, body})});
+  Node panel = Node::Command({Symbol("new"), Symbol("BandStorePanel"), Symbol("store_menu_panel"),
+                              Node::Array({Symbol("file"), Text("store.milo")}), exit_member,
+                              select});
+  return {std::move(panel)};
+}
+
+bool IsStoreRequest(const Node& node) {
+  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+         node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "store_panel" &&
+         node.kids[1].text == "request";
+}
+
+// `{if_else {== $ix <row>} ... ...}` - the gate `RouteSearchRowToKeys` writes.
+bool IsSearchGate(const Node& node, int row) {
+  if (node.tag != rb_blitz::ui::dtb::kCommand || node.kids.size() != 4 ||
+      node.kids[0].tag != rb_blitz::ui::dtb::kSymbol || node.kids[0].text != "if_else") {
+    return false;
+  }
+  const Node& condition = node.kids[1];
+  return condition.tag == rb_blitz::ui::dtb::kCommand && condition.kids.size() == 3 &&
+         condition.kids[0].text == "==" && condition.kids[1].tag == rb_blitz::ui::dtb::kVar &&
+         condition.kids[1].text == "ix" &&
+         condition.kids[2].tag == rb_blitz::ui::dtb::kInt &&
+         static_cast<int>(condition.kids[2].scalar) == row;
+}
+
+const Node* FindSearchGate(const Node& node, int row) {
+  if (IsSearchGate(node, row)) return &node;
+  for (const Node& kid : node.kids) {
+    if (const Node* found = FindSearchGate(kid, row)) return found;
+  }
+  return nullptr;
+}
+
+// `{file_exists "<path>"}`
+bool IsFileExists(const Node& node, std::string_view path) {
+  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 2 &&
+         node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "file_exists" &&
+         node.kids[1].tag == rb_blitz::ui::dtb::kString && node.kids[1].text == path;
+}
+
+bool IsGotoScreen(const Node& node, std::string_view screen) {
+  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+         node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "ui" &&
+         node.kids[1].text == "goto_screen" && node.kids[2].tag == rb_blitz::ui::dtb::kSymbol &&
+         node.kids[2].text == screen;
+}
+
+void TestSearchRowRoutesToKeys() {
+  BeginCase("the front menu's Search row opens the keys until an answer is waiting");
+
+  std::vector<Node> record = StoreMenuPanelRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeys(&record, 1, "settings_rhythmverse_search_screen",
+                                                   &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* select = FindNamedMethodNode(record[0], "store_menu_panel", "SELECT_MSG");
+  CHECK_TRUE(select != nullptr);
+  if (select == nullptr) return;
+  const Node* gate = FindSearchGate(*select, 1);
+  CHECK_TRUE(gate != nullptr);
+  if (gate == nullptr) return;
+
+  // The search branch: request when the host says an answer is waiting, else open the keys.
+  const Node& search_branch = gate->kids[2];
+  CHECK_TRUE(search_branch.tag == rb_blitz::ui::dtb::kCommand && search_branch.kids.size() == 4 &&
+             search_branch.kids[0].text == "if_else");
+  if (search_branch.kids.size() == 4) {
+    CHECK_TRUE(IsFileExists(search_branch.kids[1], rb_blitz::store::kSearchShowQuery));
+    CHECK_TRUE(IsStoreRequest(search_branch.kids[2]));
+    CHECK_TRUE(IsGotoScreen(search_branch.kids[3], "settings_rhythmverse_search_screen"));
+  }
+  // Every other row keeps retail's own statement, verbatim.
+  CHECK_TRUE(IsStoreRequest(gate->kids[3]));
+  CHECK_TRUE(gate->kids[3].kids.size() == 4 && gate->kids[3].kids[3].tag == rb_blitz::ui::dtb::kSymbol);
+  // The statements retail wrote around the request are untouched, and the source is still set for
+  // the Search row too (the row's provider name is what the palette shows).
+  bool set_source = false;
+  const auto find_set_source = [&set_source](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() > 1 &&
+        node.kids[0].text == "store_panel" && node.kids[1].text == "set_source") {
+      set_source = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  find_set_source(*select, find_set_source);
+  CHECK_TRUE(set_source);
+
+  // A second pass refuses rather than nesting a second gate.
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(&record, 1, "settings_rhythmverse_search_screen",
+                                                    &why));
+  CHECK_TRUE(why.find("already routed") != std::string::npos);
+
+  // Refusals leave the tree exactly as it was.
+  {
+    std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"), Symbol("splash_screen"),
+                                              Node::Array({Symbol("enter")})})};
+    const std::vector<Node> before = other;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(&other, 1, "settings_rhythmverse_search_screen",
+                                                      &why));
+    CHECK_TRUE(TreeUnchanged(other, before));
+  }
+  {
+    std::vector<Node> fresh = StoreMenuPanelRecord();
+    const std::vector<Node> before = fresh;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(&fresh, -1, "settings_rhythmverse_search_screen",
+                                                      &why));
+    CHECK_TRUE(TreeUnchanged(fresh, before));
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(nullptr, 1, "settings_rhythmverse_search_screen",
+                                                      &why));
+  }
+}
+
+void TestSearchRowGateSurvivesCompileAndParse() {
+  BeginCase("the routed store record survives compile and parse");
+
+  std::vector<Node> record = StoreMenuPanelRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeys(&record, 1, "settings_rhythmverse_search_screen",
+                                                   &why));
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  const Node* select =
+      parsed.empty() ? nullptr : FindNamedMethodNode(parsed[0], "store_menu_panel", "SELECT_MSG");
+  CHECK_TRUE(select != nullptr);
+  if (select == nullptr) return;
+  CHECK_TRUE(FindSearchGate(*select, 1) != nullptr);
+}
+
+// `store-edit <file.dtb> store|info|search|buttons`: run the store-record transforms against a real
+// shipped record and print the refusal reason, plus the method the transform looked at. This is the
 // measurement half of those edits - the payload applies them to whatever `ui/store/gen/*.dtb` the
 // boot mounts, and a refusal there is a note in the log that names a reason but not the record's
 // own shape.
@@ -1110,6 +1283,56 @@ int StoreEdit(const char* path, const char* which) {
     PrintNode(*buttons, 0);
     return 0;
   }
+  if (mode == "download") {
+    // P5's two transforms against the shipped record, and both methods they rewrote, printed in
+    // full: the row has to sit in the not-downloaded branch of the Downloaded gate, and its press
+    // has to be a `write_file` on a path built from the offer's own token.
+    ok = rb_blitz::store::AddDownloadButton(&roots, &why);
+    std::printf("store-edit: download row -> %s (%s)\n", ok ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool routed = rb_blitz::store::RouteDownloadButtons(&roots, &why);
+    std::printf("store-edit: download press -> %s (%s)\n", routed ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && routed;
+    const Node* buttons = nullptr;
+    const Node* select = nullptr;
+    for (const Node& root : roots) {
+      if (buttons == nullptr) buttons = FindNamedMethodNode(root, "store_info_panel", "refresh_buttons");
+      if (select == nullptr) select = FindNamedMethodNode(root, "store_info_panel", "SELECT_MSG");
+      if (buttons != nullptr && select != nullptr) break;
+    }
+    if (buttons != nullptr) {
+      std::printf("store-edit: refresh_buttons after:\n");
+      PrintNode(*buttons, 0);
+    }
+    if (select != nullptr) {
+      std::printf("store-edit: SELECT_MSG after:\n");
+      PrintNode(*select, 0);
+    }
+    return ok ? 0 : 1;
+  }
+  if (mode == "search") {
+    // P4's two transforms against the shipped record, and the method they rewrote, printed in full:
+    // the gate has to sit inside the same `{do}` that defined `$provider`/`$ix`, and only the
+    // document itself can show that.
+    const bool routed = rb_blitz::store::RouteSearchRowToKeys(
+        &roots, rb_blitz::store::kSearchMenuRow, "settings_rhythmverse_search_screen", &why);
+    std::printf("store-edit: search row -> %s (%s)\n", routed ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    const Node* select = nullptr;
+    for (const Node& root : roots) {
+      select = FindNamedMethodNode(root, "store_menu_panel", "SELECT_MSG");
+      if (select != nullptr) break;
+    }
+    if (select != nullptr) {
+      std::printf("store-edit: SELECT_MSG shape:\n");
+      PrintNode(*select, 0);
+    } else {
+      std::printf("store-edit: SELECT_MSG not found in %zu root(s)\n", roots.size());
+    }
+    return routed ? 0 : 1;
+  }
   if (mode == "store") {
     ok = rb_blitz::store::UnrollOfferDifficulty(&roots, &why);
     std::printf("store-edit: difficulty loop -> %s (%s)\n", ok ? "edited" : "refused",
@@ -1118,7 +1341,12 @@ int StoreEdit(const char* path, const char* which) {
     const bool art = rb_blitz::store::LinkAlbumArt(&roots, &why);
     std::printf("store-edit: album art -> %s (%s)\n", art ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && art;
+    why.clear();
+    const bool search = rb_blitz::store::RouteSearchRowToKeys(
+        &roots, rb_blitz::store::kSearchMenuRow, "settings_rhythmverse_search_screen", &why);
+    std::printf("store-edit: search row -> %s (%s)\n", search ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && art && search;
   } else {
     ok = rb_blitz::store::ShowOfferDetailsDirectly(&roots, &why);
     std::printf("store-edit: details route -> %s (%s)\n", ok ? "edited" : "refused",
@@ -1294,9 +1522,269 @@ void TestDownloadedRowGate() {
   CHECK_TRUE(TreeUnchanged(no_gate, no_gate_untouched));
 }
 
+// P5's row: a not-downloaded offer's page gains Download, and retail's own branch survives inside
+// it. The shape is `refresh_buttons`' own (printed from the shipped record 2026-10-22) - the gate
+// first, then the else branch with the buy path.
+void TestDownloadButtonAdded() {
+  BeginCase("the details page's Download row goes into the not-downloaded branch");
+
+  const auto insert = [](const char* row) {
+    return Node::Command({Symbol("insert_elem"), Node::Var("buttons"), Node::Int(0), Symbol(row)});
+  };
+  const auto buy_branch = [&insert] {
+    return Node::Command({Symbol("if"),
+                          Node::Command({Symbol("this"), Symbol("purchase_allowed"),
+                                         Node::Var("offer")}),
+                          Node::Command({Symbol("do"), insert("store_buy_now")})});
+  };
+  const auto record_with_gate = [&insert, &buy_branch] {
+    return std::vector<Node>{
+        Node::Command(
+            {Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+             Node::Array(
+                 {Symbol("refresh_buttons"), Node::Array({Node::Var("init")}),
+                  Node::Command(
+                      {Symbol("do"), insert("exit"),
+                       Node::Command({Symbol("if_else"),
+                                      Node::Command({Node::Var("offer"), Symbol("get_data"),
+                                                     Node::Array({Symbol("is_purchased")})}),
+                                      Node::Command({Symbol("do"), insert("store_download_again")}),
+                                      buy_branch()})})})}),
+    };
+  };
+
+  std::vector<Node> record = record_with_gate();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddDownloadButton(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* method = FindNamedMethodNode(record[0], "store_info_panel", "refresh_buttons");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+
+  // The new row exists exactly once, and it is a sibling of retail's buy path inside the else
+  // branch - not inside the downloaded branch (where the page already offers "Download Again").
+  bool now_row = false;
+  bool buy_row = false;
+  const auto scan = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+        node.kids[0].text == "insert_elem") {
+      if (node.kids.back().text == "store_download_now") now_row = true;
+      if (node.kids.back().text == "store_buy_now") buy_row = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan(*method, scan);
+  CHECK_TRUE(now_row);
+  CHECK_TRUE(buy_row);
+
+  // The row sits in the `do` that *is* the else branch: the gate's kid 3, whose first statement
+  // inserts it.
+  const Node* gate = nullptr;
+  const auto find_gate = [&](const Node& node, const auto& self) -> void {
+    if (gate != nullptr) return;
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+        node.kids[0].text == "if_else") {
+      for (const Node& kid : node.kids) {
+        if (kid.tag == rb_blitz::ui::dtb::kCommand && kid.kids.size() >= 2 &&
+            kid.kids[0].text == "do" && kid.kids[1].tag == rb_blitz::ui::dtb::kCommand &&
+            kid.kids[1].kids.size() >= 4 && kid.kids[1].kids[3].text == "store_download_now") {
+          gate = &node;
+          return;
+        }
+      }
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  find_gate(*method, find_gate);
+  CHECK_TRUE(gate != nullptr);
+  if (gate != nullptr) {
+    CHECK_TRUE(gate->kids.size() == 4);  // if_else, test, then, else
+    CHECK_TRUE(gate->kids[3].tag == rb_blitz::ui::dtb::kCommand);
+    CHECK_TRUE(gate->kids[3].kids[0].text == "do");
+    CHECK_TRUE(gate->kids[3].kids.size() == 3);  // the insert, then retail's own branch by value
+  }
+
+  // Idempotent: a second pass is refused by name and changes nothing.
+  const std::vector<Node> after_first = record;
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::AddDownloadButton(&record, &why));
+  CHECK_TRUE(TreeUnchanged(record, after_first));
+
+  // Refusals, each before any edit: a record with no such panel, and a panel whose button method
+  // carries no Downloaded gate.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AddDownloadButton(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+
+  std::vector<Node> no_gate = {
+      Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                     Node::Array({Symbol("refresh_buttons"), Node::Array({Node::Var("init")}),
+                                  Node::Command({Symbol("do"), insert("exit")})})}),
+  };
+  const std::vector<Node> no_gate_untouched = no_gate;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AddDownloadButton(&no_gate, &why));
+  CHECK_TRUE(TreeUnchanged(no_gate, no_gate_untouched));
+}
+
+// P5's press: both rows reach the request channel, and neither calls the commerce object.
+void TestDownloadButtonsRouted() {
+  BeginCase("the Download rows write a request instead of calling the commerce object");
+
+  // `SELECT_MSG`' measured shape: `{switch {component selected_sym} [case body...] ...}`.
+  const auto record_with_switch = [] {
+    return std::vector<Node>{
+        Node::Command(
+            {Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+             Node::Array(
+                 {Symbol("SELECT_MSG"),
+                  Node::Command(
+                      {Symbol("switch"),
+                       Node::Command({Node::Var("component"), Symbol("selected_sym")}),
+                       Node::Array({Symbol("store_buy_now"),
+                                    Node::Command({Symbol("store_panel"), Symbol("check_out"),
+                                                   Node::Var("offer")})}),
+                       Node::Array({Symbol("store_download_again"),
+                                    Node::Command({Symbol("store_panel"), Symbol("re_download"),
+                                                   Node::Var("offer")}),
+                                    Node::Command({Node::Command({Symbol("ui"),
+                                                                  Symbol("get_recommendation_mgr")}),
+                                                   Symbol("expire_store_rec"),
+                                                   Node::Var("offer")})})})})}),
+    };
+  };
+
+  std::vector<Node> record = record_with_switch();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::RouteDownloadButtons(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* method = FindNamedMethodNode(record[0], "store_info_panel", "SELECT_MSG");
+  CHECK_TRUE(method != nullptr);
+  if (method == nullptr) return;
+
+  // The native `re_download` call is gone, and both cases carry a `write_file` whose argument is a
+  // variable - a builtin's argument is not evaluated by the guest, so the path is built first.
+  struct CaseShape {
+    bool found = false;
+    bool native = false;
+    bool writes = false;
+    bool literal_path = false;
+    bool var_path = false;
+  };
+  const auto scan_case = [&](const char* symbol, const char* command) {
+    CaseShape shape;
+    const auto scan = [&](const Node& node, const auto& self) -> void {
+      if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+          node.kids[0].text == "store_panel" && node.kids[1].text == "re_download") {
+        shape.native = true;
+      }
+      if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+          node.kids[0].text == "write_file") {
+        shape.writes = true;
+        if (node.kids[1].tag == rb_blitz::ui::dtb::kVar && node.kids[1].text == "path") {
+          shape.var_path = true;
+        } else if (node.kids[1].tag == rb_blitz::ui::dtb::kString) {
+          shape.literal_path = node.kids[1].text.find(command) != std::string::npos;
+        }
+      }
+      for (const Node& kid : node.kids) self(kid, self);
+    };
+    for (const Node& node : method->kids) {
+      if (node.tag != rb_blitz::ui::dtb::kCommand) continue;
+      for (const Node& kid : node.kids) {
+        if (kid.tag != rb_blitz::ui::dtb::kArray || kid.kids.empty()) continue;
+        if (kid.kids[0].text != symbol) continue;
+        shape.found = true;
+        scan(kid, scan);
+      }
+    }
+    return shape;
+  };
+
+  {
+    const CaseShape again = scan_case("store_download_again", "again");
+    CHECK_TRUE(again.found);
+    CHECK_FALSE(again.native);
+    CHECK_TRUE(again.writes);
+    CHECK_FALSE(again.literal_path);  // never a literal: the token is the offer's own key
+    CHECK_TRUE(again.var_path);
+  }
+  {
+    const CaseShape now = scan_case("store_download_now", "start");
+    CHECK_TRUE(now.found);
+    CHECK_FALSE(now.native);
+    CHECK_TRUE(now.writes);
+    CHECK_FALSE(now.literal_path);
+    CHECK_TRUE(now.var_path);
+  }
+  // The path's own spelling, in the `{var $path {sprintf …}}` statement both cases carry.
+  bool start_path = false;
+  bool again_path = false;
+  const auto scan_paths = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+        node.kids[0].text == "sprintf" && node.kids[1].tag == rb_blitz::ui::dtb::kString) {
+      if (node.kids[1].text.find("rbbz-store/download/start/%s") != std::string::npos) {
+        start_path = true;
+      }
+      if (node.kids[1].text.find("rbbz-store/download/again/%s") != std::string::npos) {
+        again_path = true;
+      }
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan_paths(*method, scan_paths);
+  CHECK_TRUE(start_path);
+  CHECK_TRUE(again_path);
+  // Both cases guard the read: a record without a job answers with a message instead of walking a
+  // null (`{offer has_data job}` - the same guard `refresh_buttons` puts before `preview_art`).
+  int guarded = 0;
+  const auto scan_guard = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+        node.kids[0].text == "offer" && node.kids[1].text == "has_data" &&
+        node.kids[2].text == "job") {
+      ++guarded;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan_guard(*method, scan_guard);
+  CHECK_TRUE(guarded == 2);
+
+  // Idempotent: a second run is refused by name and changes nothing.
+  const std::vector<Node> after_first = record;
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::RouteDownloadButtons(&record, &why));
+  CHECK_TRUE(TreeUnchanged(record, after_first));
+
+  // A switch with no Download Again case, and a record with no switch at all: both refused
+  // untouched (nothing else's press is ever rewritten).
+  std::vector<Node> buy_only = {
+      Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                     Node::Array({Symbol("SELECT_MSG"),
+                                  Node::Command({Symbol("switch"),
+                                                 Node::Command({Node::Var("component"),
+                                                                Symbol("selected_sym")}),
+                                                 Node::Array({Symbol("store_buy_now"),
+                                                              Node::Command({Symbol("store_panel"),
+                                                                             Symbol("check_out")})})})})}),
+  };
+  const std::vector<Node> buy_only_untouched = buy_only;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::RouteDownloadButtons(&buy_only, &why));
+  CHECK_TRUE(TreeUnchanged(buy_only, buy_only_untouched));
+
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::RouteDownloadButtons(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
 void TestAlbumArtLinked() {
   BeginCase("the details page links a served cover without the art_loaded message");
-
   // `store_details_panel.refresh`' measured shape: the art block is the `unless` under
   // `{if_else {&& {offer has_data preview_art} {is_allowed_to_preview_offer offer}} ...}`, and its
   // last statement is `{store_panel load_art cur_preview_art this}`.
@@ -1443,6 +1931,8 @@ int main(int argc, char** argv) {
   TestStoreEntryBypass();
   TestStoreEntryBypassRefusal();
   TestStoreEntryBypassSurvivesCompileAndParse();
+  TestSearchRowRoutesToKeys();
+  TestSearchRowGateSurvivesCompileAndParse();
   TestStorePriceFooter();
   TestStoreInfoPriceChrome();
   TestStoreHeading();
@@ -1451,6 +1941,8 @@ int main(int argc, char** argv) {
   TestOfferDetailsDirect();
   TestPreviewButtonHidden();
   TestDownloadedRowGate();
+  TestDownloadButtonAdded();
+  TestDownloadButtonsRouted();
   TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();
   return rb_blitz::test::Finish();

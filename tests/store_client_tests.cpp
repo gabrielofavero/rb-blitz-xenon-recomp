@@ -845,7 +845,83 @@ void TestStoreSettings() {
   CHECK_FALSE(answer);
 }
 
+void TestChunking() {
+  test::BeginCase("P7's chunking cursor is the server's page, not the number of offers kept");
+  const auto page = [](int number, int returned, int total, int start = 0) {
+    ListingPage value;
+    value.page = number;
+    value.start = start;
+    value.returned = returned;
+    value.total_filtered = total;
+    return value;
+  };
+
+  // A full page with rows behind it: the next page, inside the budget.
+  CHECK_EQ(NextPageAfter(page(1, 25, 60), 1, 4), 2);
+  CHECK_EQ(NextPageAfter(page(2, 25, 60), 2, 4), 3);
+  // The budget is the bound: a catalogue that never says "done" still stops.
+  CHECK_EQ(NextPageAfter(page(4, 25, 100000), 4, 4), 0);
+  // A budget of 1 is the pre-P7 shape: one page, done.
+  CHECK_EQ(NextPageAfter(page(1, 25, 60), 1, 1), 0);
+  // A page the filter emptied is not the end - the server's cursor still says there is more, so
+  // the number of *offers kept* is irrelevant to the decision.
+  CHECK_EQ(NextPageAfter(page(1, 25, 60), 1, 4), 2);
+  // The server says this was the last page: stop, even inside the budget.
+  CHECK_EQ(NextPageAfter(page(3, 10, 60, 50), 3, 4), 0);
+  // An empty answer ends the walk (returned 0 is the API's "nothing matched").
+  CHECK_EQ(NextPageAfter(page(1, 0, 60), 1, 4), 0);
+  // A page that omitted `pagination.page` continues from the count of pages already read.
+  CHECK_EQ(NextPageAfter(page(0, 25, 60), 1, 4), 2);
+  // A cursor that would repeat a page is not trusted; the count is.
+  CHECK_EQ(NextPageAfter(page(1, 25, 60), 2, 4), 3);
+  // No pages read yet is not a walk.
+  CHECK_EQ(NextPageAfter(page(1, 25, 60), 0, 4), 0);
+}
+
+void TestBackoff() {
+  test::BeginCase("P7's backoff honours Retry-After, 5xx, a bad body and a transport failure");
+  CHECK_EQ(FailureBackoffSeconds(0, std::nullopt), static_cast<uint64_t>(kBackoffNetworkSeconds));
+  CHECK_EQ(FailureBackoffSeconds(500, std::nullopt),
+           static_cast<uint64_t>(kBackoffServerErrorSeconds));
+  CHECK_EQ(FailureBackoffSeconds(503, std::nullopt),
+           static_cast<uint64_t>(kBackoffServerErrorSeconds));
+  CHECK_EQ(FailureBackoffSeconds(429, std::nullopt),
+           static_cast<uint64_t>(kBackoffServerErrorSeconds));
+  CHECK_EQ(FailureBackoffSeconds(404, std::nullopt),
+           static_cast<uint64_t>(kBackoffStatusSeconds));
+  // A 200 that could not be read is drift, not weather: the same minute as a 5xx.
+  CHECK_EQ(FailureBackoffSeconds(200, std::nullopt), static_cast<uint64_t>(kBackoffAnswerSeconds));
+  // The server's own wait wins, within the clamp: a `Retry-After: 0` is not a licence to hammer,
+  // and an absurd value is not a reason to stop for the boot.
+  CHECK_EQ(FailureBackoffSeconds(503, 42), 42u);
+  CHECK_EQ(FailureBackoffSeconds(429, 0), static_cast<uint64_t>(kBackoffMinimumSeconds));
+  CHECK_EQ(FailureBackoffSeconds(503, 100000),
+           static_cast<uint64_t>(kBackoffMaximumSeconds));
+}
+
 }  // namespace
+
+#ifdef _WIN32
+// P7's backoff reads the server's own wait out of the answer. The header block is built by the
+// transport lowercased, which is what the fixture mirrors.
+void TestRetryAfterHeader() {
+  test::BeginCase("the transport reads the delta-seconds form of Retry-After");
+  HttpResponse response;
+  CHECK_FALSE(RetryAfterSeconds(response).has_value());
+  response.headers.push_back(HttpHeader{"retry-after", "120"});
+  CHECK_TRUE(RetryAfterSeconds(response).has_value());
+  if (RetryAfterSeconds(response)) {
+    CHECK_EQ(*RetryAfterSeconds(response), 120);
+  }
+  // An HTTP-date (or anything that is not an integer) is not parsed: the default wait applies.
+  response.headers.clear();
+  response.headers.push_back(HttpHeader{"retry-after", "Wed, 21 Oct 2015 07:28:00 GMT"});
+  CHECK_FALSE(RetryAfterSeconds(response).has_value());
+  response.headers.clear();
+  response.headers.push_back(HttpHeader{"retry-after", ""});
+  CHECK_FALSE(RetryAfterSeconds(response).has_value());
+}
+#endif
 
 #ifdef _WIN32
 // Manual only: `rb_blitz_store_client_tests --live-list` sends ONE list request with records=1
@@ -932,6 +1008,11 @@ int main(int argc, char** argv) {
   TestInstrumentFilter();
   TestStoreSettings();
   TestMatching();
+  TestChunking();
+  TestBackoff();
+#ifdef _WIN32
+  TestRetryAfterHeader();
+#endif
 
   return test::Finish();
 }

@@ -307,4 +307,24 @@ HttpResponse Get(std::string_view url,
   return Perform(url, {}, false, headers, options);
 }
 
+std::optional<int> RetryAfterSeconds(const HttpResponse& response) {
+  const HttpHeader* header = response.Find("retry-after");
+  if (header == nullptr || header->value.empty()) {
+    return std::nullopt;
+  }
+  // Delta-seconds only: the API answers an integer. An HTTP-date (or anything else) is not parsed
+  // - the caller's default backoff then applies, which is the conservative reading.
+  int seconds = 0;
+  for (const char c : header->value) {
+    if (c < '0' || c > '9') {
+      return std::nullopt;
+    }
+    if (seconds > 100000) {
+      return std::nullopt;  // absurd value: let the clamp decide instead of overflowing int
+    }
+    seconds = seconds * 10 + (c - '0');
+  }
+  return seconds;
+}
+
 }  // namespace rb_blitz::store

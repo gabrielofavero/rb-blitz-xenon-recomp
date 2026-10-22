@@ -22,7 +22,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,6 +49,21 @@ bool IsFrontMenuPath(std::string_view path);
 // Offer and related-record paths are deeper and are not menus.
 bool IsMenuRecordPath(std::string_view path);
 
+// True for the search row's own page (`dlc_store/<region>/<locale>/search/`). It is a menu record
+// like Recent's, but its offers are the search session's answer instead of the catalogue's list -
+// which is how the plan's "results replace the browser list" is true: the page goes through the
+// same parser, the same `process_offers`, and the same browser.
+bool IsSearchMenuPath(std::string_view path);
+
+// Where that page's offers come from. Installed once per boot by the search's transport module
+// (`src/store/store_search_service.cpp`), which composes "the session's accepted offers, as the
+// record model" and marks the answer presented; a suite installs its own source, and a boot that
+// never installs one answers the search page with an empty list - a valid page.
+using SearchPageSource = std::function<std::vector<Offer>()>;
+void SetSearchPageSource(SearchPageSource source);
+// The installed source's page (empty without one).
+std::vector<Offer> SearchPageOffers();
+
 // The offers a menu page is answered with. Installed once per boot by the catalogue worker
 // (`src/store/store_catalogue.cpp`); a test that never installs one gets an empty page, which is a
 // valid record and keeps this module free of the network.
@@ -69,6 +86,27 @@ bool IsDownloadedOffer(const Offer& offer);
 
 // The catalogue offers with the Downloaded flag resolved. `BuiltinRecord` writes this shape.
 std::vector<Offer> OffersForPage();
+
+// The download registration seam (P5). Each row of a served page carries a job token
+// (`Offer::job`) the details page's Download row can send; the worker behind that token lives in
+// `src/store/store_download_service.h` and is installed once per boot by the download service's
+// wiring. Keeping it a seam has the usual two reasons: this header stays SDK-free and free of the
+// network, and a suite can install a fake registrar to check that every offer on a page carries a
+// distinct token - which is the one thing the guest side relies on.
+//
+// The registrar receives what the worker needs and returns the token, or "" when it will not take
+// the offer (switched off, refused). `url` is what `DecideOffer` resolved, and `api_size` is the
+// catalogue's byte count (empty when unknown).
+using OfferRegistrar = std::function<std::string(std::string_view file_id, std::string_view url,
+                                                std::optional<std::int64_t> api_size,
+                                                std::string_view title)>;
+void SetOfferRegistrar(OfferRegistrar registrar);
+
+// Fills `offer->job` from the installed registrar, or leaves it empty when no registrar is
+// installed or the offer carries no download identity. Called by the serving path for every offer
+// of every page, so a row a player can see is always a row the worker can be asked about. The
+// title it passes is what the caption strip shows ("Artist - Title").
+void AttachDownloadJob(Offer* offer);
 
 // The album-art prefetch seam. `src/store/album_art_service.h` owns the worker that fetches and
 // encodes a cover; this module only reports which offers a page carries, so the fetch starts on the

@@ -19,6 +19,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -63,5 +64,10 @@ HttpResponse PostForm(std::string_view url, std::string_view body,
 HttpResponse Get(std::string_view url,
                  const std::vector<std::pair<std::string, std::string>>& headers,
                  const HttpOptions& options = {});
+
+// The `Retry-After` header in seconds, when the server sent the delta-seconds form (the only form
+// this API uses; an HTTP-date is not parsed, and an unparsable value answers nothing). Plan §P7's
+// backoff turns this into the wait before the next request.
+std::optional<int> RetryAfterSeconds(const HttpResponse& response);
 
 }  // namespace rb_blitz::store

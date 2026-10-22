@@ -1,6 +1,6 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21. Status: **in progress — P0, P6, P1 and P2
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **in progress — P0, P6, P1 and P2
 landed 2026-10-20**, and **P3's serial half (step 0) landed the same day**: the request chain is
 mapped (`sub_827501F0` → `sub_82753010` → `sub_8274FB60` → the file cache), both entries are
 hooked, and the store's own DTA record is proven editable — the panel still issues no request
@@ -34,11 +34,26 @@ page draws retail's own **DOWNLOAD AGAIN** row (§5/P3 close-out record, boots
 honest limits - no devil, no sixth pip - are in
 [known-issues.md](../../reference/known-issues.md).
 **P5's pipeline landed the same
-day, hermetically tested and not yet driven by a boot** (§5/P5 record: nothing registers offers or
-starts a job until P3/P4 wire the list and the buttons). **P4 landed the same day and is held open
-by exactly one line of its exit:** the field, the authored keys, the request, the answer and the
-two authored sentences are boot-measured, but the **matches are only held, not yet drawn** — the
-list they belong in is P3's front menu (§5/P4 record). P1's browser acceptance is met
+day, hermetically tested**; **its guest half then landed 2026-10-22 and one boot drove it end to
+end** - the details page's **DOWNLOAD** row registers, starts, installs, refreshes and receipts a
+real catalogue package, and the caption strip reports each step (§5/P5 landing record, boot
+`out/_swap/store-probe/20261022-124753`). **P4's last line landed 2026-10-22**: the
+store's own **Search** row now opens the authored keys, Done submits, and pressing the row again
+fills the retail browser with the answer - `15 MATCHES FOR "BUSH"` and the fifteen offers drawn,
+with Recent unchanged on the control leg (§5/P4 landing record, boots
+`out/_swap/search-probe/20261022-105010`, `-105401`). The field, the authored keys, the request, the
+answer and the two authored sentences were boot-measured on 2026-10-20 and stand. **P7's polish
+landed 2026-10-22** (§5/P7 record): the catalogue and the search walk API pages on the **server's
+own cursor** with a bounded per-action budget and a real cancellation, both share an in-memory page
+cache (~5 min, single flight) and P7's answer-derived backoff, and the store now says its own
+sentences in the caption strip - the credit line `Customs from RhythmVerse`, the loading line, the
+empty-state sentence and the offline reason. That review is
+**hermetic for the sentences and boot-measured for the credit line**: a store boot on the shipped
+release binary draws `Customs from RhythmVerse` under the store menu's rows
+(`out/_swap/store-probe/20261022-140259`) and its log carries the four-page walk
+(`page 1..4 -> 24,25,25,25 eligible offer(s) of 25 record(s)`, `99 offer(s) for the Recent list`).
+The loading, empty and offline lines are module-tested only. P1's browser
+acceptance is met
 on one boot (row drawn, store opens, B returns) and still owes the multi-boot/toggle matrix. Audio
 preview is decided: the API returns no preview asset (§3.3), so v1 shows none.
 Scope: wire the RhythmVerse customs catalogue into screens based on the retail store so that
@@ -1363,7 +1378,9 @@ Sarah McLachlan's *Surfacing* cover over `BUILDING A MYSTERY / SARAH MCLACHLAN /
   `out/build/win-amd64-debug`.
 - **P3 state after this record**: art is done on screen. Left open in the phase: the Downloaded
   matcher measured on a real library, page 2+ (the catalogue serves page 1), and the difficulty
-  display's `NO PART` where the catalogue publishes no rank.
+  display's `NO PART` where the catalogue publishes no rank. **All three are closed by the
+  close-out record below**, which also records the two halves the exit line still owed (a real
+  multi-song pack, and the Downloaded affordance on the details page).
 
 **P3 close-out record (2026-10-22) — the matcher reads a real package, the list carries four API
 pages, and the meter draws the catalogue's difficulty.** All three remaining items were finished
@@ -1654,6 +1671,81 @@ OCR of a capture or a log line, not an expectation:
   **zero records** (measured above). The no-match sentence carries the plan's own retry guidance,
   which is the intended outcome, not a failure state.
 
+**P4 landing record (2026-10-22) — the results are drawn: the store's Search row opens the keys,
+Done submits, and pressing the row again fills the retail browser.** The 2026-10-20 record above
+left one item open ("the matches are answered and held, not drawn - they belong in the same list P3
+now feeds"); P3 has since landed, and this closes it.
+
+- **The entry that was missing.** P3's front menu has carried a `search` row since 2026-10-21; what
+  no boot had was a destination for it. The payload now rewrites `store.dtb`'s
+  `store_menu_panel.SELECT_MSG` (`store::RouteSearchRowToKeys`): the measured body's
+  `{store_panel request <name> TRUE}` becomes
+
+  ```text
+  {if_else {== $ix <row>}
+     {if_else {file_exists "rbbz-store/search/show"} <the retail request> {ui goto_screen settings_rhythmverse_search_screen}}
+     <the retail request>}
+  ```
+
+  The row is identified by **index** (`{component selected_pos}` is already in `$ix`): a comparison
+  against `{provider get_string $ix}` would depend on whether that answer is a symbol or a string,
+  while `{== $ix 1}` is the integer the DTA already holds and the menu is ours (`kSearchMenuRow`,
+  pinned against `RhythmVerseFrontMenu()` by `store_metadata`). Every other row keeps retail's own
+  statement verbatim, which the control leg below measures. `rbbz-store/search/show` is the pending
+  answer: set when a terminal answer lands (results, no results, a failure), cleared when the
+  serving policy hands the page over and by any edit, submit or cancel.
+- **The page *is* the answer.** `BuiltinRecord` answers `dlc_store/europe/eng/search/` with the
+  `SearchPageSource` installed by `store_search_service.cpp`: the session's accepted offers through
+  the same `OfferFromSong` mapping Recent uses, plus the Downloaded predicate, the art prefetch and
+  `KeepOnlyHeldArt`. So the browser, the details screen and the Downloaded mark behave exactly as
+  they do for Recent - the page goes through retail's own parser and `process_offers`, and an
+  **empty** answer is P3's measured zero-offer page (boot 108: the DTA refreshes the menu).
+- **`leave` ends the surface, not the search.** Every search page's `exit` writes
+  `rbbz-store/search/leave`, which clears only "the keys are up", so the strip stops. The field,
+  the answer and the pending mark stay - the Search row is the way to the answer. Two earlier cuts
+  are recorded because both were measured on this route: keying the strip on the pending flag made
+  the count sit over the main menu after leaving the store, and letting `leave` clear the pending
+  flag made the second Search press open the keys again instead of the page.
+- **Done deliberately does not leave.** These panels receive one press as two (the duplicate-press
+  note in `store_search.h`), so a leaving Done would leave twice and the second delivery would press
+  whatever the destination screen lists. The strip therefore says the truth - `N matches for "x".
+  Press Back, then Search, to list them.` - and a refused submit (the API's 3-character rule) keeps
+  the player on the page with the reason.
+- **Measured on the shipped defaults** (`--store_search_seed=bush`, no diagnostic switch;
+  `scripts/probe_search.ps1 -SearchMenuRow 1 -StoreRow 3 -Seed bush`):
+  - `out/_swap/search-probe/20261022-105010`: the store menu OCRs as `RHYTHMVERSE … RECENT SEARCH`;
+    the Search row opens the keys (strip `SEARCH: BUSH`); Done submits and the strip reads
+    `15 MATCHES FOR "BUSH". PRESS BACK, THEN SEARCH, TO LIST THEM.` while the log records
+    `store_search: 25 record(s) answered, 15 eligible offer(s), state results (current)`; Back
+    returns to the store menu; the same row then asks for the page and the **retail browser lists
+    the fifteen offers** - `THE PEOPLE THAT WE LOVE / MOUTH / ARMY DREAMERS / SHAKE THAT / BUSH
+    AGAIN / COLD CONTAGIOUS / RAINBOW BRITE AND ME / FAVORITE SON …` with the details band reading
+    the selected offer's own `BUSH / GOLDEN STATE / BUSH …`.
+  - `out/_swap/search-probe/20261022-105401` (the control leg, `-SearchMenuRow 0 -RowOnly`):
+    pressing **Recent** still gets the catalogue - `OTRO DIA QUE VA / BUILDING A MYSTERY / BEEN
+    THERE. DONE THAT / …` - and an album art is served (`art
+    'dlc_store/offers/8a384938c30da5bc/cover_art.png_xbox' returned to the panel`). P3 does not
+    regress.
+- **Tests**: `store_search` (the presentation cases - pending set/cleared/kept across `leave`, the
+  two hint sentences, offers kept when the surface closes), `store_serve` (the search page answers
+  the search source, Recent the catalogue's; an empty page without a source), `store_payload` (the
+  gate on the shipped shape: both branches, idempotency, the refusals and the compile/parse round
+  trip), `store_metadata` (the row index against the menu), `settings_screen` (Done writes and never
+  leaves; every search page's `exit` carries the dismissal, and only those pages do); full `ctest`
+  **45/45**. `rb_blitz_store_payload_tests store-edit <store.dtb> search` prints the routed
+  `SELECT_MSG` out of the shipped record - the gate sits inside the same `{do}` that defines
+  `$provider`/`$ix`, which is what makes the index comparison legal DTA.
+- **P4's `Exit:` line** is met for the query the boot used (a one-word artist/title text). The
+  2026-10-20 measurements still stand for multi-word names (`kate bush` → 2 offers), the
+  combined-query limitation (`kate bush army` → 0 records, the retry sentence) and Cancel
+  (host-pinned). Not measured: the A press on a *search* offer's details page (the same record and
+  the same details route P3 closed; the list and the details band are what this boot reads).
+- **Honest limits**: a search is one API page (25 records) - Recent's `store_catalogue_pages`
+  accumulation is not applied to the search, so P7's paging rule is still owing there; typing is
+  still the authored key rows (unchanged from 2026-10-20); and the answer is a snapshot, so
+  re-pressing Search after browsing results opens the keys again (the pending mark was consumed by
+  the listing).
+
 ### P5 — download pipeline
 
 - Host `store_download` implements **all of §3.1**, using the offer's validated URL held by the
@@ -1745,13 +1837,76 @@ debug tree (the count includes P4's `store_search`, in the working tree at the t
 suite: a cancel of a **queued** job logged while holding the service mutex — `LogLine` takes the
 same mutex — which deadlocked the worker; the log is now outside the lock.
 
-Honest limits — P5's exit is **not** met yet:
+**P5 landing record (2026-10-22) — the guest half is wired and a boot drove the whole pipeline.**
+The 2026-10-20 record above ends with "nothing registers offers or starts a job"; that was true then.
+What the guest now does, in the order a press walks it:
 
-- No boot has downloaded anything. Nothing registers offers yet (the catalogue worker is P3's
-  post-step-0 lane) and no DTA button case starts a job (P3/P4 own the store screens), so "a
-  verified direct package is playable after the proven refresh or explicitly required restart" is
-  unmeasured. The service reports a verified install as installed and pending discovery; the list
-  must show **restart required** until OQ6's guest-discovery half is proven.
+- **Registration at serve time** (`src/store/store_serve.cpp`, `AttachDownloadJob`). Every offer a
+  page carries is handed to the worker as the page is written, from the offers' own fields: the
+  resolved URL `DecideOffer` accepted, the catalogue's byte count and the "Artist - Title" the
+  strip shows. One seam (`store_serve.h`'s `OfferRegistrar`, installed beside the destination in
+  `src/hooks/dlc.cpp`) means the suite installs a fake and the boot installs the service, and it is
+  the same call for Recent and for the search page - `Offer::file_id`/`download_url`/`size_bytes`
+  are host-only, exactly like `art_url`, and never reach a record.
+- **The row** (`src/store/store_payload.h`, `AddDownloadButton`). A free custom is never
+  purchasable, so the details page a served offer opens carried Exit alone. The transform inserts
+  `store_download_now` into the **not-downloaded** branch of `refresh_buttons`'
+  `{if_else {offer is_purchased} …}` gate, keeping retail's own else branch (the buy path) by
+  value. Retail's `store_download_again` row is untouched, so a downloaded offer draws
+  `DOWNLOAD AGAIN / EXIT` and a fresh one draws `DOWNLOAD / EXIT`. The label is the locale key the
+  symbol names, added with `screen::AddLocaleEntry` in the same rhythmverse-gated block.
+- **The press** (`RouteDownloadButtons`). Retail's `store_download_again` case calls the native
+  `{store_panel re_download …}`, which needs a commerce object this build never creates; the case is
+  retargeted and a `store_download_now` case appended, both writing the request path
+  `rbbz-store/download/start|again/<job>` through `write_file`. The token is the record's own
+  `(job "…")` key - written on **every** offer by both writers (`store_metadata.cpp`), because the
+  row reads it unconditionally and a missing key is the null walk this build has measured twice.
+- **The strip** (`src/ui/help_overlay.cpp`, `store_download_service.h`'s `DownloadStatusText`):
+  `Downloading 'Artist - Title': N%`, `Waiting to download …`, `Installed '…'. Restart the game to
+  play it.`, `Download failed for '…': <error>.`, and the cancelled pair - drawn where the search
+  strip draws, below it and above the row caption, for 30 s after a terminal state.
+- Accepted start/again writes are logged (`store_download: start accepted for <job>`), so a boot's
+  log answers "did the press arrive" separately from the transfer's own lines.
+
+Measured on `out/_swap/store-probe/20261022-124753` (boot, flat scratch root
+`out/_swap/p5-dlc`, profile `out/_swap/p5-profile`): store -> RECENT -> the first offer
+('Sweet Surrender') -> **DOWNLOAD**; the strip drew `INSTALLED 'SARAH MCLACHLAN - SWEET
+SURRENDER'…` on the +3 s capture and was gone on the +40 s one; the log shows
+`start accepted for j4a4d1603aab322a6`, then `installed …\rv_4a4d1603aab322a6ab257e03977614d1.con
+(5238784 bytes, title 1161890068)`, then `the store's install asked for a refresh; scanning 1 library
+root(s)` and `the refresh finished (1 package(s))`. On disk: the 5,238,784-byte container, an empty
+`.rbbz-store-staging/`, and the receipt row
+`<sha> j4a4d1603aab322a6 rv_….con 5238784 pending <stamp>` in `<user_data_root>/store/downloads.tsv`.
+
+Two guest-side defects fell out of the boots, both with the same signature (`read of guest
+0x00000000` the frame the row was pressed) and both in this payload's DTA, not in the worker:
+
+1. `{cur_offer get_data (job)}` - `get_data` sent at a **property receiver**. Retail binds the
+   property into a local first (`{var $offer {property cur_offer}}` in `refresh_buttons`) and reads
+   the offer from that.
+2. The binding written as a `{var $offer …}` **command** inside a `do`. In a compiled record a
+   binding statement is an **array** (`(Var value...)` - retail's own tree), and a `var` command
+   there is not one. A literal probe write in front of the binding proved it: the probe answered
+   `store_download: refusing a malformed write: rbbz-store/download/start/--` and the crash
+   followed in the same millisecond.
+
+The `{offer has_data job}` guard (retail's own `has_data preview_audio` shape) is what turns a
+record without the key into a message instead of a crash.
+
+Remaining honest limits (P5's exit is met; these are the parts it does not claim):
+
+- The post-install **refresh** runs and reports `1 package(s)`, and the **next boot's library scan sees the new
+  package** - `out/_swap/store-probe/20261022-130126`'s log has
+  `dlc: 1 saved-game library package(s) presented as content type 00000002` and
+  `store_library: the Downloaded mark is built from the loaded DLC packages' songs.dta`. That boot then sat on the
+  title's "Loading Cached Content List" until the harness gave up, so the *page* half - the served-page line
+  `N of them marked Downloaded` and a details page drawing `DOWNLOAD AGAIN` - is **not measured yet**; the line to
+  read on the next successful store visit is `store_fetch: the served page carries N offer(s), M of them marked
+  Downloaded`. The title's own discovery of a newly installed song inside the same session is still OQ6's open half,
+  which is why the strip says **restart**.
+- A boot that sees the DLC library change spends minutes on that loading screen in this environment (two of five
+  P5 boots never left it in 240-480 s), so a P5 evidence run wants a long `-ScreenTimeoutSec` and a log check
+  before blaming the pipeline.
 - §3.1 step 4's "readable song metadata" is only the STFS header identity; mounting the package
   and reading `songs/songs.dta` before commit is still owed.
 - The §3.2 matching index stays P3's loaded-library work; a receipt never makes a song
@@ -1814,6 +1969,94 @@ Honest limits — P5's exit is **not** met yet:
 - Refine the required RhythmVerse heading/credit from P1/P3; attribution is already present.
 - Empty-state and offline text; the store's own `store_info_unavailable_screen` copy reused.
 - Optional: recommendation/marquee areas hidden or fed from the same list (do not fetch extra).
+
+**P7 record (2026-10-22) — the polish landed in code, hermetically tested, and the credit line is
+measured on screen.** P7 has no `Exit:` line of its own, so this is the per-bullet account, each
+with the module that owns it.
+
+- **Chunking.** The cursor is the **server's own page number**, kept separately from the offers a
+  caller has kept: `rhythmverse_client.h`'s `NextPageAfter(page, pages_fetched, page_budget)` reads
+  `ListingPage::page` + `HasMorePages()` and never the visible count, so a page the
+  eligibility/instrument filter **emptied** continues the walk, an underfilled page is valid, and
+  `total_filtered` is never read as a count of downloadable offers (the strips count eligible
+  offers; the log lines print `record(s) answered` beside the eligible count). Both workers use the
+  one helper: the catalogue's `store_catalogue_pages` (default 4) and the search's new
+  `store_search_pages` (default 4) are the per-action budgets. **Cancellation** is a check, not a
+  comment: the catalogue tests `StillWanted(generation)` (same settings generation, master still
+  on, worker not quitting) before every page *and* inside a sliced `PauseBetweenPages`, so a
+  filter commit or the master switch stops the walk **before** the next request; the search's
+  equivalent is `SearchPageWanted` + `SearchBuildPageRequest` returning nothing once the job is
+  stale. A cancelled catalogue drops the pages it had (the filter that produced them is gone); a
+  cancelled search keeps the field and the previous answer.
+- **Caching.** `src/store/store_page_cache.{h,cpp}` — the in-memory page cache with the plan's
+  ~5 min TTL (`store_page_cache_ttl_seconds`, 0 = off), a 64-entry bound with oldest-first
+  eviction, and **single flight** per key. The key is the endpoint **and the form body**, so the
+  query text, the page number, the page size and the instrument filter each identity a page - a
+  settings commit cannot read a page fetched for the filter it replaced. One shared instance, so
+  Recent and Search reuse each other's pages. **The disk cache (`<user_data_root>/store/cache/`) is
+  not built**: the plan marks it optional, and it would need the user-data root and a wire format
+  inside a module whose point is being SDK-free; the in-memory TTL covers a session. The
+  transport's `User-Agent` is already the plan's product string
+  (`rb-blitz-store/0.1 (+https://rhythmverse.co/)`).
+- **Politeness / 5xx.** `FailureBackoffSeconds(status, retry_after)` is the one policy: the
+  server's `Retry-After` wins within 5..600 s (`RetryAfterSeconds` parses the delta-seconds form
+  only), a 5xx or 429 without one is 60 s, a transport failure 10 s, a `200` that could not be read
+  60 s, any other status 120 s. The catalogue holds its next fetch off for exactly that
+  (`g_retry_at`; a page that lands clears it, a partial list keeps it, so the pages that failed are
+  retried after the wait rather than on the next keypress). The search session gains the same wait
+  as state: `SearchFailAfter` stores it, `SearchSubmitQuery` **refuses inside it** with
+  `the catalogue is busy; try again in N s` instead of sending, and a page that lands, a cancel or
+  the next accepted submit clears it. A failure after some pages landed ends the walk but keeps the
+  offers already read - a partial list is a working store, not an error page.
+- **Heading and credit.** The heading stays `kStoreHeadingText = "RHYTHMVERSE"` because
+  `CUSTOMS FROM RHYTHMVERSE` clips in the retail header (measured 2026-10-21). The full attribution
+  is now drawn where a sentence fits: the caption strip's credit line
+  **`Customs from RhythmVerse`**, shown when the store's front menu is served.
+- **Empty state and offline text.** `src/store/store_catalogue_status.{h,cpp}` holds the sentences
+  and the precedence - **failure > empty > loading > credit** - with the honest reasons: a failed
+  fetch says what failed (`RhythmVerse could not be reached: the catalogue answered HTTP 503. Press
+  Back and try Recent again.`), an empty one says where the filter lives, a fetch in flight counts
+  the pages read so far, and the `store_catalogue_off` diagnostic explains its own silence. Two windows keep it
+  honest: nothing is said before a store surface served a record, and nothing after
+  `kCatalogueSurfaceWindow` (20 s) - so the strip cannot follow a player out of the store, the
+  mistake the search strip made once. Retail's own `store_info_unavailable_screen` is **not**
+  fabricated for an empty page: that screen is the enum-error route and keeps retail's copy; an
+  empty page is a normal answer the DTA already handles (it refreshes the menu), and the strip is
+  what turns that silent return into a sentence. The overlay draws it below the search and download
+  strips, above a row caption, and with Settings Labels off.
+- **Recommendation / marquee (optional): not done, on purpose.** `MESSAGES`, `RECOMMENDED` and
+  `YOUR SONGS` are **scene labels** in the store menu's art, not rows the DTA lists - measured
+  2026-10-22, the list carries only the served submenus (RECENT = 0, SEARCH = 1). Feeding them means
+  extra fetches, which the bullet forbids; hiding them means a `.milo` edit, which is not this
+  phase's seam. The list a player can act on is complete without them.
+
+Verification: **47/47** ctest in `out/build/win-amd64-debug` with two new suites - `store_page_cache`
+(**39 checks**: the TTL, the bound, the eviction order, single-flight, the shared instance) and
+`store_catalogue_status` (**28 checks**: every sentence and the precedence) - and the extended ones:
+`store_client` **402** (the chunking cursor and the backoff table, plus `Retry-After` parsing),
+`store_search` **384** (a filtered-empty page continuing the walk, the budget, cancel/commit
+cancellation, a partial failure keeping its offers, the busy refusal). The release preset builds and
+links `rb_blitz.exe`. **On screen** (`out/_swap/store-probe/20261022-140259`, release binary, a
+scratch profile with `[general] rhythmverse = true`, `-StoreRow 5 -LocalRoot ""`): the store menu
+draws `RHYTHMVERSE … RECENT SEARCH` and the strip draws **`Customs from RhythmVerse`** across the
+bottom of the screen (OCR of `store.png`; the harness's own store OCR also fragments it as
+`R USTOMS`), and the log carries the walk this phase added:
+
+```text
+store_search: transport ready (one worker thread, /api/rb3xbox/songfiles/search/live, up to 4 page(s) per search)
+store_catalogue: fetching up to 4 page(s) (the store opened)
+store_catalogue: page 1 -> 24 eligible offer(s) of 25 record(s) (24 total)
+store_catalogue: page 2 -> 25 eligible offer(s) of 25 record(s) (49 total)
+store_catalogue: page 3 -> 25 eligible offer(s) of 25 record(s) (74 total)
+store_catalogue: page 4 -> 25 eligible offer(s) of 25 record(s) (99 total)
+store_catalogue: 4 page(s) -> 99 offer(s) for the Recent list
+```
+
+The three sentences the boot did **not** exercise are the loading line (the store's screenshot was
+taken after the four pages had landed), the empty state (the live catalogue answered 99 offers) and
+the offline reason (it needs an unreachable site, which the build cannot be pointed at) - all three
+are pinned by `store_catalogue_status`'s suite instead.
+
 
 ### P8 — acceptance + docs
 

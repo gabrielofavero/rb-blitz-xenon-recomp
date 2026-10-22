@@ -84,6 +84,36 @@ bool PointUiNetcacheAtLocalServer(std::vector<ui::dtb::Node>* ui_roots,
 // Returns false and fills `why` when the record carries no `store_menu_screen` with an `enter`
 // method — before any edit.
 bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
+
+// P4's entry from the store (plan §5/P4). The front menu's rows are provider names, and
+// `store_menu_panel.SELECT_MSG` answers a press with
+//
+//   {do {var $provider {this get_menu_provider}} {var $ix {component selected_pos}}
+//        {this mark_current_highlight_idx} {this set_focus ""}
+//        {store_panel set_source … TRUE} {store_panel request <name> TRUE}
+//        {store_panel update_loading_status}}
+//
+// (out/_swap/store.tree.txt, verbatim). This rewrite wraps the `request` command in a two-level
+// gate:
+//
+//   {if_else {== $ix <search_row>}
+//      {if_else {file_exists "rbbz-store/search/show"} <request> {ui goto_screen <search_screen>}}
+//      <request>}
+//
+// so the Search row opens the authored key pages while the search has no answer to present, and
+// asks for the search page - which the serving policy answers with that answer - once it has one
+// (`store_search.h`'s `kSearchShowQuery`). Every other row keeps retail's own body verbatim.
+//
+// The row is identified by its **index**, the value `{component selected_pos}` already holds: the
+// menu is written by this project (`FrontMenuRowIndex`), so the position is a fact rather than a
+// guess about how the provider spells a name, and `{== $ix 1}` is an integer comparison the DTA can
+// evaluate without depending on symbol-vs-string equality.
+//
+// Idempotent (a second pass is refused by name); refused, before any edit, when the record carries
+// no `store_menu_panel.SELECT_MSG` with a `request` command, or when `search_row` is negative.
+bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
+                          std::string_view search_screen, std::string* why);
+
 // P3's free-download seam (plan §2.12). Retail draws its price chrome in two places, both of them
 // text the scripts show and no data we could supply hides:
 //
@@ -144,6 +174,58 @@ bool ShowOfferDetailsDirectly(std::vector<ui::dtb::Node>* store_info_roots, std:
 // unchanged (Exit only). Idempotent; refused, before any edit, when `refresh_buttons` is missing or
 // carries no such gate.
 bool UseDataForDownloadedRow(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// P5's button (plan §5/P5). The details page's button list is built by `refresh_buttons`, and for a
+// song it carries **two** rows in the not-downloaded case: `exit`, and - only when
+// `{this purchase_allowed offer}` - `store_buy_now`. A free custom is never purchasable, so the page
+// drawn for a served offer has to get its Download row from this build.
+//
+// The insert goes into the **else** branch of the `{if_else {offer is_purchased} <again> <else>}`
+// gate (the not-downloaded side), wrapped as
+//
+//   {do {insert_elem buttons 0 store_download_now} <retail's own else branch>}
+//
+// so the page reads `DOWNLOAD / EXIT` and retail's buy path is untouched. `insert_elem … 0` puts the
+// new row first - the same call retail uses for `store_download_again`, which is why the row's
+// position matches how every other price/detail row is placed.
+//
+// Run **after** `UseDataForDownloadedRow`: that transform replaces the gate's test, this one only
+// adds to a branch, so the order does not strictly matter - but doing it in this order means the
+// else branch this pass finds is already the rewritten shape the tests pin.
+//
+// Idempotent (a second pass finds its own `store_download_now` insert and refuses by name); refused,
+// before any edit, when `refresh_buttons` is missing or carries no `store_download_again` insert.
+bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// The button's other half: the press. `store_info_panel.SELECT_MSG` dispatches
+// `{switch {component selected_sym} ...}` over the button symbols, and retail's
+// `store_download_again` case calls the native `{store_panel re_download …}`, which needs the
+// commerce object this build never creates. This rewrites that case and appends a
+// `store_download_now` one so both rows reach the worker through the request channel instead:
+//
+//   {do ($offer {property cur_offer})
+//        {if_else {offer has_data job}
+//           {do ($path {sprintf "rbbz-store/download/<start|again>/%s"
+//                              {offer get_data (job)}}
+//                {write_file $path 0}}
+//           {notify "This offer carries no download job"}}}
+//
+// Every shape is one the shipped `refresh_buttons` uses: the property-to-local **binding** before a
+// data read (an array in the compiled record - a `{var}` *command* inside a `do` is not the same
+// thing and crashed the first boot that pressed the row), the `has_data` guard that keeps a missing
+// key from being walked, `sprintf` with a nested command as its argument, and the request channel's
+// own `write_file`. The path is the grammar `store_download.h` owns (`ParseJobCommand`), and the
+// token is the offer's `job` key.
+//
+// Measured 2026-10-22 on the first boot that pressed the row (`out/_swap/store-probe/
+// 20261022-115913`, log `rb_blitz_212.log`): the case dispatched and reached the host (a literal
+// probe write answered `refusing a malformed write`), and the binding written as a command died on
+// `read of guest 0x00000000` the same frame - which is what the array form above fixes.
+//
+// Idempotent (the appended case is the marker); refused, before any edit, when the record carries no
+// `SELECT_MSG` switch or no `store_download_again` case. Requires `AddDownloadButton` to have run
+// only for the row itself - the two transforms do not depend on each other's output.
+bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
 // The details page's Preview Audio row is built from `refresh_buttons`' own preview block, and its
 // gate is `{&& is_song {offer has_data preview_audio} {is_allowed_to_preview_offer offer}}`. The

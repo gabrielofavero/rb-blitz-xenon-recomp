@@ -3850,6 +3850,52 @@ void TestRhythmVerseSearchPages() {
   }
   CHECK_TRUE(opens >= 2);
 
+  // Done submits and **stays**: these panels receive one press as two (measured 2026-10-20 - one A
+  // press logged `search/key/a` twice in the same millisecond), so a leaving Done would leave
+  // twice and the second delivery would run whatever the destination screen lists. The strip
+  // reports the request and its answer; Cancel is the one key that leaves.
+  {
+    bool done_writes = false;
+    bool done_stays = true;
+    bool cancel_leaves = false;
+    for (const dtb::Node& root : DefinitionRoots()) {
+      std::vector<const dtb::Node*> tables;
+      CollectRowTables(root, &tables);
+      for (const dtb::Node* table : tables) {
+        const std::vector<std::string> done = SwitchCaseWords(*table, "settings_rv_key_done");
+        if (!done.empty()) {
+          done_writes = done_writes ||
+                        std::find(done.begin(), done.end(), "rbbz-store/search/done") != done.end();
+          if (std::find(done.begin(), done.end(), "goto_screen") != done.end()) done_stays = false;
+        }
+        const std::vector<std::string> cancel = SwitchCaseWords(*table, "settings_rv_key_cancel");
+        if (!cancel.empty() && std::find(cancel.begin(), cancel.end(), "goto_screen") != cancel.end()) {
+          cancel_leaves = true;
+        }
+      }
+    }
+    CHECK_TRUE(done_writes);
+    CHECK_TRUE(done_stays);
+    CHECK_TRUE(cancel_leaves);
+  }
+
+  // Leaving a search page ends the strip without touching the field: `exit` carries the `leave`
+  // write. Exactly the search pages carry it - one per context - so no other page can dismiss it.
+  {
+    int exits = 0;
+    int dismissing = 0;
+    for (const dtb::Node& root : DefinitionRoots()) {
+      std::vector<const dtb::Node*> members;
+      CollectMembers(root, "exit", &members);
+      for (const dtb::Node* member : members) {
+        ++exits;
+        if (HasText(*member, "rbbz-store/search/leave")) ++dismissing;
+      }
+    }
+    CHECK_TRUE(exits >= static_cast<int>(pages.size()) * 2);
+    CHECK_EQ(dismissing, static_cast<int>(pages.size()) * 2);
+  }
+
   // The measurement entry is the RhythmVerse main-menu row itself: with the diagnostic on, its
   // case jumps into the keys instead of the store. Pinned here because it is what a boot uses to
   // reach the pages before P3's front menu serves the store's own Search row.

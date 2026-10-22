@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <utility>
 
+#include "store/store_search.h"
+
 namespace rb_blitz::store {
 namespace {
 
@@ -261,6 +263,102 @@ bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string
   }
   enter->kids.push_back(
       Node::Command({Node::Symbol("store_panel"), Node::Symbol("on_init_commerce_success")}));
+  return true;
+}
+
+namespace {
+
+// `{store_panel request <name> TRUE}` - the statement the Search row's gate wraps.
+bool IsStoreRequestCommand(const Node& node) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() >= 2 &&
+         IsSymbol(node.kids[0], "store_panel") && IsSymbol(node.kids[1], "request");
+}
+
+// The first request command at any depth, with the vector that owns it (so the caller can replace
+// it in place).
+bool FindStoreRequestCommand(std::vector<Node>& nodes, std::vector<Node>** owner, size_t* index) {
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (IsStoreRequestCommand(nodes[i])) {
+      *owner = &nodes;
+      *index = i;
+      return true;
+    }
+    if (FindStoreRequestCommand(nodes[i].kids, owner, index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The gate's own query, anywhere in a method: a second pass has to refuse rather than nest one
+// wrapper inside another.
+bool MentionsSearchGate(const Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 2 && IsSymbol(node.kids[0], "file_exists") &&
+      node.kids[1].tag == ui::dtb::kString && node.kids[1].text == kSearchShowQuery) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (MentionsSearchGate(kid)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// `{file_exists "<path>"}` - the one-bit read the P1 entry gate already uses.
+Node FileExistsCommand(std::string_view path) {
+  return Node::Command({Node::Symbol("file_exists"), Node::String(std::string(path))});
+}
+
+}  // namespace
+
+bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
+                          std::string_view search_screen, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  if (search_row < 0) {
+    return refuse("the front menu carries no search row");
+  }
+  if (search_screen.empty()) {
+    return refuse("no search screen to enter");
+  }
+  Node* select = nullptr;
+  for (Node& root : *store_ui_roots) {
+    select = FindNamedMethod(root, "store_menu_panel", "SELECT_MSG");
+    if (select != nullptr) {
+      break;
+    }
+  }
+  if (select == nullptr) {
+    return refuse("the record carries no store_menu_panel SELECT_MSG method");
+  }
+  if (MentionsSearchGate(*select)) {
+    return refuse("the Search row is already routed to the keys");
+  }
+  std::vector<Node>* owner = nullptr;
+  size_t index = 0;
+  if (!FindStoreRequestCommand(select->kids, &owner, &index)) {
+    return refuse("SELECT_MSG carries no store_panel request command");
+  }
+  // The two branches share the shipped statement by value: the DTA has no callable, and a copy of
+  // the measured body is exactly as retail wrote it.
+  const Node request = (*owner)[index];
+  Node gate = Node::Command(
+      {Node::Symbol("if_else"),
+       Node::Command({Node::Symbol("=="), Node::Var("ix"),
+                      Node::Int(static_cast<uint32_t>(search_row))}),
+       Node::Command({Node::Symbol("if_else"), FileExistsCommand(kSearchShowQuery), request,
+                      Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                                     Node::Symbol(std::string(search_screen))})}),
+       request});
+  (*owner)[index] = std::move(gate);
   return true;
 }
 
@@ -627,6 +725,214 @@ bool UseDataForDownloadedRow(std::vector<ui::dtb::Node>* store_info_roots, std::
   if (RewritePurchasedReads(*method) == 0) {
     return refuse("refresh_buttons has no `{offer is_purchased}` gate to redirect");
   }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
+// The two button symbols this build adds or rewrites (store_payload.h).
+constexpr char kDownloadNowButton[] = "store_download_now";
+constexpr char kDownloadAgainButton[] = "store_download_again";
+
+// `{insert_elem buttons 0 <symbol>}` for one of those rows. The list itself is a **local** in the
+// shipped record (`[var] buttons`) and a symbol in a hand-built one, so only the spelling is pinned.
+bool IsInsertButton(const Node& node, std::string_view symbol) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() >= 4 &&
+         IsSymbol(node.kids[0], "insert_elem") && node.kids[1].text == "buttons" &&
+         IsSymbol(node.kids[3], symbol);
+}
+
+bool HasInsertButton(const Node& node, std::string_view symbol) {
+  if (IsInsertButton(node, symbol)) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasInsertButton(kid, symbol)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The `{if_else <test> <then> <else>}` whose then-branch is retail's Download Again row. The
+// shipped record puts the insert straight in the branch; a branch wrapped in a `do` counts too, so
+// the match is on the insert being *inside* it. `kids` is the vector the caller edits in place;
+// `else_index` is 3 when the branch exists and the vector's size when the record gave none (the
+// statement is then appended instead of replaced).
+bool FindDownloadedGate(std::vector<Node>& nodes, std::vector<Node>** gate, size_t* else_index) {
+  for (Node& node : nodes) {
+    if (node.tag == ui::dtb::kCommand && IsSymbol(node.kids[0], "if_else") &&
+        node.kids.size() >= 3 && HasInsertButton(node.kids[2], kDownloadAgainButton)) {
+      *gate = &node.kids;
+      *else_index = node.kids.size() >= 4 ? 3 : node.kids.size();
+      return true;
+    }
+    if (FindDownloadedGate(node.kids, gate, else_index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* method = nullptr;
+  for (Node& root : *store_info_roots) {
+    method = FindNamedMethod(root, "store_info_panel", "refresh_buttons");
+    if (method != nullptr) {
+      break;
+    }
+  }
+  if (method == nullptr) {
+    return refuse("the record carries no store_info_panel refresh_buttons method");
+  }
+  if (HasInsertButton(*method, kDownloadNowButton)) {
+    if (why != nullptr) why->clear();  // already added
+    return true;
+  }
+  std::vector<Node>* gate = nullptr;
+  size_t else_index = 0;
+  if (!FindDownloadedGate(method->kids, &gate, &else_index)) {
+    return refuse("refresh_buttons inserts no store_download_again row");
+  }
+  // The new row's own insert, then retail's else branch **by value**: the DTA has no callable, and
+  // keeping the shipped statement inside a `do` is exactly what the record meant. `{do ...}` takes
+  // its statements as its own children (`<command> unary do {…} {…}` in the record's own spelling),
+  // not as one array - a `do` around an array is a single statement the guest would not dispatch.
+  Node insert_now = Node::Command({Node::Symbol("insert_elem"), Node::Var("buttons"), Node::Int(0),
+                                   Node::Symbol(kDownloadNowButton)});
+  if (else_index >= gate->size()) {
+    gate->push_back(std::move(insert_now));
+  } else {
+    Node shipped = std::move((*gate)[else_index]);
+    (*gate)[else_index] = Node::Command(
+        {Node::Symbol("do"), std::move(insert_now), std::move(shipped)});
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
+// One button's press, as store_payload.h describes it. Every statement is a shape the shipped
+// `store_info_panel.refresh_buttons` itself uses, which is the only reason this can be written
+// without a boot per statement:
+//
+//   * `{var $offer {property cur_offer}}` - the binding it makes before reading an offer's data.
+//     A `get_data` sent straight at the property receiver is *not* that shape, and the first cut
+//     died on it: `read of guest 0x00000000` from `store_info_screen` the frame the row was pressed
+//     (`out/_swap/store-probe/20261022-115913`, log `rb_blitz_212.log`, 12:04:03).
+//   * `{offer has_data job}` - its own guard before the read, the one that keeps a missing key from
+//     being walked (`has_data preview_art`, same method). A record that carries no job therefore
+//     answers with a message instead of a null read.
+//   * `{sprintf "%s%s" … {offer get_data (preview_audio)}}` - a built path, and the same nested
+//     command as its argument.
+//   * `{write_file $path 0}` - the request channel's write side, the one builtin every settings row
+//     is already pressed through.
+Node DownloadRequest(std::string_view command) {
+  // `{do ($offer {property cur_offer}) ...}` - a **binding statement**, which is an array in the
+  // compiled record (`(Var value...)`), not a `{var $offer …}` command: the text form's `{var}` and
+  // the compiled form's binding are the same thing to the guest, and a `var` **command** inside a
+  // `do` is not. Measured 2026-10-22, the boot that first pressed the row: the literal write before
+  // this bound (`refusing a malformed write: rbbz-store/download/start/--`) reached the host, and
+  // the next statement - this binding as a command - died on `read of 0x00000000`.
+  Node bind_offer =
+      Node::Array({Node::Var("offer"), Node::Property({Node::Symbol("cur_offer")})});
+  Node read = Node::Command({Node::Symbol("sprintf"),
+                             Node::String("rbbz-store/download/" + std::string(command) + "/%s"),
+                             Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
+                                            Node::Array({Node::Symbol("job")})})});
+  Node bind_path = Node::Array({Node::Var("path"), std::move(read)});
+  Node press = Node::Command(
+      {Node::Symbol("do"), std::move(bind_path),
+       Node::Command({Node::Symbol("write_file"), Node::Var("path"), Node::Int(0)})});
+  Node no_job = Node::Command(
+      {Node::Symbol("notify"), Node::String("This offer carries no download job")});
+  return Node::Command(
+      {Node::Symbol("do"), std::move(bind_offer),
+       Node::Command({Node::Symbol("if_else"),
+                      Node::Command({Node::Var("offer"), Node::Symbol("has_data"),
+                                     Node::Symbol("job")}),
+                      std::move(press), std::move(no_job)})});
+}
+
+// The `{switch {component selected_sym} ...}` a method dispatches its buttons with, plus the vector
+// its case arrays live in.
+bool FindButtonSwitch(std::vector<Node>& nodes, std::vector<Node>** cases) {
+  for (Node& node : nodes) {
+    if (node.tag == ui::dtb::kCommand && IsSymbol(node.kids[0], "switch") &&
+        node.kids.size() >= 3) {
+      *cases = &node.kids;
+      return true;
+    }
+    if (FindButtonSwitch(node.kids, cases)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+size_t FindButtonCase(const std::vector<Node>& cases, std::string_view symbol) {
+  for (size_t i = 2; i < cases.size(); ++i) {  // 0 = `switch`, 1 = the test, 2.. = one array per case
+    const Node& node = cases[i];
+    if (node.tag == ui::dtb::kArray && !node.kids.empty() && IsSymbol(node.kids[0], symbol)) {
+      return i;
+    }
+  }
+  return cases.size();
+}
+
+}  // namespace
+
+bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* select = nullptr;
+  for (Node& root : *store_info_roots) {
+    select = FindNamedMethod(root, "store_info_panel", "SELECT_MSG");
+    if (select != nullptr) {
+      break;
+    }
+  }
+  if (select == nullptr) {
+    return refuse("the record carries no store_info_panel SELECT_MSG method");
+  }
+  std::vector<Node>* cases = nullptr;
+  if (!FindButtonSwitch(select->kids, &cases)) {
+    return refuse("SELECT_MSG dispatches no button switch");
+  }
+  if (FindButtonCase(*cases, kDownloadNowButton) != cases->size()) {
+    if (why != nullptr) why->clear();  // already routed
+    return true;
+  }
+  const size_t again = FindButtonCase(*cases, kDownloadAgainButton);
+  if (again == cases->size()) {
+    return refuse("the button switch carries no store_download_again case");
+  }
+  // The case keeps its symbol and takes this build's body: retail's own body calls the commerce
+  // object's `re_download`, which a data-only custom never has.
+  Node& retargeted = (*cases)[again];
+  retargeted.kids.erase(retargeted.kids.begin() + 1, retargeted.kids.end());
+  retargeted.kids.push_back(DownloadRequest("again"));
+  (*cases).push_back(Node::Array({Node::Symbol(kDownloadNowButton), DownloadRequest("start")}));
   if (why != nullptr) why->clear();
   return true;
 }

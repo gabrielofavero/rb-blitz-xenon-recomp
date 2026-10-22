@@ -46,6 +46,8 @@ using rb_blitz::store::Offer;
 using rb_blitz::store::OfferDirectory;
 using rb_blitz::store::OfferFromSong;
 using rb_blitz::store::RelatedOfferPath;
+using rb_blitz::store::kSearchMenuId;
+using rb_blitz::store::kSearchMenuRow;
 using rb_blitz::store::RhythmVerseFrontMenu;
 using rb_blitz::store::SongFile;
 using rb_blitz::ui::dtb::Node;
@@ -130,6 +132,13 @@ void TestOwnerFrontMenu() {
     CHECK_STR_EQ(menu.entries[0].label, "Recent");
     CHECK_STR_EQ(menu.entries[1].id, "search");
     CHECK_STR_EQ(menu.entries[1].label, "Search");
+  }
+  // The store's DTA gate presses by *index* (`{== $ix <row>}`), so the constant the payload hands
+  // the transform and the row the writer emits have to stay the same fact.
+  CHECK_TRUE(kSearchMenuRow >= 0 &&
+             static_cast<size_t>(kSearchMenuRow) < menu.entries.size());
+  if (kSearchMenuRow >= 0 && static_cast<size_t>(kSearchMenuRow) < menu.entries.size()) {
+    CHECK_STR_EQ(menu.entries[static_cast<size_t>(kSearchMenuRow)].id, kSearchMenuId);
   }
   CHECK_STR_EQ(menu.region, "europe");
   CHECK_STR_EQ(menu.platform, "xbox");
@@ -244,6 +253,63 @@ void TestMenuRecordRoundTrip() {
   CHECK_TRUE(rank_ok);
 }
 
+// P5's identity on the offer (store_metadata.h, `Offer::job`): the record carries a token, never the
+// file id or the URL, and it carries the key on **every** offer - the details page's Download row
+// reads it unconditionally, so a missing key is a null walk rather than a hidden row.
+void TestDownloadIdentity() {
+  BeginCase("an offer's job token is the record's only download spelling");
+  SongFile song;
+  song.file_id = "abc/../def";
+  song.artist = "Bush";
+  song.title = "The People That We Love";
+  song.size_bytes = 12345;
+  const std::string url = "https://example.invalid/download/abc";
+  const Offer offer = OfferFromSong(song, url);
+  // Host-only: the identity the worker needs is on the offer, and the file id is never a record key.
+  CHECK_STR_EQ(offer.file_id, "abc/../def");
+  CHECK_STR_EQ(offer.download_url, url);
+  CHECK_TRUE(offer.size_bytes.has_value() && *offer.size_bytes == 12345);
+  // A caller with no resolved URL (a test, or a song the catalogue did not offer) leaves the offer
+  // without one, which is what makes the serving path skip the job.
+  CHECK_TRUE(OfferFromSong(song).download_url.empty());
+
+  // The token the serving path would fill in; both writers carry it under `job`, and neither writes
+  // the file id or the URL anywhere.
+  Offer listed = offer;
+  listed.job = "j0123456789abcdef";
+  std::string why;
+  const std::string text = BuildMenuText({listed}, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(text.find("(job \"j0123456789abcdef\")") != std::string::npos);
+  CHECK_TRUE(text.find("abc/../def") == std::string::npos);
+  CHECK_TRUE(text.find("example.invalid") == std::string::npos);
+  const std::vector<uint8_t> bytes = BuildMenuRecord({listed}, &why);
+  CHECK_TRUE(why.empty());
+  std::vector<Node> roots;
+  rb_blitz::ui::dtb::RootHeader header;
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+  const Node* offers = RootArray(roots, "offers");
+  CHECK_TRUE(offers != nullptr && offers->kids.size() == size_t{1});
+  if (offers == nullptr || offers->kids.empty()) return;
+  CHECK_STR_EQ(OfferField(offers->kids[0], "job"), "j0123456789abcdef");
+
+  // An offer with no job still carries the key (the empty string): a page served before the
+  // download service is configured is still a page whose rows can be read.
+  const std::string bare_text = BuildMenuText({offer}, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(bare_text.find("(job \"\")") != std::string::npos);
+  const std::vector<uint8_t> bare_bytes = BuildMenuRecord({offer}, &why);
+  CHECK_TRUE(why.empty());
+  std::vector<Node> bare_roots;
+  rb_blitz::ui::dtb::RootHeader bare_header;
+  CHECK_TRUE(
+      rb_blitz::ui::dtb::Parse(bare_bytes.data(), bare_bytes.size(), &bare_roots, &bare_header, &why));
+  const Node* bare_offers = RootArray(bare_roots, "offers");
+  CHECK_TRUE(bare_offers != nullptr && !bare_offers->kids.empty());
+  if (bare_offers == nullptr || bare_offers->kids.empty()) return;
+  CHECK_STR_EQ(OfferField(bare_offers->kids[0], "job"), "");
+}
+
 void TestSongMapping() {
   BeginCase("a catalogue record becomes an offer with its own difficulty tier per part");
   SongFile song;
@@ -342,6 +408,7 @@ int main() {
   TestWriterRefusals();
   TestMenuWriterRefusals();
   TestRecordRoundTrip();
+  TestDownloadIdentity();
   TestSongMapping();
   TestMenuRecordRoundTrip();
   TestEmptyMenuRecord();

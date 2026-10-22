@@ -105,6 +105,26 @@ ListingPage Page(std::vector<SongFile> songs) {
   return page;
 }
 
+// P7's chunking cases need pages that are **not** the last one: the server's cursor is what says
+// so (`start + returned < total_filtered`), not the number of offers a caller kept.
+ListingPage Paged(int number, int start, int returned, int total, std::vector<SongFile> songs) {
+  ListingPage page;
+  page.page = number;
+  page.records_per_page = 25;
+  page.start = start;
+  page.returned = returned;
+  page.total_filtered = total;
+  page.songs = std::move(songs);
+  return page;
+}
+
+// A record that charts everything (so the default filter keeps it) but whose link is an archive
+// name, which `DecideOffer` refuses - the cheapest way to have a page of records with **zero**
+// eligible offers.
+SongFile Ineligible(std::string title) {
+  return Charted(Song("Nobody", std::move(title), "/download_file/u/i/archive.zip"));
+}
+
 // --- The field -----------------------------------------------------------------------------------
 
 void TestCodePoints() {
@@ -518,6 +538,80 @@ void TestShapeOffers() {
   CHECK_EQ(ShapeOffers(page, none).size(), 2u);
 }
 
+void TestAnswerPresentation() {
+  test::BeginCase("an answer waits for the Search row, and only the strip belongs to the keys");
+  ResetSession(true);
+  SearchOpen();
+  bool answer = false;
+  CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
+  CHECK_FALSE(answer);  // nothing to list yet: the row opens the keys
+
+  for (const char* key : {"b", "u", "s", "h"}) CHECK_TRUE(SearchApplyKey(key));
+  const SearchSubmit submit = SearchSubmitQuery();
+  CHECK_TRUE(submit.started);
+  CHECK_TRUE(AnswerSearchQuery(kSearchSearchingQuery, &answer));
+  CHECK_TRUE(answer);  // the submit is in flight
+  CHECK_FALSE(SearchAnswerPending());
+
+  CHECK_TRUE(SearchAccept(
+      submit.generation,
+      Page({Charted(Song("Bush", "The People That We Love", "/download_file/u/i/p_rb3con"))})));
+  CHECK_TRUE(SearchAnswerPending());
+  CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
+  CHECK_TRUE(answer);
+  CHECK_EQ(SearchOffers().size(), 1u);
+  CHECK_TRUE(SearchStatusText().find("1 match") != std::string::npos);
+  CHECK_TRUE(SearchStatusText().find(kSearchListHintOne) != std::string::npos);
+
+  // `leave` (every search page's `exit`, so Back ends it) closes the surface: the strip goes - it
+  // must not follow the player out of the keys - while the field, the answer **and** the pending
+  // mark stay. The mark is the Search row's gate: pressing it lists the answer.
+  std::string why;
+  CHECK_TRUE(HandleStoreSearchWrite(kSearchLeaveWrite, &why));
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(SearchStatusText().empty());
+  CHECK_STR(SearchCurrent().text, "bush");
+  CHECK_EQ(SearchOffers().size(), 1u);
+  CHECK_TRUE(SearchAnswerPending());
+  CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
+  CHECK_TRUE(answer);
+
+  // Re-entering the keys shows the answer's sentence again; the serving policy handing the store
+  // the page is what retires the mark, and the answer and the field still stay.
+  SearchOpen();
+  CHECK_TRUE(SearchStatusText().find("1 match") != std::string::npos);
+  SearchMarkShown();
+  CHECK_FALSE(SearchAnswerPending());
+  CHECK_EQ(SearchOffers().size(), 1u);
+  CHECK_TRUE(SearchStatusText().find("1 match") != std::string::npos);
+
+  // An edit retires both the answer and its pending mark.
+  SearchOpen();
+  CHECK_TRUE(SearchApplyKey("s"));
+  CHECK_FALSE(SearchAnswerPending());
+  CHECK_TRUE(SearchOffers().empty());
+  SearchCancel();
+
+  // A no-match answer is presented the same way, and so is a failure: both are pages the row must
+  // be able to open (an empty one returns the store to its menu), not silent states.
+  ResetSession(true);
+  SearchOpen();
+  for (const char* key : {"z", "z", "z", "q"}) CHECK_TRUE(SearchApplyKey(key));
+  const SearchSubmit empty = SearchSubmitQuery();
+  CHECK_TRUE(empty.started);
+  CHECK_TRUE(SearchAccept(empty.generation, Page({})));
+  CHECK_TRUE(SearchAnswerPending());
+  CHECK_TRUE(SearchStatusText().find(kSearchRetryHint) != std::string::npos);
+  SearchMarkShown();
+  const SearchSubmit failed = SearchSubmitQuery();
+  CHECK_TRUE(failed.started);
+  CHECK_TRUE(SearchFail(failed.generation, "the catalogue answered HTTP 503"));
+  CHECK_TRUE(SearchAnswerPending());
+  SearchCancel();
+  CHECK_FALSE(SearchAnswerPending());
+  CHECK_TRUE(SearchOffers().empty());
+}
+
 void TestCancelSemantics() {
   test::BeginCase("cancel clears the field, close keeps it, and open re-shows it");
   ResetSession(true);
@@ -532,6 +626,166 @@ void TestCancelSemantics() {
   CHECK_ENUM(SearchCurrent().state, SearchState::kIdle);
   CHECK_TRUE(SearchCurrent().text.empty());
   CHECK_TRUE(SearchStatusText().empty());
+}
+
+// --- P7: chunking, cancellation and backoff ----------------------------------------------------
+
+void TestMultiPageAnswer() {
+  test::BeginCase(
+      "a search walks pages, keeps every page's eligible offers, and does not stop at an emptied "
+      "one");
+  ResetSession(true);
+  SetSearchPageBudget(3);
+  CHECK_TRUE(SearchSetText("bush"));
+  const SearchSubmit submit = SearchSubmitQuery();
+  CHECK_TRUE(submit.started);
+  CHECK_TRUE(submit.request.body.find("page=1") != std::string::npos);
+
+  // Page 1: 25 records, none eligible (every link is an archive name), and the server says there
+  // are more rows. The walk continues - which is the point: the cursor, not the visible count.
+  std::vector<SongFile> junk;
+  for (int i = 0; i < 25; ++i) {
+    junk.push_back(Ineligible("junk" + std::to_string(i)));
+  }
+  const SearchPageAnswer first =
+      SearchAcceptPage(submit.generation, Paged(1, 0, 25, 30, std::move(junk)));
+  CHECK_TRUE(first.accepted);
+  CHECK_EQ(first.next_page, 2);
+  CHECK_EQ(first.matches, 0u);
+  CHECK_ENUM(SearchCurrent().state, SearchState::kSearching);  // in flight: the strip counts pages
+  CHECK_TRUE(SearchCurrent().offers.empty());
+  CHECK_TRUE(SearchStatusText().find("1 page") != std::string::npos);
+
+  // The worker's next request is the same query, one page on.
+  std::string why;
+  const std::optional<RequestSpec> second =
+      SearchBuildPageRequest(submit.generation, first.next_page, &why);
+  CHECK_TRUE(second.has_value());
+  if (second) {
+    CHECK_TRUE(second->url.find(kSearchPath) != std::string::npos);
+    CHECK_TRUE(second->body.find("page=2") != std::string::npos);
+    CHECK_TRUE(second->body.find("text=bush") != std::string::npos);
+  }
+
+  // Page 2 is the last one and carries the only eligible offer.
+  const SearchPageAnswer last = SearchAcceptPage(
+      submit.generation,
+      Paged(2, 25, 5, 30,
+            {Charted(Song("Bush", "The People That We Love", "/download_file/u/i/p_rb3con"))}));
+  CHECK_TRUE(last.accepted);
+  CHECK_EQ(last.next_page, 0);
+  CHECK_EQ(last.matches, 1u);
+  CHECK_ENUM(SearchCurrent().state, SearchState::kResults);
+  CHECK_EQ(SearchOffers().size(), 1u);
+  CHECK_TRUE(SearchAnswerPending());
+  // The count is the eligible one: the server's `total_filtered` (30) never reaches the strip.
+  CHECK_TRUE(SearchStatusText().find("1 match") != std::string::npos);
+  CHECK_TRUE(SearchStatusText().find("30") == std::string::npos);
+  SetSearchPageBudget(1);
+  SearchCancel();
+}
+
+void TestPageBudgetAndCancellation() {
+  test::BeginCase("the per-action budget bounds the walk, and a cancel or a commit ends it");
+  {
+    // A budget of 1 is the pre-P7 shape: page 1 is the whole answer.
+    ResetSession(true);
+    SetSearchPageBudget(1);
+    CHECK_TRUE(SearchSetText("bush"));
+    const SearchSubmit submit = SearchSubmitQuery();
+    const SearchPageAnswer answer =
+        SearchAcceptPage(submit.generation, Paged(1, 0, 25, 60, {Ineligible("x")}));
+    CHECK_TRUE(answer.accepted);
+    CHECK_EQ(answer.next_page, 0);
+    CHECK_ENUM(SearchCurrent().state, SearchState::kNoResults);
+  }
+  {
+    // A cancel ends the walk even with budget left.
+    ResetSession(true);
+    SetSearchPageBudget(4);
+    CHECK_TRUE(SearchSetText("bush"));
+    const SearchSubmit submit = SearchSubmitQuery();
+    const SearchPageAnswer answer =
+        SearchAcceptPage(submit.generation, Paged(1, 0, 25, 60, {Ineligible("x")}));
+    CHECK_EQ(answer.next_page, 2);
+    CHECK_TRUE(SearchPageWanted(submit.generation));
+    SearchCancel();
+    CHECK_FALSE(SearchPageWanted(submit.generation));
+    std::string why;
+    CHECK_FALSE(SearchBuildPageRequest(submit.generation, 2, &why).has_value());
+  }
+  {
+    // ...and so does a settings commit, because the filter is part of the query.
+    ResetSession(true);
+    SetSearchPageBudget(4);
+    CHECK_TRUE(SearchSetText("bush"));
+    const SearchSubmit submit = SearchSubmitQuery();
+    CHECK_TRUE(
+        SearchAcceptPage(submit.generation, Paged(1, 0, 25, 60, {Ineligible("x")})).accepted);
+    StoreSettings changed = *Settings();
+    changed.instruments.keys = true;
+    PublishSettings(changed);
+    CHECK_FALSE(SearchPageWanted(submit.generation));
+    std::string why;
+    CHECK_FALSE(SearchBuildPageRequest(submit.generation, 2, &why).has_value());
+    CHECK_TRUE(why.find("settings changed") != std::string::npos);
+  }
+  SetSearchPageBudget(1);
+  SearchCancel();
+}
+
+void TestPartialFailure() {
+  test::BeginCase("a page that fails after another landed keeps the answer and still backs off");
+  ResetSession(true);
+  SetSearchPageBudget(4);
+  CHECK_TRUE(SearchSetText("bush"));
+  const SearchSubmit submit = SearchSubmitQuery();
+  CHECK_TRUE(SearchAcceptPage(
+                 submit.generation,
+                 Paged(1, 0, 25, 60,
+                       {Charted(Song("Bush", "Mouth", "/download_file/u/u/m_rb3con"))}))
+                 .accepted);
+  CHECK_TRUE(SearchFailAfter(submit.generation, "the catalogue answered HTTP 502",
+                             std::chrono::seconds(20)));
+  CHECK_ENUM(SearchCurrent().state, SearchState::kResults);
+  CHECK_EQ(SearchOffers().size(), 1u);
+  CHECK_TRUE(SearchAnswerPending());
+  // The wait still applies: pressing Done again straight away is refused with it, and the answer
+  // that is already on screen is not replaced by a failure sentence.
+  const SearchSubmit refused = SearchSubmitQuery();
+  CHECK_FALSE(refused.started);
+  CHECK_TRUE(refused.why.find("try again in") != std::string::npos);
+  CHECK_ENUM(SearchCurrent().state, SearchState::kResults);
+  SearchCancel();
+  SetSearchPageBudget(1);
+}
+
+void TestBackoffWindow() {
+  test::BeginCase("a failed answer's wait refuses the next submit, and a cancel clears it");
+  ResetSession(true);
+  CHECK_TRUE(SearchSetText("bush"));
+  const SearchSubmit first = SearchSubmitQuery();
+  CHECK_TRUE(first.started);
+  CHECK_TRUE(SearchFailAfter(first.generation, "the catalogue answered HTTP 503",
+                             std::chrono::seconds(30)));
+  CHECK_ENUM(SearchCurrent().state, SearchState::kFailed);
+  CHECK_TRUE(SearchStatusText().find("HTTP 503") != std::string::npos);
+  const SearchSubmit refused = SearchSubmitQuery();
+  CHECK_FALSE(refused.started);
+  CHECK_TRUE(refused.why.find("try again in") != std::string::npos);
+  CHECK_TRUE(SearchStatusText().find("try again in") != std::string::npos);
+
+  // Cancel is the player's own way out of the wait (it clears the field too, so it is a fresh
+  // start rather than a retry).
+  SearchCancel();
+  CHECK_TRUE(SearchSetText("bush"));
+  const SearchSubmit again = SearchSubmitQuery();
+  CHECK_TRUE(again.started);
+  // A wait of zero - a failure that named none - lets the next submit through at once.
+  CHECK_TRUE(
+      SearchFailAfter(again.generation, "the answer could not be read", std::chrono::seconds(0)));
+  CHECK_TRUE(SearchSubmitQuery().started);
+  SearchCancel();
 }
 
 }  // namespace
@@ -591,7 +845,12 @@ int main(int argc, char** argv) {
   TestNoMatchesBody();
   TestQueries();
   TestShapeOffers();
+  TestAnswerPresentation();
   TestCancelSemantics();
+  TestMultiPageAnswer();
+  TestPageBudgetAndCancellation();
+  TestPartialFailure();
+  TestBackoffWindow();
 
   std::printf("\n%d check(s), %d failure(s)\n", test::g_checks, test::g_failures);
   return test::g_failures == 0 ? 0 : 1;

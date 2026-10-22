@@ -192,6 +192,31 @@ struct ListingPage {
 // `status:"error"` answer is a failure and carries the site's own message.
 std::optional<ListingPage> ParseListing(std::string_view json, std::string* error);
 
+// --- Chunking and politeness (§P7) ----------------------------------------------------------------
+
+// The API page a chunked fetch should ask for next, or 0 to stop. Plan §P7's rule in one function:
+// the cursor is the **server's own page number**, kept separately from the offers a caller has
+// kept - so a page the eligibility/instrument filter emptied is not mistaken for the last one (an
+// underfilled page is a valid page, and only `HasMorePages()` decides there is nothing after it),
+// and the server's `total_filtered` is never read as a count of downloadable offers. `page_budget`
+// is the per-action bound the caller was configured with (`store_catalogue_pages` /
+// `store_search_pages`); `pages_fetched` counts the pages this action has already read.
+int NextPageAfter(const ListingPage& page, int pages_fetched, int page_budget);
+
+// Plan §P7's backoff: how long a failed answer holds the next request off. A server that sent
+// `Retry-After` names its own wait (clamped to 5..600 s); 429/503 without one gets a minute; any
+// other 5xx a minute; a transport failure (`status` 0) 10 s; a 200 whose body could not be read a
+// minute (the same drift); any other status 120 s, because a moved route cannot be fixed by
+// retrying it soon. The value is a wait, not an error string - callers log it and refuse work
+// until it elapses.
+inline constexpr int kBackoffNetworkSeconds = 10;
+inline constexpr int kBackoffServerErrorSeconds = 60;
+inline constexpr int kBackoffAnswerSeconds = 60;
+inline constexpr int kBackoffStatusSeconds = 120;
+inline constexpr int kBackoffMinimumSeconds = 5;
+inline constexpr int kBackoffMaximumSeconds = 600;
+int FailureBackoffSeconds(int http_status, std::optional<int> retry_after_seconds);
+
 // --- URL policy (§3.1) ----------------------------------------------------------------------------
 
 struct UrlParts {

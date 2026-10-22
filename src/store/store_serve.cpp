@@ -23,8 +23,10 @@ namespace fs = std::filesystem;
 // when a menu page is answered.
 std::mutex g_source_mutex;
 OfferSource g_offer_source;
+SearchPageSource g_search_page_source;
 DownloadedPredicate g_downloaded_predicate;
 ArtPrefetch g_art_prefetch;
+OfferRegistrar g_offer_registrar;
 
 // A record bigger than this is not one of ours: the retail front menu and a 25-offer page are a
 // few kilobytes. The cap keeps a misnamed file from being copied into the guest heap whole.
@@ -83,6 +85,23 @@ std::vector<Offer> CatalogueOffers() {
   return source();
 }
 
+void SetSearchPageSource(SearchPageSource source) {
+  std::lock_guard<std::mutex> lock(g_source_mutex);
+  g_search_page_source = std::move(source);
+}
+
+std::vector<Offer> SearchPageOffers() {
+  SearchPageSource source;
+  {
+    std::lock_guard<std::mutex> lock(g_source_mutex);
+    source = g_search_page_source;
+  }
+  if (!source) {
+    return {};
+  }
+  return source();
+}
+
 void SetDownloadedPredicate(DownloadedPredicate predicate) {
   std::lock_guard<std::mutex> lock(g_source_mutex);
   g_downloaded_predicate = std::move(predicate);
@@ -111,6 +130,31 @@ std::vector<Offer> OffersForPage() {
 void SetArtPrefetch(ArtPrefetch prefetch) {
   std::lock_guard<std::mutex> lock(g_source_mutex);
   g_art_prefetch = std::move(prefetch);
+}
+
+void SetOfferRegistrar(OfferRegistrar registrar) {
+  std::lock_guard<std::mutex> lock(g_source_mutex);
+  g_offer_registrar = std::move(registrar);
+}
+
+void AttachDownloadJob(Offer* offer) {
+  if (offer == nullptr || offer->file_id.empty() || offer->download_url.empty()) {
+    offer->job.clear();
+    return;
+  }
+  OfferRegistrar registrar;
+  {
+    std::lock_guard<std::mutex> lock(g_source_mutex);
+    registrar = g_offer_registrar;
+  }
+  if (!registrar) {
+    offer->job.clear();
+    return;
+  }
+  // Called outside the source mutex: the registrar is the download service, which has a mutex of
+  // its own, and two locks in a guest-thread call is exactly the nesting this file avoids.
+  const std::string title = offer->artist.empty() ? offer->name : offer->artist + " - " + offer->name;
+  offer->job = registrar(offer->file_id, offer->download_url, offer->size_bytes, title);
 }
 
 namespace {
@@ -144,6 +188,19 @@ void KeepOnlyHeldArt(std::vector<Offer>* offers) {
       offer.preview_art.clear();
     }
   }
+}
+
+// Everything a page's offers need before they become a record, for both sources. The Downloaded
+// mark and the download job are resolved here - one place, so a page can never carry a row the
+// worker was not told about (the guest half of the job is `Offer::job`, and a missing key walks a
+// null when the details page reads it).
+void PreparePageOffers(std::vector<Offer>* offers) {
+  for (Offer& offer : *offers) {
+    offer.downloaded = IsDownloadedOffer(offer);
+    AttachDownloadJob(&offer);
+  }
+  StartArtPrefetch(*offers);
+  KeepOnlyHeldArt(offers);
 }
 
 }  // namespace
@@ -200,18 +257,31 @@ std::string BuiltinRecord(std::string_view path, std::string* why) {
   // source, or a catalogue that has not answered yet, the page is **empty** - a shape the retail
   // DTA already handles (`on_offers_populated` with zero offers refreshes the menu instead of
   // opening the browser), and an honest answer rather than a fabricated list.
+  if (IsSearchMenuPath(path)) {
+    // The search's answer as a page (P4). The rows are the accepted offers, mapped through the same
+    // `OfferFromSong` the catalogue uses (in the installed source), so the browser, the details
+    // screen, the Downloaded mark and the art path all behave exactly as they do for Recent. The
+    // source also marks the answer presented, which is what makes "press Search again" mean "type
+    // a new query" once this page has been listed.
+    std::vector<Offer> offers = SearchPageOffers();
+    PreparePageOffers(&offers);
+    return BuildMenuText(offers, why);
+  }
   if (IsMenuRecordPath(path)) {
     std::vector<Offer> offers = OffersForPage();
-    // The covers for this page, in the background: the panel asks for one about a second after it
-    // draws the list (`store_details_panel.refresh` -> `load_art`), and the catalogue's own page
-    // may have landed long after the front menu was served.
-    StartArtPrefetch(offers);
-    // Then drop the keys whose texture is not in hand yet (see KeepOnlyHeldArt).
-    KeepOnlyHeldArt(&offers);
+    // The covers for this page, in the background, and the per-offer state (`PreparePageOffers`):
+    // the panel asks for one about a second after it draws the list
+    // (`store_details_panel.refresh` -> `load_art`), and the catalogue's own page may have landed
+    // long after the front menu was served.
+    PreparePageOffers(&offers);
     return BuildMenuText(offers, why);
   }
   if (why) *why = "no built-in record for this path";
   return {};
+}
+
+bool IsSearchMenuPath(std::string_view path) {
+  return path == MenuRecordPath(kStoreRegion, kStoreLocale, kSearchMenuId);
 }
 
 bool IsMenuRecordPath(std::string_view path) {

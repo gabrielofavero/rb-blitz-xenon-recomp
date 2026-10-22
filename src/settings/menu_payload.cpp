@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include "store/store_metadata.h"
 #include "store/store_payload.h"
 #include "ui/settings_screen.h"
 #include "ui/menu_options.h"
@@ -353,6 +354,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         if (!store::SetStoreHeading(&roots, store::kStoreHeadingText, &why)) {
           note("the store heading was refused: " + why);
         }
+        // P5's button label. The button list is built from symbols (`insert_elem buttons 0
+        // store_download_now`), and `component` resolves that symbol to a locale key of the same
+        // name - retail's `store_download_again` row is spelled exactly like its own label key. So
+        // the row this build inserts needs its key here, or it draws with no text at all.
+        why.clear();
+        if (!screen::AddLocaleEntry(&roots, "store_download_now", "Download", &why) &&
+            why != "the locale already has that key") {
+          note("the Download label was refused: " + why);
+        }
       }
       for (const auto& [key, text] : screen::Labels()) {
         std::string why;
@@ -431,8 +441,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   // own DTA records are edited so the retail screens can show our catalogue:
   //
   //   * `store.dtb` - the commerce bypass (the panel starts its first request only from its own
-  //     `on_init_commerce_success`, which offline never fires) and the price footer, which retail
-  //     shows on the Xbox branch of the panel's `enter` (§2.12).
+  //     `on_init_commerce_success`, which offline never fires), the price footer retail shows on the
+  //     Xbox branch of the panel's `enter` (§2.12), and P4's Search row (the gate that opens the
+  //     authored keys while no answer is waiting).
   //   * `store_info.dtb` - the details page's two cost labels.
   //
   // Both are refusals-not-errors: a boot that cannot read a record keeps retail's behaviour and
@@ -465,6 +476,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       // the material is linked right after `load_art` returns (store_payload.h).
       if (!store::LinkAlbumArt(&store_ui_roots, &why)) {
         note("linking the details page's album art was refused: " + why);
+      }
+      // P4's entry from the store: the front menu's Search row opens the authored key pages while
+      // no answer is waiting, and asks for the search page (which the serving policy answers with
+      // the accepted answer) once one is (store_payload.h). The row's index is the one the front
+      // menu writer puts it at, so the DTA gate and the served record cannot disagree.
+      why.clear();
+      if (!store::RouteSearchRowToKeys(&store_ui_roots, store::kSearchMenuRow,
+                                       screen::kSearchScreen, &why)) {
+        note("routing the store's Search row to the keys was refused: " + why);
       }
       built["ui/store/gen/store.dtb"] = ui::dtb::Compile(store_ui_roots, store_ui_header);
     } else {
@@ -501,6 +521,17 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       // press populates the details screen directly (store_payload.h).
       if (!store::ShowOfferDetailsDirectly(&info_roots, &why)) {
         note("the details page's direct route was refused: " + why);
+      }
+      why.clear();
+      // P5's row (store_payload.h): a free custom is never purchasable, so the page a served offer
+      // opens would carry Exit alone - this inserts the Download row, and then rewrites its press
+      // to reach the download worker through the request channel instead of the commerce object.
+      if (!store::AddDownloadButton(&info_roots, &why)) {
+        note("adding the details page's Download row was refused: " + why);
+      }
+      why.clear();
+      if (!store::RouteDownloadButtons(&info_roots, &why)) {
+        note("routing the details page's Download rows was refused: " + why);
       }
       built["ui/store/gen/store_info.dtb"] = ui::dtb::Compile(info_roots, info_header);
     } else {

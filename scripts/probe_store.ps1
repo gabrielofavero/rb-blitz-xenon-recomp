@@ -53,6 +53,14 @@ param(
     # song, which is what opens the details screen (`store_info_screen`). -1 leaves the route as it
     # was. The page's rows are the served offers, so 0 is the newest one.
     [int]$OfferRow = -1,
+    # After the details page opens (P5), move this many rows down and accept once more: that is the
+    # press on a button of the details page. 0 is the first row, which is where this build's
+    # Download row sits (retail inserts Exit first and every other row at the front). -1 leaves the
+    # route as it was.
+    [int]$InfoRow = -1,
+    # How long to let a download run after that press before the last capture. A small custom is
+    # seconds; the wait is what makes the strip's own progress and outcome readable.
+    [int]$DownloadWaitSec = 40,
     [string]$LogLevel = "debug",
     # Turns on the SDK's noisy kernel-import logging (the `log_noisy` cvar), which is what makes a
     # trace-level run name the exports the guest calls after the store is entered.
@@ -84,11 +92,22 @@ if (-not (Test-Path (Join-Path $GameRoot "default.xex"))) { throw "no default.xe
 
 # Every helper that touches a .ps1 file goes through a child PowerShell: this machine's execution
 # policy is Restricted (docs/guides/build-and-run.md §0).
+#
+# The child's stderr is *collected as text*, not left as error records: `$ErrorActionPreference =
+# "Stop"` turns a native command's stderr into a terminating error, and `capture_window.ps1` says
+# things like "no window yet" on stderr during a scene change - which killed whole probe runs
+# (measured 2026-10-22, three boots in a row). The exit code is still checked below.
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot $Script))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
-    $out = & powershell @argv 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "$Script failed: $out" }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & powershell @argv 2>&1 | ForEach-Object { "$_" }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($LASTEXITCODE -ne 0) { throw "$Script failed: $($out -join ' ')" }
     return $out
 }
 
@@ -193,6 +212,14 @@ $verdict = [ordered]@{
     row_text     = ""
     store_text   = ""
     store_in_text = ""
+    page_text    = ""
+    page_in_text = ""
+    page_late_text = ""
+    offer_text   = ""
+    offer_late_text = ""
+    info_text    = ""
+    press_text   = ""
+    press_done_text = ""
     back_text    = ""
     dropped      = $false
 }
@@ -206,9 +233,15 @@ try {
     # lost (measured 2026-10-20: a fixed `wait:26` captured the title screen afterwards).
     $verdict.title_text = Wait-ForNeedle (Join-Path $capDir "title.png") "TO START" $BootTimeoutSec "title"
     # Title -> main menu. The build's own R3 skip is on by default, so one accept is the route
-    # (scripts/ui_states.ps1's measured route with the skip on).
+    # (scripts/ui_states.ps1's measured route with the skip on). The needle is the second row's own
+    # label when OCR loses "PLAY" to the selection highlight, which is what a four-row menu (the
+    # RhythmVerse entry on) does on some frames: both spellings only exist on this screen.
     Invoke-Actions @("key:a", "wait:8", "wait:6")
-    $verdict.menu_text = Wait-ForNeedle (Join-Path $capDir "menu.png") "PLAY" $ScreenTimeoutSec "main menu"
+    try {
+        $verdict.menu_text = Wait-ForNeedle (Join-Path $capDir "menu.png") "PLAY" $ScreenTimeoutSec "main menu"
+    } catch {
+        $verdict.menu_text = Wait-ForNeedle (Join-Path $capDir "menu.png") "EXIT GAME" $ScreenTimeoutSec "main menu (second spelling)"
+    }
 
     if ($MenuOnly) {
         "probe_store: -MenuOnly, stopping after the main menu" | Write-Host
@@ -258,6 +291,23 @@ try {
                 Start-Sleep -Seconds $SettleAfterPressSec
                 Capture-To (Join-Path $capDir "offer-late.png")
                 $verdict.offer_late_text = Get-ScreenText (Join-Path $capDir "offer-late.png")
+                if ($InfoRow -ge 0) {
+                    # P5: the press that starts a download. Rows are moved one at a time here for
+                    # the same reason the page's rows are, and the shot taken after the press is the
+                    # strip's own first state (it draws over the panel).
+                    $infoRoute = @()
+                    for ($d = 0; $d -lt $InfoRow; $d++) { $infoRoute += @("key:lstick_down", "wait:1") }
+                    if ($infoRoute.Count -gt 0) { Invoke-Actions $infoRoute }
+                    Capture-To (Join-Path $capDir "info.png")
+                    $verdict.info_text = Get-ScreenText (Join-Path $capDir "info.png")
+                    Invoke-Actions @($PageKey)
+                    Start-Sleep -Seconds 3
+                    Capture-To (Join-Path $capDir "press.png")
+                    $verdict.press_text = Get-ScreenText (Join-Path $capDir "press.png")
+                    Start-Sleep -Seconds $DownloadWaitSec
+                    Capture-To (Join-Path $capDir "press-done.png")
+                    $verdict.press_done_text = Get-ScreenText (Join-Path $capDir "press-done.png")
+                }
             }
         }
         # B returns to the menu (P1's acceptance asks for exactly this).
@@ -286,9 +336,14 @@ if ($newLog -and $newLog -ne $before) {
 
 $probeLines = @()
 $settingsLines = @()
+$downloadLines = @()
 $debugLines = @()
 if ($logText) {
     $probeLines = ($logText -split "`r?`n") | Where-Object { $_ -match "store-probe:" }
+    # P5's own lines: the pipeline's decisions (what was registered, what the transfer did, what was
+    # installed) and the boot's refresh, which is what makes the package visible to the library.
+    $downloadLines = ($logText -split "`r?`n") |
+        Where-Object { $_ -match "store_download:|store_install:|store_catalogue: |dlc: the|dlc: R7|RHYTHMVERSE" }
     $settingsLines = ($logText -split "`r?`n") |
         Where-Object { $_ -match "settings_menu: (the P2|the RhythmVerse|the restored|mounted)" }
     $debugLines = ($logText -split "`r?`n") | Where-Object { $_ -match "OutputDebugString|RtlDebugTrace" }
@@ -331,6 +386,17 @@ if (-not $MenuOnly) {
             $report += ""
             $report += "--- offer row $OfferRow opened, settle (OCR) ---"
             $report += $verdict.offer_late_text
+            if ($InfoRow -ge 0) {
+                $report += ""
+                $report += "--- details row $InfoRow selected (OCR) ---"
+                $report += $verdict.info_text
+                $report += ""
+                $report += "--- details row $InfoRow pressed, +3 s (OCR) ---"
+                $report += $verdict.press_text
+                $report += ""
+                $report += "--- after ${DownloadWaitSec}s (OCR) ---"
+                $report += $verdict.press_done_text
+            }
         }
     }
     $report += ""
@@ -340,6 +406,9 @@ if (-not $MenuOnly) {
 $report += ""
 $report += "--- store-probe lines ($($probeLines.Count)) ---"
 $report += $probeLines
+$report += ""
+$report += "--- download / refresh lines ($($downloadLines.Count)) ---"
+$report += $downloadLines
 $report += ""
 $report += "--- settings_menu lines ($($settingsLines.Count)) ---"
 $report += $settingsLines

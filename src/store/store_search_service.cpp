@@ -5,17 +5,25 @@
 
 #include "store/store_search_service.h"
 
+#include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 
+#include <rex/cvar.h>
 #include <rex/logging.h>
 
 #include "store/rhythmverse_client.h"
+#include "store/store_catalogue_status.h"
 #include "store/store_http.h"
+#include "store/store_metadata.h"
+#include "store/store_page_cache.h"
 #include "store/store_search.h"
+#include "store/store_serve.h"
 
 REXCVAR_DEFINE_BOOL(store_search_diagnostic, false, "Diagnostics",
                     "Open the authored RhythmVerse search keys when the retail store screen is "
@@ -32,8 +40,20 @@ REXCVAR_DEFINE_STRING(store_search_seed, "", "Diagnostics",
                       "P4's measurement switch; empty leaves the field empty)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_INT32(store_search_pages, 4, "Diagnostics",
+                     "How many API pages one search may read (clamped 1..20; the site's page size "
+                     "is 25 records). RhythmVerse plan P7's per-action budget: the walk continues "
+                     "past a page the eligibility/instrument filter emptied, because only the "
+                     "server's cursor decides where the results end. 1 is the pre-P7 behaviour")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 namespace rb_blitz::store {
 namespace {
+
+// The pause between two pages of one search (P7's politeness), walked in slices so a cancel or a
+// newer query is noticed while waiting rather than after the next request.
+constexpr auto kPagePause = std::chrono::milliseconds(150);
+constexpr auto kPauseSlice = std::chrono::milliseconds(25);
 
 // One request, as the submit answered it. Only the newest is kept: a player who presses Done twice
 // wants the second answer, and the session stamps every answer with its generation anyway.
@@ -41,6 +61,19 @@ struct Job {
   std::uint64_t generation = 0;
   RequestSpec request;
 };
+
+// P7's cancellation test between pages: the job is still the session's, the settings still match,
+// and the master is still on. Checked before every request and inside `PauseBetweenPages`.
+bool PauseBetweenPages(std::uint64_t generation) {
+  const auto deadline = std::chrono::steady_clock::now() + kPagePause;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (!SearchPageWanted(generation)) {
+      return false;
+    }
+    std::this_thread::sleep_for(kPauseSlice);
+  }
+  return SearchPageWanted(generation);
+}
 
 class Worker {
  public:
@@ -86,36 +119,92 @@ class Worker {
   }
 
   static void RunOne(const Job& job) {
-    // Politeness (plan P7/R2): the catalogue is a small, cacheable page and the site asks for
-    // `records=25`; one request per submit, no prefetch, no retry storm. A transient failure is
-    // reported to the player, who can press Done again - the store does not hammer a 5xx.
-    HttpOptions options;
-    options.receive_timeout_ms = 15000;
-    const HttpResponse response =
-        PostForm(job.request.url, job.request.body, job.request.headers, options);
-    if (!response.ok) {
-      REXLOG_WARN("store_search: the request failed: {}", response.error);
-      SearchFail(job.generation, response.error.empty() ? "the network is unavailable"
-                                                        : response.error);
-      return;
+    // Plan P7's chunking: the session owns the query, the cursor and the budget, so the worker is
+    // a loop - ask the session whether the job still wants a page, fetch it (or read it from the
+    // page cache), hand the page back, and let the session name the next page or the end.
+    const std::uint64_t generation = job.generation;
+    int page_number = 1;
+    RequestSpec request = job.request;
+    for (;;) {
+      if (!SearchPageWanted(generation)) {
+        REXLOG_INFO("store_search: the job ended before page {}; nothing more was sent",
+                    page_number);
+        return;
+      }
+      std::optional<ListingPage> page;
+      const std::string key = PageCacheKey(request);
+      if (std::optional<ListingPage> cached = SharedPageCache().Get(key)) {
+        page = std::move(*cached);
+        REXLOG_INFO("store_search: page {} answered from the page cache", page_number);
+      } else {
+        if (!SharedPageCache().Begin(key)) {
+          // Two identical pages at once cannot happen within one job (the body carries the page
+          // number), but the rule is the rule: never send the same request twice concurrently.
+          SearchFailAfter(generation, "an identical request is already in flight",
+                          std::chrono::seconds(kBackoffNetworkSeconds));
+          return;
+        }
+        struct Flight {
+          std::string key;
+          ~Flight() { SharedPageCache().End(key); }
+        } flight{key};
+        // Politeness (plan P7/R2): the catalogue is a small, cacheable page and the site asks for
+        // `records=25`; one request per submit, no prefetch, no retry storm. A transient failure is
+        // reported to the player, who can press Done again after the backoff the answer named -
+        // the store does not hammer a 5xx.
+        HttpOptions options;
+        options.receive_timeout_ms = 15000;
+        const HttpResponse response =
+            PostForm(request.url, request.body, request.headers, options);
+        if (!response.ok) {
+          REXLOG_WARN("store_search: the request failed: {}", response.error);
+          SearchFailAfter(generation,
+                          response.error.empty() ? "the network is unavailable" : response.error,
+                          std::chrono::seconds(FailureBackoffSeconds(0, std::nullopt)));
+          return;
+        }
+        if (response.status != 200) {
+          const int wait = FailureBackoffSeconds(response.status, RetryAfterSeconds(response));
+          REXLOG_WARN("store_search: HTTP {} from the catalogue; the next attempt waits {} s",
+                      response.status, wait);
+          SearchFailAfter(generation,
+                          "the catalogue answered HTTP " + std::to_string(response.status),
+                          std::chrono::seconds(wait));
+          return;
+        }
+        std::string error;
+        page = ParseListing(response.body, &error);
+        if (!page) {
+          REXLOG_WARN("store_search: the answer could not be read: {}", error);
+          SearchFailAfter(generation, error.empty() ? "the answer could not be read" : error,
+                          std::chrono::seconds(FailureBackoffSeconds(200, std::nullopt)));
+          return;
+        }
+        SharedPageCache().Put(key, *page);
+      }
+      const SearchPageAnswer accepted = SearchAcceptPage(generation, *page);
+      const SearchSnapshot snapshot = SearchCurrent();
+      REXLOG_INFO("store_search: page {} -> {} record(s) answered, {} eligible offer(s) in "
+                  "total, state {} ({})",
+                  page_number, page->returned, snapshot.offers.size(),
+                  SearchStateToken(snapshot.state),
+                  accepted.accepted ? "current" : "stale, dropped");
+      if (!accepted.accepted || accepted.next_page == 0) {
+        return;  // the answer is terminal, or a newer query owns the session now
+      }
+      if (!PauseBetweenPages(generation)) {
+        REXLOG_INFO("store_search: the walk stopped after {} page(s)", page_number);
+        return;
+      }
+      std::string why;
+      std::optional<RequestSpec> next = SearchBuildPageRequest(generation, accepted.next_page, &why);
+      if (!next) {
+        REXLOG_INFO("store_search: page {} was not requested: {}", accepted.next_page, why);
+        return;
+      }
+      request = std::move(*next);
+      page_number = accepted.next_page;
     }
-    if (response.status != 200) {
-      REXLOG_WARN("store_search: HTTP {} from the catalogue", response.status);
-      SearchFail(job.generation, "the catalogue answered HTTP " + std::to_string(response.status));
-      return;
-    }
-    std::string error;
-    const std::optional<ListingPage> page = ParseListing(response.body, &error);
-    if (!page) {
-      REXLOG_WARN("store_search: the answer could not be read: {}", error);
-      SearchFail(job.generation, error.empty() ? "the answer could not be read" : error);
-      return;
-    }
-    const bool accepted = SearchAccept(job.generation, *page);
-    const SearchSnapshot snapshot = SearchCurrent();
-    REXLOG_INFO("store_search: {} record(s) answered, {} eligible offer(s), state {} ({})",
-                page->returned, snapshot.offers.size(), SearchStateToken(snapshot.state),
-                accepted ? "current" : "stale, dropped");
   }
 
   std::mutex mutex_;
@@ -142,7 +231,25 @@ void InstallSearchTransport() {
   SetSubmitSink([worker](std::uint64_t generation, const RequestSpec& request) {
     worker->Post(Job{generation, request});
   });
-  REXLOG_INFO("store_search: transport ready (one worker thread, {})", kSearchPath);
+  // The search page's offers (P4's second half): the accepted answer, mapped through the same
+  // `OfferFromSong` Recent's catalogue uses, and marked presented as it is taken - the retail
+  // browser then lists it exactly as it lists Recent.
+  SetSearchPageSource([] {
+    std::vector<Offer> page;
+    for (const SearchOffer& answer : SearchOffers()) {
+      page.push_back(OfferFromSong(answer.song, answer.download_url));
+    }
+    SearchMarkShown();
+    // The search page is a store menu page like Recent's: the caption strip's copy uses this to
+    // know the store is still on screen (`store_catalogue_status.h`).
+    NoteStoreSurface(StoreSurface::kMenuPage);
+    return page;
+  });
+  // Plan P7's per-action budget: the session owns the walk, this is where it learns the bound.
+  const std::int32_t pages = REXCVAR_GET(store_search_pages);
+  SetSearchPageBudget(pages < 1 ? 1 : (pages > 20 ? 20 : pages));
+  REXLOG_INFO("store_search: transport ready (one worker thread, {}, up to {} page(s) per search)",
+              kSearchPath, SearchPageBudget());
   // The measurement's seed: a field already holding a query, so Done alone exercises the request.
   const std::string seed = REXCVAR_GET(store_search_seed);
   if (!seed.empty()) {

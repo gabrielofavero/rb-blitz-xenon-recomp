@@ -760,6 +760,54 @@ bool ListingPage::HasMorePages() const {
   return start + returned < total;
 }
 
+// --- Chunking and politeness (§P7) ---------------------------------------------------------------
+
+int NextPageAfter(const ListingPage& page, int pages_fetched, int page_budget) {
+  // The budget is the caller's per-action bound, and it is checked first: it is the only thing
+  // that stops a catalogue that never runs out (the site's `total_filtered` is a record count, so
+  // a filtered page is not evidence of the end).
+  if (pages_fetched >= page_budget || pages_fetched <= 0) {
+    return 0;
+  }
+  if (!page.HasMorePages()) {
+    return 0;
+  }
+  // The server's own cursor, when it answered with one. A page that omitted `pagination.page`
+  // (the field is optional in the captures) continues from the count of pages already read, which
+  // is the position the next request's `page` field needs.
+  const int cursor = page.page > 0 ? page.page + 1 : pages_fetched + 1;
+  // A cursor that would repeat or skip a page is not trusted; the count is.
+  if (cursor <= pages_fetched) {
+    return pages_fetched + 1;
+  }
+  return cursor;
+}
+
+int FailureBackoffSeconds(int http_status, std::optional<int> retry_after_seconds) {
+  // A server that named its own wait is believed, within bounds: a `Retry-After: 0` is not a
+  // licence to hammer, and a huge value is not a reason to stop trying for the rest of the boot.
+  if (retry_after_seconds) {
+    if (*retry_after_seconds < kBackoffMinimumSeconds) {
+      return kBackoffMinimumSeconds;
+    }
+    return *retry_after_seconds > kBackoffMaximumSeconds ? kBackoffMaximumSeconds
+                                                         : *retry_after_seconds;
+  }
+  if (http_status == 0) {
+    return kBackoffNetworkSeconds;  // no status line: DNS, TLS, proxy, timeout
+  }
+  if (http_status == 200) {
+    return kBackoffAnswerSeconds;  // the body arrived and could not be read: drift, not weather
+  }
+  if (http_status == 429 || http_status == 503) {
+    return kBackoffServerErrorSeconds;  // busy/throttled without a Retry-After
+  }
+  if (http_status >= 500) {
+    return kBackoffServerErrorSeconds;
+  }
+  return kBackoffStatusSeconds;
+}
+
 std::optional<ListingPage> ParseListing(std::string_view json, std::string* error) {
   const Json root = Json::parse(json, nullptr, false);
   if (root.is_discarded() || !root.is_object()) {

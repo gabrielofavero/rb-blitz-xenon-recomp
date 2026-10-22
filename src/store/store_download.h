@@ -166,6 +166,9 @@ struct OfferRecord {
   std::string url;  // already resolved/validated by ResolveDownloadUrl
   // `file.size` from the catalogue: 0/null is "unknown", never "a zero-byte package".
   std::optional<std::int64_t> api_size;
+  // What the strip calls the job ("Downloading 'Artist - Title': 42%"). Host-only: the guest
+  // never sees it, and it is never used as a path.
+  std::string title;
 };
 
 struct TransferOutcome {

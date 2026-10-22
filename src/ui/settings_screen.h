@@ -200,10 +200,11 @@ inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
 // panel and answers to nobody else. The key entry is therefore authored here, in the same row
 // style as the rest of this surface, and the *host* owns the query (src/store/store_search.h).
 //
-// The pages exist without a settings row pointing at them: the store's own "Search" entry opens
-// the root once P3's front menu serves it, and the P4 measurement switch opens it for a boot
-// (`store_search_diagnostic`, the P2/P3 precedent of a measurement, not a feature). The root's
-// static back target is the retail store screen because that is the surface which opens it.
+// The pages are reached from the store's own front menu: the payload routes its **Search** row here
+// (`store::RouteSearchRowToKeys`), and the row lists the answer instead once one is waiting. The
+// root's back target is the retail store screen because that is the surface which opens it, and
+// Done leaves for the same place once the host accepted the submit. `store_search_diagnostic`
+// still opens the root straight from the main menu, for a boot that measures the keys alone.
 inline constexpr char kSearchPanel[] = "settings_rhythmverse_search_panel";
 inline constexpr char kSearchScreen[] = "settings_rhythmverse_search_screen";
 inline constexpr char kSearchRetailBack[] = "store_menu_screen";

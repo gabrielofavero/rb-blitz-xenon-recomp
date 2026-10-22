@@ -31,6 +31,19 @@ param(
     [string]$Query = "bush",
     # A query already in the field at boot (the live-request arm: one Done press, no typing).
     [string]$Seed = "",
+    # P4's delivered route (store_payload.h `RouteSearchRowToKeys`): >= 0 enters the retail store
+    # from `-StoreRow`, then opens the **served front menu's** Search row at this index (RECENT is 0,
+    # SEARCH 1), instead of the main-menu diagnostic jump. The rest of the route is the delivered
+    # one: Done submits and stays, Back leaves the keys, and pressing Search again asks for the
+    # page the answer fills - which is what puts the results in the retail browser. -1 keeps the
+    # old diagnostic route (the keys straight from the main menu).
+    [int]$SearchMenuRow = -1,
+    # How long to wait for the answer before Back is pressed on the keys page.
+    [int]$SettleAfterAnswerSec = 15,
+    # Control leg: open the store row (with `-SearchMenuRow 0` that is Recent) and capture what it
+    # opened, without typing, submitting or going back. This is the leg that says the Search route
+    # did not take Recent's press with it.
+    [switch]$RowOnly,
     [string]$LogLevel = "debug",
     [int]$BootTimeoutSec = 180,
     [int]$ScreenTimeoutSec = 120,
@@ -214,12 +227,15 @@ $arguments = @(
     "--log_flush_interval=1",
     "--log_max_file_size_mb=200",
     "--store_trace=1",
-    "--store_search_diagnostic=1",
-    "--store_search_seed=$Seed",    "--user_data_root=$profileDir",
+    "--store_search_seed=$Seed",
+    "--user_data_root=$profileDir",
     "--launcher_profile=$(Join-Path $profileDir 'launcher.toml')",
     "--dlc_library=$emptyDlc",
     "--dlc_root=$emptyDlc"
 )
+# The diagnostic jump is a measurement switch; the store route must run without it, or the main
+# menu's row would open the keys instead of the store.
+if ($SearchMenuRow -lt 0) { $arguments += "--store_search_diagnostic=1" }
 
 Write-Host "probe_search: launching $exe"
 Write-Host "  args: $($arguments -join ' ')"
@@ -230,14 +246,19 @@ $verdict = [ordered]@{
     stamp      = $stamp
     query      = $Query
     store_row  = $StoreRow
+    search_row = $SearchMenuRow
     window     = $false
     title_text = ""
     menu_text  = ""
     row_text   = ""
+    store_text = ""
     keys_text  = ""
     typed_text = ""
     done_text  = ""
     answer_text = ""
+    back_text   = ""
+    results_text = ""
+    page_text    = ""
 }
 
 try {
@@ -255,14 +276,37 @@ try {
     $verdict.row_text = Get-ScreenText (Join-Path $capDir "row.png")
     Invoke-Actions @("key:a")
     Start-Sleep -Seconds $SettleAfterPressSec
-    Capture-To (Join-Path $capDir "keys.png")
-    $verdict.keys_text = Get-ScreenText (Join-Path $capDir "keys.png")
 
+    if ($SearchMenuRow -ge 0) {
+        # The store's own front menu, then its Search row (RECENT 0, SEARCH 1): the press that the
+        # payload's gate turns into the keys page while no answer is waiting.
+        $verdict.store_text = Wait-ForNeedle (Join-Path $capDir "store.png") "RECENT" `
+            $ScreenTimeoutSec "store menu"
+        $toSearch = @($clampUp)
+        for ($d = 0; $d -lt $SearchMenuRow; $d++) { $toSearch += @("key:lstick_down", "wait:1") }
+        Invoke-Actions $toSearch
+        Invoke-Actions @("key:a")
+        if ($RowOnly) {
+            Capture-To (Join-Path $capDir "page.png")
+            $verdict.page_text = Get-ScreenText (Join-Path $capDir "page.png")
+        } else {
+            $verdict.keys_text = Wait-ForNeedle (Join-Path $capDir "keys.png") "LETTERS" `
+                $ScreenTimeoutSec "the authored key pages"
+        }
+    } else {
+        Capture-To (Join-Path $capDir "keys.png")
+        $verdict.keys_text = Get-ScreenText (Join-Path $capDir "keys.png")
+    }
+
+    # `-RowOnly` stops here: the press was the measurement.
+    if (-not $RowOnly) {
     # With a seeded field (`-Seed`), the root's first row is Done: one press exercises the request
     # and the answer. Without a seed the query is typed on the key pages.
     if ($Seed -ne "") {
         Invoke-Actions @("key:a")
-        Invoke-Actions @("key:a")
+        # The diagnostic route's second press re-submitted the same query; the store route does not
+        # need it (Done stays on the page and the strip reports the answer there).
+        if ($SearchMenuRow -lt 0) { Invoke-Actions @("key:a") }
     } else {
         Invoke-Actions (Get-KeyRoute $Query)
     }
@@ -270,9 +314,25 @@ try {
     Capture-To (Join-Path $capDir "typed.png")
     $verdict.typed_text = Get-ScreenText (Join-Path $capDir "typed.png")
 
-    Start-Sleep -Seconds $SettleAfterDoneSec
+    Start-Sleep -Seconds $SettleAfterAnswerSec
     Capture-To (Join-Path $capDir "answer.png")
     $verdict.answer_text = Get-ScreenText (Join-Path $capDir "answer.png")
+
+    if ($SearchMenuRow -ge 0) {
+        # Back returns to the store menu (the keys screen's own back target), and the same Search
+        # row now asks for the page the answer fills: the retail browser, listing the results.
+        Invoke-Actions @("key:b", "wait:3")
+        $verdict.back_text = Wait-ForNeedle (Join-Path $capDir "store-back.png") "RECENT" `
+            $ScreenTimeoutSec "store menu after Back"
+        $toResults = @($clampUp)
+        for ($d = 0; $d -lt $SearchMenuRow; $d++) { $toResults += @("key:lstick_down", "wait:1") }
+        Invoke-Actions $toResults
+        Invoke-Actions @("key:a")
+        Start-Sleep -Seconds $SettleAfterPressSec
+        Capture-To (Join-Path $capDir "results.png")
+        $verdict.results_text = Get-ScreenText (Join-Path $capDir "results.png")
+    }
+    }
 } finally {
     try {
         if (-not $proc.HasExited) {
@@ -312,15 +372,33 @@ $report += ""
 $report += "--- selected row (OCR) ---"
 $report += $verdict.row_text
 $report += ""
+if ($SearchMenuRow -ge 0) {
+    $report += "--- the retail store menu (OCR) ---"
+    $report += $verdict.store_text
+    $report += ""
+}
+if ($RowOnly) {
+    $report += "--- the store row's page (OCR) ---"
+    $report += $verdict.page_text
+    $report += ""
+}
 $report += "--- the authored key pages (OCR) ---"
 $report += $verdict.keys_text
 $report += ""
 $report += "--- after typing '$Query' (OCR) ---"
 $report += $verdict.typed_text
 $report += ""
-$report += "--- after Done, settle ${SettleAfterDoneSec}s (OCR) ---"
+$report += "--- after Done, settle ${SettleAfterAnswerSec}s (OCR) ---"
 $report += $verdict.answer_text
 $report += ""
+if ($SearchMenuRow -ge 0) {
+    $report += "--- store menu after Back (OCR) ---"
+    $report += $verdict.back_text
+    $report += ""
+    $report += "--- the Search row again: the answer as the retail list (OCR) ---"
+    $report += $verdict.results_text
+    $report += ""
+}
 $report += "--- store_search lines ($($searchLines.Count)) ---"
 $report += $searchLines
 $report += ""

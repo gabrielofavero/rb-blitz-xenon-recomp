@@ -140,13 +140,15 @@ the guest's own strings, and no log line names them.
 | --- | --- | --- |
 | `store_trace` | off | Logs one line per distinct store path the game root resolves or opens, with the open's access and result. The filter also matches any path ending in `store.dtb`, so the netcache definition itself is covered. |
 | `store_local_server_root` | "" | Rewrites `config/gen/store.dtb`'s `netcache_init` at boot so the store's default server is a *local* (host-file) one rooted at this guest-relative directory. Empty leaves the record as shipped. Requires a restart (it is built into the generated payload). |
-| `store_search_diagnostic` | off | RhythmVerse plan P4: sends the **RhythmVerse Customs** main-menu row straight into the authored key pages instead of the store, so the search can be driven without P3's front menu serving the store's Search row. Requires a restart. |
+| `store_search_diagnostic` | off | RhythmVerse plan P4: sends the **RhythmVerse Customs** main-menu row straight into the authored key pages instead of the store. The shipping entry is the store's own **Search** row (2026-10-22), so this is only the measurement that drives the keys without a store visit. Requires a restart. |
 | `store_search_seed` | "" | Seeds the search field with this text at boot, so one Done press exercises the real request and answer (`scripts/probe_search.ps1 -Seed <text>`). Empty leaves the field empty. Requires a restart. |
 | `store_serve_dir` | "" | RhythmVerse plan P3's data lane: a host directory whose files answer the store's own `dlc_store/**` netcache requests (a file named exactly like the requested path, e.g. `dlc_store/europe/dlc_top_xbox_eng.dta`). Empty uses the built-in records. A `.dta` record is **text** - the insert parses that type with the engine's own text reader - and is inserted into the manager's loaded-file container. Requires a restart. |
 | `store_fetch_deliver` | **on** | P3's delivery half: leaving the file cache's readiness word (`manager + 44`) set after a served record makes retail's **own** request body take its "already loaded" branch and send the `file_req_complete` message (`sub_8235A0F8`) itself - one delivery per request, every layout below it the engine's. Off, the word stays as the boot found it and the body takes its fetch branch, exactly as retail does offline. On by default since 2026-10-21: the store has nothing to show without it, and only records this module serves are affected (serving itself is gated on the RhythmVerse master switch), so a stock boot is untouched. Measured on: the store draws the served front menu's rows (RECENT, SEARCH), a row press asks for `dlc_store/<region>/<locale>/<name>/`, the served page opens the retail browser with all 24 titles drawn and the details panel reading the offer's own artist and genre, and A opens the details screen (`out/_swap/store-probe/20261021-190304`). Requires a restart. |
 | `store_catalogue_off` | off | Turns the store catalogue fetch off: a menu page is then served **empty** (the shape the retail DTA handles by refreshing the menu), which is the control leg for "is this page the catalogue's or the writer's?". Off means the catalogue runs. Requires a restart. |
-| `store_catalogue_ttl_seconds` | 300 | How long a fetched catalogue page is held before a new store visit refetches it. A failed fetch backs off for 30 s. The fetch runs on its own thread, so a store visit never blocks the guest. Requires a restart. |
-| `store_catalogue_pages` | 4 | How many catalogue pages one store visit accumulates into the browser's single list (clamped 1..20). Retail has no paging - `song_select`'s PageUp/PageDown are screen transitions - so an offer past the first API page can only be reached by asking for those pages. The offers are published after each page, so the list fills while the remaining pages are still in flight, and a later page that fails keeps the offers already read. Measured 2026-10-22: `page 1..4 -> 24,25,25,25 eligible offers (99 total)`, and row 70 of the served list was an API **page 4** offer. Requires a restart. |
+| `store_catalogue_ttl_seconds` | 300 | How long the fetched catalogue stays fresh before a new store visit refetches it (the Recent list's own freshness, separate from the page cache below). A failed page backs off for a wait derived from the answer (P7): `Retry-After` honoured within 5..600 s, a 5xx 60 s, a transport failure 10 s, a `200` whose body could not be read 60 s and any other status 120 s. The fetch runs on its own thread, so a store visit never blocks the guest. Requires a restart. |
+| `store_catalogue_pages` | 4 | How many API pages one store action accumulates into the browser's single list (clamped 1..20). Retail has no paging - `song_select`'s PageUp/PageDown are screen transitions - so an offer past the first API page can only be reached by asking for those pages. The walk is **chunked on the server's own cursor** (P7): the offers are published after each page, a page the instrument/eligibility filter emptied is **not** treated as the last one, and the budget is the only bound on a catalogue that never says "done". A later page that fails keeps the pages already read and holds the next visit off for its backoff. Measured 2026-10-22: `page 1..4 -> 24,25,25,25 eligible offers (99 total)`, and row 70 of the served list was an API **page 4** offer. Requires a restart. |
+| `store_page_cache_ttl_seconds` | 300 | RhythmVerse plan **P7's in-memory page cache**: how long one fetched API page (25 records) is reused before the site is asked again; **0 switches the cache off**, so every visit asks the site. The key is the endpoint **and the form body**, so the query text, the page number, the page size and the instrument filter each identity a page - a settings commit cannot read a page fetched for the filter it replaced. Single flight spans Recent and Search: an identical page that is already being fetched is never requested twice. The cache holds at most 64 pages and evicts the oldest. There is no disk cache (the plan marks `<user_data_root>/store/cache/` optional; it stays unbuilt). Requires a restart. |
+| `store_search_pages` | 4 | How many API pages **one search** may read (clamped 1..20; the site's page size is 25 records) - P7's per-action budget for the search half of `store_catalogue_pages`. The walk continues past a page the eligibility/instrument filter emptied and stops on the server's cursor, the budget, or a newer submit/edit/cancel/settings commit (the cancellation the worker checks between pages). 1 is the pre-P7 behaviour. Requires a restart. |
 | `store_offer_type_symbol` | **on** | Serves each offer's `type` as a DTA **symbol** (`(type song)`) instead of a string. The symbol is what the retail provider compares `get_data("type")` against (`sub_8275A230` -> `sub_822D1CE0`) to answer a browser row's label, and with it on the log shows every title being read (`store-probe: offer name exit '<title>'`). It is the shipped default since 2026-10-21: the null read it used to trigger was the details panel's `(rank <part>)` path, which the payload now unrolls onto the record's `rank_<part>` keys (`src/store/store_payload.h`). Off is the pre-P3 blank-row behaviour. Requires a restart. |
 | `store_art_off` | off | RhythmVerse plan P3's album art: with it on, the offer records carry no `preview_art`, the retail panel keeps its own `cover_art_none.tex` placeholder, and the cover worker does not fetch anything. Off (the shipped default) serves a `.png_xbox` texture per offer from `src/store/album_art_service.cpp` - the API's `album_art` cover, decoded and encoded by `src/assets/texture_codec.cpp` - through the netcache entry `BandStorePanel::load_art` reaches (`sub_82469C28`). Requires a restart. |
 | `store_art_dump_dir` | empty | The art worker's scratch directory, for the "the cover is wrong on screen - is it the file or the engine?" question. Every encoded cover is written there as `<key>.png_xbox`, and **a file already present for a key is served instead of being fetched**, so a texture encoded in an earlier boot, a hand-made one, or a shipped `.png_xbox` can be pushed through the exact serving path. Decode a dump with `python scripts/hmx_tex.py export <key>.png_xbox cover.png`; empty (the default) writes nothing and reads nothing. Requires a restart. |
@@ -154,6 +156,19 @@ the guest's own strings, and no log line names them.
 The observation point is [fs::PayloadOverlayDevice](../../src/fs/payload_overlay.cpp), not the SDK:
 every `game:`/`d:` path resolves through that device, so the hook is a single function pointer that
 costs a null check when off, and the paths arrive overlay-relative (`ui/store/...`).
+
+**The store's own sentences (P7).** What a player reads about the store is not a cvar: every store
+state change is published to [store_catalogue_status.cpp](../../src/store/store_catalogue_status.cpp),
+which the caption overlay draws below the search and download strips. The credit line
+**`Customs from RhythmVerse`** follows the front menu's own serve (the heading itself is
+`RHYTHMVERSE`, because `CUSTOMS FROM RHYTHMVERSE` clips in the retail header - measured 2026-10-21),
+the empty state says where the instrument filter lives, the loading line counts the pages read so
+far, and a failed fetch carries the server's own reason. Measured on screen 2026-10-22
+(`out/_swap/store-probe/20261022-140259`: the credit line is drawn under the store menu's RECENT /
+SEARCH rows). All of it is drawn only within
+`kCatalogueSurfaceWindow` (20 s) of the store serving a record, so the strip cannot follow a player
+out of the store, and it is drawn with Settings Labels off - an empty or unreachable catalogue is a
+state a player cannot explain from the screen.
 
 **What a silent probe does *not* prove (measured 2026-10-20).** Records read from an `.ark` are
 never seen: the guest mounts the ark part and reads records out of it **by offset**, so no path is
@@ -168,7 +183,23 @@ for that question the noisy export log is the instrument below.
 row, the store and the return, plus the store-probe census and the run's log
 (`out/_swap/store-probe/<stamp>/`). `-MenuOnly` stops at the menu, `-LocalRoot ""` is the control
 leg (retail server), and `-StoreRow` is a parameter because the menu's rows depend on three settings
-— run `-MenuOnly` first and read `menu.txt`.
+— run `-MenuOnly` first and read `menu.txt`. `-PageRow`/`-OfferRow` walk one level deeper each (a
+menu page, then a details page), and **`-InfoRow` presses a button on that details page** and waits
+`-DownloadWaitSec` (default 40) before the last capture — that is the P5 route: `-StoreRow 3 -PageRow
+0 -OfferRow 0 -InfoRow 0` is Recent's first offer's Download row. The report's
+`--- download / refresh lines ---` section carries `store_download:`/`store_install:`/`dlc:`
+lines, which is where a started, installed and refreshed transfer shows up.
+
+**The search route, end to end (P4, measured 2026-10-22).** `scripts/probe_search.ps1 -SearchMenuRow 1
+-StoreRow 3 -Seed bush` walks the delivered path: main menu → **RhythmVerse Customs** → the store's
+front menu → its **Search** row (RECENT is 0, SEARCH 1) → the authored keys (with the query seeded,
+Done is the root's first row) → Done, which submits and **stays** → the caption strip reads
+`15 MATCHES FOR "BUSH". PRESS BACK, THEN SEARCH, TO LIST THEM.` → Back → the same Search row, which
+now asks for the page the answer fills → the retail browser listing the fifteen offers with the
+details band reading the selected one (`out/_swap/search-probe/20261022-105010`). `-RowOnly` is the
+control leg that presses the row and captures what it opened without typing (`-SearchMenuRow 0` is
+Recent: `out/_swap/search-probe/20261022-105401`). The key press path itself (one token per press,
+`search/key/<token>`) is unchanged from the 2026-10-20 measurement.
 
 **Naming the exports a screen calls.** `-LogLevel trace -Noisy` (that is `--log_noisy=1`) turns on
 the SDK's kernel-import logging, which prints one line per export call (`[NtCreateFile] path=…`,

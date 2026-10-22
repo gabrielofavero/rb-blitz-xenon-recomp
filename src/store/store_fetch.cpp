@@ -14,6 +14,7 @@
 #include <rex/system/xmemory.h>
 
 #include "store/store_catalogue.h"
+#include "store/store_catalogue_status.h"
 #include "store/store_library.h"
 #include "store/album_art.h"
 #include "store/store_serve.h"
@@ -185,10 +186,14 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   // The catalogue is fetched on its own thread, so these two calls only wake it: the front menu is
   // the store opening (the row press that needs the offers comes seconds later), a menu page is a
   // row the player actually pressed. Both are no-ops while a fetch is in flight, while the held
-  // page is fresh, and for the backoff after a failure.
+  // page is fresh, and for the backoff after a failure. The same two moments are the store's own
+  // *surface* notes (P7): the caption strip's credit line and its empty/offline sentences are
+  // drawn only between a surface being served and `kCatalogueSurfaceWindow` later.
   if (IsFrontMenuPath(path)) {
+    NoteStoreSurface(StoreSurface::kFrontMenu);
     RequestCatalogueRefresh("the store opened");
   } else if (IsMenuRecordPath(path)) {
+    NoteStoreSurface(StoreSurface::kMenuPage);
     RequestCatalogueRefresh("a menu page was asked for");
   }
   // The Downloaded mark's index touches every package, so it is built while the player is still on

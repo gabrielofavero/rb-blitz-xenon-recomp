@@ -69,6 +69,7 @@
 #include <cstdio>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -91,6 +92,7 @@
 #include "fs/refresh_state.h"
 #include "store/store_download_service.h"
 #include "store/store_library.h"
+#include "store/store_serve.h"
 #if defined(_WIN32)
 #include "store/store_transfer.h"
 #endif
@@ -529,6 +531,24 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     };
     store::ConfigureDownloads(std::move(downloads));
   }
+  // The registration half (P5): a served row's job token is the worker's handle on that offer, so
+  // the serving path gets the boot's one registrar here - beside the destination, before any page
+  // can be served, and never in a test, which installs its own (store_serve.h).
+  store::SetOfferRegistrar([](std::string_view file_id, std::string_view url,
+                              std::optional<std::int64_t> api_size, std::string_view title) {
+    return store::RegisterOffer(store::OfferRecord{std::string(file_id), std::string(url),
+                                                   api_size, std::string(title)})
+        .value_or(std::string());
+  });
+  // The registration half (P5): a served row's job token is the worker's handle on that offer, so
+  // the serving path gets the boot's one registrar here - beside the destination, before any page
+  // can be served, and never in a test, which installs its own (store_serve.h).
+  store::SetOfferRegistrar([](std::string_view file_id, std::string_view url,
+                              std::optional<std::int64_t> api_size, std::string_view title) {
+    return store::RegisterOffer(store::OfferRecord{std::string(file_id), std::string(url),
+                                                   api_size, std::string(title)})
+        .value_or(std::string());
+  });
 
   const fs::LibraryScanResult library =
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,

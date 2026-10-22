@@ -71,6 +71,15 @@ std::optional<JobStatus> QueryJob(std::string_view token);
 // The installed host path once a job has committed (empty otherwise).
 std::filesystem::path InstalledPath(std::string_view token);
 
+// What the caption strip says right now, or empty when there is nothing to say. The line follows
+// the newest job: `Downloading 'Artist - Title': 42%` while it runs, the install result for a while
+// after it commits (the title cannot play a package its boot never discovered - plan §3.2/P5), and
+// the failure's own words (never a generic "download failed"). Host-thread safe; the overlay draws
+// it every frame.
+std::string DownloadStatusText();
+// The job the line is about, for tests and diagnostics (empty when the line is empty).
+std::string DownloadStatusJob();
+
 // The guest's two channels. Both return false for a path outside `rbbz-store/`, so the hook can
 // forward it; a path inside the namespace is always consumed.
 bool AnswerDownloadQuery(std::string_view path, bool* answer);

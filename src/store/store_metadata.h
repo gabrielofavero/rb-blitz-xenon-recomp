@@ -37,6 +37,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,6 +96,15 @@ std::string MenuSourceId(std::string_view entry_id);
 
 // The owner's two menus, in order.
 FrontMenu RhythmVerseFrontMenu();
+
+// The front menu's search row, and its *index*. The index is what the store's DTA gate compares
+// against (`store::RouteSearchRowToKeys` in store_payload.h): `{component selected_pos}` is an
+// integer the DTA can test without guessing how the provider spells a name, and the menu is ours,
+// so the position is a fact of `RhythmVerseFrontMenu()` rather than a retail assumption. The two
+// are pinned together by tests/store_metadata_tests.cpp, which fails if the entry at that index is
+// no longer `kSearchMenuId`.
+inline constexpr char kSearchMenuId[] = "search";
+inline constexpr int kSearchMenuRow = 1;
 
 // The front-menu writer. The record is the shape `sub_8275D4E0` reads:
 //
@@ -160,6 +170,23 @@ struct Offer {
   // measured 2026-10-22). Retail's own gate reads the offer's native `is_purchased` instead, which a
   // data-only custom never has. A receipt never sets this flag - only the loaded library does.
   bool downloaded = false;
+  // The download job this offer's row sends (plan §5/P5), written on **every** offer as
+  // `(job "<token>")`. It is `store::JobTokenForFileId(file_id)`: 17 characters, no path separator,
+  // and never the file id or the URL - the URL and the size stay on the host (`OfferRecord`), so a
+  // record carries nothing a screen could show that the download worker does not already own. The
+  // details page's Download row reads it back (`{cur_offer get_data (job)}`) and writes it into the
+  // request path; a missing key therefore walks a null, which is the same trap `is_purchased` above
+  // documents, so the key is written even when the offer is not downloadable (empty token).
+  std::string job;
+  // --- host-only fields, never written to a record ---------------------------------------------
+  // The download's identity, kept on the offer so the serving path can hand it to the worker in
+  // one place (`store_serve.h`, `AttachDownloadJob`) instead of every source remembering to. Same
+  // rule as `art_url`: a record never carries these, so nothing here can be edited by a screen.
+  std::string file_id;
+  // What `DecideOffer` returned - already resolved and policy-checked. Empty when the catalogue did
+  // not offer this song for download, which is what leaves the offer with no job.
+  std::string download_url;
+  std::optional<std::int64_t> size_bytes;
 };
 
 // The menu record shape `sub_8274F610` reads:
@@ -189,7 +216,11 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
 // worker can encode it (`AlbumArtEnabled`), empty otherwise - an absent key is what makes the retail
 // panel draw its own placeholder art instead of asking for a file nobody serves. `art_url` carries
 // the catalogue field to that worker and is never written to a record.
-Offer OfferFromSong(const SongFile& song);
+//
+// `resolved_download_url` is what `DecideOffer` decided this song may be downloaded from (P5). It is
+// kept host-only on the offer, and a caller that does not have it - a test, or a path that never
+// offers a download - passes nothing and gets an offer with no job.
+Offer OfferFromSong(const SongFile& song, std::string_view resolved_download_url = {});
 
 // The same two shapes in **text**, which is what the netcache serves. Measured 2026-10-20 in the
 // decrypted image: the loaded-file insert (`sub_824685E0`) classifies a request path by its

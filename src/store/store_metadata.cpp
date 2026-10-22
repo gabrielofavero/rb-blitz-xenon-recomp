@@ -194,12 +194,17 @@ std::string RelatedOfferPath(std::string_view platform, std::string_view locale,
 
 std::string MenuSourceId(std::string_view entry_id) { return "menu_" + std::string(entry_id); }
 
-Offer OfferFromSong(const SongFile& song) {
+Offer OfferFromSong(const SongFile& song, std::string_view resolved_download_url) {
   Offer offer;
   // The site's `file_title` is the canonical title; `file_name` (the upload name) is the fallback
   // when the record carries no title at all, and it is what the catalogue shows for such rows.
   offer.name = song.title.empty() ? song.file_name : song.title;
   offer.artist = song.artist;
+  // The download's identity (P5): host-only, and empty when the catalogue did not offer this song,
+  // which is what leaves the offer without a job.
+  offer.file_id = song.file_id;
+  offer.download_url = std::string(resolved_download_url);
+  offer.size_bytes = song.size_bytes;
   offer.album = song.album;
   offer.genre = song.genre;
   offer.year_released = song.year.value_or(0);
@@ -252,7 +257,7 @@ Offer OfferFromSong(const SongFile& song) {
 FrontMenu RhythmVerseFrontMenu() {
   FrontMenu menu;
   menu.entries.push_back({"recent", "Recent"});
-  menu.entries.push_back({"search", "Search"});
+  menu.entries.push_back({kSearchMenuId, "Search"});
   return menu;
 }
 
@@ -320,6 +325,8 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
     if (offer.downloaded) {
       fields.push_back(Node::Array({Symbol("is_purchased"), Node::Int(offer.downloaded ? 1 : 0)}));
     }
+    // The download job (P5): always present, because the Download row reads it unconditionally.
+    fields.push_back(pair("job", offer.job));
     rows.push_back(Node::Array(std::move(fields)));
   }
   // The root `sub_8274F610` reads: three pairs, `offers_populated`, `sorted` and `offers`, and one
@@ -409,6 +416,10 @@ std::string BuildMenuText(const std::vector<Offer>& offers, std::string* why) {
     // `out/_swap/store-probe/20261022-094505`), and an int is the one value whose truth is not a
     // spelling question - 1 shows the row, 0 leaves the page as retail draws it.
     out += offer.downloaded ? "    (is_purchased 1)\n" : "    (is_purchased 0)\n";
+    // The download job (plan §5/P5). Written on every offer for the reason `is_purchased` above is:
+    // the details page's Download row asks `get_data (job)` and a missing key walks a null. An offer
+    // with no job carries an empty string, which the row treats as "nothing to start".
+    out += pair_text("job", offer.job);
     // `is_available` is deliberately not written: `purchase_allowed` needs it (so an absent key
     // keeps the price block and the Buy Now row from being built), and writing it FALSE made the
     // details path answer `{offer is_completely_unavailable}` true - measured 2026-10-21, the A

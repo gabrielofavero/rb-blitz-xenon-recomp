@@ -8,6 +8,7 @@
 
 #include <cctype>
 #include <chrono>
+#include <iterator>
 #include <mutex>
 #include <utility>
 
@@ -150,6 +151,10 @@ SearchState g_state = SearchState::kIdle;
 std::vector<SearchOffer> g_offers;
 std::uint64_t g_generation = 1;
 bool g_open = false;
+// A terminal answer the store has not listed yet: set when one lands, cleared when the serving
+// policy hands the page over (`SearchMarkShown`) or when the store is left. It is the front menu's
+// gate (`kSearchShowQuery`) and half of the caption strip's visibility rule.
+bool g_show = false;
 std::string g_failure;
 
 struct Pending {
@@ -158,8 +163,20 @@ struct Pending {
   std::uint64_t settings_generation = 0;
   std::string text;
   InstrumentFilter filter;
+  // P7's chunking state: the API page the next answer should be, how many pages this submit has
+  // already read, and the per-action budget it may spend.
+  int next_page = 1;
+  int pages_done = 0;
+  int page_budget = 1;
 };
 Pending g_pending;
+
+// Plan P7's per-action page budget (installed from `store_catalogue_pages` by the transport).
+int g_page_budget = 1;
+
+// Plan P7's backoff: a failed answer names a wait, and a submit inside it is refused with the wait
+// rather than sent. Cleared by a new submit, a cancel and a page that lands.
+std::chrono::steady_clock::time_point g_retry_at{};
 
 SubmitSink g_submit_sink;
 
@@ -201,9 +218,11 @@ void InvalidateInFlightLocked() {
 }
 
 std::string StatusTextLocked() {
-  // The strip belongs to the search surface. It is also drawn while a request is in flight after
-  // the player left the key pages (Done leaves, the answer still arrives), and not otherwise: a
-  // finished answer must not sit over every other page's caption forever.
+  // The strip belongs to the search surface: the key pages, plus the in-flight request that is
+  // still going when the player has already pressed Back. The *pending answer* (`g_show`) is not a
+  // strip state: it is the Search row's own gate, and the strip would otherwise follow the player
+  // out of the store (measured 2026-10-22: with `show` as a strip state, the count sat over the
+  // main menu after Back).
   if (!g_open && g_state != SearchState::kSearching) {
     return {};
   }
@@ -215,10 +234,19 @@ std::string StatusTextLocked() {
                                    : "Search: " + g_text.text();
     case SearchState::kTooShort:
       return kSearchTooShort;
-    case SearchState::kSearching:
-      return "Searching for " + Quote(g_text.text()) + "...";
+    case SearchState::kSearching: {
+      std::string text = "Searching for " + Quote(g_text.text()) + "...";
+      // P7's chunking: a multi-page answer says how far it has got, so a slow catalogue reads as
+      // progress rather than a hang.
+      if (g_pending.active && g_pending.pages_done > 0) {
+        text += " (" + std::to_string(g_pending.pages_done) +
+                (g_pending.pages_done == 1 ? " page)" : " pages)");
+      }
+      return text;
+    }
     case SearchState::kResults:
-      return CountNoun(g_offers.size()) + Quote(g_text.text()) + ". Press Done to open the store.";
+      return CountNoun(g_offers.size()) + Quote(g_text.text()) + ". " +
+             (g_offers.size() == 1 ? kSearchListHintOne : kSearchListHint);
     case SearchState::kNoResults:
       return "No matches for " + Quote(g_text.text()) + ". " + kSearchRetryHint;
     case SearchState::kFailed:
@@ -326,8 +354,9 @@ void SearchOpen() {
 void SearchClose() {
   const std::lock_guard<std::mutex> lock(g_mutex);
   g_open = false;
-  // Leaving the pages is **not** a cancel: Done leaves while its request is still in flight, and
-  // dropping that would make every search impossible to complete.
+  // Only the surface closes. The field, the answer and the pending mark all stay: the Search row
+  // is the way to the answer (it lists it once and then goes back to opening the keys), and
+  // leaving the pages is not a cancel - Back can be pressed while the request is still running.
 }
 
 void SearchCancel() {
@@ -335,10 +364,12 @@ void SearchCancel() {
   ++g_generation;
   g_pending = Pending{};
   g_open = false;
+  g_show = false;
   g_text.Clear();
   g_offers.clear();
   g_failure.clear();
   g_state = SearchState::kIdle;
+  g_retry_at = {};
   g_has_last_press = false;
 }
 
@@ -357,6 +388,7 @@ bool SearchApplyKey(std::string_view token) {
   }
   g_offers.clear();
   g_failure.clear();
+  g_show = false;  // an edit retires the answer the store was about to list
   g_state = SearchState::kEditing;
   g_open = true;
   return true;
@@ -370,6 +402,7 @@ bool SearchSetText(std::string_view utf8) {
   InvalidateInFlightLocked();
   g_offers.clear();
   g_failure.clear();
+  g_show = false;
   g_state = SearchState::kEditing;
   g_open = true;
   return true;
@@ -404,6 +437,25 @@ SearchSubmit SearchSubmitQuery() {
                                                 : std::string(QueryProblemText(problem));
     return out;
   }
+  // Plan P7's backoff: a failure the worker reported named a wait (Retry-After, 5xx, or the
+  // transport's own default). A submit inside it is refused with the wait instead of sent - and
+  // the previous answer, if any, stays on screen. The wait is cleared by a page that lands, by the
+  // next accepted submit, and by a cancel (the player's own way out).
+  const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+  if (now < g_retry_at) {
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::seconds>(g_retry_at - now).count() + 1;
+    out.why = "the catalogue is busy; try again in " + std::to_string(remaining) + " s";
+    // A refusal while an answer is on screen is not a failure of that answer: the list the Search
+    // row opens is still the last good one, so the state is left alone and only the reason travels
+    // (the guest hook logs it). Otherwise the busy sentence becomes the strip's own.
+    if (g_state != SearchState::kResults && g_state != SearchState::kNoResults) {
+      g_failure = out.why;
+      g_state = SearchState::kFailed;
+    }
+    out.state = g_state;
+    return out;
+  }
   ++g_generation;
   g_pending = Pending{};
   g_pending.active = true;
@@ -411,8 +463,13 @@ SearchSubmit SearchSubmitQuery() {
   g_pending.settings_generation = SettingsGeneration();
   g_pending.text = g_text.text();
   g_pending.filter = settings->instruments;
+  g_pending.next_page = 1;
+  g_pending.pages_done = 0;
+  g_pending.page_budget = g_page_budget > 0 ? g_page_budget : 1;
   g_offers.clear();
   g_failure.clear();
+  g_show = false;
+  g_retry_at = {};
   g_state = SearchState::kSearching;
   g_open = true;
   out.started = true;
@@ -422,10 +479,16 @@ SearchSubmit SearchSubmitQuery() {
   return out;
 }
 
-bool SearchAccept(std::uint64_t generation, const ListingPage& page) {
+void SetSearchPageBudget(int pages) { g_page_budget = pages > 0 ? pages : 1; }
+
+int SearchPageBudget() { return g_page_budget; }
+
+SearchPageAnswer SearchAcceptPage(std::uint64_t generation, const ListingPage& page) {
+  SearchPageAnswer out;
   const std::lock_guard<std::mutex> guard(g_mutex);
-  if (!g_pending.active || generation != g_pending.generation || g_state != SearchState::kSearching) {
-    return false;
+  if (!g_pending.active || generation != g_pending.generation ||
+      g_state != SearchState::kSearching) {
+    return out;
   }
   // A settings commit since the request went out changes the answer's meaning (the filter is part
   // of the query), and the master being off means the answer must not be shown at all. Both drop
@@ -434,31 +497,113 @@ bool SearchAccept(std::uint64_t generation, const ListingPage& page) {
     const bool enabled = Settings()->enabled;
     g_pending = Pending{};
     ++g_generation;
+    g_offers.clear();
     g_state = enabled ? SearchState::kEditing : SearchState::kDisabled;
-    return false;
+    return out;
   }
   if (!Settings()->enabled) {
     g_pending = Pending{};
     ++g_generation;
+    g_offers.clear();
     g_state = SearchState::kDisabled;
+    return out;
+  }
+  out.accepted = true;
+  ++g_pending.pages_done;
+  // The pages accumulate in the API's order, through the same filter Recent uses. A page the filter
+  // emptied is a valid step, not the end of the walk (P7).
+  std::vector<SearchOffer> shaped = ShapeOffers(page, g_pending.filter);
+  g_offers.insert(g_offers.end(), std::make_move_iterator(shaped.begin()),
+                  std::make_move_iterator(shaped.end()));
+  out.matches = g_offers.size();
+  // The cursor is the server's, never the number of offers kept: an underfilled or filtered-empty
+  // page continues.
+  const int next = NextPageAfter(page, g_pending.pages_done, g_pending.page_budget);
+  if (next != 0) {
+    g_pending.next_page = next;
+    out.next_page = next;
+    g_retry_at = {};  // a page landed: an earlier failure's wait no longer applies
+    return out;       // still `kSearching`: the worker asks for `next_page`
+  }
+  g_pending = Pending{};
+  g_state = g_offers.empty() ? SearchState::kNoResults : SearchState::kResults;
+  g_show = true;
+  return out;
+}
+
+bool SearchAccept(std::uint64_t generation, const ListingPage& page) {
+  return SearchAcceptPage(generation, page).accepted;
+}
+
+bool SearchFailAfter(std::uint64_t generation, std::string reason,
+                     std::chrono::seconds retry_after) {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  if (!g_pending.active || generation != g_pending.generation ||
+      g_state != SearchState::kSearching) {
     return false;
   }
-  std::vector<SearchOffer> offers = ShapeOffers(page, g_pending.filter);
   g_pending = Pending{};
-  g_offers = std::move(offers);
-  g_state = g_offers.empty() ? SearchState::kNoResults : SearchState::kResults;
+  g_retry_at = std::chrono::steady_clock::now() + retry_after;
+  if (!g_offers.empty()) {
+    // Pages already read are a usable answer: the failure ends the walk, not the answer. The
+    // reason still reaches the log (the worker logs it); the strip shows the count, which is what
+    // the player can act on (Back, then Search).
+    g_failure.clear();
+    g_state = SearchState::kResults;
+    g_show = true;
+    return true;
+  }
+  g_failure = std::move(reason);
+  g_state = SearchState::kFailed;
+  // A failure is presented the same way: the Search row opens the (empty) page, which is what
+  // returns the store to its menu, and the strip carries the reason until the store is left.
+  g_show = true;
   return true;
 }
 
 bool SearchFail(std::uint64_t generation, std::string reason) {
+  return SearchFailAfter(generation, std::move(reason),
+                         std::chrono::seconds(kBackoffNetworkSeconds));
+}
+
+std::optional<RequestSpec> SearchBuildPageRequest(std::uint64_t generation, int page,
+                                                  std::string* why) {
   const std::lock_guard<std::mutex> guard(g_mutex);
-  if (!g_pending.active || generation != g_pending.generation || g_state != SearchState::kSearching) {
-    return false;
+  auto refuse = [why](std::string_view reason) {
+    if (why != nullptr) *why = std::string(reason);
+    return std::optional<RequestSpec>{};
+  };
+  if (!g_pending.active || generation != g_pending.generation ||
+      g_state != SearchState::kSearching) {
+    return refuse("the search job is no longer current");
   }
-  g_pending = Pending{};
-  g_failure = std::move(reason);
-  g_state = SearchState::kFailed;
-  return true;
+  if (!Settings()->enabled) {
+    return refuse("RhythmVerse is switched off");
+  }
+  if (SettingsGeneration() != g_pending.settings_generation) {
+    return refuse("the settings changed during the search");
+  }
+  if (page == 0) {
+    return refuse("the page number is not a page");
+  }
+  Query query;
+  query.instruments = g_pending.filter;
+  query.page = page;
+  query.records = kDefaultPageSize;
+  query.text = g_pending.text;
+  QueryProblem problem = QueryProblem::kNone;
+  std::optional<RequestSpec> spec = BuildSearchRequest(query, &problem);
+  if (!spec) {
+    return refuse(QueryProblemText(problem));
+  }
+  return spec;
+}
+
+bool SearchPageWanted(std::uint64_t generation) {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  return g_pending.active && generation == g_pending.generation &&
+         g_state == SearchState::kSearching && Settings()->enabled &&
+         SettingsGeneration() == g_pending.settings_generation;
 }
 
 // --- Queries and status -----------------------------------------------------------------------
@@ -492,6 +637,10 @@ bool AnswerSearchQuery(std::string_view path, bool* answer) {
     *answer = g_text.ready();
     return true;
   }
+  if (rest == "show") {
+    *answer = g_show;
+    return true;
+  }
   constexpr std::string_view kState = "state/";
   if (rest.starts_with(kState)) {
     *answer = SearchStateToken(g_state) == rest.substr(kState.size());
@@ -514,6 +663,21 @@ bool AnswerSearchQuery(std::string_view path, bool* answer) {
     return true;
   }
   return false;
+}
+
+std::vector<SearchOffer> SearchOffers() {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  return g_offers;
+}
+
+void SearchMarkShown() {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  g_show = false;
+}
+
+bool SearchAnswerPending() {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  return g_show;
 }
 
 SearchSnapshot SearchCurrent() {
@@ -569,6 +733,10 @@ StoreParse ParseStoreWrite(std::string_view path, StoreOp* op, std::string* toke
     *op = StoreOp::kSearchCancel;
     return StoreParse::kAccepted;
   }
+  if (action == "leave") {
+    *op = StoreOp::kSearchLeave;
+    return StoreParse::kAccepted;
+  }
   constexpr std::string_view kKey = "key/";
   if (action.starts_with(kKey)) {
     const std::string_view name = action.substr(kKey.size());
@@ -622,6 +790,10 @@ bool ApplyStoreWrite(StoreOp op, std::string_view token, std::string_view text, 
         return true;
       }
       SearchCancel();
+      return true;
+    case StoreOp::kSearchLeave:
+      // Deliberately not de-duplicated: leaving twice is the same as leaving once.
+      SearchClose();
       return true;
     case StoreOp::kSearchKey:
       if (IsDuplicatePress(op, token)) {
