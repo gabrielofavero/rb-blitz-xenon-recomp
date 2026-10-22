@@ -63,6 +63,22 @@ is removed from this file, not from the log.
 > [`docs/settings/status.md`](../settings/status.md). An item is marked resolved where the removal
 > itself answers it.
 
+- **The store's catalogue is supplied locally by this mod from RhythmVerse; the online services
+  stay out of scope** (RhythmVerse store plan P8, 2026-10-22). The retail DOWNLOAD CONTENT screens
+  are retail's own, and they were already inert offline (the Open row above records that chain);
+  what this project adds is a **data source** for them. The Recent list and the search come from
+  RhythmVerse's gameformat-scoped `rb3xbox` routes, the offers are served through the retail
+  parser (`src/store/store_serve.cpp`), and a download is a package file the host fetches, checks
+  and writes into the resolved DLC root (`src/store/store_download.cpp`, `store_install.cpp`).
+  That is not a restoration of Xbox LIVE, Rock Central or the marketplace: no
+  `XamShowMarketplace*UI` call is reachable from the RhythmVerse path, no purchase or entitlement
+  exists (the offers are free, and the price chrome is hidden in the payload), nothing is
+  previewed - the API serves a YouTube *page* in both preview fields, never an audio asset
+  (plan §3.3) - and no archive is extracted and no off-site link followed (§3.1). A player who
+  never turns the row on makes no store request at all: the master switch is the workers' only
+  input, which the acceptance harness's control leg measures against a boot log
+  (`scripts/acceptance_store.ps1`, plan §5/P8 record).
+
 - **Gameplay Mapping has no Custom switch; an old profile's `gameplay_mapping_*` rows are inert**
   (P2 of the restructure plan, 2026-10-20). Custom is a fact about the table, not a setting: the
   Mouse & Keyboard table is always active in a song, and the Controller table acts when it has a

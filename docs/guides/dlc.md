@@ -138,6 +138,38 @@ headers are read on a pool, because that read is the whole cost of a scan; the w
 the merge stay on the calling thread in walk order, so the result does not depend on how
 many threads read it (§4.1).
 
+## 2.2 The in-game store writes into the same root
+
+The RhythmVerse store's **Download** row is not a second content system: it installs into the
+destination this boot already resolved, so a song it writes is a package like any other and is
+discovered on the next start (`docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md` §5/P5 and
+the P8 record). What that adds to the rules above:
+
+- **The layout is preserved, per root.** A structured root gets the package under
+  `45410914/00000002/`; a flat root gets a loose container beside the others, and **no title-id
+  directory is invented** in one - a folder that grew a title-id level would be classified
+  differently on the next boot, which could exclude the loose packages that were already there
+  (`store_install.h`'s `LibraryLayout`).
+- **The file name is generated, never taken from the catalogue**: `rv_<32 hex>.con`, the SHA-256 of
+  the offer's opaque file id, 39 bytes against the 42-byte field above; a collision adds `~<n>` and
+  still fits. No artist, title, `Content-Disposition` name or raw API id ever becomes a path.
+- **A transfer is staged outside every enumerator.** `<resolved root>/.rbbz-store-staging/` is
+  skipped by the flat walk, the cache fingerprint and the structured scan, so a half-written
+  `CON ` can neither be enumerated nor invalidate the cache on every chunk. The file is flushed,
+  its STFS identity checked, then renamed into place; a cancelled or failed transfer leaves
+  nothing behind and no receipt row.
+- **The Downloaded mark reads the packages, not a receipt.** The store mounts every package
+  `dlc::LibraryPackagePaths()` names and reads its `songs/songs.dta`
+  ([src/store/store_library.cpp](../../src/store/store_library.cpp)), so a manually installed song,
+  or a song inside a multi-song pack, matches without ever having been downloaded here. A receipt
+  (`<user_data_root>/store/downloads.tsv`) is transfer history only, and an index that is still
+  building answers "unknown", never "not installed".
+- **A newly installed package waits for the next start.** `dlc::RefreshAfterStoreInstall()` re-walks
+  the flat roots (an install is not a cache feature, so R7's gate does not apply) and the host hands
+  the fresh list to the title on the next menu frame, but the running title's own song discovery
+  begins at boot - which is why the caption strip says *Restart the game to play it* rather than
+  claiming the song is already playable. The acceptance harness measures exactly that pair of boots.
+
 ## 3. Configuration
 
 | Setting | Default | Effect |

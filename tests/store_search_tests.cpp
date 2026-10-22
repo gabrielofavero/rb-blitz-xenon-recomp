@@ -538,6 +538,30 @@ void TestShapeOffers() {
   CHECK_EQ(ShapeOffers(page, none).size(), 2u);
 }
 
+void TestPerFileDuplicates() {
+  test::BeginCase("two files for the same song stay two offers, in the API's order");
+  // OQ7 of the plan: an offer is a *file*, not an artist + title. Two charts of one song are two
+  // catalogue entries with their own ids and links, and the store lists both - the Downloaded
+  // matcher (artist + title) deliberately marks both, and Download Again stays an explicit press
+  // per row. Nothing here is deduplicated, and the API's order is preserved.
+  SongFile first = Charted(Song("Same Artist", "Same Title", "/download_file/u/i/aaa_rb3con"));
+  first.file_id = "aaa";
+  SongFile second = Charted(Song("Same Artist", "Same Title", "/download_file/u/i/bbb_rb3con"));
+  second.file_id = "bbb";
+  SongFile other = Charted(Song("Another", "Song", "/download_file/u/i/ccc_rb3con"));
+  other.file_id = "ccc";
+
+  const std::vector<SearchOffer> offers = ShapeOffers(Page({first, second, other}), InstrumentFilter{});
+  CHECK_EQ(offers.size(), 3u);
+  CHECK_STR(offers[0].song.file_id, "aaa");
+  CHECK_STR(offers[1].song.file_id, "bbb");
+  CHECK_STR(offers[2].song.file_id, "ccc");
+  CHECK_STR(offers[0].song.title, "Same Title");
+  CHECK_STR(offers[1].song.title, "Same Title");
+  // Both links survived resolution, so a Download Again row's press has its own target.
+  CHECK_TRUE(offers[0].download_url != offers[1].download_url);
+}
+
 void TestAnswerPresentation() {
   test::BeginCase("an answer waits for the Search row, and only the strip belongs to the keys");
   ResetSession(true);
@@ -845,6 +869,7 @@ int main(int argc, char** argv) {
   TestNoMatchesBody();
   TestQueries();
   TestShapeOffers();
+  TestPerFileDuplicates();
   TestAnswerPresentation();
   TestCancelSemantics();
   TestMultiPageAnswer();

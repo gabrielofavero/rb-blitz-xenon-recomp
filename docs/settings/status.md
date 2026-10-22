@@ -16,8 +16,11 @@ Part 1 wherever they disagree.
   applier replaces the store's in-process settings snapshot, which its workers will read before every
   request. **Evidence:** `rb_blitz_settings_screen_tests` (103,269 checks) pins the page order,
   labels, defaults and both contexts; `rb_blitz_store_client_tests` pins the row → snapshot mapping
-  (a commit bumps the generation, an equal commit does not). No store worker exists yet (P1/P3), so
-  "Off makes no request" is structural until one does.
+  (a commit bumps the generation, an equal commit does not). The workers read only that snapshot, so
+  Off makes no request by construction — and since 2026-10-22 that is **measured**: the acceptance
+  harness's control leg (`scripts/acceptance_store.ps1`, RhythmVerse plan §5/P8) boots with the
+  switch off and finds no `store_catalogue`/`store_fetch`/`store_library`/`store_download`/`store_search`
+  request line in the log, while the main menu's own refresh row still dispatches.
 - **RhythmVerse search is typed on an authored keyboard (2026-10-20, RhythmVerse plan P4).** There
   is no retail keyboard to reuse — all 131 compiled DTA records were decoded and the only entry
   point is `rbworld_link_panel show_keyboard`, a *native* method of the Rock Central e-mail panel —
@@ -35,8 +38,9 @@ Part 1 wherever they disagree.
   keys. **Evidence:** `rb_blitz_store_search_tests` (283 checks),
   `rb_blitz_settings_screen_tests` (page order, the six-row budget, the write path of every key),
   and a boot whose strip was OCRd (`scripts/probe_search.ps1`,
-  `out/_swap/search-probe/20261020-174624`). The matches are **not drawn in the store's own list
-  yet** — that list is P3's front menu.
+  `out/_swap/search-probe/20261020-174624`). Since 2026-10-22 the matches **are drawn**: the same
+  Search row asks for the page the answer fills and the retail browser lists it (RhythmVerse plan P4
+  landing record, `out/_swap/search-probe/20261022-105010`).
 - **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
   `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
   (`Main Menu`, `Offline Prompts`, `Help & Options Labels`); HUD moved under Gameplay and is split into

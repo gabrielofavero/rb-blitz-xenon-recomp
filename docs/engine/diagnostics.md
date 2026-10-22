@@ -188,7 +188,10 @@ menu page, then a details page), and **`-InfoRow` presses a button on that detai
 `-DownloadWaitSec` (default 40) before the last capture — that is the P5 route: `-StoreRow 3 -PageRow
 0 -OfferRow 0 -InfoRow 0` is Recent's first offer's Download row. The report's
 `--- download / refresh lines ---` section carries `store_download:`/`store_install:`/`dlc:`
-lines, which is where a started, installed and refreshed transfer shows up.
+lines, which is where a started, installed and refreshed transfer shows up. Since 2026-10-22 the
+install line names the job it finished — `store_download: job <job> installed '<Artist - Title>'
+<path> (<N> bytes, title <id>)` — which is what lets a later boot say *which* song it must find
+on the title's list (the receipt stays a transfer history with no name in it, by design).
 
 **The search route, end to end (P4, measured 2026-10-22).** `scripts/probe_search.ps1 -SearchMenuRow 1
 -StoreRow 3 -Seed bush` walks the delivered path: main menu → **RhythmVerse Customs** → the store's
@@ -200,6 +203,40 @@ details band reading the selected one (`out/_swap/search-probe/20261022-105010`)
 control leg that presses the row and captures what it opened without typing (`-SearchMenuRow 0` is
 Recent: `out/_swap/search-probe/20261022-105401`). The key press path itself (one token per press,
 `search/key/<token>`) is unchanged from the 2026-10-20 measurement.
+
+**The acceptance harness (P8, 2026-10-22).** `scripts/acceptance_store.ps1` runs the whole feature
+in four boots and is the only script here that asserts instead of describing: `-Legs Enable` (the
+master switch turned on through Help & Options > General > Downloadable Content, then the committed
+`settings.toml` value), `Store` (the row opens the retail store, Recent, the search answer, its
+results page, the details screen's Download, and the install asserted on disk, in the receipt and in
+the log), `Install` (the next boot's song list carries the downloaded title, read out of the install
+line above) and `Control` (RhythmVerse Off: no store request in the log at all and the main menu's
+refresh row still dispatches its sentinel). It uses its own profile directories and an **empty
+scratch DLC root**, so it never reads or writes the player's library, and it exits non-zero unless
+every step behaved; `-Reuse` runs the legs in separate invocations on the fixtures the first one
+wrote. Rows are clicked at the bounds the host logs (`native_mouse: row=<n> bounds=…`) because which
+index carries a row depends on the boot's settings, and the screen a click lands on
+(`native_mouse: screen=` / `help_observer: screen '…'`) is the oracle, never an OCR guess.
+
+**Its boot route is press, hover, look (`Enter-MainMenu`).** One OCR finds the title, and after that
+the only instruments are host lines: a hover at the list makes the native capture log the row table,
+the menu is the only screen with one, and `content_pipeline: usable menu` names the same moment from
+the pipeline's side. A press goes out only after a look that found no rows, so the retried accept
+cannot land on a row; a press sent during the title's discovery pass is swallowed, which is why the
+route presses again rather than reading the screen. Nothing captures while the pass runs - a boot
+that is OCR'd every ~18 s sat on `server_connect_screen` for minutes with the guest idle and 585
+ringbuffer-drop lines in its log, while the same boot left the pass 100-450 ms after the enumeration
+with the machine to itself. That is also why the harness logs `--log_level=info`: the debug stream is
+APU/GPU chatter (4.7 MB in four minutes), and every line it asserts on is an info line.
+
+**Measured shape, 2026-10-22** (`out/store-acceptance/p8-store/`): `Enable` passes every step
+(`RHYTHMVERSE: OFF` → press → `rhythmverse = true` in the profile → `RHYTHMVERSE: ON`), `Control`
+passes 13 of 13 (no store row on the menu, six absence checks at 0 matches, the refresh row's
+sentinel present), the store row opens the retail store (`native_mouse: screen=store_menu_screen`) -
+and the `Store` leg then finds the guest no longer logging on this machine, so its own assertions
+are the next thing to earn. Two other traps the harness encodes: `drive_ui.ps1` joins `-OutDir`
+against the repository root (pass it relative), and OCR hands back one line per drawn line
+(`EXIT GAME` arrives as two), which is why every label check folds the whitespace out.
 
 **Naming the exports a screen calls.** `-LogLevel trace -Noisy` (that is `--log_noisy=1`) turns on
 the SDK's kernel-import logging, which prints one line per export call (`[NtCreateFile] path=…`,

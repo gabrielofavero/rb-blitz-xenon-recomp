@@ -188,8 +188,12 @@ void RunJob(const std::string& token) {
         S().last_job = token;
         S().last_finished = std::chrono::steady_clock::now();
       }
-      LogLine("store_download: job " + token + " installed " + final_path.string() + " (" +
-                  std::to_string(outcome.bytes) + " bytes, title " +
+      // The quoted name is the job's own title ("Artist - Title", the same string the strip
+      // draws). It is what makes a boot log say *which* song was installed, and it is what
+      // scripts/acceptance_store.ps1 reads to know the title the next boot's song list must
+      // carry - the receipt stays a transfer history with no name in it, by design.
+      LogLine("store_download: job " + token + " installed '" + offer.title + "' " +
+                  final_path.string() + " (" + std::to_string(outcome.bytes) + " bytes, title " +
                   std::to_string(outcome.title_id) + ")",
               false);
       if (!config.receipt_path.empty()) {
