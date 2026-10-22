@@ -108,19 +108,53 @@ std::vector<SongMetadata> ReadSongMetadata(std::span<const uint8_t> bytes, bool 
     if (error && error->empty()) *error = "invalid or oversized song metadata";
     return {};
   }
+  // A song record is `(<key> (song (name ...) (title ...) (artist ...)))`. Two packagings exist and
+  // both are real: a `songs.dta` that is the list itself (the shape the first cut was written for),
+  // and one that wraps the list in a `(songs ...)` node - which is what a Rock Band 3 CON carries,
+  // and whose wrapped form made the store's Downloaded matcher read "0 song(s) across 1 package"
+  // for a package that does declare a song (measured 2026-10-21, boot
+  // `out/_swap/store-probe/20261021-220415`; the parse succeeded, so no error was reported).
+  std::vector<const Node*> candidates;
+  std::vector<const Node*> pending;
+  for (const Node& record : records) pending.push_back(&record);
+  while (!pending.empty()) {
+    const Node* node = pending.back();
+    pending.pop_back();
+    if (node->tag != ui::dtb::kArray || node->kids.empty() || node->kids[0].text.empty()) continue;
+    const Node* song = Field(*node, "song");
+    if (song != nullptr) {
+      candidates.push_back(node);
+      continue;
+    }
+    // Not a song record: descend once into a wrapper's children (`songs`, or a nested list).
+    for (const Node& child : node->kids) {
+      if (child.tag == ui::dtb::kArray) pending.push_back(&child);
+    }
+  }
   std::vector<SongMetadata> songs;
-  for (const Node& record : records) {
-    if (record.tag != ui::dtb::kArray || record.kids.empty() || record.kids[0].text.empty()) continue;
-    const Node* song = Field(record, "song");
-    const Node* name = song ? Field(*song, "name") : nullptr;
-    if (name && !name->kids[1].text.empty()) {
+  for (const Node* record : candidates) {
+    const Node* song = Field(*record, "song");
+    const Node* name = song != nullptr ? Field(*song, "name") : nullptr;
+    if (song != nullptr && name != nullptr && name->kids.size() >= 2 && !name->kids[1].text.empty()) {
       SongMetadata entry;
-      entry.key = record.kids[0].text;
+      entry.key = record->kids[0].text;
       entry.stream = name->kids[1].text;
       // The display identity the store matches on (§3.2). A record without them keeps empties,
       // which the matcher refuses rather than guessing.
+      //
+      // Two real placements exist and both are measured: the `song` node carries `title`/`artist`,
+      // or the fields sit on the record beside it. A downloaded Rock Band 3 CON's `songs/songs.dta`
+      // uses the second: `('o454039871_buildingamyster' ('name' "Building a Mystery")
+      // ('artist' "Sarah McLachlan") ('song' ('name' "songs/o454.../o454...") ...))` - the `song`
+      // node names only the stream. Reading the song node alone declared a song with empty fields,
+      // which `LoadedSongIndex::Add` refuses, so the library still said 0 songs with no warning
+      // (measured 2026-10-21, boot `out/_swap/store-probe/20261021-221242`). The record's `name` is
+      // the display title in that shape, so it stands in for a missing `title`.
       if (const Node* title = Field(*song, "title")) entry.title = title->kids[1].text;
+      else if (const Node* title = Field(*record, "title")) entry.title = title->kids[1].text;
+      else if (const Node* title = Field(*record, "name")) entry.title = title->kids[1].text;
       if (const Node* artist = Field(*song, "artist")) entry.artist = artist->kids[1].text;
+      else if (const Node* artist = Field(*record, "artist")) entry.artist = artist->kids[1].text;
       songs.push_back(std::move(entry));
     }
   }

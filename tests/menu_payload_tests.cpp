@@ -47,7 +47,7 @@ void CheckStrEq(const std::string& actual, const std::string& expected) {
 // screen renders them: the role column's text, then the name column's.
 const std::vector<std::string> kThanksRows = {
     "Recompiler|ReXGlue Team",   "Static Recompiler|XenonRecomp",
-    "Emulation Research|Xenia Project", "Rock Band 3 Recomp|band3_recomp",
+    "Emulation Research|Xenia Project", "Engine References (RB3)|band3_recomp by ihatecompvir",
     "Customs Store|RhythmVerse", "Asset Tooling|MiloLib",
 };
 

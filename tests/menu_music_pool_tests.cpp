@@ -425,6 +425,75 @@ void TestSongMetadata() {
   CHECK_TRUE(parse(std::string(70, '(') + "key" + std::string(70, ')')).empty());
   CHECK_TRUE(parse(std::string(2 * 1024 * 1024 + 1, ' ')).empty());
 
+  // A Rock Band 3 CON wraps the same records in `(songs ...)`. Measured 2026-10-21: a downloaded
+  // custom's `songs/songs.dta` has that wrapper, the parse succeeds, and the flat-only reader
+  // declared 0 songs - which is why the store's Downloaded matcher had never marked an offer.
+  BeginCase("a wrapped `(songs ...)` metadata file is read too");
+  const std::string wrapped = R"dta(
+    (songs
+      (o454039871_buildingamyster
+        (song
+          (name "o454039871_buildingamyster")
+          (title "Building a Mystery")
+          (artist "Sarah McLachlan"))))
+  )dta";
+  const auto wrapped_songs = parse(wrapped);
+  CHECK_TRUE(error.empty());
+  CHECK_EQ(wrapped_songs.size(), 1u);
+  if (!wrapped_songs.empty()) {
+    CHECK_TRUE(wrapped_songs[0].key == "o454039871_buildingamyster");
+    CHECK_TRUE(wrapped_songs[0].stream == "o454039871_buildingamyster");
+    CHECK_TRUE(wrapped_songs[0].title == "Building a Mystery");
+    CHECK_TRUE(wrapped_songs[0].artist == "Sarah McLachlan");
+  }
+  // A wrapper that names no song declares nothing rather than pretending.
+  CHECK_TRUE(parse("(songs (not_a_song (label \"x\")))").empty());
+
+  // The shape a downloaded Rock Band 3 CON actually carries (measured 2026-10-21 on
+  // `out/_swap/dlclib/45410914/00000002/775D...`): no wrapper, and `name`/`artist` on the record
+  // while the `song` node names only the stream. Reading the song node alone produced a song with
+  // empty display fields, which the Downloaded index refuses - the "0 song(s)" boot.
+  BeginCase("record-level name and artist are the display identity of a CON song");
+  const std::string con = R"dta(
+(
+   'o454039871_buildingamyster'
+   (
+      'name'
+      "Building a Mystery"
+   )
+   (
+      'artist'
+      "Sarah McLachlan"
+   )
+   ('master' 1)
+   (
+      'song'
+      (
+         'name'
+         "songs/o454039871_buildingamyster/o454039871_buildingamyster"
+      )
+      ('hopo_threshold' 170)
+   )
+)
+  )dta";
+  const auto con_songs = parse(con);
+  CHECK_TRUE(error.empty());
+  CHECK_EQ(con_songs.size(), 1u);
+  if (!con_songs.empty()) {
+    CHECK_TRUE(con_songs[0].key == "o454039871_buildingamyster");
+    CHECK_TRUE(con_songs[0].stream == "songs/o454039871_buildingamyster/o454039871_buildingamyster");
+    CHECK_TRUE(con_songs[0].title == "Building a Mystery");
+    CHECK_TRUE(con_songs[0].artist == "Sarah McLachlan");
+  }
+  // A song node's own title/artist win over the record's.
+  const auto prefer = parse("(k (name \"Record title\") (artist \"Record artist\") "
+                            "(song (name \"songs/k/k\") (title \"Song title\") (artist \"Song artist\")))");
+  CHECK_EQ(prefer.size(), 1u);
+  if (!prefer.empty()) {
+    CHECK_TRUE(prefer[0].title == "Song title");
+    CHECK_TRUE(prefer[0].artist == "Song artist");
+  }
+
   BeginCase("compiled metadata produces the same keys and rejects damaged bytes");
   namespace dtb = rb_blitz::ui::dtb;
   using N = dtb::Node;

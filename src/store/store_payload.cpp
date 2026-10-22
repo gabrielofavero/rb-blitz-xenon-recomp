@@ -682,49 +682,50 @@ bool ReadsRankPath(const Node& node, std::string_view var) {
   return false;
 }
 
-// `{<receiver> get_data (<rank_...>)}` - the single-component read this rewrite leaves behind.
-bool ReadsSingleRank(const Node& node) {
+// `{<receiver> get_data (<diff_...>)}` - the single-component tier read this rewrite leaves behind.
+bool ReadsDifficultyTier(const Node& node) {
   if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
       IsSymbol(node.kids[1], "get_data")) {
     const Node& path = node.kids[2];
     if (path.tag == ui::dtb::kArray && path.kids.size() == 1 &&
-        path.kids[0].tag == ui::dtb::kSymbol && path.kids[0].text.rfind("rank_", 0) == 0) {
+        path.kids[0].tag == ui::dtb::kSymbol && path.kids[0].text.rfind("diff_", 0) == 0) {
       return true;
     }
   }
   for (const Node& kid : node.kids) {
-    if (ReadsSingleRank(kid)) {
+    if (ReadsDifficultyTier(kid)) {
       return true;
     }
   }
   return false;
 }
 
-// One unrolled loop body, in the exact statement shape the retail record carries
-// (`store.dtb`'s `store_details_panel.refresh`, dumped 2026-10-21): a `{do}` binding `$rank`,
-// `$tier` and `$idd`, then the panel call. The receiver (`offer`/`this`), the binding names and the
-// values they are passed are **variables**; the keys and the tokens are symbols, exactly as the
-// shipped record spells them.
-Node RankBlock(std::string_view part) {
-  const std::string key = "rank_" + std::string(part);
+// One unrolled loop body, in the statement shape the retail record carries (`store.dtb`'s
+// `store_details_panel.refresh`, dumped 2026-10-21): a `{do}` binding `$tier`, then the panel call.
+// The receiver (`offer`/`this`) and the binding name are **variables**; the keys and the tokens are
+// symbols, exactly as the shipped record spells them.
+//
+// The retail body reads `(rank <part>)`, converts with `{song_mgr rank_tier rank <part>}` and passes
+// the result to `set_inst_difficulty`; this one reads the offer's own `(diff_<part>)` - the tier the
+// catalogue publishes - and passes it straight through, because that call takes a tier. Measured
+// 2026-10-21: the meter asset has five pips and a devil icon
+// (`ui/difficulty_meter/gen/diff_meter_all_inst.milo`: `diff_1.mesh` ... `diff_5.mesh`,
+// `icon_devil.tex`), the 0..6 scale of the API's `diff_*`, and 0 draws `no_part`. The `rank_tier`
+// thresholds this build would need to keep the rank path are not in the image.
+Node DifficultyBlock(std::string_view part) {
+  const std::string key = "diff_" + std::string(part);
   return Node::Command(
       {Node::Symbol("do"),
-       Node::Array({Node::Var("rank"),
+       Node::Array({Node::Var("tier"),
                     Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
                                    Node::Array({Node::Symbol(key)})})}),
-       Node::Array({Node::Var("tier"),
-                    Node::Command({Node::Symbol("song_mgr"), Node::Symbol("rank_tier"),
-                                   Node::Var("rank"), Node::Symbol(part)})}),
-       Node::Array({Node::Var("idd"),
-                    Node::Command({Node::Symbol("sprintf"), Node::String("diff_%s"),
-                                   Node::Symbol(part)})}),
        Node::Command({Node::Var("this"), Node::Symbol("set_inst_difficulty"),
-                      Node::Var("idd"), Node::Var("tier"), Node::Symbol("TRUE")})});
+                      Node::String(key), Node::Var("tier"), Node::Symbol("TRUE")})});
 }
 
 }  // namespace
 
-bool UnrollOfferRanks(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
+bool UnrollOfferDifficulty(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
   auto refuse = [&](std::string reason) {
     if (why != nullptr) {
       *why = std::move(reason);
@@ -746,8 +747,8 @@ bool UnrollOfferRanks(std::vector<ui::dtb::Node>* store_ui_roots, std::string* w
   }
   ForeachLocation loop;
   if (!FindForeach(*method, &loop)) {
-    // Already unrolled? The single-component reads are the state this edit leaves behind.
-    if (ReadsSingleRank(*method)) {
+    // Already unrolled? The tier reads are the state this edit leaves behind.
+    if (ReadsDifficultyTier(*method)) {
       if (why != nullptr) why->clear();
       return true;
     }
@@ -763,7 +764,7 @@ bool UnrollOfferRanks(std::vector<ui::dtb::Node>* store_ui_roots, std::string* w
   }
   std::vector<Node> blocks;
   for (const char* part : {"guitar", "drum", "vocals", "bass", "keys"}) {
-    blocks.push_back(RankBlock(part));
+    blocks.push_back(DifficultyBlock(part));
   }
   Node replacement = Node::Command({Node::Symbol("do")});
   for (Node& block : blocks) {

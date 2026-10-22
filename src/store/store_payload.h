@@ -155,21 +155,32 @@ bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 bool LinkAlbumArt(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 
 // The details panel's difficulty read is `{offer get_data (rank <part>)}` -
-// `store.dtb`'s `store_details_panel.refresh`, `{foreach part (guitar drum vocals bass keys)}`.
-// That is a **two-component** path, and the offer's `get_data` walk cannot resolve it against any
-// five-part rank map: measured 2026-10-21 by decoding the walk (`sub_82453928` -> `sub_824538A8` ->
-// `sub_824534A8`), each component is interned and `sub_823FAE00` matches it against the FIRST
-// element of a pair, so the second component asks the `rank` pair for a child whose first element
-// is the part. A map can answer that for one part; for the rest the lookup returns nothing and the
-// walk dereferences the null (boot `rb_blitz_165.log`: `read of guest 0x00000000` at the walk,
-// stack `sub_824534A8` <- `sub_82453928` <- `sub_8275C6C0` <- the DTA evaluator).
+// `store.dtb`'s `store_details_panel.refresh`, `{foreach part (guitar drum vocals bass keys)}`,
+// which then converts each rank with `{song_mgr rank_tier rank part}` and hands the result to
+// `{this set_inst_difficulty diff_<part> <tier> TRUE}`. That read is a **two-component** path, and
+// the offer's `get_data` walk cannot resolve it against any five-part rank map: measured 2026-10-21
+// by decoding the walk (`sub_82453928` -> `sub_824538A8` -> `sub_824534A8`), each component is
+// interned and `sub_823FAE00` matches it against the FIRST element of a pair, so the second
+// component asks the `rank` pair for a child whose first element is the part. A map can answer that
+// for one part; for the rest the lookup returns nothing and the walk dereferences the null (boot
+// `rb_blitz_165.log`: `read of guest 0x00000000` at the walk, stack `sub_824534A8` <-
+// `sub_82453928` <- `sub_8275C6C0` <- the DTA evaluator).
 //
-// The offer record carries single-component `(rank_<part> N)` keys for exactly this reason, and
-// this rewrite unrolls the loop onto them - five explicit `{do ("rank" {offer get_data
-// (rank_guitar)}) ...}` blocks in the measured statement shape - so the panel's difficulty display
-// keeps working. Idempotent; refused, before any edit, when `store_details_panel.refresh` has no
-// `(rank <part>)` loop and no unrolled block.
-bool UnrollOfferRanks(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
+// This rewrite replaces the loop with five explicit blocks that read the offer's own
+// `(diff_<part>)` - the **tier** the catalogue publishes - and pass it to `set_inst_difficulty`
+// unchanged, dropping the `rank_tier` conversion. Two measurements say that is the right seam:
+// the call takes a tier (its argument is retail's own `$tier`), and the meter asset is built for
+// the catalogue's 0..6 scale - five pips plus a devil icon
+// (`ui/difficulty_meter/gen/diff_meter_all_inst.milo`: `diff_1.mesh` ... `diff_5.mesh`,
+// `icon_devil.tex`), with 0 drawing the locale's `no_part`. The rank path would need
+// `rank_tier`'s per-instrument thresholds, which this build does not carry; the catalogue already
+// publishes the tier, so the display shows the catalogue's difficulty instead of a guess.
+//
+// Cost of that choice, stated plainly: an offer whose `diff_*` the API does not publish reads
+// `NO PART` for that part, and `NO PART` is also the correct state for a part the song has no chart
+// for (`diff_* = 0`). Idempotent; refused, before any edit, when `store_details_panel.refresh` has
+// no `(rank <part>)` loop and no unrolled block.
+bool UnrollOfferDifficulty(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 
 // The store heading is retail's own locale entry `store` ("MUSIC STORE"); the owner's attribution
 // requirement (§1.8) is met by a store that names its source. Replaces the entry's value whatever

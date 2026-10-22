@@ -3,6 +3,10 @@
 
 #include "store/store_metadata.h"
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 #include "store/album_art.h"
 #include "ui/dtb_author.h"
 
@@ -131,22 +135,30 @@ std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offe
 // `{sprintf "rating_%i" ...}` as a locale token, so a written 0 showed the literal text `RATING_0`
 // on the A press (measured 2026-10-21); an absent key hides the whole rating group instead.
 //
-// The `rank_<part>` keys are what the details panel is unrolled onto (store_payload.h's
-// `UnrollOfferRanks`). Measured 2026-10-21 by decoding the offer's `get_data` (`sub_82453928` ->
-// `sub_824538A8` -> the path walk `sub_824534A8`): each path component is interned and then
-// `sub_823FAE00` looks for a pair whose FIRST element equals it, so a two-component `(rank <part>)`
-// asks the `rank` pair for a child whose first element is the part - a five-part map cannot answer
-// that for more than one part, the lookup returns nothing, and the walk dereferences the null
-// (`read of guest 0x00000000`, reproduced in boot `rb_blitz_165.log`). A single-component key goes
-// through the same lookup the offer's `name` already answers, so the panel's loop is rewritten onto
-// `(rank_guitar)` ... `(rank_keys)` instead of `(rank guitar)`.
+// `rank_<part>` is the retail-shaped part of the record: a single-component spelling of the same
+// value the `(rank ((guitar N) ...))` map carries. Measured 2026-10-21 by decoding the offer's
+// `get_data` (`sub_82453928` -> `sub_824538A8` -> the path walk `sub_824534A8`): each path component
+// is interned and then `sub_823FAE00` looks for a pair whose FIRST element equals it, so a
+// two-component `(rank <part>)` asks the `rank` pair for a child whose first element is the part - a
+// five-part map cannot answer that for more than one part, the lookup returns nothing, and the walk
+// dereferences the null (`read of guest 0x00000000`, reproduced in boot `rb_blitz_165.log`).
+//
+// `diff_<part>` is the **tier** the difficulty meter draws (`Offer::diff_guitar`): the payload's
+// unrolled block reads it and hands it to `set_inst_difficulty` unchanged, because that call takes a
+// tier and the catalogue already publishes one. Single-component for the same reason as
+// `rank_<part>`.
 std::vector<std::pair<const char*, int>> ExtraIntKeys(const Offer& offer) {
   return {{"review", 0},
           {"rank_guitar", offer.rank_guitar},
           {"rank_drum", offer.rank_drum},
           {"rank_bass", offer.rank_bass},
           {"rank_vocals", offer.rank_vocals},
-          {"rank_keys", offer.rank_keys}};
+          {"rank_keys", offer.rank_keys},
+          {"diff_guitar", offer.diff_guitar},
+          {"diff_drum", offer.diff_drum},
+          {"diff_bass", offer.diff_bass},
+          {"diff_vocals", offer.diff_vocals},
+          {"diff_keys", offer.diff_keys}};
 }
 
 }  // namespace
@@ -213,6 +225,18 @@ Offer OfferFromSong(const SongFile& song) {
   offer.rank_bass = rank(Instrument::kBass);
   offer.rank_vocals = rank(Instrument::kVocals);
   offer.rank_keys = rank(Instrument::kKeys);
+  // The tier the difficulty meter draws, straight from the catalogue (0 = the song has no chart
+  // for that part). Values outside the meter's 0..6 scale are clamped rather than trusted: a 7
+  // would ask the panel for a sixth pip that does not exist.
+  const auto tier = [&song](Instrument instrument) {
+    const int value = song.difficulty[static_cast<std::size_t>(instrument)].value_or(0);
+    return std::clamp(value, 0, 6);
+  };
+  offer.diff_guitar = tier(Instrument::kGuitar);
+  offer.diff_drum = tier(Instrument::kDrums);
+  offer.diff_bass = tier(Instrument::kBass);
+  offer.diff_vocals = tier(Instrument::kVocals);
+  offer.diff_keys = tier(Instrument::kKeys);
   return offer;
 }
 

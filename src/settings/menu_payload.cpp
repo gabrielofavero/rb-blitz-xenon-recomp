@@ -66,7 +66,7 @@ constexpr CreditRow kThanksRows[] = {
     {"Recompiler", "ReXGlue Team"},
     {"Static Recompiler", "XenonRecomp"},
     {"Emulation Research", "Xenia Project"},
-    {"Rock Band 3 Recomp", "band3_recomp"},
+    {"Engine References (RB3)", "band3_recomp by ihatecompvir"},
     {"Customs Store", "RhythmVerse"},
     {"Asset Tooling", "MiloLib"},
 };
@@ -456,9 +456,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       }
       why.clear();
       // The details panel's `get_data (rank <part>)` is a two-component path the offer walk cannot
-      // resolve (store_payload.h), so its loop reads the record's single-component `rank_<part>`
-      // keys instead.
-      if (!store::UnrollOfferRanks(&store_ui_roots, &why)) {
+      // resolve (store_payload.h), so its loop reads the record's own `diff_<part>` tiers.
+      if (!store::UnrollOfferDifficulty(&store_ui_roots, &why)) {
         note("unrolling the details panel's difficulty read was refused: " + why);
       }
       why.clear();

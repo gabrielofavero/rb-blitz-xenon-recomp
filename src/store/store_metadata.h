@@ -128,17 +128,29 @@ struct Offer {
   // **unconditionally** for a song, and a missing key makes the offer walk dereference null
   // (measured 2026-10-21, the A press on a served offer). Retail's own offers always carry it.
   std::string preview_audio;
-  // The per-part rank the store's difficulty display reads. Each value is written twice: inside the
-  // retail-shaped `(rank ((guitar N) ...))` map, and as a single-component `(rank_guitar N)` key.
-  // The second spelling is the one the details panel reads in this build - its `get_data (rank
-  // <part>)` is a two-component path the offer walk cannot resolve (store_payload.h's
-  // `UnrollOfferRanks` has the measurement). 0 means "unknown" and is written as 0, not omitted:
-  // a missing part hands `song_mgr rank_tier` a null.
+  // The per-part rank the catalogue publishes (an online rank, not a tier). Written as the
+  // retail-shaped `(rank ((guitar N) ...))` map, which is the schema the shipped records carry and
+  // what the browser's `rank band` grouping reads. 0 means "unknown" and is written as 0, not
+  // omitted: a missing part hands the retail walk a null.
   int rank_guitar = 0;
   int rank_drum = 0;
   int rank_bass = 0;
   int rank_vocals = 0;
   int rank_keys = 0;
+  // The catalogue's own difficulty **tier** per part (`diff_*` in the API, 0..6). This is what the
+  // store's difficulty meter draws, as `(diff_<part> N)` keys: the panel's
+  // `{this set_inst_difficulty <id> <tier> TRUE}` takes a tier, and measured 2026-10-21 the asset it
+  // drives has exactly five pips plus a devil icon (`ui/difficulty_meter/gen/diff_meter_all_inst.milo`:
+  // `diff_1.mesh` ... `diff_5.mesh`, `icon_devil.tex`) - the 0..6 scale the `diff_*` fields use,
+  // where 0 means the song has no chart for that part and the row reads `NO PART` (`no_part` in the
+  // locale). Retail's own path converts an *online rank* to a tier with `song_mgr rank_tier`, which
+  // needs thresholds this build does not have; the catalogue already publishes the tier, so the
+  // payload hands that through instead (store_payload.h's `UnrollOfferDifficulty`).
+  int diff_guitar = 0;
+  int diff_drum = 0;
+  int diff_bass = 0;
+  int diff_vocals = 0;
+  int diff_keys = 0;
   // True when the song is already in the loaded DLC library (plan §3.2). It is written as the
   // offer's `is_purchased` key, which is what the retail scripts read as the Downloaded state:
   // `refresh_buttons` inserts `store_download_again` for a purchased offer and nothing but Exit
@@ -162,9 +174,13 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
 //
 // The mapping is the plan's first cut, now anchored to the retail script that reads it:
 // `store_details_panel refresh` asks the offer for `genre`, `year_released`, `preview_art` and - for
-// a song - `rank <part>` per part with the part spelled `drum` (the API spells its own token
-// `drums`), then runs each rank through `song_mgr rank_tier`. That is why `rank_*` (the API's rank)
-// is passed and `diff_*` (a tier) never is (plan OQ4).
+// a song - one difficulty value per part. That block is the one part of the retail script this
+// build does **not** run as written: it reads `{offer get_data (rank <part>)}` (a two-component
+// path the offer walk cannot resolve, store_payload.h's `UnrollOfferDifficulty`) and converts the
+// rank to a tier with `song_mgr rank_tier`. The payload unrolls it onto the record's own `diff_<part>`
+// keys, which carry the tier the catalogue publishes - the same 0..6 scale the meter asset draws
+// (`Offer::diff_guitar`). `rank_*` is still written: it is the retail schema, and the browser's
+// `rank band` grouping reads the `(rank (...))` map.
 //
 // `preview_art` is the served texture's path when the API names an album-art cover and the art
 // worker can encode it (`AlbumArtEnabled`), empty otherwise - an absent key is what makes the retail

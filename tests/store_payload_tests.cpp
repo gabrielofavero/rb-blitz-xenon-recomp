@@ -934,8 +934,8 @@ void TestOfferDetailsDirect() {
   CHECK_TRUE(TreeUnchanged(other, untouched));
 }
 
-void TestRankLoopUnrolled() {
-  BeginCase("the details panel reads the single-component rank keys");
+void TestDifficultyLoopUnrolled() {
+  BeginCase("the details panel reads the catalogue's tier keys");
 
   // The measured shape of `store_details_panel.refresh`'s difficulty block (`store.dtb`, dumped
   // 2026-10-21): `{if_else {== {offer offer_type} song} {do {foreach part (guitar drum vocals bass
@@ -975,13 +975,14 @@ void TestRankLoopUnrolled() {
                                     Node::String(""), Node::Int(-1), Symbol("FALSE")})})})}),
   };
   std::string why;
-  CHECK_TRUE(rb_blitz::store::UnrollOfferRanks(&record, &why));
+  CHECK_TRUE(rb_blitz::store::UnrollOfferDifficulty(&record, &why));
   if (!why.empty()) Fail(__FILE__, __LINE__, why);
   const Node* method = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
   CHECK_TRUE(method != nullptr);
   if (method == nullptr) return;
   // The `foreach` is gone; in its place one `{do ...}` with five blocks, each reading a single
-  // `rank_<part>` key and passing the part itself to `rank_tier`/`sprintf`.
+  // `diff_<part>` key and passing that tier straight to `set_inst_difficulty` - no `rank_tier`
+  // conversion, no `sprintf` label.
   const Node& ifelse = method->kids[2];
   const Node& then_branch = ifelse.kids[2];
   const Node& loop = then_branch.kids[1];
@@ -991,17 +992,20 @@ void TestRankLoopUnrolled() {
   for (size_t i = 0; i < 5; ++i) {
     const Node& one = loop.kids[i + 1];
     CHECK_STR_EQ(one.kids[0].text, "do");
-    // (rank {offer get_data (rank_<part>)}) - a ONE-element path.
+    CHECK_EQ(one.kids.size(), size_t{3});  // do + (tier ...) + the panel call
+    // (tier {offer get_data (diff_<part>)}) - a ONE-element path.
     const Node& path = one.kids[1].kids[1].kids[2];
     CHECK_EQ(path.kids.size(), size_t{1});
-    CHECK_STR_EQ(path.kids[0].text, std::string("rank_") + kParts[i]);
-    // (tier {song_mgr rank_tier rank <part>})
-    CHECK_STR_EQ(one.kids[2].kids[1].kids[3].text, kParts[i]);
-    // (idd {sprintf "diff_%s" <part>})
-    CHECK_STR_EQ(one.kids[3].kids[1].kids[2].text, kParts[i]);
+    CHECK_STR_EQ(path.kids[0].text, std::string("diff_") + kParts[i]);
+    // {this set_inst_difficulty "diff_<part>" $tier TRUE}
+    const Node& call = one.kids[2];
+    CHECK_STR_EQ(call.kids[1].text, "set_inst_difficulty");
+    CHECK_STR_EQ(call.kids[2].text, std::string("diff_") + kParts[i]);
+    CHECK_TRUE(call.kids[2].tag == rb_blitz::ui::dtb::kString);
+    CHECK_STR_EQ(call.kids[3].text, "tier");
   }
 
-  // No two-component `(rank <part>)` read is left anywhere in the method.
+  // No two-component `(rank <part>)` read and no `rank_tier` call is left anywhere in the method.
   const auto has_rank_pair = [](const Node& node, const auto& self) -> bool {
     if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
         node.kids[1].text == "get_data") {
@@ -1010,6 +1014,10 @@ void TestRankLoopUnrolled() {
           path.kids[0].text == "rank") {
         return true;
       }
+    }
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+        node.kids[1].text == "rank_tier") {
+      return true;
     }
     for (const Node& kid : node.kids) {
       if (self(kid, self)) return true;
@@ -1020,7 +1028,7 @@ void TestRankLoopUnrolled() {
 
   // Idempotent.
   why.clear();
-  CHECK_TRUE(rb_blitz::store::UnrollOfferRanks(&record, &why));
+  CHECK_TRUE(rb_blitz::store::UnrollOfferDifficulty(&record, &why));
   const Node* again = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
   CHECK_TRUE(again != nullptr && again->kids[2].kids[2].kids[1].kids.size() == size_t{6});
 
@@ -1037,7 +1045,7 @@ void TestRankLoopUnrolled() {
                                             Symbol("splash_screen")})};
   const std::vector<Node> untouched = other;
   why.clear();
-  CHECK_FALSE(rb_blitz::store::UnrollOfferRanks(&other, &why));
+  CHECK_FALSE(rb_blitz::store::UnrollOfferDifficulty(&other, &why));
   CHECK_TRUE(TreeUnchanged(other, untouched));
 
   // A foreach that is not the difficulty loop is refused too (nothing is rewritten by accident).
@@ -1052,7 +1060,7 @@ void TestRankLoopUnrolled() {
   };
   const std::vector<Node> not_ranks_untouched = not_ranks;
   why.clear();
-  CHECK_FALSE(rb_blitz::store::UnrollOfferRanks(&not_ranks, &why));
+  CHECK_FALSE(rb_blitz::store::UnrollOfferDifficulty(&not_ranks, &why));
   CHECK_TRUE(TreeUnchanged(not_ranks, not_ranks_untouched));
 }
 
@@ -1086,8 +1094,8 @@ int StoreEdit(const char* path, const char* which) {
   std::string why;
   bool ok = false;
   if (mode == "store") {
-    ok = rb_blitz::store::UnrollOfferRanks(&roots, &why);
-    std::printf("store-edit: rank loop -> %s (%s)\n", ok ? "edited" : "refused",
+    ok = rb_blitz::store::UnrollOfferDifficulty(&roots, &why);
+    std::printf("store-edit: difficulty loop -> %s (%s)\n", ok ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
     why.clear();
     const bool art = rb_blitz::store::LinkAlbumArt(&roots, &why);
@@ -1330,7 +1338,7 @@ int main(int argc, char** argv) {
   TestEveryUnavailableGuard();
   TestOfferDetailsDirect();
   TestPreviewButtonHidden();
-  TestRankLoopUnrolled();
+  TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();
   return rb_blitz::test::Finish();
 }

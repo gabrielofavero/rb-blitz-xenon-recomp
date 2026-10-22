@@ -34,16 +34,20 @@ namespace {
 using namespace rb_blitz::test;
 using rb_blitz::store::BuildFrontMenuRecord;
 using rb_blitz::store::BuildMenuRecord;
+using rb_blitz::store::BuildMenuText;
 using rb_blitz::store::FrontMenu;
 using rb_blitz::store::FrontMenuEntry;
 using rb_blitz::store::FrontMenuRecordPath;
+using rb_blitz::store::Instrument;
 using rb_blitz::store::MenuProviderPath;
 using rb_blitz::store::MenuRecordPath;
 using rb_blitz::store::MenuSourceId;
 using rb_blitz::store::Offer;
 using rb_blitz::store::OfferDirectory;
+using rb_blitz::store::OfferFromSong;
 using rb_blitz::store::RelatedOfferPath;
 using rb_blitz::store::RhythmVerseFrontMenu;
+using rb_blitz::store::SongFile;
 using rb_blitz::ui::dtb::Node;
 
 // check.h has no string comparison; a request name is exactly the value whose failure needs both
@@ -240,6 +244,77 @@ void TestMenuRecordRoundTrip() {
   CHECK_TRUE(rank_ok);
 }
 
+void TestSongMapping() {
+  BeginCase("a catalogue record becomes an offer with its own difficulty tier per part");
+  SongFile song;
+  song.file_id = "abc";
+  song.artist = "Bush";
+  song.title = "The People That We Love";
+  song.album = "Golden State";
+  song.genre = "Pop-Rock";
+  song.year = 2001;
+  const auto slot = [](rb_blitz::store::Instrument instrument) {
+    return static_cast<std::size_t>(instrument);
+  };
+  song.difficulty[slot(rb_blitz::store::Instrument::kGuitar)] = 4;
+  song.difficulty[slot(rb_blitz::store::Instrument::kDrums)] = 3;
+  song.difficulty[slot(rb_blitz::store::Instrument::kBass)] = 3;
+  song.difficulty[slot(rb_blitz::store::Instrument::kVocals)] = 3;
+  song.difficulty[slot(rb_blitz::store::Instrument::kKeys)] = 0;
+  song.rank[slot(rb_blitz::store::Instrument::kGuitar)] = 221;
+
+  const Offer offer = OfferFromSong(song);
+  CHECK_STR_EQ(offer.name, "The People That We Love");
+  CHECK_STR_EQ(offer.artist, "Bush");
+  CHECK_EQ(offer.year_released, 2001);
+  // The tier the difficulty meter draws, verbatim from the catalogue, and 0 for a part the song
+  // does not chart (the row then reads the locale's `no_part`).
+  CHECK_EQ(offer.diff_guitar, 4);
+  CHECK_EQ(offer.diff_drum, 3);
+  CHECK_EQ(offer.diff_bass, 3);
+  CHECK_EQ(offer.diff_vocals, 3);
+  CHECK_EQ(offer.diff_keys, 0);
+  // The rank is the retail schema's own value, a different number from the tier.
+  CHECK_EQ(offer.rank_guitar, 221);
+  CHECK_EQ(offer.rank_drum, 0);
+
+  // A tier outside the meter's scale is clamped, not passed on: the asset has five pips plus a
+  // devil icon, so 6 is the ceiling and a negative is "no part".
+  SongFile odd = song;
+  odd.difficulty[slot(rb_blitz::store::Instrument::kGuitar)] = 9;
+  odd.difficulty[slot(rb_blitz::store::Instrument::kDrums)] = -2;
+  const Offer clamped = OfferFromSong(odd);
+  CHECK_EQ(clamped.diff_guitar, 6);
+  CHECK_EQ(clamped.diff_drum, 0);
+
+  // Both writers carry the keys the payload reads (`(diff_<part>)`), and the compiled one as
+  // integers.
+  std::string why;
+  const std::string text = BuildMenuText({offer}, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(text.find("(diff_guitar 4)") != std::string::npos);
+  CHECK_TRUE(text.find("(diff_keys 0)") != std::string::npos);
+  CHECK_TRUE(text.find("(rank_guitar 221)") != std::string::npos);
+  const std::vector<uint8_t> bytes = BuildMenuRecord({offer}, &why);
+  CHECK_TRUE(why.empty());
+  std::vector<Node> roots;
+  rb_blitz::ui::dtb::RootHeader header;
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+  const Node* offers = RootArray(roots, "offers");
+  CHECK_TRUE(offers != nullptr && offers->kids.size() == size_t{1});
+  if (offers == nullptr || offers->kids.empty()) return;
+  bool diff_ok = false;
+  for (const Node& field : offers->kids[0].kids) {
+    if (field.tag != rb_blitz::ui::dtb::kArray || field.kids.size() < 2) continue;
+    if (field.kids[0].tag != rb_blitz::ui::dtb::kSymbol) continue;
+    if (field.kids[0].text == "diff_guitar" && field.kids[1].tag == rb_blitz::ui::dtb::kInt &&
+        field.kids[1].scalar == 4) {
+      diff_ok = true;
+    }
+  }
+  CHECK_TRUE(diff_ok);
+}
+
 void TestEmptyMenuRecord() {
   BeginCase("an empty page is a valid menu record");
   std::string why;
@@ -262,6 +337,7 @@ int main() {
   TestWriterRefusals();
   TestMenuWriterRefusals();
   TestRecordRoundTrip();
+  TestSongMapping();
   TestMenuRecordRoundTrip();
   TestEmptyMenuRecord();
   return rb_blitz::test::Finish();

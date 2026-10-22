@@ -203,6 +203,25 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
     LogOnce(path, "no record for '" + path + "': " + record.source);
     return false;
   }
+  if (TraceEnabled() && IsMenuRecordPath(path)) {
+    // The Downloaded mark is decided by `BuiltinRecord`'s predicate, so the served text is the only
+    // place to see how it landed. One page of offers is small; a plain substring count keeps this
+    // out of the writer (which is SDK-free and cannot log).
+    const std::string_view text(reinterpret_cast<const char*>(record.bytes.data()),
+                                record.bytes.size());
+    std::size_t marked = 0;
+    for (std::size_t at = text.find("(is_purchased TRUE)"); at != std::string_view::npos;
+         at = text.find("(is_purchased TRUE)", at + 1)) {
+      ++marked;
+    }
+    std::size_t offers = 0;
+    for (std::size_t at = text.find("(name \""); at != std::string_view::npos;
+         at = text.find("(name \"", at + 1)) {
+      ++offers;
+    }
+    REXLOG_INFO("store_fetch: the served page carries {} offer(s), {} of them marked Downloaded",
+                offers, marked);
+  }
   const uint32_t manager = GuestU32(base, kFileCacheGlobal);
   if (manager == 0) {
     LogOnce(path, "no record for '" + path + "': the file cache manager is not up yet");

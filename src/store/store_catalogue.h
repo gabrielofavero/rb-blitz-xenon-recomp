@@ -2,12 +2,18 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // P3's catalogue for the store's front menu (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
-// §5/P3): the page of eligible offers the "Recent" row is answered with.
+// §5/P3): the offers the "Recent" row is answered with.
+//
+// The retail browser has no paging of its own - its PageUp/PageDown are screen transitions, not a
+// next-page control (measured 2026-10-21 in `store.dtb`'s `store_browser_panel`) - so the "next
+// page" the store never showed is the catalogue's: one visit accumulates up to
+// `store_catalogue_pages` API pages (25 records each) into the single list the browser scrolls,
+// publishing each page as it lands so a player who gets there early already has the first one.
 //
 // Why this is a worker and not a call: the offers page is asked for on the **guest** thread (inside
 // the file-cache hook, `store_serve.cpp` answers the request), and a network round trip there would
 // stall a frame. So the guest only ever *reads* a snapshot; the fetch runs here, on its own thread,
-// through `store_http` (WinHTTP, redirects never followed) and the page is published when it lands.
+// through `store_http` (WinHTTP, redirects never followed) and each page is published when it lands.
 // Measured 2026-10-20: the store's front menu is served first and a row is pressed ~14 s later, so
 // the fetch started when the store opens is usually ready by the time a page is asked for. When it
 // is not, the page is empty - a record the retail DTA already handles (zero offers refreshes the
@@ -20,7 +26,7 @@
 //
 // The rules for what an offer *is* (eligibility, direct link, archive names, the instrument filter)
 // are `rhythmverse_client.h`'s and `store_search.h`'s `ShapeOffers`; this file only owns "when" and
-// "how often". P7's chunking and disk cache replace the body of `RunOne`, not this seam.
+// "how often". P7's disk cache replaces the body of `RunOne`, not this seam.
 
 #pragma once
 
