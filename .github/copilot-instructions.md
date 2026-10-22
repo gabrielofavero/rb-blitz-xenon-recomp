@@ -42,6 +42,19 @@ python .github/skills/documentation/scripts/check_docs.py
 
 `ctest` runs 37 tests; `game_restart` (#33) can flake in the parallel run and passes when re-run alone.
 
+## UI: guest-rendered, never host-drawn (owner directive, 2026-10-22)
+
+- **Never draw a host-side panel, box, button or text over the game's own UI.** It is a cheap
+  shortcut that reads as unprofessional. A feature the player sees belongs in the guest: authored
+  DTA (the settings surface, screens, lists), the title's own widgets, or a texture/record we serve.
+- **The only tolerated exception is a text-only label replacement** (the help caption strip, a
+  label's value drawn where the guest itself drew one), and even that is on notice — ask before
+  adding a new one. `src/ui/help_overlay.cpp`'s `DrawBindingRows` is the case that motivated this
+  rule; its replacement is `docs/plans/todo/2026-10-22-in-game-binding-rows-plan.md`.
+- A missing engine capability is not a reason to draw over the game: extend the guest channel
+  (DTA records, list data, bridged text) instead. Say "unproven" and plan a spike rather than
+  shipping an overlay.
+
 ## Rules that bite
 
 - **Line endings.** This checkout is CRLF (`core.autocrlf=true`); only `*.patch` is pinned to LF. A

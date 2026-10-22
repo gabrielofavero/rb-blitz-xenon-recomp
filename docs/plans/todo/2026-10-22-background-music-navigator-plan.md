@@ -1,0 +1,314 @@
+# Background music navigator — implementation plan
+
+**Status:** planning (2026-10-22). Nothing implemented. Owner request of 2026-10-22, normalized in
+§1; the design is §4, the three execution prompts are §5.
+
+## 1. Request (normalized)
+
+| Id | Requirement |
+| --- | --- |
+| R1 | An **independent** feature: navigate the music the main menu is playing with controller buttons and keyboard media keys. It must not require *DLC Menu Songs* (R9) or *Play Current Song*, but it must cooperate with both. |
+| R2 | Setting **Background Music Navigation**, default **on**, on **General → Interface → Main Menu**. |
+| R3 | Controller: **RB** (pad `0x0200`) / **MediaTrackNext** → next song. **LB** (pad `0x0100`) / **MediaTrackPrevious** → restart the current song when it has played ≥ 5 s, otherwise go to the previous song; on the first song of the queue, restart. **Start** (pad `0x0010`) / **MediaPlayPause** → pause/resume. |
+| R4 | The main-menu footer, today guest-drawn as `A Select / B Back`, must read `LB Previous | A Select | B Back | RB Next`. |
+| R5 | With the setting **on**, Controls → **Interface Mapping** gains a **Background Music Play** submenu with **Next Track / Previous Track / Play/Pause**; with the setting **off** it is hidden. |
+| R6 | When the setting is on, a navigation must keep **Play Current Song** pointing at the song that is now audible, so pressing it starts exactly what is playing in the background. |
+| R7 | With the setting off, behaviour is exactly today's: no interception, no footer prompts, no Controls row. |
+| R8 | Scope of the buttons: the **main menu only** (the owner's footer). The three Controls-page actions work wherever the menu music is playing (they are the same commands). |
+| R9 | Docs are part of the change (toggles, menu study, input-flow, settings plan/status, plan index). |
+
+## 2. What exists today
+
+- **The menu music layer** — `src/hooks/shell_music.{h,cpp}`. R9 mounts up to 50 DLC songs
+  (`Configure`, host thread), substitutes the panel's `sfx/shell/...` request in
+  `SubstituteFilename` (Load hook `sub_82757F50`), and hands the next track over from the menu's
+  own per-frame poll (`sub_827586D8`, **guest thread**) via `LoadOnGuest` + `StartNextTrack`.
+  Playback state is `shell_music::Playback` (`src/hooks/menu_music_playback.h`); the audible
+  position is the stream's own sample counter (`Stream+0xA0`, ~44,100 counts/s).
+- **The queue** — `shell_music::Rotation` (`src/hooks/menu_music_pool.h`) walks the pool at
+  random, every song once per pass, never the song that just played. It has no cursor and no
+  pause; there is no seek.
+- **The title's own tracks** — `kTitleTracks[3]` (`sfx/shell/samples/shellmusic_1..3`) are the
+  fallback when R9 has no pool. Nothing can navigate them today: R9 off leaves the Load hook inert.
+- **Play Current Song** — `AnswerPlayQuery` (`shell_music.cpp`) answers the main menu's
+  `rbbz-play/*` probes through the `file_exists` builtin (`settings_bridge_hooks.cpp`
+  `TakeExists`). `PlaySelection` (`menu_music_playback.h`) snapshots the audible/pending song per
+  press; `Choose()` prefers `recent_` for 2 s after a transition.
+- **The settings surface** — one table of `PanelSpec`s (`src/ui/settings_screen.cpp`): root →
+  General → Interface (`settings_interface_screen`) → Main Menu (`settings_main_menu_screen`), and
+  Controls → Interface Mapping (`settings_interface_mapping_screen`, five rows: Navigation,
+  A, B, Music Library Options, Reset All). Settings ids are frozen in `src/settings/model.h`;
+  the next free Interface id is **53**. `MenuConfiguration` (`settings_screen.h`) carries the
+  boot-time facts; `src/hooks/settings_payload.cpp` fills it from the service.
+- **Input** — the pad state filter in `src/input/remap.cpp` is the one seam that sees the physical
+  pad and the delivered state; the `user_index == 0` block already merges mouse/PAD pulses after
+  General Mapping. Keyboard state is the window's own key-event latch (`mouse_ui.cpp` `LatchKey` /
+  `HostKeyDown`), keyed by SDL scancode name.
+- **Media keys are not delivered** — `rexglue-sdk/src/ui/sdl_virtual_key.cpp`
+  `TranslateSDLScancode` has no case for `SDL_SCANCODE_MEDIA_*`, so the window drops those events
+  before `mouse_ui.cpp` ever sees a `VirtualKey` (the enum *does* have `kMediaNextTrack`,
+  `kMediaPrevTrack`, `kMediaPlayPause`). SDL names them `MediaTrackNext`,
+  `MediaTrackPrevious`, `MediaPlayPause`.
+- **The footer and the overlay** — `A SELECT / B BACK` is guest-drawn. The host's ImGui overlay
+  (`src/ui/help_overlay.cpp` `OnDraw`) draws the caption above that band and already draws over
+  guest labels (`DrawBindingRows`); it early-outs when there is no caption text.
+- **No pause exists** anywhere in this layer: the only track teardowns are navigation (`Stop`,
+  `StopStreams`, destructor hooks) and R7's refresh stand-down.
+- **Menu context** — `src/input/native_menu.cpp` `Context()` records the guest's screen name
+  (`splash_screen` for the main menu) and `menu_available` every frame.
+
+## 3. Decisions
+
+| Id | Decision |
+| --- | --- |
+| **D1** | **Setting.** `SettingId::kBackgroundMusicNavigation = 53`, token `interface.background_music_navigation`, `Category::kInterface`, `WidgetKind::kBoolean`, default **true**, `ApplicationStrategy::kRestart` (it decides boot-built rows and the footer, like the other menu-shaping rows). Carrier cvar `enhancements_background_music_nav` (default `true`, `kRequiresRestart`), written at the config rank by `CvarForSetting`, read once by `shell_music::Configure` and per draw by the overlay. |
+| **D2** | **The navigator owns the menu music source, not R9.** With a pool it navigates the pool; with R9 off (or no pool) it navigates the title's three tracks. It therefore learns the panel's Load arguments (`this`, gain, pan) on every Load call when the setting is on, and keeps one guest path buffer allocated even when R9 built no pool. |
+| **D3** | **The queue is the source list in order** (pool order, or `shellmusic_1..3`), with an explicit cursor. Next/Previous move the cursor and wrap. The automatic end-of-track path keeps using `Rotation::Next()`; a manual move calls a new `Rotation::NoteHeard(key)` so auto-advance neither replays the skipped song nor repeats the current one. |
+| **D4** | **The 5-second rule uses the stream's sample counter** (`Stream+0xA0` / 44,100), not wall time. A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
+| **D5** | **Pause is proven or reported, never faked.** P1 must find a seam that (a) silences the stream, (b) freezes the reported position, (c) resumes at the same position, and (d) is not undone by the guest's own poll. Candidate ladder: the `StandardStream` message/vtable pause-and-resume call; else the stream state word (`Stream+0x14`, value 4 = the usual paused state) under a measured write; else the Play/Pause action is drawn as unavailable (`<label>: Unavailable`) and Start does nothing, with the limitation in `known-issues.md`. During a pause the `Playback` watchdog must be suspended or it marks the track failed after 3 s. |
+| **D6** | **Buttons are consumed on the main menu only** (`splash_screen` *and* its option list drawn), while the setting is on and a menu-music source exists. Bits: LB `0x0100`, RB `0x0200`, Start `0x0010`; media keys ride the existing keyboard gate (`keyboard_support`). One command per physical press (rising edge), keyboard hold does not repeat. |
+| **D7** | **The footer is host-drawn beside retail's, never a payload/locale edit.** `help_overlay.cpp` draws `LB Previous` immediately left of the guest's A prompt and `RB Next` right of B, same baseline and face, only while the setting is on, the main menu is current and a menu-music source exists. The guest's `A Select / B Back` is left untouched (its button glyphs are guest art; strings are ours and are recorded as such). |
+| **D8** | **Play Current Song follows the navigated song through the existing probe, with one fix.** The probe answers at press time, so it already names the audible song; the 2 s "recent" grace in `PlaySelection` must be cleared on a *manual* transition or a press right after Next/Previous would name the song that just left. |
+| **D9** | **Commands travel as host state, not guest calls.** The input filter only *posts* a command (`rbbz-play/next|previous|pause` from the Controls page, or a rising edge in the filter). The per-frame poll applies it on the guest thread, the same place R9's handover already runs. |
+| **D10** | Nothing is committed or pushed without the owner's approval. |
+
+## 4. Design
+
+### 4.1 Modules
+
+| Module | Role |
+| --- | --- |
+| `src/input/menu_music_nav.{h,cpp}` (new, SDK-free) | `Command {kNext, kPrevious, kPlayPause}`; the rising-edge `Latch` (pad bits + the three key names); `Post`/`Take` (one command in flight); `PreviousAction(position_samples, cursor)` = restart vs step back (pure); `SetAvailable`/`Available`. |
+| `src/hooks/menu_music_pool.h` | `Rotation::NoteHeard(key)`; a pure `QueueCursor::Next/Previous(size, cursor)` helper (wrap, skip nothing — failed songs are still visible to a manual move). |
+| `src/hooks/menu_music_playback.h` | `PlaySelection::Skipped(index, now)` (a manual transition: `current_ = -1`, `pending_ = index`, **clears `recent_`**) and a `Paused` accessor for the poll. |
+| `src/hooks/shell_music.{h,cpp}` | The guest half: learn Load args when navigator-only, allocate a path buffer, `ApplyNavigatorCommand(base, ctx)` at the top of `sub_827586D8`, `NavigatorNext/Previous/TogglePause` helpers, `NavigatorEnabled()`/`NavigatorHasSource()` for the overlay, and the pause seam (P1). |
+| `src/input/remap.cpp` | `user_index == 0`: sample LB/RB/Start + the three `HostKeyDown` names, run the latch when `menu_music_nav::Available()` and `MenuScreenIs("splash_screen")`, post one command, clear the three pad bits from the delivered state. |
+| `src/input/mouse_ui.cpp` (+ a SDK patch) | `KeycodeForVirtualKey` cases for `kMediaNextTrack/kMediaPrevTrack/kMediaPlayPause`, which needs `TranslateSDLScancode` cases in `rexglue-sdk/src/ui/sdl_virtual_key.cpp` — delivered as **`patches/rexglue-sdk/0020-media-keys.patch`**, applied by `scripts/apply_sdk_patches.ps1` (never a hand edit). |
+| `src/hooks/shell_music.cpp` `AnswerPlayQuery` | Adds `rbbz-play/next`, `rbbz-play/previous`, `rbbz-play/pause` → `Post(...)`, answer `true`. |
+| `src/ui/settings_screen.{h,cpp}` | `Kind::kPlaybackAction` (one symbol, body `{file_exists "<path>"}`, no commit); the new page; the row on Interface Mapping; the new Main Menu boolean; `MenuConfiguration::background_music_navigation`. |
+| `src/ui/help_overlay.cpp` | `DrawMainMenuMusicFooter(io)` before the caption's early-out. |
+
+### 4.2 Command flow
+
+```text
+LB/RB/Start (physical pad)      media keys (event latch)      Controls → Background Music Play
+        │                              │                                  │
+        └──── rising edge (main menu, setting on) ────┐                   │ {file_exists "rbbz-play/next"}
+                                                      ▼                   ▼
+                                        menu_music_nav::Post(Command)  (AnswerPlayQuery)
+                                                      │
+                                                      ▼   one command per frame
+                                   sub_827586D8 (guest thread) → ApplyNavigatorCommand
+                                                      │
+             ┌────────────────────────────────────────┼─────────────────────────────┐
+             ▼                                        ▼                             ▼
+   next/previous: retire + Load + Start        pause: the proven seam        PlaySelection::Skipped
+   (pool entry, or title track when R9 off)     (watchdog suspended)         → Play Current Song follows
+```
+
+### 4.3 The two sources
+
+- **Pool (R9 on with a pool):** `g_pool` order is the queue. Next/Previous load
+  `g_pool[cursor].alias + ":" + stream` with `loop=false` through `LoadOnGuest`; the cursor is
+  updated under `g_mutex`; `g_current_index` is cleared until the new stream advances (exactly as
+  `NextPathLocked` already does), and `g_play_selection.Skipped(...)` runs immediately.
+- **Title tracks (R9 off / no pool):** the Load hook records the asked path; if it matches
+  `sfx/shell/samples/shellmusic_N`, the cursor is N and Next/Previous load the neighbouring entry
+  with `loop=true` (the title's own behaviour). No pool index exists, so `Play Current Song` says
+  "nothing to start" (its probe answers `begin` false) — correct, since the track is not a DLC song.
+- **R9 off** currently returns from `Configure` before allocating `g_buffers`; move the buffer
+  allocation (and the Load-argument capture) ahead of those early returns when the navigator is on.
+
+### 4.4 Pause
+
+The only open RE question. Instruments for P1, in order:
+
+1. `scripts/scan_process_strings.ps1` on a live menu boot, around the `ShellMusic`/stream class, to
+   find a message-table entry naming a pause/resume; call it on the guest thread as
+   `LoadOnGuest` does.
+2. The `StandardStream` vtable (RTTI → slots via a scratch `rtti_vtables.py`, the tool cited in
+   `docs/engine/main-menu.md` part 2; regenerate if absent) — find the slot the poll's state
+   predicates do not use.
+3. The state word `Stream+0x14` (3 = playing, 6 = finished today): try 4 while watching the
+   position and the guest's own poll.
+
+Acceptance for the seam (all measured in one boot log): position stops advancing, silence, no
+`Playback` failure line, `rbbz-play/pause` again → position continues from the same count.
+If none holds, D5's fallback applies and the Play/Pause row is drawn unavailable.
+
+### 4.5 The footer
+
+`DrawMainMenuMusicFooter` reads `VisibleMenuRows()` (screen name + drawn list), the setting's cvar,
+and `shell_music::NavigatorHasSource()`; it draws two `ImGui::TextUnformatted` runs on the prompt
+band's baseline. The x positions are calibrated from a boot capture (P3): the guest prompt cluster
+is centred at `0.5 * DisplaySize.x`; `LB Previous` ends one measured gap left of it, `RB Next`
+starts one gap right of it. No cover rectangle: nothing of the guest's is replaced.
+
+## 5. Prompts
+
+Three prompts, each self-contained (goal → files → acceptance → evidence). Start each in a fresh
+session; do not commit.
+
+### P1 — The setting, the control row, and the pure navigator core
+
+**Goal.** Land the switch and the tested bookkeeping with **no guest behaviour change yet**.
+
+**Deliverable**
+
+1. `src/settings/model.h` (`kBackgroundMusicNavigation = 53`), `model.cpp` token,
+   `schema.cpp` descriptor + strategy row (`kRestart`, empty evidence), `cvars.cpp`
+   `CvarForSetting` → `enhancements_background_music_nav`.
+2. `src/enhancements.cpp`: cvar (default `true`, `kRequiresRestart`), `kToggles` row (12 entries),
+   the boot sentence updated ("…R3, R6, R7's cache, R9, R10 and R11").
+3. `src/hooks/settings_payload.cpp`: read the service's effective value into
+   `MenuConfiguration::background_music_navigation`.
+4. `src/ui/settings_screen.{h,cpp}`: the Main Menu page row
+   (`BoolRow("settings_mm_music_nav", "interface.background_music_navigation",
+   "Background Music Navigation", …)`), inserted for both the static fallback and the live-mirror
+   list; `Kind::kPlaybackAction` + `PlaybackActionRow` (no commit, body
+   `{file_exists "<path>"}`); the Interface Mapping row
+   (`SubmenuRow("settings_interface_music_play", "settings_interface_music_play_screen",
+   "Background Music Play", …)`) and the page with **Next Track / Previous Track / Play/Pause**
+   (`rbbz-play/next`, `rbbz-play/previous`, `rbbz-play/pause`); both removed when the setting is
+   off (erase the row *and* the panel before `AllPanels()` returns); title
+   `BACKGROUND MUSIC PLAY` in `ApplyDefaultTitle`.
+5. `src/input/menu_music_nav.{h,cpp}` with the whole pure API of §4.1 (no SDK), added to
+   `RBBLITZ_SOURCES`; `Rotation::NoteHeard` + `QueueCursor` in `menu_music_pool.h`;
+   `PlaySelection::Skipped` in `menu_music_playback.h`.
+6. Tests: `tests/menu_music_pool_tests.cpp` (cursor order/wrap, `NoteHeard` vs the rotation, the
+   5 s rule, `Skipped` clears the grace, the latch fires once per press), `tests/settings_screen_tests.cpp`
+   (the two new pages, the hidden-when-off case, `TestEveryDestinationExists`, the row/page counts
+   move), `tests/settings_hot_apply_tests.cpp` if its pinned row count moves, `settings_service`
+   for the new descriptor.
+
+**Acceptance.** `ctest` green in the Vulkan-off debug tree; `check_docs.py` 0 errors. A boot with
+the setting on shows the row on General → Interface → Main Menu and the Background Music Play page
+under Controls → Interface Mapping (screenshot via `scripts/capture_window.ps1`); the same boot with
+`--no-enhancements_background_music_nav` shows neither. No behaviour change to the music itself.
+
+**Evidence.** `out/_swap/music-nav/p1-menu/` (two screenshots + the boot log lines naming the row
+state).
+
+### P2 — The runtime: pause seam, navigation, inputs, Play Current Song
+
+**Goal.** Make Next/Previous/Pause actually change the menu music, driven by LB/RB/Start and the
+media keys, and keep Play Current Song on the audible song.
+
+**Deliverable**
+
+1. Pause seam per D5 (measurement first; the chosen seam + the values in the plan record and in the
+   `shell_music` comment). Suspend the `Playback` watchdog while paused; a manual move unpauses.
+2. `shell_music`: Load-argument capture and buffer allocation for the navigator-only case (D2);
+   `ApplyNavigatorCommand` at the top of `sub_827586D8`; `NavigatorNext/Previous/TogglePause`;
+   `PlaySelection::Skipped` on every manual move; `AnswerPlayQuery` handles the three commands.
+3. `menu_music_nav` production wiring in `src/input/remap.cpp`: the `user_index == 0` block samples
+   LB/RB/Start and `HostKeyDown("MediaTrackNext"|"MediaTrackPrevious"|"MediaPlayPause")`, gates on
+   `Available()` + `MenuScreenIs("splash_screen")` + `keyboard_support` for the keys, posts one
+   command on a rising edge, clears the three pad bits.
+4. `src/input/native_menu.{h,cpp}`: `bool MenuScreenIs(std::string_view name)` (the mutex-guarded
+   `current_screen_name`).
+5. SDK patch **`patches/rexglue-sdk/0020-media-keys.patch`**: `TranslateSDLScancode` cases for
+   `MEDIA_NEXT_TRACK/PREVIOUS_TRACK/PLAY_PAUSE` → `kMediaNextTrack/kMediaPrevTrack/kMediaPlayPause`,
+   plus the three cases in `mouse_ui.cpp`'s `KeycodeForVirtualKey`; `patches/README.md` row.
+6. `scripts/drive_ui.ps1`: `media_next`/`media_prev`/`media_play_pause` (VK `0xB0/0xB1/0xB3`,
+   extended-key scancodes `E0 19/E0 10/E0 22`).
+7. A diagnostic cvar for the pad arm (the harness cannot press a pad): `background_music_nav_probe`
+   = `next|previous|play_pause`, queued once N seconds after the menu is up, so the guest-side
+   execution is testable without a physical pad.
+
+**Acceptance** (one release build, one boot log each):
+
+- Media next twice → two different songs (log names), OCR unchanged (audio only).
+- Media previous at ~2 s → previous song; at ~7 s → same song restarted (position returns to 0).
+- Play/Pause → silence + position frozen + no `failed to start` line; again → resumes at the same
+  position.
+- After a skip, pressing **Play Current Song** loads the *new* song (`settings_play_unavailable` is
+  not shown; the loading screen names it).
+- Setting off (`--no-enhancements_background_music_nav`): the same keys do nothing (log silent).
+- R9 off (`--no-enhancements_menu_dlc_songs`): the three keys move the title's tracks; pause holds.
+- Pad bits: unit test for the latch; the diagnostic probe boot for execution; a physical-pad boot is
+  **not claimed** (no pad on this machine — say so).
+
+**Evidence.** `out/_swap/music-nav/p2-media/`, `p2-pad/`, `p2-play-current/`, `p2-off/`,
+`p2-title-tracks/` (logs + captures).
+
+### P3 — The footer, the soak, and the documentation
+
+**Goal.** The visible footer, the final acceptance sweep and the docs.
+
+**Deliverable**
+
+1. `src/ui/help_overlay.cpp`: `DrawMainMenuMusicFooter(io)` before the caption early-out; draws
+   `LB Previous` / `RB Next` on the guest prompt band's baseline, only with the setting on, the
+   main menu current and a source available; x offsets are the P3 calibration constants (measure
+   the prompt cluster at 16:9 and 21:9 in one boot each).
+2. Rows/pages polish: the Play/Pause row becomes unavailable when P1's seam failed (D5).
+3. Docs: `docs/engine/toggles.md` (R11 row), `docs/engine/main-menu.md` part 2 (new section on the
+   navigator: the queue, the 5 s rule, the pause seam, the footer), part 1 §7.2 (Play Current Song
+   follows a manual skip), `docs/engine/input-flow.md` (the menu-music latch and the media-key
+   patch), `docs/settings/plan.md` §3.2/§3.5 (the three action rows + the switch),
+   `docs/settings/status.md` (one bullet), `docs/reference/known-issues.md` (only what is really
+   limited: Start is consumed on the main menu; the footer's shoulder labels are host text; the
+   media keys may be claimed by another Windows media app), this plan's status record.
+4. `docs/plans/todo/README.md` + `docs/README.md` rows already added by the planning pass; move the
+   plan to `finished/` with `git mv` + `move_docs.py` when P1–P3 are green.
+
+**Acceptance.** One full boot with a capture read by OCR: the footer reads
+`LB PREVIOUS … A SELECT … B BACK … RB NEXT` (OCR may drop the glyphs; assert on the words), the
+Controls page draws three rows, and the music responds. `ctest` green, `check_docs.py` 0 errors.
+The `nav-off` boot shows the retail footer alone.
+
+**Evidence.** `out/_swap/music-nav/p3-footer/` (16:9 + 21:9), `p3-acceptance/`.
+
+## 6. Acceptance matrix (summary)
+
+| Arm | Setting | R9 | Expected |
+| --- | --- | --- | --- |
+| `p1-menu` | on / off | on | row + page present / absent |
+| `p2-media` | on | on | next, prev(<5 s), prev(≥5 s), pause/resume |
+| `p2-play-current` | on | on | Play Current Song starts the navigated song |
+| `p2-off` | off | on | keys inert; footer absent |
+| `p2-title-tracks` | on | off | title tracks navigate and pause |
+| `p3-footer` | on / off | on | host footer / retail footer alone |
+| `p3-acceptance` | on | on | full route + OCR, ctest, check_docs |
+
+## 7. Documentation obligations
+
+| Document | Why |
+| --- | --- |
+| `docs/engine/toggles.md` | New cvar `enhancements_background_music_nav` (R11 row). |
+| `docs/engine/main-menu.md` | Part 2 owns the background music; add the navigator section, and part 1 §7.2 the manual-skip rule for Play Current Song. |
+| `docs/engine/input-flow.md` | The main-menu button capture, the media-key patch, the one-command-per-frame seam. |
+| `docs/settings/plan.md` | §3.2 (Controls → Interface Mapping) and §3.5 (General → Interface → Main Menu) rows. |
+| `docs/settings/status.md` | One at-a-glance bullet. |
+| `docs/reference/known-issues.md` | Only the measured limits (Start consumption, host-drawn shoulder labels, Windows media-key arbitration, pause if unavailable). |
+| `docs/plans/todo/README.md` + `docs/README.md` | Index rows (this pass). |
+
+## 8. Risks and open questions
+
+| Id | Question / risk | Resolution |
+| --- | --- | --- |
+| OQ1 | Is there a pause seam at all? | D5's ladder; a failed seam is a documented limitation, not a fake pause. |
+| OQ2 | Does the guest's own poll restart a paused stream or tear it down? | P2 boot: read `Stream+0x14`/`+0xA0` across 5 s while paused. |
+| OQ3 | Does Start do anything retail on the splash screen? | P2 control boot with the setting off: press Start, read the action line. If it starts PLAY, the navigator still consumes it only while it advertises the prompt (D6). |
+| OQ4 | Are media keys delivered to this window at all on Windows? | P2: log the latch; if the OS shell swallows them, Start/LB/RB remain and the limitation is recorded. |
+| OQ5 | Does the pre-press title screen also report `splash_screen`? | Gate on the option list being drawn (`VisibleMenuRows`), not on the name alone; P2's off-arm proves the title ignores the keys. |
+| OQ6 | Do LB/RB conflict with a General Mapping row? | Interface Mapping's shoulders have no visible row (compiled defaults only), so the main-menu capture shadows nothing a player can see; recorded in known-issues. |
+| OQ7 | Footer geometry at 21:9 | Two calibration boots in P3; constants, not magic numbers, in the overlay. |
+
+## 9. How to reproduce the measurements
+
+```powershell
+cmake --preset win-amd64-debug -DREXGLUE_USE_VULKAN=OFF -DBUILD_TESTING=ON
+cmake --build --preset win-amd64-debug
+ctest --test-dir out\build\win-amd64-debug
+cmake --preset win-amd64-release
+cmake --build --preset win-amd64-release
+python .github/skills/documentation/scripts/check_docs.py
+```
+
+Boots use a scratch profile (`--launcher_profile=<scratch>/launcher.toml`,
+`--user_data_root=<scratch>`, `--dlc_root=<absolute>`), a log level of `info`, and
+`dev.ps1 run-game-quick` for the auto-A route. `capture_window.ps1` + `ocr_image.ps1` (Windows
+PowerShell 5.1) read the frame. **Never edit the SDK by hand** — the media-key map is patch 0020,
+applied by `scripts/apply_sdk_patches.ps1`.

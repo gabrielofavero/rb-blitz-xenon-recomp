@@ -6,6 +6,8 @@ Plans that are written but not started. Each carries its `YYYY-MM-DD-` creation 
 | --- | --- |
 | [`2026-10-10-shader-cache-findings.md`](2026-10-10-shader-cache-findings.md) | Shader-stutter implementation plan: repair the D3D12 preload barrier, prepare a game-specific pipeline catalogue before playback, validate coverage, and package recipes (not started; expanded 2026-10-17). |
 | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) | Song Load Guard: which stall/crash cases a cooperative timeout can safely handle and which it cannot (part 1), plus the five implementation prompts that follow it (part 2). |
+| [`2026-10-22-background-music-navigator-plan.md`](2026-10-22-background-music-navigator-plan.md) | The main menu's background music navigator: a default-on setting, LB/RB/Start plus media keys for next/previous/pause, a host-drawn footer, a Background Music Play page under Controls, and Play Current Song following the navigated song (planning; three prompts). |
+| [`2026-10-22-in-game-binding-rows-plan.md`](2026-10-22-in-game-binding-rows-plan.md) | Replace the host-drawn binding rows with guest-drawn rows fed from host text: a `read_file` text op on the existing bridge, index dispatch on the list, page-entry refresh, and the retirement of `DrawBindingRows` (planning; four prompts, spike first). |
 
 The Load Guard document is a merge (2026-10-22) of two records, kept as `## Part N` sections so old
 citations still resolve:

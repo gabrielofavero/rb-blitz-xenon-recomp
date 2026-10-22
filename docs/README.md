@@ -127,6 +127,8 @@ budget, and the row-text budget — are a skill:
 | [`plans/todo/2026-10-13-load-guard.md`](plans/todo/2026-10-13-load-guard.md) | Song Load Guard: part 1 is the feasibility record (which stall/crash cases a cooperative 30s/60s timeout can safely handle and which it cannot); part 2 holds the five implementation prompts. Nothing implemented. |
 | [`plans/todo/2026-10-19-resolution-scale-expansion-plan.md`](plans/todo/2026-10-19-resolution-scale-expansion-plan.md) | Enable the six requested ultrawide/32:9 sizes and 4:3 as a first-class shape, with display-driven offers and a diagnostic downscale override for validation on a smaller panel. |
 | [`plans/todo/2026-10-19-button-layout-hotswap-plan.md`](plans/todo/2026-10-19-button-layout-hotswap-plan.md) | Button glyphs and controller art as replaceable scheme packages: a live texture override, in-game selection, keyboard/controller auto-switch, and an optional PS3 `.pkg` import. Planning only. |
+| [`plans/todo/2026-10-22-background-music-navigator-plan.md`](plans/todo/2026-10-22-background-music-navigator-plan.md) | The main menu's background music navigator: a default-on switch, LB/RB/Start and media keys for next/previous/pause, a host-drawn footer, a Background Music Play page under Controls, and Play Current Song following the navigated song. Planning only (three prompts). |
+| [`plans/todo/2026-10-22-in-game-binding-rows-plan.md`](plans/todo/2026-10-22-in-game-binding-rows-plan.md) | Replace the Interface Mapping overlay with guest-drawn rows fed from host text: a `read_file` text op on the settings bridge, index dispatch on the list, page-entry refresh, and the retirement of `DrawBindingRows`. Planning only (four prompts, spike first). |
 
 ### History
 

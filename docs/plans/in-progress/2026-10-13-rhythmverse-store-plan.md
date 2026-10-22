@@ -2,8 +2,8 @@
 
 Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **reopened
 2026-10-22** — the owner drove the shipped store and asked for eleven adjustments; **§9** carries
-one prompt per adjustment and is the work now. The bold sentence that opens the record below is what
-shipped before that pass, kept as written. **Finished
+one prompt per adjustment and is the work now, and the record below is what shipped before that
+pass, kept as it was written. **Finished
 2026-10-22 — P0, P6, P1, P2, P3, P4, P5, P7 and P8 all landed, and the acceptance harness is green
 in all four legs on one build (`out/store-acceptance/p8-final/`, **69 steps, 0 failures**): the
 switch is turned on through the UI, the store lists the catalogue, Search answers and lists, a
@@ -2519,12 +2519,14 @@ evidence of what shipped. Prompts are ordered so a later one does not have to un
 
 - **Do**: the caption is the locale token `store_offer` = `VIEW ITEM`
   (`out/_swap/locale.tree.txt:2168-2169`). Measure what Y dispatches on the RhythmVerse screens with
-  `store_trace`. The front menu's `kAction_Option` is a trial-mode upsell
-  (`out/_swap/store.tree.txt:513-…`), and the browser's only opens `show_shortcuts` when the focus is
-  `song.lst` (`:1080-1093`) — so on our surfaces it is inert. Remove the button **from our surfaces
-  only**: the `kAction_Option` inline-help token on `store_menu_screen`, `store_browser_screen` and
-  `store_info_screen` (`store.ihp`, `:850-856`), and the `shortcuts.lst` entry if it names
-  `store_offer`. Nothing is removed globally.
+  `store_trace`. The front menu's `kAction_Option` (`out/_swap/store.tree.txt:513-560`) is a
+  trial-mode upsell or the banner marquee's offer (`store_banner_panel marquee_path` →
+  `store_info_enum_panel request_enum_and_show_single_offer`), and the browser's (`:1080-1093`) only
+  opens `show_shortcuts` when the focus is `song.lst`. We serve no marquee path and the browser's
+  list is not `song.lst`, so on our surfaces the button is inert — which is what the owner sees.
+  Remove the button **from our surfaces only**: the `kAction_Option` inline-help token on
+  `store_menu_screen`, `store_browser_screen` and `store_info_screen` (`store.ihp`, `:850-856`), and
+  the `shortcuts.lst` entry if it names `store_offer`. Nothing is removed globally.
 - **Done when**: no `VIEW ITEM` is drawn on any store surface and Y has no effect there; a capture
   of the footer proves it, and the shortcut headers elsewhere are untouched.
 
@@ -2561,9 +2563,10 @@ evidence of what shipped. Prompts are ordered so a later one does not have to un
   2. **failure surface** — a press of the store row with no offers and a failed catalogue shows
      retail's `error_popup_panel show_popup <token>` (the panel P1's gate used, §2.1) with a **new
      locale sentence**: RhythmVerse is unavailable right now. Once per boot, not per press. Then the
-     session takes the **hidden flow**: the main-menu row is removed and the RhythmVerse tab hidden,
-     the same path P9-9 uses when the master is off. Do not fabricate
-     `store_info_unavailable_screen` (§5/P7's note).
+     session takes the **hidden flow**: the main-menu row is removed, and the **RhythmVerse tab** is
+     hidden — the same path P9-9 uses when the master is off; MESSAGES and RECOMMENDED keep
+     following P9-4, which is what the owner's "if Show Messages and Recommendations is enabled"
+     leaves standing. Do not fabricate `store_info_unavailable_screen` (§5/P7's note).
   3. **the three outcomes** — reproduce each with `store_trace` before changing timing: "works";
      "nothing" (does the log show `store_catalogue: fetching` and then no page?); and the crash
      (capture its log and fault). This machine drops the GPU ring on roughly one boot in three
