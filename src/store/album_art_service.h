@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3's album art, the worker half (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
+// P3's album art, the worker half (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
 // §5/P3, plan §3.1's art rule): fetch the API's `album_art` image on a host thread, decode it with
 // Windows Imaging Component, encode the `.png_xbox` the retail art loader wants
 // (`src/assets/texture_codec.h`) and publish it into the cache `album_art.h` owns.

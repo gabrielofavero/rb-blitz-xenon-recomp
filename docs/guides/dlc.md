@@ -142,7 +142,7 @@ many threads read it (§4.1).
 
 The RhythmVerse store's **Download** row is not a second content system: it installs into the
 destination this boot already resolved, so a song it writes is a package like any other and is
-discovered on the next start (`docs/plans/finished/2026-10-13-rhythmverse-store-plan.md` §5/P5 and
+discovered on the next start (`docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md` §5/P5 and
 the P8 record). What that adds to the rules above:
 
 - **The layout is preserved, per root.** A structured root gets the package under

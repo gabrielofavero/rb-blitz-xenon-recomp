@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P6 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
+// P6 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
 // §1.6, P6): the store's settings as its workers see them.
 //
 // Three rules shape this file:

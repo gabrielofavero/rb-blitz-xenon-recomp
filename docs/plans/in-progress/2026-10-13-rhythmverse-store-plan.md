@@ -1,6 +1,9 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **finished
+Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **reopened
+2026-10-22** — the owner drove the shipped store and asked for eleven adjustments; **§9** carries
+one prompt per adjustment and is the work now. The bold sentence that opens the record below is what
+shipped before that pass, kept as written. **Finished
 2026-10-22 — P0, P6, P1, P2, P3, P4, P5, P7 and P8 all landed, and the acceptance harness is green
 in all four legs on one build (`out/store-acceptance/p8-final/`, **69 steps, 0 failures**): the
 switch is turned on through the UI, the store lists the catalogue, Search answers and lists, a
@@ -74,7 +77,7 @@ custom songs can be browsed, searched, and downloaded in-game, with instrument f
 in-game settings.
 
 Related reading: [dlc.md](../../guides/dlc.md) (content pipeline),
-[song-cache-plan.md](2026-10-10-song-cache-plan.md) (R7, refresh),
+[song-cache-plan.md](../finished/2026-10-10-song-cache-plan.md) (R7, refresh),
 [settings/menu.md](../../settings/menu.md), [settings/architecture.md](../../settings/architecture.md),
 [known-issues.md](../../reference/known-issues.md) (the store is currently offline-only — this
 plan is the community-mod-style feature that known-issues.md explicitly assigns to "the community
@@ -197,6 +200,12 @@ captures in `docs/rythmverse-responses/{list,search}.json`.
     preview only if the API returns a preview asset — it does not: both preview fields are YouTube
     web pages (§3.3). V1 therefore ships **no audio preview**, and no YouTube/browser path exists to
     fake one.
+
+> **Superseded 2026-10-22 by the owner pass (§9).** The settings pair moves into
+> `General ▸ Downloadable Content ▸ RhythmVerse` as that page's first row, and the filter is named
+> **Search Song Filter** (P9-3); the master now defaults **On** (P9-1) and a change to it asks for a
+> restart (P9-2); the **Customs from RhythmVerse** line of item 8 is removed (P9-6); and "Recent"
+> reads **Recently Added** (P9-5). Items 1-10 above otherwise stand as the 2026-10-14 requirement.
 
 ---
 
@@ -2361,9 +2370,231 @@ redirect targets). Recognizing manually installed loaded DLC is a v1 requirement
 | `out/_swap/rvp_list_rb3xbox.json`                                                     | failed earlier probe: HTML 404, **not** a JSON success fixture                                                                                                                                                                                                                                                                                                                                              |
 | `out/_swap/rv_songfile.html`                                                          | 2026-10-20 song-page probe (HTTP 200, 171,707 bytes): the only preview is a YouTube `<iframe>`; no audio asset (§3.3)                                                                                                                                                                                                                                                                                          |
 | `out/_swap/rv_p0_encoded.json`                                                        | 2026-10-20 list probe with percent-encoded form keys: HTTP 200, `status=success`, 1 `rb3xbox` record                                                                                                                                                                                                                                                                                                          |
+| `out/_swap/song_select.tree.txt`                                                      | decoded `ui/song_select/gen/song_select.dtb` (2026-10-14): the song list's tab cases (`kAction_PageUp`/`PageDown` at `:1659`/`:1627`, gated on `rock_central`/`user_mgr`) and its own keyboard search (`kAction_Start` at `:1753` → `virtual_keyboard show_keyboard … localize search_for_song`) - cited by §9/P9-9 and §9/P9-11 |
+| `out/_swap/locale.tree.txt`                                                           | decoded locale table (2026-10-13): `inline_help_options` = `HELP & OPTIONS` (`:732`), `store_offer` = `VIEW ITEM` (`:2169`) - cited by §9/P9-7 and §9/P9-8                                                                                                                                                                                                                                                    |
 | §2.11 code-reference table                                                             | current menu ownership, settings schema/panels, bridge limitations, SDK package reader, HTTP redirects, filename limits and refresh gaps checked on 2026-10-14                                                                                                                                                                                                                                                    |
 | image string offsets                                                                    | `BandStorePanel` 0x3A078; `is_store_offer` 0x3D308; `has_created_commerce_session` 0x87B00; `load_art` 0x87BC0; `netcache_init` 0x8E6EC; `get_store_offer` 0x105248; `set_target_store_offer_id` 0x105270; `dlc_store` 0x102D00; `/dlc_top_%s_%s.dta` 0x102D58; `dlc_store/%s/%s/offers/%s/` 0x105088; `dlc_store/%s/%s/related/%s.dta` 0x104740; `Xis_participating_user_online` 0x13FBB |
 | imports (checkout)                                                                      | `__imp__XamShowMarketplaceUI` 0x827F6544, `…NuiMarketplaceUI` 0x827F65B4, `…MarketplaceDownloadItemsUI` 0x827F6774                                                                                                                                                                                                                                                                                        |
+
+## 9. Owner pass — reopened 2026-10-22 (P9 prompts)
+
+The store shipped, the owner drove it, and asked for eleven adjustments. **One prompt each**, grouped
+by the surface it touches; each names the seam it edits and the measurement that closes it. Where a
+prompt overrides a P0-P8 decision it says so — the records in §5 are not rewritten, they are the
+evidence of what shipped. Prompts are ordered so a later one does not have to undo an earlier one.
+
+| # | Surface | The adjustment | Overrides |
+| --- | --- | --- | --- |
+| P9-1 | Settings | The master switch defaults **On** | the P6 record's "master off" |
+| P9-2 | Settings | A change to the master asks for a restart | P6 (all six rows `kHot`) |
+| P9-3 | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
+| P9-4 | Settings | New `Interface ▸ Music Library & Store ▸ Show Messages and Recommendations` (On) | — |
+| P9-5 | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
+| P9-6 | Store menu | No `Customs from RhythmVerse` credit line | P7 |
+| P9-7 | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
+| P9-8 | Store footer | Hide **Y View Item** where it does nothing | — |
+| P9-9 | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
+| P9-10 | Catalogue | Warm Recently Added at boot; on failure the offline popup, then the hidden flow | P7's fetch-on-open |
+| P9-11 | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
+
+### P9-1 — the master switch defaults On
+
+- **Do**: flip the default in three places that must agree — the schema row
+  (`src/settings/schema.cpp:159-163`, `BoolValue(false)` plus the comment above it), the store's
+  compiled snapshot (`src/store/store_settings.h:29-33`, `enabled = false`), and the prose that
+  promises "off by default" (`docs/settings/status.md`, `docs/guides/dlc.md`, the index rows).
+- **Move with it**: the acceptance harness. `scripts/acceptance_store.ps1` currently starts the
+  Enable leg from a fresh profile with the switch **off** (`:6-7`, `-RhythmVerseRow 3` at `:66`,
+  the `rhythmverse = false` write at `:152`, the "reads Off before the press" step at `:557`). With
+  On as the default the Enable leg proves the default instead of flipping it, and the **Control leg
+  becomes the only leg that writes the value off**. Pin the default in
+  `tests/settings_screen_tests.cpp` and `tests/store_client_tests.cpp`.
+- **Done when**: a profile with no `settings.toml` boots with the row On, the main menu draws the
+  store row and the store serves offers; the control leg (master written off) still makes no store
+  request; the suites are green.
+
+### P9-2 — a master change asks for a restart
+
+- **Do**: the master is `ApplicationStrategy::kHot` today (`src/settings/schema.cpp:411`) with a live
+  applier (`src/store/store_settings.cpp:61-74`). Make the **master** `kRestart`: the committed value
+  reaches the store at the next boot, and the surface's existing prompt — the authored
+  `settings_restart_now` / `settings_close` page (`src/ui/settings_screen.cpp:1500-1512`), opened when
+  the merged root is left (`docs/settings/architecture.md` part 6 §6.1) — offers `Restart now` /
+  `Close`. Keep the five instrument leaves hot: their live effect is measured (P7's cancellable walk,
+  the page cache keyed by the request body). The main-menu row's presence is already baked at boot
+  (§5/P1), which is exactly why a restart is the honest strategy for the master.
+- **Move with it**: the pinned hot-row list in `tests/settings_hot_apply_tests.cpp` (six store rows
+  today), P6's "the six rows are `kHot`" sentence (supersede with a line naming this prompt), and
+  `docs/settings/menu.md`'s hot/restart column.
+- **Done when**: flipping the master and leaving Help & Options draws the prompt once; `Close`
+  leaves the store on its pre-change value and makes no request; `Restart now` relaunches and the new
+  value acts (row present/absent, prewarm done/not); flipping a filter leaf asks for nothing.
+
+### P9-3 — `Downloadable Content ▸ RhythmVerse` first, and a renamed filter
+
+- **Do**: `src/ui/settings_screen.cpp:1056-1098` becomes five rows, in this order — **RhythmVerse**
+  (a submenu, first), Cache DLC Library, Refresh Music Library, DLC Scan Threads, DLC Menu Music. The
+  new `settings_rhythmverse_panel` (Back → `settings_dlc_screen`) holds the master `RhythmVerse` row
+  and the filter submenu; the filter's page title (`:659`) and its row label (`:1088-1091`) read
+  **Search Song Filter**, help text included. Five rows stay inside the six-row budget
+  (in-game-settings skill §2), and the filters stay reachable while the master is off (P6's rule).
+- **Move with it**: `settings_screen`'s page-order and page-count pins (P6 moved them to 59 per
+  context, 118 both; they move again — the tests hold the exact numbers), the title/locale/help
+  tables, `scripts/acceptance_store.ps1:66` (`-RhythmVerseRow 3`) and its Enable-leg OCR steps
+  (`:556-574`: the master is now reached through the submenu), `docs/settings/menu.md` (the
+  Downloadable Content page) and `docs/settings/status.md`.
+- **Done when**: Help & Options ▸ General ▸ Downloadable Content reads those five rows in that order,
+  RhythmVerse opens onto the master + Search Song Filter, Back returns to the page, and the main-menu
+  and pause-context twins agree.
+
+### P9-4 — `Interface ▸ Music Library & Store ▸ Show Messages and Recommendations`
+
+- **Do**: add a fourth row to the Interface page (`src/ui/settings_screen.cpp:1431-1447` — Main Menu,
+  Offline Prompts, Help & Options Labels, in that order, unchanged), a page of its own, and one
+  boolean `interface.show_messages_recommendations` (**On** by default) with a fresh `SettingId`
+  appended to `src/settings/model.h` (80-85 are taken by P6) and its row/token/help entries. It
+  gates the retail tab bar's MESSAGES and RECOMMENDED tabs on **both** surfaces (P9-9); the
+  RhythmVerse tab is gated by the store master instead. Strategy: **restart** unless a boot measures
+  the tab bar changing live — the tab captions are scene art (§5/P7), so do not mark it hot on
+  faith.
+- **Move with it**: `settings_screen`'s page/row pins and defaults, the `profile` round-trip tests,
+  `docs/settings/menu.md` (the Interface page) and `docs/settings/status.md`.
+- **Done when**: a fresh profile reads On; MESSAGES and RECOMMENDED are drawn while On and neither
+  while Off, in the store and in the song list; the row's help sentence names both tabs.
+
+### P9-5 — **Recently Added**, and no count beside the two rows
+
+- **Do two things in `src/store/store_metadata.cpp`**:
+  1. the front-menu label (`:259`, `{"recent", "Recent"}`) becomes **Recently Added**. The id stays
+     `recent` — the provider path `dlc_store/europe/eng/recent/` the panel asks for is measured and
+     unchanged — and the user-facing sentences follow: `store_catalogue_status.cpp:43` and `:46`
+     ("try Recent again"), the empty-state sentence, and §1.6's prose.
+  2. the trailing **1**. The row is a three-element array `(path label TRUE)` — the shape P3 measured
+     (§5/P3: `sub_8275C968` reads a row as an array and wants `count > 2` with the third element
+     non-null). Serve variants and keep the one with no number drawn: `FALSE`, an integer, and a
+     four-field row (never a two-field row — P3 measured that faulting). If the non-null third
+     element is load-bearing, find the field the retail menu draws the number from (the list
+     resource or the panel's own count) before inventing state.
+- **Move with it**: `store_metadata`'s tests, the front-menu OCR in
+  `scripts/acceptance_store.ps1:600-601` and the `Assert-Label` calls, and P7's strip copy. The log
+  token (`offer(s) for the Recent list`) is a log string and may stay.
+- **Done when**: the front menu OCRs `RHYTHMVERSE / RECENTLY ADDED / SEARCH` with no digit beside
+  either row, both rows still request their measured paths, and the browser opens on their offers.
+
+### P9-6 — remove the `Customs from RhythmVerse` credit line
+
+- **Do**: delete the credit sentence — `src/store/store_catalogue_status.h:49` (`kStoreCreditText`)
+  and the `kFrontMenu` credit branch at `:117-118` in the `.cpp`, plus `kCatalogueCreditHold` if
+  nothing else reads it. The heading `RHYTHMVERSE` stays (`kStoreHeadingText`; `CUSTOMS FROM
+  RHYTHMVERSE` clips in the retail header, measured 2026-10-21). Loading, empty and offline
+  sentences stay — they are the store's own words, not a credit.
+- **Move with it**: `tests/store_catalogue_status_tests.cpp` (28 checks; the precedence
+  failure > empty > loading > credit becomes failure > empty > loading) and the credit capture step
+  in `scripts/acceptance_store.ps1:608-619`. P7's record keeps its measurement; the superseding line
+  is this prompt.
+- **Done when**: a store boot draws no credit line (the strip is silent on a full list), the three
+  remaining sentences still appear where their states are forced, and the suite is green.
+
+### P9-7 — the store's Start button opens **Search Filters**, and Back returns to the store
+
+- **Do**: the store's Start case jumps to retail's `options_screen` and sets its `back_screen` to
+  `store_menu_screen` — two copies, `out/_swap/store.tree.txt:450-461` (front menu) and `:1061-1075`
+  (browser). Re-point both at the **Search Song Filter** page and make **this flow's** Back the store
+  front menu; the Help & Options route keeps `settings_dlc_screen` (`src/ui/settings_screen.cpp:1118-1120`),
+  so the back target is per flow — author a second entry page whose Back is `store_menu_screen` or
+  make the target runtime state, whichever the payload measures as possible. The footer label is the
+  scene's inline help: set Start's token to a new locale string **Search Filters** with
+  `store.ihp`'s `set_action_token kAction_Start <token>` (the retail idiom,
+  `out/_swap/song_select.tree.txt:1821-1823`; the default token is `inline_help_options` =
+  `HELP & OPTIONS`, `out/_swap/locale.tree.txt:732`). Do not re-point `options_screen` globally:
+  Help & Options elsewhere must still reach the merged surface.
+- **Move with it**: the payload edit (two DTA cases + one locale entry), a boot capture of the footer,
+  `docs/settings/menu.md` if it claims the store's Start target, and the acceptance harness if it
+  presses Start in the store.
+- **Done when**: the store's footer reads `(Start) SEARCH FILTERS`, Start opens that page, Back
+  returns to the store front menu **and only from this flow** (the Help & Options route still backs
+  to Downloadable Content), and the master being off does not block the page (P6's rule).
+
+### P9-8 — hide **Y View Item** where it does nothing
+
+- **Do**: the caption is the locale token `store_offer` = `VIEW ITEM`
+  (`out/_swap/locale.tree.txt:2168-2169`). Measure what Y dispatches on the RhythmVerse screens with
+  `store_trace`. The front menu's `kAction_Option` is a trial-mode upsell
+  (`out/_swap/store.tree.txt:513-…`), and the browser's only opens `show_shortcuts` when the focus is
+  `song.lst` (`:1080-1093`) — so on our surfaces it is inert. Remove the button **from our surfaces
+  only**: the `kAction_Option` inline-help token on `store_menu_screen`, `store_browser_screen` and
+  `store_info_screen` (`store.ihp`, `:850-856`), and the `shortcuts.lst` entry if it names
+  `store_offer`. Nothing is removed globally.
+- **Done when**: no `VIEW ITEM` is drawn on any store surface and Y has no effect there; a capture
+  of the footer proves it, and the shortcut headers elsewhere are untouched.
+
+### P9-9 — the LT/RT tabs work from **Your Songs**, and the RhythmVerse tab follows the master
+
+- **Measured starting point** (both dumps are in §8): the song list already carries the two cases —
+  `out/_swap/song_select.tree.txt:1627` (`kAction_PageDown` → the store via `which_store_screen`) and
+  `:1659` (`kAction_PageUp` → `recommendation_screen`) — but both arms sit under
+  `{|| {rock_central is_login_blocked} {user_mgr is_participating_user_online}}`, and offline they
+  take the `arrow_*.flow activate` arm: the arrow flashes, nothing moves. The store's own cases are
+  the mirror image and already navigate (`out/_swap/store.tree.txt:464-497`: PageDown →
+  `inbox_screen`, PageUp → `song_select_screen`; `:1023-1050` the same in the browser).
+- **Do**: force the navigation arm of `song_select_screen`'s two cases, the way P1 forced the store's
+  entry gate; leave the store's cases alone. The tab captions are scene art (`background_panel`,
+  §5/P7), so the visibility rule is a resource/payload edit, not a list row: **MESSAGES and
+  RECOMMENDED follow P9-4**, and **the RhythmVerse tab is hidden while the store master is off**
+  (P9-1 makes it On by default).
+- **Done when**: one boot walks Your Songs → RT → the store front menu → LT → Your Songs, with the
+  highlight following the tab; with the master off the RhythmVerse tab is not drawn; with P9-4 off
+  neither Messages nor Recommended is drawn; P9-7's Start/Back still behave from the store.
+
+### P9-10 — warm **Recently Added** at boot; fail once, then hide
+
+- **Why**: the owner sees the row "sometimes work, sometimes do nothing, sometimes crash". Today the
+  first fetch starts when the store opens (`src/store/store_fetch.cpp:194-197`), so the row can be
+  pressed into a request still in flight; the in-memory page cache already answers a second visit
+  for ~5 minutes (`store_page_cache`), which is the "feels automatic" asked for.
+- **Do**:
+  1. **prewarm** — with the master on, once per boot after the guest is up, call
+     `RequestCatalogueRefresh("the boot asked")` (`src/store/store_catalogue.h:62-68`; installed at
+     `src/rb_blitz_app.h:361`). Same worker, same budget (`store_catalogue_pages`), and silent: no
+     strip, no screen, no guest state. A failure lands in the catalogue's existing `failed` state
+     with its backoff.
+  2. **failure surface** — a press of the store row with no offers and a failed catalogue shows
+     retail's `error_popup_panel show_popup <token>` (the panel P1's gate used, §2.1) with a **new
+     locale sentence**: RhythmVerse is unavailable right now. Once per boot, not per press. Then the
+     session takes the **hidden flow**: the main-menu row is removed and the RhythmVerse tab hidden,
+     the same path P9-9 uses when the master is off. Do not fabricate
+     `store_info_unavailable_screen` (§5/P7's note).
+  3. **the three outcomes** — reproduce each with `store_trace` before changing timing: "works";
+     "nothing" (does the log show `store_catalogue: fetching` and then no page?); and the crash
+     (capture its log and fault). This machine drops the GPU ring on roughly one boot in three
+     (§5/P8's environment note), so a crash claim needs its own evidence.
+- **Done when**: a boot pressed immediately opens the browser on offers, and its log carries no
+  `store_catalogue: fetching` at press time; a boot pointed at an unreachable host draws the popup
+  once and afterwards no store row and no RhythmVerse tab; each of the three symptoms has a recorded
+  cause or a recorded measurement that it is the environment.
+
+### P9-11 — Search uses the title's own keyboard; the authored keys retire
+
+- **Measured starting point**: the song list's Start opens the title's keyboard —
+  `out/_swap/song_select.tree.txt:1753` `kAction_Start` → `virtual_keyboard show_keyboard user 100
+  (localize search_for_song) (localize search_for_song_desc) this`, with `search_mode` and
+  `song_search.lst` beside it (`:1769-1823`). **P4's record contradicts this** — its scan of
+  `main_xbox_0.ark`'s 131 records found only `rbworld_link_panel`'s `show_keyboard`. Resolve that
+  first: name the ark the dump came from (the owner sees the search in Ultimate; the default target
+  is `common`) and confirm the route under both builds.
+- **Do**: the store's Search row opens that keyboard instead of the authored key pages
+  (`settings_rhythmverse_search_*`, P4), and the answer reaches `store_search`'s existing submit
+  (the field rules stay: >= 3 characters, one value, artist **or** title, never combined; the
+  caption strip's query/count sentences stay). The authored pages leave the flow — delete them or
+  leave them unreachable, and say which; the surface does not grow a second keyboard. If a target
+  without the facility matters, keep the authored keys behind the same row and state the fallback on
+  the row's help line.
+- **Move with it**: `store_search`'s key-token grammar keeps only what the typed field needs;
+  `settings_screen`'s key-page pins drop; the seed diagnostic (`scripts/probe_search.ps1`,
+  `store_search_diagnostic`) moves to the new entry.
+- **Done when**: store → Search draws the title's own popup, a typed query answers in the strip and
+  fills the browser, Cancel returns to the front menu, and the authored key pages are gone or
+  provably unreachable.
 
 ## Appendix A — request cheat sheet
 

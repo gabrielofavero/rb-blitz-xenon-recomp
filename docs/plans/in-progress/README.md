@@ -4,16 +4,16 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
-The last plan filed here, [`2026-10-13-rhythmverse-store-plan.md`](../finished/2026-10-13-rhythmverse-store-plan.md) —
+The plan filed here is [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) —
 the RhythmVerse customs catalogue inside the retail DOWNLOAD CONTENT store (P0 → P6 → P1 → P2 → P3 →
-P4 → P5 → P7 → P8) — **moved to [`../finished/`](../finished/) on 2026-10-22**: its acceptance
-harness is green in all four legs on one build (`out/store-acceptance/p8-final/`, 69 steps,
-0 failures), so the switch, the store's Recent/Search/download/install, the song on the title's own
-next-boot list and the control boot's silence are all measured rather than owed. The same run found
-two defects that are now fixed (§5/P8's close-out record), and its acceptance matrix still says
-which rows were measured by a probe rather than by the harness.
-
-This folder is empty until the next plan starts being worked.
+P4 → P5 → P7 → P8). It **finished on 2026-10-22** — its acceptance harness is green in all four legs
+on one build (`out/store-acceptance/p8-final/`, 69 steps, 0 failures) — and was **reopened the same
+day** for the owner's pass: **§9** carries eleven prompts, **P9-1 … P9-11**, one per adjustment (the
+master switch's default and its restart prompt, the settings reorganisation, the store's labels and
+footer, the LT/RT tabs on Your Songs, the boot warm-up with its offline popup, and the move to the
+title's own keyboard search). Those prompts are owed; the records in §5 are what shipped before the
+pass, and the P8 close-out record still says which rows were measured by a probe rather than by the
+harness.
 
 The most recent plan before it,
 [`2026-10-19-interface-gameplay-mapping-restructure-plan.md`](../finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md) —

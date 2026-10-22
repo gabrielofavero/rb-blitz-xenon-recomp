@@ -1,4 +1,4 @@
-# P8 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the store's acceptance.
+# P8 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the store's acceptance.
 #
 # The walk the plan asks for, in the order a player takes it, split into legs so each one can be
 # run and read on its own:

@@ -1,4 +1,4 @@
-# P4 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the search measurement.
+# P4 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the search measurement.
 #
 # One boot that drives the authored key pages end to end and captures what the caption says:
 #

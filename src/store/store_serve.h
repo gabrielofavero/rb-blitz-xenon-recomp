@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3's data lane (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md §5/P3): what a store
+// P3's data lane (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md §5/P3): what a store
 // netcache request is answered with.
 //
 // The seam is the file cache itself. `FileCache::Request` (`sub_8235A240`) asks the manager's

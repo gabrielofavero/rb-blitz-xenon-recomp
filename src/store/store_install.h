@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P5 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
+// P5 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
 // §2.9, §5/P5): where a validated download becomes a library package.
 //
 // The rules this file exists for:
