@@ -207,6 +207,9 @@ TransferResult Perform(const std::string_view url, const TransferReceiver& recei
     result.error = Win32Error("WinHttpCrackUrl");
     return result;
   }
+  // Strict here, unlike `store_http.cpp`'s one loopback exception: this is the package transfer, and
+  // the diagnostic that allows a plain-http loopback origin (`store_api_base`) never reaches it -
+  // a download URL resolves through `ResolveDownloadUrl`, which requires HTTPS and the site's host.
   if (components.nScheme != INTERNET_SCHEME_HTTPS) {
     result.error = "the transport only speaks HTTPS";
     return result;

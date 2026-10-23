@@ -129,6 +129,30 @@ std::optional<RequestSpec> BuildSearchRequest(const Query& query, QueryProblem* 
 // The exact `application/x-www-form-urlencoded` body, exposed for tests and diagnostics.
 std::string BuildFormBody(const Query& query, bool search);
 
+// --- The API base, and the measurement override ---------------------------------------------------
+//
+// `kApiBase` is the shipped value, and `ApiBase()` is what the two request builders below use. The
+// override exists for the failure measurements that need a host which cannot answer (RhythmVerse
+// plan §9/P9-10: the press's popup and its background retry): pointed at nothing, the walk lands in
+// `kFailed` in a second instead of after a DNS or connect timeout, and a local stub can be flipped
+// from refusing to serving inside one boot.
+//
+// It deliberately does **not** move the download/artwork resolution below: that stays same-site
+// with `kSiteHost` (a policy, §3.1), so no diagnostic boot can be talked into fetching a package
+// from somewhere else.
+std::string_view ApiBase();
+
+// Empty restores `kApiBase`. Otherwise `base` must be an absolute `http://` or `https://` origin
+// with no path, credentials, query or fragment (a port is allowed), because the endpoints are
+// appended to it. `http://` is accepted only for a **loopback** host - the measurement stub - and
+// every other value is refused, leaving the current base alone.
+bool SetApiBaseOverride(std::string_view base);
+
+// True for the loopback spellings a stub can use: `127.0.0.1`, `::1` / `[::1]` and `localhost`,
+// case-insensitively. The plain-http allowance above and the transport's one exception
+// (`store_http.cpp`) both read this, so the rule has one definition.
+bool IsLoopbackHost(std::string_view host);
+
 // RFC 3986 percent-encoding with `%20` for a space (not `+`), and only the unreserved set left alone.
 std::string FormEncode(std::string_view text);
 

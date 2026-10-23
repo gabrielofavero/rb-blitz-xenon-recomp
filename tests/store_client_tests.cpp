@@ -129,6 +129,71 @@ void TestListRequest() {
   CHECK_TRUE(BuildFormBody(query, false).find("page=2") != std::string::npos);
 }
 
+// P9-10's failure instrument (the `store_api_base` diagnostic): the two request builders follow an
+// override, the same-site download/art resolution does not, and a value that is not a bare origin
+// is refused rather than half-applied - the boot that expected to fail must not quietly succeed.
+void TestApiBaseOverride() {
+  test::BeginCase("the API base override moves list/search only, and refuses anything but an origin");
+
+  Query query;
+  CHECK_STR(std::string(ApiBase()), kApiBase);
+  CHECK_TRUE(SetApiBaseOverride(""));
+  CHECK_STR(std::string(ApiBase()), kApiBase);
+
+  // A bare origin with a port is the measurement's shape (a local stub that can start refusing
+  // and then serving inside one boot).
+  CHECK_TRUE(SetApiBaseOverride("http://127.0.0.1:8765"));
+  CHECK_STR(std::string(ApiBase()), "http://127.0.0.1:8765");
+  const std::optional<RequestSpec> list = BuildListRequest(query);
+  CHECK_TRUE(list.has_value());
+  CHECK_STR(list->url, "http://127.0.0.1:8765/api/rb3xbox/songfiles/list");
+  query.text = "nirvana";
+  const std::optional<RequestSpec> search = BuildSearchRequest(query);
+  CHECK_TRUE(search.has_value());
+  CHECK_STR(search->url, "http://127.0.0.1:8765/api/rb3xbox/songfiles/search/live");
+  CHECK_STR(search->url.substr(0, search->url.size() - std::string(kSearchPath).size()),
+            "http://127.0.0.1:8765");
+  query.text.clear();
+
+  // Same-site resolution is policy (§3.1) and deliberately does not follow the override.
+  SongFile song = Song("artist", "title");
+  song.download_url = "/download_file/user/id/pkg_rb3con";
+  const ResolvedUrl resolved = ResolveDownloadUrl(song.download_url);
+  CHECK_TRUE(resolved.ok);
+  CHECK_STR(resolved.url, "https://rhythmverse.co/download_file/user/id/pkg_rb3con");
+
+  // Refused, and the previous value is left alone.
+  for (const char* refused : {"https://", "http://", "rhythmverse.co", "ftp://rhythmverse.co",
+                              "http://127.0.0.1:8765/api", "http://user@127.0.0.1:8765",
+                              "http://127.0.0.1:8765?x=1", "http://127.0.0.1:8765#frag",
+                              "http://127.0.0.1 :8765", "://127.0.0.1",
+                              // Plain http is a loopback-only allowance (`IsLoopbackHost`), so a
+                              // stub can never be pointed off the machine.
+                              "http://192.168.1.5:8765", "http://example.invalid"}) {
+    CHECK_TRUE(!SetApiBaseOverride(refused));
+    CHECK_STR(std::string(ApiBase()), "http://127.0.0.1:8765");
+  }
+
+  // The loopback spellings the stub can be addressed with, and the two that are not loopback.
+  CHECK_TRUE(IsLoopbackHost("127.0.0.1"));
+  CHECK_TRUE(IsLoopbackHost("LOCALHOST"));
+  CHECK_TRUE(IsLoopbackHost("::1"));
+  CHECK_TRUE(IsLoopbackHost("[::1]"));
+  CHECK_TRUE(!IsLoopbackHost("127.0.0.2"));
+  CHECK_TRUE(!IsLoopbackHost("localhost.invalid"));
+  CHECK_TRUE(SetApiBaseOverride("http://localhost:8765"));
+  CHECK_STR(std::string(ApiBase()), "http://localhost:8765");
+  CHECK_TRUE(SetApiBaseOverride("http://[::1]:8765"));
+  CHECK_STR(std::string(ApiBase()), "http://[::1]:8765");
+  CHECK_TRUE(SetApiBaseOverride("http://127.0.0.1:8765"));
+
+  // Surrounding whitespace is trimmed, an empty value restores the shipped base.
+  CHECK_TRUE(SetApiBaseOverride("  https://example.invalid  "));
+  CHECK_STR(std::string(ApiBase()), "https://example.invalid");
+  CHECK_TRUE(SetApiBaseOverride(""));
+  CHECK_STR(std::string(ApiBase()), kApiBase);
+}
+
 void TestSearchRequest() {
   test::BeginCase("request: search trims one query, encodes it, and enforces 3..64 code points");
 
@@ -846,6 +911,18 @@ void TestStoreSettings() {
   CHECK_FALSE(AnswerStoreQuery("rbbz-settings/enabled", &answer));
   CHECK_FALSE(AnswerStoreQuery("rbbz-store/", &answer));
 
+  // P9-10's press gate: the two paths the RhythmVerse row's case reads and writes. Exact matches
+  // only - a near miss must not be answered by the store's namespace.
+  CHECK_TRUE(IsCatalogueFailedQuery("rbbz-store/catalogue/failed"));
+  CHECK_TRUE(IsCatalogueRetryCommand("rbbz-store/catalogue/retry"));
+  CHECK_FALSE(IsCatalogueFailedQuery("rbbz-store/catalogue/retry"));
+  CHECK_FALSE(IsCatalogueRetryCommand("rbbz-store/catalogue/failed"));
+  CHECK_FALSE(IsCatalogueFailedQuery("rbbz-store/catalogue/"));
+  CHECK_FALSE(IsCatalogueFailedQuery("rbbz-store/catalogue/failed/x"));
+  CHECK_FALSE(IsCatalogueRetryCommand("rbbz-store/catalogue/retry/"));
+  CHECK_FALSE(IsCatalogueFailedQuery("rbbz-store/enabled"));
+  CHECK_FALSE(IsCatalogueRetryCommand("rbbz-settings/catalogue/retry"));
+
   // Leave the process at the compiled defaults (the store on, the owner's filter).
   PublishSettings(StoreSettings{});
   CHECK_TRUE(Settings()->enabled);
@@ -1003,6 +1080,7 @@ int main(int argc, char** argv) {
   (void)live_list;
 #endif
   TestListRequest();
+  TestApiBaseOverride();
   TestSearchRequest();
   TestListFixture(project_dir);
   TestSearchFixture(project_dir);

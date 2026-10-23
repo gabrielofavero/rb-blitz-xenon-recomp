@@ -202,6 +202,11 @@ inline constexpr char kRhythmVerseLabel[] = "RhythmVerse";
 // Answered by the host from the store's settings snapshot (src/store/store_settings.h); true means
 // the master switch is on. `rbbz-store/instrument/<token>` answers the five filter leaves.
 inline constexpr char kStoreEnabledQuery[] = "rbbz-store/enabled";
+// P9-10's press gate: while the catalogue holds no offers and its last walk failed
+// (`store_settings.h`'s path, answered by the catalogue worker), the row's press draws the popup
+// below and asks for a fresh walk instead of opening a store with nothing to list.
+inline constexpr char kStoreUnreachableKey[] = "rbbz_store_unreachable";
+inline constexpr char kStoreUnreachableText[] = "RhythmVerse could not be reached. Try again later.";
 // The probe namespace the row asks the host through (`file_exists`):
 // `rbbz-play/current/<pool index>`, parsed by src/hooks/menu_music_pool.h.
 inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";

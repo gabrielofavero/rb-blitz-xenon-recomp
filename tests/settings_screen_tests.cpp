@@ -45,6 +45,7 @@
 #include "profile/input_rows.h"
 #include "profile/remap.h"
 #include "settings/schema.h"
+#include "store/store_settings.h"
 #include "ui/dtb_author.h"
 #include "ui/help_topics.h"
 #include "ui/settings_screen.h"
@@ -3853,6 +3854,59 @@ void TestRhythmVerseRow() {
   CHECK_TRUE(follows_dlc);
   CHECK_TRUE(asks_gate);
   CHECK_TRUE(enters_store);
+
+  // P9-10: the case's failed-catalogue branch, in the shape the payload builds:
+  //
+  //   {if_else {file_exists "rbbz-store/catalogue/failed"}
+  //      {do {write_file "rbbz-store/catalogue/retry" 0}
+  //          {error_popup_panel show_popup rbbz_store_unreachable splash_panel}}
+  //      {if {file_exists "rbbz-store/enabled"} {ui goto_screen <destination>}}}
+  //
+  // The retry write is first and the popup last (nothing re-focuses after the panel takes the
+  // focus), and the enabled gate is still the branch that enters the store.
+  const auto find_case_body = [](const Node& node, const auto& self) -> const Node* {
+    if (node.tag == dtb::kArray && node.kids.size() >= 2 && node.kids[0].tag == dtb::kSymbol &&
+        node.kids[0].text == kRhythmVerseRow) {
+      return &node.kids[1];
+    }
+    for (const Node& kid : node.kids) {
+      if (const Node* found = self(kid, self)) return found;
+    }
+    return nullptr;
+  };
+  const Node* case_body = nullptr;
+  for (const Node& root : nodes) {
+    case_body = find_case_body(root, find_case_body);
+    if (case_body != nullptr) break;
+  }
+  CHECK_TRUE(case_body != nullptr);
+  if (case_body != nullptr) {
+    CHECK_TRUE(case_body->tag == dtb::kCommand && case_body->kids.size() >= 4 &&
+               case_body->kids[0].text == "if_else");
+    if (case_body->kids.size() >= 4) {
+      const Node& test = case_body->kids[1];
+      CHECK_TRUE(test.kids.size() >= 2 && test.kids[0].text == "file_exists" &&
+                 test.kids[1].text == rb_blitz::store::kCatalogueFailedQuery);
+      const Node& failed = case_body->kids[2];
+      CHECK_TRUE(failed.kids.size() >= 3 && failed.kids[0].text == "do");
+      if (failed.kids.size() >= 3) {
+        const Node& write = failed.kids[1];
+        CHECK_TRUE(write.kids.size() >= 3 && write.kids[0].text == "write_file" &&
+                   write.kids[1].text == rb_blitz::store::kCatalogueRetryCommand);
+        CHECK_TRUE(write.kids[2].tag == dtb::kInt && write.kids[2].scalar == 0);
+        const Node& popup = failed.kids[2];
+        CHECK_TRUE(popup.kids.size() >= 4 && popup.kids[0].text == "error_popup_panel" &&
+                   popup.kids[1].text == "show_popup" &&
+                   popup.kids[2].text == kStoreUnreachableKey &&
+                   popup.kids[3].text == "splash_panel");
+      }
+      const Node& otherwise = case_body->kids[3];
+      CHECK_TRUE(otherwise.kids.size() >= 3 && otherwise.kids[0].text == "if" &&
+                 otherwise.kids[1].kids.size() >= 2 &&
+                 otherwise.kids[1].kids[0].text == "file_exists" &&
+                 otherwise.kids[1].kids[1].text == kStoreEnabledQuery);
+    }
+  }
 
   // The label the menu draws for the row's symbol exists only on the boot that built it.
   bool labelled = false;

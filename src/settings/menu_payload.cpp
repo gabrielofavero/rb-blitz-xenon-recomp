@@ -623,6 +623,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             why != "the locale already has that key") {
           note("the Search Filters footer label was refused: " + why);
         }
+        // P9-10's failed-press sentence: the store row's case shows this in the main menu's own
+        // error popup when the catalogue could not be reached (the same panel P9-6b's install
+        // notice uses; this is its first sentence).
+        why.clear();
+        if (!screen::AddLocaleEntry(&roots, screen::kStoreUnreachableKey,
+                                    screen::kStoreUnreachableText, &why) &&
+            why != "the locale already has that key") {
+          note("the store-unreachable popup sentence was refused: " + why);
+        }
       }
       for (const auto& [key, text] : screen::Labels()) {
         std::string why;

@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "store/rhythmverse_client.h"
+
 namespace rb_blitz::store {
 namespace {
 
@@ -185,9 +187,6 @@ HttpResponse Perform(std::string_view url, std::string_view body, bool post,
   if (!WinHttpCrackUrl(wide_url.c_str(), static_cast<DWORD>(wide_url.size()), 0, &components)) {
     return Fail(std::move(response), Win32Error("WinHttpCrackUrl"));
   }
-  if (components.nScheme != INTERNET_SCHEME_HTTPS) {
-    return Fail(std::move(response), "the transport only speaks HTTPS");
-  }
 
   std::wstring object(components.lpszUrlPath, components.dwUrlPathLength);
   if (components.lpszExtraInfo != nullptr && components.dwExtraInfoLength != 0) {
@@ -198,6 +197,18 @@ HttpResponse Perform(std::string_view url, std::string_view body, bool post,
   // with 12005 ERROR_WINHTTP_INVALID_URL).
   const std::wstring host(components.lpszHostName, components.dwHostNameLength);
 
+  // §3.1: the store fetches over HTTPS. The one exception is a **loopback** origin, which exists for
+  // the measurements that need a server they can make fail and then answer inside one boot
+  // (`store_api_base` + `scripts/store_stub_api.py`, RhythmVerse plan P9-10). Loopback cannot leave
+  // the machine, no shipped URL is plain http (the builders compose `https://rhythmverse.co` and
+  // the download/art policy refuses anything else), and `SetApiBaseOverride` refuses a plain-http
+  // base that is not loopback - so this can only be reached by that one diagnostic flag.
+  const bool https = components.nScheme == INTERNET_SCHEME_HTTPS;
+  if (!https && !(components.nScheme == INTERNET_SCHEME_HTTP &&
+                  IsLoopbackHost(Narrow(host.c_str(), host.size())))) {
+    return Fail(std::move(response), "the transport only speaks HTTPS");
+  }
+
   InternetHandle connection(WinHttpConnect(session.get(), host.c_str(), components.nPort, 0));
   if (!connection) {
     return Fail(std::move(response), Win32Error("WinHttpConnect"));
@@ -206,7 +217,7 @@ HttpResponse Perform(std::string_view url, std::string_view body, bool post,
   const wchar_t* verb = post ? L"POST" : L"GET";
   InternetHandle request(WinHttpOpenRequest(connection.get(), verb, object.c_str(), nullptr,
                                             WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                            WINHTTP_FLAG_SECURE));
+                                            https ? WINHTTP_FLAG_SECURE : 0));
   if (!request) {
     return Fail(std::move(response), Win32Error("WinHttpOpenRequest"));
   }

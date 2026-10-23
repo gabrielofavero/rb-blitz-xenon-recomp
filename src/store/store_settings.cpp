@@ -128,4 +128,8 @@ bool AnswerStoreQuery(std::string_view path, bool* answer) {
   return false;
 }
 
+bool IsCatalogueFailedQuery(std::string_view path) { return path == kCatalogueFailedQuery; }
+
+bool IsCatalogueRetryCommand(std::string_view path) { return path == kCatalogueRetryCommand; }
+
 }  // namespace rb_blitz::store

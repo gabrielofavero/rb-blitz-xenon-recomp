@@ -19,6 +19,7 @@
 #include "profile/input_rows.h"
 #include "profile/remap.h"
 #include "store/store_search.h"
+#include "store/store_settings.h"
 
 namespace rb_blitz::ui::screen {
 namespace {
@@ -3146,9 +3147,23 @@ bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   // rows. Entered from the main menu like every settings page, the same pages behave.
   const std::string destination =
       g_configuration.store_search_diagnostic ? std::string(kSearchScreen) : "store_menu_screen";
+  // P9-10: a press whose catalogue holds nothing because the site could not be reached says so
+  // instead of opening a store with an empty list, and asks for a fresh walk. The retry write
+  // comes first and the popup last, so nothing re-focuses after the panel takes the focus; both
+  // are the channel's established shapes (`{write_file <path> 0}`, and `error_popup_panel
+  // show_popup <token> <return panel>`, which retail's own `splash_dlc` case uses on this screen).
+  // The row and the tabs are never hidden on a failure (owner scope, 2026-10-22): the press says
+  // what happened and tries again.
+  const Node retry_write =
+      Cmd({Sym("write_file"), Str(store::kCatalogueRetryCommand), Node::Int(0)});
+  const Node failure_popup = Cmd({Sym("error_popup_panel"), Sym("show_popup"),
+                                  Sym(kStoreUnreachableKey), Sym("splash_panel")});
+  const Node unreachable = Cmd({Sym("do"), retry_write, failure_popup});
+  const Node store_entry = Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(kStoreEnabledQuery)}),
+                                Cmd({Sym("ui"), Sym("goto_screen"), Sym(destination)})});
   const std::vector<Node> body{
-      Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(kStoreEnabledQuery)}),
-           Cmd({Sym("ui"), Sym("goto_screen"), Sym(destination)})})};
+      Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(store::kCatalogueFailedQuery)}),
+           unreachable, store_entry})};
   return AddMainMenuSwitchCase(nodes, kRhythmVerseRow, body, reason);
 }
 

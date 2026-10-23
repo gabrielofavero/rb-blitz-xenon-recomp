@@ -59,6 +59,15 @@ REXCVAR_DEFINE_BOOL(store_catalogue_off, false, "Diagnostics",
                     "an empty page); off is the ordinary boot")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_STRING(store_api_base, "", "Diagnostics",
+                      "Point the list and search requests at another API origin - an absolute "
+                      "http(s)://host[:port] with no path (RhythmVerse plan P9-10's failure "
+                      "measurement: an origin that refuses makes the press draw the popup and ask "
+                      "for a fresh walk, and a local stub can be flipped to serving inside the "
+                      "same boot); empty keeps https://rhythmverse.co. The download and artwork "
+                      "resolution stay same-site and do not follow it")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 namespace rb_blitz::store {
 namespace {
 
@@ -404,35 +413,10 @@ std::vector<Offer> Snapshot() {
   return g_offers;
 }
 
-}  // namespace
-
-void InstallStoreCatalogue() {
-  g_fetch_enabled = !REXCVAR_GET(store_catalogue_off);
-  const std::int32_t ttl = REXCVAR_GET(store_catalogue_ttl_seconds);
-  g_ttl = std::chrono::seconds(ttl > 0 ? ttl : 0);
-  const std::int32_t pages = REXCVAR_GET(store_catalogue_pages);
-  g_pages = pages < 1 ? 1 : (pages > 20 ? 20 : pages);
-  // P7's page cache. Its TTL is this boot's, and the search worker reads the same instance, so the
-  // two actions share both the pages and the single-flight marks.
-  const std::int32_t page_ttl = REXCVAR_GET(store_page_cache_ttl_seconds);
-  SetSharedPageCacheTtl(std::chrono::seconds(page_ttl > 0 ? page_ttl : 0));
-  SetCatalogueFetchEnabled(g_fetch_enabled);
-  PublishCatalogueFetchState(CatalogueFetchState::kIdle, 0, 0);
-  g_on = true;
-  SetOfferSource([] {
-    // Every menu page the store asks for passes through here, so this is where the caption strip
-    // learns which surface is on screen (`store_catalogue_status.h`). The front menu is noted by
-    // the file-cache hook itself, because it never asks for offers.
-    NoteStoreSurface(StoreSurface::kMenuPage);
-    return Snapshot();
-  });
-  TheWorker();  // start the thread now, so the first request only has to wake it
-  REXLOG_INFO("store_catalogue: the RhythmVerse list is the store's Recent source (up to {} page(s) "
-              "per visit, fetched on demand, fresh for {} s, fetching {})",
-              g_pages, g_ttl.count(), g_fetch_enabled ? "on" : "off");
-}
-
-void RequestCatalogueRefresh(std::string_view why) {
+// The walk request both public entries share. `ignore_backoff` is P9-10's user-initiated press:
+// the player asked, so the wait a previous failure named does not hold the press off; the
+// automatic path (boot prewarm, a store opening) keeps it.
+void RequestRefresh(std::string_view why, bool ignore_backoff) {
   if (!g_on || !g_fetch_enabled) {
     return;
   }
@@ -451,7 +435,7 @@ void RequestCatalogueRefresh(std::string_view why) {
       case State::kReady:
         // A page that landed inside this visit clears the wait; a partial list keeps it, so the
         // pages that failed are retried after their backoff rather than on the next keypress.
-        if (now < g_retry_at) {
+        if (now < g_retry_at && !ignore_backoff) {
           return;
         }
         if (SettingsGeneration() == g_fetched_generation && now - g_changed_at < g_ttl) {
@@ -459,7 +443,7 @@ void RequestCatalogueRefresh(std::string_view why) {
         }
         break;
       case State::kFailed:
-        if (now < g_retry_at) {
+        if (now < g_retry_at && !ignore_backoff) {
           REXLOG_DEBUG("store_catalogue: not fetching yet; the last failure asked for {} ms more",
                        std::chrono::duration_cast<std::chrono::milliseconds>(g_retry_at - now)
                            .count());
@@ -477,6 +461,70 @@ void RequestCatalogueRefresh(std::string_view why) {
   g_wake.notify_one();
   PublishCatalogueFetchState(CatalogueFetchState::kFetching, 0, offers_now, {});
   REXLOG_INFO("store_catalogue: fetching up to {} page(s) ({})", g_pages, why);
+}
+
+}  // namespace
+
+void InstallStoreCatalogue() {
+  g_fetch_enabled = !REXCVAR_GET(store_catalogue_off);
+  const std::int32_t ttl = REXCVAR_GET(store_catalogue_ttl_seconds);
+  g_ttl = std::chrono::seconds(ttl > 0 ? ttl : 0);
+  const std::int32_t pages = REXCVAR_GET(store_catalogue_pages);
+  g_pages = pages < 1 ? 1 : (pages > 20 ? 20 : pages);
+  // P7's page cache. Its TTL is this boot's, and the search worker reads the same instance, so the
+  // two actions share both the pages and the single-flight marks.
+  const std::int32_t page_ttl = REXCVAR_GET(store_page_cache_ttl_seconds);
+  SetSharedPageCacheTtl(std::chrono::seconds(page_ttl > 0 ? page_ttl : 0));
+  SetCatalogueFetchEnabled(g_fetch_enabled);
+  // P9-10's failure instrument: a boot can move the API origin, so the press's failed branch is
+  // measurable without touching the machine's network. A refused value is reported rather than
+  // silently ignored, because the boot that expected to fail would otherwise quietly succeed.
+  const std::string api_base = REXCVAR_GET(store_api_base);
+  if (api_base.empty()) {
+    SetApiBaseOverride("");
+  } else if (SetApiBaseOverride(api_base)) {
+    REXLOG_INFO("store_catalogue: the API base is '{}' (store_api_base)", ApiBase());
+  } else {
+    REXLOG_WARN("store_catalogue: store_api_base '{}' is not an absolute http(s) origin; the "
+                "requests keep '{}'",
+                api_base, ApiBase());
+  }
+  PublishCatalogueFetchState(CatalogueFetchState::kIdle, 0, 0);
+  g_on = true;
+  SetOfferSource([] {
+    // Every menu page the store asks for passes through here, so this is where the caption strip
+    // learns which surface is on screen (`store_catalogue_status.h`). The front menu is noted by
+    // the file-cache hook itself, because it never asks for offers.
+    NoteStoreSurface(StoreSurface::kMenuPage);
+    return Snapshot();
+  });
+  TheWorker();  // start the thread now, so the first request only has to wake it
+  REXLOG_INFO("store_catalogue: the RhythmVerse list is the store's Recent source (up to {} page(s) "
+              "per visit, fetched on demand, fresh for {} s, fetching {})",
+              g_pages, g_ttl.count(), g_fetch_enabled ? "on" : "off");
+}
+
+void RequestCatalogueRefresh(std::string_view why) { RequestRefresh(why, false); }
+
+void RequestCatalogueRefreshNow(std::string_view why) { RequestRefresh(why, true); }
+
+bool AnswerCatalogueQuery(std::string_view path, bool* answer) {
+  if (answer == nullptr || !IsCatalogueFailedQuery(path)) {
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    *answer = g_state == State::kFailed && g_offers.empty();
+  }
+  return true;
+}
+
+bool HandleCatalogueWrite(std::string_view path) {
+  if (!IsCatalogueRetryCommand(path)) {
+    return false;
+  }
+  RequestCatalogueRefreshNow("a press asked");
+  return true;
 }
 
 std::string_view CatalogueStateToken() {

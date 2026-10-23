@@ -199,6 +199,8 @@ ResolvedUrl ResolveSameSiteUrl(std::string_view raw, std::string_view required_p
   std::string synthesized;
   std::string_view absolute = text;
   if (text.starts_with('/')) {
+    // `kApiBase`, not `ApiBase()`: the same-site rules below are the download/art policy, and the
+    // measurement override (`SetApiBaseOverride`) is confined to the list/search requests.
     synthesized = std::string(kApiBase) + std::string(text);
     absolute = synthesized;
   }
@@ -691,7 +693,7 @@ std::optional<RequestSpec> BuildRequest(const Query& query, bool search, QueryPr
     return std::nullopt;
   }
   RequestSpec spec;
-  spec.url = std::string(kApiBase) + (search ? kSearchPath : kListPath);
+  spec.url = std::string(ApiBase()) + (search ? kSearchPath : kListPath);
   spec.body = BuildFormBody(query, search);
   spec.headers = {
       {"Content-Type", "application/x-www-form-urlencoded"},
@@ -736,6 +738,68 @@ std::optional<RequestSpec> BuildListRequest(const Query& query, QueryProblem* pr
 
 std::optional<RequestSpec> BuildSearchRequest(const Query& query, QueryProblem* problem) {
   return BuildRequest(query, true, problem);
+}
+
+namespace {
+
+// The base the two request builders above compose, moved only by `SetApiBaseOverride`.
+std::string g_api_base = kApiBase;
+
+}  // namespace
+
+std::string_view ApiBase() { return g_api_base; }
+
+bool IsLoopbackHost(std::string_view host) {
+  const std::string lowered = ToLowerAscii(host);
+  return lowered == "127.0.0.1" || lowered == "::1" || lowered == "[::1]" ||
+         lowered == "localhost";
+}
+
+bool SetApiBaseOverride(std::string_view base) {
+  const std::string_view text = TrimAscii(base);
+  if (text.empty()) {
+    g_api_base = kApiBase;
+    return true;
+  }
+  for (const unsigned char c : text) {
+    if (c <= 0x20 || c == 0x7F) {
+      return false;  // whitespace or a control character cannot appear in an authority
+    }
+  }
+  std::string_view rest = text;
+  constexpr std::string_view kHttps = "https://";
+  constexpr std::string_view kHttp = "http://";
+  bool https = false;
+  if (rest.starts_with(kHttps)) {
+    rest.remove_prefix(kHttps.size());
+    https = true;
+  } else if (rest.starts_with(kHttp)) {
+    rest.remove_prefix(kHttp.size());
+  } else {
+    return false;
+  }
+  if (rest.empty()) {
+    return false;
+  }
+  // The endpoints begin with '/', so a base carrying a path, a query, a fragment or credentials
+  // would build a URL this module never meant to send. Refused rather than silently trimmed.
+  if (rest.find_first_of("/?#@") != std::string_view::npos) {
+    return false;
+  }
+  // Plain http only where it cannot leave the machine: the measurement stub is a loopback server,
+  // and the transport's one scheme exception names the same hosts (`store_http.cpp`).
+  std::string_view host = rest;
+  if (host.starts_with("[")) {
+    const std::size_t close = host.find(']');
+    host = close == std::string_view::npos ? host : host.substr(0, close + 1);
+  } else {
+    host = host.substr(0, host.find(':'));
+  }
+  if (!https && !IsLoopbackHost(host)) {
+    return false;
+  }
+  g_api_base.assign(text);
+  return true;
 }
 
 // --- Listing -------------------------------------------------------------------------------------

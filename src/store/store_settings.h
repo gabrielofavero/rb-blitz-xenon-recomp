@@ -70,4 +70,19 @@ bool ApplyCommittedRow(settings::SettingId id, const settings::Value& value, std
 // Returns false (and leaves `answer` alone) for any other path, so the caller can forward the call.
 bool AnswerStoreQuery(std::string_view path, bool* answer);
 
+// P9-10's press gate, the two paths the RhythmVerse main-menu row's case uses when the catalogue
+// came back empty because the site could not be reached:
+//
+//   rbbz-store/catalogue/failed     one-bit read: no offers are held and the last walk failed
+//   rbbz-store/catalogue/retry      write: start a fresh walk now, ignoring a previous failure's wait
+//
+// The grammar lives here (SDK-free, so `store_client` pins it) beside the other store queries; the
+// state half is the catalogue worker's (`store_catalogue.h`'s `AnswerCatalogueQuery`), and the row
+// is built by `ui/screen`'s `AddRhythmVerseRow`.
+inline constexpr char kCatalogueFailedQuery[] = "rbbz-store/catalogue/failed";
+inline constexpr char kCatalogueRetryCommand[] = "rbbz-store/catalogue/retry";
+
+bool IsCatalogueFailedQuery(std::string_view path);
+bool IsCatalogueRetryCommand(std::string_view path);
+
 }  // namespace rb_blitz::store

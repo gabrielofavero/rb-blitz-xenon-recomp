@@ -100,7 +100,8 @@ of owner screenshots showed the remaining presentation gate: Your Songs still
 sent its online-signin check to `set_offline_mode_headers`, dimming the other
 tabs and hiding LT/RT. Its entry now sends FALSE, like the store, whenever either
 Show Headers or the RhythmVerse master is On; only both Off select offline styling.
-The updated visual behavior is pending the owner's retest.
+The updated visual behavior is pending the owner's retest. *(Superseded 2026-10-23:
+the owner confirmed the corrected swipes and compact layout on the rebuilt binary.)*
 
 Status: **executed for the main-menu entry**, one measured engine constraint left open for the in-song
 entry. Evidence is real boots against the pinned retail image (§4); every "measured" line names its log and

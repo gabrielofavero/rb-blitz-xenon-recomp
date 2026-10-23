@@ -67,6 +67,24 @@ void InstallStoreCatalogue();
 // no-op until the TTL expires, and a failed one backs off before trying again.
 void RequestCatalogueRefresh(std::string_view why);
 
+// P9-10's **user-initiated** walk: the same worker and the same `store_catalogue_pages` budget,
+// but it does not wait out the backoff a previous failure named - the player pressed the row and
+// asked, so the press is not held off by a politeness delay meant for automatic retries. Single
+// flight still folds a burst of presses into the running walk, and a failed attempt re-arms the
+// wait for the automatic path.
+void RequestCatalogueRefreshNow(std::string_view why);
+
+// P9-10's read/write pair on the guest bridge (`src/hooks/settings_bridge_hooks.cpp`), beside the
+// settings snapshot's own queries:
+//
+//   rbbz-store/catalogue/failed   answered true while no offers are held and the last walk failed
+//   rbbz-store/catalogue/retry    starts `RequestCatalogueRefreshNow("a press asked")`
+//
+// `AnswerCatalogueQuery` returns false for any other path so the caller can forward the call;
+// `HandleCatalogueWrite` does the same for a write it does not own.
+bool AnswerCatalogueQuery(std::string_view path, bool* answer);
+bool HandleCatalogueWrite(std::string_view path);
+
 // The log token for the catalogue's current state: `fresh`, `fetching`, `stale`, `failed`,
 // `off`. Diagnostics only.
 std::string_view CatalogueStateToken();

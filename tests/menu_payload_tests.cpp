@@ -632,6 +632,19 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
       }
       if (name == "ui/background/gen/background.dtb") CheckBar(roots, mask);
       if (name == "ui/gen/transition_screens.dtb") CheckAnimations(roots, mask);
+      if (name == "ui/locale/eng/gen/locale_keep.dtb") {
+        // P9-7/P9-10's store entries ride in every locale the payload edits while the store is on:
+        // the Start caption and the failed-press sentence. Off leaves the locale alone.
+        bool filters = false;
+        bool unreachable = false;
+        for (const auto& root : roots) {
+          if (root.tag != dtb::kArray || root.kids.size() < 2) continue;
+          if (root.kids[0].text == "inline_help_search_filters") filters = true;
+          if (root.kids[0].text == screen::kStoreUnreachableKey) unreachable = true;
+        }
+        CHECK_TRUE(filters == state.store);
+        CHECK_TRUE(unreachable == state.store);
+      }
       for (int current = 0; current < 4; ++current) if (name == kRecords[current]) CheckRoutes(roots, current, mask);
       fs::create_directories((dir / name).parent_path());
       std::ofstream file(dir / name, std::ios::binary);

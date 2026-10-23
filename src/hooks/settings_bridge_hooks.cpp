@@ -65,6 +65,7 @@
 #include "settings/input_bindings.h"
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
+#include "store/store_catalogue.h"
 #include "store/store_download_service.h"
 #include "store/store_search.h"
 #include "store/store_settings.h"
@@ -652,6 +653,14 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     WriteResultCell(base, ctx.r3.u32, store_answer ? 1u : 0u);
     return true;
   }
+  // P9-10's press gate (`rbbz-store/catalogue/failed`): the catalogue holds no offers and its
+  // last walk failed. Answered by the catalogue worker rather than the settings snapshot, and
+  // before the settings gate for the same reason (the main menu's store row depends on it).
+  bool catalogue_answer = false;
+  if (::rb_blitz::store::AnswerCatalogueQuery(path, &catalogue_answer)) {
+    WriteResultCell(base, ctx.r3.u32, catalogue_answer ? 1u : 0u);
+    return true;
+  }
   // P5's download state predicates (`rbbz-store/state/<job>/<state>`,
   // `progress/<job>/at-least/<bucket>`, `error/<job>/<token>`) are the same one-bit read. They
   // are answered here for the same reason: the store owns them, not the settings channel.
@@ -696,6 +705,14 @@ bool TakeWrite(PPCContext& ctx, uint8_t* base) {
     } else {
       REXLOG_INFO("store_search: '{}' {}", path, search_why);
     }
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
+  // P9-10's retry (`rbbz-store/catalogue/retry`) has to be parsed **before** the download handler,
+  // which claims the whole `rbbz-store/` prefix and answers `true` for anything it cannot parse as
+  // a job command ("refusing a malformed write") - the same reason P4's search keys come first.
+  if (::rb_blitz::store::HandleCatalogueWrite(path)) {
+    REXLOG_INFO("store_catalogue: '{}' asked for a fresh walk", path);
     WriteResultCell(base, ctx.r3.u32, 0);
     return true;
   }

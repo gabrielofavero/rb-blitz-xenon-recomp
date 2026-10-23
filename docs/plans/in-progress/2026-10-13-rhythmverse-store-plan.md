@@ -2409,17 +2409,19 @@ one.
 | P9-6 | Todo | Store surface (3 prompts) | **6a** the download/install status, Cancel and Download Again live in the details page's own box (guest-drawn); **6b** a retail popup on leaving the store or reaching Your Songs announces new songs after an install; **6c** the credit line goes, RhythmVerse stays credited in **Credits** | P5's strip, P7's credit line |
 | P9-7 | Done | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
 | P9-8 | Done | Store footer | Hide **Y View Item** where it does nothing | — |
-| P9-9 | In Progress | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
-| P9-10 | In Progress | Catalogue | Warm Recently Added at boot; a failed press draws the connection-failed popup (P9-6b's panel) and retries in the background — nothing is hidden | P7's fetch-on-open |
+| P9-9 | Done | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
+| P9-10 | Done | Catalogue | Warm Recently Added at boot; a failed press draws the retail connection-failed popup and retries in the background — nothing is hidden | P7's fetch-on-open |
 | P9-11 | Todo | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
-| P9-12 | In Progress | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
+| P9-12 | Done | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
 | P9-13 | Todo | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
 
 Status checked 2026-10-23 against this section's records and the tree: **Done** = the prompt's
 Done-when is met by a record; **In Progress** = part is landed and the closing measurement is owed;
-**Todo** = nothing is in the tree. Evidence for the non-Done rows: P9-9 has its host implementation and remains open for its closing measurement; P9-5
+**Todo** = nothing is in the tree. Evidence for the non-Done rows: P9-5
 landed 2026-10-23 (the label, the four row forms and the `store_front_menu_row` diagnostic) and the
-owner's boot reads `RECENTLY ADDED / SEARCH` with no digit beside either row; P9-6 has none of its
+owner's boot reads `RECENTLY ADDED / SEARCH` with no digit beside either row; **P9-9 is Done
+(owner's boot, 2026-10-23)** — the split-controls record's ordered tab ring works on the rebuilt
+binary, closing the walk the prompt's Done-when names; P9-6 has none of its
 three parts
 (`src/ui/help_overlay.cpp:381` still draws `DownloadStatusText`, `src/store/store_catalogue_status.cpp:118`
 still returns `kStoreCreditText`, and no `notice/pending` predicate exists); **P9-7 and P9-8 are
@@ -2430,15 +2432,16 @@ in `src/settings/menu_payload.cpp` with the `inline_help_search_filters` locale 
 clear the Y caption on all three store surfaces, and the owner's retest on the release build read
 the store root's footer correct after the panel-enter correction; the acceptance harness's
 Store-leg steps (footer `SEARCH FILTERS`, Start → the filter page, Back → the store menu, no
-`VIEW ITEM` on any store surface) stay as the standing check; P9-10 measured its
-boot prewarm (`src/rb_blitz_app.h:381`) and owes items 2-3 (the failed-press popup and the
-background retry); P9-11's authored key pages are still registered in `src/ui/settings_screen.cpp`;
-P9-12's labels and default are in the tree (`kRhythmVerseLabel` is `RhythmVerse`,
-`kDlcRowRefreshLabel` is `Refresh Songs`, `general.refresh_music_library` compiles On); the
-harness's fixture no longer names `refresh_music_library` and its Enable leg reads the renamed rows
-(2026-10-23, record below), so the remaining step is the owner's boot check on the rebuilt
-binary - not a missing code half; P9-13 has no `audio_type`, `charter` or `release_date` on
-`SongFile` or `Offer`.
+`VIEW ITEM` on any store surface) stay as the standing check; **P9-10 is Done (measured
+2026-10-23)** — the boot prewarm (2026-10-22), then items 2–3 (popup, press-asked retry, recovery)
+measured in one boot against a loopback stub via the new `store_api_base` diagnostic: two refusing
+presses each drew the retail popup and logged `(a press asked)`, the third after the stub was
+flipped served four pages and the Recent list opened with its offers
+(`out/_swap/p910-fail/run3/20261023-151158`); P9-11's authored key pages are still registered in
+`src/ui/settings_screen.cpp`;
+**P9-12 is Done (owner's boot, 2026-10-23)** — the main menu's `RHYTHMVERSE` / `REFRESH SONGS`
+labels and the refresh entry's compiled-On default were confirmed on the rebuilt binary; P9-13 has
+no `audio_type`, `charter` or `release_date` on `SongFile` or `Offer`.
 
 ### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
 
@@ -2493,11 +2496,13 @@ finished the halves the prompt still owed and closed the owner-visible gap that 
   `general.refresh_music_library = false` with `manual` provenance, which is why their menu had no
   refresh row at all; with their approval that stored value and its provenance row were removed on
   2026-10-23, so the compiled default applies on the next boot.
-- **Not measured**: the boot OCR itself. The owner chose to check it themselves on the rebuilt
-  binary (the recipe: main menu `RHYTHMVERSE` + `REFRESH SONGS`; Help & Options → General →
-  Downloadable Content reads `Refresh Songs: On`; Interface → Main Menu reads `Download content:
-  Hidden` and `Refresh Songs: Visible`). P9-12 stays **In Progress** in the table until that check is
-  recorded.
+- **Not measured at this record's time**: the boot OCR itself. The owner chose to check it
+themselves on the rebuilt binary (the recipe: main menu `RHYTHMVERSE` + `REFRESH SONGS`; Help &
+Options → General → Downloadable Content reads `Refresh Songs: On`; Interface → Main Menu reads
+`Download content: Hidden` and `Refresh Songs: Visible`). *(Superseded by the close-out below.)*
+- **Close-out (owner's boot, 2026-10-23) — P9-12 is met.** The owner confirmed the two renamed rows
+and the refresh entry's compiled-On default on the rebuilt binary; read by hand, no capture stored.
+**P9-12 → Done.**
 
 ### P9-13 — the box that carries Download / Cancel carries the custom's own credit block (2026-10-22)
 
@@ -2858,8 +2863,8 @@ TRUE, since neither trigger has a destination. The shared background definition
 remains unchanged while Show Headers is On. Regression tests pin both the trigger
 cases and this screen-entry call, including the actual generated retail records
 for all four switch combinations. **Visual retest remains with the owner**; these
-checks do not navigate the game.
-
+  checks do not navigate the game. *(Superseded 2026-10-23: the owner confirmed the
+  corrected swipes and compact layout on the rebuilt binary.)*
 **P9-4 split-controls record (2026-10-23; owner update).** The owner reported
 that the preceding combined header/navigation correction **worked perfectly**,
 then requested independent **Show Messages** and **Show Recommendations** rows
@@ -2895,7 +2900,8 @@ The page has two rows in both contexts; no new page is needed.
   in both directions, arrow state, labels, badge and preserved preview cleanup.
   Evidence: `out/_swap/split-headers/records/state-0..7/`, where the state bits
   are store=1, Messages=2, Recommendations=4. **In-game retest of the new split
-  remains with the owner.**
+  remains with the owner.** *(Superseded 2026-10-23: the owner confirmed the tabs
+  and the split switches on the rebuilt binary - see the P9-9 close-out.)*
 
 **Final defaults (owner update, 2026-10-23): Show Messages = true; Show
 Recommendations = false.** These replace the split record's initial On/On
@@ -3356,7 +3362,8 @@ closing step.**
 song-list trigger cases offline and skips MESSAGES/RECOMMENDED while hidden.
 The subsequent **P9-4 split-controls record** implements the master-dependent
 tab visibility and the full ring for all eight states; that split's in-game
-acceptance remains pending with the owner.
+acceptance remains pending with the owner. *(Superseded the same day by the close-out
+below: the owner confirmed the tabs on the rebuilt binary.)*
 
 - **Measured starting point** (both dumps are in §8): the song list already carries the two cases —
   `out/_swap/song_select.tree.txt:1627` (`kAction_PageDown` → the store via `which_store_screen`) and
@@ -3373,6 +3380,12 @@ acceptance remains pending with the owner.
 - **Done when**: one boot walks Your Songs → RT → the store front menu → LT → Your Songs, with the
   highlight following the tab; with the master off the RhythmVerse tab is not drawn; with P9-4 off
   neither Messages nor Recommended is drawn; P9-7's Start/Back still behave from the store.
+
+**P9-9 close-out (owner's boot, 2026-10-23) — P9-9 is met.** The owner confirmed on the rebuilt
+binary that the song list's LT/RT tabs navigate as the split-controls record describes (Your Songs →
+RhythmVerse → Messages → Recommended, each disabled tab skipped), which is the Done-when's walk and
+the visibility rule in one reading. Read by hand, no capture stored — the same standing as P9-5's
+and P9-7's owner boots. **P9-9 → Done.**
 
 ### P9-10 — warm **Recently Added** at boot; a failed press says so and retries
 
@@ -3508,6 +3521,122 @@ re-entry (20:09:01) faulted before the serve hook logged anything.
   `RBBLITZ_LINK_MAP` build option, and two trace lines in `docs/engine/diagnostics.md`
   (`art request …`, the completion's `wrapper=…`). The temporary step hooks used to bisect the
   completion (match/decode/upload) were removed again.
+
+**P9-10 status (2026-10-23) — the boot half is done, the failure half is not.** *(Superseded the
+same day by the two records below: items 2–3 landed, and the failure clauses were then measured in
+the game against a loopback stub — the plan entry is **Done**.)* Since the two records above, the
+phase stood at:
+
+| Item | State |
+| --- | --- |
+| 1. warm Recently Added once per boot (`RequestCatalogueRefresh("the boot asked")`, `src/rb_blitz_app.h`) | **Landed and measured** (2026-10-22, release build: all four pages by the title screen, the press serves 75,229 bytes and opens the browser) |
+| the "sometimes crash" symptom | **Closed** (second-visit cover decode fixed with one guest buffer per served path per boot) |
+| 2. a failed press draws the connection-failed popup instead of the empty page | **Landed 2026-10-23 and measured** (two refusing presses, one boot: the retail popup over the main menu, the row still listed) |
+| 3. the same press starts a fresh background walk (and a press inside P7's backoff bypasses the wait) | **Landed 2026-10-23 and measured** (`'rbbz-store/catalogue/retry' asked for a fresh walk` + `(a press asked)` on every press while refusing; the first press after the stub answered served 4 pages and opened the Recent list) |
+
+So an unreachable catalogue still answered the press with the retail empty page plus the caption
+strip's failure sentence (the P7 line), and a press inside a cold fetch's ~3 s still met that
+empty page. P9-10 stayed **In Progress** on items 2–3, whose work was exactly the prompt's `Do`
+bullets 2 and 3 above — landed, with the owed boots, in the record that follows.
+
+**P9-10 record (2026-10-23) — items 2–3 landed: a failed press says so and asks for a fresh walk;
+the closing boot is owed.** Nothing is hidden (the owner's re-scope above): with an unreachable
+catalogue the main-menu row and the RhythmVerse tab stay, and the press answers with the retail
+popup while a new walk starts in the background.
+
+- **The row's case**, one shape in `AddRhythmVerseRow` (`src/ui/settings_screen.cpp`):
+  `{if_else {file_exists "rbbz-store/catalogue/failed"} {do {write_file
+  "rbbz-store/catalogue/retry" 0} {error_popup_panel show_popup rbbz_store_unreachable
+  splash_panel}} {if {file_exists "rbbz-store/enabled"} {ui goto_screen store_menu_screen}}}` — the
+  retry write first and the popup last, so nothing re-focuses after the panel takes the focus; the
+  popup is the `error_popup_panel` / `splash_panel` pair retail's own `splash_dlc` case uses on this
+  screen (§2.1), and the press after a success is P1's unchanged enabled gate.
+- **The predicate** — `store::AnswerCatalogueQuery` (`src/store/store_catalogue.cpp`) answers
+  `rbbz-store/catalogue/failed` true **iff** the catalogue is `kFailed` **and** holds no offers. A
+  walk that failed *after* publishing offers therefore leaves the press alone: the strip's P7
+  sentence still describes that visit, and P9-6c owns its wording.
+- **The retry** — `store::HandleCatalogueWrite` claims `rbbz-store/catalogue/retry` and calls
+  `RequestCatalogueRefreshNow("a press asked")`, the one worker with the same
+  `store_catalogue_pages` budget and the same silence, reached through a `ignore_backoff` flag that
+  skips `g_retry_at`. P7's automatic path (`RequestCatalogueRefresh`, boot prewarm and the store's
+  own open) keeps the wait; a failed retry restores it. **Single flight** is untouched: `kFetching`
+  returns before the backoff branch, so a burst of presses folds into the walk already running, and
+  the master-off gate still refuses at the top of `RequestRefresh`.
+- **The bridge order** (`src/hooks/settings_bridge_hooks.cpp`): the predicate is answered in
+  `TakeExists` beside P1's `AnswerStoreQuery`, and the write is offered to `HandleCatalogueWrite`
+  **before** `HandleDownloadWrite`, which would otherwise claim the whole `rbbz-store/` prefix.
+- **The sentence** — `rbbz_store_unreachable` → *RhythmVerse could not be reached. Try again
+  later.*, added beside `inline_help_search_filters` through `screen::AddLocaleEntry`, so a build
+  with the store off carries neither token.
+- **Pinned by tests**: `store_client` (**413 checks**) pins both path predicates exact (trailing
+  slash, prefix, foreign namespace all refused); `settings_screen` (**141602**) pins the row's
+  shape (the predicate path, the retry as `{write_file … 0}` before the popup, the popup's three
+  arguments and `splash_panel` last, and the else branch as the enabled gate); `menu_payload`
+  (**1692**) pins both locale entries to `state.store`. `ctest` **47/47**.
+- **Still owed (the prompt's Done-when)**: a boot **pointed at an unreachable host** — no
+  diagnostic switch covers this, `store_catalogue_off` leaves the state `kIdle` (so the popup is
+  correctly *not* drawn) and the API base is a compile-time constant
+  (`src/store/rhythmverse_client.h:47`), so the measurement needs the name blocked outside the game
+  (a hosts-file mapping of `rhythmverse.co` to `127.0.0.1`, or the network down). What that boot
+  must show: the first press draws the popup and logs `store_catalogue: fetching … (a press asked)`
+  while the row and the tab stay; a second press draws the same popup and starts another walk; once
+  the block is lifted the next press on the same row opens the store with offers. Until then the
+  failure surface is **built and pinned, unmeasured in the game**. *(Superseded the same day: the
+  instrument named in the next record — `store_api_base` and a loopback stub — measured all three
+  clauses in one boot; the tab is P9-9's and was not part of that boot.)*
+
+**P9-10 record (2026-10-23, second) — measured: the popup, the press-asked retry, and the recovery,
+all in one boot.** The measurement needed a host that could fail *and then answer* inside one boot,
+which the hosts file cannot give; so the boot got an instrument of its own.
+
+- **The instrument — `store_api_base`** (Diagnostics cvar, requires a restart): an absolute
+  `http(s)://host[:port]` origin with no path that the **list and search** requests are built against
+  (`store::ApiBase` / `SetApiBaseOverride`, `src/store/rhythmverse_client.{h,cpp}`). Empty keeps
+  `https://rhythmverse.co`; a value that is not a bare origin is refused at install and reported
+  (`store_catalogue: store_api_base '…' is not an absolute http(s) origin; the requests keep '…'`).
+  It moves **only** list/search: the download and artwork resolution stays same-site with
+  `rhythmverse.co` (§3.1), so no diagnostic boot can be talked into fetching a package elsewhere.
+  `tests/store_client_tests.cpp` pins both (the builders follow it, same-site resolution does not,
+  every malformed value refused, the loopback spellings).
+- **Plain http is loopback-only.** The transport refused `http://` outright on the first attempt
+  (`run1`: "the transport only speaks HTTPS", before any socket), so `store_http.cpp` now allows
+  plain http for a **loopback** host and nothing else, and `SetApiBaseOverride` refuses a
+  non-loopback `http://` base for the same reason; both read one predicate (`IsLoopbackHost`:
+  `127.0.0.1`, `::1`, `[::1]`, `localhost`). The package transfer
+  (`store_transfer_winhttp.cpp`) stays strict and says why in a comment. `store_http.cpp`'s
+  `WINHTTP_FLAG_SECURE` is now set from the scheme instead of always.
+- **The stub and the probe**: `scripts/store_stub_api.py` answers every request `503` while a flag
+  file exists and a captured real list page once it is gone (no `Retry-After`, so the wait in play
+  is the catalogue's own); `scripts/probe_store_failure.ps1` starts it, boots
+  `--store_api_base=http://127.0.0.1:<port>`, and drives the three presses, lifting the flag before
+  the third. The payload is one real body captured with the client's own form body.
+- **Measured (`out/_swap/p910-fail/run2/20261023-150750`, release build, the owner's profile)**:
+  15:08:06 `the API base is 'http://127.0.0.1:8765' (store_api_base)` then
+  `fetching … (the boot asked)` → `HTTP 503; the next attempt waits 60 s`; **15:09:31 press →
+  `fetching … (a press asked)` + `'rbbz-store/catalogue/retry' asked for a fresh walk`** while the
+  stub logs the request, and `popup.png` shows the retail popup over the main menu; **15:09:45 the
+  second press → the same pair** (`popup2.png`), i.e. drawn on every press and not once per boot;
+  the flag lifted, **15:10:09 the third press → four pages served, `4 page(s) -> 76 offer(s)`** and
+  `serving.png` reads the retail front menu (`RECENTLY ADDED`, `YOUR SONGS`, `SEARCH`, the
+  `SEARCH FILTERS` footer, `BACK`). Every menu capture after a popup still lists `RHYTHMVERSE`, so
+  nothing is hidden. **Fault lines: 0.**
+- **Measured again with the Recent row (`out/_swap/p910-fail/run3/20261023-151158`)**: the same
+  three clauses (walks at 15:13:37, 15:13:51 and 15:14:01 while refusing; 15:14:14 serving), and
+  `page.png` / `page-late.png` read the **served offers**: `HUWAG NA HUWAG MONG SASABIHIN`,
+  `EVERYBODY'S GOT TO LEARN SOMETIME`, `MIGRAINE`, `SWEET TALK 101`, `NEWPORT LIVING`, `RENT TO
+  OWN`, `FOR EVERY LIFE`, `AO TO NATSU`, `CUT E CORD`, with the details panel on `KITCHIE NADAL` /
+  `POP-ROCK` / `NO PART` — the later press opens the list.
+- **The sentence, from the owner's own boot** (same build, screenshot kept with this record): the
+  message box reads **RhythmVerse could not be reached. Try again later.** with *Press A to
+  Continue*, drawn by the retail panel over the main menu — the panel, the ack and the focus are
+  retail's own, which is the point (`error_popup_panel` / `splash_panel`).
+- **Note on the counts**: 76 offers is the stub's doing — it serves the same page for pages 1..4
+  because it has no cursor, so the walk lists the same 19 eligible offers four times. The site's
+  own walk measured 99 distinct offers on 2026-10-22; nothing about either number is a claim about
+  the other.
+- **Not measured here**: the RhythmVerse **tab**. It is P9-9's surface and follows the master
+  switch (measured 2026-10-23); nothing in the failure path touches a record that draws it. The
+  main-menu row, which the failure path *does* own, was read on every capture above.
 
 ### P9-11 — Search uses the title's own keyboard; the authored keys retire
 

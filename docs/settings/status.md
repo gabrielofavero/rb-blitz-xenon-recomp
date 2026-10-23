@@ -65,12 +65,15 @@ Part 1 wherever they disagree.
   and Off skips the hidden pages when navigating between Your Songs and the store.
   All four switch combinations build from the real extracted records without
   refusals and round-trip byte-identically. **In-game retest pending with the owner**;
-  the crash is not claimed fixed from host tests alone. The owner's subsequent
+  the crash is not claimed fixed from host tests alone. *(Superseded 2026-10-23: the
+  owner confirmed the corrected behavior on the rebuilt binary, and the split block
+  above records it.)* The owner's subsequent
   screenshots exposed a separate presentation gate: Your Songs still chose the
   offline header Flow (dim tabs, no LT/RT), while the store chose the full header.
   The song screen now selects the full header whenever either switch is On.
   The host matrix asserts this entry call in the actual generated retail records;
-  visual confirmation remains pending with the owner.
+  visual confirmation remains pending with the owner. *(Superseded 2026-10-23: the
+  owner confirmed the corrected swipes and compact layout.)*
 
 - **The RhythmVerse store's settings are in the game (2026-10-20, RhythmVerse plan P6).** Under
   **General ▸ Downloadable Content ▸ RhythmVerse** (first row, P9-3): `RhythmVerse`
