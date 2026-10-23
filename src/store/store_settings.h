@@ -8,8 +8,11 @@
 //
 //   * **Workers never read the settings store or a cvar registry** (project rule). They read an
 //     immutable snapshot handed to them, so a commit can only ever affect the *next* request.
-//   * **A commit is live.** `ApplyCommittedRow` replaces the snapshot in-process, which is why the
-//     six rows are `hot` in the schema: the effect is the next catalogue request, not the next boot.
+//   * **A filter commit is live.** `ApplyCommittedRow` replaces the snapshot in-process, which is
+//     why the five instrument leaves are `hot` in the schema: the effect is the next request, not
+//     the next boot. The **master** is `restart` (owner pass, plan §9/P9-2, 2026-10-22): the row it
+//     also owns - the main-menu entry - and the store's heading are baked when the boot builds its
+//     payload, so its value reaches this snapshot through `SeedStoreSettings` on the next start.
 //   * **Master off means no requests.** The workers ask `enabled` before they touch the network; the
 //     filter's five leaves stay meaningful (and editable) while the master is off.
 //

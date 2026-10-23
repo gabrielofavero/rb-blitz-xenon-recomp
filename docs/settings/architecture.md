@@ -1332,7 +1332,7 @@ for the rest: save first, spawn exactly one child that waits for this process to
 It is **not** the authored restart prompt (§6.1) and **not** the boot wiring that calls the coordinator
 (`src/main.cpp`'s bootstrap entry, §6.2) — both named, with the shape they need, in §6.
 
-### 2. The strategy table, and why only two rows are hot
+### 2. The strategy table, and which rows are hot
 
 `src/settings/schema.cpp` carries a single table (`kStrategies`), materialized into `Descriptor::strategy`
 by `BuildDescriptors` and read without a descriptor list by `schema::StrategyOf`. Tests assert the table is
@@ -1344,6 +1344,8 @@ complete, that a `hot` row always carries evidence, that a `restart` row never d
 | --- | --- | --- |
 | `graphics.vsync` (`kVsync`) | **hot** | **Measured**: with the guest running, the host flipped this exact cvar and the discovery rate moved from 16.66 ms per item to 5.68 ms (46.7 s → 15.96 s for 2,807 items), the log recording `vsync false, was true` 7 ms after the flip — [dlc.md](../guides/dlc.md) §"Frame pacing for the discovery". The mechanism is the GPU plugin's worker re-reading `vsync` every iteration. |
 | `interface.settings_labels` (`kSettingsLabels`) | **hot** | **Measured 2026-10-14**: the caption overlay re-reads `settings_help_overlay` in `HelpOverlayDialog::OnDraw` on every frame, so flipping the row in Help & Options hid the caption on the next draw — `hot_apply: settings_help_overlay = false (was true), applied to the running game` and `settings_bridge: applied 'interface.settings_labels' to the running game; the row carries no pending state`, with no `request_restart` in the log — [status.md](status.md) §"Row descriptions". |
+| `general.rhythmverse_{guitar,bass,drums,vocals,keys}` (`kRhythmVerse*` leaves) | **hot** | **Measured 2026-10-20** (host): the applier replaces the store's immutable settings snapshot, which its workers read before every request, and `store_client` observes the generation bump on a real commit and its absence on an equal one. No guest state is involved, which is what makes the swap legal on the commit's own thread. |
+| `general.rhythmverse` (`kRhythmVerse`, the master) | restart | The switch owns what the boot **drew** as well as what a worker reads: the main-menu *RhythmVerse Customs* row is compiled into the record the boot generates and the store's heading is a locale entry the payload replaces, so a mid-session change would leave one of the two surfaces lying until the next start. Made `restart` by the owner pass of 2026-10-22 (RhythmVerse plan §9/P9-2), after the cost of a live row presence was weighed against a prompt the surface already has; the same reasoning will apply to P9-9's tab and P9-10's hidden flow. |
 | everything else | restart | Nothing has a measured live effect. Notably `interface.hide_hud` — the parent plan §5.5 named Hide HUD as its hot example **before** P6 measured when the provider reads its values (the payload's loader fills its DTA variables before the first frame), so the honest answer for it is `restart`. The render-path rows are structurally restart (§5.5); the remaining native rows are read at boot by their consumer. |
 
 One candidate has a live read in the code and **no measurement yet**, staying `restart` until one exists:
@@ -1374,12 +1376,17 @@ prompt decision — not the descriptors — because a session can contain a hot 
 
 ### 4. The runtime applier, and the thread rule
 
-`src/hooks/hot_apply_runtime.cpp` knows exactly two rows:
+`src/hooks/hot_apply_runtime.cpp` knows two kinds of live write:
 
 ```text
 graphics.vsync             -> rex::cvar::SetFlagByName("vsync", "true"|"false")
 interface.settings_labels  -> rex::cvar::SetFlagByName("settings_help_overlay", "true"|"false")
+general.rhythmverse_<i>    -> store::ApplyCommittedRow (replaces the store's settings snapshot)
 ```
+
+The store's **master** is not among them: it is `restart` (RhythmVerse plan §9/P9-2), so the seam
+never asks the applier for it and the table above deliberately omits it - a row listed here is a
+claim that a commit reaches the running game.
 
 * **By name**, because `vsync` is defined in `rexruntime.dll`'s GPU category and `settings_help_overlay` is
   defined by the game's own overlay module (`src/ui/help_overlay.cpp`); this project defines no storage

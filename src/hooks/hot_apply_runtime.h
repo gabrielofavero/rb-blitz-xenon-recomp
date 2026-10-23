@@ -2,13 +2,16 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // P9 - the runtime half of the live apply (src/settings/hot_apply.h owns the seam). This file is
-// the only place that knows HOW a `hot` row reaches the running game, and today it knows exactly
-// one row:
+// the only place that knows HOW a `hot` row reaches the running game, and it knows two kinds:
 //
-//   * `graphics.vsync` writes the SDK's own `vsync` cvar **by name**, because it is defined in
-//     `rexruntime.dll`'s GPU category and this project defines no storage symbol for it. The same
-//     call R7's frame pacing already makes, and the reason the row is `hot` at all: with the guest
-//     running, that write moved the discovery from 16.66 ms per item to 5.68 ms (docs/guides/dlc.md).
+//   * `graphics.vsync` and `interface.settings_labels` write a cvar **by name**, because `vsync`
+//     is defined in `rexruntime.dll`'s GPU category and `settings_help_overlay` by the game's own
+//     overlay module; this project defines no storage symbol for either. Both rows are `hot`
+//     because a boot measured the effect (docs/guides/dlc.md's frame pacing, docs/settings/
+//     status.md's Settings Labels).
+//   * The five RhythmVerse **filter** leaves replace the store's in-process settings snapshot,
+//     which its workers read before every request (src/store/store_settings.h). The master is not
+//     here: it is `restart` (plan §9/P9-2), because the switch also owns what the boot drew.
 //
 // Two constraints from the project, both structural rather than stylistic:
 //

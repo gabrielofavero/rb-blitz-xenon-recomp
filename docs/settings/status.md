@@ -13,9 +13,12 @@ Part 1 wherever they disagree.
   2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `RhythmVerse Song Filter`, a
   submenu of five instrument booleans (Guitar/Bass/Drums/Vocals On, Keys Off; On = that chart is
   required, Off = no condition, all off = no constraint). The two menu-music rows moved under a
-  `DLC Menu Music` submenu so the page stays at the six-row budget. The six rows are `hot`: the
-  applier replaces the store's in-process settings snapshot, which its workers will read before every
-  request. **Evidence:** `rb_blitz_settings_screen_tests` (136,641 checks) pins the page order,
+  `DLC Menu Music` submenu so the page stays at the six-row budget. The five **filter** rows are
+  `hot`: the applier replaces the store's in-process settings snapshot, which its workers read
+  before every request. The **master is `restart`** since the owner pass of 2026-10-22 (plan
+  §9/P9-2): the switch also owns what the boot drew - the main-menu *RhythmVerse Customs* row and
+  the store's heading - so a change opens the restart confirmation when Help & Options is left, and
+  *Close* finishes the leave with the running process still on its pre-change value. **Evidence:** `rb_blitz_settings_screen_tests` (136,641 checks) pins the page order,
   labels and both contexts, and pins the master's compiled default to On against
   `schema::FindRow(kRhythmVerse)`; `rb_blitz_store_client_tests` pins the row → snapshot mapping
   (the snapshot's own default is On, a commit bumps the generation, an equal commit does not). The
@@ -26,6 +29,14 @@ Part 1 wherever they disagree.
   log, while the main menu's own refresh row still dispatches. The harness's Enable leg is what
   proves the default: its profile never names the setting, the page draws `RhythmVerse: On`, the
   boot adds no key to the profile, and the same boot's main menu already carries the store row.
+  **The restart rule is measured too (P9-2, 2026-10-22)**: `scripts/probe_master_restart.ps1` flips
+  a filter leaf and then the master through the page — the leaf is applied live
+  (`hot_apply: general.rhythmverse_guitar = false`) and leaving asks for nothing, the master is never
+  applied live and leaving draws `settings_restart_screen` once (`Restart now` / `Close`), *Close*
+  finishes the leave with the menu still drawing the store row, and the next boot, on the file the
+  game committed, has no store row and makes no store request
+  (`out/_swap/master-restart/20261022-214004/session.log`,
+  `out/_swap/master-restart/20261022-214555/next-boot.log`, 9 steps / 0 failures).
 - **RhythmVerse search is typed on an authored keyboard (2026-10-20, RhythmVerse plan P4).** There
   is no retail keyboard to reuse — all 131 compiled DTA records were decoded and the only entry
   point is `rbworld_link_panel show_keyboard`, a *native* method of the Rock Central e-mail panel —

@@ -1973,7 +1973,10 @@ Remaining honest limits (P5's exit is met; these are the parts it does not claim
   snapshot** (generation 1 = compiled defaults; an equal publish keeps the generation), and
   `src/hooks/hot_apply_runtime.cpp` applies a committed row to it — no cvar, no guest state — so the
   six rows are `kHot` with that observed behaviour as their evidence. Workers will read the snapshot
-  and never the settings store or a cvar registry (project rule).
+  and never the settings store or a cvar registry (project rule). **Superseded 2026-10-22 by
+  §9/P9-2, for the master only**: `general.rhythmverse` is `kRestart`, because the switch also owns
+  what the boot drew (the main-menu row and the store's heading), while the five filter leaves keep
+  the `kHot` this record measured.
 - **Tests**: `settings_screen` grew `TestRhythmVerseRows` (page order for all three pages, both
   contexts, exact labels, the 28-character line budget, and the two new panels' in-song twins) and
   its pinned page counts moved 57 → **59** per context (114 → **118**, non-root cancels 112 →
@@ -2400,7 +2403,7 @@ one.
 | P9-7 | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
 | P9-8 | Store footer | Hide **Y View Item** where it does nothing | — |
 | P9-9 | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
-| P9-10 | Catalogue | Warm Recently Added at boot; on failure the offline popup, then the hidden flow | P7's fetch-on-open |
+| P9-10 | Catalogue | Warm Recently Added at boot; a failed press draws the connection-failed popup (P9-6b's panel) and retries in the background — nothing is hidden | P7's fetch-on-open |
 | P9-11 | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
 
 ### P9-1 — the master switch defaults On
@@ -2487,9 +2490,11 @@ proves it instead of flipping it:
   (`docs/settings/architecture.md` part 6 §6.1) - offers `Restart now` / `Close`. Keep the five
   instrument leaves `kHot`: their live effect is measured (P7's cancellable walk, the page cache
   keyed by the request body).
-- **Also bound to the master later**: P9-9's RhythmVerse tab and P9-10's hidden flow each add a
-  surface the switch owns. A hot master would owe those in the same boot as well, which is the
-  second reason Route B is the honest default today; say so in the record if Route B lands.
+- **Also bound to the master later**: P9-9's RhythmVerse tab adds a surface the switch owns. (P9-10
+  first carried a hidden flow beside it; its 2026-10-22 scope change retired that — a failed press
+  says so and retries, nothing is hidden.) A hot master would owe that tab in the same boot as
+  well, which is the second reason Route B is the honest default today; say so in the record if
+  Route B lands.
 - **Move with it**: the pinned hot-row list in `tests/settings_hot_apply_tests.cpp` (six store rows
   today), P6's "the six rows are `kHot`" sentence (supersede with a line naming this prompt), and
   `docs/settings/menu.md`'s hot/restart column. Route A also owes a live-presence case (the built
@@ -2501,6 +2506,66 @@ proves it instead of flipping it:
   `Close` leaves the store on its pre-change value and makes no request; `Restart now` relaunches
   and the new value acts (row present/absent, prewarm done/not); flipping a filter leaf asks for
   nothing. The record names which route landed and why.
+
+**P9-2 record (2026-10-22) — Route B landed: the master is `restart`, the five filter leaves stay
+`hot`.** The owner's rule is a hot master only while the main-menu row **and** the store's heading
+follow a commit live. Neither does: the row is compiled into the record the boot generates (§5/P1)
+and the heading is a locale entry `SetStoreHeading` replaces in that same payload, so a mid-session
+change would leave one of the two lying — and a hot master would also owe P9-9's RhythmVerse tab and
+P9-10's hidden flow in the same boot. Route A therefore stays unproven (a live row presence plus a
+live heading replacement is its own spike), and the prompt the surface already has is the honest
+answer.
+
+- **Code**: `kStrategies` carries `kRhythmVerse` as `kRestart` with an empty evidence string, and the
+  five `kRhythmVerse*` leaves keep `kHot`; the runtime applier's store table drops the master (the
+  seam is never asked for it, and listing it would be a second, quieter claim), and
+  `store_settings.h` says where the master's value does come from — `SettingsBoot::SeedStoreSettings`
+  at boot, which is also what lets *Close* leave the running store on its pre-change value.
+- **No new prompt was written**: leaving the merged root already asks `snapshot/restart.pending`,
+  which `SettingsBoot::RestartPending()` answers by comparing every row's effective value with the
+  boot's (`PendingRestartRows`), so a master change opens the authored `settings_restart_screen` and
+  *Close* finishes the leave.
+- **Measured** (`scripts/probe_master_restart.ps1`, release binary, scratch profile, two boots; the
+  session leg is `out/_swap/master-restart/20261022-214004/session.log`, every step green, and the
+  next boot is `out/_swap/master-restart/20261022-214555/next-boot.log`, which that leg's own run
+  reports as **9 steps, 0 failures**):
+  - the page reads `RHYTHMVERSE: ON` on a profile that never named it; the filter page's `Guitar`
+    flips Off and the log carries `hot_apply: general.rhythmverse_guitar = false`;
+  - leaving after the leaf returns to `splash_screen` with **no** `settings_restart_screen` line;
+  - re-entering and flipping the master reads `RHYTHMVERSE: OFF`, the log carries **no**
+    `hot_apply: general.rhythmverse = …` line, and leaving enters `settings_restart_screen` **once**
+    (OCR `RESTART … CLOSE`; the entry count does not move again after *Close*);
+  - the commit makes **no** catalogue request (the boot's own prewarm count is unchanged, 1 before
+    and 1 after) and the store is never opened (`store_fetch: served '` = 0);
+  - *Close* returns to the main menu, which **still draws the store row** (`CUST`) — the session
+    kept the pre-change value;
+  - `settings.toml` carries `rhythmverse = false` and `rhythmverse_guitar = false`, written by the
+    game itself (copied beside the log as `settings-after-session.toml`);
+  - the next boot on that file has no store row (`BLITZ … HELP & OPTIONS EXIT GAME REFRESH MUSIC
+    LIBRARY`, and the host says `settings_menu: the RhythmVerse Customs entry is off (its setting is
+    off)`), reads `RHYTHMVERSE: OFF` on the page, and `store_catalogue: fetching`,
+    `store_fetch: served '`, `store_library: indexing`, `store_download: start` and
+    `store_search: page` are all at 0 matches. Its live-applier line lists seven rows and the
+    master is not among them (`graphics.vsync`, `interface.settings_labels` and the five
+    `general.rhythmverse_*` leaves).
+  *Not measured*: the `Restart now` row's own relaunch. Its mechanics are P3's installed-game review
+  (status item 32) and `game_restart`'s host tests, and the value's action is what the next boot
+  above reads; pressing it here would only re-prove the coordinator.
+- **Environment**: this 4-core machine dropped the GPU ringbuffer (`PRIMARY RINGBUFFER: packet …
+  incomplete … retrying`) on three of the seven boots taken for this prompt, each time on the
+  connect screen with no log line afterwards. Those attempts are kept beside the evidence
+  (`20261022-213310`, `20261022-214349`, `20261022-214452`) and none of them is counted as a result;
+  the two logs above are the green ones. The session leg's run also carried two probe-only failures
+  in the next-boot half — absence needles that matched the modules' own boot announcements
+  (`store_library: `, `store_download: `) instead of their work lines (`… indexing`, `… start`) —
+  fixed before the leg was re-run on its own (`-NextBootOnly`, the run cited above).
+- **Tests**: `settings_hot_apply` pins **7** hot rows and `kRhythmVerse` in the must-stay-restart
+  list (re-promoting it now needs a measurement), and `store_client`'s case title no longer calls
+  the master a live commit; full `ctest` **47/47** in `out/build/win-amd64-debug`.
+- **Docs**: `settings/plan.md` (the row's `hot` → `restart`), `settings/status.md` (at a glance plus
+  the measurement), `settings/architecture.md` part 6 (§2's table, §4's row set), `engine/
+  diagnostics.md` (the new probe), and §5/P6's record carries a superseding line.
+  `settings/menu.md` carries no per-row strategy column for these rows, so it needed nothing.
 
 ### P9-3 — `Downloadable Content ▸ RhythmVerse` first, and a renamed filter
 
@@ -2764,33 +2829,64 @@ Measurements this prompt rides on (2026-10-22, shipped records, no boot):
   highlight following the tab; with the master off the RhythmVerse tab is not drawn; with P9-4 off
   neither Messages nor Recommended is drawn; P9-7's Start/Back still behave from the store.
 
-### P9-10 — warm **Recently Added** at boot; fail once, then hide
+### P9-10 — warm **Recently Added** at boot; a failed press says so and retries
 
 - **Why**: the owner sees the row "sometimes work, sometimes do nothing, sometimes crash". Today the
   first fetch starts when the store opens (`src/store/store_fetch.cpp:194-197`), so the row can be
   pressed into a request still in flight; the in-memory page cache already answers a second visit
   for ~5 minutes (`store_page_cache`), which is the "feels automatic" asked for.
+- **Scope change (owner, 2026-10-22)** — this supersedes the **hidden flow** the prompt first
+  carried (the main-menu row removed, the RhythmVerse tab hidden): **nothing is hidden on
+  failure.** A warm that failed makes the press say so in the same popup P9-6b uses for its
+  install notice — connection failed, try again later — and starts a fresh fetch in the
+  background; if that fetch lands the next press is served the list, and if it does not the next
+  press draws the same popup and asks for another fetch, and so on. No measurement depends on
+  hiding, so that half was retired rather than softened.
 - **Do**:
   1. **prewarm** — with the master on, once per boot after the guest is up, call
      `RequestCatalogueRefresh("the boot asked")` (`src/store/store_catalogue.h:62-68`; installed at
      `src/rb_blitz_app.h:361`). Same worker, same budget (`store_catalogue_pages`), and silent: no
-     strip, no screen, no guest state. A failure lands in the catalogue's existing `failed` state
+     strip, no screen, no guest state. A failure lands in the catalogue's existing `kFailed` state
      with its backoff.
-  2. **failure surface** — a press of the store row with no offers and a failed catalogue shows
-     retail's `error_popup_panel show_popup <token>` (the panel P1's gate used, §2.1) with a **new
-     locale sentence**: RhythmVerse is unavailable right now. Once per boot, not per press. Then the
-     session takes the **hidden flow**: the main-menu row is removed, and the **RhythmVerse tab** is
-     hidden — the same path P9-9 uses when the master is off; MESSAGES and RECOMMENDED keep
-     following P9-4, which is what the owner's "if Show Messages and Recommendations is enabled"
-     leaves standing. Do not fabricate `store_info_unavailable_screen` (§5/P7's note).
-  3. **the three outcomes** — reproduce each with `store_trace` before changing timing: "works";
+  2. **failure surface** — a press of the **RhythmVerse Customs** row while the catalogue holds no
+     offers and its state is `kFailed` (`CatalogueStateToken()` = `failed`) does **not** enter the
+     store: the row's case (P1's `AddRhythmVerseRow`, `src/settings/menu_payload.cpp`) shows
+     `{error_popup_panel show_popup <token> splash_panel}` — the `error_popup_panel` `splash_screen`
+     already carries, whose Ack closes it and returns the focus, and the very call retail's own
+     `splash_dlc` case makes with `store_unavailable_not_online` (§2.1) — with a **new locale
+     sentence** through `screen::AddLocaleEntry`: **RhythmVerse could not be reached. Try again
+     later.** One panel, two sentences (P9-6b's install notice and this one), the same visual. It is
+     drawn on **every** such press, not once per boot. Inside the store, P7's failure sentence still
+     describes a walk that failed after it published offers (P9-6c keeps it); the popup is the
+     press's answer when there is nothing to open.
+  3. **the press retries** — in the same case, beside the popup, a
+     `{write_file "rbbz-store/catalogue/retry" 0}` asks for a fresh background walk
+     (`RequestCatalogueRefresh("a press asked")`: same worker, same `store_catalogue_pages` budget,
+     silent). The read and the write use the bridge's established shapes — a one-bit `file_exists`
+     predicate answered by the catalogue beside P1's `store::AnswerStoreQuery` probes in
+     `src/hooks/settings_bridge_hooks.cpp` (`rbbz-store/catalogue/failed`), and a `write_file`
+     command beside P4/P5's (`rbbz-store/catalogue/retry`). The case, in one shape:
+     `{if_else {file_exists "rbbz-store/catalogue/failed"} {do {write_file
+     "rbbz-store/catalogue/retry" 0} {error_popup_panel show_popup <token> splash_panel}} <P1's
+     enabled gate and the store entry>}` — the retry first, the popup last, so nothing re-focuses
+     after the panel takes the focus. **Single flight** already folds a burst of presses into the
+     one running walk, and this **user-initiated** attempt must bypass P7's remaining backoff wait
+     (`RequestCatalogueRefresh` refuses inside `g_retry_at`, `store_catalogue.cpp:454-465`), so the
+     press path asks with that wait ignored — the automatic refetch keeps it and a failed retry
+     restores it. When the walk lands the catalogue holds offers, so the next press is served the
+     page: the owner's "unblocked" half. A press while a fetch is merely in flight (the prewarm, or
+     a press-asked retry still running) is unchanged: the state is not `failed`, and the retail
+     empty page is what the DTA already handles (the record below measured it).
+  4. **the three outcomes** — reproduce each with `store_trace` before changing timing: "works";
      "nothing" (does the log show `store_catalogue: fetching` and then no page?); and the crash
      (capture its log and fault). This machine drops the GPU ring on roughly one boot in three
      (§5/P8's environment note), so a crash claim needs its own evidence.
 - **Done when**: a boot pressed immediately opens the browser on offers, and its log carries no
   `store_catalogue: fetching` at press time; a boot pointed at an unreachable host draws the popup
-  once and afterwards no store row and no RhythmVerse tab; each of the three symptoms has a recorded
-  cause or a recorded measurement that it is the environment.
+  on the first press, **keeps** the main-menu row and the RhythmVerse tab, and its log carries the
+  press-asked fetch; a second press with the site still down draws the same popup and starts
+  another walk; a later press once the site answers (same boot, same row) opens the list; each of
+  the three symptoms has a recorded cause or a recorded measurement that it is the environment.
 
 **P9-10 record (2026-10-22) — item 1 landed: the catalogue warms at boot; items 2–3 are open.**
 
@@ -2827,6 +2923,9 @@ Measurements this prompt rides on (2026-10-22, shipped records, no boot):
   unreachable site still answers the press with the empty page (the strip's failure sentence is what
   the player sees), and a press inside the ~3 s a **cold** fetch needs — a boot whose prewarm failed
   and whose backoff has expired, or a master turned on after boot — can still meet that empty page.
+  *(Item 2 was re-scoped the same day by the owner — no hidden flow; a failed press draws the retail
+  popup and retries in the background, see the prompt above — and nothing has landed for it yet, so
+  the measurements in this bullet stand.)*
   *(The crash symptom is closed by the record below: it was the second visit's cover decode, not a
   store-visit race.)*
 

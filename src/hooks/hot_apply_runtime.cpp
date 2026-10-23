@@ -35,17 +35,20 @@ constexpr HotRow kHotRows[] = {
     {SettingId::kSettingsLabels, "interface.settings_labels", "settings_help_overlay"},
 };
 
-// The RhythmVerse store's rows (plan P6). They write no cvar: their consumer is the store's own
-// snapshot (src/store/store_settings.h), which the workers read before every request. The write is
-// therefore a host-side swap of an immutable value - no guest state, no cvar registry - and the
-// next catalogue request sees it.
+// The RhythmVerse store's filter rows (plan P6). They write no cvar: their consumer is the store's
+// own snapshot (src/store/store_settings.h), which the workers read before every request. The
+// write is therefore a host-side swap of an immutable value - no guest state, no cvar registry -
+// and the next catalogue request sees it.
+//
+// **The master is deliberately absent** (`restart` since 2026-10-22, plan §9/P9-2). The switch also
+// owns what the boot *drew* - the main-menu row and the store's heading - so the seam never applies
+// it; listing it here would be a second, quieter claim that it can.
 struct StoreRow {
   SettingId id;
   const char* token;
 };
 
 constexpr StoreRow kStoreRows[] = {
-    {SettingId::kRhythmVerse, "general.rhythmverse"},
     {SettingId::kRhythmVerseGuitar, "general.rhythmverse_guitar"},
     {SettingId::kRhythmVerseBass, "general.rhythmverse_bass"},
     {SettingId::kRhythmVerseDrums, "general.rhythmverse_drums"},

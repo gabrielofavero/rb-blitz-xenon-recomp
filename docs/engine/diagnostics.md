@@ -228,6 +228,18 @@ control leg that presses the row and captures what it opened without typing (`-S
 Recent: `out/_swap/search-probe/20261022-105401`). The key press path itself (one token per press,
 `search/key/<token>`) is unchanged from the 2026-10-20 measurement.
 
+**The master switch's restart rule (P9-2, measured 2026-10-22).** `scripts/probe_master_restart.ps1`
+flips a filter leaf and the store's master switch through Help & Options and reads what leaving does.
+A leaf is applied live (`hot_apply: general.rhythmverse_guitar = false`) and asks for nothing; the
+master draws the authored restart confirmation exactly once (`settings_restart_screen`, offering
+`Restart now` / `Close`) and is **never** applied live; `Close` finishes the leave on the session's
+pre-change value (the main menu still draws the store row); the boot makes no extra catalogue
+request from the commit; and the next boot, on the file the game itself committed, has no store row
+and no store request. Two boots write `<OutDir>/<stamp>/session.log` and `next-boot.log`, a
+screenshot per step, and a copy of the committed `settings-after-session.toml`. `-SessionOnly` stops
+after the first boot, and `-NextBootOnly` runs only the second one on the `settings.toml` the session
+leg already committed (it does not rewrite the fixture, which is the point of that leg).
+
 **The acceptance harness (P8, 2026-10-22).** `scripts/acceptance_store.ps1` runs the whole feature
 in four boots and is the only script here that asserts instead of describing: `-Legs Enable` (the
 master switch turned on through Help & Options > General > Downloadable Content, then the committed

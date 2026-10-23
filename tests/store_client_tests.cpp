@@ -767,7 +767,7 @@ void TestMatching() {
 // --- Settings (P6) ---------------------------------------------------------------------------------
 
 void TestStoreSettings() {
-  test::BeginCase("settings: the six rows map onto the store's snapshot, live and idempotently");
+  test::BeginCase("settings: the six rows map onto the store's snapshot, idempotently");
 
   // Defaults: the store is **on** (owner pass of 2026-10-22, RhythmVerse plan §9/P9-1 - the master
   // is a shipped switch, not an opt-in), and the instrument filter is the owner's set (keys off).
@@ -790,8 +790,11 @@ void TestStoreSettings() {
   off.kind = settings::ValueKind::kBool;
   off.boolean = false;
   std::string error;
-  // A commit is live: switching the master off replaces the snapshot, which is the seam the
-  // control leg's silence rests on (Off means no catalogue, art, download or search request).
+  // The snapshot is the workers' view of the six rows: the five filter leaves reach it through a
+  // live commit (`hot`), and the master reaches it at boot (`SettingsBoot::SeedStoreSettings`)
+  // because P9-2 made it restart-scoped - the mapping itself is the same either way. This case is
+  // the mapping's own contract, which is why it exercises the master directly: Off in the snapshot
+  // is what the control leg's silence rests on (no catalogue, art, download or search request).
   CHECK_TRUE(ApplyCommittedRow(settings::SettingId::kRhythmVerse, off, &error));
   CHECK_TRUE(error.empty());
   CHECK_FALSE(Settings()->enabled);

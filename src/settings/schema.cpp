@@ -158,7 +158,8 @@ std::vector<SchemaRow> BuildTable() {
   // filter is a submenu of its own (no SettingId), so its five leaves carry their own group. The
   // master defaults **on** (owner pass, plan §9/P9-1, 2026-10-22): the store is a shipped feature,
   // and Off is the switch that silences it - the workers still ask `StoreSettings::enabled` before
-  // they touch the network, so an Off commit makes no request (RhythmVerse plan §5/P8's control leg).
+  // they touch the network, so an Off session makes no request (RhythmVerse plan §5/P8's control
+  // leg). A master change is restart-scoped (plan §9/P9-2): see its entry in the strategy table.
   rows.push_back(Row(Make(SettingId::kRhythmVerse, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "rhythmverse"}, "dlc", "RhythmVerse",
@@ -369,11 +370,20 @@ std::vector<SchemaRow> BuildTable() {
 // tests/settings_hot_apply_tests.cpp asserts the two agree row by row, which is what keeps them
 // from drifting.
 //
-// **`kHot` is a measurement, not a preference.** Two rows carry it, both because a boot observed
-// the live effect and the evidence column names it:
+// **`kHot` is a measurement, not a preference.** Seven rows carry it, every one because something
+// observed the live effect and the evidence column names it:
 //
 //   * `kVsync` - the GPU plugin's worker re-reads `vsync` every iteration.
 //   * `kSettingsLabels` - the caption overlay re-reads `settings_help_overlay` every draw.
+//   * The five RhythmVerse filter leaves - the store's workers read the snapshot before every
+//     request, and the applier replaces it in-process.
+//
+// The RhythmVerse **master** is `restart` (owner pass, plan §9/P9-2, 2026-10-22): the switch owns
+// what is *drawn*, not only what a worker reads - the main-menu row is compiled into the record the
+// boot generates (plan §5/P1) and the store's heading is a locale entry the payload replaces - so a
+// value committed mid-boot would leave one of the two lying until the next start. The tab P9-9 adds
+// and the hidden flow P9-10 adds will owe the same surface. `settings_hot_apply_tests.cpp` pins
+// this as a row that must stay restart, so a future session promotes it only with a measurement.
 //
 // Everything else is `restart`, and that is a measurement rather than a policy:
 //
@@ -406,13 +416,19 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
     // Consumed by the boot that builds the menu payload, for the same reason.
     {SettingId::kPlayCurrentSong, ApplicationStrategy::kRestart, ""},
-    // RhythmVerse store (plan P6). Nothing in the guest reads these rows: the store's own workers
-    // read the snapshot below, and the applier replaces it in-process, so a commit is effective for
-    // the next request with no restart. The behaviour is measured by the `store_client` suite
-    // (a committed row bumps the snapshot generation and the next read sees the new value).
-    {SettingId::kRhythmVerse, ApplicationStrategy::kHot,
-     "the applier replaces the store's in-process snapshot; `store_client` observes the generation "
-     "change after a commit (no guest state involved)"},
+    // RhythmVerse store (plan P6; the master made restart-scoped by the owner pass, plan §9/P9-2,
+    // 2026-10-22). The **master** owns what is drawn, not only what a worker reads: the main-menu
+    // row is baked into the record the boot generates (plan §5/P1) and the store's heading is a
+    // locale entry `SetStoreHeading` replaces in that same payload, so a value committed mid-boot
+    // would leave one of the two surfaces lying until the next start. A restart is therefore the
+    // honest answer, and the prompt asked when Help & Options is left is what carries it. A hot
+    // master would also owe P9-9's RhythmVerse tab and P9-10's hidden flow in the same boot, which
+    // is the second reason it is not hot today.
+    {SettingId::kRhythmVerse, ApplicationStrategy::kRestart, ""},
+    // The **filter leaves** are `hot`: nothing in the guest reads them. The store's own workers read
+    // the snapshot the applier replaces in-process, so a commit is effective for the next request
+    // with no restart. The behaviour is measured by the `store_client` suite (a committed leaf bumps
+    // the snapshot generation and the next read sees the new value; an equal one does not).
     {SettingId::kRhythmVerseGuitar, ApplicationStrategy::kHot,
      "the applier replaces the store's in-process snapshot; `store_client` observes the filter "
      "change after a commit"},
@@ -432,12 +448,12 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
-    // The one row with measured live evidence, and therefore the one `hot` row. The evidence is
-    // R7's frame-pacing measurement, not a guess about reloadability: with the guest running, the
-    // host flipped this exact cvar and the discovery rate moved from 16.66 ms per item to 5.68 ms
-    // (46.7 s -> 15.96 s for 2,807 items), with the log recording `vsync false, was true` 7 ms
-    // after the flip (docs/guides/dlc.md, "Frame pacing for the discovery"; the mechanism is the GPU
-    // plugin's worker re-reading `vsync` every iteration).
+    // The first row promoted to `hot`, and its evidence is a measurement rather than a guess about
+    // reloadability: with the guest running, the host flipped this exact cvar and the discovery
+    // rate moved from 16.66 ms per item to 5.68 ms (46.7 s -> 15.96 s for 2,807 items), with the
+    // log recording `vsync false, was true` 7 ms after the flip (docs/guides/dlc.md, "Frame pacing
+    // for the discovery"; the mechanism is the GPU plugin's worker re-reading `vsync` every
+    // iteration).
     {SettingId::kVsync, ApplicationStrategy::kHot,
      "flipping the `vsync` cvar with the guest running moved the discovery rate from 16.66 ms per "
      "item to 5.68 ms (46.7 s -> 15.96 s, docs/guides/dlc.md), i.e. a live effect measured in a boot"},
