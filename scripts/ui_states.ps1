@@ -50,7 +50,8 @@ $script:UiBootToTitle = @("wait:28")
 
 # The route to a main-menu row: from the menu, clamp, then tap down `Downs` times
 # and accept. Row 0 is PLAY, 1 LEADERBOARDS, 2 ACHIEVEMENTS, 3 HELP & OPTIONS,
-# 4 DOWNLOAD CONTENT, 5 EXIT GAME (measured: acceptance_screens.ps1's Downs).
+# 4 the row R7 repaints (DOWNLOAD CONTENT, or REFRESH SONGS while the refresh row
+# is on - the default since 2026-10-22), 5 EXIT GAME (measured: acceptance_screens.ps1's Downs).
 function New-UiMenuRoute([int]$Downs) {
     $route = @($script:UiClampUp)
     for ($d = 0; $d -lt $Downs; $d++) { $route += "key:lstick_down" }
@@ -114,16 +115,17 @@ $script:UiStates["offline-prompt"] = @{
     Settled = $false
 }
 $script:UiStates["main-menu"] = @{
-    Needle = "DOWNLOAD CONTENT"; Settle = 6; Note = "the main menu's own row names"
+    Needle = "REFRESH SONGS"; Settle = 6; Note = "the main menu's own row names"
     Route  = @($script:UiBootToTitle) + @($script:UiTitleToMenu)
     # The main menu draws the same animated background as the title screen and has
     # the same measured problem (see the title entry): a same-build pair whose
     # capture OCR'd as this menu differed by 17.71 % of the frame.
     #
-    # The needle is the stock row list, so it is a run with R5 off and R7 off. R5
-    # removes the row, and R7 redraws it as "REFRESH SONG LIBRARY" (docs/guides/dlc.md
-    # §4.2); both are off by default, and a run with either on is checked by the
-    # toggle's own acceptance instead of this route.
+    # The needle is the stock row list. R5 must be off (it removes the row), and
+    # since 2026-10-22 R7's refresh row is on by default and redraws `splash_dlc`
+    # as "REFRESH SONGS" (docs/guides/dlc.md §4.2); a run with `dlc_cache` off, or
+    # with the refresh entry off, reads "DOWNLOAD CONTENT" instead and has to pass
+    # its own needle. Each toggle's own acceptance is the check for its route.
     Settled = $false
 }
 $script:UiStates["song-list"] = @{

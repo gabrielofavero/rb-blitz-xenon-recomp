@@ -1,9 +1,9 @@
 # RhythmVerse in-store integration — research + implementation plan
 
 Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22. Status: **reopened
-2026-10-22** — the owner drove the shipped store and asked for eleven adjustments; **§9** carries
-one prompt per adjustment and is the work now, and the record below is what shipped before that
-pass, kept as it was written. **Finished
+2026-10-22** — the owner drove the shipped store and asked for eleven adjustments, then two more the
+same day (P9-12 and P9-13); **§9** carries one prompt per adjustment and is the work now, and the
+record below is what shipped before that pass, kept as it was written. **Finished
 2026-10-22 — P0, P6, P1, P2, P3, P4, P5, P7 and P8 all landed, and the acceptance harness is green
 in all four legs on one build (`out/store-acceptance/p8-final/`, **69 steps, 0 failures**): the
 switch is turned on through the UI, the store lists the catalogue, Search answers and lists, a
@@ -2388,6 +2388,13 @@ The store shipped, the owner drove it, and asked for eleven adjustments. **One p
 except **P9-6**, which the owner split into three the same day because its surface turned out to
 carry three kinds of store text (the credit line, the download/install status and its result);
 grouped by the surface it touches, each names the seam it edits and the measurement that closes it.
+**A twelfth adjustment (P9-12) followed on 2026-10-22** — two row renames and the refresh entry's
+default — and is recorded below with its prompt. **A thirteenth (P9-13) followed the same day**: the
+details page's box that carries the Download / Cancel buttons must carry the **custom's own** credit
+block — the charter, the custom's release date, its audio type and its download count — and it is
+recorded beside P9-12 with its prompt. The owner corrected the first reading the same day: the
+values are the **file's**, not the song's, because one title can have several customs with different
+authors and dates.
 Where a prompt overrides a P0-P8 decision it says so — the records in §5 are not rewritten, they are
 the evidence of what shipped. Prompts are ordered so a later one does not have to undo an earlier
 one.
@@ -2397,14 +2404,125 @@ one.
 | P9-1 | Settings | The master switch defaults **On** | the P6 record's "master off" |
 | P9-2 | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
 | P9-3 | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
-| P9-4 | Settings | New `Interface ▸ Music Library & Store ▸ Show Messages and Recommendations` (On) | — |
+| P9-4 | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | Split implemented; eight-state host checks pass; in-game retest pending |
 | P9-5 | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
 | P9-6 | Store surface (3 prompts) | **6a** the download/install status, Cancel and Download Again live in the details page's own box (guest-drawn); **6b** a retail popup on leaving the store or reaching Your Songs announces new songs after an install; **6c** the credit line goes, RhythmVerse stays credited in **Credits** | P5's strip, P7's credit line |
 | P9-7 | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
 | P9-8 | Store footer | Hide **Y View Item** where it does nothing | — |
-| P9-9 | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
+| P9-9 | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | Implemented with P9-4 split; eight-state host checks pass; in-game retest pending |
 | P9-10 | Catalogue | Warm Recently Added at boot; a failed press draws the connection-failed popup (P9-6b's panel) and retries in the background — nothing is hidden | P7's fetch-on-open |
 | P9-11 | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
+| P9-12 | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
+| P9-13 | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
+
+### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
+
+- **Do**: two owner-visible renames and one default flip. The main-menu store row's label becomes
+  `RhythmVerse` (`src/ui/settings_screen.h`'s `kRhythmVerseLabel`) and the refresh row's label
+  becomes `Refresh Songs` (`src/ui/menu_options.h`'s `kDlcRowRefreshLabel`, which the main-menu
+  locale rewrite, the payload's own records and the Interface → Main Menu mirror all read). The
+  Downloadable Content page's own row is renamed with it (`src/ui/settings_screen.cpp`), and
+  `general.refresh_music_library` compiles `BoolValue(true)` in `src/settings/schema.cpp` with its
+  cvar carrier (`src/enhancements.cpp`) flipped to match.
+- **Do not** rename the setting id or the cvar: `general.refresh_music_library` and
+  `enhancements_refresh_music_library` are what a profile and a command line already carry, so a
+  rename would silently drop a saved Off.
+- **Move with it**: the store acceptance harness's OCR assertions (`scripts/acceptance_store.ps1`
+  read `CUST` and `MUSIC LIBR` on the main menu, and `REFRESH MUSIC` on the DLC page) and the
+  observation harness's `main-menu` needle (`scripts/ui_states.ps1`), which now reads
+  `REFRESH SONGS` on a default boot.
+- **Done when**: the suites are green, the DLC page draws `Refresh Songs: On` on a profile that never
+  named the key, and a boot's main menu reads `RHYTHMVERSE` / `REFRESH SONGS`. The label halves are
+  the harness's Enable/Store legs (`scripts/acceptance_store.ps1`), **not yet measured** on a build
+  that carries the rename.
+
+### P9-13 — the box that carries Download / Cancel carries the custom's own credit block (2026-10-22)
+
+- **Do**: draw the **custom's** facts, not the song's year, in the details page's own box —
+  `store_info_panel` of `ui/store/gen/store_info.dtb`, the left panel whose `buttons.lst` carries
+  Download / Cancel / Download Again and Exit. The box today carries the name alone (`song.lbl` via
+  `set_offer_name`, `out/_swap/store_info.tree.txt:338`; the P3 details capture
+  `out/_swap/store-probe/20261021-190304/offer-late.png` OCRs `Building a Mystery` and nothing else
+  above the buttons), with the *song's* artist in the right-hand `store_details_panel` band. The
+  owner's correction (2026-10-22) is the point of the prompt: a title can have several customs with
+  different authors and release dates, so the page must say which one this is. The layout asked
+  for, in this order (bold/italic/spacing only if the label supports it; two facts on one line is
+  fine when space demands it):
+
+  ```text
+  Song Title          (the name, bold if the label permits)
+  Song Artist
+  Audio type          (nothing at all when the catalogue has none)
+  Charted by <name>
+  Released at <date>
+  <N> Downloads
+  ```
+
+**The fields, measured on the committed captures** (`docs/rythmverse-responses/list.json`,
+`search.json`; each record's `file` object, all of them present on all 33 captured records unless
+noted):
+
+| Line | Field | Measured, 2026-10-22 |
+| --- | --- | --- |
+| Audio type | `file.audio_type` | a **code**: `single` (19 of the list capture's 25), `full` (4), `partial` (2). The site's own dropdown labels four options **Multitrack / Karaoke / Partial Multitracks / Single Track** (owner's capture); the `karaoke` code is **not** in either capture, so the code→label table is a reading to confirm against the site, an unknown code draws **nothing** and logs once, and the raw token is never drawn. |
+| Charted by | `file.charter`, else `file.author.name`, else `file.author_id` | `charter` is **null on every captured record**, `author.name` is the display name (`Virtual-Man`) and `author_id` the shortname (`anonymous-family`). `file.credits.instrument.<part>[]` names per-instrument charters - a richer list than one line, left out of v1 with this note. |
+| Released at | `file.release_date`, else `upload_date` | `2026-10-11 19:07:55` on the capture (equal to `upload_date`/`record_created`/`giorno` there); the line shows the date part only (`2026-10-11`). |
+| Downloads | `file.downloads` | `61` on the list capture and `84` on the search capture. **`data.downloads` is a different number** (`0` on the same record - the song's, not this file's) and `file.scaricamenti` is a legacy counter that stays `0`; the line reads the file's own count, a snapshot from the catalogue fetch (5-minute TTL since P7), never a live figure. |
+| Song Artist | `file.file_artist` | already served as the offer's `artist`. |
+| Song Title | `file.file_title`, else `file_name` | already served as the offer's `name`. |
+
+- **The model grows four fields**: `SongFile` today parses `downloads` (`file.downloads` preferred
+  over `data.downloads`, `src/store/rhythmverse_client.cpp:406`) and `update_date`, but **not**
+  `audio_type`, `author`/`charter` or `release_date`; `Offer`
+  (`src/store/store_metadata.h`) carries none of the four. Both are extended, and **both writers
+  write all four keys on every offer** (`store_metadata.cpp`'s compiled writer at `:303-306` and
+  its text writer at `:395-398`): a `get_data` on a missing key walks a null (the trap P3 measured
+  on `(rank <part>)`), so an empty value is written as an empty string, never omitted. The audio
+  type is stored as its **code** and rendered through one `AudioTypeLabel(code)` table in the
+  SDK-free module, so the mapping is tested once rather than spelled at the write site.
+- **Where the lines go (one boot measures the scene).** The box's milo has no spare label
+  (`store_info.milo_xbox`: `song.lbl`, `drm.lbl`, `cost.lbl`/`cost_ps3.lbl`,
+  `rating.lbl`/`rating_description.lbl`, `recommended*.lbl`, `wait.lbl` — `python
+  scripts/hmx_milo.py list assets/game/360/ui/store/gen/store_info.milo_xbox`), and two rows are
+  already ours: `song.lbl` (the name) and `drm.lbl` (the description `refresh_panel` writes,
+  `store_info.tree.txt:418-419`, which P9-6a also adopts as its job-status line). The labels that
+  exist but are hidden today — `rating.lbl`/`rating_description.lbl` (inside `rating.grp`, hidden by
+  `refresh_panel` since P3 writes no `rating`) and `cost.lbl`/`cost_ps3.lbl` (hidden by the
+  payload's price-chrome removal) — are the candidates for the remaining rows, and one boot that
+  writes sentinel text into each says which is usable and where it sits. In this order:
+  1. **each fact on its own row** (the owner's layout), by showing the hidden label(s) **after**
+     `refresh_panel`'s own hides and writing the text — guest-drawn retail furniture, no new milo;
+  2. **two facts per row** when the scene has fewer usable rows — `Artist · Multitrack` and
+     `Charted by X · Released 2026-10-11 · 61 Downloads` — keeping the owner's order and dropping
+     only the audio type when it is empty;
+  3. **one composed block in `drm.lbl`** only if that label renders line breaks (unproven; a boot
+     decides).
+  Bold/italic are the label's own (a text tag or its material): if the boot shows neither, the
+  title stays plain, which the owner permitted.
+- **Do not**: draw a host-side line (owner rule), add a milo (no writer), write the raw
+  `audio_type` code, invent a line for an empty audio type, or let the block swallow the job status
+  — P9-6a's status borrows `drm.lbl` while a job runs and this block is what it restores when idle.
+  The song's `year_released` stays on the record (the details band reads it) but is **not** what
+  this box shows.
+- **Order**: it lands with or after **P9-6a**, because both own `drm.lbl`; if 6a is not in the tree
+  yet, the writes go straight into `refresh_panel` beside `set_offer_description` (the seam P3's
+  transforms own) and 6a's restore keeps them.
+- **Move with it**: `src/store/rhythmverse_client.{h,cpp}` (the three new fields and their captured
+  values), `src/store/store_metadata.{h,cpp}` (the four `Offer` fields, `OfferFromSong`, both
+  writers, the `AudioTypeLabel` table), `src/store/store_payload.{h,cpp}` (the block's writes;
+  idempotent, refusing by name before an edit), `tests/store_client_tests.cpp` (the parse against
+  the captured records: `audio_type`, `author.name`, `release_date`, `downloads`, and that
+  `data.downloads` never wins over `file.downloads`), `tests/store_metadata_tests.cpp` (both
+  writers carry the four keys on every offer; the label table's four codes and its unknown-code
+  fallback), `tests/store_payload_tests.cpp` (the writes and the empty-field fallbacks, including
+  the empty audio type drawing nothing), the `store-edit <store_info.dtb> info` diagnostic dump,
+  and `scripts/acceptance_store.ps1`'s details-page step, which today asserts `DOWNLOAD` / `EXIT`
+  only (`out/store-acceptance/p8-final/`).
+- **Done when**: a boot opens a served offer's details page and its box OCRs the block on the
+  captured fixture — `Forever Young`, `Youth Group`, the audio type's label (`Single Track` for
+  that record's `single`), `Charted by Virtual-Man`, `Released at 2026-10-11` and `61 Downloads` —
+  while the download rows still follow P9-6a's job states, an offer with no audio type draws no
+  line for it, the block returns after a job ends, and no caption-strip line carries any of it.
 
 ### P9-1 — the master switch defaults On
 
@@ -2612,6 +2730,122 @@ and the page counts. The updated acceptance script has not been run end to end f
 - **Done when**: a fresh profile reads On; MESSAGES and RECOMMENDED are drawn while On and neither
   while Off, in the store and in the song list; the row's help sentence names both tabs.
 
+**P9-4 implementation record (2026-10-22).** The owner chose **Show Headers**
+when the proposed label would exceed the in-game-settings skill's 28-character
+line budget; the full Off line is 17 characters. Interface keeps its first three
+rows and appends **Music Library & Store**, whose one boolean has the help caption
+**Show the MESSAGES and RECOMMENDED headers in Your Songs and the store. Requires a restart.**
+The page exists in both contexts and backs to Interface (71 pages per context).
+`SettingId::kShowMessagesRecommendations = 86` maps to
+`interface.show_messages_recommendations`, defaults On, and is restart-scoped.
+The boot passes its effective value into the payload configuration.
+
+The shared `ui/background/gen/background.dtb` owns the labels: its
+`set_offline_mode_headers` handler runs on store and song-list entry. With Off,
+the payload appends hiding `main_Home.lbl` (RECOMMENDED), `main_inbox.lbl`
+(MESSAGES), and `main_new_msg.lbl`; `update_inbox_header` also hides the badge
+after its retail callback. On leaves this record untouched. The change is
+independent of the RhythmVerse master. **Superseded 2026-10-23:** the correction
+below also implements the song list's offline trigger navigation; P9-9 still owes
+the store tab's own visibility.
+
+**P9-4 correction (2026-10-23; manual verification pending).** The owner tested the
+first implementation: **On** draws the labels but Your Songs does not navigate,
+and **Off** crashes. The earlier unit checks proved the generated tree's shape,
+not its behavior in the game. The initial visual probe measured the new settings
+page and caption only; its extra Back press dismissed the restart prompt before
+the assertion and it never completed the On/Off surface matrix.
+
+- **Off:** replace `{{$this find "<label>"} set_showing FALSE}` with
+  `{<label> set_showing FALSE}`, the direct scene-object command retail already
+  uses for `main_new_msg.lbl` in this same panel. This removes the nested lookup
+  added after the header Flow runs. The reported crash is **not yet reproduced
+  or confirmed fixed**; the owner elected to retest manually.
+- **On:** `ui/song_select/gen/song_select.dtb`'s `song_select_panel` wraps both
+  trigger cases in an online condition (P9-9's measured starting point). Replace
+  that condition with TRUE, preserving the store destination, analytics and arrow
+  flow. This is the reason the song list previously stayed still while the store
+  could navigate. With the store master Off, RT skips the disabled store for Inbox.
+- **Off navigation:** both song-list triggers open the enabled store; the store
+  menu and browser replace their RT destination Inbox with Your Songs. Thus the
+  hidden MESSAGES and RECOMMENDED pages are skipped. With both switches Off,
+  the song-list triggers only pulse their arrows.
+- **Host verification:** the four relevant suites (`menu_payload`, `settings_screen`,
+  `settings_service`, `settings_hot_apply`) pass. The payload suite also provides
+  `check-header-records <extracted-assets> <output-dir>`: the real extracted retail
+  records were built for all four switch combinations, **zero optional-edit
+  refusals**, every generated DTB parsed and recompiled byte-identically. The output
+  is `out/_swap/headers-correction/records/{on,off}-store-{on,off}/`. This check
+  does not boot or navigate the game.
+  The release executable was rebuilt successfully; the documentation checker
+  reports zero errors. Manual retest: restart with Show Headers On, use LT/RT
+  from Your Songs and the store, then restart with Off and repeat.
+
+**P9-4 header presentation correction (2026-10-23; owner screenshots).** The
+owner's Your Songs capture still shows dim neighboring tabs and no LT/RT arrows;
+the RhythmVerse capture shows bright tabs and both arrows. The previous correction
+changed the button handlers, but retained the screen's separate presentation gate:
+`{background_panel set_offline_mode_headers {! {user_mgr is_participating_user_online}}}`.
+The store's own screen sends `FALSE`. In `ui/background/gen/background.dtb`, this
+argument selects `offline_headers.flow` versus `online_headers.flow`.
+
+The song-list payload now sends **FALSE whenever Show Headers or the RhythmVerse
+master is On**, matching the store's navigation appearance. With both Off it sends
+TRUE, since neither trigger has a destination. The shared background definition
+remains unchanged while Show Headers is On. Regression tests pin both the trigger
+cases and this screen-entry call, including the actual generated retail records
+for all four switch combinations. **Visual retest remains with the owner**; these
+checks do not navigate the game.
+
+**P9-4 split-controls record (2026-10-23; owner update).** The owner reported
+that the preceding combined header/navigation correction **worked perfectly**,
+then requested independent **Show Messages** and **Show Recommendations** rows
+in the same Music Library & Store page. Both default On, require a restart,
+and fit the row budget (`Show Recommendations: Off` is 25 characters).
+The page has two rows in both contexts; no new page is needed.
+
+- **Storage:** fresh stable ids 87 and 88, tokens `show_messages` and
+  `show_recommendations`, under `[interface]`. Id 86 is retired and never reused.
+  Each absent new key inherits the valid old `show_messages_recommendations`
+  boolean; an explicit new key wins independently. The old bytes remain, and
+  loading and conflict detection use the same fallback so an inherited Off
+  does not cause a false save conflict.
+- **Visibility:** MESSAGES and the new-message badge follow Show Messages;
+  RECOMMENDED follows Show Recommendations; RHYTHMVERSE follows the store master.
+  The shared panel keeps the direct scene-object commands the previous correction
+  used. Its full-header Flow is selected whenever **any** optional tab is On,
+  regardless of sign-in. All three Off selects offline styling and hides LT/RT.
+- **Navigation:** all five panels (song list, store menu/browser, inbox,
+  recommendations) use the ordered ring **Your Songs → RhythmVerse → Messages →
+  Recommended**, RT forwards and LT backwards, skipping every disabled entry.
+  This replaces the earlier paired shortcuts. Original preview cleanup,
+  store-highlight saving and the directional arrow Flows are retained.
+  Recommendations' RT helper is expanded only in that trigger case, preserving
+  other callers that must still open Your Songs. No disabled store is re-entered
+  from Inbox. The record therefore also implements P9-9's tab visibility rule.
+- **Host verification:** the five relevant suites pass (`settings_screen`,
+  `settings_service`, `settings_store`, `settings_hot_apply`, `menu_payload`),
+  including independent persistence, legacy fallback and conflict checks.
+  The release executable was rebuilt successfully. `check-header-records` builds
+  **all eight states** from extracted retail records, with zero refusals and
+  byte-identical DTB round trips; its **617 assertions** inspect the destinations
+  in both directions, arrow state, labels, badge and preserved preview cleanup.
+  Evidence: `out/_swap/split-headers/records/state-0..7/`, where the state bits
+  are store=1, Messages=2, Recommendations=4. **In-game retest of the new split
+  remains with the owner.**
+
+**Final defaults (owner update, 2026-10-23): Show Messages = true; Show
+Recommendations = false.** These replace the split record's initial On/On
+defaults in the schema and both payload configuration defaults. Saved split
+values and the legacy combined preference keep their existing precedence.
+The existing default assertions now pin Messages On and Recommendations Off.
+
+**Final placement (owner update, 2026-10-23):** Interface now reads **Main Menu →
+Music Library & Store → Offline Prompts → Help & Options Labels**, in both menu
+and pause contexts. This supersedes the initial placement as the fourth row;
+the two switches and their defaults are unchanged. The existing row-order test
+pins the new order.
+
 ### P9-5 — **Recently Added**, and no count beside the two rows
 
 - **Do two things in `src/store/store_metadata.cpp`**:
@@ -2706,6 +2940,8 @@ Measurements this prompt rides on (2026-10-22, shipped records, no boot):
 - **Do (the strip loses the line).** Remove `DownloadStatusText()` from `help_overlay.cpp` (and the
   branch that draws it), and the service's `DownloadStatusText`/`kStatusHold` once nothing reads
   them. The guest reads `QueryJob` predicates now; the string was the overlay's.
+- **Shares the row with P9-13.** The credit block P9-13 adds is this prompt's idle state for
+  `drm.lbl`; its writes and this restore are written together, or the restore erases them.
 - **Locale**: new authored entries (Downloading, Installed, Failed, Cancelled and the generic
   failure) through `screen::AddLocaleEntry`, the mechanism the heading and the Download row use.
 - **Move with it**: `store_payload.{h,cpp}` (the poll, the gate, the cancel row and case, the Back
@@ -2825,6 +3061,12 @@ Measurements this prompt rides on (2026-10-22, shipped records, no boot):
   of the footer proves it, and the shortcut headers elsewhere are untouched.
 
 ### P9-9 — the LT/RT tabs work from **Your Songs**, and the RhythmVerse tab follows the master
+
+**Partial implementation (2026-10-23):** P9-4's correction above enables the
+song-list trigger cases offline and skips MESSAGES/RECOMMENDED while hidden.
+The subsequent **P9-4 split-controls record** implements the master-dependent
+tab visibility and the full ring for all eight states; that split's in-game
+acceptance remains pending with the owner.
 
 - **Measured starting point** (both dumps are in §8): the song list already carries the two cases —
   `out/_swap/song_select.tree.txt:1627` (`kAction_PageDown` → the store via `which_store_screen`) and

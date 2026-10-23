@@ -44,14 +44,59 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 > (y=368..427 at 993 client height) and Overscan stays On. The earlier `local_xfm` spelling did not
 > move the list, and the owner's capture from it showed Overscan off on entry.
 > Owner-driven manual captures on 2026-10-19 confirmed the titles and the tree.
+>
+> **Current-state correction (2026-10-23, owner request):** the Interface page's offline row reads
+> **`Skip Offline Prompts: On | Off`**, renamed from `Offline Prompts: Hidden|Visible` because the
+> visibility spelling made the player translate a negation before flipping it. The stored setting is
+> unchanged (`interface.hide_offline_prompts`, true = the prompts are skipped, default true), so the
+> change is presentation only; the page's row order is `Main Menu`, `Music Library & Store`,
+> `Skip Offline Prompts`, `Help & Options Labels`.
 
 **Downloadable Content (2026-10-22, P9-3):** General ▸ Downloadable Content has five
-rows in order: **RhythmVerse**, **Cache DLC Library**, **Refresh Music Library**,
-**DLC Scan Threads**, **DLC Menu Music**. RhythmVerse opens a page containing the
+rows in order: **RhythmVerse**, **Cache DLC Library**, **Refresh Songs**, **DLC Scan
+Threads**, **DLC Menu Music**. (The third row was **Refresh Music Library** until the owner renamed
+it on 2026-10-22, the same request that made it default On.) RhythmVerse opens a page containing the
 **RhythmVerse: On | Off** master and **Search Song Filter**. The filter title is
 **SEARCH SONG FILTER** and its five instrument switches remain available while the
 master is Off. Back from the filter returns to RhythmVerse; Back from RhythmVerse
 returns to Downloadable Content. The main-menu and pause contexts share this tree.
+
+**Current Music Library & Store (2026-10-23):** General ▸ Interface's second
+row, immediately after Main Menu, opens **Show Messages** and **Show Recommendations**, each with On/Off
+states, requiring a restart. **Show Messages defaults On; Show Recommendations
+defaults Off** (owner's final defaults, 2026-10-23). Either can be On while the other is Off.
+The former combined switch's value is inherited by either new key while that
+key is absent; explicit new values are independent. Both rows and their full
+values fit the line budget, and the page has two rows in both contexts.
+
+The navigation ring is Your Songs → RhythmVerse → Messages → Recommended;
+LT reverses it. Disabled tabs are hidden and skipped, including RhythmVerse
+while its master is Off. The Messages badge follows Show Messages. LT/RT
+are absent only when RhythmVerse, Messages and Recommendations are all Off.
+The owner confirmed the prior combined header correction works; the new split
+and eight-state ring are host-verified and await the owner's in-game retest.
+
+**Earlier combined implementation (2026-10-22, superseded by the split above):** General ▸ Interface
+has four rows: **Main Menu**, **Offline Prompts**, **Help & Options Labels**, then
+**Music Library & Store**. The new page has **Show Headers: On | Off** (default On),
+with a caption naming the MESSAGES and RECOMMENDED headers in Your Songs and the store.
+The original proposed label exceeded the settings skill's 28-character line budget;
+`Show Headers: Off` uses 17 characters. The boolean persists as
+`interface.show_messages_recommendations`, requires a restart, and Off hides those
+two guest-rendered labels and their new-message badge in the shared background panel.
+Both settings contexts have the page, with Back returning to Interface.
+
+**2026-10-23 correction:** the owner's manual test found Your Songs could not
+navigate the visible headers and Off crashed. The Off handler now uses retail's
+direct scene-label commands. Your Songs bypasses its offline trigger gate;
+with headers Off its triggers open the enabled store, whose RT returns to
+Your Songs instead of the hidden Inbox. Both switches Off leave only the arrow
+pulse. Host checks pass; the owner chose to perform the in-game retest. A second pair
+of owner screenshots showed the remaining presentation gate: Your Songs still
+sent its online-signin check to `set_offline_mode_headers`, dimming the other
+tabs and hiding LT/RT. Its entry now sends FALSE, like the store, whenever either
+Show Headers or the RhythmVerse master is On; only both Off select offline styling.
+The updated visual behavior is pending the owner's retest.
 
 Status: **executed for the main-menu entry**, one measured engine constraint left open for the in-song
 entry. Evidence is real boots against the pinned retail image (§4); every "measured" line names its log and
@@ -232,7 +277,7 @@ driven with `scripts/drive_ui.ps1` through `out/_swap/p5b/run.ps1 -Route <r>`. P
 
 | Proof | Route | Evidence | Result |
 | --- | --- | --- | --- |
-| **2026-10-19 tree and titles** | manual (owner) | owner's 2026-10-19 captures: root, INTERFACE, DLC rows, AUDIO/VIDEO | root is `How to Play / Calibration / General / Controls / Audio/Video / Gameplay`; INTERFACE reads `Main Menu / Offline Prompts: Hidden|Visible / Help & Options Labels: On`; Audio/Video reads `Audio / Video`; the Audio page is retitled `AUDIO`. **Not a harness boot** — see the 2026-10-19 correction above. |
+| **2026-10-19 tree and titles** | manual (owner) | owner's 2026-10-19 captures: root, INTERFACE, DLC rows, AUDIO/VIDEO | root is `How to Play / Calibration / General / Controls / Audio/Video / Gameplay`; INTERFACE reads `Main Menu / Offline Prompts: Hidden|Visible / Help & Options Labels: On`; Audio/Video reads `Audio / Video`; the Audio page is retitled `AUDIO`. **Not a harness boot** — see the 2026-10-19 correction above. **Superseded for the offline row (2026-10-23):** it now reads `Skip Offline Prompts: On|Off` — see the 2026-10-23 correction; the capture is kept as the record of what that build drew. |
 | **Audio page alignment + overscan** (2026-10-19) | `probe` | `out/audio-fix/probe3/shots/02-av.png` (parent), `03-audio-mouse.png` and `04-audio-key.png` (Audio page) | Both entries draw the Audio page's first row in the parent page's own band (y=368..427 at 993 client height) and read `Overscan: On`; `probe1`/`probe2` measured the one-row pitch (63 px) and the `get_local_pos`/`set_local_pos` pair. |
 | Base install shows **five** rows, no dead `Gameplay` (superseded layout) | `baseroot` | `baseroot.log`, `shots-baseroot/00-root.png` | Old root `General / Controls / Calibration / Audio/Video / Interface`, General selected |
 | Down and up walk the list and **clamp at both ends** | `baseroot` | `shots-baseroot/01..05-clamp.png`, `06..10-up-clamp.png` | INTERFACE stays selected through the 5th down; GENERAL the same going up |

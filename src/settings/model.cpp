@@ -68,6 +68,12 @@ std::string_view SettingIdToken(SettingId id) {
       return "settings_labels";
     case SettingId::kHideDownloadContent:
       return "hide_download_content";
+    case SettingId::kShowMessages:
+      return "show_messages";
+    case SettingId::kShowRecommendations:
+      return "show_recommendations";
+    case SettingId::kShowMessagesRecommendations:
+      return "show_messages_recommendations";
     case SettingId::kRhythmVerse:
       return "rhythmverse";
     case SettingId::kRhythmVerseGuitar:

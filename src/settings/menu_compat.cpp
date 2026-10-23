@@ -51,7 +51,7 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
     if (refresh_row_off) {
       PushUnique(&decision.hidden, kRefreshMenuRow);
       decision.refresh_row_disabled = true;
-      decision.note = "the hide master is off, and the Refresh Music Library entry is off too, so "
+      decision.note = "the hide master is off, and the Refresh Songs entry is off too, so "
                       "its row is gone";
       return decision;
     }
@@ -116,7 +116,7 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
             " stays because it refreshes the DLC library";
   }
   if (decision.refresh_row_disabled) {
-    note += "; the Refresh Music Library entry is off, so its row is gone";
+    note += "; the Refresh Songs entry is off, so its row is gone";
   }
   if (decision.alternate_refresh_needed) {
     note += "; the library refresh lost its row, so it needs another one";

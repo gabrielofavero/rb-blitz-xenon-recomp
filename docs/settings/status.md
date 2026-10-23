@@ -8,6 +8,54 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Two rows renamed, the refresh entry back on by default (2026-10-22, owner request):** the main
+  menu's store entry reads **RhythmVerse** (was *RhythmVerse Customs*) and the refresh row reads
+  **Refresh Songs** (was *Refresh Music Library*); the Downloadable Content page's own switch is
+  renamed with it. `general.refresh_music_library` now defaults **On** again (it was On when it
+  shipped on 2026-10-15 and Off from 2026-10-20), in the schema row and in its cvar carrier, which
+  must agree. The setting id and the cvar name are unchanged, so a profile that named the key keeps
+  its value. The renamed labels are `kRhythmVerseLabel` (`src/ui/settings_screen.h`) and
+  `kDlcRowRefreshLabel` (`src/ui/menu_options.h`), which the main-menu locale rewrite, the payload's
+  own records and the Interface → Main Menu mirror all read, so no second spelling exists to drift.
+  **Pinned:** `rb_blitz_settings_screen_tests` asserts `Refresh Songs: On` and the row's 28-character
+  line budget; **not yet measured:** a boot OCR of the renamed menu rows (the store acceptance's
+  Enable/Store legs are the harness that reads them).
+
+- **Independent header switches (2026-10-23):** General ▸ Interface ▸
+  Music Library & Store (second row, immediately after Main Menu) now has
+  **Show Messages** and **Show Recommendations**,
+  defaulting to **Messages On / Recommendations Off** (owner's final defaults,
+  2026-10-23); both are restart-scoped. The owner confirmed the preceding
+  combined header correction worked, then requested this split. A legacy
+  `show_messages_recommendations` value supplies either new key only while
+  that key is absent. The tab ring is **Your Songs → RhythmVerse → Messages →
+  Recommended**, with LT reversing it; every screen skips disabled entries.
+  The RhythmVerse tab follows its master, and the new-message badge follows
+  Messages. LT/RT styling is disabled only when all three optional tabs are Off.
+  All eight states compile from extracted retail records without refusals
+  (`out/_swap/split-headers/records/state-0..7/`); destination, arrow and preview
+  cleanup assertions run on those records. The new split's in-game retest is
+  pending with the owner.
+
+- **Historical combined Show Headers (2026-10-22, superseded by the split above):** General ▸ Interface now ends with
+  **Music Library & Store**, containing **Show Headers: On | Off**. Default On;
+  `interface.show_messages_recommendations` (id 86) is restart-scoped. Off hides
+  MESSAGES and RECOMMENDED on Your Songs and the store, including the new-message
+  badge, through their shared guest background panel. The caption names both tabs;
+  the full Off label is 17 characters. Both menu and pause contexts carry the page.
+  **2026-10-23 correction:** the owner's test found an Off crash and no trigger
+  navigation from Your Songs while On. The nested lookup was replaced with
+  retail's direct scene-label commands, the song-list offline gate is bypassed,
+  and Off skips the hidden pages when navigating between Your Songs and the store.
+  All four switch combinations build from the real extracted records without
+  refusals and round-trip byte-identically. **In-game retest pending with the owner**;
+  the crash is not claimed fixed from host tests alone. The owner's subsequent
+  screenshots exposed a separate presentation gate: Your Songs still chose the
+  offline header Flow (dim tabs, no LT/RT), while the store chose the full header.
+  The song screen now selects the full header whenever either switch is On.
+  The host matrix asserts this entry call in the actual generated retail records;
+  visual confirmation remains pending with the owner.
+
 - **The RhythmVerse store's settings are in the game (2026-10-20, RhythmVerse plan P6).** Under
   **General ▸ Downloadable Content ▸ RhythmVerse** (first row, P9-3): `RhythmVerse`
   (default **On** since the owner pass of 2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `Search Song Filter`, a
@@ -18,7 +66,8 @@ Part 1 wherever they disagree.
   contexts. The five **filter** rows are
   `hot`: the applier replaces the store's in-process settings snapshot, which its workers read
   before every request. The **master is `restart`** since the owner pass of 2026-10-22 (plan
-  §9/P9-2): the switch also owns what the boot drew - the main-menu *RhythmVerse Customs* row and
+  §9/P9-2): the switch also owns what the boot drew - the main-menu *RhythmVerse* row (labelled
+  *RhythmVerse Customs* until the 2026-10-22 rename) and
   the store's heading - so a change opens the restart confirmation when Help & Options is left, and
   *Close* finishes the leave with the running process still on its pre-change value. **Evidence:** `rb_blitz_settings_screen_tests` (136,641 checks) pins the page order,
   labels and both contexts, and pins the master's compiled default to On against
@@ -52,7 +101,7 @@ Part 1 wherever they disagree.
   `Searching for "bush"...`, `15 matches for "bush". Press Done to open the store.`, and the
   no-match `Try just the artist name or just the song title.` — and drawn **even with Settings
   Labels off**, because a field a player cannot read is an input problem, not optional help. With
-  `store_search_diagnostic` on, the main menu's **RhythmVerse Customs** row jumps straight to the
+  `store_search_diagnostic` on, the main menu's **RhythmVerse** row jumps straight to the
   keys. **Evidence:** `rb_blitz_store_search_tests` (283 checks),
   `rb_blitz_settings_screen_tests` (page order, the six-row budget, the write path of every key),
   and a boot whose strip was OCRd (`scripts/probe_search.ps1`,
@@ -61,7 +110,10 @@ Part 1 wherever they disagree.
   landing record, `out/_swap/search-probe/20261022-105010`).
 - **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
   `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
-  (`Main Menu`, `Offline Prompts`, `Help & Options Labels`); HUD moved under Gameplay and is split into
+  (`Main Menu`, `Music Library & Store`, `Skip Offline Prompts`, `Help & Options Labels`;
+  Music Library & Store moved directly after Main Menu on 2026-10-23, and the offline row was
+  renamed from `Offline Prompts: Hidden|Visible` to `Skip Offline Prompts: On|Off` the same day -
+  same setting, presentation only); HUD moved under Gameplay and is split into
   `HUD Elements` (five `Visible`/`Hidden` rows) plus the `Note Streak`/`Input Viewer` switches. The
   4:3 Letterboxing row is removed, the Main Menu page has one `Visible`/`Hidden` row per hideable
   entry with no master, and Target draws `Rock Band Blitz / Ultimate / Demo`. The scene's `header.lbl`
@@ -109,7 +161,10 @@ Part 1 wherever they disagree.
   refresh row; the cache itself stays on), the retail *Download Content* main-menu entry is restored
   as `splash_dlc_store` behind `interface.hide_download_content` (**default Hidden**, offered on
   Interface → Main Menu), and *Play Current Song* stays on by default but its settings row is hidden
-  when the boot found no DLC at all. `src/hooks/settings_payload.cpp` reads the catalog from
+  when the boot found no DLC at all. **Superseded 2026-10-22** for the default and the row's name:
+  the owner asked for the refresh entry to default **On** again and for the row to read *Refresh
+  Songs* (see the first bullet above); the restored *Download Content* row and the *Play Current
+  Song* rule are unchanged. `src/hooks/settings_payload.cpp` reads the catalog from
   `dlc::LibraryPackagePaths()`; the row clone is built in `src/ui/settings_screen.cpp` before
   `SetRefreshRowAction` reroutes `splash_dlc`.
 - **Boot speed (2026-10-13)**: the wait is the DLC discovery, not the A/V load; the defaults now cache

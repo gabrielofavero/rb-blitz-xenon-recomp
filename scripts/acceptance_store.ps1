@@ -23,7 +23,7 @@
 #             '<Artist - Title>' ...`), so the leg asserts the package it actually installed and
 #             not a name this script guessed from the catalogue.
 #   Control - a boot with RhythmVerse **Off**: no store activity in the log at all, no store row on
-#             the main menu, and the main menu's own **Refresh Music Library** row still dispatches
+#             the main menu, and the main menu's own **Refresh Songs** row still dispatches
 #             its sentinel (`dlc: refresh asked for from the main menu`).
 #
 # Two scratch fixtures, never the owner's files: a profile directory per leg family (the launcher
@@ -378,7 +378,8 @@ function Assert-Lacks([string]$Text, [string]$Needle, [string]$Name) {
 }
 
 # A long row label's OCR drops letters often enough that a strict substring is a false negative:
-# measured 2026-10-22, `REFRESH MUSIC LIBRARY` came back as `REF ESH MUSIC LIBR RY` (no R, no A).
+# measured 2026-10-22, `REFRESH MUSIC LIBRARY` came back as `REF ESH MUSIC LIBR RY` (no R, no A) -
+# the row is `REFRESH SONGS` since that day, and it gets the same fragment treatment.
 # A label check therefore asks for its distinctive word(s) with the whitespace folded out, and the
 # row's *behaviour* is asserted from the log - never from the label alone.
 function Assert-Label([string]$Text, [string[]]$Words, [string]$Name) {
@@ -567,7 +568,7 @@ function Invoke-EnableLeg {
         Add-Step 'enable: Downloadable Content opens' $true "row $GeneralDlcRow"
 
         $dlcText = Get-ScreenText 'dlc-rows.png'
-        Assert-Label $dlcText @('RHYTHMVERSE', 'CACHE DLC', 'REFRESH MUSIC', 'DLC SCAN', 'DLC MENU') 'enable: DLC page has the five settings rows'
+        Assert-Label $dlcText @('RHYTHMVERSE', 'CACHE DLC', 'REFRESH', 'DLC SCAN', 'DLC MENU') 'enable: DLC page has the five settings rows'
         if (-not (ClickRow $RhythmVerseRow 'rhythmverse' -Wait 2) -or
             -not (Wait-ForScreenName 'settings_rhythmverse_screen' 15 'RhythmVerse page')) {
             Add-Step 'enable: RhythmVerse submenu opens' $false (Get-Screen)
@@ -603,15 +604,16 @@ function Invoke-StoreLeg {
     try {
         if (-not (Enter-MainMenu $BootTimeoutSec)) { return }
         $menuText = Get-ScreenText 'menu.png'
-        # The row is `RhythmVerse Customs`, but OCR reads it several ways depending on the
-        # highlight: `HYTH VERSE CUSTOM` and `RHYTHMVERSE CUSTOM` were both measured on 2026-10-22,
-        # and the Install leg's boot read it as `RHY HMVERSECUST M`. `CUST` is the part every
-        # measured reading keeps; the row's *behaviour* below is the real oracle.
-        Assert-Label $menuText @('CUST') 'store: the main menu carries the store row'
-        Assert-Label $menuText @('MUSIC LIBR') 'store: the refresh row is still on the main menu'
+        # The row is `RhythmVerse` (renamed from `RhythmVerse Customs` on 2026-10-22), but OCR
+        # reads it several ways depending on the highlight: `HYTH VERSE CUSTOM` and
+        # `RHYTHMVERSE CUSTOM` were both measured on 2026-10-22, and the shorter label leaves fewer
+        # letters to drop. `HYTH` is the part the measured readings keep; the row's *behaviour*
+        # below is the real oracle.
+        Assert-Label $menuText @('HYTH') 'store: the main menu carries the store row'
+        Assert-Label $menuText @('REFRESH') 'store: the refresh row is still on the main menu'
 
         $index = Open-ScreenByRow 'store_menu_screen' $StoreRow 'store-entry'
-        Add-Step 'store: the RhythmVerse Customs row opens the retail store' ($index -ge 0) "row $index"
+        Add-Step 'store: the RhythmVerse row opens the retail store' ($index -ge 0) "row $index"
         if ($index -lt 0) { return }
 
         $storeText = Wait-ForScreen 'store.png' 'RECENT' $ScreenTimeoutSec 'the store front menu'
@@ -854,13 +856,13 @@ function Invoke-ControlLeg {
         if (-not (Enter-MainMenu $BootTimeoutSec)) { return }
         $menuText = Get-ScreenText 'menu.png'
         # Two spellings, because the row's OCR changes with the highlight: selected, the label
-        # loses its middle letters (`HYTH VERSE CUSTOM`); unselected it reads `RHYTHMVERSE CUSTOMS`
-        # (the fixture menus above were read that way on 2026-10-22). One negative check on either
-        # spelling can miss, so both are asserted.
+        # loses its middle letters (`HYTH VERSE CUSTOM`); unselected it read `RHYTHMVERSE CUSTOMS`
+        # (the fixture menus above were read that way on 2026-10-22; the label itself is
+        # `RhythmVerse` since that day). One negative check on either spelling can miss, so both
+        # are asserted.
         Assert-Lacks $menuText 'HYTH VERSE' 'control: the main menu has no store row while the feature is Off'
         Assert-Lacks $menuText 'RHYTHMVERSE' 'control: the main menu draws no RhythmVerse label'
-        Assert-Lacks $menuText 'CUSTOMS' 'control: the main menu draws no Customs row'
-        Assert-Label $menuText @('MUSIC LIBR') 'control: the refresh row is on the main menu'
+        Assert-Label $menuText @('REFRESH') 'control: the refresh row is on the main menu'
 
         # Press the refresh row and follow its sentinel. The fixture's layout puts it at
         # `-RefreshRow`; the hint is tried first (a click that opens another screen is backed out
@@ -882,7 +884,7 @@ function Invoke-ControlLeg {
             Refresh-LogText
             if ($script:logText -match 'dlc: refresh asked for from the main menu') { $found = $attempt }
         }
-        Add-Step 'control: the Refresh Music Library row dispatches its refresh' ($found -ge 0) "row $found"
+        Add-Step 'control: the Refresh Songs row dispatches its refresh' ($found -ge 0) "row $found"
 
         Refresh-LogText
         # The modules are installed on every boot (their own lines are here), so an absent request

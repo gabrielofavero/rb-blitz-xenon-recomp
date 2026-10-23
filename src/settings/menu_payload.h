@@ -57,6 +57,19 @@ bool AddRecompilationCredits(std::vector<ui::dtb::Node>* roots, bool ultimate, s
 // while every read that carried the row was rewritten - out/_swap/menu-run/refresh14). False when
 // the flag is off, when the roots hold no such case, or when it already carries the sentinel.
 bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);
+// The shared header ring is Your Songs -> RhythmVerse -> Messages -> Recommended.
+// Your Songs is always enabled; every trigger skips disabled entries.
+enum class LibraryHeader { kSongs = 0, kStore = 1, kMessages = 2, kRecommendations = 3 };
+struct LibraryHeaderOptions {
+  bool store = false;
+  bool messages = true;
+  bool recommendations = false;
+  bool navigation_enabled() const { return store || messages || recommendations; }
+};
+bool ConfigureLibraryHeaderBar(std::vector<ui::dtb::Node>* roots,
+                                LibraryHeaderOptions options, std::string* why);
+bool RouteLibraryHeaderNavigation(std::vector<ui::dtb::Node>* roots, LibraryHeader current,
+                                   LibraryHeaderOptions options, std::string* why);
 // Extend an existing patch index with our records. Existing records retain their offsets,
 // compression and checksums, and the ark keeps the part count it had: when the mounted index has a
 // single part its bytes are carried into the new one (`mounted_part`) and only the last records

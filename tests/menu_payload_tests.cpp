@@ -18,6 +18,11 @@
 #include "settings/menu_payload.h"
 #include "settings/ultimate_adapter.h"
 #include "ui/menu_options.h"
+#include "ui/settings_screen.h"
+
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 
 #include <cstddef>
 #include <cstdint>
@@ -253,7 +258,245 @@ void TestMountedPartOfTheWrongSizeIsNotCarried() {
 
 }  // namespace
 
-int main() {
+namespace header_test {
+using rb_blitz::ui::dtb::Node;
+namespace dtb = rb_blitz::ui::dtb;
+namespace settings = rb_blitz::settings;
+using Tab = settings::LibraryHeader;
+using Options = settings::LibraryHeaderOptions;
+Node S(const char* text) { return Node::Symbol(text); }
+Node C(std::vector<Node> nodes) { return Node::Command(std::move(nodes)); }
+Node A(std::vector<Node> nodes) { return Node::Array(std::move(nodes)); }
+constexpr const char* kScreens[] = {"song_select_screen", "store_menu_screen", "inbox_screen", "recommendation_screen"};
+constexpr const char* kRecords[] = {"ui/song_select/gen/song_select.dtb", "ui/store/gen/store.dtb",
+                                   "ui/inbox/gen/inbox.dtb", "ui/recommendations/gen/recommendations.dtb"};
+const std::vector<std::vector<const char*>> kPanels = {{"song_select_panel"},
+    {"store_menu_panel", "store_browser_panel"}, {"inbox_panel"}, {"recommendation_panel"}};
+// Expected adjacency, including a disabled surface reached by some unrelated retail flow.
+constexpr int kRight[8][4] = {{0,0,0,0}, {1,0,0,0}, {2,2,0,0}, {1,2,0,0},
+                             {3,3,3,0}, {1,3,3,0}, {2,2,3,0}, {1,2,3,0}};
+constexpr int kLeft[8][4] = {{0,0,0,0}, {1,0,1,1}, {2,0,0,2}, {2,0,1,2},
+                            {3,0,0,0}, {3,0,1,1}, {3,0,0,2}, {3,0,1,2}};
+Options State(int mask) { return {bool(mask & 1), bool(mask & 2), bool(mask & 4)}; }
+Node Arrow(bool right) {
+  return C({C({S("background_panel"), S("find"), S(right ? "arrow_rt.flow" : "arrow_lt.flow")}), S("activate")});
+}
+Node Transition(int destination) {
+  return C({S("transition_to"), destination == 1 ?
+      C({S("store_menu_screen"), S("get"), S("which_store_screen")}) : S(kScreens[destination])});
+}
+const Node* Method(const std::vector<Node>& roots, const char* panel, const char* name) {
+  for (const auto& root : roots) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 || root.kids[2].text != panel) continue;
+    for (const auto& child : root.kids) {
+      if (child.tag == dtb::kArray && !child.kids.empty() && child.kids[0].text == name) return &child;
+    }
+  }
+  return nullptr;
+}
+bool Has(const Node& node, const char* text) {
+  if (node.text == text) return true;
+  for (const auto& child : node.kids) if (Has(child, text)) return true;
+  return false;
+}
+const Node* Case(const Node& node, const char* action) {
+  if (node.tag == dtb::kArray && !node.kids.empty()) {
+    const auto& first = node.kids[0];
+    if ((first.tag == dtb::kSymbol && first.text == action) ||
+        (first.tag == dtb::kCommand && first.kids.size() == 3 && first.kids[0].text == "==" &&
+         first.kids[2].text == action)) return &node;
+  }
+  for (const auto& child : node.kids) if (auto* found = Case(child, action)) return found;
+  return nullptr;
+}
+void Destinations(const Node& node, std::vector<int>* found) {
+  if (node.tag == dtb::kCommand && node.kids.size() == 2 && node.kids[0].text == "transition_to") {
+    const auto& destination = node.kids[1];
+    if (destination.tag == dtb::kCommand) {
+      CHECK_TRUE(Has(destination, "which_store_screen"));
+      found->push_back(1);
+    } else {
+      for (int i = 0; i < 4; ++i) if (destination.text == kScreens[i]) found->push_back(i);
+    }
+  }
+  for (const auto& child : node.kids) Destinations(child, found);
+}
+void CheckRoutes(const std::vector<Node>& roots, int current, int mask) {
+  for (const char* panel : kPanels[current]) {
+    const auto* buttons = Method(roots, panel, "BUTTON_DOWN_MSG");
+    CHECK_TRUE(buttons != nullptr);
+    if (!buttons) continue;
+    for (bool right : {true, false}) {
+      const auto* kase = Case(*buttons, right ? "kAction_PageDown" : "kAction_PageUp");
+      CHECK_TRUE(kase != nullptr);
+      if (!kase) continue;
+      std::vector<int> destinations;
+      Destinations(*kase, &destinations);
+      const int expected = right ? kRight[mask][current] : kLeft[mask][current];
+      if (expected == current) CHECK_TRUE(destinations.empty());
+      else { CHECK_EQ(destinations.size(), 1u); if (!destinations.empty()) CHECK_EQ(destinations[0], expected); }
+      CHECK_TRUE(Has(*kase, right ? "arrow_rt.flow" : "arrow_lt.flow"));
+      if (current == 3) CHECK_TRUE(Has(*kase, "stop_preview_audio"));
+      if (std::string(panel) == "store_browser_panel") CHECK_TRUE(Has(*kase, "turn_off_preview"));
+      CHECK_TRUE(!Has(*kase, "online_gate"));
+    }
+  }
+}
+std::vector<Node> Fixture(int current) {
+  std::vector<Node> roots;
+  for (const char* panel : kPanels[current]) {
+    std::vector<Node> cases{S(current == 1 ? "cond" : "switch")};
+    if (current != 1) cases.push_back(Node::Var("action"));
+    for (bool right : {true, false}) {
+      const int next = right ? (current + 1) % 4 : (current + 3) % 4;
+      Node key = S(right ? "kAction_PageDown" : "kAction_PageUp");
+      if (current == 1) key = C({S("=="), Node::Var("action"), key});
+      std::vector<Node> body{key};
+      if (current == 0) {
+        body.push_back(C({S("if"), C({S("online_gate")}), Transition(next), Arrow(right)}));
+      } else if (current == 3 && right) {
+        body.push_back(C({Node::Var("this"), S("go_to_song_select")}));
+      } else {
+        const char* cleanup = current == 3 ? "stop_preview_audio" :
+            (std::string(panel) == "store_browser_panel" ? "turn_off_preview" : "mark_current_highlight_idx");
+        body.push_back(C({S("do"), C({Node::Var("this"), S(cleanup)}), Transition(next), Arrow(right)}));
+      }
+      cases.push_back(A(std::move(body)));
+    }
+    cases.push_back(A({S("kAction_Start"), C({S("retail_keyboard")})}));
+    std::vector<Node> definition{S("new"), S("UIPanel"), S(panel), A({S("BUTTON_DOWN_MSG"), C(std::move(cases))})};
+    if (current == 3) definition.push_back(A({S("go_to_song_select"),
+        C({Node::Var("this"), S("stop_preview_audio")}), Arrow(true), Transition(0)}));
+    roots.push_back(C(std::move(definition)));
+  }
+  return roots;
+}
+std::vector<Node> Background() {
+  return {C({S("new"), S("UIPanel"), S("background_panel"),
+      A({S("set_offline_mode_headers"), A({Node::Var("offline")}),
+          C({S("if_else"), Node::Var("offline"), C({S("offline_flow")}), C({S("online_flow")})})}),
+      A({S("update_inbox_header"), A({Node::Var("new_msgs")}), C({S("retail_badge")})})})};
+}
+void CheckBar(const std::vector<Node>& roots, int mask) {
+  const auto* mode = Method(roots, "background_panel", "set_offline_mode_headers");
+  const auto* inbox = Method(roots, "background_panel", "update_inbox_header");
+  CHECK_TRUE(mode && inbox);
+  if (!mode || !inbox) return;
+  CHECK_TRUE(mode->kids[2].kids[1].text == (mask ? "FALSE" : "TRUE"));
+  const std::vector<std::pair<const char*, int>> labels = {
+      {"main_store.lbl",1}, {"main_inbox.lbl",2}, {"main_new_msg.lbl",2}, {"main_Home.lbl",4}};
+  for (const auto& [label, bit] : labels) {
+    int hides = 0;
+    for (const auto& command : mode->kids) {
+      if (command.tag == dtb::kCommand && command.kids.size() == 3 && command.kids[0].text == label) {
+        CHECK_TRUE(command.kids[0].tag == dtb::kSymbol);
+        CHECK_TRUE(command.kids[1].text == "set_showing" && command.kids[2].text == "FALSE");
+        ++hides;
+      }
+    }
+    CHECK_EQ(hides, (mask & bit) ? 0 : 1);
+  }
+  CHECK_EQ(inbox->kids.size(), (mask & 2) ? 3u : 4u);
+}
+}
+
+void TestHeaderVisibility() {
+  using namespace header_test;
+  BeginCase("independent header visibility: eight states, badge follows Messages, arrows follow any destination");
+  for (int mask = 0; mask < 8; ++mask) {
+    auto roots = Background();
+    std::string why;
+    CHECK_TRUE(settings::ConfigureLibraryHeaderBar(&roots, State(mask), &why));
+    CheckBar(roots, mask);
+  }
+  auto invalid = Background();
+  invalid[0].kids.pop_back();
+  const auto before = dtb::Compile(invalid);
+  std::string why;
+  CHECK_FALSE(settings::ConfigureLibraryHeaderBar(&invalid, State(0), &why));
+  CHECK_TRUE(dtb::Compile(invalid) == before);
+}
+void TestHeaderNavigation() {
+  using namespace header_test;
+  BeginCase("all eight header rings: both triggers skip disabled destinations on all five panels");
+  for (int mask = 0; mask < 8; ++mask) {
+    for (int current = 0; current < 4; ++current) {
+      auto roots = Fixture(current);
+      const auto original = roots;
+      std::string why;
+      CHECK_TRUE(settings::RouteLibraryHeaderNavigation(&roots, static_cast<Tab>(current), State(mask), &why));
+      CheckRoutes(roots, current, mask);
+      for (const char* panel : kPanels[current]) {
+        const auto* old_start = Case(*Method(original, panel, "BUTTON_DOWN_MSG"), "kAction_Start");
+        const auto* new_start = Case(*Method(roots, panel, "BUTTON_DOWN_MSG"), "kAction_Start");
+        CHECK_TRUE(dtb::Compile({*old_start}) == dtb::Compile({*new_start}));
+      }
+    }
+  }
+  auto invalid = Fixture(1);
+  invalid.pop_back();
+  const auto before = dtb::Compile(invalid);
+  std::string why;
+  CHECK_FALSE(settings::RouteLibraryHeaderNavigation(&invalid, Tab::kStore, State(7), &why));
+  CHECK_TRUE(dtb::Compile(invalid) == before);
+}
+
+// Optional integration check against extracted records; never boots or drives the game.
+int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root) {
+  namespace fs = std::filesystem;
+  namespace screen = rb_blitz::ui::screen;
+  using namespace header_test;
+  settings::RecordReader read = [&](const std::string& name, std::vector<uint8_t>* bytes, std::string* why) {
+    std::ifstream file(fs::path(asset_root) / name, std::ios::binary);
+    if (!file) { if (why) *why = "missing " + name; return false; }
+    bytes->assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return true;
+  };
+  for (int mask = 0; mask < 8; ++mask) {
+    const auto state = State(mask);
+    screen::MenuConfiguration config;
+    config.rhythmverse_row = state.store;
+    config.show_messages = state.messages;
+    config.show_recommendations = state.recommendations;
+    screen::ConfigureMenu(config);
+    settings::MenuRecords records;
+    std::string why;
+    std::vector<std::string> notes;
+    if (!settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"}, &records,
+                                    &why, false, false, false, &notes)) {
+      std::printf("header records refused: %s\n", why.c_str()); return 1;
+    }
+    CHECK_TRUE(notes.empty());
+    const auto dir = fs::path(output_root) / ("state-" + std::to_string(mask));
+    for (const auto& [name, bytes] : records) {
+      if (!name.ends_with(".dtb")) continue;
+      std::vector<Node> roots;
+      dtb::RootHeader header;
+      if (!dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why) || dtb::Compile(roots, header) != bytes) {
+        std::printf("header records invalid: %s: %s\n", name.c_str(), why.c_str()); return 1;
+      }
+      if (name == "ui/background/gen/background.dtb") CheckBar(roots, mask);
+      for (int current = 0; current < 4; ++current) if (name == kRecords[current]) CheckRoutes(roots, current, mask);
+      fs::create_directories((dir / name).parent_path());
+      std::ofstream file(dir / name, std::ios::binary);
+      file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+      if (!file) return 1;
+    }
+    for (const char* path : kRecords) CHECK_TRUE(records.contains(path));
+    CHECK_TRUE(records.contains("ui/background/gen/background.dtb"));
+    std::printf("store=%d messages=%d recommendations=%d: %zu records round-tripped, %zu refusal(s)\n",
+                state.store, state.messages, state.recommendations, records.size(), notes.size());
+  }
+  screen::ConfigureMenu({});
+  return Finish();
+}
+
+int main(int argc, char** argv) {
+  if (argc == 4 && std::string(argv[1]) == "check-header-records") {
+    return CheckInstalledHeaderRecords(argv[2], argv[3]);
+  }
+  TestHeaderVisibility();
+  TestHeaderNavigation();
   BeginCase("the generated locale names a cached list only after a real host hit");
   {
     using rb_blitz::ui::dtb::Node;

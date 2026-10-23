@@ -179,8 +179,8 @@ the P8 record). What that adds to the rules above:
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
 | `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
-| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | off (2026-10-20) | The main menu's refresh entry's own switch: the visible row is Help & Options → Downloadable Content → *Refresh Music Library* (`general.refresh_music_library`). On shows that menu row; off hides it, and the boot's scan is unaffected. Only meaningful with the cache on (§4.1). Changing it needs a relaunch. The retail *Download Content* entry is restored as a separate row, hidden by default (`interface.hide_download_content`). |
-| `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Music Library* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
+| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | on (2026-10-22; off 2026-10-20 to 2026-10-22) | The main menu's refresh entry's own switch: the visible row is Help & Options → Downloadable Content → *Refresh Songs* (`general.refresh_music_library`, renamed from *Refresh Music Library* on 2026-10-22). On shows that menu row; off hides it, and the boot's scan is unaffected. Only meaningful with the cache on (§4.1). Changing it needs a relaunch. The retail *Download Content* entry is restored as a separate row, hidden by default (`interface.hide_download_content`). |
+| `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Songs* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
 and every write path in the content manager (create, thumbnail, install, delete)
@@ -393,8 +393,9 @@ business — a package the scan has just discovered is a package the title has n
 yet, so its own discovery reads it and extends its own cache.
 
 Since 2026-10-15 that entry has a switch of its own: Help & Options → Downloadable Content →
-*Refresh Music Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`,
-**off by default since 2026-10-20**). On shows the menu row; off hides it - with the hide master on or
+*Refresh Songs* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`,
+**on by default since 2026-10-22**; it was off 2026-10-20 to 2026-10-22 and the row was named
+*Refresh Music Library* until the 2026-10-22 rename). On shows the menu row; off hides it - with the hide master on or
 off, and whatever the Interface ▸ Hide Items selection says, because the row is this feature's own
 entry rather than one of the retail rows that list governs - and the payload stops repainting it.
 Nothing else changes: a library whose tree changed is still re-scanned at the next boot, and

@@ -190,7 +190,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
         boot->service()->EffectiveValue(SettingId::kPlayCurrentSong).boolean;
   }
   const bool play_current_row = play_current_setting && menu_music_pool;
-  // The RhythmVerse Customs entry (RhythmVerse plan P1): the store's master switch, read from the
+  // The RhythmVerse entry (RhythmVerse plan P1): the store's master switch, read from the
   // service that loaded `settings.toml`. Its own hot applier keeps the store's snapshot current, but
   // the menu record is built once per boot, so the row's *presence* follows the boot value: switching
   // it off stops a press immediately (the case re-checks the live gate) and removes the row on the
@@ -199,7 +199,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
     rhythmverse_setting = boot->service()->EffectiveValue(SettingId::kRhythmVerse).boolean;
   }
-  REXLOG_INFO("settings_menu: the RhythmVerse Customs entry is {}",
+  REXLOG_INFO("settings_menu: the RhythmVerse entry is {}",
               rhythmverse_setting ? "requested (its setting is on; a refusal is logged below)"
                                   : "off (its setting is off)");
   REXLOG_INFO("settings_menu: \"DLC Menu Songs\" is {}; {} menu-music song(s); the Play Current "
@@ -336,6 +336,10 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     }
     configuration.play_current_song = play_current_row;
     configuration.rhythmverse_row = rhythmverse_setting;
+    configuration.show_messages =
+        boot->service()->EffectiveValue(SettingId::kShowMessages).boolean;
+    configuration.show_recommendations =
+        boot->service()->EffectiveValue(SettingId::kShowRecommendations).boolean;
     // P2's data-layer spike (RhythmVerse plan §5/P2): empty is the ordinary boot.
     configuration.store_local_server_root = std::string(store::LocalServerRoot());
     configuration.store_search_diagnostic = store::SearchDiagnostic();

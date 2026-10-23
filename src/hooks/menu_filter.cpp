@@ -546,7 +546,7 @@ void Configure() {
       // The entry is off (Help & Options -> Downloadable Content), so the row was hidden by the
       // decision above and there is nothing to repaint. The discovery screen's caption still
       // belongs to the cache, which is untouched by that switch.
-      REXLOG_INFO("menu_filter: R7 is on but the Refresh Music Library entry is off; the "
+      REXLOG_INFO("menu_filter: R7 is on but the Refresh Songs entry is off; the "
                   "downloadable-content row is hidden from the menu");
     }
   }

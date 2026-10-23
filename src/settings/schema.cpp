@@ -122,12 +122,13 @@ std::vector<SchemaRow> BuildTable() {
   // TapRefreshCache while R7 is on, so it is a feature toggle of its own - a player who does not
   // want the entry can remove it here instead of digging into Interface -> Hidden Items. It is a
   // restart row like the other menu-shaping ones: the row list is baked when the menu's records
-  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale. Off by default (owner
-  // request, 2026-10-20): the cache still works, but the main menu does not grow a refresh entry
-  // unless the player asks for it.
+  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale. On by default since the
+  // owner request of 2026-10-22 (off 2026-10-20 to 2026-10-22): the refresh entry is part of a
+  // shipped install again, and the row here is how a player removes it. The visible row and the
+  // main-menu entry are both named "Refresh Songs" (renamed with the same owner request).
   rows.push_back(Row(Make(SettingId::kRefreshMusicLibrary, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
-                     {"general", "refresh_music_library"}, "dlc", "Refresh Music Library",
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"general", "refresh_music_library"}, "dlc", "Refresh Songs",
                      "Show the main menu entry that re-scans your DLC folders."));
   {
     Descriptor d = Make(SettingId::kDlcScanThreads, Category::kGeneral, Provider::kNative,
@@ -288,6 +289,15 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "settings_labels"}, "", "Settings Labels",
                      "Show a description of the highlighted row at the bottom of the screen."));
+  // P9-4: the shared background panel is authored once at boot.
+  rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
+                          Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"interface", "show_messages"}, "music_library_store", "Show Messages",
+                     "Show the MESSAGES tab in the music library and store. Requires a restart."));
+  rows.push_back(Row(Make(SettingId::kShowRecommendations, Category::kInterface,
+                          Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"interface", "show_recommendations"}, "music_library_store", "Show Recommendations",
+                     "Show the RECOMMENDED tab in the music library and store. Requires a restart."));
   // The main menu's Download Content row (owner request, 2026-10-20). R7's refresh took the row
   // over (`splash_dlc`), so the retail entry lost its label and action; the payload now restores
   // it as a row of its own. This switch is its visibility, and `true` means hidden: a fresh
@@ -466,6 +476,8 @@ constexpr StrategyEntry kStrategies[] = {
     // Interface
     {SettingId::kLetterbox, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideDownloadContent, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowMessages, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowRecommendations, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideOfflinePrompts, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHiddenMainMenu, ApplicationStrategy::kRestart, ""},

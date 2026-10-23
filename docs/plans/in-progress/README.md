@@ -8,12 +8,13 @@ The plan filed here is [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhyth
 the RhythmVerse customs catalogue inside the retail DOWNLOAD CONTENT store (P0 → P6 → P1 → P2 → P3 →
 P4 → P5 → P7 → P8). It **finished on 2026-10-22** — its acceptance harness is green in all four legs
 on one build (`out/store-acceptance/p8-final/`, 69 steps, 0 failures) — and was **reopened the same
-day** for the owner's pass: **§9** carries eleven prompts, **P9-1 … P9-11**, one per adjustment (the
-master switch's default and its restart prompt, the settings reorganisation, the store's labels and
-footer, the LT/RT tabs on Your Songs, the boot warm-up with its offline popup, and the move to the
-title's own keyboard search). Those prompts are owed; the records in §5 are what shipped before the
-pass, and the P8 close-out record still says which rows were measured by a probe rather than by the
-harness.
+day** for the owner's pass: **§9** carries thirteen prompts, **P9-1 … P9-13**, one per adjustment
+(the master switch's default and its restart prompt, the settings reorganisation, the store's labels
+and footer, the LT/RT tabs on Your Songs, the boot warm-up with its offline popup, the move to the
+title's own keyboard search, the two main-menu/refresh row renames of P9-12, and P9-13's
+charter/release-date/audio-type/download block in the details page's download box). Those prompts
+are owed; the records in §5 are what shipped before the pass, and the P8 close-out record still
+says which rows were measured by a probe rather than by the harness.
 
 The most recent plan before it,
 [`2026-10-19-interface-gameplay-mapping-restructure-plan.md`](../finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md) —

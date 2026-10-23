@@ -103,10 +103,13 @@ struct MenuConfiguration {
   // `splash_dlc`, because with the cache off that retail row is the Download Content entry.
   bool download_content_row = false;
   bool download_content_row_available = false;
-  // The RhythmVerse Customs entry (RhythmVerse plan P1): true when the boot builds the row, i.e.
+  // The RhythmVerse entry (RhythmVerse plan P1): true when the boot builds the row, i.e.
   // when the store's master switch was on. Its case re-checks the live gate, so switching the
   // store off stops the press without a restart.
   bool rhythmverse_row = false;
+  // P9-4: shared MESSAGES / RECOMMENDED header labels; frozen for this boot.
+  bool show_messages = true;
+  bool show_recommendations = false;
   // The P2 data-layer spike (RhythmVerse plan §5/P2): when non-empty, the boot rewrites
   // `config/gen/store.dtb` so the retail store's netcache fetches from a local (host-file) server
   // rooted here (src/store/store_payload.h). Empty - every ordinary boot - leaves the record as
@@ -178,12 +181,13 @@ inline constexpr char kPlayCurrentLabel[] = "Play Current Song";
 inline constexpr char kDownloadContentRow[] = "splash_dlc_store";
 inline constexpr char kDownloadContentLabel[] = "Download Content";
 
-// The RhythmVerse Customs entry (RhythmVerse plan P1). A main menu row of our own, built only while
-// the store's master switch is on, so the store is reachable without Xbox LIVE and without taking
+// The RhythmVerse entry (RhythmVerse plan P1). A main menu row of our own, built only while the
+// store's master switch is on, so the store is reachable without Xbox LIVE and without taking
 // `splash_dlc` away from R7's refresh. The case re-checks the live one-bit gate below, because the
-// switch is a `hot` row: turning the store off stops the press on the next menu entry.
+// switch is a `hot` row: turning the store off stops the press on the next menu entry. The row was
+// labelled `RhythmVerse Customs` until the owner shortened it to `RhythmVerse` (2026-10-22).
 inline constexpr char kRhythmVerseRow[] = "rbbz_rhythmverse";
-inline constexpr char kRhythmVerseLabel[] = "RhythmVerse Customs";
+inline constexpr char kRhythmVerseLabel[] = "RhythmVerse";
 // Answered by the host from the store's settings snapshot (src/store/store_settings.h); true means
 // the master switch is on. `rbbz-store/instrument/<token>` answers the five filter leaves.
 inline constexpr char kStoreEnabledQuery[] = "rbbz-store/enabled";
@@ -349,7 +353,7 @@ bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason);
 // off, when the record has no `splash_dlc` case, or when the row is already there.
 bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason);
 
-// Adds the RhythmVerse Customs entry (RhythmVerse plan P1): `kRhythmVerseRow` right after the
+// Adds the RhythmVerse entry (RhythmVerse plan P1): `kRhythmVerseRow` right after the
 // restored Download Content row when the boot built it, otherwise after the shipped `splash_dlc`,
 // plus a case whose body enters `store_menu_screen` only while `kStoreEnabledQuery` answers true -
 // no Xbox LIVE check and no Marketplace call anywhere in it. The anchor is the retail store row's

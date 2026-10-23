@@ -212,6 +212,19 @@ decision. The model uses `rb_blitz::profile::LaunchTarget` (`kCommon`/`kDemo`/`k
 
 ### 5.1 Values, identifiers, descriptors
 
+**2026-10-22 extension (RhythmVerse P9-4):** append
+`kShowMessagesRecommendations = 86` to the live enum in `src/settings/model.h`
+(after P6's ids 80-85). Its stable token is `show_messages_recommendations`;
+the native boolean persists under `[interface]`, defaults true, and requires
+a restart. **Superseded 2026-10-23:** id 86 is retired and never reused. The split
+preferences are `kShowMessages = 87` (`interface.show_messages`) and
+`kShowRecommendations = 88` (`interface.show_recommendations`), both native
+booleans, restart-scoped, with final defaults **Messages true / Recommendations
+false** (owner update, 2026-10-23). A missing new key inherits the old
+combined key's boolean; an explicit new key takes precedence. The fallback is
+used for loading and conflict detection, and the old key remains untouched.
+The snapshot below records the original frozen set.
+
 ```cpp
 enum class Category : uint8_t { kGeneral = 0, kGraphics = 1, kInterface = 2, kGameplay = 3 };
 

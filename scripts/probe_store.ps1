@@ -1,6 +1,6 @@
 # P2 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the data-layer probe.
 #
-# One boot, driven to the RhythmVerse Customs entry and into the retail store, with two
+# One boot, driven to the RhythmVerse entry and into the retail store, with two
 # instruments on:
 #
 #   * `--store_trace=1` — every game-root path the guest resolves or opens that names the store

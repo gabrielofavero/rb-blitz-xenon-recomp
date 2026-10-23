@@ -91,7 +91,7 @@ Value Enum(std::string token) {
 constexpr SettingId kRowsThatMustStayRestart[] = {
     SettingId::kTarget,     SettingId::kHideHud,     SettingId::kCacheDlcLibrary,
     SettingId::kResolution, SettingId::kRenderer,   SettingId::kAntiAliasing,
-    SettingId::kFiltering,  SettingId::kRhythmVerse,
+    SettingId::kFiltering,  SettingId::kRhythmVerse, SettingId::kShowMessages, SettingId::kShowRecommendations,
 };
 
 // The hot set, by name, so a promotion is a deliberate edit to this list and not a side effect.

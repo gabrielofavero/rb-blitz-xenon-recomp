@@ -372,9 +372,10 @@ after completing the read); scatter reads are not treated as contiguous file dat
 
 **The two labels.** The row ships as `Download Content` and the connect panel's status line as
 `Discovering Downloadable Content`, both in the game's English locale
-(`ui/locale/eng/gen/locale_keep.dtb`). R7 rewrites both: the row becomes `Refresh Music Library`,
-the status line `Loading Cached Content List` when the host answered this boot's enumeration out of
-the cache (`dlc: CacheServedThisBoot()`) - no discovery to announce. **Both are built into the
+(`ui/locale/eng/gen/locale_keep.dtb`). R7 rewrites both: the row becomes `Refresh Songs` (renamed
+from `Refresh Music Library` on 2026-10-22), the status line `Loading Cached Content List` when the
+host answered this boot's enumeration out of the cache (`dlc: CacheServedThisBoot()`) - no
+discovery to announce. **Both are built into the
 payload's generated locale records since 2026-10-15** (`SetRefreshRowLabel` / `SetDiscoveryCacheLabel`,
 [src/settings/menu_payload.cpp](../../src/settings/menu_payload.cpp) - the payload's records carry no
 split-read length constraint), because the in-flight `menu_filter` relabel cannot reach a locale that
@@ -420,10 +421,10 @@ thread, and a stream left playing through it repeats its last buffered slice. Th
 down before the block and the rotation's next song starts on the first menu frame after it - part 2
 §4 has the mechanism and the measurement, and `out/_swap/menu-run/music3` is the arm.
 
-**The entry's own switch (2026-10-15).** Help & Options → Downloadable Content → *Refresh Music
-Library* (`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, **off by
-default since 2026-10-20**) shows that row on the menu. On, it is a property of the feature rather
-than of the hide list: off hides `splash_dlc` with the hide master on **or** off and whatever the
+**The entry's own switch (2026-10-15).** Help & Options → Downloadable Content → *Refresh Songs*
+(`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, **on by default
+since 2026-10-22**; it shipped on 2026-10-15 and was off 2026-10-20 to 2026-10-22) shows that row
+on the menu. On, it is a property of the feature rather than of the hide list: off hides `splash_dlc` with the hide master on **or** off and whatever the
 Interface ▸ Hide Items selection says, it does not raise the hide list's "the refresh lost its row"
 warning (that warning is for a player who hid it *by accident*), and the payload's own locale stops
 repainting the row (`refresh_row_active` follows `enhancements_dlc_cache &&
@@ -525,13 +526,14 @@ does not claim to have touched ([known-issues.md](../reference/known-issues.md))
 On an unavailable press the `settings_play_unavailable` page remains; arms and captures are in
 [play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) §Evidence.
 
-### 7.3 The RhythmVerse Customs row (2026-10-20)
+### 7.3 The RhythmVerse row (2026-10-20; shortened 2026-10-22)
 
 **The feature.** The main menu's second store entry, and the way into the retail
 `store_menu_screen` without Xbox LIVE: the retail row's own case is gated by
 `{user_mgr is_participating_user_online}`, which offline always answers false. The row is built only
-while `general.rhythmverse` was on at boot; its label is `RhythmVerse Customs`
-(`rbbz_rhythmverse`, a locale entry of its own on that boot only).
+while `general.rhythmverse` was on at boot; its label is `RhythmVerse`
+(`rbbz_rhythmverse`, a locale entry of its own on that boot only) - `RhythmVerse Customs` until the
+owner shortened it on 2026-10-22.
 
 **The edit.** `ui::screen::AddRhythmVerseRow` ([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp))
 inserts the symbol into the option array directly after the restored *Download Content* row when
@@ -550,7 +552,8 @@ row stays drawn until the next boot, and turning the store on needs a restart fo
 
 **Measured 2026-10-20, and the two defects that measurement found** (boots under
 `out/_swap/store-probe/`, plan §5/P2 record). With the master on: the menu reads **PLAY / PLAY
-CURRENT SONG / HELP & OPTIONS / EXIT GAME / RHYTHMVERSE CUSTOMS**, the entry opens the retail
+CURRENT SONG / HELP & OPTIONS / EXIT GAME / RHYTHMVERSE CUSTOMS** (that boot's label - the row has
+read **RHYTHMVERSE** since 2026-10-22), the entry opens the retail
 `store_menu_screen` (MUSIC STORE / RECOMMENDED / YOUR SONGS … `LOADING`), and B returns to the same
 menu. Two things had to be fixed before that sentence was true:
 
@@ -569,7 +572,7 @@ menu. Two things had to be fixed before that sentence was true:
    fallback for a boot that builds no payload.
 
 **Not yet measured**: ≥5 consecutive boots, cache On/Off, store On/Off after a restart, Ultimate
-absent, and Refresh Music Library's sentinel in the same run. `rb_blitz_settings_screen_tests` pins
+absent, and Refresh Songs' sentinel in the same run. `rb_blitz_settings_screen_tests` pins
 the insertion (after the store row), the baked hide decision, the label, the gate, the refusal and a
 reparse; `rb_blitz_store_client_tests` pins the query answers.
 

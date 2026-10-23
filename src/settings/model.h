@@ -84,6 +84,10 @@ enum class SettingId : uint16_t {
   kRhythmVerseDrums = 83,
   kRhythmVerseVocals = 84,
   kRhythmVerseKeys = 85,
+  // Shared music-library/store headers (RhythmVerse owner pass P9-4).
+  kShowMessagesRecommendations = 86,  // retired combined preference; never reused
+  kShowMessages = 87,
+  kShowRecommendations = 88,
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

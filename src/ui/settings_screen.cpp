@@ -657,6 +657,7 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_dlc_panel", "DOWNLOADABLE CONTENT"},
       {"settings_dlc_menu_panel", "DLC MENU MUSIC"},
       {"settings_rhythmverse_panel", "RHYTHMVERSE"},
+      {"settings_music_library_store_panel", "MUSIC LIBRARY & STORE"},
       {"settings_rhythmverse_filter_panel", "SEARCH SONG FILTER"},
       {"settings_rhythmverse_search_panel", "RHYTHMVERSE SEARCH"},
       {"settings_rhythmverse_search_letters_panel", "LETTERS"},
@@ -1071,7 +1072,7 @@ std::vector<PanelSpec> AllPanels() {
                               // row only exists while R7 owns it, and this is how a player removes
                               // that entry without going through Interface -> Hidden Items.
                               BoolRow("settings_dlc_refresh", "general.refresh_music_library",
-                                      "Refresh Music Library",
+                                      "Refresh Songs",
                                       "Show the main menu entry that re-scans your DLC folders and re-runs the discovery pass. Needs Cache DLC Library."),
                               SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
                                         "DLC Scan Threads",
@@ -1435,15 +1436,33 @@ std::vector<PanelSpec> AllPanels() {
                               SubmenuRow("settings_main_menu", "settings_main_menu_screen",
                                          "Main Menu",
                                          "Choose which main-menu entries are visible."),
-                              VisibilityRow("settings_offline", "interface.hide_offline_prompts",
-                                            "Offline Prompts",
-                                            "Show or hide the pop-ups shown while playing offline."),
+                              SubmenuRow("settings_music_library_store", "settings_music_library_store_screen",
+                                         "Music Library & Store",
+                                         "Choose which headers appear in Your Songs and the store."),
+                              // Owner request, 2026-10-23: the row says what the switch *does*
+                              // rather than naming the prompts it removes. `hide_offline_prompts`
+                              // true *is* the skip, so the ordinary `On`/`Off` spelling is the
+                              // honest one here - `Hidden`/`Visible` made the player translate a
+                              // negation before flipping the row.
+                              BoolRow("settings_offline", "interface.hide_offline_prompts",
+                                      "Skip Offline Prompts",
+                                      "Skip the connection prompts and go straight to the menu in offline mode."),
                               // The caption overlay's own switch (owner request, 2026-10-14). It is
                               // the surface's second `hot` row - flipping it hides or shows the
                               // caption on the next frame, with no restart prompt.
                               BoolRow("settings_labels", "interface.settings_labels",
                                       "Help & Options Labels",
                                       "Show a description of the highlighted row at the bottom of the screen."),
+                          }});
+
+  out.push_back(PanelSpec{"settings_music_library_store_panel", "settings_music_library_store_screen",
+                          "settings_interface_screen", MenuPanels(),
+                          {
+                              BoolRow("settings_show_messages", "interface.show_messages", "Show Messages",
+                                      "Show the MESSAGES tab in the music library and store. Requires a restart."),
+                              BoolRow("settings_show_recommendations", "interface.show_recommendations",
+                                      "Show Recommendations",
+                                      "Show the RECOMMENDED tab in the music library and store. Requires a restart."),
                           }});
 
   // 5a. HUD: the element visibility page, then the two provider switches that read On/Off. The
@@ -1553,9 +1572,9 @@ std::vector<PanelSpec> AllPanels() {
         // row is the library refresh, which is the identity the live list gives it too.
         for (Row& row : panel.rows) {
           if (row.setting == "interface.hidden_main_menu.splash_dlc") {
-            row.label = "REFRESH MUSIC LIBRARY";
-            row.on_label = "REFRESH MUSIC LIBRARY: Hidden";
-            row.off_label = "REFRESH MUSIC LIBRARY: Visible";
+            row.label = "REFRESH SONGS";
+            row.on_label = "REFRESH SONGS: Hidden";
+            row.off_label = "REFRESH SONGS: Visible";
           }
         }
       }
@@ -3297,7 +3316,7 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   if (g_configuration.download_content_row) {
     add(kDownloadContentRow, kDownloadContentLabel);
   }
-  // The RhythmVerse Customs entry (plan P1) is the same kind of key: only the boot that builds the
+  // The RhythmVerse entry (plan P1) is the same kind of key: only the boot that builds the
   // row carries its string.
   if (g_configuration.rhythmverse_row) {
     add(kRhythmVerseRow, kRhythmVerseLabel);

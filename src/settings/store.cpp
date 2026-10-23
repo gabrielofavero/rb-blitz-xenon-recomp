@@ -785,6 +785,18 @@ bool ParseValueFromItem(const Descriptor& descriptor, const toml::Item& item, Va
   return false;
 }
 
+// A missing split preference inherits the retired combined switch. Use the same
+// read for loading and optimistic conflict checks, so an inherited Off can be saved.
+// Explicit new keys (including malformed ones) take precedence; old bytes survive.
+toml::Item PreferenceItem(const toml::Document& doc, const StorageKey& storage) {
+  auto item = doc.Get(storage.section, storage.key);
+  if (!item.found && storage.section == "interface" &&
+      (storage.key == "show_messages" || storage.key == "show_recommendations")) {
+    item = doc.Get("interface", "show_messages_recommendations");
+  }
+  return item;
+}
+
 std::string ProvenanceKey(const StorageKey& storage) {
   return std::string(storage.section) + "." + std::string(storage.key);
 }
@@ -886,7 +898,7 @@ DocumentLoad LoadSettingsDocument(const fs::path& file) {
     if (!row.storage.persisted() || IsAction(row.descriptor.id)) {
       continue;
     }
-    const toml::Item item = doc.Get(row.storage.section, row.storage.key);
+    const toml::Item item = PreferenceItem(doc, row.storage);
     if (!item.found) {
       continue;
     }
@@ -1010,7 +1022,7 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
     }
     Value disk;
     bool disk_found = false;
-    const toml::Item item = doc.Get(storage.section, storage.key);
+    const toml::Item item = PreferenceItem(doc, storage);
     if (item.found) {
       const schema::SchemaRow* row = schema::FindRow(id);
       if (row != nullptr && ParseValueFromItem(row->descriptor, item, &disk)) {

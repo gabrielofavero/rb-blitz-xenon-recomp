@@ -2,7 +2,7 @@
 # restart rule, measured in two boots.
 #
 # The owner pass (2026-10-22) made `general.rhythmverse` **restart**-scoped, because the switch owns
-# what the boot drew as well as what the store's workers read: the main-menu *RhythmVerse Customs*
+# what the boot drew as well as what the store's workers read: the main-menu *RhythmVerse*
 # row is compiled into the record the payload generates and the store's heading is a locale entry
 # that payload replaces. The five instrument leaves stay `hot`.
 #

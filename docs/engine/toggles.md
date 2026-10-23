@@ -71,14 +71,15 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 | `hide_menu_options` | R5 hiding categories: remove named entries from the main menu's option list (the list the guest navigates, not only the drawing). Needs `enhancements_hidden_menu_options` to name them; the compiled default is the three rows that only ever worked online | every shipped entry is present | U1 ([main-menu-flow.md](main-menu.md)) |
 | `mouse_ui_nav` (no prefix) | R6 native menu hover, A/B clicks and wheel navigation. In a song the pointer and the wheel are off (the cursor stays hidden), and a `[remap]` or Keyboard + Mouse table `mouse:` source reads the raw button state instead (P2/P3) - a bound mouse button acts on the song, a menu click never does. Off blocks every mouse path: the pointer and all mouse bindings. Since P7 it has an in-game row (Controls -> Input Types -> Mouse) and applies to the next poll. | keyboard/controller navigation | [input-flow.md](input-flow.md) |
 | `dlc_cache` | On by default: reuse an unchanged flat-library content list; fingerprint every boot. A real hit displays "Loading Cached Content List" in the English locale. Cold, invalid and refresh boots scan and report discovery. Since 2026-10-15 the refresh row also re-runs the title's own discovery pass on a press - the connect screen, its bar and the mounting, exactly as a first boot's start - and the press waits (bounded) for the re-scan so the pass enumerates the fresh list ([main-menu.md](main-menu.md) §7.1, [dlc.md](../guides/dlc.md) §4.2). The row's own on/off is the `refresh_music_library` row below. See [dlc.md](../guides/dlc.md) §4.4 for current measurements and the separate guest songcache. | Scan headers every boot without reading or writing the host cache; structured loading, progress, zero default mount delay and the independent pacing option still apply. | [dlc_cached_library.h](../../src/fs/dlc_cached_library.h), [dlc.cpp](../../src/hooks/dlc.cpp), [menu_payload.cpp](../../src/settings/menu_payload.cpp) |
-| `refresh_music_library` | **Off by default (2026-10-20):** the main menu's refresh entry has a switch of its own - the visible row is Help & Options → Downloadable Content → "Refresh Music Library" (`general.refresh_music_library`), which the boot writes into this cvar at the config rank ([src/settings/cvars.cpp](../../src/settings/cvars.cpp), [src/settings/boot.cpp](../../src/settings/boot.cpp)). On shows the row (`menu_filter`'s hide decision, master and selection unaffected), and the payload repaints it. Needs `dlc_cache`: with the cache off the row is the title's own online entry and this switch says nothing about it. The retail **Download Content** entry is restored separately as `splash_dlc_store`, behind `interface.hide_download_content` (default Hidden). | the row is hidden; the library is still re-scanned at boot whenever its fingerprint changed, and `--refresh_dlc_cache` still forces one | [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp), [src/settings/menu_compat.cpp](../../src/settings/menu_compat.cpp) (`DecideHiddenRows`), [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) |
+| `refresh_music_library` | **On by default since 2026-10-22** (off 2026-10-20 to 2026-10-22, on when it first shipped 2026-10-15; owner request): the main menu's refresh entry has a switch of its own - the visible row is Help & Options → Downloadable Content → "Refresh Songs" (`general.refresh_music_library`, renamed from "Refresh Music Library" on 2026-10-22; the setting id and cvar name are unchanged so existing profiles keep working), which the boot writes into this cvar at the config rank ([src/settings/cvars.cpp](../../src/settings/cvars.cpp), [src/settings/boot.cpp](../../src/settings/boot.cpp)). On shows the row (`menu_filter`'s hide decision, master and selection unaffected), and the payload repaints it. Needs `dlc_cache`: with the cache off the row is the title's own online entry and this switch says nothing about it. The retail **Download Content** entry is restored separately as `splash_dlc_store`, behind `interface.hide_download_content` (default Hidden). | the row is hidden; the library is still re-scanned at boot whenever its fingerprint changed, and `--refresh_dlc_cache` still forces one | [src/hooks/menu_filter.cpp](../../src/hooks/menu_filter.cpp), [src/settings/menu_compat.cpp](../../src/settings/menu_compat.cpp) (`DecideHiddenRows`), [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) |
 | `dlc_uncap_enumeration` | On by default: temporarily free V-Sync throughout content discovery, including post-enumeration finalization; request restoration of the player's original value at the verified usable main menu. Independent of host-cache On/Off. The title's own discovery bar follows the actual aggregate enumerators, host-pushed per whole percent (2026-10-15); the historical last-item/idle restoration is superseded by P6 and the overlay by the native bar. | Keep the player's frame-pacing setting throughout loading; the title's own bar remains the title's own. | [content_progress.cpp](../../src/hooks/content_progress.cpp), [content_progress.h](../../src/ui/content_progress.h), [native_menu.cpp](../../src/input/native_menu.cpp), [dlc.md](../guides/dlc.md) §4.4 |
 | `force_controller_scheme` | R8 force a predefined controller scheme on load (needs `enhancements_controller_scheme`, a string; empty means unnamed and leaves the saved layout alone) | the player's saved layout is used untouched | D3 |
 | `menu_dlc_songs` | R9 change the main menu's songs for loaded DLC ones — **the carrier of an in-game setting since 2026-10-14**: the visible row is Help & Options → Downloadable Content → "DLC Menu Songs" (`general.dlc_menu_songs`), and the boot writes that row into this cvar at the config rank ([src/settings/cvars.cpp](../../src/settings/cvars.cpp), [src/settings/boot.cpp](../../src/settings/boot.cpp)), so a flag or environment value still outranks it. The menu's background pool is the title's own three streamed tracks (the `shellmusic` block of `config/synth.dtb`), and with this on every track it plays is a loaded DLC song instead - a pool of at most **50** songs drawn at random from the whole library every boot, where a mounted package contributes **every** `.mogg` it holds rather than only its first (a merged pack is one container with a disc's worth of songs in it, and taking only the first pinned the menu to the same track every boot; the old `enhancements_menu_dlc_song_count` size row is retired and ignored). Streamed read-only from the package it came from and walked as a **rotation**: every song of the pool is heard once before any of them is heard again, no song ever follows itself — including across a reshuffle, a menu re-entry or a pool rebuilt by a library refresh, because the order is remembered by song *identity* rather than by position — and a pool that can only offer the song that just played (a one-song library) plays it once and then hands the menu back to the title's own tracks — one of the three, played with the title's own loop, as the title plays its music — instead of repeating the DLC song. A song whose load fails sits out the pass it failed in, is tried again in the next, and is retired after repeated failures. The follow-up feature **Play Current Song** (2026-10-14) rides the same switch: with it on and a pool, the main menu gains a second entry that starts the song the menu is playing - the power-up screen with Ultimate, the loading screen on the offline base target ([main-menu.md](main-menu.md) part 1 §7.2) - and with the switch off the entry is not built and its settings row reads unavailable. Needs a DLC library: without one the menu is unchanged | the title's own three tracks, one chosen at random per menu visit and looped | [menu-music.md](main-menu.md) part 2 ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp)) |
 | `rename_mod_settings` | R10 rename the mod's settings row: the Ultimate mod's own screen is drawn as "Ultimate Settings" instead of the "Mod Settings" it ships with (needs the payload installed; the in-game menu hides the row without it) | the mod's own label | [main-menu-flow.md](main-menu.md) § "the label" |
 | `settings_help_overlay` (no prefix) | **the help captions, and the carrier of an in-game setting since 2026-10-14**: a one-or-two-line description of the highlighted settings row, drawn as a host overlay over the presented frame while Help & Options (or a page it routes into) is open. The visible row is Help & Options → Interface → "Settings Labels" (`interface.settings_labels`, default On), which the boot writes into this cvar at the config rank and the P9 live applier writes when the row is committed, so flipping it hides or shows the caption **on the next draw, with no restart prompt** ([docs/settings/status.md](../settings/status.md) § "Row descriptions"). Off is invisible rather than "drawn and empty": the dialog returns before `Begin()`, so nothing is drawn at all | no caption is drawn; every row's description is still authored and still published over the settings channel | [src/ui/help_overlay.cpp](../../src/ui/help_overlay.cpp) (the drawing and the font), [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) (the texts and the guest-side publishing), [src/hooks/help_observer.cpp](../../src/hooks/help_observer.cpp) (the retail pages), [docs/settings/status.md](../settings/status.md) § "Row descriptions" |
 
-**R3, R6, R7's cache, R9 and R10 are the toggles that ship on**, and so does the caption overlay's own
+**R3, R6, R7's cache (and, since 2026-10-22, its `refresh_music_library` entry), R9 and R10 are the
+toggles that ship on**, and so does the caption overlay's own
 `settings_help_overlay`: it is a display aid rather than a deviation from the title, its effect is
 purely additive to what is on screen, and it now has a visible row which is the honest control for
 it (Help & Options → Interface → Settings Labels). R10's row belongs to the Ultimate mod, so a run without
@@ -159,6 +160,60 @@ the next poll (plan §16.2). The Controller switch defaults off because its
 physical-pad arm is unmeasured on this machine; the Keyboard + Mouse switch ships on because its
 dispatch is measured live (plan §13.3). `kGameplayDispatchReady` is the one place a build can hold
 both switches' routing off again without deleting the code path.
+
+## Music-library and store headers
+
+**Current (2026-10-23, independent switches):** General ▸ Interface ▸
+Music Library & Store has two native booleans, both restart-scoped. The owner's
+final defaults (2026-10-23) are **Messages On / Recommendations Off**:
+
+| Row | Settings key | Stable id |
+| --- | --- | --- |
+| Show Messages | `interface.show_messages` | 87 |
+| Show Recommendations | `interface.show_recommendations` | 88 |
+
+The retired combined id 86 is never reused. Its old key seeds an absent new
+key, while explicit new keys win; loading does not rewrite the profile.
+`src/settings/store.cpp` uses the same fallback for optimistic conflict checks.
+
+`src/settings/menu_payload.cpp` authors a single tab ring: Your Songs →
+RhythmVerse → Messages → Recommended. Every trigger case skips disabled tabs,
+retaining the retail preview cleanup and store highlight saves. The shared
+background handler chooses the full header Flow whenever any optional tab is
+enabled, independently hides each disabled label, and hides the badge only
+when Messages is Off. Both arrows disappear only when all three optional tabs
+are Off. This also hides RhythmVerse while its master is Off. The eight-state
+matrix is checked on synthetic and extracted records; the new split awaits
+the owner's in-game retest.
+
+**Earlier combined implementation (superseded by the split above):**
+
+RhythmVerse owner pass **P9-4** (2026-10-22) adds a native settings boolean rather
+than a cvar. **General ▸ Interface ▸ Music Library & Store ▸ Show Headers** stores
+`interface.show_messages_recommendations` (id 86), default **On**, and requires
+a restart. On preserves retail's shared `background_panel` record. Off appends
+`set_showing FALSE` for `main_Home.lbl` (RECOMMENDED), `main_inbox.lbl` (MESSAGES)
+and `main_new_msg.lbl` after `set_offline_mode_headers`, and suppresses the badge
+after `update_inbox_header`. Both the store and Your Songs call that same panel.
+The boot reads the effective setting in `src/hooks/settings_payload.cpp`;
+`src/settings/menu_payload.cpp` edits `ui/background/gen/background.dtb`.
+**2026-10-23 correction:** hiding uses direct scene-object commands, matching
+retail's badge handler; the initial nested `$this find` form is retired after
+the owner reported an Off crash. An in-game retest remains pending. The song
+list's trigger cases now bypass their offline gate. With headers Off, both
+triggers go to the enabled store, and the store menu/browser's RT skips Inbox
+for Your Songs. With the store master Off and headers On, song-list RT goes
+to Inbox; with both Off, triggers only pulse their arrows. Header positions
+and the other labels retain their retail behavior. The payload tests cover
+all four switch combinations on synthetic and extracted retail records.
+
+**Header presentation correction (2026-10-23):** the owner's screenshots showed
+Your Songs retained dim tabs and no LT/RT. Its screen-entry call still chose the
+offline header Flow based on sign-in, independently of the button handlers.
+`RouteSongSelectHeaders` now sends FALSE to `set_offline_mode_headers` whenever
+Show Headers or the store master is On (the same value the store sends), and TRUE
+only when both switches are Off. The tests assert this argument in both synthetic
+and generated retail records. The visual change awaits the owner's retest.
 
 ## Adding a toggle
 

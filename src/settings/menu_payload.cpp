@@ -2,6 +2,7 @@
 #include "settings/menu_payload.h"
 
 #include <algorithm>
+#include <array>
 #include <numeric>
 #include "store/store_metadata.h"
 #include "store/store_payload.h"
@@ -17,6 +18,160 @@ void U32(std::vector<uint8_t>& out, uint32_t n) {
 void U64(std::vector<uint8_t>& out, uint64_t n) {
   U32(out, static_cast<uint32_t>(n)); U32(out, static_cast<uint32_t>(n >> 32));
 }
+}
+
+namespace {
+Node* PanelMethod(std::vector<Node>* roots, std::string_view panel, std::string_view method) {
+  if (!roots) return nullptr;
+  for (auto& root : *roots) {
+    if (root.tag != ui::dtb::kCommand || root.kids.size() < 3 ||
+        root.kids[0].text != "new" || root.kids[2].text != panel) continue;
+    for (auto& child : root.kids) {
+      if (child.tag == ui::dtb::kArray && !child.kids.empty() &&
+          child.kids[0].text == method) return &child;
+    }
+  }
+  return nullptr;
+}
+void FindTriggerCases(Node& node, std::string_view action, std::vector<Node*>* cases) {
+  if (node.tag == ui::dtb::kArray && !node.kids.empty()) {
+    const auto& first = node.kids[0];
+    // Song list / Inbox / Recommendations use switch cases; both store panels use cond.
+    if ((first.tag == ui::dtb::kSymbol && first.text == action) ||
+        (first.tag == ui::dtb::kCommand && first.kids.size() == 3 &&
+         first.kids[0].text == "==" && first.kids[1].tag == ui::dtb::kVar &&
+         first.kids[1].text == "action" && first.kids[2].text == action)) {
+      cases->push_back(&node);
+      return;
+    }
+  }
+  for (auto& child : node.kids) FindTriggerCases(child, action, cases);
+}
+constexpr std::array<const char*, 4> kHeaderScreens = {
+    "song_select_screen", "store_menu_screen", "inbox_screen", "recommendation_screen"};
+LibraryHeader AdjacentHeader(LibraryHeader current, int direction, LibraryHeaderOptions options) {
+  const std::array<bool, 4> enabled = {true, options.store, options.messages, options.recommendations};
+  for (int step = 1; step <= 4; ++step) {
+    const int index = (static_cast<int>(current) + direction * step + 8) % 4;
+    if (enabled[index]) return static_cast<LibraryHeader>(index);
+  }
+  return LibraryHeader::kSongs;
+}
+Node HeaderDestination(LibraryHeader header) {
+  if (header == LibraryHeader::kStore) {
+    return Node::Command({Node::Symbol("store_menu_screen"), Node::Symbol("get"),
+                          Node::Symbol("which_store_screen")});
+  }
+  return Node::Symbol(kHeaderScreens[static_cast<int>(header)]);
+}
+Node HeaderArrow(int direction) {
+  return Node::Command({Node::Command({Node::Symbol("background_panel"), Node::Symbol("find"),
+      Node::Symbol(direction > 0 ? "arrow_rt.flow" : "arrow_lt.flow")}), Node::Symbol("activate")});
+}
+// Rewrite only the transition in each authored case: retain preview cleanup, store
+// highlight saves and the arrow Flow. Expand Recommendations' RT helper locally,
+// since its other callers must still go to Your Songs.
+bool RewriteHeaderTransition(Node& node, LibraryHeader destination, const Node* song_helper) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() == 2 &&
+      node.kids[1].text == "go_to_song_select") {
+    if (!song_helper) return false;
+    std::vector<Node> body{Node::Symbol("do")};
+    body.insert(body.end(), song_helper->kids.begin() + 1, song_helper->kids.end());
+    node = Node::Command(std::move(body));
+  }
+  if (node.tag == ui::dtb::kCommand && node.kids.size() == 2 &&
+      node.kids[0].text == "transition_to") {
+    node.kids[1] = HeaderDestination(destination);
+    return true;
+  }
+  if (destination != LibraryHeader::kStore) {
+    std::erase_if(node.kids, [](const Node& child) {
+      return child.tag == ui::dtb::kCommand && child.kids.size() >= 3 &&
+             child.kids[0].text == "data_mine_mgr" && child.kids[1].text == "add_event" &&
+             child.kids[2].text == "enter_store";
+    });
+  }
+  bool found = false;
+  for (auto& child : node.kids) found |= RewriteHeaderTransition(child, destination, song_helper);
+  return found;
+}
+}
+
+bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions options, std::string* why) {
+  if (!roots) { if (why) *why = "no background record"; return false; }
+  auto staged = *roots;
+  Node* mode = PanelMethod(&staged, "background_panel", "set_offline_mode_headers");
+  Node* inbox = PanelMethod(&staged, "background_panel", "update_inbox_header");
+  Node* flow = nullptr;
+  if (mode) {
+    for (auto& command : mode->kids) {
+      if (command.tag == ui::dtb::kCommand && command.kids.size() == 4 &&
+          command.kids[0].text == "if_else") {
+        if (flow) { if (why) *why = "ambiguous header Flow"; return false; }
+        flow = &command;
+      }
+    }
+  }
+  if (!flow || !inbox) {
+    if (why) *why = "background_panel lacks its header Flow or inbox callback";
+    return false;
+  }
+  // Full LT/RT appearance whenever there is another enabled tab, regardless of sign-in.
+  flow->kids[1] = Node::Symbol(options.navigation_enabled() ? "FALSE" : "TRUE");
+  const auto hide = [](const char* label) {
+    return Node::Command({Node::Symbol(label), Node::Symbol("set_showing"), Node::Symbol("FALSE")});
+  };
+  if (!options.store) mode->kids.push_back(hide("main_store.lbl"));
+  if (!options.recommendations) mode->kids.push_back(hide("main_Home.lbl"));
+  if (!options.messages) {
+    mode->kids.push_back(hide("main_inbox.lbl"));
+    mode->kids.push_back(hide("main_new_msg.lbl"));
+    inbox->kids.push_back(hide("main_new_msg.lbl"));
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
+bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader current,
+                                   LibraryHeaderOptions options, std::string* why) {
+  if (!roots) { if (why) *why = "no navigation record"; return false; }
+  auto staged = *roots;
+  const std::array<std::vector<const char*>, 4> panels = {{
+      {"song_select_panel"}, {"store_menu_panel", "store_browser_panel"},
+      {"inbox_panel"}, {"recommendation_panel"}}};
+  for (const char* panel : panels[static_cast<int>(current)]) {
+    Node* buttons = PanelMethod(&staged, panel, "BUTTON_DOWN_MSG");
+    const Node* helper = PanelMethod(&staged, panel, "go_to_song_select");
+    for (int direction : {1, -1}) {
+      std::vector<Node*> cases;
+      if (buttons) FindTriggerCases(*buttons,
+          direction > 0 ? "kAction_PageDown" : "kAction_PageUp", &cases);
+      if (cases.size() != 1) {
+        if (why) *why = std::string(panel) + " lacks its unique trigger case";
+        return false;
+      }
+      Node& kase = *cases[0];
+      const LibraryHeader next = AdjacentHeader(current, direction, options);
+      if (next == current) {
+        kase.kids = {kase.kids[0], HeaderArrow(direction)};
+        continue;
+      }
+      if (current == LibraryHeader::kSongs) {
+        if (kase.kids.size() != 2 || kase.kids[1].tag != ui::dtb::kCommand ||
+            kase.kids[1].kids.size() < 4 || kase.kids[1].kids[0].text != "if") {
+          if (why) *why = "song list lacks its offline navigation gate";
+          return false;
+        }
+        kase.kids[1].kids[1] = Node::Symbol("TRUE");
+      }
+      if (!RewriteHeaderTransition(kase, next, helper)) {
+        if (why) *why = std::string(panel) + " lacks its header transition";
+        return false;
+      }
+    }
+  }
+  *roots = std::move(staged);
+  return true;
 }
 
 bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit) {
@@ -296,13 +451,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             note("the Play Current Song row was refused: " + why);
           }
         }
-        // The RhythmVerse Customs entry (plan P1): built only when the store's master switch was on
+        // The RhythmVerse entry (plan P1): built only when the store's master switch was on
         // for this boot, so a store the player turned off never draws a row that would refuse the
         // press. A refusal here is not fatal - the row simply is not there.
         if (screen::CurrentMenuConfiguration().rhythmverse_row) {
           std::string why;
           if (!screen::AddRhythmVerseRow(&roots, &why)) {
-            note("the RhythmVerse Customs row was refused: " + why);
+            note("the RhythmVerse row was refused: " + why);
           }
         }
         // The R5 hide decision, baked into the record this payload generates. The in-flight twin
@@ -437,6 +592,22 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       note("the store's netcache-init rewrite was refused: " + ui_why);
     }
   }
+  // Independently enabled tabs share one cyclic route and one header appearance.
+  const auto& menu_config = screen::CurrentMenuConfiguration();
+  const LibraryHeaderOptions headers{menu_config.rhythmverse_row, menu_config.show_messages,
+                                     menu_config.show_recommendations};
+  if (!edit("ui/background/gen/background.dtb", [&](auto& roots) {
+        return ConfigureLibraryHeaderBar(&roots, headers, error);
+      })) return false;
+  for (const auto& [path, tab] : std::array<std::pair<const char*, LibraryHeader>, 4>{{
+      {"ui/song_select/gen/song_select.dtb", LibraryHeader::kSongs},
+      {"ui/store/gen/store.dtb", LibraryHeader::kStore},
+      {"ui/inbox/gen/inbox.dtb", LibraryHeader::kMessages},
+      {"ui/recommendations/gen/recommendations.dtb", LibraryHeader::kRecommendations}}}) {
+    if (!edit(path, [&](auto& roots) {
+          return RouteLibraryHeaderNavigation(&roots, tab, headers, error);
+        })) return false;
+  }
   // P3's data lane (RhythmVerse plan §5/P3). With the store's master switch on, the retail store's
   // own DTA records are edited so the retail screens can show our catalogue:
   //
@@ -454,7 +625,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     std::vector<Node> store_ui_roots;
     ui::dtb::RootHeader store_ui_header;
     std::string store_ui_why;
-    if (read("ui/store/gen/store.dtb", &store_ui_bytes, &store_ui_why) &&
+    // Carry the hidden-header navigation edit into the RhythmVerse edits below.
+    const auto header_record = built.find("ui/store/gen/store.dtb");
+    const bool have_store = header_record != built.end();
+    if (have_store) store_ui_bytes = header_record->second;
+    if ((have_store || read("ui/store/gen/store.dtb", &store_ui_bytes, &store_ui_why)) &&
         ui::dtb::Parse(store_ui_bytes.data(), store_ui_bytes.size(), &store_ui_roots,
                        &store_ui_header, &store_ui_why)) {
       std::string why;

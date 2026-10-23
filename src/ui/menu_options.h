@@ -88,7 +88,9 @@ inline constexpr char kUltimateSettingsLabel[] = "Ultimate Settings";
 // entry - the settings page's old duplicate is gone).
 inline constexpr char kDlcRowKey[] = "splash_dlc";
 inline constexpr char kDlcRowLabel[] = "Download Content";
-inline constexpr char kDlcRowRefreshLabel[] = "Refresh Music Library";
+// Renamed `Refresh Songs` by the owner on 2026-10-22 (it was `Refresh Music Library`): the row
+// re-scans the DLC folders, and "songs" is the word the rest of the surface uses for them.
+inline constexpr char kDlcRowRefreshLabel[] = "Refresh Songs";
 
 // The refresh row's action, shared by the two places that build it: the in-flight edit
 // (`TapRefreshCache`, byte-budgeted because the ark index fixes the file's length) and the

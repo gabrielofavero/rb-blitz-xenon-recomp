@@ -21,7 +21,7 @@
 //     retail HELP & OPTIONS row (`splash_options`), the only route into the settings surface, so a
 //     selection that names it is refused - and *reported*, because a silent refusal is how a user
 //     ends up with no settings screen.
-//   * **"Default offline rows must not hide Refresh Music Library when `splash_dlc` has that
+//   * **"Default offline rows must not hide Refresh Songs when `splash_dlc` has that
 //     job."** The same row carries the DLC refresh while R7 owns it, so the default trio loses
 //     that row and says so; only an explicit user choice may hide it, and then the caller is told
 //     the refresh has no row left.

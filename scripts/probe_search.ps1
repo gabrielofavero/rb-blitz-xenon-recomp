@@ -26,7 +26,8 @@ param(
     [string]$GameRoot,
     [string]$UltimateMode = "1",
     # The main menu row that opens the store. With the store's master switch on the measured order
-    # is PLAY / PLAY CURRENT SONG / HELP & OPTIONS / EXIT GAME / RHYTHMVERSE CUSTOMS.
+    # is PLAY / PLAY CURRENT SONG / HELP & OPTIONS / EXIT GAME / RHYTHMVERSE (the row was
+    # RHYTHMVERSE CUSTOMS until 2026-10-22).
     [int]$StoreRow = 4,
     [string]$Query = "bush",
     # A query already in the field at boot (the live-request arm: one Done press, no typing).

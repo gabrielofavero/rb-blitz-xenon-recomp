@@ -136,6 +136,54 @@ struct FakeProvider : ProviderSink {
   }
 };
 
+void TestShowHeadersRoundTrip() {
+  BeginCase("header defaults: Messages On, Recommendations Off; independent persistence and restart");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  constexpr auto messages = SettingId::kShowMessages;
+  constexpr auto recommendations = SettingId::kShowRecommendations;
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(Capabilities());
+  CHECK_TRUE(service.EffectiveValue(messages).boolean);
+  CHECK_FALSE(service.EffectiveValue(recommendations).boolean);
+  for (int mask = 0; mask < 4; ++mask) {
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(txn, messages, BoolV(mask & 1), service.capability_revision()).ok);
+    CHECK_TRUE(service.Set(txn, recommendations, BoolV(mask & 2), service.capability_revision()).ok);
+    const auto result = service.Commit(txn);
+    CHECK_TRUE(result.status == CommitStatus::kSaved);
+    CHECK_TRUE(result.restart_required);
+    Service reloaded(paths);
+    reloaded.Boot(nullptr, PathEntry{}, nullptr);
+    reloaded.SetCapabilities(Capabilities());
+    CHECK_TRUE(reloaded.EffectiveValue(messages).boolean == bool(mask & 1));
+    CHECK_TRUE(reloaded.EffectiveValue(recommendations).boolean == bool(mask & 2));
+  }
+  BeginCase("legacy combined preference seeds only absent split keys and remains untouched");
+  WriteFile(paths.settings_file, "schema_version = 1\n[interface]\nshow_messages_recommendations = false # keep\n");
+  Service legacy(paths);
+  legacy.Boot(nullptr, PathEntry{}, nullptr);
+  legacy.SetCapabilities(Capabilities());
+  CHECK_FALSE(legacy.EffectiveValue(messages).boolean);
+  CHECK_FALSE(legacy.EffectiveValue(recommendations).boolean);
+  const auto txn = legacy.BeginEdit(legacy.revision());
+  CHECK_TRUE(legacy.Set(txn, messages, BoolV(true), legacy.capability_revision()).ok);
+  CHECK_TRUE(legacy.Commit(txn).status == CommitStatus::kSaved);
+  const auto loaded = LoadSettingsDocument(paths.settings_file);
+  CHECK_TRUE(loaded.document.values.at(messages).boolean);
+  CHECK_FALSE(loaded.document.values.at(recommendations).boolean);
+  std::ifstream saved(paths.settings_file);
+  const std::string text((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+  CHECK_TRUE(text.find("show_messages_recommendations = false # keep") != std::string::npos);
+  // A later edit of the old fallback is still another writer's change.
+  Store writer(paths);
+  writer.Load();
+  WriteFile(paths.settings_file, "schema_version = 1\n[interface]\nshow_messages_recommendations = true\nshow_messages = true\n");
+  writer.MarkChanged(recommendations, BoolV(true), Origin::kManual);
+  CHECK_TRUE(writer.Save().status == CommitStatus::kConflict);
+}
+
 void TestDurableEditReload() {
   Scratch scratch;
   const StorePaths paths = Paths(scratch);
@@ -630,6 +678,7 @@ void TestCvarVocabulary() {
 }  // namespace
 
 int main() {
+  TestShowHeadersRoundTrip();
   TestDurableEditReload();
   TestValidationAndPending();
   TestOverridesAndCorrections();
