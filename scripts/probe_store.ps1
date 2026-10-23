@@ -27,6 +27,10 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -StoreRow 3 -EnterStore -PageRow 0 -OfferRow 0
 #   # control leg: retail server, no local rewrite, trace still on
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -StoreRow 5 -LocalRoot ""
+#   # second visit: leave the store, wait, walk back in and press the page row again. This is the
+#   # route `rb_blitz_238.log` (2026-10-22, 20:09) crashed on, and the probe has `store_trace` on,
+#   # so its fault logger prints the stack the shipping boot did not have.
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\probe_store.ps1 -StoreRow 4 -PageRow 0 -Reenter -ReenterWaitSec 15
 param(
     [string]$BuildDir = "out/build/win-amd64-release",
     [string]$OutDir = "out/_swap/store-probe",
@@ -61,6 +65,13 @@ param(
     # How long to let a download run after that press before the last capture. A small custom is
     # seconds; the wait is what makes the strip's own progress and outcome readable.
     [int]$DownloadWaitSec = 40,
+    # Second visit (P9 route, 2026-10-22): after the page steps, Back out to the main menu, wait,
+    # walk back in through the store row and press the page row again. The owner's crash
+    # (`rb_blitz_238.log`, `read of guest 0x00000004`) happened on exactly that second press, when
+    # the Downloaded index had landed between the visits; the script always runs `store_trace`, so
+    # the fault logger captures the stack the shipping boot did not have.
+    [switch]$Reenter,
+    [int]$ReenterWaitSec = 0,
     [string]$LogLevel = "debug",
     # Turns on the SDK's noisy kernel-import logging (the `log_noisy` cvar), which is what makes a
     # trace-level run name the exports the guest calls after the store is entered.
@@ -220,6 +231,9 @@ $verdict = [ordered]@{
     info_text    = ""
     press_text   = ""
     press_done_text = ""
+    reenter_text = ""
+    reenter_page_text = ""
+    reenter_page_late_text = ""
     back_text    = ""
     dropped      = $false
 }
@@ -310,6 +324,34 @@ try {
                 }
             }
         }
+        if ($Reenter) {
+            # Leave the store (one Back per screen the route opened), wait for the Downloaded index
+            # to land, then walk the same route again. `-ReenterWaitSec` is the parameter because a
+            # 1,700-package library needs its index built before the second page carries marks;
+            # a two-package one is ready almost immediately.
+            $backs = if ($PageRow -ge 0) { @("key:b", "wait:2", "key:b", "wait:4") } else { @("key:b", "wait:4") }
+            Invoke-Actions $backs
+            Capture-To (Join-Path $capDir "reenter-left.png")
+            Start-Sleep -Seconds $ReenterWaitSec
+            $again = @($clampUp)
+            for ($d = 0; $d -lt $StoreRow; $d++) { $again += "key:lstick_down" }
+            $again += @("key:a", "wait:8")
+            Invoke-Actions $again
+            Capture-To (Join-Path $capDir "reenter.png")
+            $verdict.reenter_text = Get-ScreenText (Join-Path $capDir "reenter.png")
+            if ($PageRow -ge 0) {
+                $againRoute = @()
+                for ($d = 0; $d -lt $PageRow; $d++) { $againRoute += @("key:lstick_down", "wait:1") }
+                if ($againRoute.Count -gt 0) { Invoke-Actions $againRoute }
+                Invoke-Actions @($PageKey)
+                Start-Sleep -Seconds 2
+                Capture-To (Join-Path $capDir "reenter-page.png")
+                $verdict.reenter_page_text = Get-ScreenText (Join-Path $capDir "reenter-page.png")
+                Start-Sleep -Seconds $SettleAfterPressSec
+                Capture-To (Join-Path $capDir "reenter-page-late.png")
+                $verdict.reenter_page_late_text = Get-ScreenText (Join-Path $capDir "reenter-page-late.png")
+            }
+        }
         # B returns to the menu (P1's acceptance asks for exactly this).
         Invoke-Actions @("key:b", "wait:4")
         Capture-To (Join-Path $capDir "store-back.png")
@@ -397,6 +439,19 @@ if (-not $MenuOnly) {
                 $report += "--- after ${DownloadWaitSec}s (OCR) ---"
                 $report += $verdict.press_done_text
             }
+        }
+    }
+    if ($Reenter) {
+        $report += ""
+        $report += "--- second visit: store (OCR) ---"
+        $report += $verdict.reenter_text
+        if ($PageRow -ge 0) {
+            $report += ""
+            $report += "--- second visit: row $PageRow opened, +2 s (OCR) ---"
+            $report += $verdict.reenter_page_text
+            $report += ""
+            $report += "--- second visit: row $PageRow opened, settle (OCR) ---"
+            $report += $verdict.reenter_page_late_text
         }
     }
     $report += ""

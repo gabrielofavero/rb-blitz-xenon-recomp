@@ -4,9 +4,11 @@
 #include "store/store_fetch.h"
 
 #include <atomic>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -95,13 +97,19 @@ std::string GuestCString(uint8_t* base, uint32_t addr, size_t max_length) {
   return out;
 }
 
-// The guest buffer the record is copied into. One per boot, grown when a larger record arrives:
-// the insert copies what it is handed (the download path hands it a buffer it owns and frees its
-// own source), so the buffer only has to outlive the call - but reusing one allocation is cheaper
-// than allocating per request and leaves no freed pointer behind a panic.
+// The guest buffer a record is copied into: **one per served path per boot**, never one shared
+// across records. The insert does not copy what it is handed - `sub_82468248` stores the pointer
+// itself at `file + 56` (`stw r28,56(r30)`) and parses it in place - so the bytes have to outlive
+// the request object, which the file cache keeps for the whole boot. Measured 2026-10-22: the
+// store's second visit re-requested the first offer's cover, the engine refused the duplicate
+// insert (`sub_824685E0` answers 0 for a path it already holds), and the completion then decoded
+// the **file object from the first visit** - whose `+56` was the one shared buffer the rest of the
+// boot had since overwritten with a menu page and other covers - and read guest 0x4
+// (`rb_blitz_243.log`; the same decode call with the same arguments decodes cleanly on the first
+// visit). Per-path buffers are the smallest fix: a path's bytes never change within a boot, so a
+// repeat serve reuses its own allocation, and no live object ever sees another record's bytes.
 std::mutex g_buffer_mutex;
-uint32_t g_buffer = 0;
-uint32_t g_buffer_size = 0;
+std::map<std::string, std::pair<uint32_t, uint32_t>> g_buffers;  // path -> (address, capacity)
 // 32 bytes of guest scratch for the delivery calls' return slot and message struct.
 uint32_t g_scratch = 0;
 
@@ -125,18 +133,18 @@ uint32_t Allocate(PPCContext& ctx, uint8_t* base, size_t size) {
   return call.r3.u32;
 }
 
-uint32_t EnsureBuffer(PPCContext& ctx, uint8_t* base, size_t size) {
+uint32_t RecordBuffer(PPCContext& ctx, uint8_t* base, const std::string& path, size_t size) {
   std::lock_guard<std::mutex> lock(g_buffer_mutex);
-  if (g_buffer != 0 && g_buffer_size >= size) {
-    return g_buffer;
+  const auto it = g_buffers.find(path);
+  if (it != g_buffers.end() && it->second.second >= size) {
+    return it->second.first;
   }
   const uint32_t allocated = Allocate(ctx, base, size);
   if (allocated == 0) {
     return 0;
   }
-  g_buffer = allocated;
-  g_buffer_size = static_cast<uint32_t>((size + 255) & ~size_t{255});
-  return g_buffer;
+  g_buffers[path] = {allocated, static_cast<uint32_t>((size + 255) & ~size_t{255})};
+  return allocated;
 }
 
 // One line per distinct path per boot: a store screen re-requests the same menu on every visit.
@@ -256,7 +264,7 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
                 GuestU32(base, manager + 44), GuestU32(base, manager + 48),
                 GuestU32(base, manager + 104));
   }
-  const uint32_t buffer = EnsureBuffer(ctx, base, record.bytes.size() + 1);
+  const uint32_t buffer = RecordBuffer(ctx, base, path, record.bytes.size() + 1);
   if (buffer == 0) {
     LogOnce(path, "no record for '" + path + "': the guest buffer allocation failed");
     return false;
@@ -365,7 +373,7 @@ bool ServeArtRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
     return false;
   }
   const uint32_t path_chars = path_string;
-  const uint32_t buffer = EnsureBuffer(ctx, base, bytes.size() + 1);
+  const uint32_t buffer = RecordBuffer(ctx, base, path, bytes.size() + 1);
   if (buffer == 0) {
     LogOnce(path, "no texture for '" + path + "': the guest buffer allocation failed");
     return false;

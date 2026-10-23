@@ -18,7 +18,12 @@
 //   * `sub_824685E0(manager, path, data, size)` is the retail insert into that container. Its
 //     signature is read off its other caller, the download-completion path: it passes the path, the
 //     downloaded buffer and its length, and the function classifies the record by the path's
-//     extension (`.dta` is the text parser's type) before storing it.
+//     extension (`.dta` is the text parser's type) before storing it. It stores the **pointer** it
+//     is handed (`file + 56`) and parses that memory in place, so the bytes must outlive the boot -
+//     and it refuses a path the container already holds (it answers 0), so a second visit never
+//     replaces the first one's object. src/store/store_fetch.cpp keeps one guest buffer per served
+//     path for exactly that reason: reusing one buffer across records made the second visit decode
+//     bytes a later serve had written (`read of guest 0x00000004`, 2026-10-22).
 //
 // So serving a record is: put it in the container *before* the request runs, and then - once the
 // request has registered its client - run the retail notification, which is what turns the loaded

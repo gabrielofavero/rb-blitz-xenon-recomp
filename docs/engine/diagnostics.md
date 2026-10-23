@@ -175,6 +175,25 @@ SEARCH rows). All of it is drawn only within
 out of the store, and it is drawn with Settings Labels off - an empty or unreachable catalogue is a
 state a player cannot explain from the screen.
 
+**The store's fault logger and its map.** `store_trace` also installs the first-chance handler that
+turns a guest null read into a line
+(`store-probe: fault read of 0x… at rip 0x…, frames: …`, then the SDK's own report). The frames are
+**host** addresses, so they are only names when the link map comes from the same link as the binary
+that booted - a map one build old named nothing real and cost this plan a diagnosis
+(measured 2026-10-22). A measurement build asks for the map explicitly:
+
+```powershell
+cmake --preset win-amd64-release -DRBBLITZ_LINK_MAP=ON
+cmake --build --preset win-amd64-release --target rb_blitz
+python out/_swap/fault_lookup.py --base <the module base the boot logged> <frames…>
+```
+
+The option adds `-Xlinker /MAP` to the game target only (`CMakeLists.txt`), so the tool targets are
+untouched; it is off by default and a normal build carries no map. The store's own art path has two
+extra trace lines for the same class of question: `store-probe: art request manager=… client=…
+path='…'` (every request for a store texture, served or not) and the completion's `wrapper=…[…]`
+words (the file object whose bytes the decode reads).
+
 **What a silent probe does *not* prove (measured 2026-10-20).** Records read from an `.ark` are
 never seen: the guest mounts the ark part and reads records out of it **by offset**, so no path is
 resolved for them at all. A trace-level boot of this title is 30 `NtCreateFile` lines in total — the

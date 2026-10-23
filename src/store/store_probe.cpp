@@ -433,6 +433,14 @@ REX_HOOK_RAW(sub_8235A240) {
 REX_EXTERN(__imp__sub_82469C28);
 REX_HOOK_RAW(sub_82469C28) {
   const uint32_t path_string = ctx.r4.u32;
+  if (rb_blitz::store::TraceEnabled() && path_string != 0) {
+    const std::string path = rb_blitz::store::GuestCString(base, path_string, 240);
+    if (path.find("dlc_store") != std::string::npos ||
+        path.find(".png_xbox") != std::string::npos) {
+      REXLOG_INFO("store-probe: art request manager={:#x} client={:#x} path='{}'", ctx.r3.u32,
+                  ctx.r5.u32, path);
+    }
+  }
   const bool served = rb_blitz::store::ServeArtRequest(ctx, base, path_string);
   __imp__sub_82469C28(ctx, base);
   if (served && path_string != 0 && rb_blitz::store::TraceEnabled()) {
@@ -446,18 +454,22 @@ REX_HOOK_RAW(sub_82469C28) {
 // texture (`panel + 100`) and only then messages `art_loaded` to the DTA object the request wrapped
 // (`panel + 104`), but *only* while that wrapper's state word (`+28`) is 1. Every one of those steps
 // can be a silent no-op, so a trace boot reports the state before the call, the texture's fields
-// after it, and whether the material's texture was ever the one we served.
+// after it, and whether the material's texture was ever the one we served. The wrapper the request
+// built (`ctx.r5`) is logged too: its second word is the file object whose bytes the decode reads,
+// which is what named the 2026-10-22 second-visit fault.
 REX_EXTERN(__imp__sub_82445CD8);
 REX_HOOK_RAW(sub_82445CD8) {
   const uint32_t panel = ctx.r4.u32;
+  const uint32_t wrapper = ctx.r5.u32;
   const bool trace = rb_blitz::store::TraceEnabled();
   if (trace && panel != 0) {
     const uint32_t callback = rb_blitz::store::GuestU32(base, panel + 104);
     const uint32_t texture = rb_blitz::store::GuestU32(base, panel + 100);
     REXLOG_INFO("store-probe: art completion enter panel={:#x} texture={:#x} callback={:#x} "
-                "callback[28]={}",
+                "callback[28]={} wrapper={:#x}[{}]",
                 panel, texture, callback,
-                callback != 0 ? rb_blitz::store::GuestU32(base, callback + 28) : 0u);
+                callback != 0 ? rb_blitz::store::GuestU32(base, callback + 28) : 0u, wrapper,
+                wrapper != 0 ? rb_blitz::store::GuestWords(base, wrapper, 3) : std::string());
   }
   __imp__sub_82445CD8(ctx, base);
   if (trace && panel != 0) {

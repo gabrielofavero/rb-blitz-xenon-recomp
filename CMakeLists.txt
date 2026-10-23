@@ -274,6 +274,16 @@ if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32)
 endif()
 
+# The store's fault logger (src/store/store_probe.cpp) prints host frames, which are resolved
+# against `rb_blitz.map` by out/_swap/fault_lookup.py - and the map has to come from the same link
+# as the binary or the symbols are noise (measured 2026-10-22: a map one build old named nothing
+# real). Off by default; a measurement boot asks for it:
+#   cmake --preset win-amd64-release -DRBBLITZ_LINK_MAP=ON
+#   cmake --build --preset win-amd64-release --target rb_blitz
+if(RBBLITZ_LINK_MAP)
+    target_link_options(rb_blitz PRIVATE -Xlinker /MAP)
+endif()
+
 # Which graphics backends the GPU plugin was compiled with, in the order the in-game *Renderer*
 # row should offer them. The same two variables decide what `rexgpu-xenos.dll` contains (the SDK
 # reads them itself), so passing them on as one string keeps the two in step: the row can never
