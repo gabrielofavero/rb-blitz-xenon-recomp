@@ -287,4 +287,81 @@ bool UnrollOfferDifficulty(std::vector<ui::dtb::Node>* store_ui_roots, std::stri
 inline constexpr char kStoreHeadingText[] = "RHYTHMVERSE";
 bool SetStoreHeading(std::vector<ui::dtb::Node>* locale_roots, std::string_view heading,
                      std::string* why);
+
+// ---------------------------------------------------------------------------------------------
+// P9-7/P9-8 - the store's own footer: the Search Filters button, and no View Item caption
+// ---------------------------------------------------------------------------------------------
+//
+// The retail store's footer is the scene's `InlineHelp` panel, and each store scene bakes a caption
+// per pad action into itself (`store_menu.milo`: Confirm/Back/Start/Option; `store_browser.milo`:
+// the same set for `store.ihp`; `store_info.milo` for the details page). Two of those captions are
+// wrong for this build:
+//
+//   * **Start** reads `inline_help_options` ("HELP & OPTIONS") and its case jumps to retail's
+//     `options_screen`. P9-7 re-points the button at this build's **Search Song Filter** page, so
+//     the caption follows the destination;
+//   * **Y** (`kAction_Option`) reads `store_offer` ("VIEW ITEM"). On the front menu the case opens a
+//     trial upsell or the banner's marquee offer (we serve no marquee path), on the browser it opens
+//     the provider's shortcut list (our provider supplies none) and on the details page it opens a
+//     recommendation (`recommended.grp` is never shown). The caption therefore names an action that
+//     can do nothing; P9-8 removes it from our surfaces.
+//
+// The commands are the retail idiom (`{<ihp> set_action_token <action> <token>}` /
+// `{<ihp> clear_action_token <action>}`, as `song_select.dtb` and `store_info.dtb` spell them), and
+// the object names are the scenes' own - measured 2026-10-23 with `python scripts/hmx_milo.py list`:
+// `store_menu.milo` declares `InlineHelp.ihp`, `store_browser.milo` declares `store.ihp`, and
+// `store_info.milo` declares `store_info.ihp` and `view_offer.ihp`.
+
+// The locale key and text the Start caption reads on both store screens (P9-7). The entry is added
+// to every installed locale by `menu_payload.cpp`; `SEARCH FILTERS` matches the retail entries'
+// own upper-case spelling (`inline_help_options` = "HELP & OPTIONS").
+inline constexpr char kFooterSearchFiltersToken[] = "inline_help_search_filters";
+inline constexpr char kFooterSearchFiltersText[] = "SEARCH FILTERS";
+
+// P9-7's destination. Both store screens carry the shipped Start case -
+//
+//   {options_screen set back_screen store_menu_screen} {ui goto_screen options_screen}
+//
+// (the front menu's `BUTTON_DOWN_MSG` and the browser's, out/_swap/store.tree.txt:450-461 and
+// :1061-1075) - and both are re-pointed at `filter_screen`, with the back target left as the store
+// front menu retail already sets. The back target is runtime state, not a second page: a settings
+// screen's Back reads `{{ui current_screen} get back_screen}` (src/ui/settings_screen.cpp's
+// `Leave`), so this edit points the filter page at the store for *this* flow while Help & Options'
+// own `EnterScreen` re-points it at the RhythmVerse page on its way in.
+//
+// Idempotent (a case that already goes to `filter_screen` is left alone); refused, before any edit,
+// when either panel or its Start case is missing, or when the case carries neither the shipped
+// `options_screen` pair nor this edit's own destination.
+bool RouteStoreStartToFilter(std::vector<ui::dtb::Node>* store_ui_roots,
+                             std::string_view filter_screen, std::string* why);
+
+// P9-7's caption: `store_menu_panel.enter` and `store_browser_panel.refresh_list` are told to draw
+// `start_token` for Start, on `InlineHelp.ihp` and `store.ihp` respectively. Idempotent; refused,
+// before any edit, when either method is missing.
+//
+// **The front menu's command goes in a panel method, not the screen's `enter`.** Measured on the
+// owner's boot of 2026-10-23: the same commands appended to `store_menu_screen.enter` changed
+// nothing on screen, while the browser's (in `refresh_list`, a panel method) drew `SEARCH
+// FILTERS` — the screen's `enter` runs before the panels' scenes are the objects a command
+// resolves against, which is the rule `settings_screen.cpp` already records for retail scenes
+// ("a statement in our own panel runs before `{ui goto_screen …}`, when the retail scene is not
+// loaded yet"). `store_panel.enter`'s own `{microsoft.lbl set_showing FALSE}` is the measured
+// precedent that a panel `enter` does reach its scene's objects. The command is inserted **first**
+// in the method too, because the shipped `store_menu_panel.enter` ends in a `{cond …}` whose
+// default arm is `{fail …}`.
+bool SetStoreFooterStart(std::vector<ui::dtb::Node>* store_ui_roots, std::string_view start_token,
+                         std::string* why);
+
+// P9-8 on the two screens: `{InlineHelp.ihp clear_action_token kAction_Option}` in
+// `store_menu_panel.enter` (first statement, for the reason above) and
+// `{store.ihp clear_action_token kAction_Option}` at the end of `store_browser_panel.refresh_list`
+// (after its own shortcut-header gate, so the caption cannot come back on a refresh). Idempotent;
+// refused, before any edit, when either method is missing.
+bool ClearStoreFooterOption(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
+
+// P9-8 on the details record (`ui/store/gen/store_info.dtb`): `store_info_panel.enter` clears
+// `kAction_Option` on both inline-help objects its scene declares, because the page's Y case only
+// opens a recommendation and this build never shows one. Idempotent; refused, before any edit, when
+// the panel or its `enter` method is missing.
+bool ClearDetailsFooterOption(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 }  // namespace rb_blitz::store

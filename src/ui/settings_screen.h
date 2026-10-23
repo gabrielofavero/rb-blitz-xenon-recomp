@@ -224,6 +224,14 @@ inline constexpr char kSearchPanel[] = "settings_rhythmverse_search_panel";
 inline constexpr char kSearchScreen[] = "settings_rhythmverse_search_screen";
 inline constexpr char kSearchRetailBack[] = "store_menu_screen";
 
+// The **Search Song Filter** page (plan P9-3/P9-7). Listed by the RhythmVerse page, and reached
+// from the store's own Start button: the payload re-points both store screens' Start cases here
+// (`store::RouteStoreStartToFilter`), and the back target is runtime state - Help & Options enters
+// it from the RhythmVerse page, the store from its front menu (both through `EnterScreen`'s
+// "point the destination back at whoever sent us" statement, or the store's own equivalent).
+inline constexpr char kRhythmVerseFilterPanel[] = "settings_rhythmverse_filter_panel";
+inline constexpr char kRhythmVerseFilterScreen[] = "settings_rhythmverse_filter_screen";
+
 
 // The installed Ultimate payload's own settings entry, which the merged surface **removes**: every
 // page it opened is reachable from Help & Options now, so a second button for the same thing is one

@@ -183,8 +183,20 @@ background handler chooses the full header Flow whenever any optional tab is
 enabled, independently hides each disabled label, and hides the badge only
 when Messages is Off. Both arrows disappear only when all three optional tabs
 are Off. This also hides RhythmVerse while its master is Off. The eight-state
-matrix is checked on synthetic and extracted records; the new split awaits
-the owner's in-game retest.
+matrix is checked on synthetic and extracted records.
+
+**Animation/layout correction (2026-10-23):** the owner's split-control tests
+showed RT from Songs to Messages swiping left with the store Off, and hidden
+tabs leaving holes. Header-only transition wrappers now carry the pressed
+direction; ordinary transitions reset that override before entering a cached
+transition object and retain retail's index-based fallback. Background entry
+rewrites the enabled labels' `TextShift.anim` endpoint X keys into consecutive
+retail positions in cyclic order, including the new-message badge; unused space
+stays at the right. All four tabs enabled preserves the original position keys.
+`menu_payload` and the eight-state extracted-record check pass (1,550 checks),
+and the release build succeeds. The owner manually confirmed the corrected swipes
+and compact layout work.
+See RhythmVerse plan P9-4 for record paths, native handler and evidence.
 
 **Earlier combined implementation (superseded by the split above):**
 

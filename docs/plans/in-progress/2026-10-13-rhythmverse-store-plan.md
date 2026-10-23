@@ -2404,11 +2404,11 @@ one.
 | P9-1 | Done | Settings | The master switch defaults **On** | the P6 record's "master off" |
 | P9-2 | Done | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
 | P9-3 | Done | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
-| P9-4 | In Progress | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
+| P9-4 | Done | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
 | P9-5 | Done | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
 | P9-6 | Todo | Store surface (3 prompts) | **6a** the download/install status, Cancel and Download Again live in the details page's own box (guest-drawn); **6b** a retail popup on leaving the store or reaching Your Songs announces new songs after an install; **6c** the credit line goes, RhythmVerse stays credited in **Credits** | P5's strip, P7's credit line |
-| P9-7 | Todo | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
-| P9-8 | Todo | Store footer | Hide **Y View Item** where it does nothing | — |
+| P9-7 | Done | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
+| P9-8 | Done | Store footer | Hide **Y View Item** where it does nothing | — |
 | P9-9 | In Progress | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
 | P9-10 | In Progress | Catalogue | Warm Recently Added at boot; a failed press draws the connection-failed popup (P9-6b's panel) and retries in the background — nothing is hidden | P7's fetch-on-open |
 | P9-11 | Todo | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
@@ -2417,14 +2417,20 @@ one.
 
 Status checked 2026-10-23 against this section's records and the tree: **Done** = the prompt's
 Done-when is met by a record; **In Progress** = part is landed and the closing measurement is owed;
-**Todo** = nothing is in the tree. Evidence for the non-Done rows: P9-4 and P9-9 landed their host
-halves (the split controls and the ordered tab ring) and wait on the owner's in-game retest; P9-5
+**Todo** = nothing is in the tree. Evidence for the non-Done rows: P9-9 has its host implementation and remains open for its closing measurement; P9-5
 landed 2026-10-23 (the label, the four row forms and the `store_front_menu_row` diagnostic) and the
 owner's boot reads `RECENTLY ADDED / SEARCH` with no digit beside either row; P9-6 has none of its
 three parts
 (`src/ui/help_overlay.cpp:381` still draws `DownloadStatusText`, `src/store/store_catalogue_status.cpp:118`
-still returns `kStoreCreditText`, and no `notice/pending` predicate exists); P9-7 and P9-8 have no
-code in `src/` (`Search Filters` and the `kAction_Option` edit do not exist); P9-10 measured its
+still returns `kStoreCreditText`, and no `notice/pending` predicate exists); **P9-7 and P9-8 are
+Done (owner's boot, 2026-10-23)**: `store::RouteStoreStartToFilter`, `SetStoreFooterStart`,
+`ClearStoreFooterOption` and `ClearDetailsFooterOption` (`src/store/store_payload.{h,cpp}`, wired
+in `src/settings/menu_payload.cpp` with the `inline_help_search_filters` locale entry;
+`store_payload` **376 checks**) re-point both store Start cases at the Search Song Filter page and
+clear the Y caption on all three store surfaces, and the owner's retest on the release build read
+the store root's footer correct after the panel-enter correction; the acceptance harness's
+Store-leg steps (footer `SEARCH FILTERS`, Start → the filter page, Back → the store menu, no
+`VIEW ITEM` on any store surface) stay as the standing check; P9-10 measured its
 boot prewarm (`src/rb_blitz_app.h:381`) and owes items 2-3 (the failed-press popup and the
 background retry); P9-11's authored key pages are still registered in `src/ui/settings_screen.cpp`;
 P9-12's labels and default are in the tree (`kRhythmVerseLabel` is `RhythmVerse`,
@@ -2903,6 +2909,48 @@ and pause contexts. This supersedes the initial placement as the fourth row;
 the two switches and their defaults are unchanged. The existing row-order test
 pins the new order.
 
+**Animation and layout correction (owner reports, 2026-10-23).** The split was
+manually exercised: with RhythmVerse Off and both other tabs On, RT correctly
+opened Messages but swiped left. With Recommendations Off and RhythmVerse/Messages
+On, the hidden label left a hole between visible labels, rotating through the bar.
+This supersedes the earlier assumption that retaining the retail positions and
+transition inference was sufficient.
+
+- **Direction:** `ui/gen/transition_screens.dtb` infers a wrap whenever the index
+  difference is not one. Songs is index 1 and Messages is 3, so skipping the store
+  reverses that inference. Header trigger cases now call an authored wrapper with
+  +1 for RT / -1 for LT. The transition object receives that override before
+  `ui goto_screen`; ordinary transitions explicitly reset it to zero, retaining
+  the original selector for vertical changes and unrelated callers. Cached
+  transitions therefore cannot retain an earlier trigger override. Two-tab rings
+  can animate the same source/destination pair in either direction.
+- **Compaction:** the background panel's scene owns `TextShift.anim`, with
+  `local_xfm/x` tracks on `main_home.trans`, `main_mySongs.trans`, `main_store.trans`,
+  `main_inbox.trans`, and `main_newMessage.trans`. Its endpoints are frames
+  0/10/20/30/40 (Recommended/Songs/Store/Messages/Recommended). On background entry,
+  native `set_key_val` commands rewrite the enabled labels' endpoint X values in
+  cyclic order into consecutive retail slots (-345, -43, 91, 226; Recommended's
+  original fourth-slot offset is 235). The badge shares Messages' position. Hidden
+  slots consequently trail the enabled labels at every selected header. Retail
+  scale/colour tracks, offscreen wrap keys, and unrelated scene tracks survive;
+  all four tabs enabled emits no position edits. This changes the guest's animation
+  data, with no host drawing or per-frame position correction. The native handler
+  is `sub_82286570`, its `set_key_val` branch at 0x822867F4, calling `sub_82286178`.
+- **Host verification:** `menu_payload` passes, and the real-record checker runs
+  **1,550 assertions** over all eight combinations: both trigger routes and swipe
+  directions, ordinary-transition fallback/reset, consecutive positions for every
+  enabled current header, the frame-0/40 wrap, and the badge. All generated DTBs
+  parse/recompile byte-identically, with zero refused edits. Evidence is
+  `out/_swap/header-animation/records/state-0..7/`. The full
+  `cmake --build --preset win-amd64-release` succeeds. **Visual motion and layout
+  still require the owner's manual retest; no game UI was driven for this fix.**
+
+**P9-4 closed (2026-10-23; owner confirmation):** the owner manually tested
+and confirmed the independent switches, skipped-tab swipe direction, and compact
+header layout work. P9-4 is Done. The pending-test notes above preserve the state
+before this confirmation. The release build and all eight host configurations
+were verified; the agent did not navigate the game.
+
 ### P9-5 — **Recently Added**, and no count beside the two rows
 
 - **Do two things in `src/store/store_metadata.cpp`**:
@@ -3153,6 +3201,96 @@ Measurements this prompt rides on (2026-10-22, shipped records, no boot):
   returns to the store front menu **and only from this flow** (the Help & Options route still backs
   to Downloadable Content), and the master being off does not block the page (P6's rule).
 
+**P9-7 record (2026-10-23) — landed in code and pinned hermetically; the boot capture is the
+closing step.**
+
+- **Where the button is, measured out of the shipped record** (dumped with
+  `rb_blitz_settings_screen_tests dump-record assets/game/360/ui/store/gen/store.dtb`): the front
+  menu's case is `({== $action kAction_Start} {options_screen set back_screen store_menu_screen}
+  {ui goto_screen options_screen})` in `store_menu_panel.BUTTON_DOWN_MSG`, and the browser's is the
+  same two statements inside `{do {$this turn_off_preview} …}` in
+  `store_browser_panel.BUTTON_DOWN_MSG`. `store::RouteStoreStartToFilter` rewrites both:
+  `settings_rhythmverse_filter_screen set back_screen store_menu_screen` then
+  `{ui goto_screen settings_rhythmverse_filter_screen}`. Nothing else in either case changes.
+- **No second entry page was needed — the back target is runtime state.** A settings screen's Back
+  is `{ui goto_screen {{ui current_screen} get back_screen}}`
+  (`src/ui/settings_screen.cpp`'s `Leave`), and Help & Options' own navigation re-points the
+  destination at whoever sent it (`EnterScreen`). So the store's case sets the filter page's
+  `back_screen` to `store_menu_screen` on its way in, and the Help & Options route sets it to
+  `settings_rhythmverse_screen` on its own way in: one page, two return paths. The RhythmVerse
+  page's own back stays `settings_dlc_screen`.
+- **The footer caption is a scene property, not a DTA token — that is why the plan's own line was
+  the only one.** Every compiled record in `assets/game/360` was dumped and searched for the bare
+  locale token `store_offer`, and only the locale records carry it; the captions are baked into the
+  scenes' `InlineHelp` panels (`store_menu.milo` carries `inline_help_options` and `store_offer`;
+  `store_info.milo` carries `store_offer`; `store_browser.milo` carries neither, which is why its
+  Option caption is the record's own `shortcut_header` or nothing). The objects are named
+  `InlineHelp.ihp` (`store_menu.milo`), `store.ihp` (`store_browser.milo`) and `store_info.ihp` /
+  `view_offer.ihp` (`store_info.milo`) — measured 2026-10-23 with
+  `python scripts/hmx_milo.py list`. `store::SetStoreFooterStart` therefore writes
+  `{InlineHelp.ihp set_action_token kAction_Start inline_help_search_filters}` and the same command
+  on `store.ihp` for the browser — the retail idiom `song_select.dtb` already spells
+  (`{InlineHelp.ihp set_action_token kAction_Start search}`). The token is a bare symbol and the
+  locale entry `inline_help_search_filters` = `SEARCH FILTERS` is added to every locale beside the
+  Download label; `SEARCH FILTERS` matches the retail caption table's own upper case.
+- **The command belongs in the panel, not the screen — corrected after the owner's boot
+  (2026-10-23).** The first cut appended both front-menu commands to `store_menu_screen.enter`;
+  the owner's boot then showed the **browser** footer correct (`(X) SEARCH FILTERS`, no View Item)
+  while the **store front menu** still drew `(X) HELP & OPTIONS` and `(Y) VIEW ITEM` — the
+  browser's commands sit in `store_browser_panel.refresh_list`, a panel method, and the screen's
+  `enter` runs before the panels' scenes are the objects a command resolves against (the same rule
+  `settings_screen.cpp` records for retail scenes: "a statement in our own panel runs before
+  `{ui goto_screen …}`, when the retail scene is not loaded yet"). `store_panel.enter`'s own
+  `{microsoft.lbl set_showing FALSE}` is the measured precedent that a panel `enter` does reach its
+  scene's objects. Both front-menu commands are now written into `store_menu_panel.enter` and
+  inserted **first** in it, because that method ends in the shipped `{cond …}` whose default arm is
+  `{fail …}`: a statement after that arm is one this build would be relying on `fail` not aborting
+  to run. Measured against the shipped record (`store-edit <store.dtb> start`): the two commands
+  are the method's first two statements, before `{store_panel add_sink …}`.
+- **Refusals, not errors**: both transforms run in the payload's rhythmverse-gated store block and
+  report a named refusal without touching the record (no `BUTTON_DOWN_MSG`, no `kAction_Start`
+  case, a Start case that jumps somewhere else, or a missing `enter`/`refresh_list`). A second pass
+  is idempotent: the destination is the marker (and the caption token is rewritten in place rather
+  than appended twice).
+- **Tests**: `store_payload` grew `TestStoreStartRoutesToFilter`, `TestStoreFooterStart`,
+  `TestStoreFooterOptionCleared` and `TestDetailsFooterOptionCleared` (**376 checks** in the
+  suite):
+  both cases re-pointed with the browser's `turn_off_preview` kept, no `options_screen` jump left,
+  the caption command on the scene's own objects with a symbol token, the clear sitting after the
+  browser's shortcut gate and **first** in the front menu's `enter` (with the shipped `{fail …}`
+  arm still present after it), idempotency, compile→parse round trips, and every refusal leaving
+  the tree byte-identical. The `store-edit <store.dtb> start` diagnostic prints each verdict and
+  dumps both `BUTTON_DOWN_MSG` methods, `store_menu_panel.enter` and the browser's `refresh_list`:
+  measured against the shipped record, all three transforms answer **edited**, and the dump shows
+  exactly the statements above.
+- **Harness**: `scripts/acceptance_store.ps1`'s Store leg now asserts the footer reads
+  `SEARCH FILTERS`, presses **Start**, waits for `settings_rhythmverse_filter_screen`, checks the
+  five instrument rows, presses Back and asserts `store_menu_screen` — and asserts the same
+  caption and the absence of `VIEW ITEM` on the browser and the details page (P9-8).
+- **Docs**: `docs/settings/menu.md` claims no store Start target (checked 2026-10-23), so it needed
+  nothing; the `store-edit ... start` mode is documented here and in the test's own header.
+- **Owner retest recipe** (release build relinked 2026-10-23,
+  `out/build/win-amd64-release/rb_blitz.exe`): main menu → **RhythmVerse** → the store front menu's
+  footer reads `SEARCH FILTERS` beside the Start glyph (the owner's 2026-10-23 capture shows the
+  glyph as `(X)`) and draws no `Y VIEW ITEM`; Start opens the page titled `SEARCH SONG FILTER`
+  (Guitar / Bass / Drums / Vocals / Keys); Back returns to the store front menu; open Recently
+  Added and the browser's footer reads the same caption with no View Item; A on an offer shows a
+  details page with no View Item; and Help & Options → General → Downloadable Content →
+  RhythmVerse → Search Song Filter still returns to the RhythmVerse page (the other flow). The
+  **browser** half is already measured (owner boot, 2026-10-23); the front menu's is the half the
+  first placement missed.
+- **Not measured at this record's time**: the boot itself. The Done-when's OCR ("the footer reads
+  `(Start) SEARCH FILTERS`, Start opens that page, Back returns to the store") is
+  `scripts/acceptance_store.ps1 -Legs Store`'s new steps, which had not been run on a binary
+  carrying this change. *(Superseded by the close-out below: the owner's boot is the measurement,
+  and the harness's steps stay as the standing check.)*
+- **Close-out (owner's boot, 2026-10-23) — P9-7 is met.** After the panel-enter correction the
+  owner retested `out/build/win-amd64-release/rb_blitz.exe` (relinked 13:00) against the recipe
+  above and confirmed it works: the store root's footer no longer reads `HELP & OPTIONS`/`VIEW
+  ITEM`, Start reaches the `SEARCH SONG FILTER` page, and Back returns to the store front menu.
+  Read by hand rather than stored as a capture (the same standing as P9-5's owner boot), on top of
+  the browser half measured on the earlier boot of the same day. **P9-7 → Done.**
+
 ### P9-8 — hide **Y View Item** where it does nothing
 
 - **Do**: the caption is the locale token `store_offer` = `VIEW ITEM`
@@ -3167,6 +3305,50 @@ Measurements this prompt rides on (2026-10-22, shipped records, no boot):
   the `shortcuts.lst` entry if it names `store_offer`. Nothing is removed globally.
 - **Done when**: no `VIEW ITEM` is drawn on any store surface and Y has no effect there; a capture
   of the footer proves it, and the shortcut headers elsewhere are untouched.
+
+**P9-8 record (2026-10-23) — landed in code and pinned hermetically; the boot capture is the
+closing step.**
+
+- **The caption's source, measured** (2026-10-23): no DTA record sets `kAction_Option` to
+  `store_offer`. All records of `assets/game/360` were dumped and searched; the only store-record
+  Option token is `refresh_list`'s `shortcut_header` for a provider that reports shortcuts
+  (`out/_swap/store.tree.txt:849-856`), and the bare token `store_offer` exists only in the locale
+  records (the store, inbox and recommendations records carry longer tokens such as
+  `store_offer_fetch_panel`, `store_offer_unavailable` and `store_offer_new`, not the caption's).
+  The caption is baked into the scenes: `store_menu.milo` and `store_info.milo` carry `store_offer`,
+  `store_browser.milo` does not. That also says the three Y handlers the plan lists are inert for
+  us (no trial mode, no marquee path, no shortcut provider, no recommendation band), which is what
+  the owner saw.
+- **Three clears, on the scenes' own objects**: `store::ClearStoreFooterOption` writes
+  `{InlineHelp.ihp clear_action_token kAction_Option}` into `store_menu_panel.enter` (first
+  statement, for the panel-versus-screen reason the P9-7 record measures) and
+  `{store.ihp clear_action_token kAction_Option}` at the end of `store_browser_panel.refresh_list`
+  — after that method's own shortcut-header gate, so a provider that ever reported shortcuts still
+  cannot bring the caption back. `store::ClearDetailsFooterOption` appends the same clear for
+  `store_info.ihp` and `view_offer.ihp` to `store_info_panel.enter`, because both inline-help
+  objects belong to the details scene and which one draws the caption is not distinguishable from
+  the outside. A clear of an action that is not set is safe: retail's own
+  `store_offer_fetch_panel.enter` calls `{cancel.ihp clear_action_token kAction_Cancel}`
+  unconditionally before anything sets that token.
+- **Y's handlers are left in place, not removed.** They already do nothing on our surfaces (above);
+  the plan's own instruction was to remove the caption, and removing dispatch cases would be an
+  edit no measurement asks for. The browser's `shortcuts.lst` needs no edit either: it is filled
+  from the provider's shortcut array, which this build never supplies.
+- **Refusals and idempotency**: each transform refuses by name before any edit when its method is
+  missing; the counter for an existing clear counts **direct children only**, so the browser's own
+  nested clear inside the `has_shortcuts` else branch is not mistaken for this edit's work (that
+  nested clear is exactly what a true branch could undo).
+- **Tests**: the three cases in `store_payload` (above, **376 checks**) pin the commands on the
+  right objects, the front menu's clear first in the method, the browser's clear after the gate,
+  idempotency and the refusals; the bootstrap `store-edit <store.dtb> start` and
+  `store-edit <store_info.dtb> info` diagnostics answer **edited** against both shipped records.
+- **Not measured at this record's time**: the boot capture. `scripts/acceptance_store.ps1`'s Store
+  leg asserts `VIEW ITEM` is absent from the front menu, the browser and the details page; it had
+  not been run on a binary carrying this change. *(Superseded by the close-out below.)*
+- **Close-out (owner's boot, 2026-10-23) — P9-8 is met.** The same retest the P9-7 close-out
+  records confirmed the captions are gone from the store's own footer (the store root's `Y VIEW
+  ITEM` is no longer drawn; the browser had already lost it on the earlier boot). Read by hand,
+  no capture stored; the harness's absence checks stay as the standing check. **P9-8 → Done.**
 
 ### P9-9 — the LT/RT tabs work from **Your Songs**, and the RhythmVerse tab follows the master
 

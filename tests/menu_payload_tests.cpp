@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -309,8 +310,9 @@ const Node* Case(const Node& node, const char* action) {
   for (const auto& child : node.kids) if (auto* found = Case(child, action)) return found;
   return nullptr;
 }
-void Destinations(const Node& node, std::vector<int>* found) {
-  if (node.tag == dtb::kCommand && node.kids.size() == 2 && node.kids[0].text == "transition_to") {
+void Destinations(const Node& node, std::vector<int>* found, bool right) {
+  if (node.tag == dtb::kCommand && node.kids.size() == 3 && node.kids[0].text == settings::kLibraryHeaderTransition) {
+    CHECK_EQ(static_cast<int32_t>(node.kids[2].scalar), right ? 1 : -1);
     const auto& destination = node.kids[1];
     if (destination.tag == dtb::kCommand) {
       CHECK_TRUE(Has(destination, "which_store_screen"));
@@ -319,7 +321,7 @@ void Destinations(const Node& node, std::vector<int>* found) {
       for (int i = 0; i < 4; ++i) if (destination.text == kScreens[i]) found->push_back(i);
     }
   }
-  for (const auto& child : node.kids) Destinations(child, found);
+  for (const auto& child : node.kids) Destinations(child, found, right);
 }
 void CheckRoutes(const std::vector<Node>& roots, int current, int mask) {
   for (const char* panel : kPanels[current]) {
@@ -331,7 +333,8 @@ void CheckRoutes(const std::vector<Node>& roots, int current, int mask) {
       CHECK_TRUE(kase != nullptr);
       if (!kase) continue;
       std::vector<int> destinations;
-      Destinations(*kase, &destinations);
+      Destinations(*kase, &destinations, right);
+      CHECK_FALSE(Has(*kase, "transition_to"));
       const int expected = right ? kRight[mask][current] : kLeft[mask][current];
       if (expected == current) CHECK_TRUE(destinations.empty());
       else { CHECK_EQ(destinations.size(), 1u); if (!destinations.empty()) CHECK_EQ(destinations[0], expected); }
@@ -375,7 +378,8 @@ std::vector<Node> Background() {
   return {C({S("new"), S("UIPanel"), S("background_panel"),
       A({S("set_offline_mode_headers"), A({Node::Var("offline")}),
           C({S("if_else"), Node::Var("offline"), C({S("offline_flow")}), C({S("online_flow")})})}),
-      A({S("update_inbox_header"), A({Node::Var("new_msgs")}), C({S("retail_badge")})})})};
+      A({S("update_inbox_header"), A({Node::Var("new_msgs")}), C({S("retail_badge")})}),
+      A({S("enter"), C({S("retail_enter")})})})};
 }
 void CheckBar(const std::vector<Node>& roots, int mask) {
   const auto* mode = Method(roots, "background_panel", "set_offline_mode_headers");
@@ -397,7 +401,158 @@ void CheckBar(const std::vector<Node>& roots, int mask) {
     CHECK_EQ(hides, (mask & bit) ? 0 : 1);
   }
   CHECK_EQ(inbox->kids.size(), (mask & 2) ? 3u : 4u);
+  const auto* enter = Method(roots, "background_panel", "enter");
+  CHECK_TRUE(enter != nullptr);
+  if (!enter) return;
+  std::map<std::pair<std::string, int>, int> keys;
+  for (const auto& command : enter->kids) {
+    if (command.tag != dtb::kCommand || command.kids.size() != 6 || command.kids[1].text != "set_key_val") continue;
+    CHECK_TRUE(Has(command.kids[0], "TextShift.anim"));
+    CHECK_TRUE(Has(command.kids[3], "local_xfm") && Has(command.kids[3], "x"));
+    const auto key = std::make_pair(command.kids[2].kids[2].text, int(command.kids[4].scalar));
+    CHECK_FALSE(keys.contains(key));
+    keys[key] = static_cast<int32_t>(command.kids[5].scalar);
+  }
+  if (mask == 7) { CHECK_TRUE(keys.empty()); return; }
+  const char* names[] = {"main_mySongs.trans", "main_store.trans", "main_inbox.trans", "main_home.trans"};
+  const int indices[] = {1, 2, 3, 0};
+  const int slots[] = {-345, -43, 91, 226};
+  for (int current = 0; current < 4; ++current) {
+    if (current && !(mask & (1 << (current - 1)))) continue;
+    int slot = 0;
+    for (int offset = 0; offset < 4; ++offset) {
+      const int tab = (current + offset) % 4;
+      if (tab && !(mask & (1 << (tab - 1)))) continue;
+      const int expected = tab == 3 && slot == 3 ? 235 : slots[slot];
+      CHECK_EQ(keys[std::make_pair(names[tab], indices[current] * 10)], expected);
+      if (tab == 2) CHECK_EQ(keys[std::make_pair("main_newMessage.trans", indices[current] * 10)], expected);
+      ++slot;
+    }
+  }
+  for (const auto& [key, value] : keys) {
+    if (key.second == 0) CHECK_EQ(keys[std::make_pair(key.first, 40)], value);
+  }
 }
+
+const Node* Find(const Node& node, uint32_t tag, const char* text) {
+  if (node.tag == tag && !node.kids.empty() && node.kids[0].text == text) return &node;
+  for (const auto& child : node.kids) if (const auto* result = Find(child, tag, text)) return result;
+  return nullptr;
+}
+const Node* Function(const std::vector<Node>& roots, const char* name) {
+  for (const auto& root : roots) {
+    if (root.tag == dtb::kCommand && root.kids.size() == 4 && root.kids[0].text == "func" &&
+        root.kids[1].text == name) return &root;
+  }
+  return nullptr;
+}
+std::vector<Node> AnimationFixture() {
+  const Node fallback = C({S("if_else"), Node::Var("did_jump"),
+      C({S("if_else"), C({S(">"), Node::Var("start_header_num"), Node::Var("target_header_num")}),
+         S("shift_up"), S("shift_down")}),
+      C({S("if_else"), C({S("^^"),
+          C({S(">"), Node::Var("start_header_num"), Node::Var("target_header_num")}), Node::Var("did_loop")}),
+          S("shift_left"), S("shift_right")})});
+  return {C({S("func"), S("create_one_way_transition_screen"), A({}),
+      C({S("new"), S("TransitionScreen"), S("test_transition"),
+          A({S("TRANSITION_COMPLETE_MSG"), C({S("do"), A({Node::Var("anim_type"), fallback})})})})}),
+      C({S("func"), S("transition_between"), A({Node::Var("screen_a"), Node::Var("screen_b")}),
+          C({S("do"), C({S("create_one_way_transition_screen")}),
+             C({S("ui"), S("goto_screen"), C({S("object"), Node::Var("screen_name")})})})})};
+}
+// Evaluate the finite boolean/selection grammar used by the actual retail anim_type
+// expression. Exercise the generated expression, including its unmodified fallback.
+Node EvalAnimation(const Node& node, int start, int target, int direction) {
+  if (node.tag == dtb::kProperty) return Node::Int(static_cast<uint32_t>(direction));
+  if (node.tag == dtb::kVar) {
+    int value = 0;
+    if (node.text == "start_header_num") value = start;
+    else if (node.text == "target_header_num") value = target;
+    else if (node.text == "did_jump") value = start / 10 != target / 10;
+    else if (node.text == "did_loop") value = start / 10 == target / 10 && start / 10 == 0 && std::abs(start - target) != 1;
+    else CHECK_TRUE(false);
+    return Node::Int(static_cast<uint32_t>(value));
+  }
+  if (node.tag != dtb::kCommand) return node;
+  const auto& op = node.kids[0].text;
+  const auto number = [&](int child) { return static_cast<int32_t>(EvalAnimation(node.kids[child], start, target, direction).scalar); };
+  if (op == "if_else") return EvalAnimation(node.kids[number(1) ? 2 : 3], start, target, direction);
+  if (op == "!=") return Node::Int(number(1) != number(2));
+  if (op == ">") return Node::Int(number(1) > number(2));
+  if (op == "^^") return Node::Int(bool(number(1)) != bool(number(2)));
+  CHECK_TRUE(false);
+  return Node::Int(0);
+}
+void CheckAnimations(const std::vector<Node>& roots, int mask) {
+  const auto* factory = Function(roots, "create_one_way_transition_screen");
+  CHECK_TRUE(factory != nullptr);
+  if (!factory) return;
+  const auto* binding = Find(*factory, dtb::kArray, "anim_type");
+  CHECK_TRUE(binding && binding->kids.size() == 2);
+  if (!binding || binding->kids.size() != 2) return;
+  const auto& expression = binding->kids[1];
+  const int indices[] = {1, 2, 3, 0};
+  for (int current = 0; current < 4; ++current) {
+    for (int direction : {1, -1}) {
+      const int next = direction > 0 ? kRight[mask][current] : kLeft[mask][current];
+      if (next == current) continue;
+      CheckStrEq(EvalAnimation(expression, indices[current], indices[next], direction).text,
+                 direction > 0 ? "shift_right" : "shift_left");
+    }
+  }
+  for (int start : {0, 1, 2, 3, 10, 21}) {
+    for (int target : {0, 1, 2, 3, 10, 21}) {
+      if (start == target) continue;
+      const bool jump = start / 10 != target / 10;
+      const bool loop = !jump && start / 10 == 0 && std::abs(start - target) != 1;
+      const auto expected = jump ? (start > target ? "shift_up" : "shift_down") :
+          ((bool(start > target) != loop) ? "shift_left" : "shift_right");
+      CheckStrEq(EvalAnimation(expression, start, target, 0).text, expected);
+    }
+  }
+  for (bool directional : {false, true}) {
+    const auto* function = Function(roots, directional ? "rbbz_header_transition_between" : "transition_between");
+    CHECK_TRUE(function != nullptr);
+    if (!function) continue;
+    CHECK_EQ(function->kids[2].kids.size(), directional ? 3u : 2u);
+    const auto* go = Find(*function, dtb::kCommand, "do");
+    CHECK_TRUE(go != nullptr);
+    const Node* sequence = nullptr;
+    if (go) {
+      for (const auto& child : go->kids) {
+        if (child.tag == dtb::kCommand && child.kids.size() == 3 && child.kids[0].text == "do" &&
+            Has(child.kids[1], "rbbz_header_animation") && Has(child.kids[2], "goto_screen")) sequence = &child;
+      }
+    }
+    CHECK_TRUE(sequence != nullptr);
+    if (sequence) {
+      const auto& value = sequence->kids[1].kids[3];
+      if (directional) CHECK_TRUE(value.tag == dtb::kVar && value.text == "rbbz_header_direction");
+      else CHECK_TRUE(value.tag == dtb::kInt && value.scalar == 0);
+    }
+  }
+  const auto* wrapper = Function(roots, settings::kLibraryHeaderTransition);
+  CHECK_TRUE(wrapper && Has(*wrapper, "rbbz_header_transition_between"));
+}
+}
+
+void TestHeaderAnimations() {
+  using namespace header_test;
+  BeginCase("header swipes follow the pressed trigger, including two-tab rings; ordinary transitions reset the override");
+  auto roots = AnimationFixture();
+  const auto original = roots;
+  std::string why;
+  CHECK_TRUE(settings::ConfigureLibraryHeaderAnimations(&roots, &why));
+  const auto* binding = Find(*Function(roots, "create_one_way_transition_screen"), dtb::kArray, "anim_type");
+  const auto* old = Find(*Function(original, "create_one_way_transition_screen"), dtb::kArray, "anim_type");
+  CHECK_TRUE(binding && old);
+  if (binding && old) CHECK_TRUE(dtb::Compile({binding->kids[1].kids[3]}) == dtb::Compile({old->kids[1]}));
+  for (int mask = 0; mask < 8; ++mask) CheckAnimations(roots, mask);
+  auto invalid = AnimationFixture();
+  invalid.pop_back();
+  const auto before = dtb::Compile(invalid);
+  CHECK_FALSE(settings::ConfigureLibraryHeaderAnimations(&invalid, &why));
+  CHECK_TRUE(dtb::Compile(invalid) == before);
 }
 
 void TestHeaderVisibility() {
@@ -476,6 +631,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
         std::printf("header records invalid: %s: %s\n", name.c_str(), why.c_str()); return 1;
       }
       if (name == "ui/background/gen/background.dtb") CheckBar(roots, mask);
+      if (name == "ui/gen/transition_screens.dtb") CheckAnimations(roots, mask);
       for (int current = 0; current < 4; ++current) if (name == kRecords[current]) CheckRoutes(roots, current, mask);
       fs::create_directories((dir / name).parent_path());
       std::ofstream file(dir / name, std::ios::binary);
@@ -484,6 +640,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     }
     for (const char* path : kRecords) CHECK_TRUE(records.contains(path));
     CHECK_TRUE(records.contains("ui/background/gen/background.dtb"));
+    CHECK_TRUE(records.contains("ui/gen/transition_screens.dtb"));
     std::printf("store=%d messages=%d recommendations=%d: %zu records round-tripped, %zu refusal(s)\n",
                 state.store, state.messages, state.recommendations, records.size(), notes.size());
   }
@@ -495,6 +652,7 @@ int main(int argc, char** argv) {
   if (argc == 4 && std::string(argv[1]) == "check-header-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3]);
   }
+  TestHeaderAnimations();
   TestHeaderVisibility();
   TestHeaderNavigation();
   BeginCase("the generated locale names a cached list only after a real host hit");

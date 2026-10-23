@@ -73,8 +73,12 @@ The navigation ring is Your Songs → RhythmVerse → Messages → Recommended;
 LT reverses it. Disabled tabs are hidden and skipped, including RhythmVerse
 while its master is Off. The Messages badge follows Show Messages. LT/RT
 are absent only when RhythmVerse, Messages and Recommendations are all Off.
-The owner confirmed the prior combined header correction works; the new split
-and eight-state ring are host-verified and await the owner's in-game retest.
+The owner's split-control tests exposed reversed swipes when skipping tabs and
+holes where hidden labels occupied fixed positions (2026-10-23). Header triggers
+now pass their direction explicitly, and the guest's header animation keys pack
+enabled labels consecutively, leaving unused space at the right. All eight states
+are host-verified; the owner manually confirmed the corrected swipes and compact
+layout work (RhythmVerse plan P9-4, animation and layout correction).
 
 **Earlier combined implementation (2026-10-22, superseded by the split above):** General ▸ Interface
 has four rows: **Main Menu**, **Offline Prompts**, **Help & Options Labels**, then

@@ -66,6 +66,9 @@ struct LibraryHeaderOptions {
   bool recommendations = false;
   bool navigation_enabled() const { return store || messages || recommendations; }
 };
+// Header-only transition wrapper: destination, then +1 for RT or -1 for LT.
+inline constexpr const char* kLibraryHeaderTransition = "rbbz_header_transition_to";
+bool ConfigureLibraryHeaderAnimations(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool ConfigureLibraryHeaderBar(std::vector<ui::dtb::Node>* roots,
                                 LibraryHeaderOptions options, std::string* why);
 bool RouteLibraryHeaderNavigation(std::vector<ui::dtb::Node>* roots, LibraryHeader current,

@@ -1091,7 +1091,7 @@ std::vector<PanelSpec> AllPanels() {
                               BoolRow("settings_rhythmverse", "general.rhythmverse", "RhythmVerse",
                                       "Browse the RhythmVerse customs catalogue in the store and download songs."),
                               SubmenuRow("settings_rhythmverse_filter",
-                                         "settings_rhythmverse_filter_screen",
+                                         kRhythmVerseFilterScreen,
                                          "Search Song Filter",
                                          "Search Song Filter: choose which instruments listed customs must have."),
                           }});
@@ -1116,9 +1116,10 @@ std::vector<PanelSpec> AllPanels() {
 
   // 1b-ii. Search Song Filter (plan P6 §1.6): one boolean per instrument, On = that chart is
   // required, Off = no condition, so all five off means no instrument constraint at all. The labels
-  // are the instrument names a player already reads on the retail surfaces.
-  out.push_back(PanelSpec{"settings_rhythmverse_filter_panel",
-                          "settings_rhythmverse_filter_screen", "settings_rhythmverse_screen", MenuPanels(),
+  // are the instrument names a player already reads on the retail surfaces. The page is also the
+  // store's Start destination since P9-7 (`kRhythmVerseFilterScreen`).
+  out.push_back(PanelSpec{kRhythmVerseFilterPanel,
+                          kRhythmVerseFilterScreen, "settings_rhythmverse_screen", MenuPanels(),
                           {
                               BoolRow("settings_rv_guitar", "general.rhythmverse_guitar", "Guitar",
                                       "Only list customs that have a guitar chart."),

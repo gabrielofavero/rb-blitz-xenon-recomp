@@ -1191,4 +1191,290 @@ bool SetStoreHeading(std::vector<ui::dtb::Node>* locale_roots, std::string_view 
   return refuse("the locale has no `store` entry");
 }
 
+namespace {
+
+// `{== $action kAction_Start}` - the test a button case array begins with. `$action` parses as a
+// variable (`store_payload.h`'s note on `kVar`), so only the name is compared.
+bool IsActionCaseTest(const Node& node, std::string_view action) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() == 3 && IsSymbol(node.kids[0], "==") &&
+         node.kids[1].text == "action" && IsSymbol(node.kids[2], action);
+}
+
+// The `{== $action <action>} ...` case array inside a method, at any depth.
+Node* FindActionCase(Node& node, std::string_view action) {
+  if (node.tag == ui::dtb::kArray && !node.kids.empty() &&
+      IsActionCaseTest(node.kids.front(), action)) {
+    return &node;
+  }
+  for (Node& kid : node.kids) {
+    if (Node* found = FindActionCase(kid, action)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+// `{ui goto_screen <screen>}` - the jump this edit rewrites, and the marker of one already routed.
+bool IsGotoScreenStatement(const Node& node, std::string_view screen) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() == 3 && IsSymbol(node.kids[0], "ui") &&
+         IsSymbol(node.kids[1], "goto_screen") && IsSymbol(node.kids[2], screen);
+}
+
+bool HasGotoScreenStatement(const Node& node, std::string_view screen) {
+  if (IsGotoScreenStatement(node, screen)) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasGotoScreenStatement(kid, screen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// `{options_screen set back_screen <target>}` - the other half of the shipped Start case.
+bool IsOptionsBackStatement(const Node& node) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() == 4 &&
+         IsSymbol(node.kids[0], "options_screen") && IsSymbol(node.kids[1], "set") &&
+         IsSymbol(node.kids[2], "back_screen");
+}
+
+bool HasOptionsGotoStatement(const Node& node) {
+  if (IsGotoScreenStatement(node, "options_screen")) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasOptionsGotoStatement(kid)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Rewrites the shipped Start case: the `options_screen` receiver of its back-target statement and
+// its jump both become `filter_screen`.
+void RetargetStartStatements(std::vector<Node>& nodes, std::string_view filter_screen) {
+  for (Node& node : nodes) {
+    if (IsOptionsBackStatement(node)) {
+      node.kids[0] = Node::Symbol(filter_screen);
+      continue;
+    }
+    if (IsGotoScreenStatement(node, "options_screen")) {
+      node.kids[2] = Node::Symbol(filter_screen);
+      continue;
+    }
+    RetargetStartStatements(node.kids, filter_screen);
+  }
+}
+// `{<receiver> <method> <action> [<token>]}` - the inline-help command this module writes, and the
+// marker an idempotent second pass looks for.
+bool IsHelpCommand(const Node& node, std::string_view receiver, std::string_view method,
+                   std::string_view action) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+         IsSymbol(node.kids[0], receiver) && IsSymbol(node.kids[1], method) &&
+         IsSymbol(node.kids[2], action);
+}
+
+Node HelpCommand(std::string_view receiver, std::string_view method, std::string_view action,
+                 std::string_view token) {
+  std::vector<Node> kids{Node::Symbol(receiver), Node::Symbol(method), Node::Symbol(action)};
+  if (!token.empty()) {
+    kids.push_back(Node::Symbol(token));
+  }
+  return Node::Command(std::move(kids));
+}
+
+// Rewrites every `{<receiver> set_action_token <action> ...}` in `nodes` to `token` and counts the
+// ones it found; the caller appends one when the count is zero. A method that carries no such
+// command is what an idempotent second pass looks like too, because the appended command is one.
+size_t ClaimHelpToken(std::vector<Node>& nodes, std::string_view receiver,
+                      std::string_view action, std::string_view token) {
+  size_t claimed = 0;
+  for (Node& node : nodes) {
+    if (IsHelpCommand(node, receiver, "set_action_token", action)) {
+      if (node.kids.size() >= 4) {
+        node.kids[3] = Node::Symbol(token);
+      } else {
+        node.kids.push_back(Node::Symbol(token));
+      }
+      ++claimed;
+      continue;
+    }
+    claimed += ClaimHelpToken(node.kids, receiver, action, token);
+  }
+  return claimed;
+}
+
+// The same for `clear_action_token`, but **direct children only**: the browser's `refresh_list`
+// already carries a clear inside its `has_shortcuts` else branch, and that one is exactly what this
+// edit must not accept as done - the caption it guards against can be set by the true branch.
+// Counting only a statement this edit appended keeps the second pass idempotent.
+size_t ClaimHelpClear(std::vector<Node>& nodes, std::string_view receiver,
+                      std::string_view action) {
+  size_t claimed = 0;
+  for (Node& node : nodes) {
+    if (IsHelpCommand(node, receiver, "clear_action_token", action)) {
+      ++claimed;
+    }
+  }
+  return claimed;
+}
+
+// One named object's method, searched over every root. Null when the record does not define it.
+Node* FindMethodIn(std::vector<Node>& roots, std::string_view object, std::string_view method) {
+  for (Node& root : roots) {
+    if (Node* found = FindNamedMethod(root, object, method)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+// Inserts `command` right after the method's own name. The front menu's footer commands go in
+// **first**, because `store_menu_panel.enter` ends in the shipped `{cond …}` whose default arm is
+// `{fail "StorePanel Commerce Session in an illegal state…"}`: that is a ship-build log-and-return
+// in retail, but a statement this build must not depend on running after it is one it puts before.
+void PrependToMethod(Node* method, Node command) {
+  method->kids.insert(method->kids.begin() + 1, std::move(command));
+}
+
+}  // namespace
+
+bool RouteStoreStartToFilter(std::vector<ui::dtb::Node>* store_ui_roots,
+                             std::string_view filter_screen, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  if (filter_screen.empty()) {
+    return refuse("no filter page to open");
+  }
+  // Both cases are located before either is written, so a refusal leaves the record as it was.
+  Node* cases[2] = {nullptr, nullptr};
+  static const char* const kPanels[] = {"store_menu_panel", "store_browser_panel"};
+  for (size_t i = 0; i < 2; ++i) {
+    Node* method = FindMethodIn(*store_ui_roots, kPanels[i], "BUTTON_DOWN_MSG");
+    if (method == nullptr) {
+      return refuse(std::string("the record carries no ") + kPanels[i] + " BUTTON_DOWN_MSG method");
+    }
+    Node* start = FindActionCase(*method, "kAction_Start");
+    if (start == nullptr) {
+      return refuse(std::string(kPanels[i]) + "'s button table carries no kAction_Start case");
+    }
+    if (!HasGotoScreenStatement(*start, filter_screen) && !HasOptionsGotoStatement(*start)) {
+      return refuse(std::string(kPanels[i]) +
+                    "'s Start case jumps to neither options_screen nor the filter page");
+    }
+    cases[i] = start;
+  }
+  for (Node* start : cases) {
+    // A case that already goes to the filter page is the idempotent second pass - its back
+    // statement may or may not have been retargeted with it, and both are harmless.
+    if (HasGotoScreenStatement(*start, filter_screen)) {
+      continue;
+    }
+    RetargetStartStatements(start->kids, filter_screen);
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+bool SetStoreFooterStart(std::vector<ui::dtb::Node>* store_ui_roots, std::string_view start_token,
+                         std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  if (start_token.empty()) {
+    return refuse("the Start caption token is empty");
+  }
+  Node* menu_enter = FindMethodIn(*store_ui_roots, "store_menu_panel", "enter");
+  if (menu_enter == nullptr) {
+    return refuse("the record carries no store_menu_panel enter method");
+  }
+  Node* browser_refresh = FindMethodIn(*store_ui_roots, "store_browser_panel", "refresh_list");
+  if (browser_refresh == nullptr) {
+    return refuse("the record carries no store_browser_panel refresh_list method");
+  }
+  if (ClaimHelpToken(menu_enter->kids, "InlineHelp.ihp", "kAction_Start", start_token) == 0) {
+    PrependToMethod(menu_enter,
+                    HelpCommand("InlineHelp.ihp", "set_action_token", "kAction_Start", start_token));
+  }
+  if (ClaimHelpToken(browser_refresh->kids, "store.ihp", "kAction_Start", start_token) == 0) {
+    browser_refresh->kids.push_back(
+        HelpCommand("store.ihp", "set_action_token", "kAction_Start", start_token));
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+bool ClearStoreFooterOption(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* menu_enter = FindMethodIn(*store_ui_roots, "store_menu_panel", "enter");
+  if (menu_enter == nullptr) {
+    return refuse("the record carries no store_menu_panel enter method");
+  }
+  Node* browser_refresh = FindMethodIn(*store_ui_roots, "store_browser_panel", "refresh_list");
+  if (browser_refresh == nullptr) {
+    return refuse("the record carries no store_browser_panel refresh_list method");
+  }
+  if (ClaimHelpClear(menu_enter->kids, "InlineHelp.ihp", "kAction_Option") == 0) {
+    PrependToMethod(menu_enter,
+                    HelpCommand("InlineHelp.ihp", "clear_action_token", "kAction_Option", ""));
+  }
+  // Appended **after** `refresh_list`'s own `has_shortcuts` gate, so a provider that ever reports
+  // shortcuts still cannot bring the caption back.
+  if (ClaimHelpClear(browser_refresh->kids, "store.ihp", "kAction_Option") == 0) {
+    browser_refresh->kids.push_back(
+        HelpCommand("store.ihp", "clear_action_token", "kAction_Option", ""));
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+bool ClearDetailsFooterOption(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* enter = FindMethodIn(*store_info_roots, "store_info_panel", "enter");
+  if (enter == nullptr) {
+    return refuse("the record carries no store_info_panel enter method");
+  }
+  // Both inline-help objects the details scene declares (`python scripts/hmx_milo.py list
+  // assets/game/360/ui/store/gen/store_info.milo_xbox`): the page draws `store_info.ihp`, and
+  // `view_offer.ihp` sits in the recommendation area, so both are cleared rather than guessing
+  // which one the caption comes from.
+  for (const char* receiver : {"store_info.ihp", "view_offer.ihp"}) {
+    if (ClaimHelpClear(enter->kids, receiver, "kAction_Option") == 0) {
+      enter->kids.push_back(HelpCommand(receiver, "clear_action_token", "kAction_Option", ""));
+    }
+  }
+  if (why != nullptr) why->clear();
+  return true;
+}
+
 }  // namespace rb_blitz::store

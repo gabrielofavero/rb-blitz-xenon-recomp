@@ -9,7 +9,9 @@
 #             boot writes nothing for it, and the main menu already carries the store row. The
 #             Control leg is the only one that writes the value off.
 #   Store   - the row opens the retail store, the front menu draws RECENTLY ADDED / SEARCH with no
-#             count beside either row (P9-5) and the `Customs from RhythmVerse` credit, Recently
+#             count beside either row (P9-5) and the `Customs from RhythmVerse` credit, its footer
+#             reads SEARCH FILTERS and draws no VIEW ITEM caption (P9-7/P9-8), Start opens the
+#             Search Song Filter page and Back returns to the store menu, Recently
 #             Added's page carries eligible offers (read from the log, not guessed) and the retail
 #             browser opens on them. Then Search runs a real
 #             query - the field is seeded with -SearchQuery, so one Done press exercises the
@@ -644,6 +646,23 @@ function Invoke-StoreLeg {
         # eats letters (`HYTH VERSE CUSTOM`), which is why only that check asks for a fragment
         # (measured 2026-10-22).
         Assert-Label $storeText @('RHYTHMVERSE') 'store: the heading names RhythmVerse'
+        # P9-7/P9-8: the store's own footer. Start now reads SEARCH FILTERS (the button opens that
+        # page), and Y's VIEW ITEM caption is gone. Both are checked with the whitespace folded out
+        # (`Assert-Label`/`Assert-Lacks`), because the footer's button icons split the words.
+        Assert-Label $storeText @('SEARCHFILTERS') 'store: the footer names the Search Filters button'
+        Assert-Lacks $storeText 'VIEWITEM' 'store: the footer carries no View Item caption'
+
+        # Start opens the Search Song Filter page and Back returns to the store front menu. The
+        # page's back target is runtime state (the payload re-points the shipped Start case at the
+        # filter page with `back_screen store_menu_screen`, plan P9-7), which is what lets this
+        # flow return to the store while Help & Options' own flow still returns to RhythmVerse.
+        Drive @('key:start', 'wait:4')
+        $filtersText = Wait-ForScreen 'filters.png' 'GUITAR' $ScreenTimeoutSec 'the Search Song Filter page'
+        Add-Step 'store: Start opens the Search Song Filter page' (Wait-ForScreenName 'settings_rhythmverse_filter_screen' 20 'filters') (Get-Screen)
+        Assert-Label $filtersText @('GUITAR', 'BASS', 'DRUMS', 'VOCALS', 'KEYS') 'store: the filter page lists the five instruments'
+        Assert-Lacks $filtersText 'VIEWITEM' 'store: the filter page carries no View Item caption'
+        Drive @('key:b', 'wait:3')
+        Add-Step 'store: Back from the filter page returns to the store menu' (Wait-ForScreenName 'store_menu_screen' 20 'back from filters') (Get-Screen)
         # P7's credit line is outranked by the loading sentence while the catalogue holds no offer
         # yet, and it is held for 12 s after the front menu is served - so it is read once the first
         # page has landed, not on the entry capture (measured 2026-10-22: the entry capture reads
@@ -690,6 +709,11 @@ function Invoke-StoreLeg {
         Add-Step 'store: the retail browser is the current screen' (Wait-ForScreenName 'store_browser_screen' 30 'Recently Added') (Get-Screen)
         Assert-Lacks $browserText 'MICROSOFT' 'store: no Microsoft Points chrome on the browser'
         Assert-Lacks $browserText 'BUY NOW' 'store: no Buy Now row on the browser'
+        # P9-7/P9-8 on the browser's footer too: the Start caption follows the destination and the
+        # Y caption is cleared there as well (the record appends the clear after its own
+        # shortcut-header gate, so a provider with shortcuts cannot bring it back).
+        Assert-Label $browserText @('SEARCHFILTERS') 'store: the browser footer names Search Filters'
+        Assert-Lacks $browserText 'VIEWITEM' 'store: the browser footer carries no View Item caption'
 
         # Search: Back to the menu, the second row (Search) opens the authored keys, Done submits
         # the seeded query, the answer is drawn, and the same row then opens the results page.
@@ -739,6 +763,8 @@ function Invoke-StoreLeg {
         Assert-Lacks $detailsText 'BUY NOW' 'store: the details page offers no Buy Now'
         Assert-Lacks $detailsText 'MICROSOFT' 'store: the details page carries no currency chrome'
         Assert-Lacks $detailsText 'POINTS' 'store: the details page carries no points chrome'
+        # P9-8: the details page's Y caption is cleared in the payload too.
+        Assert-Lacks $detailsText 'VIEWITEM' 'store: the details page carries no View Item caption'
 
         # Press Download (row 0 is where this build's Download row sits) and follow the transfer.
         $installsBefore = Get-LogMatches "store_download: job \w+ installed '"

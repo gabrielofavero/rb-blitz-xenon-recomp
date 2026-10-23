@@ -42,8 +42,16 @@ Part 1 wherever they disagree.
   Messages. LT/RT styling is disabled only when all three optional tabs are Off.
   All eight states compile from extracted retail records without refusals
   (`out/_swap/split-headers/records/state-0..7/`); destination, arrow and preview
-  cleanup assertions run on those records. The new split's in-game retest is
-  pending with the owner.
+  cleanup assertions run on those records. **Subsequent owner tests** exposed
+  reversed swipes when skipping tabs and holes where hidden tabs had been.
+  Header triggers now pass an explicit direction; the guest header's animation
+  keys pack enabled labels and the badge consecutively in cyclic order. Ordinary
+  transitions reset the override and retain retail's selector. The updated
+  eight-state checker passes 1,550 assertions, including animation and positions
+  (`out/_swap/header-animation/records/state-0..7/`), and the full release build
+  succeeds. The owner manually confirmed the corrected swipes and compact layout
+  work; P9-4 is closed. (The preceding host-verification notes preserve the earlier
+  pending state.)
 
 - **Historical combined Show Headers (2026-10-22, superseded by the split above):** General ▸ Interface now ends with
   **Music Library & Store**, containing **Show Headers: On | Off**. Default On;

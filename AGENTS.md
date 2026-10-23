@@ -11,3 +11,7 @@
 - If the user asks you to work autonomously, drive the game/UI as needed without
   asking about manual testing. Honor that authorization for its stated scope
   until the user changes it.
+- Always build before asking the user to test something, unless you are sure the
+  current build already contains the most recent change. An unbuilt change means
+  the user tests stale binaries. Build command:
+  `cmake --build --preset win-amd64-release`.

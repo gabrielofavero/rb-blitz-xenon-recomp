@@ -71,7 +71,7 @@ Node HeaderArrow(int direction) {
 // Rewrite only the transition in each authored case: retain preview cleanup, store
 // highlight saves and the arrow Flow. Expand Recommendations' RT helper locally,
 // since its other callers must still go to Your Songs.
-bool RewriteHeaderTransition(Node& node, LibraryHeader destination, const Node* song_helper) {
+bool RewriteHeaderTransition(Node& node, LibraryHeader destination, int direction, const Node* song_helper) {
   if (node.tag == ui::dtb::kCommand && node.kids.size() == 2 &&
       node.kids[1].text == "go_to_song_select") {
     if (!song_helper) return false;
@@ -81,7 +81,8 @@ bool RewriteHeaderTransition(Node& node, LibraryHeader destination, const Node* 
   }
   if (node.tag == ui::dtb::kCommand && node.kids.size() == 2 &&
       node.kids[0].text == "transition_to") {
-    node.kids[1] = HeaderDestination(destination);
+    node.kids = {Node::Symbol(kLibraryHeaderTransition), HeaderDestination(destination),
+                 Node::Int(static_cast<uint32_t>(direction))};
     return true;
   }
   if (destination != LibraryHeader::kStore) {
@@ -92,9 +93,72 @@ bool RewriteHeaderTransition(Node& node, LibraryHeader destination, const Node* 
     });
   }
   bool found = false;
-  for (auto& child : node.kids) found |= RewriteHeaderTransition(child, destination, song_helper);
+  for (auto& child : node.kids) found |= RewriteHeaderTransition(child, destination, direction, song_helper);
   return found;
 }
+}
+
+namespace {
+Node* FindNode(Node& node, uint32_t tag, std::string_view first, std::string_view second = {}) {
+  if (node.tag == tag && !node.kids.empty() && node.kids[0].text == first &&
+      (second.empty() || (node.kids.size() > 1 && node.kids[1].text == second))) return &node;
+  for (auto& child : node.kids) if (auto* found = FindNode(child, tag, first, second)) return found;
+  return nullptr;
+}
+// The cached transition object must receive the override before goto_screen starts it.
+// Ordinary transitions explicitly reset it, including when they reuse a tab transition.
+bool SetHeaderAnimationBeforeGoto(Node& function, Node direction) {
+  auto* jump = FindNode(function, ui::dtb::kCommand, "ui", "goto_screen");
+  if (!jump) return false;
+  Node setter = Node::Command({Node::Command({Node::Symbol("object"), Node::Var("screen_name")}),
+      Node::Symbol("set"), Node::Symbol("rbbz_header_animation"), std::move(direction)});
+  *jump = Node::Command({Node::Symbol("do"), std::move(setter), *jump});
+  return true;
+}
+}
+
+// Retail interprets an index gap greater than one as a wrap. Skipping a hidden
+// tab breaks that inference, and two-tab rings need opposite swipes for the same
+// endpoints. Only trigger routes override it; keep the retail expression intact
+// for every other caller. See RhythmVerse plan P9-4's animation/layout correction.
+bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why) {
+  if (!roots) { if (why) *why = "no transition definitions"; return false; }
+  auto staged = *roots;
+  Node* between = nullptr;
+  Node* transition = nullptr;
+  for (auto& root : staged) {
+    if (auto* found = FindNode(root, ui::dtb::kCommand, "func", "transition_between")) between = found;
+    if (auto* found = FindNode(root, ui::dtb::kCommand, "new", "TransitionScreen")) transition = found;
+  }
+  Node* animation = transition ? FindNode(*transition, ui::dtb::kArray, "anim_type") : nullptr;
+  if (!between || between->kids.size() != 4 || between->kids[2].tag != ui::dtb::kArray ||
+      !animation || animation->kids.size() != 2) {
+    if (why) *why = "transition definitions lack the header animation selector";
+    return false;
+  }
+  Node directional = *between;
+  directional.kids[1] = Node::Symbol("rbbz_header_transition_between");
+  directional.kids[2].kids.push_back(Node::Var("rbbz_header_direction"));
+  if (!SetHeaderAnimationBeforeGoto(directional, Node::Var("rbbz_header_direction")) ||
+      !SetHeaderAnimationBeforeGoto(*between, Node::Int(0))) {
+    if (why) *why = "transition_between lacks goto_screen";
+    return false;
+  }
+  const auto property = [] { return Node::Property({Node::Symbol("rbbz_header_animation")}); };
+  animation->kids[1] = Node::Command({Node::Symbol("if_else"),
+      Node::Command({Node::Symbol("!="), property(), Node::Int(0)}),
+      Node::Command({Node::Symbol("if_else"),
+          Node::Command({Node::Symbol(">"), property(), Node::Int(0)}),
+          Node::Symbol("shift_right"), Node::Symbol("shift_left")}), animation->kids[1]});
+  transition->kids.push_back(Node::Array({Node::Symbol("rbbz_header_animation"), Node::Int(0)}));
+  staged.push_back(std::move(directional));
+  staged.push_back(Node::Command({Node::Symbol("func"), Node::Symbol(kLibraryHeaderTransition),
+      Node::Array({Node::Var("screen_b"), Node::Var("rbbz_header_direction")}),
+      Node::Command({Node::Symbol("rbbz_header_transition_between"),
+          Node::Command({Node::Symbol("ui"), Node::Symbol("current_screen")}),
+          Node::Var("screen_b"), Node::Var("rbbz_header_direction")})}));
+  *roots = std::move(staged);
+  return true;
 }
 
 bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions options, std::string* why) {
@@ -102,6 +166,7 @@ bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions op
   auto staged = *roots;
   Node* mode = PanelMethod(&staged, "background_panel", "set_offline_mode_headers");
   Node* inbox = PanelMethod(&staged, "background_panel", "update_inbox_header");
+  Node* enter = PanelMethod(&staged, "background_panel", "enter");
   Node* flow = nullptr;
   if (mode) {
     for (auto& command : mode->kids) {
@@ -112,8 +177,8 @@ bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions op
       }
     }
   }
-  if (!flow || !inbox) {
-    if (why) *why = "background_panel lacks its header Flow or inbox callback";
+  if (!flow || !inbox || !enter) {
+    if (why) *why = "background_panel lacks its header Flow, enter or inbox callback";
     return false;
   }
   // Full LT/RT appearance whenever there is another enabled tab, regardless of sign-in.
@@ -127,6 +192,37 @@ bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions op
     mode->kids.push_back(hide("main_inbox.lbl"));
     mode->kids.push_back(hide("main_new_msg.lbl"));
     inbox->kids.push_back(hide("main_new_msg.lbl"));
+  }
+  // TextShift.anim owns the label positions throughout a transition, so moving
+  // transforms after a snap would be overwritten on the next frame. Reauthor its
+  // existing X keys once the scene is loaded, before the screen's jump_to_header.
+  // Its five endpoints are Recommendations/Songs/Store/Messages/Recommendations.
+  // Keep the retail offscreen wrap keys, scale, colour, and all unrelated tracks.
+  const std::array<bool, 4> visible = {options.recommendations, true, options.store, options.messages};
+  constexpr std::array<const char*, 5> transforms = {"main_home.trans", "main_mySongs.trans",
+      "main_store.trans", "main_inbox.trans", "main_newMessage.trans"};
+  constexpr std::array<int, 4> slots = {-345, -43, 91, 226};
+  if (!(options.store && options.messages && options.recommendations)) {
+    for (int frame = 0; frame <= 4; ++frame) {
+      const int current = frame % 4;
+      int slot = 0;
+      for (int offset = 0; offset < 4; ++offset) {
+        const int header = (current + offset) % 4;
+        if (!visible[header]) continue;
+        const int x = header == 0 && slot == 3 ? 235 : slots[slot];
+        const auto set_x = [&](int transform) {
+          enter->kids.push_back(Node::Command({
+              Node::Command({Node::Var("this"), Node::Symbol("find"), Node::Symbol("TextShift.anim")}),
+              Node::Symbol("set_key_val"),
+              Node::Command({Node::Var("this"), Node::Symbol("find"), Node::Symbol(transforms[transform])}),
+              Node::Array({Node::Symbol("local_xfm"), Node::Symbol("x")}),
+              Node::Int(frame * 10), Node::Int(static_cast<uint32_t>(x))}));
+        };
+        set_x(header);
+        if (header == 3) set_x(4);  // Messages' badge follows its header.
+        ++slot;
+      }
+    }
   }
   *roots = std::move(staged);
   return true;
@@ -164,7 +260,7 @@ bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader curren
         }
         kase.kids[1].kids[1] = Node::Symbol("TRUE");
       }
-      if (!RewriteHeaderTransition(kase, next, helper)) {
+      if (!RewriteHeaderTransition(kase, next, direction, helper)) {
         if (why) *why = std::string(panel) + " lacks its header transition";
         return false;
       }
@@ -518,6 +614,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             why != "the locale already has that key") {
           note("the Download label was refused: " + why);
         }
+        // P9-7's footer caption: the store's Start button now opens the Search Song Filter page, so
+        // its inline help names that page instead of the scene's `inline_help_options`
+        // (store_payload.h's `SetStoreFooterStart` writes the token on both store screens).
+        why.clear();
+        if (!screen::AddLocaleEntry(&roots, store::kFooterSearchFiltersToken,
+                                    store::kFooterSearchFiltersText, &why) &&
+            why != "the locale already has that key") {
+          note("the Search Filters footer label was refused: " + why);
+        }
       }
       for (const auto& [key, text] : screen::Labels()) {
         std::string why;
@@ -599,6 +704,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   if (!edit("ui/background/gen/background.dtb", [&](auto& roots) {
         return ConfigureLibraryHeaderBar(&roots, headers, error);
       })) return false;
+  if (!edit("ui/gen/transition_screens.dtb", [&](auto& roots) {
+        return ConfigureLibraryHeaderAnimations(&roots, error);
+      })) return false;
   for (const auto& [path, tab] : std::array<std::pair<const char*, LibraryHeader>, 4>{{
       {"ui/song_select/gen/song_select.dtb", LibraryHeader::kSongs},
       {"ui/store/gen/store.dtb", LibraryHeader::kStore},
@@ -661,6 +769,24 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                                        screen::kSearchScreen, &why)) {
         note("routing the store's Search row to the keys was refused: " + why);
       }
+      // P9-7: the store's Start button opens the Search Song Filter page, and Back from there
+      // returns to the store front menu - the shipped case's own back target, re-pointed at a page
+      // whose Back reads its current screen (store_payload.h).
+      why.clear();
+      if (!store::RouteStoreStartToFilter(&store_ui_roots, screen::kRhythmVerseFilterScreen, &why)) {
+        note("routing the store's Start button to the filter page was refused: " + why);
+      }
+      // P9-7/P9-8: the store's own footer. Start reads SEARCH FILTERS (it now opens that page), and
+      // Y's caption goes - the front menu's option case opens a trial upsell or a marquee offer we
+      // never serve, and the browser's opens a shortcut list our provider never supplies.
+      why.clear();
+      if (!store::SetStoreFooterStart(&store_ui_roots, store::kFooterSearchFiltersToken, &why)) {
+        note("the store's Start footer caption was refused: " + why);
+      }
+      why.clear();
+      if (!store::ClearStoreFooterOption(&store_ui_roots, &why)) {
+        note("hiding the store's View Item caption was refused: " + why);
+      }
       built["ui/store/gen/store.dtb"] = ui::dtb::Compile(store_ui_roots, store_ui_header);
     } else {
       note("the store's screen record could not be read: " + store_ui_why);
@@ -707,6 +833,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       why.clear();
       if (!store::RouteDownloadButtons(&info_roots, &why)) {
         note("routing the details page's Download rows was refused: " + why);
+      }
+      // P9-8: the details page's Y caption goes too - its option case only opens a recommendation,
+      // and this build never shows the recommendation band (store_payload.h).
+      why.clear();
+      if (!store::ClearDetailsFooterOption(&info_roots, &why)) {
+        note("hiding the details page's View Item caption was refused: " + why);
       }
       built["ui/store/gen/store_info.dtb"] = ui::dtb::Compile(info_roots, info_header);
     } else {

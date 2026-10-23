@@ -1237,11 +1237,11 @@ void TestSearchRowGateSurvivesCompileAndParse() {
   CHECK_TRUE(FindSearchGate(*select, 1) != nullptr);
 }
 
-// `store-edit <file.dtb> store|info|search|buttons`: run the store-record transforms against a real
-// shipped record and print the refusal reason, plus the method the transform looked at. This is the
-// measurement half of those edits - the payload applies them to whatever `ui/store/gen/*.dtb` the
-// boot mounts, and a refusal there is a note in the log that names a reason but not the record's
-// own shape.
+// `store-edit <file.dtb> store|info|search|buttons|start`: run the store-record transforms against
+// a real shipped record and print the refusal reason, plus the method the transform looked at. This
+// is the measurement half of those edits - the payload applies them to whatever `ui/store/gen/*.dtb`
+// the boot mounts, and a refusal there is a note in the log that names a reason but not the record's
+// own shape. `start` covers P9-7/P9-8: the two Start cases and the inline-help caption commands.
 void PrintNode(const Node& node, int depth) {
   std::printf("%*s[0x%02x] %s\n", depth * 2, "", node.tag, node.text.c_str());
   if (depth >= 10) return;
@@ -1347,6 +1347,55 @@ int StoreEdit(const char* path, const char* which) {
     std::printf("store-edit: search row -> %s (%s)\n", search ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
     ok = ok && art && search;
+  } else if (mode == "start") {
+    // P9-7/P9-8 against the shipped store record, then every method those edits touch, printed in
+    // full: whether the caption commands sit on the scenes' own `InlineHelp.ihp`/`store.ihp`
+    // objects, and whether both Start cases keep their shipped surrounds, is what the record itself
+    // has to show (`docs/engine/diagnostics.md`, the store-edit modes).
+    const bool routed = rb_blitz::store::RouteStoreStartToFilter(
+        &roots, "settings_rhythmverse_filter_screen", &why);
+    std::printf("store-edit: start route -> %s (%s)\n", routed ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool caption = rb_blitz::store::SetStoreFooterStart(
+        &roots, rb_blitz::store::kFooterSearchFiltersToken, &why);
+    std::printf("store-edit: start caption -> %s (%s)\n", caption ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool option = rb_blitz::store::ClearStoreFooterOption(&roots, &why);
+    std::printf("store-edit: view item caption -> %s (%s)\n", option ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = routed && caption && option;
+    const Node* front = nullptr;
+    const Node* browser = nullptr;
+    const Node* enter = nullptr;
+    const Node* refresh = nullptr;
+    for (const Node& root : roots) {
+      if (front == nullptr) front = FindNamedMethodNode(root, "store_menu_panel", "BUTTON_DOWN_MSG");
+      if (browser == nullptr) {
+        browser = FindNamedMethodNode(root, "store_browser_panel", "BUTTON_DOWN_MSG");
+      }
+      if (enter == nullptr) enter = FindNamedMethodNode(root, "store_menu_panel", "enter");
+      if (refresh == nullptr) {
+        refresh = FindNamedMethodNode(root, "store_browser_panel", "refresh_list");
+      }
+    }
+    if (front != nullptr) {
+      std::printf("store-edit: store_menu_panel BUTTON_DOWN_MSG after:\n");
+      PrintNode(*front, 0);
+    }
+    if (browser != nullptr) {
+      std::printf("store-edit: store_browser_panel BUTTON_DOWN_MSG after:\n");
+      PrintNode(*browser, 0);
+    }
+    if (enter != nullptr) {
+      std::printf("store-edit: store_menu_panel enter after:\n");
+      PrintNode(*enter, 0);
+    }
+    if (refresh != nullptr) {
+      std::printf("store-edit: store_browser_panel refresh_list after:\n");
+      PrintNode(*refresh, 0);
+    }
   } else {
     ok = rb_blitz::store::ShowOfferDetailsDirectly(&roots, &why);
     std::printf("store-edit: details route -> %s (%s)\n", ok ? "edited" : "refused",
@@ -1359,7 +1408,11 @@ int StoreEdit(const char* path, const char* which) {
     const bool purchased = rb_blitz::store::UseDataForDownloadedRow(&roots, &why);
     std::printf("store-edit: downloaded row -> %s (%s)\n", purchased ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && preview && purchased;
+    why.clear();
+    const bool option = rb_blitz::store::ClearDetailsFooterOption(&roots, &why);
+    std::printf("store-edit: view item caption -> %s (%s)\n", option ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && preview && purchased && option;
   }
   std::printf("store-edit: %s -> %s\n", mode.c_str(), ok ? "edited" : "refused");
   const Node* method = nullptr;
@@ -1911,6 +1964,413 @@ void TestAlbumArtLinked() {
   CHECK_TRUE(TreeUnchanged(no_art, no_art_untouched));
 }
 
+// ---------------------------------------------------------------------------------------------
+// P9-7/P9-8 - the store's Start button and its own footer
+// ---------------------------------------------------------------------------------------------
+//
+// The fixtures are the shipped shapes (`out/_swap/store.tree.txt`): the front menu's Start case is
+// two statements, the browser's is one `{do ...}`, and each screen's inline help is a scene object
+// the record addresses as `InlineHelp.ihp` / `store.ihp` / `store_info.ihp`.
+
+// `{== $action <action>}` - the test a case array begins with, in the shipped spelling.
+Node ActionCaseTest(const char* action) {
+  return Node::Command({Symbol("=="), Node::Var("action"), Symbol(action)});
+}
+
+// The case array for one action, at any depth (null when the method has none).
+const Node* FindActionCaseNode(const Node& node, const char* action) {
+  if (node.tag == rb_blitz::ui::dtb::kArray && !node.kids.empty() &&
+      node.kids[0].tag == rb_blitz::ui::dtb::kCommand && node.kids[0].kids.size() == 3 &&
+      node.kids[0].kids[0].text == "==" && node.kids[0].kids[1].text == "action" &&
+      node.kids[0].kids[2].text == action) {
+    return &node;
+  }
+  for (const Node& kid : node.kids) {
+    if (const Node* found = FindActionCaseNode(kid, action)) return found;
+  }
+  return nullptr;
+}
+
+bool HasBackStatement(const Node& node, std::string_view receiver, std::string_view target) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 4 &&
+      node.kids[0].text == receiver && node.kids[1].text == "set" &&
+      node.kids[2].text == "back_screen" && node.kids[3].text == target) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasBackStatement(kid, receiver, target)) return true;
+  }
+  return false;
+}
+
+bool HasGotoStatement(const Node& node, std::string_view screen) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+      node.kids[0].text == "ui" && node.kids[1].text == "goto_screen" &&
+      node.kids[2].text == screen) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasGotoStatement(kid, screen)) return true;
+  }
+  return false;
+}
+
+// `{<receiver> <method> <action> [<token>]}`.
+bool HasHelpStatement(const Node& node, std::string_view receiver, std::string_view method,
+                      std::string_view action, std::string_view token = {}) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+      node.kids[0].text == receiver && node.kids[1].text == method &&
+      node.kids[2].text == action &&
+      (token.empty() || (node.kids.size() >= 4 && node.kids[3].text == token))) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasHelpStatement(kid, receiver, method, action, token)) return true;
+  }
+  return false;
+}
+
+// The record both store screens live in: the front menu panel and the browser panel, each with the
+// shipped Start case, and the front menu's `enter` carrying the shipped trailing `{cond …}` whose
+// default arm is a `{fail …}` - the reason the footer commands are inserted before it.
+std::vector<Node> StoreScreensRecord() {
+  const Node front_case = Node::Array(
+      {ActionCaseTest("kAction_Start"),
+       Node::Command({Symbol("options_screen"), Symbol("set"), Symbol("back_screen"),
+                      Symbol("store_menu_screen")}),
+       Node::Command({Symbol("ui"), Symbol("goto_screen"), Symbol("options_screen")})});
+  const Node browser_case = Node::Array(
+      {ActionCaseTest("kAction_Start"),
+       Node::Command({Symbol("do"),
+                      Node::Command({Symbol("this"), Symbol("turn_off_preview")}),
+                      Node::Command({Symbol("options_screen"), Symbol("set"),
+                                     Symbol("back_screen"), Symbol("store_menu_screen")}),
+                      Node::Command({Symbol("ui"), Symbol("goto_screen"),
+                                     Symbol("options_screen")})})});
+  const Node fail_arm =
+      Node::Command({Symbol("fail"), Text("StorePanel Commerce Session in an illegal state "
+                                          "(likely kSessionNone).")});
+  const Node loading_arm =
+      Node::Command({Symbol("this"), Symbol("set_loading_visual_state"), Symbol("loading")});
+  const Node cond =
+      Node::Command({Symbol("cond"),
+                     Node::Command({Symbol("store_panel"),
+                                    Symbol("is_creating_commerce_session")}),
+                     loading_arm, fail_arm});
+  const Node menu_enter = Node::Array(
+      {Symbol("enter"),
+       Node::Command({Symbol("store_panel"), Symbol("add_sink"), Node::Var("this")}), cond});
+  const Node menu_panel =
+      Node::Command({Symbol("new"), Symbol("StoreMenuPanel"), Symbol("store_menu_panel"),
+                     Node::Array({Symbol("file"), Text("store_menu.milo")}), menu_enter,
+                     Node::Array({Symbol("BUTTON_DOWN_MSG"),
+                                  Node::Command({Symbol("cond"), front_case})})});
+  const Node refresh_do = Node::Command(
+      {Symbol("do"), Node::Command({Symbol("store_panel"), Symbol("update_crumb_text")}),
+       Node::Command({Symbol("if_else"),
+                      Node::Command({Symbol("store_panel"), Symbol("has_shortcuts")}),
+                      Node::Command({Symbol("store.ihp"), Symbol("set_action_token"),
+                                     Symbol("kAction_Option"), Symbol("shortcut_header")}),
+                      Node::Command({Symbol("store.ihp"), Symbol("clear_action_token"),
+                                     Symbol("kAction_Option")})})});
+  const Node browser_panel = Node::Command(
+      {Symbol("new"), Symbol("HeldButtonPanel"), Symbol("store_browser_panel"),
+       Node::Array({Symbol("file"), Text("store_browser.milo")}),
+       Node::Array({Symbol("refresh_list"), refresh_do}),
+       Node::Array({Symbol("BUTTON_DOWN_MSG"),
+                    Node::Command({Symbol("cond"), browser_case})})});
+  return {menu_panel, browser_panel};
+}
+
+void TestStoreStartRoutesToFilter() {
+  BeginCase("the store's Start button opens the Search Song Filter page");
+
+  std::vector<Node> record = StoreScreensRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::RouteStoreStartToFilter(
+      &record, "settings_rhythmverse_filter_screen", &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* front = FindNamedMethodNode(record[0], "store_menu_panel", "BUTTON_DOWN_MSG");
+  const Node* browser = FindNamedMethodNode(record[1], "store_browser_panel", "BUTTON_DOWN_MSG");
+  CHECK_TRUE(front != nullptr && browser != nullptr);
+  if (front == nullptr || browser == nullptr) return;
+  const Node* front_start = FindActionCaseNode(*front, "kAction_Start");
+  const Node* browser_start = FindActionCaseNode(*browser, "kAction_Start");
+  CHECK_TRUE(front_start != nullptr && browser_start != nullptr);
+  if (front_start == nullptr || browser_start == nullptr) return;
+  // The destination and its back target are both ours; nothing jumps to retail's options screen.
+  for (const Node* start : {front_start, browser_start}) {
+    CHECK_TRUE(HasGotoStatement(*start, "settings_rhythmverse_filter_screen"));
+    CHECK_FALSE(HasGotoStatement(*start, "options_screen"));
+    CHECK_TRUE(HasBackStatement(*start, "settings_rhythmverse_filter_screen", "store_menu_screen"));
+    CHECK_FALSE(HasBackStatement(*start, "options_screen", "store_menu_screen"));
+  }
+  // The browser's own statement around the jump is untouched.
+  CHECK_TRUE(HasGotoStatement(*browser_start, "settings_rhythmverse_filter_screen"));
+  bool preview_kept = false;
+  const auto scan = [&preview_kept](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+        node.kids[0].text == "this" && node.kids[1].text == "turn_off_preview") {
+      preview_kept = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan(*browser_start, scan);
+  CHECK_TRUE(preview_kept);
+
+  // Idempotent: a second pass finds its own destination and changes nothing.
+  const std::vector<uint8_t> once = rb_blitz::ui::dtb::SerializeNodes(record);
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::RouteStoreStartToFilter(
+      &record, "settings_rhythmverse_filter_screen", &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(record) == once);
+
+  // Compile and parse round trip.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+  if (!parsed.empty()) {
+    const Node* again = FindNamedMethodNode(parsed[0], "store_menu_panel", "BUTTON_DOWN_MSG");
+    CHECK_TRUE(again != nullptr);
+    if (again != nullptr) {
+      const Node* start = FindActionCaseNode(*again, "kAction_Start");
+      CHECK_TRUE(start != nullptr &&
+                 HasGotoStatement(*start, "settings_rhythmverse_filter_screen"));
+    }
+  }
+
+  // Refusals leave the record exactly as it was: no browser panel, and a Start case that jumps
+  // somewhere else entirely.
+  {
+    std::vector<Node> only_front = StoreScreensRecord();
+    only_front.pop_back();
+    const std::vector<Node> untouched = only_front;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::RouteStoreStartToFilter(
+        &only_front, "settings_rhythmverse_filter_screen", &why));
+    CHECK_TRUE(why.find("store_browser_panel") != std::string::npos);
+    CHECK_TRUE(TreeUnchanged(only_front, untouched));
+  }
+  {
+    const Node other_case = Node::Array(
+        {ActionCaseTest("kAction_Start"),
+         Node::Command({Symbol("ui"), Symbol("goto_screen"), Symbol("splash_screen")})});
+    std::vector<Node> other = {
+        Node::Command({Symbol("new"), Symbol("StoreMenuPanel"), Symbol("store_menu_panel"),
+                       Node::Array({Symbol("BUTTON_DOWN_MSG"),
+                                    Node::Command({Symbol("cond"), other_case})})}),
+        Node::Command({Symbol("new"), Symbol("HeldButtonPanel"), Symbol("store_browser_panel"),
+                       Node::Array({Symbol("BUTTON_DOWN_MSG"),
+                                    Node::Command({Symbol("cond"), other_case})})}),
+    };
+    const std::vector<Node> untouched = other;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::RouteStoreStartToFilter(
+        &other, "settings_rhythmverse_filter_screen", &why));
+    CHECK_TRUE(why.find("options_screen") != std::string::npos);
+    CHECK_TRUE(TreeUnchanged(other, untouched));
+  }
+  // An empty destination is refused too.
+  std::vector<Node> record2 = StoreScreensRecord();
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::RouteStoreStartToFilter(&record2, "", &why));
+}
+
+void TestStoreFooterStart() {
+  BeginCase("the store's footer names the Search Filters button");
+
+  std::vector<Node> record = StoreScreensRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::SetStoreFooterStart(
+      &record, rb_blitz::store::kFooterSearchFiltersToken, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* menu_enter = FindNamedMethodNode(record[0], "store_menu_panel", "enter");
+  const Node* refresh = FindNamedMethodNode(record[1], "store_browser_panel", "refresh_list");
+  CHECK_TRUE(menu_enter != nullptr && refresh != nullptr);
+  if (menu_enter == nullptr || refresh == nullptr) return;
+  CHECK_TRUE(HasHelpStatement(*menu_enter, "InlineHelp.ihp", "set_action_token", "kAction_Start",
+                              rb_blitz::store::kFooterSearchFiltersToken));
+  CHECK_TRUE(HasHelpStatement(*refresh, "store.ihp", "set_action_token", "kAction_Start",
+                              rb_blitz::store::kFooterSearchFiltersToken));
+  // The front menu's command is the method's **first** statement, before the shipped `{cond …}`
+  // whose default arm is `{fail …}` (P9-7 record: the owner's boot showed the screen-level
+  // placement does nothing, and a statement after that arm is one this build cannot rely on).
+  CHECK_TRUE(menu_enter->kids.size() >= 2 && menu_enter->kids[1].tag == rb_blitz::ui::dtb::kCommand &&
+             menu_enter->kids[1].kids.size() >= 3 &&
+             menu_enter->kids[1].kids[0].text == "InlineHelp.ihp" &&
+             menu_enter->kids[1].kids[1].text == "set_action_token");
+  bool fail_kept = false;
+  for (const Node& kid : menu_enter->kids) {
+    if (kid.tag == rb_blitz::ui::dtb::kCommand && !kid.kids.empty() &&
+        kid.kids[0].text == "cond") {
+      for (const Node& arm : kid.kids) {
+        if (arm.tag == rb_blitz::ui::dtb::kCommand && !arm.kids.empty() &&
+            arm.kids[0].text == "fail") {
+          fail_kept = true;
+        }
+      }
+    }
+  }
+  CHECK_TRUE(fail_kept);
+  // The token is a symbol, not a quoted string: `set_action_token` interns its argument.
+  const auto token_is_symbol = [](const Node& node, const auto& self) -> bool {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 4 &&
+        node.kids[1].text == "set_action_token" && node.kids[2].text == "kAction_Start") {
+      return node.kids[3].tag == rb_blitz::ui::dtb::kSymbol;
+    }
+    for (const Node& kid : node.kids) {
+      if (self(kid, self)) return true;
+    }
+    return false;
+  };
+  CHECK_TRUE(token_is_symbol(*menu_enter, token_is_symbol));
+  CHECK_TRUE(token_is_symbol(*refresh, token_is_symbol));
+
+  // Idempotent.
+  const std::vector<uint8_t> once = rb_blitz::ui::dtb::SerializeNodes(record);
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::SetStoreFooterStart(
+      &record, rb_blitz::store::kFooterSearchFiltersToken, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(record) == once);
+
+  // Compile and parse round trip.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+
+  // Refusals: no browser panel, and an empty token.
+  {
+    std::vector<Node> only_front = StoreScreensRecord();
+    only_front.pop_back();
+    const std::vector<Node> untouched = only_front;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::SetStoreFooterStart(
+        &only_front, rb_blitz::store::kFooterSearchFiltersToken, &why));
+    CHECK_TRUE(TreeUnchanged(only_front, untouched));
+  }
+  std::vector<Node> record2 = StoreScreensRecord();
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::SetStoreFooterStart(&record2, "", &why));
+}
+
+void TestStoreFooterOptionCleared() {
+  BeginCase("the store's footer draws no View Item caption");
+
+  std::vector<Node> record = StoreScreensRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::ClearStoreFooterOption(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* menu_enter = FindNamedMethodNode(record[0], "store_menu_panel", "enter");
+  const Node* refresh = FindNamedMethodNode(record[1], "store_browser_panel", "refresh_list");
+  CHECK_TRUE(menu_enter != nullptr && refresh != nullptr);
+  if (menu_enter == nullptr || refresh == nullptr) return;
+  CHECK_TRUE(HasHelpStatement(*menu_enter, "InlineHelp.ihp", "clear_action_token",
+                              "kAction_Option"));
+  CHECK_TRUE(HasHelpStatement(*refresh, "store.ihp", "clear_action_token", "kAction_Option"));
+  // The front menu's clear is the method's first statement (see `TestStoreFooterStart`).
+  CHECK_TRUE(menu_enter->kids.size() >= 2 && menu_enter->kids[1].tag == rb_blitz::ui::dtb::kCommand &&
+             menu_enter->kids[1].kids.size() >= 3 &&
+             menu_enter->kids[1].kids[0].text == "InlineHelp.ihp" &&
+             menu_enter->kids[1].kids[1].text == "clear_action_token");
+  // The browser's unconditional clear sits **after** its own shortcut-header gate: the statement
+  // order inside the method is `do(... if_else ...) ...`, so the gate is still there and the clear
+  // is a later sibling.
+  bool gate_first = false;
+  size_t gate_index = 0;
+  size_t clear_index = 0;
+  for (size_t i = 0; i < refresh->kids.size(); ++i) {
+    if (refresh->kids[i].tag == rb_blitz::ui::dtb::kCommand &&
+        refresh->kids[i].kids.size() >= 1 && refresh->kids[i].kids[0].text == "do") {
+      gate_index = i;
+      gate_first = true;
+    }
+    if (refresh->kids[i].tag == rb_blitz::ui::dtb::kCommand &&
+        refresh->kids[i].kids.size() >= 3 && refresh->kids[i].kids[0].text == "store.ihp" &&
+        refresh->kids[i].kids[1].text == "clear_action_token") {
+      clear_index = i;
+    }
+  }
+  CHECK_TRUE(gate_first && clear_index > gate_index);
+
+  // Idempotent.
+  const std::vector<uint8_t> once = rb_blitz::ui::dtb::SerializeNodes(record);
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::ClearStoreFooterOption(&record, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(record) == once);
+
+  // Compile and parse round trip.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+
+  // A record without the front-menu panel is refused untouched, and the reason names it.
+  std::vector<Node> no_panel = StoreScreensRecord();
+  no_panel.erase(no_panel.begin());
+  const std::vector<Node> untouched = no_panel;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::ClearStoreFooterOption(&no_panel, &why));
+  CHECK_TRUE(why.find("store_menu_panel") != std::string::npos);
+  CHECK_TRUE(TreeUnchanged(no_panel, untouched));
+}
+
+void TestDetailsFooterOptionCleared() {
+  BeginCase("the details page draws no View Item caption");
+
+  std::vector<Node> record = {
+      Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                     Node::Array({Symbol("file"), Text("store_info.milo")}),
+                     Node::Array({Symbol("enter"),
+                                  Node::Command({Symbol("this"), Symbol("refresh_panel")}),
+                                  Node::Command({Symbol("store_preview_mgr"), Symbol("add_sink"),
+                                                 Node::Var("this")})})}),
+  };
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::ClearDetailsFooterOption(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* enter = FindNamedMethodNode(record[0], "store_info_panel", "enter");
+  CHECK_TRUE(enter != nullptr);
+  if (enter == nullptr) return;
+  // Both inline-help objects the details scene declares are cleared; the panel's own enter work is
+  // untouched.
+  CHECK_TRUE(HasHelpStatement(*enter, "store_info.ihp", "clear_action_token", "kAction_Option"));
+  CHECK_TRUE(HasHelpStatement(*enter, "view_offer.ihp", "clear_action_token", "kAction_Option"));
+  CHECK_TRUE(HasHelpStatement(*enter, "store_preview_mgr", "add_sink", "this"));
+
+  // Idempotent.
+  const std::vector<uint8_t> once = rb_blitz::ui::dtb::SerializeNodes(record);
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::ClearDetailsFooterOption(&record, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(record) == once);
+
+  // Compile and parse round trip.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+
+  // A record without the panel is refused untouched.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("store_info_screen")})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::ClearDetailsFooterOption(&other, &why));
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
 int main(int argc, char** argv) {
   if (argc >= 3 && std::strcmp(argv[1], "dump-menu") == 0) {
     return DumpMenu(argv[2]);
@@ -1920,8 +2380,7 @@ int main(int argc, char** argv) {
   }
   if (argc >= 4 && std::strcmp(argv[1], "store-edit") == 0) {
     return StoreEdit(argv[2], argv[3]);
-  }
-  TestRewriteAddsLocalServer();
+  }  TestRewriteAddsLocalServer();
   TestRewriteReplacesExistingLocal();
   TestRefusalsLeaveTheTreeAlone();
   TestRewrittenRecordSurvivesCompileAndParse();
@@ -1945,5 +2404,9 @@ int main(int argc, char** argv) {
   TestDownloadButtonsRouted();
   TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();
+  TestStoreStartRoutesToFilter();
+  TestStoreFooterStart();
+  TestStoreFooterOptionCleared();
+  TestDetailsFooterOptionCleared();
   return rb_blitz::test::Finish();
 }
