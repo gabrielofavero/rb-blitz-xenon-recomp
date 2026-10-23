@@ -89,10 +89,13 @@ void TestFrontMenuText() {
   std::string why;
   const std::string text = BuildFrontMenuText(RhythmVerseFrontMenu(), &why);
   CHECK_TRUE(why.empty());
+  // P9-5: the label is `Recently Added`, and each row carries retail's no-count marker
+  // (`random_song` as the fourth element, store_metadata.h) so the front menu draws no digit
+  // beside it.
   CHECK_STR_EQ(text,
                "(submenus\n"
-               "  (\"/eng/recent/\" \"Recent\" TRUE)\n"
-               "  (\"/eng/search/\" \"Search\" TRUE)\n"
+               "  (\"/eng/recent/\" \"Recently Added\" TRUE random_song)\n"
+               "  (\"/eng/search/\" \"Search\" TRUE random_song)\n"
                ")\n"
                "(new_releases \"/eng/recent/\")\n");
   // The key is a bare symbol, each row a three-element array whose first element is the provider
@@ -101,6 +104,44 @@ void TestFrontMenuText() {
   CHECK_TRUE(text.find("(submenus") == 0);
   CHECK_FALSE(Contains(text, "\"submenus\""));
   CHECK_TRUE(Contains(text, "(new_releases"));
+}
+
+void TestFrontMenuRowForms() {
+  BeginCase("every count form is a row the retail readers accept");
+  // The owner's two shapes and the variants that were served on the way to the marker
+  // (store_metadata.h's FrontMenuRowForm). Only `no-count` stops the count label being fed a
+  // number; the others are kept because a boot compares them, and because a row without a third
+  // element is the shape P3 measured faulting.
+  struct Case {
+    rb_blitz::store::FrontMenuRowForm form;
+    const char* first_row;
+  };
+  const Case cases[] = {
+      {rb_blitz::store::FrontMenuRowForm::kCount, "  (\"/eng/recent/\" \"Recently Added\" TRUE)\n"},
+      {rb_blitz::store::FrontMenuRowForm::kFalse, "  (\"/eng/recent/\" \"Recently Added\" FALSE)\n"},
+      {rb_blitz::store::FrontMenuRowForm::kZero, "  (\"/eng/recent/\" \"Recently Added\" 0)\n"},
+      {rb_blitz::store::FrontMenuRowForm::kNoCount,
+       "  (\"/eng/recent/\" \"Recently Added\" TRUE random_song)\n"},
+  };
+  for (const Case& one : cases) {
+    rb_blitz::store::SetFrontMenuRowForm(one.form);
+    std::string why;
+    const std::string text = BuildFrontMenuText(RhythmVerseFrontMenu(), &why);
+    CHECK_TRUE(why.empty());
+    if (!Contains(text, one.first_row)) {
+      Fail(__FILE__, __LINE__,
+           std::string("the row for '") +
+               std::string(rb_blitz::store::FrontMenuRowFormToken(one.form)) + "' is not '" +
+               one.first_row + "'; text: " + text);
+    }
+    // Every form keeps three elements at least (the third is the count the panel reads), and the
+    // marker is a bare symbol - a quoted string would never match the interned `random_song`.
+    CHECK_TRUE(Contains(text, "\"Search\""));
+    CHECK_FALSE(Contains(text, "\"random_song\""));
+  }
+  rb_blitz::store::SetFrontMenuRowForm(rb_blitz::store::FrontMenuRowForm::kNoCount);
+  std::string why;
+  CHECK_TRUE(Contains(BuildFrontMenuText(RhythmVerseFrontMenu(), &why), "TRUE random_song)"));
 }
 
 void TestFrontMenuRefusals() {
@@ -519,6 +560,7 @@ void TestDownloadJob() {
 int main() {
   TestRequestPaths();
   TestFrontMenuText();
+  TestFrontMenuRowForms();
   TestFrontMenuRefusals();
   TestMenuText();
   TestTextQuoting();

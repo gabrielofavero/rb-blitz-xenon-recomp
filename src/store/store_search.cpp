@@ -524,8 +524,8 @@ SearchPageAnswer SearchAcceptPage(std::uint64_t generation, const ListingPage& p
   }
   out.accepted = true;
   ++g_pending.pages_done;
-  // The pages accumulate in the API's order, through the same filter Recent uses. A page the filter
-  // emptied is a valid step, not the end of the walk (P7).
+  // The pages accumulate in the API's order, through the same filter Recently Added uses. A page
+  // the filter emptied is a valid step, not the end of the walk (P7).
   std::vector<SearchOffer> shaped = ShapeOffers(page, g_pending.filter);
   g_offers.insert(g_offers.end(), std::make_move_iterator(shaped.begin()),
                   std::make_move_iterator(shaped.end()));

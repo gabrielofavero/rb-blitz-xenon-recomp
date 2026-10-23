@@ -9,8 +9,8 @@
 // until the TTL expires, and two callers that want the same page at the same time cost it one
 // request. Both halves matter here for different reasons:
 //
-//   * Recent is asked for again every time the store opens, and a player who backs out of the
-//     browser and presses Recent again within a few minutes asks the same question twice. The
+//   * Recently Added is asked for again every time the store opens, and a player who backs out of
+//     the browser and presses the row again within a few minutes asks the same question twice. The
 //     catalogue's own freshness (`store_catalogue_ttl_seconds`) already holds the *list*; this
 //     cache holds the *pages*, so a refetch that the TTL does allow still re-uses any page the
 //     site says has not changed shape (the request body is the key).

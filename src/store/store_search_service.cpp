@@ -232,16 +232,16 @@ void InstallSearchTransport() {
     worker->Post(Job{generation, request});
   });
   // The search page's offers (P4's second half): the accepted answer, mapped through the same
-  // `OfferFromSong` Recent's catalogue uses, and marked presented as it is taken - the retail
-  // browser then lists it exactly as it lists Recent.
+  // `OfferFromSong` Recently Added's catalogue uses, and marked presented as it is taken - the
+  // retail browser then lists it exactly as it lists Recently Added.
   SetSearchPageSource([] {
     std::vector<Offer> page;
     for (const SearchOffer& answer : SearchOffers()) {
       page.push_back(OfferFromSong(answer.song, answer.download_url));
     }
     SearchMarkShown();
-    // The search page is a store menu page like Recent's: the caption strip's copy uses this to
-    // know the store is still on screen (`store_catalogue_status.h`).
+    // The search page is a store menu page like Recently Added's: the caption strip's copy uses
+    // this to know the store is still on screen (`store_catalogue_status.h`).
     NoteStoreSurface(StoreSurface::kMenuPage);
     return page;
   });

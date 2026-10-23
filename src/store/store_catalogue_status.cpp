@@ -40,10 +40,10 @@ std::string Shortened(std::string reason) {
 
 std::string OfflineText(const std::string& reason) {
   if (reason.empty()) {
-    return "RhythmVerse could not be reached. Press Back and try Recent again.";
+    return "RhythmVerse could not be reached. Press Back and open Recently Added again.";
   }
   return "RhythmVerse could not be reached: " + Shortened(reason) +
-         ". Press Back and try Recent again.";
+         ". Press Back and open Recently Added again.";
 }
 
 std::string LoadingText(int pages) {

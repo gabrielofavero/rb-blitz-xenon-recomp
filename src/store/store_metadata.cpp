@@ -19,6 +19,11 @@ using ui::dtb::Node;
 // and it is the shipped default. `store_offer_type_symbol=0` selects the string spelling.
 bool g_type_symbol = true;
 
+// See store_metadata.h: how a front-menu row's count is written. `kNoCount` is the shipped default
+// because it is the only form whose count label is never fed a number (the fourth-element
+// `random_song` marker is what skips `sub_8275CD58`'s count branch).
+FrontMenuRowForm g_front_menu_row = FrontMenuRowForm::kNoCount;
+
 Node Symbol(std::string_view name) { return Node::Symbol(name); }
 Node Text(std::string_view text) { return Node::String(text); }
 
@@ -165,6 +170,41 @@ std::vector<std::pair<const char*, int>> ExtraIntKeys(const Offer& offer) {
 
 void SetOfferTypeSymbol(bool symbol) { g_type_symbol = symbol; }
 
+FrontMenuRowForm FrontMenuRow() { return g_front_menu_row; }
+
+void SetFrontMenuRowForm(FrontMenuRowForm form) { g_front_menu_row = form; }
+
+std::string_view FrontMenuRowFormToken(FrontMenuRowForm form) {
+  switch (form) {
+    case FrontMenuRowForm::kCount:
+      return "count";
+    case FrontMenuRowForm::kFalse:
+      return "false";
+    case FrontMenuRowForm::kZero:
+      return "zero";
+    case FrontMenuRowForm::kNoCount:
+      return "no-count";
+  }
+  return "no-count";
+}
+
+bool ParseFrontMenuRowForm(std::string_view token, FrontMenuRowForm* form) {
+  FrontMenuRowForm parsed = FrontMenuRowForm::kNoCount;
+  if (token == "count") {
+    parsed = FrontMenuRowForm::kCount;
+  } else if (token == "false") {
+    parsed = FrontMenuRowForm::kFalse;
+  } else if (token == "zero") {
+    parsed = FrontMenuRowForm::kZero;
+  } else if (token != "no-count") {
+    return false;
+  }
+  if (form != nullptr) {
+    *form = parsed;
+  }
+  return true;
+}
+
 std::string FrontMenuRecordPath(std::string_view region, std::string_view platform,
                                 std::string_view locale) {
   return "dlc_store/" + std::string(region) + "/dlc_top_" + std::string(platform) + "_" +
@@ -256,8 +296,8 @@ Offer OfferFromSong(const SongFile& song, std::string_view resolved_download_url
 
 FrontMenu RhythmVerseFrontMenu() {
   FrontMenu menu;
-  menu.entries.push_back({"recent", "Recent"});
-  menu.entries.push_back({kSearchMenuId, "Search"});
+  menu.entries.push_back({kRecentlyAddedMenuId, kRecentlyAddedLabel});
+  menu.entries.push_back({kSearchMenuId, kSearchMenuLabel});
   return menu;
 }
 
@@ -336,8 +376,8 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
   // and not an index list: `refresh_list` compares it with "" and, when it is empty, calls
   // `build_list_no_grouping`; otherwise it looks the value up in the shipped `groupings` table. An
   // index list there answers nothing, so `build_list` produced a list with no rows - which is what
-  // boots 112-117 showed (the browser open, its row band drawn, every row blank). Recent has no
-  // grouping of its own, so it writes the empty name.
+  // boots 112-117 showed (the browser open, its row band drawn, every row blank). Recently Added
+  // has no grouping of its own, so it writes the empty name.
   // One root array with flat key/value pairs - the convention `BuildFrontMenuRecord` writes and
   // the suite reads (`(offers_populated TRUE sorted "" offers (...))`). `ui::dtb::Compile`
   // serializes every top-level node as its own root, so the map must be a single node.
@@ -357,13 +397,34 @@ std::string BuildFrontMenuText(const FrontMenu& menu, std::string* why) {
   // string against a provider name. A bare quoted path (the first shape) is a *string* node, which
   // those two readers walk as if it were an array - measured 2026-10-20 evening, the builder's
   // first call faulted on `read of 0x44` right after the entry walk.
+  //
+  // The tail of the row is the *count* the front-menu list draws (P9-5): element 2 is formatted by
+  // `sub_8275CD58`'s `count` label, and element 3 is the marker `sub_8275C9D8` reads to skip it.
+  // `FrontMenuRowForm` in store_metadata.h carries the measurements.
   std::string out = "(submenus\n";
+  const FrontMenuRowForm form = g_front_menu_row;
   for (const FrontMenuEntry& entry : menu.entries) {
     out += "  (";
     out += Quote(MenuProviderPath(menu.locale, entry.id));
     out += " ";
     out += Quote(entry.label);
-    out += " TRUE)\n";
+    switch (form) {
+      case FrontMenuRowForm::kCount:
+        out += " TRUE";
+        break;
+      case FrontMenuRowForm::kFalse:
+        out += " FALSE";
+        break;
+      case FrontMenuRowForm::kZero:
+        out += " 0";
+        break;
+      case FrontMenuRowForm::kNoCount:
+        // The marker is a bare symbol on purpose: `sub_8275C9D8` resolves element 3 and compares
+        // it with its interned `random_song`, so a quoted *string* would not match.
+        out += " TRUE random_song";
+        break;
+    }
+    out += ")\n";
   }
   out += ")\n(new_releases ";
   out += Quote(MenuProviderPath(menu.locale, menu.entries.front().id));

@@ -90,6 +90,7 @@ See [`engine/README.md`](engine/README.md) for the per-document summary.
 | [`engine/input-flow.md`](engine/input-flow.md) | Native menu mouse and wheel navigation (R6): the retail path, the remap, and the checks. |
 | [`engine/loading-cancel.md`](engine/loading-cancel.md) | Why a song load that never finishes cannot be cancelled yet, and what was measured trying. |
 | [`engine/diagnostics.md`](engine/diagnostics.md) | The two standing instruments: the runtime probe overlay and the UI-state observer. |
+| [`engine/messages.md`](engine/messages.md) | The retail Messages screen: its record, the `InboxProvider`/`InboxMessage` objects and addresses, the empty-state tokens, the bottom-bar inline help, and the row-icon set with converted PNGs. |
 
 ### Settings
 
@@ -129,6 +130,7 @@ budget, and the row-text budget — are a skill:
 | [`plans/todo/2026-10-19-button-layout-hotswap-plan.md`](plans/todo/2026-10-19-button-layout-hotswap-plan.md) | Button glyphs and controller art as replaceable scheme packages: a live texture override, in-game selection, keyboard/controller auto-switch, and an optional PS3 `.pkg` import. Planning only. |
 | [`plans/todo/2026-10-22-background-music-navigator-plan.md`](plans/todo/2026-10-22-background-music-navigator-plan.md) | The main menu's background music navigator: a default-on switch, LB/RB/Start and media keys for next/previous/pause, a host-drawn footer, a Background Music Play page under Controls, and Play Current Song following the navigated song. Planning only (three prompts). |
 | [`plans/todo/2026-10-22-in-game-binding-rows-plan.md`](plans/todo/2026-10-22-in-game-binding-rows-plan.md) | Replace the Interface Mapping overlay with guest-drawn rows fed from host text: a `read_file` text op on the settings bridge, index dispatch on the list, page-entry refresh, and the retirement of `DrawBindingRows`. Planning only (four prompts, spike first). |
+| [`plans/todo/2026-10-23-messages-and-update-feed-plan.md`](plans/todo/2026-10-23-messages-and-update-feed-plan.md) | A built-in message feed from a Cloudflare Worker drawn in the retail Messages screen (boot fetch, JSON cache, retail empty-state fallback, named icons from the game's set or `assets/messages/`) and the version check that turns the screen's `(START)` prompt into *Update Game* and launches the dormant `RockBandBlitzUpdater.exe`. Planning only (M0–M8). |
 
 ### History
 

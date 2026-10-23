@@ -67,7 +67,8 @@ is removed from this file, not from the log.
 - **The store's catalogue is supplied locally by this mod from RhythmVerse; the online services
   stay out of scope** (RhythmVerse store plan P8, 2026-10-22). The retail DOWNLOAD CONTENT screens
   are retail's own, and they were already inert offline (the Open row above records that chain);
-  what this project adds is a **data source** for them. The Recent list and the search come from
+  what this project adds is a **data source** for them. The Recently Added list (the row was named
+  `Recent` before P9-5) and the search come from
   RhythmVerse's gameformat-scoped `rb3xbox` routes, the offers are served through the retail
   parser (`src/store/store_serve.cpp`), and a download is a package file the host fetches, checks
   and writes into the resolved DLC root (`src/store/store_download.cpp`, `store_install.cpp`).

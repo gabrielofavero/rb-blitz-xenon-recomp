@@ -2399,21 +2399,38 @@ Where a prompt overrides a P0-P8 decision it says so — the records in §5 are 
 the evidence of what shipped. Prompts are ordered so a later one does not have to undo an earlier
 one.
 
-| # | Surface | The adjustment | Overrides |
-| --- | --- | --- | --- |
-| P9-1 | Settings | The master switch defaults **On** | the P6 record's "master off" |
-| P9-2 | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
-| P9-3 | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
-| P9-4 | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | Split implemented; eight-state host checks pass; in-game retest pending |
-| P9-5 | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
-| P9-6 | Store surface (3 prompts) | **6a** the download/install status, Cancel and Download Again live in the details page's own box (guest-drawn); **6b** a retail popup on leaving the store or reaching Your Songs announces new songs after an install; **6c** the credit line goes, RhythmVerse stays credited in **Credits** | P5's strip, P7's credit line |
-| P9-7 | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
-| P9-8 | Store footer | Hide **Y View Item** where it does nothing | — |
-| P9-9 | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | Implemented with P9-4 split; eight-state host checks pass; in-game retest pending |
-| P9-10 | Catalogue | Warm Recently Added at boot; a failed press draws the connection-failed popup (P9-6b's panel) and retries in the background — nothing is hidden | P7's fetch-on-open |
-| P9-11 | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
-| P9-12 | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
-| P9-13 | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
+| # | Status | Surface | The adjustment | Overrides |
+| --- | --- | --- | --- | --- |
+| P9-1 | Done | Settings | The master switch defaults **On** | the P6 record's "master off" |
+| P9-2 | Done | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
+| P9-3 | Done | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
+| P9-4 | In Progress | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
+| P9-5 | Done | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
+| P9-6 | Todo | Store surface (3 prompts) | **6a** the download/install status, Cancel and Download Again live in the details page's own box (guest-drawn); **6b** a retail popup on leaving the store or reaching Your Songs announces new songs after an install; **6c** the credit line goes, RhythmVerse stays credited in **Credits** | P5's strip, P7's credit line |
+| P9-7 | Todo | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
+| P9-8 | Todo | Store footer | Hide **Y View Item** where it does nothing | — |
+| P9-9 | In Progress | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
+| P9-10 | In Progress | Catalogue | Warm Recently Added at boot; a failed press draws the connection-failed popup (P9-6b's panel) and retries in the background — nothing is hidden | P7's fetch-on-open |
+| P9-11 | Todo | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
+| P9-12 | In Progress | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
+| P9-13 | Todo | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
+
+Status checked 2026-10-23 against this section's records and the tree: **Done** = the prompt's
+Done-when is met by a record; **In Progress** = part is landed and the closing measurement is owed;
+**Todo** = nothing is in the tree. Evidence for the non-Done rows: P9-4 and P9-9 landed their host
+halves (the split controls and the ordered tab ring) and wait on the owner's in-game retest; P9-5
+landed 2026-10-23 (the label, the four row forms and the `store_front_menu_row` diagnostic) and the
+owner's boot reads `RECENTLY ADDED / SEARCH` with no digit beside either row; P9-6 has none of its
+three parts
+(`src/ui/help_overlay.cpp:381` still draws `DownloadStatusText`, `src/store/store_catalogue_status.cpp:118`
+still returns `kStoreCreditText`, and no `notice/pending` predicate exists); P9-7 and P9-8 have no
+code in `src/` (`Search Filters` and the `kAction_Option` edit do not exist); P9-10 measured its
+boot prewarm (`src/rb_blitz_app.h:381`) and owes items 2-3 (the failed-press popup and the
+background retry); P9-11's authored key pages are still registered in `src/ui/settings_screen.cpp`;
+P9-12's labels and default are in the tree (`kRhythmVerseLabel` is `RhythmVerse`,
+`kDlcRowRefreshLabel` is `Refresh Songs`, `general.refresh_music_library` compiles On) while no
+boot carrying them is measured and `scripts/acceptance_store.ps1` still asserts `CUST` on the main
+menu; P9-13 has no `audio_type`, `charter` or `release_date` on `SongFile` or `Offer`.
 
 ### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
 
@@ -2864,6 +2881,57 @@ pins the new order.
   token (`offer(s) for the Recent list`) is a log string and may stay.
 - **Done when**: the front menu OCRs `RHYTHMVERSE / RECENTLY ADDED / SEARCH` with no digit beside
   either row, both rows still request their measured paths, and the browser opens on their offers.
+
+**P9-5 record (2026-10-23) — landed, and the owner's boot reads the row with no count.**
+
+- **Where the number came from, measured statically out of the image** (`out/_swap/blitz_image.bin`,
+  base `0x82000000`, read with `out/_swap/fn_strings.py` and `find_string_refs.py`). The front menu's
+  list is `store_menu.milo`'s `filter.lst`, whose resource
+  (`ui/resource/lists/gen/list_store_menu.milo_xbox`, dumped with `scripts/hmx_milo.py`) carries
+  exactly two labels — `count.lbl` and `filter.lbl` — and the native provider that fills them is
+  `sub_8275CD58(data, index, label, out)`:
+  - `label == "filter"` (literal `0x82044668`) copies the row's **second** element, the text the
+    player reads;
+  - `label == "count"` (literal `0x82059C28`) resolves the row's **third** element and formats it
+    through the formatter at `provider + 68`. That is why `(path label TRUE)` drew `1`: `TRUE` is the
+    number 1 (`out/_swap/store-probe/20261022-140259/store.png` OCRs `Recent 1 / Search 1`).
+  - `sub_8275C9D8(row)` is the only predicate that **skips** that branch, handing the label an empty
+    string: it answers true when the row is an array whose **fourth** element resolves to the symbol
+    `random_song` (its sole string literal, `0x82106738`) — retail's own "this row has no count"
+    marker, used on its random-song row. So no spelling of the *third* element draws nothing, and the
+    prompt's "four-field row" is the only variant that can.
+- **Code**: `src/store/store_metadata.h/.cpp` gained `FrontMenuRowForm` (`kCount` =
+  `(path label TRUE)`, `kFalse`, `kZero`, `kNoCount` = `(path label TRUE random_song)`) with
+  `FrontMenuRow`/`SetFrontMenuRowForm`/`FrontMenuRowFormToken`/`ParseFrontMenuRowForm`, and
+  `RhythmVerseFrontMenu()` now serves `Recently Added` (`kRecentlyAddedLabel`; the id stays `recent`,
+  so the measured request `dlc_store/europe/eng/recent/` and the source id `menu_recent` are
+  unchanged) and `Search` (`kSearchMenuLabel`). `BuildFrontMenuText` writes the row's tail per form,
+  with the marker as a **bare symbol** (the predicate compares the resolved value, so a quoted string
+  would not match). `src/store/store_fetch.cpp` reads the new `store_front_menu_row` diagnostic
+  (**default `no-count`**) at installation and logs the form it serves; an unknown token warns and
+  keeps the default rather than serving something nobody measured.
+- **Copy that followed the rename**: the two offline sentences now read "Press Back and open
+  Recently Added again" (`src/store/store_catalogue_status.cpp`); the empty-state sentence never
+  named the row, so it stands; the comments in `store_catalogue`, `store_serve`, `store_search`,
+  `store_search_service` and `store_page_cache` name the row `Recently Added`. The log token
+  (`offer(s) for the Recent list`) stays, as the prompt allows.
+- **Pinned hermetically**: `store_metadata` (new `TestFrontMenuRowForm`: the default is `no-count`,
+  every token round-trips, and a typo leaves the form alone) and `store_serve` (the exact front-menu
+  text with both labels and the marker, plus `TestFrontMenuRowForms` covering all four tails and that
+  the marker is never quoted); full `ctest` **47/47** in `out/build/win-amd64-debug` and the debug
+  game target links.
+- **Harness**: `scripts/acceptance_store.ps1`'s Store leg waits for `RECENTLY`, asserts the two
+  labels, and now also asserts the **absence** of the digit the old row drew (`RECENTLYADDED1`,
+  `SEARCH1` through `Assert-Lacks`'s whitespace fold).
+- **Measured (owner, 2026-10-23) — the boot this prompt's Done-when asks for, and it closes the
+  prompt.** On a release build carrying this change the owner opened **RHYTHMVERSE** from the main
+  menu and the front menu draws **Recently Added / Search with no digit beside either row**, then
+  listed the offers and reported it working. That is the Done-when's OCR half, read by hand rather
+  than stored as a capture: no screenshot path accompanies this record, so the `store_front_menu_row`
+  diagnostic stays documented as the way to re-read the row (`count` restores the pre-P9-5 record
+  that drew `1`). The harness's Store leg asserts the same two labels and the absence of the digit
+  (`RECENTLYADDED1`, `SEARCH1`), but that leg has **not** been re-run on a build carrying the
+  change - the owner's boot is the measurement, and the leg is the standing check.
 
 ### P9-6 — the store's own words leave the overlay: live status in the details page, one notice popup, and no credit line
 

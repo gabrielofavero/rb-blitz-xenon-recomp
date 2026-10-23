@@ -26,7 +26,7 @@
 // the front menu's rows are provider names, and a press runs
 // `{store_panel set_source …}{store_panel request <name> TRUE}{store_panel update_loading_status}`,
 // whose answer the panel turns into `store_browser_screen` with `num_offers` rows. So the search's
-// results reach the player through the same page Recent uses: the payload's
+// results reach the player through the same page Recently Added uses: the payload's
 // `store::RouteSearchRowToKeys` makes the Search row open the authored keys while nothing is
 // pending, and the serving policy answers the search page with the accepted answer
 // (`SearchOffers`) otherwise. `SearchMarkShown`/`SearchAnswerPending` are the one-bit state that
@@ -266,7 +266,7 @@ bool SearchSeedField(std::string_view utf8);
   bool SearchPageWanted(std::uint64_t generation);
 // The eligible offers of the last accepted answer, in the API's order. `store_search_service.cpp`
 // turns them into the store's search page (`OfferFromSong`, installed as `store_serve.h`'s
-// `SearchPageSource`); Recent's equivalent is the catalogue's own list.
+// `SearchPageSource`); Recently Added's equivalent is the catalogue's own list.
 std::vector<SearchOffer> SearchOffers();
 
 // The serving policy handed the store the search page: the answer is on screen, so the front
@@ -294,8 +294,8 @@ std::string SearchStatusText();
 using SubmitSink = std::function<void(std::uint64_t, const RequestSpec&)>;
 void SetSubmitSink(SubmitSink sink);
 
-// The one filter rule, shared with Recent: the cheap eligibility predicate (`DecideOffer`) plus
-// the instrument filter. Exposed so P3's record writer and the tests apply the same functions.
+// The one filter rule, shared with Recently Added: the cheap eligibility predicate (`DecideOffer`)
+// plus the instrument filter. Exposed so P3's record writer and the tests apply the same functions.
 std::vector<SearchOffer> ShapeOffers(const ListingPage& page, const InstrumentFilter& filter);
 
 // --- The strings ------------------------------------------------------------------------------

@@ -45,6 +45,14 @@ REXCVAR_DEFINE_BOOL(store_offer_type_symbol, true, "Diagnostics",
                     "by the payload (store_payload.h). Off is the pre-P3 blank-row behaviour.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_STRING(store_front_menu_row, "no-count", "Diagnostics",
+                      "How a served front-menu row spells its count (store_metadata.h's "
+                      "FrontMenuRowForm): `no-count` marks the row with retail's own "
+                      "`random_song` fourth element, which is the only form whose count label is "
+                      "never fed a number; `count` is the pre-P9-5 `(path label TRUE)` that drew "
+                      "`1`, `false` and `zero` are the other spellings of the same count")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 namespace rb_blitz::store {
 namespace {
 
@@ -169,12 +177,24 @@ void InstallStoreFetch() {
   // The offer record's `type` node kind (store_metadata.h): read here because the writers are
   // SDK-free and a guest thread must not touch the cvar registry.
   SetOfferTypeSymbol(REXCVAR_GET(store_offer_type_symbol));
+  // The front-menu row's count form, for the same reason (store_metadata.h's FrontMenuRowForm).
+  FrontMenuRowForm form = FrontMenuRow();
+  const std::string row_form = REXCVAR_GET(store_front_menu_row);
+  if (ParseFrontMenuRowForm(row_form, &form)) {
+    SetFrontMenuRowForm(form);
+  } else {
+    REXLOG_WARN("store_fetch: `store_front_menu_row` = '{}' is not one of count/false/zero/"
+                "no-count; serving '{}'",
+                row_form, FrontMenuRowFormToken(form));
+  }
   g_on = true;
   REXLOG_INFO("store_fetch: serving the store's records from {} (delivery {})",
               g_serve_dir.empty() ? "the built-in records" : ("'" + g_serve_dir + "' first"),
               g_deliver ? "on" : "off");
   REXLOG_INFO("store_fetch: the offer `type` is served as a {}",
               REXCVAR_GET(store_offer_type_symbol) ? "symbol" : "string (labels stay blank)");
+  REXLOG_INFO("store_fetch: a front-menu row's count is served as '{}'",
+              FrontMenuRowFormToken(FrontMenuRow()));
 }
 
 bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {

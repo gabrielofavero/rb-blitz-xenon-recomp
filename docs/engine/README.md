@@ -11,6 +11,7 @@ or hook point it measured, with the evidence it came from.
 | [`input-flow.md`](input-flow.md) | Native menu mouse, hover and wheel navigation (R6): the retail path it hooks, the click/remap rules, and the live checks. |
 | [`loading-cancel.md`](loading-cancel.md) | Cancelling a song load that never finishes (R11): what the title does, what was measured, why the "try-catch the load" route is unavailable, and what the removed module did. |
 | [`diagnostics.md`](diagnostics.md) | The two standing instruments: the runtime probe (what the guest is doing, now) and the UI-state observer (what a captured state is made of). Both are also the harness the acceptance scripts drive. |
+| [`messages.md`](messages.md) | The retail Messages screen: its record and panels, the `InboxProvider` and `InboxMessage` objects, the empty-state tokens, the bottom-bar inline help, and the row-icon set (twelve 512×512 DXT1 icons with converted PNGs). |
 
 Reading order for a new feature: find its toggle in [`toggles.md`](toggles.md), then follow the
 document it names — that document is where the addresses, the file offsets and the measurements are.

@@ -50,9 +50,9 @@ bool IsFrontMenuPath(std::string_view path);
 bool IsMenuRecordPath(std::string_view path);
 
 // True for the search row's own page (`dlc_store/<region>/<locale>/search/`). It is a menu record
-// like Recent's, but its offers are the search session's answer instead of the catalogue's list -
-// which is how the plan's "results replace the browser list" is true: the page goes through the
-// same parser, the same `process_offers`, and the same browser.
+// like Recently Added's, but its offers are the search session's answer instead of the
+// catalogue's list - which is how the plan's "results replace the browser list" is true: the page
+// goes through the same parser, the same `process_offers`, and the same browser.
 bool IsSearchMenuPath(std::string_view path);
 
 // Where that page's offers come from. Installed once per boot by the search's transport module

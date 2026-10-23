@@ -8,9 +8,10 @@
 #             `RhythmVerse: On`, which is the shipped **default** (RhythmVerse plan §9/P9-1), the
 #             boot writes nothing for it, and the main menu already carries the store row. The
 #             Control leg is the only one that writes the value off.
-#   Store   - the row opens the retail store, the front menu draws RECENT / SEARCH and the
-#             `Customs from RhythmVerse` credit, Recent's page carries eligible offers (read from
-#             the log, not guessed) and the retail browser opens on them. Then Search runs a real
+#   Store   - the row opens the retail store, the front menu draws RECENTLY ADDED / SEARCH with no
+#             count beside either row (P9-5) and the `Customs from RhythmVerse` credit, Recently
+#             Added's page carries eligible offers (read from the log, not guessed) and the retail
+#             browser opens on them. Then Search runs a real
 #             query - the field is seeded with -SearchQuery, so one Done press exercises the
 #             request - the answer is drawn, and the same row opens the results page in the retail
 #             browser. Then A on the first result opens the details screen, DOWNLOAD is pressed,
@@ -616,9 +617,15 @@ function Invoke-StoreLeg {
         Add-Step 'store: the RhythmVerse row opens the retail store' ($index -ge 0) "row $index"
         if ($index -lt 0) { return }
 
-        $storeText = Wait-ForScreen 'store.png' 'RECENT' $ScreenTimeoutSec 'the store front menu'
-        Assert-Contains $storeText 'RECENT' 'store: the front menu draws Recent'
+        $storeText = Wait-ForScreen 'store.png' 'RECENTLY' $ScreenTimeoutSec 'the store front menu'
+        # P9-5 renamed the row from `Recent` to `Recently Added` and removed the `1` the front-menu
+        # list drew beside both rows (the served row carries retail's own `random_song` no-count
+        # marker; `store_front_menu_row` in docs/engine/diagnostics.md). `Assert-Lacks` folds
+        # whitespace out, so the check is exactly the digit the old row drew next to its label.
+        Assert-Contains $storeText 'RECENTLY' 'store: the front menu draws Recently Added'
         Assert-Contains $storeText 'SEARCH' 'store: the front menu draws Search'
+        Assert-Lacks $storeText 'RECENTLYADDED1' 'store: no count is drawn beside Recently Added'
+        Assert-Lacks $storeText 'SEARCH1' 'store: no count is drawn beside Search'
         # The header draws the locale entry `store` with RhythmVerse's own name on it (P3's
         # `SetStoreHeading`) and the OCR reads the whole word; it is the *menu row's* highlight that
         # eats letters (`HYTH VERSE CUSTOM`), which is why only that check asks for a fragment
@@ -650,7 +657,7 @@ function Invoke-StoreLeg {
         $recentCount = if ($recent.Success) { [int]$recent.Groups[1].Value } else { 0 }
         Add-Step 'store: the catalogue answered eligible offers' ($recentCount -ge 1) "$recentCount offer(s)"
 
-        # Recent is the front menu's first row.
+        # Recently Added is the front menu's first row.
         Drive @('key:lstick_up', 'wait:1')
         # `store_fetch: served '<path>' ...` is the shipping line (`LogOnce`, info). The per-page
         # `the served page carries N offer(s), M of them marked Downloaded` line is **trace-only**
@@ -667,14 +674,14 @@ function Invoke-StoreLeg {
         Start-Sleep -Seconds 3
         $browserText = Get-ScreenText 'browser.png'
         Assert-Log "store_fetch: served 'dlc_store/" 'store: the page was served to the retail parser'
-        Add-Step 'store: the retail browser is the current screen' (Wait-ForScreenName 'store_browser_screen' 30 'Recent') (Get-Screen)
+        Add-Step 'store: the retail browser is the current screen' (Wait-ForScreenName 'store_browser_screen' 30 'Recently Added') (Get-Screen)
         Assert-Lacks $browserText 'MICROSOFT' 'store: no Microsoft Points chrome on the browser'
         Assert-Lacks $browserText 'BUY NOW' 'store: no Buy Now row on the browser'
 
         # Search: Back to the menu, the second row (Search) opens the authored keys, Done submits
         # the seeded query, the answer is drawn, and the same row then opens the results page.
         Drive @('key:b', 'wait:3')
-        Add-Step 'store: Back returns to the store menu' (Wait-ForScreenName 'store_menu_screen' 20 'back from Recent')
+        Add-Step 'store: Back returns to the store menu' (Wait-ForScreenName 'store_menu_screen' 20 'back from Recently Added')
         Drive @('key:lstick_up', 'wait:1', 'key:lstick_down', 'wait:1', 'key:a', 'wait:4')
         $keysText = Wait-ForScreen 'keys.png' 'LETTERS' $ScreenTimeoutSec 'the search keys'
         Assert-Contains $keysText 'LETTERS' 'store: the Search row opens the authored keys'

@@ -260,9 +260,9 @@ std::string BuiltinRecord(std::string_view path, std::string* why) {
   if (IsSearchMenuPath(path)) {
     // The search's answer as a page (P4). The rows are the accepted offers, mapped through the same
     // `OfferFromSong` the catalogue uses (in the installed source), so the browser, the details
-    // screen, the Downloaded mark and the art path all behave exactly as they do for Recent. The
-    // source also marks the answer presented, which is what makes "press Search again" mean "type
-    // a new query" once this page has been listed.
+    // screen, the Downloaded mark and the art path all behave exactly as they do for Recently
+    // Added. The source also marks the answer presented, which is what makes "press Search again"
+    // mean "type a new query" once this page has been listed.
     std::vector<Offer> offers = SearchPageOffers();
     PreparePageOffers(&offers);
     return BuildMenuText(offers, why);

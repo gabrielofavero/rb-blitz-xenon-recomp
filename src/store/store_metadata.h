@@ -62,8 +62,51 @@ struct FrontMenuEntry {
   std::string label;
 };
 
-// The front menu the owner asked for (§1): Recent and Search, nothing else. Retail's categories
-// are intentionally not reproduced.
+// How a front-menu row is written **after** its label (P9-5).
+//
+// The row is read by two native functions, both measured out of the image on 2026-10-23:
+//
+//   * `sub_8275CD58` is the front-menu list's provider `Text(data, label, out)`. Its `filter` label
+//     copies the row's **second** element (the label the player reads), and its `count` label
+//     formats the row's **third** element through the formatter at `provider + 68` - which is why
+//     the pre-P9-5 record `(path label TRUE)` drew `1` beside both rows (`TRUE` resolves to the
+//     number 1, `out/_swap/store-probe/20261022-140259/store.png`);
+//   * `sub_8275C9D8` is the one predicate that **skips** the count branch and hands the label an
+//     empty string: it answers true when the row is an array whose **fourth** element is the symbol
+//     `random_song` (its only string literal). That is retail's own "this row has no count" marker,
+//     used on its random-song row.
+//
+// So a number is drawn for every third element, whatever its spelling; the only in-record way to
+// draw none is the fourth-element marker. The other two spellings are kept because a boot serves
+// them (the plan's "serve variants and keep the one with no number drawn"), and because a record
+// whose third element is absent is the shape P3 measured faulting (`sub_8275C968` wants more than
+// two elements).
+enum class FrontMenuRowForm {
+  // `(path label TRUE)` - the shape served before P9-5; the count label draws `1`.
+  kCount,
+  // `(path label FALSE)` - the same count spelled as the other boolean.
+  kFalse,
+  // `(path label 0)` - an integer count.
+  kZero,
+  // `(path label TRUE random_song)` - retail's own "no count" marker. Shipped default.
+  kNoCount,
+};
+
+// The form both writers emit. Set once per boot from the `store_front_menu_row` diagnostic
+// (src/store/store_fetch.cpp): the writers are SDK-free and a guest thread must not read the cvar
+// registry, so the value is copied here before the guest exists.
+FrontMenuRowForm FrontMenuRow();
+void SetFrontMenuRowForm(FrontMenuRowForm form);
+
+// The diagnostic's spellings: `count`, `false`, `zero`, `no-count`. An unknown token leaves the
+// form alone and answers false, so a typo cannot silently change what a boot serves.
+std::string_view FrontMenuRowFormToken(FrontMenuRowForm form);
+bool ParseFrontMenuRowForm(std::string_view token, FrontMenuRowForm* form);
+
+// The front menu the owner asked for (§1): **Recently Added** and Search, nothing else. The first
+// row's id stays `recent` - it is the provider path `dlc_store/<region>/eng/recent/` the panel asks
+// for (measured 2026-10-20) and the source id `menu_recent` - while the label is P9-5's rename.
+// Retail's categories are intentionally not reproduced.
 struct FrontMenu {
   std::string region = kStoreRegion;
   std::string platform = kStorePlatform;
@@ -97,6 +140,12 @@ std::string MenuSourceId(std::string_view entry_id);
 // The owner's two menus, in order.
 FrontMenu RhythmVerseFrontMenu();
 
+// The two rows' ids and labels. The ids are the measured provider names (`recent` is what the panel
+// asks for, `search` is the row the store's own gate routes), and the labels are what the player
+// reads: P9-5 renamed the first one from `Recent`, and `Search` is unchanged.
+inline constexpr char kRecentlyAddedMenuId[] = "recent";
+inline constexpr char kRecentlyAddedLabel[] = "Recently Added";
+
 // The front menu's search row, and its *index*. The index is what the store's DTA gate compares
 // against (`store::RouteSearchRowToKeys` in store_payload.h): `{component selected_pos}` is an
 // integer the DTA can test without guessing how the provider spells a name, and the menu is ours,
@@ -105,6 +154,7 @@ FrontMenu RhythmVerseFrontMenu();
 // no longer `kSearchMenuId`.
 inline constexpr char kSearchMenuId[] = "search";
 inline constexpr int kSearchMenuRow = 1;
+inline constexpr char kSearchMenuLabel[] = "Search";
 
 // The front-menu writer. The record is the shape `sub_8275D4E0` reads:
 //
@@ -113,6 +163,11 @@ inline constexpr int kSearchMenuRow = 1;
 // Returns an empty vector and fills `why` when the menu has no entries or an entry has an empty
 // id or label - a record with a nameless row would make the panel fetch `/<locale>//`, which is a
 // worse failure than not shipping one.
+//
+// This is the compiled form, for a record that goes into an ark; it writes the path-only rows it
+// always wrote. A record the server answers with is the **text** form below, which carries each
+// row's label and its count form (P3 measured bare paths as rows faulting, so the two are not
+// interchangeable).
 std::vector<uint8_t> BuildFrontMenuRecord(const FrontMenu& menu, std::string* why);
 
 // One song offer, with the fields the decoded scripts read (plan §2.4). Optional fields are left

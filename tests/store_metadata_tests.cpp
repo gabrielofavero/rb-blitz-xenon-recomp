@@ -9,7 +9,7 @@
 //   * the request names measured in the first real fetch (`dlc_store/europe/dlc_top_xbox_eng.dta`
 //     and the `/<locale>/<name>/` provider path the panel builds the next request from), plus the
 //     offer directory/related templates and the `menu_<id>` source id;
-//   * the owner's front menu is Recent then Search and nothing else;
+//   * the owner's front menu is Recently Added then Search and nothing else;
 //   * the front-menu record carries `submenus` - the key `sub_8275D4E0` reads - with one
 //     `/<locale>/<id>/` entry per row;
 //   * the menu record carries `offers_populated`, `sorted` and `offers`, an empty page is valid,
@@ -38,6 +38,9 @@ using rb_blitz::store::BuildMenuText;
 using rb_blitz::store::FrontMenu;
 using rb_blitz::store::FrontMenuEntry;
 using rb_blitz::store::FrontMenuRecordPath;
+using rb_blitz::store::FrontMenuRow;
+using rb_blitz::store::FrontMenuRowForm;
+using rb_blitz::store::FrontMenuRowFormToken;
 using rb_blitz::store::Instrument;
 using rb_blitz::store::MenuProviderPath;
 using rb_blitz::store::MenuRecordPath;
@@ -46,9 +49,14 @@ using rb_blitz::store::Offer;
 using rb_blitz::store::OfferDirectory;
 using rb_blitz::store::OfferFromSong;
 using rb_blitz::store::RelatedOfferPath;
+using rb_blitz::store::kRecentlyAddedLabel;
+using rb_blitz::store::kRecentlyAddedMenuId;
 using rb_blitz::store::kSearchMenuId;
+using rb_blitz::store::kSearchMenuLabel;
 using rb_blitz::store::kSearchMenuRow;
+using rb_blitz::store::ParseFrontMenuRowForm;
 using rb_blitz::store::RhythmVerseFrontMenu;
+using rb_blitz::store::SetFrontMenuRowForm;
 using rb_blitz::store::SongFile;
 using rb_blitz::ui::dtb::Node;
 
@@ -124,15 +132,20 @@ void TestRequestNames() {
 }
 
 void TestOwnerFrontMenu() {
-  BeginCase("the owner's front menu is Recent then Search");
+  BeginCase("the owner's front menu is Recently Added then Search");
   const FrontMenu menu = RhythmVerseFrontMenu();
   CHECK_EQ(menu.entries.size(), size_t{2});
   if (menu.entries.size() == 2) {
     CHECK_STR_EQ(menu.entries[0].id, "recent");
-    CHECK_STR_EQ(menu.entries[0].label, "Recent");
+    CHECK_STR_EQ(menu.entries[0].label, "Recently Added");
     CHECK_STR_EQ(menu.entries[1].id, "search");
     CHECK_STR_EQ(menu.entries[1].label, "Search");
   }
+  // The constants the writers, the tests and the payload's row gate share are the values above:
+  // the id is the measured provider name, the label is what the player reads (P9-5's rename).
+  CHECK_STR_EQ(std::string(kRecentlyAddedMenuId), "recent");
+  CHECK_STR_EQ(std::string(kRecentlyAddedLabel), "Recently Added");
+  CHECK_STR_EQ(std::string(kSearchMenuLabel), "Search");
   // The store's DTA gate presses by *index* (`{== $ix <row>}`), so the constant the payload hands
   // the transform and the row the writer emits have to stay the same fact.
   CHECK_TRUE(kSearchMenuRow >= 0 &&
@@ -152,7 +165,7 @@ void TestWriterRefusals() {
   CHECK_FALSE(why.empty());
 
   FrontMenu nameless;
-  nameless.entries.push_back({"", "Recent"});
+  nameless.entries.push_back({"", "Recently Added"});
   why.clear();
   CHECK_TRUE(BuildFrontMenuRecord(nameless, &why).empty());
   CHECK_FALSE(why.empty());
@@ -400,11 +413,49 @@ void TestEmptyMenuRecord() {
   if (offers != nullptr) CHECK_TRUE(offers->kids.empty());
 }
 
+void TestFrontMenuRowForm() {
+  BeginCase("a front-menu row's count form defaults to the no-count marker");
+  // P9-5: the front-menu list's `count` label formats the row's third element, and only the
+  // fourth-element `random_song` marker makes `sub_8275C9D8` skip it (store_metadata.h). The
+  // shipped default is therefore the marker, and the other three spellings exist for the boot that
+  // compares them.
+  CHECK_TRUE(FrontMenuRow() == FrontMenuRowForm::kNoCount);
+  CHECK_STR_EQ(std::string(FrontMenuRowFormToken(FrontMenuRowForm::kCount)), "count");
+  CHECK_STR_EQ(std::string(FrontMenuRowFormToken(FrontMenuRowForm::kFalse)), "false");
+  CHECK_STR_EQ(std::string(FrontMenuRowFormToken(FrontMenuRowForm::kZero)), "zero");
+  CHECK_STR_EQ(std::string(FrontMenuRowFormToken(FrontMenuRowForm::kNoCount)), "no-count");
+
+  // Every spelling the diagnostic documents parses, and a typo changes nothing - a boot whose cvar
+  // is mistyped must serve the default rather than a form nobody measured.
+  FrontMenuRowForm parsed = FrontMenuRowForm::kCount;
+  CHECK_TRUE(ParseFrontMenuRowForm("false", &parsed));
+  CHECK_TRUE(parsed == FrontMenuRowForm::kFalse);
+  CHECK_TRUE(ParseFrontMenuRowForm("zero", &parsed));
+  CHECK_TRUE(parsed == FrontMenuRowForm::kZero);
+  CHECK_TRUE(ParseFrontMenuRowForm("no-count", &parsed));
+  CHECK_TRUE(parsed == FrontMenuRowForm::kNoCount);
+  CHECK_TRUE(ParseFrontMenuRowForm("count", &parsed));
+  CHECK_TRUE(parsed == FrontMenuRowForm::kCount);
+
+  parsed = FrontMenuRowForm::kNoCount;
+  CHECK_FALSE(ParseFrontMenuRowForm("", &parsed));
+  CHECK_FALSE(ParseFrontMenuRowForm("NoCount", &parsed));
+  CHECK_FALSE(ParseFrontMenuRowForm("no count", &parsed));
+  CHECK_FALSE(ParseFrontMenuRowForm("1", &parsed));
+  CHECK_TRUE(parsed == FrontMenuRowForm::kNoCount);  // left alone
+
+  SetFrontMenuRowForm(FrontMenuRowForm::kZero);
+  CHECK_TRUE(FrontMenuRow() == FrontMenuRowForm::kZero);
+  SetFrontMenuRowForm(FrontMenuRowForm::kNoCount);
+  CHECK_TRUE(FrontMenuRow() == FrontMenuRowForm::kNoCount);
+}
+
 }  // namespace
 
 int main() {
   TestRequestNames();
   TestOwnerFrontMenu();
+  TestFrontMenuRowForm();
   TestWriterRefusals();
   TestMenuWriterRefusals();
   TestRecordRoundTrip();
