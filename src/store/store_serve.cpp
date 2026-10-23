@@ -172,24 +172,6 @@ void StartArtPrefetch(const std::vector<Offer>& offers) {
   }
 }
 
-// Only advertise a cover the serving path can answer *now*. `load_art` is answered synchronously
-// out of the art cache (store_fetch.cpp), and the record this build compiles links the material
-// immediately after that call returns (store_payload.h, `LinkAlbumArt`) - so an offer whose cover
-// has not been encoded yet would link a texture the panel never loaded. Clearing the key is exactly
-// the shape of an offer with no art: the DTA's `{offer has_data preview_art}` test fails and retail's
-// own placeholder stays. `art_url` is host-only (never written into the record) and is kept, so a
-// later prefetch for this offer still resolves.
-void KeepOnlyHeldArt(std::vector<Offer>* offers) {
-  for (Offer& offer : *offers) {
-    if (offer.preview_art.empty()) {
-      continue;
-    }
-    if (!HasArtTexture(ArtKeyFromPath(offer.preview_art))) {
-      offer.preview_art.clear();
-    }
-  }
-}
-
 // Everything a page's offers need before they become a record, for both sources. The Downloaded
 // mark and the download job are resolved here - one place, so a page can never carry a row the
 // worker was not told about (the guest half of the job is `Offer::job`, and a missing key walks a
@@ -200,7 +182,8 @@ void PreparePageOffers(std::vector<Offer>* offers) {
     AttachDownloadJob(&offer);
   }
   StartArtPrefetch(*offers);
-  KeepOnlyHeldArt(offers);
+  // Keep every valid art path. The details panel waits for its selected cover
+  // asynchronously; stripping a cold path would hide that cover for the visit.
 }
 
 }  // namespace

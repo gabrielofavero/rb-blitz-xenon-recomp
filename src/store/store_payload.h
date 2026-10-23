@@ -133,6 +133,17 @@ inline constexpr char kSearchKeyboardDescText[] =
 // The front menu is written with the default locale, so the row's own `{$provider get_string $ix}`
 // is exactly this string; the keyboard's result handler asks for it after the submit.
 inline constexpr char kSearchPageRequest[] = "/eng/search/";
+inline constexpr char kSearchLoadingPanel[] = "rbbz_search_loading_panel";
+inline constexpr char kSearchLoadingToken[] = "rbbz_search_loading";
+inline constexpr char kSearchLoadingText[] = "Searching RhythmVerse...";
+inline constexpr char kSearchCancelToken[] = "rbbz_search_cancel";
+inline constexpr char kSearchCancelText[] = "Press <alt1>B</alt1> to Cancel";
+inline constexpr char kSearchEmptyToken[] = "rbbz_search_empty";
+inline constexpr char kSearchEmptyText[] = "No matches. Try another artist or song title.";
+inline constexpr char kSearchFailedToken[] = "rbbz_search_failed";
+inline constexpr char kSearchFailedText[] = "The search could not finish. Please try again shortly.";
+inline constexpr char kSearchShortToken[] = "rbbz_search_short";
+inline constexpr char kSearchShortText[] = "Enter at least 3 characters to search.";
 bool RouteSearchRowToKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
                               std::string_view keyboard_method, std::string* why);
 
@@ -150,7 +161,7 @@ bool RouteSearchRowToKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, int se
 //   (open_store_search
 //      {do {write_file "rbbz-store/search/open" 0}
 //          {if_else {file_exists "rbbz-store/search/seed"}
-//                   {do {write_file "rbbz-store/search/done" 0} <the search page's request>}
+//                   {do {write_file "rbbz-store/search/done" 0} <show loading modal>}
 //                   {do {$user {user_mgr get_participating_user}}
 //                       {if_else $user
 //                                {virtual_keyboard show_keyboard $user 100
@@ -163,17 +174,15 @@ bool RouteSearchRowToKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, int se
 //      {if_else $ok
 //               {do {write_file {sprintf "rbbz-store/search/text/%s" $text} 0}
 //                   {write_file "rbbz-store/search/done" 0}
-//                   <the search page's request>}
+//                   <show loading modal>}
 //               {write_file "rbbz-store/search/leave" 0}})
 //
-// `<the search page's request>` is the shipped row's own triple, `{store_panel set_source
-// menu_search TRUE}` + `{store_panel request "/eng/search/" TRUE}` + `{store_panel
-// update_loading_status}` (out/_swap/store.tree.txt, `store_menu_panel.SELECT_MSG`): confirming the
-// keyboard submits the query *and* asks the store for the page, so the answer opens in the browser
-// without a second press. `"/eng/search/"` is `MenuProviderPath` for `kSearchMenuId` - the front
-// menu is written with the default locale, so the row asks for exactly this string. The request
-// waits for the answer on the host side (`store_fetch.h`'s `store_search_wait_ms`), which is what
-// keeps the page a results list rather than an empty one.
+// The focused loading panel uses the retail error popup's resource. Its `poll`
+// waits for `search/busy` to clear, hides the popup, and requests the results with
+// the shipped row's set_source/request/update_loading_status triple. No guest
+// thread waits for HTTP. Empty/invalid/failed searches show a terminal notice.
+// B/Back cancels the request and restores the store's list focus; all other
+// buttons are consumed. Leaving with the popup active cancels the search too.
 //
 // The keyboard's first argument is a **User object**: `sub_8237B008` asks it for the player's name
 // through its first virtual slot before it calls the platform keyboard, so the bare symbol is a
@@ -330,8 +339,10 @@ bool HidePreviewButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 // the request), so that guard can never be satisfied: this append runs the same assignment the
 // callback would have, right after `load_art` returns (boot `rb_blitz_176.log`).
 //
-// The serving policy only advertises `preview_art` for a texture it already holds, so the append
-// cannot link a stale cover: with no art the DTA never calls `load_art` (store_serve.cpp).
+// Cold covers keep their preview_art path in the page. A selection requests that
+// cover through the host bridge; poll_store_art waits for art/ready/<path> before
+// loading and linking it. The placeholder stays until then. Only cur_preview_art
+// can be linked, so a late cover for an earlier selection cannot replace it.
 // Idempotent; refused, before any edit, when `store_details_panel.refresh` has no `load_art` call.
 bool LinkAlbumArt(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 

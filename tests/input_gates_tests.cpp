@@ -8,6 +8,7 @@
 
 #include "check.h"
 #include "input/pad_packet.h"
+#include "input/modal_input.h"
 #include "input/source_gates.h"
 #include "profile/gameplay_remap.h"
 #include "profile/remap.h"
@@ -824,5 +825,19 @@ int main() {
     }
   }
 
+  BeginCase("system dialogs consume input and the closing press through release");
+  {
+    ModalInputGate gate;
+    CHECK_FALSE(gate.Block(false, true));  // ordinary interface input
+    CHECK_TRUE(gate.Block(true, false));
+    CHECK_TRUE(gate.Block(true, true));    // typing, mouse, or controller
+    CHECK_TRUE(gate.Block(false, true));   // held Enter/Escape after closing
+    CHECK_TRUE(gate.Block(false, true));
+    CHECK_TRUE(gate.Block(false, false));  // consume the release frame too
+    CHECK_FALSE(gate.Block(false, true));  // the next press belongs to the game
+    CHECK_TRUE(gate.Block(true, true));    // opening again re-arms the gate
+    CHECK_TRUE(gate.Block(false, false));
+    CHECK_FALSE(gate.Block(false, false));
+  }
   return Finish();
 }

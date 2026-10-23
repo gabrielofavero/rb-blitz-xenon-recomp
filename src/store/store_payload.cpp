@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "store/store_search.h"
+#include "store/album_art.h"
 
 namespace rb_blitz::store {
 namespace {
@@ -422,15 +423,22 @@ bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* 
   if (panel_exit == nullptr) {
     return refuse("the record carries no store_menu_panel exit method");
   }
+  Node* panels = nullptr;
+  for (Node& kid : screen->kids) {
+    if (kid.tag == ui::dtb::kArray && !kid.kids.empty() && IsSymbol(kid.kids[0], "panels")) {
+      panels = &kid;
+      break;
+    }
+  }
+  if (panels == nullptr) return refuse("the store screen carries no panels list");
   for (const Node& kid : screen->kids) {
     if (kid.tag == ui::dtb::kArray && !kid.kids.empty() && IsSymbol(kid.kids[0], "open_store_search")) {
       return refuse("the store screen already carries the keyboard entry");
     }
   }
 
-  // The keyboard entry: the strip's guidance first (so the one-at-a-time rule is on screen while
-  // the player types), then either the seeded submit - the measurement switch - or the title's own
-  // keyboard, with `$this` (the screen) as the receiver of its result message.
+  // The keyboard entry: guidance, then the seeded submit and modal, or the
+  // title's keyboard with `$this` as the receiver of its result message.
   //
   // The first argument is a **User object**, not the bare symbol: the native show
   // (`sub_8237B008`) asks it for the player's name through its first virtual slot before it calls
@@ -440,7 +448,7 @@ bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* 
   // the first that answers and dismisses the surface when neither does.
   const Node keyboard = Node::Command(
       {Node::Symbol("virtual_keyboard"), Node::Symbol("show_keyboard"), Node::Var("user"),
-       Node::Int(100),
+       Node::Int(kMaxSearchChars),
        Node::Command({Node::Symbol("localize"), Node::Symbol("search_for_song")}),
        Node::Command({Node::Symbol("localize"), Node::Symbol("search_for_song_desc")}),
        Node::String(""), Node::Var("this")});
@@ -456,14 +464,23 @@ bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* 
        Node::Command({Node::Symbol("do"), bind_pad_zero_user,
                       Node::Command({Node::Symbol("if_else"), Node::Var("user"), keyboard,
                                      WriteCommand(kSearchLeaveWrite)})})});
+  const Node show_loading = Node::Command(
+      {Node::Symbol(kSearchLoadingPanel), Node::Symbol("show_popup")});
+  // No page request until the entire search has finished. The modal's poll keeps
+  // the guest drawing and processing Cancel while the transport runs off-thread.
   const Node open = Node::Command(
       {Node::Symbol("do"), WriteCommand("rbbz-store/search/open"),
        Node::Command({Node::Symbol("if_else"), FileExistsCommand(kSearchSeedQuery),
                       Node::Command({Node::Symbol("do"),
                                      WriteCommand("rbbz-store/search/done"),
-                                     SearchPageRequest()}),
+                                     show_loading}),
                       Node::Command({Node::Symbol("do"), bind_participating_user,
                                      show_with_user})})});
+  panels->kids.push_back(Node::Symbol(kSearchLoadingPanel));
+  if (std::none_of(panels->kids.begin(), panels->kids.end(),
+                   [](const Node& n) { return IsSymbol(n, "error_popup_panel"); })) {
+    panels->kids.push_back(Node::Symbol("error_popup_panel"));
+  }
   screen->kids.push_back(Node::Array({Node::Symbol("open_store_search"), open}));
 
   // The result: `$ok` true writes the typed text and then the submit, in that order, so the session
@@ -482,7 +499,7 @@ bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* 
   const Node result = Node::Command(
       {Node::Symbol("if_else"), Node::Var("ok"),
        Node::Command({Node::Symbol("do"), write_text, WriteCommand("rbbz-store/search/done"),
-                      SearchPageRequest()}),
+                      show_loading}),
        WriteCommand(kSearchLeaveWrite)});
   const Node result_params = Node::Array({Node::Var("ok"), Node::Var("text")});
   screen->kids.push_back(
@@ -490,6 +507,51 @@ bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* 
 
   // Leaving the store menu ends the search surface: the strip stops, the field and the answer stay.
   panel_exit->kids.push_back(WriteCommand(kSearchLeaveWrite));
+
+  const auto cmd = [](std::initializer_list<Node> kids) { return Node::Command(kids); };
+  const auto sym = [](const char* s) { return Node::Symbol(s); };
+  const auto member = [](const char* name, std::initializer_list<Node> body) {
+    std::vector<Node> kids{Node::Symbol(name)};
+    kids.insert(kids.end(), body.begin(), body.end());
+    return Node::Array(std::move(kids));
+  };
+  const Node active = Node::Property({sym("active")});
+  const Node deactivate = cmd({sym("set"), active, sym("FALSE")});
+  const Node hide = cmd({sym("all.grp"), sym("set_showing"), sym("FALSE")});
+  const Node close = cmd({sym(kSearchLoadingPanel), sym("hide_popup")});
+  const auto notice = [&](const char* token) {
+    return cmd({sym("error_popup_panel"), sym("show_popup"), sym(token), sym("store_menu_panel")});
+  };
+  const Node terminal_notice = cmd({sym("do"), WriteCommand("rbbz-store/search/shown"),
+      cmd({sym("if_else"), FileExistsCommand(kSearchEmptyQuery), notice(kSearchEmptyToken),
+           cmd({sym("if_else"), FileExistsCommand(kSearchShortQuery), notice(kSearchShortToken),
+                notice(kSearchFailedToken)})})});
+  Node loading = cmd({sym("new"), sym("UIPanel"), sym(kSearchLoadingPanel),
+      Node::Array({sym("file"), Node::String("../error/error_general.milo")}),
+      Node::Array({sym("active"), sym("FALSE")}),
+      member("enter", {deactivate, hide}),
+      member("exit", {cmd({sym("if"), active, WriteCommand("rbbz-store/search/cancel")}), deactivate, hide}),
+      member("show_popup", {
+          cmd({sym("set"), active, sym("TRUE")}),
+          cmd({sym("error.lbl"), sym("set_token_fmt"), sym(kSearchLoadingToken)}),
+          cmd({sym("continue.lbl"), sym("set_token_fmt"), sym(kSearchCancelToken)}),
+          cmd({sym("all.grp"), sym("set_showing"), sym("TRUE")}),
+          cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"), Node::Var("this")})}),
+      member("hide_popup", {deactivate, hide, WriteCommand(kSearchLeaveWrite),
+          cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"), sym("store_menu_panel")}),
+          cmd({sym("store_menu_panel"), sym("set_focus"), Node::String("filter.lst")})}),
+      member("poll", {cmd({sym("if"),
+          cmd({sym("&&"), active, cmd({sym("!"), FileExistsCommand(kSearchBusyQuery)})}),
+          cmd({sym("do"), close,
+              cmd({sym("if_else"), FileExistsCommand(kSearchResultsQuery),
+                   SearchPageRequest(), terminal_notice})})})}),
+      member("BUTTON_DOWN_MSG", {cmd({sym("switch"), Node::Var("action"),
+          Node::Array({sym("kAction_Cancel"),
+              cmd({sym("if"), active, WriteCommand("rbbz-store/search/cancel"), close})})}),
+          Node::Int(1)})});
+  // Define the panel before the screen that lists it. Its own resource directory
+  // keeps the labels local, exactly like the retail error popup.
+  store_ui_roots->insert(store_ui_roots->begin(), std::move(loading));
   return true;
 }
 
@@ -1125,16 +1187,18 @@ bool LinkAlbumArt(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) 
     return refuse("no record roots");
   }
   Node* method = nullptr;
+  Node* panel = nullptr;
   for (Node& root : *store_ui_roots) {
     method = FindNamedMethod(root, "store_details_panel", "refresh");
     if (method != nullptr) {
+      panel = &root;
       break;
     }
   }
   if (method == nullptr) {
     return refuse("the record carries no store_details_panel refresh method");
   }
-  if (HasAlbumLink(*method)) {
+  if (FindNamedMethod(*panel, "store_details_panel", "poll_store_art") != nullptr) {
     if (why != nullptr) why->clear();
     return true;  // an idempotent second pass
   }
@@ -1142,11 +1206,41 @@ bool LinkAlbumArt(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) 
   if (!FindReceiverCall(*method, "store_panel", "load_art", &call)) {
     return refuse("store_details_panel refresh carries no store_panel load_art call");
   }
-  Node link = Node::Command({Node::Symbol("album.mat"), Node::Symbol("set"),
-                             Node::Symbol("diffuse_tex"),
-                             Node::Command({Node::Symbol("store_panel"), Node::Symbol("album_tex")})});
-  call.owner->insert(call.owner->begin() + static_cast<std::ptrdiff_t>(call.index) + 1,
-                     std::move(link));
+  const auto sym = [](const char* value) { return Node::Symbol(value); };
+  const auto cmd = [](std::initializer_list<Node> kids) { return Node::Command(kids); };
+  const Node desired = Node::Property({sym("cur_preview_art")});
+  const Node linked = Node::Property({sym("rbbz_linked_art")});
+  const Node poll_call = cmd({Node::Var("this"), sym("poll_store_art")});
+  const Node load = cmd({sym("store_panel"), sym("load_art"), desired, Node::Var("this")});
+  const Node link = cmd({sym("album.mat"), sym("set"), sym("diffuse_tex"),
+                         cmd({sym("store_panel"), sym("album_tex")})});
+  const Node request = cmd({sym("write_file"),
+      cmd({sym("sprintf"), Node::String(std::string(kArtRequestWritePrefix) + "%s"), desired}),
+      Node::Int(0)});
+  const Node ready = cmd({sym("file_exists"),
+      cmd({sym("sprintf"), Node::String(std::string(kArtReadyQueryPrefix) + "%s"), desired})});
+  // Replace the eager load. The native refresh has already selected this path
+  // and installed the placeholder; the per-frame poll waits for just this cover.
+  (*call.owner)[call.index] = cmd({sym("do"),
+      cmd({sym("set"), linked, sym("")}), request, poll_call});
+  if (call.index + 1 < call.owner->size() && HasAlbumLink((*call.owner)[call.index + 1])) {
+    // Upgrade an already transformed record without leaving its eager link.
+    call.owner->erase(call.owner->begin() + static_cast<std::ptrdiff_t>(call.index) + 1);
+  }
+  const Node poll_art = Node::Array({sym("poll_store_art"),
+      cmd({sym("if"),
+          cmd({sym("&&"), cmd({sym("!="), desired, sym("")}),
+                               cmd({sym("!="), desired, linked})}),
+          cmd({sym("if"), ready, load, link, cmd({sym("set"), linked, desired})})})});
+  // Preserve any retail polling work. Polling only links the current path, so a
+  // late image for an earlier highlight cannot replace the selected song's cover.
+  if (Node* poll = FindNamedMethod(*panel, "store_details_panel", "poll")) {
+    poll->kids.push_back(poll_call);
+  } else {
+    panel->kids.push_back(Node::Array({sym("poll"), poll_call}));
+  }
+  panel->kids.push_back(Node::Array({sym("rbbz_linked_art"), sym("")}));
+  panel->kids.push_back(poll_art);
   if (why != nullptr) why->clear();
   return true;
 }

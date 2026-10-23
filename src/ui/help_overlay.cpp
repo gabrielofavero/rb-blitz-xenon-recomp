@@ -372,7 +372,9 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // every caption while the search surface is open (or a request is in flight), and it is drawn
     // with Settings Labels off for the same reason a capture is: a field a player cannot read is
     // an input problem, not optional help.
-    const std::string search_status = store_ns::SearchStatusText();
+    // Loading belongs to the focused retail modal; do not duplicate it in the caption strip.
+    const std::string search_status = store_ns::SearchInFlight()
+                                          ? std::string{} : store_ns::SearchStatusText();
     const bool searching = !search_status.empty();
     // P5: a store download's progress and its outcome are the same kind of input feedback - the
     // details page draws static rows, so the strip is where "42%" and "Installed, restart the

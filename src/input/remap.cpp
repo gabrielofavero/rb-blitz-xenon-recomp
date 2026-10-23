@@ -9,6 +9,7 @@
 #include "input/effective_input.h"
 #include "input/host_pad.h"
 #include "input/input_capture.h"
+#include "input/modal_input.h"
 #include "input/native_menu.h"
 #include "input/pad_packet.h"
 #include "input/source_gates.h"
@@ -18,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -30,6 +32,7 @@
 
 #include <rex/cvar.h>
 #include <rex/input/input_system.h>
+#include <rex/kernel/xam/module.h>
 #include <rex/logging.h>
 
 #include "profile/profile.h"
@@ -440,7 +443,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // P8: the Controls recovery path observes one host-wide key once per poll (plan
           // §17.2). It is also observed by the settings overlay, because this filter does not
           // run at all when no device enumerates - see remap.h.
-          if (IsGameplayUser(user_index)) {
+          const bool system_ui = rex::kernel::xam::xeXamIsUIActive();
+          if (IsGameplayUser(user_index) && !system_ui) {
             TickInputRecovery();
           }
           // P7: one snapshot for the whole poll; see InstallPadRemap.
@@ -461,6 +465,17 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // key/mouse sources and both gameplay tables read the same raw devices, so they can
           // never disagree about what is held.
           const PhysicalInput physical = SamplePhysicalInput();
+          static thread_local std::array<ModalInputGate, 4> modal_gates;
+          const auto& raw = state.gamepad;
+          const bool held = HostAnyKeyDown() || physical.mouse_buttons ||
+                            raw.buttons || raw.left_trigger > 30 || raw.right_trigger > 30 ||
+                            std::abs(int(raw.thumb_lx)) > 8000 ||
+                            std::abs(int(raw.thumb_ly)) > 8000 ||
+                            std::abs(int(raw.thumb_rx)) > 8000 ||
+                            std::abs(int(raw.thumb_ry)) > 8000;
+          const bool modal_blocked = user_index < modal_gates.size()
+              ? modal_gates[user_index].Block(system_ui, held) : system_ui;
+          if (modal_blocked && IsGameplayUser(user_index)) InvalidateGameplayInput();
           // The sources a direct table is holding right now. General Mapping is rewritten below,
           // before the gameplay tables are evaluated, so the collector runs here: a press that
           // belongs to a gameplay action must not also become a General Mapping target when the
@@ -480,7 +495,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           static thread_local uint64_t key_serial = 0;
           std::vector<std::string> new_keys;
           HostKeyEventsSince(&key_serial, &new_keys);
-          const bool capture_armed = capture::Armed();
+          const bool capture_armed = capture::Armed() && !modal_blocked;
           if (capture_armed) {
             capture::Observation observation;
             observation.focused = physical.window_focused;
@@ -572,7 +587,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // A capture owns raw input until it completes or is cancelled: the guest sees a neutral
           // pad and no gameplay action, so the press being bound cannot navigate, pause, or strike
           // a note (plan §14.3).
-          if (capture_armed) {
+          if (capture_armed || modal_blocked) {
             state.gamepad.buttons = 0;
             state.gamepad.left_trigger = 0;
             state.gamepad.right_trigger = 0;
@@ -589,7 +604,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // Controller table's own buttons are removed while it routes, and Start carries the
           // direct Pause action (plan D3/D4). While a capture is armed the overlay is skipped: the
           // candidate press is the dialog's input, not the song's.
-          if (IsGameplayUser(user_index) && !capture_armed) {
+          if (IsGameplayUser(user_index) && !capture_armed && !modal_blocked) {
             const uint16_t controller_buttons = ControllerOwnedButtons(config->controller);
             const gameplay_input::PadOverlay overlay = context->ObserveGameplay(
                 physical, gates, routing, gameplay, REXCVAR_GET(input_source_trace), *config,

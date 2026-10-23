@@ -50,8 +50,12 @@ Part 1 wherever they disagree.
   eight-state checker passes 1,550 assertions, including animation and positions
   (`out/_swap/header-animation/records/state-0..7/`), and the full release build
   succeeds. The owner manually confirmed the corrected swipes and compact layout
-  work; P9-4 is closed. (The preceding host-verification notes preserve the earlier
-  pending state.)
+  work. **Reopened after an intermittent Search report:** with Recommendations Off,
+  its restored caption overlapped Your Songs. The shared background now reapplies
+  disabled-label visibility on entry and poll, covering the browser entry that
+  skips the front menu's header setup. The updated eight-state record check passes
+  1,982 assertions (`out/_swap/header-search-visibility/records/state-0..7/`).
+  Manual confirmation of this follow-up remains pending; P9-4 is In Progress.
 
 - **Historical combined Show Headers (2026-10-22, superseded by the split above):** General ▸ Interface now ends with
   **Music Library & Store**, containing **Show Headers: On | Off**. Default On;
@@ -117,13 +121,17 @@ Part 1 wherever they disagree.
   (`store::AddSearchKeyboard`): `open_store_search`, which writes `rbbz-store/search/open` and opens
   the keyboard with `$this` as the result's receiver, and `virtual_keyboard_result_msg ($ok $text)`,
   which writes `{sprintf "rbbz-store/search/text/%s" $text}`, submits with `rbbz-store/search/done`
-  **and then asks the store for the search page** (the shipped row's own `set_source` +
-  `request "/eng/search/"` + `update_loading_status`). So confirming the keyboard opens the results
-  in the retail browser with **no second press**; the host holds that request until the first API
-  page lands (`store_search_wait_ms`, measured 2.7 s on `bush`). The field and its sentences are
-  still read on the Help & Options caption bar (`Search: bush`, `Searching for "bush"...`,
-  `15 matches for "bush"...`, and the no-match sentence) and drawn **even with Settings Labels
-  off**, because a field a player cannot read is an input problem, not optional help. **The ten
+  **and opens a focused loading popup** using the retail error popup's visual. B/Back cancels;
+  its `poll` waits for the entire search to finish, closes the popup, and requests the results
+  using the shipped row's own `set_source` + `request "/eng/search/"` + `update_loading_status`.
+  Repeated requests replace the cached parsed page, so each new search lists its own answer.
+  Cover paths remain available while images load; the selected song gets priority, keeps its
+  placeholder until ready, then links its cover without reloading the results page.
+  There is **no second press** and no blocking host wait; empty/failed/short searches show a notice.
+  While the system keyboard is open, game input and native mouse navigation are blocked, and the
+  closing press is consumed through release. Editing guidance can still appear on the Help &
+  Options caption bar **even with Settings Labels off**; loading belongs to the modal and
+  completed searches dismiss the caption before opening results or a terminal notice. **The ten
   authored key pages per context are gone** (page count 71 → 61, both contexts), and so is P4's
   `store_search_diagnostic`; `store_search_seed` stays as the way a scripted boot reaches a request
   without typing on the on-screen keys (the screen asks `rbbz-store/search/seed` and submits the

@@ -726,11 +726,16 @@ Honest limits — P1's exit is partly met:
   edit is not delivered for this record, which is what pushed the row off the page).
 - Not yet exercised: ≥5 boots, cache On/Off, store On/Off after a restart, Ultimate absent, and
   Refresh Music Library's sentinel in the same run.
-- **Open P1 defect found by the measurement**: the store entry is drawn *last*, after EXIT GAME,
-  because the only selectable position is the retail store row's own (`splash_dlc` follows
+- **P1 defect (placement) closed 2026-10-23**: the store entry was drawn *last*, after EXIT GAME,
+  because the only selectable position measured was the retail store row's own (`splash_dlc` follows
   `splash_exit` in the shipped array) and inserting before `splash_exit` produced a row whose label
-  drew and whose navigation was skipped. Placing it above EXIT needs a runtime reorder, not a
-  different insert index; see P7.
+  drew and whose navigation was skipped. The row's *placement* is now a separate step:
+  `ui::screen::OrderMainMenuRows` (src/ui/settings_screen.cpp) permutes the option array after every
+  insertion, so the menu draws **PLAY / PLAY CURRENT SONG / RHYTHMVERSE / REFRESH SONGS / HELP &
+  OPTIONS / EXIT GAME** with EXIT GAME always last, while the symbol is still inserted at the one
+  position measured to navigate ([main-menu.md](../../engine/main-menu.md) §7.4). Pinned by
+  `rb_blitz_settings_screen_tests` in both shipped array shapes; the drawn order and the highlight
+  are **unproven on screen** until a boot is measured.
 
 ### P2 — instrument the data layer (DECISION GATE: A vs B)
 
@@ -785,7 +790,9 @@ Landed, and tested without a boot (`store_payload`, **32 checks**; full `ctest` 
   2. **A row inserted before `splash_exit` is drawn and skipped by navigation.** With the row placed
      above EXIT the menu read PLAY / PLAY CURRENT SONG / HELP & OPTIONS / RHYTHMVERSE CUSTOMS / EXIT
      GAME, but three and four taps both landed the highlight on EXIT GAME. The only *selectable*
-     position measured is the retail store row's own: appended after `splash_dlc`, i.e. last.
+     position measured is the retail store row's own: appended after `splash_dlc`, i.e. last. (The
+     drawn position was a separate problem, fixed 2026-10-23 by `OrderMainMenuRows`, main-menu.md
+     §7.4; the insert index is still this one.)
 - `settings_menu`'s P1 boot line now says *requested*, and every optional authoring refusal is
   reported (`BuildMenuRecords`'s new `notes`, logged at warn) — before that, a refused row and a
   built row printed the same sentence.
@@ -2409,7 +2416,7 @@ one.
 | P9-1 | Done | Settings | The master switch defaults **On** | the P6 record's "master off" |
 | P9-2 | Done | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
 | P9-3 | Done | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** | P6's flat page |
-| P9-4 | Done | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
+| P9-4 | In Progress | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
 | P9-5 | Done | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
 | P9-6 | Todo | Store surface (3 prompts) | **6a** the download/install status, Cancel and Download Again live in the details page's own box (guest-drawn); **6b** a retail popup on leaving the store or reaching Your Songs announces new songs after an install; **6c** the credit line goes, RhythmVerse stays credited in **Credits** | P5's strip, P7's credit line |
 | P9-7 | Done | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
@@ -2962,6 +2969,28 @@ and confirmed the independent switches, skipped-tab swipe direction, and compact
 header layout work. P9-4 is Done. The pending-test notes above preserve the state
 before this confirmation. The release build and all eight host configurations
 were verified; the agent did not navigate the game.
+
+**P9-4 reopened: intermittent Search overlap (2026-10-23).** After the earlier
+manual acceptance, the owner reported Recommended overlapping Your Songs around
+Search, with RhythmVerse and Messages On and Recommendations Off. The screenshot
+shows the disabled caption at the same position as the compacted Your Songs label.
+Static inspection finds `store_browser_screen.enter` does not call
+`set_offline_mode_headers`; only the store front menu does. A restored caption
+therefore has no visibility correction on that entry path. The exact intermittent
+restoration timing has not been reproduced in-game.
+
+`ConfigureLibraryHeaderBar` now applies its disabled-label mask in the shared
+background panel's `enter` and `poll`, as well as the existing mode and badge
+callbacks. Existing poll statements survive. These callbacks hide only disabled
+captions; poll never restarts a Flow or rewrites position keys, so it cannot
+interrupt a swipe. All tabs On adds no poll method. Host tests simulate captions
+being restored visible and verify entry/poll hide every disabled caption while
+leaving enabled captions alone. `menu_payload` passes, and the extracted-record
+matrix passes **1,982 checks** across all eight states, with zero refusals and
+byte-identical DTB round trips. Evidence:
+`out/_swap/header-search-visibility/records/state-0..7/`.
+**Manual Search retest remains with the owner; the intermittent visual glitch is
+not claimed reproduced or confirmed fixed from host checks.**
 
 ### P9-5 — **Recently Added**, and no count beside the two rows
 
@@ -3788,6 +3817,49 @@ title's own keyboard; the in-game typing is the one half this environment cannot
   drive the platform dialog only when a script sends host keystrokes into it) and whether the
   ~2.7 s hold before the results page reads acceptably; the store page stays on screen for it, and a
   deferral that lets retail's own LOADING draw instead is the next step if it does not.
+
+**P9-11 input/loading follow-up (2026-10-23).** The owner's typing pass found keyboard input
+also navigating the store and rejected the nonmodal loading feedback. The input filter now
+neutralizes controller, keyboard and mouse input while XAM UI is active, skips gameplay/capture
+dispatch, and consumes the closing press through release. The separate native mouse queue is
+also disabled during system UI.
+
+Submitting Search now opens `rbbz_search_loading_panel`, using the retail error popup's
+`../error/error_general.milo` visual with **Searching RhythmVerse...** and **B to Cancel**.
+It owns focus and consumes all button actions. B/Back invalidates the search generation and
+restores the store list; late responses cannot open a page. The panel's native `poll` waits for
+the entire API page walk, then hides the popup and requests the completed results directly.
+Empty, short and failed searches show a terminal notice. The blocking `store_search_wait_ms`
+path is removed, and the loading sentence no longer appears in the caption overlay. Confirming
+empty text replaces the previous query instead of resubmitting it; the keyboard's length limit
+now matches the search session's 64 characters.
+
+Validation: release build and the `input_gates`, `store_search`, `store_payload` and
+`settings_screen` suites. Regression coverage includes input release gating, partial pages staying
+busy, cancellation rejecting late results, terminal notices and the modal's focus/button contract.
+**Live UI verification remains pending the owner's testing choice** under `AGENTS.md`.
+
+**P9-11 repeat-search/art follow-up (2026-10-23).** The owner verified the keyboard/loading
+changes in-game, then reported that only the first search song showed art and a second search
+still displayed the first query's list. `rb_blitz_280.log` confirms that the API returned 98
+eligible Linkin Park offers and later 7 Walk the Moon offers, while the shared search page path
+was reused. The native file-cache insert refuses duplicates: rewriting the source buffer leaves
+the first parsed DataArray in place. Served text records now use fresh parser-owned buffers and
+reparse the existing cached file before its normal single delivery. The replaced array's reference
+and the cache's byte count are updated using the native ownership rules; art files keep their
+separate persistent raw buffers.
+
+The art log also shows covers completing after the results page was served. `KeepOnlyHeldArt`
+had removed every cold cover path from that page, so those images could never be selected even
+after encoding. Pages now retain every valid path. Selection requests its cover with priority
+over background prefetches; `store_details_panel.poll_store_art` checks readiness and links only
+the current path after its bytes are available. There is no blocking wait and no stale cover
+assignment. Missing/failed art keeps the placeholder.
+
+Validation: release build; `menu_payload`, `store_payload`, `store_serve`, `store_art` and
+`store_search` suites. Regression checks cover repeated parsed-page replacements, growing and
+shrinking cache accounting, array ownership, cold art paths, and independent readiness for
+different selected covers. The new in-game behavior still needs the owner's retest.
 
 ## Appendix A — request cheat sheet
 

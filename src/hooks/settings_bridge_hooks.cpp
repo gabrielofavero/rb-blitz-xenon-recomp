@@ -66,6 +66,7 @@
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
 #include "store/store_catalogue.h"
+#include "store/album_art.h"
 #include "store/store_download_service.h"
 #include "store/store_search.h"
 #include "store/store_settings.h"
@@ -682,6 +683,12 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     WriteResultCell(base, ctx.r3.u32, search_answer ? 1u : 0u);
     return true;
   }
+  bool art_answer = false;
+  if (::rb_blitz::store::AnswerArtQuery(path, &art_answer)) {
+    WriteResultCell(base, ctx.r3.u32,
+                    art_answer && ::rb_blitz::store::Settings()->enabled ? 1u : 0u);
+    return true;
+  }
   if (!g_enabled || g_forward_only) {
     return false;
   }
@@ -696,6 +703,10 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
 
 bool TakeWrite(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  if (::rb_blitz::store::HandleArtWrite(path, ::rb_blitz::store::Settings()->enabled)) {
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
   // P4's search keys (`rbbz-store/search/open|done|cancel|key/<token>|text/<hex>`) come first
   // because the download handler below claims the *whole* `rbbz-store/` prefix: it answers `true`
   // for anything it cannot parse as a job command ("refusing a malformed write"), which would

@@ -82,6 +82,7 @@ std::string ArtKeyFromPath(std::string_view path) {
   if (name == std::string_view::npos) {
     return {};
   }
+  if (name + std::string_view(kAlbumArtFileName).size() != path.size()) return {};
   // The exact tail must be `/cover_art.png_xbox`.
   if (name == 0 || path[std::size_t(name) - 1] != '/') {
     return {};
@@ -171,6 +172,24 @@ void RequestArtTexture(std::string_view key) {
   if (request && !key.empty()) {
     request(key);
   }
+}
+
+bool HandleArtWrite(std::string_view path, bool store_enabled) {
+  constexpr std::string_view prefix = kArtRequestWritePrefix;
+  if (!path.starts_with(prefix)) return false;
+  const auto key = ArtKeyFromPath(path.substr(prefix.size()));
+  if (store_enabled && AlbumArtEnabled() && !key.empty() && !HasArtTexture(key)) {
+    RequestArtTexture(key);
+  }
+  return true;
+}
+
+bool AnswerArtQuery(std::string_view path, bool* answer) {
+  constexpr std::string_view prefix = kArtReadyQueryPrefix;
+  if (!answer || !path.starts_with(prefix)) return false;
+  const auto key = ArtKeyFromPath(path.substr(prefix.size()));
+  *answer = AlbumArtEnabled() && !key.empty() && HasArtTexture(key);
+  return true;
 }
 
 }  // namespace rb_blitz::store

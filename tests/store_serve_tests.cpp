@@ -25,10 +25,12 @@
 #include "store/album_art.h"
 #include "store/store_metadata.h"
 #include "store/store_serve.h"
+#include "store/store_record_refresh.h"
 
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <map>
 #include <string>
 #include <vector>
 namespace {
@@ -309,12 +311,9 @@ void TestDownloadedMark() {
   rb_blitz::store::SetOfferSource({});
 }
 
-// A cover is advertised only while its texture is in hand (store_serve.cpp, `KeepOnlyHeldArt`):
-// `load_art` is answered synchronously out of the art cache and the compiled record links the
-// material right after it returns (store_payload.h, `LinkAlbumArt`), so a key announced before the
-// worker has encoded it would link a texture the panel never loaded.
-void TestArtAdvertisedOnlyWhenHeld() {
-  BeginCase("a cover is only offered to the panel while the texture is in hand");
+// Cold covers must keep their paths: the selected cover is linked asynchronously.
+void TestColdArtRemainsInPage() {
+  BeginCase("a cover remains available even when it finishes after the page is listed");
   const std::string key = rb_blitz::store::ArtKeyForSong("file-id-42", "Bush", "The People That We Love");
   CHECK_TRUE(!key.empty());
   std::vector<Offer> offers(1);
@@ -324,8 +323,8 @@ void TestArtAdvertisedOnlyWhenHeld() {
   offers[0].art_url = "https://example.invalid/cover.jpg";
   rb_blitz::store::SetOfferSource([offers] { return offers; });
 
-  // Nothing encoded yet: no `preview_art` key, so the retail panel draws its own placeholder.
-  // The record is built through `BuiltinRecord`, which is where the filter lives - the offers page
+  // Nothing encoded yet: retain preview_art so the panel can wait for it.
+  // The record is built through `BuiltinRecord` - the offers page
   // a menu row asks for (`dlc_store/europe/eng/recent/`, measured 2026-10-20).
   const std::string menu_path = "dlc_store/europe/eng/recent/";
   CHECK_TRUE(IsMenuRecordPath(menu_path));
@@ -334,12 +333,12 @@ void TestArtAdvertisedOnlyWhenHeld() {
   std::string why;
   const std::string bare = BuiltinRecord(menu_path, &why);
   CHECK_TRUE(why.empty());
-  CHECK_FALSE(Contains(bare, "(preview_art"));
-  // The offer itself is still listed - only the key is dropped.
+  CHECK_TRUE(Contains(bare, "(preview_art \"/offers/" + key + "/cover_art.png_xbox\")"));
+  // Both the offer and its eventual cover are listed.
   CHECK_TRUE(Contains(bare, "(name \"The People That We Love\")"));
 
-  // Once the worker has published the bytes the key is announced, spelled as the path the panel
-  // will ask for (leading slash: the panel's own prefix is `dlc_store`, with no trailing slash).
+  // Once the worker publishes the bytes, the path remains identical; no page
+  // reload is needed to make the readiness predicate true.
   rb_blitz::store::PublishArtTexture(key, std::string(16, '\0'));
   CHECK_TRUE(rb_blitz::store::HasArtTexture(key));
   const std::string held = BuiltinRecord(menu_path, &why);
@@ -349,6 +348,51 @@ void TestArtAdvertisedOnlyWhenHeld() {
   // Per boot: leave nothing behind for a later case.
   rb_blitz::store::ResetAlbumArtForTests();
   rb_blitz::store::SetOfferSource({});
+}
+
+void TestParsedPageRefresh() {
+  BeginCase("repeated menu requests replace parsed results and keep cache ownership balanced");
+  constexpr uint32_t manager = 0x100, file = 0x200;
+  std::map<uint32_t, uint32_t> memory;
+  memory[file + 52] = 3;
+  memory[file + 60] = 100;
+  memory[file + 68] = 0x1000;
+  memory[file + 64] = 7;  // existing references must survive a refresh
+  memory[manager + 92] = 400;
+  const auto read = [&](uint32_t address) { return memory[address]; };
+  const auto write = [&](uint32_t address, uint32_t value) { memory[address] = value; };
+  uint32_t next_array = 0x2000;
+  std::vector<uint32_t> released;
+  const auto parse = [&](uint32_t target) {
+    CHECK_EQ(target, file);
+    CHECK_TRUE(memory[target + 56] != 0);
+    memory[target + 56] = 0;  // retail consumes the owned text buffer
+    memory[target + 68] = next_array;
+  };
+  const auto release = [&](uint32_t previous) {
+    CHECK_EQ(memory[file + 68], next_array);  // install before releasing the old array
+    released.push_back(previous);
+  };
+  CHECK_TRUE(rb_blitz::store::RefreshCachedTextRecord(manager, file, 0x3000, 250,
+                                                     read, write, parse, release));
+  CHECK_EQ(memory[file + 68], 0x2000u);
+  CHECK_EQ(memory[manager + 92], 550u);
+  CHECK_EQ(released.size(), 1u);
+  CHECK_EQ(released[0], 0x1000u);
+  next_array = 0x4000;
+  CHECK_TRUE(rb_blitz::store::RefreshCachedTextRecord(manager, file, 0x5000, 50,
+                                                     read, write, parse, release));
+  CHECK_EQ(memory[manager + 92], 350u);  // smaller second search
+  CHECK_EQ(memory[file + 68], 0x4000u);
+  CHECK_EQ(released.back(), 0x2000u);
+  CHECK_EQ(memory[file + 64], 7u);
+  next_array = 0;  // invalid replacement preserves the last usable page
+  CHECK_FALSE(rb_blitz::store::RefreshCachedTextRecord(manager, file, 0x6000, 75,
+                                                      read, write, parse, release));
+  CHECK_EQ(memory[file + 68], 0x4000u);
+  CHECK_EQ(memory[file + 60], 50u);
+  CHECK_EQ(memory[manager + 92], 350u);
+  CHECK_EQ(released.size(), 2u);
 }
 
 void TestServedFile() {
@@ -566,7 +610,8 @@ int main() {
   TestTextQuoting();
   TestDownloadedMark();
   TestDownloadJob();
-  TestArtAdvertisedOnlyWhenHeld();
+  TestColdArtRemainsInPage();
+  TestParsedPageRefresh();
   TestServedFile();
   TestRecordChoice();
   TestMenuPaths();

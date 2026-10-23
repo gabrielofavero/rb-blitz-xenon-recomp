@@ -2,14 +2,13 @@
 // rb_blitz - ReXGlue Recompiled Project
 
 #include "store/store_fetch.h"
+#include "store/store_record_refresh.h"
 
 #include <atomic>
-#include <chrono>
 #include <map>
 #include <mutex>
 #include <set>
 #include <string>
-#include <thread>
 #include <utility>
 
 #include <rex/cvar.h>
@@ -56,14 +55,6 @@ REXCVAR_DEFINE_STRING(store_front_menu_row, "no-count", "Diagnostics",
                       "`1`, `false` and `zero` are the other spellings of the same count")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(store_search_wait_ms, 4000, "Diagnostics",
-                   "How long the search page's own request waits for the RhythmVerse answer before "
-                   "it is written. Confirming the title's keyboard submits the query and asks for "
-                   "the page in the same breath (`store_payload.h`'s keyboard entry), and the "
-                   "browser only opens when the page carries offers, so the request holds until "
-                   "the first page lands. 0 writes the page immediately - an empty list, which "
-                   "the store answers by staying on its menu");
-
 namespace rb_blitz::store {
 namespace {
 
@@ -75,6 +66,10 @@ REX_EXTERN(__imp__sub_823E0C00);  // the guest allocator (160-byte request entri
 REX_EXTERN(__imp__sub_824685E0);  // insert a loaded file: (manager, path, data, size)
 REX_EXTERN(__imp__sub_82468518);  // "is this path already loaded?" (the request's branch test)
 REX_EXTERN(__imp__sub_82474E68);  // the loaded-file lookup behind it, on `manager + 76`
+REX_EXTERN(__imp__sub_82474E08);  // lookup returning a retained file, not a boolean
+REX_EXTERN(__imp__sub_82468120);  // release the lookup's file reference
+REX_EXTERN(__imp__sub_82468138);  // parse the file's owned text buffer
+REX_EXTERN(__imp__sub_82190510);  // release a DataArray (LoadedFile's destructor uses it)
 REX_EXTERN(__imp__sub_8274F610);  // the panel's offers parser: (out, panel, message)
 
 // Set once by InstallStoreFetch() on the host thread, before the guest exists; read-only after, so
@@ -116,7 +111,7 @@ std::string GuestCString(uint8_t* base, uint32_t addr, size_t max_length) {
   return out;
 }
 
-// The guest buffer a record is copied into: **one per served path per boot**, never one shared
+// The guest buffer an art file is copied into: **one per served path per boot**, never one shared
 // across records. The insert does not copy what it is handed - `sub_82468248` stores the pointer
 // itself at `file + 56` (`stw r28,56(r30)`) and parses it in place - so the bytes have to outlive
 // the request object, which the file cache keeps for the whole boot. Measured 2026-10-22: the
@@ -125,8 +120,8 @@ std::string GuestCString(uint8_t* base, uint32_t addr, size_t max_length) {
 // the **file object from the first visit** - whose `+56` was the one shared buffer the rest of the
 // boot had since overwritten with a menu page and other covers - and read guest 0x4
 // (`rb_blitz_243.log`; the same decode call with the same arguments decodes cleanly on the first
-// visit). Per-path buffers are the smallest fix: a path's bytes never change within a boot, so a
-// repeat serve reuses its own allocation, and no live object ever sees another record's bytes.
+// visit). Art files retain their raw bytes, so repeat art serves reuse that path's allocation.
+// Text metadata uses fresh owned buffers instead: the native parser consumes and frees them.
 std::mutex g_buffer_mutex;
 std::map<std::string, std::pair<uint32_t, uint32_t>> g_buffers;  // path -> (address, capacity)
 // 32 bytes of guest scratch for the delivery calls' return slot and message struct.
@@ -242,29 +237,8 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   if (IsFrontMenuPath(path) || IsMenuRecordPath(path)) {
     RequestLibraryRefresh("the store asked for a page");
   }
-  // The search page is asked for the moment the player confirms the keyboard (`store_payload.h`),
-  // so the answer may still be in flight. Hold the request until the first page of it lands: the
-  // browser opens only when the page carries offers (`store_menu_panel.process_offers`), so a page
-  // written now would be an empty list the player has to ask for again. The wait is bounded and
-  // only ever paid on a query the page cache does not hold.
-  if (IsSearchMenuPath(path)) {
-    const auto started = std::chrono::steady_clock::now();
-    while (SearchInFlight()) {
-      const auto waited = std::chrono::steady_clock::now() - started;
-      if (waited >= std::chrono::milliseconds(REXCVAR_GET(store_search_wait_ms))) {
-        break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    const auto waited = std::chrono::steady_clock::now() - started;
-    if (waited >= std::chrono::milliseconds(50)) {
-      LogOnce(path + "#wait",
-              "the search page waited " +
-                  std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(waited)
-                                     .count()) +
-                  " ms for the answer");
-    }
-  }
+  // Search is requested only after the loading modal observes a terminal answer.
+  // Never stall the guest here: drawing and cancellation must keep running.
   const ServedRecord record = RecordForRequest(path, g_serve_dir);
   if (record.bytes.empty()) {
     LogOnce(path, "no record for '" + path + "': " + record.source);
@@ -318,7 +292,9 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
                 GuestU32(base, manager + 44), GuestU32(base, manager + 48),
                 GuestU32(base, manager + 104));
   }
-  const uint32_t buffer = RecordBuffer(ctx, base, path, record.bytes.size() + 1);
+  // The text parser owns and frees this buffer. Never reuse the address held
+  // for an earlier parsed page; art files, in contrast, retain their raw bytes.
+  const uint32_t buffer = Allocate(ctx, base, record.bytes.size() + 1);
   if (buffer == 0) {
     LogOnce(path, "no record for '" + path + "': the guest buffer allocation failed");
     return false;
@@ -333,11 +309,42 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   }
   dest[record.bytes.size()] = 0;
   PPCContext call = ctx;
-  call.r3.u64 = manager;
+  call.r3.u64 = manager + 76;
   call.r4.u64 = path_chars;
-  call.r5.u64 = buffer;
-  call.r6.u64 = static_cast<uint32_t>(record.bytes.size());
-  __imp__sub_824685E0(call, base);
+  __imp__sub_82474E08(call, base);
+  const uint32_t cached_file = call.r3.u32;
+  if (cached_file != 0) {
+    const bool refreshed = RefreshCachedTextRecord(
+        manager, cached_file, buffer, static_cast<uint32_t>(record.bytes.size()),
+        [&](uint32_t address) { return GuestU32(base, address); },
+        [&](uint32_t address, uint32_t value) { WriteGuestU32(base, address, value); },
+        [&](uint32_t file) {
+          PPCContext parse = ctx;
+          parse.r3.u64 = file;
+          __imp__sub_82468138(parse, base);
+        },
+        [&](uint32_t array) {
+          PPCContext release = ctx;
+          release.r3.u64 = array;
+          __imp__sub_82190510(release, base);
+        });
+    PPCContext release = ctx;
+    release.r3.u64 = cached_file;
+    __imp__sub_82468120(release, base);
+    if (!refreshed) {
+      REXLOG_WARN("store_fetch: could not refresh cached record '{}'", path);
+      return false;
+    }
+    call.r3.u64 = cached_file;
+    REXLOG_INFO("store_fetch: refreshed cached record '{}' ({} byte(s))", path, record.bytes.size());
+  } else {
+    call = ctx;
+    call.r3.u64 = manager;
+    call.r4.u64 = path_chars;
+    call.r5.u64 = buffer;
+    call.r6.u64 = static_cast<uint32_t>(record.bytes.size());
+    __imp__sub_824685E0(call, base);
+  }
   g_record.store(call.r3.u32 != 0 ? GuestU32(base, call.r3.u32 + 68) : 0,
                  std::memory_order_relaxed);
   // The manager's readiness word is left set so `sub_8235A240`'s body - which runs after this hook

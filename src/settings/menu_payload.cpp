@@ -186,12 +186,39 @@ bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions op
   const auto hide = [](const char* label) {
     return Node::Command({Node::Symbol(label), Node::Symbol("set_showing"), Node::Symbol("FALSE")});
   };
-  if (!options.store) mode->kids.push_back(hide("main_store.lbl"));
-  if (!options.recommendations) mode->kids.push_back(hide("main_Home.lbl"));
+  std::vector<Node> hidden;
+  if (!options.store) hidden.push_back(hide("main_store.lbl"));
+  if (!options.recommendations) hidden.push_back(hide("main_Home.lbl"));
   if (!options.messages) {
-    mode->kids.push_back(hide("main_inbox.lbl"));
-    mode->kids.push_back(hide("main_new_msg.lbl"));
+    hidden.push_back(hide("main_inbox.lbl"));
+    hidden.push_back(hide("main_new_msg.lbl"));
     inbox->kids.push_back(hide("main_new_msg.lbl"));
+  }
+  mode->kids.insert(mode->kids.end(), hidden.begin(), hidden.end());
+  // Search results enter store_browser_screen without the front menu's header
+  // setup. Scene/Flow restoration can re-show a disabled label at its old slot,
+  // overlapping an enabled label whose animation keys were compacted below.
+  // Enforce only the visibility mask at the shared panel's lifecycle boundaries;
+  // never restart header Flows or move animated labels from poll.
+  enter->kids.insert(enter->kids.end(), hidden.begin(), hidden.end());
+  if (!hidden.empty()) {
+    Node* poll = PanelMethod(&staged, "background_panel", "poll");
+    if (poll) {
+      poll->kids.insert(poll->kids.end(), hidden.begin(), hidden.end());
+    } else {
+      std::vector<Node> body{Node::Symbol("poll")};
+      body.insert(body.end(), hidden.begin(), hidden.end());
+      // Adding a method can move its siblings; finish using mode/inbox first and
+      // reacquire enter before appending the position-key edits.
+      for (auto& root : staged) {
+        if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+            root.kids[0].text == "new" && root.kids[2].text == "background_panel") {
+          root.kids.push_back(Node::Array(std::move(body)));
+          break;
+        }
+      }
+      enter = PanelMethod(&staged, "background_panel", "enter");
+    }
   }
   // TextShift.anim owns the label positions throughout a transition, so moving
   // transforms after a snap would be overwritten on the next frame. Reauthor its
@@ -566,6 +593,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             note("hiding the main-menu rows was refused: " + why);
           }
         }
+        // The owner's row order (2026-10-23): Play, Play Current Song, RhythmVerse, Refresh Songs,
+        // retail's own rows, then Exit Game last. After every insertion and after the hide
+        // decision, so the rows it orders are all present; the rows it removes are already gone.
+        {
+          std::string why;
+          if (!screen::OrderMainMenuRows(&roots, &why)) {
+            note("ordering the main-menu rows was refused: " + why);
+          }
+        }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
         if (!screen::RerouteRow(&roots, screen::kPauseMenuRow,
@@ -648,6 +684,18 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                                     store::kSearchKeyboardDescText, &why) &&
             why != "the locale already has that key") {
           note("the search keyboard's description was refused: " + why);
+        }
+        for (const auto& [key, text] : {
+                 std::pair{store::kSearchLoadingToken, store::kSearchLoadingText},
+                 std::pair{store::kSearchCancelToken, store::kSearchCancelText},
+                 std::pair{store::kSearchEmptyToken, store::kSearchEmptyText},
+                 std::pair{store::kSearchFailedToken, store::kSearchFailedText},
+                 std::pair{store::kSearchShortToken, store::kSearchShortText}}) {
+          why.clear();
+          if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
+              why != "the locale already has that key") {
+            note("the search popup label was refused: " + why);
+          }
         }
       }
       for (const auto& [key, text] : screen::Labels()) {

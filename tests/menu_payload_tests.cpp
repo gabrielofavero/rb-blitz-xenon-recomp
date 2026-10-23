@@ -413,6 +413,26 @@ void CheckBar(const std::vector<Node>& roots, int mask) {
     CHECK_FALSE(keys.contains(key));
     keys[key] = static_cast<int32_t>(command.kids[5].scalar);
   }
+  // A scene refresh may restore all captions while Search opens its browser.
+  // Apply the generated entry/poll statements to that state and ensure every
+  // disabled caption is hidden again without touching the enabled captions.
+  const auto* poll = Method(roots, "background_panel", "poll");
+  CHECK_TRUE(mask == 7 || poll != nullptr);
+  for (const auto* callback : {enter, poll}) {
+    if (!callback) continue;
+    std::map<std::string, bool> showing;
+    for (const auto& [label, bit] : labels) showing[label] = true;
+    for (const auto& command : callback->kids) {
+      if (command.tag == dtb::kCommand && command.kids.size() == 3 &&
+          command.kids[1].text == "set_showing" && showing.contains(command.kids[0].text)) {
+        CHECK_TRUE(command.kids[2].text == "FALSE");
+        showing[command.kids[0].text] = false;
+      }
+      CHECK_FALSE(Has(command, "online_headers.flow"));
+      CHECK_FALSE(Has(command, "SnapToIndex.flow"));
+    }
+    for (const auto& [label, bit] : labels) CHECK_EQ(showing[label], bool(mask & bit));
+  }
   if (mask == 7) { CHECK_TRUE(keys.empty()); return; }
   const char* names[] = {"main_mySongs.trans", "main_store.trans", "main_inbox.trans", "main_home.trans"};
   const int indices[] = {1, 2, 3, 0};
@@ -563,6 +583,15 @@ void TestHeaderVisibility() {
     std::string why;
     CHECK_TRUE(settings::ConfigureLibraryHeaderBar(&roots, State(mask), &why));
     CheckBar(roots, mask);
+  }
+  {
+    auto roots = Background();
+    roots[0].kids.push_back(A({S("poll"), C({S("retail_poll")})}));
+    std::string why;
+    CHECK_TRUE(settings::ConfigureLibraryHeaderBar(&roots, State(3), &why));
+    const auto* poll = Method(roots, "background_panel", "poll");
+    CHECK_TRUE(poll && poll->kids.size() == 3 && Has(*poll, "retail_poll"));
+    CheckBar(roots, 3);
   }
   auto invalid = Background();
   invalid[0].kids.pop_back();

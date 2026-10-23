@@ -3941,6 +3941,150 @@ void TestRhythmVerseRow() {
   ConfigureMenu(MenuConfiguration{});
 }
 
+// Where a main-menu option array *draws* its rows: the array's direct symbols, in order, with a
+// `#ifdef`/`#endif` pair kept in the list so a shape change shows up instead of passing silently
+// (a defined macro's block is drawn, so its contents belong in the sequence).
+bool MenuDrawOrder(const Node& root, std::vector<std::string>* order) {
+  const Node* array = nullptr;
+  const auto find = [&](const auto& self, const Node& scan) -> void {
+    if (array != nullptr) {
+      return;
+    }
+    if (scan.tag == dtb::kArray) {
+      for (const Node& kid : scan.kids) {
+        if (kid.tag == dtb::kSymbol && kid.text == "splash_start") {
+          array = &scan;
+          return;
+        }
+      }
+    }
+    for (const Node& kid : scan.kids) {
+      self(self, kid);
+    }
+  };
+  find(find, root);
+  if (array == nullptr) {
+    return false;
+  }
+  for (const Node& kid : array->kids) {
+    if (kid.tag == dtb::kIfdef) {
+      order->push_back("#ifdef " + kid.text);
+    } else if (kid.tag == dtb::kEndif) {
+      order->push_back("#endif");
+    } else if (kid.tag == dtb::kSymbol) {
+      order->push_back(kid.text);
+    }
+  }
+  return true;
+}
+
+void TestMainMenuOrder() {
+  BeginCase("the main menu is ordered Play / Play Current Song / RhythmVerse / Refresh Songs / the "
+            "hidden rows / Exit last, in both shipped array shapes");
+
+  // A splash record whose option array already carries every row the payload can build. `parked`
+  // selects retail's shape (Exit Game inside `#ifdef HX_XBOX`); both records park
+  // `splash_achievements` that way.
+  const auto fixture = [](bool parked) {
+    Node ifdef;
+    ifdef.tag = dtb::kIfdef;
+    ifdef.text = "HX_XBOX";
+    Node endif;
+    endif.tag = dtb::kEndif;
+    const auto parked_block = [&](const char* row) {
+      std::vector<dtb::Node> block = {ifdef, Sym(row), endif};
+      return block;
+    };
+    std::vector<dtb::Node> kids = {Sym("splash_start"), Sym("splash_play_current"),
+                                   Sym("splash_leaderboard")};
+    const std::vector<dtb::Node> achievements = parked_block("splash_achievements");
+    kids.insert(kids.end(), achievements.begin(), achievements.end());
+    kids.push_back(Sym("splash_options"));
+    kids.push_back(Sym("mod_settings"));
+    kids.push_back(Sym("splash_upgrade"));
+    if (parked) {
+      const std::vector<dtb::Node> exit_block = parked_block("splash_exit");
+      kids.insert(kids.end(), exit_block.begin(), exit_block.end());
+    } else {
+      kids.push_back(Sym("splash_exit"));
+    }
+    kids.push_back(Sym("splash_dlc"));
+    kids.push_back(Sym("splash_dlc_store"));
+    kids.push_back(Sym("rbbz_rhythmverse"));
+    const Node enter =
+        Cmd({Sym("do"), Cmd({Var("options_array"), Cmd({Sym("array"), Arr(kids)})}),
+             Cmd({Sym("start.lst"), Sym("set_data"), Var("options_array")})});
+    const Node table = Cmd({Sym("switch"), Cmd({Sym("start.lst"), Sym("selected_sym")}),
+                           Arr({Sym("splash_start"), Cmd({Var("this"), Sym("goto_main_hub")})})});
+    return std::vector<dtb::Node>{Cmd({Sym("new"), Sym("UIPanel"), Sym("splash_panel"),
+                                      Arr({Sym("file"), Str("splash.milo")}),
+                                      Arr({Sym("enter"), enter}), Arr({Sym("SELECT_MSG"), table})})};
+  };
+
+  // The payload's shape: Exit Game is an element of its own, so it lands in the last row slot.
+  const std::vector<std::string> payload_order = {
+      "splash_start",  "splash_play_current", "rbbz_rhythmverse", "splash_dlc",
+      "splash_dlc_store", "splash_leaderboard", "#ifdef HX_XBOX", "splash_achievements",
+      "#endif",        "splash_options",      "splash_upgrade",   "mod_settings",
+      "splash_exit"};
+  // Retail's shape: the exit row travels inside its conditional block, which is why the directives
+  // move with it - a dangling block is a fault the loader does not survive.
+  const std::vector<std::string> retail_order = {
+      "splash_start",       "splash_play_current", "rbbz_rhythmverse",    "splash_dlc",
+      "splash_dlc_store",   "splash_leaderboard",  "#ifdef HX_XBOX",      "splash_achievements",
+      "#endif",             "splash_options",      "splash_upgrade",      "mod_settings",
+      "#ifdef HX_XBOX",     "splash_exit",         "#endif"};
+
+  for (const bool parked : {false, true}) {
+    std::vector<dtb::Node> nodes = fixture(parked);
+    std::string reason;
+    CHECK_TRUE(OrderMainMenuRows(&nodes, &reason));
+    CHECK_TRUE(reason.empty());
+
+    std::vector<std::string> order;
+    CHECK_TRUE(MenuDrawOrder(nodes[0], &order));
+    // The exit row is last in both shapes; `mod_settings` is a row this table does not name, so it
+    // keeps its place among the unnamed rows, before the exit.
+    CHECK_TRUE(order.back() == "splash_exit" || order.back() == "#endif");
+
+    // Idempotent: a record that already reads in order must not be shuffled by a second pass.
+    std::string again;
+    CHECK_TRUE(OrderMainMenuRows(&nodes, &again));
+    std::vector<std::string> twice;
+    CHECK_TRUE(MenuDrawOrder(nodes[0], &twice));
+    CHECK_TRUE(twice == order);
+
+    std::string error;
+    CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+  }
+
+  // The exact sequences: in retail's shape the exit block is the array's tail, in the payload's the
+  // exit symbol is.
+  {
+    std::vector<dtb::Node> nodes = fixture(false);
+    std::string reason;
+    CHECK_TRUE(OrderMainMenuRows(&nodes, &reason));
+    std::vector<std::string> order;
+    CHECK_TRUE(MenuDrawOrder(nodes[0], &order));
+    CHECK_TRUE(order == payload_order);
+  }
+  {
+    std::vector<dtb::Node> nodes = fixture(true);
+    std::string reason;
+    CHECK_TRUE(OrderMainMenuRows(&nodes, &reason));
+    std::vector<std::string> order;
+    CHECK_TRUE(MenuDrawOrder(nodes[0], &order));
+    CHECK_TRUE(order == retail_order);
+  }
+
+  // A record without an option array is a refusal, and the tree is left alone.
+  std::vector<dtb::Node> none = {Cmd({Sym("new"), Sym("UIPanel"), Sym("other_panel")})};
+  std::string reason;
+  CHECK_FALSE(OrderMainMenuRows(&none, &reason));
+  CHECK_TRUE(!reason.empty());
+  CHECK_EQ(none.size(), 1u);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -3981,6 +4125,7 @@ int main(int argc, char** argv) {
   TestDownloadContentVisibilityAndNoDlc();
   TestRhythmVerseRows();
   TestRhythmVerseRow();
+  TestMainMenuOrder();
   TestPauseReroute();
   TestInSongContext();
   TestPauseMergeEdits();

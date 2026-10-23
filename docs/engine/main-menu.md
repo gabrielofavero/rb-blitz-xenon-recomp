@@ -560,11 +560,13 @@ read **RHYTHMVERSE** since 2026-10-22), the entry opens the retail
 `store_menu_screen` (MUSIC STORE / RECOMMENDED / YOUR SONGS … `LOADING`), and B returns to the same
 menu. Two things had to be fixed before that sentence was true:
 
-1. **The row is last, after EXIT GAME, on purpose.** Appended after `splash_dlc` (the retail store
-   row's own position in the shipped option array, which follows `splash_exit`) it is selectable;
-   inserted before `splash_exit` it drew its label and the list's navigation skipped it (3 and 4
-   taps both landed the highlight on EXIT GAME). Moving it above EXIT needs a runtime reorder, not
-   another insert index — recorded for P7.
+1. **The row could not be drawn above EXIT GAME by choosing another insert index.** Appended after
+   `splash_dlc` (the retail store row's own position in the shipped option array, which follows
+   `splash_exit`) it is selectable; inserted before `splash_exit` it drew its label and the list's
+   navigation skipped it (3 and 4 taps both landed the highlight on EXIT GAME). This was recorded
+   as the reason the row was drawn last; since 2026-10-23 it is drawn third, because the array is
+   re-ordered after every insertion (§7.4) — the insert index stays the one position measured to
+   navigate, and the draw order is a separate step.
 2. **R5's hide decision has to be baked into the generated record.** The in-flight edit logs
    `hid 3 row(s)` and is then not delivered: `an edit to a file spanning two reads (ark offset
    16041952) reaches into the first 14368 byte(s), which this read does not carry and the guest has
@@ -577,7 +579,40 @@ menu. Two things had to be fixed before that sentence was true:
 **Not yet measured**: ≥5 consecutive boots, cache On/Off, store On/Off after a restart, Ultimate
 absent, and Refresh Songs' sentinel in the same run. `rb_blitz_settings_screen_tests` pins
 the insertion (after the store row), the baked hide decision, the label, the gate, the refusal and a
-reparse; `rb_blitz_store_client_tests` pins the query answers.
+reparse; `rb_blitz_store_client_tests` pins the query answers. The 2026-10-20 order above is
+superseded by §7.4's: the row now reads third, and that sequence is still **unproven on screen**.
+
+### 7.4 The menu's row order (2026-10-23)
+
+**The order.** Play, Play Current Song, RhythmVerse, Refresh Songs, then retail's own rows (the two
+the hide decision removes by default, Download content when the visibility switch is on, Help &
+Options, Upgrade), then **Exit Game, always last** — so a player reaching for the exit never reads
+past the rows this project added. With the stock switches the menu draws **PLAY / PLAY CURRENT SONG /
+RHYTHMVERSE / REFRESH SONGS / HELP & OPTIONS / EXIT GAME** (six rows, the visible page's budget).
+
+**The edit.** `ui::screen::OrderMainMenuRows`
+([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp)) permutes the option array's own
+elements among the slots they already occupy, by the rank table next to it; the payload calls it
+last, after every insertion and after the hide decision
+([src/settings/menu_payload.cpp](../../src/settings/menu_payload.cpp)). Two properties make it safe:
+
+| Property | Why it matters |
+| --- | --- |
+| A *slot* is one row element **or one whole `#ifdef ... #endif` block whose contents are only row symbols** | retail's record parks `splash_exit` inside `#ifdef HX_XBOX` (the payload's lists it as an element of its own, `out/_swap/retail-splash.dtb` vs the payload's `split-headers/records` dump). The block travels with its directives, so the conditional stack stays balanced — a dangling `#endif` faults at load (§3, §8) |
+| A row the table does not name keeps its relative place after the named ones, and Exit Game's rank is last in every shape | an unknown payload row (`mod_settings`, a future provider entry) is neither dropped nor promoted, and the exit cannot be pushed off the end by one |
+
+The array keeps its length (a permutation, not an insert), so nothing about the byte-neutral
+in-flight edit changes. Both shipped shapes are pinned by `rb_blitz_settings_screen_tests`
+(`TestMainMenuOrder`: the exact drawn sequences, idempotence, and the refusal on a record without an
+option array).
+
+**Unproven on screen.** The 2026-10-20 measurement above is the one thing to watch: a row *inserted*
+before EXIT GAME was drawn and skipped by navigation. The reorder is not an insertion — the array's
+element count and every element's identity are unchanged, only their places move — but whether the
+list navigates a permuted array straight is a boot's question, not a test's. When measuring, count
+rows by the logged bounds (`native_mouse: row=… bounds=…`), never by taps: one `lstick_down` moves
+two rows on this title (the duplicate-press note in
+[diagnostics.md](diagnostics.md)).
 
 ### 8. Evidence
 

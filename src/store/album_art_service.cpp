@@ -4,6 +4,7 @@
 #include "store/album_art_service.h"
 
 #include <atomic>
+#include <algorithm>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -336,13 +337,27 @@ void WorkerMain() {
   }
 }
 
-void Enqueue(std::string key) {
+void Enqueue(std::string key, bool selected = false) {
   {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_off || g_quit || !g_started) return;
-    if (g_pending.size() >= kMaxQueuedArt) return;
-    if (!g_pending.insert(key).second) return;
-    g_queue.push_back(std::move(key));
+    if (selected) {
+      // Move a queued selected cover to the front. An in-flight cover already
+      // owns the worker; a new selection follows it without waiting for a page.
+      const auto queued = std::find(g_queue.begin(), g_queue.end(), key);
+      if (queued != g_queue.end()) g_queue.erase(queued);
+      else if (g_pending.contains(key)) return;
+      else if (g_pending.size() >= kMaxQueuedArt && !g_queue.empty()) {
+        g_pending.erase(g_queue.back());
+        g_queue.pop_back();
+      }
+      g_pending.insert(key);
+      g_queue.push_front(std::move(key));
+    } else {
+      if (g_pending.size() >= kMaxQueuedArt) return;
+      if (!g_pending.insert(key).second) return;
+      g_queue.push_back(std::move(key));
+    }
   }
   g_state.store(State::kQueued, std::memory_order_relaxed);
   g_wake.notify_one();
@@ -419,7 +434,7 @@ void RequestAlbumArtTexture(std::string_view key) {
   if (g_off || key.empty()) return;
   if (HasArtTexture(key)) return;
   if (ArtUrlForKey(key).empty()) return;
-  Enqueue(std::string(key));
+  Enqueue(std::string(key), /*selected=*/true);
 }
 
 std::string_view AlbumArtStateToken() {

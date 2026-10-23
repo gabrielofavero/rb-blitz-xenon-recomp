@@ -1205,7 +1205,7 @@ bool IsShowKeyboard(const Node& node) {
       (node.kids[1].tag != rb_blitz::ui::dtb::kSymbol && node.kids[1].tag != rb_blitz::ui::dtb::kVar) ||
       node.kids[1].text != "show_keyboard" || node.kids[2].tag != rb_blitz::ui::dtb::kVar ||
       node.kids[2].text != "user" || node.kids[3].tag != rb_blitz::ui::dtb::kInt ||
-      node.kids[3].scalar != 100) {
+      node.kids[3].scalar != rb_blitz::store::kMaxSearchChars) {
     return false;
   }
   const Node& title = node.kids[4];
@@ -1336,6 +1336,33 @@ void TestSearchKeyboardScreenMethods() {
   CHECK_TRUE(panel != nullptr);
   if (screen == nullptr || panel == nullptr) return;
 
+  // Loading owns focus, consumes every action, and only B can cancel. A page
+  // request is deferred to poll, so slow requests cannot freeze the guest/UI.
+  const Node& loading = record.front();
+  CHECK_TRUE(loading.kids.size() >= 3 &&
+             loading.kids[2].text == rb_blitz::store::kSearchLoadingPanel);
+  const auto contains = [](auto&& self, const Node& node, std::string_view text) -> bool {
+    if (node.text == text) return true;
+    for (const auto& kid : node.kids) if (self(self, kid, text)) return true;
+    return false;
+  };
+  const Node* poll = FindMethod(loading, "poll");
+  const Node* buttons = FindMethod(loading, "BUTTON_DOWN_MSG");
+  const Node* show = FindMethod(loading, "show_popup");
+  CHECK_TRUE(poll != nullptr && buttons != nullptr && show != nullptr);
+  if (poll && buttons && show) {
+    CHECK_TRUE(contains(contains, *poll, rb_blitz::store::kSearchBusyQuery));
+    CHECK_TRUE(contains(contains, *poll, rb_blitz::store::kSearchPageRequest));
+    CHECK_TRUE(contains(contains, *poll, rb_blitz::store::kSearchEmptyToken));
+    CHECK_TRUE(contains(contains, *buttons, "kAction_Cancel"));
+    CHECK_FALSE(contains(contains, *buttons, "kAction_Confirm"));
+    CHECK_TRUE(contains(contains, *buttons, "rbbz-store/search/cancel"));
+    CHECK_TRUE(buttons->kids.back().tag == rb_blitz::ui::dtb::kInt &&
+               buttons->kids.back().scalar == 1);  // no action falls through to the store
+    CHECK_TRUE(contains(contains, *show, "set_focus_panel"));
+    CHECK_TRUE(contains(contains, *show, rb_blitz::store::kSearchCancelToken));
+  }
+
   // 1. The entry: guidance first, then the seeded submit or the keyboard itself.
   const Node* open = FindMethod(*screen, "open_store_search");
   CHECK_TRUE(open != nullptr);
@@ -1349,13 +1376,14 @@ void TestSearchKeyboardScreenMethods() {
       CHECK_TRUE(gate.kids.size() == 4 && gate.kids[0].text == "if_else");
       if (gate.kids.size() == 4) {
         CHECK_TRUE(IsFileExists(gate.kids[1], rb_blitz::store::kSearchSeedQuery));
-        // The seeded submit asks for the page in the same breath, so a scripted boot measures the
-        // whole flow (submit -> page -> browser) without a second press.
+        // The seeded submit uses the same loading modal as a keyboard submission.
         const Node& seeded = gate.kids[2];
         CHECK_TRUE(seeded.kids.size() == 3 && seeded.kids[0].text == "do");
         if (seeded.kids.size() == 3) {
           CHECK_TRUE(IsWriteFile(seeded.kids[1], "rbbz-store/search/done"));
-          CHECK_TRUE(IsSearchPageRequest(seeded.kids[2]));
+          CHECK_TRUE(seeded.kids[2].kids.size() == 2 &&
+                     seeded.kids[2].kids[0].text == rb_blitz::store::kSearchLoadingPanel &&
+                     seeded.kids[2].kids[1].text == "show_popup");
         }
         // The keyboard arm binds a User object first: the native show reads the player's name
         // from it, and a bare symbol there is a null read (measured 2026-10-23).
@@ -1414,8 +1442,10 @@ void TestSearchKeyboardScreenMethods() {
                  write.kids[1].kids[2].tag == rb_blitz::ui::dtb::kVar &&
                  write.kids[1].kids[2].text == "text");
       CHECK_TRUE(IsWriteFile(inner.kids[2], "rbbz-store/search/done"));
-      // ...and then the page, so confirming the keyboard opens the answer in the browser.
-      CHECK_TRUE(IsSearchPageRequest(inner.kids[3]));
+      // Open the modal, whose poll requests the page once the answer is complete.
+      CHECK_TRUE(inner.kids[3].kids.size() == 2 &&
+                 inner.kids[3].kids[0].text == rb_blitz::store::kSearchLoadingPanel &&
+                 inner.kids[3].kids[1].text == "show_popup");
     }
   }
 
@@ -2128,7 +2158,7 @@ void TestDownloadButtonsRouted() {
 }
 
 void TestAlbumArtLinked() {
-  BeginCase("the details page links a served cover without the art_loaded message");
+  BeginCase("the details page waits for its selected cover and links it after loading");
   // `store_details_panel.refresh`' measured shape: the art block is the `unless` under
   // `{if_else {&& {offer has_data preview_art} {is_allowed_to_preview_offer offer}} ...}`, and its
   // last statement is `{store_panel load_art cur_preview_art this}`.
@@ -2157,12 +2187,13 @@ void TestAlbumArtLinked() {
   CHECK_TRUE(rb_blitz::store::LinkAlbumArt(&record, &why));
   if (!why.empty()) Fail(__FILE__, __LINE__, why);
 
-  const Node* method = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
-  CHECK_TRUE(method != nullptr);
-  if (method == nullptr) return;
+  const Node* refresh = FindNamedMethodNode(record[0], "store_details_panel", "refresh");
+  const Node* method = FindNamedMethodNode(record[0], "store_details_panel", "poll_store_art");
+  CHECK_TRUE(method != nullptr && refresh != nullptr);
+  if (method == nullptr || refresh == nullptr) return;
 
-  // The append is a *sibling right after* `load_art`, inside the same `unless`: the DTA runs a
-  // command's arguments first, so a preceding sibling would read the texture before it is loaded.
+  // The material link follows load_art inside the ready guard, not the initial
+  // selection refresh. Cold images must not trigger the offline native fetch.
   const auto find_load_art = [](const Node& node, const auto& self, const Node** parent,
                                 size_t* index) -> bool {
     for (size_t i = 0; i < node.kids.size(); ++i) {
@@ -2181,7 +2212,8 @@ void TestAlbumArtLinked() {
   size_t index = 0;
   CHECK_TRUE(find_load_art(*method, find_load_art, &parent, &index));
   if (parent == nullptr) return;
-  CHECK_TRUE(parent->kids.size() == index + 2);
+  CHECK_TRUE(parent->kids.size() >= index + 2);
+  CHECK_TRUE(parent->kids[0].text == "if" && parent->kids[1].kids[0].text == "file_exists");
   if (parent->kids.size() < index + 2) return;
   const Node& link = parent->kids[index + 1];
   CHECK_TRUE(link.tag == rb_blitz::ui::dtb::kCommand);
@@ -2206,7 +2238,7 @@ void TestAlbumArtLinked() {
     }
     for (const Node& kid : node.kids) self(kid, self);
   };
-  scan(*method, scan);
+  scan(*refresh, scan);
   CHECK_TRUE(placeholder);
 
   // Idempotent: a second pass adds nothing.

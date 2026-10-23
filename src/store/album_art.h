@@ -120,4 +120,11 @@ using ArtTextureRequest = std::function<void(std::string_view key)>;
 void SetArtTextureRequest(ArtTextureRequest request);
 void RequestArtTexture(std::string_view key);
 
+// Guest bridge: one request on selection, then a readiness check from the panel's
+// poll. Only the selected cover is loaded into the shared guest texture.
+inline constexpr char kArtRequestWritePrefix[] = "rbbz-store/art/request/";
+inline constexpr char kArtReadyQueryPrefix[] = "rbbz-store/art/ready/";
+bool HandleArtWrite(std::string_view path, bool store_enabled);
+bool AnswerArtQuery(std::string_view path, bool* answer);
+
 }  // namespace rb_blitz::store

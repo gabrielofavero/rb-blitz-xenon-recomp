@@ -197,6 +197,12 @@ stays at the right. All four tabs enabled preserves the original position keys.
 and the release build succeeds. The owner manually confirmed the corrected swipes
 and compact layout work.
 See RhythmVerse plan P9-4 for record paths, native handler and evidence.
+**Search follow-up (2026-10-23):** a subsequent owner screenshot shows a disabled
+Recommended caption overlapping compacted Your Songs around Search. The shared
+background now reapplies the disabled-label mask on entry and poll, covering the
+browser entry that skips the front menu's header setup. Poll only hides disabled
+labels; it does not restart animations. All eight configurations pass the updated
+host check (1,982 checks); visual confirmation remains pending.
 
 **Earlier combined implementation (superseded by the split above):**
 

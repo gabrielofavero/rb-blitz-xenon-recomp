@@ -4,6 +4,7 @@
 #include "input/remap.h"
 #include <rex/hook.h>
 #include <rex/cvar.h>
+#include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
 #include "hooks/content_progress.h"
 #include <bit>
@@ -195,7 +196,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   current_screen = screen; current_focus = focus; menu_available = allowed;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
-  queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled());
+  queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
+                !rex::kernel::xam::xeXamIsUIActive());
 }
 // UIListState::Selected - the list's live selection - read with isolated registers like
 // every other side call (the same read the hit test's ordering uses).
@@ -293,7 +295,8 @@ void MouseMenuFocus(bool focused) {
   if (focused != window_focused && REXCVAR_GET(mouse_native_trace))
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
-  queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled());
+  queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled() &&
+                !rex::kernel::xam::xeXamIsUIActive());
   // P2 (plan D5): losing the window drops every gameplay hold. The physical layer already
   // reports nothing while unfocused; this makes the *edge* disappear too, so a key released
   // behind another window cannot be delivered as one the guest acted on.

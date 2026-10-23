@@ -567,6 +567,22 @@ bool AnswerSearchQuery(std::string_view path, bool* answer) {
     *answer = g_seed;
     return true;
   }
+  if (rest == "busy") {
+    *answer = g_state == SearchState::kSearching;
+    return true;
+  }
+  if (rest == "results") {
+    *answer = g_state == SearchState::kResults && !g_offers.empty();
+    return true;
+  }
+  if (rest == "empty") {
+    *answer = g_state == SearchState::kNoResults;
+    return true;
+  }
+  if (rest == "too-short") {
+    *answer = g_state == SearchState::kTooShort;
+    return true;
+  }
   return false;
 }
 
@@ -587,7 +603,7 @@ bool SearchAnswerPending() {
 
 bool SearchInFlight() {
   const std::lock_guard<std::mutex> guard(g_mutex);
-  return g_state == SearchState::kSearching && g_offers.empty();
+  return g_state == SearchState::kSearching;
 }
 
 SearchSnapshot SearchCurrent() {
@@ -647,15 +663,18 @@ StoreParse ParseStoreWrite(std::string_view path, StoreOp* op, std::string* toke
     *op = StoreOp::kSearchLeave;
     return StoreParse::kAccepted;
   }
+  if (action == "shown") {
+    *op = StoreOp::kSearchShown;
+    return StoreParse::kAccepted;
+  }
   constexpr std::string_view kText = "text/";
   if (action.starts_with(kText)) {
     // P9-11: the title's keyboard hands over one raw UTF-8 string, and `SearchText::Set` is the
     // only gate it needs (trim, control characters, UTF-8, length). The path is not a token list
     // any more, so spaces, apostrophes and accented bytes are the query itself.
     const std::string_view query = action.substr(kText.size());
-    if (query.empty()) {
-      return refuse("the text body is empty");
-    }
+    // Confirming an empty keyboard must replace an earlier query, so Done can
+    // report the minimum length instead of accidentally submitting the old text.
     if (query.size() > 4u * kMaxSearchChars) {
       return refuse("the text body is too long");
     }
@@ -684,6 +703,9 @@ bool ApplyStoreWrite(StoreOp op, std::string_view token, std::string_view text, 
     case StoreOp::kSearchLeave:
       // Deliberately not de-duplicated: leaving twice is the same as leaving once.
       SearchClose();
+      return true;
+    case StoreOp::kSearchShown:
+      SearchMarkShown();
       return true;
     case StoreOp::kSearchText:
       return SearchSetText(text) ? true : refuse("the query is not valid UTF-8 or is too long");

@@ -244,10 +244,11 @@ void TestParseWrites() {
              StoreParse::kAccepted);
   CHECK_STR(text, std::string("mot\xC3\xB6rhead"));
 
-  // Malformed search paths are refused (answered, never forwarded): an empty body and an unknown
-  // action. A path the retired key grammar used is *unknown* now, not silently accepted.
+  // Empty text replaces the previous query; Done will explain the minimum length.
   CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/", &op, &token, &text, &why) ==
-             StoreParse::kRefused);
+             StoreParse::kAccepted);
+  CHECK_STR(text, "");
+  // Unknown actions, including the retired key grammar, are refused.
   CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/a", &op, &token, &text, &why) ==
              StoreParse::kRefused);
   CHECK_TRUE(ParseStoreWrite("rbbz-store/search/unknown", &op, &token, &text, &why) ==
@@ -548,6 +549,63 @@ void TestShapeOffers() {
   InstrumentFilter none;
   none.guitar = none.bass = none.drums = none.vocals = none.keys = false;
   CHECK_EQ(ShapeOffers(page, none).size(), 2u);
+}
+
+void TestLoadingModalState() {
+  test::BeginCase("the loading modal waits for all pages and cancellation rejects a late answer");
+  const auto query = [](const char* path) {
+    bool answer = false;
+    CHECK_TRUE(AnswerSearchQuery(path, &answer));
+    return answer;
+  };
+  ResetSession(true);
+  SetSearchPageBudget(4);
+  CHECK_TRUE(SearchSetText("bush"));
+  const auto submit = SearchSubmitQuery();
+  CHECK_TRUE(submit.started);
+  CHECK_TRUE(query(kSearchBusyQuery));
+  CHECK_FALSE(query(kSearchResultsQuery));
+  const auto page = Paged(1, 0, 25, 30,
+      {Charted(Song("Bush", "Mouth", "/download_file/u/i/m_rb3con"))});
+  CHECK_TRUE(SearchAcceptPage(submit.generation, page).accepted);
+  CHECK_TRUE(query(kSearchBusyQuery));  // partial offers cannot close the modal
+  CHECK_TRUE(SearchInFlight());
+  CHECK_FALSE(query(kSearchResultsQuery));
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/cancel", nullptr));
+  CHECK_FALSE(query(kSearchBusyQuery));
+  CHECK_FALSE(SearchPageWanted(submit.generation));
+  CHECK_FALSE(SearchAcceptPage(submit.generation, Page({page.songs[0]})).accepted);
+  CHECK_FALSE(query(kSearchResultsQuery));
+  CHECK_FALSE(SearchAnswerPending());
+
+  CHECK_TRUE(SearchSetText("bush"));
+  const auto completed = SearchSubmitQuery();
+  CHECK_TRUE(SearchAccept(completed.generation, Page({page.songs[0]})));
+  CHECK_FALSE(query(kSearchBusyQuery));
+  CHECK_TRUE(query(kSearchResultsQuery));
+  CHECK_FALSE(query(kSearchEmptyQuery));
+
+  SearchCancel();
+  CHECK_TRUE(SearchSetText("zzzq"));
+  const auto empty = SearchSubmitQuery();
+  CHECK_TRUE(SearchAccept(empty.generation, Page({})));
+  CHECK_FALSE(query(kSearchBusyQuery));
+  CHECK_FALSE(query(kSearchResultsQuery));
+  CHECK_TRUE(query(kSearchEmptyQuery));
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/shown", nullptr));
+  CHECK_FALSE(SearchAnswerPending());
+
+  SearchCancel();
+  CHECK_TRUE(SearchSetText("ab"));
+  CHECK_FALSE(SearchSubmitQuery().started);
+  CHECK_FALSE(query(kSearchBusyQuery));
+  CHECK_TRUE(query(kSearchShortQuery));
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/text/", nullptr));
+  CHECK_STR(SearchCurrent().text, "");
+  CHECK_FALSE(SearchSubmitQuery().started);
+  CHECK_TRUE(query(kSearchShortQuery));
+  SetSearchPageBudget(1);
+  SearchCancel();
 }
 
 void TestPerFileDuplicates() {
@@ -881,6 +939,7 @@ int main(int argc, char** argv) {
   TestNoMatchesBody();
   TestQueries();
   TestShapeOffers();
+  TestLoadingModalState();
   TestPerFileDuplicates();
   TestAnswerPresentation();
   TestCancelSemantics();

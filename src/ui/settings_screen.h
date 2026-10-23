@@ -366,14 +366,25 @@ bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason);
 // plus a case whose body enters `store_menu_screen` only while `kStoreEnabledQuery` answers true -
 // no Xbox LIVE check and no Marketplace call anywhere in it. The anchor is the retail store row's
 // own position, which is the only one measured *selectable*: inserted before `splash_exit` the row
-// drew its label and the list's navigation skipped it (2026-10-20). Refuses when the boot did not
-// configure the row, or when the record has no option array to insert into.
+// drew its label and the list's navigation skipped it (2026-10-20). Where the row *ends up* on the
+// menu is `OrderMainMenuRows`'s business - it runs after every insertion, so RhythmVerse is drawn
+// third while still being inserted at the one position measured to navigate. Refuses when the boot
+// did not configure the row, or when the record has no option array to insert into.
 bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason);
 
 // Removes the named rows from every main-menu option array: the R5 hide decision applied to the
 // record this payload generates (see the definition for why the in-flight edit alone is not enough).
 bool HideMenuRows(std::vector<dtb::Node>* nodes, const std::vector<std::string>& rows,
                   std::string* reason);
+
+// Puts the main menu's rows in the owner's order (2026-10-23): Play, Play Current Song, RhythmVerse,
+// Refresh Songs, then retail's own rows (the two the hide decision removes by default, Download
+// content, Help & Options, Upgrade), then Exit Game, always last. Applied to whichever splash record
+// the boot reads, so the payload target and the retail one read the same. Rows are permuted among
+// the slots they already occupy and a directive keeps its slot, so `splash_achievements` (inside
+// `#ifdef HX_XBOX`) does not move; a row the order does not name keeps its relative place after the
+// named ones. Refuses, leaving `nodes` untouched, when the record has no main-menu option array.
+bool OrderMainMenuRows(std::vector<dtb::Node>* nodes, std::string* reason);
 
 // The current menu configuration, for the authoring functions that read it (the play row's pool).
 const MenuConfiguration& CurrentMenuConfiguration();

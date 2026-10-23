@@ -79,6 +79,11 @@ now pass their direction explicitly, and the guest's header animation keys pack
 enabled labels consecutively, leaving unused space at the right. All eight states
 are host-verified; the owner manually confirmed the corrected swipes and compact
 layout work (RhythmVerse plan P9-4, animation and layout correction).
+An intermittent Search overlap was subsequently reported with Recommendations
+Off. The shared background now also reapplies disabled-caption visibility at
+entry and poll, since the browser's entry skips the front menu's header setup.
+This follow-up passes the eight-state host check; the owner's visual retest is
+pending (RhythmVerse plan P9-4, Search overlap record).
 
 **Earlier combined implementation (2026-10-22, superseded by the split above):** General ▸ Interface
 has four rows: **Main Menu**, **Offline Prompts**, **Help & Options Labels**, then

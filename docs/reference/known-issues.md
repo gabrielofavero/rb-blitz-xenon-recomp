@@ -9,6 +9,15 @@ is removed from this file, not from the log.
 
 ## Open
 
+**Intermittent header overlap around RhythmVerse Search (2026-10-23):** the
+owner's screenshot shows Recommended overlapping Your Songs with Recommendations
+Off and RhythmVerse/Messages On. The shared background now reapplies the hidden
+caption mask at entry and poll; the browser does not run the front menu's header
+setup. The eight-state host check passes, but exact restoration timing and the
+visual correction remain unverified in-game. See
+[RhythmVerse plan P9-4](../plans/in-progress/2026-10-13-rhythmverse-store-plan.md)
+for the follow-up record and evidence.
+
 | Issue | What it is | Where |
 | --- | --- | --- |
 | **A store page pressed while the catalogue is still being fetched is answered empty, and the retail DTA turns an empty page back into the front menu (measured 2026-10-22; the boot now prewarms the catalogue, the failure flow is open)** | The owner's "Recent does nothing": two consecutive boots pressed Recent 1.7 s / 1.1 s after the store's front menu was served and got `store_fetch: served 'dlc_store/europe/eng/recent/' … (46 byte(s))` — the empty offers page — while catalogue page 1 landed 1.0 s / 1.9 s *after* the press (`rb_blitz_233.log`, `rb_blitz_234.log`). The DTA's zero-offer arm refreshes the menu, so nothing changes on screen; the caption strip's loading sentence is the only sign. **Fixed for the normal route (P9-10 item 1):** the catalogue is warmed once per boot before the guest starts (`src/rb_blitz_app.h`, `RequestCatalogueRefresh("the boot asked")`), measured on the release build — all four pages (99 offers) by 19:52:15 while the title was still on `server_connect_screen`, and the later Recent press served **75,229 bytes** and opened the browser (`out/_swap/p910-recent2/20261022-195200`). **Still true:** a **cold** fetch always needs ~3 s for page 1, so a press inside that window (after a failed prewarm whose backoff expired, or after the master is switched on following a boot with it off) still gets the empty page; and a failed catalogue still has no popup on the press — P9-10 items 2–3 are open. | [RhythmVerse store plan](../plans/in-progress/2026-10-13-rhythmverse-store-plan.md) §9/P9-10 record, `src/rb_blitz_app.h`, `src/store/store_fetch.cpp` |

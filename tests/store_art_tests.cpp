@@ -371,6 +371,40 @@ void TestCache() {
   CHECK_EQ(rb_blitz::store::ArtUrlCount(), 0u);
 }
 
+void TestSelectedArtBridge() {
+  BeginCase("selected covers become ready independently after the page was listed");
+  using namespace rb_blitz::store;
+  ResetAlbumArtForTests();
+  const auto first = ArtPathForKey("0123456789abcdef");
+  const auto second = ArtPathForKey("fedcba9876543210");
+  bool ready = true;
+  std::vector<std::string> requested;
+  SetArtTextureRequest([&](std::string_view key) { requested.emplace_back(key); });
+  CHECK_TRUE(HandleArtWrite(std::string(kArtRequestWritePrefix) + second, true));
+  CHECK_EQ(requested.size(), 1u);
+  CHECK_STR_EQ(requested.back(), "fedcba9876543210");
+  CHECK_TRUE(AnswerArtQuery(std::string(kArtReadyQueryPrefix) + second, &ready));
+  CHECK_FALSE(ready);
+  PublishArtTexture("0123456789abcdef", "first cover");
+  CHECK_TRUE(AnswerArtQuery(std::string(kArtReadyQueryPrefix) + second, &ready));
+  CHECK_FALSE(ready);  // the first cover cannot satisfy another song's request
+  PublishArtTexture("fedcba9876543210", "second cover");
+  CHECK_TRUE(AnswerArtQuery(std::string(kArtReadyQueryPrefix) + second, &ready));
+  CHECK_TRUE(ready);  // no page reload or new selection required
+  CHECK_TRUE(AnswerArtQuery(std::string(kArtReadyQueryPrefix) + first, &ready));
+  CHECK_TRUE(ready);
+  CHECK_FALSE(AnswerArtQuery("rbbz-store/search/show", &ready));
+  CHECK_TRUE(AnswerArtQuery(std::string(kArtReadyQueryPrefix) + second + "/bad", &ready));
+  CHECK_FALSE(ready);
+  CHECK_TRUE(HandleArtWrite(std::string(kArtRequestWritePrefix) + "bad", true));
+  CHECK_TRUE(HandleArtWrite(std::string(kArtRequestWritePrefix) + ArtPathForKey("1111111111111111"), false));
+  CHECK_EQ(requested.size(), 1u);
+  SetAlbumArtEnabled(false);
+  CHECK_TRUE(AnswerArtQuery(std::string(kArtReadyQueryPrefix) + first, &ready));
+  CHECK_FALSE(ready);
+  ResetAlbumArtForTests();
+}
+
 }  // namespace
 
 int main() {
@@ -381,5 +415,6 @@ int main() {
   TestResize();
   TestArtKeys();
   TestCache();
+  TestSelectedArtBridge();
   return rb_blitz::test::Finish();
 }

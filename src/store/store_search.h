@@ -93,6 +93,10 @@ class SearchText {
 inline constexpr char kSearchShowQuery[] = "rbbz-store/search/show";
 inline constexpr char kSearchSeedQuery[] = "rbbz-store/search/seed";
 inline constexpr char kSearchLeaveWrite[] = "rbbz-store/search/leave";
+inline constexpr char kSearchBusyQuery[] = "rbbz-store/search/busy";
+inline constexpr char kSearchResultsQuery[] = "rbbz-store/search/results";
+inline constexpr char kSearchEmptyQuery[] = "rbbz-store/search/empty";
+inline constexpr char kSearchShortQuery[] = "rbbz-store/search/too-short";
 // --- The write channel (guest -> host) --------------------------------------------------------
 
 enum class StoreOp {
@@ -101,6 +105,7 @@ enum class StoreOp {
   kSearchText,    // the keyboard's answer: a whole query in raw UTF-8
   kSearchDone,    // submit the query (the same handler writes this right after the text)
   kSearchCancel,  // leave the search: invalidate in-flight work and clear the field
+  kSearchShown,   // a terminal notice consumed the answer without opening a list
   // The store was left (its menu panel's `exit`): the field and the answer stay - the answer is
   // still the list the Search row opens - but the caption strip stops, because the surface it
   // belongs to is gone.
@@ -255,10 +260,8 @@ std::vector<SearchOffer> SearchOffers();
 // The serving policy handed the store the search page: the answer is on screen, so the front
 // menu's Search row opens the keys again instead of re-listing it. Called by `BuiltinRecord`.
 void SearchMarkShown();
-// True while a request is in flight and no offer of it has landed yet. The search page's request
-// runs moments after the submit (the keyboard's result handler asks for it), so `store_fetch`'s
-// serving policy waits on this before it writes the page: a page written mid-flight would be the
-// empty list the player then has to ask for again.
+// True until the search's complete page walk finishes, even when earlier pages
+// already supplied offers. The modal owns loading feedback during this interval.
 bool SearchInFlight();
 // True while a terminal answer (results, no results, a failure) has not been presented yet - the
 // one bit the front menu's gate reads (`kSearchShowQuery`).

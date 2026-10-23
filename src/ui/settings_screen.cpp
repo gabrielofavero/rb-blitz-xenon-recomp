@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <initializer_list>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -2778,6 +2779,110 @@ bool InsertMenuRow(std::vector<dtb::Node>* nodes, const std::string_view after_r
 // AddRhythmVerseRow). The position that works is the retail store row's own, after `splash_dlc`.
 
 // ------------------------------------------------------------------------------------------------
+// The owner's main-menu order (2026-10-23)
+// ------------------------------------------------------------------------------------------------
+//
+// Play, Play Current Song, RhythmVerse, Refresh Songs, then retail's rows, then Exit Game - which is
+// always last, so a player reaching for it never reads past the rows this project added. The rows
+// are re-ordered *in place*: the array's own elements are permuted among the positions they already
+// occupy, and every directive keeps its slot, because a conditional is not a row and moving one
+// would move whatever else it guards.
+constexpr char kMainMenuStartRow[] = "splash_start";
+constexpr char kMainMenuExitRow[] = "splash_exit";
+// `splash_dlc` is `menu_options::kDlcRowKey` - R7's refresh row. The literal is repeated here
+// because this module does not include that header; settings_screen_tests pins the two spellings.
+constexpr char kMainMenuRefreshRow[] = "splash_dlc";
+
+constexpr const char* kMainMenuOrder[] = {
+    kMainMenuStartRow,     kPlayCurrentRow,       kRhythmVerseRow,
+    kMainMenuRefreshRow,   kDownloadContentRow,   "splash_leaderboard",
+    "splash_achievements", kMainMenuRow,           "splash_upgrade",
+};
+// A row the table above does not name keeps its relative order in this rank: after every named
+// row, before Exit Game. An unknown row is therefore neither dropped nor promoted.
+constexpr size_t kUnnamedRowRank = std::size(kMainMenuOrder);
+constexpr size_t kExitRowRank = kUnnamedRowRank + 1;
+
+size_t MainMenuRank(std::string_view row) {
+  for (size_t i = 0; i < std::size(kMainMenuOrder); ++i) {
+    if (row == kMainMenuOrder[i]) {
+      return i;
+    }
+  }
+  return row == kMainMenuExitRow ? kExitRowRank : kUnnamedRowRank;
+}
+
+// `#ifndef` (tag 0x23): the other directive that opens a conditional block. `ui/dtb_author.h` names
+// `kIfdef` and `kEndif` only; a block is treated the same whichever directive opens it.
+constexpr uint32_t kMenuIfndef = 0x23;
+
+// The `#ifdef`/`#ifndef` block that holds `row` and nothing else, when the array has one: retail's
+// record parks `splash_exit` inside `#ifdef HX_XBOX ... #endif` (the payload's lists it as an
+// element of its own). `begin` is the directive, `end` its matching `#endif`.
+bool ParkedRowBlock(const Node& array, std::string_view row, size_t* begin, size_t* end) {
+  for (size_t i = 0; i < array.kids.size(); ++i) {
+    if (array.kids[i].tag != dtb::kIfdef && array.kids[i].tag != kMenuIfndef) {
+      continue;
+    }
+    int depth = 0;
+    bool holds_row = false;
+    bool holds_other = false;
+    size_t close = array.kids.size();
+    for (size_t j = i; j < array.kids.size(); ++j) {
+      const Node& kid = array.kids[j];
+      if (kid.tag == dtb::kIfdef || kid.tag == kMenuIfndef) {
+        ++depth;
+        holds_other = holds_other || j != i;  // a nested conditional is structure, not a row
+      } else if (kid.tag == dtb::kEndif) {
+        if (--depth == 0) {
+          close = j;
+          break;
+        }
+      } else if (IsSymbol(kid, row)) {
+        holds_row = true;
+      } else {
+        holds_other = true;
+      }
+    }
+    if (close == array.kids.size()) {
+      continue;  // not closed inside the array: not a block this edit may move
+    }
+    if (holds_row && !holds_other) {
+      *begin = i;
+      *end = close;
+      return true;
+    }
+  }
+  return false;
+}
+
+// The main menu's option array in either shipped shape. A direct `splash_start` element is what no
+// other array carries; `splash_exit` is a direct element in the payload's record and a parked one in
+// retail's.
+bool IsMainMenuArray(const Node& node) {
+  if (node.tag != dtb::kArray) {
+    return false;
+  }
+  bool start = false;
+  for (const Node& kid : node.kids) {
+    if (IsSymbol(kid, kMainMenuStartRow)) {
+      start = true;
+    }
+  }
+  if (!start) {
+    return false;
+  }
+  size_t begin = 0;
+  size_t end = 0;
+  for (const Node& kid : node.kids) {
+    if (IsSymbol(kid, kMainMenuExitRow)) {
+      return true;
+    }
+  }
+  return ParkedRowBlock(node, kMainMenuExitRow, &begin, &end);
+}
+
+// ------------------------------------------------------------------------------------------------
 // The "Play Current Song" entry (owner feature, 2026-10-14)
 // ------------------------------------------------------------------------------------------------
 // The host identifies the advancing stream through file_exists probes. The song key
@@ -2920,6 +3025,9 @@ bool AddRhythmVerseRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   // (measured 2026-10-20, both a 3-down and a 4-down route landed on EXIT GAME while the highlight
   // shot showed the row on screen). With R5's hidden rows baked into this record (HideMenuRows),
   // the entry is also on the visible page - the seventh row that was off it is what put it there.
+  // Where the row is drawn is `OrderMainMenuRows`'s business: it permutes the array after every
+  // insertion, so the row can sit third while being inserted at the one position measured to
+  // navigate.
   const char* anchor = "splash_dlc";
   Hit hit;
   FindInRoots(nodes, [](const Node& node) { return IsSymbol(node, kDownloadContentRow); }, &hit);
@@ -2990,6 +3098,113 @@ bool HideMenuRows(std::vector<dtb::Node>* nodes, const std::vector<std::string>&
   if (removed == 0) {
     return refuse("none of the named rows are in the option list");
   }
+  if (reason != nullptr) reason->clear();
+  return true;
+}
+
+// The owner's order, applied to whichever splash record the boot reads - the payload's copy or
+// retail's own - so the menu reads the same on both targets.
+//
+// A *slot* of the array is one row element, or one whole `#ifdef ... #endif` block whose contents
+// are nothing but row symbols (retail parks `splash_exit` in one; both records park
+// `splash_achievements` in one). Slots are permuted among the index ranges they already occupy, by
+// `MainMenuRank`, and a block travels with its directives - so the conditional stack can never end
+// up unbalanced, which the title's loader does not survive (docs/engine/main-menu.md §3). Anything
+// that is not a row slot - a directive without an owner, a block carrying non-row content - keeps
+// its place, and Exit Game's rank is last in every shape.
+struct MenuRowSlot {
+  size_t begin = 0;  // the slot's first index in the array
+  size_t end = 0;    // its last index (`begin` for a single symbol)
+  size_t rank = 0;   // the best (lowest) rank of the rows it carries
+};
+
+bool OrderMainMenuRows(std::vector<dtb::Node>* nodes, std::string* reason) {
+  auto refuse = [reason](const char* why) {
+    if (reason != nullptr) *reason = why;
+    return false;
+  };
+  if (nodes == nullptr) {
+    return refuse("nothing to edit");
+  }
+  Hit hit;
+  FindInRoots(nodes, [](const Node& node) { return IsMainMenuArray(node); }, &hit);
+  if (!hit.found || hit.parent == nullptr) {
+    return refuse("no main menu option array to order");
+  }
+  Node& array = hit.parent->kids[hit.index];
+
+  std::vector<MenuRowSlot> slots;
+  for (size_t i = 0; i < array.kids.size();) {
+    const Node& kid = array.kids[i];
+    if (kid.tag == dtb::kIfdef || kid.tag == kMenuIfndef) {
+      // The matching `#endif`, counting nested conditionals.
+      int depth = 0;
+      size_t close = array.kids.size();
+      bool rows_only = true;
+      size_t rank = kExitRowRank + 1;
+      for (size_t j = i; j < array.kids.size(); ++j) {
+        const Node& inner = array.kids[j];
+        if (inner.tag == dtb::kIfdef || inner.tag == kMenuIfndef) {
+          ++depth;
+          if (j != i) rows_only = false;  // a nested conditional is structure, not a row
+        } else if (inner.tag == dtb::kEndif) {
+          if (--depth == 0) {
+            close = j;
+            break;
+          }
+        } else if (inner.tag == dtb::kSymbol) {
+          rank = std::min(rank, MainMenuRank(inner.text));
+        } else {
+          rows_only = false;  // a scalar or a block: not a row, so the block is not a slot
+        }
+      }
+      if (close != array.kids.size() && rows_only && rank <= kExitRowRank) {
+        slots.push_back({i, close, rank});
+      }
+      i = close == array.kids.size() ? i + 1 : close + 1;
+      continue;
+    }
+    if (kid.tag == dtb::kSymbol) {
+      slots.push_back({i, i, MainMenuRank(kid.text)});
+    }
+    ++i;
+  }
+  if (slots.empty()) {
+    return refuse("the option array carries no rows");
+  }
+
+  // The permutation: slot indices in `slots`, ordered by rank, ties keeping the shipped order.
+  std::vector<size_t> order(slots.size());
+  for (size_t i = 0; i < order.size(); ++i) {
+    order[i] = i;
+  }
+  std::stable_sort(order.begin(), order.end(),
+                   [&slots](size_t left, size_t right) { return slots[left].rank < slots[right].rank; });
+
+  // Rebuild the array in place: at each slot's own range, write the next slot's nodes.
+  std::vector<Node> rebuilt;
+  rebuilt.reserve(array.kids.size());
+  size_t next = 0;
+  for (size_t i = 0; i < array.kids.size();) {
+    size_t slot = slots.size();
+    for (size_t s = 0; s < slots.size(); ++s) {
+      if (slots[s].begin == i) {
+        slot = s;
+        break;
+      }
+    }
+    if (slot == slots.size()) {
+      rebuilt.push_back(std::move(array.kids[i]));
+      ++i;
+      continue;
+    }
+    const MenuRowSlot& source = slots[order[next++]];
+    for (size_t j = source.begin; j <= source.end; ++j) {
+      rebuilt.push_back(std::move(array.kids[j]));
+    }
+    i = slots[slot].end + 1;
+  }
+  array.kids = std::move(rebuilt);
   if (reason != nullptr) reason->clear();
   return true;
 }
