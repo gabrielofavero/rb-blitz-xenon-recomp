@@ -81,9 +81,9 @@ Part 1 wherever they disagree.
 
 - **The RhythmVerse store's settings are in the game (2026-10-20, RhythmVerse plan P6).** Under
   **General ▸ Downloadable Content ▸ RhythmVerse** (first row, P9-3): `RhythmVerse`
-  (default **On** since the owner pass of 2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `Search Song Filter`, a
-  submenu of five instrument booleans (Guitar/Bass/Drums/Vocals On, Keys Off; On = that chart is
-  required, Off = no condition, all off = no constraint). The two menu-music rows moved under a
+  (default **On** since the owner pass of 2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `Filters` (titled
+  `RHYTHMVERSE FILTERS` since the P9-11 renaming), a submenu of five instrument booleans
+  (Guitar/Bass/Drums/Vocals On, Keys Off; On = that chart is required, Off = no condition, all off = no constraint). The two menu-music rows moved under a
   `DLC Menu Music` submenu. P9-3 makes Downloadable Content five rows, with RhythmVerse first;
   its two-row page backs to Downloadable Content and the filter backs to RhythmVerse in both
   contexts. The five **filter** rows are
@@ -142,8 +142,8 @@ Part 1 wherever they disagree.
   `SELECT_MSG` and the panel `exit`), `rb_blitz_store_search_tests` (287 checks, the raw-UTF-8
   grammar), `rb_blitz_store_payload_tests` / `rb_blitz_settings_screen_tests` pins, the measured
   one-press flow (`out/_swap/search-probe/20261023-175633`: `waited 2730 ms`, `15 offer(s)`,
-  `store_browser_screen`), and the plan's P9-11 record. Typing on the console keyboard in the
-  owner's own boot is the one part this environment cannot measure.
+  `store_browser_screen`), and the plan's P9-11 record. The owner's own boot (2026-10-23) typed on
+  the console keyboard and confirmed the route end to end.
 - **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
   `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
   (`Main Menu`, `Music Library & Store`, `Skip Offline Prompts`, `Help & Options Labels`;

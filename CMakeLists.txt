@@ -1012,9 +1012,10 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_store_page_cache_tests PRIVATE src)
     add_test(NAME store_page_cache COMMAND rb_blitz_store_page_cache_tests)
 
-    # P7's store sentences (src/store/store_catalogue_status.h): the credit line, the loading line,
-    # the empty state and the offline text, with the precedence between them and the window that
-    # keeps them inside the store. SDK-free; the suite shrinks the two windows to prove expiry.
+    # P7's store sentences (src/store/store_catalogue_status.h): the loading line, the empty state
+    # and the offline text, with the precedence between them and the window that keeps them inside
+    # the store. The credit line they used to include was removed on the owner's request
+    # (2026-10-23). SDK-free; the suite shrinks the window to prove expiry.
     add_executable(rb_blitz_store_catalogue_status_tests
         tests/store_catalogue_status_tests.cpp
         src/store/store_catalogue_status.cpp

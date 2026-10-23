@@ -18,7 +18,6 @@ using Clock = std::chrono::steady_clock;
 
 std::mutex g_mutex;
 Clock::time_point g_last_surface{};
-StoreSurface g_surface = StoreSurface::kFrontMenu;
 bool g_surface_seen = false;
 CatalogueFetchState g_state = CatalogueFetchState::kIdle;
 int g_pages = 0;
@@ -26,7 +25,6 @@ std::size_t g_offers = 0;
 std::string g_reason;
 bool g_fetch_enabled = true;
 std::chrono::milliseconds g_surface_window = kCatalogueSurfaceWindow;
-std::chrono::milliseconds g_credit_hold = kCatalogueCreditHold;
 
 // A reason can be a transport sentence ("WinHttpConnect: win32 error 12029"); the strip wraps at
 // the caption width, so only an absurd one is shortened. The sentence stays readable either way.
@@ -57,9 +55,10 @@ std::string LoadingText(int pages) {
 
 }  // namespace
 
-void NoteStoreSurface(StoreSurface surface) {
+// The surface value no longer selects a sentence (the credit line was removed, 2026-10-23); the
+// note only says that the store was handed a record now.
+void NoteStoreSurface(StoreSurface /*surface*/) {
   const std::lock_guard<std::mutex> lock(g_mutex);
-  g_surface = surface;
   g_surface_seen = true;
   g_last_surface = Clock::now();
 }
@@ -105,7 +104,7 @@ std::string CatalogueStatusText() {
       if (g_offers == 0) {
         return kCatalogueEmptyText;
       }
-      break;  // a full list: the credit line is what is left to say
+      break;  // a full list says nothing (the credit line was removed, 2026-10-23)
     case CatalogueFetchState::kFetching:
       if (g_offers == 0) {
         return LoadingText(g_pages);
@@ -114,16 +113,12 @@ std::string CatalogueStatusText() {
     case CatalogueFetchState::kIdle:
       break;
   }
-  if (g_surface == StoreSurface::kFrontMenu && since_surface <= g_credit_hold) {
-    return kStoreCreditText;
-  }
   return {};
 }
 
 void ResetCatalogueStatus() {
   const std::lock_guard<std::mutex> lock(g_mutex);
   g_last_surface = {};
-  g_surface = StoreSurface::kFrontMenu;
   g_surface_seen = false;
   g_state = CatalogueFetchState::kIdle;
   g_pages = 0;
@@ -131,14 +126,11 @@ void ResetCatalogueStatus() {
   g_reason.clear();
   g_fetch_enabled = true;
   g_surface_window = kCatalogueSurfaceWindow;
-  g_credit_hold = kCatalogueCreditHold;
 }
 
-void SetCatalogueStatusTiming(std::chrono::milliseconds surface_window,
-                              std::chrono::milliseconds credit_hold) {
+void SetCatalogueStatusTiming(std::chrono::milliseconds surface_window) {
   const std::lock_guard<std::mutex> lock(g_mutex);
   g_surface_window = surface_window;
-  g_credit_hold = credit_hold;
 }
 
 }  // namespace rb_blitz::store

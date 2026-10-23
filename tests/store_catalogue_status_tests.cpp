@@ -3,12 +3,12 @@
 //
 // Unit tests for P7's store sentences (src/store/store_catalogue_status.h).
 //
-// What these pin down (plan §5/P7, "refine the required RhythmVerse heading/credit" and
-// "empty-state and offline text"):
+// What these pin down (plan §5/P7's "empty-state and offline text", and the credit line's removal,
+// 2026-10-23):
 //   * nothing is said before the store served a record, and nothing after the surface window - the
 //     strip must not follow a player out of the store;
-//   * the credit line is drawn when the store opens, and expires after its hold;
-//   * a failure is the loudest sentence, then the empty list, then the loading line, then the credit;
+//   * a full catalogue says nothing: opening the store draws no credit line;
+//   * a failure is the loudest sentence, then the empty list, then the loading line;
 //   * the loading line appears only while nothing is on screen yet, and counts the pages read;
 //   * the diagnostics switch (`store_catalogue_off`) explains its own silence;
 //   * the server's own reasons are carried, and an absurd one is shortened rather than drawn whole.
@@ -44,7 +44,7 @@ void SleepMs(int milliseconds) {
 
 void Reset() {
   ResetCatalogueStatus();
-  SetCatalogueStatusTiming(kCatalogueSurfaceWindow, kCatalogueCreditHold);
+  SetCatalogueStatusTiming(kCatalogueSurfaceWindow);
 }
 
 void TestSilence() {
@@ -56,23 +56,18 @@ void TestSilence() {
   CHECK_TRUE(CatalogueStatusText().empty());
 }
 
-void TestCredit() {
-  test::BeginCase("the credit line follows the store's opening and expires");
+void TestNoCredit() {
+  test::BeginCase("a full catalogue draws no credit line, on either surface");
   Reset();
-  SetCatalogueStatusTiming(std::chrono::milliseconds(300), std::chrono::milliseconds(80));
+  SetCatalogueStatusTiming(std::chrono::milliseconds(300));
   PublishCatalogueFetchState(CatalogueFetchState::kReady, 4, 99);
+  // The store opening used to draw "Customs from RhythmVerse" here; it must stay silent now.
   NoteStoreSurface(StoreSurface::kFrontMenu);
-  CHECK_STR(CatalogueStatusText(), kStoreCreditText);
-  SleepMs(100);  // past the credit hold, still inside the surface window
   CHECK_TRUE(CatalogueStatusText().empty());
-  NoteStoreSurface(StoreSurface::kFrontMenu);
-  CHECK_STR(CatalogueStatusText(), kStoreCreditText);
-
-  // A menu page is not the store opening: the credit belongs to the front menu.
-  Reset();
-  SetCatalogueStatusTiming(std::chrono::milliseconds(300), std::chrono::milliseconds(300));
-  PublishCatalogueFetchState(CatalogueFetchState::kReady, 4, 99);
+  // A menu page asked for a list says nothing about a full list either.
   NoteStoreSurface(StoreSurface::kMenuPage);
+  CHECK_TRUE(CatalogueStatusText().empty());
+  SleepMs(20);  // still inside the surface window: the silence is not just the first frame
   CHECK_TRUE(CatalogueStatusText().empty());
 }
 
@@ -135,13 +130,14 @@ void TestDisabled() {
   PublishCatalogueFetchState(CatalogueFetchState::kIdle, 0, 0);
   CHECK_STR(CatalogueStatusText(), kCatalogueDisabledText);
   SetCatalogueFetchEnabled(true);
-  CHECK_STR(CatalogueStatusText(), kStoreCreditText);
+  // Back on, idle catalogue, nothing on the list: there is nothing left to say.
+  CHECK_TRUE(CatalogueStatusText().empty());
 }
 
 void TestWindow() {
   test::BeginCase("the strip stops when the store is no longer the surface");
   Reset();
-  SetCatalogueStatusTiming(std::chrono::milliseconds(40), std::chrono::milliseconds(40));
+  SetCatalogueStatusTiming(std::chrono::milliseconds(40));
   NoteStoreSurface(StoreSurface::kMenuPage);
   PublishCatalogueFetchState(CatalogueFetchState::kFailed, 0, 0, "HTTP 500");
   CHECK_TRUE(!CatalogueStatusText().empty());
@@ -155,9 +151,7 @@ void TestWindow() {
 }
 
 void TestStrings() {
-  test::BeginCase("the sentences the plan asks for are the ones the module carries");
-  // Plan §1.8's attribution: "Customs from RhythmVerse", in the site's own spelling.
-  CHECK_STR(std::string(kStoreCreditText), "Customs from RhythmVerse");
+  test::BeginCase("the sentences the module carries are the ones the store needs");
   CHECK_TRUE(std::string(kCatalogueEmptyText).find("RhythmVerse") == 0);
   CHECK_TRUE(std::string(kCatalogueDisabledText).find("RhythmVerse") != std::string::npos);
 }
@@ -166,7 +160,7 @@ void TestStrings() {
 
 int main() {
   TestSilence();
-  TestCredit();
+  TestNoCredit();
   TestLoading();
   TestEmpty();
   TestOffline();

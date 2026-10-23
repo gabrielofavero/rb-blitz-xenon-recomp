@@ -382,12 +382,12 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // progress line) and outranks a row caption.
     const std::string download_status = store_ns::DownloadStatusText();
     const bool downloading = !download_status.empty();
-    // P7: the store's own words - the credit line when it opens, the loading sentence while the
-    // first page is in flight, and the empty/offline sentence after it. It yields to every input
-    // surface (the search field, a download's progress, the recovery notice, a capture) and
-    // outranks a row caption: it is what explains a page that has nothing on it. The module itself
-    // says nothing outside a short window after the store served a record, so the line cannot
-    // follow a player out of the store.
+    // P7: the store's own words - the loading sentence while the first page is in flight, and the
+    // empty/offline sentence after it (the credit line that used to open the store was removed on
+    // the owner's request, 2026-10-23). It yields to every input surface (the search field, a
+    // download's progress, the recovery notice, a capture) and outranks a row caption: it is what
+    // explains a page that has nothing on it. The module itself says nothing outside a short window
+    // after the store served a record, so the line cannot follow a player out of the store.
     const std::string store_status = store_ns::CatalogueStatusText();
     const bool store_speaking = !store_status.empty();
     if (searching) {
@@ -403,9 +403,8 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     }
     // Off is invisible, not "drawn and empty", and the cvar is re-read here so the toggle is
     // live - the probe overlay's rule, and what makes Interface -> Settings Labels a `hot` row.
-    // The store's own sentences are drawn regardless: the credit line is the attribution the
-    // store has to carry, and an empty or unreachable catalogue is a state a player cannot explain
-    // from the screen, the same rule the search field follows.
+    // The store's own sentences are drawn regardless: an empty or unreachable catalogue is a state
+    // a player cannot explain from the screen, the same rule the search field follows.
     if (text.empty() ||
         (!capturing && !recovering && !searching && !downloading && !store_speaking &&
          !REXCVAR_GET(settings_help_overlay))) {

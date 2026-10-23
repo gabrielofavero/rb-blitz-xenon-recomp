@@ -56,9 +56,9 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 rows in order: **RhythmVerse**, **Cache DLC Library**, **Refresh Songs**, **DLC Scan
 Threads**, **DLC Menu Music**. (The third row was **Refresh Music Library** until the owner renamed
 it on 2026-10-22, the same request that made it default On.) RhythmVerse opens a page containing the
-**RhythmVerse: On | Off** master and **Search Song Filter**. The filter title is
-**SEARCH SONG FILTER** and its five instrument switches remain available while the
-master is Off. Back from the filter returns to RhythmVerse; Back from RhythmVerse
+**RhythmVerse: On | Off** master and **Filters**. The filter title is
+**RHYTHMVERSE FILTERS** (renamed 2026-10-23, plan P9-11) and its five instrument switches remain
+available while the master is Off. Back from the filter returns to RhythmVerse; Back from RhythmVerse
 returns to Downloadable Content. The main-menu and pause contexts share this tree.
 
 **Current Music Library & Store (2026-10-23):** General ▸ Interface's second
