@@ -4,10 +4,12 @@
 #include "store/store_fetch.h"
 
 #include <atomic>
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include <rex/cvar.h>
@@ -19,6 +21,7 @@
 #include "store/store_catalogue_status.h"
 #include "store/store_library.h"
 #include "store/album_art.h"
+#include "store/store_search.h"
 #include "store/store_serve.h"
 #include "store/store_probe.h"
 #include "store/store_settings.h"
@@ -52,6 +55,14 @@ REXCVAR_DEFINE_STRING(store_front_menu_row, "no-count", "Diagnostics",
                       "never fed a number; `count` is the pre-P9-5 `(path label TRUE)` that drew "
                       "`1`, `false` and `zero` are the other spellings of the same count")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_INT32(store_search_wait_ms, 4000, "Diagnostics",
+                   "How long the search page's own request waits for the RhythmVerse answer before "
+                   "it is written. Confirming the title's keyboard submits the query and asks for "
+                   "the page in the same breath (`store_payload.h`'s keyboard entry), and the "
+                   "browser only opens when the page carries offers, so the request holds until "
+                   "the first page lands. 0 writes the page immediately - an empty list, which "
+                   "the store answers by staying on its menu");
 
 namespace rb_blitz::store {
 namespace {
@@ -230,6 +241,29 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   // a negative claim (plan §3.2).
   if (IsFrontMenuPath(path) || IsMenuRecordPath(path)) {
     RequestLibraryRefresh("the store asked for a page");
+  }
+  // The search page is asked for the moment the player confirms the keyboard (`store_payload.h`),
+  // so the answer may still be in flight. Hold the request until the first page of it lands: the
+  // browser opens only when the page carries offers (`store_menu_panel.process_offers`), so a page
+  // written now would be an empty list the player has to ask for again. The wait is bounded and
+  // only ever paid on a query the page cache does not hold.
+  if (IsSearchMenuPath(path)) {
+    const auto started = std::chrono::steady_clock::now();
+    while (SearchInFlight()) {
+      const auto waited = std::chrono::steady_clock::now() - started;
+      if (waited >= std::chrono::milliseconds(REXCVAR_GET(store_search_wait_ms))) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto waited = std::chrono::steady_clock::now() - started;
+    if (waited >= std::chrono::milliseconds(50)) {
+      LogOnce(path + "#wait",
+              "the search page waited " +
+                  std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(waited)
+                                     .count()) +
+                  " ms for the answer");
+    }
   }
   const ServedRecord record = RecordForRequest(path, g_serve_dir);
   if (record.bytes.empty()) {

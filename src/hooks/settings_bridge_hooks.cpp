@@ -176,7 +176,11 @@ std::string ArgumentString(uint8_t* base, PPCContext& ctx, const uint32_t arg_ar
   }
   // A settings path is short and printable; anything else is not one of ours. Reading stops at
   // the first byte outside the path's own alphabet, which also means a missing terminator cannot
-  // walk off into unrelated memory.
+  // walk off into unrelated memory. Bytes at or above 0x80 are admitted because they are the
+  // UTF-8 of a *typed* query: P9-11's search field is written by the title's own keyboard as
+  // `rbbz-store/search/text/<query>` (src/store/store_search.h), and a song or artist name may
+  // carry an accent. Every other namespace matches ASCII tokens only, so admitting them costs
+  // those parsers nothing - their comparisons simply fail on a name they never spell.
   constexpr size_t kMaxScan = 4096;
   std::string out;
   for (size_t i = 0; i < kMaxScan; ++i) {
@@ -184,7 +188,7 @@ std::string ArgumentString(uint8_t* base, PPCContext& ctx, const uint32_t arg_ar
     if (c == 0) {
       break;
     }
-    if (c < 0x20 || c > 0x7E) {
+    if (c < 0x20 || c == 0x7F) {
       return {};
     }
     out.push_back(static_cast<char>(c));
@@ -669,9 +673,10 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     WriteResultCell(base, ctx.r3.u32, download_answer ? 1u : 0u);
     return true;
   }
-  // P4's search predicates (`rbbz-store/search/open|ready|state/<token>|count/at-least/<n>`) are
-  // the authored key pages' read half - the same one-bit channel again, answered with the settings
-  // channel off for the same reason.
+  // P4's search bits (`rbbz-store/search/show|seed`) are the store record's read half - the same
+  // one-bit channel again, answered with the settings channel off for the same reason. P9-11
+  // retired the key pages' own probes (`open`, `ready`, `state/<token>`, `count/at-least/<n>`)
+  // along with the pages.
   bool search_answer = false;
   if (::rb_blitz::store::AnswerSearchQuery(path, &search_answer)) {
     WriteResultCell(base, ctx.r3.u32, search_answer ? 1u : 0u);

@@ -107,26 +107,35 @@ Part 1 wherever they disagree.
   game committed, has no store row and makes no store request
   (`out/_swap/master-restart/20261022-214004/session.log`,
   `out/_swap/master-restart/20261022-214555/next-boot.log`, 9 steps / 0 failures).
-- **RhythmVerse search is typed on an authored keyboard (2026-10-20, RhythmVerse plan P4).** There
-  is no retail keyboard to reuse — all 131 compiled DTA records were decoded and the only entry
-  point is `rbworld_link_panel show_keyboard`, a *native* method of the Rock Central e-mail panel —
-  so the query is typed on ten authored pages per context in the house row style: the root is
-  `Done / Letters / Numbers 0-5 / Numbers 6-9 / Space / More Keys`, with a letters index, five
-  letter pages, two number pages and a `More Keys` page (`Backspace / Clear / Cancel`); every
-  character page returns to the root, so one query can mix letters, digits and a space. Each key is
-  a row that writes `rbbz-store/search/key/<token>` (never the text in a path), and each page's
-  caption names the character it adds ("Add 'B' to the search. Search by artist or song title, one
-  at a time."). The field is read on the Help & Options caption bar — `Search: bush`,
-  `Searching for "bush"...`, `15 matches for "bush". Press Done to open the store.`, and the
-  no-match `Try just the artist name or just the song title.` — and drawn **even with Settings
-  Labels off**, because a field a player cannot read is an input problem, not optional help. With
-  `store_search_diagnostic` on, the main menu's **RhythmVerse** row jumps straight to the
-  keys. **Evidence:** `rb_blitz_store_search_tests` (283 checks),
-  `rb_blitz_settings_screen_tests` (page order, the six-row budget, the write path of every key),
-  and a boot whose strip was OCRd (`scripts/probe_search.ps1`,
-  `out/_swap/search-probe/20261020-174624`). Since 2026-10-22 the matches **are drawn**: the same
-  Search row asks for the page the answer fills and the retail browser lists it (RhythmVerse plan P4
-  landing record, `out/_swap/search-probe/20261022-105010`).
+- **RhythmVerse search is typed on the title's own keyboard (2026-10-23, RhythmVerse plan P9-11).**
+  The store's **Search** row opens `virtual_keyboard show_keyboard` - the native
+  `.?AVVirtualKeyboard@@` the Ultimate payload's own song search drives (retail's `song_select` does
+  not use it, which is what P4's 2026-10-20 scan measured; the class is in the retail image all the
+  same). The first argument is a **User object** (`{user_mgr get_participating_user}`, then pad 0's
+  as the fallback), because the native show reads the player's name from it - the bare symbol was a
+  null read in game. The payload writes two screen methods onto `store_menu_screen`
+  (`store::AddSearchKeyboard`): `open_store_search`, which writes `rbbz-store/search/open` and opens
+  the keyboard with `$this` as the result's receiver, and `virtual_keyboard_result_msg ($ok $text)`,
+  which writes `{sprintf "rbbz-store/search/text/%s" $text}`, submits with `rbbz-store/search/done`
+  **and then asks the store for the search page** (the shipped row's own `set_source` +
+  `request "/eng/search/"` + `update_loading_status`). So confirming the keyboard opens the results
+  in the retail browser with **no second press**; the host holds that request until the first API
+  page lands (`store_search_wait_ms`, measured 2.7 s on `bush`). The field and its sentences are
+  still read on the Help & Options caption bar (`Search: bush`, `Searching for "bush"...`,
+  `15 matches for "bush"...`, and the no-match sentence) and drawn **even with Settings Labels
+  off**, because a field a player cannot read is an input problem, not optional help. **The ten
+  authored key pages per context are gone** (page count 71 → 61, both contexts), and so is P4's
+  `store_search_diagnostic`; `store_search_seed` stays as the way a scripted boot reaches a request
+  without typing on the on-screen keys (the screen asks `rbbz-store/search/seed` and submits the
+  field while one is installed). The store's own **Start** button is captioned `FILTERS` since the
+  same day (it was `SEARCH FILTERS`), and the page it opens is titled `RHYTHMVERSE FILTERS`.
+  **Evidence:** the transforms run against the shipped record
+  (`rb_blitz_store_payload_tests store-edit <store.dtb> search` prints both methods, the routed
+  `SELECT_MSG` and the panel `exit`), `rb_blitz_store_search_tests` (287 checks, the raw-UTF-8
+  grammar), `rb_blitz_store_payload_tests` / `rb_blitz_settings_screen_tests` pins, the measured
+  one-press flow (`out/_swap/search-probe/20261023-175633`: `waited 2730 ms`, `15 offer(s)`,
+  `store_browser_screen`), and the plan's P9-11 record. Typing on the console keyboard in the
+  owner's own boot is the one part this environment cannot measure.
 - **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
   `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
   (`Main Menu`, `Music Library & Store`, `Skip Offline Prompts`, `Help & Options Labels`;

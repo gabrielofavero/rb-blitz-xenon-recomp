@@ -632,6 +632,23 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             why != "the locale already has that key") {
           note("the store-unreachable popup sentence was refused: " + why);
         }
+        // P9-11: the title's own keyboard titles itself with `search_for_song` and describes
+        // itself with `search_for_song_desc` (the two tokens the Ultimate payload's song search
+        // passes, measured in its `song_select.dtb`). Retail's locale carries neither, so the
+        // store screen's `open_store_search` would draw bare token names without them. The
+        // description is the plan's own one-at-a-time sentence, so the rule is read while typing.
+        why.clear();
+        if (!screen::AddLocaleEntry(&roots, store::kSearchKeyboardTitleToken,
+                                    store::kSearchKeyboardTitleText, &why) &&
+            why != "the locale already has that key") {
+          note("the search keyboard's title was refused: " + why);
+        }
+        why.clear();
+        if (!screen::AddLocaleEntry(&roots, store::kSearchKeyboardDescToken,
+                                    store::kSearchKeyboardDescText, &why) &&
+            why != "the locale already has that key") {
+          note("the search keyboard's description was refused: " + why);
+        }
       }
       for (const auto& [key, text] : screen::Labels()) {
         std::string why;
@@ -769,14 +786,19 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (!store::LinkAlbumArt(&store_ui_roots, &why)) {
         note("linking the details page's album art was refused: " + why);
       }
-      // P4's entry from the store: the front menu's Search row opens the authored key pages while
-      // no answer is waiting, and asks for the search page (which the serving policy answers with
-      // the accepted answer) once one is (store_payload.h). The row's index is the one the front
-      // menu writer puts it at, so the DTA gate and the served record cannot disagree.
+      // P4's entry from the store, re-pointed by P9-11 at the title's own keyboard: the front
+      // menu's Search row opens the keyboard while no answer is waiting, and asks for the search
+      // page (which the serving policy answers with the accepted answer) once one is. The row's
+      // index is the one the front menu writer puts it at, so the DTA gate and the served record
+      // cannot disagree. Both halves are screen methods the same edit adds (store_payload.h).
       why.clear();
-      if (!store::RouteSearchRowToKeys(&store_ui_roots, store::kSearchMenuRow,
-                                       screen::kSearchScreen, &why)) {
-        note("routing the store's Search row to the keys was refused: " + why);
+      if (!store::AddSearchKeyboard(&store_ui_roots, &why)) {
+        note("adding the store's search keyboard was refused: " + why);
+      }
+      why.clear();
+      if (!store::RouteSearchRowToKeyboard(&store_ui_roots, store::kSearchMenuRow,
+                                           store::kSearchKeyboardMethod, &why)) {
+        note("routing the store's Search row to the keyboard was refused: " + why);
       }
       // P9-7: the store's Start button opens the Search Song Filter page, and Back from there
       // returns to the store front menu - the shipped case's own back target, re-pointed at a page

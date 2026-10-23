@@ -1,14 +1,17 @@
 # P4 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the search measurement.
 #
-# One boot that drives the authored key pages end to end and captures what the caption says:
+# One boot that drives the store's own Search row and captures what the caption says. Since P9-11
+# the typing happens on the **title's own keyboard**, not on authored key pages, so a scripted boot
+# cannot press it; the probe therefore uses the seed the keyboard entry itself honours:
 #
-#   * `--store_search_diagnostic=1` (src/store/store_search_service.cpp) appends
-#     `{ui goto_screen settings_rhythmverse_search_screen}` to the retail store screen's own
-#     `{enter}`, so the boot reaches the keys without P3's front menu having landed. It is a
-#     measurement switch, not a feature.
+#   * `--store_search_seed=<query>` fills the host's field at boot without opening a surface
+#     (src/store/store_search_service.cpp), and the store screen's `open_store_search` asks
+#     `rbbz-store/search/seed` (src/store/store_search.h). While a seed is installed, pressing the
+#     Search row submits the field instead of drawing the keyboard - the measurement switch, not a
+#     feature: a player's boot never has one.
 #   * `--store_trace=1` keeps the P2/P3 path probe on, so a run also records whether the store
-#     asked for anything while the keys were up.
-#   * The search itself is real: Done posts through src/store/store_http.cpp, and the worker's
+#     asked for anything around the press.
+#   * The search itself is real: the submit posts through src/store/store_http.cpp, and the worker's
 #     answer is logged (`store_search: ...`) - the OCR of the caption is what proves the *player*
 #     sees the field and the outcome.
 #
@@ -30,15 +33,22 @@ param(
     # RHYTHMVERSE CUSTOMS until 2026-10-22).
     [int]$StoreRow = 4,
     [string]$Query = "bush",
-    # A query already in the field at boot (the live-request arm: one Done press, no typing).
+    # A query already in the field at boot (the live-request arm: one Search press, no typing).
+    # `-Query` seeds it when this is empty.
     [string]$Seed = "",
-    # P4's delivered route (store_payload.h `RouteSearchRowToKeys`): >= 0 enters the retail store
-    # from `-StoreRow`, then opens the **served front menu's** Search row at this index (RECENT is 0,
-    # SEARCH 1), instead of the main-menu diagnostic jump. The rest of the route is the delivered
-    # one: Done submits and stays, Back leaves the keys, and pressing Search again asks for the
-    # page the answer fills - which is what puts the results in the retail browser. -1 keeps the
-    # old diagnostic route (the keys straight from the main menu).
-    [int]$SearchMenuRow = -1,
+    # The keyboard's own arm: no seed is installed, so the Search press opens the title's keyboard.
+    # The keyboard is the platform's ImGui dialog (the SDK implements `XamShowKeyboardUI`), so the
+    # run proves the call reaches it; what a script cannot do is *type* on a console keyboard, which
+    # is why every other arm seeds the field instead.
+    [switch]$NoSeed,
+    # `-NoSeed`'s typing route: driver key actions joined by commas (`key:m,key:a,key:s,key:s`
+    # spells "mass" - `drive_ui.ps1` carries only a handful of letters), then `key:enter` as the
+    # dialog's OK. Empty = open the keyboard and cancel it.
+    [string]$TypeKeys = "key:m,key:a,key:s,key:s",
+    # The store's own front menu row that runs the search: RECENT is 0, SEARCH 1 (P3's front menu).
+    # The authored key pages this script used to drive were retired by P9-11, so a negative value is
+    # refused below rather than silently opening the store and typing nothing.
+    [int]$SearchMenuRow = 1,
     # How long to wait for the answer before Back is pressed on the keys page.
     [int]$SettleAfterAnswerSec = 15,
     # Control leg: open the store row (with `-SearchMenuRow 0` that is Recent) and capture what it
@@ -185,33 +195,13 @@ function Invoke-Actions([string[]]$Actions) {
     Invoke-ChildScript "drive_ui.ps1" @{ Actions = ($Actions -join ","); BuildDir = $BuildDir; OutDir = $OutDir } | Out-Null
 }
 
-# The key route for `query`: the pages are the authored table's, so the script derives the path
-# instead of hard-coding one. The root's first row is Done and every character page returns to the
-# root, so the route is flat: for each character, Letters -> its page -> its letter, then Back; and
-# Done is one press at the end.
-function Get-KeyRoute([string]$Text) {
-    $groups = @("abcdef", "ghijkl", "mnopqr", "stuvwx", "yz")
-    $route = @()
-    foreach ($c in $Text.ToLowerInvariant().ToCharArray()) {
-        $page = -1
-        $row = -1
-        for ($p = 0; $p -lt $groups.Count; $p++) {
-            $at = $groups[$p].IndexOf($c)
-            if ($at -ge 0) { $page = $p; $row = $at; break }
-        }
-        if ($page -lt 0) { throw "the key pages do not carry '$c'" }
-        # The root's rows are Done, Letters, Numbers 0-5, Numbers 6-9, Space, More Keys.
-        $route += @("key:lstick_down", "wait:1")  # Done -> Letters
-        $route += @("key:a", "wait:2")            # the letters index (row 0 = "Letters A-F")
-        for ($i = 0; $i -lt $page; $i++) { $route += @("key:lstick_down", "wait:1") }
-        $route += @("key:a", "wait:2")            # the index -> the letter page
-        for ($i = 0; $i -lt $row; $i++) { $route += @("key:lstick_down", "wait:1") }
-        $route += @("key:a", "wait:1")            # append the character
-        $route += @("key:b", "wait:2")            # the page -> the root (Done is row 0)
-    }
-    $route += @("key:a")                           # Done
-    return $route
+# The store route is the only route since P9-11: the Search row opens the title's keyboard, and a
+# script cannot type on it. The seeded field is what lets this probe reach the request at all.
+if ($SearchMenuRow -lt 0) {
+    throw "the authored key pages are retired (P9-11); pass -SearchMenuRow 1 for the store's Search row"
 }
+if ($Seed -eq "") { $Seed = $Query }
+if ($NoSeed) { $Seed = "" }
 
 $clampUp = @()
 for ($i = 0; $i -lt 8; $i++) { $clampUp += @("key:lstick_up", "wait:1") }
@@ -228,15 +218,15 @@ $arguments = @(
     "--log_flush_interval=1",
     "--log_max_file_size_mb=200",
     "--store_trace=1",
-    "--store_search_seed=$Seed",
     "--user_data_root=$profileDir",
     "--launcher_profile=$(Join-Path $profileDir 'launcher.toml')",
     "--dlc_library=$emptyDlc",
     "--dlc_root=$emptyDlc"
 )
-# The diagnostic jump is a measurement switch; the store route must run without it, or the main
-# menu's row would open the keys instead of the store.
-if ($SearchMenuRow -lt 0) { $arguments += "--store_search_diagnostic=1" }
+# The diagnostic jump is retired with the key pages; the store route always runs.
+# The seed travels only when the run wants one: `-NoSeed` leaves `store_search_seed` empty so the
+# screen's `open_store_search` draws the keyboard instead of submitting.
+if (-not $NoSeed) { $arguments += "--store_search_seed=$Seed" }
 
 Write-Host "probe_search: launching $exe"
 Write-Host "  args: $($arguments -join ' ')"
@@ -290,49 +280,47 @@ try {
         if ($RowOnly) {
             Capture-To (Join-Path $capDir "page.png")
             $verdict.page_text = Get-ScreenText (Join-Path $capDir "page.png")
+        } elseif ($NoSeed) {
+            # The keyboard's own arm: the press must have drawn the title's keyboard over the store
+            # menu. The keyboard is the platform's ImGui dialog, so the host keys the driver can send
+            # type into it; Enter is the dialog's OK (`InputText` returns true on Enter). A run that
+            # lands the text proves the whole path - dialog, `$ok`/`$text` back to the screen, the
+            # `text/<query>` write and the submit.
+            Capture-To (Join-Path $capDir "keys.png")
+            $verdict.keys_text = Get-ScreenText (Join-Path $capDir "keys.png")
+            if ($TypeKeys) {
+                $typing = @()
+                foreach ($k in ($TypeKeys -split ',')) { $typing += @($k.Trim(), "wait:1") }
+                $typing += @("wait:2")
+                Invoke-Actions $typing
+                Capture-To (Join-Path $capDir "typed-on-keyboard.png")
+                $verdict.typed_text = Get-ScreenText (Join-Path $capDir "typed-on-keyboard.png")
+                Invoke-Actions @("key:enter", "wait:2")
+                Start-Sleep -Seconds $SettleAfterPressSec
+                Capture-To (Join-Path $capDir "answer.png")
+                $verdict.answer_text = Get-ScreenText (Join-Path $capDir "answer.png")
+            }
+            foreach ($attempt in 1..3) {
+                Invoke-Actions @("key:b", "wait:2")
+                Start-Sleep -Seconds 2
+            }
+            Capture-To (Join-Path $capDir "back.png")
+            $verdict.back_text = Get-ScreenText (Join-Path $capDir "back.png")
         } else {
-            $verdict.keys_text = Wait-ForNeedle (Join-Path $capDir "keys.png") "LETTERS" `
-                $ScreenTimeoutSec "the authored key pages"
+            # The press submits the seeded query (the screen's `seed` branch) *and* asks the store
+            # for the search page in the same breath (`store::AddSearchKeyboard`), so the browser
+            # opens on the answer with no second press. The host holds that request until the first
+            # page of the answer lands (`store_search_wait_ms`), which is the wait this leg sits
+            # through.
+            Start-Sleep -Seconds $SettleAfterPressSec
+            Capture-To (Join-Path $capDir "keys.png")
+            $verdict.keys_text = Get-ScreenText (Join-Path $capDir "keys.png")
+            Start-Sleep -Seconds $SettleAfterAnswerSec
+            Capture-To (Join-Path $capDir "results.png")
+            $verdict.results_text = Get-ScreenText (Join-Path $capDir "results.png")
         }
     } else {
-        Capture-To (Join-Path $capDir "keys.png")
-        $verdict.keys_text = Get-ScreenText (Join-Path $capDir "keys.png")
-    }
-
-    # `-RowOnly` stops here: the press was the measurement.
-    if (-not $RowOnly) {
-    # With a seeded field (`-Seed`), the root's first row is Done: one press exercises the request
-    # and the answer. Without a seed the query is typed on the key pages.
-    if ($Seed -ne "") {
-        Invoke-Actions @("key:a")
-        # The diagnostic route's second press re-submitted the same query; the store route does not
-        # need it (Done stays on the page and the strip reports the answer there).
-        if ($SearchMenuRow -lt 0) { Invoke-Actions @("key:a") }
-    } else {
-        Invoke-Actions (Get-KeyRoute $Query)
-    }
-    Start-Sleep -Seconds 2
-    Capture-To (Join-Path $capDir "typed.png")
-    $verdict.typed_text = Get-ScreenText (Join-Path $capDir "typed.png")
-
-    Start-Sleep -Seconds $SettleAfterAnswerSec
-    Capture-To (Join-Path $capDir "answer.png")
-    $verdict.answer_text = Get-ScreenText (Join-Path $capDir "answer.png")
-
-    if ($SearchMenuRow -ge 0) {
-        # Back returns to the store menu (the keys screen's own back target), and the same Search
-        # row now asks for the page the answer fills: the retail browser, listing the results.
-        Invoke-Actions @("key:b", "wait:3")
-        $verdict.back_text = Wait-ForNeedle (Join-Path $capDir "store-back.png") "RECENT" `
-            $ScreenTimeoutSec "store menu after Back"
-        $toResults = @($clampUp)
-        for ($d = 0; $d -lt $SearchMenuRow; $d++) { $toResults += @("key:lstick_down", "wait:1") }
-        Invoke-Actions $toResults
-        Invoke-Actions @("key:a")
-        Start-Sleep -Seconds $SettleAfterPressSec
-        Capture-To (Join-Path $capDir "results.png")
-        $verdict.results_text = Get-ScreenText (Join-Path $capDir "results.png")
-    }
+        throw "the Search row must be the store's own (>= 0); the authored key pages are retired"
     }
 } finally {
     try {
@@ -383,20 +371,11 @@ if ($RowOnly) {
     $report += $verdict.page_text
     $report += ""
 }
-$report += "--- the authored key pages (OCR) ---"
+$report += "--- the keyboard entry: the store menu after the Search press (OCR) ---"
 $report += $verdict.keys_text
 $report += ""
-$report += "--- after typing '$Query' (OCR) ---"
-$report += $verdict.typed_text
-$report += ""
-$report += "--- after Done, settle ${SettleAfterAnswerSec}s (OCR) ---"
-$report += $verdict.answer_text
-$report += ""
-if ($SearchMenuRow -ge 0) {
-    $report += "--- store menu after Back (OCR) ---"
-    $report += $verdict.back_text
-    $report += ""
-    $report += "--- the Search row again: the answer as the retail list (OCR) ---"
+if (-not $NoSeed) {
+    $report += "--- after the submit, settle ${SettleAfterAnswerSec}s: the search page the press opened (OCR) ---"
     $report += $verdict.results_text
     $report += ""
 }

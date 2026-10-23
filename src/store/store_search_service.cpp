@@ -25,16 +25,11 @@
 #include "store/store_search.h"
 #include "store/store_serve.h"
 
-REXCVAR_DEFINE_BOOL(store_search_diagnostic, false, "Diagnostics",
-                    "Open the authored RhythmVerse search keys when the retail store screen is "
-                    "entered (RhythmVerse plan P4's measurement switch; off leaves every record as "
-                    "shipped). The shipping entry is the store's own Search row, served by P3's "
-                    "front menu")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-// The same measurement's second half: a query already in the field when the keys open, so a boot
-// can press Done and read the live answer without typing on the (harness-flaky) key pages. Empty
-// is the ordinary boot. Read on the host thread at InstallSearchTransport.
+// A query already in the field at boot, so a scripted boot can reach a live request and answer
+// without typing on the on-screen keyboard: the store screen's keyboard entry asks
+// `rbbz-store/search/seed` (`store_search.h`) and submits the field instead of drawing the
+// keyboard while a seed is installed. Empty is the ordinary boot. Read on the host thread at
+// InstallSearchTransport.
 REXCVAR_DEFINE_STRING(store_search_seed, "", "Diagnostics",
                       "Seed the RhythmVerse search field with this text at boot (RhythmVerse plan "
                       "P4's measurement switch; empty leaves the field empty)")
@@ -263,7 +258,5 @@ void InstallSearchTransport() {
     }
   }
 }
-
-bool SearchDiagnostic() { return REXCVAR_GET(store_search_diagnostic); }
 
 }  // namespace rb_blitz::store

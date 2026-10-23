@@ -128,7 +128,7 @@ SongFile Ineligible(std::string title) {
 // --- The field -----------------------------------------------------------------------------------
 
 void TestCodePoints() {
-  test::BeginCase("the field counts code points, so one backspace is one character");
+  test::BeginCase("the field counts code points, so a name is bounded in characters");
   CHECK_EQ(CodePointCount("halsey"), 6u);
   CHECK_EQ(CodePointCount(std::string_view("caf\xC3\xA9")), 4u);          // café
   CHECK_EQ(CodePointCount(std::string_view("\xE6\x9D\xB1\xE4\xBA\xAC")), 2u);  // 東京
@@ -137,42 +137,28 @@ void TestCodePoints() {
   SearchText text;
   CHECK_TRUE(text.Set(std::string_view("caf\xC3\xA9")));
   CHECK_EQ(text.length(), 4u);
-  CHECK_TRUE(text.Backspace());
-  CHECK_TRUE(text.text() == "caf");
-  CHECK_TRUE(text.Backspace());
-  CHECK_TRUE(text.text() == "ca");
-  CHECK_TRUE(text.Backspace());
-  CHECK_TRUE(text.Backspace());
-  CHECK_FALSE(text.Backspace());
-  CHECK_TRUE(text.text().empty());
+  CHECK_TRUE(text.text() == "caf\xC3\xA9");
+  CHECK_TRUE(text.ready());
 }
 
-void TestKeyTokens() {
-  test::BeginCase("key tokens build the query, folding case and joining words");
+// P9-11: the title's keyboard hands the session one raw UTF-8 string, so the old one-token-per-press
+// grammar is gone. What the field must still do is keep the characters a typed *name* carries -
+// spaces, apostrophes, slashes and accents - and refuse the ones it cannot match.
+void TestRawText() {
+  test::BeginCase("the keyboard's raw text keeps a name's spaces, slashes and accents");
   SearchText text;
-  CHECK_TRUE(text.AppendKeyToken("H") == SearchText::Edit::kOk);
-  CHECK_TRUE(text.AppendKeyToken("a") == SearchText::Edit::kOk);
-  CHECK_TRUE(text.AppendKeyToken(kKeySpace) == SearchText::Edit::kOk);
-  CHECK_TRUE(text.AppendKeyToken("2") == SearchText::Edit::kOk);
-  CHECK_TRUE(text.AppendKeyToken(kKeyDash) == SearchText::Edit::kOk);
-  CHECK_TRUE(text.AppendKeyToken("4") == SearchText::Edit::kOk);
-  CHECK_STR(text.text(), "ha 2-4");
-  CHECK_TRUE(text.AppendKeyToken(kKeyApostrophe) == SearchText::Edit::kOk);
-  CHECK_TRUE(text.AppendKeyToken(kKeyPeriod) == SearchText::Edit::kOk);
+  CHECK_TRUE(text.Set("Guns N' Roses"));
+  CHECK_STR(text.text(), "Guns N' Roses");
+  CHECK_TRUE(text.Set("AC/DC"));
+  CHECK_STR(text.text(), "AC/DC");
+  CHECK_TRUE(text.Set(std::string_view("mot\xC3\xB6rhead")));  // motörhead
+  CHECK_EQ(text.length(), 9u);
+  CHECK_TRUE(text.Set("ha 2-4'."));
   CHECK_STR(text.text(), "ha 2-4'.");
-  // The action keys are not characters, and an unknown spelling is refused rather than guessed.
-  CHECK_TRUE(text.AppendKeyToken(kKeyBackspace) == SearchText::Edit::kRejected);
-  CHECK_TRUE(text.AppendKeyToken(kKeyClear) == SearchText::Edit::kRejected);
-  CHECK_TRUE(text.AppendKeyToken("nonsense") == SearchText::Edit::kRejected);
-  CHECK_TRUE(text.AppendKeyToken("") == SearchText::Edit::kRejected);
-
   // The ceiling is the API field's own: 64 code points, refused rather than truncated.
-  SearchText full;
-  for (int i = 0; i < kMaxSearchChars; ++i) {
-    CHECK_TRUE(full.AppendKeyToken("a") == SearchText::Edit::kOk);
-  }
-  CHECK_TRUE(full.AppendKeyToken("a") == SearchText::Edit::kFull);
-  CHECK_EQ(full.length(), static_cast<std::size_t>(kMaxSearchChars));
+  CHECK_TRUE(text.Set(std::string(static_cast<std::size_t>(kMaxSearchChars), 'a')));
+  CHECK_FALSE(text.Set(std::string(static_cast<std::size_t>(kMaxSearchChars) + 1, 'a')));
+  CHECK_EQ(text.length(), static_cast<std::size_t>(kMaxSearchChars));
 }
 
 void TestSetText() {
@@ -225,7 +211,7 @@ void TestSeedField() {
 }
 
 void TestParseWrites() {
-  test::BeginCase("the write grammar accepts the key pages and leaves P5's commands alone");
+  test::BeginCase("the write grammar takes the keyboard's text and leaves P5's commands alone");
   StoreOp op = StoreOp::kNone;
   std::string token;
   std::string text;
@@ -240,37 +226,29 @@ void TestParseWrites() {
   CHECK_TRUE(ParseStoreWrite("rbbz-store/search/cancel", &op, &token, &text, &why) ==
              StoreParse::kAccepted);
   CHECK_ENUM(op, StoreOp::kSearchCancel);
+  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/leave", &op, &token, &text, &why) ==
+             StoreParse::kAccepted);
+  CHECK_ENUM(op, StoreOp::kSearchLeave);
 
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/a", &op, &token, &text, &why) ==
-             StoreParse::kAccepted);
-  CHECK_ENUM(op, StoreOp::kSearchKey);
-  CHECK_STR(token, "a");
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/7", &op, &token, &text, &why) ==
-             StoreParse::kAccepted);
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/space", &op, &token, &text, &why) ==
-             StoreParse::kAccepted);
-  CHECK_STR(token, "space");
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/backspace", &op, &token, &text, &why) ==
-             StoreParse::kAccepted);
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/clear", &op, &token, &text, &why) ==
-             StoreParse::kAccepted);
-
-  // Hex carries any UTF-8 - spaces, slashes, accents - inside the token alphabet.
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/41432f4443", &op, &token, &text, &why) ==
+  // P9-11: the body after `text/` is the query itself - the keyboard's `{sprintf
+  // "rbbz-store/search/text/%s" $text}` - so spaces, slashes, apostrophes and accents all arrive
+  // as written, and nothing decodes or unescapes them.
+  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/AC/DC", &op, &token, &text, &why) ==
              StoreParse::kAccepted);
   CHECK_ENUM(op, StoreOp::kSearchText);
   CHECK_STR(text, "AC/DC");
+  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/guns n' roses", &op, &token, &text, &why) ==
+             StoreParse::kAccepted);
+  CHECK_STR(text, "guns n' roses");
+  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/mot\xC3\xB6rhead", &op, &token, &text, &why) ==
+             StoreParse::kAccepted);
+  CHECK_STR(text, std::string("mot\xC3\xB6rhead"));
 
-  // Malformed search paths are refused (answered, never forwarded).
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/", &op, &token, &text, &why) ==
-             StoreParse::kRefused);
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/mystery", &op, &token, &text, &why) ==
-             StoreParse::kRefused);
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/abc", &op, &token, &text, &why) ==
-             StoreParse::kRefused);
-  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/zz", &op, &token, &text, &why) ==
-             StoreParse::kRefused);
+  // Malformed search paths are refused (answered, never forwarded): an empty body and an unknown
+  // action. A path the retired key grammar used is *unknown* now, not silently accepted.
   CHECK_TRUE(ParseStoreWrite("rbbz-store/search/text/", &op, &token, &text, &why) ==
+             StoreParse::kRefused);
+  CHECK_TRUE(ParseStoreWrite("rbbz-store/search/key/a", &op, &token, &text, &why) ==
              StoreParse::kRefused);
   CHECK_TRUE(ParseStoreWrite("rbbz-store/search/unknown", &op, &token, &text, &why) ==
              StoreParse::kRefused);
@@ -290,10 +268,10 @@ void TestWriteHandlerOwnsOnlySearch() {
   std::string why;
   CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/open", &why));
   CHECK_TRUE(why.empty());
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/h", &why));
-  CHECK_TRUE(SearchCurrent().text == "h");
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/text/halsey", &why));
+  CHECK_TRUE(SearchCurrent().text == "halsey");
   // A refusal is still "ours" - it is answered, not forwarded.
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/nope", &why));
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/text/bad\tquery", &why));
   CHECK_TRUE(!why.empty());
   CHECK_FALSE(HandleStoreSearchWrite("rbbz-store/download/start/job1", &why));
   CHECK_FALSE(HandleStoreSearchWrite("rbbz-settings/set/a/b:1", &why));
@@ -301,24 +279,22 @@ void TestWriteHandlerOwnsOnlySearch() {
 }
 
 void TestDuplicatePressGuard() {
-  test::BeginCase("one guest press delivered twice in the same frame appends one character");
-  // Measured in a boot (2026-10-20): a single A press reached the host as two `search/key/a`
-  // writes in the same millisecond. The channel treats an identical command inside its window as
-  // the same press; a different key, or the same one after a cancel, is a new press.
+  test::BeginCase("one guest press delivered twice in the same frame submits once");
+  // Measured in a boot (2026-10-20): a single press can reach the host as two writes in the same
+  // millisecond. The keyboard writes its text and its submit together and each write is a
+  // different path, so they are always two commands; what the window protects is the *submit*,
+  // which must not post the same request twice.
   ResetSession(true);
+  int posted = 0;
+  SetSubmitSink([&posted](std::uint64_t, const RequestSpec&) { ++posted; });
   std::string why;
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/open", &why));
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/a", &why));
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/a", &why));
-  CHECK_STR(SearchCurrent().text, "a");
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/b", &why));
-  CHECK_STR(SearchCurrent().text, "ab");
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/backspace", &why));
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/backspace", &why));
-  CHECK_STR(SearchCurrent().text, "a");
-  SearchCancel();
-  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/key/a", &why));
-  CHECK_STR(SearchCurrent().text, "a");
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/text/bush", &why));
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/text/bush", &why));
+  CHECK_STR(SearchCurrent().text, "bush");
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/done", &why));
+  CHECK_TRUE(HandleStoreSearchWrite("rbbz-store/search/done", &why));
+  CHECK_EQ(posted, 1);
+  SetSubmitSink(nullptr);
   SearchCancel();
 }
 
@@ -337,9 +313,7 @@ void TestSubmitAndAccept() {
   CHECK_ENUM(SearchCurrent().state, SearchState::kEditing);
   CHECK_STR(SearchStatusText(), kSearchGuidance);
 
-  for (const char* key : {"h", "a", "l", "s", "e", "y"}) {
-    CHECK_TRUE(SearchApplyKey(key));
-  }
+  CHECK_TRUE(SearchSetText("halsey"));
   CHECK_STR(SearchStatusText(), "Search: halsey");
   CHECK_TRUE(SearchCurrent().generation >= 1u);
 
@@ -354,7 +328,7 @@ void TestSubmitAndAccept() {
   const std::uint64_t first = posted[0].first;
 
   // A second submit makes the first answer stale.
-  SearchApplyKey("x");
+  CHECK_TRUE(SearchSetText("halsey x"));
   CHECK_ENUM(SearchCurrent().state, SearchState::kEditing);
   const SearchSubmit second = SearchSubmitQuery();
   CHECK_TRUE(second.started);
@@ -386,7 +360,7 @@ void TestStaleAnswers() {
   }
   {
     ResetSession(true);
-    for (const char* key : {"a", "c", "d", "c"}) CHECK_TRUE(SearchApplyKey(key));
+    CHECK_TRUE(SearchSetText("acdc"));
     const SearchSubmit submit = SearchSubmitQuery();
     CHECK_TRUE(submit.started);
     // A settings commit changes the query's meaning (the filter is part of it).
@@ -402,7 +376,7 @@ void TestStaleAnswers() {
   {
     // Cancel invalidates in-flight work: the answer must not appear after the player left.
     ResetSession(true);
-    for (const char* key : {"a", "c", "d", "c"}) CHECK_TRUE(SearchApplyKey(key));
+    CHECK_TRUE(SearchSetText("acdc"));
     const SearchSubmit submit = SearchSubmitQuery();
     CHECK_TRUE(submit.started);
     SearchCancel();
@@ -413,7 +387,7 @@ void TestStaleAnswers() {
   {
     // Master off mid-flight: the answer is dropped and the state says why.
     ResetSession(true);
-    for (const char* key : {"a", "c", "d", "c"}) CHECK_TRUE(SearchApplyKey(key));
+    CHECK_TRUE(SearchSetText("acdc"));
     const SearchSubmit submit = SearchSubmitQuery();
     StoreSettings off;
     off.enabled = false;
@@ -436,7 +410,7 @@ void TestMessages() {
   CHECK_STR(SearchStatusText(), kSearchGuidance);
   CHECK_TRUE(std::string(kSearchGuidance).find("one at a time") != std::string::npos);
 
-  for (const char* key : {"l", "o", "r", "n"}) CHECK_TRUE(SearchApplyKey(key));
+  CHECK_TRUE(SearchSetText("lorn"));
   const SearchSubmit submit = SearchSubmitQuery();
   CHECK_TRUE(submit.started);
   CHECK_TRUE(SearchAccept(submit.generation, Page({})));
@@ -451,7 +425,7 @@ void TestMessages() {
   CHECK_TRUE(SearchStatusText().find("HTTP 503") != std::string::npos);
 
   // Typing after an answer returns to the field; the answer is no longer current.
-  CHECK_TRUE(SearchApplyKey("s"));
+  CHECK_TRUE(SearchSetText("sabaton"));
   CHECK_ENUM(SearchCurrent().state, SearchState::kEditing);
   CHECK_TRUE(SearchCurrent().offers.empty());
   SearchCancel();
@@ -482,7 +456,7 @@ void TestNoMatchesBody() {
           .has_value());
 
   ResetSession(true);
-  for (const char* key : {"z", "z", "z", "q"}) CHECK_TRUE(SearchApplyKey(key));
+  CHECK_TRUE(SearchSetText("zzzq"));
   const SearchSubmit submit = SearchSubmitQuery();
   CHECK_TRUE(submit.started);
   CHECK_TRUE(SearchAccept(submit.generation, *ParseListing(body, &error)));
@@ -493,43 +467,51 @@ void TestNoMatchesBody() {
 }
 
 void TestQueries() {
-  test::BeginCase("the one-bit queries answer the key pages and nothing else");
+  test::BeginCase("the one-bit queries answer the Search row's two bits and nothing else");
   ResetSession(true);
-  SearchOpen();
   bool answer = false;
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/open", &answer));
-  CHECK_TRUE(answer);
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/ready", &answer));
+  CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
   CHECK_FALSE(answer);
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/state/editing", &answer));
-  CHECK_TRUE(answer);
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/state/searching", &answer));
+  CHECK_TRUE(AnswerSearchQuery(kSearchSeedQuery, &answer));
   CHECK_FALSE(answer);
-
-  for (const char* key : {"z", "z", "t", "o", "p"}) CHECK_TRUE(SearchApplyKey(key));
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/ready", &answer));
-  CHECK_TRUE(answer);
-  const SearchSubmit submit = SearchSubmitQuery();
-  CHECK_TRUE(SearchAccept(submit.generation,
-                          Page({Charted(Song("ZZ Top", "Sharp Dressed Man", "/download_file/u/i/s_rb3con")),
-                                Charted(Song("ZZ Top", "Gimme All Your Lovin", "/download_file/u/i/g_rb3con"))})));
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/state/results", &answer));
-  CHECK_TRUE(answer);
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/count/at-least/2", &answer));
-  CHECK_TRUE(answer);
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/count/at-least/3", &answer));
-  CHECK_FALSE(answer);
-  CHECK_FALSE(AnswerSearchQuery("rbbz-store/search/count/at-least/x", &answer));
+  // P9-11 retired the key pages' own probes; an old path is not a query at all now.
+  CHECK_FALSE(AnswerSearchQuery("rbbz-store/search/open", &answer));
+  CHECK_FALSE(AnswerSearchQuery("rbbz-store/search/ready", &answer));
+  CHECK_FALSE(AnswerSearchQuery("rbbz-store/search/state/editing", &answer));
+  CHECK_FALSE(AnswerSearchQuery("rbbz-store/search/count/at-least/2", &answer));
   CHECK_FALSE(AnswerSearchQuery("rbbz-store/search/nonsense", &answer));
   CHECK_FALSE(AnswerSearchQuery("rbbz-store/enabled", &answer));
   CHECK_FALSE(AnswerSearchQuery("rbbz-store/download/state/x/installed", &answer));
 
-  SearchClose();
-  CHECK_TRUE(AnswerSearchQuery("rbbz-store/search/open", &answer));
+  // The seed bit is true only while a diagnostic boot's field holds it: typing retires it, and so
+  // does a submit or a cancel.
+  CHECK_TRUE(SearchSeedField("bush"));
+  CHECK_TRUE(AnswerSearchQuery(kSearchSeedQuery, &answer));
+  CHECK_TRUE(answer);
+  CHECK_TRUE(SearchSetText("kate"));
+  CHECK_TRUE(AnswerSearchQuery(kSearchSeedQuery, &answer));
   CHECK_FALSE(answer);
-  // Leaving is not a cancel: the answer is still there when the pages are re-entered.
+  CHECK_TRUE(SearchSeedField("bush"));
+  const SearchSubmit submit = SearchSubmitQuery();
+  CHECK_TRUE(submit.started);
+  CHECK_TRUE(AnswerSearchQuery(kSearchSeedQuery, &answer));
+  CHECK_FALSE(answer);
+
+  // `show` is the answer's own mark: set when one lands, cleared by the policy that lists it.
+  CHECK_TRUE(SearchAccept(submit.generation,
+                          Page({Charted(Song("Bush", "Mouth", "/download_file/u/i/m_rb3con"))})));
+  CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
+  CHECK_TRUE(answer);
+  SearchMarkShown();
+  CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
+  CHECK_FALSE(answer);
+
+  // Leaving is not a cancel: the answer is still there when the store menu is re-entered.
+  SearchClose();
   CHECK_ENUM(SearchCurrent().state, SearchState::kResults);
   SearchCancel();
+  CHECK_TRUE(AnswerSearchQuery(kSearchSeedQuery, &answer));
+  CHECK_FALSE(answer);
 }
 
 // --- Predicates ----------------------------------------------------------------------------------
@@ -593,18 +575,17 @@ void TestPerFileDuplicates() {
 }
 
 void TestAnswerPresentation() {
-  test::BeginCase("an answer waits for the Search row, and only the strip belongs to the keys");
+  test::BeginCase("an answer waits for the Search row, and only the strip belongs to the keyboard");
   ResetSession(true);
   SearchOpen();
   bool answer = false;
   CHECK_TRUE(AnswerSearchQuery(kSearchShowQuery, &answer));
-  CHECK_FALSE(answer);  // nothing to list yet: the row opens the keys
+  CHECK_FALSE(answer);  // nothing to list yet: the row opens the keyboard
 
-  for (const char* key : {"b", "u", "s", "h"}) CHECK_TRUE(SearchApplyKey(key));
+  CHECK_TRUE(SearchSetText("bush"));
   const SearchSubmit submit = SearchSubmitQuery();
   CHECK_TRUE(submit.started);
-  CHECK_TRUE(AnswerSearchQuery(kSearchSearchingQuery, &answer));
-  CHECK_TRUE(answer);  // the submit is in flight
+  CHECK_TRUE(SearchStatusText().find("Searching for") != std::string::npos);
   CHECK_FALSE(SearchAnswerPending());
 
   CHECK_TRUE(SearchAccept(
@@ -617,9 +598,9 @@ void TestAnswerPresentation() {
   CHECK_TRUE(SearchStatusText().find("1 match") != std::string::npos);
   CHECK_TRUE(SearchStatusText().find(kSearchListHintOne) != std::string::npos);
 
-  // `leave` (every search page's `exit`, so Back ends it) closes the surface: the strip goes - it
-  // must not follow the player out of the keys - while the field, the answer **and** the pending
-  // mark stay. The mark is the Search row's gate: pressing it lists the answer.
+  // `leave` (the store menu's exit, so leaving the store ends it) closes the surface: the strip
+  // goes - it must not follow the player out of the store - while the field, the answer **and**
+  // the pending mark stay. The mark is the Search row's gate: pressing it lists the answer.
   std::string why;
   CHECK_TRUE(HandleStoreSearchWrite(kSearchLeaveWrite, &why));
   CHECK_TRUE(why.empty());
@@ -641,7 +622,7 @@ void TestAnswerPresentation() {
 
   // An edit retires both the answer and its pending mark.
   SearchOpen();
-  CHECK_TRUE(SearchApplyKey("s"));
+  CHECK_TRUE(SearchSetText("sabaton"));
   CHECK_FALSE(SearchAnswerPending());
   CHECK_TRUE(SearchOffers().empty());
   SearchCancel();
@@ -650,7 +631,7 @@ void TestAnswerPresentation() {
   // be able to open (an empty one returns the store to its menu), not silent states.
   ResetSession(true);
   SearchOpen();
-  for (const char* key : {"z", "z", "z", "q"}) CHECK_TRUE(SearchApplyKey(key));
+  CHECK_TRUE(SearchSetText("zzzq"));
   const SearchSubmit empty = SearchSubmitQuery();
   CHECK_TRUE(empty.started);
   CHECK_TRUE(SearchAccept(empty.generation, Page({})));
@@ -669,7 +650,7 @@ void TestAnswerPresentation() {
 void TestCancelSemantics() {
   test::BeginCase("cancel clears the field, close keeps it, and open re-shows it");
   ResetSession(true);
-  for (const char* key : {"q", "u", "e", "e", "n"}) CHECK_TRUE(SearchApplyKey(key));
+  CHECK_TRUE(SearchSetText("queen"));
   SearchClose();
   CHECK_ENUM(SearchCurrent().state, SearchState::kEditing);
   CHECK_STR(SearchCurrent().text, "queen");
@@ -888,7 +869,7 @@ int main(int argc, char** argv) {
   }
 #endif
   TestCodePoints();
-  TestKeyTokens();
+  TestRawText();
   TestSetText();
   TestSeedField();
   TestParseWrites();

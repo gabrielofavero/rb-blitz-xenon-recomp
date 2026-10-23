@@ -6,7 +6,6 @@
 
 #include "store/store_search.h"
 
-#include <cctype>
 #include <chrono>
 #include <iterator>
 #include <mutex>
@@ -111,38 +110,6 @@ bool HasControlCharacter(std::string_view text) {
   return false;
 }
 
-// --- Key tokens -------------------------------------------------------------------------------
-//
-// The spelling keys the authored pages send, and the characters they stand for. A letter or digit
-// is its own token, so the pages carry one row per character and this table stays four lines.
-
-struct SpellingKey {
-  std::string_view token;
-  std::string_view text;
-};
-
-constexpr SpellingKey kSpellingKeys[] = {
-    {kKeySpace, " "}, {kKeyApostrophe, "'"}, {kKeyDash, "-"}, {kKeyPeriod, "."},
-};
-
-bool IsLetterOrDigitToken(std::string_view token) {
-  return token.size() == 1 && ((token[0] >= 'a' && token[0] <= 'z') ||
-                               (token[0] >= '0' && token[0] <= '9') ||
-                               (token[0] >= 'A' && token[0] <= 'Z'));
-}
-
-bool IsKnownKeyToken(std::string_view token) {
-  if (IsLetterOrDigitToken(token)) {
-    return true;
-  }
-  for (const SpellingKey& key : kSpellingKeys) {
-    if (token == key.token) {
-      return true;
-    }
-  }
-  return token == kKeyBackspace || token == kKeyClear;
-}
-
 // --- The session ------------------------------------------------------------------------------
 
 std::mutex g_mutex;
@@ -155,6 +122,11 @@ bool g_open = false;
 // policy hands the page over (`SearchMarkShown`) or when the store is left. It is the front menu's
 // gate (`kSearchShowQuery`) and half of the caption strip's visibility rule.
 bool g_show = false;
+// P9-11's measurement switch: a boot with `store_search_seed` filled the field without opening the
+// surface. The store screen's keyboard entry asks `kSearchSeedQuery` and submits the field instead
+// of showing the keyboard while this is set; typing, submitting or cancelling retires it, so a
+// player who starts a real search gets the real keyboard.
+bool g_seed = false;
 std::string g_failure;
 
 struct Pending {
@@ -182,10 +154,11 @@ SubmitSink g_submit_sink;
 
 // The guest surface delivers one press as **two** writes in the same frame (measured 2026-10-20 in
 // a boot: one A press logged `search/key/a` twice at 17:19:36.328, and one C press twice at
-// 17:19:52.462). Applying both would append the character twice, delete two characters for one
-// Backspace and post two requests for one Done, so an identical command inside a few milliseconds
-// is treated as the same press. The window is far below a human double-tap (a player pressing A
-// twice for "ee" takes well over 100 ms).
+// 17:19:52.462 - the key pages that produced those writes are retired, but the panel behaviour they
+// measured is the store's own and still applies). Applying both would post two requests for one
+// submit, so an identical command inside a few milliseconds is treated as the same press. The
+// window is far below a human double-tap (a player pressing A twice for "ee" takes well over
+// 100 ms).
 constexpr auto kDuplicatePressWindow = std::chrono::milliseconds(50);
 bool g_has_last_press = false;
 StoreOp g_last_press_op = StoreOp::kNone;
@@ -218,11 +191,11 @@ void InvalidateInFlightLocked() {
 }
 
 std::string StatusTextLocked() {
-  // The strip belongs to the search surface: the key pages, plus the in-flight request that is
-  // still going when the player has already pressed Back. The *pending answer* (`g_show`) is not a
-  // strip state: it is the Search row's own gate, and the strip would otherwise follow the player
-  // out of the store (measured 2026-10-22: with `show` as a strip state, the count sat over the
-  // main menu after Back).
+  // The strip belongs to the search surface - the keyboard, plus the in-flight request that is
+  // still going when the player has pressed the keyboard's Cancel. The *pending answer* (`g_show`)
+  // is not a strip state: it is the Search row's own gate, and the strip would otherwise follow the
+  // player out of the store (measured 2026-10-22: with `show` as a strip state, the count sat over
+  // the main menu after Back).
   if (!g_open && g_state != SearchState::kSearching) {
     return {};
   }
@@ -277,27 +250,6 @@ std::size_t CodePointCount(std::string_view utf8) {
 
 // --- SearchText -------------------------------------------------------------------------------
 
-SearchText::Edit SearchText::AppendKeyToken(std::string_view token) {
-  if (token == kKeyBackspace || token == kKeyClear || token == kKeyDone || token == kKeyCancel) {
-    return Edit::kRejected;
-  }
-  if (length() + 1 > static_cast<std::size_t>(kMaxSearchChars)) {
-    return Edit::kFull;
-  }
-  if (IsLetterOrDigitToken(token)) {
-    // The pages send the character itself; upper case is folded, because the API's matching is
-    // not case-sensitive and `A` and `a` on two pages are the same letter to the catalogue.
-    text_.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(token[0]))));
-    return Edit::kOk;
-  }
-  const std::string_view piece = KeyTokenText(token);
-  if (piece.empty()) {
-    return Edit::kRejected;
-  }
-  text_.append(piece);
-  return Edit::kOk;
-}
-
 bool SearchText::Set(std::string_view utf8) {
   const std::string_view trimmed = Trim(utf8);
   if (!IsValidUtf8(trimmed) || HasControlCharacter(trimmed)) {
@@ -310,28 +262,7 @@ bool SearchText::Set(std::string_view utf8) {
   return true;
 }
 
-bool SearchText::Backspace() {
-  if (text_.empty()) {
-    return false;
-  }
-  std::size_t pos = text_.size() - 1;
-  while (pos > 0 && (static_cast<std::uint8_t>(text_[pos]) & 0xC0) == 0x80) {
-    --pos;
-  }
-  text_.erase(pos);
-  return true;
-}
-
 void SearchText::Clear() { text_.clear(); }
-
-std::string_view KeyTokenText(std::string_view token) {
-  for (const SpellingKey& key : kSpellingKeys) {
-    if (token == key.token) {
-      return key.text;
-    }
-  }
-  return {};
-}
 
 // --- The session's commands -------------------------------------------------------------------
 
@@ -355,8 +286,8 @@ void SearchClose() {
   const std::lock_guard<std::mutex> lock(g_mutex);
   g_open = false;
   // Only the surface closes. The field, the answer and the pending mark all stay: the Search row
-  // is the way to the answer (it lists it once and then goes back to opening the keys), and
-  // leaving the pages is not a cancel - Back can be pressed while the request is still running.
+  // is the way to the answer (it lists it once and then goes back to opening the keyboard), and
+  // leaving the store is not a cancel - the request can still be running.
 }
 
 void SearchCancel() {
@@ -365,33 +296,13 @@ void SearchCancel() {
   g_pending = Pending{};
   g_open = false;
   g_show = false;
+  g_seed = false;
   g_text.Clear();
   g_offers.clear();
   g_failure.clear();
   g_state = SearchState::kIdle;
   g_retry_at = {};
   g_has_last_press = false;
-}
-
-bool SearchApplyKey(std::string_view token) {
-  const std::lock_guard<std::mutex> lock(g_mutex);
-  if (!IsKnownKeyToken(token)) {
-    return false;
-  }
-  InvalidateInFlightLocked();
-  if (token == kKeyBackspace) {
-    g_text.Backspace();
-  } else if (token == kKeyClear) {
-    g_text.Clear();
-  } else {
-    g_text.AppendKeyToken(token);
-  }
-  g_offers.clear();
-  g_failure.clear();
-  g_show = false;  // an edit retires the answer the store was about to list
-  g_state = SearchState::kEditing;
-  g_open = true;
-  return true;
 }
 
 bool SearchSetText(std::string_view utf8) {
@@ -403,6 +314,8 @@ bool SearchSetText(std::string_view utf8) {
   g_offers.clear();
   g_failure.clear();
   g_show = false;
+  // A typed query is the player's, not the diagnostic's: the next Search press shows the keyboard.
+  g_seed = false;
   g_state = SearchState::kEditing;
   g_open = true;
   return true;
@@ -419,6 +332,7 @@ bool SearchSeedField(std::string_view utf8) {
   g_show = false;
   g_state = SearchState::kEditing;
   // Deliberately not `g_open = true`: the field is seeded, the surface is not entered.
+  g_seed = true;
   return true;
 }
 
@@ -486,6 +400,8 @@ SearchSubmit SearchSubmitQuery() {
   g_retry_at = {};
   g_state = SearchState::kSearching;
   g_open = true;
+  // P9-11: a submit consumes the diagnostic seed - the next Search press shows the keyboard again.
+  g_seed = false;
   out.started = true;
   out.generation = g_generation;
   out.request = *spec;
@@ -643,37 +559,12 @@ bool AnswerSearchQuery(std::string_view path, bool* answer) {
   }
   const std::string_view rest = path.substr(kPrefix.size());
   const std::lock_guard<std::mutex> guard(g_mutex);
-  if (rest == "open") {
-    *answer = g_open;
-    return true;
-  }
-  if (rest == "ready") {
-    *answer = g_text.ready();
-    return true;
-  }
   if (rest == "show") {
     *answer = g_show;
     return true;
   }
-  constexpr std::string_view kState = "state/";
-  if (rest.starts_with(kState)) {
-    *answer = SearchStateToken(g_state) == rest.substr(kState.size());
-    return true;
-  }
-  constexpr std::string_view kCount = "count/at-least/";
-  if (rest.starts_with(kCount)) {
-    const std::string_view digits = rest.substr(kCount.size());
-    if (digits.empty() || digits.size() > 2) {
-      return false;
-    }
-    int wanted = 0;
-    for (const char c : digits) {
-      if (c < '0' || c > '9') {
-        return false;
-      }
-      wanted = wanted * 10 + (c - '0');
-    }
-    *answer = static_cast<int>(g_offers.size()) >= wanted;
+  if (rest == "seed") {
+    *answer = g_seed;
     return true;
   }
   return false;
@@ -692,6 +583,11 @@ void SearchMarkShown() {
 bool SearchAnswerPending() {
   const std::lock_guard<std::mutex> guard(g_mutex);
   return g_show;
+}
+
+bool SearchInFlight() {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  return g_state == SearchState::kSearching && g_offers.empty();
 }
 
 SearchSnapshot SearchCurrent() {
@@ -751,40 +647,20 @@ StoreParse ParseStoreWrite(std::string_view path, StoreOp* op, std::string* toke
     *op = StoreOp::kSearchLeave;
     return StoreParse::kAccepted;
   }
-  constexpr std::string_view kKey = "key/";
-  if (action.starts_with(kKey)) {
-    const std::string_view name = action.substr(kKey.size());
-    if (!IsKnownKeyToken(name)) {
-      return refuse("unknown key token");
-    }
-    *op = StoreOp::kSearchKey;
-    *token = std::string(name);
-    return StoreParse::kAccepted;
-  }
   constexpr std::string_view kText = "text/";
   if (action.starts_with(kText)) {
-    const std::string_view hex = action.substr(kText.size());
-    if (hex.empty() || hex.size() % 2 != 0 || hex.size() > 4u * kMaxSearchChars) {
-      return refuse("the text body is not whole-byte hex");
+    // P9-11: the title's keyboard hands over one raw UTF-8 string, and `SearchText::Set` is the
+    // only gate it needs (trim, control characters, UTF-8, length). The path is not a token list
+    // any more, so spaces, apostrophes and accented bytes are the query itself.
+    const std::string_view query = action.substr(kText.size());
+    if (query.empty()) {
+      return refuse("the text body is empty");
     }
-    std::string bytes;
-    bytes.reserve(hex.size() / 2);
-    for (std::size_t i = 0; i < hex.size(); i += 2) {
-      const auto nibble = [](const char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
-      };
-      const int hi = nibble(hex[i]);
-      const int lo = nibble(hex[i + 1]);
-      if (hi < 0 || lo < 0) {
-        return refuse("the text body is not whole-byte hex");
-      }
-      bytes.push_back(static_cast<char>((hi << 4) | lo));
+    if (query.size() > 4u * kMaxSearchChars) {
+      return refuse("the text body is too long");
     }
     *op = StoreOp::kSearchText;
-    *text = std::move(bytes);
+    *text = std::string(query);
     return StoreParse::kAccepted;
   }
   return refuse("unknown search action");
@@ -809,11 +685,6 @@ bool ApplyStoreWrite(StoreOp op, std::string_view token, std::string_view text, 
       // Deliberately not de-duplicated: leaving twice is the same as leaving once.
       SearchClose();
       return true;
-    case StoreOp::kSearchKey:
-      if (IsDuplicatePress(op, token)) {
-        return true;
-      }
-      return SearchApplyKey(token) ? true : refuse("unknown key token");
     case StoreOp::kSearchText:
       return SearchSetText(text) ? true : refuse("the query is not valid UTF-8 or is too long");
     case StoreOp::kSearchDone: {

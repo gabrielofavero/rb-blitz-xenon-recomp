@@ -1112,7 +1112,7 @@ bool IsStoreRequest(const Node& node) {
          node.kids[1].text == "request";
 }
 
-// `{if_else {== $ix <row>} ... ...}` - the gate `RouteSearchRowToKeys` writes.
+// `{if_else {== $ix <row>} ... ...}` - the gate `RouteSearchRowToKeyboard` writes.
 bool IsSearchGate(const Node& node, int row) {
   if (node.tag != rb_blitz::ui::dtb::kCommand || node.kids.size() != 4 ||
       node.kids[0].tag != rb_blitz::ui::dtb::kSymbol || node.kids[0].text != "if_else") {
@@ -1141,20 +1141,105 @@ bool IsFileExists(const Node& node, std::string_view path) {
          node.kids[1].tag == rb_blitz::ui::dtb::kString && node.kids[1].text == path;
 }
 
-bool IsGotoScreen(const Node& node, std::string_view screen) {
-  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
-         node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "ui" &&
-         node.kids[1].text == "goto_screen" && node.kids[2].tag == rb_blitz::ui::dtb::kSymbol &&
-         node.kids[2].text == screen;
+// `{ {ui current_screen} <method> }` - the screen method the Search row calls (P9-11).
+bool IsCurrentScreenCall(const Node& node, std::string_view method) {
+  if (node.tag != rb_blitz::ui::dtb::kCommand || node.kids.size() != 2) return false;
+  const Node& receiver = node.kids[0];
+  return receiver.tag == rb_blitz::ui::dtb::kCommand && receiver.kids.size() == 2 &&
+         receiver.kids[0].tag == rb_blitz::ui::dtb::kSymbol && receiver.kids[0].text == "ui" &&
+         receiver.kids[1].tag == rb_blitz::ui::dtb::kSymbol &&
+         receiver.kids[1].text == "current_screen" && node.kids[1].tag == rb_blitz::ui::dtb::kSymbol &&
+         node.kids[1].text == method;
 }
 
-void TestSearchRowRoutesToKeys() {
-  BeginCase("the front menu's Search row opens the keys until an answer is waiting");
+// `{do {store_panel set_source menu_search TRUE} {store_panel request "/eng/search/" TRUE}
+// {store_panel update_loading_status}}` - the shipped Search row's own three statements, which the
+// keyboard's result handler runs after the submit so the answer opens in the browser with no second
+// press (`store_menu_panel.SELECT_MSG`).
+bool IsSearchPageRequest(const Node& node) {
+  if (node.tag != rb_blitz::ui::dtb::kCommand || node.kids.size() != 4 ||
+      node.kids[0].tag != rb_blitz::ui::dtb::kSymbol || node.kids[0].text != "do") {
+    return false;
+  }
+  const Node& source = node.kids[1];
+  const Node& request = node.kids[2];
+  const Node& loading = node.kids[3];
+  return source.tag == rb_blitz::ui::dtb::kCommand && source.kids.size() == 4 &&
+         source.kids[0].tag == rb_blitz::ui::dtb::kSymbol && source.kids[0].text == "store_panel" &&
+         source.kids[1].tag == rb_blitz::ui::dtb::kSymbol && source.kids[1].text == "set_source" &&
+         source.kids[2].tag == rb_blitz::ui::dtb::kSymbol && source.kids[2].text == "menu_search" &&
+         request.tag == rb_blitz::ui::dtb::kCommand && request.kids.size() == 4 &&
+         request.kids[0].tag == rb_blitz::ui::dtb::kSymbol && request.kids[0].text == "store_panel" &&
+         request.kids[1].tag == rb_blitz::ui::dtb::kSymbol && request.kids[1].text == "request" &&
+         request.kids[2].tag == rb_blitz::ui::dtb::kString &&
+         request.kids[2].text == rb_blitz::store::kSearchPageRequest &&
+         loading.tag == rb_blitz::ui::dtb::kCommand && loading.kids.size() == 2 &&
+         loading.kids[0].tag == rb_blitz::ui::dtb::kSymbol &&
+         loading.kids[0].text == "store_panel" && loading.kids[1].text == "update_loading_status";
+}
+
+bool IsWriteFile(const Node& node, std::string_view path) {
+  return node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+         node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "write_file" &&
+         node.kids[1].tag == rb_blitz::ui::dtb::kString && node.kids[1].text == path;
+}
+
+// `{$user {user_mgr <getter> …}}` - the bind the keyboard's first argument needs.
+bool IsUserBinding(const Node& node, std::string_view getter) {
+  if (node.tag != rb_blitz::ui::dtb::kArray || node.kids.size() < 2) return false;
+  const Node& target = node.kids[0];
+  const Node& call = node.kids[1];
+  return target.tag == rb_blitz::ui::dtb::kVar && target.text == "user" &&
+         call.tag == rb_blitz::ui::dtb::kCommand && call.kids.size() >= 2 &&
+         call.kids[0].tag == rb_blitz::ui::dtb::kSymbol && call.kids[0].text == "user_mgr" &&
+         call.kids[1].tag == rb_blitz::ui::dtb::kSymbol && call.kids[1].text == getter;
+}
+
+// `{virtual_keyboard show_keyboard $user 100 (localize …) (localize …) "" $this}` - the call the
+// Ultimate payload's own song search makes, with `$this` as the result's receiver. `$user` is a
+// **variable holding a User object**: the native show reads the player's name from it, so a symbol
+// there is a null read (measured 2026-10-23).
+bool IsShowKeyboard(const Node& node) {
+  if (node.tag != rb_blitz::ui::dtb::kCommand || node.kids.size() != 8) return false;
+  if (node.kids[0].tag != rb_blitz::ui::dtb::kSymbol || node.kids[0].text != "virtual_keyboard" ||
+      (node.kids[1].tag != rb_blitz::ui::dtb::kSymbol && node.kids[1].tag != rb_blitz::ui::dtb::kVar) ||
+      node.kids[1].text != "show_keyboard" || node.kids[2].tag != rb_blitz::ui::dtb::kVar ||
+      node.kids[2].text != "user" || node.kids[3].tag != rb_blitz::ui::dtb::kInt ||
+      node.kids[3].scalar != 100) {
+    return false;
+  }
+  const Node& title = node.kids[4];
+  const Node& desc = node.kids[5];
+  const Node& initial = node.kids[6];
+  const Node& receiver = node.kids[7];
+  return title.tag == rb_blitz::ui::dtb::kCommand && title.kids.size() == 2 &&
+         title.kids[0].text == "localize" && title.kids[1].text == "search_for_song" &&
+         desc.tag == rb_blitz::ui::dtb::kCommand && desc.kids.size() == 2 &&
+         desc.kids[0].text == "localize" && desc.kids[1].text == "search_for_song_desc" &&
+         initial.tag == rb_blitz::ui::dtb::kString && initial.text.empty() &&
+         receiver.tag == rb_blitz::ui::dtb::kVar && receiver.text == "this";
+}
+
+const Node* FindMethod(const Node& root, std::string_view name) {
+  if (root.tag == rb_blitz::ui::dtb::kCommand && root.kids.size() >= 4 &&
+      root.kids[0].text == "new") {
+    for (size_t i = 3; i < root.kids.size(); ++i) {
+      const Node& kid = root.kids[i];
+      if (kid.tag == rb_blitz::ui::dtb::kArray && !kid.kids.empty() &&
+          kid.kids[0].tag == rb_blitz::ui::dtb::kSymbol && kid.kids[0].text == name) {
+        return &kid;
+      }
+    }
+  }
+  return nullptr;
+}
+
+void TestSearchRowRoutesToKeyboard() {
+  BeginCase("the front menu's Search row opens the title's keyboard until an answer is waiting");
 
   std::vector<Node> record = StoreMenuPanelRecord();
   std::string why;
-  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeys(&record, 1, "settings_rhythmverse_search_screen",
-                                                   &why));
+  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeyboard(&record, 1, "open_store_search", &why));
   if (!why.empty()) Fail(__FILE__, __LINE__, why);
 
   const Node* select = FindNamedMethodNode(record[0], "store_menu_panel", "SELECT_MSG");
@@ -1164,14 +1249,14 @@ void TestSearchRowRoutesToKeys() {
   CHECK_TRUE(gate != nullptr);
   if (gate == nullptr) return;
 
-  // The search branch: request when the host says an answer is waiting, else open the keys.
+  // The search branch: request when the host says an answer is waiting, else the keyboard entry.
   const Node& search_branch = gate->kids[2];
   CHECK_TRUE(search_branch.tag == rb_blitz::ui::dtb::kCommand && search_branch.kids.size() == 4 &&
              search_branch.kids[0].text == "if_else");
   if (search_branch.kids.size() == 4) {
     CHECK_TRUE(IsFileExists(search_branch.kids[1], rb_blitz::store::kSearchShowQuery));
     CHECK_TRUE(IsStoreRequest(search_branch.kids[2]));
-    CHECK_TRUE(IsGotoScreen(search_branch.kids[3], "settings_rhythmverse_search_screen"));
+    CHECK_TRUE(IsCurrentScreenCall(search_branch.kids[3], "open_store_search"));
   }
   // Every other row keeps retail's own statement, verbatim.
   CHECK_TRUE(IsStoreRequest(gate->kids[3]));
@@ -1191,8 +1276,7 @@ void TestSearchRowRoutesToKeys() {
 
   // A second pass refuses rather than nesting a second gate.
   why.clear();
-  CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(&record, 1, "settings_rhythmverse_search_screen",
-                                                    &why));
+  CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeyboard(&record, 1, "open_store_search", &why));
   CHECK_TRUE(why.find("already routed") != std::string::npos);
 
   // Refusals leave the tree exactly as it was.
@@ -1201,21 +1285,190 @@ void TestSearchRowRoutesToKeys() {
                                               Node::Array({Symbol("enter")})})};
     const std::vector<Node> before = other;
     why.clear();
-    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(&other, 1, "settings_rhythmverse_search_screen",
-                                                      &why));
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeyboard(&other, 1, "open_store_search", &why));
     CHECK_TRUE(TreeUnchanged(other, before));
   }
   {
     std::vector<Node> fresh = StoreMenuPanelRecord();
     const std::vector<Node> before = fresh;
     why.clear();
-    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(&fresh, -1, "settings_rhythmverse_search_screen",
-                                                      &why));
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeyboard(&fresh, -1, "open_store_search", &why));
     CHECK_TRUE(TreeUnchanged(fresh, before));
     why.clear();
-    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeys(nullptr, 1, "settings_rhythmverse_search_screen",
-                                                      &why));
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeyboard(&fresh, 1, "", &why));
+    CHECK_TRUE(TreeUnchanged(fresh, before));
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::RouteSearchRowToKeyboard(nullptr, 1, "open_store_search", &why));
   }
+}
+
+// The record shape `AddSearchKeyboard` edits: the store's own shipped screen plus a menu panel with
+// an `exit` the transform appends the dismissal to.
+std::vector<Node> StoreMenuScreenRecord() {
+  std::vector<Node> record = StoreMenuPanelRecord();
+  Node screen = Node::Command({Symbol("new"), Symbol("UIScreen"), Symbol("store_menu_screen"),
+                               Node::Array({Symbol("panels"), Symbol("store_menu_panel")}),
+                               Node::Array({Symbol("enter"), Node::Command({Symbol("do")})})});
+  record.push_back(std::move(screen));
+  return record;
+}
+
+void TestSearchKeyboardScreenMethods() {
+  BeginCase("the store screen carries the keyboard entry, its result, and the dismissal");
+
+  std::vector<Node> record = StoreMenuScreenRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddSearchKeyboard(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+
+  const Node* screen = nullptr;
+  const Node* panel = nullptr;
+  for (const Node& root : record) {
+    if (root.kids.size() >= 3 && root.kids[2].tag == rb_blitz::ui::dtb::kSymbol &&
+        root.kids[2].text == "store_menu_screen") {
+      screen = &root;
+    }
+    if (root.kids.size() >= 3 && root.kids[2].text == "store_menu_panel") {
+      panel = &root;
+    }
+  }
+  CHECK_TRUE(screen != nullptr);
+  CHECK_TRUE(panel != nullptr);
+  if (screen == nullptr || panel == nullptr) return;
+
+  // 1. The entry: guidance first, then the seeded submit or the keyboard itself.
+  const Node* open = FindMethod(*screen, "open_store_search");
+  CHECK_TRUE(open != nullptr);
+  if (open != nullptr) {
+    const Node& body = open->kids[1];
+    CHECK_TRUE(body.tag == rb_blitz::ui::dtb::kCommand && body.kids[0].text == "do" &&
+               body.kids.size() == 3);
+    if (body.kids.size() == 3) {
+      CHECK_TRUE(IsWriteFile(body.kids[1], "rbbz-store/search/open"));
+      const Node& gate = body.kids[2];
+      CHECK_TRUE(gate.kids.size() == 4 && gate.kids[0].text == "if_else");
+      if (gate.kids.size() == 4) {
+        CHECK_TRUE(IsFileExists(gate.kids[1], rb_blitz::store::kSearchSeedQuery));
+        // The seeded submit asks for the page in the same breath, so a scripted boot measures the
+        // whole flow (submit -> page -> browser) without a second press.
+        const Node& seeded = gate.kids[2];
+        CHECK_TRUE(seeded.kids.size() == 3 && seeded.kids[0].text == "do");
+        if (seeded.kids.size() == 3) {
+          CHECK_TRUE(IsWriteFile(seeded.kids[1], "rbbz-store/search/done"));
+          CHECK_TRUE(IsSearchPageRequest(seeded.kids[2]));
+        }
+        // The keyboard arm binds a User object first: the native show reads the player's name
+        // from it, and a bare symbol there is a null read (measured 2026-10-23).
+        const Node& with_user = gate.kids[3];
+        CHECK_TRUE(with_user.kids.size() == 3 && with_user.kids[0].text == "do");
+        if (with_user.kids.size() == 3) {
+          CHECK_TRUE(IsUserBinding(with_user.kids[1], "get_participating_user"));
+          const Node& pick = with_user.kids[2];
+          CHECK_TRUE(pick.kids.size() == 4 && pick.kids[0].text == "if_else" &&
+                     pick.kids[1].tag == rb_blitz::ui::dtb::kVar && pick.kids[1].text == "user");
+          CHECK_TRUE(pick.kids.size() == 4 && IsShowKeyboard(pick.kids[2]));
+          const Node& fallback = pick.kids.size() == 4 ? pick.kids[3] : pick;
+          CHECK_TRUE(fallback.kids.size() == 3 && fallback.kids[0].text == "do");
+          if (fallback.kids.size() == 3) {
+            CHECK_TRUE(IsUserBinding(fallback.kids[1], "get_user_from_pad_num"));
+            const Node& second = fallback.kids[2];
+            CHECK_TRUE(second.kids.size() == 4 && second.kids[0].text == "if_else" &&
+                       second.kids[1].tag == rb_blitz::ui::dtb::kVar &&
+                       second.kids[1].text == "user");
+            CHECK_TRUE(second.kids.size() == 4 && IsShowKeyboard(second.kids[2]));
+            if (second.kids.size() == 4) {
+              CHECK_TRUE(IsWriteFile(second.kids[3], rb_blitz::store::kSearchLeaveWrite));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. The result: `$ok` gates the text write and the submit; its else arm dismisses the strip.
+  const Node* result = FindMethod(*screen, rb_blitz::store::kSearchKeyboardResultMethod);
+  CHECK_TRUE(result != nullptr);
+  if (result != nullptr) {
+    // Two positional values arrive from the engine, so the method carries a parameter list.
+    CHECK_TRUE(result->kids.size() == 3);
+    if (result->kids.size() == 3) {
+      const Node& params = result->kids[1];
+      CHECK_TRUE(params.tag == rb_blitz::ui::dtb::kArray && params.kids.size() == 2 &&
+                 params.kids[0].tag == rb_blitz::ui::dtb::kVar && params.kids[0].text == "ok" &&
+                 params.kids[1].tag == rb_blitz::ui::dtb::kVar && params.kids[1].text == "text");
+    }
+    const Node& body = result->kids.size() == 3 ? result->kids[2] : result->kids[1];
+    CHECK_TRUE(body.kids.size() == 4 && body.kids[0].text == "if_else" &&
+               body.kids[1].tag == rb_blitz::ui::dtb::kVar && body.kids[1].text == "ok");
+    CHECK_TRUE(body.kids.size() == 4 &&
+               IsWriteFile(body.kids[3], rb_blitz::store::kSearchLeaveWrite));
+    const Node& inner = body.kids[2];
+    CHECK_TRUE(inner.kids.size() == 4 && inner.kids[0].text == "do");
+    if (inner.kids.size() == 4) {
+      const Node& write = inner.kids[1];
+      CHECK_TRUE(write.kids.size() == 3 && write.kids[0].text == "write_file" &&
+                 write.kids[1].tag == rb_blitz::ui::dtb::kCommand &&
+                 write.kids[1].kids[0].text == "sprintf" &&
+                 write.kids[1].kids[1].tag == rb_blitz::ui::dtb::kString &&
+                 write.kids[1].kids[1].text == "rbbz-store/search/text/%s" &&
+                 write.kids[1].kids[2].tag == rb_blitz::ui::dtb::kVar &&
+                 write.kids[1].kids[2].text == "text");
+      CHECK_TRUE(IsWriteFile(inner.kids[2], "rbbz-store/search/done"));
+      // ...and then the page, so confirming the keyboard opens the answer in the browser.
+      CHECK_TRUE(IsSearchPageRequest(inner.kids[3]));
+    }
+  }
+
+  // 3. The dismissal: leaving the store ends the strip, and the field and answer stay.
+  const Node* exit = FindMethod(*panel, "exit");
+  CHECK_TRUE(exit != nullptr);
+  if (exit != nullptr) {
+    CHECK_TRUE(!exit->kids.empty() &&
+               IsWriteFile(exit->kids.back(), rb_blitz::store::kSearchLeaveWrite));
+  }
+
+  // A second pass refuses, and refusals leave the record byte-identical.
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AddSearchKeyboard(&record, &why));
+  CHECK_TRUE(why.find("already carries") != std::string::npos);
+  {
+    std::vector<Node> panel_only = StoreMenuPanelRecord();
+    const std::vector<Node> before = panel_only;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::AddSearchKeyboard(&panel_only, &why));
+    CHECK_TRUE(TreeUnchanged(panel_only, before));
+  }
+  {
+    std::vector<Node> nothing;
+    why.clear();
+    CHECK_FALSE(rb_blitz::store::AddSearchKeyboard(nullptr, &why));
+    CHECK_TRUE(nothing.empty());
+  }
+}
+
+void TestSearchKeyboardSurvivesCompileAndParse() {
+  BeginCase("the keyboard methods survive compile and parse");
+
+  std::vector<Node> record = StoreMenuScreenRecord();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddSearchKeyboard(&record, &why));
+  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeyboard(&record, 1, "open_store_search", &why));
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  const Node* screen = nullptr;
+  for (const Node& root : parsed) {
+    if (root.kids.size() >= 3 && root.kids[2].tag == rb_blitz::ui::dtb::kSymbol &&
+        root.kids[2].text == "store_menu_screen") {
+      screen = &root;
+    }
+  }
+  CHECK_TRUE(screen != nullptr);
+  if (screen == nullptr) return;
+  CHECK_TRUE(FindMethod(*screen, "open_store_search") != nullptr);
+  CHECK_TRUE(FindMethod(*screen, rb_blitz::store::kSearchKeyboardResultMethod) != nullptr);
 }
 
 void TestSearchRowGateSurvivesCompileAndParse() {
@@ -1223,8 +1476,7 @@ void TestSearchRowGateSurvivesCompileAndParse() {
 
   std::vector<Node> record = StoreMenuPanelRecord();
   std::string why;
-  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeys(&record, 1, "settings_rhythmverse_search_screen",
-                                                   &why));
+  CHECK_TRUE(rb_blitz::store::RouteSearchRowToKeyboard(&record, 1, "open_store_search", &why));
   const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
   std::vector<Node> parsed;
   rb_blitz::ui::dtb::RootHeader header;
@@ -1313,11 +1565,17 @@ int StoreEdit(const char* path, const char* which) {
     return ok ? 0 : 1;
   }
   if (mode == "search") {
-    // P4's two transforms against the shipped record, and the method they rewrote, printed in full:
+    // P9-11's transforms against the shipped record, and the methods they wrote, printed in full:
     // the gate has to sit inside the same `{do}` that defined `$provider`/`$ix`, and only the
-    // document itself can show that.
-    const bool routed = rb_blitz::store::RouteSearchRowToKeys(
-        &roots, rb_blitz::store::kSearchMenuRow, "settings_rhythmverse_search_screen", &why);
+    // document itself can show that. `AddSearchKeyboard` runs first because the gate calls the
+    // screen method it defines.
+    why.clear();
+    const bool keyboard = rb_blitz::store::AddSearchKeyboard(&roots, &why);
+    std::printf("store-edit: search keyboard -> %s (%s)\n", keyboard ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool routed = rb_blitz::store::RouteSearchRowToKeyboard(
+        &roots, rb_blitz::store::kSearchMenuRow, rb_blitz::store::kSearchKeyboardMethod, &why);
     std::printf("store-edit: search row -> %s (%s)\n", routed ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
     const Node* select = nullptr;
@@ -1331,6 +1589,35 @@ int StoreEdit(const char* path, const char* which) {
     } else {
       std::printf("store-edit: SELECT_MSG not found in %zu root(s)\n", roots.size());
     }
+    const Node* open = nullptr;
+    const Node* result = nullptr;
+    for (const Node& root : roots) {
+      if (open == nullptr) open = FindMethod(root, "open_store_search");
+      if (result == nullptr) result = FindMethod(root, rb_blitz::store::kSearchKeyboardResultMethod);
+    }
+    if (open != nullptr) {
+      std::printf("store-edit: open_store_search:\n");
+      PrintNode(*open, 0);
+    } else {
+      std::printf("store-edit: open_store_search not found\n");
+    }
+    if (result != nullptr) {
+      std::printf("store-edit: %s:\n", rb_blitz::store::kSearchKeyboardResultMethod);
+      PrintNode(*result, 0);
+    } else {
+      std::printf("store-edit: %s not found\n", rb_blitz::store::kSearchKeyboardResultMethod);
+    }
+    const Node* exit = nullptr;
+    for (const Node& root : roots) {
+      exit = FindNamedMethodNode(root, "store_menu_panel", "exit");
+      if (exit != nullptr) break;
+    }
+    if (exit != nullptr) {
+      std::printf("store-edit: store_menu_panel exit:\n");
+      PrintNode(*exit, 0);
+    } else {
+      std::printf("store-edit: store_menu_panel exit not found\n");
+    }
     return routed ? 0 : 1;
   }
   if (mode == "store") {
@@ -1342,11 +1629,15 @@ int StoreEdit(const char* path, const char* which) {
     std::printf("store-edit: album art -> %s (%s)\n", art ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
     why.clear();
-    const bool search = rb_blitz::store::RouteSearchRowToKeys(
-        &roots, rb_blitz::store::kSearchMenuRow, "settings_rhythmverse_search_screen", &why);
+    const bool keyboard = rb_blitz::store::AddSearchKeyboard(&roots, &why);
+    std::printf("store-edit: search keyboard -> %s (%s)\n", keyboard ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool search = rb_blitz::store::RouteSearchRowToKeyboard(
+        &roots, rb_blitz::store::kSearchMenuRow, rb_blitz::store::kSearchKeyboardMethod, &why);
     std::printf("store-edit: search row -> %s (%s)\n", search ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && art && search;
+    ok = ok && art && keyboard && search;
   } else if (mode == "start") {
     // P9-7/P9-8 against the shipped store record, then every method those edits touch, printed in
     // full: whether the caption commands sit on the scenes' own `InlineHelp.ihp`/`store.ihp`
@@ -2083,7 +2374,7 @@ std::vector<Node> StoreScreensRecord() {
 }
 
 void TestStoreStartRoutesToFilter() {
-  BeginCase("the store's Start button opens the Search Song Filter page");
+  BeginCase("the store's Start button opens the Filters page");
 
   std::vector<Node> record = StoreScreensRecord();
   std::string why;
@@ -2181,7 +2472,7 @@ void TestStoreStartRoutesToFilter() {
 }
 
 void TestStoreFooterStart() {
-  BeginCase("the store's footer names the Search Filters button");
+  BeginCase("the store's footer names the Filters button");
 
   std::vector<Node> record = StoreScreensRecord();
   std::string why;
@@ -2390,7 +2681,9 @@ int main(int argc, char** argv) {
   TestStoreEntryBypass();
   TestStoreEntryBypassRefusal();
   TestStoreEntryBypassSurvivesCompileAndParse();
-  TestSearchRowRoutesToKeys();
+  TestSearchRowRoutesToKeyboard();
+  TestSearchKeyboardScreenMethods();
+  TestSearchKeyboardSurvivesCompileAndParse();
   TestSearchRowGateSurvivesCompileAndParse();
   TestStorePriceFooter();
   TestStoreInfoPriceChrome();

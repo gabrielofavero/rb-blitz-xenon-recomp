@@ -1771,6 +1771,11 @@ now feeds"); P3 has since landed, and this closes it.
   re-pressing Search after browsing results opens the keys again (the pending mark was consumed by
   the listing).
 
+*(Superseded 2026-10-23 by §9/P9-11's record: the authored key pages are **deleted** and the
+Search row opens the title's own keyboard, so "typing is still the authored key rows", the two
+"Press Back, then Search" sentences and the key-page test cases this record lists no longer
+describe the build; the measurements it took - the request, the answer and the served page - stand.)*
+
 ### P5 — download pipeline
 
 - Host `store_download` implements **all of §3.1**, using the offer's validated URL held by the
@@ -2411,7 +2416,7 @@ one.
 | P9-8 | Done | Store footer | Hide **Y View Item** where it does nothing | — |
 | P9-9 | Done | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
 | P9-10 | Done | Catalogue | Warm Recently Added at boot; a failed press draws the retail connection-failed popup and retries in the background — nothing is hidden | P7's fetch-on-open |
-| P9-11 | Todo | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
+| P9-11 | In Progress | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
 | P9-12 | Done | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
 | P9-13 | Todo | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
 
@@ -2437,9 +2442,10 @@ Store-leg steps (footer `SEARCH FILTERS`, Start → the filter page, Back → th
 measured in one boot against a loopback stub via the new `store_api_base` diagnostic: two refusing
 presses each drew the retail popup and logged `(a press asked)`, the third after the stub was
 flipped served four pages and the Recent list opened with its offers
-(`out/_swap/p910-fail/run3/20261023-151158`); P9-11's authored key pages are still registered in
-`src/ui/settings_screen.cpp`;
-**P9-12 is Done (owner's boot, 2026-10-23)** — the main menu's `RHYTHMVERSE` / `REFRESH SONGS`
+(`out/_swap/p910-fail/run3/20261023-151158`); **P9-11 is In Progress**: the keyboard route is
+landed and checked against the shipped record (`store-edit … search`), and the authored key pages
+are gone, but the in-game typing is the owner's retest (this environment cannot type on the console
+keyboard);
 labels and the refresh entry's compiled-On default were confirmed on the rebuilt binary; P9-13 has
 no `audio_type`, `charter` or `release_date` on `SongFile` or `Offer`.
 
@@ -3660,6 +3666,128 @@ which the hosts file cannot give; so the boot got an instrument of its own.
 - **Done when**: store → Search draws the title's own popup, a typed query answers in the strip and
   fills the browser, Cancel returns to the front menu, and the authored key pages are gone or
   provably unreachable.
+
+**P9-11 record (2026-10-23) — the authored key pages are gone and the store's Search row opens the
+title's own keyboard; the in-game typing is the one half this environment cannot measure.**
+
+- **The contradiction, resolved — the dump was from the Ultimate build.** `out/_swap/song_select.tree.txt`
+  is the record in `assets/game/360/…`, which `scripts/extract_assets.ps1` writes as *base plus the
+  Ultimate overlay*; P4's scan read `game/gen/main_xbox_0.ark` alone. Re-running
+  `out/_swap/scan_dtb_tokens.py keyboard show_keyboard` (with UTF-8 output — the 2026-10-20 run died
+  on the French locale's first hit, which is why its report named only the first records it printed)
+  gives **131 records, 20 with a hit**, and the only `show_keyboard` in the **retail** ark is
+  `ui/rbworld_link/gen/rbworld_link.dtb`. The Ultimate patch's own entry list
+  (`python scripts/hmx_ark.py list --hdr game/ultimate/gen/patch_xbox.hdr -v`) carries
+  `ui/song_select/gen/song_select.dtb` at 32,554 bytes against retail's 19,934 — the overlays are
+  exactly the difference. So P4's measurement was right about the *base* target and P9-11's starting
+  point is right about the *installed* one.
+- **The keyboard is native and in the retail image, so both builds can show it.** The RTTI table
+  (`python out/_swap/rtti_vtables.py VirtualKeyboard`) puts `.?AVVirtualKeyboard@@`'s vtable slot 5
+  at `sub_8237AD10`, whose only literals are `show_keyboard` and `clear_callback` — the class's
+  `Handle`. `.?AVVirtualKeyboardResultMsg@@` exists beside it, and `sub_822CE5F8` interns the message
+  name while `sub_8237A878` builds it from `(ok, text)`, whose two symbols sit in the engine's name
+  block (`0x37A97`). The object name `virtual_keyboard` is a symbol at `0x5F8F8` with no code
+  reference: it is registered by the UI manager, which is why the Ultimate record can call it
+  without creating it and why retail's `song_select` simply never does.
+- **The route, in the record the store already owns.** `store::AddSearchKeyboard`
+  (`src/store/store_payload.{h,cpp}`) writes two script methods onto `store_menu_screen`:
+  `(open_store_search {do {write_file "rbbz-store/search/open" 0} {if_else {file_exists
+  "rbbz-store/search/seed"} {write_file "rbbz-store/search/done" 0} {virtual_keyboard show_keyboard
+  user 100 (localize search_for_song) (localize search_for_song_desc) "" $this}}})` and
+  `(VIRTUAL_KEYBOARD_RESULT_MSG {if $ok {do {write_file {sprintf "rbbz-store/search/text/%s" $text} 0}
+  {write_file "rbbz-store/search/done" 0}}})`; the same call appends
+  `{write_file "rbbz-store/search/leave" 0}` to `store_menu_panel.exit`, so leaving the store stops
+  the strip. `store::RouteSearchRowToKeyboard` replaces P4's `RouteSearchRowToKeys`: the Search
+  row's gate keeps `{file_exists "rbbz-store/search/show"}` → retail's own request, and its
+  no-answer arm is now `{{ui current_screen} open_store_search}`. `$this` in the screen's method is
+  the screen object, which is why the keyboard's result lands on the surface that opened it.
+- **Measured against the shipped record, before any boot** (`rb_blitz_store_payload_tests store-edit
+  assets\game\360\ui\store\gen\store.dtb search`): `search keyboard -> edited`, `search row ->
+  edited`, and the printed tree carries `{{ui current_screen} open_store_search}`, the
+  `open_store_search` method with `rbbz-store/search/open`, the `rbbz-store/search/seed` gate,
+  `virtual_keyboard show_keyboard`, and `VIRTUAL_KEYBOARD_RESULT_MSG` with
+  `rbbz-store/search/text/%s` + `rbbz-store/search/done`, plus `rbbz-store/search/leave` in the
+  panel's exit.
+- **The transport keeps only what the typed field needs.** `ParseStoreWrite` (`store_search.cpp`)
+  now reads `open | done | cancel | leave | text/<raw UTF-8>`; `key/<token>` and the hex spelling are
+  **refused** (`unknown search action`) and `SearchText` lost `AppendKeyToken`/`Backspace` and the
+  five key constants. The bridge's `ArgumentString` admits bytes ≥ 0x80 (control characters and DEL
+  are still refused), so a typed accent survives; every other namespace matches ASCII tokens only.
+  `AnswerSearchQuery` answers `show` and `seed` and nothing else — the key pages' `open`, `ready`,
+  `state/<token>` and `count/at-least/<n>` probes retired with them.
+- **The authored pages are deleted, not hidden** — ten pages per context, so the page count moves
+  71 → 61 (142 → 122 panels, `settings_screen` pins updated), and `store_search_diagnostic`, its
+  locale work and the main-menu destination branch are gone with them. The seed stays and **moves to
+  the new entry**: the screen asks `rbbz-store/search/seed`, which is true only while a boot's
+  `store_search_seed` is in the field (typing, submitting or cancelling retires it), so a scripted
+  boot's Search press submits instead of drawing a keyboard it cannot type on. `probe_search.ps1`
+  and `acceptance_store.ps1` drive that route now; `-SearchMenuRow` defaults to 1 and a negative
+  value throws rather than pretending the key route exists.
+- **The sentences followed the route.** The answer hint is `Press Search to list them.` (there is no
+  Back step any more: the keyboard closes onto the same menu), and the keyboard's own title and
+  description are new locale entries `search_for_song` = `SEARCH` and `search_for_song_desc` =
+  `Search by artist or song title, one at a time.` — retail's locale carries neither, so the Ultimate
+  payload's tokens would have drawn bare names.
+- **Tests**: `ctest` **47/47** in `out/build/win-amd64-debug`; `store_search` **287** (the raw-text
+  grammar, the retired paths refused, the seed bit, the one-bit queries, the new hint),
+  `store_payload` (the keyboard methods, the routed gate, the dismissal, idempotency, refusals, a
+  compile/parse round trip, and the printed diagnostics), `settings_screen` **107,644** with the
+  new page counts and no key-label exception left.
+- **Not measured (the prompt's Done-when, in the game)**: store → Search drawing the title's own
+  keyboard, typing on it, and Cancel returning to the front menu. A script cannot type on the
+  console keyboard and this machine cannot drive it, so the owner retests on the release build
+  (`out/build/win-amd64-release/rb_blitz.exe`, relinked 2026-10-23): main menu → **RhythmVerse** →
+  the store → **Search** → the keyboard draws over the store menu → type a query → OK → the strip
+  reads the matches → the same row lists them → Cancel (OK with an empty field, or the keyboard's
+  back) returns to the front menu. `store_search_seed` must be empty for that boot, or the keyboard
+  is skipped by design.
+
+**P9-11 follow-up (2026-10-23) — the crash the owner hit, the one-press flow, and the Filters rename.**
+
+- **The crash, named and fixed: the keyboard's first argument was a symbol, not a User object.**
+  The owner's boot (`out/build/win-amd64-release/logs/rb_blitz_271.log`) ended in `Unhandled guest
+  access violation: read of guest 0x00000000` 150 ms after `store_search: 'rbbz-store/search/open'`.
+  `sub_8237B008` (the show the keyboard's `show_keyboard` handler reaches) reads the **player's name**
+  out of its first argument before it calls the platform keyboard — `r19 = (*(void**)(*arg0))(arg0)`
+  — so the record's bare `user` symbol resolved to no object and the call read address 0. The fix is
+  the shape this build's own records use: bind it first, `{$user {user_mgr get_participating_user}}`,
+  with `{user_mgr get_user_from_pad_num 0}` as the fallback and a `leave` write when neither answers
+  (the store is reachable in both the front-menu gate's and the offline case). Measured on the next
+  boot: the keyboard draws (`SEARCH SONG` + the Ultimate locale's description + OK/Cancel over the
+  store page) and no fault line appears.
+- **The result handler's name and shape were also wrong.** `sub_8237A878` interns
+  `virtual_keyboard_result_msg` (lowercase; `macros.dtb`'s `VIRTUAL_KEYBOARD_RESULT_MSG` is the macro
+  that expands to it) and sends `(ok, text)` **positionally**, so the record's method must carry a
+  parameter list: `(virtual_keyboard_result_msg ($ok $text) …)`, the shape `store_info.dtb`'s
+  `(preview_download_complete_msg ($bSuccess) …)` uses. The traced boot
+  (`out/_swap/search-probe/20261023-171029`, instrumented with one `rbbz-store/search/trace/<n>`
+  write per step, since removed) showed the body taking the participating-user arm and reaching the
+  keyboard.
+- **One press now opens the results.** Confirming the keyboard submits (`text/<query>` + `done`)
+  **and** runs the shipped Search row's own three statements — `{store_panel set_source menu_search
+  TRUE}`, `{store_panel request "/eng/search/" TRUE}`, `{store_panel update_loading_status}` — written
+  out because a screen method has none of the row's locals; `"/eng/search/"` is exactly
+  `MenuProviderPath(default locale, "search")`, the string the row itself would pass. The retail
+  browser only opens when the page carries offers (`store_menu_panel.process_offers`), so the host
+  holds that request until the first API page of the answer lands (`store_search_wait_ms`, default
+  4000; the wait is bounded and never paid by a query the page cache holds). Measured
+  (`out/_swap/search-probe/20261023-175633`): `cache request 'dlc_store/europe/eng/search/'` at
+  17:58:29.008 → `the search page waited 2730 ms for the answer` → `the served page carries 15
+  offer(s)` → `screen 'store_browser_screen'` at 17:58:31.927, with the OCR reading the Bush list
+  (`THE PEOPLE THAT WE LOVE`, `ARMY DREAMERS`, band `BUSH / GOLDEN STATE`). The `leave` line that
+  follows `open` is the store menu panel's own `exit`, which the engine runs while a system dialog
+  (the keyboard) is up — it only dismisses the strip.
+- **Renames (owner request, same pass).** The store's Start caption is `FILTERS` (was `SEARCH
+  FILTERS`; the OCR of the same boot reads it in the footer), the page it opens is titled
+  `RHYTHMVERSE FILTERS` (was `SEARCH SONG FILTER`), and the RhythmVerse page's row is `Filters`.
+  Pins updated in `store_payload`, `settings_screen` and `acceptance_store.ps1`.
+- **Tests**: `store_payload` **421**, `settings_screen` **107,627**; the payload suite pins the User
+  binding, the lowercase handler with its parameter list, and the page request in both the keyboard's
+  and the seed's arm.
+- **Still the owner's to measure**: typing on the keyboard in a player's boot (this environment can
+  drive the platform dialog only when a script sends host keystrokes into it) and whether the
+  ~2.7 s hold before the results page reads acceptably; the store page stays on screen for it, and a
+  deferral that lets retail's own LOADING draw instead is the next step if it does not.
 
 ## Appendix A — request cheat sheet
 

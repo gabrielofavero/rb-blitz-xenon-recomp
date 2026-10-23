@@ -147,7 +147,7 @@ inline constexpr char kRecentlyAddedMenuId[] = "recent";
 inline constexpr char kRecentlyAddedLabel[] = "Recently Added";
 
 // The front menu's search row, and its *index*. The index is what the store's DTA gate compares
-// against (`store::RouteSearchRowToKeys` in store_payload.h): `{component selected_pos}` is an
+// against (`store::RouteSearchRowToKeyboard` in store_payload.h): `{component selected_pos}` is an
 // integer the DTA can test without guessing how the provider spells a name, and the menu is ours,
 // so the position is a fact of `RhythmVerseFrontMenu()` rather than a retail assumption. The two
 // are pinned together by tests/store_metadata_tests.cpp, which fails if the entry at that index is

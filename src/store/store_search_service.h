@@ -25,11 +25,4 @@ namespace rb_blitz::store {
 // transport, which `ApplyStoreWrite` reports as a refusal rather than a silent nothing.
 void InstallSearchTransport();
 
-// The P4 measurement switch: makes the retail store screen open the authored key pages as it is
-// entered, so a boot can drive the whole search without P3's front menu having landed yet. It is
-// a measurement, not a feature - the plan's shipping entry is the store's own Search row, which
-// P3's record writer serves - and it is off by default. Read on the host thread during the
-// payload build.
-bool SearchDiagnostic();
-
 }  // namespace rb_blitz::store

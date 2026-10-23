@@ -7,30 +7,29 @@
 //
 // Three measured facts decide the shape of this file (all recorded in the plan):
 //
-//   * **there is no retail keyboard to borrow.** All 131 compiled DTA records of the main ark were
-//     scanned (2026-10-20, `out/_swap/scan_dtb_tokens.py`): the only `show_keyboard` in the title
-//     is `rbworld_link_panel`'s native method for the Rock Central e-mail field. So the query is
-//     authored - `src/ui/settings_screen.cpp` builds the key pages - and the host owns the buffer.
-//   * **the DTA cannot carry a typed string.** A script can concatenate constants and format
-//     integers, but it cannot build a CRC-32 (`src/hooks/settings_bridge.h`) and its text-form
-//     token alphabet has no spaces. Characters therefore do not travel as text in a path at all:
-//     the guest sends one *key token* per press (`rbbz-store/search/key/<token>`), and the host
-//     composes the UTF-8 string. A whole-string spelling (`rbbz-store/search/text/<hex>`) exists
-//     for a caller that can build bytes; it is the bounded UTF-8 transport the plan asks for -
-//     hex keeps spaces, slashes, quotes and accented bytes inside a token-safe alphabet.
-//   * **one query field, one value, never a concatenation.** The API matches artist OR title
-//     (owner point §1.5), so this module has no API that takes two names, and the strings it
-//     returns say so at the two moments a player meets the rule: on entry and after no matches.
+//   * **the query arrives as one raw UTF-8 string.** The player types on the title's own
+//     `VirtualKeyboard` (P9-11: `.?AVVirtualKeyboard@@` and its `show_keyboard` method are in the
+//     retail image, vtable slot 5 = `sub_8237AD10`, and the Ultimate payload's own song search
+//     uses them). Its result message carries `(ok <bool>)` and `(text <string>)`, and the store
+//     screen's handler writes the text back as `rbbz-store/search/text/<query>` - DTA `sprintf`
+//     builds that path, and the bridge reads printable UTF-8 bytes, spaces included. The authored
+//     key pages P4 shipped are retired with P9-11, and so is their one-token-per-press grammar.
+//   * **the field is one value, never a concatenation.** The API matches artist OR title (owner
+//     point §1.5), so this module has no API that takes two names, and the strings it returns say
+//     so at the two moments a player meets the rule: on entry and after no matches.
+//   * **one shot from the keyboard is one submit.** The keyboard's result is written as the text
+//     and then `done`, in that order, so the session's own rules (at least `kMinSearchChars` code
+//     points, one value) are the only gate between a typed query and the request.
 //
 // The *presentation* half is the store's own list (measured 2026-10-21 in `ui/store/gen/store.dtb`):
 // the front menu's rows are provider names, and a press runs
 // `{store_panel set_source …}{store_panel request <name> TRUE}{store_panel update_loading_status}`,
 // whose answer the panel turns into `store_browser_screen` with `num_offers` rows. So the search's
 // results reach the player through the same page Recently Added uses: the payload's
-// `store::RouteSearchRowToKeys` makes the Search row open the authored keys while nothing is
+// `store::RouteSearchRowToKeyboard` makes the Search row open the title's keyboard while nothing is
 // pending, and the serving policy answers the search page with the accepted answer
 // (`SearchOffers`) otherwise. `SearchMarkShown`/`SearchAnswerPending` are the one-bit state that
-// decision needs; the panel's exit writes `leave`, and the strip stops.
+// decision needs; the store menu's exit writes `leave`, and the strip stops.
 //
 // SDK-free on purpose: every rule here is a decision over plain data, so
 // tests/store_search_tests.cpp walks the whole matrix without a boot, a network or a package.
@@ -61,18 +60,14 @@ inline constexpr char kStoreNamespace[] = "rbbz-store/";
 // buffer refuses more rather than truncating a name the player is still typing.
 std::size_t CodePointCount(std::string_view utf8);
 
-// The typed query. UTF-8 throughout: a whole code point is one backspace, and an invalid sequence
-// is refused rather than stored (the API's own field is UTF-8, and a broken string cannot match).
+// The typed query. UTF-8 throughout, because a name with an accent must survive being typed: the
+// keyboard's text is trimmed, then validated (length, control characters, UTF-8), and an invalid
+// sequence is refused rather than stored (the API's own field is UTF-8, and a broken string cannot
+// match).
 class SearchText {
  public:
-  enum class Edit { kOk, kFull, kRejected };
-
-  // One key token: a..z, 0..9, and the five spelling keys below. Unknown tokens are `kRejected`.
-  Edit AppendKeyToken(std::string_view token);
   // The whole-string transport: trimmed, then validated (length, control characters, UTF-8).
   bool Set(std::string_view utf8);
-  // Removes one code point from the end. False when the field was already empty.
-  bool Backspace();
   void Clear();
 
   const std::string& text() const { return text_; }
@@ -84,42 +79,31 @@ class SearchText {
   std::string text_;
 };
 
-// The two paths beyond the session's own grammar that other modules spell: the one-bit query the
-// store's Search-row gate reads (src/store/store_payload.cpp writes the gate into `store.dtb`) and
-// the dismissal the store menu writes when it is left (src/ui/settings_screen.cpp owns the keys,
-// store_payload.cpp the store screen's exit).
+// The paths beyond the session's own grammar that other modules spell:
+//
+//   * `rbbz-store/search/show` - the one-bit query the store's Search-row gate reads
+//     (src/store/store_payload.cpp writes the gate into `store.dtb`);
+//   * `rbbz-store/search/seed` - P9-11's measurement switch. True while a boot's
+//     `store_search_seed` is in the field, and only then: the screen's keyboard entry asks it and,
+//     when it answers, submits the field instead of showing the keyboard, which is how a scripted
+//     boot exercises the request and the answer without typing on the on-screen keys. A player's
+//     boot never has a seed, so the keyboard is what they always see;
+//   * `rbbz-store/search/leave` - the dismissal the store menu writes when it is left
+//     (store_payload.cpp appends it to the panel's exit).
 inline constexpr char kSearchShowQuery[] = "rbbz-store/search/show";
+inline constexpr char kSearchSeedQuery[] = "rbbz-store/search/seed";
 inline constexpr char kSearchLeaveWrite[] = "rbbz-store/search/leave";
-// The state a submit puts the session in. Spelled here because it is the one state a *guest* side
-// distinguishes (`SearchSubmitQuery` answering `started`), and the suite pins the spelling.
-inline constexpr char kSearchSearchingQuery[] = "rbbz-store/search/state/searching";
-
-// The key tokens the DTA's pages send. Kept in one place so the authoring side
-// (src/ui/settings_screen.cpp) and this parser cannot drift.
-inline constexpr char kKeySpace[] = "space";
-inline constexpr char kKeyApostrophe[] = "apostrophe";
-inline constexpr char kKeyDash[] = "dash";
-inline constexpr char kKeyPeriod[] = "period";
-inline constexpr char kKeyBackspace[] = "backspace";
-inline constexpr char kKeyClear[] = "clear";
-inline constexpr char kKeyDone[] = "done";
-inline constexpr char kKeyCancel[] = "cancel";
-
-// The code point a spelling key stands for; empty for the four action keys.
-std::string_view KeyTokenText(std::string_view token);
-
 // --- The write channel (guest -> host) --------------------------------------------------------
 
 enum class StoreOp {
   kNone,
-  kSearchOpen,    // the key pages were entered: the session opens and shows its guidance
-  kSearchKey,     // one typed key; `token` names it
-  kSearchText,    // a whole query; `text` carries it (bounded UTF-8, from the hex form)
-  kSearchDone,    // submit the query
+  kSearchOpen,    // the keyboard was opened: the session opens and shows its guidance
+  kSearchText,    // the keyboard's answer: a whole query in raw UTF-8
+  kSearchDone,    // submit the query (the same handler writes this right after the text)
   kSearchCancel,  // leave the search: invalidate in-flight work and clear the field
-  // The store was left (its menu panel's `exit`): the field and the answer stay - re-entering the
-  // keys shows the query, and the answer is still the list the Search row opens - but the caption
-  // strip stops, because the surface it belongs to is gone.
+  // The store was left (its menu panel's `exit`): the field and the answer stay - the answer is
+  // still the list the Search row opens - but the caption strip stops, because the surface it
+  // belongs to is gone.
   kSearchLeave,
 };
 
@@ -129,22 +113,23 @@ enum class StoreParse {
   kRefused,   // ours, malformed - answered (never forwarded), with `why` for the log
 };
 
-// Grammar (every segment is token-safe; the query never appears in the path):
+// Grammar (the query is the one segment that is not a fixed token; every other segment is):
 //
 //   path = "rbbz-store/search/" action
 //   action = "open" | "done" | "cancel" | "leave"
-//          | "key/" <key>                 (a..z, 0..9, space, apostrophe, dash, period,
-//                                          backspace, clear)
-//          | "text/" <hex-bytes>          (UTF-8, 2 hex digits per byte, at most 4x the field)
+//          | "text/" <query>             (raw UTF-8, trimmed and validated by `SearchText`)
 //
-// Anything else in the namespace is `kNotOurs`, not a refusal: P5's job ops share the prefix and
-// must not be eaten by this parser.
+// `open` and `leave` come from the store record's own screen methods (`store_payload.h`),
+// `text/` and `done` from the keyboard-result handler, and `cancel` is the same handler's negative
+// arm. Anything else in the namespace is `kNotOurs`, not a refusal: P5's job ops share the prefix
+// and must not be eaten by this parser.
 StoreParse ParseStoreWrite(std::string_view path, StoreOp* op, std::string* token, std::string* text,
                            std::string* why);
 
 // Applies one parsed write. Returns false (and fills `why`) when the op could not be applied -
-// an unknown key token, or a submit the session refused (the field is too short, the master
-// switch is off). A false answer is still *handled*: the write is ours and must not be forwarded.
+// a text the field refused (invalid UTF-8, a control character, longer than `kMaxSearchChars`), or
+// a submit the session refused (the field is too short, the master switch is off, P7's backoff
+// still running). A false answer is still *handled*: the write is ours and must not be forwarded.
 bool ApplyStoreWrite(StoreOp op, std::string_view token, std::string_view text, std::string* why);
 
 // The guest hook's single entry point: parse, apply, and answer "is this path ours?" so the
@@ -157,15 +142,14 @@ bool HandleStoreSearchWrite(std::string_view path, std::string* why);
 // --- The one-bit read channel (host -> guest) -------------------------------------------------
 
 // Answers the DTA's membership queries on `file_exists`; false means "not a search query", so the
-// caller keeps trying the other namespaces.
+// caller keeps trying the other namespaces. The two bits the store record reads are the whole
+// grammar; the key pages' probes (`open`, `ready`, `state/<token>`, `count/at-least/<n>`) retired
+// with them.
 //
-//   rbbz-store/search/open                  the key pages are the current surface
-//   rbbz-store/search/ready                 the field holds at least `kMinSearchChars` code points
 //   rbbz-store/search/show                  an answer arrived and the store has not listed it yet
 //                                           (the front menu's Search-row gate)
-//   rbbz-store/search/state/<token>         editing | searching | results | empty | failed |
-//                                           disabled
-//   rbbz-store/search/count/at-least/<n>    the result count is at least n (0..99)
+//   rbbz-store/search/seed                  a diagnostic boot seeded the field, so the Search row
+//                                           submits it instead of showing the keyboard
 bool AnswerSearchQuery(std::string_view path, bool* answer);
 
 // --- The session -------------------------------------------------------------------------------
@@ -200,20 +184,19 @@ struct SearchSubmit {
   SearchState state = SearchState::kIdle;
 };
 
-// Opens the key pages: the session shows its guidance and accepts keys. Safe to call repeatedly
-// (every page of the keyboard opens it).
+// Opens the surface: the session shows its guidance. Written by the keyboard entry before the
+// keyboard appears, so the strip already carries the one-at-a-time rule while the player types.
+// Safe to call repeatedly.
 void SearchOpen();
 // Leaves the surface (`leave`): the strip stops, an answer that is still in flight keeps running,
-// and the field and the answer are kept - re-entering shows the query, and the Search row can still
-// list the answer. Cancels nothing; that is `SearchCancel`'s job.
+// and the field and the answer are kept - the answer is still the list the Search row opens.
+// Cancels nothing; that is `SearchCancel`'s job.
 void SearchClose();
 // The whole "cancel" path the plan's exit asks about: leave, invalidate, and clear the field.
 void SearchCancel();
 
-// One key token from the DTA (`ApplyStoreWrite` routes here). Unknown tokens are refused.
-bool SearchApplyKey(std::string_view token);
-// The whole-string transport. Trims; refuses control characters, invalid UTF-8, or a field longer
-// than `kMaxSearchChars`.
+// The keyboard's answer (`ApplyStoreWrite` routes here). Trims; refuses control characters,
+// invalid UTF-8, or a field longer than `kMaxSearchChars`.
 bool SearchSetText(std::string_view utf8);
 // The diagnostic seed's entry point (`store_search_seed`): fills the field exactly like
 // `SearchSetText` but does **not** open the surface. The strip belongs to the key pages
@@ -272,6 +255,11 @@ std::vector<SearchOffer> SearchOffers();
 // The serving policy handed the store the search page: the answer is on screen, so the front
 // menu's Search row opens the keys again instead of re-listing it. Called by `BuiltinRecord`.
 void SearchMarkShown();
+// True while a request is in flight and no offer of it has landed yet. The search page's request
+// runs moments after the submit (the keyboard's result handler asks for it), so `store_fetch`'s
+// serving policy waits on this before it writes the page: a page written mid-flight would be the
+// empty list the player then has to ask for again.
+bool SearchInFlight();
 // True while a terminal answer (results, no results, a failure) has not been presented yet - the
 // one bit the front menu's gate reads (`kSearchShowQuery`).
 bool SearchAnswerPending();
@@ -309,10 +297,10 @@ inline constexpr char kSearchRetryHint[] =
     "Try just the artist name or just the song title.";
 inline constexpr char kSearchDisabled[] =
     "RhythmVerse is switched off. Turn it on in Help & Options, Downloadable Content.";
-// The route from an answer to the browser, in the two presses it takes: Back leaves the keys (the
-// strip lives with them), and the front menu's Search row then asks for the page the answer fills.
-inline constexpr char kSearchListHint[] = "Press Back, then Search, to list them.";
+// The route from an answer to the browser: the keyboard closes onto the same store menu, so the
+// Search row the player just used asks for the page the answer fills.
+inline constexpr char kSearchListHint[] = "Press Search to list them.";
 // The single-match spelling of the same sentence (`CountNoun` picks the branch).
-inline constexpr char kSearchListHintOne[] = "Press Back, then Search, to list it.";
+inline constexpr char kSearchListHintOne[] = "Press Search to list it.";
 
 }  // namespace rb_blitz::store

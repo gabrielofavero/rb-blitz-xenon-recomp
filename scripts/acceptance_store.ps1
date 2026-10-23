@@ -10,14 +10,17 @@
 #             Control leg is the only one that writes the value off.
 #   Store   - the row opens the retail store, the front menu draws RECENTLY ADDED / SEARCH with no
 #             count beside either row (P9-5) and the `Customs from RhythmVerse` credit, its footer
-#             reads SEARCH FILTERS and draws no VIEW ITEM caption (P9-7/P9-8), Start opens the
-#             Search Song Filter page and Back returns to the store menu, Recently
+#             reads FILTERS and draws no VIEW ITEM caption (P9-7/P9-8), Start opens the Filters page
+#             and Back returns to the store menu, Recently
 #             Added's page carries eligible offers (read from the log, not guessed) and the retail
 #             browser opens on them. Then Search runs a real
-#             query - the field is seeded with -SearchQuery, so one Done press exercises the
-#             request - the answer is drawn, and the same row opens the results page in the retail
-#             browser. Then A on the first result opens the details screen, DOWNLOAD is pressed,
-#             and the install is asserted on disk, in the receipt and in the log. No price,
+#             query - the field is seeded with -SearchQuery, and on a seeded boot the Search press
+#             itself submits it (P9-11: the row opens the title's own keyboard, which a script
+#             cannot type on; the keyboard entry honours the seed instead) - and that one press
+#             asks for the search page too, so the results open in the retail
+#             browser without a second press. Then A on the first result opens the details screen,
+#             DOWNLOAD is pressed, and the install is asserted on disk, in the receipt and in the
+#             log. No price,
 #             currency or purchase word appears on the browser, the details page or the browser it
 #             returns to.
 #   Install - the next boot, same profile, same DLC root: the downloaded song is on the title's
@@ -466,9 +469,10 @@ function Start-Leg([string]$Leg, [string]$Profile, [string]$Dlc, [int]$BootTimeo
         '--log_max_file_size_mb=200',
         '--mouse_native_trace=true'
     )
-    # The authored key pages type one character per press, which is a long route for a script; the
-    # field is seeded so one Done press exercises the request, the answer and the strip. Only the
-    # Store leg seeds it - the other legs never open the store.
+    # P9-11: the Search row opens the title's own keyboard, which a script cannot type on, so the
+    # field is seeded and the screen's entry submits it instead (the `rbbz-store/search/seed` bit).
+    # That one press exercises the request, the answer and the strip. Only the Store leg seeds it -
+    # the other legs never open the store.
     if ($SearchSeed -ne '') { $arguments += "--store_search_seed=$SearchSeed" }
     Write-Host ''
     Write-Host "=== $Leg (profile=$Profile dlc=$Dlc) ==="
@@ -590,7 +594,7 @@ function Invoke-EnableLeg {
         }
         Add-Step 'enable: RhythmVerse submenu opens' $true "row $RhythmVerseRow"
         $rvText = Get-ScreenText 'rhythmverse-rows.png'
-        Assert-Label $rvText @('SEARCH SONG FILTER') 'enable: the renamed filter is reachable'
+        Assert-Label $rvText @('FILTERS') 'enable: the renamed filter is reachable'
 
         $before = Wait-ForScreen 'dlc-before.png' 'RHYTHMVERSE' $ScreenTimeoutSec 'dlc page rows'
         Add-Step 'enable: the master switch reads On with no committed value' ($before -match 'RHYTHMVERSE\s*:?\s*ON') (($before -replace '\s+', ' ').Trim())
@@ -646,19 +650,20 @@ function Invoke-StoreLeg {
         # eats letters (`HYTH VERSE CUSTOM`), which is why only that check asks for a fragment
         # (measured 2026-10-22).
         Assert-Label $storeText @('RHYTHMVERSE') 'store: the heading names RhythmVerse'
-        # P9-7/P9-8: the store's own footer. Start now reads SEARCH FILTERS (the button opens that
-        # page), and Y's VIEW ITEM caption is gone. Both are checked with the whitespace folded out
-        # (`Assert-Label`/`Assert-Lacks`), because the footer's button icons split the words.
-        Assert-Label $storeText @('SEARCHFILTERS') 'store: the footer names the Search Filters button'
+        # P9-7/P9-8: the store's own footer. Start reads FILTERS (the button opens that page; the
+        # caption was `SEARCH FILTERS` until 2026-10-23), and Y's VIEW ITEM caption is gone. Both
+        # are checked with the whitespace folded out (`Assert-Label`/`Assert-Lacks`), because the
+        # footer's button icons split the words.
+        Assert-Label $storeText @('FILTERS') 'store: the footer names the Filters button'
         Assert-Lacks $storeText 'VIEWITEM' 'store: the footer carries no View Item caption'
 
-        # Start opens the Search Song Filter page and Back returns to the store front menu. The
+        # Start opens the Filters page and Back returns to the store front menu. The
         # page's back target is runtime state (the payload re-points the shipped Start case at the
         # filter page with `back_screen store_menu_screen`, plan P9-7), which is what lets this
         # flow return to the store while Help & Options' own flow still returns to RhythmVerse.
         Drive @('key:start', 'wait:4')
-        $filtersText = Wait-ForScreen 'filters.png' 'GUITAR' $ScreenTimeoutSec 'the Search Song Filter page'
-        Add-Step 'store: Start opens the Search Song Filter page' (Wait-ForScreenName 'settings_rhythmverse_filter_screen' 20 'filters') (Get-Screen)
+        $filtersText = Wait-ForScreen 'filters.png' 'GUITAR' $ScreenTimeoutSec 'the Filters page'
+        Add-Step 'store: Start opens the Filters page' (Wait-ForScreenName 'settings_rhythmverse_filter_screen' 20 'filters') (Get-Screen)
         Assert-Label $filtersText @('GUITAR', 'BASS', 'DRUMS', 'VOCALS', 'KEYS') 'store: the filter page lists the five instruments'
         Assert-Lacks $filtersText 'VIEWITEM' 'store: the filter page carries no View Item caption'
         Drive @('key:b', 'wait:3')
@@ -712,19 +717,29 @@ function Invoke-StoreLeg {
         # P9-7/P9-8 on the browser's footer too: the Start caption follows the destination and the
         # Y caption is cleared there as well (the record appends the clear after its own
         # shortcut-header gate, so a provider with shortcuts cannot bring it back).
-        Assert-Label $browserText @('SEARCHFILTERS') 'store: the browser footer names Search Filters'
+        Assert-Label $browserText @('FILTERS') 'store: the browser footer names Filters'
         Assert-Lacks $browserText 'VIEWITEM' 'store: the browser footer carries no View Item caption'
 
-        # Search: Back to the menu, the second row (Search) opens the authored keys, Done submits
-        # the seeded query, the answer is drawn, and the same row then opens the results page.
+        # Search: Back to the menu, the second row (Search). P9-11 made that row open the title's
+        # own keyboard; on this seeded boot the screen's entry honours the seed and submits the
+        # field instead (`rbbz-store/search/seed`). Since 2026-10-23 the same press also asks the
+        # store for the search page, so the browser opens on the answer with no second press - what
+        # this leg measures is that one press and the page it served.
         Drive @('key:b', 'wait:3')
         Add-Step 'store: Back returns to the store menu' (Wait-ForScreenName 'store_menu_screen' 20 'back from Recently Added')
-        Drive @('key:lstick_up', 'wait:1', 'key:lstick_down', 'wait:1', 'key:a', 'wait:4')
-        $keysText = Wait-ForScreen 'keys.png' 'LETTERS' $ScreenTimeoutSec 'the search keys'
-        Assert-Contains $keysText 'LETTERS' 'store: the Search row opens the authored keys'
         $pagesBefore = Get-LogMatches "store_fetch: served '"
+        $searchLinesBefore = Get-LogMatches 'store_search: '
+        Drive @('key:lstick_up', 'wait:1', 'key:lstick_down', 'wait:1', 'key:a', 'wait:2')
+        # The keyboard never draws on a seeded boot, so the proof the press reached the host is its
+        # own log line rather than a screen.
+        $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
+        while ((Get-Date) -lt $deadline) {
+            Refresh-LogText
+            if ((Get-LogMatches 'store_search: ') -gt $searchLinesBefore) { break }
+            Start-Sleep -Seconds 2
+        }
+        Add-Step 'store: the Search row submitted the seeded query' ((Get-LogMatches 'store_search: ') -gt $searchLinesBefore) 'the press reached the search session'
 
-        Drive @('key:a', 'wait:2')
         $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
         while ((Get-Date) -lt $deadline) {
             Refresh-LogText
@@ -736,13 +751,9 @@ function Invoke-StoreLeg {
         $eligible = if ($answer.Success) { [int]$answer.Groups[2].Value } else { 0 }
         $records = if ($answer.Success) { $answer.Groups[1].Value } else { '0' }
         Add-Step 'store: the search answered eligible offers' ($eligible -ge 1) "$eligible eligible of $records record(s)"
-        Start-Sleep -Seconds 3
-        $answerText = Get-ScreenText 'answer.png'
-        Assert-Contains $answerText 'MATCHES FOR' 'store: the strip reports the matches'
 
-        Drive @('key:b', 'wait:3')
-        Add-Step 'store: Back returns to the store menu from the keys' (Wait-ForScreenName 'store_menu_screen' 20 'back from the keys')
-        Drive @('key:lstick_up', 'wait:1', 'key:lstick_down', 'wait:1', 'key:a', 'wait:4')
+        # The same press asked for the search page and the host held it until the answer landed, so
+        # the browser opens by itself.
         $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
         while ((Get-Date) -lt $deadline) {
             Refresh-LogText

@@ -122,10 +122,6 @@ struct MenuConfiguration {
   // shipped. The measurement, not a feature: what the store asks for becomes a file open the
   // probe can name.
   std::string store_local_server_root;
-  // P4's measurement switch: when true the payload appends the jump into the authored search key
-  // pages to the retail store's own `enter`, so a boot can drive the whole search before P3's
-  // front menu serves the store's Search row. Off in every ordinary boot.
-  bool store_search_diagnostic = false;
   // False when the boot found no DLC at all. The Play Current Song row is then not drawn: a row
   // that exists must work, and with no library there is nothing it could ever start.
   bool has_dlc_library = true;
@@ -211,26 +207,14 @@ inline constexpr char kStoreUnreachableText[] = "RhythmVerse could not be reache
 // `rbbz-play/current/<pool index>`, parsed by src/hooks/menu_music_pool.h.
 inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
 
-// ------------------------------------------------------------------------------------------------
-// The RhythmVerse search keys (RhythmVerse plan P4)
-// ------------------------------------------------------------------------------------------------
-// The retail title has no keyboard to borrow: all 131 compiled DTA records of the main ark were
-// scanned (2026-10-20, out/_swap/scan_dtb_tokens.py) and the only `show_keyboard` in the game is
-// `rbworld_link_panel`'s native method for the Rock Central e-mail field, which belongs to that
-// panel and answers to nobody else. The key entry is therefore authored here, in the same row
-// style as the rest of this surface, and the *host* owns the query (src/store/store_search.h).
-//
-// The pages are reached from the store's own front menu: the payload routes its **Search** row here
-// (`store::RouteSearchRowToKeys`), and the row lists the answer instead once one is waiting. The
-// root's back target is the retail store screen because that is the surface which opens it, and
-// Done leaves for the same place once the host accepted the submit. `store_search_diagnostic`
-// still opens the root straight from the main menu, for a boot that measures the keys alone.
-inline constexpr char kSearchPanel[] = "settings_rhythmverse_search_panel";
-inline constexpr char kSearchScreen[] = "settings_rhythmverse_search_screen";
-inline constexpr char kSearchRetailBack[] = "store_menu_screen";
+// The RhythmVerse search entry (RhythmVerse plan P4) was **authored key pages** until P9-11; the
+// store's Search row now opens the title's own `VirtualKeyboard` instead, from a pair of screen
+// methods the payload writes into `ui/store/gen/store.dtb` (`store::AddSearchKeyboard`). Nothing
+// of the search surface is drawn from this record any more.
 
-// The **Search Song Filter** page (plan P9-3/P9-7). Listed by the RhythmVerse page, and reached
-// from the store's own Start button: the payload re-points both store screens' Start cases here
+// The **Filters** page (plan P9-3/P9-7), titled `RHYTHMVERSE FILTERS`. Listed by the RhythmVerse
+// page, and reached from the store's own Start button (whose footer caption is `FILTERS` since
+// 2026-10-23): the payload re-points both store screens' Start cases here
 // (`store::RouteStoreStartToFilter`), and the back target is runtime state - Help & Options enters
 // it from the RhythmVerse page, the store from its front menu (both through `EnterScreen`'s
 // "point the destination back at whoever sent us" statement, or the store's own equivalent).
@@ -418,8 +402,8 @@ bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view 
 std::vector<dtb::Node> AudioPageEnterStatements();
 
 // The statement an earlier P4 measurement appended to the retail store screen's `{enter}`. Retired
-// (a jump from that screen re-delivers presses to the newly current page); `store_search_diagnostic`
-// routes the RhythmVerse main-menu row at the keys instead - see `AddRhythmVerseRow`.
+// with the authored key pages (P9-11): the store's own Search row opens the title's keyboard, and
+// that route needs no settings screen at all.
 
 // ------------------------------------------------------------------------------------------------
 // The labels, the requests, and the locale edit

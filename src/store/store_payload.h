@@ -85,8 +85,8 @@ bool PointUiNetcacheAtLocalServer(std::vector<ui::dtb::Node>* ui_roots,
 // method — before any edit.
 bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 
-// P4's entry from the store (plan §5/P4). The front menu's rows are provider names, and
-// `store_menu_panel.SELECT_MSG` answers a press with
+// P4's entry from the store, re-pointed by P9-11 at the title's own keyboard. The front menu's
+// rows are provider names, and `store_menu_panel.SELECT_MSG` answers a press with
 //
 //   {do {var $provider {this get_menu_provider}} {var $ix {component selected_pos}}
 //        {this mark_current_highlight_idx} {this set_focus ""}
@@ -97,11 +97,12 @@ bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string
 // gate:
 //
 //   {if_else {== $ix <search_row>}
-//      {if_else {file_exists "rbbz-store/search/show"} <request> {ui goto_screen <search_screen>}}
+//      {if_else {file_exists "rbbz-store/search/show"} <request>
+//               {{ui current_screen} <keyboard_method>}}
 //      <request>}
 //
-// so the Search row opens the authored key pages while the search has no answer to present, and
-// asks for the search page - which the serving policy answers with that answer - once it has one
+// so the Search row opens the keyboard while the search has no answer to present, and asks for the
+// search page - which the serving policy answers with that answer - once it has one
 // (`store_search.h`'s `kSearchShowQuery`). Every other row keeps retail's own body verbatim.
 //
 // The row is identified by its **index**, the value `{component selected_pos}` already holds: the
@@ -111,8 +112,90 @@ bool AddStoreEntryBypass(std::vector<ui::dtb::Node>* store_ui_roots, std::string
 //
 // Idempotent (a second pass is refused by name); refused, before any edit, when the record carries
 // no `store_menu_panel.SELECT_MSG` with a `request` command, or when `search_row` is negative.
-bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
-                          std::string_view search_screen, std::string* why);
+//
+// The method is the screen's own (see `AddSearchKeyboard`); the name is a constant because the
+// gate and the definition are written by two transforms and the suite pins both.
+inline constexpr char kSearchKeyboardMethod[] = "open_store_search";
+// The message the title's own keyboard sends when the player finishes with it. `sub_8237A878`
+// interns exactly this spelling; `macros.dtb`'s `VIRTUAL_KEYBOARD_RESULT_MSG` is the macro that
+// expands to it, so the record's method has to carry the expanded (lowercase) name.
+inline constexpr char kSearchKeyboardResultMethod[] = "virtual_keyboard_result_msg";
+// The keyboard's own title and description tokens (P9-11). The Ultimate payload's song search
+// passes `search_for_song` / `search_for_song_desc`, but retail's locale carries neither, so both
+// are added by `menu_payload.cpp` while the store is on.
+inline constexpr char kSearchKeyboardTitleToken[] = "search_for_song";
+inline constexpr char kSearchKeyboardTitleText[] = "SEARCH";
+inline constexpr char kSearchKeyboardDescToken[] = "search_for_song_desc";
+inline constexpr char kSearchKeyboardDescText[] =
+    "Search by artist or song title, one at a time.";
+// The store page the Search row asks for, as the front menu names it: `MenuProviderPath(locale,
+// kSearchMenuId)` = `/eng/search/`, which the panel joins with the region (`store_metadata.h`).
+// The front menu is written with the default locale, so the row's own `{$provider get_string $ix}`
+// is exactly this string; the keyboard's result handler asks for it after the submit.
+inline constexpr char kSearchPageRequest[] = "/eng/search/";
+bool RouteSearchRowToKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
+                              std::string_view keyboard_method, std::string* why);
+
+// P9-11: the title's own keyboard, as the store's search field. Measured in the retail image
+// (2026-10-23): `.?AVVirtualKeyboard@@` is a native class whose vtable slot 5 (`sub_8237AD10`)
+// dispatches `show_keyboard`, the boot init `sub_823631C0` names one instance `virtual_keyboard`
+// in the object directory, and `sub_8237A878` answers the callback receiver with the message
+// `virtual_keyboard_result_msg` carrying two positional values, `ok` and `text`. The Ultimate
+// payload's own song search drives it from DTA with
+//
+//   {virtual_keyboard show_keyboard $user 100 (localize <title>) (localize <desc>) "" $this}
+//
+// so the seam is a script method pair on the screen the row is pressed on:
+//
+//   (open_store_search
+//      {do {write_file "rbbz-store/search/open" 0}
+//          {if_else {file_exists "rbbz-store/search/seed"}
+//                   {do {write_file "rbbz-store/search/done" 0} <the search page's request>}
+//                   {do {$user {user_mgr get_participating_user}}
+//                       {if_else $user
+//                                {virtual_keyboard show_keyboard $user 100
+//                                                 (localize search_for_song)
+//                                                 (localize search_for_song_desc) "" $this}
+//                                {do {$user {user_mgr get_user_from_pad_num 0}}
+//                                    {if_else $user <the same call>
+//                                             {write_file "rbbz-store/search/leave" 0}}}}}}})
+//   (virtual_keyboard_result_msg ($ok $text)
+//      {if_else $ok
+//               {do {write_file {sprintf "rbbz-store/search/text/%s" $text} 0}
+//                   {write_file "rbbz-store/search/done" 0}
+//                   <the search page's request>}
+//               {write_file "rbbz-store/search/leave" 0}})
+//
+// `<the search page's request>` is the shipped row's own triple, `{store_panel set_source
+// menu_search TRUE}` + `{store_panel request "/eng/search/" TRUE}` + `{store_panel
+// update_loading_status}` (out/_swap/store.tree.txt, `store_menu_panel.SELECT_MSG`): confirming the
+// keyboard submits the query *and* asks the store for the page, so the answer opens in the browser
+// without a second press. `"/eng/search/"` is `MenuProviderPath` for `kSearchMenuId` - the front
+// menu is written with the default locale, so the row asks for exactly this string. The request
+// waits for the answer on the host side (`store_fetch.h`'s `store_search_wait_ms`), which is what
+// keeps the page a results list rather than an empty one.
+//
+// The keyboard's first argument is a **User object**: `sub_8237B008` asks it for the player's name
+// through its first virtual slot before it calls the platform keyboard, so the bare symbol is a
+// null read (measured 2026-10-23: `read of guest 0x00000000` right after the press). The store is
+// reachable with the participating user (retail's front-menu gate) or, offline, with pad 0's, so
+// the body binds the first that answers and dismisses the surface when neither does.
+//
+// `$this` is the screen object, so the keyboard's answer lands on the same screen that opened it;
+// retail spells this handler with a parameter list and a body (`store_info.dtb`'s
+// `(preview_download_complete_msg ($bSuccess) …)`), which is how the two values arrive.
+// `$ok` false is the keyboard's own Cancel, which dismisses the surface (`leave`) and leaves the
+// field and any earlier answer untouched. The `seed` branch is the measurement switch
+// (`store_search.h`'s `kSearchSeedQuery`): a boot whose field was seeded submits it instead of
+// drawing a keyboard a script cannot type on.
+//
+// The same call also appends `{write_file "rbbz-store/search/leave" 0}` to `store_menu_panel`'s
+// `exit`, so leaving the store stops the caption strip (the surface the sentences belong to is
+// gone) while the field and the answer stay for the next visit.
+//
+// Idempotent (a second pass is refused by name); refused, before any edit, when the record carries
+// no `store_menu_screen` definition or no `store_menu_panel.exit`.
+bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why);
 
 // P3's free-download seam (plan §2.12). Retail draws its price chrome in two places, both of them
 // text the scripts show and no data we could supply hides:
@@ -313,10 +396,12 @@ bool SetStoreHeading(std::vector<ui::dtb::Node>* locale_roots, std::string_view 
 // `store_info.milo` declares `store_info.ihp` and `view_offer.ihp`.
 
 // The locale key and text the Start caption reads on both store screens (P9-7). The entry is added
-// to every installed locale by `menu_payload.cpp`; `SEARCH FILTERS` matches the retail entries'
-// own upper-case spelling (`inline_help_options` = "HELP & OPTIONS").
+// to every installed locale by `menu_payload.cpp`; `FILTERS` matches the retail entries' own
+// upper-case spelling (`inline_help_options` = "HELP & OPTIONS"). It read `SEARCH FILTERS` until
+// 2026-10-23; the owner shortened it, because the button edits the filter list - searching is the
+// Search row's job.
 inline constexpr char kFooterSearchFiltersToken[] = "inline_help_search_filters";
-inline constexpr char kFooterSearchFiltersText[] = "SEARCH FILTERS";
+inline constexpr char kFooterSearchFiltersText[] = "FILTERS";
 
 // P9-7's destination. Both store screens carry the shipped Start case -
 //

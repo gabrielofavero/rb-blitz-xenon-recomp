@@ -141,6 +141,13 @@ Node* FindNamedMethod(Node& node, std::string_view object, std::string_view meth
   return nullptr;
 }
 
+// `{new <class> <name> ...}` - the definition of one record object, matched by class as well as
+// by name so a panel and a screen that share a name cannot be confused.
+bool IsNewObject(const Node& node, std::string_view class_name, std::string_view object) {
+  return node.tag == ui::dtb::kCommand && node.kids.size() >= 3 && IsSymbol(node.kids[0], "new") &&
+         IsSymbol(node.kids[1], class_name) && IsSymbol(node.kids[2], object);
+}
+
 }  // namespace
 
 bool PointNetcacheAtLocalServer(std::vector<ui::dtb::Node>* roots, std::string_view server_root,
@@ -310,10 +317,37 @@ Node FileExistsCommand(std::string_view path) {
   return Node::Command({Node::Symbol("file_exists"), Node::String(std::string(path))});
 }
 
+// `{write_file "<path>" 0}` - the channel's one-way write, the shape every store command uses.
+Node WriteCommand(std::string_view path) {
+  return Node::Command({Node::Symbol("write_file"), Node::String(std::string(path)), Node::Int(0)});
+}
+
+// The shipped Search row's own three statements (`store_menu_panel.SELECT_MSG`), speaking for the
+// row: the source symbol the row builds (`menu_<id>`), the page it asks for, and the loading state
+// its own footer reads. Written out because a screen method has none of the row's locals.
+Node SearchPageRequest() {
+  return Node::Command(
+      {Node::Symbol("do"),
+       Node::Command({Node::Symbol("store_panel"), Node::Symbol("set_source"),
+                      Node::Symbol("menu_search"), Node::Symbol("TRUE")}),
+       Node::Command({Node::Symbol("store_panel"), Node::Symbol("request"),
+                      Node::String(kSearchPageRequest), Node::Symbol("TRUE")}),
+       Node::Command({Node::Symbol("store_panel"), Node::Symbol("update_loading_status")})});
+}
+
+// `{{ui current_screen} <method>}` - a screen method called on whichever screen is current. The
+// store's own record already calls methods on a computed receiver (`{{ui current_screen}
+// set_focus_panel $this`), which is why the keyboard entry does not have to name the screen.
+Node CurrentScreenMethod(std::string_view method) {
+  return Node::Command(
+      {Node::Command({Node::Symbol("ui"), Node::Symbol("current_screen")}),
+       Node::Symbol(std::string(method))});
+}
+
 }  // namespace
 
-bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
-                          std::string_view search_screen, std::string* why) {
+bool RouteSearchRowToKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, int search_row,
+                              std::string_view keyboard_method, std::string* why) {
   auto refuse = [&](std::string reason) {
     if (why != nullptr) {
       *why = std::move(reason);
@@ -326,8 +360,8 @@ bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search
   if (search_row < 0) {
     return refuse("the front menu carries no search row");
   }
-  if (search_screen.empty()) {
-    return refuse("no search screen to enter");
+  if (keyboard_method.empty()) {
+    return refuse("no keyboard method to call");
   }
   Node* select = nullptr;
   for (Node& root : *store_ui_roots) {
@@ -340,7 +374,7 @@ bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search
     return refuse("the record carries no store_menu_panel SELECT_MSG method");
   }
   if (MentionsSearchGate(*select)) {
-    return refuse("the Search row is already routed to the keys");
+    return refuse("the Search row is already routed to the keyboard");
   }
   std::vector<Node>* owner = nullptr;
   size_t index = 0;
@@ -355,10 +389,107 @@ bool RouteSearchRowToKeys(std::vector<ui::dtb::Node>* store_ui_roots, int search
        Node::Command({Node::Symbol("=="), Node::Var("ix"),
                       Node::Int(static_cast<uint32_t>(search_row))}),
        Node::Command({Node::Symbol("if_else"), FileExistsCommand(kSearchShowQuery), request,
-                      Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
-                                     Node::Symbol(std::string(search_screen))})}),
+                      CurrentScreenMethod(keyboard_method)}),
        request});
   (*owner)[index] = std::move(gate);
+  return true;
+}
+
+bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_ui_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  // Both targets are located before either is written, so a refusal leaves the record as shipped.
+  Node* screen = nullptr;
+  Node* panel_exit = nullptr;
+  for (Node& root : *store_ui_roots) {
+    if (screen == nullptr && IsNewObject(root, "UIScreen", "store_menu_screen")) {
+      screen = &root;
+    }
+    if (panel_exit == nullptr) {
+      panel_exit = FindNamedMethod(root, "store_menu_panel", "exit");
+    }
+  }
+  if (screen == nullptr) {
+    return refuse("the record carries no store_menu_screen definition");
+  }
+  if (panel_exit == nullptr) {
+    return refuse("the record carries no store_menu_panel exit method");
+  }
+  for (const Node& kid : screen->kids) {
+    if (kid.tag == ui::dtb::kArray && !kid.kids.empty() && IsSymbol(kid.kids[0], "open_store_search")) {
+      return refuse("the store screen already carries the keyboard entry");
+    }
+  }
+
+  // The keyboard entry: the strip's guidance first (so the one-at-a-time rule is on screen while
+  // the player types), then either the seeded submit - the measurement switch - or the title's own
+  // keyboard, with `$this` (the screen) as the receiver of its result message.
+  //
+  // The first argument is a **User object**, not the bare symbol: the native show
+  // (`sub_8237B008`) asks it for the player's name through its first virtual slot before it calls
+  // the platform keyboard, and a symbol names no object - the measured result was
+  // `read of guest 0x00000000` right after the press (2026-10-23). The store is reachable with the
+  // participating user (retail's front-menu gate) or, offline, with pad 0's user, so the body binds
+  // the first that answers and dismisses the surface when neither does.
+  const Node keyboard = Node::Command(
+      {Node::Symbol("virtual_keyboard"), Node::Symbol("show_keyboard"), Node::Var("user"),
+       Node::Int(100),
+       Node::Command({Node::Symbol("localize"), Node::Symbol("search_for_song")}),
+       Node::Command({Node::Symbol("localize"), Node::Symbol("search_for_song_desc")}),
+       Node::String(""), Node::Var("this")});
+  const Node bind_participating_user = Node::Array(
+      {Node::Var("user"),
+       Node::Command({Node::Symbol("user_mgr"), Node::Symbol("get_participating_user")})});
+  const Node bind_pad_zero_user =
+      Node::Array({Node::Var("user"), Node::Command({Node::Symbol("user_mgr"),
+                                                     Node::Symbol("get_user_from_pad_num"),
+                                                     Node::Int(0)})});
+  const Node show_with_user = Node::Command(
+      {Node::Symbol("if_else"), Node::Var("user"), keyboard,
+       Node::Command({Node::Symbol("do"), bind_pad_zero_user,
+                      Node::Command({Node::Symbol("if_else"), Node::Var("user"), keyboard,
+                                     WriteCommand(kSearchLeaveWrite)})})});
+  const Node open = Node::Command(
+      {Node::Symbol("do"), WriteCommand("rbbz-store/search/open"),
+       Node::Command({Node::Symbol("if_else"), FileExistsCommand(kSearchSeedQuery),
+                      Node::Command({Node::Symbol("do"),
+                                     WriteCommand("rbbz-store/search/done"),
+                                     SearchPageRequest()}),
+                      Node::Command({Node::Symbol("do"), bind_participating_user,
+                                     show_with_user})})});
+  screen->kids.push_back(Node::Array({Node::Symbol("open_store_search"), open}));
+
+  // The result: `$ok` true writes the typed text and then the submit, in that order, so the session
+  // receives them as one query. `$ok` false is the keyboard's Cancel, which dismisses the surface
+  // (the same `leave` a store exit writes) and touches nothing else - the field and any earlier
+  // answer stay, so the Search row still lists what it had.
+  //
+  // The two values arrive positionally, so the method carries a parameter list and a body - the
+  // shape retail's own engine-sent handlers use (`store_info.dtb`'s
+  // `(preview_download_complete_msg ($bSuccess) …)`).
+  const Node write_text = Node::Command(
+      {Node::Symbol("write_file"),
+       Node::Command({Node::Symbol("sprintf"), Node::String("rbbz-store/search/text/%s"),
+                      Node::Var("text")}),
+       Node::Int(0)});
+  const Node result = Node::Command(
+      {Node::Symbol("if_else"), Node::Var("ok"),
+       Node::Command({Node::Symbol("do"), write_text, WriteCommand("rbbz-store/search/done"),
+                      SearchPageRequest()}),
+       WriteCommand(kSearchLeaveWrite)});
+  const Node result_params = Node::Array({Node::Var("ok"), Node::Var("text")});
+  screen->kids.push_back(
+      Node::Array({Node::Symbol(kSearchKeyboardResultMethod), result_params, result}));
+
+  // Leaving the store menu ends the search surface: the strip stops, the field and the answer stay.
+  panel_exit->kids.push_back(WriteCommand(kSearchLeaveWrite));
   return true;
 }
 
