@@ -431,12 +431,15 @@ repainting the row (`refresh_row_active` follows `enhancements_dlc_cache &&
 enhancements_refresh_music_library`). The boot's scan is untouched by the switch — a library whose
 tree changed is still re-read at the next boot — and with `enhancements_dlc_cache` off the row is
 the title's own online entry again, over which this switch has no say ([dlc.md](../guides/dlc.md)
-§4.1).
+§4.1). The Interface → Main Menu mirror follows the switch too (2026-10-23): with it off the menu
+has no `splash_dlc` row, so the page does not offer a visibility toggle for it
+(`MenuConfiguration::refresh_row_on`) — the switch here is where it comes back.
 
 **The restored Download Content row (2026-10-20).** Because R7 repurposes `splash_dlc`, the retail
 row's shipped label and action were no longer reachable. The payload now clones that shipped case
 into `splash_dlc_store` (the row right after `splash_dlc` in the option array) and gives it the
-*Download Content* locale entry, but only on a boot whose `interface.hide_download_content` row is
+*Download content* locale entry (sentence case since 2026-10-23, owner request), but only on a boot
+whose `interface.hide_download_content` row is
 set to *Visible*. That row is on Interface → Main Menu and defaults to **Hidden**: a fresh install
 does not offer an entry that only ever worked online, and the player can turn it back on one page
 away. With the cache off the retail `splash_dlc` row is the Download Content entry itself, so the

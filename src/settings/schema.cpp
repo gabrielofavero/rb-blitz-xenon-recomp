@@ -306,8 +306,8 @@ std::vector<SchemaRow> BuildTable() {
   // that retail row is the Download Content entry itself.
   rows.push_back(Row(Make(SettingId::kHideDownloadContent, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"interface", "hide_download_content"}, "hide_items", "Download Content",
-                     "Show the main menu's Download Content entry."));
+                     {"interface", "hide_download_content"}, "hide_items", "Download content",
+                     "Show the main menu's Download content entry."));
   {
     Descriptor d = Make(SettingId::kHideMainMenu, Category::kInterface, Provider::kNative,
                         WidgetKind::kBooleanWithSubmenu, ValueKind::kBool, BoolValue(false));

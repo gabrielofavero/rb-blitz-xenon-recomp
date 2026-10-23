@@ -103,6 +103,12 @@ struct MenuConfiguration {
   // `splash_dlc`, because with the cache off that retail row is the Download Content entry.
   bool download_content_row = false;
   bool download_content_row_available = false;
+  // The refresh entry's own switch (`general.refresh_music_library`), frozen at boot with the other
+  // menu-shaping values (P9-12). With it off the main menu does not carry `splash_dlc` at all, so
+  // the Interface -> Main Menu mirror must not offer that row either: a row that is not in the menu
+  // is not a hideable choice (P10's rule in src/ui/menu_options.h). The switch itself lives on the
+  // Downloadable Content page, not on the mirror.
+  bool refresh_row_on = true;
   // The RhythmVerse entry (RhythmVerse plan P1): true when the boot builds the row, i.e.
   // when the store's master switch was on. Its case re-checks the live gate, so switching the
   // store off stops the press without a restart.
@@ -178,8 +184,13 @@ inline constexpr char kPlayCurrentLabel[] = "Play Current Song";
 // the retail row over (`splash_dlc` now performs the library refresh), so this row is a clone of
 // the shipped `splash_dlc` case under a symbol of its own: the same action, the same label, and a
 // visibility switch (`interface.hide_download_content`) whose default is hidden.
+//
+// The label is sentence case (owner request, 2026-10-23): "Download content", beside the mirror's
+// other locale-derived rows (`Leaderboards`, `Refresh Songs`). The shipped spelling "Download
+// Content" stays in `menu_options::kDlcRowLabel`, which is the text the locale rewrite searches
+// for - changing that one would stop the refresh relabel from finding the shipped string.
 inline constexpr char kDownloadContentRow[] = "splash_dlc_store";
-inline constexpr char kDownloadContentLabel[] = "Download Content";
+inline constexpr char kDownloadContentLabel[] = "Download content";
 
 // The RhythmVerse entry (RhythmVerse plan P1). A main menu row of our own, built only while the
 // store's master switch is on, so the store is reachable without Xbox LIVE and without taking

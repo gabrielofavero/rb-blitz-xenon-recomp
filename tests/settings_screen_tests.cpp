@@ -1021,6 +1021,45 @@ void TestDownloadContentVisibilityAndNoDlc() {
   ConfigureMenu(configuration);
   CHECK_FALSE(has_symbol("settings_mm_download_content_on"));
 
+  // P9-12: the refresh entry's own switch takes `splash_dlc` out of the menu, so the mirror must
+  // not offer a toggle for it - a row that is not in the menu is not a hideable choice (P10's
+  // rule). The menu here carries a second hideable row, so the live list (not the static
+  // fallback) is what is measured.
+  configuration.menu_rows = {{"splash_start", "PLAY"},
+                             {"splash_dlc", "REFRESH SONGS"},
+                             {"splash_upgrade", "UNLOCK FULL GAME"},
+                             {"splash_exit", "EXIT GAME"}};
+  configuration.refresh_row_on = true;
+  ConfigureMenu(configuration);
+  CHECK_EQ(PanelRowSymbols("settings_main_menu_panel").size(), 2u);
+  configuration.refresh_row_on = false;
+  ConfigureMenu(configuration);
+  CHECK_EQ(PanelRowSymbols("settings_main_menu_panel").size(), 1u);
+
+  // The restored row's own switch is independent of the refresh entry: with the entry off it is
+  // still offered where the menu draws it, because the row itself is still on the menu.
+  configuration.download_content_row_available = true;
+  ConfigureMenu(configuration);
+  CHECK_EQ(PanelRowSymbols("settings_main_menu_panel").size(), 2u);
+  CHECK_TRUE(has_symbol("settings_mm_download_content_on"));
+
+  // The restored row's spelling is the owner's sentence case (2026-10-23), and its state text is
+  // the visibility pair the rest of the mirror draws.
+  configuration.refresh_row_on = true;
+  configuration.download_content_row_available = true;
+  ConfigureMenu(configuration);
+  bool download_label = false;
+  for (const auto& label : Labels()) {
+    if (label.first == "settings_mm_download_content_on") {
+      download_label = true;
+      CHECK_TRUE(label.second == "Download content: Hidden");
+    }
+    if (label.first == "settings_mm_download_content_off") {
+      CHECK_TRUE(label.second == "Download content: Visible");
+    }
+  }
+  CHECK_TRUE(download_label);
+
   ConfigureMenu(MenuConfiguration{});
 }
 

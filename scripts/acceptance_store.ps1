@@ -152,8 +152,11 @@ function Write-LauncherProfile([string]$Dir) {
 # `$RhythmVerse = $null` leaves the key out of the file entirely, which is how the Enable leg proves
 # the shipped default (On, plan §9/P9-1) instead of a value this script wrote: the page must draw On
 # from the compiled default, and the boot must not add the key. Only the Control leg passes `$false`.
+# `refresh_music_library` is left out for the same reason since P9-12: its default is On again, so
+# the fixture proves that default instead of writing it, and the Enable leg checks that the boot
+# did not commit it.
 function Write-StoreSettings([string]$Dir, [System.Nullable[bool]]$RhythmVerse) {
-    $lines = @('schema_version = 1', '', '[general]', 'refresh_music_library = true')
+    $lines = @('schema_version = 1', '', '[general]')
     if ($null -ne $RhythmVerse) {
         if ($RhythmVerse) { $lines += 'rhythmverse = true' } else { $lines += 'rhythmverse = false' }
     }
@@ -168,10 +171,10 @@ function Initialize-Fixtures([bool]$Fresh) {
         if ($Fresh -or -not (Test-Path -LiteralPath (Join-Path $dir 'launcher.toml'))) { Write-LauncherProfile $dir }
     }
     if ($Fresh) {
-        # P9-1 flipped the master to On, so the Enable leg proves the default rather than flipping
-        # the switch: its profile carries the other rows the fixture needs (the main menu's refresh
-        # row and the two hidden online rows) and never names `rhythmverse`. The Control leg is the
-        # only leg that writes the value off.
+        # P9-1/P9-12 flipped both switches to On, so the Enable leg proves the defaults rather than
+        # flipping them: its profile carries the two hidden online rows the layout needs and never
+        # names `rhythmverse` or `refresh_music_library`. The Control leg is the only leg that
+        # writes the store value off.
         Write-StoreSettings $profileDir $null
         Write-StoreSettings $controlProfileDir $false
         # A fresh, empty DLC root: this leg must not depend on the owner's own library.
@@ -547,9 +550,14 @@ function Invoke-EnableLeg {
     try {
         if (-not (Enter-MainMenu $BootTimeoutSec)) { return }
         # The store is On by default (P9-1), so a profile that never named the setting already
-        # carries the row - the boot-level half of the default.
+        # carries the row - the boot-level half of the default. The row reads `RhythmVerse` since
+        # P9-12; OCR loses letters from a highlighted row, so the check asks for a fragment
+        # (`HYTH` is what every measured reading of the shortened label keeps). The refresh row is
+        # the other half of P9-12: its own default is On again, so it is on the menu without the
+        # fixture naming `refresh_music_library`.
         $menuText = Get-ScreenText 'menu.png'
-        Assert-Label $menuText @('CUST') 'enable: the main menu carries the store row on a default profile'
+        Assert-Label $menuText @('HYTH') 'enable: the main menu carries the store row on a default profile'
+        Assert-Label $menuText @('REFRESH') 'enable: the main menu carries the refresh row on a default profile'
 
         $index = Open-ScreenByRow 'settings_screen' $HelpOptionsRow 'help-options'
         Add-Step 'enable: Help & Options opens' ($index -ge 0) "row $index"
@@ -569,7 +577,10 @@ function Invoke-EnableLeg {
         Add-Step 'enable: Downloadable Content opens' $true "row $GeneralDlcRow"
 
         $dlcText = Get-ScreenText 'dlc-rows.png'
-        Assert-Label $dlcText @('RHYTHMVERSE', 'CACHE DLC', 'REFRESH', 'DLC SCAN', 'DLC MENU') 'enable: DLC page has the five settings rows'
+        # The four settings rows and the store submenu, in P9-3's order. `SONGS` is the Refresh Songs
+        # row (P9-12) - its `On` state is pinned by `rb_blitz_settings_screen_tests` and by the
+        # no-commit check below, because OCR may drop the value off a long line.
+        Assert-Label $dlcText @('RHYTHMVERSE', 'CACHE DLC', 'REFRESH', 'SONGS', 'DLC SCAN', 'DLC MENU') 'enable: DLC page has the five settings rows'
         if (-not (ClickRow $RhythmVerseRow 'rhythmverse' -Wait 2) -or
             -not (Wait-ForScreenName 'settings_rhythmverse_screen' 15 'RhythmVerse page')) {
             Add-Step 'enable: RhythmVerse submenu opens' $false (Get-Screen)
@@ -586,9 +597,11 @@ function Invoke-EnableLeg {
         # A read must not become a write: the fixture's file never named the master, so an absent
         # key after the boot is what makes the On above the *compiled default* rather than a value
         # this boot committed. The Store leg is the behavioural half - the same profile, the switch
-        # untouched, and the store serves.
+        # untouched, and the store serves. The refresh entry's own default is measured the same
+        # way (P9-12): the row is on the menu above, and the boot did not write its key.
         $settingsText = Get-FileText (Join-Path $profileDir 'settings.toml')
         Add-Step 'enable: the boot did not commit the default into the profile' ($settingsText -notmatch '(?m)^\s*rhythmverse\s*=') ($settingsText -replace "`r?`n", ' | ')
+        Add-Step 'enable: the boot did not commit the refresh default' ($settingsText -notmatch '(?m)^\s*refresh_music_library\s*=') ($settingsText -replace "`r?`n", ' | ')
 
         Drive @('key:b', 'wait:2')
         Add-Step 'enable: RhythmVerse Back returns to DLC' (Wait-ForScreenName 'settings_dlc_screen' 15 'back to DLC') (Get-Screen)

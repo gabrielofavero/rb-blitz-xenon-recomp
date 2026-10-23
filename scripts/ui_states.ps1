@@ -123,9 +123,10 @@ $script:UiStates["main-menu"] = @{
     #
     # The needle is the stock row list. R5 must be off (it removes the row), and
     # since 2026-10-22 R7's refresh row is on by default and redraws `splash_dlc`
-    # as "REFRESH SONGS" (docs/guides/dlc.md §4.2); a run with `dlc_cache` off, or
-    # with the refresh entry off, reads "DOWNLOAD CONTENT" instead and has to pass
-    # its own needle. Each toggle's own acceptance is the check for its route.
+    # as "REFRESH SONGS" (docs/guides/dlc.md §4.2); a run with `dlc_cache` off
+    # reads "DOWNLOAD CONTENT" instead, and a run with the refresh entry off has
+    # no such row at all (the entry switch removes it) - each needs its own needle.
+    # Each toggle's own acceptance is the check for its route.
     Settled = $false
 }
 $script:UiStates["song-list"] = @{

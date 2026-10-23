@@ -19,7 +19,15 @@ Part 1 wherever they disagree.
   own records and the Interface → Main Menu mirror all read, so no second spelling exists to drift.
   **Pinned:** `rb_blitz_settings_screen_tests` asserts `Refresh Songs: On` and the row's 28-character
   line budget; **not yet measured:** a boot OCR of the renamed menu rows (the store acceptance's
-  Enable/Store legs are the harness that reads them).
+  Enable/Store legs are the harness that reads them). **2026-10-23, owner pass:** the restored
+  Download Content row is spelled **`Download content`** on Interface → Main Menu (sentence case,
+  like the mirror's other live rows; the shipped `Download Content` spelling survives only as the
+  string the locale rewrite searches for), and the mirror no longer offers the refresh row while
+  `general.refresh_music_library` is off — the menu does not carry it then, and
+  `Refresh Songs: Visible` beside a menu without the row is a lie
+  (`MenuConfiguration::refresh_row_on`, pinned by `settings_screen`). The acceptance fixture no
+  longer writes `refresh_music_library`, so its Enable leg proves that default from the compiled
+  value and checks the boot did not commit it.
 
 - **Independent header switches (2026-10-23):** General ▸ Interface ▸
   Music Library & Store (second row, immediately after Main Menu) now has

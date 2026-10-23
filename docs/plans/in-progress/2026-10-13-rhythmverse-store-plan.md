@@ -2428,9 +2428,11 @@ code in `src/` (`Search Filters` and the `kAction_Option` edit do not exist); P9
 boot prewarm (`src/rb_blitz_app.h:381`) and owes items 2-3 (the failed-press popup and the
 background retry); P9-11's authored key pages are still registered in `src/ui/settings_screen.cpp`;
 P9-12's labels and default are in the tree (`kRhythmVerseLabel` is `RhythmVerse`,
-`kDlcRowRefreshLabel` is `Refresh Songs`, `general.refresh_music_library` compiles On) while no
-boot carrying them is measured and `scripts/acceptance_store.ps1` still asserts `CUST` on the main
-menu; P9-13 has no `audio_type`, `charter` or `release_date` on `SongFile` or `Offer`.
+`kDlcRowRefreshLabel` is `Refresh Songs`, `general.refresh_music_library` compiles On); the
+harness's fixture no longer names `refresh_music_library` and its Enable leg reads the renamed rows
+(2026-10-23, record below), so the remaining step is the owner's boot check on the rebuilt
+binary - not a missing code half; P9-13 has no `audio_type`, `charter` or `release_date` on
+`SongFile` or `Offer`.
 
 ### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
 
@@ -2451,7 +2453,45 @@ menu; P9-13 has no `audio_type`, `charter` or `release_date` on `SongFile` or `O
 - **Done when**: the suites are green, the DLC page draws `Refresh Songs: On` on a profile that never
   named the key, and a boot's main menu reads `RHYTHMVERSE` / `REFRESH SONGS`. The label halves are
   the harness's Enable/Store legs (`scripts/acceptance_store.ps1`), **not yet measured** on a build
-  that carries the rename.
+  that carries the rename. *(Superseded by the 2026-10-23 record below: the harness now reads the
+  renamed rows and proves the default from the profile's silence; only the boot OCR is open.)*
+
+**P9-12 record (2026-10-23).** The labels and the default were already in the tree; this pass
+finished the halves the prompt still owed and closed the owner-visible gap that came with them.
+
+- **The harness proves the default instead of naming it.** `scripts/acceptance_store.ps1`'s
+  `Write-StoreSettings` no longer writes `refresh_music_library = true`, so both fixture profiles
+  start from the compiled default (On) exactly as the store switch does (P9-1). The Enable leg now
+  asserts `HYTH` (the fragment every measured OCR reading of the shortened `RhythmVerse` label
+  keeps) and `REFRESH` on the main menu, `SONGS` on the Downloadable Content page, and that the
+  boot did **not** commit `refresh_music_library` into the profile - the same read-not-write check
+  the store master already had. The old `CUST` needle is gone (the label has not contained it since
+  the 2026-10-22 rename). `Store` and `Control` keep their own `REFRESH` checks; `scripts/ui_states.ps1`
+  no longer claims the refresh-entry-off boot reads `DOWNLOAD CONTENT` (that boot has no such row).
+- **The Interface → Main Menu mirror now agrees with the menu** (owner report, 2026-10-23: the page
+  said `Refresh Songs: Visible` while the button was absent). With `general.refresh_music_library`
+  off the menu does not carry `splash_dlc`, so `MenuConfiguration::refresh_row_on` (frozen at boot
+  from the cvar in `src/hooks/settings_payload.cpp`) makes `src/ui/settings_screen.cpp` drop that
+  row from the live list *and* from the static fallback. The switch stays where it lives, on
+  Downloadable Content. Pinned by `settings_screen` (`TestDownloadContentVisibilityAndNoDlc`: two
+  mirror rows with the entry on, one with it off, and the restored row's own switch still offered
+  while the entry is off).
+- **`Download content`, not `DOWNLOAD CONTENT`** (owner request, 2026-10-23, the same pass): the
+  restored row's own locale entry (`kDownloadContentLabel`), its two mirror labels and the
+  `interface.hide_download_content` schema label are sentence case, matching the mirror's
+  locale-derived rows (`Leaderboards`, `Refresh Songs`) that the boot OCRs. The shipped
+  `Download Content` text stays only in `menu_options::kDlcRowLabel`, which is the string the
+  refresh locale rewrite searches for - changing it would silently stop the relabel.
+- **Verification**: `ctest` in `out/build/win-amd64-debug` is **47/47**; the release preset builds and
+  links `rb_blitz.exe` (2026-10-23 11:57). The owner's own profile carried
+  `general.refresh_music_library = false` with `manual` provenance, which is why their menu had no
+  refresh row at all; with their approval that stored value and its provenance row were removed on
+  2026-10-23, so the compiled default applies on the next boot.
+- **Not measured**: the boot OCR itself. The owner chose to check it themselves on the rebuilt
+  binary (the recipe: main menu `RHYTHMVERSE` + `REFRESH SONGS`; Help & Options → General →
+  Downloadable Content reads `Refresh Songs: On`; Interface → Main Menu reads `Download content:
+  Hidden` and `Refresh Songs: Visible`). P9-12 stays **In Progress** in the table until that check is
+  recorded.
 
 ### P9-13 — the box that carries Download / Cancel carries the custom's own credit block (2026-10-22)
 

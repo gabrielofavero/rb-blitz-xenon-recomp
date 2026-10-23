@@ -303,10 +303,13 @@ A capture of the first working build showed the owner-caught defect: our rows dr
 ours and were typed in the main menu's capitals, while the retail rows come from the options *page* locale
 strings. They now read `General` / `Gameplay` / `Interface`, and the same correction applied to every other
 label of ours (`Downloadable Content`, `Anti-Aliasing`, `Precision Mode`, `Anisotropic Filtering: 16x`,
-`Native (2x)`, ...). Two deliberate exceptions stay in capitals: the **Main Menu mirror** (`Hide Items ->
-Main Menu`), which lists the menu's own entries (`PLAY`, `LEADERBOARDS`, `ACHIEVEMENTS`, `HELP & OPTIONS`,
-`UPGRADE`, `DOWNLOAD CONTENT`, `EXIT GAME`, mirroring incl. `PLAY`/`LEADERBOARDS` where an earlier table had
-`START`/`LEADERBOARD`), and the acronyms `HUD` / `FXAA`. `TestLabels` now fails if any other label of ours
+`Native (2x)`, ...). Two deliberate exceptions stay in capitals: the **acronyms** `HUD` / `FXAA`, and the static fallback of the **Main Menu mirror** (`Hide Items ->
+Main Menu`), which types the menu's entries (`PLAY`, `LEADERBOARDS`, `ACHIEVEMENTS`, `HELP & OPTIONS`,
+`UPGRADE`, `EXIT GAME`, mirroring incl. `PLAY`/`LEADERBOARDS` where an earlier table had
+`START`/`LEADERBOARD`). The mirror normally redraws itself from the live menu, and those rows carry the
+locale's own casing (`Leaderboards`, `Refresh Songs`); its restored row reads **`Download content`**
+since 2026-10-23 (owner request), and with the refresh entry off the mirror does not list that row at
+all, because the menu does not have it. `TestLabels` now fails if any other label of ours
 carries no lowercase letter; boolean rows still render their state in capitals (`Cache DLC Library: OFF`).
 
 ### 5. Reproduce

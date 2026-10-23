@@ -350,6 +350,10 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     configuration.menu_music_songs = menu_music_songs;
     configuration.download_content_row = download_content_row;
     configuration.download_content_row_available = download_content_row_available;
+    // P9-12: the Interface -> Main Menu mirror lists the menu's actual rows, and with the refresh
+    // entry off `splash_dlc` is not one of them - so the mirror must not offer it as a hideable
+    // choice either (the control lives on Downloadable Content).
+    configuration.refresh_row_on = refresh_row_on;
     configuration.has_dlc_library = has_dlc_library;
     for (const auto& row : schema::MenuRows()) {
       configuration.menu_rows.emplace_back(row.token, row.label);

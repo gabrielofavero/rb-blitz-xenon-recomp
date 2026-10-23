@@ -1519,16 +1519,19 @@ std::vector<PanelSpec> AllPanels() {
                                             "Show or hide the main menu's UPGRADE entry."),
                               VisibilityRow("settings_mm_dlc",
                                             "interface.hidden_main_menu.splash_dlc",
-                                            "DOWNLOAD CONTENT",
-                                            "Show or hide the main menu's DOWNLOAD CONTENT entry."),
+                                            "Download content",
+                                            "Show or hide the main menu's Download content entry."),
                               // The retail Download Content entry R7's refresh took over, restored
                               // as a row of its own (owner request, 2026-10-20). Hidden by default;
                               // the static fallback is shown only when the menu inventory is empty,
                               // so the live list below normally provides this row instead.
+                              //
+                              // Sentence case is the owner's spelling (2026-10-23), matching the
+                              // live list's locale-derived rows beside it.
                               VisibilityRow("settings_mm_download_content",
                                             "interface.hide_download_content",
-                                            "DOWNLOAD CONTENT",
-                                            "Show or hide the main menu's DOWNLOAD CONTENT entry."),
+                                            "Download content",
+                                            "Show or hide the main menu's Download content entry."),
                           }});
 
   // The confirmation scene is copied from the installation under our own name, as with the menu.
@@ -1578,6 +1581,14 @@ std::vector<PanelSpec> AllPanels() {
           }
         }
       }
+      if (!g_configuration.refresh_row_on) {
+        // P9-12: the refresh entry's own switch takes `splash_dlc` away from the menu entirely, so
+        // the fallback must not offer a visibility toggle for a row that is not there. The switch
+        // itself is on the Downloadable Content page.
+        std::erase_if(panel.rows, [](const Row& row) {
+          return row.setting == "interface.hidden_main_menu.splash_dlc";
+        });
+      }
       if (!g_configuration.menu_rows.empty()) {
         std::vector<Row> live;
         size_t index = 0;
@@ -1589,22 +1600,31 @@ std::vector<PanelSpec> AllPanels() {
               token == "splash_exit" || token == kProviderMenuRow || token == kPlayCurrentRow) {
             continue;
           }
-          const std::string symbol = "settings_mm_live_" + std::to_string(index++);
-          // The live mirror follows the installed menu, so the caption is derived from the row's
-          // own label rather than a token table: a menu this record does not know still gets text.
-          const std::string description =
-              "Show or hide the main menu's " + label + " entry.";
-          live.push_back(VisibilityRow(symbol.c_str(),
-                                       ("interface.hidden_main_menu." + token).c_str(),
-                                       label.c_str(), description.c_str()));
+          // The refresh entry's own switch (P9-12): with it off the main menu does not carry this
+          // row at all, so the mirror must not offer a toggle that would do nothing. The switch is
+          // on Downloadable Content; the row returns to both the menu and this page with it. The
+          // restored Download Content row below keeps its own switch either way - it is a row of
+          // its own, not part of the refresh entry.
+          const bool refresh_entry_off =
+              token == "splash_dlc" && !g_configuration.refresh_row_on;
+          if (!refresh_entry_off) {
+            const std::string symbol = "settings_mm_live_" + std::to_string(index++);
+            // The live mirror follows the installed menu, so the caption is derived from the row's
+            // own label rather than a token table: a menu this record does not know still gets text.
+            const std::string description =
+                "Show or hide the main menu's " + label + " entry.";
+            live.push_back(VisibilityRow(symbol.c_str(),
+                                         ("interface.hidden_main_menu." + token).c_str(),
+                                         label.c_str(), description.c_str()));
+          }
           // The restored Download Content row sits where the retail menu drew it: right after the
           // row R7 took over (`splash_dlc`), whose label above is the refresh name while the cache
           // owns it. Its own switch is the feature's, so it is not part of the hide list.
           if (token == "splash_dlc" && g_configuration.download_content_row_available) {
             live.push_back(VisibilityRow("settings_mm_download_content",
                                          "interface.hide_download_content",
-                                         "DOWNLOAD CONTENT",
-                                         "Show or hide the main menu's DOWNLOAD CONTENT entry."));
+                                         "Download content",
+                                         "Show or hide the main menu's Download content entry."));
           }
         }
         // An effective menu with nothing hideable keeps the static fallback rows rather than an
