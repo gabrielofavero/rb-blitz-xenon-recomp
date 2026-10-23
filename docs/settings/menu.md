@@ -45,6 +45,14 @@ records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.m
 > move the list, and the owner's capture from it showed Overscan off on entry.
 > Owner-driven manual captures on 2026-10-19 confirmed the titles and the tree.
 
+**Downloadable Content (2026-10-22, P9-3):** General ▸ Downloadable Content has five
+rows in order: **RhythmVerse**, **Cache DLC Library**, **Refresh Music Library**,
+**DLC Scan Threads**, **DLC Menu Music**. RhythmVerse opens a page containing the
+**RhythmVerse: On | Off** master and **Search Song Filter**. The filter title is
+**SEARCH SONG FILTER** and its five instrument switches remain available while the
+master is Off. Back from the filter returns to RhythmVerse; Back from RhythmVerse
+returns to Downloadable Content. The main-menu and pause contexts share this tree.
+
 Status: **executed for the main-menu entry**, one measured engine constraint left open for the in-song
 entry. Evidence is real boots against the pinned retail image (§4); every "measured" line names its log and
 capture. Supersedes P5's `advanced_settings` tree (that row, its locale entry and its screen are gone).

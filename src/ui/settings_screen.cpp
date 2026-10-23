@@ -656,7 +656,8 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_target_panel", "TARGET"},
       {"settings_dlc_panel", "DOWNLOADABLE CONTENT"},
       {"settings_dlc_menu_panel", "DLC MENU MUSIC"},
-      {"settings_rhythmverse_filter_panel", "RHYTHMVERSE SONG FILTER"},
+      {"settings_rhythmverse_panel", "RHYTHMVERSE"},
+      {"settings_rhythmverse_filter_panel", "SEARCH SONG FILTER"},
       {"settings_rhythmverse_search_panel", "RHYTHMVERSE SEARCH"},
       {"settings_rhythmverse_search_letters_panel", "LETTERS"},
       {"settings_rhythmverse_search_af_panel", "LETTERS A-F"},
@@ -1056,13 +1057,12 @@ std::vector<PanelSpec> AllPanels() {
 
   // 1b. Downloadable Content.
   //
-  // Six rows is the page budget (the in-game-settings skill §2), and the RhythmVerse pair below is
-  // what brought the page to seven. The two menu-music rows therefore moved into their own submenu
-  // rather than letting the page scroll invisibly: they are one subject (the main menu's music and
-  // the entry that starts it), and the player still reaches both in one press.
+  // P9-3: the store controls share a submenu, first in this five-row page.
   out.push_back(PanelSpec{"settings_dlc_panel", "settings_dlc_screen", "settings_general_screen",
                           MenuPanels(),
                           {
+                              SubmenuRow("settings_rhythmverse_menu", "settings_rhythmverse_screen",
+                                         "RhythmVerse", "Browse store settings and the Search Song Filter."),
                               BoolRow("settings_dlc_cache", "general.cache_dlc_library",
                                       "Cache DLC Library",
                                       "Reuse an unchanged package list on the next launch. Songs still need to load."),
@@ -1078,21 +1078,21 @@ std::vector<PanelSpec> AllPanels() {
                                         "How many threads scan your packages. More threads scan faster.",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
-                              // The RhythmVerse store (plan P6). On by default since the owner pass
-                              // of 2026-10-22 (plan §9/P9-1): Off is the switch that silences the
-                              // store, and the workers ask it before every request. The filter page
-                              // is a plain submenu - it holds no value of its own - and it stays
-                              // reachable while the master is off, because its five rows are the
-                              // next thing a player wants after switching the store on.
+                              SubmenuRow("settings_dlc_menu", "settings_dlc_menu_screen",
+                                         "DLC Menu Music",
+                                         "The main menu's DLC background music and its Play Current Song entry."),
+                          }});
+
+  // The filter remains reachable with the master off. Both contexts use this same page.
+  out.push_back(PanelSpec{"settings_rhythmverse_panel", "settings_rhythmverse_screen",
+                          "settings_dlc_screen", MenuPanels(),
+                          {
                               BoolRow("settings_rhythmverse", "general.rhythmverse", "RhythmVerse",
                                       "Browse the RhythmVerse customs catalogue in the store and download songs."),
                               SubmenuRow("settings_rhythmverse_filter",
                                          "settings_rhythmverse_filter_screen",
-                                         "RhythmVerse Song Filter",
-                                         "Choose which instruments a custom must have to be listed."),
-                              SubmenuRow("settings_dlc_menu", "settings_dlc_menu_screen",
-                                         "DLC Menu Music",
-                                         "The main menu's DLC background music and its Play Current Song entry."),
+                                         "Search Song Filter",
+                                         "Search Song Filter: choose which instruments listed customs must have."),
                           }});
 
   // 1b-i. DLC Menu Music: R9's own row (owner request, 2026-10-14) and the Play Current Song entry.
@@ -1113,11 +1113,11 @@ std::vector<PanelSpec> AllPanels() {
                                       "Add a main menu entry that starts the song playing in the background."),
                           }});
 
-  // 1b-ii. RhythmVerse Song Filter (plan P6 §1.6): one boolean per instrument, On = that chart is
+  // 1b-ii. Search Song Filter (plan P6 §1.6): one boolean per instrument, On = that chart is
   // required, Off = no condition, so all five off means no instrument constraint at all. The labels
   // are the instrument names a player already reads on the retail surfaces.
   out.push_back(PanelSpec{"settings_rhythmverse_filter_panel",
-                          "settings_rhythmverse_filter_screen", "settings_dlc_screen", MenuPanels(),
+                          "settings_rhythmverse_filter_screen", "settings_rhythmverse_screen", MenuPanels(),
                           {
                               BoolRow("settings_rv_guitar", "general.rhythmverse_guitar", "Guitar",
                                       "Only list customs that have a guitar chart."),

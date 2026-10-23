@@ -4,7 +4,7 @@
 # run and read on its own:
 #
 #   Enable  - a boot on a fresh profile whose settings file never names the master switch (the main
-#             menu's refresh row is on): Help & Options > General > Downloadable Content draws
+#             menu's refresh row is on): Help & Options > General > Downloadable Content > RhythmVerse draws
 #             `RhythmVerse: On`, which is the shipped **default** (RhythmVerse plan §9/P9-1), the
 #             boot writes nothing for it, and the main menu already carries the store row. The
 #             Control leg is the only one that writes the value off.
@@ -64,6 +64,7 @@ param(
     # Calibration 1, then our General 2 (measured 2026-10-22 from `settings_screen.cpp`'s root).
     [int]$HelpGeneralRow = 2,
     [int]$GeneralDlcRow = 2,
+    [int]$RhythmVerseRow = 0,
     # The main menu's own refresh row, in the fixture's layout (the store row is appended after it).
     [int]$RefreshRow = 3,
     [int]$BootTimeoutSec = 240,
@@ -565,6 +566,17 @@ function Invoke-EnableLeg {
         }
         Add-Step 'enable: Downloadable Content opens' $true "row $GeneralDlcRow"
 
+        $dlcText = Get-ScreenText 'dlc-rows.png'
+        Assert-Label $dlcText @('RHYTHMVERSE', 'CACHE DLC', 'REFRESH MUSIC', 'DLC SCAN', 'DLC MENU') 'enable: DLC page has the five settings rows'
+        if (-not (ClickRow $RhythmVerseRow 'rhythmverse' -Wait 2) -or
+            -not (Wait-ForScreenName 'settings_rhythmverse_screen' 15 'RhythmVerse page')) {
+            Add-Step 'enable: RhythmVerse submenu opens' $false (Get-Screen)
+            return
+        }
+        Add-Step 'enable: RhythmVerse submenu opens' $true "row $RhythmVerseRow"
+        $rvText = Get-ScreenText 'rhythmverse-rows.png'
+        Assert-Label $rvText @('SEARCH SONG FILTER') 'enable: the renamed filter is reachable'
+
         $before = Wait-ForScreen 'dlc-before.png' 'RHYTHMVERSE' $ScreenTimeoutSec 'dlc page rows'
         Add-Step 'enable: the master switch reads On with no committed value' ($before -match 'RHYTHMVERSE\s*:?\s*ON') (($before -replace '\s+', ' ').Trim())
         Copy-Item -LiteralPath (Join-Path $profileDir 'settings.toml') -Destination (Join-Path $base 'profile-after-enable.toml') -Force
@@ -576,6 +588,8 @@ function Invoke-EnableLeg {
         $settingsText = Get-FileText (Join-Path $profileDir 'settings.toml')
         Add-Step 'enable: the boot did not commit the default into the profile' ($settingsText -notmatch '(?m)^\s*rhythmverse\s*=') ($settingsText -replace "`r?`n", ' | ')
 
+        Drive @('key:b', 'wait:2')
+        Add-Step 'enable: RhythmVerse Back returns to DLC' (Wait-ForScreenName 'settings_dlc_screen' 15 'back to DLC') (Get-Screen)
         # Leave the page before the process ends, so the boot's own shutdown path runs.
         Drive @('key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2')
         Save-Shot 'enable-back.png' | Out-Null

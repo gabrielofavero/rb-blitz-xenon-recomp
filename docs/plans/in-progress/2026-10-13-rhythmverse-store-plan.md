@@ -2584,6 +2584,19 @@ answer.
   RhythmVerse opens onto the master + Search Song Filter, Back returns to the page, and the main-menu
   and pause-context twins agree.
 
+**P9-3 record (2026-10-22) — landed.** Downloadable Content now has the five rows
+above, with RhythmVerse first. The new two-row RhythmVerse page contains the master and
+**Search Song Filter**; the filter's title and help text use the new name, and it remains
+reachable while the master is Off. Back from the filter returns to RhythmVerse, and Back
+from RhythmVerse returns to Downloadable Content in both contexts. The shared page set is
+now **70 per context / 140 total** (the starting point was 69 / 138 after P4's key pages).
+The acceptance script enters DLC row **0**, checks the submenu and renamed filter, and checks
+Back to DLC. `docs/settings/menu.md` and `status.md` describe the new tree.
+
+Validation: the owner manually tested the change and reported it working. The
+`settings_screen` host suite passed **137,801 checks**, including both contexts' Back targets
+and the page counts. The updated acceptance script has not been run end to end for this change.
+
 ### P9-4 — `Interface ▸ Music Library & Store ▸ Show Messages and Recommendations`
 
 - **Do**: add a fourth row to the Interface page (`src/ui/settings_screen.cpp:1431-1447` — Main Menu,

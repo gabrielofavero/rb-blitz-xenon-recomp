@@ -427,11 +427,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 138u);  // sixty-nine pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 140u);  // seventy pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 138u);
+  CHECK_EQ(screens.size(), 140u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -497,8 +497,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 69);
-  CHECK_EQ(in_song, 69);
+  CHECK_EQ(main_menu, 70);
+  CHECK_EQ(in_song, 70);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -559,7 +559,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 69);  // one per page, the root included
+  CHECK_EQ(in_song, 70);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -1105,7 +1105,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 69u);
+  CHECK_EQ(menu_screens.size(), 70u);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1125,7 +1125,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 69);
+  CHECK_EQ(in_song_panels, 70);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1376,7 +1376,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 138);                   // every panel, in both contexts
+  CHECK_EQ(fills, 140);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1523,7 +1523,7 @@ void TestEveryDestinationExists() {
       }
     }
   }
-  CHECK_EQ(screens, 138);
+  CHECK_EQ(screens, 140);
   // Every row that enters a screen of ours contributes one `{ui goto_screen <name>}`; the count is
   // reported rather than guessed at, because a change of row kind moves it.
   std::printf("         %d screen(s), %d goto_screen target(s), all known\n", screens, targets);
@@ -1572,7 +1572,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 138);  // every panel, in both contexts
+  CHECK_EQ(tables, 140);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1625,7 +1625,7 @@ void TestButtonTableIsOneSwitch() {
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 138);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 140);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1725,9 +1725,9 @@ void TestRestartPromptOnlyOnLeave() {
     CHECK_FALSE(HasText(root, "commit.restart_required"));
     CHECK_FALSE(HasText(root, "rbbz-settings/cancel/-/-"));
   }
-  CHECK_EQ(panels, 138);
+  CHECK_EQ(panels, 140);
   CHECK_EQ(root_cancels, 2);
-  CHECK_EQ(other_cancels, 136);
+  CHECK_EQ(other_cancels, 138);
 }
 
 // A `{<receiver> set <member> <value>}` call, with the value node kept so a test can say what the
@@ -2818,7 +2818,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 138);        // every page, in both contexts
+  CHECK_EQ(panels, 140);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
   CHECK_EQ(scrolls, panels - 6);  // every ordinary page, not the three suppressed twins
@@ -2988,7 +2988,7 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 138);         // the whole surface, in both contexts
+  CHECK_EQ(panels, 140);         // the whole surface, in both contexts
   CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
 }
 
@@ -3562,18 +3562,34 @@ void TestScreenBindingRows() {
 void TestRhythmVerseRows() {
   BeginCase("the RhythmVerse rows: page order, six-row budget, labels and defaults");
 
-  // The Downloadable Content page: the three original rows, then the store's two, then the menu
-  // music submenu that kept the page at the six-row budget (in-game-settings skill §2).
-  const std::vector<std::string> dlc = PanelRowSymbols("settings_dlc_panel");
-  CHECK_EQ(dlc.size(), 6u);
+  // P9-3: the store submenu leads the five-row page in both contexts.
   const std::vector<std::string> expected_dlc = {
-      "settings_dlc_cache", "settings_dlc_refresh", "settings_dlc_threads",
-      "settings_rhythmverse", "settings_rhythmverse_filter", "settings_dlc_menu"};
-  if (dlc == expected_dlc) {
-    CHECK_TRUE(true);
-  } else {
-    CHECK_TRUE(false);
+      "settings_rhythmverse_menu", "settings_dlc_cache", "settings_dlc_refresh",
+      "settings_dlc_threads", "settings_dlc_menu"};
+  const std::vector<std::string> expected_store = {
+      "settings_rhythmverse", "settings_rhythmverse_filter"};
+  CHECK_TRUE(PanelRowSymbols("settings_dlc_panel") == expected_dlc);
+  CHECK_TRUE(PanelRowSymbols("settings_rhythmverse_panel") == expected_store);
+  // Pause twins are generated from these rows; verify their navigation declarations too.
+  int back_targets = 0;
+  for (const auto& root : DefinitionRoots()) {
+    ScreenFacts facts;
+    if (!ReadScreenFacts(root, &facts)) continue;
+    for (const bool pause : {false, true}) {
+      const auto screen = [&](const char* name) {
+        return pause ? PauseScreen(name) : std::string(name);
+      };
+      if (facts.name == screen("settings_rhythmverse_screen")) {
+        CHECK_TRUE(facts.back == screen("settings_dlc_screen"));
+        ++back_targets;
+      }
+      if (facts.name == screen("settings_rhythmverse_filter_screen")) {
+        CHECK_TRUE(facts.back == screen("settings_rhythmverse_screen"));
+        ++back_targets;
+      }
+    }
   }
+  CHECK_EQ(back_targets, 4);
 
   // The filter page holds the five instruments in the owner's order (plan §1.6).
   const std::vector<std::string> filter = PanelRowSymbols("settings_rhythmverse_filter_panel");
@@ -3616,7 +3632,7 @@ void TestRhythmVerseRows() {
     }
     if (label.first == "settings_rhythmverse_filter") {
       filter_title = true;
-      CHECK_TRUE(label.second == "RhythmVerse Song Filter");
+      CHECK_TRUE(label.second == "Search Song Filter");
     }
     if (label.first == "settings_rv_guitar_on") {
       guitar_on = true;

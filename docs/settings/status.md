@@ -9,11 +9,13 @@ Part 1 wherever they disagree.
 ## At a glance
 
 - **The RhythmVerse store's settings are in the game (2026-10-20, RhythmVerse plan P6).** Under
-  **General ▸ Downloadable Content**: `RhythmVerse` (default **On** since the owner pass of
-  2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `RhythmVerse Song Filter`, a
+  **General ▸ Downloadable Content ▸ RhythmVerse** (first row, P9-3): `RhythmVerse`
+  (default **On** since the owner pass of 2026-10-22, plan §9/P9-1 - it was off in the P6 delivery) and `Search Song Filter`, a
   submenu of five instrument booleans (Guitar/Bass/Drums/Vocals On, Keys Off; On = that chart is
   required, Off = no condition, all off = no constraint). The two menu-music rows moved under a
-  `DLC Menu Music` submenu so the page stays at the six-row budget. The five **filter** rows are
+  `DLC Menu Music` submenu. P9-3 makes Downloadable Content five rows, with RhythmVerse first;
+  its two-row page backs to Downloadable Content and the filter backs to RhythmVerse in both
+  contexts. The five **filter** rows are
   `hot`: the applier replaces the store's in-process settings snapshot, which its workers read
   before every request. The **master is `restart`** since the owner pass of 2026-10-22 (plan
   §9/P9-2): the switch also owns what the boot drew - the main-menu *RhythmVerse Customs* row and
