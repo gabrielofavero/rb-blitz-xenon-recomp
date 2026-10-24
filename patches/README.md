@@ -103,6 +103,27 @@ change is instrumentation only — no creation, submission or synchronization de
 reads a key. See the [P3 record](../docs/engine/shader-cache-p3.md) and
 [`config/pipeline_helper_inventory.json`](../config/pipeline_helper_inventory.json).
 
+`rexglue-sdk/0027-graphics-preparation-lifecycle.patch` makes persistent
+shader/pipeline preparation a cancellable generation instead of one blocking call.
+`include/rex/graphics/graphics_preparation.h` adds `GraphicsPreparationPhase`,
+`GraphicsPreparationKey`, `GraphicsPreparationProgress` and
+`GraphicsPreparationController`; `pipeline_preload.h` gains a terminal *cancelled*
+state and `CancelPending()`, so a cancelled generation can never report `Complete()`.
+The base `CommandProcessor` owns the controller, starts a generation from any thread
+(the import is scheduled with `CallInThread`) and services it in bounded slices from
+its worker loop — between packets and while the ring is idle — so the loading UI keeps
+polling and presenting. Both pipeline caches are split into begin/service/cancel
+around their existing import, translation and creation code, and each gets a
+**separate preparation creation pool and queue**, so `EndSubmission()` never waits for
+preparation and preparation never consumes a pipeline a draw needs first.
+`InitializeShaderStorage(..., blocking)` stays as a wrapper with the P1 result
+contract; `IGraphicsSystem`/`GraphicsSystem` expose begin/cancel/query/wait, and
+`rex_app.cpp` starts the generation after guest resume when
+`shader_storage_async_preparation` is on (default off — the visible loading phase is
+P6's). See the
+[P4 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen)
+and [shader-cache-p4.md](../docs/engine/shader-cache-p4.md).
+
 ## Apply / verify
 
 ```powershell

@@ -20,8 +20,12 @@ shader identities resolving locally and the committed candidate extended from 18
 carried by the trace since SDK patch 0026, so the inventory's 31 repeated helper
 recipes are key-identified instead of call-site-only. The graphics-settings matrix is
 the last unmeasured axis; the owner states that ordinary songs and DLC do not vary
-shader usage, so that axis is not a coverage obligation. Preparation integration
-remains P4/P6; full route validation remains P8.
+shader usage, so that axis is not a coverage obligation. P4 implemented 2026-10-24: a
+cancellable preparation generation both backends advance in bounded command-processor
+slices, with a dedicated preparation queue and pool per backend so submissions never
+wait for it, plus the `shader_storage_async_preparation` launch switch (default off)
+that starts it beside the guest. The visible phase and the post-A gate are P6; native
+caches are P5; full route validation remains P8.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -32,8 +36,10 @@ The cause of individual freezes is still not established: four of the eight
 empty-cache long frames record no compile work at all. A storage preload now reports
 explicit required/succeeded/failed/missing counts on both backends and cannot return
 before its required work finished ([P1 record](#p1--make-backend-completion-and-failure-reporting-trustworthy));
-the graphics-preparation lifecycle and UI (P4–P9) are not implemented, and the post-A gate remains
-a P6 blocker. Evidence:
+since P4 the same work can run as a cancellable generation beside the guest
+([P4 record](#p4--add-asynchronous-preparation-without-starving-the-loading-screen)),
+and the visible loading phase, native caches, invalidation and route validation remain
+P5–P9. The post-A gate remains a P6 blocker. Evidence:
 [shader-cache-p0.md](../../engine/shader-cache-p0.md),
 [shader-cache-p3.md](../../engine/shader-cache-p3.md) and
 `out/shader-cache-p0/runs/`.
@@ -613,8 +619,8 @@ and S6 packaging; a preload barrier alone cannot prepare previously unknown pipe
 ## Implementation prompts (2026-10-24)
 
 Original planning status: **P0–P9 were unstarted when these prompts were authored**.
-P0's implementation update is recorded below; P1–P9 remain unstarted.
-The planning update inspected project
+Implementation updates are recorded below each prompt: **P0–P4 are implemented
+(2026-10-24)**, P5–P9 remain unstarted prompts.The planning update inspected project
 `a8f0bb5`, SDK `c94f5eb` and the current working-tree sources. No game/UI navigation,
 build, cache deletion or new performance measurement was performed. The prompts are
 future implementation tasks, not authorization to execute them as part of this edit.
@@ -664,7 +670,9 @@ other synchronization costs need separate diagnosis if they remain.
 - `ReXApp::LaunchModule()` still calls blocking `InitializeShaderStorage(..., true)`
   on the deferred UI-thread launch path before `main_thread->Resume()`. The D3D12
   worker-growth/completion defect F1 is still present (**superseded: P1 replaced the
-  D3D12 preload barrier, 2026-10-24; the blocking call site itself is P4's to change**).
+  D3D12 preload barrier, 2026-10-24; P4 made the call site a switch —
+  `shader_storage_async_preparation=true` starts the generation after guest resume,
+  and the blocking form stays the default until P6 integrates the guest gate**).
   Vulkan's storage loader joins
   its preload workers even when called with `blocking = false`; flipping that flag
   does not provide the asynchronous loading-screen workflow.
@@ -1169,6 +1177,70 @@ Exit: both backends can prepare the catalogue while the intended loading UI anim
 and polls; all required real pipelines remain resident after successful completion.
 If this cannot be achieved with the current ownership model, document and fix that
 architecture before integrating the guest bar. The old blocking API is not the new API.
+
+Implementation update, 2026-10-24:
+
+- New SDK header `include/rex/graphics/graphics_preparation.h` (patch
+  `0027-graphics-preparation-lifecycle.patch`): `GraphicsPreparationPhase`
+  (`importing → translating → creating → finalizing`, then `succeeded` / `incomplete` /
+  `cancelled` / `failed`), `GraphicsPreparationKey` (title id, caller configuration
+  epoch, storage-root hash), `GraphicsPreparationProgress` (generation token, phase,
+  explicit counts, backend and rendering path, `has_catalogue`, cancelled flag, elapsed
+  time, service slices) and `GraphicsPreparationController`, which owns the generation
+  token, the phase, the cancellation request and the entry tracker. Rules it encodes:
+  one generation at a time with a strictly increasing token; phases move forwards only
+  and terminal phases are published by `Finish()`; a zero-entry catalogue finishes
+  `incomplete` and can never be `ready`; cancellation moves not-yet-started entries to
+  a terminal *cancelled* state (never a success) while in-flight creation reports its
+  own result; `Reset()` releases every waiter.
+- `pipeline_preload.h` gained that terminal cancelled state, `CancelPending()` and the
+  `cancelled` count; `Complete()` excludes cancelled entries.
+- **The ownership model was the blocker, and it changed**: preparation never runs on a
+  submission path and never uses the gameplay creation queue. The base
+  `CommandProcessor` owns the controller, schedules the import on its own thread
+  (`CallInThread`) and services one bounded slice per worker-loop iteration and on each
+  idle-spin iteration. Each cache has a **separate** preparation creation queue and a
+  bounded worker pool (joined at finish/cancel), so D3D12's `EndSubmission()` drain/waits
+  and Vulkan's `startup_loading_`/`EndSubmission()` behaviour still apply to gameplay
+  pipelines only. Pipeline-map mutation, root-signature lookup and publication stay on
+  the command processor thread; workers only touch a published `Pipeline`'s atomics and
+  call the driver with pre-resolved arguments; no worker calls a guest function.
+- D3D12: `InitializeShaderStorage` is now a wrapper over `Begin`/`Service`; the import
+  reads and validates records, loads shaders, registers every stored description as a
+  required entry and starts the translation pool, then returns. Slices poll translation,
+  enqueue up to 32 descriptions and create up to 4 pipelines on the processor thread per
+  slice while the preparation workers create the rest. The permanent `creation_threads_`
+  and their completion event are untouched.
+- Vulkan: the same split, with translations done **one per slice** (the measured 1.54 s
+  translation cost no longer lands in one call), then 16 enqueues and 2 processor-thread
+  creations per slice, workers for the rest. `startup_loading_` stays tied to the old
+  blocking path.
+- Cancellation finishes the generation in the same slice: stop enqueueing, cancel the
+  entries that have not started, join in-flight work (its real pipelines stay resident)
+  and report `cancelled`. `ShutdownShaderStorage` resets the controller before joining,
+  so a waiter can never be left blocking on work nobody finishes.
+- App surface: `IGraphicsSystem`/`GraphicsSystem` gained
+  `BeginShaderStoragePreparation`, `CancelShaderStoragePreparation`,
+  `QueryShaderStoragePreparation` and `WaitForShaderStoragePreparation` (unsupported
+  defaults, implemented on top of the command processor). `rex_app.cpp` keeps the old
+  blocking call by default; `shader_storage_async_preparation=true` starts the
+  generation after `main_thread->Resume()` instead, which is the measurement
+  configuration P8 will drive (P6 owns the visible phase and the post-A gate).
+- Tests: `tests/graphics_preparation_tests.cpp` → ctest `graphics_preparation`, 141
+  checks against the real header with real threads (tokens, terminal finality,
+  forwards-only phases, completed-work-only progress, zero-entry catalogue, cancellation
+  with a running entry left open, idempotent cancel/reset, a delayed worker the wait
+  cannot outrun, reset releasing a waiter, tracker cancellation).
+- Gates (2026-10-24): release build links `rexruntime.dll`, `rexgpu-xenos.dll` and
+  `rb_blitz.exe`; full release `ctest` **60/60**; `apply_sdk_patches.ps1 -Check` reports
+  **26 patches, 0 failed, 74 patched files, 0 unexpected**. No game/UI run was made in
+  this pass, so P4 does **not** claim that the loading UI animates yet and makes no
+  in-song compile-work claim — the async boot is P8's route, and the visible bar plus
+  the post-A continuation remain P6's.
+- Remaining for P4's exit in practice: the responsive-loading-screen evidence (the
+  switch booted with the trace on) and P6's decision on where the generation starts.
+  The import itself is still one slice; only translation and creation are sliced.
+  Details: [shader-cache-p4.md](../../engine/shader-cache-p4.md).
 
 ### P5 — Persist native results for faster subsequent boots on both backends
 

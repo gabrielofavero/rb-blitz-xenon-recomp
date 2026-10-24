@@ -135,15 +135,36 @@ repeat a suspect route with tracing off, and note that resource I/O, texture con
 and readback are not timed.
 
 Since shader-cache P1 (2026-10-24) a storage preload also logs its own result whether
-or not the trace switch is on: `Shader storage preload: N required, M succeeded
-(K already present), F failed, X missing, Q queued, R running, D duplicate request(s)
-in … milliseconds` (the Vulkan backend prefixes the same counts with `Vulkan`), and
-`Shader storage preload is not ready: …` when required work did not produce every
-pipeline. `succeeded` counts real pipelines only — a Vulkan placeholder retained after
-a failed real creation is reported as failed — and a preload with zero required entries
-is empty, not covered. The states and the blocking barrier live in
+or not the trace switch is on. Since P4 the line names the terminal phase and carries
+the cancelled count (there is no single creation duration any more — progress is taken
+from the controller): `Shader storage preload succeeded: N required, M succeeded
+(K already present), F failed, X missing, C cancelled, D duplicate request(s)` (the
+Vulkan backend prefixes the same counts with `Vulkan`), and
+`Shader storage preload is not ready (cancelled|incomplete): …` when required work did
+not produce every pipeline. `succeeded` counts real pipelines only — a Vulkan
+placeholder retained after a failed real creation is reported as failed — and a
+preload with zero required entries is empty, not covered (its line says so). The states
+and the blocking barrier live in
 [pipeline_preload.h](../../rexglue-sdk/include/rex/graphics/pipeline_preload.h)
 (SDK patch 0021).
+
+Since shader-cache P4 (2026-10-24) the preload can also run **beside** the guest instead of
+before it. `shader_storage_async_preparation` (default `false`) makes the launch path start the
+preparation generation after the guest resumes rather than blocking the launch; the command
+processor then services it in bounded slices between packets (and while the ring is idle), so the
+loading UI keeps polling and presenting. The generation reports itself through
+`GraphicsSystem::QueryShaderStoragePreparation()` — phase (`importing`, `translating`, `creating`,
+`finalizing`, then `succeeded` / `incomplete` / `cancelled` / `failed`), explicit required /
+succeeded / failed / missing / cancelled counts, the renderer and its rendering path, and the
+elapsed time and slice count. A generation with no catalogue is `incomplete`, never `ready`;
+`CancelShaderStoragePreparation()` stops enqueuing, cancels entries whose creation has not started
+and keeps the pipelines that were already in flight. The lifecycle lives in
+[graphics_preparation.h](../../rexglue-sdk/include/rex/graphics/graphics_preparation.h)
+(SDK patch 0027).
+
+| Cvar | Default | What it does |
+| --- | --- | --- |
+| `shader_storage_async_preparation` | `false` | Prepares the persistent shader/pipeline storage after the guest starts, in bounded command-processor slices, instead of blocking the launch. P4's measurement and integration switch; the visible loading phase belongs to P6. |
 
 ### Adding a point
 

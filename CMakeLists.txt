@@ -521,6 +521,17 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME pipeline_preload COMMAND rb_blitz_pipeline_preload_tests)
 
+    # P4: the cancellable graphics-preparation lifecycle both backends drive
+    # from the command processor thread (rexglue-sdk/include/rex/graphics/
+    # graphics_preparation.h). Header-only, real threads and real waits, so the
+    # ordering rules the plan states are pinned without a GPU or a boot.
+    add_executable(rb_blitz_graphics_preparation_tests tests/graphics_preparation_tests.cpp)
+    target_link_libraries(rb_blitz_graphics_preparation_tests PRIVATE rex::core)
+    if(WIN32)
+        target_link_libraries(rb_blitz_graphics_preparation_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME graphics_preparation COMMAND rb_blitz_graphics_preparation_tests)
+
     if(WIN32 AND REXGLUE_USE_VULKAN)
         add_executable(rb_blitz_vulkan_texture_descriptor_cache_tests
             tests/vulkan_texture_descriptor_cache_tests.cpp)

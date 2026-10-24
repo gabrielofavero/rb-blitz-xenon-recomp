@@ -1,0 +1,2619 @@
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index 2744842..6a80031 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -13,6 +13,7 @@
+ 
+ #include <atomic>
+ #include <cstring>
++#include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <mutex>
+@@ -21,6 +22,7 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++#include <rex/graphics/graphics_preparation.h>
+ #include <rex/graphics/register_file.h>
+ #include <rex/graphics/registers.h>
+ #include <rex/graphics/xenos.h>
+@@ -115,6 +117,34 @@ class CommandProcessor {
+   virtual void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
+                                        bool blocking);
+ 
++  // --- Graphics preparation (P4 of the shader-cache plan) -------------------
++  // Starts a preparation generation and returns immediately. The import,
++  // shader translation and pipeline creation then run in bounded slices on the
++  // command processor thread (ServiceShaderStoragePreparation), so guest
++  // submissions, window events and the loading UI keep being serviced while it
++  // runs. `configuration` is the caller's epoch for everything outside the
++  // title that changes the requirement set (graphics settings, content,
++  // rendering path); the backend only stores and compares it.
++  //
++  // Returns false when the arguments cannot identify a storage, or when a
++  // generation is already active - the caller must cancel it first, so two
++  // preparations never write the same caches at once.
++  bool BeginShaderStoragePreparation(const std::filesystem::path& cache_root, uint32_t title_id,
++                                     uint64_t configuration);
++  // Asks the active generation to stop. The command processor thread observes
++  // this at its next slice: it stops enqueueing, cancels entries whose creation
++  // has not started, and finishes the generation as cancelled after work
++  // already in flight reports its own result (a driver pipeline creation cannot
++  // be interrupted, and the pipelines it produces are real, so they are kept).
++  void RequestCancelShaderStoragePreparation();
++  GraphicsPreparationProgress QueryShaderStoragePreparation() const;
++  // Blocks until the active generation finishes or is reset. Only waits on the
++  // controller, so this is safe from a thread that does not own the pipeline
++  // maps.
++  GraphicsPreparationProgress WaitForShaderStoragePreparation();
++  GraphicsPreparationController& preparation() { return preparation_; }
++  const GraphicsPreparationController& preparation() const { return preparation_; }
++
+   void InitializeRingBuffer(uint32_t ptr, uint32_t size_log2);
+   void EnableReadPointerWriteBack(uint32_t ptr, uint32_t block_size_log2);
+ 
+@@ -142,6 +172,21 @@ class CommandProcessor {
+   virtual bool SetupContext() = 0;
+   virtual void ShutdownContext() = 0;
+ 
++  // Graphics-preparation hooks, called on the command processor thread only.
++  // BeginShaderStoragePreparationOnProcessorThread opens the storage and
++  // imports records; it must return promptly and report the generation through
++  // preparation() (NoteCatalogue, AdvancePhase, Finish on failure). The service
++  // hook runs one bounded slice and finishes the generation when nothing is
++  // unfinished.
++  virtual void BeginShaderStoragePreparationOnProcessorThread(
++      const std::filesystem::path& cache_root, uint32_t title_id) {
++    (void)cache_root;
++    (void)title_id;
++  }
++  virtual void ServiceShaderStoragePreparationOnProcessorThread() {}
++  // Called from the worker loop. Cheap when no generation is active.
++  void ServiceShaderStoragePreparation();
++
+   virtual void WriteRegister(uint32_t index, uint32_t value);
+   uint32_t ReadRegisterValue(uint32_t index) const;
+   virtual void WriteRegistersFromMem(uint32_t start_index, uint32_t* base, uint32_t num_registers);
+@@ -285,6 +330,14 @@ class CommandProcessor {
+ 
+   bool paused_ = false;
+ 
++  // The active (or last) graphics-preparation generation. The controller owns
++  // the entry accounting and the cancellation request; the backends advance it
++  // from the command processor thread.
++  GraphicsPreparationController preparation_;
++  // Fast path for the worker loop, so an idle spin does not take the
++  // controller's lock on every iteration.
++  std::atomic<bool> preparation_active_{false};
++
+   // By default (such as for tools), post-processing is disabled.
+   // "Desired" is for the external thread managing the post-processing effect.
+   SwapPostEffect swap_post_effect_desired_ = SwapPostEffect::kNone;
+diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+index a46e79b..f305362 100644
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -56,6 +56,12 @@ class D3D12CommandProcessor : public CommandProcessor {
+   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
+                                bool blocking) override;
+ 
++  // Graphics preparation, serviced from the base class's worker loop. Both run
++  // on the command processor thread and are bounded per call.
++  void BeginShaderStoragePreparationOnProcessorThread(const std::filesystem::path& cache_root,
++                                                      uint32_t title_id) override;
++  void ServiceShaderStoragePreparationOnProcessorThread() override;
++
+   ui::d3d12::D3D12Provider& GetD3D12Provider() const {
+     return *static_cast<ui::d3d12::D3D12Provider*>(graphics_system_->provider());
+   }
+diff --git a/include/rex/graphics/d3d12/pipeline_cache.h b/include/rex/graphics/d3d12/pipeline_cache.h
+index b468412..89990fc 100644
+--- a/include/rex/graphics/d3d12/pipeline_cache.h
++++ b/include/rex/graphics/d3d12/pipeline_cache.h
+@@ -15,10 +15,12 @@
+ #include <condition_variable>
+ #include <cstdio>
+ #include <deque>
++#include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <mutex>
+ #include <queue>
++#include <set>
+ #include <string>
+ #include <thread>
+ #include <unordered_map>
+@@ -29,6 +31,7 @@
+ #include <rex/graphics/d3d12/render_target_cache.h>
+ #include <rex/graphics/d3d12/shader.h>
+ #include <rex/graphics/flags.h>
++#include <rex/graphics/graphics_preparation.h>
+ #include <rex/graphics/pipeline/shader/dxbc_translator.h>
+ #include <rex/graphics/pipeline_preload.h>
+ #include <rex/graphics/primitive_processor.h>
+@@ -64,8 +67,28 @@ class PipelineCache {
+   // pipeline. A blocking call returns only after every required entry reached a
+   // terminal state; a non-blocking one may report queued/running entries, which
+   // are not ready.
++  //
++  // This is the synchronous wrapper: it begins a preparation generation and
++  // drives every slice on the calling thread, which is the command processor
++  // thread (or any thread while the command processor is paused). It exists for
++  // the launch-time path and for tools; new code should let the command
++  // processor service the generation instead.
+   PipelinePreloadResult InitializeShaderStorage(const std::filesystem::path& cache_root,
+                                                 uint32_t title_id, bool blocking);
++  // Asynchronous form, called on the command processor thread by
++  // CommandProcessor::BeginShaderStoragePreparationOnProcessorThread. Opens the
++  // storage and imports descriptions and guest shaders, then returns - the
++  // remaining work is done by ServiceShaderStoragePreparation in bounded slices,
++  // with pipeline creation continuing on the preparation workers.
++  void BeginShaderStoragePreparation(const std::filesystem::path& cache_root, uint32_t title_id);
++  // Advances the active generation by one bounded slice. Returns true while more
++  // work remains. The generation is finished through the command processor's
++  // controller, so this never reports a terminal phase without the counts.
++  bool ServiceShaderStoragePreparation();
++  // Stops enqueueing and cancels the entries whose creation has not started.
++  // Creation already in flight is joined while the generation finishes, and the
++  // pipelines it produced are kept - they are real.
++  void CancelShaderStoragePreparation();
+   void ShutdownShaderStorage();
+   // Result of the most recent preload; empty before the first one.
+   const PipelinePreloadResult& shader_storage_preload_result() const {
+@@ -409,10 +432,61 @@ class PipelineCache {
+   std::unique_ptr<rex::thread::Thread> storage_write_thread_;
+ 
+   // Explicit terminal states and the blocking completion barrier of the storage
+-  // preload, including entries queued for the permanent creation threads.
+-  PipelinePreloadTracker preload_tracker_;
++  // preload, including entries queued for the permanent creation threads. The
++  // tracker itself lives in the command processor's preparation controller, so
++  // cancellation and progress share one owner.
+   PipelinePreloadResult shader_storage_preload_result_;
+ 
++  // --- Graphics preparation (P4) -------------------------------------------
++  // The imported descriptions and the state machine that turns them into
++  // pipelines one bounded slice at a time. Preparation never uses the gameplay
++  // creation queue: submissions must not wait for preparation work, and
++  // preparation must not consume the pipelines a draw needs first.
++  bool OpenShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id);
++  void StartPreparationWorkers(size_t logical_processor_count);
++  bool PreparationTranslationsFinished() const;
++  void JoinPreparationTranslationWorkers();
++  size_t EnqueuePreparationPipelines(size_t max_count);
++  size_t CreatePreparationPipelinesOnProcessorThread(size_t max_count);
++  void PreparationCreationThread(size_t thread_index);
++  void ShutdownPreparationWorkers();
++  void FinishShaderStoragePreparation(GraphicsPreparationPhase terminal_phase);
++
++  bool preparation_running_ = false;
++  bool preparation_blocking_ = false;
++  bool preparation_cancelled_ = false;
++  size_t pipelines_already_present_ = 0;
++  std::vector<PipelineStoredDescription> preparation_descriptions_;
++  size_t preparation_next_description_ = 0;
++  // Read by the translation workers, so it outlives the import slice.
++  bool preparation_edram_rov_used_ = false;
++  std::set<std::pair<uint64_t, uint64_t>> preparation_shader_translations_needed_;
++  // Bounded work per service slice, so a slice cannot hold the command processor
++  // thread for long. Creation is the expensive half (a driver call per entry),
++  // so it gets the smaller batch and the workers carry the rest.
++  static constexpr size_t kPreparationEnqueueBatch = 32;
++  static constexpr size_t kPreparationCreationBatch = 4;
++
++  // Shader translation pool for the stored descriptions' variants. It exists for
++  // one generation and is joined when the translation phase ends.
++  mutable std::mutex preparation_translation_lock_;
++  std::condition_variable preparation_translation_cond_;
++  std::deque<D3D12Shader*> preparation_shaders_to_translate_;
++  size_t preparation_translation_busy_ = 0;
++  bool preparation_translation_shutdown_ = false;
++  std::vector<std::unique_ptr<rex::thread::Thread>> preparation_translation_threads_;
++  std::mutex preparation_failed_translations_lock_;
++  std::vector<D3D12Shader::D3D12Translation*> preparation_failed_translations_;
++
++  // Bounded pipeline creation pool, separate from the gameplay creation threads.
++  std::mutex preparation_creation_lock_;
++  std::condition_variable preparation_creation_cond_;
++  std::priority_queue<Pipeline*, std::vector<Pipeline*>, PipelineCreationPriorityComparator>
++      preparation_creation_queue_;
++  size_t preparation_creation_busy_ = 0;
++  bool preparation_creation_shutdown_ = false;
++  std::vector<std::unique_ptr<rex::thread::Thread>> preparation_creation_threads_;
++
+   // Pipeline creation threads.
+   void CreationThread(size_t thread_index);
+   void CreateQueuedPipelinesOnProcessorThread();
+diff --git a/include/rex/graphics/graphics_preparation.h b/include/rex/graphics/graphics_preparation.h
+new file mode 100644
+index 0000000..6079d46
+--- /dev/null
++++ b/include/rex/graphics/graphics_preparation.h
+@@ -0,0 +1,382 @@
++/**
++ ******************************************************************************
++ * Xenia : Xbox 360 Emulator Research Project                                 *
++ ******************************************************************************
++ * Copyright 2022 Ben Vanik. All rights reserved.                             *
++ * Released under the BSD license - see LICENSE in the root for more details. *
++ *
++ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
++ *
++ ******************************************************************************
++ */
++
++#pragma once
++
++#include <chrono>
++#include <condition_variable>
++#include <cstddef>
++#include <cstdint>
++#include <mutex>
++
++#include <rex/graphics/pipeline_preload.h>
++
++// A graphics-preparation generation: the lifecycle that turns persistent shader
++// and pipeline storage into ready GPU pipelines without holding the command
++// processor or the guest.
++//
++// The problem this models, in one sentence: opening the storage, translating
++// shader variants and creating driver pipelines is one long job, and running it
++// as one blocking call - before the first frame, or on the command processor
++// thread - stops the loading UI from animating and stops submissions. The
++// lifecycle below is deliberately independent of the graphics backend: a
++// backend starts a generation, advances it in bounded slices from its owner
++// thread, and finishes it; the caller only ever sees phases and explicit counts.
++//
++// Rules the state encodes, so a caller cannot accidentally weaken them:
++//   * Only the owner thread advances the phase or finishes a generation.
++//   * A phase never moves backwards within a generation.
++//   * "Zero entries" is not coverage: a generation whose storage declared no
++//     required pipelines finishes as kIncomplete, never kSucceeded.
++//   * Cancellation moves not-yet-started entries to a terminal cancelled state,
++//     stops further enqueues, and still lets work already in flight report its
++//     own result - nothing is abandoned in a half-published state.
++//   * Every waiter is released, including by Reset() during shutdown.
++
++namespace rex::graphics {
++
++enum class GraphicsPreparationPhase : uint8_t {
++  // No generation has started, or the previous one was reset.
++  kIdle = 0,
++  // Opening the storage and importing descriptions and guest shaders.
++  kImporting,
++  // Translating the shader variants the stored pipelines reference.
++  kTranslating,
++  // Creating the pipelines themselves.
++  kCreating,
++  // Committing results (releasing temporary workers, flushing storage).
++  kFinalizing,
++  // Terminal: every required entry produced a real pipeline.
++  kSucceeded,
++  // Terminal: the work finished, but entries failed, were missing, or the
++  // storage declared no required pipelines at all.
++  kIncomplete,
++  // Terminal: the generation was cancelled by its owner.
++  kCancelled,
++  // Terminal: the storage could not be opened or imported.
++  kFailed,
++};
++
++inline bool GraphicsPreparationIsTerminal(GraphicsPreparationPhase phase) {
++  return phase >= GraphicsPreparationPhase::kSucceeded;
++}
++
++inline const char* GraphicsPreparationPhaseName(GraphicsPreparationPhase phase) {
++  switch (phase) {
++    case GraphicsPreparationPhase::kIdle:
++      return "idle";
++    case GraphicsPreparationPhase::kImporting:
++      return "importing";
++    case GraphicsPreparationPhase::kTranslating:
++      return "translating";
++    case GraphicsPreparationPhase::kCreating:
++      return "creating";
++    case GraphicsPreparationPhase::kFinalizing:
++      return "finalizing";
++    case GraphicsPreparationPhase::kSucceeded:
++      return "succeeded";
++    case GraphicsPreparationPhase::kIncomplete:
++      return "incomplete";
++    case GraphicsPreparationPhase::kCancelled:
++      return "cancelled";
++    case GraphicsPreparationPhase::kFailed:
++      return "failed";
++  }
++  return "unknown";
++}
++
++// Which backend produced the generation. Informational - one process boots one
++// backend - but a progress reader should not have to guess it.
++enum class GraphicsPreparationBackend : uint32_t {
++  kUnknown = 0,
++  kD3D12 = 1,
++  kVulkan = 2,
++};
++
++inline const char* GraphicsPreparationBackendName(GraphicsPreparationBackend backend) {
++  switch (backend) {
++    case GraphicsPreparationBackend::kD3D12:
++      return "d3d12";
++    case GraphicsPreparationBackend::kVulkan:
++      return "vulkan";
++    case GraphicsPreparationBackend::kUnknown:
++      break;
++  }
++  return "unknown";
++}
++
++// Identity of everything a prepared result depends on that can change between
++// generations. A caller starts a new generation when any of these change; a
++// result from a different key may never be reported as ready.
++struct GraphicsPreparationKey {
++  uint32_t title_id = 0;
++  // Caller-supplied epoch for settings, content and rendering choices. The
++  // graphics backend does not interpret it, only compares it.
++  uint64_t configuration = 0;
++  // Hash of the resolved storage root, so two generations reading different
++  // caches are distinguishable in a log.
++  uint64_t cache_root = 0;
++
++  bool operator==(const GraphicsPreparationKey& other) const {
++    return title_id == other.title_id && configuration == other.configuration &&
++           cache_root == other.cache_root;
++  }
++  bool operator!=(const GraphicsPreparationKey& other) const { return !(*this == other); }
++};
++
++// One immutable reading of a generation. `entries` carries the explicit counts
++// (required / queued / running / succeeded / failed / missing / cancelled).
++struct GraphicsPreparationProgress {
++  uint64_t generation = 0;
++  GraphicsPreparationKey key;
++  GraphicsPreparationPhase phase = GraphicsPreparationPhase::kIdle;
++  PipelinePreloadResult entries;
++  GraphicsPreparationBackend backend = GraphicsPreparationBackend::kUnknown;
++  // Backend-specific rendering path (D3D12 rtv/rov, Vulkan fbo/fsi).
++  uint32_t render_path = 0;
++  // Whether the storage declared any required pipelines. A generation with no
++  // catalogue cannot be "ready" - there was nothing to verify.
++  bool has_catalogue = false;
++  bool cancel_requested = false;
++  bool active = false;
++  bool finished = false;
++  bool complete = false;
++  uint64_t elapsed_milliseconds = 0;
++  // Bounded slices the owner thread ran. A slice count that stops moving while
++  // `active` stays true is the signature of a stalled owner thread.
++  uint64_t service_slices = 0;
++
++  // The one readiness question a caller may ask: this generation finished,
++  // succeeded, and every required entry produced a real pipeline.
++  bool ready() const {
++    return finished && phase == GraphicsPreparationPhase::kSucceeded && complete;
++  }
++  uint64_t completed_entries() const { return entries.succeeded; }
++  uint64_t required_entries() const { return entries.required; }
++};
++
++// The lifecycle state machine. The owning command processor creates one, starts
++// a generation when the application asks for preparation, and advances it from
++// its own thread; every other thread may only take snapshots or wait.
++class GraphicsPreparationController {
++ public:
++  using Clock = std::chrono::steady_clock;
++
++  // Starts a generation. Returns false when one is already active - the caller
++  // must cancel it first, so two preparations can never write the same caches
++  // concurrently. The generation token strictly increases across Begin() and
++  // Reset(), so a stale snapshot can never be mistaken for a new generation.
++  bool Begin(const GraphicsPreparationKey& key) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (active_) {
++      return false;
++    }
++    tracker_.Reset();
++    ++generation_;
++    key_ = key;
++    phase_ = GraphicsPreparationPhase::kImporting;
++    cancel_requested_ = false;
++    has_catalogue_ = false;
++    backend_ = GraphicsPreparationBackend::kUnknown;
++    render_path_ = 0;
++    service_slices_ = 0;
++    started_at_ = Clock::now();
++    finished_at_ = Clock::time_point();
++    active_ = true;
++    finished_ = false;
++    complete_ = false;
++    return true;
++  }
++
++  // Records which backend and rendering path the generation prepares for.
++  void SetRenderer(GraphicsPreparationBackend backend, uint32_t render_path) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    backend_ = backend;
++    render_path_ = render_path;
++  }
++
++  // Declares whether the storage contained any required pipelines. Called once
++  // the import is complete; `false` makes the generation finish kIncomplete.
++  void NoteCatalogue(bool has_catalogue) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    has_catalogue_ = has_catalogue;
++  }
++
++  // Moves the phase forwards. Refuses to move backwards, into a terminal phase
++  // (Finish does that) or while no generation is active.
++  bool AdvancePhase(GraphicsPreparationPhase phase) {
++    if (phase == GraphicsPreparationPhase::kIdle || GraphicsPreparationIsTerminal(phase)) {
++      return false;
++    }
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (!active_ || GraphicsPreparationIsTerminal(phase_) || phase <= phase_) {
++      return false;
++    }
++    phase_ = phase;
++    return true;
++  }
++
++  // Entry accounting, forwarded so cancellation and progress share one lock
++  // ordering with the lifecycle.
++  bool RegisterEntry(uint64_t identity) { return tracker_.Register(identity); }
++  void BeginEntry(uint64_t identity) { tracker_.BeginWork(identity); }
++  void SucceedEntry(uint64_t identity) { tracker_.Succeed(identity); }
++  void FailEntry(uint64_t identity) { tracker_.Fail(identity); }
++  void MissEntry(uint64_t identity) { tracker_.Miss(identity); }
++  size_t CancelPendingEntries() { return tracker_.CancelPending(); }
++
++  // Asks for cancellation. The owner thread observes this at its next slice,
++  // stops enqueueing, cancels not-yet-started entries and finishes the
++  // generation as kCancelled after in-flight work reports.
++  void RequestCancel() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    cancel_requested_ = true;
++  }
++
++  bool CancelRequested() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return cancel_requested_;
++  }
++
++  bool Active() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return active_;
++  }
++
++  uint64_t generation() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return generation_;
++  }
++
++  GraphicsPreparationPhase phase() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return phase_;
++  }
++
++  // Numbers of entries still queued or running. The owner thread uses it to
++  // decide whether the generation can be finalized.
++  size_t unfinished_entries() const { return tracker_.UnfinishedCount(); }
++
++  // Live entry counts. Taken without the lifecycle lock, so a backend can read
++  // them from inside its own slice.
++  PipelinePreloadResult entries() const { return tracker_.Read(); }
++
++  void NoteServiceSlice() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    ++service_slices_;
++  }
++
++  // Publishes the terminal phase and wakes every waiter. Only an active
++  // generation can finish; the first terminal wins.
++  bool Finish(GraphicsPreparationPhase terminal_phase) {
++    if (!GraphicsPreparationIsTerminal(terminal_phase)) {
++      return false;
++    }
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (!active_) {
++        return false;
++      }
++      const PipelinePreloadResult entries = tracker_.Read();
++      phase_ = terminal_phase;
++      finished_ = true;
++      active_ = false;
++      complete_ = terminal_phase == GraphicsPreparationPhase::kSucceeded && has_catalogue_ &&
++                  entries.Complete();
++      finished_at_ = Clock::now();
++    }
++    terminal_condition_.notify_all();
++    return true;
++  }
++
++  GraphicsPreparationProgress Snapshot() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return SnapshotLocked();
++  }
++
++  // Blocks until the active generation reaches a terminal phase, or until
++  // Reset()/Begin() replaces it. An idle controller returns immediately.
++  GraphicsPreparationProgress WaitForTerminal() {
++    std::unique_lock<std::mutex> lock(mutex_);
++    const uint64_t generation = generation_;
++    terminal_condition_.wait(lock,
++                             [this, generation] { return generation_ != generation || !active_; });
++    return SnapshotLocked();
++  }
++
++  // Shutdown and re-initialization. Releases every waiter (a waiting barrier can
++  // never be left blocking on work nobody will finish) and abandons the current
++  // generation as cancelled. Counts of the new generation start empty.
++  void Reset() {
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      ++generation_;
++      if (active_) {
++        phase_ = GraphicsPreparationPhase::kCancelled;
++        finished_ = true;
++        active_ = false;
++        complete_ = false;
++        finished_at_ = Clock::now();
++      }
++      tracker_.Reset();
++      cancel_requested_ = false;
++      has_catalogue_ = false;
++      service_slices_ = 0;
++    }
++    terminal_condition_.notify_all();
++  }
++
++ private:
++  GraphicsPreparationProgress SnapshotLocked() const {
++    GraphicsPreparationProgress progress;
++    progress.generation = generation_;
++    progress.key = key_;
++    progress.phase = phase_;
++    progress.entries = tracker_.Read();
++    progress.backend = backend_;
++    progress.render_path = render_path_;
++    progress.has_catalogue = has_catalogue_;
++    progress.cancel_requested = cancel_requested_;
++    progress.active = active_;
++    progress.finished = finished_;
++    progress.complete = complete_;
++    progress.service_slices = service_slices_;
++    if (generation_ != 0) {
++      const Clock::time_point end = active_ || !finished_ ? Clock::now() : finished_at_;
++      if (end > started_at_) {
++        progress.elapsed_milliseconds =
++            uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(end - started_at_)
++                         .count());
++      }
++    }
++    return progress;
++  }
++
++  mutable std::mutex mutex_;
++  std::condition_variable terminal_condition_;
++  PipelinePreloadTracker tracker_;
++  GraphicsPreparationKey key_;
++  GraphicsPreparationBackend backend_ = GraphicsPreparationBackend::kUnknown;
++  uint32_t render_path_ = 0;
++  uint64_t generation_ = 0;
++  GraphicsPreparationPhase phase_ = GraphicsPreparationPhase::kIdle;
++  bool active_ = false;
++  bool finished_ = false;
++  bool complete_ = false;
++  bool has_catalogue_ = false;
++  bool cancel_requested_ = false;
++  uint64_t service_slices_ = 0;
++  Clock::time_point started_at_;
++  Clock::time_point finished_at_;
++};
++
++}  // namespace rex::graphics
+diff --git a/include/rex/graphics/graphics_system.h b/include/rex/graphics/graphics_system.h
+index ac6b056..4fdacda 100644
+--- a/include/rex/graphics/graphics_system.h
++++ b/include/rex/graphics/graphics_system.h
+@@ -83,6 +83,15 @@ class GraphicsSystem : public system::IGraphicsSystem {
+   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
+                                bool blocking) override;
+ 
++  // Asynchronous preparation (P4). These forward to the command processor's
++  // generation controller and are safe to call from any thread; the work itself
++  // only ever runs on the command processor thread.
++  bool BeginShaderStoragePreparation(const std::filesystem::path& cache_root, uint32_t title_id,
++                                     uint64_t configuration) override;
++  void CancelShaderStoragePreparation() override;
++  GraphicsPreparationProgress QueryShaderStoragePreparation() const override;
++  GraphicsPreparationProgress WaitForShaderStoragePreparation() override;
++
+   bool is_paused() const { return paused_; }
+   void Pause();
+   void Resume();
+diff --git a/include/rex/graphics/pipeline_preload.h b/include/rex/graphics/pipeline_preload.h
+index ef7b322..b7db4b0 100644
+--- a/include/rex/graphics/pipeline_preload.h
++++ b/include/rex/graphics/pipeline_preload.h
+@@ -29,6 +29,10 @@
+ // blocking barrier waits on those states instead of on temporary-worker
+ // bookkeeping (the Direct3D 12 preload used to wait only inside the branch that
+ // grew the worker pool, so the no-growth case could return with workers busy).
++//
++// The same states carry cancellation: an entry whose creation has not started
++// moves to a cancelled terminal state, which is never a success, so a cancelled
++// generation cannot report Complete() even if everything that did run succeeded.
+ 
+ namespace rex::graphics {
+ 
+@@ -41,7 +45,8 @@ inline constexpr uint64_t kNoPreloadIdentity = UINT64_MAX;
+ // Explicit counts of one storage preload. `succeeded` counts only entries whose
+ // real pipeline exists (created now or present before the preload); `failed`
+ // counts attempts that finished without a pipeline, `missing` counts entries
+-// that never could be attempted (no shader data, no creation arguments).
++// that never could be attempted (no shader data, no creation arguments), and
++// `cancelled` counts entries the owner abandoned before creation started.
+ struct PipelinePreloadResult {
+   uint64_t required = 0;
+   uint64_t queued = 0;
+@@ -49,6 +54,11 @@ struct PipelinePreloadResult {
+   uint64_t succeeded = 0;
+   uint64_t failed = 0;
+   uint64_t missing = 0;
++  // Entries cancelled before their creation started. A cancelled entry is
++  // terminal - nothing will create it in this generation - but it is not a
++  // success, and work already in flight keeps running until it reports its own
++  // terminal state.
++  uint64_t cancelled = 0;
+   // Repeated registration of one identity - refused, and not required twice.
+   uint64_t duplicates = 0;
+   // Entries satisfied by a pipeline that already existed before the preload.
+@@ -59,9 +69,15 @@ struct PipelinePreloadResult {
+   bool HasWork() const { return required != 0; }
+   // No entry is queued or running any more. Failures may still be counted.
+   bool Finished() const { return queued == 0 && running == 0; }
++  // The required entries that count as progress (successes, or real pipelines
++  // that already existed). This is what a progress bar reads; it excludes the
++  // failed, missing and cancelled entries.
++  uint64_t Succeeded() const { return succeeded; }
+   // Every required entry produced a real pipeline. An empty preload (nothing
+   // stored) is not complete coverage - it is simply empty.
+-  bool Complete() const { return HasWork() && Finished() && failed == 0 && missing == 0; }
++  bool Complete() const {
++    return HasWork() && Finished() && failed == 0 && missing == 0 && cancelled == 0;
++  }
+ };
+ 
+ class PipelinePreloadTracker {
+@@ -88,6 +104,29 @@ class PipelinePreloadTracker {
+   // Terminal failure: the entry could not be attempted at all.
+   void Miss(uint64_t identity) { Transition(identity, EntryState::kMissing); }
+ 
++  // Abandons every entry whose creation has not started yet (queued ->
++  // cancelled) and wakes waiters when nothing is running any more. Entries that
++  // are already running are left alone: a pipeline creation in a graphics
++  // driver cannot be interrupted, so it finishes and reports its own terminal
++  // state, and a late transition on a cancelled entry is ignored. Returns the
++  // number of entries cancelled. Idempotent.
++  size_t CancelPending() {
++    size_t cancelled = 0;
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      for (auto& entry : entries_) {
++        if (entry.second == EntryState::kQueued) {
++          entry.second = EntryState::kCancelled;
++          ++cancelled;
++        }
++      }
++    }
++    if (cancelled) {
++      finished_cond_.notify_all();
++    }
++    return cancelled;
++  }
++
+   // Number of entries still queued or running.
+   size_t UnfinishedCount() const {
+     std::lock_guard<std::mutex> lock(mutex_);
+@@ -132,11 +171,12 @@ class PipelinePreloadTracker {
+     kSucceeded,
+     kFailed,
+     kMissing,
++    kCancelled,
+   };
+ 
+   static bool IsTerminal(EntryState state) {
+     return state == EntryState::kSucceeded || state == EntryState::kFailed ||
+-           state == EntryState::kMissing;
++           state == EntryState::kMissing || state == EntryState::kCancelled;
+   }
+ 
+   void Transition(uint64_t identity, EntryState target) {
+@@ -190,6 +230,9 @@ class PipelinePreloadTracker {
+         case EntryState::kMissing:
+           ++result.missing;
+           break;
++        case EntryState::kCancelled:
++          ++result.cancelled;
++          break;
+       }
+     }
+     return result;
+diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
+index d88783c..927df01 100644
+--- a/include/rex/graphics/vulkan/command_processor.h
++++ b/include/rex/graphics/vulkan/command_processor.h
+@@ -136,6 +136,12 @@ class VulkanCommandProcessor : public CommandProcessor {
+   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
+                                bool blocking) override;
+ 
++  // Graphics preparation, serviced from the base class's worker loop. Both run
++  // on the command processor thread and are bounded per call.
++  void BeginShaderStoragePreparationOnProcessorThread(const std::filesystem::path& cache_root,
++                                                      uint32_t title_id) override;
++  void ServiceShaderStoragePreparationOnProcessorThread() override;
++
+   ui::vulkan::VulkanDevice* GetVulkanDevice() const {
+     return static_cast<const ui::vulkan::VulkanProvider*>(graphics_system_->provider())
+         ->vulkan_device();
+diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
+index e6d59dc..23438fc 100644
+--- a/include/rex/graphics/vulkan/pipeline_cache.h
++++ b/include/rex/graphics/vulkan/pipeline_cache.h
+@@ -28,6 +28,7 @@
+ #include <vector>
+ 
+ #include <rex/graphics/pipeline/shader/spirv_translator.h>
++#include <rex/graphics/graphics_preparation.h>
+ #include <rex/graphics/pipeline_preload.h>
+ #include <rex/hash.h>
+ #include <rex/platform.h>
+@@ -72,6 +73,19 @@ class VulkanPipelineCache {
+   // failed, never as a real pipeline.
+   PipelinePreloadResult InitializeShaderStorage(const std::filesystem::path& cache_root,
+                                                 uint32_t title_id, bool blocking);
++  // Asynchronous form, called on the command processor thread by
++  // CommandProcessor::BeginShaderStoragePreparationOnProcessorThread. Opens the
++  // storage and imports descriptions and guest shaders, then returns; translation
++  // and creation run in bounded slices from ServiceShaderStoragePreparation, with
++  // pipeline creation continuing on the preparation workers.
++  void BeginShaderStoragePreparation(const std::filesystem::path& cache_root, uint32_t title_id);
++  // Advances the active generation by one bounded slice; true while more work
++  // remains. The generation is finished through the command processor's
++  // controller.
++  bool ServiceShaderStoragePreparation();
++  // Stops enqueueing and cancels entries whose creation has not started. Work
++  // already in flight is joined while the generation finishes.
++  void CancelShaderStoragePreparation();
+   void ShutdownShaderStorage();
+   void EndSubmission();
+   // Result of the most recent preload; empty before the first one.
+@@ -489,8 +503,43 @@ class VulkanPipelineCache {
+   std::vector<std::unique_ptr<rex::thread::Thread>> creation_threads_;
+ 
+   // Explicit terminal states and the completion barrier of the storage preload.
+-  PipelinePreloadTracker preload_tracker_;
++  // The tracker itself lives in the command processor's preparation controller,
++  // so cancellation and progress share one owner.
+   PipelinePreloadResult shader_storage_preload_result_;
++
++  // --- Graphics preparation (P4) -------------------------------------------
++  bool OpenShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id);
++  size_t TranslatePreparationShaders(size_t max_count);
++  size_t EnqueuePreparationPipelines(size_t max_count);
++  size_t CreatePreparationPipelinesOnProcessorThread(size_t max_count);
++  void PreparationCreationThread(size_t thread_index);
++  void StartPreparationWorkers();
++  void ShutdownPreparationWorkers();
++  void FinishShaderStoragePreparation(GraphicsPreparationPhase terminal_phase);
++
++  bool preparation_running_ = false;
++  bool preparation_blocking_ = false;
++  bool preparation_cancelled_ = false;
++  size_t pipelines_already_present_ = 0;
++  std::vector<PipelineStoredDescription> preparation_descriptions_;
++  std::vector<std::pair<uint64_t, uint64_t>> preparation_translations_;
++  size_t preparation_next_translation_ = 0;
++  std::vector<PipelineCreationArguments> preparation_creations_;
++  size_t preparation_next_creation_ = 0;
++  // Bounded work per service slice: a translation costs tens of milliseconds and
++  // a driver pipeline creation more, so both get small batches and the workers
++  // carry the rest while the command processor thread returns to submissions.
++  static constexpr size_t kPreparationTranslationBatch = 1;
++  static constexpr size_t kPreparationEnqueueBatch = 16;
++  static constexpr size_t kPreparationCreationBatch = 2;
++  std::mutex preparation_creation_lock_;
++  std::condition_variable preparation_creation_cond_;
++  std::priority_queue<PipelineCreationArguments, std::vector<PipelineCreationArguments>,
++                      PipelineCreationArgumentsPriorityComparator>
++      preparation_creation_queue_;
++  size_t preparation_creation_busy_ = 0;
++  bool preparation_creation_shutdown_ = false;
++  std::vector<std::unique_ptr<rex::thread::Thread>> preparation_creation_threads_;
+ };
+ 
+ }  // namespace rex::graphics::vulkan
+diff --git a/include/rex/system/interfaces/graphics.h b/include/rex/system/interfaces/graphics.h
+index d54df86..9b56d69 100644
+--- a/include/rex/system/interfaces/graphics.h
++++ b/include/rex/system/interfaces/graphics.h
+@@ -14,6 +14,7 @@
+ #include <cstdint>
+ #include <filesystem>
+ 
++#include <rex/graphics/graphics_preparation.h>
+ #include <rex/system/xtypes.h>
+ 
+ // Forward declarations
+@@ -79,6 +80,26 @@ class IGraphicsSystem {
+     (void)blocking;
+   }
+ 
++  // Starts preparing the persistent shader/pipeline storage without blocking
++  // the caller or the guest. The backend services the work in bounded slices on
++  // its own thread, so the loading UI keeps polling and presenting while the
++  // storage is prepared. `configuration` is the caller's epoch for the things
++  // outside the title that change the requirement set. Default: unsupported.
++  virtual bool BeginShaderStoragePreparation(const std::filesystem::path& cache_root,
++                                             uint32_t title_id, uint64_t configuration) {
++    (void)cache_root;
++    (void)title_id;
++    (void)configuration;
++    return false;
++  }
++  virtual void CancelShaderStoragePreparation() {}
++  virtual graphics::GraphicsPreparationProgress QueryShaderStoragePreparation() const {
++    return graphics::GraphicsPreparationProgress();
++  }
++  virtual graphics::GraphicsPreparationProgress WaitForShaderStoragePreparation() {
++    return graphics::GraphicsPreparationProgress();
++  }
++
+   // One-shot convenience for callers that don't care about the split.
+   X_STATUS Setup(runtime::FunctionDispatcher* function_dispatcher, KernelState* kernel_state,
+                  ui::WindowedAppContext* app_context, bool with_presentation) {
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index 34706e8..fcb79ea 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -153,11 +153,58 @@ void CommandProcessor::Shutdown() {
+   write_ptr_index_event_->Set();
+   worker_thread_->Wait(0, 0, 0, nullptr);
+   worker_thread_.reset();
++  // The worker loop is gone, so no backend slice can be running any more. A
++  // waiter must never be left blocking on a generation nobody will finish.
++  preparation_.Reset();
++  preparation_active_.store(false, std::memory_order_release);
+ }
+ 
+ void CommandProcessor::InitializeShaderStorage(const std::filesystem::path& cache_root,
+                                                uint32_t title_id, bool blocking) {}
+ 
++bool CommandProcessor::BeginShaderStoragePreparation(const std::filesystem::path& cache_root,
++                                                     uint32_t title_id, uint64_t configuration) {
++  if (cache_root.empty() || title_id == 0) {
++    return false;
++  }
++  GraphicsPreparationKey key;
++  key.title_id = title_id;
++  key.configuration = configuration;
++  key.cache_root = uint64_t(std::hash<std::filesystem::path>{}(cache_root));
++  if (!preparation_.Begin(key)) {
++    return false;
++  }
++  preparation_active_.store(true, std::memory_order_release);
++  // Even the import is scheduled on the command processor thread: the pipeline
++  // and shader maps, and the storage streams, belong to that thread. The caller
++  // gets its generation token back immediately and reads progress from the
++  // controller.
++  CallInThread([this, cache_root, title_id]() {
++    BeginShaderStoragePreparationOnProcessorThread(cache_root, title_id);
++  });
++  return true;
++}
++
++void CommandProcessor::RequestCancelShaderStoragePreparation() { preparation_.RequestCancel(); }
++
++GraphicsPreparationProgress CommandProcessor::QueryShaderStoragePreparation() const {
++  return preparation_.Snapshot();
++}
++
++GraphicsPreparationProgress CommandProcessor::WaitForShaderStoragePreparation() {
++  return preparation_.WaitForTerminal();
++}
++
++void CommandProcessor::ServiceShaderStoragePreparation() {
++  if (!preparation_active_.load(std::memory_order_acquire)) {
++    return;
++  }
++  ServiceShaderStoragePreparationOnProcessorThread();
++  if (!preparation_.Active()) {
++    preparation_active_.store(false, std::memory_order_release);
++  }
++}
++
+ void CommandProcessor::CallInThread(std::function<void()> fn) {
+   if (pending_fns_.empty() && system::XThread::IsInThread(worker_thread_.get())) {
+     fn();
+@@ -211,6 +258,12 @@ void CommandProcessor::WorkerThreadMain() {
+       fn();
+     }
+ 
++    // Graphics preparation runs beside command execution, never inside a
++    // submission: one bounded slice per loop iteration, and further slices
++    // while the ring is quiet. This is what lets the loading UI keep animating
++    // and the guest keep polling while the storage is prepared.
++    ServiceShaderStoragePreparation();
++
+     uint32_t write_ptr_index = write_ptr_index_.load();
+     if (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index) {
+       SCOPE_profile_cpu_i("gpu", "rex::graphics::CommandProcessor::Stall");
+@@ -229,6 +282,9 @@ void CommandProcessor::WorkerThreadMain() {
+ 
+         rex::thread::MaybeYield();
+         loop_count++;
++        // The guest is waiting for the next frame, but preparation is not:
++        // advance it while nothing else needs the thread.
++        ServiceShaderStoragePreparation();
+         write_ptr_index = write_ptr_index_.load();
+       } while (worker_running_ && pending_fns_.empty() &&
+                (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+index 3e56bb4..fadc506 100644
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -152,6 +152,21 @@ void D3D12CommandProcessor::InitializeShaderStorage(const std::filesystem::path&
+   pipeline_cache_->InitializeShaderStorage(cache_root, title_id, blocking);
+ }
+ 
++void D3D12CommandProcessor::BeginShaderStoragePreparationOnProcessorThread(
++    const std::filesystem::path& cache_root, uint32_t title_id) {
++  if (!pipeline_cache_) {
++    preparation().Finish(GraphicsPreparationPhase::kFailed);
++    return;
++  }
++  pipeline_cache_->BeginShaderStoragePreparation(cache_root, title_id);
++}
++
++void D3D12CommandProcessor::ServiceShaderStoragePreparationOnProcessorThread() {
++  if (pipeline_cache_) {
++    pipeline_cache_->ServiceShaderStoragePreparation();
++  }
++}
++
+ bool D3D12CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* reader,
+                                                                uint32_t packet, uint32_t count) {
+   if (!REXCVAR_GET(occlusion_query_enable) || !occlusion_query_resources_available_) {
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+index ecd8e5d..c90af8a 100644
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -221,12 +221,56 @@ void PipelineCache::Shutdown() {
+ 
+ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+     const std::filesystem::path& cache_root, uint32_t title_id, bool blocking) {
++  // The synchronous form of the generation. It owns the slices while it runs,
++  // which is the same thread and the same work as before P4 - the asynchronous
++  // form below is what lets the guest and the loading UI keep running.
++  auto& preparation = command_processor_.preparation();
++  GraphicsPreparationKey key;
++  key.title_id = title_id;
++  key.configuration = 0;
++  key.cache_root = uint64_t(std::hash<std::filesystem::path>{}(cache_root));
+   ShutdownShaderStorage();
++  if (!preparation.Begin(key)) {
++    REXGPU_WARN(
++        "Shader storage preparation was requested while another generation is still active");
++    return shader_storage_preload_result_;
++  }
++  preparation_blocking_ = blocking;
++  if (!OpenShaderStorage(cache_root, title_id)) {
++    preparation.Finish(GraphicsPreparationPhase::kFailed);
++    return shader_storage_preload_result_;
++  }
++  while (ServiceShaderStoragePreparation()) {
++  }
++  if (blocking) {
++    // Service finishes the generation itself, so this returns at once; it keeps
++    // the old barrier contract explicit for callers that read the result.
++    preparation.WaitForTerminal();
++  }
++  return shader_storage_preload_result_;
++}
++
++void PipelineCache::BeginShaderStoragePreparation(const std::filesystem::path& cache_root,
++                                                  uint32_t title_id) {
++  // The generation (key, entry accounting, cancellation) was started by
++  // CommandProcessor::BeginShaderStoragePreparation on the caller's thread; the
++  // import below is the first slice that must run here.
++  preparation_blocking_ = false;
++  if (!OpenShaderStorage(cache_root, title_id)) {
++    command_processor_.preparation().Finish(GraphicsPreparationPhase::kFailed);
++  }
++}
++
++bool PipelineCache::OpenShaderStorage(const std::filesystem::path& cache_root,
++                                      uint32_t title_id) {
+   // Every exit from this function reports explicit counts; the early storage
+   // failures below return "nothing was prepared", not a successful preload.
+   shader_storage_preload_result_ = PipelinePreloadResult();
+-  preload_tracker_.Reset();
+-  PipelinePreloadResult preload_result;
++  auto& preparation = command_processor_.preparation();
++  preparation_descriptions_.clear();
++  preparation_next_description_ = 0;
++  pipelines_already_present_ = 0;
++  preparation_cancelled_ = false;
+ 
+   auto shader_storage_root = cache_root / "shaders";
+   // For files that can be moved between different hosts.
+@@ -242,18 +286,23 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+           "Failed to create the shareable shader storage directory, persistent "
+           "shader storage will be disabled: {}",
+           rex::path_to_utf8(shader_storage_shareable_root));
+-      return shader_storage_preload_result_;
++      return false;
+     }
+   }
+ 
+   bool edram_rov_used =
+       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
++  preparation.SetRenderer(GraphicsPreparationBackend::kD3D12, edram_rov_used ? 1u : 0u);
++  preparation_edram_rov_used_ = edram_rov_used;
+ 
+   // Initialize the pipeline storage stream - read pipeline descriptions and
+   // collect used shader modifications to translate.
+-  std::vector<PipelineStoredDescription> pipeline_stored_descriptions;
++  std::vector<PipelineStoredDescription>& pipeline_stored_descriptions =
++      preparation_descriptions_;
+   // <Shader hash, modification bits>.
+-  std::set<std::pair<uint64_t, uint64_t>> shader_translations_needed;
++  std::set<std::pair<uint64_t, uint64_t>>& shader_translations_needed =
++      preparation_shader_translations_needed_;
++  shader_translations_needed.clear();
+   auto pipeline_storage_file_path =
+       shader_storage_shareable_root /
+       fmt::format("{:08X}.{}.d3d12.xpso", title_id, edram_rov_used ? "rov" : "rtv");
+@@ -263,7 +312,7 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+         "Failed to open the Direct3D 12 pipeline description storage file for "
+         "writing, persistent shader storage will be disabled: {}",
+         rex::path_to_utf8(pipeline_storage_file_path));
+-    return shader_storage_preload_result_;
++    return false;
+   }
+   pipeline_storage_file_flush_needed_ = false;
+   // 'XEPS'.
+@@ -342,7 +391,7 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+         rex::path_to_utf8(shader_storage_file_path));
+     fclose(pipeline_storage_file_);
+     pipeline_storage_file_ = nullptr;
+-    return shader_storage_preload_result_;
++    return false;
+   }
+   ++shader_storage_index_;
+   shader_storage_file_flush_needed_ = false;
+@@ -364,19 +413,14 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+     ucode_dwords.reserve(0xFFFF);
+     size_t shaders_translated = 0;
+ 
+-    // Threads overlapping file reading.
+-    std::mutex shaders_translation_thread_mutex;
+-    std::condition_variable shaders_translation_thread_cond;
+-    std::deque<D3D12Shader*> shaders_to_translate;
+-    size_t shader_translation_threads_busy = 0;
+-    bool shader_translation_threads_shutdown = false;
+-    std::mutex shaders_failed_to_translate_mutex;
+-    std::vector<D3D12Shader::D3D12Translation*> shaders_failed_to_translate;
+-    auto shader_translation_thread_function = [&]() {
++    // Threads overlapping file reading. They live in the cache for the length of
++    // the generation, so a service slice can keep creating pipelines while
++    // translations finish, and JoinPreparationTranslationWorkers() retires them.
++      auto shader_translation_thread_function = [this]() {
+       const ui::d3d12::D3D12Provider& provider = command_processor_.GetD3D12Provider();
+       string::StringBuffer ucode_disasm_buffer;
+       DxbcShaderTranslator translator(
+-          provider.GetAdapterVendorID(), bindless_resources_used_, edram_rov_used,
++          provider.GetAdapterVendorID(), bindless_resources_used_, preparation_edram_rov_used_,
+           !render_target_cache_.gamma_render_target_as_unorm16(),
+           render_target_cache_.msaa_2x_supported(), render_target_cache_.draw_resolution_scale_x(),
+           render_target_cache_.draw_resolution_scale_y(),
+@@ -395,26 +439,26 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+       for (;;) {
+         D3D12Shader* shader_to_translate;
+         for (;;) {
+-          std::unique_lock<std::mutex> lock(shaders_translation_thread_mutex);
+-          if (shaders_to_translate.empty()) {
+-            if (shader_translation_threads_shutdown) {
++          std::unique_lock<std::mutex> lock(preparation_translation_lock_);
++          if (preparation_shaders_to_translate_.empty()) {
++            if (preparation_translation_shutdown_) {
+               return;
+             }
+-            shaders_translation_thread_cond.wait(lock);
++            preparation_translation_cond_.wait(lock);
+             continue;
+           }
+-          shader_to_translate = shaders_to_translate.front();
+-          shaders_to_translate.pop_front();
+-          ++shader_translation_threads_busy;
++          shader_to_translate = preparation_shaders_to_translate_.front();
++          preparation_shaders_to_translate_.pop_front();
++          ++preparation_translation_busy_;
+           break;
+         }
+         shader_to_translate->AnalyzeUcode(ucode_disasm_buffer);
+         // Translate each needed modification on this thread after performing
+         // modification-independent analysis of the whole shader.
+         uint64_t ucode_data_hash = shader_to_translate->ucode_data_hash();
+-        for (auto modification_it = shader_translations_needed.lower_bound(
++        for (auto modification_it = preparation_shader_translations_needed_.lower_bound(
+                  std::make_pair(ucode_data_hash, uint64_t(0)));
+-             modification_it != shader_translations_needed.end() &&
++             modification_it != preparation_shader_translations_needed_.end() &&
+              modification_it->first == ucode_data_hash;
+              ++modification_it) {
+           D3D12Shader::D3D12Translation* translation = static_cast<D3D12Shader::D3D12Translation*>(
+@@ -426,13 +470,13 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+           if (!translation->is_translated() &&
+               !TranslateAnalyzedShader(translator, *translation, dxbc_converter, dxc_utils,
+                                        dxc_compiler)) {
+-            std::lock_guard<std::mutex> lock(shaders_failed_to_translate_mutex);
+-            shaders_failed_to_translate.push_back(translation);
++            std::lock_guard<std::mutex> lock(preparation_failed_translations_lock_);
++            preparation_failed_translations_.push_back(translation);
+           }
+         }
+         {
+-          std::lock_guard<std::mutex> lock(shaders_translation_thread_mutex);
+-          --shader_translation_threads_busy;
++          std::lock_guard<std::mutex> lock(preparation_translation_lock_);
++          --preparation_translation_busy_;
+         }
+       }
+       if (dxc_compiler) {
+@@ -445,7 +489,6 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+         dxbc_converter->Release();
+       }
+     };
+-    std::vector<std::unique_ptr<rex::thread::Thread>> shader_translation_threads;
+ 
+     while (true) {
+       if (!fread(&shader_header, sizeof(shader_header), 1, shader_storage_file_)) {
+@@ -477,44 +520,32 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+       // minus one.
+       size_t shader_translation_threads_needed;
+       {
+-        std::lock_guard<std::mutex> lock(shaders_translation_thread_mutex);
+-        shader_translation_threads_needed =
+-            std::min(shader_translation_threads_busy + shaders_to_translate.size() + size_t(1),
+-                     logical_processor_count - size_t(1));
++        std::lock_guard<std::mutex> lock(preparation_translation_lock_);
++        shader_translation_threads_needed = std::min(
++            preparation_translation_busy_ + preparation_shaders_to_translate_.size() + size_t(1),
++            logical_processor_count - size_t(1));
+       }
+-      while (shader_translation_threads.size() < shader_translation_threads_needed) {
++      while (preparation_translation_threads_.size() < shader_translation_threads_needed) {
+         auto thread = rex::thread::Thread::Create({}, shader_translation_thread_function);
+         assert_not_null(thread);
+         thread->set_name("Shader Translation");
+-        shader_translation_threads.push_back(std::move(thread));
++        preparation_translation_threads_.push_back(std::move(thread));
+       }
+       // Request ucode information gathering and translation of all the needed
+       // shaders.
+       {
+-        std::lock_guard<std::mutex> lock(shaders_translation_thread_mutex);
+-        shaders_to_translate.push_back(shader);
++        std::lock_guard<std::mutex> lock(preparation_translation_lock_);
++        preparation_shaders_to_translate_.push_back(shader);
+       }
+-      shaders_translation_thread_cond.notify_one();
++      preparation_translation_cond_.notify_one();
+       ++shaders_translated;
+     }
+-    if (!shader_translation_threads.empty()) {
++    if (!preparation_translation_threads_.empty()) {
+       {
+-        std::lock_guard<std::mutex> lock(shaders_translation_thread_mutex);
+-        shader_translation_threads_shutdown = true;
+-      }
+-      shaders_translation_thread_cond.notify_all();
+-      for (auto& shader_translation_thread : shader_translation_threads) {
+-        rex::thread::Wait(shader_translation_thread.get(), false);
+-      }
+-      shader_translation_threads.clear();
+-      for (D3D12Shader::D3D12Translation* translation : shaders_failed_to_translate) {
+-        D3D12Shader* shader = static_cast<D3D12Shader*>(&translation->shader());
+-        shader->DestroyTranslation(translation->modification());
+-        if (shader->translations().empty()) {
+-          shaders_.erase(shader->ucode_data_hash());
+-          delete shader;
+-        }
++        std::lock_guard<std::mutex> lock(preparation_translation_lock_);
++        preparation_translation_shutdown_ = true;
+       }
++      preparation_translation_cond_.notify_all();
+     }
+     REXGPU_INFO("Translated {} shaders from the storage in {} milliseconds", shaders_translated,
+                 (rex::chrono::Clock::QueryHostTickCount() - shader_storage_initialization_start) *
+@@ -528,31 +559,50 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+            shader_storage_file_);
+   }
+ 
+-  // Create the pipelines.
+-  if (!pipeline_stored_descriptions.empty()) {
+-    uint64_t pipeline_creation_start_ = rex::chrono::Clock::QueryHostTickCount();
+-
+-    // Launch additional creation threads to use all cores to create
+-    // pipelines faster. Will also be using the main thread, so minus 1.
+-    size_t creation_thread_original_count = creation_threads_.size();
+-    size_t creation_thread_needed_count = PreloadCreationThreadCount(
+-        pipeline_stored_descriptions.size(), logical_processor_count,
+-        creation_thread_original_count);
+-    while (creation_threads_.size() < creation_thread_needed_count) {
+-      size_t creation_thread_index = creation_threads_.size();
+-      std::unique_ptr<rex::thread::Thread> creation_thread = rex::thread::Thread::Create(
+-          {}, [this, creation_thread_index]() { CreationThread(creation_thread_index); });
+-      assert_not_null(creation_thread);
+-      creation_thread->set_name("D3D12 Pipelines");
+-      creation_threads_.push_back(std::move(creation_thread));
+-    }
++  // Write the header for an empty storage, or truncate an invalid tail. This is
++  // the import's own bookkeeping and does not depend on pipeline creation.
++  if (pipeline_stored_descriptions.empty()) {
++    rex::filesystem::TruncateStdioFile(pipeline_storage_file_, 0);
++    pipeline_storage_file_header.magic = pipeline_storage_magic;
++    pipeline_storage_file_header.magic_api = pipeline_storage_magic_api;
++    pipeline_storage_file_header.version_swapped = pipeline_storage_version_swapped;
++    fwrite(&pipeline_storage_file_header, sizeof(pipeline_storage_file_header), 1,
++           pipeline_storage_file_);
++  } else {
++    rex::filesystem::TruncateStdioFile(
++        pipeline_storage_file_,
++        uint64_t(sizeof(pipeline_storage_file_header) +
++                 sizeof(PipelineStoredDescription) * pipeline_stored_descriptions.size()));
++  }
++
++  shader_storage_cache_root_ = cache_root;
++  shader_storage_title_id_ = title_id;
+ 
+-    size_t pipelines_already_present = 0;
+-    for (size_t pipeline_stored_description_index = 0;
+-         pipeline_stored_description_index < pipeline_stored_descriptions.size();
+-         ++pipeline_stored_description_index) {
++  // Every stored description is a required entry from now on: progress is known
++  // before the first pipeline is created, and a cancelled generation can never
++  // be mistaken for complete coverage. The creation loop itself runs in
++  // EnqueuePreparationPipelines, one bounded batch per service slice.
++  preparation.NoteCatalogue(!preparation_descriptions_.empty());
++  for (size_t preload_identity = 0; preload_identity < preparation_descriptions_.size();
++       ++preload_identity) {
++    preparation.RegisterEntry(uint64_t(preload_identity));
++  }
++  StartPreparationWorkers(logical_processor_count);
++  preparation.AdvancePhase(GraphicsPreparationPhase::kTranslating);
++  preparation_running_ = true;
++  return true;
++}
++
++size_t PipelineCache::EnqueuePreparationPipelines(size_t max_count) {
++  auto& preparation = command_processor_.preparation();
++  size_t enqueued_count = 0;
++  while (enqueued_count < max_count &&
++         preparation_next_description_ < preparation_descriptions_.size()) {
++    const size_t pipeline_stored_description_index = preparation_next_description_++;
++    ++enqueued_count;
++    {
+       const PipelineStoredDescription& pipeline_stored_description =
+-          pipeline_stored_descriptions[pipeline_stored_description_index];
++          preparation_descriptions_[pipeline_stored_description_index];
+       const uint64_t preload_identity = uint64_t(pipeline_stored_description_index);
+       const PipelineDescription& pipeline_description = pipeline_stored_description.description;
+       // TODO(Triang3l): On Vulkan, skip pipelines requiring unsupported device
+@@ -571,12 +621,11 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+       if (pipeline_found) {
+         // Already known is only ready when the real pipeline object exists - an
+         // entry that is still being created, or that failed before, is not.
+-        preload_tracker_.Register(preload_identity);
+         if (pipeline_found->state.load(std::memory_order_acquire)) {
+-          preload_tracker_.Succeed(preload_identity);
+-          ++pipelines_already_present;
++          preparation.SucceedEntry(preload_identity);
++          ++pipelines_already_present_;
+         } else {
+-          preload_tracker_.Fail(preload_identity);
++          preparation.FailEntry(preload_identity);
+         }
+         continue;
+       }
+@@ -584,8 +633,7 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+       PipelineRuntimeDescription pipeline_runtime_description;
+       auto vertex_shader_it = shaders_.find(pipeline_description.vertex_shader_hash);
+       if (vertex_shader_it == shaders_.end()) {
+-        preload_tracker_.Register(preload_identity);
+-        preload_tracker_.Miss(preload_identity);
++        preparation.MissEntry(preload_identity);
+         continue;
+       }
+       D3D12Shader* vertex_shader = vertex_shader_it->second;
+@@ -594,16 +642,14 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+       if (!pipeline_runtime_description.vertex_shader ||
+           !pipeline_runtime_description.vertex_shader->is_translated() ||
+           !pipeline_runtime_description.vertex_shader->is_valid()) {
+-        preload_tracker_.Register(preload_identity);
+-        preload_tracker_.Miss(preload_identity);
++        preparation.MissEntry(preload_identity);
+         continue;
+       }
+       D3D12Shader* pixel_shader;
+       if (pipeline_description.pixel_shader_hash) {
+         auto pixel_shader_it = shaders_.find(pipeline_description.pixel_shader_hash);
+         if (pixel_shader_it == shaders_.end()) {
+-          preload_tracker_.Register(preload_identity);
+-          preload_tracker_.Miss(preload_identity);
++          preparation.MissEntry(preload_identity);
+           continue;
+         }
+         pixel_shader = pixel_shader_it->second;
+@@ -612,8 +658,7 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+         if (!pipeline_runtime_description.pixel_shader ||
+             !pipeline_runtime_description.pixel_shader->is_translated() ||
+             !pipeline_runtime_description.pixel_shader->is_valid()) {
+-          preload_tracker_.Register(preload_identity);
+-          preload_tracker_.Miss(preload_identity);
++          preparation.MissEntry(preload_identity);
+           continue;
+         }
+       } else {
+@@ -635,8 +680,7 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+               DxbcShaderTranslator::Modification(pipeline_description.vertex_shader_modification)
+                   .vertex.host_vertex_shader_type));
+       if (!pipeline_runtime_description.root_signature) {
+-        preload_tracker_.Register(preload_identity);
+-        preload_tracker_.Miss(preload_identity);
++        preparation.MissEntry(preload_identity);
+         continue;
+       }
+       std::memcpy(&pipeline_runtime_description.description, &pipeline_description,
+@@ -665,125 +709,291 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+           bound_rts, shader_writes_color_targets, shader_writes_depth);
+       pipelines_.emplace(pipeline_stored_description.description_hash, new_pipeline);
+       COUNT_profile_set("gpu/pipeline_cache/pipelines", pipelines_.size());
+-      preload_tracker_.Register(preload_identity);
+-      if (!creation_threads_.empty()) {
+-        // Submit the pipeline for creation to any available thread. The entry
++      if (!preparation_creation_threads_.empty()) {
++        // Submit the pipeline for creation to the preparation workers. The entry
+         // identity travels with the pipeline so the worker that creates it can
+-        // report the terminal state.
++        // report the terminal state. Creation is deliberately not put on the
++        // gameplay queue: submissions must never wait for preparation work.
+         {
+-          std::lock_guard<std::mutex> lock(creation_request_lock_);
++          std::lock_guard<std::mutex> lock(preparation_creation_lock_);
+           new_pipeline->preload_identity = preload_identity;
+-          creation_queue_.push(new_pipeline);
++          preparation_creation_queue_.push(new_pipeline);
+         }
+-        creation_request_cond_.notify_one();
++        preparation_creation_cond_.notify_one();
+       } else {
+         new_pipeline->state.store(CreateD3D12Pipeline(pipeline_runtime_description),
+                                   std::memory_order_release);
+         if (new_pipeline->state.load(std::memory_order_acquire)) {
+-          preload_tracker_.Succeed(preload_identity);
++          preparation.SucceedEntry(preload_identity);
+         } else {
+-          preload_tracker_.Fail(preload_identity);
++          preparation.FailEntry(preload_identity);
+         }
+       }
+     }
++  }
++  return enqueued_count;
++}
++
++bool PipelineCache::ServiceShaderStoragePreparation() {
++  auto& preparation = command_processor_.preparation();
++  if (!preparation_running_) {
++    return false;
++  }
++  preparation.NoteServiceSlice();
++  if (!preparation.Active()) {
++    // Reset from outside (shutdown). Retire the workers without reporting into a
++    // generation that no longer exists.
++    ShutdownPreparationWorkers();
++    preparation_running_ = false;
++    return false;
++  }
++
++  if (preparation.CancelRequested() && !preparation_cancelled_) {
++    // Cancellation finalizes the generation: nothing more is enqueued, entries
++    // whose creation has not started are cancelled, and work already in flight
++    // is joined - the pipelines it produced are real and stay resident.
++    CancelShaderStoragePreparation();
++    FinishShaderStoragePreparation(GraphicsPreparationPhase::kCancelled);
++    return false;
++  }
+ 
+-    // Drain the queue on the processor thread first - this is the thread that
+-    // must not be left with compilation to wait for later.
+-    if (!creation_threads_.empty()) {
++  const GraphicsPreparationPhase phase = preparation.phase();
++  if (phase == GraphicsPreparationPhase::kImporting) {
++    // Reaching the service slice still importing means a generation was started
++    // without OpenShaderStorage - nothing can be prepared.
++    FinishShaderStoragePreparation(GraphicsPreparationPhase::kFailed);
++    return false;
++  }
++
++  if (phase == GraphicsPreparationPhase::kTranslating) {
++    if (!PreparationTranslationsFinished()) {
++      return true;
++    }
++    JoinPreparationTranslationWorkers();
++    // A failed translation removed its shader, so the stored pipelines that
++    // reference it report missing data rather than a wrong pipeline.
++    preparation.AdvancePhase(GraphicsPreparationPhase::kCreating);
++  }
++
++  if (preparation.phase() == GraphicsPreparationPhase::kCreating) {
++    if (!preparation_cancelled_) {
++      EnqueuePreparationPipelines(kPreparationEnqueueBatch);
++    }
++    {
++      // The processor thread participates in creation (it is the owner of the
++      // maps and the driver calls), but only for a bounded batch per slice.
+       rex::graphics::compile_trace::Scope trace_drain(
+           rex::graphics::compile_trace::Event::kCompileDrain,
+           "src/graphics/d3d12/pipeline_cache.cpp");
+-      CreateQueuedPipelinesOnProcessorThread();
++      CreatePreparationPipelinesOnProcessorThread(kPreparationCreationBatch);
+       trace_drain.Success();
+     }
++    const bool all_enqueued =
++        preparation_next_description_ >= preparation_descriptions_.size();
++    if (all_enqueued && preparation.unfinished_entries() == 0) {
++      const GraphicsPreparationPhase terminal_phase =
++          preparation_cancelled_
++              ? GraphicsPreparationPhase::kCancelled
++              : (preparation.entries().Complete() ? GraphicsPreparationPhase::kSucceeded
++                                                  : GraphicsPreparationPhase::kIncomplete);
++      FinishShaderStoragePreparation(terminal_phase);
++      return false;
++    }
++    return true;
++  }
+ 
+-    // A blocking preload is followed by guest resume, so the barrier covers
+-    // every required entry - also when no temporary worker was added, and
+-    // independently of the temporary-worker cleanup below. This wait used to
+-    // live inside the branch that grew the pool, so the no-growth case could
+-    // return with creation threads still busy.
+-    if (blocking) {
+-      if (preload_tracker_.UnfinishedCount() != 0) {
+-        rex::graphics::compile_trace::Scope trace_wait(
+-            rex::graphics::compile_trace::Event::kCompileWait,
+-            "src/graphics/d3d12/pipeline_cache.cpp");
+-        preload_result = preload_tracker_.WaitUntilFinished();
+-        trace_wait.Success();
+-      } else {
+-        preload_result = preload_tracker_.Read();
++  return preparation.Active();
++}
++
++void PipelineCache::CancelShaderStoragePreparation() {
++  auto& preparation = command_processor_.preparation();
++  if (!preparation_running_ || preparation_cancelled_) {
++    return;
++  }
++  preparation_cancelled_ = true;
++  // Entries whose creation has not started are abandoned; describing the
++  // remaining stored pipelines as never enqueued covers them in the same step.
++  preparation.CancelPendingEntries();
++  preparation_next_description_ = preparation_descriptions_.size();
++  preparation.AdvancePhase(GraphicsPreparationPhase::kFinalizing);
++}
++
++void PipelineCache::StartPreparationWorkers(size_t logical_processor_count) {
++  // The translation pool was grown while the storage was read; only the creation
++  // pool is created here, sized once to the whole batch.
++  size_t creation_thread_count =
++      PreloadCreationThreadCount(preparation_descriptions_.size(), logical_processor_count, 0);
++  {
++    std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++    while (!preparation_creation_queue_.empty()) {
++      preparation_creation_queue_.pop();
++    }
++    preparation_creation_shutdown_ = false;
++    preparation_creation_busy_ = 0;
++  }
++  preparation_creation_threads_.clear();
++  preparation_creation_threads_.reserve(creation_thread_count);
++  for (size_t thread_index = 0; thread_index < creation_thread_count; ++thread_index) {
++    std::unique_ptr<rex::thread::Thread> creation_thread = rex::thread::Thread::Create(
++        {}, [this, thread_index]() { PreparationCreationThread(thread_index); });
++    assert_not_null(creation_thread);
++    creation_thread->set_name("D3D12 Prep Pipelines");
++    preparation_creation_threads_.push_back(std::move(creation_thread));
++  }
++}
++
++bool PipelineCache::PreparationTranslationsFinished() const {
++  std::lock_guard<std::mutex> lock(preparation_translation_lock_);
++  return preparation_translation_busy_ == 0 && preparation_shaders_to_translate_.empty();
++}
++
++void PipelineCache::JoinPreparationTranslationWorkers() {
++  {
++    std::lock_guard<std::mutex> lock(preparation_translation_lock_);
++    preparation_translation_shutdown_ = true;
++  }
++  preparation_translation_cond_.notify_all();
++  for (auto& shader_translation_thread : preparation_translation_threads_) {
++    rex::thread::Wait(shader_translation_thread.get(), false);
++  }
++  preparation_translation_threads_.clear();
++  std::vector<D3D12Shader::D3D12Translation*> failed_translations;
++  {
++    std::lock_guard<std::mutex> lock(preparation_failed_translations_lock_);
++    failed_translations.swap(preparation_failed_translations_);
++  }
++  for (D3D12Shader::D3D12Translation* translation : failed_translations) {
++    D3D12Shader* shader = static_cast<D3D12Shader*>(&translation->shader());
++    shader->DestroyTranslation(translation->modification());
++    if (shader->translations().empty()) {
++      shaders_.erase(shader->ucode_data_hash());
++      delete shader;
++    }
++  }
++}
++
++size_t PipelineCache::CreatePreparationPipelinesOnProcessorThread(size_t max_count) {
++  auto& preparation = command_processor_.preparation();
++  size_t created_count = 0;
++  while (created_count < max_count) {
++    Pipeline* pipeline_to_create;
++    uint64_t preload_identity = kNoPreloadIdentity;
++    {
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      if (preparation_creation_queue_.empty()) {
++        break;
++      }
++      pipeline_to_create = preparation_creation_queue_.top();
++      preparation_creation_queue_.pop();
++      preload_identity = pipeline_to_create->preload_identity;
++      ++preparation_creation_busy_;
++    }
++    if (preload_identity != kNoPreloadIdentity) {
++      preparation.BeginEntry(preload_identity);
++    }
++    PipelineRuntimeDescription runtime_description;
++    if (!PrepareRuntimeDescriptionForQueuedCreation(pipeline_to_create, runtime_description)) {
++      pipeline_to_create->state.store(nullptr, std::memory_order_release);
++      if (preload_identity != kNoPreloadIdentity) {
++        preparation.FailEntry(preload_identity);
++      }
++    } else {
++      pipeline_to_create->state.store(CreateD3D12Pipeline(runtime_description),
++                                      std::memory_order_release);
++      if (preload_identity != kNoPreloadIdentity) {
++        if (pipeline_to_create->state.load(std::memory_order_acquire)) {
++          preparation.SucceedEntry(preload_identity);
++        } else {
++          preparation.FailEntry(preload_identity);
++        }
+       }
+-      preload_result.awaited = true;
+     }
++    {
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      --preparation_creation_busy_;
++    }
++    ++created_count;
++  }
++  return created_count;
++}
+ 
+-    // Temporary workers only served the burst; anything still in flight belongs
+-    // to the permanent creation threads.
+-    if (creation_threads_.size() > creation_thread_original_count) {
+-      {
+-        std::lock_guard<std::mutex> lock(creation_request_lock_);
+-        creation_threads_shutdown_from_ = creation_thread_original_count;
+-        // The queue was drained above, so a temporary thread cannot leave
+-        // required work behind, and a blocking preload has already waited for
+-        // the permanent threads' entries to reach a terminal state.
++void PipelineCache::PreparationCreationThread(size_t thread_index) {
++  (void)thread_index;
++  auto& preparation = command_processor_.preparation();
++  for (;;) {
++    Pipeline* pipeline_to_create;
++    uint64_t preload_identity = kNoPreloadIdentity;
++    {
++      std::unique_lock<std::mutex> lock(preparation_creation_lock_);
++      if (preparation_creation_shutdown_) {
++        return;
+       }
+-      creation_request_cond_.notify_all();
+-      while (creation_threads_.size() > creation_thread_original_count) {
+-        rex::thread::Wait(creation_threads_.back().get(), false);
+-        creation_threads_.pop_back();
++      if (preparation_creation_queue_.empty()) {
++        preparation_creation_cond_.wait(lock);
++        continue;
++      }
++      pipeline_to_create = preparation_creation_queue_.top();
++      preparation_creation_queue_.pop();
++      preload_identity = pipeline_to_create->preload_identity;
++      ++preparation_creation_busy_;
++    }
++    if (preload_identity != kNoPreloadIdentity) {
++      preparation.BeginEntry(preload_identity);
++    }
++    PipelineRuntimeDescription runtime_description;
++    if (!PrepareRuntimeDescriptionForQueuedCreation(pipeline_to_create, runtime_description)) {
++      pipeline_to_create->state.store(nullptr, std::memory_order_release);
++      if (preload_identity != kNoPreloadIdentity) {
++        preparation.FailEntry(preload_identity);
+       }
+-      {
+-        // Cleanup so additional threads can be created later again.
+-        std::lock_guard<std::mutex> lock(creation_request_lock_);
+-        creation_threads_shutdown_from_ = SIZE_MAX;
+-      }
+-    }
+-
+-    if (!blocking) {
+-      // A non-blocking preload keeps creating on the worker threads; queued and
+-      // running entries are reported as such, never as ready.
+-      preload_result = preload_tracker_.Read();
+-    }
+-    preload_result.already_present = pipelines_already_present;
+-
+-    const uint64_t pipeline_creation_ms =
+-        (rex::chrono::Clock::QueryHostTickCount() - pipeline_creation_start_) * 1000 /
+-        rex::chrono::Clock::QueryHostTickFrequency();
+-    if (preload_result.Complete() || !preload_result.HasWork()) {
+-      REXGPU_INFO(
+-          "Shader storage preload: {} required, {} succeeded ({} already present), {} "
+-          "failed, {} missing, {} queued, {} running, {} duplicate request(s) in {} "
+-          "milliseconds",
+-          preload_result.required, preload_result.succeeded, preload_result.already_present,
+-          preload_result.failed, preload_result.missing, preload_result.queued,
+-          preload_result.running, preload_result.duplicates, pipeline_creation_ms);
+     } else {
+-      REXGPU_WARN(
+-          "Shader storage preload is not ready: {} required, {} succeeded ({} already "
+-          "present), {} failed, {} missing, {} queued, {} running, {} duplicate request(s) "
+-          "in {} milliseconds{}",
+-          preload_result.required, preload_result.succeeded, preload_result.already_present,
+-          preload_result.failed, preload_result.missing, preload_result.queued,
+-          preload_result.running, preload_result.duplicates, pipeline_creation_ms,
+-          preload_result.awaited ? "" : " (not awaited)");
+-    }
+-    // If any pipeline descriptions were corrupted (or the whole file has excess
+-    // bytes in the end), truncate to the last valid pipeline description.
+-    rex::filesystem::TruncateStdioFile(
+-        pipeline_storage_file_,
+-        uint64_t(sizeof(pipeline_storage_file_header) +
+-                 sizeof(PipelineStoredDescription) * pipeline_stored_descriptions.size()));
+-  } else {
+-    rex::filesystem::TruncateStdioFile(pipeline_storage_file_, 0);
+-    pipeline_storage_file_header.magic = pipeline_storage_magic;
+-    pipeline_storage_file_header.magic_api = pipeline_storage_magic_api;
+-    pipeline_storage_file_header.version_swapped = pipeline_storage_version_swapped;
+-    fwrite(&pipeline_storage_file_header, sizeof(pipeline_storage_file_header), 1,
+-           pipeline_storage_file_);
++      pipeline_to_create->state.store(CreateD3D12Pipeline(runtime_description),
++                                      std::memory_order_release);
++      if (preload_identity != kNoPreloadIdentity) {
++        if (pipeline_to_create->state.load(std::memory_order_acquire)) {
++          preparation.SucceedEntry(preload_identity);
++        } else {
++          preparation.FailEntry(preload_identity);
++        }
++      }
++    }
++    {
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      --preparation_creation_busy_;
++    }
+   }
++}
+ 
+-  shader_storage_cache_root_ = cache_root;
+-  shader_storage_title_id_ = title_id;
++void PipelineCache::ShutdownPreparationWorkers() {
++  JoinPreparationTranslationWorkers();
++  {
++    std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++    preparation_creation_shutdown_ = true;
++    while (!preparation_creation_queue_.empty()) {
++      preparation_creation_queue_.pop();
++    }
++  }
++  preparation_creation_cond_.notify_all();
++  for (auto& creation_thread : preparation_creation_threads_) {
++    rex::thread::Wait(creation_thread.get(), false);
++  }
++  preparation_creation_threads_.clear();
++  {
++    std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++    preparation_creation_shutdown_ = false;
++    preparation_creation_busy_ = 0;
++  }
++}
+ 
+-  // Start the storage writing thread.
++void PipelineCache::FinishShaderStoragePreparation(
++    GraphicsPreparationPhase terminal_phase) {
++  auto& preparation = command_processor_.preparation();
++  // Nothing may still be creating: joining the workers here is what makes the
++  // counts final.
++  ShutdownPreparationWorkers();
++
++  // Start the storage writing thread - it owns the streams for the rest of the
++  // run and must exist before any shader or pipeline is written.
+   storage_write_flush_shaders_ = false;
+   storage_write_flush_pipelines_ = false;
+   storage_write_thread_shutdown_ = false;
+@@ -791,11 +1001,45 @@ PipelinePreloadResult PipelineCache::InitializeShaderStorage(
+   assert_not_null(storage_write_thread_);
+   storage_write_thread_->set_name("D3D12 Storage writer");
+ 
++  PipelinePreloadResult preload_result = preparation.entries();
++  preload_result.already_present = pipelines_already_present_;
++  preload_result.awaited = preparation_blocking_;
++  if (preload_result.Complete() || !preload_result.HasWork()) {
++    REXGPU_INFO(
++        "Shader storage preload {}: {} required, {} succeeded ({} already present), {} "
++        "failed, {} missing, {} cancelled, {} duplicate request(s){}",
++        GraphicsPreparationPhaseName(terminal_phase), preload_result.required,
++        preload_result.succeeded, preload_result.already_present, preload_result.failed,
++        preload_result.missing, preload_result.cancelled, preload_result.duplicates,
++        preload_result.HasWork() ? "" : " (the storage declared no pipelines)");
++  } else {
++    REXGPU_WARN(
++        "Shader storage preload is not ready ({}): {} required, {} succeeded ({} already "
++        "present), {} failed, {} missing, {} cancelled, {} queued, {} running, {} duplicate "
++        "request(s){}",
++        GraphicsPreparationPhaseName(terminal_phase), preload_result.required,
++        preload_result.succeeded, preload_result.already_present, preload_result.failed,
++        preload_result.missing, preload_result.cancelled, preload_result.queued,
++        preload_result.running, preload_result.duplicates,
++        preload_result.awaited ? "" : " (not awaited)");
++  }
+   shader_storage_preload_result_ = preload_result;
+-  return preload_result;
++  preparation_running_ = false;
++  preparation.Finish(terminal_phase);
+ }
+ 
+ void PipelineCache::ShutdownShaderStorage() {
++  if (preparation_running_) {
++    // A generation still owns translation and creation workers; the controller
++    // is reset so a waiter can never be left blocking on work nobody finishes.
++    command_processor_.preparation().RequestCancel();
++    command_processor_.preparation().Reset();
++    ShutdownPreparationWorkers();
++    preparation_running_ = false;
++    preparation_cancelled_ = false;
++    preparation_descriptions_.clear();
++    preparation_next_description_ = 0;
++  }
+   if (storage_write_thread_) {
+     {
+       std::lock_guard<std::mutex> lock(storage_write_request_lock_);
+@@ -3324,7 +3568,7 @@ void PipelineCache::CreationThread(size_t thread_index) {
+     }
+ 
+     if (preload_identity != kNoPreloadIdentity) {
+-      preload_tracker_.BeginWork(preload_identity);
++      command_processor_.preparation().BeginEntry(preload_identity);
+     }
+     PipelineRuntimeDescription runtime_description;
+     if (!PrepareRuntimeDescriptionForQueuedCreation(pipeline_to_create, runtime_description)) {
+@@ -3335,9 +3579,9 @@ void PipelineCache::CreationThread(size_t thread_index) {
+     }
+     if (preload_identity != kNoPreloadIdentity) {
+       if (pipeline_to_create->state.load(std::memory_order_acquire)) {
+-        preload_tracker_.Succeed(preload_identity);
++        command_processor_.preparation().SucceedEntry(preload_identity);
+       } else {
+-        preload_tracker_.Fail(preload_identity);
++        command_processor_.preparation().FailEntry(preload_identity);
+       }
+     }
+ 
+@@ -3366,13 +3610,13 @@ void PipelineCache::CreateQueuedPipelinesOnProcessorThread() {
+       preload_identity = pipeline_to_create->preload_identity;
+     }
+     if (preload_identity != kNoPreloadIdentity) {
+-      preload_tracker_.BeginWork(preload_identity);
++      command_processor_.preparation().BeginEntry(preload_identity);
+     }
+     PipelineRuntimeDescription runtime_description;
+     if (!PrepareRuntimeDescriptionForQueuedCreation(pipeline_to_create, runtime_description)) {
+       pipeline_to_create->state.store(nullptr, std::memory_order_release);
+       if (preload_identity != kNoPreloadIdentity) {
+-        preload_tracker_.Fail(preload_identity);
++        command_processor_.preparation().FailEntry(preload_identity);
+       }
+       continue;
+     }
+@@ -3380,9 +3624,9 @@ void PipelineCache::CreateQueuedPipelinesOnProcessorThread() {
+                                     std::memory_order_release);
+     if (preload_identity != kNoPreloadIdentity) {
+       if (pipeline_to_create->state.load(std::memory_order_acquire)) {
+-        preload_tracker_.Succeed(preload_identity);
++        command_processor_.preparation().SucceedEntry(preload_identity);
+       } else {
+-        preload_tracker_.Fail(preload_identity);
++        command_processor_.preparation().FailEntry(preload_identity);
+       }
+     }
+   }
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index 8f2fcb0..0f92be3 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -39,6 +39,12 @@ REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+                     "Store shaders persistently and load them when loading games to avoid "
+                     "runtime spikes and freezes when playing the game not for the first time.");
+ 
++REXCVAR_DEFINE_BOOL(shader_storage_async_preparation, false, "GPU",
++                    "Prepare the persistent shader and pipeline storage in bounded slices after "
++                    "the guest starts, instead of blocking the launch before it. The loading UI "
++                    "keeps animating while it runs; the generation's progress and result are "
++                    "reported through GraphicsSystem::QueryShaderStoragePreparation.");
++
+ namespace {
+ 
+ rex::graphics::CommandProcessor::SwapPostEffect ParseSwapPostEffect(
+@@ -369,6 +375,37 @@ void GraphicsSystem::Pause() {
+   command_processor_->Pause();
+ }
+ 
++bool GraphicsSystem::BeginShaderStoragePreparation(const std::filesystem::path& cache_root,
++                                                   uint32_t title_id, uint64_t configuration) {
++  if (!REXCVAR_GET(store_shaders)) {
++    return false;
++  }
++  if (!command_processor_) {
++    return false;
++  }
++  return command_processor_->BeginShaderStoragePreparation(cache_root, title_id, configuration);
++}
++
++void GraphicsSystem::CancelShaderStoragePreparation() {
++  if (command_processor_) {
++    command_processor_->RequestCancelShaderStoragePreparation();
++  }
++}
++
++GraphicsPreparationProgress GraphicsSystem::QueryShaderStoragePreparation() const {
++  if (!command_processor_) {
++    return GraphicsPreparationProgress();
++  }
++  return command_processor_->QueryShaderStoragePreparation();
++}
++
++GraphicsPreparationProgress GraphicsSystem::WaitForShaderStoragePreparation() {
++  if (!command_processor_) {
++    return GraphicsPreparationProgress();
++  }
++  return command_processor_->WaitForShaderStoragePreparation();
++}
++
+ void GraphicsSystem::Resume() {
+   paused_ = false;
+   command_processor_->Resume();
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index e8c1864..8fcc27d 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -652,6 +652,21 @@ void VulkanCommandProcessor::InitializeShaderStorage(const std::filesystem::path
+   pipeline_cache_->InitializeShaderStorage(cache_root, title_id, blocking);
+ }
+ 
++void VulkanCommandProcessor::BeginShaderStoragePreparationOnProcessorThread(
++    const std::filesystem::path& cache_root, uint32_t title_id) {
++  if (!pipeline_cache_) {
++    preparation().Finish(GraphicsPreparationPhase::kFailed);
++    return;
++  }
++  pipeline_cache_->BeginShaderStoragePreparation(cache_root, title_id);
++}
++
++void VulkanCommandProcessor::ServiceShaderStoragePreparationOnProcessorThread() {
++  if (pipeline_cache_) {
++    pipeline_cache_->ServiceShaderStoragePreparation();
++  }
++}
++
+ bool VulkanCommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* reader,
+                                                                 uint32_t packet, uint32_t count) {
+   if (!REXCVAR_GET(occlusion_query_enable) || !occlusion_query_resources_available_) {
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+index f413ef8..390a146 100644
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -391,7 +391,44 @@ bool VulkanPipelineCache::Initialize() {
+ 
+ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+     const std::filesystem::path& cache_root, uint32_t title_id, bool blocking) {
++  // The synchronous form of the generation: it owns the slices while it runs.
++  // The asynchronous form below is what lets the guest keep polling and
++  // presenting while the storage is prepared.
++  auto& preparation = command_processor_.preparation();
++  GraphicsPreparationKey key;
++  key.title_id = title_id;
++  key.configuration = 0;
++  key.cache_root = uint64_t(std::hash<std::filesystem::path>{}(cache_root));
+   ShutdownShaderStorage();
++  if (!preparation.Begin(key)) {
++    REXGPU_WARN(
++        "Vulkan shader storage preparation was requested while another generation is still "
++        "active");
++    return shader_storage_preload_result_;
++  }
++  preparation_blocking_ = blocking;
++  if (!OpenShaderStorage(cache_root, title_id)) {
++    preparation.Finish(GraphicsPreparationPhase::kFailed);
++    return shader_storage_preload_result_;
++  }
++  while (ServiceShaderStoragePreparation()) {
++  }
++  if (blocking) {
++    preparation.WaitForTerminal();
++  }
++  return shader_storage_preload_result_;
++}
++
++void VulkanPipelineCache::BeginShaderStoragePreparation(const std::filesystem::path& cache_root,
++                                                        uint32_t title_id) {
++  preparation_blocking_ = false;
++  if (!OpenShaderStorage(cache_root, title_id)) {
++    command_processor_.preparation().Finish(GraphicsPreparationPhase::kFailed);
++  }
++}
++
++bool VulkanPipelineCache::OpenShaderStorage(const std::filesystem::path& cache_root,
++                                            uint32_t title_id) {
+   {
+     std::lock_guard<std::mutex> lock(creation_request_lock_);
+     startup_loading_ = false;
+@@ -399,8 +436,14 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+   // Every exit from this function reports explicit counts; the early storage
+   // failures below return "nothing was prepared", not a successful preload.
+   shader_storage_preload_result_ = PipelinePreloadResult();
+-  preload_tracker_.Reset();
+-  PipelinePreloadResult preload_result;
++  auto& preparation = command_processor_.preparation();
++  preparation_descriptions_.clear();
++  preparation_translations_.clear();
++  preparation_next_translation_ = 0;
++  preparation_creations_.clear();
++  preparation_next_creation_ = 0;
++  pipelines_already_present_ = 0;
++  preparation_cancelled_ = false;
+ 
+   auto shader_storage_root = cache_root / "shaders";
+   auto shader_storage_shareable_root = shader_storage_root / "shareable";
+@@ -410,16 +453,19 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+           "Failed to create the shareable shader storage directory, persistent "
+           "shader storage will be disabled: {}",
+           rex::path_to_utf8(shader_storage_shareable_root));
+-      return shader_storage_preload_result_;
++      return false;
+     }
+   }
+ 
+   bool edram_fragment_shader_interlock =
+       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
++  preparation.SetRenderer(GraphicsPreparationBackend::kVulkan,
++                          edram_fragment_shader_interlock ? 1u : 0u);
+ 
+   // Initialize the pipeline storage stream - read pipeline descriptions and
+   // collect used shader modifications to translate.
+-  std::vector<PipelineStoredDescription> pipeline_stored_descriptions;
++  std::vector<PipelineStoredDescription>& pipeline_stored_descriptions =
++      preparation_descriptions_;
+   // <Shader hash, modification bits>.
+   std::set<std::pair<uint64_t, uint64_t>> shader_translations_needed;
+   auto pipeline_storage_file_path =
+@@ -431,7 +477,7 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+         "Failed to open the Vulkan pipeline description storage file for "
+         "writing, persistent shader storage will be disabled: {}",
+         rex::path_to_utf8(pipeline_storage_file_path));
+-    return shader_storage_preload_result_;
++    return false;
+   }
+   pipeline_storage_file_flush_needed_ = false;
+   // 'XEPS'.
+@@ -516,7 +562,7 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+         rex::path_to_utf8(shader_storage_file_path));
+     fclose(pipeline_storage_file_);
+     pipeline_storage_file_ = nullptr;
+-    return shader_storage_preload_result_;
++    return false;
+   }
+   ++shader_storage_index_;
+   shader_storage_file_flush_needed_ = false;
+@@ -570,8 +616,55 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+            shader_storage_file_);
+   }
+ 
+-  // Translate shader modifications needed for stored pipelines.
+-  for (const std::pair<uint64_t, uint64_t>& translation_needed : shader_translations_needed) {
++  // Translation of the stored pipelines' shader modifications is deferred to the
++  // service slices: a translation costs tens of milliseconds, so doing all of
++  // them here would hold the command processor thread - and the loading UI - for
++  // a whole second on a cold storage.
++  preparation_translations_.assign(shader_translations_needed.begin(),
++                                   shader_translations_needed.end());
++  preparation_next_translation_ = 0;
++
++  // Every stored description is a required entry from now on: progress is known
++  // before the first pipeline is created, and a cancelled generation can never
++  // be mistaken for complete coverage.
++  preparation.NoteCatalogue(!preparation_descriptions_.empty());
++  for (size_t preload_identity = 0; preload_identity < preparation_descriptions_.size();
++       ++preload_identity) {
++    preparation.RegisterEntry(uint64_t(preload_identity));
++  }
++
++  shader_storage_cache_root_ = cache_root;
++  shader_storage_title_id_ = title_id;
++
++  // Write the header for an empty storage, or truncate an invalid tail. This is
++  // the import's own bookkeeping and does not depend on pipeline creation.
++  if (pipeline_stored_descriptions.empty()) {
++    rex::filesystem::TruncateStdioFile(pipeline_storage_file_, 0);
++    pipeline_storage_file_header.magic = pipeline_storage_magic;
++    pipeline_storage_file_header.magic_api = pipeline_storage_magic_api;
++    pipeline_storage_file_header.version_swapped = pipeline_storage_version_swapped;
++    fwrite(&pipeline_storage_file_header, sizeof(pipeline_storage_file_header), 1,
++           pipeline_storage_file_);
++  } else {
++    rex::filesystem::TruncateStdioFile(
++        pipeline_storage_file_,
++        uint64_t(sizeof(pipeline_storage_file_header) +
++                 sizeof(PipelineStoredDescription) * pipeline_stored_descriptions.size()));
++  }
++
++  StartPreparationWorkers();
++  preparation.AdvancePhase(GraphicsPreparationPhase::kTranslating);
++  preparation_running_ = true;
++  return true;
++}
++
++size_t VulkanPipelineCache::TranslatePreparationShaders(size_t max_count) {
++  size_t translated_count = 0;
++  while (translated_count < max_count &&
++         preparation_next_translation_ < preparation_translations_.size()) {
++    const std::pair<uint64_t, uint64_t>& translation_needed =
++        preparation_translations_[preparation_next_translation_++];
++    ++translated_count;
+     auto shader_it = shaders_.find(translation_needed.first);
+     if (shader_it == shaders_.end()) {
+       continue;
+@@ -590,20 +683,21 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+       }
+     }
+   }
++  return translated_count;
++}
+ 
+-  // Create the pipelines.
+-  std::vector<PipelineCreationArguments> pipeline_creations;
+-  pipeline_creations.reserve(pipeline_stored_descriptions.size());
+-  size_t pipelines_already_present = 0;
+-  for (size_t pipeline_stored_description_index = 0;
+-       pipeline_stored_description_index < pipeline_stored_descriptions.size();
+-       ++pipeline_stored_description_index) {
++size_t VulkanPipelineCache::EnqueuePreparationPipelines(size_t max_count) {
++  auto& preparation = command_processor_.preparation();
++  size_t enqueued_count = 0;
++  while (enqueued_count < max_count &&
++         preparation_next_creation_ < preparation_descriptions_.size()) {
++    const size_t pipeline_stored_description_index = preparation_next_creation_++;
++    ++enqueued_count;
+     const PipelineStoredDescription& pipeline_stored_description =
+-        pipeline_stored_descriptions[pipeline_stored_description_index];
++        preparation_descriptions_[pipeline_stored_description_index];
+     const uint64_t preload_identity = uint64_t(pipeline_stored_description_index);
+     const PipelineDescription& pipeline_description = pipeline_stored_description.description;
+ 
+-    preload_tracker_.Register(preload_identity);
+     auto find_it = pipelines_.find(pipeline_description);
+     if (find_it != pipelines_.end()) {
+       // A pipeline that already exists is ready only when it holds a real
+@@ -613,10 +707,10 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+       if (found_pipeline.pipeline.load(std::memory_order_acquire) != VK_NULL_HANDLE &&
+           !found_pipeline.is_placeholder.load(std::memory_order_acquire) &&
+           !found_pipeline.real_pipeline_failed.load(std::memory_order_acquire)) {
+-        preload_tracker_.Succeed(preload_identity);
+-        ++pipelines_already_present;
++        preparation.SucceedEntry(preload_identity);
++        ++pipelines_already_present_;
+       } else {
+-        preload_tracker_.Fail(preload_identity);
++        preparation.FailEntry(preload_identity);
+       }
+       continue;
+     }
+@@ -625,7 +719,7 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+     if (!TryGetPipelineCreationArgumentsForDescription(pipeline_description, &pipeline,
+                                                        creation_arguments)) {
+       pipelines_.erase(pipeline_description);
+-      preload_tracker_.Miss(preload_identity);
++      preparation.MissEntry(preload_identity);
+       continue;
+     }
+     uint32_t bound_rts = 0;
+@@ -644,114 +738,234 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+     creation_arguments.priority = pipeline_util::CalculatePipelinePriority(
+         bound_rts, shader_writes_color_targets, shader_writes_depth);
+     creation_arguments.preload_identity = preload_identity;
+-    pipeline_creations.push_back(creation_arguments);
++    // The arguments outlive this slice: the workers pop their own copy, and the
++    // vector keeps the descriptions alive for the generation.
++    preparation_creations_.push_back(creation_arguments);
++    if (preparation_creation_threads_.empty()) {
++      if (EnsurePipelineCreated(preparation_creations_.back())) {
++        preparation.SucceedEntry(preload_identity);
++      } else {
++        preparation.FailEntry(preload_identity);
++      }
++      continue;
++    }
++    {
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      preparation_creation_queue_.push(preparation_creations_.back());
++    }
++    preparation_creation_cond_.notify_one();
++  }
++  return enqueued_count;
++}
++
++bool VulkanPipelineCache::ServiceShaderStoragePreparation() {
++  auto& preparation = command_processor_.preparation();
++  if (!preparation_running_) {
++    return false;
++  }
++  preparation.NoteServiceSlice();
++  if (!preparation.Active()) {
++    ShutdownPreparationWorkers();
++    preparation_running_ = false;
++    return false;
+   }
+ 
+-  if (!pipeline_creations.empty()) {
+-    {
+-      std::lock_guard<std::mutex> lock(creation_request_lock_);
+-      startup_loading_ = true;
++  if (preparation.CancelRequested() && !preparation_cancelled_) {
++    // Cancellation finalizes the generation: nothing more is enqueued, entries
++    // whose creation has not started are cancelled, and work already in flight
++    // is joined.
++    CancelShaderStoragePreparation();
++    FinishShaderStoragePreparation(GraphicsPreparationPhase::kCancelled);
++    return false;
++  }
++
++  if (preparation.phase() == GraphicsPreparationPhase::kImporting) {
++    FinishShaderStoragePreparation(GraphicsPreparationPhase::kFailed);
++    return false;
++  }
++
++  if (preparation.phase() == GraphicsPreparationPhase::kTranslating) {
++    if (!preparation_cancelled_) {
++      TranslatePreparationShaders(kPreparationTranslationBatch);
+     }
+-    uint32_t logical_processor_count = rex::thread::logical_processor_count();
+-    if (!logical_processor_count) {
+-      // Pick some reasonable amount if couldn't determine the number of cores.
+-      logical_processor_count = 6;
++    if (preparation_next_translation_ < preparation_translations_.size()) {
++      return true;
+     }
+-    size_t creation_thread_count;
+-    if (REXCVAR_GET(vulkan_pipeline_creation_threads) == 0) {
+-      creation_thread_count = 1;
+-    } else if (REXCVAR_GET(vulkan_pipeline_creation_threads) < 0) {
+-      creation_thread_count = std::max(logical_processor_count * 3 / 4, uint32_t(1));
+-    } else {
+-      creation_thread_count = std::min(uint32_t(REXCVAR_GET(vulkan_pipeline_creation_threads)),
+-                                       logical_processor_count);
++    preparation.AdvancePhase(GraphicsPreparationPhase::kCreating);
++  }
++
++  if (preparation.phase() == GraphicsPreparationPhase::kCreating) {
++    if (!preparation_cancelled_) {
++      EnqueuePreparationPipelines(kPreparationEnqueueBatch);
+     }
+-    if (!blocking) {
+-      // Vulkan currently doesn't support deferred pipeline handles at draw time,
+-      // so complete preload creation regardless of blocking mode.
+-      creation_thread_count = std::max(creation_thread_count, size_t(1));
++    {
++      rex::graphics::compile_trace::Scope trace_drain(
++          rex::graphics::compile_trace::Event::kCompileDrain,
++          "src/graphics/vulkan/pipeline_cache.cpp");
++      CreatePreparationPipelinesOnProcessorThread(kPreparationCreationBatch);
++      trace_drain.Success();
++    }
++    const bool all_enqueued = preparation_next_creation_ >= preparation_descriptions_.size();
++    if (all_enqueued && preparation.unfinished_entries() == 0) {
++      const GraphicsPreparationPhase terminal_phase =
++          preparation_cancelled_
++              ? GraphicsPreparationPhase::kCancelled
++              : (preparation.entries().Complete() ? GraphicsPreparationPhase::kSucceeded
++                                                  : GraphicsPreparationPhase::kIncomplete);
++      FinishShaderStoragePreparation(terminal_phase);
++      return false;
+     }
+-    creation_thread_count = std::min(creation_thread_count, pipeline_creations.size());
++    return true;
++  }
+ 
+-    std::atomic<size_t> next_creation_index(0);
+-    auto creation_worker = [this, &pipeline_creations, &next_creation_index]() {
+-      while (true) {
+-        size_t creation_index = next_creation_index.fetch_add(1);
+-        if (creation_index >= pipeline_creations.size()) {
+-          break;
+-        }
+-        const uint64_t preload_identity = pipeline_creations[creation_index].preload_identity;
+-        preload_tracker_.BeginWork(preload_identity);
+-        if (EnsurePipelineCreated(pipeline_creations[creation_index])) {
+-          preload_tracker_.Succeed(preload_identity);
+-        } else {
+-          preload_tracker_.Fail(preload_identity);
+-        }
+-      }
+-    };
++  return preparation.Active();
++}
++
++void VulkanPipelineCache::CancelShaderStoragePreparation() {
++  auto& preparation = command_processor_.preparation();
++  if (!preparation_running_ || preparation_cancelled_) {
++    return;
++  }
++  preparation_cancelled_ = true;
++  preparation.CancelPendingEntries();
++  preparation_next_translation_ = preparation_translations_.size();
++  preparation_next_creation_ = preparation_descriptions_.size();
++  preparation.AdvancePhase(GraphicsPreparationPhase::kFinalizing);
++}
+ 
+-    if (creation_thread_count <= 1) {
+-      creation_worker();
++void VulkanPipelineCache::StartPreparationWorkers() {
++  // The creation pool is separate from the gameplay `creation_threads_`: a
++  // submission's EndSubmission() must never wait for preparation work, and
++  // preparation must not consume a pipeline a draw needs first.
++  size_t creation_thread_count = 1;
++  uint32_t logical_processor_count = rex::thread::logical_processor_count();
++  if (!logical_processor_count) {
++    logical_processor_count = 6;
++  }
++  if (REXCVAR_GET(vulkan_pipeline_creation_threads) == 0) {
++    creation_thread_count = 1;
++  } else if (REXCVAR_GET(vulkan_pipeline_creation_threads) < 0) {
++    creation_thread_count =
++        std::max(size_t(logical_processor_count * 3 / 4), size_t(1));
++  } else {
++    creation_thread_count =
++        std::min(size_t(REXCVAR_GET(vulkan_pipeline_creation_threads)),
++                 size_t(logical_processor_count));
++  }
++  creation_thread_count = std::max(creation_thread_count, size_t(1));
++  creation_thread_count = std::min(creation_thread_count, preparation_descriptions_.size());
++  {
++    std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++    while (!preparation_creation_queue_.empty()) {
++      preparation_creation_queue_.pop();
++    }
++    preparation_creation_shutdown_ = false;
++    preparation_creation_busy_ = 0;
++  }
++  preparation_creation_threads_.clear();
++  preparation_creation_threads_.reserve(creation_thread_count);
++  for (size_t thread_index = 0; thread_index < creation_thread_count; ++thread_index) {
++    std::unique_ptr<rex::thread::Thread> creation_thread = rex::thread::Thread::Create(
++        {}, [this, thread_index]() { PreparationCreationThread(thread_index); });
++    assert_not_null(creation_thread);
++    creation_thread->set_name("Vulkan Prep Pipelines");
++    preparation_creation_threads_.push_back(std::move(creation_thread));
++  }
++}
++
++size_t VulkanPipelineCache::CreatePreparationPipelinesOnProcessorThread(size_t max_count) {
++  auto& preparation = command_processor_.preparation();
++  size_t created_count = 0;
++  while (created_count < max_count) {
++    PipelineCreationArguments creation_arguments;
++    {
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      if (preparation_creation_queue_.empty()) {
++        break;
++      }
++      creation_arguments = preparation_creation_queue_.top();
++      preparation_creation_queue_.pop();
++      ++preparation_creation_busy_;
++    }
++    if (creation_arguments.preload_identity != kNoPreloadIdentity) {
++      preparation.BeginEntry(creation_arguments.preload_identity);
++    }
++    if (EnsurePipelineCreated(creation_arguments)) {
++      preparation.SucceedEntry(creation_arguments.preload_identity);
+     } else {
+-      std::vector<std::unique_ptr<rex::thread::Thread>> creation_threads;
+-      creation_threads.reserve(creation_thread_count);
+-      for (size_t i = 0; i < creation_thread_count; ++i) {
+-        std::unique_ptr<rex::thread::Thread> creation_thread =
+-            rex::thread::Thread::Create({}, creation_worker);
+-        assert_not_null(creation_thread);
+-        creation_thread->set_name("Vulkan Pipelines");
+-        creation_threads.push_back(std::move(creation_thread));
++      preparation.FailEntry(creation_arguments.preload_identity);
++    }
++    {
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      --preparation_creation_busy_;
++    }
++    ++created_count;
++  }
++  return created_count;
++}
++
++void VulkanPipelineCache::PreparationCreationThread(size_t thread_index) {
++  (void)thread_index;
++  auto& preparation = command_processor_.preparation();
++  for (;;) {
++    PipelineCreationArguments creation_arguments;
++    {
++      std::unique_lock<std::mutex> lock(preparation_creation_lock_);
++      if (preparation_creation_shutdown_) {
++        return;
+       }
+-      for (const auto& creation_thread : creation_threads) {
+-        rex::thread::Wait(creation_thread.get(), false);
++      if (preparation_creation_queue_.empty()) {
++        preparation_creation_cond_.wait(lock);
++        continue;
+       }
++      creation_arguments = preparation_creation_queue_.top();
++      preparation_creation_queue_.pop();
++      ++preparation_creation_busy_;
++    }
++    if (creation_arguments.preload_identity != kNoPreloadIdentity) {
++      preparation.BeginEntry(creation_arguments.preload_identity);
++    }
++    if (EnsurePipelineCreated(creation_arguments)) {
++      preparation.SucceedEntry(creation_arguments.preload_identity);
++    } else {
++      preparation.FailEntry(creation_arguments.preload_identity);
+     }
+-
+     {
+-      std::lock_guard<std::mutex> lock(creation_request_lock_);
+-      startup_loading_ = false;
++      std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++      --preparation_creation_busy_;
+     }
+   }
++}
+ 
+-  // Vulkan completes the storage creation regardless of the blocking mode and
+-  // the workers above have been joined, so the counts are final here - but a
+-  // failed or never-attempted entry is still not ready.
+-  preload_result = preload_tracker_.WaitUntilFinished();
+-  preload_result.awaited = true;
+-  preload_result.already_present = pipelines_already_present;
+-  if (preload_result.Complete() || !preload_result.HasWork()) {
+-    REXGPU_INFO(
+-        "Vulkan shader storage preload: {} required, {} succeeded ({} already present), {} "
+-        "failed, {} missing, {} duplicate request(s)",
+-        preload_result.required, preload_result.succeeded, preload_result.already_present,
+-        preload_result.failed, preload_result.missing, preload_result.duplicates);
+-  } else {
+-    REXGPU_WARN(
+-        "Vulkan shader storage preload is not ready: {} required, {} succeeded ({} already "
+-        "present), {} failed, {} missing, {} duplicate request(s)",
+-        preload_result.required, preload_result.succeeded, preload_result.already_present,
+-        preload_result.failed, preload_result.missing, preload_result.duplicates);
+-  }
+-
+-  // If any pipeline descriptions were corrupted (or the whole file has excess
+-  // bytes in the end), truncate to the last valid pipeline description.
+-  rex::filesystem::TruncateStdioFile(
+-      pipeline_storage_file_,
+-      uint64_t(sizeof(pipeline_storage_file_header) +
+-               sizeof(PipelineStoredDescription) * pipeline_stored_descriptions.size()));
+-  if (pipeline_stored_descriptions.empty()) {
+-    rex::filesystem::TruncateStdioFile(pipeline_storage_file_, 0);
+-    pipeline_storage_file_header.magic = pipeline_storage_magic;
+-    pipeline_storage_file_header.magic_api = pipeline_storage_magic_api;
+-    pipeline_storage_file_header.version_swapped = pipeline_storage_version_swapped;
+-    fwrite(&pipeline_storage_file_header, sizeof(pipeline_storage_file_header), 1,
+-           pipeline_storage_file_);
++void VulkanPipelineCache::ShutdownPreparationWorkers() {
++  {
++    std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++    preparation_creation_shutdown_ = true;
++    while (!preparation_creation_queue_.empty()) {
++      preparation_creation_queue_.pop();
++    }
+   }
++  preparation_creation_cond_.notify_all();
++  for (auto& creation_thread : preparation_creation_threads_) {
++    rex::thread::Wait(creation_thread.get(), false);
++  }
++  preparation_creation_threads_.clear();
++  {
++    std::lock_guard<std::mutex> lock(preparation_creation_lock_);
++    preparation_creation_shutdown_ = false;
++    preparation_creation_busy_ = 0;
++  }
++}
+ 
+-  shader_storage_cache_root_ = cache_root;
+-  shader_storage_title_id_ = title_id;
++void VulkanPipelineCache::FinishShaderStoragePreparation(
++    GraphicsPreparationPhase terminal_phase) {
++  auto& preparation = command_processor_.preparation();
++  // Joining the workers is what makes the counts final - a worker must not
++  // publish a pipeline after the result is reported.
++  ShutdownPreparationWorkers();
+ 
+-  // Start the storage writing thread.
++  // Start the storage writing thread; it owns the streams for the rest of the
++  // run and must exist before any shader or pipeline is written.
+   storage_write_flush_shaders_ = false;
+   storage_write_flush_pipelines_ = false;
+   storage_write_thread_shutdown_ = false;
+@@ -759,11 +973,48 @@ PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
+   assert_not_null(storage_write_thread_);
+   storage_write_thread_->set_name("Vulkan Storage writer");
+ 
++  PipelinePreloadResult preload_result = preparation.entries();
++  preload_result.already_present = pipelines_already_present_;
++  preload_result.awaited = preparation_blocking_;
++  if (preload_result.Complete() || !preload_result.HasWork()) {
++    REXGPU_INFO(
++        "Vulkan shader storage preload {}: {} required, {} succeeded ({} already present), "
++        "{} failed, {} missing, {} cancelled, {} duplicate request(s){}",
++        GraphicsPreparationPhaseName(terminal_phase), preload_result.required,
++        preload_result.succeeded, preload_result.already_present, preload_result.failed,
++        preload_result.missing, preload_result.cancelled, preload_result.duplicates,
++        preload_result.HasWork() ? "" : " (the storage declared no pipelines)");
++  } else {
++    REXGPU_WARN(
++        "Vulkan shader storage preload is not ready ({}): {} required, {} succeeded ({} "
++        "already present), {} failed, {} missing, {} cancelled, {} queued, {} running, {} "
++        "duplicate request(s){}",
++        GraphicsPreparationPhaseName(terminal_phase), preload_result.required,
++        preload_result.succeeded, preload_result.already_present, preload_result.failed,
++        preload_result.missing, preload_result.cancelled, preload_result.queued,
++        preload_result.running, preload_result.duplicates,
++        preload_result.awaited ? "" : " (not awaited)");
++  }
+   shader_storage_preload_result_ = preload_result;
+-  return preload_result;
++  preparation_running_ = false;
++  preparation.Finish(terminal_phase);
+ }
+ 
+ void VulkanPipelineCache::ShutdownShaderStorage() {
++  if (preparation_running_) {
++    // A generation still owns creation workers; reset the controller so a waiter
++    // can never be left blocking on work nobody will finish.
++    command_processor_.preparation().RequestCancel();
++    command_processor_.preparation().Reset();
++    ShutdownPreparationWorkers();
++    preparation_running_ = false;
++    preparation_cancelled_ = false;
++    preparation_descriptions_.clear();
++    preparation_translations_.clear();
++    preparation_creations_.clear();
++    preparation_next_translation_ = 0;
++    preparation_next_creation_ = 0;
++  }
+   if (storage_write_thread_) {
+     {
+       std::lock_guard<std::mutex> lock(storage_write_request_lock_);
+@@ -3612,7 +3863,7 @@ void VulkanPipelineCache::CreationThread(size_t thread_index) {
+     }
+ 
+     if (creation_arguments.preload_identity != kNoPreloadIdentity) {
+-      preload_tracker_.BeginWork(creation_arguments.preload_identity);
++      command_processor_.preparation().BeginEntry(creation_arguments.preload_identity);
+     }
+     bool created = EnsurePipelineCreated(creation_arguments);
+     if (!created) {
+@@ -3634,9 +3885,9 @@ void VulkanPipelineCache::CreationThread(size_t thread_index) {
+     }
+     if (creation_arguments.preload_identity != kNoPreloadIdentity) {
+       if (created) {
+-        preload_tracker_.Succeed(creation_arguments.preload_identity);
++        command_processor_.preparation().SucceedEntry(creation_arguments.preload_identity);
+       } else {
+-        preload_tracker_.Fail(creation_arguments.preload_identity);
++        command_processor_.preparation().FailEntry(creation_arguments.preload_identity);
+       }
+     }
+ 
+@@ -3660,7 +3911,7 @@ void VulkanPipelineCache::CreateQueuedPipelinesOnProcessorThread() {
+       creation_queue_.pop();
+     }
+     if (creation_arguments.preload_identity != kNoPreloadIdentity) {
+-      preload_tracker_.BeginWork(creation_arguments.preload_identity);
++      command_processor_.preparation().BeginEntry(creation_arguments.preload_identity);
+     }
+     bool created = EnsurePipelineCreated(creation_arguments);
+     if (!created) {
+@@ -3681,9 +3932,9 @@ void VulkanPipelineCache::CreateQueuedPipelinesOnProcessorThread() {
+     }
+     if (creation_arguments.preload_identity != kNoPreloadIdentity) {
+       if (created) {
+-        preload_tracker_.Succeed(creation_arguments.preload_identity);
++        command_processor_.preparation().SucceedEntry(creation_arguments.preload_identity);
+       } else {
+-        preload_tracker_.Fail(creation_arguments.preload_identity);
++        command_processor_.preparation().FailEntry(creation_arguments.preload_identity);
+       }
+     }
+   }
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index b94fe9e..84708f2 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -457,17 +457,34 @@ void ReXApp::LaunchModule() {
+     }
+ 
+     auto* graphics_system = runtime_->graphics_system();
+-    if (graphics_system && !runtime_->cache_root().empty()) {
+-      uint32_t title_id = runtime_->kernel_state()->title_id();
+-      if (title_id != 0) {
+-        REXLOG_INFO("Initializing shader storage for title {:08X}...", title_id);
+-        graphics_system->InitializeShaderStorage(runtime_->cache_root(), title_id, true);
+-      }
++    uint32_t title_id =
++        (graphics_system && runtime_->kernel_state()) ? runtime_->kernel_state()->title_id() : 0;
++    const bool has_shader_storage =
++        graphics_system && !runtime_->cache_root().empty() && title_id != 0;
++    // P4: preparation can run beside the guest instead of before it. The
++    // blocking call below returns only after every stored pipeline exists, which
++    // is why the loading UI cannot animate during it; the asynchronous form
++    // starts the same work after the guest resumes and services it in bounded
++    // slices on the command processor thread. The cvar is the measurement and
++    // integration switch (P6 owns the visible phase); the default keeps the
++    // launch-time behaviour.
++    const bool async_preparation =
++        rex::cvar::GetFlagByName("shader_storage_async_preparation") == "true";
++    if (has_shader_storage && !async_preparation) {
++      REXLOG_INFO("Initializing shader storage for title {:08X}...", title_id);
++      graphics_system->InitializeShaderStorage(runtime_->cache_root(), title_id, true);
+     }
+ 
+     OnPostLaunchModule(main_thread.get());
+     main_thread->Resume();
+ 
++    if (has_shader_storage && async_preparation) {
++      REXLOG_INFO("Preparing shader storage for title {:08X} beside the guest...", title_id);
++      if (!graphics_system->BeginShaderStoragePreparation(runtime_->cache_root(), title_id, 0)) {
++        REXLOG_WARN("Shader storage preparation could not start (a generation is already active)");
++      }
++    }
++
+     module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {
+       main_thread->Wait(0, 0, 0, nullptr);
+       OnGuestThreadExit(main_thread.get());
