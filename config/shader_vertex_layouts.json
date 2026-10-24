@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "title_id": "5841122D",
+  "source_revision": "config/game_fingerprints.toml:entrypoint",
+  "linker": "d3d9-sub_82521908-v1",
+  "scope": "Layouts observed by the preserved P0 candidate, reconstructed from installed executable declarations or its FVF constructor. Strides are dwords. This does not enumerate arbitrary custom content layouts.",
+  "swizzle_masks_offset": 697480,
+  "format_sizes_offset": 697496,
+  "layouts": [
+    {"name": "mesh-packed", "declaration_offset": 8440080, "strides": [9]},
+    {"name": "mesh-unpacked", "declaration_offset": 8440176, "strides": [24]},
+    {"name": "multimesh-packed", "declaration_offset": 8440816, "strides": [9, 1]},
+    {"name": "particles", "declaration_offset": 8441112, "strides": [9]},
+    {"name": "fullscreen-fvf450", "fvf": 450, "strides": [7]}
+  ],
+  "bootstrap_shaders": [
+    {"name": "d3d-bootstrap-fetch", "offset": 696704, "bytes": 108, "hash": "1e6883fccde1f688"},
+    {"name": "d3d-bootstrap-alu", "offset": 695568, "bytes": 96, "hash": "b6c9863f710683ec"}
+  ]
+}

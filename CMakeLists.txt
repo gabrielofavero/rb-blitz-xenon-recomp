@@ -454,7 +454,30 @@ add_dependencies(rb_blitz_codegen rb_blitz_toolchain_gate)
 # - see docs/guides/build-and-run.md. `cmake --build <build dir>; ctest` runs them.
 include(CTest)
 
+# P2's offline local-asset resolver hashes guest bytes with the same SDK XXH3
+# implementation as both graphics backends. It never launches the guest.
+add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
+target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
+
 if(BUILD_TESTING)
+    find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME shader_asset_resolver
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_asset_resolver_tests.py"
+                --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/default.xex" AND
+       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/gen/main_xbox.hdr")
+        add_test(NAME shader_asset_resolver_retail
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_asset_resolver_tests.py"
+                    --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>
+                    --installation "${CMAKE_CURRENT_SOURCE_DIR}/game")
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate/gen/patch_xbox.hdr")
+            add_test(NAME shader_asset_resolver_ultimate
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_asset_resolver_tests.py"
+                        --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>
+                        --installation "${CMAKE_CURRENT_SOURCE_DIR}/game"
+                        --effective-overlay-root "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate")
+        endif()
+    endif()
     add_executable(rb_blitz_loading_record_inspect tools/loading_record_inspect.cpp
         src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_loading_record_inspect PRIVATE src)
@@ -468,6 +491,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME shader_compile_trace_enabled COMMAND rb_blitz_shader_compile_trace_tests enabled)
     add_test(NAME shader_compile_trace_disabled COMMAND rb_blitz_shader_compile_trace_tests disabled)
+
+    # Shader-storage preload accounting and the blocking barrier, the component
+    # both backends use (rexglue-sdk/include/rex/graphics/pipeline_preload.h).
+    # Header-only, and exercised with real threads rather than a copied model.
+    add_executable(rb_blitz_pipeline_preload_tests tests/pipeline_preload_tests.cpp)
+    target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE rex::core)
+    if(WIN32)
+        target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME pipeline_preload COMMAND rb_blitz_pipeline_preload_tests)
 
     # Exercise the component conversion shared by the patched D3D12 and Vulkan texture caches.
     add_executable(rb_blitz_texture_conversion_tests tests/texture_conversion_tests.cpp)

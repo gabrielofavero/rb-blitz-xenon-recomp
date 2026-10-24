@@ -9,33 +9,6 @@ diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline
  #include "thirdparty/dxbc/DXBCChecksum.h"
  
  #include <algorithm>
-@@ -651,7 +652,13 @@
-     }
- 
-     if (!creation_threads_.empty()) {
--      CreateQueuedPipelinesOnProcessorThread();
-+      {
-+        rex::graphics::compile_trace::Scope trace_drain(
-+            rex::graphics::compile_trace::Event::kCompileDrain,
-+            "src/graphics/d3d12/pipeline_cache.cpp");
-+        CreateQueuedPipelinesOnProcessorThread();
-+        trace_drain.Success();
-+      }
-       if (creation_threads_.size() > creation_thread_original_count) {
-         {
-           std::lock_guard<std::mutex> lock(creation_request_lock_);
-@@ -680,7 +687,11 @@
-         }
-         if (await_creation_completion_event) {
-           creation_request_cond_.notify_one();
-+          rex::graphics::compile_trace::Scope trace_wait(
-+              rex::graphics::compile_trace::Event::kCompileWait,
-+              "src/graphics/d3d12/pipeline_cache.cpp");
-           rex::thread::Wait(creation_completion_event_.get(), false);
-+          trace_wait.Success();
-         }
-       }
-     }
 @@ -763,7 +774,13 @@
      pipeline_storage_file_flush_needed_ = false;
    }

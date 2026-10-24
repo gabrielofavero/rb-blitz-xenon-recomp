@@ -4,7 +4,12 @@ Date: 2026-10-10. Architecture review 2026-10-16; plan finalized 2026-10-17.
 Product flow and implementation prompts updated 2026-10-24.
 Scope: first-play freezes that become less frequent with further play and do not
 recur at the same spot after restarting a song.
-Status: P0 implemented 2026-10-24 and its controlled traces collected the same day.
+Status: P0 implemented 2026-10-24 and its controlled traces collected the same day;
+P1 (backend completion and result reporting) implemented 2026-10-24. P2's bounded
+local resolver/index is implemented and tested 2026-10-24: all 186 current candidate
+shader identities (120 pixel, 66 vertex) resolve locally and match preserved runtime
+bytes exactly. Vertex declaration linking and the executable's bootstrap shader
+sources are resolved; complete pipeline coverage and preparation integration remain P3/P4.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -12,8 +17,11 @@ the learned records preloads 132 pipelines at boot and then adds 5/4 with no com
 wait. Vulkan/retail is worse in the song: 79 creations and 56 translations plus
 336 ms of compile wait on first play, and 7 creations plus a 199 ms wait on replay.
 The cause of individual freezes is still not established: four of the eight
-empty-cache long frames record no compile work at all. Graphics preparation
-(P1–P9) is not implemented, and the post-A gate remains a P6 blocker. Evidence:
+empty-cache long frames record no compile work at all. A storage preload now reports
+explicit required/succeeded/failed/missing counts on both backends and cannot return
+before its required work finished ([P1 record](#p1--make-backend-completion-and-failure-reporting-trustworthy));
+the graphics-preparation lifecycle and UI (P3–P9) are not implemented, and the post-A gate remains
+a P6 blocker. Evidence:
 [shader-cache-p0.md](../../engine/shader-cache-p0.md) and
 `out/shader-cache-p0/runs/`.
 
@@ -291,8 +299,8 @@ custom content and untested settings remain outside that guarantee until validat
 
 | ID | Finding and evidence | Required consequence |
 | --- | --- | --- |
-| F1 | In D3D12 [pipeline_cache.cpp](../../../rexglue-sdk/src/graphics/d3d12/pipeline_cache.cpp):529–541, `creation_thread_needed_count` is computed, but the growth loop compares the current size with `creation_thread_original_count`, initialized to that same size. No temporary workers are added. At 653–684, the blocking worker wait is inside `size > original_count`, so the ordinary path skips it. `CreateQueuedPipelinesOnProcessorThread()` at 3246 only drains the queue; other workers may still be creating PSOs. | Fix worker-count logic **and** put the blocking completion barrier outside temporary-worker cleanup. Even fixing the loop alone leaves the no-growth case uncovered. Reproduce with a deliberately delayed worker; effect on reported song stalls is unmeasured. |
-| F2 | D3D12 increments `pipelines_created` at 650 regardless of eventual worker success; `IsCreatingPipelines()` at 787 reports queue/busy state, not success. Vulkan [pipeline_cache.cpp](../../../rexglue-sdk/src/graphics/vulkan/pipeline_cache.cpp):624–687 actually joins preload workers and counts successes. However, at 3541–3549 a failed async real pipeline can leave a placeholder with `is_placeholder` cleared. | Define explicit successful/failed completion per required pipeline. Neither a log count, an empty queue, nor a cleared placeholder flag is a sufficient readiness test. |
+| F1 | In D3D12 [pipeline_cache.cpp](../../../rexglue-sdk/src/graphics/d3d12/pipeline_cache.cpp):529–541, `creation_thread_needed_count` is computed, but the growth loop compares the current size with `creation_thread_original_count`, initialized to that same size. No temporary workers are added. At 653–684, the blocking worker wait is inside `size > original_count`, so the ordinary path skips it. `CreateQueuedPipelinesOnProcessorThread()` at 3246 only drains the queue; other workers may still be creating PSOs. | Fix worker-count logic **and** put the blocking completion barrier outside temporary-worker cleanup. Even fixing the loop alone leaves the no-growth case uncovered. Reproduce with a deliberately delayed worker; effect on reported song stalls is unmeasured. **Fixed by P1 (2026-10-24): the loop uses the computed count and the barrier is the tracker's, outside the cleanup.** |
+| F2 | D3D12 increments `pipelines_created` at 650 regardless of eventual worker success; `IsCreatingPipelines()` at 787 reports queue/busy state, not success. Vulkan [pipeline_cache.cpp](../../../rexglue-sdk/src/graphics/vulkan/pipeline_cache.cpp):624–687 actually joins preload workers and counts successes. However, at 3541–3549 a failed async real pipeline can leave a placeholder with `is_placeholder` cleared. | Define explicit successful/failed completion per required pipeline. Neither a log count, an empty queue, nor a cleared placeholder flag is a sufficient readiness test. **P1 (2026-10-24) implements this rule on both backends.** |
 | F3 | [ReXApp::LaunchModule](../../../rexglue-sdk/src/ui/rex_app.cpp):430–469 performs blocking storage initialization inside a deferred UI-thread callback. [GraphicsSystem::InitializeShaderStorage](../../../rexglue-sdk/src/graphics/graphics_system.cpp):342–364 either uses a paused command processor or dispatches to its thread and waits. | Keep the guest start barrier, but expose an asynchronous preparation operation and UI progress. Simply displaying a progress label before the existing call would still freeze event processing. |
 | F4 | D3D12 [command_processor.cpp](../../../rexglue-sdk/src/graphics/d3d12/command_processor.cpp):2480–2482 skips an unready pipeline's draw; 3490 waits before deferred commands execute. Vulkan `ConfigurePipeline()` translates first at 1058, may create a placeholder synchronously at 1166, and its ordinary `EndSubmission()` drains/waits at 746–787. | Background compilation is not the playback guarantee on either backend. Preserve submission correctness while moving work before playback. |
 | F5 | D3D12 storage obtains needed translation modifications from pipeline descriptions (246–318), then translates those variants (405–425). Its [PipelineDescription](../../../rexglue-sdk/include/rex/graphics/d3d12/pipeline_cache.h):183–222 includes shader hashes/modifications, depth, stencil, blend, topology and render-target state. | Loading every guest shader alone does not prepare all variants or PSOs. Catalogue actual normalized recipes, not a cartesian product of shader pairs. |
@@ -637,7 +645,9 @@ other synchronization costs need separate diagnosis if they remain.
 
 - `ReXApp::LaunchModule()` still calls blocking `InitializeShaderStorage(..., true)`
   on the deferred UI-thread launch path before `main_thread->Resume()`. The D3D12
-  worker-growth/completion defect F1 is still present. Vulkan's storage loader joins
+  worker-growth/completion defect F1 is still present (**superseded: P1 replaced the
+  D3D12 preload barrier, 2026-10-24; the blocking call site itself is P4's to change**).
+  Vulkan's storage loader joins
   its preload workers even when called with `blocking = false`; flipping that flag
   does not provide the asynchronous loading-screen workflow.
 - The DLC bar is title-owned: `src/hooks/content_progress.cpp` drives the connect
@@ -717,7 +727,9 @@ Implementation update, 2026-10-24:
   drains, completion waits and guest/GPU frame gaps. Phase observation shares the
   existing UI poll and enabled-controller boundary, independent of mouse/focus flags.
   Diagnostics default off; details/storage are bounded. No submission wait was removed
-  and the P1 completion defect remains unfixed.
+  and the P1 completion defect remained unfixed at that point (**superseded** by the
+  P1 record below, which replaces the D3D12 preload barrier and moves the two
+  instrumentation sites it owned into patch 0021).
 - Added `scripts/shader_cache_trace.py`, the production-parser-based
   `rb_blitz_loading_record_inspect` host tool, actual runtime-counter tests and report
   attribution tests. Preparation creates isolated cache/save/settings copies and an
@@ -775,6 +787,51 @@ Implementation update, 2026-10-24:
 Exit: preload cannot return successful while required work is running, failed or
 missing. Tests exercise the actual completion logic, rather than only a copied model.
 
+Implementation update, 2026-10-24:
+
+- New SDK header `include/rex/graphics/pipeline_preload.h` (patch
+  `0021-preload-completion-accounting.patch`): `PipelinePreloadTracker` owns one
+  explicit state per required entry (`queued -> running -> succeeded | failed`, or
+  `missing` when it could never be attempted), the duplicate-request refusal and the
+  completion barrier (`WaitUntilFinished`, `UnfinishedCount`, `Read`, `Reset`);
+  `PipelinePreloadResult` carries required/queued/running/succeeded/failed/missing/
+  duplicates/already-present and `Complete()` = *has work, nothing unfinished, nothing
+  failed or missing* (an empty preload is not coverage). `PreloadCreationThreadCount()`
+  replaces the inline growth arithmetic.
+- D3D12 `PipelineCache`: the growth loop uses the computed needed count (it compared
+  the live size against the size it had just read, so it never grew), and the blocking
+  barrier is the tracker's, **outside** the temporary-worker cleanup and also reached
+  when no worker was added. Each stored description registers one entry; a real
+  `ID3D12PipelineState` is the only success, a `nullptr` is `failed`, and an
+  already-known description counts as `already_present` only when its state exists.
+  `InitializeShaderStorage` now returns the result (both early storage failures return
+  "nothing prepared"), and a `Shader storage preload…` line logs the counts - `REXGPU_WARN`
+  when required work did not produce every pipeline.
+- Vulkan `VulkanPipelineCache`: the same states around the creation loop and workers.
+  A placeholder, and a retained placeholder left after a failed real creation (new
+  `Pipeline::real_pipeline_failed`), are never ready, and `pipeline failed` is reported
+  instead of a success count. The loader already joins its workers, so the counts are
+  final for both blocking modes; it returns the same result type.
+- `EndSubmission()` waits and the temporary-worker lifetime are unchanged; the change
+  is which states are called complete, not when submission waits happen.
+- Tests: `tests/pipeline_preload_tests.cpp` → ctest `pipeline_preload`, 174 checks
+  against the header both caches include: worker-count growth and the no-growth cases,
+  empty ≠ complete, synchronous creation, queued/running not ready, a delayed worker
+  (the barrier waits at least 150 ms for a 200 ms creation), four workers over one
+  hundred entries, failure and missing entries, duplicate registration and terminal
+  finality, and `Reset()` releasing a blocked waiter (shutdown).
+- Gates (2026-10-24): release build links `rexruntime.dll`, `rexgpu-xenos.dll` and
+  `rb_blitz.exe` with the reworked caches; `ctest` in the release tree **51/51**;
+  `apply_sdk_patches.ps1 -Check` exit 0 (20 patches, exact replay audit, 60 patched
+  files, 0 unexpected).
+- Remaining: no game/UI run was made for P1 (it changes accounting and the D3D12
+  barrier, not which pipelines exist), so this makes no claim that in-song compile
+  work dropped; that needs P2–P4 and the P8 route matrix. A non-blocking D3D12 preload
+  still returns with queued/running entries by design, and reports them as not ready.
+  Patch 0020 no longer carries the D3D12 preload drain/wait hunks - the restructuring
+  replaces those sites, and a patch whose post-image is rewritten cannot pass the
+  audit's `--reverse --check`; `patches/README.md` records the move.
+
 ### P2 — Resolve shaders locally before their first draw
 
 > Implement P2. Investigate the installed `xbox_shaders` / `xbox_preinit_shaders` assets
@@ -790,6 +847,132 @@ missing. Tests exercise the actual completion logic, rather than only a copied m
 Exit: every shader in the candidate supported catalogue resolves locally and matches
 runtime identity, or there is an explicit coverage blocker. Existing developer caches
 may support experiments but cannot be the release's only first-run shader source.
+
+#### P2 initial investigation, 2026-10-24 (superseded by the implementation below)
+
+Tooling lived in `out/_swap/p2/` (throwaway, ignored): `compare_runtime.py` parses the
+runtime store, `parse_container.py` walks the container, `show_func.py` prints one
+decompiled function.
+
+Measured against
+`out/shader-cache-p0/runs/d3d12-ultimate-empty-r3/inputs/user-data/Saved Games/cache/shaders/shareable/5841122D.xsh`
+(181 records, 100,736 bytes, parses to EOF):
+
+- Store format is `'XESH'`, swapped version, then `{u64 hash, u32 (count:31 | type:1)}`
+  followed by `count * 4` guest-endian microcode bytes.
+- `assets/game/360/xbox_shaders` contains **every runtime pixel shader byte for byte**:
+  117 of 117, at 117 distinct offsets. `xbox_preinit_shaders` contains none of them.
+- **No runtime vertex shader is in either asset** (0 of 64). Skipping 0/4/8/12/16/20
+  leading bytes does not help, and the aligned differences sit in the control-flow
+  region: the title rewrites and links vertex microcode at load, so the uploaded
+  identity is not the stored bytes.
+- Container: `'XOBX'`, u32 version 1, u32 shader count (23 main, 22 preinit). The
+  decompiled `sub_8224DC70` reads per shader a length-prefixed name, a variant count,
+  then per variant an 8-byte key and two length-prefixed program blocks.
+- Entry table measured from the bytes: 21 named entries in `xbox_shaders` (bloom, blur,
+  depthvolume, downsample, downsample_4x, downsample_depth, error, fur, line, movie,
+  particles, postproc_error, ...), each carrying after the name a `u32 variant_count`,
+  a `u32 vs_bytes` and a `u32 ps_bytes`. `vs_bytes` is the **summed** vertex stride:
+  `blur` has 5 variants whose vertex version dwords are exactly 112 bytes apart with
+  `vs_bytes = 0x230 = 5 * 112`; `bloom` has 1 variant, `vs_bytes = 0xA0`, and its vertex
+  version dword sits at program start + 0x28.
+- **Unresolved**: the pixel region does not follow the vertex region directly. `bloom`
+  stores `ps_bytes = 0x100`, but its pixel version dword is 0x470 bytes past the end of
+  the vertex block; `blur` stores `ps_bytes = 0x600` while its five pixel version dwords
+  are 976 bytes apart (0x600 is not 5 * 976). No tried offset or header reading
+  reconciles the two, and the file cannot be walked end to end with the `sub_8224DC70`
+  read order: that walk consumes only 0x112AE9 of 0x506F87 bytes before it loses the
+  stream.
+
+Coverage blocker, stated explicitly: pixel identities are recoverable from the asset
+(117/117 byte-exact matches) but only once the pixel framing is pinned; vertex
+identities are not recoverable from the asset at all, because the uploaded microcode is
+a runtime transform of the stored program. P2's exit criterion is therefore not met, and
+no resolver code was written - assuming a framing, or hashing the stored vertex bytes,
+would publish identities that differ from what the game hashes and would be worse than
+reporting them unresolved.
+
+The then-proposed experiment was to dump one small entry (`line`: 1 variant, vs 0x70,
+ps 0x40, span 0x574) beside its runtime partner and find the pixel program by searching
+for a runtime record stem instead of whole blobs; then model the vertex transform in
+`sub_8224DAB0` / `sub_822A4CC8` / `sub_822A4FF0`.
+
+#### P2 first resolver and coverage blocker, 2026-10-24 (superseded below)
+
+- Added `scripts/shader_asset_resolver.py`, the built
+  `rb_blitz_shader_microcode_hash` helper and ctest `shader_asset_resolver`.
+  The resolver reads effective installed retail/Ultimate ARKs using actual overlay
+  and patch/main precedence, fingerprints content, indexes stage/hash/permutation
+  source locators, validates runtime evidence and resolves hash-only candidate
+  requests. Developer `.xsh` files are comparison evidence only, never its source.
+- Corrected the framing: the actual vtable loader is `sub_823EC540`, not the
+  base-class `sub_8224DC70`. Each entry has pixel object/code banks, vertex
+  object/code banks, then a `{key, four bank-relative offsets}` permutation table.
+  Both assets parse to EOF (23/2,098 main entries/permutations, 22/89 preinit).
+  Big-endian object metadata points to the exact microcode slice, including a
+  nonzero code offset where constants precede it. The helper uses the SDK's own
+  `XXH3_64bits` over guest-endian bytes.
+- Locally indexed 565 pixel identities and 178 unlinked vertex templates. All
+  117 pixels in the original 181-record P2 sample resolve byte for byte, as do all
+  120 distinct pixels across ten preserved P0 stores. All 66 vertex identities in
+  that broader union remain blocked. Both installed content variants select the
+  same shader bytes here; this does not certify other installations or pipelines.
+- Located the actual remaining dependency: D3D submission calls `sub_82521908`
+  through `sub_82522410` / `sub_82522208` to patch, sort and coalesce fetch
+  instructions using the live vertex declaration and stream mappings. The
+  initialization functions cited by the initial investigation do not produce the
+  final uploaded vertex identity. Reproducing this linker and recovering its input
+  declarations from content/initialization remain required for vertex coverage.
+- Every missing identity is reported with a reason. Templates cannot satisfy
+  runtime vertex requests; an empty request list is not complete. The versioned
+  index contains no shader bytes and always says `live_ready=false`. The CLI exits
+  2 after writing its explicit coverage-blocker result. No normal caches are changed,
+  and the game is not wired to this offline tooling yet (P4 integration remains).
+- Validation: release build succeeds; the new twelve-test suite passes, including
+  every-byte truncations, malformed metadata/lengths/offsets, hash verification and
+  collisions, fingerprint changes, synthetic effective-content precedence and
+  bounded decompression and CLI failure/blocker/overwrite behavior. Full ctest is
+  52/52 with `TEMP`/`TMP` under writable `out/_swap/p2/test-temp`. The unchanged
+  `path_policy` check fails in the default temporary location and passes under
+  that workspace location; no path-policy code was changed. No UI run.
+
+This delivers P2's resolver and its **explicit coverage-blocker exit alternative**;
+it does not satisfy complete release coverage or remove in-song compilation.
+Details, commands, hashes, local evidence paths and the remaining linker work:
+[shader-cache-p2.md](../../engine/shader-cache-p2.md).
+
+#### P2 completed for the current candidate, 2026-10-24
+
+- Reproduced `sub_82521908` in bounded `scripts/shader_vertex_link.py`: source fetch
+  table parsing, declaration matching, component swizzles, stream/offset/format
+  fields, sorting, prefetch counts and mini-fetch coalescing. Four static vertex
+  declarations come from the supported installed executable. The fifth is FVF 450,
+  constructed by `sub_82512730` and selected by fullscreen draw `sub_823EAB58`.
+- Located two additional runtime vertex programs byte for byte in the executable,
+  at image offsets `0xAA180` / `0xA9D10`. New `shader_xex_source.py` verifies the
+  entrypoint fingerprint, quietly decodes its bounded basic-compression blocks,
+  and supplies those programs and declarations without a prior run. Keys remain
+  owned by the existing SDK; no decoded executable is written by the resolver.
+- Committed hash-only `config/shader_resolution_candidate.json` (186 identities)
+  and declarative `config/shader_vertex_layouts.json` (five layout recipes and
+  bounded source locators). Recipes contain no shader instruction replacements.
+  The installed assets/executable remain the only byte sources. Generation is
+  bounded and publishes only verified results; it fingerprints both content and
+  linkage recipes and refuses reuse across source generations.
+- The index now resolves 1,328 unique shaders (565 pixels, 763 reconstructed
+  vertices). **All 186/186 candidate identities resolve on retail and Ultimate**
+  without a `.xsh` input. A separate comparison of all ten distinct preserved P0
+  stores verifies all 120 pixel and 66 vertex programs **byte for byte**, not only
+  by hash. The former 66-vertex blocker is closed.
+- Release build succeeds. Nineteen hermetic resolver tests and the two optional
+  installed-content candidate tests pass; full ctest is 54/54 with workspace
+  `TEMP`/`TMP` (the existing default-temp path-policy issue is unchanged). No game
+  UI run was required, and the user does not need to train a cache for P2.
+
+P2's resolution exit criterion is met for this candidate. This does not claim
+complete P3 pipeline/helper coverage, arbitrary DLC/custom vertex layouts or P4
+live GPU preparation. `live_ready` remains false. Evidence, commands and exact
+scope: [shader-cache-p2.md](../../engine/shader-cache-p2.md).
 
 ### P3 — Build the complete candidate pipeline catalogue, including helpers
 

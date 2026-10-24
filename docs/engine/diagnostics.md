@@ -134,6 +134,17 @@ depend on mouse or focus settings; `active_song` is an input-enabled controller 
 repeat a suspect route with tracing off, and note that resource I/O, texture conversion
 and readback are not timed.
 
+Since shader-cache P1 (2026-10-24) a storage preload also logs its own result whether
+or not the trace switch is on: `Shader storage preload: N required, M succeeded
+(K already present), F failed, X missing, Q queued, R running, D duplicate request(s)
+in … milliseconds` (the Vulkan backend prefixes the same counts with `Vulkan`), and
+`Shader storage preload is not ready: …` when required work did not produce every
+pipeline. `succeeded` counts real pipelines only — a Vulkan placeholder retained after
+a failed real creation is reported as failed — and a preload with zero required entries
+is empty, not covered. The states and the blocking barrier live in
+[pipeline_preload.h](../../rexglue-sdk/include/rex/graphics/pipeline_preload.h)
+(SDK patch 0021).
+
 ### Adding a point
 
 1. Pick a function that is already named, or an address proved by hand ([symbols.md](../reference/symbols.md) is the table).
