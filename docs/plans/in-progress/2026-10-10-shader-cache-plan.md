@@ -4,8 +4,18 @@ Date: 2026-10-10. Architecture review 2026-10-16; plan finalized 2026-10-17.
 Product flow and implementation prompts updated 2026-10-24.
 Scope: first-play freezes that become less frequent with further play and do not
 recur at the same spot after restarting a song.
-Status: read-only investigation completed; cause of individual freezes is not yet
-measured. This document proposes follow-up work, not an implemented fix.
+Status: P0 implemented 2026-10-24 and its controlled traces collected the same day.
+On an empty application cache the first song creates 81 guest pipelines and
+translates 61 shaders, with four of its eight active-song long frames (worst
+306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
+the learned records preloads 132 pipelines at boot and then adds 5/4 with no compile
+wait. Vulkan/retail is worse in the song: 79 creations and 56 translations plus
+336 ms of compile wait on first play, and 7 creations plus a 199 ms wait on replay.
+The cause of individual freezes is still not established: four of the eight
+empty-cache long frames record no compile work at all. Graphics preparation
+(P1–P9) is not implemented, and the post-A gate remains a P6 blocker. Evidence:
+[shader-cache-p0.md](../../engine/shader-cache-p0.md) and
+`out/shader-cache-p0/runs/`.
 
 The [2026-10-24 prompt plan](#implementation-prompts-2026-10-24) defines the next work:
 a graphics-preparation phase after the title-screen A press, beside the existing
@@ -412,7 +422,7 @@ song, scene, power-ups and content. It must hold **every** route into active gam
 before audio and scoring begin while allowing guest loading, UI events and GPU work to
 continue. A host pipeline count reaching zero cannot replace the title's asset-load
 completion condition. [Loading-cancel findings](../../engine/loading-cancel.md) and
-the [Load Guard study](2026-10-13-load-guard.md) are required context: a safe
+the [Load Guard study](../todo/2026-10-13-load-guard.md) are required context: a safe
 loading/return transition cannot be assumed from a visible loading screen alone.
 
 The inspected `loading_screen` has two start routes: `load_finished` either waits for
@@ -576,7 +586,9 @@ and S6 packaging; a preload barrier alone cannot prepare previously unknown pipe
 
 ## Implementation prompts (2026-10-24)
 
-Status: **planning only; P0–P9 below are unstarted**. This update inspected project
+Original planning status: **P0–P9 were unstarted when these prompts were authored**.
+P0's implementation update is recorded below; P1–P9 remain unstarted.
+The planning update inspected project
 `a8f0bb5`, SDK `c94f5eb` and the current working-tree sources. No game/UI navigation,
 build, cache deletion or new performance measurement was performed. The prompts are
 future implementation tasks, not authorization to execute them as part of this edit.
@@ -682,6 +694,72 @@ mark a runtime acceptance gate passed from source inspection or a successful bui
 Exit: a source/evidence map of the post-A gate, lifetime and bypass routes, plus a
 repeatable measurement workflow. If the gate is not proven, record that blocker;
 P1–P5 can proceed, but P6 must not guess the guest transition.
+
+Implementation update, 2026-10-24:
+
+- Source map, ownership/lifetime analysis and repeatable workflow:
+  [shader-cache-p0.md](../../engine/shader-cache-p0.md). Read-only archive inspection
+  scanned 131 retail and 42 Ultimate DTBs; the inspected Ultimate has no connect-panel
+  override. Both use the retail connect machine, with different splash records.
+- The candidate continuation is the script pair `splash directory state=main_menu`
+  followed by `ui goto_screen splash_screen`. Confirm, Option/skip and R3's automatic
+  `update_state` transition each reach it. `0x822CA8E8` dispatches `update_state`
+  synchronously before native advance; blocking it would stop UI progress, and
+  intercepting its return would miss navigation already requested by R3.
+- **Gate blocker:** content/configuration completion at every exit and safe deferred
+  scheduling have not been demonstrated at runtime. Option can skip a nonterminal
+  state; stable splash identity alone also matches a canceled title screen. P6 must
+  validate the predicate/continuation and protect return/refresh/play-current routes.
+  No new guest state number or graphics gate was implemented.
+- Added the runtime-owned `shader_compile_trace` instrument through SDK patch 0020,
+  extending 0019's swap observations. It measures both backends' translation, guest
+  PSOs, Vulkan placeholders, helper graphics/compute creation, processor compile
+  drains, completion waits and guest/GPU frame gaps. Phase observation shares the
+  existing UI poll and enabled-controller boundary, independent of mouse/focus flags.
+  Diagnostics default off; details/storage are bounded. No submission wait was removed
+  and the P1 completion defect remains unfixed.
+- Added `scripts/shader_cache_trace.py`, the production-parser-based
+  `rb_blitz_loading_record_inspect` host tool, actual runtime-counter tests and report
+  attribution tests. Preparation creates isolated cache/save/settings copies and an
+  inert launcher; collection preserves comparisons and reports unresolved gaps.
+  Helper identity is currently a call site, and active-song timing is an input-enabled
+  controller proxy; neither is a complete P3 catalogue or a validated audio boundary.
+- The SDK patch audit now reconstructs exact final files in ignored scratch storage,
+  including newly added files; concatenating hunk bodies could not validate disjoint
+  instrumentation changes added before earlier patches' edits. The SDK gitlink is
+  unchanged. CMake preserves an explicit parent `BUILD_TESTING` request across the SDK's
+  dependency configuration, which otherwise forces it off.
+- Build and non-UI checks (2026-10-24, release tree configured with
+  `-DBUILD_TESTING=ON`): `rb_blitz`, `rb_blitz_loading_record_inspect`,
+  `rb_blitz_shader_compile_trace_tests` and every test target build and link. The full
+  `ctest` roster runs **50/50 and passes**, including
+  `shader_compile_trace_enabled`/`shader_compile_trace_disabled` (the two that run the
+  real counters, including the disabled path) and the Python report tests
+  (3/3, `python -m unittest tests.shader_cache_trace_tools_tests`). SDK patch audit
+  exit 0 after the change. (An earlier run in the same tree reported 16 tests
+  `Not Run`; those executables had simply not been built yet — the full build now
+  builds them.)
+- Runtime evidence, 2026-10-24: after the owner authorized the agent to drive the
+  prepared runs, three controlled traces were collected under
+  `out/shader-cache-p0/runs/` and are quoted in the evidence map's "Measured runs"
+  section. `d3d12-ultimate-empty-r4` is the empty application cache (first play ~30 s,
+  pause → Restart → YES, replay ~30 s, normal close); `d3d12-ultimate-warm-r4` is the
+  same route after a full process restart with `-r4`'s learned `shaders/shareable`
+  records seeded; `vulkan-retail-empty-r2` is Vulkan/retail through the manual offline
+  confirmations. First play: 81 guest pipelines / 61 translations (D3D12 empty), 5 / 4
+  (D3D12 warm, no compile wait after a 132-pipeline boot preload), 79 / 56 plus 336 ms
+  of compile wait (Vulkan). Replay deltas: 1 / 1, 0 / 0, and 7 / 7 with a 199 ms
+  Vulkan wait. Long frames with no recorded compile work remain (four of eight empty,
+  one of two warm, both ~90–100 ms Vulkan frames), so this does not name the reported
+  freeze's cause and no startup/gameplay improvement is claimed.
+- Two harness mistakes are kept as superseded probes rather than deleted:
+  `d3d12-ultimate-empty-r3` stalled because the loading screen needs a second A press
+  on `PRESS (A) TO BEGIN`; `vulkan-retail-empty-final` waited for a power-up screen
+  retail does not have. The first empty-cache trace (`d3d12-ultimate-empty-final`)
+  reached only one active-song segment and its recorded observation is corrected in
+  the evidence map. What remains uncollected: a player's own visual/audio/input
+  judgment, Vulkan warm, retail D3D12, other hardware, DLC/custom content and the
+  cancel/error/trial/upsell routes.
 
 ### P1 — Make backend completion and failure reporting trustworthy
 

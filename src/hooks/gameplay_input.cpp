@@ -44,6 +44,7 @@
 #include <rex/system/xmemory.h>
 
 #include "diag/gameplay_probe.h"
+#include "diag/shader_trace.h"
 #include "input/effective_input.h"
 #include "input/native_menu.h"
 #include "input/source_gates.h"
@@ -361,8 +362,10 @@ REX_HOOK_RAW(sub_82443A30) {
           controller) {
     // The probe's tick only advances in a live song, which is what its arms were calibrated
     // against.
-    if (rb_blitz::input::GameScreenActive() &&
-        rb_blitz::gameplay_input::detail::ControllerReceivesInput(base, controller)) {
+    const bool receives_input = rb_blitz::input::GameScreenActive() &&
+        rb_blitz::gameplay_input::detail::ControllerReceivesInput(base, controller);
+    rb_blitz::diag::shader_trace::ObserveSongController(receives_input);
+    if (receives_input) {
       const int tick =
           rb_blitz::gameplay_input::detail::g_tick.fetch_add(1, std::memory_order_relaxed) + 1;
       rb_blitz::diag::gameplay_probe::Frame(ctx, base, controller, tick);

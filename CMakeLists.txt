@@ -37,7 +37,15 @@ endif()
 # The SDK's Windows default is D3D12-only.
 option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
 
+# The SDK's thirdparty configuration forces BUILD_TESTING=OFF for its dependencies.
+# Preserve an explicit parent request so our host diagnostics/tests can still build.
+if(DEFINED BUILD_TESTING)
+    set(RBBLITZ_REQUESTED_BUILD_TESTING "${BUILD_TESTING}")
+endif()
 include(generated/rexglue.cmake)
+if(DEFINED RBBLITZ_REQUESTED_BUILD_TESTING)
+    set(BUILD_TESTING "${RBBLITZ_REQUESTED_BUILD_TESTING}" CACHE BOOL "Build host tests" FORCE)
+endif()
 
 # A clean checkout has no generated/default/sources.cmake yet, because codegen is
 # a build step, and the file above includes it only when it is already there. The
@@ -87,6 +95,7 @@ set(RBBLITZ_SOURCES
     src/diag/probe_points.cpp
     src/diag/probe_trace.cpp
     src/diag/gameplay_probe.cpp
+    src/diag/shader_trace.cpp
     src/enhancements.cpp
     src/hooks/content_progress.cpp
     src/hooks/crypto.cpp
@@ -446,6 +455,20 @@ add_dependencies(rb_blitz_codegen rb_blitz_toolchain_gate)
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_loading_record_inspect tools/loading_record_inspect.cpp
+        src/ui/dtb_author.cpp src/ui/menu_options.cpp)
+    target_include_directories(rb_blitz_loading_record_inspect PRIVATE src)
+
+    add_executable(rb_blitz_shader_compile_trace_tests tests/shader_compile_trace_tests.cpp)
+    target_link_libraries(rb_blitz_shader_compile_trace_tests PRIVATE rex::runtime)
+    if(WIN32)
+        add_custom_command(TARGET rb_blitz_shader_compile_trace_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_shader_compile_trace_tests>)
+    endif()
+    add_test(NAME shader_compile_trace_enabled COMMAND rb_blitz_shader_compile_trace_tests enabled)
+    add_test(NAME shader_compile_trace_disabled COMMAND rb_blitz_shader_compile_trace_tests disabled)
+
     # Exercise the component conversion shared by the patched D3D12 and Vulkan texture caches.
     add_executable(rb_blitz_texture_conversion_tests tests/texture_conversion_tests.cpp)
     target_link_libraries(rb_blitz_texture_conversion_tests PRIVATE rex::core)

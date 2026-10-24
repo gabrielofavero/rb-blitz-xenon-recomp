@@ -10,6 +10,7 @@ or hook point it measured, with the evidence it came from.
 | [`toggles.md`](toggles.md) | The enhancement toggle registry: how to set one, the boot line, and a row per toggle with its faithful (off) behaviour and the module that implements it. |
 | [`input-flow.md`](input-flow.md) | Native menu mouse, hover and wheel navigation (R6): the retail path it hooks, the click/remap rules, and the live checks. |
 | [`loading-cancel.md`](loading-cancel.md) | Cancelling a song load that never finishes (R11): what the title does, what was measured, why the "try-catch the load" route is unavailable, and what the removed module did. |
+| [`shader-cache-p0.md`](shader-cache-p0.md) | The post-A loading gate and the shader-compilation measurement: the source-supported continuation and all ten exits, the progress object's ownership and lifetime, the opt-in `shader_compile_trace` instrument and its limits, and the 2026-10-24 empty/warm/Vulkan runs with their counters and long frames. |
 | [`diagnostics.md`](diagnostics.md) | The two standing instruments: the runtime probe (what the guest is doing, now) and the UI-state observer (what a captured state is made of). Both are also the harness the acceptance scripts drive. |
 | [`messages.md`](messages.md) | The retail Messages screen: its record and panels, the `InboxProvider` and `InboxMessage` objects, the empty-state tokens, the bottom-bar inline help, and the row-icon set (twelve 512×512 DXT1 icons with converted PNGs). |
 

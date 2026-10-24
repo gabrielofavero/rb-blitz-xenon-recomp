@@ -12,6 +12,18 @@ checkout.
 
 ## Patches
 
+Shader-cache P0 adds `0020-bounded-shader-compilation-trace.patch` and extends
+0019's swap observations with the shared, opt-in instrument. The runtime owns the
+clock/phases/counters so helper creation in `rexruntime.dll` and guest creation in
+`rexgpu-xenos.dll` use the same timeline. It changes no compilation or submission
+policy. See [the P0 evidence map](../docs/engine/shader-cache-p0.md).
+
+The patch audit now replays the full stack against pristine HEAD files under
+ignored `out/sdk-patch-audit/` and compares final contents (normalizing CRLF).
+This handles new files and disjoint edits added out of source order; concatenated
+hunk bodies could not validate those cases. Nested dependency artifacts that only
+make untracked files are excluded; tracked edits and moved gitlinks remain visible.
+
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
 | `rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` | `XThread::SetActiveCpu` re-logged "Too few processor cores" on every thread CPU assignment (~11k lines, ~580 KB per boot). Log it once. | yes |

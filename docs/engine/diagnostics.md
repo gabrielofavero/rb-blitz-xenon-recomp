@@ -112,6 +112,28 @@ tap carries its own `wait:1` — the guest drops a run of taps with no wait betw
 window is never started hidden, because a hidden window cannot be captured or driven. The scratch
 driver `out/_swap/p0/run.ps1` carries the later switches that have not been folded back.
 
+### The shader-compilation trace (shader-cache P0, 2026-10-24)
+
+`shader_compile_trace` is the instrument behind [shader-cache-p0.md](shader-cache-p0.md)
+and SDK patch 0020. It is a runtime-owned counter set (one monotonic clock shared by
+`rexruntime.dll` and the GPU plugin), not the probe ring: it times shader translation,
+guest PSO creation, Vulkan placeholders, render-target helper graphics/compute creation,
+compile-queue drains and completion waits, and pairs them with the guest/GPU frame
+intervals carried by patch 0019's swap observations.
+
+| Cvar | Default | What it does |
+| --- | --- | --- |
+| `shader_compile_trace` | `false` | Enables the counters and their log lines (restart required). Details are capped at 2,048 per event type, summaries at 256 snapshots; only frame gaps >= 50 ms and drains >= 1 ms get individual lines. |
+
+Phases (`boot`, `pre_a`, `post_a_loading`, `menu`, `song_loading`, `active_song`,
+`paused`, `unknown`) come from the shared `UIManager::Poll` observation, so they do not
+depend on mouse or focus settings; `active_song` is an input-enabled controller proxy,
+**not** an audio-clock boundary. The parser and the report correlation live in
+`scripts/shader_cache_trace.py`, whose `report.json` names overlaps and says
+`unresolved` when a long frame records none. The instrument itself perturbs timing:
+repeat a suspect route with tracing off, and note that resource I/O, texture conversion
+and readback are not timed.
+
 ### Adding a point
 
 1. Pick a function that is already named, or an address proved by hand ([symbols.md](../reference/symbols.md) is the table).

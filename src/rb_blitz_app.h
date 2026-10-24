@@ -54,6 +54,8 @@
 #include <string>
 
 #include <rex/cvar.h>
+#include <rex/graphics/compile_trace.h>
+#include "diag/shader_trace.h"
 #include <rex/filesystem.h>
 #include <rex/logging/macros.h>
 #include <rex/platform/dynlib.h>
@@ -409,9 +411,11 @@ class RbBlitzApp : public rex::ReXApp {
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
+    rb_blitz::diag::shader_trace::LogConfiguration();
   }
 
   bool OnWindowCloseRequested() override {
+    rex::graphics::compile_trace::Snapshot("window_close");
     if (settings_boot_) settings_boot_->Closing();
     return true;
   }

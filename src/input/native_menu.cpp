@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Retail guest ABI and validation: docs/engine/input-flow.md.
 #include "input/native_menu.h"
+#include "diag/shader_trace.h"
 #include "input/remap.h"
 #include <rex/hook.h>
 #include <rex/cvar.h>
@@ -162,6 +163,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       (name != "game_screen" || panel_name == "pause_panel");
   const bool in_song = screen != 0 && name == "game_screen" && panel_name != "pause_panel";
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
+  rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, ObjectName(base, ObjectBase(base, focus)),
+                                             U32(base, manager + 16) != 0);
   if (screen != current_screen || focus != current_focus || allowed != menu_available) {
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;

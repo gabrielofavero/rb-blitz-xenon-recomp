@@ -175,9 +175,10 @@ if ($failed.Count -gt 0) {
     Write-Host "    git -C $SdkDir diff"
 }
 
-# A file's expected body is every patch's hunks for it in patch order: two patches may
-# legitimately touch one file (0009 and 0013 both edit src/core/cvar.cpp), and the file's own
-# `git diff` is those hunks one after another.
+# Collect the paths, then replay the whole patch stack against pristine HEAD
+# copies. Concatenating hunk bodies fails when later patches insert earlier in a
+# file (0020 instruments helper creation before 0015's resolution diagnostics).
+# Comparing final contents also covers new files, whose edits git diff omits.
 $patchSections = @{}
 foreach ($patch in $patches) {
     $sections = Get-DiffSections -Lines @(Get-Content -LiteralPath $patch.FullName)
@@ -190,7 +191,44 @@ foreach ($patch in $patches) {
     }
 }
 
-$status = Invoke-Git @('-c', 'safe.directory=*', '-C', $sdkPath, 'status', '--porcelain')
+$auditPath = Join-Path $RepoRoot ('out/sdk-patch-audit/' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $auditPath -Force | Out-Null
+$init = Invoke-Git @('-C', $auditPath, 'init', '--quiet')
+if ($init.ExitCode -ne 0) { Write-Error 'Could not initialize isolated patch audit'; exit 1 }
+foreach ($entryPath in $patchSections.Keys) {
+    $exists = Invoke-Git @('-C', $sdkPath, 'cat-file', '-e', "HEAD:$entryPath")
+    if ($exists.ExitCode -ne 0) { continue } # A patch may add a new file.
+    $target = Join-Path $auditPath $entryPath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    # Copy raw stdout: PowerShell's text pipeline can change encoding/newlines.
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = 'git'
+    $start.Arguments = "-C `"$sdkPath`" show `"HEAD:$entryPath`""
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($start)
+    $stream = [System.IO.File]::Create($target)
+    try { $process.StandardOutput.BaseStream.CopyTo($stream) } finally { $stream.Dispose() }
+    $showError = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) { Write-Error "Cannot read pristine $entryPath`: $showError"; exit 1 }
+    $process.Dispose()
+}
+foreach ($patch in $patches) {
+    $replay = Invoke-Git @('-C', $auditPath, 'apply', $patch.FullName)
+    if ($replay.ExitCode -ne 0) {
+        Write-Error "Isolated replay failed for $($patch.Name): $($replay.Output -join ' ')"
+        exit 1
+    }
+}
+Write-Host "Exact replay audit : $auditPath"
+
+# Untracked build artifacts inside nested dependencies do not change a gitlink
+# or its tracked source. Tracked nested edits and moved gitlinks remain visible.
+$status = Invoke-Git @('-c', 'safe.directory=*', '-C', $sdkPath, 'status', '--porcelain',
+                      '--untracked-files=all', '--ignore-submodules=untracked')
 $accounted = @()
 $uncovered = @()
 $untracked = @()
@@ -201,7 +239,9 @@ foreach ($raw in $status.Output) {
     if ($line.Trim().Length -eq 0) { continue }
 
     $entryPath = $line.Substring(3).Trim()
-    if ($line.StartsWith('??')) { $untracked += $entryPath; continue }
+    if ($line.StartsWith('??') -and -not $patchSections.ContainsKey($entryPath)) {
+        $untracked += $entryPath; continue
+    }
     if ($entryPath.Contains(' -> ')) { $entryPath = ($entryPath -split ' -> ')[-1] }
 
     if (-not $patchSections.ContainsKey($entryPath)) {
@@ -209,9 +249,19 @@ foreach ($raw in $status.Output) {
         continue
     }
 
-    $live = Invoke-Git @('-c', 'safe.directory=*', '-C', $sdkPath, 'diff', 'HEAD', '--', $entryPath)
-    $liveSections = Get-DiffSections -Lines @($live.Output)
-    if ($liveSections.ContainsKey($entryPath) -and $liveSections[$entryPath] -eq $patchSections[$entryPath]) {
+    $expectedPath = Join-Path $auditPath $entryPath
+    $livePath = Join-Path $sdkPath $entryPath
+    $matchesExpected = $false
+    if ((Test-Path -LiteralPath $expectedPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $livePath -PathType Leaf)) {
+        $expectedText = [IO.File]::ReadAllText($expectedPath).Replace("`r`n", "`n")
+        $liveText = [IO.File]::ReadAllText($livePath).Replace("`r`n", "`n")
+        $matchesExpected = $expectedText -ceq $liveText
+    } elseif (-not (Test-Path -LiteralPath $expectedPath) -and
+              -not (Test-Path -LiteralPath $livePath)) {
+        $matchesExpected = $true
+    }
+    if ($matchesExpected) {
         $accounted += $entryPath
     } else {
         $uncovered += "$entryPath (differs from the patch set)"

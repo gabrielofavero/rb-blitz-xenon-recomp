@@ -1,0 +1,760 @@
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include "thirdparty/dxbc/DXBCChecksum.h"
+ 
+ #include <algorithm>
+@@ -651,7 +652,13 @@
+     }
+ 
+     if (!creation_threads_.empty()) {
+-      CreateQueuedPipelinesOnProcessorThread();
++      {
++        rex::graphics::compile_trace::Scope trace_drain(
++            rex::graphics::compile_trace::Event::kCompileDrain,
++            "src/graphics/d3d12/pipeline_cache.cpp");
++        CreateQueuedPipelinesOnProcessorThread();
++        trace_drain.Success();
++      }
+       if (creation_threads_.size() > creation_thread_original_count) {
+         {
+           std::lock_guard<std::mutex> lock(creation_request_lock_);
+@@ -680,7 +687,11 @@
+         }
+         if (await_creation_completion_event) {
+           creation_request_cond_.notify_one();
++          rex::graphics::compile_trace::Scope trace_wait(
++              rex::graphics::compile_trace::Event::kCompileWait,
++              "src/graphics/d3d12/pipeline_cache.cpp");
+           rex::thread::Wait(creation_completion_event_.get(), false);
++          trace_wait.Success();
+         }
+       }
+     }
+@@ -763,7 +774,13 @@
+     pipeline_storage_file_flush_needed_ = false;
+   }
+   if (!creation_threads_.empty()) {
+-    CreateQueuedPipelinesOnProcessorThread();
++    {
++      rex::graphics::compile_trace::Scope trace_drain(
++          rex::graphics::compile_trace::Event::kCompileDrain,
++          "src/graphics/d3d12/pipeline_cache.cpp");
++      CreateQueuedPipelinesOnProcessorThread();
++      trace_drain.Success();
++    }
+     // Await creation of all queued pipelines.
+     bool await_creation_completion_event;
+     {
+@@ -779,7 +796,11 @@
+     }
+     if (await_creation_completion_event) {
+       creation_request_cond_.notify_one();
++      rex::graphics::compile_trace::Scope trace_wait(
++          rex::graphics::compile_trace::Event::kCompileWait,
++          "src/graphics/d3d12/pipeline_cache.cpp");
+       rex::thread::Wait(creation_completion_event_.get(), false);
++      trace_wait.Success();
+     }
+   }
+ }
+@@ -1060,6 +1081,9 @@
+                                             IDxbcConverter* dxbc_converter, IDxcUtils* dxc_utils,
+                                             IDxcCompiler* dxc_compiler) {
+   D3D12Shader& shader = static_cast<D3D12Shader&>(translation.shader());
++  rex::graphics::compile_trace::Scope trace(rex::graphics::compile_trace::Event::kTranslation,
++                                            "d3d12",
++                                            shader.ucode_data_hash(), translation.modification());
+ 
+   // Perform translation.
+   // If this fails the shader will be marked as invalid and ignored later.
+@@ -1229,6 +1253,7 @@
+                                                     : "d3d12");
+   }
+ 
++  trace.Success(translation.is_valid());
+   return translation.is_valid();
+ }
+ 
+@@ -3029,7 +3054,12 @@
+   // Create the D3D12 pipeline state object.
+   ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
+   ID3D12PipelineState* state;
+-  if (FAILED(device->CreateGraphicsPipelineState(&state_desc, IID_PPV_ARGS(&state)))) {
++  if (FAILED(rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kGuestPipeline,
++          "src/graphics/d3d12/pipeline_cache.cpp:3047",
++          XXH3_64bits(&description, sizeof(description)), [&] {
++            return device->CreateGraphicsPipelineState(&state_desc, IID_PPV_ARGS(&state));
++          }))) {
+     if (runtime_description.pixel_shader != nullptr) {
+       REXGPU_ERROR("Failed to create graphics pipeline with VS {:016X}, PS {:016X}",
+                    runtime_description.vertex_shader->shader().ucode_data_hash(),
+diff --git a/src/graphics/d3d12/render_target_cache.cpp b/src/graphics/d3d12/render_target_cache.cpp
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include "thirdparty/dxbc/DXBCChecksum.h"
+ 
+ #include <algorithm>
+@@ -844,8 +845,12 @@
+           uint32_rtv_clear_pipeline_desc.SampleDesc.Count = 1 << j;
+         }
+         ID3D12PipelineState* uint32_rtv_clear_pipeline;
+-        if (FAILED(device->CreateGraphicsPipelineState(&uint32_rtv_clear_pipeline_desc,
+-                                                       IID_PPV_ARGS(&uint32_rtv_clear_pipeline)))) {
++        if (FAILED(rex::graphics::compile_trace::Call(
++                rex::graphics::compile_trace::Event::kHelperGraphics,
++                "src/graphics/d3d12/render_target_cache.cpp:847", 0, [&] {
++                  return device->CreateGraphicsPipelineState(
++                      &uint32_rtv_clear_pipeline_desc, IID_PPV_ARGS(&uint32_rtv_clear_pipeline));
++                }))) {
+           REXGPU_ERROR(
+               "D3D12RenderTargetCache: Failed to create the {} {}-sample "
+               "render target clearing pipeline",
+@@ -3731,8 +3736,12 @@
+     bool stencil_pipelines_created = true;
+     for (uint32_t i = 0; i < 8; ++i) {
+       pipeline_desc.DepthStencilState.StencilWriteMask = UINT8(1) << i;
+-      if (SUCCEEDED(device->CreateGraphicsPipelineState(&pipeline_desc,
+-                                                        IID_PPV_ARGS(&stencil_bit_pipelines[i])))) {
++      if (SUCCEEDED(rex::graphics::compile_trace::Call(
++              rex::graphics::compile_trace::Event::kHelperGraphics,
++              "src/graphics/d3d12/render_target_cache.cpp:3734", 0, [&] {
++                return device->CreateGraphicsPipelineState(&pipeline_desc,
++                                                           IID_PPV_ARGS(&stencil_bit_pipelines[i]));
++              }))) {
+         continue;
+       }
+       stencil_pipelines_created = false;
+@@ -3770,7 +3779,11 @@
+       pipeline_desc.DSVFormat = GetDepthDSVDXGIFormat(dest_depth_format);
+     }
+     ID3D12PipelineState* pipeline;
+-    if (FAILED(device->CreateGraphicsPipelineState(&pipeline_desc, IID_PPV_ARGS(&pipeline)))) {
++    if (FAILED(rex::graphics::compile_trace::Call(
++            rex::graphics::compile_trace::Event::kHelperGraphics,
++            "src/graphics/d3d12/render_target_cache.cpp:3773", 0, [&] {
++              return device->CreateGraphicsPipelineState(&pipeline_desc, IID_PPV_ARGS(&pipeline));
++            }))) {
+       pipeline = nullptr;
+     }
+     // Even if creation fails, still store the null pointer not to try to create
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
+@@ -1721,9 +1722,13 @@
+   std::array<VkResult, 4> swap_apply_gamma_pipeline_create_results;
+   for (size_t i = 0; i < swap_apply_gamma_pipelines.size(); ++i) {
+     swap_apply_gamma_pipeline_stages[1].module = swap_apply_gamma_pipeline_pixel_shaders[i];
+-    swap_apply_gamma_pipeline_create_results[i] = dfn.vkCreateGraphicsPipelines(
+-        device, VK_NULL_HANDLE, 1, &swap_apply_gamma_pipeline_create_info, nullptr,
+-        swap_apply_gamma_pipelines[i]);
++    swap_apply_gamma_pipeline_create_results[i] = rex::graphics::compile_trace::Call(
++        rex::graphics::compile_trace::Event::kHelperGraphics,
++        "src/graphics/vulkan/command_processor.cpp:1724", 0, [&] {
++          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
++                                               &swap_apply_gamma_pipeline_create_info, nullptr,
++                                               swap_apply_gamma_pipelines[i]);
++        });
+   }
+   if (!vulkan_device->properties().imageViewFormatSwizzle) {
+     auto create_rb_swap_pipeline = [&](const char* source, VkPipeline& pipeline_out,
+@@ -1741,9 +1746,13 @@
+         return;
+       }
+       swap_apply_gamma_pipeline_stages[1].module = pixel_shader_module;
+-      if (dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+-                                        &swap_apply_gamma_pipeline_create_info, nullptr,
+-                                        &pipeline_out) != VK_SUCCESS) {
++      if (rex::graphics::compile_trace::Call(
++              rex::graphics::compile_trace::Event::kHelperGraphics,
++              "src/graphics/vulkan/command_processor.cpp:1744", 0, [&] {
++                return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
++                                                     &swap_apply_gamma_pipeline_create_info,
++                                                     nullptr, &pipeline_out);
++              }) != VK_SUCCESS) {
+         REXGPU_WARN("Failed to create {} pipeline", pipeline_name);
+         pipeline_out = VK_NULL_HANDLE;
+       }
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -769,7 +770,13 @@
+       creation_request_cond_.notify_one();
+     } else {
+       // Help worker threads on the processor thread to reduce warm-up latency.
+-      CreateQueuedPipelinesOnProcessorThread();
++      {
++        rex::graphics::compile_trace::Scope trace_drain(
++            rex::graphics::compile_trace::Event::kCompileDrain,
++            "src/graphics/vulkan/pipeline_cache.cpp");
++        CreateQueuedPipelinesOnProcessorThread();
++        trace_drain.Success();
++      }
+       bool await_creation_completion_event;
+       {
+         std::lock_guard<std::mutex> lock(creation_request_lock_);
+@@ -783,7 +790,11 @@
+       }
+       if (await_creation_completion_event) {
+         creation_request_cond_.notify_one();
++        rex::graphics::compile_trace::Scope trace_wait(
++            rex::graphics::compile_trace::Event::kCompileWait,
++            "src/graphics/vulkan/pipeline_cache.cpp");
+         rex::thread::Wait(creation_completion_event_.get(), false);
++        trace_wait.Success();
+       }
+     }
+   }
+@@ -1235,6 +1246,9 @@
+ bool VulkanPipelineCache::TranslateAnalyzedShader(SpirvShaderTranslator& translator,
+                                                   VulkanShader::VulkanTranslation& translation) {
+   VulkanShader& shader = static_cast<VulkanShader&>(translation.shader());
++  rex::graphics::compile_trace::Scope trace(rex::graphics::compile_trace::Event::kTranslation,
++                                            "vulkan",
++                                            shader.ucode_data_hash(), translation.modification());
+ 
+   // Perform translation.
+   // If this fails the shader will be marked as invalid and ignored later.
+@@ -1298,6 +1312,7 @@
+     shader.SetSamplerBindingLayoutUserUID(shader.GetSamplerBindingsAfterTranslation().size());
+   }
+ 
++  trace.Success();
+   return true;
+ }
+ 
+@@ -3480,8 +3495,14 @@
+   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
+   VkPipeline pipeline;
+-  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+-                                                         &pipeline_create_info, nullptr, &pipeline);
++  VkResult create_result = rex::graphics::compile_trace::Call(
++      creating_placeholder ? rex::graphics::compile_trace::Event::kPlaceholder
++                           : rex::graphics::compile_trace::Event::kGuestPipeline,
++      "src/graphics/vulkan/pipeline_cache.cpp:3492", XXH3_64bits(&description, sizeof(description)),
++      [&] {
++        return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info,
++                                             nullptr, &pipeline);
++      });
+   if (create_result != VK_SUCCESS) {
+     uint64_t ps_hash = creation_arguments.pixel_shader
+                            ? creation_arguments.pixel_shader->shader().ucode_data_hash()
+diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
+--- a/src/graphics/vulkan/render_target_cache.cpp
++++ b/src/graphics/vulkan/render_target_cache.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <algorithm>
+ #include <array>
+ #include <cstddef>
+@@ -4506,8 +4507,12 @@
+   pipeline_create_info.subpass = 0;
+   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
+   pipeline_create_info.basePipelineIndex = -1;
+-  if (dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
+-                                    &pipelines[0]) != VK_SUCCESS) {
++  if (rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kHelperGraphics,
++          "src/graphics/vulkan/render_target_cache.cpp:4509", 0, [&] {
++            return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info,
++                                                 nullptr, &pipelines[0]);
++          }) != VK_SUCCESS) {
+     REXGPU_ERROR(
+         "VulkanRenderTargetCache: Failed to create the render target ownership "
+         "transfer pipeline for render pass 0x{:08X}, shader 0x{:08X}",
+@@ -4528,8 +4533,12 @@
+           (dest_sample_count == 2 && !msaa_2x_attachments_supported_ && i == 1) ? 3 : i;
+       sample_id_specialization_constant = host_sample_index;
+       sample_mask = uint32_t(1) << host_sample_index;
+-      if (dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
+-                                        &pipelines[i]) != VK_SUCCESS) {
++      if (rex::graphics::compile_trace::Call(
++              rex::graphics::compile_trace::Event::kHelperGraphics,
++              "src/graphics/vulkan/render_target_cache.cpp:4531", 0, [&] {
++                return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
++                                                     &pipeline_create_info, nullptr, &pipelines[i]);
++              }) != VK_SUCCESS) {
+         REXGPU_ERROR(
+             "VulkanRenderTargetCache: Failed to create the render target "
+             "ownership transfer pipeline for render pass 0x{:08X}, shader "
+diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
+--- a/src/system/CMakeLists.txt
++++ b/src/system/CMakeLists.txt
+@@ -1,4 +1,5 @@
+ set(REXSYSTEM_SOURCES
++    compile_trace.cpp
+     runtime.cpp
+     embedded_metadata.cpp
+     achievement_manager.cpp
+diff --git a/src/ui/d3d12/d3d12_immediate_drawer.cpp b/src/ui/d3d12/d3d12_immediate_drawer.cpp
+--- a/src/ui/d3d12/d3d12_immediate_drawer.cpp
++++ b/src/ui/d3d12/d3d12_immediate_drawer.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <cstring>
+ #include <memory>
+ #include <utility>
+@@ -155,13 +156,22 @@
+   pipeline_desc.NumRenderTargets = 1;
+   pipeline_desc.RTVFormats[0] = D3D12Presenter::kSwapChainFormat;
+   pipeline_desc.SampleDesc.Count = 1;
+-  if (FAILED(
+-          device->CreateGraphicsPipelineState(&pipeline_desc, IID_PPV_ARGS(&pipeline_triangle_)))) {
++  if (FAILED(rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kHelperGraphics,
++          "src/ui/d3d12/d3d12_immediate_drawer.cpp:159", 0, [&] {
++            return device->CreateGraphicsPipelineState(&pipeline_desc,
++                                                       IID_PPV_ARGS(&pipeline_triangle_));
++          }))) {
+     REXLOG_ERROR("D3D12ImmediateDrawer: Failed to create the triangle pipeline");
+     return false;
+   }
+   pipeline_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+-  if (FAILED(device->CreateGraphicsPipelineState(&pipeline_desc, IID_PPV_ARGS(&pipeline_line_)))) {
++  if (FAILED(
++          rex::graphics::compile_trace::Call(rex::graphics::compile_trace::Event::kHelperGraphics,
++                                             "src/ui/d3d12/d3d12_immediate_drawer.cpp:164", 0, [&] {
++                                               return device->CreateGraphicsPipelineState(
++                                                   &pipeline_desc, IID_PPV_ARGS(&pipeline_line_));
++                                             }))) {
+     REXLOG_ERROR("D3D12ImmediateDrawer: Failed to create the line pipeline");
+     return false;
+   }
+diff --git a/src/ui/d3d12/d3d12_presenter.cpp b/src/ui/d3d12/d3d12_presenter.cpp
+--- a/src/ui/d3d12/d3d12_presenter.cpp
++++ b/src/ui/d3d12/d3d12_presenter.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <algorithm>
+ #include <climits>
+ #include <cmath>
+@@ -1415,9 +1416,13 @@
+             .Get();
+     if (CanGuestOutputPaintEffectBeIntermediate(guest_output_paint_effect)) {
+       guest_output_paint_pipeline_desc.RTVFormats[0] = kGuestOutputIntermediateFormat;
+-      if (FAILED(device->CreateGraphicsPipelineState(
+-              &guest_output_paint_pipeline_desc,
+-              IID_PPV_ARGS(&guest_output_paint_intermediate_pipelines_[i])))) {
++      if (FAILED(rex::graphics::compile_trace::Call(
++              rex::graphics::compile_trace::Event::kHelperGraphics,
++              "src/ui/d3d12/d3d12_presenter.cpp:1418", 0, [&] {
++                return device->CreateGraphicsPipelineState(
++                    &guest_output_paint_pipeline_desc,
++                    IID_PPV_ARGS(&guest_output_paint_intermediate_pipelines_[i]));
++              }))) {
+         REXLOG_ERROR(
+             "D3D12Presenter: Failed to create the guest output painting "
+             "pipeline for effect {} writing to an intermediate texture",
+@@ -1427,9 +1432,13 @@
+     }
+     if (CanGuestOutputPaintEffectBeFinal(guest_output_paint_effect)) {
+       guest_output_paint_pipeline_desc.RTVFormats[0] = kSwapChainFormat;
+-      if (FAILED(device->CreateGraphicsPipelineState(
+-              &guest_output_paint_pipeline_desc,
+-              IID_PPV_ARGS(&guest_output_paint_final_pipelines_[i])))) {
++      if (FAILED(rex::graphics::compile_trace::Call(
++              rex::graphics::compile_trace::Event::kHelperGraphics,
++              "src/ui/d3d12/d3d12_presenter.cpp:1430", 0, [&] {
++                return device->CreateGraphicsPipelineState(
++                    &guest_output_paint_pipeline_desc,
++                    IID_PPV_ARGS(&guest_output_paint_final_pipelines_[i]));
++              }))) {
+         REXLOG_ERROR(
+             "D3D12Presenter: Failed to create the guest output painting "
+             "pipeline for effect {} writing to a swap chain buffer",
+diff --git a/src/ui/d3d12/d3d12_util.cpp b/src/ui/d3d12/d3d12_util.cpp
+--- a/src/ui/d3d12/d3d12_util.cpp
++++ b/src/ui/d3d12/d3d12_util.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <rex/assert.h>
+ #include <rex/logging.h>
+ #include <rex/ui/d3d12/d3d12_util.h>
+@@ -51,7 +52,9 @@
+   desc.CachedPSO.CachedBlobSizeInBytes = 0;
+   desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+   ID3D12PipelineState* pipeline = nullptr;
+-  device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline));
++  rex::graphics::compile_trace::Call(
++      rex::graphics::compile_trace::Event::kHelperCompute, "src/ui/d3d12/d3d12_util.cpp:54", 0,
++      [&] { return device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)); });
+   return pipeline;
+ }
+ 
+diff --git a/src/ui/vulkan/vulkan_immediate_drawer.cpp b/src/ui/vulkan/vulkan_immediate_drawer.cpp
+--- a/src/ui/vulkan/vulkan_immediate_drawer.cpp
++++ b/src/ui/vulkan/vulkan_immediate_drawer.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <algorithm>
+ #include <cstring>
+ #include <iterator>
+@@ -672,8 +673,12 @@
+   pipeline_create_info.subpass = 0;
+   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
+   pipeline_create_info.basePipelineIndex = -1;
+-  if (dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
+-                                    &pipeline_triangle_) != VK_SUCCESS) {
++  if (rex::graphics::compile_trace::Call(rex::graphics::compile_trace::Event::kHelperGraphics,
++                                         "src/ui/vulkan/vulkan_immediate_drawer.cpp:675", 0, [&] {
++                                           return dfn.vkCreateGraphicsPipelines(
++                                               device, VK_NULL_HANDLE, 1, &pipeline_create_info,
++                                               nullptr, &pipeline_triangle_);
++                                         }) != VK_SUCCESS) {
+     REXLOG_ERROR("VulkanImmediateDrawer: Failed to create the triangle list pipeline");
+     dfn.vkDestroyShaderModule(device, stages[1].module, nullptr);
+     dfn.vkDestroyShaderModule(device, stages[0].module, nullptr);
+@@ -687,8 +692,12 @@
+       (pipeline_create_info.flags & ~VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) |
+       VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+   pipeline_create_info.basePipelineHandle = pipeline_triangle_;
+-  VkResult pipeline_line_create_result = dfn.vkCreateGraphicsPipelines(
+-      device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline_line_);
++  VkResult pipeline_line_create_result = rex::graphics::compile_trace::Call(
++      rex::graphics::compile_trace::Event::kHelperGraphics,
++      "src/ui/vulkan/vulkan_immediate_drawer.cpp:690", 0, [&] {
++        return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info,
++                                             nullptr, &pipeline_line_);
++      });
+   dfn.vkDestroyShaderModule(device, stages[1].module, nullptr);
+   dfn.vkDestroyShaderModule(device, stages[0].module, nullptr);
+   if (pipeline_line_create_result != VK_SUCCESS) {
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <algorithm>
+ #include <atomic>
+ #include <cstddef>
+@@ -2650,8 +2651,12 @@
+   const VkDevice device = vulkan_device_->device();
+ 
+   VkPipeline pipeline;
+-  if (dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
+-                                    &pipeline) != VK_SUCCESS) {
++  if (rex::graphics::compile_trace::Call(rex::graphics::compile_trace::Event::kHelperGraphics,
++                                         "src/ui/vulkan/vulkan_presenter.cpp:2653", 0, [&] {
++                                           return dfn.vkCreateGraphicsPipelines(
++                                               device, VK_NULL_HANDLE, 1, &pipeline_create_info,
++                                               nullptr, &pipeline);
++                                         }) != VK_SUCCESS) {
+     REXLOG_ERROR(
+         "VulkanPresenter: Failed to create the guest output painting pipeline "
+         "for effect {}",
+diff --git a/src/ui/vulkan/vulkan_util.cpp b/src/ui/vulkan/vulkan_util.cpp
+--- a/src/ui/vulkan/vulkan_util.cpp
++++ b/src/ui/vulkan/vulkan_util.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/graphics/compile_trace.h>
+ #include <cstdint>
+ 
+ #include <rex/assert.h>
+@@ -191,9 +192,13 @@
+   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
+   pipeline_create_info.basePipelineIndex = -1;
+   VkPipeline pipeline;
+-  if (vulkan_device->functions().vkCreateComputePipelines(vulkan_device->device(), VK_NULL_HANDLE,
+-                                                          1, &pipeline_create_info, nullptr,
+-                                                          &pipeline) != VK_SUCCESS) {
++  if (rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kHelperCompute, "src/ui/vulkan/vulkan_util.cpp:194",
++          0, [&] {
++            return vulkan_device->functions().vkCreateComputePipelines(
++                vulkan_device->device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
++                &pipeline);
++          }) != VK_SUCCESS) {
+     return VK_NULL_HANDLE;
+   }
+   return pipeline;
+diff --git a/include/rex/graphics/compile_trace.h b/include/rex/graphics/compile_trace.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/graphics/compile_trace.h
+@@ -0,0 +1,78 @@
++// Diagnostic counters shared by rexruntime, the GPU plugin and the title.
++// No rendering policy or synchronization decisions depend on this instrument.
++#pragma once
++#include <cstdint>
++#include <utility>
++
++namespace rex::graphics::compile_trace {
++enum class Phase : uint32_t {
++  kBoot,
++  kPreA,
++  kPostALoading,
++  kMenu,
++  kSongLoading,
++  kActiveSong,
++  kPaused,
++  kUnknown,
++  kCount
++};
++enum class Event : uint32_t {
++  kTranslation,
++  kGuestPipeline,
++  kPlaceholder,
++  kHelperGraphics,
++  kHelperCompute,
++  kCompileDrain,
++  kCompileWait,
++  kGuestFrame,
++  kGpuFrame,
++  kCount
++};
++bool Enabled();
++uint64_t Now();
++Phase CurrentPhase();
++void SetPhase(Phase phase, const char* reason);
++void Record(Event event, Phase phase, const char* site, uint64_t key, uint64_t begin_us,
++            uint64_t end_us, bool success, uint64_t variant = 0);
++void Frame(Event event);
++void Snapshot(const char* reason);
++struct CounterSnapshot {
++  uint64_t count, failed, total_us, max_us, ge50, ge100, ge250, suppressed;
++};
++CounterSnapshot ReadCounter(Phase phase, Event event);
++
++class Scope {
++ public:
++  Scope(Event event, const char* site, uint64_t key = 0, uint64_t variant = 0)
++      : enabled_(Enabled()), event_(event), site_(site), key_(key), variant_(variant) {
++    if (enabled_) {
++      phase_ = CurrentPhase();
++      begin_ = Now();
++    }
++  }
++  ~Scope() {
++    if (enabled_)
++      Record(event_, phase_, site_, key_, begin_, Now(), success_, variant_);
++  }
++  void Success(bool success = true) { success_ = success; }
++  Scope(const Scope&) = delete;
++  Scope& operator=(const Scope&) = delete;
++
++ private:
++  bool enabled_, success_ = false;
++  Event event_;
++  const char* site_;
++  uint64_t key_, variant_, begin_ = 0;
++  Phase phase_ = Phase::kUnknown;
++};
++
++// D3D12 S_OK and Vulkan VK_SUCCESS are both zero. Positive Vulkan results such
++// as PIPELINE_COMPILE_REQUIRED are deliberately not counted as success.
++template <typename F>
++auto Call(Event event, const char* site, uint64_t key, F&& f) {
++  Scope scope(event, site, key);
++  auto result = std::forward<F>(f)();
++  scope.Success(result == 0);
++  return result;
++}
++}  // namespace rex::graphics::compile_trace
+diff --git a/src/system/compile_trace.cpp b/src/system/compile_trace.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/system/compile_trace.cpp
+@@ -0,0 +1,154 @@
++// Opt-in, bounded shader-cache P0 measurements. One owner in rexruntime so
++// runtime helper creation and GPU-plugin work share a clock, phase and budget.
++#include <rex/graphics/compile_trace.h>
++#include <rex/cvar.h>
++#include <rex/logging.h>
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <chrono>
++#include <mutex>
++
++REXCVAR_DEFINE_BOOL(shader_compile_trace, false, "Diagnostics",
++                    "Bounded compilation, wait and frame-gap measurements; restart required.")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++
++namespace rex::graphics::compile_trace {
++namespace {
++constexpr size_t kPhases = size_t(Phase::kCount), kEvents = size_t(Event::kCount);
++constexpr const char* kPhaseNames[] = {"boot",         "pre_a",       "post_a_loading", "menu",
++                                       "song_loading", "active_song", "paused",         "unknown"};
++constexpr const char* kEventNames[] = {"translation",     "guest_pipeline", "placeholder",
++                                       "helper_graphics", "helper_compute", "compile_drain",
++                                       "compile_wait",    "guest_frame",    "gpu_frame"};
++struct Counter {
++  uint64_t count = 0, failed = 0, total = 0, worst = 0;
++  uint64_t over50 = 0, over100 = 0, over250 = 0, suppressed = 0;
++};
++std::mutex mutex;
++std::array<std::array<Counter, kEvents>, kPhases> counters{};
++std::array<uint64_t, kEvents> details{};
++std::atomic<Phase> phase{Phase::kBoot};
++uint32_t snapshots = 0, transitions = 0;
++// Each producer has its own last-frame timestamp (all guarded by mutex).
++uint64_t last_guest = 0, last_gpu = 0;
++Phase last_guest_phase = Phase::kBoot, last_gpu_phase = Phase::kBoot;
++uint64_t last_snapshot = 0;
++
++void SnapshotLocked(const char* reason) {
++  if (snapshots >= 256)
++    return;
++  ++snapshots;
++  for (size_t p = 0; p < kPhases; ++p) {
++    for (size_t e = 0; e < kEvents; ++e) {
++      const auto& c = counters[p][e];
++      if (!c.count)
++        continue;
++      REXLOG_INFO(
++          "shader_trace: summary snapshot={} reason={} phase={} event={} count={} "
++          "failed={} total_us={} max_us={} ge50={} ge100={} ge250={} suppressed={}",
++          snapshots, reason, kPhaseNames[p], kEventNames[e], c.count, c.failed, c.total, c.worst,
++          c.over50, c.over100, c.over250, c.suppressed);
++    }
++  }
++}
++void RecordLocked(Event event, Phase start_phase, const char* site, uint64_t key, uint64_t begin,
++                  uint64_t end, bool success, uint64_t variant = 0) {
++  auto e = size_t(event), p = size_t(start_phase);
++  if (e >= kEvents || p >= kPhases || end < begin)
++    return;
++  auto& c = counters[p][e];
++  const uint64_t us = end - begin;
++  ++c.count;
++  c.failed += !success;
++  c.total += us;
++  c.worst = std::max(c.worst, us);
++  c.over50 += us >= 50000;
++  c.over100 += us >= 100000;
++  c.over250 += us >= 250000;
++  const bool frame = event == Event::kGuestFrame || event == Event::kGpuFrame;
++  const bool drain = event == Event::kCompileDrain;
++  if ((frame && us < 50000) || (drain && us < 1000))
++    return;
++  // Keep collecting all counters after the detail budget is spent. Never log
++  // every draw or every normal frame. Cross-phase operations retain both ends.
++  if (details[e]++ < 2048) {
++    REXLOG_INFO(
++        "shader_trace: event={} phase={} end_phase={} site={} key={:016X} variant={:016X} "
++        "begin_us={} end_us={} duration_us={} success={}",
++        kEventNames[e], kPhaseNames[p], kPhaseNames[size_t(phase.load())], site, key, variant,
++        begin, end, us, success);
++  } else {
++    ++c.suppressed;
++  }
++}
++}  // namespace
++bool Enabled() {
++  // First use follows argument/config parsing; immutable for this process.
++  static const bool enabled = REXCVAR_GET(shader_compile_trace);
++  return enabled;
++}
++uint64_t Now() {
++  return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
++                      std::chrono::steady_clock::now().time_since_epoch())
++                      .count());
++}
++Phase CurrentPhase() {
++  return phase.load(std::memory_order_relaxed);
++}
++void SetPhase(Phase value, const char* reason) {
++  if (!Enabled() || size_t(value) >= kPhases)
++    return;
++  if (CurrentPhase() == value)
++    return;
++  std::lock_guard lock(mutex);
++  auto before = phase.exchange(value);
++  if (before == value)
++    return;
++  if (transitions++ < 512) {
++    REXLOG_INFO("shader_trace: phase={} previous={} t_us={} reason={}", kPhaseNames[size_t(value)],
++                kPhaseNames[size_t(before)], Now(), reason);
++  }
++  SnapshotLocked("phase_change");
++}
++void Record(Event event, Phase start_phase, const char* site, uint64_t key, uint64_t begin,
++            uint64_t end, bool success, uint64_t variant) {
++  if (!Enabled())
++    return;
++  std::lock_guard lock(mutex);
++  RecordLocked(event, start_phase, site, key, begin, end, success, variant);
++}
++void Frame(Event event) {
++  if (!Enabled() || (event != Event::kGuestFrame && event != Event::kGpuFrame))
++    return;
++  const uint64_t now = Now();
++  std::lock_guard lock(mutex);
++  auto& last = event == Event::kGuestFrame ? last_guest : last_gpu;
++  auto& previous = event == Event::kGuestFrame ? last_guest_phase : last_gpu_phase;
++  const auto current = CurrentPhase();
++  // A gap spanning a phase boundary is explicitly unknown rather than charged
++  // wholly to gameplay. The endpoints still correlate with compilation details.
++  if (last)
++    RecordLocked(event, previous == current ? current : Phase::kUnknown, "swap", 0, last, now,
++                 true);
++  last = now;
++  previous = current;
++  if (now - last_snapshot >= 10000000) {
++    last_snapshot = now;
++    SnapshotLocked("periodic");
++  }
++}
++void Snapshot(const char* reason) {
++  if (!Enabled())
++    return;
++  std::lock_guard lock(mutex);
++  SnapshotLocked(reason);
++}
++CounterSnapshot ReadCounter(Phase value, Event event) {
++  std::lock_guard lock(mutex);
++  if (size_t(value) >= kPhases || size_t(event) >= kEvents)
++    return {};
++  const auto& c = counters[size_t(value)][size_t(event)];
++  return {c.count, c.failed, c.total, c.worst, c.over50, c.over100, c.over250, c.suppressed};
++}
++}  // namespace rex::graphics::compile_trace

@@ -17,6 +17,15 @@ A Refresh on the download toast, landed 2026-10-24 and still owing its same-sess
 prompts are owed; the records in §5 are what shipped before the pass, and the P8 close-out record still
 says which rows were measured by a probe rather than by the harness.
 
+[`2026-10-10-shader-cache-plan.md`](2026-10-10-shader-cache-plan.md) is the shader-stutter program,
+moved here from `todo/` and renamed on 2026-10-24. **P0 is done**: the post-A gate map, the opt-in
+`shader_compile_trace` instrument and the repeatable measurement workflow, with controlled
+D3D12 empty/warm and Vulkan empty traces collected the same day
+([`../../engine/shader-cache-p0.md`](../../engine/shader-cache-p0.md), evidence under
+`out/shader-cache-p0/runs/`). P1–P9 (completion truth, local shader resolution, the catalogue,
+asynchronous preparation, native caches, the post-A phase, invalidation, validation and packaging)
+are prompts; the post-A gate remains a P6 blocker.
+
 The most recent plan before it,
 [`2026-10-19-interface-gameplay-mapping-restructure-plan.md`](../finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md) —
 Interface Mapping versus always-on Gameplay Mapping, preset-aware controller defaults, inferred
