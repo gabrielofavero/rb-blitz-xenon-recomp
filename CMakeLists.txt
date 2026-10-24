@@ -478,6 +478,13 @@ if(BUILD_TESTING)
                         --effective-overlay-root "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate")
         endif()
     endif()
+    # P3's offline pipeline recipe catalogue: reads the renderer's normalized
+    # .xpso stores, validates every record with the same SDK XXH3 helper,
+    # deduplicates/merges them with provenance and checks the referenced shader
+    # identities against P2's resolver or a resolver index.
+    add_test(NAME shader_pipeline_catalogue
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_pipeline_catalogue_tests.py"
+                --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>)
     add_executable(rb_blitz_loading_record_inspect tools/loading_record_inspect.cpp
         src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_loading_record_inspect PRIVATE src)

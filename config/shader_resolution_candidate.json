@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "title_id": "5841122D",
-  "scope": "Shader identities in all ten distinct preserved P0 stores, including developer input caches. This is a P2 shader-resolution candidate, not the P3 pipeline recipe or gameplay coverage catalogue.",
+  "scope": "Shader identities referenced by the P3 pipeline recipe catalogues: the ten distinct preserved P0 stores (including developer input caches) plus the 2026-10-24 owner-driven D3D12 and Vulkan coverage sessions (d3d12-ultimate-coverage-r1/r2, vulkan-ultimate-coverage-r1). This is a P2 shader-resolution candidate, not a P3 pipeline recipe or gameplay coverage catalogue.",
   "shaders": [
     {
       "stage": "pixel",
@@ -45,6 +45,10 @@
     },
     {
       "stage": "pixel",
+      "hash": "107a4887fbf22857"
+    },
+    {
+      "stage": "pixel",
       "hash": "10f6cb456a407644"
     },
     {
@@ -78,6 +82,10 @@
     {
       "stage": "pixel",
       "hash": "22d6c36f072b9790"
+    },
+    {
+      "stage": "pixel",
+      "hash": "242498f602140a91"
     },
     {
       "stage": "pixel",
@@ -126,6 +134,10 @@
     {
       "stage": "pixel",
       "hash": "35432fc8a261c03e"
+    },
+    {
+      "stage": "pixel",
+      "hash": "37f0746d803d41c2"
     },
     {
       "stage": "pixel",
@@ -185,7 +197,15 @@
     },
     {
       "stage": "pixel",
+      "hash": "4dcaa09a4a645833"
+    },
+    {
+      "stage": "pixel",
       "hash": "4f64e4988031075f"
+    },
+    {
+      "stage": "pixel",
+      "hash": "5110fe6aa991466b"
     },
     {
       "stage": "pixel",
@@ -209,6 +229,10 @@
     },
     {
       "stage": "pixel",
+      "hash": "5bdab7f7afcdf6db"
+    },
+    {
+      "stage": "pixel",
       "hash": "5d7681a012b7b233"
     },
     {
@@ -222,6 +246,10 @@
     {
       "stage": "pixel",
       "hash": "607ef3d23ec33cc7"
+    },
+    {
+      "stage": "pixel",
+      "hash": "6226610400312a8b"
     },
     {
       "stage": "pixel",
@@ -242,6 +270,10 @@
     {
       "stage": "pixel",
       "hash": "69e9d5f6788dd393"
+    },
+    {
+      "stage": "pixel",
+      "hash": "6a072f5a39f42ef2"
     },
     {
       "stage": "pixel",
@@ -278,6 +310,14 @@
     {
       "stage": "pixel",
       "hash": "754c2748c238de97"
+    },
+    {
+      "stage": "pixel",
+      "hash": "76def253143358ce"
+    },
+    {
+      "stage": "pixel",
+      "hash": "7d9ba0eca6b85ede"
     },
     {
       "stage": "pixel",
@@ -333,6 +373,10 @@
     },
     {
       "stage": "pixel",
+      "hash": "95e4714da6c6db12"
+    },
+    {
+      "stage": "pixel",
       "hash": "96c1f6963f14f8cb"
     },
     {
@@ -354,6 +398,10 @@
     {
       "stage": "pixel",
       "hash": "ab1bb9c27904dd6b"
+    },
+    {
+      "stage": "pixel",
+      "hash": "af0ec59bf0d67487"
     },
     {
       "stage": "pixel",
@@ -417,6 +465,10 @@
     },
     {
       "stage": "pixel",
+      "hash": "de5a76421f0d4f18"
+    },
+    {
+      "stage": "pixel",
       "hash": "e11d929ef60b9d7e"
     },
     {
@@ -426,6 +478,10 @@
     {
       "stage": "pixel",
       "hash": "e3aa93879f293bba"
+    },
+    {
+      "stage": "pixel",
+      "hash": "e85d19d6177eac4a"
     },
     {
       "stage": "pixel",
@@ -453,11 +509,19 @@
     },
     {
       "stage": "pixel",
+      "hash": "efaf4f41835f65fc"
+    },
+    {
+      "stage": "pixel",
       "hash": "f2f22e1d1738a661"
     },
     {
       "stage": "pixel",
       "hash": "f4f72b80590776b7"
+    },
+    {
+      "stage": "pixel",
+      "hash": "f5e4439a730fc074"
     },
     {
       "stage": "pixel",
@@ -478,6 +542,10 @@
     {
       "stage": "pixel",
       "hash": "fa1c714c30b518ec"
+    },
+    {
+      "stage": "pixel",
+      "hash": "fc53125b5eb914f8"
     },
     {
       "stage": "pixel",
@@ -510,6 +578,10 @@
     {
       "stage": "vertex",
       "hash": "2156c812dd418844"
+    },
+    {
+      "stage": "vertex",
+      "hash": "24b20d3d1e182fa5"
     },
     {
       "stage": "vertex",
@@ -566,6 +638,14 @@
     {
       "stage": "vertex",
       "hash": "53c521e2125f437b"
+    },
+    {
+      "stage": "vertex",
+      "hash": "5e20f6e9539d166d"
+    },
+    {
+      "stage": "vertex",
+      "hash": "5e3bd3a639289def"
     },
     {
       "stage": "vertex",
@@ -630,6 +710,10 @@
     {
       "stage": "vertex",
       "hash": "97196a24a122e5db"
+    },
+    {
+      "stage": "vertex",
+      "hash": "97a4c887be1869ff"
     },
     {
       "stage": "vertex",
@@ -714,6 +798,10 @@
     {
       "stage": "vertex",
       "hash": "dae487d985598531"
+    },
+    {
+      "stage": "vertex",
+      "hash": "dca4a4959db33559"
     },
     {
       "stage": "vertex",

@@ -9,7 +9,18 @@ P1 (backend completion and result reporting) implemented 2026-10-24. P2's bounde
 local resolver/index is implemented and tested 2026-10-24: all 186 current candidate
 shader identities (120 pixel, 66 vertex) resolve locally and match preserved runtime
 bytes exactly. Vertex declaration linking and the executable's bootstrap shader
-sources are resolved; complete pipeline coverage and preparation integration remain P3/P4.
+sources are resolved. P3 implemented 2026-10-24: a validated, deduplicated catalogue
+of the renderer's normalized D3D12/Vulkan pipeline recipes, a merged replayable store
+per backend, and a 26-site helper-pipeline inventory. Three owner-driven coverage
+sessions driven the same day (options surface, every power-up, songs — on D3D12 and
+Vulkan) raised the catalogues from 175/144 to 412 D3D12 and 409 Vulkan recipes and
+the referenced shader identities from 116/95 to 206/200 — all resolving locally, with
+the committed candidate extended from 186 to 208 — so the power-up effects are
+covered on both backends. Helper recipe key identity remains call-site-only, and
+`rov`/`fsi` plus the graphics-settings matrix stay unmeasured; the owner states that
+ordinary songs and DLC do not vary shader usage, so that axis is not a coverage
+obligation. Preparation integration remains P4/P6; full route/helper
+validation remains P8.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -20,9 +31,10 @@ The cause of individual freezes is still not established: four of the eight
 empty-cache long frames record no compile work at all. A storage preload now reports
 explicit required/succeeded/failed/missing counts on both backends and cannot return
 before its required work finished ([P1 record](#p1--make-backend-completion-and-failure-reporting-trustworthy));
-the graphics-preparation lifecycle and UI (P3–P9) are not implemented, and the post-A gate remains
+the graphics-preparation lifecycle and UI (P4–P9) are not implemented, and the post-A gate remains
 a P6 blocker. Evidence:
-[shader-cache-p0.md](../../engine/shader-cache-p0.md) and
+[shader-cache-p0.md](../../engine/shader-cache-p0.md),
+[shader-cache-p3.md](../../engine/shader-cache-p3.md) and
 `out/shader-cache-p0/runs/`.
 
 The [2026-10-24 prompt plan](#implementation-prompts-2026-10-24) defines the next work:
@@ -155,6 +167,7 @@ Once the agent can report newly observed pipelines, work through this checklist:
 - [ ] A complete song through the ending and results screen.
 - [ ] Retail and Ultimate separately if both are supported release modes.
 - [ ] Representative bundled, DLC and custom songs with unusual visual behavior.
+      **Not required (owner, 2026-10-24): songs and DLC do not vary shader usage.**
 
 The agent should maintain the coverage checklist and tell you which sessions added
 pipelines. Stop repeating a route once it adds no new records, unless it is needed
@@ -370,7 +383,8 @@ and measure UI/audio contention instead of assuming more threads are always fast
    current-pipeline fast path; do not interpret them as complete per-draw telemetry.
 2. **Cover reachable visuals.** Exercise the checklist above: loading, notes and track
    switching, all power-ups and overlapping effects, streak/checkpoint changes, pause,
-   endings/results, backgrounds, retail/Ultimate and representative DLC/custom content.
+   endings/results, backgrounds and retail/Ultimate. DLC/custom songs are not a
+   coverage step: the owner states (2026-10-24) they do not vary shader usage.
    Use a development replay/capture route with isolated saves if automated. Never make
    normal players complete scored songs merely to train the release baseline.
 3. **Resolve shaders before rendering.** The game provides `xbox_shaders` and
@@ -583,6 +597,9 @@ possible source of stutter has been eliminated.
   set, AA mode and draw scale, and what is their residency cost?
 - Do different songs introduce new materials/shaders or mostly reuse common effects?
   Measure additions by route rather than assuming one cache per song or universal reuse.
+  **Answered 2026-10-24 by owner judgment (not a measurement): ordinary songs and DLC
+  do not vary shader usage, so the song/DLC axis is not a coverage obligation; only a
+  package that introduces genuinely new effects could add recipes.**
 - Where are all song-start/audio-start transitions, and which can safely defer
   completion? This blocks per-song gating, not startup preparation.
 - How much of the user's stutter is compilation versus readback/resource work, and
@@ -991,6 +1008,105 @@ Exit: a versioned candidate catalogue with helper recipes, local shader resoluti
 provenance and explicit coverage scope. Capture saturation is useful evidence, not
 proof that arbitrary DLC/custom content can never add a pipeline.
 
+Implementation update, 2026-10-24:
+
+- New `scripts/shader_pipeline_catalogue.py` reads the renderer's own
+  `*.d3d12.xpso` / `*.vk.xpso` stores, validates the 12-byte header and every record's
+  `XXH3_64bits(description)` with the SDK hash helper, decodes both packed
+  `PipelineDescription` layouts (64-byte D3D12 / 60-byte Vulkan), deduplicates by
+  exact description, merges with per-store provenance, and writes a schema-1
+  catalogue. `--merged-store` emits a byte-compatible store for the same backend and
+  rendering path; `--resolver-index` or `--game-root` checks every referenced shader
+  identity with P2's resolver. Exit 0 = complete declared coverage, 2 = published with
+  explicit blockers, 1 = invalid input. Version pins are re-read from the four SDK
+  headers by the tests, so a translator/layout change cannot silently reuse a
+  catalogue.
+- New `config/pipeline_helper_inventory.json` inventories 26 helper creation sites
+  across both backends (render-target transfer — including stencil bits and masked
+  Vulkan samples — dump, resolve copy, host depth store, ROV/FSI clear, presenters,
+  immediate drawers, swap gamma/FXAA, and the shared compute utilities), each with its
+  key composition, dependencies, creation timing and trace identity. The tests assert
+  every `trace.site` literal still occurs in the SDK source.
+- New `tests/shader_pipeline_catalogue_tests.py` → ctest
+  `shader_pipeline_catalogue`, seventeen hermetic tests: both decoders, every header/
+  API/version rejection, title mismatch, accepted corrupt tail, dedupe/provenance,
+  hash collisions, resolver-index and candidate scope, inventory validation, CLI exit
+  codes and overwrite refusal, a replayable merged store, a refused mixed-backend
+  merge, directory expansion, SDK version pins, the inventory drift guard, and every
+  preserved P0 store when the local evidence exists. `CMakeLists.txt` registers the
+  test with the existing hash helper.
+- Catalogue measurements (preserved P0 stores, outputs under
+  `out/shader-cache-p3/`): D3D12 `rtv` 8 stores / 801 records → **175 unique
+  recipes**, 41 vertex + 75 pixel shaders, 114 shader pairs, 4 without a pixel
+  shader; Vulkan `fbo` 2 stores / 193 records → **144 unique recipes**, 36 + 59
+  shaders, 85 pairs, 5 without a pixel shader. All **116/116** recipe-referenced
+  shader identities resolve from the installed content (the 186-identity candidate
+  also includes translated shaders no stored pipeline references in these sessions).
+  The D3D12 warm store is exactly the 132 records P0 measured as a boot preload.
+  Merged stores replay to 175 and 144 records (12,612 and 9,804 bytes).
+  **Superseded the same day by the coverage sessions below: 412 D3D12 recipes and
+  206 identities; the Vulkan 144/95 figures still stand.**
+- Explicit remaining gap: the inventory describes 22 of the 26 helper recipes only at
+  call-site identity, because `shader_compile_trace` records `key=0` there; the
+  catalogue therefore exits 2 even with every shader resolved. Carrying the real
+  transfer/dump/clear keys into the trace belongs to the P4 lifecycle or the P8
+  measurement pass. Captured recipes are session evidence, not a reachability proof;
+  every graphics setting remains unmeasured. Songs and DLC were on this list until the
+  owner stated (2026-10-24) that they do not vary shader usage.
+- Validation: release build links `rb_blitz` and the hash helper; full release
+  `ctest` is **55/55** (with workspace `TEMP`/`TMP`, the pre-existing `path_policy`
+  default-temp issue unchanged). No SDK patch and no game/UI navigation were needed;
+  P4 remains the first consumer. Details: [shader-cache-p3.md](../../engine/shader-cache-p3.md).
+
+#### P3 coverage sessions, 2026-10-24
+
+- After the owner offered to test, two coverage sessions were prepared and launched
+  for owner play: `out/shader-cache-p0/runs/d3d12-ultimate-coverage-r1` and `…-r2`,
+  both D3D12/Ultimate with isolated cache/saves/profile and the trace enabled. r1
+  (options surface, songs, several power-ups) grew the store from 132 to 388 records
+  and then ended in a guest access violation the owner assigns to a separate ticket;
+  the store still verified to its last record with no unverified tail, so the crash
+  cost no captured evidence. r2, seeded from r1's collected snapshot, exercised
+  **every power-up** (owner-confirmed) and closed normally: 412 records after a
+  388/388 boot preload (0 failed, 0 missing, 367 ms).
+- Result: D3D12 catalogue 175 → **412 recipes** (71 vertex, 135 pixel, 272 pairs;
+  +237 over the preserved P0 set) and referenced identities 116 → **206** (+30
+  vertex, +60 pixel), all resolved from installed content.
+  `config/shader_resolution_candidate.json` was extended from 186 to those 206
+  identities and still contains hashes only. The combined catalogue (10 D3D12 + 2
+  Vulkan stores, 1,794 records) holds 556 unique recipes; the re-sorted
+  `out/shader-cache-p3/merged-rtv-coverage.d3d12.xpso` (412 records) replays through
+  the same parser. r2's store already contains every recipe of the eight earlier
+  D3D12 stores, so the merge adds ordering, provenance and validation there rather
+  than new descriptions.
+- Still open and unchanged: the 22 site-repeated helper recipes carry call-site-only
+  key identity (the catalogue keeps exiting 2 for it), `d3d12/rov` and `vulkan/fsi`
+  were never captured, and graphics settings were not varied. Songs and DLC are **not**
+  on this list: the owner states they do not vary shader usage. The shader test subset
+  passes 6/6 after each candidate extension. Evidence:
+  [shader-cache-p3.md](../../engine/shader-cache-p3.md).
+
+#### P3 Vulkan coverage, 2026-10-24
+
+- `vulkan-ultimate-coverage-r1` ran the same route on the other backend, prepared and
+  launched for owner play like the D3D12 sessions. It is the first **Vulkan/Ultimate**
+  boot recorded here (P0 covered Vulkan/retail only). It started from the preserved
+  144-record retail `fbo` store, exercised every power-up (owner-confirmed) and closed
+  normally: 409 records after a `144 required / 144 succeeded / 0 failed / 0 missing`
+  preload.
+- Vulkan catalogue 144 → **409 recipes** (70 vertex, 130 pixel, 265 pairs) and
+  referenced identities 95 → **200** (+35 vertex, +70 pixel), all resolved; the
+  committed candidate went 206 → 208 (+2 pixel). The combined 13-store catalogue is
+  **821 unique recipes / 2,203 verified records** with 208/208 identities resolved,
+  and `out/shader-cache-p3/merged-fbo-coverage.vk.xpso` (409 records) replays through
+  the same parser. The Vulkan store subsumes both preserved Vulkan stores, including
+  the retail ones, so retail and Ultimate pipelines overlapped completely here.
+- The Vulkan session's `active_song` phase still recorded 221 guest pipeline
+  creations, 94 translations and **29 compile waits (2.90 s total, worst 168.3 ms)**
+  even though its 144 seeded recipes had preloaded. No P4/P6 work exists yet, so this
+  is the expected first-play cost, not a regression; it is the clearest measurement so
+  far of the work the preparation phase has to remove.
+
 ### P4 — Add asynchronous preparation without starving the loading screen
 
 > Implement P4. Separate storage opening/import from a reusable preparation operation.
@@ -1077,8 +1193,9 @@ catalogue or an invalid live generation.
 > autonomous testing is authorized. Run the measurement matrix above on D3D12 and Vulkan:
 > fresh application cache plus shipped catalogue/local assets, immediate replay, full
 > restart, changed configuration, invalid native cache, cancellation and failure. Complete
-> the visual/power-up matrix through song endings; record retail/Ultimate and supported
-> DLC/custom scope separately. Capture runtime translations, guest/helper creations,
+> the visual/power-up matrix through song endings; record retail/Ultimate separately
+> (the owner states ordinary songs and DLC do not vary shader usage, so only unexpected
+> additions matter). Capture runtime translations, guest/helper creations,
 > compile waits, skipped draws/placeholders, frame gaps and audio/input evidence. Any
 > compilation event during covered active playback fails that route; extend coverage
 > and repeat the affected checks. Measure cold and warm post-A latency, visible-bar

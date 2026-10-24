@@ -5,8 +5,9 @@ P2's local shader-resolution criterion is now met for the current candidate:
 and 66 vertex identities in ten distinct preserved P0 stores. The former vertex
 blocker is resolved by reproducing declaration linking and extracting two bootstrap
 programs from the supported executable. Resolution requires no previous gameplay or
-developer cache on the user's machine. P3 must still establish pipeline coverage;
-P4 must integrate preparation. This alone does not establish live GPU readiness or
+developer cache on the user's machine. P3's catalogue now consumes this resolver for
+every recipe-referenced identity ([shader-cache-p3.md](shader-cache-p3.md)); P4 must
+integrate preparation. This alone does not establish live GPU readiness or
 remove in-song compilation.
 
 Implementation: [shader_asset_resolver.py](../../scripts/shader_asset_resolver.py),

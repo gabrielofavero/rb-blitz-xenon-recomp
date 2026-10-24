@@ -183,7 +183,11 @@ phase state and counters to both the executable and GPU plugin.
 - Native helper graphics calls in render-target caches, swap setup, presenters and
   immediate drawers are wrapped. Compute helpers are measured at each backend's
   shared compute-pipeline utility. Helper identity is the creation call site
-  (`key=0`), **not a complete per-variant recipe key**; P3 must inventory those keys.
+  (`key=0`), **not** a complete per-variant recipe key. P3 inventoried the 26 sites
+  and their key compositions in
+  [`config/pipeline_helper_inventory.json`](../../config/pipeline_helper_inventory.json)
+  ([shader-cache-p3.md](shader-cache-p3.md)); the trace still logs call-site identity,
+  so per-variant attribution remains an explicit gap for P4/P8.
 - Processor queue draining and actual completion-event waits are separate events.
   CPU worker durations may overlap; summing them does not measure wall-clock delay.
 - `VdSwap` and `XE_SWAP` independently measure guest submission and GPU-command-

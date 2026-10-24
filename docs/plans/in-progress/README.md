@@ -22,9 +22,14 @@ moved here from `todo/` and renamed on 2026-10-24. **P0 is done**: the post-A ga
 `shader_compile_trace` instrument and the repeatable measurement workflow, with controlled
 D3D12 empty/warm and Vulkan empty traces collected the same day
 ([`../../engine/shader-cache-p0.md`](../../engine/shader-cache-p0.md), evidence under
-`out/shader-cache-p0/runs/`). P1–P9 (completion truth, local shader resolution, the catalogue,
-asynchronous preparation, native caches, the post-A phase, invalidation, validation and packaging)
-are prompts; the post-A gate remains a P6 blocker.
+`out/shader-cache-p0/runs/`). **P1** made preload completion explicit on both backends.
+**P2** resolves all 186 candidate shader identities from installed content
+([`../../engine/shader-cache-p2.md`](../../engine/shader-cache-p2.md)). **P3** validates,
+deduplicates and merges the renderer's pipeline recipes with provenance and resolves every
+recipe-referenced identity, and inventories the 26 helper-pipeline sites
+([`../../engine/shader-cache-p3.md`](../../engine/shader-cache-p3.md)). P4–P9 (asynchronous
+preparation, native caches, the post-A phase, invalidation, validation and packaging) are prompts;
+helper recipe key identity and the post-A gate remain open.
 
 The most recent plan before it,
 [`2026-10-19-interface-gameplay-mapping-restructure-plan.md`](../finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md) —
