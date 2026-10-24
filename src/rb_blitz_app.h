@@ -128,15 +128,8 @@ class RbBlitzApp : public rex::ReXApp {
     if (!config.graphics && !config.gpu_plugin.empty()) {
       config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
     }
-    // The title samples 32-bit fixed-point textures through a CPU conversion (B-010).
-    // Keep GPU resolve results visible to that conversion on Vulkan too, matching the
-    // D3D12 development profile. Explicit backend/shared readback settings still win.
-    if (config.graphics && selected_backend_ == "vulkan" &&
-        rex::cvar::GetFlagSource("readback_resolve") == rex::cvar::Source::kDefault &&
-        rex::cvar::GetFlagSource("vulkan_readback_resolve") == rex::cvar::Source::kDefault &&
-        rex::cvar::SetFlagFromConfig("vulkan_readback_resolve", "true")) {
-      REXLOG_INFO("render: enabled Vulkan resolve readback for fixed-point texture conversion");
-    }
+    // Vulkan converts B-010 fixed-point textures directly from GPU shared memory
+    // (SDK patch 0022), so it no longer needs automatic CPU resolve readback.
     if (config.graphics && settings_boot_) {
       settings_boot_->BeforeGraphicsSetup(selected_backend_);
     }

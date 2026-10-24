@@ -190,6 +190,18 @@
           "coverage": "site_repeated"
         },
         {
+          "id": "vulkan.texture_conversion",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
+          "function": "VulkanTextureCache::Initialize",
+          "when": "startup",
+          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
+          "key": {"fields": ["kTextureConversionShader", "load_pipeline_layout_"]},
+          "dependencies": ["texture load pipeline layout", "GPU fixed-point/integer conversion shader"],
+          "variants": "1; endian, signedness and number format are push constants",
+          "coverage": "site_repeated"
+        },
+        {
           "id": "vulkan.host_depth_store",
           "kind": "compute",
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",

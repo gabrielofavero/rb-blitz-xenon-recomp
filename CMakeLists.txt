@@ -278,6 +278,18 @@ endif()
 
 rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 
+# The SDK stages runtime-loaded plugins only in the executable's POST_BUILD
+# step. A renderer-only rebuild need not relink the executable, leaving an old
+# DLL beside it. Make staging a dependency of every game build as well.
+add_custom_target(rb_blitz_stage_gpu
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:rb_blitz>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:rex::gpu-xenos>" "$<TARGET_FILE_DIR:rb_blitz>"
+    DEPENDS rex::gpu-xenos
+    COMMENT "Staging the current GPU plugin beside rb_blitz"
+    VERBATIM)
+add_dependencies(rb_blitz rb_blitz_stage_gpu)
+
 # P0 of the RhythmVerse store plan: its JSON dependency is the copy the SDK tree already vendors
 # (inja's single-header nlohmann 3.11.3, MIT) - no new third-party code is added to the project - and
 # the transport links WinHTTP (src/store/store_http.cpp is the only file that includes it).
@@ -508,6 +520,29 @@ if(BUILD_TESTING)
         target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE ws2_32)
     endif()
     add_test(NAME pipeline_preload COMMAND rb_blitz_pipeline_preload_tests)
+
+    if(WIN32 AND REXGLUE_USE_VULKAN)
+        add_executable(rb_blitz_vulkan_texture_descriptor_cache_tests
+            tests/vulkan_texture_descriptor_cache_tests.cpp)
+        target_include_directories(rb_blitz_vulkan_texture_descriptor_cache_tests PRIVATE
+            "${REXSDK_DIR}/include")
+        target_link_libraries(rb_blitz_vulkan_texture_descriptor_cache_tests PRIVATE Vulkan::Headers)
+        add_test(NAME vulkan_texture_descriptor_cache COMMAND rb_blitz_vulkan_texture_descriptor_cache_tests)
+
+        add_executable(rb_blitz_vulkan_texture_conversion_tests
+            tests/vulkan_texture_conversion_tests.cpp
+            "${REXSDK_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp")
+        target_include_directories(rb_blitz_vulkan_texture_conversion_tests PRIVATE
+            "${REXSDK_DIR}/include" "${REXSDK_DIR}/thirdparty/glslang")
+        target_link_libraries(rb_blitz_vulkan_texture_conversion_tests PRIVATE
+            Vulkan::Headers glslang::SPIRV glslang)
+        add_test(NAME vulkan_texture_conversion COMMAND rb_blitz_vulkan_texture_conversion_tests)
+        set_tests_properties(vulkan_texture_conversion PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+    if(WIN32)
+        add_test(NAME sdk_patch_stack
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_patch_stack_tests.py")
+    endif()
 
     # Exercise the component conversion shared by the patched D3D12 and Vulkan texture caches.
     add_executable(rb_blitz_texture_conversion_tests tests/texture_conversion_tests.cpp)

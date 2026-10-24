@@ -3237,7 +3237,7 @@ void TestRendererRowVisibility() {
   // Two backends: the row is drawn, next to the two group rows that are always on the page.
   {
     MenuConfiguration configuration;
-    configuration.choices["graphics.renderer"] = {{"d3d12", "D3D12"}, {"vulkan", "VULKAN"}};
+    configuration.choices["graphics.renderer"] = {{"d3d12", "D3D12"}, {"vulkan", "Vulkan"}};
     ConfigureMenu(configuration);
     CHECK_TRUE(has_renderer_row());
     CHECK_TRUE(video_page_has_its_groups());

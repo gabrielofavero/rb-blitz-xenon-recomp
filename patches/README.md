@@ -57,6 +57,29 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 | `rexglue-sdk/0017-fixed-size-window.patch` | The SDK had no way for an application to decline the *user's* resize handle: `WindowSDL::OpenImpl` passed `SDL_WINDOW_RESIZABLE` unconditionally, so the only lever was the window *size*, and a drag could leave any shape at all. Found fixing the installed game's window ([../docs/plans/finished/2026-10-14-installed-game-fix-prompts.md](../docs/plans/finished/2026-10-14-installed-game-fix-prompts.md) P2): rb_blitz decides its guest frame, the SDK draw scale and the presenter's output region from one resolution row *before* the window exists, and its windowed client area has to keep that aspect or the picture is squashed/letterboxed. Adds the `window_resizable` cvar (`UI/Window`, default **true** = SDL's own default and the SDK's unchanged behaviour; `kRequiresRestart`; declared in `include/rex/ui/flags.h`, defined in `src/ui/window.cpp`) and applies it in `WindowSDL::OpenImpl` with `SDL_SetWindowResizable(window, false)` — SDL exposes resizability separately from both the creation size and the fullscreen state, and the call site is beside the other desired-state applies, just before the window is shown. Not a defect fix upstream (nothing there asks for it), and the separate Controller Settings utility builds its own SDL window and never reads the cvar. | maybe |
 | `rexglue-sdk/0021-preload-completion-accounting.patch` | A shader-storage preload could report success it had not achieved. In `src/graphics/d3d12/pipeline_cache.cpp` the growth loop compared `creation_threads_.size()` against `creation_thread_original_count` — the value it had just read from that same size — so a preload needing no extra worker (one stored description, or a pool already at the computed count) never entered the block holding the blocking wait, and `InitializeShaderStorage(..., true)` returned with creation threads still busy; the success line counted `++pipelines_created` per *scheduled* entry regardless of whether its `ID3D12PipelineState` was ever created. Adds `include/rex/graphics/pipeline_preload.h`: `PipelinePreloadTracker` (one `queued → running → succeeded/failed`, or `missing`, per identity; duplicate registration refused; `WaitUntilFinished`/`Reset`) and `PipelinePreloadResult` (`Complete()` = has work, nothing unfinished, nothing failed or missing — an empty preload is not coverage), plus `PreloadCreationThreadCount()` for the growth arithmetic. Both caches register every stored description, mark success only from a real pipeline (`state != nullptr` / a non-placeholder `VkPipeline`), and count retained-placeholder recovery (`Pipeline::real_pipeline_failed`) as a failure; `InitializeShaderStorage` returns the result and logs it, with a warning when required work did not produce every pipeline. D3D12's barrier is the tracker's, outside the temporary-worker cleanup; `EndSubmission()` waits are untouched. | yes — the growth condition and the skipped barrier are defects; the tracker is a design addition |
 
+`rexglue-sdk/0022-vulkan-gpu-texture-conversion.patch` replaces 0002's Vulkan CPU
+conversion with a compute shader reading current GPU shared memory. It reuses
+completed device-local buffers and creates its pipeline at device initialization.
+The application no longer automatically enables Vulkan resolve readback. D3D12
+and explicit readback overrides retain their behavior. See
+[Vulkan performance](../docs/engine/vulkan-performance.md) for validation and limits.
+When a later patch replaces an earlier hunk, the checker accepts the earlier
+patch only if every file it touches matches the final pristine-HEAD patch replay.
+
+`rexglue-sdk/0023-vulkan-texture-descriptor-cache.patch` avoids reallocating and
+rewriting identical texture/sampler descriptor sets within a command submission.
+The cache is bounded, preserves the existing allocator's retirement rules, and
+clears before submission/frame/pool reuse. Set `vulkan_texture_descriptor_cache`
+to false for an A/B comparison. Host tests exercise the actual cache/key; gameplay
+timings remain to be measured. See [Vulkan performance](../docs/engine/vulkan-performance.md).
+
+`rexglue-sdk/0024-vulkan-descriptor-binding-reuse.patch` preserves valid descriptor
+sets that are already bound when a cache lookup returns the same immutable set.
+It also applies the computed pipeline-layout compatibility prefix and uses
+`vkGetFenceStatus` for nonblocking polls. Required bindings and blocking waits
+remain in place. Host tests cover the state helper, including layout and command
+buffer invalidation; see [Vulkan performance](../docs/engine/vulkan-performance.md).
+
 ## Apply / verify
 
 ```powershell

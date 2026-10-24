@@ -1,0 +1,186 @@
+diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
+--- a/include/rex/graphics/vulkan/texture_cache.h
++++ b/include/rex/graphics/vulkan/texture_cache.h
+@@ -352,12 +352,12 @@
+   struct ConversionBuffer {
+     VkBuffer buffer;
+     VmaAllocation allocation;
+-    uint8_t* mapping;
+     VkDeviceSize size;
+     uint64_t submission;
+   };
+   std::vector<ConversionBuffer> conversion_buffers_;
+   uint8_t conversion_reported_[64] = {};
++  VkPipeline conversion_pipeline_ = VK_NULL_HANDLE;
+   bool ConvertTextureRange(uint32_t guest_address, uint32_t size, TextureKey key,
+                            VkDescriptorBufferInfo& source);
+ 
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -27,6 +27,7 @@
+ #include <rex/graphics/vulkan/command_processor.h>
+ #include <rex/graphics/vulkan/deferred_command_buffer.h>
+ #include <rex/graphics/vulkan/texture_cache.h>
++#include <rex/graphics/vulkan/texture_conversion_shader.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+ #include <rex/ui/vulkan/mem_alloc.h>
+@@ -483,6 +484,9 @@
+       dfn.vkDestroyPipeline(device, load_pipeline, nullptr);
+     }
+   }
++  if (conversion_pipeline_ != VK_NULL_HANDLE) {
++    dfn.vkDestroyPipeline(device, conversion_pipeline_, nullptr);
++  }
+   if (load_pipeline_layout_ != VK_NULL_HANDLE) {
+     dfn.vkDestroyPipelineLayout(device, load_pipeline_layout_, nullptr);
+   }
+@@ -1257,38 +1261,61 @@
+     buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+     VmaAllocationCreateInfo allocation_info = {};
+-    allocation_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+-    allocation_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+-                            VMA_ALLOCATION_CREATE_MAPPED_BIT;
++    allocation_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+     ConversionBuffer created = {};
+-    VmaAllocationInfo mapping_info = {};
+     if (vmaCreateBuffer(vma_allocator_, &buffer_info, &allocation_info, &created.buffer,
+-                        &created.allocation, &mapping_info) != VK_SUCCESS) {
++                        &created.allocation, nullptr) != VK_SUCCESS) {
+       REXGPU_ERROR("VulkanTextureCache: Failed to allocate {} bytes for texture conversion", range);
+       return false;
+     }
+-    created.mapping = static_cast<uint8_t*>(mapping_info.pMappedData);
+     created.size = range;
+     conversion_buffers_.push_back(created);
+     staging = &conversion_buffers_.back();
+   }
+   staging->submission = command_processor_.GetCurrentSubmission();
+-  auto& guest_memory = static_cast<VulkanSharedMemory&>(shared_memory());
+-  texture_util::ConvertNonFloatGuestRange(guest_memory.TranslatePhysical(guest_address),
+-      staging->mapping, size, key.endianness, key.signed_separate != 0, key.num_format != 0);
+-  std::memset(staging->mapping + size, 0, size_t(range - size));
+-  if (vmaFlushAllocation(vma_allocator_, staging->allocation, 0, range) != VK_SUCCESS) {
+-    return false;
+-  }
++  auto& gpu_memory = static_cast<VulkanSharedMemory&>(shared_memory());
++  const auto* vulkan_device = command_processor_.GetVulkanDevice();
++  VkDescriptorSet sets[2];
++  VkDescriptorBufferInfo buffers[2] = {
++      {staging->buffer, 0, range}, {gpu_memory.buffer(), guest_address, range}};
++  VkWriteDescriptorSet writes[2] = {};
++  for (uint32_t i = 0; i < 2; ++i) {
++    sets[i] = command_processor_.AllocateSingleTransientDescriptor(
++        VulkanCommandProcessor::SingleTransientDescriptorLayout::kStorageBufferCompute);
++    if (sets[i] == VK_NULL_HANDLE) return false;
++    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++    writes[i].dstSet = sets[i];
++    writes[i].descriptorCount = 1;
++    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
++    writes[i].pBufferInfo = &buffers[i];
++  }
++  vulkan_device->functions().vkUpdateDescriptorSets(vulkan_device->device(), 2, writes, 0, nullptr);
++  gpu_memory.Use(VulkanSharedMemory::Usage::kRead);
++  command_processor_.SubmitBarriers(true);
++  command_processor_.BindExternalComputePipeline(conversion_pipeline_);
++  auto& commands = command_processor_.deferred_command_buffer();
++  commands.CmdVkBindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, load_pipeline_layout_,
++                                  0, 2, sets, 0, nullptr);
++  // Convert padding too: the word-mover load shaders read complete vectors.
++  uint32_t word_count = uint32_t(range / sizeof(uint32_t));
++  uint32_t group_count = (word_count + 63) / 64;
++  // Vulkan guarantees at least 65535 groups per dimension. Even a full 512 MiB
++  // shared-memory range needs only 33 rows with 64 words per group.
++  uint32_t groups_per_row = std::min(group_count, UINT32_C(65535));
++  const uint32_t constants[] = {word_count, uint32_t(key.endianness),
++      uint32_t(key.signed_separate), uint32_t(key.num_format), groups_per_row};
++  commands.CmdVkPushConstants(load_pipeline_layout_, VK_SHADER_STAGE_COMPUTE_BIT,
++                              0, sizeof(constants), constants);
++  commands.CmdVkDispatch(groups_per_row, (group_count + groups_per_row - 1) / groups_per_row, 1);
+   command_processor_.PushBufferMemoryBarrier(staging->buffer, 0, range,
+-      VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+-      VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++      VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+   const uint8_t report_bit = uint8_t(1 << (uint32_t(key.signed_separate) |
+                                          (uint32_t(key.num_format) << 1)));
+   auto& reported = conversion_reported_[uint32_t(key.format)];
+   if (!(reported & report_bit)) {
+     reported |= report_bit;
+-    REXGPU_INFO("VulkanTextureCache: Converting {} {} {} components to float32",
++    REXGPU_INFO("VulkanTextureCache: GPU converting {} {} {} components to float32",
+                 FormatInfo::Get(key.format)->name, key.signed_separate ? "signed" : "unsigned",
+                 key.num_format ? "integer" : "fixed-point");
+   }
+@@ -2846,6 +2873,21 @@
+   if (dfn.vkCreatePipelineLayout(device, &load_pipeline_layout_create_info, nullptr,
+                                  &load_pipeline_layout_)) {
+     REXGPU_ERROR("VulkanTexture: Failed to create the texture load pipeline layout");
++    return false;
++  }
++
++  // Compile once at device initialization, never on a texture load during gameplay.
++  std::vector<uint32_t> conversion_spirv;
++  std::string conversion_error;
++  if (!command_processor_.CompileGlslToSpirv(VK_SHADER_STAGE_COMPUTE_BIT,
++          kTextureConversionShader, conversion_spirv, conversion_error)) {
++    REXGPU_ERROR("VulkanTextureCache: Failed to compile GPU conversion: {}", conversion_error);
++    return false;
++  }
++  conversion_pipeline_ = ui::vulkan::util::CreateComputePipeline(vulkan_device,
++      load_pipeline_layout_, conversion_spirv.data(), conversion_spirv.size() * sizeof(uint32_t));
++  if (conversion_pipeline_ == VK_NULL_HANDLE) {
++    REXGPU_ERROR("VulkanTextureCache: Failed to create GPU conversion pipeline");
+     return false;
+   }
+ 
+diff --git a/include/rex/graphics/vulkan/texture_conversion_shader.h b/include/rex/graphics/vulkan/texture_conversion_shader.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/graphics/vulkan/texture_conversion_shader.h
+@@ -0,0 +1,43 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++namespace rex::graphics::vulkan {
++
++// Preserve tiling, mip packing and endianness for the existing texture-load shaders.
++// Read current GPU memory, including resolves, without a CPU mirror or round trip.
++inline constexpr char kTextureConversionShader[] = R"glsl(#version 450
++layout(local_size_x = 64) in;
++layout(set = 0, binding = 0, std430) writeonly buffer Destination { uint dest[]; };
++layout(set = 1, binding = 0, std430) readonly buffer Source { uint src[]; };
++layout(push_constant) uniform Constants {
++  uint word_count;
++  uint endianness;
++  uint is_signed;
++  uint is_integer;
++  uint groups_per_row;
++} c;
++
++uint swap_guest(uint value) {
++  if (c.endianness == 1u || c.endianness == 2u) {
++    value = ((value & 0x00ff00ffu) << 8u) | ((value >> 8u) & 0x00ff00ffu);
++  }
++  if (c.endianness == 2u || c.endianness == 3u) {
++    value = (value << 16u) | (value >> 16u);
++  }
++  return value;
++}
++
++void main() {
++  uint i = (gl_WorkGroupID.y * c.groups_per_row + gl_WorkGroupID.x) * 64u
++      + gl_LocalInvocationID.x;
++  if (i >= c.word_count) return;
++  uint value = swap_guest(src[i]);
++  float converted = c.is_signed != 0u ? float(int(value)) : float(value);
++  if (c.is_integer == 0u) {
++    converted *= c.is_signed != 0u ? (1.0 / 2147483647.0) : (1.0 / 4294967295.0);
++  }
++  dest[i] = swap_guest(floatBitsToUint(converted));
++}
++)glsl";
++
++}  // namespace rex::graphics::vulkan

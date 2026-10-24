@@ -547,6 +547,7 @@ void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
           character = static_cast<char>(character - 'a' + 'A');
         }
       }
+      if (renderer.token == "vulkan") label = "Vulkan";
       descriptor.choices.push_back(Choice{renderer.token, label});
     }
   } else if (source == "resolutions") {

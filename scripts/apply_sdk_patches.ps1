@@ -11,7 +11,8 @@
     The script is idempotent: for every patch it first asks Git whether the patch
     is already applied (`git apply --reverse --check`), then whether it applies
     cleanly (`git apply --check`), and only then applies it. Patches are applied in
-    file-name order.
+    file-name order. When a later patch replaces an earlier hunk, every path of
+    the earlier patch must match the final pristine-HEAD replay to count as applied.
 
     Re-run after `git submodule update`, a fresh clone, or any checkout that
     rewrites the SDK tree. See patches/README.md and docs/guides/build-and-run.md.
@@ -159,22 +160,6 @@ foreach ($patch in $patches) {
     }
 }
 
-Write-Host ''
-Write-Host "Patches considered : $($patches.Count)"
-Write-Host "Already applied    : $($current.Count)"
-foreach ($item in $current) { Write-Host "    $item" }
-Write-Host "Applied now        : $($applied.Count)"
-foreach ($item in $applied) { Write-Host "    $item" }
-Write-Host "Failed             : $($failed.Count)"
-foreach ($item in $failed) { Write-Host "    $($item.Patch): $($item.Detail)" }
-
-if ($failed.Count -gt 0) {
-    Write-Host ''
-    Write-Host 'A patch that neither applies nor reverse-applies usually means the SDK pin moved,'
-    Write-Host 'or the working tree was already edited by hand. Inspect with:'
-    Write-Host "    git -C $SdkDir diff"
-}
-
 # Collect the paths, then replay the whole patch stack against pristine HEAD
 # copies. Concatenating hunk bodies fails when later patches insert earlier in a
 # file (0020 instruments helper creation before 0015's resolution diagnostics).
@@ -224,6 +209,51 @@ foreach ($patch in $patches) {
     }
 }
 Write-Host "Exact replay audit : $auditPath"
+
+# A later patch can replace an earlier patch's added code (0022 replaces 0002's
+# CPU conversion). Neither direction of the earlier patch then applies in
+# isolation. Accept that case only if EVERY path it touches equals the final
+# pristine-HEAD replay, including paths absent from git status. Partial stacks
+# and unrelated edits must still fail.
+$remainingFailures = @()
+foreach ($failure in $failed) {
+    $sections = Get-DiffSections -Lines @(Get-Content -LiteralPath (Join-Path $patchPath $failure.Patch))
+    $matchesFinal = $sections.Count -gt 0
+    foreach ($entryPath in $sections.Keys) {
+        $expectedPath = Join-Path $auditPath $entryPath
+        $livePath = Join-Path $sdkPath $entryPath
+        if ((Test-Path -LiteralPath $expectedPath -PathType Leaf) -and
+            (Test-Path -LiteralPath $livePath -PathType Leaf)) {
+            $expectedText = [IO.File]::ReadAllText($expectedPath).Replace("`r`n", "`n")
+            $liveText = [IO.File]::ReadAllText($livePath).Replace("`r`n", "`n")
+            if ($expectedText -cne $liveText) { $matchesFinal = $false; break }
+        } elseif ((Test-Path -LiteralPath $expectedPath) -or (Test-Path -LiteralPath $livePath)) {
+            $matchesFinal = $false; break
+        }
+    }
+    if ($matchesFinal) {
+        $current += "$($failure.Patch) (verified in final patch stack)"
+    } else {
+        $remainingFailures += $failure
+    }
+}
+$failed = $remainingFailures
+
+Write-Host ''
+Write-Host "Patches considered : $($patches.Count)"
+Write-Host "Already applied    : $($current.Count)"
+foreach ($item in $current) { Write-Host "    $item" }
+Write-Host "Applied now        : $($applied.Count)"
+foreach ($item in $applied) { Write-Host "    $item" }
+Write-Host "Failed             : $($failed.Count)"
+foreach ($item in $failed) { Write-Host "    $($item.Patch): $($item.Detail)" }
+
+if ($failed.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'A patch that neither applies nor reverse-applies usually means the SDK pin moved,'
+    Write-Host 'or the working tree was already edited by hand. Inspect with:'
+    Write-Host "    git -C $SdkDir diff"
+}
 
 # Untracked build artifacts inside nested dependencies do not change a gitlink
 # or its tracked source. Tracked nested edits and moved gitlinks remain visible.

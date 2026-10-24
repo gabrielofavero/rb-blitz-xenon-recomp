@@ -273,8 +273,11 @@ next boot. Before 2026-10-24 the graphics reconciler replaced even a usable Vulk
 the active D3D12 backend, making the row appear stuck and preventing the next boot from using it.
 Vulkan also needs the B-010 fixed-point texture conversion in SDK patch 0002; without it the
 highway is invisible and the log repeats `k_32_32_32_32 resource unsigned`. The patch covers
-both backends as of 2026-10-24. Vulkan resolve readback defaults on for this title; an explicit
-`readback_resolve` or `vulkan_readback_resolve` setting is honored.
+both backends as of 2026-10-24. SDK patch 0022 moves Vulkan's conversion onto the GPU and
+removes the title's automatic resolve readback. Explicit `readback_resolve` or
+`vulkan_readback_resolve` overrides are still honored; use `readback_resolve = 'none'`
+when comparing performance without an old readback override. See
+[Vulkan performance](../engine/vulkan-performance.md) for scope and validation.
 For a dev override, launch `rb_blitz.exe --gpu_backend=vulkan`; an explicit override owns the
 setting for that process, so use a normal launch when testing the menu's saved preference.
 

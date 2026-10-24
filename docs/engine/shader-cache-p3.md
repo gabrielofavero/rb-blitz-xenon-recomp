@@ -231,12 +231,16 @@ still appears verbatim in the SDK source, so the list cannot silently drift.
 | Vulkan | `transfer` | graphics | lazy | call site, one per `TransferPipelineKey` |
 | Vulkan | `transfer_masked_samples` | graphics | lazy | call site, derivative samples |
 | Vulkan | `resolve_copy` / `host_depth_store` / `fsi_resolve_clear` / `dump` | compute | startup or lazy | shared util site |
+| Vulkan | `texture_conversion` | compute | startup | shared util site; added by SDK patch 0022 after the preserved runs |
 | Vulkan | `swap_gamma_graphics` / `_rb_swap` / `_compute` / `swap_fxaa` | graphics/compute | startup | call site, several per site |
 | Vulkan | `immediate_drawer_triangle` / `_line` | graphics | startup | unique site |
 | Vulkan | `presenter` | graphics | startup | call site, per paint effect |
 | Vulkan | `compute_util` | compute | shared helper | shared util site |
 
-Coverage is **26 inventoried: 4 site-unique, 22 site-repeated**. A site-repeated
+The current inventory has **27 entries: 4 site-unique, 23 site-repeated**. The
+GPU texture-conversion helper was added after these captures and has headless
+numeric validation; its gameplay validation remains pending (see
+[Vulkan performance](vulkan-performance.md)). A site-repeated
 helper is fully described statically but the trace's `key=0` collapses its variants,
 so the catalogue cannot attribute an observed helper creation to one recipe yet.
 This is an explicit blocker, not a silent success; the catalogue still exits 2 when

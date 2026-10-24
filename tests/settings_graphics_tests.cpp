@@ -342,6 +342,10 @@ void TestReconcileRenderer() {
   // It need not be active yet: the saved choice drives the next boot.
   auto both = caps;
   both.renderers[0].usable = true;
+  const auto both_descriptors = schema::BuildDescriptors(both);
+  const auto* both_renderer = Find(both_descriptors, SettingId::kRenderer);
+  CHECK_TRUE(schema::LabelForToken(*both_renderer, "vulkan") == "Vulkan");
+  CHECK_TRUE(schema::LabelForToken(*both_renderer, "d3d12") == "D3D12");
   const auto selected = reconciler.Reconcile(SettingId::kRenderer, *renderer, EnumV("vulkan"), both);
   CHECK_FALSE(selected.corrected);
   CHECK_TRUE(IsToken(selected.effective, "vulkan"));
