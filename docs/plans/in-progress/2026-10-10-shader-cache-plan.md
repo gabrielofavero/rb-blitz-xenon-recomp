@@ -11,16 +11,17 @@ shader identities (120 pixel, 66 vertex) resolve locally and match preserved run
 bytes exactly. Vertex declaration linking and the executable's bootstrap shader
 sources are resolved. P3 implemented 2026-10-24: a validated, deduplicated catalogue
 of the renderer's normalized D3D12/Vulkan pipeline recipes, a merged replayable store
-per backend, and a 26-site helper-pipeline inventory. Three owner-driven coverage
-sessions driven the same day (options surface, every power-up, songs — on D3D12 and
-Vulkan) raised the catalogues from 175/144 to 412 D3D12 and 409 Vulkan recipes and
-the referenced shader identities from 116/95 to 206/200 — all resolving locally, with
-the committed candidate extended from 186 to 208 — so the power-up effects are
-covered on both backends. Helper recipe key identity remains call-site-only, and
-`rov`/`fsi` plus the graphics-settings matrix stay unmeasured; the owner states that
-ordinary songs and DLC do not vary shader usage, so that axis is not a coverage
-obligation. Preparation integration remains P4/P6; full route/helper
-validation remains P8.
+per rendering path, and a 35-entry helper-pipeline inventory. Five owner-driven
+coverage sessions the same day (options surface, every power-up, songs, and both
+alternate rendering paths) took the catalogues from 175/144 to 631 D3D12 (`rtv` 412 +
+`rov` 219) and 637 Vulkan (`fbo` 409 + `fsi` 228) recipes, with 208/208 referenced
+shader identities resolving locally and the committed candidate extended from 186 to
+208 — so all four declared rendering paths are covered. Helper creation keys are
+carried by the trace since SDK patch 0026, so the inventory's 31 repeated helper
+recipes are key-identified instead of call-site-only. The graphics-settings matrix is
+the last unmeasured axis; the owner states that ordinary songs and DLC do not vary
+shader usage, so that axis is not a coverage obligation. Preparation integration
+remains P4/P6; full route validation remains P8.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -1079,12 +1080,55 @@ Implementation update, 2026-10-24:
   the same parser. r2's store already contains every recipe of the eight earlier
   D3D12 stores, so the merge adds ordering, provenance and validation there rather
   than new descriptions.
-- Still open and unchanged: the 22 site-repeated helper recipes carry call-site-only
-  key identity (the catalogue keeps exiting 2 for it), `d3d12/rov` and `vulkan/fsi`
-  were never captured, and graphics settings were not varied. Songs and DLC are **not**
-  on this list: the owner states they do not vary shader usage. The shader test subset
-  passes 6/6 after each candidate extension. Evidence:
+- Still open: the graphics-settings matrix was not varied. Songs and DLC are **not** on
+  this list (the owner states they do not vary shader usage), and neither are
+  `d3d12/rov` / `vulkan/fsi` or helper key identity — both closed later the same day,
+  below. The shader test subset passes 6/6 after each candidate extension. Evidence:
   [shader-cache-p3.md](../../engine/shader-cache-p3.md).
+
+#### P3 alternate rendering paths, 2026-10-24
+
+- `d3d12-rov-coverage-r1` ran with `render_target_path_d3d12=rov` and
+  `vulkan-fsi-coverage-r1` with `render_target_path_vulkan=fsi` (the device advertises
+  both `fragmentShaderSampleInterlock` and `fragmentShaderPixelInterlock`). Each had
+  **no store for its own path**, so both measured first play from scratch. The owner
+  reported heavy stuttering; the trace agrees — D3D12 ROV created 165 pipelines during
+  `active_song` for 61.9 s of cumulative creation (worst single 8.38 s) with 29
+  compile waits totalling 11.9 s (23 of them ≥250 ms), and Vulkan FSI created 172
+  pipelines plus 172 placeholders for 85.2 s of creation and 13.4 s of waits. Shader
+  translation stayed cheap (44 ms and 1.54 s), so the stalls were driver pipeline
+  creation on an empty per-path store — the first-play cost P4/P6 exist to remove, not
+  a regression from anything in P3.
+- Captured **219 `rov` and 228 `fsi` recipes**. They add no new shader identities (206
+  and 206, all resolving) and share no recipe with their primary counterpart
+  (412 + 219 = 631; 409 + 228 = 637).
+- A merged store may not span paths, so each alternate path has its own
+  (`merged-rov.d3d12.xpso`, `merged-fsi.vk.xpso`). The combined 15-store catalogue is
+  **1,268 recipes / 2,650 verified records**, 208/208 identities resolved, no
+  uncaptured path, exit 0.
+
+#### P3 helper key identity, 2026-10-24
+
+- SDK patch `0026-helper-pipeline-key-identity.patch` carries a real key at every
+  helper creation site instead of the placeholder `0`: the `HelperKind` enum names the
+  creator in the key's upper byte and the caller's own packed key sits below it. The
+  shared `ui::d3d12::util::CreateComputePipeline` and both Vulkan overloads gained a
+  `trace_key` argument, and every render-target, presenter, swap-chain and texture
+  caller now passes one (`TransferShaderKey`, `DumpPipelineKey`, `ResolveCopyShaderIndex`,
+  sample counts, paint effect, shader index, and so on). Masked-sample derivatives and
+  stencil-bit variants use the trace's `variant` field.
+- Inventory: 35 entries — 4 site-unique, **31 key-identified, 0 unresolved**. Each keyed
+  entry documents its bit layout in `trace.key_bits`. Eight helper families that were
+  missing were added (`texture_load`, `texture_load_scaled` and `resolve_downscale` on
+  both backends, plus the Vulkan swap-chain variants and the D3D12 gamma/FXAA compute
+  pipelines). Two guards keep it true: the existing trace-site drift check and a new
+  check that every `kind N (kName)` matches the value `HelperKind` has in the SDK header.
+- Behaviour change: the combined catalogue now exits **0** (complete declared coverage)
+  where the byte-identical 13-store revision exited 2 for the helper gap. Recipes,
+  records and shader identities are unchanged; this is attribution, not new coverage.
+- Validation: release build links both backends; the shader ctest subset passes 6/6
+  (including the new schema and enum guards); `apply_sdk_patches.ps1 -Check` replays 25
+  patches with 0 failed and 0 unexpected SDK files.
 
 #### P3 Vulkan coverage, 2026-10-24
 

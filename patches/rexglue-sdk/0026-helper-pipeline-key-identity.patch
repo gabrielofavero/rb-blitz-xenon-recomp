@@ -1,0 +1,804 @@
+diff --git a/include/rex/graphics/compile_trace.h b/include/rex/graphics/compile_trace.h
+--- a/include/rex/graphics/compile_trace.h
++++ b/include/rex/graphics/compile_trace.h
+@@ -41,6 +41,29 @@
+ };
+ CounterSnapshot ReadCounter(Phase phase, Event event);
+ 
++// Several helpers are created by one shared function (for example every compute
++// pipeline in the D3D12 and Vulkan UI utilities), so the trace site alone cannot
++// name the recipe. The upper byte of the key names the creator and the remaining
++// bits are the creator's own packed key, so the identity is stable across runs and
++// readable in a log (it never hashes pointers or data that can move).
++enum class HelperKind : uint64_t {
++  kResolveCopy = 1,
++  kHostDepthStore = 2,
++  kRovClear = 3,
++  kDump = 4,
++  kTransfer = 5,
++  kTransferStencilBit = 6,
++  kClearRtv = 7,
++  kPresenter = 8,
++  kSwapChain = 9,
++  kComputeUtil = 10,
++  kTextureConversion = 11,
++  kTextureLoad = 12,
++};
++inline uint64_t HelperKey(HelperKind kind, uint64_t detail) {
++  return (uint64_t(kind) << 56) | (detail & 0x00FFFFFFFFFFFFFFull);
++}
++
+ class Scope {
+  public:
+   Scope(Event event, const char* site, uint64_t key = 0, uint64_t variant = 0)
+@@ -69,8 +92,8 @@
+ // D3D12 S_OK and Vulkan VK_SUCCESS are both zero. Positive Vulkan results such
+ // as PIPELINE_COMPILE_REQUIRED are deliberately not counted as success.
+ template <typename F>
+-auto Call(Event event, const char* site, uint64_t key, F&& f) {
+-  Scope scope(event, site, key);
++auto Call(Event event, const char* site, uint64_t key, F&& f, uint64_t variant = 0) {
++  Scope scope(event, site, key, variant);
+   auto result = std::forward<F>(f)();
+   scope.Success(result == 0);
+   return result;
+diff --git a/include/rex/ui/d3d12/d3d12_util.h b/include/rex/ui/d3d12/d3d12_util.h
+--- a/include/rex/ui/d3d12/d3d12_util.h
++++ b/include/rex/ui/d3d12/d3d12_util.h
+@@ -39,7 +39,9 @@
+                                          const D3D12_ROOT_SIGNATURE_DESC& desc);
+ 
+ ID3D12PipelineState* CreateComputePipeline(ID3D12Device* device, const void* shader,
+-                                           size_t shader_size, ID3D12RootSignature* root_signature);
++                                           size_t shader_size,
++                                           ID3D12RootSignature* root_signature,
++                                           uint64_t trace_key = 0);
+ 
+ constexpr DXGI_FORMAT GetUintPow2DXGIFormat(uint32_t element_size_bytes_log2) {
+   switch (element_size_bytes_log2) {
+diff --git a/include/rex/ui/vulkan/presenter.h b/include/rex/ui/vulkan/presenter.h
+--- a/include/rex/ui/vulkan/presenter.h
++++ b/include/rex/ui/vulkan/presenter.h
+@@ -433,7 +433,8 @@
+   bool InitializeSurfaceIndependent();
+ 
+   [[nodiscard]] VkPipeline CreateGuestOutputPaintPipeline(GuestOutputPaintEffect effect,
+-                                                          VkRenderPass render_pass);
++                                                          VkRenderPass render_pass,
++                                                          bool intermediate);
+ 
+ #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
+   bool EnsureTemporalUpscalerContext(uint32_t render_width, uint32_t render_height,
+diff --git a/include/rex/ui/vulkan/util.h b/include/rex/ui/vulkan/util.h
+--- a/include/rex/ui/vulkan/util.h
++++ b/include/rex/ui/vulkan/util.h
+@@ -155,11 +155,13 @@
+ VkPipeline CreateComputePipeline(const VulkanDevice* vulkan_device, VkPipelineLayout layout,
+                                  VkShaderModule shader,
+                                  const VkSpecializationInfo* specialization_info = nullptr,
+-                                 const char* entry_point = "main");
++                                 const char* entry_point = "main",
++                                 uint64_t trace_key = 0);
+ VkPipeline CreateComputePipeline(const VulkanDevice* vulkan_device, VkPipelineLayout layout,
+                                  const uint32_t* shader_code, size_t shader_code_size_bytes,
+                                  const VkSpecializationInfo* specialization_info = nullptr,
+-                                 const char* entry_point = "main");
++                                 const char* entry_point = "main",
++                                 uint64_t trace_key = 0);
+ 
+ }  // namespace util
+ }  // namespace vulkan
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -19,6 +19,7 @@
+ #include <rex/cvar.h>
+ #include <rex/dbg.h>
+ #include <rex/perf/counter.h>
++#include <rex/graphics/compile_trace.h>
+ #include <rex/graphics/d3d12/command_processor.h>
+ #include <rex/graphics/d3d12/fence_sync.h>
+ #include <rex/graphics/d3d12/graphics_system.h>
+@@ -1360,7 +1361,9 @@
+   }
+   *(apply_gamma_table_pipeline_.ReleaseAndGetAddressOf()) = ui::d3d12::util::CreateComputePipeline(
+       device, shaders::apply_gamma_table_cs, sizeof(shaders::apply_gamma_table_cs),
+-      apply_gamma_root_signature_.Get());
++      apply_gamma_root_signature_.Get(),
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x200));
+   if (!apply_gamma_table_pipeline_) {
+     REXGPU_ERROR(
+         "Failed to create the 256-entry table gamma ramp application compute "
+@@ -1370,7 +1373,10 @@
+   *(apply_gamma_table_fxaa_luma_pipeline_.ReleaseAndGetAddressOf()) =
+       ui::d3d12::util::CreateComputePipeline(device, shaders::apply_gamma_table_fxaa_luma_cs,
+                                              sizeof(shaders::apply_gamma_table_fxaa_luma_cs),
+-                                             apply_gamma_root_signature_.Get());
++                                             apply_gamma_root_signature_.Get(),
++                                             rex::graphics::compile_trace::HelperKey(
++                                                 rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                                 0x201));
+   if (!apply_gamma_table_fxaa_luma_pipeline_) {
+     REXGPU_ERROR(
+         "Failed to create the 256-entry table gamma ramp application compute "
+@@ -1379,7 +1385,9 @@
+   }
+   *(apply_gamma_pwl_pipeline_.ReleaseAndGetAddressOf()) = ui::d3d12::util::CreateComputePipeline(
+       device, shaders::apply_gamma_pwl_cs, sizeof(shaders::apply_gamma_pwl_cs),
+-      apply_gamma_root_signature_.Get());
++      apply_gamma_root_signature_.Get(),
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x202));
+   if (!apply_gamma_pwl_pipeline_) {
+     REXGPU_ERROR("Failed to create the PWL gamma ramp application compute pipeline");
+     return false;
+@@ -1387,7 +1395,10 @@
+   *(apply_gamma_pwl_fxaa_luma_pipeline_.ReleaseAndGetAddressOf()) =
+       ui::d3d12::util::CreateComputePipeline(device, shaders::apply_gamma_pwl_fxaa_luma_cs,
+                                              sizeof(shaders::apply_gamma_pwl_fxaa_luma_cs),
+-                                             apply_gamma_root_signature_.Get());
++                                             apply_gamma_root_signature_.Get(),
++                                             rex::graphics::compile_trace::HelperKey(
++                                                 rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                                 0x203));
+   if (!apply_gamma_pwl_fxaa_luma_pipeline_) {
+     REXGPU_ERROR(
+         "Failed to create the PWL gamma ramp application compute pipeline with "
+@@ -1463,14 +1474,18 @@
+     return false;
+   }
+   *(fxaa_pipeline_.ReleaseAndGetAddressOf()) = ui::d3d12::util::CreateComputePipeline(
+-      device, shaders::fxaa_cs, sizeof(shaders::fxaa_cs), fxaa_root_signature_.Get());
++      device, shaders::fxaa_cs, sizeof(shaders::fxaa_cs), fxaa_root_signature_.Get(),
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x400));
+   if (!fxaa_pipeline_) {
+     REXGPU_ERROR("Failed to create the FXAA compute pipeline");
+     return false;
+   }
+   *(fxaa_extreme_pipeline_.ReleaseAndGetAddressOf()) = ui::d3d12::util::CreateComputePipeline(
+       device, shaders::fxaa_extreme_cs, sizeof(shaders::fxaa_extreme_cs),
+-      fxaa_root_signature_.Get());
++      fxaa_root_signature_.Get(),
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x401));
+   if (!fxaa_pipeline_) {
+     REXGPU_ERROR("Failed to create the extreme-quality FXAA compute pipeline");
+     return false;
+@@ -1527,9 +1542,11 @@
+       ui::d3d12::util::CreateRootSignature(provider, resolve_downscale_root_signature_desc);
+   if (resolve_downscale_root_signature_) {
+     *(resolve_downscale_pipeline_.ReleaseAndGetAddressOf()) =
+-        ui::d3d12::util::CreateComputePipeline(device, shaders::resolve_downscale_cs,
+-                                               sizeof(shaders::resolve_downscale_cs),
+-                                               resolve_downscale_root_signature_.Get());
++        ui::d3d12::util::CreateComputePipeline(
++            device, shaders::resolve_downscale_cs, sizeof(shaders::resolve_downscale_cs),
++            resolve_downscale_root_signature_.Get(),
++            rex::graphics::compile_trace::HelperKey(
++                rex::graphics::compile_trace::HelperKind::kSwapChain, 0x500));
+   }
+   if (!resolve_downscale_root_signature_ || !resolve_downscale_pipeline_) {
+     resolve_downscale_pipeline_.Reset();
+diff --git a/src/graphics/d3d12/render_target_cache.cpp b/src/graphics/d3d12/render_target_cache.cpp
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -355,7 +355,10 @@
+                                : resolve_copy_shader_code.unscaled,
+         draw_resolution_scaled ? resolve_copy_shader_code.scaled_size
+                                : resolve_copy_shader_code.unscaled_size,
+-        resolve_copy_root_signature_);
++        resolve_copy_root_signature_,
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kResolveCopy,
++            uint64_t(i) | (draw_resolution_scaled ? 0x100 : 0)));
+     if (resolve_copy_pipeline == nullptr) {
+       REXGPU_ERROR("D3D12RenderTargetCache: Failed to create {} resolve copy pipeline",
+                    resolve_copy_shader_info.debug_name);
+@@ -530,9 +533,11 @@
+     // Pipelines.
+     // 1 sample.
+     host_depth_store_pipelines_[size_t(xenos::MsaaSamples::k1X)] =
+-        ui::d3d12::util::CreateComputePipeline(device, shaders::host_depth_store_1xmsaa_cs,
+-                                               sizeof(shaders::host_depth_store_1xmsaa_cs),
+-                                               host_depth_store_root_signature_);
++        ui::d3d12::util::CreateComputePipeline(
++            device, shaders::host_depth_store_1xmsaa_cs,
++            sizeof(shaders::host_depth_store_1xmsaa_cs), host_depth_store_root_signature_,
++            rex::graphics::compile_trace::HelperKey(
++                rex::graphics::compile_trace::HelperKind::kHostDepthStore, 0));
+     if (!host_depth_store_pipelines_[size_t(xenos::MsaaSamples::k1X)]) {
+       REXGPU_ERROR(
+           "D3D12RenderTargetCache: Failed to create the 1-sample host depth "
+@@ -544,9 +549,11 @@
+         L"Host Depth Store 1xMSAA");
+     // 2 samples.
+     host_depth_store_pipelines_[size_t(xenos::MsaaSamples::k2X)] =
+-        ui::d3d12::util::CreateComputePipeline(device, shaders::host_depth_store_2xmsaa_cs,
+-                                               sizeof(shaders::host_depth_store_2xmsaa_cs),
+-                                               host_depth_store_root_signature_);
++        ui::d3d12::util::CreateComputePipeline(
++            device, shaders::host_depth_store_2xmsaa_cs,
++            sizeof(shaders::host_depth_store_2xmsaa_cs), host_depth_store_root_signature_,
++            rex::graphics::compile_trace::HelperKey(
++                rex::graphics::compile_trace::HelperKind::kHostDepthStore, 1));
+     if (!host_depth_store_pipelines_[size_t(xenos::MsaaSamples::k2X)]) {
+       REXGPU_ERROR(
+           "D3D12RenderTargetCache: Failed to create the 2-sample host depth "
+@@ -558,9 +565,11 @@
+         L"Host Depth Store 2xMSAA");
+     // 4 samples.
+     host_depth_store_pipelines_[size_t(xenos::MsaaSamples::k4X)] =
+-        ui::d3d12::util::CreateComputePipeline(device, shaders::host_depth_store_4xmsaa_cs,
+-                                               sizeof(shaders::host_depth_store_4xmsaa_cs),
+-                                               host_depth_store_root_signature_);
++        ui::d3d12::util::CreateComputePipeline(
++            device, shaders::host_depth_store_4xmsaa_cs,
++            sizeof(shaders::host_depth_store_4xmsaa_cs), host_depth_store_root_signature_,
++            rex::graphics::compile_trace::HelperKey(
++                rex::graphics::compile_trace::HelperKind::kHostDepthStore, 2));
+     if (!host_depth_store_pipelines_[size_t(xenos::MsaaSamples::k4X)]) {
+       REXGPU_ERROR(
+           "D3D12RenderTargetCache: Failed to create the 4-sample host depth "
+@@ -847,7 +856,11 @@
+         ID3D12PipelineState* uint32_rtv_clear_pipeline;
+         if (FAILED(rex::graphics::compile_trace::Call(
+                 rex::graphics::compile_trace::Event::kHelperGraphics,
+-                "src/graphics/d3d12/render_target_cache.cpp:847", 0, [&] {
++                "src/graphics/d3d12/render_target_cache.cpp:847",
++                rex::graphics::compile_trace::HelperKey(
++                    rex::graphics::compile_trace::HelperKind::kClearRtv,
++                    (uint64_t(i) << 8) | uint64_t(j)),
++                [&] {
+                   return device->CreateGraphicsPipelineState(
+                       &uint32_rtv_clear_pipeline_desc, IID_PPV_ARGS(&uint32_rtv_clear_pipeline));
+                 }))) {
+@@ -929,7 +942,10 @@
+                                : shaders::resolve_clear_32bpp_cs,
+         draw_resolution_scaled ? sizeof(shaders::resolve_clear_32bpp_scaled_cs)
+                                : sizeof(shaders::resolve_clear_32bpp_cs),
+-        resolve_rov_clear_root_signature_);
++        resolve_rov_clear_root_signature_,
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kRovClear,
++            draw_resolution_scaled ? 0x100 : 0));
+     if (resolve_rov_clear_32bpp_pipeline_ == nullptr) {
+       REXGPU_ERROR(
+           "D3D12RenderTargetCache: Failed to create the 32bpp resolve EDRAM "
+@@ -944,7 +960,10 @@
+                                : shaders::resolve_clear_64bpp_cs,
+         draw_resolution_scaled ? sizeof(shaders::resolve_clear_64bpp_scaled_cs)
+                                : sizeof(shaders::resolve_clear_64bpp_cs),
+-        resolve_rov_clear_root_signature_);
++        resolve_rov_clear_root_signature_,
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kRovClear,
++            1 | (draw_resolution_scaled ? 0x100 : 0)));
+     if (resolve_rov_clear_64bpp_pipeline_ == nullptr) {
+       REXGPU_ERROR(
+           "D3D12RenderTargetCache: Failed to create the 64bpp resolve EDRAM "
+@@ -3738,10 +3757,14 @@
+       pipeline_desc.DepthStencilState.StencilWriteMask = UINT8(1) << i;
+       if (SUCCEEDED(rex::graphics::compile_trace::Call(
+               rex::graphics::compile_trace::Event::kHelperGraphics,
+-              "src/graphics/d3d12/render_target_cache.cpp:3734", 0, [&] {
++              "src/graphics/d3d12/render_target_cache.cpp:3734",
++              rex::graphics::compile_trace::HelperKey(
++                  rex::graphics::compile_trace::HelperKind::kTransferStencilBit, key.key),
++              [&] {
+                 return device->CreateGraphicsPipelineState(&pipeline_desc,
+                                                            IID_PPV_ARGS(&stencil_bit_pipelines[i]));
+-              }))) {
++              },
++              uint64_t(i)))) {
+         continue;
+       }
+       stencil_pipelines_created = false;
+@@ -3781,7 +3804,10 @@
+     ID3D12PipelineState* pipeline;
+     if (FAILED(rex::graphics::compile_trace::Call(
+             rex::graphics::compile_trace::Event::kHelperGraphics,
+-            "src/graphics/d3d12/render_target_cache.cpp:3773", 0, [&] {
++            "src/graphics/d3d12/render_target_cache.cpp:3773",
++            rex::graphics::compile_trace::HelperKey(
++                rex::graphics::compile_trace::HelperKind::kTransfer, key.key),
++            [&] {
+               return device->CreateGraphicsPipelineState(&pipeline_desc, IID_PPV_ARGS(&pipeline));
+             }))) {
+       pipeline = nullptr;
+@@ -5529,7 +5555,9 @@
+   ID3D12PipelineState* pipeline = ui::d3d12::util::CreateComputePipeline(
+       command_processor_.GetD3D12Provider().GetDevice(), built_shader_.data(),
+       built_shader_size_bytes,
+-      key.is_depth ? dump_root_signature_depth_ : dump_root_signature_color_);
++      key.is_depth ? dump_root_signature_depth_ : dump_root_signature_color_,
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kDump,
++                                              key.key));
+   const char* format_name = key.is_depth
+                                 ? xenos::GetDepthRenderTargetFormatName(key.GetDepthFormat())
+                                 : xenos::GetColorRenderTargetFormatName(key.GetColorFormat());
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -20,6 +20,7 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/dbg.h>
++#include <rex/graphics/compile_trace.h>
+ #include <rex/graphics/d3d12/command_processor.h>
+ #include <rex/graphics/d3d12/shared_memory.h>
+ #include <rex/graphics/d3d12/texture_cache.h>
+@@ -587,7 +588,9 @@
+     }
+     *(load_pipelines_[i].ReleaseAndGetAddressOf()) = ui::d3d12::util::CreateComputePipeline(
+         device, current_load_shader_code.pShaderBytecode, current_load_shader_code.BytecodeLength,
+-        load_root_signature_.Get());
++        load_root_signature_.Get(),
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kTextureLoad, uint64_t(i)));
+     if (!load_pipelines_[i]) {
+       REXGPU_ERROR(
+           "D3D12TextureCache: Failed to create the texture loading pipeline "
+@@ -601,7 +604,9 @@
+         *(load_pipelines_scaled_[i].ReleaseAndGetAddressOf()) =
+             ui::d3d12::util::CreateComputePipeline(
+                 device, current_load_shader_code_scaled.pShaderBytecode,
+-                current_load_shader_code_scaled.BytecodeLength, load_root_signature_.Get());
++                current_load_shader_code_scaled.BytecodeLength, load_root_signature_.Get(),
++                rex::graphics::compile_trace::HelperKey(
++                    rex::graphics::compile_trace::HelperKind::kTextureLoad, 0x100 | uint64_t(i)));
+         if (!load_pipelines_scaled_[i]) {
+           REXGPU_ERROR(
+               "D3D12TextureCache: Failed to create the resolution-scaled "
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -1729,7 +1729,10 @@
+     swap_apply_gamma_pipeline_stages[1].module = swap_apply_gamma_pipeline_pixel_shaders[i];
+     swap_apply_gamma_pipeline_create_results[i] = rex::graphics::compile_trace::Call(
+         rex::graphics::compile_trace::Event::kHelperGraphics,
+-        "src/graphics/vulkan/command_processor.cpp:1724", 0, [&] {
++        "src/graphics/vulkan/command_processor.cpp:1724",
++        rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                                uint64_t(i)),
++        [&] {
+           return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+                                                &swap_apply_gamma_pipeline_create_info, nullptr,
+                                                swap_apply_gamma_pipelines[i]);
+@@ -1737,7 +1740,7 @@
+   }
+   if (!vulkan_device->properties().imageViewFormatSwizzle) {
+     auto create_rb_swap_pipeline = [&](const char* source, VkPipeline& pipeline_out,
+-                                       const char* pipeline_name) {
++                                       const char* pipeline_name, size_t variant) {
+       std::vector<uint32_t> pixel_spirv;
+       std::string compile_error;
+       if (!CompileGlslToSpirv(VK_SHADER_STAGE_FRAGMENT_BIT, source, pixel_spirv, compile_error)) {
+@@ -1753,7 +1756,10 @@
+       swap_apply_gamma_pipeline_stages[1].module = pixel_shader_module;
+       if (rex::graphics::compile_trace::Call(
+               rex::graphics::compile_trace::Event::kHelperGraphics,
+-              "src/graphics/vulkan/command_processor.cpp:1744", 0, [&] {
++              "src/graphics/vulkan/command_processor.cpp:1744",
++              rex::graphics::compile_trace::HelperKey(
++                  rex::graphics::compile_trace::HelperKind::kSwapChain, 0x100 | variant),
++              [&] {
+                 return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+                                                      &swap_apply_gamma_pipeline_create_info,
+                                                      nullptr, &pipeline_out);
+@@ -1765,10 +1771,10 @@
+     };
+     create_rb_swap_pipeline(GetSwapApplyGammaTablePixelRbSwapSource(),
+                             swap_apply_gamma_256_entry_table_rb_swap_pipeline_,
+-                            "swap gamma table red/blue fallback");
++                            "swap gamma table red/blue fallback", 0);
+     create_rb_swap_pipeline(GetSwapApplyGammaPwlPixelRbSwapSource(),
+                             swap_apply_gamma_pwl_rb_swap_pipeline_,
+-                            "swap gamma PWL red/blue fallback");
++                            "swap gamma PWL red/blue fallback", 1);
+   }
+   dfn.vkDestroyShaderModule(device, swap_apply_gamma_pipeline_stages[0].module, nullptr);
+   for (VkShaderModule swap_apply_gamma_pixel_shader : swap_apply_gamma_pixel_shaders) {
+@@ -1785,7 +1791,9 @@
+   // Gamma ramp application compute pipelines.
+   swap_apply_gamma_compute_256_entry_table_pipeline_ = ui::vulkan::util::CreateComputePipeline(
+       vulkan_device, swap_apply_gamma_compute_pipeline_layout_, shaders::apply_gamma_table_cs,
+-      sizeof(shaders::apply_gamma_table_cs));
++      sizeof(shaders::apply_gamma_table_cs), nullptr, "main",
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x200));
+   if (swap_apply_gamma_compute_256_entry_table_pipeline_ == VK_NULL_HANDLE) {
+     REXGPU_WARN(
+         "Failed to create the 256-entry table gamma ramp application compute "
+@@ -1794,7 +1802,10 @@
+   swap_apply_gamma_compute_256_entry_table_fxaa_luma_pipeline_ =
+       ui::vulkan::util::CreateComputePipeline(
+           vulkan_device, swap_apply_gamma_compute_pipeline_layout_,
+-          shaders::apply_gamma_table_fxaa_luma_cs, sizeof(shaders::apply_gamma_table_fxaa_luma_cs));
++          shaders::apply_gamma_table_fxaa_luma_cs, sizeof(shaders::apply_gamma_table_fxaa_luma_cs),
++          nullptr, "main",
++          rex::graphics::compile_trace::HelperKey(
++              rex::graphics::compile_trace::HelperKind::kSwapChain, 0x201));
+   if (swap_apply_gamma_compute_256_entry_table_fxaa_luma_pipeline_ == VK_NULL_HANDLE) {
+     REXGPU_WARN(
+         "Failed to create the 256-entry table gamma ramp application compute "
+@@ -1802,13 +1813,18 @@
+   }
+   swap_apply_gamma_compute_pwl_pipeline_ = ui::vulkan::util::CreateComputePipeline(
+       vulkan_device, swap_apply_gamma_compute_pipeline_layout_, shaders::apply_gamma_pwl_cs,
+-      sizeof(shaders::apply_gamma_pwl_cs));
++      sizeof(shaders::apply_gamma_pwl_cs), nullptr, "main",
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x202));
+   if (swap_apply_gamma_compute_pwl_pipeline_ == VK_NULL_HANDLE) {
+     REXGPU_WARN("Failed to create the PWL gamma ramp application compute pipeline");
+   }
+   swap_apply_gamma_compute_pwl_fxaa_luma_pipeline_ = ui::vulkan::util::CreateComputePipeline(
+       vulkan_device, swap_apply_gamma_compute_pipeline_layout_,
+-      shaders::apply_gamma_pwl_fxaa_luma_cs, sizeof(shaders::apply_gamma_pwl_fxaa_luma_cs));
++      shaders::apply_gamma_pwl_fxaa_luma_cs, sizeof(shaders::apply_gamma_pwl_fxaa_luma_cs),
++      nullptr, "main",
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
++                                              0x203));
+   if (swap_apply_gamma_compute_pwl_fxaa_luma_pipeline_ == VK_NULL_HANDLE) {
+     REXGPU_WARN(
+         "Failed to create the PWL gamma ramp application compute pipeline with "
+@@ -1816,7 +1832,7 @@
+   }
+   if (!vulkan_device->properties().imageViewFormatSwizzle) {
+     auto create_rb_swap_compute_pipeline = [&](const char* source, VkPipeline& pipeline_out,
+-                                               const char* pipeline_name) {
++                                               const char* pipeline_name, size_t variant) {
+       std::vector<uint32_t> compute_spirv;
+       std::string compile_error;
+       if (!CompileGlslToSpirv(VK_SHADER_STAGE_COMPUTE_BIT, source, compute_spirv, compile_error)) {
+@@ -1825,24 +1841,26 @@
+       }
+       pipeline_out = ui::vulkan::util::CreateComputePipeline(
+           vulkan_device, swap_apply_gamma_compute_pipeline_layout_, compute_spirv.data(),
+-          sizeof(uint32_t) * compute_spirv.size());
++          sizeof(uint32_t) * compute_spirv.size(), nullptr, "main",
++          rex::graphics::compile_trace::HelperKey(
++              rex::graphics::compile_trace::HelperKind::kSwapChain, 0x300 | variant));
+       if (pipeline_out == VK_NULL_HANDLE) {
+         REXGPU_WARN("Failed to create {} pipeline", pipeline_name);
+       }
+     };
+     create_rb_swap_compute_pipeline(GetSwapApplyGammaTableComputeRbSwapSource(),
+                                     swap_apply_gamma_compute_256_entry_table_rb_swap_pipeline_,
+-                                    "swap gamma table compute red/blue fallback");
++                                    "swap gamma table compute red/blue fallback", 0);
+     create_rb_swap_compute_pipeline(GetSwapApplyGammaPwlComputeRbSwapSource(),
+                                     swap_apply_gamma_compute_pwl_rb_swap_pipeline_,
+-                                    "swap gamma PWL compute red/blue fallback");
++                                    "swap gamma PWL compute red/blue fallback", 1);
+     create_rb_swap_compute_pipeline(
+         GetSwapApplyGammaTableFxaaLumaComputeRbSwapSource(),
+         swap_apply_gamma_compute_256_entry_table_fxaa_luma_rb_swap_pipeline_,
+-        "swap gamma table FXAA-luma compute red/blue fallback");
++        "swap gamma table FXAA-luma compute red/blue fallback", 2);
+     create_rb_swap_compute_pipeline(GetSwapApplyGammaPwlFxaaLumaComputeRbSwapSource(),
+                                     swap_apply_gamma_compute_pwl_fxaa_luma_rb_swap_pipeline_,
+-                                    "swap gamma PWL FXAA-luma compute red/blue fallback");
++                                    "swap gamma PWL FXAA-luma compute red/blue fallback", 3);
+   }
+ 
+   // FXAA compute pipelines, compiled to SPIR-V at runtime.
+@@ -1854,7 +1872,9 @@
+   } else {
+     swap_fxaa_pipeline_ = ui::vulkan::util::CreateComputePipeline(
+         vulkan_device, swap_fxaa_pipeline_layout_, swap_fxaa_spirv.data(),
+-        sizeof(uint32_t) * swap_fxaa_spirv.size());
++        sizeof(uint32_t) * swap_fxaa_spirv.size(), nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kSwapChain, 0x400));
+     if (swap_fxaa_pipeline_ == VK_NULL_HANDLE) {
+       REXGPU_WARN("Failed to create the FXAA compute pipeline");
+     }
+@@ -1869,7 +1889,9 @@
+   } else {
+     swap_fxaa_extreme_pipeline_ = ui::vulkan::util::CreateComputePipeline(
+         vulkan_device, swap_fxaa_pipeline_layout_, swap_fxaa_extreme_spirv.data(),
+-        sizeof(uint32_t) * swap_fxaa_extreme_spirv.size());
++        sizeof(uint32_t) * swap_fxaa_extreme_spirv.size(), nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kSwapChain, 0x401));
+     if (swap_fxaa_extreme_pipeline_ == VK_NULL_HANDLE) {
+       REXGPU_WARN("Failed to create the extreme-quality FXAA compute pipeline");
+     }
+@@ -1892,7 +1914,9 @@
+                                  &resolve_downscale_pipeline_layout_) == VK_SUCCESS) {
+     resolve_downscale_pipeline_ = ui::vulkan::util::CreateComputePipeline(
+         vulkan_device, resolve_downscale_pipeline_layout_, shaders::resolve_downscale_cs,
+-        sizeof(shaders::resolve_downscale_cs));
++        sizeof(shaders::resolve_downscale_cs), nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kSwapChain, 0x500));
+     if (resolve_downscale_pipeline_ == VK_NULL_HANDLE) {
+       REXGPU_WARN("Failed to create Vulkan resolve-downscale readback pipeline");
+       ui::vulkan::util::DestroyAndNullHandle(dfn.vkDestroyPipelineLayout, device,
+diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
+--- a/src/graphics/vulkan/render_target_cache.cpp
++++ b/src/graphics/vulkan/render_target_cache.cpp
+@@ -627,7 +627,11 @@
+         draw_resolution_scaled ? resolve_copy_shader_code.scaled
+                                : resolve_copy_shader_code.unscaled,
+         draw_resolution_scaled ? resolve_copy_shader_code.scaled_size_bytes
+-                               : resolve_copy_shader_code.unscaled_size_bytes);
++                               : resolve_copy_shader_code.unscaled_size_bytes,
++        nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kResolveCopy,
++            uint64_t(i) | (draw_resolution_scaled ? 0x100 : 0)));
+     if (resolve_copy_pipeline == VK_NULL_HANDLE) {
+       REXGPU_ERROR(
+           "VulkanRenderTargetCache: Failed to create the resolve copy "
+@@ -690,7 +694,9 @@
+           host_depth_store_shaders[i];
+       VkPipeline host_depth_store_pipeline = ui::vulkan::util::CreateComputePipeline(
+           vulkan_device, host_depth_store_pipeline_layout_, host_depth_store_shader.first,
+-          host_depth_store_shader.second);
++          host_depth_store_shader.second, nullptr, "main",
++          rex::graphics::compile_trace::HelperKey(
++              rex::graphics::compile_trace::HelperKind::kHostDepthStore, uint64_t(i)));
+       if (host_depth_store_pipeline == VK_NULL_HANDLE) {
+         REXGPU_ERROR(
+             "VulkanRenderTargetCache: Failed to create the {}-sample host "
+@@ -865,7 +871,11 @@
+         draw_resolution_scaled ? shaders::resolve_clear_32bpp_scaled_cs
+                                : shaders::resolve_clear_32bpp_cs,
+         draw_resolution_scaled ? sizeof(shaders::resolve_clear_32bpp_scaled_cs)
+-                               : sizeof(shaders::resolve_clear_32bpp_cs));
++                               : sizeof(shaders::resolve_clear_32bpp_cs),
++        nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kRovClear,
++            draw_resolution_scaled ? 0x100 : 0));
+     if (resolve_fsi_clear_32bpp_pipeline_ == VK_NULL_HANDLE) {
+       REXGPU_ERROR(
+           "VulkanRenderTargetCache: Failed to create the 32bpp resolve EDRAM "
+@@ -878,7 +888,11 @@
+         draw_resolution_scaled ? shaders::resolve_clear_64bpp_scaled_cs
+                                : shaders::resolve_clear_64bpp_cs,
+         draw_resolution_scaled ? sizeof(shaders::resolve_clear_64bpp_scaled_cs)
+-                               : sizeof(shaders::resolve_clear_64bpp_cs));
++                               : sizeof(shaders::resolve_clear_64bpp_cs),
++        nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(
++            rex::graphics::compile_trace::HelperKind::kRovClear,
++            1 | (draw_resolution_scaled ? 0x100 : 0)));
+     if (resolve_fsi_clear_64bpp_pipeline_ == VK_NULL_HANDLE) {
+       REXGPU_ERROR(
+           "VulkanRenderTargetCache: Failed to create the 64bpp resolve EDRAM "
+@@ -4509,7 +4523,11 @@
+   pipeline_create_info.basePipelineIndex = -1;
+   if (rex::graphics::compile_trace::Call(
+           rex::graphics::compile_trace::Event::kHelperGraphics,
+-          "src/graphics/vulkan/render_target_cache.cpp:4509", 0, [&] {
++          "src/graphics/vulkan/render_target_cache.cpp:4509",
++          rex::graphics::compile_trace::HelperKey(
++              rex::graphics::compile_trace::HelperKind::kTransfer,
++              (uint64_t(key.render_pass_key.key) << 32) | uint64_t(key.shader_key.key)),
++          [&] {
+             return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info,
+                                                  nullptr, &pipelines[0]);
+           }) != VK_SUCCESS) {
+@@ -4535,10 +4553,15 @@
+       sample_mask = uint32_t(1) << host_sample_index;
+       if (rex::graphics::compile_trace::Call(
+               rex::graphics::compile_trace::Event::kHelperGraphics,
+-              "src/graphics/vulkan/render_target_cache.cpp:4531", 0, [&] {
++              "src/graphics/vulkan/render_target_cache.cpp:4531",
++              rex::graphics::compile_trace::HelperKey(
++                  rex::graphics::compile_trace::HelperKind::kTransfer,
++                  (uint64_t(key.render_pass_key.key) << 32) | uint64_t(key.shader_key.key)),
++              [&] {
+                 return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+                                                      &pipeline_create_info, nullptr, &pipelines[i]);
+-              }) != VK_SUCCESS) {
++              },
++              uint64_t(i)) != VK_SUCCESS) {
+         REXGPU_ERROR(
+             "VulkanRenderTargetCache: Failed to create the render target "
+             "ownership transfer pipeline for render pass 0x{:08X}, shader "
+@@ -5950,7 +5973,10 @@
+   VkPipeline pipeline = ui::vulkan::util::CreateComputePipeline(
+       command_processor_.GetVulkanDevice(),
+       key.is_depth ? dump_pipeline_layout_depth_ : dump_pipeline_layout_color_,
+-      reinterpret_cast<const uint32_t*>(shader_code.data()), sizeof(uint32_t) * shader_code.size());
++      reinterpret_cast<const uint32_t*>(shader_code.data()),
++      sizeof(uint32_t) * shader_code.size(), nullptr, "main",
++      rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kDump,
++                                              key.key));
+   if (pipeline == VK_NULL_HANDLE) {
+     REXGPU_ERROR(
+         "VulkanRenderTargetCache: Failed to create a render target dumping "
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -21,6 +21,7 @@
+ #include <rex/math.h>
+ #include <rex/cvar.h>
+ #include <rex/dbg.h>
++#include <rex/graphics/compile_trace.h>
+ #include <rex/graphics/flags.h>
+ #include <rex/graphics/pipeline/texture/info.h>
+ #include <rex/graphics/pipeline/texture/util.h>
+@@ -2885,7 +2886,10 @@
+     return false;
+   }
+   conversion_pipeline_ = ui::vulkan::util::CreateComputePipeline(vulkan_device,
+-      load_pipeline_layout_, conversion_spirv.data(), conversion_spirv.size() * sizeof(uint32_t));
++      load_pipeline_layout_, conversion_spirv.data(), conversion_spirv.size() * sizeof(uint32_t),
++      nullptr, "main",
++      rex::graphics::compile_trace::HelperKey(
++          rex::graphics::compile_trace::HelperKind::kTextureConversion, 0));
+   if (conversion_pipeline_ == VK_NULL_HANDLE) {
+     REXGPU_ERROR("VulkanTextureCache: Failed to create GPU conversion pipeline");
+     return false;
+@@ -3064,7 +3068,9 @@
+     assert_not_null(current_load_shader_code.first);
+     load_pipelines_[i] = ui::vulkan::util::CreateComputePipeline(
+         vulkan_device, load_pipeline_layout_, current_load_shader_code.first,
+-        current_load_shader_code.second);
++        current_load_shader_code.second, nullptr, "main",
++        rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kTextureLoad,
++                                                uint64_t(i)));
+     if (load_pipelines_[i] == VK_NULL_HANDLE) {
+       REXGPU_ERROR(
+           "VulkanTextureCache: Failed to create the texture loading pipeline "
+@@ -3078,7 +3084,9 @@
+       if (current_load_shader_code_scaled.first) {
+         load_pipelines_scaled_[i] = ui::vulkan::util::CreateComputePipeline(
+             vulkan_device, load_pipeline_layout_, current_load_shader_code_scaled.first,
+-            current_load_shader_code_scaled.second);
++            current_load_shader_code_scaled.second, nullptr, "main",
++            rex::graphics::compile_trace::HelperKey(
++                rex::graphics::compile_trace::HelperKind::kTextureLoad, 0x100 | uint64_t(i)));
+         if (load_pipelines_scaled_[i] == VK_NULL_HANDLE) {
+           REXGPU_ERROR(
+               "VulkanTextureCache: Failed to create the resolution-scaled "
+diff --git a/src/ui/d3d12/d3d12_presenter.cpp b/src/ui/d3d12/d3d12_presenter.cpp
+--- a/src/ui/d3d12/d3d12_presenter.cpp
++++ b/src/ui/d3d12/d3d12_presenter.cpp
+@@ -1418,7 +1418,10 @@
+       guest_output_paint_pipeline_desc.RTVFormats[0] = kGuestOutputIntermediateFormat;
+       if (FAILED(rex::graphics::compile_trace::Call(
+               rex::graphics::compile_trace::Event::kHelperGraphics,
+-              "src/ui/d3d12/d3d12_presenter.cpp:1418", 0, [&] {
++              "src/ui/d3d12/d3d12_presenter.cpp:1418",
++              rex::graphics::compile_trace::HelperKey(
++                  rex::graphics::compile_trace::HelperKind::kPresenter, uint64_t(i) | 0x100),
++              [&] {
+                 return device->CreateGraphicsPipelineState(
+                     &guest_output_paint_pipeline_desc,
+                     IID_PPV_ARGS(&guest_output_paint_intermediate_pipelines_[i]));
+@@ -1434,7 +1437,10 @@
+       guest_output_paint_pipeline_desc.RTVFormats[0] = kSwapChainFormat;
+       if (FAILED(rex::graphics::compile_trace::Call(
+               rex::graphics::compile_trace::Event::kHelperGraphics,
+-              "src/ui/d3d12/d3d12_presenter.cpp:1430", 0, [&] {
++              "src/ui/d3d12/d3d12_presenter.cpp:1430",
++              rex::graphics::compile_trace::HelperKey(
++                  rex::graphics::compile_trace::HelperKind::kPresenter, uint64_t(i)),
++              [&] {
+                 return device->CreateGraphicsPipelineState(
+                     &guest_output_paint_pipeline_desc,
+                     IID_PPV_ARGS(&guest_output_paint_final_pipelines_[i]));
+diff --git a/src/ui/d3d12/d3d12_util.cpp b/src/ui/d3d12/d3d12_util.cpp
+--- a/src/ui/d3d12/d3d12_util.cpp
++++ b/src/ui/d3d12/d3d12_util.cpp
+@@ -42,7 +42,8 @@
+ 
+ ID3D12PipelineState* CreateComputePipeline(ID3D12Device* device, const void* shader,
+                                            size_t shader_size,
+-                                           ID3D12RootSignature* root_signature) {
++                                           ID3D12RootSignature* root_signature,
++                                           uint64_t trace_key) {
+   D3D12_COMPUTE_PIPELINE_STATE_DESC desc;
+   desc.pRootSignature = root_signature;
+   desc.CS.pShaderBytecode = shader;
+@@ -53,7 +54,8 @@
+   desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+   ID3D12PipelineState* pipeline = nullptr;
+   rex::graphics::compile_trace::Call(
+-      rex::graphics::compile_trace::Event::kHelperCompute, "src/ui/d3d12/d3d12_util.cpp:54", 0,
++      rex::graphics::compile_trace::Event::kHelperCompute, "src/ui/d3d12/d3d12_util.cpp:54",
++      trace_key,
+       [&] { return device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)); });
+   return pipeline;
+ }
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -1838,7 +1838,7 @@
+             assert_true(CanGuestOutputPaintEffectBeFinal(swapchain_effect));
+             assert_true(guest_output_paint_fs_[size_t(swapchain_effect)] != VK_NULL_HANDLE);
+             swapchain_effect_pipeline.swapchain_pipeline = CreateGuestOutputPaintPipeline(
+-                swapchain_effect, paint_context_.swapchain_render_pass);
++                swapchain_effect, paint_context_.swapchain_render_pass, false);
+             if (swapchain_effect_pipeline.swapchain_pipeline == VK_NULL_HANDLE) {
+               guest_output_flow.effect_count = 0;
+             }
+@@ -2507,7 +2507,7 @@
+       continue;
+     }
+     VkPipeline guest_output_paint_intermediate_pipeline = CreateGuestOutputPaintPipeline(
+-        GuestOutputPaintEffect(i), guest_output_intermediate_render_pass_);
++        GuestOutputPaintEffect(i), guest_output_intermediate_render_pass_, true);
+     if (guest_output_paint_intermediate_pipeline == VK_NULL_HANDLE) {
+       return false;
+     }
+@@ -2572,7 +2572,8 @@
+ }
+ 
+ VkPipeline VulkanPresenter::CreateGuestOutputPaintPipeline(GuestOutputPaintEffect effect,
+-                                                           VkRenderPass render_pass) {
++                                                           VkRenderPass render_pass,
++                                                           bool intermediate) {
+   VkPipelineShaderStageCreateInfo stages[2] = {};
+   for (uint32_t i = 0; i < 2; ++i) {
+     VkPipelineShaderStageCreateInfo& stage = stages[i];
+@@ -2651,12 +2652,16 @@
+   const VkDevice device = vulkan_device_->device();
+ 
+   VkPipeline pipeline;
+-  if (rex::graphics::compile_trace::Call(rex::graphics::compile_trace::Event::kHelperGraphics,
+-                                         "src/ui/vulkan/vulkan_presenter.cpp:2653", 0, [&] {
+-                                           return dfn.vkCreateGraphicsPipelines(
+-                                               device, VK_NULL_HANDLE, 1, &pipeline_create_info,
+-                                               nullptr, &pipeline);
+-                                         }) != VK_SUCCESS) {
++  if (rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kHelperGraphics,
++          "src/ui/vulkan/vulkan_presenter.cpp:2653",
++          rex::graphics::compile_trace::HelperKey(
++              rex::graphics::compile_trace::HelperKind::kPresenter,
++              uint64_t(size_t(effect)) | (intermediate ? 0x100 : 0)),
++          [&] {
++            return dfn.vkCreateGraphicsPipelines(
++                device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline);
++          }) != VK_SUCCESS) {
+     REXLOG_ERROR(
+         "VulkanPresenter: Failed to create the guest output painting pipeline "
+         "for effect {}",
+diff --git a/src/ui/vulkan/vulkan_util.cpp b/src/ui/vulkan/vulkan_util.cpp
+--- a/src/ui/vulkan/vulkan_util.cpp
++++ b/src/ui/vulkan/vulkan_util.cpp
+@@ -176,7 +176,7 @@
+ VkPipeline CreateComputePipeline(const VulkanDevice* const vulkan_device,
+                                  const VkPipelineLayout layout, const VkShaderModule shader,
+                                  const VkSpecializationInfo* const specialization_info,
+-                                 const char* const entry_point) {
++                                 const char* const entry_point, const uint64_t trace_key) {
+   VkComputePipelineCreateInfo pipeline_create_info;
+   pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+   pipeline_create_info.pNext = nullptr;
+@@ -194,7 +194,7 @@
+   VkPipeline pipeline;
+   if (rex::graphics::compile_trace::Call(
+           rex::graphics::compile_trace::Event::kHelperCompute, "src/ui/vulkan/vulkan_util.cpp:194",
+-          0, [&] {
++          trace_key, [&] {
+             return vulkan_device->functions().vkCreateComputePipelines(
+                 vulkan_device->device(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
+                 &pipeline);
+@@ -207,14 +207,14 @@
+ VkPipeline CreateComputePipeline(const VulkanDevice* const vulkan_device, VkPipelineLayout layout,
+                                  const uint32_t* shader_code, size_t shader_code_size_bytes,
+                                  const VkSpecializationInfo* specialization_info,
+-                                 const char* entry_point) {
++                                 const char* entry_point, const uint64_t trace_key) {
+   const VkShaderModule shader =
+       CreateShaderModule(vulkan_device, shader_code, shader_code_size_bytes);
+   if (shader == VK_NULL_HANDLE) {
+     return VK_NULL_HANDLE;
+   }
+-  const VkPipeline pipeline =
+-      CreateComputePipeline(vulkan_device, layout, shader, specialization_info, entry_point);
++  const VkPipeline pipeline = CreateComputePipeline(vulkan_device, layout, shader,
++                                                    specialization_info, entry_point, trace_key);
+   vulkan_device->functions().vkDestroyShaderModule(vulkan_device->device(), shader, nullptr);
+   return pipeline;
+ }

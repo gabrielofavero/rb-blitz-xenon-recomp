@@ -254,6 +254,13 @@ class CatalogueTests(unittest.TestCase):
             "no-dependencies": {**base, "dependencies": []},
             "wrong-prefix": {**base, "id": "vulkan.one"},
             "missing-field": {key: value for key, value in base.items() if key != "variants"},
+            "key-coverage-without-key-identity": {**base, "coverage": "key_identified"},
+            "key-identity-with-site-unique": {
+                **base, "trace": {**base["trace"], "identity": "key",
+                                   "key_bits": "kind 1 (kDump)"}},
+            "key-identity-without-bits": {
+                **base, "coverage": "key_identified",
+                "trace": {**base["trace"], "identity": "key"}},
         }
         for name, row in mutations.items():
             path = self.write_helpers([row])
@@ -302,6 +309,20 @@ class CatalogueTests(unittest.TestCase):
         coverage = pc.helper_coverage(repeated)
         self.assertFalse(coverage["complete"])
         self.assertEqual(coverage["key_identity_unresolved"], ["d3d12.repeated"])
+
+    def test_key_identified_helper_is_not_a_blocker(self):
+        row = {"id": "d3d12.keyed", "kind": "compute", "site": "s.cpp", "function": "f",
+               "when": "startup",
+               "trace": {"event": "helper_compute", "site": "s.cpp:1", "identity": "key",
+                         "key_bits": "kind 4 (kDump) << 56 | DumpPipelineKey"},
+               "key": {"fields": ["msaa_samples"]}, "dependencies": ["d"], "variants": "many",
+               "coverage": "key_identified"}
+        entries = pc.load_helper_inventory(self.write_helpers([row]), "5841122D")
+        coverage = pc.helper_coverage(entries)
+        self.assertTrue(coverage["complete"])
+        self.assertEqual(coverage["key_identified"], 1)
+        self.assertEqual(coverage["site_repeated"], 0)
+        self.assertEqual(coverage["key_identity_unresolved"], [])
 
     def test_merged_store_is_replayable(self):
         self.write_helpers()
@@ -384,6 +405,27 @@ class CatalogueTests(unittest.TestCase):
             self.assertTrue(trace_source.exists(), f"{entry['id']}: {match.group(1)} is missing")
             self.assertIn(site, trace_source.read_text(encoding="utf-8"),
                           f"{entry['id']}: trace site '{site}' drifted out of the SDK source")
+
+    def test_shipped_helper_keys_match_the_trace_enum(self):
+        header = (ROOT / "rexglue-sdk" / "include" / "rex" / "graphics" /
+                  "compile_trace.h").read_text(encoding="utf-8")
+        kind_enum = {name: int(value)
+                     for name, value in re.findall(r"(k\w+)\s*=\s*(\d+)\s*,", header)}
+        self.assertIn("kTransfer", kind_enum, "HelperKind drifted out of the trace header")
+        entries = pc.load_helper_inventory(
+            ROOT / "config" / "pipeline_helper_inventory.json", "5841122D")
+        self.assertFalse([entry["id"] for entry in entries
+                          if entry["coverage"] == "site_repeated"],
+                         "a helper recipe still carries no key and remains a coverage blocker")
+        keyed = [entry for entry in entries if entry["coverage"] == "key_identified"]
+        self.assertGreaterEqual(len(keyed), 20, "the keyed helper set shrank unexpectedly")
+        for entry in keyed:
+            match = re.match(r"kind (\d+) \((k\w+)\)", entry["trace"]["key_bits"])
+            self.assertIsNotNone(match, f"{entry['id']}: key_bits do not name the helper kind")
+            kind, name = int(match.group(1)), match.group(2)
+            self.assertIn(name, kind_enum, f"{entry['id']}: {name} is not a HelperKind")
+            self.assertEqual(kind_enum[name], kind,
+                             f"{entry['id']}: {name} moved in the trace header")
 
     @unittest.skipUnless((ROOT / "out" / "shader-cache-p0" / "runs").is_dir(),
                          "no preserved P0 stores in this checkout")

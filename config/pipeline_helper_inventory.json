@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "title_id": "5841122D",
-  "note": "P3 inventory of lazy and startup graphics/compute pipelines the renderer creates outside the guest .xpso recipe stores. Recipes are normalized descriptions plus their creation key and dependencies; no shader bytes. trace.site is the exact site string the P0 shader_compile_trace instrument logs, so this file stays checkable against the SDK sources. coverage=site_unique means the trace site identifies one creation per process; coverage=site_repeated means one trace site creates several pipelines and its key is not yet carried in the trace.",
+  "note": "P3 inventory of lazy and startup graphics/compute pipelines the renderer creates outside the guest .xpso recipe stores. Recipes are normalized descriptions plus their creation key and dependencies; no shader bytes. trace.site is the exact site string the P0 shader_compile_trace instrument logs, so this file stays checkable against the SDK sources. coverage=site_unique means the trace site identifies one creation per process; coverage=key_identified means one trace site creates several pipelines and each creation now logs the caller's key (trace.key_bits documents its layout, so a logged key can be read back into a recipe); coverage=site_repeated would mean the key is still not carried and remains a blocker.",
   "backends": {
     "d3d12": {
       "entries": [
@@ -11,11 +11,25 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/d3d12/render_target_cache.cpp:847", "identity": "call_site"},
-          "key": {"fields": ["color format (k_32_FLOAT | k_32_32_FLOAT)", "sample count (1x, 2x, 4x)"]},
-          "dependencies": ["uint32_rtv_clear_root_signature_", "shaders::fullscreen_cw_vs", "shaders::clear_uint2_ps"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/d3d12/render_target_cache.cpp:847",
+            "identity": "key",
+            "key_bits": "kind 7 (kClearRtv) << 56 | format index << 8 | sample index"
+          },
+          "key": {
+            "fields": [
+              "color format (k_32_FLOAT | k_32_32_FLOAT)",
+              "sample count (1x, 2x, 4x)"
+            ]
+          },
+          "dependencies": [
+            "uint32_rtv_clear_root_signature_",
+            "shaders::fullscreen_cw_vs",
+            "shaders::clear_uint2_ps"
+          ],
           "variants": "6 pipelines from the two loop bounds in source",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.resolve_copy",
@@ -23,11 +37,24 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup",
-          "trace": {"event": "helper_compute", "site": "src/ui/d3d12/d3d12_util.cpp:54", "identity": "shared_util_site"},
-          "key": {"fields": ["draw_util::ResolveCopyShaderIndex", "draw_resolution_scaled"]},
-          "dependencies": ["resolve_copy_root_signature_", "kResolveCopyShaders[] (unscaled/scaled)"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 1 (kResolveCopy) << 56 | ResolveCopyShaderIndex | 0x100 when draw-resolution scaled"
+          },
+          "key": {
+            "fields": [
+              "draw_util::ResolveCopyShaderIndex",
+              "draw_resolution_scaled"
+            ]
+          },
+          "dependencies": [
+            "resolve_copy_root_signature_",
+            "kResolveCopyShaders[] (unscaled/scaled)"
+          ],
           "variants": "one pipeline per ResolveCopyShaderIndex and draw-resolution-scaled variant",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.host_depth_store",
@@ -35,11 +62,23 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup",
-          "trace": {"event": "helper_compute", "site": "src/ui/d3d12/d3d12_util.cpp:54", "identity": "shared_util_site"},
-          "key": {"fields": ["sample count (1x, 2x, 4x)"]},
-          "dependencies": ["host depth store compute root signature", "shaders::host_depth_store_{1,2,4}xmsaa_cs"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 2 (kHostDepthStore) << 56 | 0 = 1x, 1 = 2x, 2 = 4x"
+          },
+          "key": {
+            "fields": [
+              "sample count (1x, 2x, 4x)"
+            ]
+          },
+          "dependencies": [
+            "host depth store compute root signature",
+            "shaders::host_depth_store_{1,2,4}xmsaa_cs"
+          ],
           "variants": "one pipeline per supported sample count",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.rov_resolve_clear",
@@ -47,11 +86,23 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup (ROV path only)",
-          "trace": {"event": "helper_compute", "site": "src/ui/d3d12/d3d12_util.cpp:54", "identity": "shared_util_site"},
-          "key": {"fields": ["destination component width (32bpp | 64bpp)"]},
-          "dependencies": ["ROV resolve clear root signature", "resolve clear compute shaders"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 3 (kRovClear) << 56 | 0 = 32bpp, 1 = 64bpp, | 0x100 when draw-resolution scaled"
+          },
+          "key": {
+            "fields": [
+              "destination component width (32bpp | 64bpp)"
+            ]
+          },
+          "dependencies": [
+            "ROV resolve clear root signature",
+            "resolve clear compute shaders"
+          ],
           "variants": "2 pipelines (32bpp, 64bpp)",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.transfer",
@@ -59,11 +110,28 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::GetOrCreateTransferPipelines",
           "when": "lazy: first ownership transfer for a key",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/d3d12/render_target_cache.cpp:3773", "identity": "call_site"},
-          "key": {"layout": "D3D12RenderTargetCache::TransferShaderKey", "fields": ["mode (TransferMode)", "dest_resource_format", "source_resource_format", "dest_msaa_samples"]},
-          "dependencies": ["transfer_root_signatures_[mode]", "shaders::passthrough_position_xy_vs", "built transfer pixel shader"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/d3d12/render_target_cache.cpp:3773",
+            "identity": "key",
+            "key_bits": "kind 5 (kTransfer) << 56 | TransferShaderKey (low 32 bits)"
+          },
+          "key": {
+            "layout": "D3D12RenderTargetCache::TransferShaderKey",
+            "fields": [
+              "mode (TransferMode)",
+              "dest_resource_format",
+              "source_resource_format",
+              "dest_msaa_samples"
+            ]
+          },
+          "dependencies": [
+            "transfer_root_signatures_[mode]",
+            "shaders::passthrough_position_xy_vs",
+            "built transfer pixel shader"
+          ],
           "variants": "one pipeline per TransferShaderKey actually used by a render-target ownership transfer",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.transfer_stencil_bit",
@@ -71,11 +139,29 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::GetOrCreateTransferPipelines",
           "when": "lazy: first stencil-bit transfer for a key",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/d3d12/render_target_cache.cpp:3734", "identity": "call_site"},
-          "key": {"layout": "TransferShaderKey + stencil write mask bit", "fields": ["mode", "dest_resource_format", "source_resource_format", "dest_msaa_samples", "stencil bit (0..7)"]},
-          "dependencies": ["transfer_root_signatures_[mode]", "passthrough VS", "built stencil transfer pixel shader"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/d3d12/render_target_cache.cpp:3734",
+            "identity": "key",
+            "key_bits": "kind 6 (kTransferStencilBit) << 56 | TransferShaderKey (low 32 bits); variant = stencil bit 0..7"
+          },
+          "key": {
+            "layout": "TransferShaderKey + stencil write mask bit",
+            "fields": [
+              "mode",
+              "dest_resource_format",
+              "source_resource_format",
+              "dest_msaa_samples",
+              "stencil bit (0..7)"
+            ]
+          },
+          "dependencies": [
+            "transfer_root_signatures_[mode]",
+            "passthrough VS",
+            "built stencil transfer pixel shader"
+          ],
           "variants": "8 pipelines per stencil-bit TransferShaderKey",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.dump",
@@ -83,11 +169,26 @@
           "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::GetOrCreateDumpPipeline",
           "when": "lazy: first dump of a render-target key",
-          "trace": {"event": "helper_compute", "site": "src/ui/d3d12/d3d12_util.cpp:54", "identity": "shared_util_site"},
-          "key": {"layout": "D3D12RenderTargetCache::DumpPipelineKey", "fields": ["msaa_samples", "resource_format", "is_depth"]},
-          "dependencies": ["dump_root_signature_depth_/color_", "generated DXBC dump shader from key"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 4 (kDump) << 56 | DumpPipelineKey (low 32 bits)"
+          },
+          "key": {
+            "layout": "D3D12RenderTargetCache::DumpPipelineKey",
+            "fields": [
+              "msaa_samples",
+              "resource_format",
+              "is_depth"
+            ]
+          },
+          "dependencies": [
+            "dump_root_signature_depth_/color_",
+            "generated DXBC dump shader from key"
+          ],
           "variants": "one pipeline per DumpPipelineKey actually dumped",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.immediate_drawer_triangle",
@@ -95,9 +196,19 @@
           "site": "rexglue-sdk/src/ui/d3d12/d3d12_immediate_drawer.cpp",
           "function": "D3D12ImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/d3d12/d3d12_immediate_drawer.cpp:159", "identity": "call_site"},
-          "key": {"fields": []},
-          "dependencies": ["immediate drawer root signature", "triangle pixel/vertex shaders", "kSwapChainFormat"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/d3d12/d3d12_immediate_drawer.cpp:159",
+            "identity": "call_site"
+          },
+          "key": {
+            "fields": []
+          },
+          "dependencies": [
+            "immediate drawer root signature",
+            "triangle pixel/vertex shaders",
+            "kSwapChainFormat"
+          ],
           "variants": "1",
           "coverage": "site_unique"
         },
@@ -107,9 +218,19 @@
           "site": "rexglue-sdk/src/ui/d3d12/d3d12_immediate_drawer.cpp",
           "function": "D3D12ImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/d3d12/d3d12_immediate_drawer.cpp:164", "identity": "call_site"},
-          "key": {"fields": []},
-          "dependencies": ["immediate drawer root signature", "line pixel/vertex shaders", "kSwapChainFormat"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/d3d12/d3d12_immediate_drawer.cpp:164",
+            "identity": "call_site"
+          },
+          "key": {
+            "fields": []
+          },
+          "dependencies": [
+            "immediate drawer root signature",
+            "line pixel/vertex shaders",
+            "kSwapChainFormat"
+          ],
           "variants": "1",
           "coverage": "site_unique"
         },
@@ -119,11 +240,24 @@
           "site": "rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp",
           "function": "D3D12Presenter::InitializeGuestOutputPaint",
           "when": "startup (presenter)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/d3d12/d3d12_presenter.cpp:1418", "identity": "call_site"},
-          "key": {"fields": ["GuestOutputPaintEffect"]},
-          "dependencies": ["guest output paint root signature", "effect pixel shader", "kGuestOutputIntermediateFormat"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/d3d12/d3d12_presenter.cpp:1418",
+            "identity": "key",
+            "key_bits": "kind 8 (kPresenter) << 56 | GuestOutputPaintEffect | 0x100"
+          },
+          "key": {
+            "fields": [
+              "GuestOutputPaintEffect"
+            ]
+          },
+          "dependencies": [
+            "guest output paint root signature",
+            "effect pixel shader",
+            "kGuestOutputIntermediateFormat"
+          ],
           "variants": "one pipeline per supported paint effect that may be intermediate",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.presenter_final",
@@ -131,11 +265,24 @@
           "site": "rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp",
           "function": "D3D12Presenter::InitializeGuestOutputPaint",
           "when": "startup (presenter)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/d3d12/d3d12_presenter.cpp:1430", "identity": "call_site"},
-          "key": {"fields": ["GuestOutputPaintEffect"]},
-          "dependencies": ["guest output paint root signature", "effect pixel shader", "kSwapChainFormat"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/d3d12/d3d12_presenter.cpp:1430",
+            "identity": "key",
+            "key_bits": "kind 8 (kPresenter) << 56 | GuestOutputPaintEffect"
+          },
+          "key": {
+            "fields": [
+              "GuestOutputPaintEffect"
+            ]
+          },
+          "dependencies": [
+            "guest output paint root signature",
+            "effect pixel shader",
+            "kSwapChainFormat"
+          ],
           "variants": "one pipeline per supported paint effect that may be final",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "d3d12.compute_util",
@@ -143,11 +290,142 @@
           "site": "rexglue-sdk/src/ui/d3d12/d3d12_util.cpp",
           "function": "ui::d3d12::util::CreateComputePipeline",
           "when": "shared creation helper for every compute pipeline above",
-          "trace": {"event": "helper_compute", "site": "src/ui/d3d12/d3d12_util.cpp:54", "identity": "shared_util_site"},
-          "key": {"fields": ["shader bytes", "root signature"]},
-          "dependencies": ["caller-owned shader and root signature"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 10 (kComputeUtil) << 56 | the caller's HelperKey; a creation logged with key=0 is a caller that has not been keyed yet"
+          },
+          "key": {
+            "fields": [
+              "shader bytes",
+              "root signature"
+            ]
+          },
+          "dependencies": [
+            "caller-owned shader and root signature"
+          ],
           "variants": "every caller in this inventory",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
+        },
+        {
+          "id": "d3d12.texture_load",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/d3d12/texture_cache.cpp",
+          "function": "D3D12TextureCache::Initialize",
+          "when": "startup, for every texture load shader the used formats need",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 12 (kTextureLoad) << 56 | kLoadShaderIndex"
+          },
+          "key": {
+            "fields": [
+              "kLoadShaderIndex"
+            ]
+          },
+          "dependencies": [
+            "load_root_signature_",
+            "load_shader_code[index]"
+          ],
+          "variants": "one pipeline per texture load shader index the formats need",
+          "coverage": "key_identified"
+        },
+        {
+          "id": "d3d12.texture_load_scaled",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/d3d12/texture_cache.cpp",
+          "function": "D3D12TextureCache::Initialize",
+          "when": "startup when draw resolution is scaled",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 12 (kTextureLoad) << 56 | 0x100 | kLoadShaderIndex"
+          },
+          "key": {
+            "fields": [
+              "kLoadShaderIndex",
+              "draw-resolution-scaled variant"
+            ]
+          },
+          "dependencies": [
+            "load_root_signature_",
+            "load_shader_code_scaled[index]"
+          ],
+          "variants": "one pipeline per scaled texture load shader index the formats need",
+          "coverage": "key_identified"
+        },
+        {
+          "id": "d3d12.swap_gamma_compute",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/d3d12/command_processor.cpp",
+          "function": "D3D12CommandProcessor::SetupContext",
+          "when": "startup",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x200..0x203 = table/PWL, plain and FXAA-luma"
+          },
+          "key": {
+            "fields": [
+              "gamma shader variant (256-entry table | PWL, ±FXAA luma)"
+            ]
+          },
+          "dependencies": [
+            "apply_gamma_root_signature_",
+            "apply_gamma_*_cs"
+          ],
+          "variants": "4 pipelines",
+          "coverage": "key_identified"
+        },
+        {
+          "id": "d3d12.swap_fxaa",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/d3d12/command_processor.cpp",
+          "function": "D3D12CommandProcessor::SetupContext",
+          "when": "startup when FXAA is enabled",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x400 = FXAA, 0x401 = FXAA extreme"
+          },
+          "key": {
+            "fields": [
+              "fxaa | fxaa extreme"
+            ]
+          },
+          "dependencies": [
+            "fxaa_root_signature_",
+            "shaders::fxaa_cs / fxaa_extreme_cs"
+          ],
+          "variants": "one pipeline per enabled FXAA variant",
+          "coverage": "key_identified"
+        },
+        {
+          "id": "d3d12.resolve_downscale",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/d3d12/command_processor.cpp",
+          "function": "D3D12CommandProcessor::SetupContext",
+          "when": "startup when the resolve-downscale root signature exists",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x500"
+          },
+          "key": {
+            "fields": []
+          },
+          "dependencies": [
+            "resolve_downscale_root_signature_",
+            "shaders::resolve_downscale_cs"
+          ],
+          "variants": "1",
+          "coverage": "key_identified"
         }
       ]
     },
@@ -159,11 +437,26 @@
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::GetTransferPipelines",
           "when": "lazy: first ownership transfer for a key",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/vulkan/render_target_cache.cpp:4509", "identity": "call_site"},
-          "key": {"layout": "VulkanRenderTargetCache::TransferPipelineKey", "fields": ["render_pass_key (msaa, attachments, formats, transfer formats)", "shader_key (mode, formats, msaa, color rt index)"]},
-          "dependencies": ["GetHostRenderTargetsRenderPass(key.render_pass_key)", "GetTransferShader(key.shader_key)", "transfer_pipeline_layouts_[mode]"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/vulkan/render_target_cache.cpp:4509",
+            "identity": "key",
+            "key_bits": "kind 5 (kTransfer) << 56 | render_pass_key << 32 | shader_key"
+          },
+          "key": {
+            "layout": "VulkanRenderTargetCache::TransferPipelineKey",
+            "fields": [
+              "render_pass_key (msaa, attachments, formats, transfer formats)",
+              "shader_key (mode, formats, msaa, color rt index)"
+            ]
+          },
+          "dependencies": [
+            "GetHostRenderTargetsRenderPass(key.render_pass_key)",
+            "GetTransferShader(key.shader_key)",
+            "transfer_pipeline_layouts_[mode]"
+          ],
           "variants": "one pipeline per TransferPipelineKey actually used",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.transfer_masked_samples",
@@ -171,11 +464,24 @@
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::GetTransferPipelines",
           "when": "lazy: masked-sample variants of a transfer pipeline",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/vulkan/render_target_cache.cpp:4531", "identity": "call_site"},
-          "key": {"fields": ["TransferPipelineKey", "sample index (1..dest_sample_count-1)"]},
-          "dependencies": ["pipelines[0] as a derivative base", "sample-id specialization constant"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/vulkan/render_target_cache.cpp:4531",
+            "identity": "key",
+            "key_bits": "kind 5 (kTransfer) << 56 | render_pass_key << 32 | shader_key; variant = sample index"
+          },
+          "key": {
+            "fields": [
+              "TransferPipelineKey",
+              "sample index (1..dest_sample_count-1)"
+            ]
+          },
+          "dependencies": [
+            "pipelines[0] as a derivative base",
+            "sample-id specialization constant"
+          ],
           "variants": "dest_sample_count-1 pipelines per masked-sample TransferPipelineKey",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.resolve_copy",
@@ -183,11 +489,24 @@
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::Initialize",
           "when": "startup",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["draw_util::ResolveCopyShaderIndex", "draw_resolution_scaled"]},
-          "dependencies": ["resolve_copy_pipeline_layout_", "kResolveCopyShaders[]"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 1 (kResolveCopy) << 56 | ResolveCopyShaderIndex | 0x100 when draw-resolution scaled"
+          },
+          "key": {
+            "fields": [
+              "draw_util::ResolveCopyShaderIndex",
+              "draw_resolution_scaled"
+            ]
+          },
+          "dependencies": [
+            "resolve_copy_pipeline_layout_",
+            "kResolveCopyShaders[]"
+          ],
           "variants": "one pipeline per ResolveCopyShaderIndex and draw-resolution-scaled variant",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.texture_conversion",
@@ -195,11 +514,24 @@
           "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
           "function": "VulkanTextureCache::Initialize",
           "when": "startup",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["kTextureConversionShader", "load_pipeline_layout_"]},
-          "dependencies": ["texture load pipeline layout", "GPU fixed-point/integer conversion shader"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 11 (kTextureConversion) << 56 | 0 (one pipeline; format is a push constant)"
+          },
+          "key": {
+            "fields": [
+              "kTextureConversionShader",
+              "load_pipeline_layout_"
+            ]
+          },
+          "dependencies": [
+            "texture load pipeline layout",
+            "GPU fixed-point/integer conversion shader"
+          ],
           "variants": "1; endian, signedness and number format are push constants",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.host_depth_store",
@@ -207,11 +539,23 @@
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::Initialize",
           "when": "startup",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["sample count (1x, 2x, 4x)"]},
-          "dependencies": ["host depth store pipeline layout", "host depth store compute shaders"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 2 (kHostDepthStore) << 56 | 0 = 1x, 1 = 2x, 2 = 4x"
+          },
+          "key": {
+            "fields": [
+              "sample count (1x, 2x, 4x)"
+            ]
+          },
+          "dependencies": [
+            "host depth store pipeline layout",
+            "host depth store compute shaders"
+          ],
           "variants": "one pipeline per supported sample count",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.fsi_resolve_clear",
@@ -219,11 +563,23 @@
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::Initialize",
           "when": "startup (FSI path only)",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["destination component width (32bpp | 64bpp)"]},
-          "dependencies": ["FSI resolve clear pipeline layout", "resolve clear compute shaders"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 3 (kRovClear) << 56 | 0 = 32bpp, 1 = 64bpp, | 0x100 when draw-resolution scaled"
+          },
+          "key": {
+            "fields": [
+              "destination component width (32bpp | 64bpp)"
+            ]
+          },
+          "dependencies": [
+            "FSI resolve clear pipeline layout",
+            "resolve clear compute shaders"
+          ],
           "variants": "2 pipelines (32bpp, 64bpp)",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.dump",
@@ -231,11 +587,26 @@
           "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::GetOrCreateDumpPipeline",
           "when": "lazy: first dump of a render-target key",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"layout": "VulkanRenderTargetCache::DumpPipelineKey", "fields": ["msaa_samples", "resource_format", "is_depth"]},
-          "dependencies": ["dump_pipeline_layout_depth_/color_", "generated SPIR-V dump shader from key"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 4 (kDump) << 56 | DumpPipelineKey (low 32 bits)"
+          },
+          "key": {
+            "layout": "VulkanRenderTargetCache::DumpPipelineKey",
+            "fields": [
+              "msaa_samples",
+              "resource_format",
+              "is_depth"
+            ]
+          },
+          "dependencies": [
+            "dump_pipeline_layout_depth_/color_",
+            "generated SPIR-V dump shader from key"
+          ],
           "variants": "one pipeline per DumpPipelineKey actually dumped",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.swap_gamma_graphics",
@@ -243,11 +614,24 @@
           "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
           "function": "VulkanCommandProcessor::InitializeTraceSwapPipelines",
           "when": "startup (presenter)",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/vulkan/command_processor.cpp:1724", "identity": "call_site"},
-          "key": {"fields": ["gamma pixel shader variant (256-entry table, PWL, FXAA luma)"]},
-          "dependencies": ["swap_apply_gamma_pipeline_layout_", "swap_apply_gamma_render_pass_", "gamma pixel shaders"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/vulkan/command_processor.cpp:1724",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0..3 = pixel shader variant"
+          },
+          "key": {
+            "fields": [
+              "gamma pixel shader variant (256-entry table, PWL, FXAA luma)"
+            ]
+          },
+          "dependencies": [
+            "swap_apply_gamma_pipeline_layout_",
+            "swap_apply_gamma_render_pass_",
+            "gamma pixel shaders"
+          ],
           "variants": "4 pipelines from the shader array",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.swap_gamma_rb_swap",
@@ -255,11 +639,23 @@
           "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
           "function": "VulkanCommandProcessor::InitializeTraceSwapPipelines",
           "when": "startup when imageViewFormatSwizzle is absent",
-          "trace": {"event": "helper_graphics", "site": "src/graphics/vulkan/command_processor.cpp:1744", "identity": "call_site"},
-          "key": {"fields": ["RB-swap gamma source (256-entry table | PWL)"]},
-          "dependencies": ["same pipeline layout/render pass as the gamma pipelines", "runtime-compiled RB-swap pixel shader"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/graphics/vulkan/command_processor.cpp:1744",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x100 | 0..1 = table/PWL red-blue fallback"
+          },
+          "key": {
+            "fields": [
+              "RB-swap gamma source (256-entry table | PWL)"
+            ]
+          },
+          "dependencies": [
+            "same pipeline layout/render pass as the gamma pipelines",
+            "runtime-compiled RB-swap pixel shader"
+          ],
           "variants": "2 pipelines from the two create_rb_swap_pipeline calls",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.swap_gamma_compute",
@@ -267,11 +663,24 @@
           "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
           "function": "VulkanCommandProcessor::InitializeTraceSwapCompute",
           "when": "startup when the graphics gamma path is unavailable",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["gamma compute variant", "RB-swap fallback"]},
-          "dependencies": ["gamma compute pipeline layout", "compute shaders"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x200..0x203 and 0x300..0x303 = table/PWL/±FXAA-luma, plain and red-blue fallback"
+          },
+          "key": {
+            "fields": [
+              "gamma compute variant",
+              "RB-swap fallback"
+            ]
+          },
+          "dependencies": [
+            "gamma compute pipeline layout",
+            "compute shaders"
+          ],
           "variants": "the compute pipeline set created by the swap compute initializer",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.swap_fxaa",
@@ -279,11 +688,24 @@
           "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
           "function": "VulkanCommandProcessor::InitializeTraceSwapCompute",
           "when": "startup when FXAA is enabled",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["fxaa | fxaa extreme", "resolve downscale"]},
-          "dependencies": ["FXAA pipeline layout", "FXAA compute shaders"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x400 = FXAA, 0x401 = FXAA extreme"
+          },
+          "key": {
+            "fields": [
+              "fxaa | fxaa extreme",
+              "resolve downscale"
+            ]
+          },
+          "dependencies": [
+            "FXAA pipeline layout",
+            "FXAA compute shaders"
+          ],
           "variants": "one pipeline per enabled FXAA/resolve-downscale variant",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.immediate_drawer_triangle",
@@ -291,9 +713,19 @@
           "site": "rexglue-sdk/src/ui/vulkan/vulkan_immediate_drawer.cpp",
           "function": "VulkanImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/vulkan/vulkan_immediate_drawer.cpp:675", "identity": "call_site"},
-          "key": {"fields": []},
-          "dependencies": ["pipeline_layout_", "ui draw context render pass", "triangle shaders"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/vulkan/vulkan_immediate_drawer.cpp:675",
+            "identity": "call_site"
+          },
+          "key": {
+            "fields": []
+          },
+          "dependencies": [
+            "pipeline_layout_",
+            "ui draw context render pass",
+            "triangle shaders"
+          ],
           "variants": "1",
           "coverage": "site_unique"
         },
@@ -303,9 +735,18 @@
           "site": "rexglue-sdk/src/ui/vulkan/vulkan_immediate_drawer.cpp",
           "function": "VulkanImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/vulkan/vulkan_immediate_drawer.cpp:690", "identity": "call_site"},
-          "key": {"fields": []},
-          "dependencies": ["triangle pipeline as derivative base", "line topology"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/vulkan/vulkan_immediate_drawer.cpp:690",
+            "identity": "call_site"
+          },
+          "key": {
+            "fields": []
+          },
+          "dependencies": [
+            "triangle pipeline as derivative base",
+            "line topology"
+          ],
           "variants": "1",
           "coverage": "site_unique"
         },
@@ -315,11 +756,24 @@
           "site": "rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp",
           "function": "VulkanPresenter::GetGuestOutputPaintPipeline",
           "when": "startup (presenter, per requested effect)",
-          "trace": {"event": "helper_graphics", "site": "src/ui/vulkan/vulkan_presenter.cpp:2653", "identity": "call_site"},
-          "key": {"fields": ["GuestOutputPaintEffect"]},
-          "dependencies": ["guest_output_paint_pipeline_layouts_[effect]", "effect render pass", "effect pixel shader"],
+          "trace": {
+            "event": "helper_graphics",
+            "site": "src/ui/vulkan/vulkan_presenter.cpp:2653",
+            "identity": "key",
+            "key_bits": "kind 8 (kPresenter) << 56 | GuestOutputPaintEffect | 0x100 when writing the intermediate target"
+          },
+          "key": {
+            "fields": [
+              "GuestOutputPaintEffect"
+            ]
+          },
+          "dependencies": [
+            "guest_output_paint_pipeline_layouts_[effect]",
+            "effect render pass",
+            "effect pixel shader"
+          ],
           "variants": "one pipeline per requested paint effect",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
         },
         {
           "id": "vulkan.compute_util",
@@ -327,11 +781,95 @@
           "site": "rexglue-sdk/src/ui/vulkan/vulkan_util.cpp",
           "function": "ui::vulkan::util::CreateComputePipeline",
           "when": "shared creation helper for every compute pipeline above",
-          "trace": {"event": "helper_compute", "site": "src/ui/vulkan/vulkan_util.cpp:194", "identity": "shared_util_site"},
-          "key": {"fields": ["shader module or code", "pipeline layout", "specialization info"]},
-          "dependencies": ["caller-owned shader, layout and specialization"],
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 10 (kComputeUtil) << 56 | the caller's HelperKey; a creation logged with key=0 is a caller that has not been keyed yet"
+          },
+          "key": {
+            "fields": [
+              "shader module or code",
+              "pipeline layout",
+              "specialization info"
+            ]
+          },
+          "dependencies": [
+            "caller-owned shader, layout and specialization"
+          ],
           "variants": "every caller in this inventory",
-          "coverage": "site_repeated"
+          "coverage": "key_identified"
+        },
+        {
+          "id": "vulkan.texture_load",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
+          "function": "VulkanTextureCache::Initialize",
+          "when": "startup, for every texture load shader the used formats need",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 12 (kTextureLoad) << 56 | kLoadShaderIndex"
+          },
+          "key": {
+            "fields": [
+              "kLoadShaderIndex"
+            ]
+          },
+          "dependencies": [
+            "load_pipeline_layout_",
+            "load_shader_code[index]"
+          ],
+          "variants": "one pipeline per texture load shader index actually needed",
+          "coverage": "key_identified"
+        },
+        {
+          "id": "vulkan.texture_load_scaled",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
+          "function": "VulkanTextureCache::Initialize",
+          "when": "startup when draw resolution is scaled",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 12 (kTextureLoad) << 56 | 0x100 | kLoadShaderIndex"
+          },
+          "key": {
+            "fields": [
+              "kLoadShaderIndex",
+              "draw-resolution-scaled variant"
+            ]
+          },
+          "dependencies": [
+            "load_pipeline_layout_",
+            "load_shader_code_scaled[index]"
+          ],
+          "variants": "one pipeline per scaled texture load shader index actually needed",
+          "coverage": "key_identified"
+        },
+        {
+          "id": "vulkan.resolve_downscale",
+          "kind": "compute",
+          "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
+          "function": "VulkanCommandProcessor::InitializeTraceSwapCompute",
+          "when": "startup when the resolve-downscale readback pipeline layout exists",
+          "trace": {
+            "event": "helper_compute",
+            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "identity": "key",
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x500"
+          },
+          "key": {
+            "fields": []
+          },
+          "dependencies": [
+            "resolve_downscale_pipeline_layout_",
+            "shaders::resolve_downscale_cs"
+          ],
+          "variants": "1",
+          "coverage": "key_identified"
         }
       ]
     }

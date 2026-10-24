@@ -530,14 +530,20 @@ def load_helper_inventory(path, title_id):
             ids.add(row["id"])
             if row["kind"] not in ("graphics", "compute"):
                 raise ValueError(f"{path}: helper '{row['id']}' has an invalid kind")
-            if row["coverage"] not in ("site_unique", "site_repeated"):
+            if row["coverage"] not in ("site_unique", "key_identified", "site_repeated"):
                 raise ValueError(f"{path}: helper '{row['id']}' has invalid coverage")
             trace = row["trace"]
             if not isinstance(trace, dict) or trace.get("event") not in (
                     "helper_graphics", "helper_compute"):
                 raise ValueError(f"{path}: helper '{row['id']}' has an invalid trace event")
-            if trace.get("identity") not in ("call_site", "shared_util_site"):
+            if trace.get("identity") not in ("call_site", "shared_util_site", "key"):
                 raise ValueError(f"{path}: helper '{row['id']}' has invalid trace identity")
+            if (trace.get("identity") == "key") != (row["coverage"] == "key_identified"):
+                raise ValueError(f"{path}: helper '{row['id']}' must pair a key identity with "
+                                 "key_identified coverage, and only with it")
+            if trace.get("identity") == "key" and not isinstance(trace.get("key_bits"), str):
+                raise ValueError(f"{path}: helper '{row['id']}' carries a key but does not "
+                                 "document its bit layout")
             if not isinstance(trace.get("site"), str) or not re.fullmatch(r"[^\s]+:\d+", trace["site"]):
                 raise ValueError(f"{path}: helper '{row['id']}' has an invalid trace site")
             if not isinstance(row["dependencies"], list) or not row["dependencies"]:
@@ -550,9 +556,12 @@ def load_helper_inventory(path, title_id):
 
 def helper_coverage(entries):
     repeated = [row["id"] for row in entries if row["coverage"] == "site_repeated"]
+    key_identified = [row["id"] for row in entries if row["coverage"] == "key_identified"]
+    site_unique = [row["id"] for row in entries if row["coverage"] == "site_unique"]
     return {
         "inventoried": len(entries),
-        "site_unique": len(entries) - len(repeated),
+        "site_unique": len(site_unique),
+        "key_identified": len(key_identified),
         "site_repeated": len(repeated),
         "complete": not repeated,
         "key_identity_unresolved": repeated,
@@ -676,7 +685,8 @@ def print_report(stores, entries, catalogue):
           f"({catalogue['coverage']['resolution']})")
     helpers = catalogue["coverage"]["helpers"]
     print(f"Helpers: {helpers['inventoried']} inventoried "
-          f"({helpers['site_unique']} site-unique, {helpers['site_repeated']} site-repeated)")
+          f"({helpers['site_unique']} site-unique, {helpers['key_identified']} key-identified, "
+          f"{helpers['site_repeated']} site-repeated)")
     if catalogue["coverage"]["outside_committed_candidate"]:
         print(f"Outside the committed candidate: "
               f"{len(catalogue['coverage']['outside_committed_candidate'])} shader identit(ies)")

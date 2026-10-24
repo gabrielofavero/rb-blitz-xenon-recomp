@@ -89,6 +89,20 @@ readback slots. The new headless DX12 test exercises production sequencing and
 GPU readback. See [DX12 loading freeze](../docs/engine/d3d12-loading-freeze.md) for
 the reported run, validation and the limits of the diagnosis.
 
+`rexglue-sdk/0026-helper-pipeline-key-identity.patch` gives every helper pipeline
+creation a real identity in `shader_compile_trace`. Before it, the shared
+`CreateComputePipeline` utilities and the render-target, presenter and swap-chain
+creators logged the placeholder `key=0`, so one trace site could not be told apart
+from another and the P3 catalogue could only describe those recipes by call site. The
+`HelperKind` enum (`include/rex/graphics/compile_trace.h`) names the creator in the
+key's upper byte and the caller's own packed key sits below it (`TransferShaderKey`,
+`DumpPipelineKey`, `ResolveCopyShaderIndex`, sample counts, paint effect, texture load
+shader index, and so on); masked-sample and stencil-bit derivatives use the trace's
+`variant` field, and `compile_trace::Call` gained that argument to carry them. The
+change is instrumentation only — no creation, submission or synchronization decision
+reads a key. See the [P3 record](../docs/engine/shader-cache-p3.md) and
+[`config/pipeline_helper_inventory.json`](../config/pipeline_helper_inventory.json).
+
 ## Apply / verify
 
 ```powershell
