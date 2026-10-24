@@ -279,41 +279,74 @@ void TestRetryPolicy() {
 // --- Install rules --------------------------------------------------------------------------------
 
 void TestInstallPlanning() {
-  BeginCase("an install is staged under the root and named by a hash, not by the offer");
+  BeginCase("an install is staged under the root and named after the song, made safe");
   const fs::path root = fs::path("D:/Songs");
   InstallLayout flat;
   flat.destination_root = root;
   std::string error;
-  const std::optional<StagedInstall> flat_plan = PlanInstall(flat, "opaque-id", &error);
+  const std::optional<StagedInstall> flat_plan =
+      PlanInstall(flat, "opaque-id", "The Artist - The Song", &error);
   CHECK_TRUE(flat_plan.has_value());
   CHECK_STR_EQ(flat_plan ? flat_plan->staging_dir.filename().string() : "",
                std::string(rbfs::kStoreStagingDirName));
   CHECK_TRUE(flat_plan && flat_plan->staging_dir.parent_path() == root);
   CHECK_TRUE(flat_plan && flat_plan->final_dir == root);
+  CHECK_STR_EQ(flat_plan ? flat_plan->final_name : "", std::string("The Artist - The Song"));
   CHECK_TRUE(flat_plan && IsValidInstallName(flat_plan->final_name));
-  CHECK_TRUE(flat_plan && flat_plan->final_name.size() == kInstallNameBytes);
-  CHECK_FALSE(flat_plan && flat_plan->final_name.find("opaque-id") != std::string::npos);
+  // No extension: a dot would read as a format, and a package has none.
+  CHECK_TRUE(flat_plan && flat_plan->final_name.find('.') == std::string::npos);
+  // The part file keeps the id's hash, so staging never carries the song's name.
+  CHECK_TRUE(flat_plan && flat_plan->part_path.filename().string().starts_with("rv_"));
+  CHECK_TRUE(flat_plan && flat_plan->part_path.filename().string().ends_with(".part"));
 
   InstallLayout structured;
   structured.destination_root = root;
   structured.structured = true;
-  const std::optional<StagedInstall> structured_plan = PlanInstall(structured, "opaque-id", &error);
+  const std::optional<StagedInstall> structured_plan =
+      PlanInstall(structured, "opaque-id", "The Artist - The Song", &error);
   CHECK_TRUE(structured_plan.has_value());
   CHECK_TRUE(structured_plan &&
              structured_plan->final_dir == root / "45410914" / "00000002");
 
   InstallLayout empty;
-  CHECK_FALSE(PlanInstall(empty, "opaque-id", &error).has_value());
-  CHECK_FALSE(PlanInstall(flat, "", &error).has_value());
+  CHECK_FALSE(PlanInstall(empty, "opaque-id", "The Artist - The Song", &error).has_value());
+  CHECK_FALSE(PlanInstall(flat, "", "The Artist - The Song", &error).has_value());
 
-  CHECK_TRUE(IsValidInstallName(flat_plan ? flat_plan->final_name : ""));
-  CHECK_TRUE(IsValidInstallName("rv_0123456789abcdef0123456789abcdef.con"));
-  CHECK_TRUE(IsValidInstallName("rv_0123456789abcdef0123456789abcdef~12.con"));
-  CHECK_FALSE(IsValidInstallName("rv_0123456789ABCDEF0123456789abcdef.con"));
-  CHECK_FALSE(IsValidInstallName("opaque-id.con"));
-  CHECK_FALSE(IsValidInstallName("rv_0123456789abcdef0123456789abcdef.zip"));
-  CHECK_FALSE(IsValidInstallName("rv_0123456789abcdef0123456789abcdef.conx"));
-  CHECK_FALSE(IsValidInstallName("rv_0123456789abcdef0123456789abcdef~.con"));
+  // An offer with no usable name still installs, under its id's hash.
+  const std::optional<StagedInstall> unnamed = PlanInstall(flat, "opaque-id", "", &error);
+  CHECK_TRUE(unnamed.has_value());
+  CHECK_STR_EQ(unnamed ? unnamed->final_name : "", InstallStem("opaque-id"));
+  CHECK_TRUE(unnamed && IsValidInstallName(unnamed->final_name));
+
+  // The sanitizer: dots, the punctuation Windows refuses, the ends, and device names.
+  CHECK_STR_EQ(InstallName("Mr. Brightside"), std::string("Mr Brightside"));
+  CHECK_STR_EQ(InstallName("AC/DC: Back in Black?"), std::string("ACDC Back in Black"));
+  CHECK_STR_EQ(InstallName("  A  -  B  "), std::string("A - B"));
+  CHECK_STR_EQ(InstallName("Tab\tand\nnewline"), std::string("Tabandnewline"));
+  CHECK_STR_EQ(InstallName("CON"), std::string("CON_"));
+  CHECK_STR_EQ(InstallName("nul"), std::string("nul_"));
+  CHECK_STR_EQ(InstallName("LPT2"), std::string("LPT2_"));
+  CHECK_STR_EQ(InstallName("CONSOLE"), std::string("CONSOLE"));
+  CHECK_STR_EQ(InstallName("NUL ~ x"), std::string("NUL ~ x"));
+  CHECK_STR_EQ(InstallName("..."), std::string(""));
+
+  // The guest's field is 42 bytes: the name is cut at a code point, never inside one, and never
+  // ends in the space the cut may have exposed.
+  CHECK_TRUE(InstallName(std::string(80, 'a')).size() == kMaxInstallFileNameBytes);
+  CHECK_TRUE(InstallName(std::string(41, 'a') + " b").size() == 41);
+  const std::string emoji = InstallName(std::string(40, 'a') + "\xF0\x9F\x98\x80" + "bbbb");
+  CHECK_TRUE(emoji.size() == 40);  // the 4-byte code point would have been cut in half
+  CHECK_TRUE(IsValidInstallName(emoji));
+
+  // The validator: what this module can produce, and nothing a host would refuse.
+  CHECK_TRUE(IsValidInstallName("The Artist - The Song"));
+  CHECK_FALSE(IsValidInstallName(""));
+  CHECK_FALSE(IsValidInstallName("Artist - Song.con"));
+  CHECK_FALSE(IsValidInstallName("Artist/Song"));
+  CHECK_FALSE(IsValidInstallName("Artist: Song"));
+  CHECK_FALSE(IsValidInstallName("Trailing "));
+  CHECK_FALSE(IsValidInstallName("CON"));
+  CHECK_FALSE(IsValidInstallName(std::string(kMaxInstallFileNameBytes + 1, 'a')));
 }
 
 void TestStagingAndCommit() {
@@ -322,7 +355,7 @@ void TestStagingAndCommit() {
   InstallLayout layout;
   layout.destination_root = scratch.base / "library";
   std::string error;
-  const std::optional<StagedInstall> plan = PlanInstall(layout, "same-offer", &error);
+  const std::optional<StagedInstall> plan = PlanInstall(layout, "same-offer", "Same Offer", &error);
   CHECK_TRUE(plan.has_value());
   CHECK_TRUE(plan && EnsureStagingDirectory(*plan, &error));
   WriteFile(plan->part_path, "CON first bytes");
@@ -332,6 +365,7 @@ void TestStagingAndCommit() {
   CHECK_TRUE(fs::exists(first));
   CHECK_STR_EQ(ReadFile(first), "CON first bytes");
   CHECK_TRUE(first.parent_path() == layout.destination_root);
+  CHECK_STR_EQ(first.filename().string(), std::string("Same Offer"));
   CHECK_FALSE(fs::exists(plan->part_path));
 
   CHECK_TRUE(plan && EnsureStagingDirectory(*plan, &error));
@@ -343,14 +377,33 @@ void TestStagingAndCommit() {
   CHECK_STR_EQ(ReadFile(first), "CON first bytes");
   CHECK_STR_EQ(ReadFile(second), "CON second bytes");
   CHECK_TRUE(IsValidInstallName(second.filename().string()));
+  CHECK_STR_EQ(second.filename().string(), std::string("Same Offer~1"));
   // The collision suffix still fits the guest's 42-byte field.
   CHECK_TRUE(second.filename().string().size() <= rbfs::kMaxContentFileName);
+
+  // A name already at the ceiling gives bytes up to the suffix rather than overflow the field.
+  const std::string long_name(kMaxInstallFileNameBytes, 'a');
+  const std::optional<StagedInstall> long_plan =
+      PlanInstall(layout, "long-offer", long_name, &error);
+  CHECK_TRUE(long_plan.has_value());
+  if (long_plan && EnsureStagingDirectory(*long_plan, &error)) {
+    WriteFile(long_plan->part_path, "CON long one");
+    fs::path long_first;
+    CHECK_TRUE(CommitStagedInstall(*long_plan, &long_first, &error));
+    WriteFile(long_plan->part_path, "CON long two");
+    fs::path long_second;
+    CHECK_TRUE(CommitStagedInstall(*long_plan, &long_second, &error));
+    CHECK_TRUE(long_second.filename().string().size() == kMaxInstallFileNameBytes);
+    CHECK_TRUE(long_second.filename().string().ends_with("~1"));
+    CHECK_TRUE(IsValidInstallName(long_second.filename().string()));
+  }
 
   // A structured layout creates its title/content-type levels.
   InstallLayout structured;
   structured.destination_root = scratch.base / "structured";
   structured.structured = true;
-  const std::optional<StagedInstall> tree = PlanInstall(structured, "other-offer", &error);
+  const std::optional<StagedInstall> tree =
+      PlanInstall(structured, "other-offer", "Other Offer", &error);
   CHECK_TRUE(tree.has_value());
   CHECK_TRUE(tree && EnsureStagingDirectory(*tree, &error));
   WriteFile(tree->part_path, "CON tree");

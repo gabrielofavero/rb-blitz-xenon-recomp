@@ -180,6 +180,18 @@ struct Offer {
   std::string genre;
   // 0 means "unknown" and is omitted: a zero year is not a release date.
   int year_released = 0;
+  // P9-13's credit block on the details page: the **custom's** own facts (the file the player is
+  // looking at), not the song's year. `audio_type` is the catalogue's code; `AudioTypeLabel`
+  // renders it and the raw token never reaches a record. `release_date` is already the date part
+  // (`DatePart`), serialized as `rbbz_release_date` because retail owns `release_date`
+  // as a numeric date tuple. `downloads` is the file's own count (a snapshot from the catalogue fetch,
+  // never a live figure). All four - these three and `downloads` - are written on **every** offer,
+  // empty values included: the payload's credit block reads them unconditionally, and a missing
+  // key walks a null (the trap P3 measured on `(rank <part>)`).
+  std::string audio_type;
+  std::string charter;
+  std::string release_date;
+  int downloads = 0;
   // A path the art loader can fetch (`store_panel load_art <path> this`); empty hides the art.
   // The panel composes `request prefix + this value`, so the value is `offers/<key>/cover_art.png_xbox`
   // (src/store/album_art.h owns the spelling) and the bytes are answered by the serving policy.
@@ -276,6 +288,16 @@ std::vector<uint8_t> BuildMenuRecord(const std::vector<Offer>& offers, std::stri
 // kept host-only on the offer, and a caller that does not have it - a test, or a path that never
 // offers a download - passes nothing and gets an offer with no job.
 Offer OfferFromSong(const SongFile& song, std::string_view resolved_download_url = {});
+
+// The label a catalogue `audio_type` **code** draws on the details page (P9-13), or empty for a
+// code this build does not know - an unknown code draws nothing rather than the raw token.
+//
+// The four labels are the site's own dropdown (owner's capture, plan §9/P9-13): Multitrack /
+// Karaoke / Partial Multitracks / Single Track. `single`, `partial` and `full` are measured on the
+// committed captures (2026-10-23); `karaoke` appears in neither, so that row is the one reading
+// still to confirm against the site - and it is exactly why an unknown code must fall back to
+// nothing instead of drawing itself.
+std::string_view AudioTypeLabel(std::string_view code);
 
 // The same two shapes in **text**, which is what the netcache serves. Measured 2026-10-20 in the
 // decrypted image: the loaded-file insert (`sub_824685E0`) classifies a request path by its

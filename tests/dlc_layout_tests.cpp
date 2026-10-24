@@ -266,6 +266,8 @@ int main() {
     Scratch flat;
     WriteFile(flat.root / "Adele - Skyfall", "CON a container");
     WriteFile(flat.root / "ACDC - Back in Black", "CON a container");
+    // A hexadecimal filename alone is not a structured title directory.
+    WriteFile(flat.root / "45410914", "CON a container");
     CHECK_FALSE(HasStructuredLayout(flat.root));
 
     // Nested is still a library: the title level is read at the root alone.

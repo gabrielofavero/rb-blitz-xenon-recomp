@@ -130,7 +130,19 @@ std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offe
           {"pack_name", std::string()},
           // Empty, never absent: `refresh_buttons` reads it for every song before it checks
           // `has_data` (see the Offer member). No preview asset exists (§3.3), so it is "".
-          {"preview_audio", offer.preview_audio}};
+          {"preview_audio", offer.preview_audio},
+          // P9-13's credit block. `audio_type` is the *label* (the code is storage, never drawn),
+          // and an unknown or empty code writes an empty string, which the payload's own guard
+          // reads as "draw no line" - the key is still written, because `get_data` on a missing
+          // key walks a null. `charter` and `release_date` are the custom's own facts, and both
+          // are written empty-included for the same reason.
+          {"audio_type", std::string(AudioTypeLabel(offer.audio_type))},
+          {"charter", offer.charter},
+          // Retail's StoreOffer constructor (sub_824544E0, 0x82454710)
+          // consumes `release_date` as three integers. A string under that key
+          // faults before the browser opens; keep our display value separate.
+          {"rbbz_release_date", offer.release_date}
+  };
 }
 
 // The integer keys the same scripts read: `review` is formatted by `{"sprintf" "review_%i" ...}`
@@ -154,6 +166,9 @@ std::vector<std::pair<const char*, std::string>> ExtraTextKeys(const Offer& offe
 // `rank_<part>`.
 std::vector<std::pair<const char*, int>> ExtraIntKeys(const Offer& offer) {
   return {{"review", 0},
+          // The file's own download count (plan §9/P9-13). An int, and 0 when the catalogue did
+          // not publish one - the payload's credit line treats 0 as "no count to show".
+          {"downloads", offer.downloads},
           {"rank_guitar", offer.rank_guitar},
           {"rank_drum", offer.rank_drum},
           {"rank_bass", offer.rank_bass},
@@ -234,6 +249,17 @@ std::string RelatedOfferPath(std::string_view platform, std::string_view locale,
 
 std::string MenuSourceId(std::string_view entry_id) { return "menu_" + std::string(entry_id); }
 
+std::string_view AudioTypeLabel(std::string_view code) {
+  // The site's four dropdown labels (plan §9/P9-13, the owner's capture). The codes are matched
+  // exactly - they are a closed set the API publishes in lower case - and anything else is empty:
+  // the transport rewrites this from nothing, so a typo cannot reach the screen.
+  if (code == "single") return "Single Track";
+  if (code == "full") return "Multitrack";
+  if (code == "partial") return "Partial Multitracks";
+  if (code == "karaoke") return "Karaoke";
+  return {};
+}
+
 Offer OfferFromSong(const SongFile& song, std::string_view resolved_download_url) {
   Offer offer;
   // The site's `file_title` is the canonical title; `file_name` (the upload name) is the fallback
@@ -248,6 +274,13 @@ Offer OfferFromSong(const SongFile& song, std::string_view resolved_download_url
   offer.album = song.album;
   offer.genre = song.genre;
   offer.year_released = song.year.value_or(0);
+  // P9-13's credit block: the custom's own facts, straight from the catalogue record. `audio_type`
+  // stays the code here (the writers render it through `AudioTypeLabel`), and every field is the
+  // file's rather than the song's - the reason the block exists at all.
+  offer.audio_type = song.audio_type;
+  offer.charter = song.charter;
+  offer.release_date = song.release_date;
+  offer.downloads = song.downloads.value_or(0);
   // Album art (plan §1.3): the API points at a cover on its own host. The record carries only the
   // path the retail loader will ask for; the texture behind it is produced by the art worker
   // (src/store/album_art_service.h) and served from the file cache. An empty field, a field that is

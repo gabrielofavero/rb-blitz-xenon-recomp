@@ -105,7 +105,8 @@ void SetOfferRegistrar(OfferRegistrar registrar);
 // Fills `offer->job` from the installed registrar, or leaves it empty when no registrar is
 // installed or the offer carries no download identity. Called by the serving path for every offer
 // of every page, so a row a player can see is always a row the worker can be asked about. The
-// title it passes is what the caption strip shows ("Artist - Title").
+// title it passes is what the caption strip shows ("Artist - Title") and what the installed
+// package is named after (sanitized by `store_install.cpp`, which owns that rule).
 void AttachDownloadJob(Offer* offer);
 
 // The album-art prefetch seam. `src/store/album_art_service.h` owns the worker that fetches and

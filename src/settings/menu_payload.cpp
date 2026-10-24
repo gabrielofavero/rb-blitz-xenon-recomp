@@ -881,6 +881,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (!store::HideStoreInfoPriceChrome(&info_roots, &why)) {
         note("hiding the details page's price was refused: " + why);
       }
+      // P9-13: the box that carries the Download / Cancel rows carries the custom's own credit
+      // block. It runs **after** the price-chrome transform, because it re-shows `cost.lbl` -
+      // the scene's last free row - and the price transform's hides have to be the earlier
+      // statements (store_payload.h).
+      why.clear();
+      if (!store::ShowOfferCredits(&info_roots, &why)) {
+        note("writing the details page's credit block was refused: " + why);
+      }
       why.clear();
       if (!store::AlwaysShowOfferDetails(&info_roots, &why)) {
         note("opening the details page for a free offer was refused: " + why);

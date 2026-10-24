@@ -31,14 +31,56 @@ std::string ContentTypeDirectory() {
   return std::string(text);
 }
 
-std::string CandidateName(const std::string& stem, const std::size_t attempt) {
-  std::string name = stem;
-  if (attempt != 0) {
-    name += "~";
-    name += std::to_string(attempt);
+// The punctuation a Windows file name cannot hold. `.` is handled separately: it is legal to the
+// host but reads as an extension, and a package has none - a name like `Song.1` would look like a
+// `1` format to a human and to anything that keys on the suffix.
+constexpr std::string_view kInvalidNameChars = "<>:\"/\\|?*";
+
+bool IsReservedDeviceName(std::string_view name) {
+  // Windows reserves these as a file's base name, extension or not - and this module produces
+  // extensionless names, so the whole name is the base.
+  std::string upper;
+  upper.reserve(name.size());
+  for (const char c : name) {
+    upper.push_back(c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c);
   }
-  name += ".con";
-  return name;
+  if (upper == "CON" || upper == "PRN" || upper == "AUX" || upper == "NUL") {
+    return true;
+  }
+  return upper.size() == 4 && (upper.starts_with("COM") || upper.starts_with("LPT")) &&
+         upper[3] >= '1' && upper[3] <= '9';
+}
+
+// The largest prefix of `text` of at most `bytes` bytes that does not cut a UTF-8 code point:
+// the guest's field counts bytes, but a half-written character is not a name.
+std::size_t Utf8Prefix(const std::string& text, const std::size_t bytes) {
+  std::size_t cut = std::min(bytes, text.size());
+  while (cut > 0 && cut < text.size() &&
+         (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+    --cut;
+  }
+  return cut;
+}
+
+void TrimTrailingSpaces(std::string* text) {
+  while (!text->empty() && text->back() == ' ') {
+    text->pop_back();
+  }
+}
+
+// `base[~<n>]`, cut so the suffix stays inside the guest's field. `base` already passed the
+// sanitizer, so a suffix never turns it back into a device name.
+std::string CandidateName(const std::string& base, const std::size_t attempt) {
+  std::string suffix;
+  if (attempt != 0) {
+    suffix = "~" + std::to_string(attempt);
+  }
+  std::string name = base;
+  if (name.size() + suffix.size() > kMaxInstallFileNameBytes) {
+    name.resize(Utf8Prefix(name, kMaxInstallFileNameBytes - suffix.size()));
+    TrimTrailingSpaces(&name);
+  }
+  return name + suffix;
 }
 
 }  // namespace
@@ -48,43 +90,64 @@ std::string InstallStem(std::string_view file_id) {
   return "rv_" + digest.substr(0, 32);
 }
 
-bool IsValidInstallName(std::string_view name) {
+std::string InstallName(std::string_view display_name) {
+  std::string name;
+  name.reserve(std::min(display_name.size(), kMaxInstallFileNameBytes));
+  bool space_pending = false;
+  for (const char raw : display_name) {
+    const auto c = static_cast<unsigned char>(raw);
+    if (c < 0x20 || c == 0x7F ||
+        kInvalidNameChars.find(static_cast<char>(c)) != std::string_view::npos) {
+      continue;
+    }
+    if (c == '.') {
+      continue;  // a dot would read as a format, and the package has none
+    }
+    if (c == ' ') {
+      space_pending = !name.empty();  // collapse a run, never a leading space
+      continue;
+    }
+    if (space_pending) {
+      name.push_back(' ');
+      space_pending = false;
+    }
+    name.push_back(raw);
+  }
   if (name.size() > kMaxInstallFileNameBytes) {
+    name.resize(Utf8Prefix(name, kMaxInstallFileNameBytes));
+    TrimTrailingSpaces(&name);  // the cut can land after a space
+  }
+  if (IsReservedDeviceName(name)) {
+    // `CON` is a device, not a file. The marker goes last, and the name gives a byte up for it
+    // when it is already at the ceiling.
+    if (name.size() >= kMaxInstallFileNameBytes) {
+      name.resize(Utf8Prefix(name, kMaxInstallFileNameBytes - 1));
+      TrimTrailingSpaces(&name);
+    }
+    name.push_back('_');
+  }
+  return name;
+}
+
+bool IsValidInstallName(std::string_view name) {
+  if (name.empty() || name.size() > kMaxInstallFileNameBytes) {
     return false;
   }
-  // `rv_` + 32 lowercase hex.
-  if (name.size() < kInstallNameBytes || !name.starts_with("rv_")) {
-    return false;
+  if (name.back() == ' ') {
+    return false;  // Windows strips it, and then the guest's name is not the one we chose
   }
-  std::size_t index = 3;
-  for (std::size_t hex = 0; hex < 32; ++hex, ++index) {
-    if (index >= name.size()) {
-      return false;
-    }
-    const char c = name[index];
-    const bool digit = c >= '0' && c <= '9';
-    const bool lower = c >= 'a' && c <= 'f';
-    if (!digit && !lower) {
+  for (const char raw : name) {
+    const auto c = static_cast<unsigned char>(raw);
+    if (c < 0x20 || c == 0x7F || c == '.' ||
+        kInvalidNameChars.find(static_cast<char>(c)) != std::string_view::npos) {
       return false;
     }
   }
-  // An optional `~<n>` collision suffix (1-3 digits, since kMaxInstallAttempts is 100).
-  if (index < name.size() && name[index] == '~') {
-    ++index;
-    std::size_t digits = 0;
-    while (index < name.size() && name[index] >= '0' && name[index] <= '9') {
-      ++index;
-      ++digits;
-    }
-    if (digits == 0 || digits > 3) {
-      return false;
-    }
-  }
-  return name.substr(index) == ".con";
+  return !IsReservedDeviceName(name);
 }
 
 std::optional<StagedInstall> PlanInstall(const InstallLayout& layout, std::string_view file_id,
-                                         std::string* error) {
+                                         std::string_view display_name, std::string* error) {
   if (layout.destination_root.empty()) {
     if (error != nullptr) {
       *error = "the store has no resolved DLC destination";
@@ -105,7 +168,10 @@ std::optional<StagedInstall> PlanInstall(const InstallLayout& layout, std::strin
                           : layout.destination_root;
   install.stem = InstallStem(file_id);
   install.part_path = install.staging_dir / (install.stem + ".part");
-  install.final_name = CandidateName(install.stem, 0);
+  // The package is named after the song the player chose; an offer that carries no usable name
+  // still installs, under its id's hash.
+  const std::string named = InstallName(display_name);
+  install.final_name = named.empty() ? install.stem : named;
   return install;
 }
 
@@ -141,9 +207,8 @@ void DiscardStagedFile(const StagedInstall& install) {
 bool CommitStagedInstall(const StagedInstall& install, std::filesystem::path* final_path,
                          std::string* error) {
   for (std::size_t attempt = 0; attempt < kMaxInstallAttempts; ++attempt) {
-    const std::string name =
-        attempt == 0 ? install.final_name : CandidateName(install.stem, attempt);
-    if (name.size() > kMaxInstallFileNameBytes || !IsValidInstallName(name)) {
+    const std::string name = CandidateName(install.final_name, attempt);
+    if (!IsValidInstallName(name)) {
       if (error != nullptr) {
         *error = "no install name fits the guest's 42-byte file-name field";
       }

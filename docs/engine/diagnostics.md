@@ -253,6 +253,20 @@ session, not by the reader. `rb_blitz_store_payload_tests store-edit <store.dtb>
 both methods, the routed `SELECT_MSG` and the panel `exit` that dismisses the strip, against the
 shipped record - which is how the edit was checked before any boot.
 
+**The details page's credit block (P9-13, 2026-10-23).** The box that carries the Download rows
+draws the **custom's** own facts, written by `store::ShowOfferCredits` into labels the shipped
+`store_info_panel.refresh_panel` already owns: `drm.lbl` the artist, `rating.lbl` the audio type
+(hidden when the catalogue publishes none), `rating_description.lbl` `Charted by <name>`, and
+`cost.lbl` `Released at <date>, <N> Downloads` (the scene's last free row; the audio type and the
+charter hide rather than draw an empty line, and the cost row hides when there is neither a date nor
+a count). The values are record keys: `audio_type` is already the **label** (`AudioTypeLabel`'s
+table; the raw code never reaches a record), and `charter`/`release_date`/`downloads` are the
+file's own facts. The block is one `{do ...}` appended to the method, after `refresh_panel`'s hides
+and after `HideStoreInfoPriceChrome`'s, which is why the payload wires it after that transform.
+`rb_blitz_store_payload_tests store-edit <store_info.dtb> info` runs it against the shipped record
+and dumps the whole transformed `refresh_panel`, which is how the edit was checked before any boot;
+the block's on-screen reading (label positions in that box) is the prompt's open measurement.
+
 **The master switch's restart rule (P9-2, measured 2026-10-22).** `scripts/probe_master_restart.ps1`
 flips a filter leaf and the store's master switch through Help & Options and reads what leaving does.
 A leaf is applied live (`hot_apply: general.rhythmverse_guitar = false`) and asks for nothing; the
@@ -309,7 +323,9 @@ flipped that default and made the Enable leg assert it instead of pressing the r
 `99 offer(s)`, opens the browser on them, answers a search (`15 MATCHES FOR "BUSH"`) and lists the
 result, opens the details page's `DOWNLOAD`, installs `rv_436f1b68360f1ad9be533437be169410.con`
 (4,927,488 bytes, one container in the flat root, empty staging, receipt `pending`, refresh logged)
-with no points/Buy Now chrome anywhere; `Install` finds the title on the next boot's own song list
+with no points/Buy Now chrome anywhere; *(the name is the 2026-10-20/22 rule; the store names an
+install `Artist - Song` since 2026-10-23 - `docs/guides/dlc.md` §2.2)* `Install` finds the title on
+the next boot's own song list
 (`YOUR SONGS … BUSH THE PEOPLE THAT WE LOVE` after `dlc: 1 saved-game library package(s) presented
 as content type 00000002`); `Control` makes no store request at all and still dispatches the refresh
 row. The assertions that changed to get there are listed in the plan's §5/P8 close-out record - the

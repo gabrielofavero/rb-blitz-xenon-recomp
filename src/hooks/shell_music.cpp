@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -594,43 +595,70 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 
   std::vector<PoolEntry> candidates;
   size_t mounts = 0;
-  for (size_t i = 0; i < order.size() && candidates.size() < cap && mounts < cap; ++i) {
-    const std::filesystem::path& package = packages[order[i]];
-    const std::string mount_path = fmt::format("\\Device\\BlitzMenuMusic\\{}\\", mounts);
-    std::error_code ec;
-    std::unique_ptr<rex::filesystem::Device> device = MountPackage(mount_path, package, ec);
-    if (device == nullptr) {
-      REXLOG_WARN("shell_music: cannot mount {} as DLC menu music ({})", package.string(),
-                  ec ? ec.message() : "not a mountable package");
-      continue;
+  // Opening cold containers can be expensive even when the DLC enumeration is
+  // cached. Prepare independent devices concurrently, then publish in draw order
+  // on this thread. No worker touches the VFS, RNG, guest memory or pool state.
+  struct PreparedPackage {
+    std::unique_ptr<rex::filesystem::Device> device;
+    std::vector<std::string> streams;
+    std::vector<rb_blitz::shell_music::SongMetadata> metadata;
+  };
+  const auto pool_start = std::chrono::steady_clock::now();
+  constexpr size_t kMountWorkers = 4;
+  for (size_t next = 0; next < order.size() && candidates.size() < cap && mounts < cap;) {
+    const size_t batch_start = next;
+    const size_t count = std::min({kMountWorkers, order.size() - next,
+                                   cap - candidates.size(), cap - mounts});
+    std::vector<std::future<PreparedPackage>> pending;
+    for (size_t j = 0; j < count; ++j, ++next) {
+      const auto package = packages[order[next]];
+      const auto mount_path = fmt::format("\\Device\\BlitzMenuMusic\\{}\\", next);
+      pending.push_back(std::async(std::launch::async, [package, mount_path] {
+        PreparedPackage prepared;
+        std::error_code ec;
+        prepared.device = MountPackage(mount_path, package, ec);
+        if (!prepared.device) {
+          REXLOG_WARN("shell_music: cannot mount {} as DLC menu music ({})", package.string(),
+                      ec ? ec.message() : "not a mountable package");
+          return prepared;
+        }
+        prepared.streams = FindSongStreams(*prepared.device);
+        if (!prepared.streams.empty()) {
+          prepared.metadata = FindSongMetadata(*prepared.device);
+        }
+        return prepared;
+      }));
     }
-    std::vector<std::string> streams = FindSongStreams(*device);
-    if (streams.empty()) {
-      REXLOG_WARN("shell_music: {} holds no streamable .mogg, skipping it", package.string());
-      continue;
-    }
-    const auto metadata = FindSongMetadata(*device);
-    const std::string alias = fmt::format("menumusic{}", mounts);
-    if (!file_system->RegisterDevice(std::move(device))) {
-      REXLOG_WARN("shell_music: cannot register the device for {}", package.string());
-      continue;
-    }
-    if (!file_system->RegisterSymbolicLink(alias + ":", mount_path)) {
-      REXLOG_WARN("shell_music: cannot point {}: at {}", alias, mount_path);
-      continue;
-    }
-    ++mounts;
-    for (std::string& stream : streams) {
-      std::string key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
-      if (!metadata.empty() && key.empty()) {
-        REXLOG_WARN("shell_music: {}:{} has no unambiguous song metadata; excluding it from "
-                    "the menu pool", alias, stream);
+    for (size_t j = 0; j < count; ++j) {
+      auto prepared = pending[j].get();
+      if (!prepared.device || prepared.streams.empty() || candidates.size() >= cap) continue;
+      const auto& package = packages[order[batch_start + j]];
+      const auto mount_path = fmt::format("\\Device\\BlitzMenuMusic\\{}\\", batch_start + j);
+      const std::string alias = fmt::format("menumusic{}", batch_start + j);
+      auto& device = prepared.device;
+      auto& streams = prepared.streams;
+      const auto& metadata = prepared.metadata;
+      if (!file_system->RegisterDevice(std::move(device))) {
+        REXLOG_WARN("shell_music: cannot register the device for {}", package.string());
         continue;
       }
-      if (!key.empty() && key != rb_blitz::shell_music::SongName(stream)) {
-        REXLOG_INFO("shell_music: song metadata maps {}:{} to key \"{}\"", alias, stream, key);
+      if (!file_system->RegisterSymbolicLink(alias + ":", mount_path)) {
+        REXLOG_WARN("shell_music: cannot point {}: at {}", alias, mount_path);
+        continue;
       }
-      candidates.push_back({alias, std::move(stream), std::move(key)});
+      ++mounts;
+      for (std::string& stream : streams) {
+        std::string key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
+        if (!metadata.empty() && key.empty()) {
+          REXLOG_WARN("shell_music: {}:{} has no unambiguous song metadata; excluding it from "
+                      "the menu pool", alias, stream);
+          continue;
+        }
+        if (!key.empty() && key != rb_blitz::shell_music::SongName(stream)) {
+          REXLOG_INFO("shell_music: song metadata maps {}:{} to key \"{}\"", alias, stream, key);
+        }
+        candidates.push_back({alias, std::move(stream), std::move(key)});
+      }
     }
   }
 
@@ -686,6 +714,9 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   REXLOG_INFO("shell_music: R9 plays the loaded DLC in the main menu: {} song(s) drawn at random "
               "from {} mounted package(s) of {} (pool cap {})",
               g_pool.size(), mounts, total, cap);
+  REXLOG_INFO("shell_music: pool prepared in {} ms (up to {} concurrent mounts)",
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - pool_start).count(), kMountWorkers);
   for (const PoolEntry& entry : g_pool) {
     REXLOG_INFO("shell_music:   {}:{}.mogg", entry.alias, entry.stream);
   }

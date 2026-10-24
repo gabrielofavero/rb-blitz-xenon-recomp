@@ -1041,3 +1041,17 @@ original song key, resolves and reaches gameplay in `out/_swap/music-fix/reliabi
 | The pool sample and the deck (host logic) | [src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h), `tests/menu_music_pool_tests.cpp` |
 | The toggles | [toggles.md](toggles.md) (R9) |
 | The library it draws from | [dlc.md](../guides/dlc.md), `rb_blitz::dlc::LibraryPackagePaths()` |
+
+
+### Startup cost of the DLC music pool (2026-10-24)
+
+The last reported slow boot (`rb_blitz_299.log`) spent about 44 seconds preparing
+50 menu-music packages serially, before guest execution. Pool preparation now mounts
+and reads metadata for up to four independent packages concurrently. The host
+registers completed devices and assembles the pool in the original random draw
+order; workers do not access the VFS, guest memory, RNG, or playback state. The
+50-song cap and the song keys baked into Play Current Song remain unchanged.
+`shell_music: pool prepared in ... ms` reports this phase's elapsed time. Startup
+also rejects ordinary filenames before querying directory attributes when deciding
+whether a DLC root uses the structured layout (the same log measured that layout
+check at 6.75 seconds for a flat library). End-to-end timings await the owner's test.

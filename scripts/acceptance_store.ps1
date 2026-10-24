@@ -19,8 +19,9 @@
 #             cannot type on; the keyboard entry honours the seed instead) - and that one press
 #             asks for the search page too, so the results open in the retail
 #             browser without a second press. Then A on the first result opens the details screen,
-#             DOWNLOAD is pressed, and the install is asserted on disk, in the receipt and in the
-#             log. No price,
+#             where the box that carries DOWNLOAD also carries the custom's own credit block
+#             (P9-13: charted by, released at, downloads), DOWNLOAD is pressed, and the install is
+#             asserted on disk, in the receipt and in the log. No price,
 #             currency or purchase word appears on the browser, the details page or the browser it
 #             returns to.
 #   Install - the next boot, same profile, same DLC root: the downloaded song is on the title's
@@ -776,6 +777,12 @@ function Invoke-StoreLeg {
         Assert-Lacks $detailsText 'POINTS' 'store: the details page carries no points chrome'
         # P9-8: the details page's Y caption is cleared in the payload too.
         Assert-Lacks $detailsText 'VIEWITEM' 'store: the details page carries no View Item caption'
+        # P9-13: the box that carries the Download row carries the custom's own credit block. The
+        # artist, title and figures change with the live catalogue, so the steps assert the
+        # block's own words - the lines the served offer's `charter`/`release_date`/`downloads`
+        # keys produce.
+        Assert-Label $detailsText @('CHARTED') 'store: the details page names the custom''s charter'
+        Assert-Label $detailsText @('RELEASED', 'DOWNLOADS') 'store: the details page carries the release date and download count'
 
         # Press Download (row 0 is where this build's Download row sits) and follow the transfer.
         $installsBefore = Get-LogMatches "store_download: job \w+ installed '"
@@ -808,8 +815,25 @@ function Invoke-StoreLeg {
             if (Test-Path -LiteralPath $full) {
                 $size = (Get-Item -LiteralPath $full).Length
                 Add-Step 'store: the installed file has the transferred length' ($size -eq $script:installedBytes) "$size byte(s)"
+                # The name is the catalogue's "Artist - Song" with every `.` removed, so the
+                # package carries no extension at all - it is recognised by its CON/LIVE/PIRS
+                # magic, not by a suffix (P5, revised 2026-10-23).
+                $installedName = [System.IO.Path]::GetFileName($full)
+                Add-Step 'store: the installed name has no extension' (-not $installedName.Contains('.')) $installedName
             }
-            $containers = @(Get-ChildItem -LiteralPath $dlcRoot -Filter '*.con' -File -ErrorAction SilentlyContinue)
+            # A container is a file whose first four bytes are CON /LIVE/PIRS: the root is empty
+            # on a fresh fixture, and the store's name is extensionless, so the filter cannot be a
+            # pattern any more.
+            $containers = @(Get-ChildItem -LiteralPath $dlcRoot -File -ErrorAction SilentlyContinue | Where-Object {
+                    $head = New-Object byte[] 4
+                    $stream = [System.IO.File]::OpenRead($_.FullName)
+                    try {
+                        [void]$stream.Read($head, 0, 4)
+                    } finally {
+                        $stream.Dispose()
+                    }
+                    [System.Text.Encoding]::ASCII.GetString($head) -in @('CON ', 'LIVE', 'PIRS')
+                })
             Add-Step 'store: the DLC root holds exactly one container' ($containers.Count -eq 1) "$($containers.Count) container(s)"
             $titleLevels = @(Get-ChildItem -LiteralPath $dlcRoot -Directory -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -match '^[0-9A-Fa-f]{8}$' })

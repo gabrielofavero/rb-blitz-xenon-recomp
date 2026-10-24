@@ -413,6 +413,90 @@ void TestEmptyMenuRecord() {
   if (offers != nullptr) CHECK_TRUE(offers->kids.empty());
 }
 
+// P9-13: the details page's credit block reads four record keys (`audio_type`, `charter`,
+// `rbbz_release_date`, `downloads`), so both writers carry all four on **every** offer - an empty value
+// included, because `get_data` on a missing key walks a null (the trap P3 measured on
+// `(rank <part>)`).
+void TestOfferCredits() {
+  BeginCase("an offer carries the custom's credit facts, empty values included");
+
+  // The site's own dropdown labels (plan §9/P9-13). `karaoke` is the one code neither committed
+  // capture carries; an unknown code is empty, so the raw token can never reach a record.
+  CHECK_STR_EQ(std::string(rb_blitz::store::AudioTypeLabel("single")), "Single Track");
+  CHECK_STR_EQ(std::string(rb_blitz::store::AudioTypeLabel("full")), "Multitrack");
+  CHECK_STR_EQ(std::string(rb_blitz::store::AudioTypeLabel("partial")), "Partial Multitracks");
+  CHECK_STR_EQ(std::string(rb_blitz::store::AudioTypeLabel("karaoke")), "Karaoke");
+  CHECK_TRUE(rb_blitz::store::AudioTypeLabel("stems").empty());
+  CHECK_TRUE(rb_blitz::store::AudioTypeLabel("").empty());
+  CHECK_TRUE(rb_blitz::store::AudioTypeLabel("Single").empty());  // codes are lower case
+
+  SongFile song;
+  song.file_id = "abc";
+  song.artist = "Youth Group";
+  song.title = "Forever Young";
+  song.audio_type = "single";
+  song.charter = "Virtual-Man";
+  song.release_date = "2026-10-11";
+  song.downloads = 61;
+  const Offer offer = OfferFromSong(song);
+  CHECK_STR_EQ(offer.audio_type, "single");  // the code stays the model's storage
+  CHECK_STR_EQ(offer.charter, "Virtual-Man");
+  CHECK_STR_EQ(offer.release_date, "2026-10-11");
+  CHECK_EQ(offer.downloads, 61);
+
+  std::string why;
+  const std::string text = BuildMenuText({offer}, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(text.find("(audio_type \"Single Track\")") != std::string::npos);
+  CHECK_TRUE(text.find("(charter \"Virtual-Man\")") != std::string::npos);
+  CHECK_TRUE(text.find("(rbbz_release_date \"2026-10-11\")") != std::string::npos);
+  CHECK_TRUE(text.find("(downloads 61)") != std::string::npos);
+  // Retail consumes release_date as (key year month day) during offer
+  // construction, before a UI script runs. Display metadata must not claim it.
+  CHECK_TRUE(text.find("(release_date ") == std::string::npos);
+  // The code itself is storage, never a record value.
+  CHECK_TRUE(text.find("(audio_type \"single\")") == std::string::npos);
+
+  const std::vector<uint8_t> bytes = BuildMenuRecord({offer}, &why);
+  CHECK_TRUE(why.empty());
+  std::vector<Node> roots;
+  rb_blitz::ui::dtb::RootHeader header;
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+  const Node* offers = RootArray(roots, "offers");
+  CHECK_TRUE(offers != nullptr && offers->kids.size() == size_t{1});
+  if (offers == nullptr || offers->kids.empty()) return;
+  CHECK_STR_EQ(OfferField(offers->kids[0], "audio_type"), "Single Track");
+  CHECK_STR_EQ(OfferField(offers->kids[0], "charter"), "Virtual-Man");
+  CHECK_STR_EQ(OfferField(offers->kids[0], "rbbz_release_date"), "2026-10-11");
+  for (const Node& field : offers->kids[0].kids) {
+    CHECK_FALSE(field.tag == rb_blitz::ui::dtb::kArray && !field.kids.empty() &&
+                field.kids[0].text == "release_date");
+  }
+  bool downloads_ok = false;
+  for (const Node& field : offers->kids[0].kids) {
+    if (field.tag != rb_blitz::ui::dtb::kArray || field.kids.size() < 2) continue;
+    if (field.kids[0].tag == rb_blitz::ui::dtb::kSymbol && field.kids[0].text == "downloads" &&
+        field.kids[1].tag == rb_blitz::ui::dtb::kInt && field.kids[1].scalar == 61) {
+      downloads_ok = true;
+    }
+  }
+  CHECK_TRUE(downloads_ok);
+
+  // A record the catalogue could not credit still carries all four keys, empty: the payload's
+  // block reads them unconditionally, so a missing key would be a null walk, not a hidden line.
+  SongFile bare;
+  bare.file_id = "abc";
+  bare.artist = "Nobody";
+  bare.title = "Untitled";
+  const Offer blank = OfferFromSong(bare);
+  const std::string bare_text = BuildMenuText({blank}, &why);
+  CHECK_TRUE(why.empty());
+  CHECK_TRUE(bare_text.find("(audio_type \"\")") != std::string::npos);
+  CHECK_TRUE(bare_text.find("(charter \"\")") != std::string::npos);
+  CHECK_TRUE(bare_text.find("(rbbz_release_date \"\")") != std::string::npos);
+  CHECK_TRUE(bare_text.find("(downloads 0)") != std::string::npos);
+}
+
 void TestFrontMenuRowForm() {
   BeginCase("a front-menu row's count form defaults to the no-count marker");
   // P9-5: the front-menu list's `count` label formats the row's third element, and only the
@@ -463,5 +547,6 @@ int main() {
   TestSongMapping();
   TestMenuRecordRoundTrip();
   TestEmptyMenuRecord();
+  TestOfferCredits();
   return rb_blitz::test::Finish();
 }

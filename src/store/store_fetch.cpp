@@ -5,6 +5,9 @@
 #include "store/store_record_refresh.h"
 
 #include <atomic>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
@@ -366,6 +369,20 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   LogOnce(path, "served '" + path + "' from " + record.source + " (" +
                     std::to_string(record.bytes.size()) + " byte(s), insert -> " +
                     std::to_string(call.r3.u32) + ")");
+  // BISECT: dump the exact text served, so a crash in the guest's parser can be read offline.
+  if (const char* dump_dir = std::getenv("RBBZ_DUMP_SERVED")) {
+    std::error_code ec;
+    std::filesystem::create_directories(dump_dir, ec);
+    std::string name = path;
+    for (char& c : name) {
+      if (c == '/') {
+        c = '_';
+      }
+    }
+    std::ofstream dump(std::filesystem::path(dump_dir) / (name + ".txt"), std::ios::binary);
+    dump.write(reinterpret_cast<const char*>(record.bytes.data()),
+               static_cast<std::streamsize>(record.bytes.size()));
+  }
   if (TraceEnabled()) {
     // Names the two objects the notify involves: the client the request registered (`ctx.r5`) and
     // the loaded file the insert returned. Their vtables say which interface the callback really

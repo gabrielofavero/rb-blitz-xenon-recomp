@@ -1,6 +1,6 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23. Status:
+the Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23. Status:
 **reopened 2026-10-22** — the owner drove the shipped store and asked for eleven adjustments, then
 two more the same day (P9-12 and P9-13), and **P9-6 was redesigned from scratch on 2026-10-23** (a
 modal download popup and its success toast; §9); **§9** carries one prompt per adjustment and is the
@@ -1798,11 +1798,18 @@ describe the build; the measurements it took - the request, the answer and the s
   or refuse the transfer. A dot prefix or `.part` suffix is not enough: scanners inspect magic,
   so a half-downloaded `CON ` can otherwise be enumerated. No final title-ID directory is created
   inside a flat library (§2.9).
-- Validate, flush/close, then atomically rename to a safe generated name of ≤42 UTF-8 bytes
-  (for example `rv_<32-hex-stable-id-hash>.con`), with collision detection and no silent overwrite
-  of user packages. Existing loaded packages must not be replaced in place; an explicit Download
-  Again either installs a distinct package or reports that replacement requires restart. Never use
-  untrusted title/artist, Content-Disposition or raw opaque IDs as a filesystem path.
+- Validate, flush/close, then atomically rename to a safe name of ≤42 UTF-8 bytes, with collision
+  detection and no silent overwrite of user packages. **Revised 2026-10-23 (owner):** the name is
+  the catalogue's `Artist - Song` after sanitizing - every character Windows refuses and every `.`
+  removed, whitespace collapsed, both ends trimmed, cut at a UTF-8 code-point boundary - and it
+  carries **no extension**; a device name (`CON`, `NUL`, `LPT1`, ...) gets a trailing `_`, a
+  collision adds `~<n>`, and an offer with no usable name falls back to `rv_<32 hex>` of its
+  opaque id. The staged part file keeps that hash as `rv_<32 hex>.part`. The P5 build below
+  shipped `rv_<32 hex>.con`; that spelling is historical. Existing loaded packages must not be
+  replaced in place; an explicit Download Again either installs a distinct package or reports
+  that replacement requires restart. Everything that reaches the file system passes the
+  sanitizer: no `Content-Disposition` name and no raw opaque id is ever joined into a path
+  unsanitized.
 - Cancel and clean up on user cancel, master Off or shutdown; drain workers before restart.
   Retry transient network failures at most twice with backoff (honor Retry-After for throttling);
   do not retry archive/policy/validation errors. Give specific disk-full/read-only/HTTP/size errors.
@@ -1846,6 +1853,9 @@ guest bridge:
   `rv_<32 hex>.con` (39 bytes; a collision adds `~<n>` and still fits the guest's 42-byte field),
   the layout rule (structured root → `45410914/00000002/`; flat root → a loose container; an absent
   root is created flat, never with a title-ID level), and no silent overwrite of a user package.
+  *(Superseded 2026-10-23 by the revised naming bullet above: the package is `Artist - Song` with
+  no extension, the 42-byte cut and the device-name guard are part of the rule, and only the part
+  file keeps the `rv_<32 hex>` spelling.)*
 - `src/store/store_download_service.{h,cpp}` — the offer registry (`RegisterOffer`, the P3
   contract: the host holds the URL, the guest only ever sends a token), one worker with a bounded
   queue (8), idempotent start/again/cancel, master Off refusing a start and cancelling a running
@@ -2219,7 +2229,8 @@ the one row of the P8 bullet this record does not call done.
 with the one-line change above.
 
 **Docs written with the phase.** [`docs/guides/dlc.md`](../../guides/dlc.md) §2.2 - what the store
-adds to the install rules (layout preservation per root, the generated `rv_<32 hex>.con` name, the
+adds to the install rules (layout preservation per root, the generated name (`rv_<32 hex>.con` then,
+`Artist - Song` since 2026-10-23), the
 staging exclusion, "the Downloaded mark reads the packages, not a receipt", and the restart the strip
 asks for). [`docs/reference/known-issues.md`](../../reference/known-issues.md)'s *Accepted (by
 design)* section gains the scoped statement the P8 bullet asks for: the catalogue is supplied
@@ -2249,7 +2260,7 @@ scratch DLC root, on `out/store-acceptance/p8-final/`: **69 steps, 0 failures**,
 | Leg | Verdict | Its own evidence |
 | --- | --- | --- |
 | `Enable` | **PASS, every step** | the DLC page reads `RHYTHMVERSE: OFF`, the row is pressed, `rhythmverse = true` is in `settings.toml`, and the page then reads `RHYTHMVERSE: ON` |
-| `Store` | **PASS, every step** | heading `RHYTHMVERSE`, front menu `RECENT SEARCH`, the credit line (OCR `R USTOMS` … `M YTHMVERSE`), `99 offer(s)` from the catalogue; the served page opens the retail browser (`CUT THE CORD`, `COMING FOR YOU`, `SWEET SURRENDER`, …); Search → the authored keys → `15 MATCHES FOR "BUSH"` → the same row lists the fifteen offers; A → the details page `DOWNLOAD / EXIT` with no Buy Now, points or currency; the press installs `rv_436f1b68360f1ad9be533437be169410.con` (4,927,488 bytes) into the flat root, one container, empty staging, the receipt row `pending`, and the host's refresh runs and reports `1 package(s)`; the browser it returns to carries no chrome |
+| `Store` | **PASS, every step** | heading `RHYTHMVERSE`, front menu `RECENT SEARCH`, the credit line (OCR `R USTOMS` … `M YTHMVERSE`), `99 offer(s)` from the catalogue; the served page opens the retail browser (`CUT THE CORD`, `COMING FOR YOU`, `SWEET SURRENDER`, …); Search → the authored keys → `15 MATCHES FOR "BUSH"` → the same row lists the fifteen offers; A → the details page `DOWNLOAD / EXIT` with no Buy Now, points or currency; the press installs `rv_436f1b68360f1ad9be533437be169410.con` (*the naming rule of that day - installs are `Artist - Song` since 2026-10-23, see §5/P5's revised bullet*) (4,927,488 bytes) into the flat root, one container, empty staging, the receipt row `pending`, and the host's refresh runs and reports `1 package(s)`; the browser it returns to carries no chrome |
 | `Install` | **PASS** | the next boot: `dlc: 1 saved-game library package(s) presented as content type 00000002`, the song list draws `YOUR SONGS … BUSH THE PEOPLE THAT WE LOVE`, and the installed title is found on it (read out of the Store leg's install line) |
 | `Control` | **PASS, every step** | no store row, no `RHYTHMVERSE` label, no `CUSTOMS` row on the main menu, the Refresh Music Library row dispatches its sentinel, and `store_catalogue: fetching`, `store_fetch: served '`, `the served page carries`, `store_library: indexing`, `store_download: start` and `store_search: page` are all at **0 matches** |
 
@@ -2430,7 +2441,7 @@ one.
 | P9-10 | Done | Catalogue | Warm Recently Added at boot; a failed press draws the retail connection-failed popup and retries in the background — nothing is hidden | P7's fetch-on-open |
 | P9-11 | Done | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
 | P9-12 | Done | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
-| P9-13 | Todo | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
+| P9-13 | In Progress | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
 
 Status checked 2026-10-23 against this section's records and the tree: **Done** = the prompt's
 Done-when is met by a record; **In Progress** = part is landed and the closing measurement is owed;
@@ -2458,8 +2469,9 @@ flipped served four pages and the Recent list opened with its offers
 (`out/_swap/p910-fail/run3/20261023-151158`); **P9-11 is Done (owner's boot, 2026-10-23)**: the
 title's keyboard route, the modal search popup, the answer listing, a second search replacing the
 first and the per-search art were confirmed in game, closing the prompt's Done-when;
-labels and the refresh entry's compiled-On default were confirmed on the rebuilt binary; P9-13 has
-no `audio_type`, `charter` or `release_date` on `SongFile` or `Offer`.
+labels and the refresh entry's compiled-On default were confirmed on the rebuilt binary; **P9-13's
+model, writers and payload edit landed 2026-10-23** (the record under the prompt below) and the boot
+that OCRs the block is the one measurement it still owes.
 
 ### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
 
@@ -2607,6 +2619,100 @@ noted):
   that record's `single`), `Charted by Virtual-Man`, `Released at 2026-10-11` and `61 Downloads` —
   while pressing the download row still opens P9-6a's popup, an offer with no audio type draws no
   line for it, and no caption-strip line carries any of it.
+
+**P9-13 record (2026-10-23) — the model, both writers and the payload edit landed; the boot that
+OCRs the block is owed.** Everything the prompt moves with is in the tree and pinned hermetically;
+the prompt's own Done-when is a boot, and on this machine that is the owner's to take.
+
+- **The catalogue model** (`src/store/rhythmverse_client.{h,cpp}`). `SongFile` gained `audio_type`
+  (the raw **code**), `charter` and `release_date`, and the parse follows the prompt's order:
+  `charter` first, then `author.name`, then `author_id`; `release_date`, then `upload_date`. A new
+  `DatePart` reduces a timestamp to its day (`2026-10-11 19:07:55` → `2026-10-11`), passes a
+  non-timestamp through unchanged rather than blanking it, and turns the site's zero date
+  (`0000-00-00 00:00:00`) into empty. `downloads` stays the **file's** count: the committed record
+  carries `file.downloads = 61` beside `data.downloads = 0`, and `store_client` pins 61.
+- **Measured on the committed captures** (`docs/rythmverse-responses/{list,search}.json`, both
+  re-read 2026-10-23): `file.audio_type` is `single` on 25 records, `partial` on 3 and `full` on 5;
+  `karaoke` appears in neither; `file.charter` is **null on every record**, so the resolved charter
+  is `author.name` (`Virtual-Man` on the record the Done-when names); `release_date` equals
+  `upload_date`/`record_created` and the line shows `2026-10-11`. `data.audio_type` does not exist,
+  which is why the field is read from `file` only.
+- **The model and the table** (`src/store/store_metadata.{h,cpp}`). `Offer` carries the four facts,
+  and `AudioTypeLabel` is the one code → label map (Multitrack / Karaoke / Partial Multitracks /
+  Single Track; an unknown code is **empty**, so the raw token can never be drawn). Both writers
+  emit `audio_type` (already the label), `charter`, `rbbz_release_date` and `downloads` on **every**
+  offer, empty values included - a `get_data` on a missing key walks a null, the trap P3 measured on
+  `(rank <part>)`. An unknown code is named once per boot by the catalogue worker and once by the
+  search's page source (`store_catalogue` / `store_search` warn), because the writer is SDK-free and
+  cannot log.
+- **The payload edit** (`src/store/store_payload.{h,cpp}`, `store::ShowOfferCredits`). The details
+  box has six `UILabel`s and no spare one (`store_info.milo_xbox`), so the block reuses the labels
+  retail's own `refresh_panel` drives and hides for a data-only offer, in the owner's order:
+  `song.lbl` stays the title (retail's `set_offer_name`); `drm.lbl` draws **Song Artist**;
+  `rating.lbl` draws the **audio type** (the group is shown again, the label hidden when the
+  catalogue has none); `rating_description.lbl` draws `Charted by <charter>` (hidden when nobody is
+  named); `cost.lbl` - the scene's last free row - draws `Released at <date>, <N> Downloads`, the
+  count alone without a date, and nothing when neither exists. One `{do ...}` block is appended to
+  the method (retail's own body shape, with the compiled record's array binding for `$offer`), so
+  it runs **after** `refresh_panel`'s hides and after `HideStoreInfoPriceChrome`'s - which is why it
+  is wired after that transform in `src/settings/menu_payload.cpp`. The DTA tests are the DTA's own
+  string truthiness (`{if <get_data value> ...}`, the shape `refresh_list` uses for its sort name),
+  and every value is composed from the record's keys - nothing is invented.
+- **No host drawing, no new milo**: the lines are retail's own labels and the guest's text setter
+  (`set_display_text_string`, the message the label's name table carries beside `set_offer_name`).
+- **Checked against the shipped record before any boot**:
+  `rb_blitz_store_payload_tests store-edit assets\game\360\ui\store\gen\store_info.dtb info` answers
+  `credit block -> edited` and dumps the transformed `refresh_panel` - the block sits after the
+  shipped `do`, with the binding, the three writes and their guards, exactly as the suite pins
+  (evidence kept as `out/_swap/p9-13-info2.txt`).
+- **Suites**: `store_client` **590** (the fixture's four facts, `DatePart`, the precedence of
+  `charter`/author and `file.downloads`/`data.downloads`), `store_metadata` **144** (`OfferFromSong`
+  carries the four, both writers emit them empty-included, the label table's four codes and its
+  unknown fallback), `store_payload` **460** (`TestOfferCredits`: the block's statements, the
+  binding, idempotency, the compile/parse round trip and both refusals), full `ctest` **47/47** in
+  `out/build/win-amd64-debug`; the release preset builds and links `rb_blitz.exe`.
+- **The harness**: `scripts/acceptance_store.ps1`'s Store leg now asserts `CHARTED` and
+  `RELEASED`/`DOWNLOADS` on the details capture (the artist and figures vary with the live
+  catalogue, so the steps assert the block's own words). Not re-run on this build.
+- **Owed (the prompt's Done-when)**: the boot that opens a served offer's details page and OCRs the
+  block. On this machine that is the owner's to take (`AGENTS.md`), and it is the one measurement
+  that decides two things this record cannot: whether the re-used labels read in the owner's order,
+  and whether `karaoke` really is the site's fourth code. The Done-when's "pressing the download row
+  still opens P9-6a's popup" clause is P9-6a's, which is still Todo - until it lands the press
+  starts the transfer as P5 shipped it. **P9-13 stays In Progress** until that boot.
+
+**P9-13 layout correction (2026-10-24).** The owner's capture shows the retail label positions
+are unsuitable: both rating labels overlap above the box, the release/count label overlaps the
+title, and the artist sits far below it. `ShowOfferCredits` now resets `rating.grp`'s translation
+and explicitly places the six existing labels in a left-aligned stack inside the box. The title
+keeps its bold font at size 24; the other rows use size 18, a 28-unit pitch, bounded width and
+ellipsis. Release date and downloads have separate rows (`cost.lbl` and `cost_ps3.lbl`). Missing
+optional values hide their labels without advancing the row cursor; the action list follows the
+last visible fact and aligns with the text. No scene asset or host text overlay is added.
+
+Validation: `cmake --build --preset win-amd64-release` succeeds; `store_payload` and `menu_payload`
+pass in the debug build. The real `store_info.dtb` passes the `store-edit ... info` diagnostic
+(`out/_swap/p9-13-layout-info.txt`), including the new layout commands. This validates payload
+construction, not rendering. The owner chose to perform the visual check themselves; P9-13
+remains In Progress pending that check.
+
+**P9-13 crash correction (2026-10-24).** The owner's first layout test crashed opening details;
+`logs/rb_blitz_301.log` ends with a read of guest `0x00000008`. The new property writes used
+RndText's `align` and `(styles 0 size)` on UILabel objects. The shipped UILabel schema instead
+exposes `alignment` and `(styles 0 text_size)`; retail's `song_select.dtb` uses the latter path.
+The native UILabel handlers are `sub_824BD570` / `sub_824BBC28`, rather than the lower-level text
+handlers the initial layout change referenced. The payload now writes the UILabel names, and its
+regression checks require them and reject the RndText spellings. The original structural tests
+checked the wrong names and did not execute guest property handlers. Runtime confirmation remains
+with the owner, who chose manual testing.
+
+**P9-13 visual refinement (2026-10-24).** The owner confirmed the corrected property names work
+and supplied a rendered capture, then requested better visuals with both buttons on the right.
+The layout now adds padding inside the frame, retains the bold size-24 title and orange size-18
+artist, and groups the remaining facts below them at size 14 with a 22-unit pitch. The title and
+artist widths are 480 units; metadata is 440, with ellipsis retained. Download / Exit return to
+the scene's original lower-right action area, fixed independently of missing metadata. This
+refinement uses the same confirmed UILabel properties; its visual check remains with the owner.
 
 ### P9-1 — the master switch defaults On
 
@@ -3865,3 +3971,15 @@ curl.exe -s -X POST "https://rhythmverse.co/api/rb3xbox/songfiles/search/live" `
 curl.exe --head --max-time 20 --max-redirs 0 `
   "https://rhythmverse.co/download_file/<user_folder>/<file_id>/<encoded_file_name>"
 ```
+
+
+**2026-10-24 — Recently Added crash correction.** The last run (`rb_blitz_299.log`)
+served 98 offers and faulted before delivery returned. The same fault occurred with
+24 offers in `rb_blitz_298.log`. The native StoreOffer constructor (`sub_824544E0`,
+`0x82454710..0x82454780`) consumes the reserved `release_date` field as three
+integers (year, month, day). P9-13 wrote a date string under that name, which made
+that constructor read beyond the field and dereference null. Both metadata writers
+now use `rbbz_release_date` for the credit string, and the credit-panel transform
+reads that key. Regression checks reject the reserved key in text and compiled
+records. The release build and focused host tests pass; the owner chose to perform
+the in-game validation.

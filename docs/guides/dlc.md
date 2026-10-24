@@ -149,10 +149,19 @@ the P8 record). What that adds to the rules above:
   `45410914/00000002/`; a flat root gets a loose container beside the others, and **no title-id
   directory is invented** in one - a folder that grew a title-id level would be classified
   differently on the next boot, which could exclude the loose packages that were already there
-  (`store_install.h`'s `LibraryLayout`).
-- **The file name is generated, never taken from the catalogue**: `rv_<32 hex>.con`, the SHA-256 of
-  the offer's opaque file id, 39 bytes against the 42-byte field above; a collision adds `~<n>` and
-  still fits. No artist, title, `Content-Disposition` name or raw API id ever becomes a path.
+  (`store_install.h`'s `InstallLayout`).
+- **The file name is the song's own, made safe** (revised 2026-10-23, owner): the catalogue's
+  `Artist - Song`, with every character Windows refuses (`< > : " / \ | ? *`, the control range)
+  **and every `.`** removed - a dot would read as an extension, and the package has none -
+  whitespace runs collapsed, both ends trimmed, the result cut to the guest's 42-byte field at a
+  UTF-8 code-point boundary, and a device name (`CON`, `NUL`, `LPT1`, ...) given a trailing `_`. A
+  collision adds `~<n>` (the base gives up the bytes it needs), so a package is never replaced.
+  The staged part file keeps `rv_<32 hex>.part` - the SHA-256 of the offer's opaque file id - so a
+  partial transfer never carries the song's name, and an offer that carries no usable name
+  installs under that hash alone. No `Content-Disposition` name or raw API id ever becomes a
+  path. Until 2026-10-23 every install was `rv_<32 hex>.con`; measurements that name such a file
+  ([`docs/engine/diagnostics.md`](../engine/diagnostics.md), the plan's P5/P8 records) are runs of
+  that older rule, not descriptions of the current one.
 - **A transfer is staged outside every enumerator.** `<resolved root>/.rbbz-store-staging/` is
   skipped by the flat walk, the cache fingerprint and the structured scan, so a half-written
   `CON ` can neither be enumerated nor invalidate the cache on every chunk. The file is flushed,

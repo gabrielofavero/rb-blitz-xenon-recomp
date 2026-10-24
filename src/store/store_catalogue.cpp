@@ -301,6 +301,23 @@ void RunOne() {
       // serving path hands it to the download worker when the page is written.
       offers.push_back(OfferFromSong(offer.song, offer.download_url));
     }
+    // P9-13: an audio type this build has no label for draws no line on the details page. Name it
+    // once per boot, so a catalogue that starts publishing a new code is visible without a screen.
+    {
+      static bool noted_unknown_audio_type = false;
+      if (!noted_unknown_audio_type) {
+        for (const SearchOffer& offer : shaped) {
+          if (!offer.song.audio_type.empty() &&
+              AudioTypeLabel(offer.song.audio_type).empty()) {
+            REXLOG_WARN("store_catalogue: the catalogue publishes audio type '{}' which this "
+                        "build has no label for; the details page draws no audio-type line",
+                        offer.song.audio_type);
+            noted_unknown_audio_type = true;
+            break;
+          }
+        }
+      }
+    }
 
     bool dropped = false;
     {

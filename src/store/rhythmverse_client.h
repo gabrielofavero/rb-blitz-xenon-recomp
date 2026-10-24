@@ -172,7 +172,27 @@ struct SongFile {
   std::optional<int> album_track_number;
   std::optional<int> song_length_seconds;  // the API's `file_song_length` is seconds, not millis
   std::optional<std::int64_t> size_bytes;  // 0 = unknown, never "a zero-byte package"
+  // The **file's** own download count (`file.downloads`), never `data.downloads` - measured
+  // 2026-10-23 on the committed captures, where the same record carries 61 and 0 respectively.
+  // The details page's credit block shows this one (plan §9/P9-13).
   std::optional<int> downloads;
+
+  // P9-13: the custom's own credit facts, which are **the file's**, not the song's - one title can
+  // have several customs with different authors and dates, so the details page has to say which
+  // one the player is looking at (owner correction, plan §9/P9-13).
+  //
+  //   * `audio_type` is the catalogue's **code** (`single`, `partial`, `full`, `karaoke`), measured
+  //     on the committed captures 2026-10-23: the list capture carries `single`/`partial`/`full`
+  //     and neither capture carries `karaoke`. The code -> label table lives in
+  //     `store_metadata.h`'s `AudioTypeLabel`; the raw token is never drawn;
+  //   * `charter` is `file.charter`, else `file.author.name`, else `file.author_id`, in that order.
+  //     `charter` is null on every captured record, so in practice this is the author's display
+  //     name (`Virtual-Man` on the captured record);
+  //   * `release_date` is `file.release_date`, else `file.upload_date`, reduced to the date part by
+  //     `DatePart` (`2026-10-11 19:07:55` -> `2026-10-11`).
+  std::string audio_type;
+  std::string charter;
+  std::string release_date;
 
   std::string download_url;       // as returned: root-relative or absolute, possibly containing spaces
   std::string download_page_url;  // a web page, never used as a download target
@@ -217,6 +237,12 @@ struct ListingPage {
 std::optional<ListingPage> ParseListing(std::string_view json, std::string* error);
 
 // --- Chunking and politeness (§P7) ----------------------------------------------------------------
+
+// The date part of a catalogue timestamp (`2026-10-11 19:07:55` -> `2026-10-11`), or empty for the
+// site's zero date (`0000-00-00 00:00:00`, which appears in its own date fields) and for a string
+// that does not start with a `YYYY-MM-DD` shape. The details page's credit line shows the day only
+// (plan §9/P9-13); `0 Downloads`-style composed lines are the caller's business, not this one's.
+std::string DatePart(std::string_view text);
 
 // The API page a chunked fetch should ask for next, or 0 to stop. Plan §P7's rule in one function:
 // the cursor is the **server's own page number**, kept separately from the offers a caller has

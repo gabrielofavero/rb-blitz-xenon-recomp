@@ -1733,7 +1733,13 @@ int StoreEdit(const char* path, const char* which) {
     const bool option = rb_blitz::store::ClearDetailsFooterOption(&roots, &why);
     std::printf("store-edit: view item caption -> %s (%s)\n", option ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && preview && purchased && option;
+    // P9-13: the credit block is written into `refresh_panel`, whose whole method the dump below
+    // prints so a boot's record can be compared with this one.
+    why.clear();
+    const bool credits = rb_blitz::store::ShowOfferCredits(&roots, &why);
+    std::printf("store-edit: credit block -> %s (%s)\n", credits ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && preview && purchased && option && credits;
   }
   std::printf("store-edit: %s -> %s\n", mode.c_str(), ok ? "edited" : "refused");
   const Node* method = nullptr;
@@ -1748,6 +1754,19 @@ int StoreEdit(const char* path, const char* which) {
     PrintNode(*method, 0);
   } else {
     std::printf("store-edit: method not found in %zu root(s)\n", roots.size());
+  }
+  if (mode != "store") {
+    const Node* panel = nullptr;
+    for (const Node& root : roots) {
+      panel = FindNamedMethodNode(root, "store_info_panel", "refresh_panel");
+      if (panel != nullptr) break;
+    }
+    if (panel != nullptr) {
+      std::printf("store-edit: store_info_panel refresh_panel after:\n");
+      PrintNode(*panel, 0);
+    } else {
+      std::printf("store-edit: refresh_panel not found in %zu root(s)\n", roots.size());
+    }
   }
   return ok ? 0 : 1;
 }
@@ -2694,6 +2713,223 @@ void TestDetailsFooterOptionCleared() {
   CHECK_TRUE(TreeUnchanged(other, untouched));
 }
 
+// P9-13's fixture: `store_info_panel.refresh_panel`'s measured shape
+// (`out/_swap/store_info_panel.txt`, 2026-10-23): a single `{do ...}` body that binds `$offer`,
+// writes the name, drives the rating group's two labels and the record's description, and hides
+// the two cost labels. Every receiver the transform anchors on appears exactly as the shipped
+// record spells it.
+std::vector<Node> StoreInfoCreditsRecord() {
+  std::vector<Node> body;
+  body.push_back(Node::Array({Node::Var("offer"), Node::Property({Symbol("cur_offer")})}));
+  body.push_back(Node::Command({Symbol("song.lbl"), Symbol("set_offer_name"), Node::Var("offer")}));
+  body.push_back(Node::Command({Symbol("rating.grp"), Symbol("set_showing"), Symbol("FALSE")}));
+  body.push_back(Node::Command({Symbol("rating.lbl"), Symbol("set_showing"), Symbol("FALSE")}));
+  body.push_back(Node::Command({Symbol("rating_description.lbl"), Symbol("set"),
+                                Symbol("text_token"), Text("rating_0")}));
+  body.push_back(Node::Command({Symbol("drm.lbl"), Symbol("set_offer_description"),
+                                Node::Var("offer")}));
+  body.push_back(Node::Command({Symbol("cost.lbl"), Symbol("set_showing"), Symbol("FALSE")}));
+  body.push_back(Node::Command({Symbol("cost_ps3.lbl"), Symbol("set_showing"), Symbol("FALSE")}));
+  Node do_body = Node::Command({Symbol("do")});
+  do_body.kids = std::move(body);
+  return {Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                         Node::Array({Symbol("file"), Text("store_info.milo")}),
+                         Node::Array({Symbol("refresh_buttons"),
+                             Node::Command({Symbol("buttons.lst"), Symbol("set_data"),
+                                            Node::Var("buttons")})}),
+                         Node::Array({Symbol("refresh_panel"), std::move(do_body)})})};
+}
+
+// `{<receiver> set_display_text_string <value>}` at any depth.
+const Node* FindDisplayText(const Node& node, std::string_view receiver) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+      node.kids[0].text == receiver && node.kids[1].text == "set_display_text_string") {
+    return &node;
+  }
+  for (const Node& kid : node.kids) {
+    if (const Node* found = FindDisplayText(kid, receiver)) return found;
+  }
+  return nullptr;
+}
+
+// `{offer get_data (<key>)}` at any depth.
+bool HasCreditDataRead(const Node& node, std::string_view key) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+      node.kids[0].tag == rb_blitz::ui::dtb::kVar && node.kids[0].text == "offer" &&
+      node.kids[1].text == "get_data" && node.kids[2].tag == rb_blitz::ui::dtb::kArray &&
+      node.kids[2].kids.size() == 1 && node.kids[2].kids[0].text == key) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasCreditDataRead(kid, key)) return true;
+  }
+  return false;
+}
+
+// The format string of a `sprintf` anywhere in the subtree, or empty.
+std::string FindSprintfFormat(const Node& node) {
+  if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+      node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == "sprintf" &&
+      node.kids[1].tag == rb_blitz::ui::dtb::kString) {
+    return node.kids[1].text;
+  }
+  for (const Node& kid : node.kids) {
+    std::string found = FindSprintfFormat(kid);
+    if (!found.empty()) return found;
+  }
+  return {};
+}
+
+void TestOfferCredits() {
+  BeginCase("the details page's box carries the custom's own credit block");
+
+  std::vector<Node> record = StoreInfoCreditsRecord();
+  const Node* before = FindNamedMethodNode(record[0], "store_info_panel", "refresh_panel");
+  CHECK_TRUE(before != nullptr);
+  if (before == nullptr) return;
+  const size_t before_count = before->kids.size();
+
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::ShowOfferCredits(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node* panel = FindNamedMethodNode(record[0], "store_info_panel", "refresh_panel");
+  CHECK_TRUE(panel != nullptr);
+  if (panel == nullptr) return;
+  // The method's own body is untouched, and one `{do ...}` block follows it: a method-level
+  // `do` is retail's own shape for a body that binds a local (`refresh_buttons`), and the binding
+  // inside it is the compiled record's array statement, not a `{var}` command.
+  CHECK_EQ(panel->kids.size(), before_count + 1);
+  const std::vector<uint8_t> once = rb_blitz::ui::dtb::SerializeNodes(record);
+
+  bool binding_ok = false;
+  if (panel->kids.size() == before_count + 1) {
+    const Node& block = panel->kids.back();
+    binding_ok = block.tag == rb_blitz::ui::dtb::kCommand && block.kids.size() >= 2 &&
+                 block.kids[0].tag == rb_blitz::ui::dtb::kSymbol && block.kids[0].text == "do" &&
+                 block.kids[1].tag == rb_blitz::ui::dtb::kArray && block.kids[1].kids.size() == 2 &&
+                 block.kids[1].kids[0].tag == rb_blitz::ui::dtb::kVar &&
+                 block.kids[1].kids[0].text == "offer" &&
+                 block.kids[1].kids[1].tag == rb_blitz::ui::dtb::kProperty;
+  }
+  CHECK_TRUE(binding_ok);
+  // The rating group is shown again (retail hid it because a served offer carries no `rating`),
+  // and the cost row - which the price transform hides - is shown before its line is written.
+  CHECK_TRUE(HasHelpStatement(*panel, "rating.grp", "set_showing", "TRUE"));
+  CHECK_TRUE(HasHelpStatement(*panel, "cost.lbl", "set_showing", "TRUE"));
+
+  // Song Artist on `drm.lbl`, from the record's own key.
+  const Node* artist = FindDisplayText(*panel, "drm.lbl");
+  CHECK_TRUE(artist != nullptr);
+  if (artist != nullptr) CHECK_TRUE(HasCreditDataRead(artist->kids[2], "artist"));
+
+  // The audio type is drawn through its own guard: a value shows `rating.lbl` and writes it, an
+  // empty one hides the label (the plan's "nothing at all when the catalogue has none").
+  CHECK_TRUE(HasCreditDataRead(*panel, "audio_type"));
+  CHECK_TRUE(HasHelpStatement(*panel, "rating.lbl", "set_showing", "FALSE"));
+
+  // Every text label has bounded, left-aligned ellipsis, including the title and the
+  // formerly hidden PS3 cost label, now a separate download-count row.
+  for (const char* label : {"song.lbl", "drm.lbl", "rating.lbl", "rating_description.lbl",
+                            "cost.lbl", "cost_ps3.lbl"}) {
+    const Node* fit = nullptr;
+    const Node* align = nullptr;
+    const Node* text_size = nullptr;
+    bool uses_rnd_text_properties = false;
+    const auto find_layout = [&](const Node& node, const auto& self) -> void {
+      if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 4 &&
+          node.kids[0].text == label && node.kids[1].text == "set") {
+        if (node.kids[2].text == "fit_type") fit = &node;
+        if (node.kids[2].text == "alignment") align = &node;
+        if (node.kids[2].text == "align") uses_rnd_text_properties = true;
+        const Node& path = node.kids[2];
+        if (path.tag == rb_blitz::ui::dtb::kArray && path.kids.size() == 3 &&
+            path.kids[0].text == "styles" && path.kids[1].scalar == 0) {
+          if (path.kids[2].text == "text_size") text_size = &node;
+          if (path.kids[2].text == "size") uses_rnd_text_properties = true;
+        }
+      }
+      for (const Node& kid : node.kids) self(kid, self);
+    };
+    find_layout(*panel, find_layout);
+    CHECK_TRUE(fit != nullptr);
+    CHECK_TRUE(align != nullptr);
+    // These names come from the shipped UILabel schema / song_select.dtb,
+    // not RndText's similarly named properties. Invalid paths can crash the guest.
+    CHECK_TRUE(text_size != nullptr);
+    CHECK_FALSE(uses_rnd_text_properties);
+    if (fit) CHECK_EQ(fit->kids[3].scalar, 2u);
+    if (align) CHECK_EQ(align->kids[3].scalar, 0x11u);
+    if (text_size) CHECK_EQ(text_size->kids[3].scalar,
+                            std::string_view(label) == "song.lbl" ? 24u :
+                            std::string_view(label) == "drm.lbl" ? 18u : 14u);
+  }
+  CHECK_TRUE(FindDisplayText(*panel, "cost_ps3.lbl") != nullptr);
+  const Node* release = FindDisplayText(*panel, "cost.lbl");
+  CHECK_TRUE(release != nullptr);
+  if (release) CHECK_STR_EQ(FindSprintfFormat(*release), "Released at %s");
+
+  // Charted by <name>, Released at <date>, and <N> Downloads - separate lines, with the
+  // record's own keys inside the format calls.
+  CHECK_STR_EQ(FindSprintfFormat(*panel), "Charted by %s");
+  CHECK_TRUE(HasCreditDataRead(*panel, "charter"));
+  CHECK_TRUE(HasCreditDataRead(*panel, "rbbz_release_date"));
+  CHECK_FALSE(HasCreditDataRead(*panel, "release_date"));
+  CHECK_TRUE(HasCreditDataRead(*panel, "downloads"));
+  bool downloads_format = false;
+  const auto scan_formats = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 2 &&
+        node.kids[0].text == "sprintf" && node.kids[1].tag == rb_blitz::ui::dtb::kString &&
+        node.kids[1].text.find("Downloads") != std::string::npos) {
+      downloads_format = true;
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  scan_formats(*panel, scan_formats);
+  CHECK_TRUE(downloads_format);
+
+  // Idempotent: a second pass adds nothing.
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::ShowOfferCredits(&record, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(record) == once);
+
+  // Compile and parse round trip, and the parsed record is still recognised as already written.
+  const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  why.clear();
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_TRUE(!parsed.empty());
+  const std::vector<uint8_t> reparsed_once = rb_blitz::ui::dtb::SerializeNodes(parsed);
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::ShowOfferCredits(&parsed, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(parsed) == reparsed_once);
+
+  // A record whose `refresh_panel` does not drive one of the labels is refused, untouched: the
+  // anchor is what keeps four object names out of a scene this edit was not measured against.
+  std::vector<Node> other = {Node::Command(
+      {Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"), Text("elsewhere.milo"),
+       Node::Array({Symbol("refresh_panel"),
+                    Node::Command({Symbol("do"),
+                                   Node::Command({Symbol("song.lbl"), Symbol("set_offer_name"),
+                                                  Node::Var("offer")}),
+                                   Node::Command({Symbol("drm.lbl"),
+                                                  Symbol("set_offer_description"),
+                                                  Node::Var("offer")})})})})};
+  const std::vector<Node> untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::ShowOfferCredits(&other, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(other, untouched));
+
+  // A record without the details panel is refused too.
+  std::vector<Node> missing = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                              Symbol("store_info_screen")})};
+  const std::vector<Node> missing_untouched = missing;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::ShowOfferCredits(&missing, &why));
+  CHECK_TRUE(TreeUnchanged(missing, missing_untouched));
+}
+
 int main(int argc, char** argv) {
   if (argc >= 3 && std::strcmp(argv[1], "dump-menu") == 0) {
     return DumpMenu(argv[2]);
@@ -2733,5 +2969,6 @@ int main(int argc, char** argv) {
   TestStoreFooterStart();
   TestStoreFooterOptionCleared();
   TestDetailsFooterOptionCleared();
+  TestOfferCredits();
   return rb_blitz::test::Finish();
 }

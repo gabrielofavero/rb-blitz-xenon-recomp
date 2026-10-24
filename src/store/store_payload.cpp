@@ -662,6 +662,198 @@ bool HideStoreInfoPriceChrome(std::vector<ui::dtb::Node>* store_info_roots, std:
 
 namespace {
 
+// The string writer the credit block is built from. `set_display_text_string` is the same message
+// retail's own labels answer (the name table at image 0x820423dc carries it beside
+// `set_offer_name`/`set_offer_description`), and its handler converts the argument with
+// `sub_823F9538` before calling the label's own text write - which is what makes a composed
+// `sprintf` result drawable.
+constexpr char kDisplayTextMethod[] = "set_display_text_string";
+
+// This edit's marker: any `{<label> set_display_text_string ...}` inside the method.
+bool HasDisplayTextWrite(const Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+      IsSymbol(node.kids[1], kDisplayTextMethod)) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (HasDisplayTextWrite(kid)) return true;
+  }
+  return false;
+}
+
+// `{<receiver> ...}` anywhere in the method: the anchor check below. A receiver is a scene object;
+// the shipped `refresh_panel` names all of the labels this edit writes.
+bool MentionsReceiver(const Node& node, std::string_view receiver) {
+  if (node.tag == ui::dtb::kCommand && !node.kids.empty() &&
+      node.kids[0].tag == ui::dtb::kSymbol && node.kids[0].text == receiver) {
+    return true;
+  }
+  for (const Node& kid : node.kids) {
+    if (MentionsReceiver(kid, receiver)) return true;
+  }
+  return false;
+}
+
+// `{offer get_data (<key>)}` - the one-component data read the offer walk resolves (the shape
+// retail itself uses for `preview_audio`; the two-component `(rank <part>)` is the one it cannot).
+Node CreditData(std::string_view key) {
+  return Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
+                        Node::Array({Node::Symbol(key)})});
+}
+
+Node CreditText(std::string_view label, Node value) {
+  return Node::Command({Node::Symbol(label), Node::Symbol(kDisplayTextMethod), std::move(value)});
+}
+
+Node CreditSprintf(std::string_view format, std::initializer_list<Node> arguments) {
+  Node command = Node::Command({Node::Symbol("sprintf"), Node::String(std::string(format))});
+  for (const Node& argument : arguments) {
+    command.kids.push_back(argument);
+  }
+  return command;
+}
+
+Node CreditInt(int value) {
+  return Node::Int(static_cast<uint32_t>(value));
+}
+
+Node CreditProperty(std::string_view label, std::string_view property, int value) {
+  return Node::Command({Node::Symbol(label), Node::Symbol("set"),
+                        Node::Symbol(property), CreditInt(value)});
+}
+
+// UILabel's own property handlers: alignment/width/height/fit_type (824BD570),
+// and the font size in (styles 0 text_size) (824BBC28). RndText's align/size
+// properties (822A1A40 / 8229DEE0) are not exposed by UILabel. The retail
+// song_select panel also writes (styles 0 text_size) directly.
+// Use bounded, single-line ellipsis rather than the retail price/icon layout.
+void CreditLabelLayout(std::vector<Node>& statements, std::string_view label,
+                       int size, int width, int height) {
+  statements.push_back(CreditProperty(label, "alignment", 0x11));  // top left
+  statements.push_back(CreditProperty(label, "width", width));
+  statements.push_back(CreditProperty(label, "height", height));
+  statements.push_back(CreditProperty(label, "fit_type", 2));  // ellipsis
+  statements.push_back(Node::Command({Node::Symbol(label), Node::Symbol("set"),
+      Node::Array({Node::Symbol("styles"), Node::Int(0), Node::Symbol("text_size")}),
+      CreditInt(size)}));
+}
+
+Node CreditPosition(std::string_view label, Node z) {
+  return Node::Command({Node::Symbol(label), Node::Symbol("set_local_pos"),
+                        CreditInt(-320), Node::Int(0), std::move(z)});
+}
+
+Node CreditRow(std::string_view label, Node text, int pitch = 22) {
+  return Node::Command({Node::Symbol("do"),
+      Node::Command({Node::Symbol(label), Node::Symbol("set_showing"), Node::Symbol("TRUE")}),
+      CreditPosition(label, Node::Var("credit_z")), CreditText(label, std::move(text)),
+      Node::Command({Node::Symbol("set"), Node::Var("credit_z"),
+          Node::Command({Node::Symbol("-"), Node::Var("credit_z"), CreditInt(pitch)})})});
+}
+
+Node OptionalCreditRow(std::string_view label, Node condition, Node text) {
+  return Node::Command({Node::Symbol("if_else"), std::move(condition),
+      CreditRow(label, std::move(text)),
+      Node::Command({Node::Symbol(label), Node::Symbol("set_showing"), Node::Symbol("FALSE")})});
+}
+
+}  // namespace
+
+bool ShowOfferCredits(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* panel = nullptr;
+  for (Node& root : *store_info_roots) {
+    panel = FindNamedMethod(root, "store_info_panel", "refresh_panel");
+    if (panel != nullptr) {
+      break;
+    }
+  }
+  if (panel == nullptr) {
+    return refuse("the record carries no store_info_panel refresh_panel method");
+  }
+  if (HasDisplayTextWrite(*panel)) {
+    if (why != nullptr) why->clear();  // an idempotent second pass
+    return true;
+  }
+  // The scene anchor: every label this edit writes has to be one the shipped method already
+  // drives. Refuse an unfamiliar scene before writing any layout commands.
+  for (const char* receiver : {"song.lbl", "drm.lbl", "rating.grp", "rating.lbl",
+                               "rating_description.lbl", "cost.lbl", "cost_ps3.lbl"}) {
+    if (!MentionsReceiver(*panel, receiver)) {
+      return refuse(std::string("refresh_panel does not drive ") + receiver);
+    }
+  }
+  bool has_buttons = false;
+  for (const Node& root : *store_info_roots) {
+    // The list is populated in refresh_buttons, called by refresh_panel.
+    if (MentionsReceiver(root, "buttons.lst")) has_buttons = true;
+  }
+  if (!has_buttons) return refuse("the details record does not drive buttons.lst");
+  // The statements run after the method's own body, which is where `refresh_panel`'s hides (the
+  // rating group's and, once `HideStoreInfoPriceChrome` has run, both cost labels') have already
+  // executed. They go in **one** `{do ...}` - retail's own body shape for a method that binds a
+  // local (`refresh_buttons` is `{do ($offer ...) ...}`), so the binding is the compiled record's
+  // array statement and not a `{var}` command (plan §5/P5 measured that distinction twice).
+  std::vector<Node> statements;
+  statements.push_back(
+      Node::Array({Node::Var("offer"), Node::Property({Node::Symbol("cur_offer")})}));
+  statements.push_back(Node::Array({Node::Var("credit_z"), Node::Int(66)}));
+  // The scene's rating group is translated above the box; both rating labels were
+  // at the same height, while the price label was right-aligned beside the title.
+  // Neutralise that group offset and lay every label out in the box's coordinates.
+  statements.push_back(Node::Command({Node::Symbol("rating.grp"), Node::Symbol("set_local_pos"),
+                                      Node::Int(0), Node::Int(0), Node::Int(0)}));
+  // Keep the title and artist prominent; custom metadata is a quieter block
+  // below them. The padded widths end inside the frame even on long titles.
+  CreditLabelLayout(statements, "song.lbl", 24, 480, 30);
+  CreditLabelLayout(statements, "drm.lbl", 18, 480, 24);
+  for (const char* label : {"rating.lbl", "rating_description.lbl", "cost.lbl", "cost_ps3.lbl"}) {
+    CreditLabelLayout(statements, label, 14, 440, 20);
+  }
+  statements.push_back(CreditPosition("song.lbl", Node::Int(98)));
+  // The rating group holds `rating.lbl` (the audio type) and `rating_description.lbl` (the
+  // charter); `refresh_panel` hides it because a served offer carries no `rating` data.
+  statements.push_back(Node::Command({Node::Symbol("rating.grp"), Node::Symbol("set_showing"),
+                                      Node::Symbol("TRUE")}));
+  // Song Artist: `drm.lbl` is the record's own `set_offer_description` row, and a served offer has
+  // no description to show, so the row is rewritten to the custom's artist.
+  statements.push_back(CreditRow("drm.lbl", CreditData("artist"), 36));
+  // Audio type, or no line at all: the plan's rule is that an empty audio type draws nothing.
+  // The test is the DTA's own string truthiness - the same shape `refresh_list` uses to tell
+  // `{store_panel sort_name}` "" (no grouping) from a grouping name.
+  statements.push_back(OptionalCreditRow("rating.lbl", CreditData("audio_type"),
+                                          CreditData("audio_type")));
+  // Charted by <name>, or no line at all when the catalogue names nobody.
+  statements.push_back(OptionalCreditRow("rating_description.lbl", CreditData("charter"),
+      CreditSprintf("Charted by %s", {CreditData("charter")})));
+  statements.push_back(OptionalCreditRow("cost.lbl", CreditData("rbbz_release_date"),
+      CreditSprintf("Released at %s", {CreditData("rbbz_release_date")})));
+  statements.push_back(OptionalCreditRow("cost_ps3.lbl", CreditData("downloads"),
+      CreditSprintf("%i Downloads", {CreditData("downloads")})));
+  // Restore the retail lower-right action area, independent of missing credits.
+  // list_store_songpage's list.lbl is offset (-339.246, 0, -90.392)
+  // from this origin; the scene authors buttons.lst at (248.246, 0, 6.585).
+  statements.push_back(Node::Command({Node::Symbol("buttons.lst"), Node::Symbol("set_local_pos"),
+      Node::Int(248), Node::Int(0), Node::Int(7)}));
+  Node block = Node::Command({Node::Symbol("do")});
+  for (Node& statement : statements) {
+    block.kids.push_back(std::move(statement));
+  }
+  panel->kids.push_back(std::move(block));
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
 // The `if_else` whose test is `{<receiver> is_completely_unavailable}`, collected from every panel
 // the record defines (both `store_info_enum_panel` and `store_offer_fetch_panel` carry one).
 void CollectUnavailableGuards(Node& node, std::vector<Node*>* guards) {

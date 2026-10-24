@@ -307,6 +307,14 @@ void TestListFixture(const fs::path& project_dir) {
   CHECK_TRUE(first->HasChart(Instrument::kVocals));
   // The keys field exists only in the `data` copy and 0 is its "not authored" spelling.
   CHECK_FALSE(first->HasChart(Instrument::kKeys));
+  // P9-13's credit facts, on the record the plan's Done-when names: `Forever Young` /
+  // `Youth Group` / `Single Track` / `Charted by Virtual-Man` / `Released at 2026-10-11` /
+  // `61 Downloads`. `file.downloads` is 61 while `data.downloads` is 0 on this same record, so
+  // the check pins the precedence too.
+  CHECK_STR(first->audio_type, "single");
+  CHECK_STR(first->charter, "Virtual-Man");  // `charter` is null; the author's display name
+  CHECK_STR(first->release_date, "2026-10-11");
+  CHECK_EQ(first->downloads.value_or(-1), 61);
 
   // A song with keys: Promises carries diff_keys = 6 in `data` and nothing in `file`.
   const SongFile* promises = nullptr;
@@ -447,6 +455,82 @@ void TestParseTolerates() {
       CHECK_TRUE(page->songs.front().withdrawn);
       CHECK_ENUM(DecideOffer(page->songs.front()).reject, OfferReject::kWithdrawn);
     }
+  }
+}
+
+// --- P9-13's credit facts -------------------------------------------------------------------------
+
+void TestCreditFields(const fs::path& project_dir) {
+  test::BeginCase("the custom's credit facts: audio type, charter, release date, downloads");
+
+  // `DatePart` shows the day only, and the site's zero date is "no date" rather than a line that
+  // reads `Released at 0000-00-00` (plan §9/P9-13).
+  CHECK_STR(DatePart("2026-10-11 19:07:55"), "2026-10-11");
+  CHECK_STR(DatePart("2026-10-11"), "2026-10-11");
+  CHECK_STR(DatePart("0000-00-00 00:00:00"), "");
+  CHECK_STR(DatePart(""), "");
+  CHECK_STR(DatePart("not a date"), "not a date");  // passed through, never silently blanked
+
+  const auto parse_one = [](const char* file_extra) {
+    const std::string json =
+        std::string(
+            R"({"status":"success","data":{"records":{"returned":1,"total_filtered":1},)"
+            R"("pagination":{"page":1,"records":25},"songs":[{"file":{"file_id":"x",)"
+            R"("gameformat":"rb3xbox","file_artist":"Youth Group","file_title":"Forever Young",)"
+            R"("download_url":"/download_file/u/x/a_rb3con")") +
+        file_extra + "}}]}}";
+    std::string error;
+    const std::optional<ListingPage> page = ParseListing(json, &error);
+    CHECK_TRUE(page.has_value());
+    if (!page || page->songs.empty()) return SongFile{};
+    return page->songs.front();
+  };
+
+  // `charter` wins over the author; `release_date` wins over `upload_date`, and `file.downloads`
+  // wins over `data.downloads` (the same record carries both in the fixture, 61 vs 0).
+  const SongFile full = parse_one(
+      R"(,"charter":"Some Charter","audio_type":"full","release_date":"2026-10-11 19:07:55",)"
+      R"("upload_date":"2026-01-02 00:00:00","downloads":61,"author":{"name":"Virtual-Man"},)"
+      R"("author_id":"anonymous-family")");
+  CHECK_STR(full.audio_type, "full");
+  CHECK_STR(full.charter, "Some Charter");
+  CHECK_STR(full.release_date, "2026-10-11");
+  CHECK_EQ(full.downloads.value_or(-1), 61);
+
+  // No charter: the author's display name, then its shortname, then nothing.
+  const SongFile named = parse_one(R"(,"author":{"name":"Virtual-Man"},)"
+                                   R"("author_id":"anonymous-family")");
+  CHECK_STR(named.charter, "Virtual-Man");
+  const SongFile shortname = parse_one(R"(,"author_id":"anonymous-family")");
+  CHECK_STR(shortname.charter, "anonymous-family");
+  // No release date: the upload date's own day, and no `audio_type` at all leaves it empty.
+  const SongFile uploaded = parse_one(R"(,"upload_date":"2026-08-29 07:11:31")");
+  CHECK_STR(uploaded.release_date, "2026-08-29");
+  CHECK_TRUE(uploaded.audio_type.empty());
+  CHECK_FALSE(uploaded.downloads.has_value());
+  const SongFile zero = parse_one(R"(,"release_date":"0000-00-00 00:00:00")");
+  CHECK_TRUE(zero.release_date.empty());
+
+  // The committed captures carry the codes the label table translates; `data.audio_type` does not
+  // exist, which is why the field is read from `file` only.
+  const std::string_view codes[] = {"single", "full", "partial"};
+  for (const std::string_view code : codes) {
+    int seen = 0;
+    for (const char* name : {"list.json", "search.json"}) {
+      const std::optional<std::string> json =
+          ReadFile(project_dir / "docs" / "rythmverse-responses" / name);
+      if (!json) continue;
+      std::string error;
+      const std::optional<ListingPage> page = ParseListing(*json, &error);
+      if (!page) continue;
+      for (const SongFile& song : page->songs) {
+        if (song.audio_type == code) ++seen;
+        CHECK_TRUE(song.audio_type.empty() || song.audio_type == "single" ||
+                   song.audio_type == "full" || song.audio_type == "partial" ||
+                   song.audio_type == "karaoke");
+      }
+    }
+    CHECK_TRUE(seen > 0);
   }
 }
 
@@ -1085,6 +1169,7 @@ int main(int argc, char** argv) {
   TestListFixture(project_dir);
   TestSearchFixture(project_dir);
   TestParseTolerates();
+  TestCreditFields(project_dir);
   TestPreviewDecision(project_dir);
   TestDownloadUrls();
   TestAlbumArtUrls();

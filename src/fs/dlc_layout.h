@@ -186,7 +186,10 @@ inline bool HasStructuredLayout(const std::filesystem::path& dlc_root) {
     return false;
   }
   for (const auto& entry : it) {
-    if (entry.is_directory(ec) && !ec && IsContentRootName(entry.path().filename().string())) {
+    // Reject ordinary song filenames before querying their attributes. On Windows
+    // that query can open each package to resolve reparse points, defeating a warm
+    // library cache before the cached scan even starts.
+    if (IsContentRootName(entry.path().filename().string()) && entry.is_directory(ec) && !ec) {
       return true;
     }
   }

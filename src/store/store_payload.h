@@ -225,6 +225,54 @@ bool HideStorePriceChrome(std::vector<ui::dtb::Node>* store_ui_roots, std::strin
 // `{offer is_available}`, which a free custom never sets - see `Offer::downloaded`.
 bool HideStoreInfoPriceChrome(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
+// ---------------------------------------------------------------------------------------------
+// P9-13 - the details page's box carries the custom's own credit block
+// ---------------------------------------------------------------------------------------------
+//
+// The box that holds the Download / Cancel rows (`store_info_panel`, `ui/store/gen/store_info.dtb`)
+// drew the song's name alone (`song.lbl set_offer_name`; the P3 details capture OCRs
+// `Building a Mystery` and nothing else above the buttons). The owner's correction of 2026-10-22 is
+// the point of the block: a title can have several customs with different authors and release
+// dates, so the page has to name the custom the player is looking at - its charter, its release
+// date, its audio type and its download count.
+//
+// The scene has no spare label (`store_info.milo_xbox` declares `song.lbl`, `drm.lbl`,
+// `rating.lbl`, `rating_description.lbl`, `cost.lbl`/`cost_ps3.lbl` as its only `UILabel`s), and
+// retail's `refresh_panel` already *hides* the ones it does not use for a data-only offer:
+// `rating.grp` is hidden when the offer carries no `rating`, and the cost labels are hidden by
+// `HideStoreInfoPriceChrome`. This transform shows them again, **after** those hides, and
+// replaces their retail positioning with a bounded, top-left-aligned stack. The lines are:
+//
+//   drm.lbl                 Song Artist
+//   rating.lbl              Audio type (`AudioTypeLabel`'s text; hidden when the catalogue has none)
+//   rating_description.lbl  Charted by <charter> (hidden when the record has none)
+//   cost.lbl                Released at <date> (hidden when absent)
+//   cost_ps3.lbl            <N> Downloads (hidden when absent)
+//   song.lbl                Song Title - retail's own `set_offer_name`
+//
+// Each fact gets its own row. Every string is the record's own key written by
+// `store_metadata.cpp` (`audio_type`, `charter`, `rbbz_release_date`, `downloads`), so the payload
+// composes text and never invents a value; a missing or unknown value draws no line rather than a
+// placeholder, and the raw `audio_type` code is never drawn.
+//
+// The statements are appended to the **method**, as one `{do ...}` block after its own body,
+// because they must run after `refresh_panel`'s own hides and after the two cost hides above -
+// which is also why this transform must run after `HideStoreInfoPriceChrome`. The offer is bound
+// inside that block with the compiled record's own binding statement
+// (`(Var offer (Property cur_offer))`), the shape `refresh_buttons` uses and the one a `{var}`
+// command is not (P5 measured that distinction twice).
+//
+// Reset rating.grp's offset so its labels share the box's coordinates. The padded title/artist
+// block uses sizes 24/18 and a 480-unit width. Metadata uses size 14, width 440 and a 22-unit
+// pitch, advancing only for visible facts. Long values use ellipsis. The actions keep their
+// retail lower-right position. A boot provides visual confirmation; tests do not render the scene.
+//
+// Idempotent (the marker is a `set_display_text_string` on `drm.lbl`); refused, before any edit,
+// when the record has no `store_info_panel.refresh_panel`, when that method does not drive one of
+// the labels this edit writes (the anchor that keeps it from writing into a scene it does not
+// know), or when the string writer's name it depends on is spelled differently.
+bool ShowOfferCredits(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
 // A free custom is never "completely unavailable": that state only exists in the retail purchase
 // model. `store_info_enum_panel.on_enum_finished` opens `store_info_screen` only when
 // `{offer is_completely_unavailable}` is false, and measured 2026-10-21 the A press on a served

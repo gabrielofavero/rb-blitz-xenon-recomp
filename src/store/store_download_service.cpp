@@ -145,7 +145,8 @@ void RunJob(const std::string& token) {
   }
 
   std::string plan_error;
-  const std::optional<StagedInstall> install = PlanInstall(config.layout, offer.file_id, &plan_error);
+  const std::optional<StagedInstall> install =
+      PlanInstall(config.layout, offer.file_id, offer.title, &plan_error);
   if (!install) {
     SetFailed(token, DownloadError::kStorage, plan_error);
     return;

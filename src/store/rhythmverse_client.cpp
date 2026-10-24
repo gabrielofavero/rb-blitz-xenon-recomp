@@ -407,6 +407,24 @@ SongFile ParseSong(const Json& entry) {
   song.size_bytes = AsInteger(Member(*file, "size"));
   song.downloads = FirstInt(file, "downloads", data, "downloads");
 
+  // P9-13's credit facts. All three are the **file's**, not the song's: the same title can have
+  // several customs, each with its own author and date (plan §9/P9-13).
+  song.audio_type = AsText(Member(*file, "audio_type"));
+  song.charter = AsText(Member(*file, "charter"));
+  if (song.charter.empty()) {
+    if (const Json* author = ObjectMember(*file, "author")) {
+      song.charter = AsText(Member(*author, "name"));
+    }
+  }
+  if (song.charter.empty()) {
+    song.charter = AsText(Member(*file, "author_id"));
+  }
+  song.release_date = AsText(Member(*file, "release_date"));
+  if (song.release_date.empty()) {
+    song.release_date = AsText(Member(*file, "upload_date"));
+  }
+  song.release_date = DatePart(song.release_date);
+
   song.download_url = AsText(Member(*file, "download_url"));
   song.download_page_url = AsText(Member(*file, "download_page_url"));
   song.album_art = FirstText(file, "album_art", data, "album_art");
@@ -542,6 +560,34 @@ char32_t FoldCodePoint(char32_t cp) {
 }
 
 }  // namespace
+
+std::string DatePart(std::string_view text) {
+  // The shape check is deliberate: a field that is not a timestamp is passed through unchanged (a
+  // future API spelling is then drawn as it came, not silently blanked), while the site's zero
+  // date becomes empty, because `Released at 0000-00-00` is worse than no line at all.
+  if (text.size() < 10) {
+    return std::string(text);
+  }
+  bool shaped = true;
+  for (std::size_t i = 0; i < 10; ++i) {
+    if (i == 4 || i == 7) {
+      shaped = text[i] == '-';
+    } else {
+      shaped = text[i] >= '0' && text[i] <= '9';
+    }
+    if (!shaped) break;
+  }
+  if (!shaped) {
+    return std::string(text);
+  }
+  if (text.size() > 10 && text[10] != ' ') {
+    return std::string(text);
+  }
+  if (text.substr(0, 10) == "0000-00-00") {
+    return {};
+  }
+  return std::string(text.substr(0, 10));
+}
 
 // --- Instruments ----------------------------------------------------------------------------------
 

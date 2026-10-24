@@ -231,7 +231,17 @@ void InstallSearchTransport() {
   // retail browser then lists it exactly as it lists Recently Added.
   SetSearchPageSource([] {
     std::vector<Offer> page;
+    // P9-13: an audio type this build has no label for draws no line on the details page. Name it
+    // once per boot (the catalogue worker does the same for Recently Added's list).
+    static bool noted_unknown_audio_type = false;
     for (const SearchOffer& answer : SearchOffers()) {
+      if (!noted_unknown_audio_type && !answer.song.audio_type.empty() &&
+          AudioTypeLabel(answer.song.audio_type).empty()) {
+        REXLOG_WARN("store_search: the catalogue publishes audio type '{}' which this build has "
+                    "no label for; the details page draws no audio-type line",
+                    answer.song.audio_type);
+        noted_unknown_audio_type = true;
+      }
       page.push_back(OfferFromSong(answer.song, answer.download_url));
     }
     SearchMarkShown();
