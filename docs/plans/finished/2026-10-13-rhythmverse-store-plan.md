@@ -1,9 +1,10 @@
 # RhythmVerse in-store integration — research + implementation plan
 
-the Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23. Status:
+the Date: 2026-10-13. Reviewed: 2026-10-14, 2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23, 2026-10-24. Status:
 **reopened 2026-10-22** — the owner drove the shipped store and asked for eleven adjustments, then
-two more the same day (P9-12 and P9-13), and **P9-6 was redesigned from scratch on 2026-10-23** (a
-modal download popup and its success toast; §9); **§9** carries one prompt per adjustment and is the
+two more the same day (P9-12 and P9-13), and **P9-6 was redesigned from scratch on 2026-10-23** (one
+modal download popup; **delivered 2026-10-24**), with **P9-14** (the toast's A Refresh, **landed
+2026-10-24**) following; **§9** carries one prompt per adjustment and is the
 work now, and the record below is what shipped before that pass, kept as it was written. **Finished
 2026-10-22 — P0, P6, P1, P2, P3, P4, P5, P7 and P8 all landed, and the acceptance harness is green
 in all four legs on one build (`out/store-acceptance/p8-final/`, **69 steps, 0 failures**): the
@@ -202,14 +203,15 @@ captures in `docs/rythmverse-responses/{list,search}.json`.
     web pages (§3.3). V1 therefore ships **no audio preview**, and no YouTube/browser path exists to
     fake one.
 
-> **Superseded 2026-10-22 by the owner pass (§9), revised 2026-10-23.** The settings pair moves
+> **Superseded 2026-10-22 by the owner pass (§9), revised 2026-10-23 and 2026-10-24.** The settings pair moves
 > into `General ▸ Downloadable Content ▸ RhythmVerse` as that page's first row, and the filter is
 > **Filters** (`RHYTHMVERSE FILTERS` page title; P9-3, renamed by P9-11); the master now defaults
 > **On** (P9-1) and stays hot only if the main-menu row and the store's heading follow a commit
 > live - otherwise a change to it asks for a restart (P9-2); the **Customs from RhythmVerse** line
-> of item 8 is removed (P9-6d), while a download press opens a single modal popup that carries the
-> status and becomes the success toast whose A refreshes the songs (P9-6a/b/c, redesigned
-> 2026-10-23 - the 2026-10-22 draft's details-page box and exit notice are withdrawn); and
+> of item 8 **stays** (the credit-line removal was withdrawn on 2026-10-24), while a download press
+> opens a single modal popup that carries the transfer's state (P9-6, delivered 2026-10-24), whose
+> **A Refresh** (P9-14, landed 2026-10-24) runs the main menu's own refresh from the installed toast
+> so the song is listed without a restart; and
 > "Recent" reads **Recently Added** (P9-5). Items 1-10 above otherwise stand as the 2026-10-14
 > requirement.
 
@@ -2410,19 +2412,20 @@ redirect targets). Recognizing manually installed loaded DLC is a v1 requirement
 
 ## 9. Owner pass — reopened 2026-10-22 (P9 prompts)
 
-The store shipped, the owner drove it, and asked for eleven adjustments. **One prompt each** —
-except **P9-6**, which the owner split into three the same day and then **redesigned from scratch
-on 2026-10-23** (one modal download popup whose text carries the status, which becomes the success
-toast that refreshes the songs; the 2026-10-22 draft's details-page box and exit notice are
-withdrawn, and its credit-line removal survives as 6d); grouped by the surface it touches, each
-names the seam it edits and the measurement that closes it.
+The store shipped, the owner drove it, and asked for eleven adjustments. **One prompt each**, grouped
+by the surface it touches, each names the seam it edits and the measurement that closes it.
+**P9-6** was split into three the same day, redesigned from scratch on 2026-10-23 as **one modal
+download popup**, and **delivered as one prompt on 2026-10-24** - the three follow-up states it was
+briefly split into (a live progress line, the toast's A-refresh, a credit-line removal) were
+**withdrawn by the owner that day**, the A-refresh returning as **P9-14**.
 **A twelfth adjustment (P9-12) followed on 2026-10-22** — two row renames and the refresh entry's
 default — and is recorded below with its prompt. **A thirteenth (P9-13) followed the same day**: the
 details page's box that carries the Download / Cancel buttons must carry the **custom's own** credit
 block — the charter, the custom's release date, its audio type and its download count — and it is
 recorded beside P9-12 with its prompt. The owner corrected the first reading the same day: the
 values are the **file's**, not the song's, because one title can have several customs with different
-authors and dates.
+authors and dates. **A fourteenth (P9-14) followed on 2026-10-24**: the download toast must offer an
+**A Refresh** beside **B Back**, and that refresh must list the new song **without a restart**.
 Where a prompt overrides a P0-P8 decision it says so — the records in §5 are not rewritten, they are
 the evidence of what shipped. Prompts are ordered so a later one does not have to undo an earlier
 one.
@@ -2434,7 +2437,7 @@ one.
 | P9-3 | Done | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** (renamed again to **Filters**, page `RHYTHMVERSE FILTERS`, by P9-11) | P6's flat page |
 | P9-4 | Done | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
 | P9-5 | Done | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
-| P9-6 | In Progress | Store surface (3 prompts + 1) | **6a** a download press opens one modal *Downloading from RhythmVerse* popup (the search panel's shape; B cancels, auto-closes on a terminal state); **6b** the popup's own text carries the live status (a native bar only if one can be reused, else text); **6c** the same popup becomes the success toast — **A** runs the main menu's Refresh Songs, **B** closes, and the refresh must list the new song without a restart; **6d** the credit line goes (unchanged 2026-10-22 item) | P5's overlay strip, P7's credit line, the 2026-10-22 P9-6 draft |
+| P9-6 | Done | Store surface | A download press opens one modal *Downloading from RhythmVerse* popup (the search panel's shape); **B** cancels, and the same panel switches to its outcome sentence — *Downloaded '<song>'.* / **Press B to Close**. The 6b/6c/6d follow-ups were withdrawn 2026-10-24 (the toast's refresh is P9-14) | P5's overlay strip, the 2026-10-22 P9-6 draft |
 | P9-7 | Done | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
 | P9-8 | Done | Store footer | Hide **Y View Item** where it does nothing | — |
 | P9-9 | Done | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
@@ -2442,6 +2445,7 @@ one.
 | P9-11 | Done | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
 | P9-12 | Done | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
 | P9-13 | Done | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
+| P9-14 | In Progress | Store download toast | The downloaded toast carries **A Refresh** beside **B Back**: A opens the refresh/discovery page and runs the refresh, and the new song is listed **without a restart** | P9-6's outcome state (one sentence, **B** only) |
 
 Status checked 2026-10-23 against this section's records and the tree: **Done** = the prompt's
 Done-when is met by a record; **In Progress** = part is landed and the closing measurement is owed;
@@ -2473,11 +2477,14 @@ labels and the refresh entry's compiled-On default were confirmed on the rebuilt
 model, writers and payload edit landed 2026-10-23** (the record under the prompt below) and the boot
 that OCRs the block is the one measurement it still owed.
 
-Status checked 2026-10-24, against this section's records and the tree: **P9-4 and P9-13 are Done**
-(both closed by the owner's own in-game check on 2026-10-24 - see the close-outs under their prompts;
-P9-4's reopened Search-overlap item included), and **P9-6a landed** the same day (`AddDownloadPopup`,
-the press routed through it, the caption strip's download line removed - see the P9-6a record), which
-leaves P9-6 **In Progress** on 6b, 6c and 6d.
+Status checked 2026-10-24, against this section's records and the tree: **P9-4, P9-6 and P9-13 are
+Done** (each closed by the owner's own in-game check on 2026-10-24 - see the close-outs under their
+prompts; P9-4's reopened Search-overlap item included), and **P9-14 is In Progress**: the toast's
+**A Refresh** is in the tree (`finish_installed` sets an `installed` property beside `terminal`,
+`BUTTON_DOWN_MSG`'s `kAction_Confirm` case runs the menu row's own three statements, and the prompt
+reads **A Refresh   B Close**), its suites are green and the acceptance harness asserts the
+same-boot walk; the boot that reads the song on Your Songs after **A** is the measurement it still
+owes - see its record under the prompt.
 
 ### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
 
@@ -2623,7 +2630,7 @@ noted):
 - **Done when**: a boot opens a served offer's details page and its box OCRs the block on the
   captured fixture — `Forever Young`, `Youth Group`, the audio type's label (`Single Track` for
   that record's `single`), `Charted by Virtual-Man`, `Released at 2026-10-11` and `61 Downloads` —
-  while pressing the download row still opens P9-6a's popup, an offer with no audio type draws no
+  while pressing the download row still opens P9-6's popup, an offer with no audio type draws no
   line for it, and no caption-strip line carries any of it.
 
 **P9-13 record (2026-10-23) — the model, both writers and the payload edit landed; the boot that
@@ -2684,8 +2691,9 @@ the prompt's own Done-when is a boot, and on this machine that is the owner's to
   block. On this machine that is the owner's to take (`AGENTS.md`), and it is the one measurement
   that decides two things this record cannot: whether the re-used labels read in the owner's order,
   and whether `karaoke` really is the site's fourth code. The Done-when's "pressing the download row
-  still opens P9-6a's popup" clause is P9-6a's, which is still Todo - until it lands the press
-  starts the transfer as P5 shipped it. **P9-13 stays In Progress** until that boot.
+  still opens P9-6's popup" clause is P9-6's, which landed on 2026-10-24 - until then the press
+  started the transfer as P5 shipped it. **P9-13 stayed In Progress** until its own boot, which the
+  close-out below records.
 
 **P9-13 layout correction (2026-10-24).** The owner's capture shows the retail label positions
 are unsuitable: both rating labels overlap above the box, the release/count label overlaps the
@@ -2729,8 +2737,126 @@ the same standing as P9-5's, P9-7's and P9-9's owner boots. What stays as the st
 writers emit the four keys on every offer, the audio-type label table and its unknown fallback),
 `store_payload`'s `TestOfferCredits` and the `store-edit <store_info.dtb> info` dump, and
 `scripts/acceptance_store.ps1`'s Store leg (`CHARTED`, `RELEASED`, `DOWNLOADS`). P9-13 leaves one
-downstream task, not its own: P9-6a's popup opens on the same box's Download press, and the row
+downstream task, not its own: P9-6's popup opens on the same box's Download press, and the row
 pressed there is unchanged by this block.
+
+### P9-14 — the download toast offers **A Refresh**, and the new song appears without a restart (2026-10-24)
+
+- **Do**: the popup P9-6 delivered already has its outcome state - `error.lbl` reads
+  **Downloaded '<song>'.** and `continue.lbl` reads **Press B to Close**, and `BUTTON_DOWN_MSG`
+  consumes every action but `kAction_Cancel`. This prompt gives that state a second action:
+  **A Refresh**. The prompt line becomes **A Refresh   B Close** (a new locale entry beside
+  `rbbz_download_close`), and **A** (`kAction_Confirm`) - offered **only while the state is
+  `installed`**, so a cancelled or failed job keeps B alone - does what the main menu's **Refresh
+  Songs** row does, in that row's own words rather than a copy of it:
+  1. closes the popup (the details page is left behind, so there is nothing to cancel - `terminal`
+     is already set and the popup's `exit` therefore writes no cancel),
+  2. `{ui goto_screen server_connect_screen}` - the title's own discovery pass, the page the row
+     enters (`menu_options::TapRefreshCache`, `src/ui/menu_options.cpp:867`),
+  3. `{file_exists "songcache:/rbbz_dlc_refresh"}` - the sentinel `src/hooks/dlc_refresh.cpp`
+     answers on a **guest thread** by re-scanning the configured libraries and publishing the new
+     list (`dlc::RefreshConfigured`, with `shell_music::StandDownForRefresh` first). The thread rule
+     is why the sentinel, not a host-initiated publish, is the seam: `ContentManager`'s library is
+     written from a guest thread only.
+
+  So "the refresh cache page" is the discovery screen the row already uses, and the button reuses
+  the row's own two statements - no second refresh path, no host-drawn progress.
+- **The hard half — the guest's own discovery.** The install's host-side refresh already runs at
+  commit (`dlc::RefreshAfterStoreInstall`, P5's landing record: `1 package(s)`), and the title's
+  **next boot** lists the song. What has never been proven is the running title picking it up, which
+  is OQ6's open half and the reason P5's strip said *restart* and P9-6's sentence stops at
+  *Downloaded*. This prompt makes that measurable and requires it: after **A**, the discovery pass
+  runs, and the song list - **same session, no restart** - carries the title. Where the pass alone
+  is not enough the prompt's measurement decides the next step (for example a publish at a proven
+  menu boundary, or re-entering Your Songs after the pass), but *restart* is not an accepted answer,
+  and nothing may hide the failure.
+- **Do not**: add a host-side progress or confirmation line (the popup is the surface, and the
+  owner's rule stands); draw A in a state where there is nothing to refresh; or change what **B**
+  does (close, no refresh - the song then arrives on the next boot, which the harness keeps as belt
+  and braces).
+- **Move with it**: `finish_installed` and the popup's `BUTTON_DOWN_MSG` (`src/store/store_payload.cpp`),
+  the A/B locale pair, `store_payload_tests` (A exists only in the installed state, its case runs
+  the navigate + sentinel pair, B still closes, idempotency), `scripts/acceptance_store.ps1` (the
+  Store leg becomes a **same-boot** assertion - download, A, the song list carries the title - with
+  the Install leg kept as the next-boot check), `docs/guides/dlc.md` §2.2 (its "waits for the next
+  start" bullet becomes conditional on **B**), `docs/reference/known-issues.md` (OQ6's restart
+  limit narrows to "until P9-14 is measured", then to whatever the measurement leaves) and
+  `docs/engine/diagnostics.md`.
+- **Done when**: a boot downloads a real package; the toast reads **A Refresh   B Close**; **A**
+  shows the discovery pass, the refresh runs (the host's own re-scan line), and returning to the
+  menu Your Songs lists the downloaded title **in that same session**; the offer's next visit reads
+  Downloaded; **B** closes without refreshing, and that route's song arrives on the next boot's list
+  instead (the harness keeps the Install leg as that check); a cancelled or failed job draws no
+  **A**.
+
+**P9-14 record (2026-10-24) — the payload, its tests and the harness's same-boot steps landed; the
+boot that reads the song on Your Songs after A is the measurement the prompt still owes.**
+
+- **The state.** `AddDownloadPopup` (`src/store/store_payload.cpp`) grew a third boolean beside
+  `active`/`terminal`: `installed`, declared `FALSE` in the panel, set `TRUE` by `finish_installed`
+  and `FALSE` by `show_popup` and `finish_failed` - so the caption and the action both hang off the
+  one state that has a song to refresh for, and a cancelled or failed job carries neither. The
+  installed state's prompt is the new locale entry `rbbz_download_refresh` =
+  `<alt1>A</alt1> Refresh   <alt1>B</alt1> Close` (added by `menu_payload.cpp` beside the other four
+  popup entries). Nothing else about P9-6's panel changed: B still cancels while the job runs and
+  closes after it, `exit` still cancels with the popup up, and no host line was added.
+- **A's case, measured against the shipped record.** `BUTTON_DOWN_MSG`'s `kAction_Confirm` case is
+  the menu row's own three statements, in the row's own order, as **siblings** - the shape
+  `TapRefreshCache` measured a screen change to survive, where a `do` loses everything after the
+  navigation (2026-10-15):
+
+  ```text
+  (kAction_Confirm
+    {if [installed] {rbbz_download_panel hide_popup}}
+    {if [installed] {ui goto_screen server_connect_screen}}
+    {if [installed] {file_exists "songcache:/rbbz_dlc_refresh"}})
+  ```
+
+  The two spellings are `menu_options::kRefreshRowDiscoverScreen` / `kRefreshSentinelPath` - the
+  row's own constants, not copies - and the guard is repeated per statement so no partial sequence
+  can run. `rb_blitz_store_payload_tests store-edit assets\game\360\ui\store\gen\store_info.dtb
+  download` answers `download row -> edited`, `download popup -> edited`, `download press ->
+  edited` and dumps exactly that tree (`out/_swap/p9-14-download.txt`).
+- **The refresh's three layers, mechanically.** The sentinel reaches `dlc_refresh.cpp`'s file-call
+  hook, which logs `dlc: refresh asked for ("songcache:/rbbz_dlc_refresh"), re-scanning the DLC
+  libraries` (the line names the refresh now, not one entry - the toast is its second caller) and
+  calls `dlc::RefreshConfigured`, which schedules the scan (`dlc: the song refresh entry asked for a
+  refresh; …`) and then `WaitForRefreshToLand` publishes the fresh list to the content manager on
+  this guest thread, bounded at 15 s. Two host changes make that the same guarantee the row gets:
+  `RefreshConfigured` no longer returns before the wait when the cache is off (the store's
+  post-install scan ignores that switch, so a pending list is published either way), and
+  `WaitForRefreshToLand` is gated on the runtime alone instead of the cache - with nothing pending
+  it exits on its first test.
+- **Tests.** `store_payload` is **575 checks** (was 552): `TestDownloadRefreshAction` pins the
+  `installed` declaration, the three writers, the refresh prompt token, the A case's three guarded
+  siblings in order with the menu constants, and that B's case never mentions the refresh;
+  `TestDownloadPopup` now also pins the refresh token in the tree. Full `ctest` in
+  `out/build/win-amd64-debug` is **47/47** (`texture_conversion`, a test another workstream added to
+  the tree, is unbuilt in that directory and excluded - its "Not Run" predates this change).
+- **Harness.** `scripts/acceptance_store.ps1`'s Store leg now reads the installed toast's prompt
+  (`DOWNLOADED`, `REFRESH`, `CLOSE`), presses **A**, and asserts the three host oracles the press
+  produces - the sentinel's line, a further `content_pipeline: attempt N started` (the title
+  re-enters its discovery pass), and `splash_screen` coming back on its own - then Play → Your Songs
+  and the installed title's words on the list, **in the same boot**. The leg's browser-return chrome
+  check moved before the download, because A ends the visit at the main menu. The `Install` leg
+  keeps the next-boot check, which is also the route **B** leaves. The Control leg's sentinel
+  assertion follows the log's new wording (`dlc: refresh asked for`).
+- **Docs**: `docs/engine/diagnostics.md` (the popup paragraph, the A case and the harness's steps),
+  `docs/guides/dlc.md` §2.2 (the "waits for the next start" bullet is now the A/B split) and
+  `docs/reference/known-issues.md`'s store row (OQ6's restart limit becomes "the same-session boot is
+  the measurement owed").
+- **Owed (the prompt's Done-when)**: the boot. It must read the toast's **A Refresh   B Close**, the
+  discovery pass after A, and the downloaded title on Your Songs without a restart; a cancelled or
+  failed job must draw no **A**. The same-session list is the part this environment has never
+  measured for any package - the install's list has only been read after a **boot** (the `Install`
+  leg) - so the first boot either closes OQ6's open half or says what the pass alone still misses.
+  On this machine the boot is the owner's to take (`AGENTS.md`), and the release binary must be
+  relinked first (the owner's running copy holds it).
+- **Not asserted by the new leg**: **B**'s close-after-install and the browser it returns to. P9-6
+  measured that press in game (2026-10-24) and the A case's guard pins that B carries no refresh;
+  the Store leg's one transfer is spent on the same-session route instead. The offer's next visit
+  reading *Downloaded* is likewise not on this boot's route (the Downloaded matcher's in-session
+  invalidation after a refresh is host-pinned: `InvalidateLibrary` runs in `PublishPendingRefresh`).
 
 ### P9-1 — the master switch defaults On
 
@@ -2785,7 +2911,9 @@ proves it instead of flipping it:
   page 1 landed at 19:30:21.9 (10.4 s), and the credit is only drawn within
   `kCatalogueCreditHold` (12 s) of the surface note, so the capture at ~19:30:25 found a blank strip
   (`store-credit.png` OCRs the front menu and no credit). **P9-6d deletes that line and its step**, so
-  the fix belongs there rather than here. `ctest` is **47/47** with the two suites' new pins.
+  the fix belongs there rather than here. *(Superseded 2026-10-24: 6d was withdrawn with the other
+  follow-ups, so the credit line and that harness step stay; the timing window the step hit is the
+  harness's own to widen.)* `ctest` is **47/47** with the two suites' new pins.
 
 ### P9-2 — a master change: hot only if the menu row and the header follow it
 
@@ -3198,16 +3326,14 @@ defaults and the legacy fallback.
   (`RECENTLYADDED1`, `SEARCH1`), but that leg has **not** been re-run on a build carrying the
   change - the owner's boot is the measurement, and the leg is the standing check.
 
-### P9-6 — the download is one modal popup, and its success toast refreshes the songs (redesigned 2026-10-23)
+### P9-6 — the download is one modal popup (delivered 2026-10-24)
 
-*(Owner revision, 2026-10-23 — written from scratch. It supersedes the 2026-10-22 draft, whose
-details-page status box and install-notice-on-exit popup are withdrawn; only its credit-line
-removal survives, as **6d**. The design is now one modal popup for the whole transfer, in the
-shape P9-11's search loading panel already proved: **6a** a *Downloading from RhythmVerse* popup on
-the press (B cancels, auto-closes on a terminal state), **6b** its own text carries the live status
-(a native bar only if one can be reused, else text), **6c** the same popup becomes the success
-toast — **A** refreshes the songs the way the main menu's row does, **B** closes, and the refresh
-must list the new song.)*
+*(One prompt, as delivered. The owner's 2026-10-23 design replaced P5's caption line with one modal
+panel; the follow-up states it was briefly split into — a live progress line (**6b**), the toast's
+A-refresh (**6c**) and a credit-line removal (**6d**) — were **withdrawn by the owner on 2026-10-24**.
+The toast's A-refresh returns as its own prompt, **P9-14**; the credit line stays as P7 wrote it.
+What shipped, and all this prompt owns, is the panel with its loading sentence, its outcome sentence,
+the cancel and the close.)*
 
 Measurements the design rides on (each dated at its source):
 
@@ -3229,43 +3355,48 @@ Measurements the design rides on (each dated at its source):
   UI is `server_connect.milo`'s `progress_bar.grp` (`content_percent.lbl`, the boot's enumeration
   bar); the main menu's own loading state is the text caption `Loading Cached Content List` (P5's
   boots), not a bar. The engine's UI class table has no progress-bar class and the tree has no milo
-  writer (`scripts/hmx_milo.py` reads scenes; nothing writes one) — so 6b's bar half is a spike
-  with a named fallback.
+  writer (`scripts/hmx_milo.py` reads scenes; nothing writes one) — which is why the delivered popup
+  is text-only, and why the withdrawn 6b would have been a spike with a textual fallback.
 - **The refresh the main menu runs** is `menu_options::TapRefreshCache`
-  (`src/ui/menu_options.cpp:867`, logged as `dlc: refresh asked for from the main menu`).
-  `dlc::RefreshAfterStoreInstall` re-walks the flat roots (no cache gate) and publishes to the
-  content manager, but the **running title's own discovery** of the newly installed package is
-  OQ6's open half — which is exactly what 6c's Done-when closes, and why the overlay line P5
-  shipped says *Restart the game to play it*.
-- **The lines this prompt removes**: the overlay's download status (`DownloadStatusText`,
-  `src/ui/help_overlay.cpp:383` and its drawing branch, `src/store/store_download_service.cpp:441`)
-  and, in 6d, the credit sentence (`kStoreCreditText`, `src/store/store_catalogue_status.h:49`,
-  returned at `store_catalogue_status.cpp:118` — P7's record).
+  (`src/ui/menu_options.cpp:867`, logged as `dlc: refresh asked for from the main menu`), whose own
+  action is `{ui goto_screen server_connect_screen}` followed by
+  `{file_exists "songcache:/rbbz_dlc_refresh"}` — the discovery pass, then the sentinel
+  `src/hooks/dlc_refresh.cpp` answers by re-scanning. `dlc::RefreshAfterStoreInstall` re-walks the
+  flat roots (no cache gate) and publishes to the content manager, but the **running title's own
+  discovery** of the newly installed package is OQ6's open half — which is exactly what **P9-14**
+  now owns, and why the delivered popup stops at *Downloaded '<song>'.* instead of promising the
+  song is playable.
+- **The line this prompt removes**: the overlay's download status (`DownloadStatusText`,
+  `src/ui/help_overlay.cpp:383` and its drawing branch, `src/store/store_download_service.cpp:441`).
+  The caption strip's credit sentence stays — 6d was withdrawn, so P7's credit line and its
+  `store_catalogue_status` tests are untouched.
 
-#### P9-6a — a download press opens one modal *Downloading from RhythmVerse* popup
+**The prompt as delivered** (the owner's 2026-10-23 words, with the withdrawn states removed):
 
 - **Do**: the two download cases P5 wrote (`store_download_now` / `store_download_again` in
   `store_info.dtb`) open a modal popup before they write `rbbz-store/download/start|again/<job>` —
-  a second panel on `store_info_screen` (where the press happens), built exactly like
+  a panel on `store_info_screen` (where the press happens), built exactly like
   `rbbz_search_loading_panel`: the same `../error/error_general.milo`, `error.lbl` reading
   **Downloading from RhythmVerse...**, `continue.lbl` reading **B to Cancel**, focus-owning, every
   button action consumed. **B/Back** writes `rbbz-store/download/cancel/<job>` and closes, so the
-  transfer never outlives the press. The popup **auto-closes on a terminal state**: on `installed`
-  it switches to 6c's toast **in the same panel object** (no second popup); on `failed`/`cancelled`
-  it stays with 6b's reason and B closes it.
+  transfer never outlives the press. The popup **switches state on a terminal one, in the same panel
+  object** (no second popup): `installed` reads **Downloaded '<song>'.**, `failed`/`cancelled` the
+  generic failure sentence, both with **Press B to Close**.
 - **Do not** keep the overlay line — `DownloadStatusText()` leaves `help_overlay.cpp` with its
-  drawing branch, and the service's status string and hold window go once nothing reads them.
+  drawing branch, and the service's status string and hold window go once nothing reads them. Do
+  not remove the caption strip's credit line (6d is withdrawn), and do not draw a host-side line for
+  any of it.
 - **Move with it**: the panel definition and its placement on `store_info_screen` (idempotent,
   refusing by name), the two button cases' route into it, the cancel write, `store_payload_tests`
-  (the popup opens on the press, the cancel write, the terminal close), `scripts/acceptance_store.ps1`
+  (the popup opens on the press, the cancel write, the terminal switch), `scripts/acceptance_store.ps1`
   (the Store leg's download step OCRs the popup instead of the strip), `docs/engine/diagnostics.md`,
-  `docs/guides/dlc.md` §2.2 and `known-issues.md` if the restart wording moves.
+  `docs/guides/dlc.md` §2.2 and `known-issues.md` where the restart wording moves.
 - **Done when**: one boot presses Download on a real offer — the popup draws over the details page,
   the transfer runs, and B at any point cancels (no package, no receipt, the popup closes); letting
-  it finish reaches 6c without a second popup.
+  it finish switches the same panel to its outcome sentence.
 
-**P9-6a record (2026-10-24) — the modal is in the tree, the caption strip's download line is gone,
-and the boot that presses the row is the one measurement owed.**
+**P9-6 record (2026-10-24) — the modal is in the tree, the caption strip's download line is gone,
+and the owner's boot reads both states on screen.**
 
 - **The panel** (`store::AddDownloadPopup`, `src/store/store_payload.{h,cpp}`). `rbbz_download_panel`
   is defined in `store_info.dtb` — the record that carries the press — with the search modal's own
@@ -3303,14 +3434,13 @@ and the boot that presses the row is the one measurement owed.**
   written with `set_display_text_string` — the writer `ShowOfferCredits` already draws with.
 - **The overlay line is gone**: `DownloadStatusText`/`DownloadStatusJob`, the service's last-job
   bookkeeping (`last_job`/`last_finished`, `kStatusHold`, `NoteTerminal`) and `help_overlay.cpp`'s
-  download branch were removed with it, so no host-side line describes a transfer any more. The
-  store's own catalogue sentences and the search strip are untouched (`store_catalogue_status.h`'s
-  credit line is **6d's**, not this record's).
-- **Scope of this prompt, stated plainly**: the loading line is static (6b adds the progress bucket
-  and the failure reason tokens), and the installed state stops at the sentence — 6c replaces it with
-  the toast whose **A** runs the main menu's Refresh Songs and proves same-session discovery. What
-  6a owns is the panel, its switch between states, the cancel and the close, and it does not draw
-  over the game: every string is one of the panel's own labels.
+  download branch were removed with it, so no host-side line describes a transfer any more. P7's
+  catalogue sentences and the search strip are untouched, and the credit line stays (6d withdrawn).
+- **Scope of this prompt, stated plainly**: the loading sentence is static - the popup reports that
+  a transfer is running, not how far it has come (the live-status state was withdrawn, so no bucket
+  text is owed) - and the installed state stops at the sentence, because the in-session refresh is
+  **P9-14**'s. What this prompt owns is the panel, its switch between states, the cancel and the
+  close, and it does not draw over the game: every string is one of the panel's own labels.
 - **Verification**, hermetic: `cmake --build --preset win-amd64-debug` links the game and every
   target; `ctest` in `out/build/win-amd64-debug` is **47/47**; `store_payload` is **552 checks**
   (`TestDownloadPopup`: the definition, its resource, the eight methods, the three state predicates,
@@ -3320,83 +3450,24 @@ and the boot that presses the row is the one measurement owed.**
   `rb_blitz_store_payload_tests store-edit assets\game\360\ui\store\gen\store_info.dtb download`
   answers `download row -> edited`, `download popup -> edited`, `download press -> edited` and dumps
   the whole panel definition (evidence: `out/_swap/p9-6a-download.txt`).
-- **Owed — the prompt's Done-when is a boot**, and on this machine that is the owner's to take
-  (`AGENTS.md`). Recipe, release build `out/build/win-amd64-release/rb_blitz.exe`: main menu →
-  **RhythmVerse** → **Recently Added** → A on an offer → **Download**; the popup draws over the
-  details page reading *Downloading from RhythmVerse...* / *Press B to Cancel*; pressing **B** at
-  once cancels (log: `store_download: job … cancelled`, no package in the root, no receipt row, the
-  popup closes); pressing it and letting the transfer finish leaves the same panel reading
-  *Downloaded '<song>'.* / *Press B to Close*; **B** closes it and the details page is focused again
-  (its Exit row still returns to the browser). The harness's Store leg now asserts all of that
-  (`popup.png`, `popup-done.png`, `popup-closed.png`) but has not been re-run on this build.
+- **Measured — the prompt's Done-when, by the owner's own boot (2026-10-24).** The owner pressed
+  **Download** on a served offer on the release binary, the popup drew over the details page, the
+  transfer ran, and its switch to the outcome sentence drew as recorded here and in
+  `docs/engine/diagnostics.md`; the owner reports it working. Read by hand, no capture stored - the
+  same standing as P9-5's, P9-7's and P9-9's owner boots. What stays as the standing check: the
+  recipe below, and the harness's Store leg, which asserts both states (`popup.png` reading
+  *Downloading* or *Downloaded*, `popup-done.png` reading *Downloaded … Close*, `popup-closed.png`
+  showing it gone) but has not been re-run on this build. Recipe: main menu → **RhythmVerse** →
+  **Recently Added** → A on an offer → **Download**; **B** at once cancels (log:
+  `store_download: job … cancelled`, no package in the root, no receipt row, the popup closes);
+  letting the transfer finish leaves the same panel reading *Downloaded '<song>'.* / *Press B to
+  Close*, and **B** closes it with the details page focused again (its Exit row still returns to
+  the browser).
 
-#### P9-6b — the popup's own text carries the live status
-
-- **Do**: instead of the static sentence, the popup's `error.lbl` (native, guest-drawn) carries the
-  status: while `queued|downloading` it reads **Downloading from RhythmVerse... <best progress
-  bucket>%** (the bucket literal, not a computed percentage), a frame-throttled `poll` rewriting it
-  only when the bucket or state moves; on a terminal failure it names the reason from a bounded set
-  of `error` tokens (`disabled`, `network`, `http`, `disk-full`, `read-only`, `archive`, `cancelled`;
-  anything else is one generic sentence). The success state is 6c's.
-- **The bar (spike, explicit fallback).** Try a native bar before settling for text: the only
-  candidate is `server_connect.milo`'s `progress_bar.grp` (`content_percent.lbl`) loaded into the
-  popup, or an equivalent label driven by `UILabel set_percent` (the call `song_results` uses). One
-  boot decides; if it does not draw, the textual bucket is the design — **not** a host overlay,
-  **not** a new milo.
-- **Locale**: the sentences are new authored entries (Downloading, the failure set, the generic
-  failure) through `screen::AddLocaleEntry`, the mechanism the heading and the Download row use.
-- **Move with it**: the popup's poll and label writes, the locale tables, `store_payload_tests` (the
-  label per state and bucket, the failure tokens, the throttle), `store_download` if a bucket needs
-  exposing.
-- **Done when**: a boot watches the popup from press to install — the text moves through the buckets
-  (or the bar draws, and the boot records which form shipped), a forced failure draws its reason in
-  the same popup, and no overlay line appears at any point.
-
-#### P9-6c — success: the same popup becomes the toast, and A refreshes the songs
-
-- **Do**: when the job reaches `installed`, the same panel switches state — `error.lbl` reading
-  **Downloaded '<Artist - Title>'. Refresh the songs?** and `continue.lbl` reading **A Refresh   B
-  Close**. **A** writes `rbbz-store/refresh-songs` (answered by the host beside P5's download
-  writes, running `menu_options::TapRefreshCache` — the identical code path the main menu's
-  **Refresh Songs** row uses, not a copy) and closes; **B** just closes. No caption-strip line
-  carries any of it.
-- **The hard half**: the refresh must make the newly installed song appear **without a restart**.
-  Today the host refresh publishes the package but the running title's own discovery is OQ6's open
-  half (P5's landing record), which is why the shipped overlay asks for a restart. This prompt makes
-  the guest rediscovery measurable: after **A**, the song list carries the downloaded title in the
-  same session (a screen transition such as returning to the main menu / Your Songs is allowed if
-  the measurement shows discovery needs it), and the offer's next visit reads Downloaded again. A
-  restart is no longer the answer the UI gives.
-- **Move with it**: the toast state and its two actions, the `rbbz-store/refresh-songs` command,
-  `store_download` (the terminal hook that flips the panel), the guest discovery path (OQ6),
-  `scripts/acceptance_store.ps1` (the Install leg's separate boot becomes a same-boot assertion;
-  keep the next-boot check as belt and braces), `docs/guides/dlc.md` §2.2, `known-issues.md` (the
-  restart limitation is deleted or narrowed to what remains true).
-- **Done when**: a boot downloads a real package, presses **A** on the toast, and the song list —
-  same boot, no restart — carries the downloaded title; **B** closes without refreshing and the
-  song arrives on the next boot's list instead; a cancelled or failed job shows no toast.
-
-#### P9-6d — the credit line goes; RhythmVerse stays credited in **Credits** (unchanged, 2026-10-22)
-
-- **Do**: remove the **caption-strip** credit sentence — `kStoreCreditText`
-  (`src/store/store_catalogue_status.h:49`) and the `kFrontMenu` credit branch at
-  `store_catalogue_status.cpp:118`, plus `kCatalogueCreditHold` and its timing seam if nothing else
-  reads them. The heading `RHYTHMVERSE` stays (`CUSTOMS FROM RHYTHMVERSE` clips in the retail
-  header, measured 2026-10-21). The loading, empty and offline sentences stay — they are the
-  store's own words, not a credit.
-- **Do not remove the attribution.** The **Credits** page already names RhythmVerse —
-  `AddRecompilationCredits`'s **Thanks To** section carries `{"Customs Store", "RhythmVerse"}`
-  (`src/settings/menu_payload.cpp:50`, `:71`) into both the retail credits record and the Ultimate
-  payload's, pinned by `menu_payload_tests.cpp`. This prompt edits nothing there. §1.8 is narrowed
-  accordingly: the attribution is the `RHYTHMVERSE` heading plus the **Credits** row.
-- **Move with it**: `tests/store_catalogue_status_tests.cpp` (the precedence
-  failure > empty > loading > credit becomes failure > empty > loading, and the credit-hold timing
-  case goes with it), the credit step in `scripts/acceptance_store.ps1`, and
-  [`docs/engine/diagnostics.md`](../../engine/diagnostics.md)'s "The store's own sentences (P7)"
-  paragraph, which names the credit line and its 2026-10-22 capture.
-- **Done when**: a store boot draws no credit line, the three remaining sentences still appear
-  where their states are forced, the **Credits** page still names RhythmVerse, and the suite is
-  green.
+**P9-6 close-out (2026-10-24; owner's boot) — P9-6 is Done.** The modal is the delivered answer to
+the owner's 2026-10-23 design, and the owner confirmed it in game. The three follow-up states
+withdrawn the same day are recorded once, in the preamble above; the one the owner still wants - a
+refresh from the toast - is **P9-14**, and the credit line stays P7's.
 
 ### P9-7 — the store's Start button opens **Search Filters**, and Back returns to the store
 

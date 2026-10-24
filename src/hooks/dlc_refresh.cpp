@@ -10,6 +10,11 @@
 // path is the signal. The query itself stays harmless: the file does not exist, so the
 // title's `file_exists` answers false and the row's DTA does nothing with it.
 //
+// A second entry runs the same call since P9-14: the download toast's **A Refresh**
+// (src/store/store_payload.cpp) writes the identical sentinel right before it navigates
+// into the discovery pass, which is why the log line below names the refresh and no longer
+// one caller.
+//
 // The *device* in the path matters, and it was measured rather than guessed: a name
 // under the game-data mount (`d:/…`) is answered out of the ark the title already has
 // mapped and never reaches a file call at all, while a device the title owns is asked
@@ -101,8 +106,7 @@ void CheckSentinel(GuestString path, uint8_t* base, PPCContext& ctx) {
                   kRefreshSentinel + kSentinelLength) == path.text + path.length) {
     return;
   }
-  REXLOG_INFO("dlc: refresh asked for from the main menu (\"{}\"), re-scanning the DLC "
-              "libraries",
+  REXLOG_INFO("dlc: refresh asked for (\"{}\"), re-scanning the DLC libraries",
               std::string_view(path.text, path.length));
   // R9/R7 (owner report, 2026-10-16): the press blocks this guest thread while the scan catches
   // up (dlc::RefreshConfigured's bounded wait), and a stream left playing with nothing advancing

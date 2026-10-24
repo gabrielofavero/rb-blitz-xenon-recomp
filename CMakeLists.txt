@@ -33,6 +33,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options("-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
 endif()
 
+# Include Vulkan in dev and shipping builds, including configurations made without a preset.
+# The SDK's Windows default is D3D12-only.
+option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
+
 include(generated/rexglue.cmake)
 
 # A clean checkout has no generated/default/sources.cmake yet, because codegen is
@@ -442,6 +446,14 @@ add_dependencies(rb_blitz_codegen rb_blitz_toolchain_gate)
 include(CTest)
 
 if(BUILD_TESTING)
+    # Exercise the component conversion shared by the patched D3D12 and Vulkan texture caches.
+    add_executable(rb_blitz_texture_conversion_tests tests/texture_conversion_tests.cpp)
+    target_link_libraries(rb_blitz_texture_conversion_tests PRIVATE rex::core)
+    if(WIN32)
+        target_link_libraries(rb_blitz_texture_conversion_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME texture_conversion COMMAND rb_blitz_texture_conversion_tests)
+
     add_executable(rb_blitz_local_save_tests tests/local_save_tests.cpp src/util/sha256.cpp)
     target_include_directories(rb_blitz_local_save_tests PRIVATE src)
     add_test(NAME local_save COMMAND rb_blitz_local_save_tests)
@@ -846,6 +858,8 @@ if(BUILD_TESTING)
     # mock.
     add_executable(rb_blitz_settings_bridge_service_tests
         tests/settings_bridge_service_tests.cpp
+        src/settings/capabilities.cpp
+        src/settings/graphics_policy.cpp
         src/settings/model.cpp
         src/settings/schema.cpp
         src/settings/store.cpp

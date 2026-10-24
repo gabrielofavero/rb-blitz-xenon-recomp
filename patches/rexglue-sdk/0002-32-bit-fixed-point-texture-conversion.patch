@@ -1,5 +1,5 @@
 diff --git a/include/rex/graphics/d3d12/shared_memory.h b/include/rex/graphics/d3d12/shared_memory.h
-index 5100818..bed24e8 100644
+index 51008187..bed24e81 100644
 --- a/include/rex/graphics/d3d12/shared_memory.h
 +++ b/include/rex/graphics/d3d12/shared_memory.h
 @@ -37,6 +37,12 @@ class D3D12SharedMemory : public SharedMemory {
@@ -16,7 +16,7 @@ index 5100818..bed24e8 100644
    void BeginSubmission();
  
 diff --git a/include/rex/graphics/d3d12/texture_cache.h b/include/rex/graphics/d3d12/texture_cache.h
-index 4d845c7..c5d9d0b 100644
+index 4d845c79..c5d9d0b0 100644
 --- a/include/rex/graphics/d3d12/texture_cache.h
 +++ b/include/rex/graphics/d3d12/texture_cache.h
 @@ -27,6 +27,7 @@
@@ -53,7 +53,7 @@ index 4d845c7..c5d9d0b 100644
    std::array<Microsoft::WRL::ComPtr<ID3D12PipelineState>, kLoadShaderCount> load_pipelines_;
    // Load pipelines for resolution-scaled resolve targets.
 diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
-index d26cd4f..86e3db5 100644
+index d26cd4fb..86e3db53 100644
 --- a/include/rex/graphics/pipeline/texture/cache.h
 +++ b/include/rex/graphics/pipeline/texture/cache.h
 @@ -160,8 +160,12 @@ class TextureCache {
@@ -70,8 +70,126 @@ index d26cd4f..86e3db5 100644
  
      TextureKey() { MakeInvalid(); }
      TextureKey(const TextureKey& key) { std::memcpy(this, &key, sizeof(*this)); }
+diff --git a/include/rex/graphics/pipeline/texture/util.h b/include/rex/graphics/pipeline/texture/util.h
+index 2c9fad63..c6e7aa92 100644
+--- a/include/rex/graphics/pipeline/texture/util.h
++++ b/include/rex/graphics/pipeline/texture/util.h
+@@ -11,6 +11,7 @@
+  */
+ 
+ #include <algorithm>
++#include <cstring>
+ 
+ #include <rex/graphics/pipeline/texture/info.h>
+ #include <rex/graphics/xenos.h>
+@@ -18,6 +19,56 @@
+ 
+ namespace rex::graphics::texture_util {
+ 
++// Whether the guest format stores 32-bit-per-component data that isn't
++// floating-point, so it needs to be converted for a host texture (see the k_32
++// comment in host_formats_). The num_format bit of the fetch constant tells
++// whether such data is a fraction or an integer.
++inline bool IsNonFloat32bpcFormat(xenos::TextureFormat format) {
++  return format == xenos::TextureFormat::k_32 || format == xenos::TextureFormat::k_32_32 ||
++         format == xenos::TextureFormat::k_32_32_32_32;
++}
++
++// Converts the 32-bit components of a big-endian guest texture region to the
++// floating-point values a shader sampling it on the console would receive (used
++// for the guest formats that aren't floating-point, such as 0.32 fixed-point and
++// 32-bit integer ones), using the same math as the vertex fetch and the memory
++// export for such formats. The conversion is done in-place for each component
++// without any assumptions about the layout (tiling, mip packing and so on), as it
++// doesn't change it - so the load shaders can still be used to load the converted
++// data.
++inline void ConvertNonFloatGuestRange(const uint8_t* source, uint8_t* destination, uint32_t size_bytes,
++                               xenos::Endian endianness, bool is_signed, bool is_integer) {
++  std::memcpy(destination, source, size_bytes);
++  uint32_t component_count = size_bytes >> 2;
++  uint32_t* destination_components = reinterpret_cast<uint32_t*>(destination);
++  for (uint32_t i = 0; i < component_count; ++i) {
++    // Store the floating-point bits in the byte order of the guest data, since
++    // the load shaders apply the endianness conversion from the load constant
++    // to what they read.
++    uint32_t guest_value = xenos::GpuSwap(destination_components[i], endianness);
++    float converted_value;
++    if (is_integer) {
++      // Integer - the value reaches the shaders as it is, not scaled to the
++      // normalized range, just like in the is_integer mode of the vertex fetch
++      // and the unsigned integer and the signed integer surface number formats
++      // of the memory export, so the game applies any scaling it needs itself.
++      converted_value = is_signed ? float(int32_t(guest_value)) : float(guest_value);
++    } else if (is_signed) {
++      // Signed repeating fraction (the only mode supported for textures,
++      // kZeroClampMinusOne) - 1 / (2^31 - 1), with the most negative value
++      // rounded to -1 as float32, so no clamping is needed.
++      converted_value = float(int32_t(guest_value)) * (1.0f / 2147483647.0f);
++    } else {
++      // Unsigned repeating fraction - 1 / (2^32 - 1).
++      converted_value = float(guest_value) * (1.0f / 4294967295.0f);
++    }
++    uint32_t converted_value_bits;
++    std::memcpy(&converted_value_bits, &converted_value, sizeof(converted_value_bits));
++    destination_components[i] = xenos::GpuSwap(converted_value_bits, endianness);
++  }
++}
++
++
+ // This namespace replaces texture_extent and most of texture_info for
+ // simplicity.
+ 
+diff --git a/include/rex/graphics/vulkan/shared_memory.h b/include/rex/graphics/vulkan/shared_memory.h
+index 104bdad3..648113c1 100644
+--- a/include/rex/graphics/vulkan/shared_memory.h
++++ b/include/rex/graphics/vulkan/shared_memory.h
+@@ -49,6 +49,11 @@ class VulkanSharedMemory : public SharedMemory {
+ 
+   VkBuffer buffer() const { return buffer_; }
+ 
++  // CPU mirror used when converting guest texture components before upload.
++  uint8_t* TranslatePhysical(uint32_t guest_address) const {
++    return memory().TranslatePhysical(guest_address);
++  }
++
+  protected:
+   bool AllocateSparseHostGpuMemoryRange(uint32_t offset_allocations,
+                                         uint32_t length_allocations) override;
+diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
+index 04856ee7..492dce63 100644
+--- a/include/rex/graphics/vulkan/texture_cache.h
++++ b/include/rex/graphics/vulkan/texture_cache.h
+@@ -75,6 +75,8 @@ class VulkanTextureCache final : public TextureCache {
+ 
+   ~VulkanTextureCache();
+ 
++  void ClearCache() override;
++
+   void BeginSubmission(uint64_t new_submission_index) override;
+   void BeginFrame() override;
+   void EndFrame();
+@@ -346,6 +348,19 @@ class VulkanTextureCache final : public TextureCache {
+   static const HostFormatPair kHostFormatDXT5AUnaligned;
+   HostFormatPair host_formats_[64];
+ 
++  // Converted guest data must stay alive until its texture-load submission completes.
++  struct ConversionBuffer {
++    VkBuffer buffer;
++    VmaAllocation allocation;
++    uint8_t* mapping;
++    VkDeviceSize size;
++    uint64_t submission;
++  };
++  std::vector<ConversionBuffer> conversion_buffers_;
++  uint8_t conversion_reported_[64] = {};
++  bool ConvertTextureRange(uint32_t guest_address, uint32_t size, TextureKey key,
++                           VkDescriptorBufferInfo& source);
++
+   VkPipelineLayout load_pipeline_layout_ = VK_NULL_HANDLE;
+   std::array<VkPipeline, kLoadShaderCount> load_pipelines_{};
+   std::array<VkPipeline, kLoadShaderCount> load_pipelines_scaled_{};
 diff --git a/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h b/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
-index 0e33a65..3e13012 100644
+index 0e33a656..3e130129 100644
 --- a/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
 +++ b/include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
 @@ -20,6 +20,10 @@ class D3D12UploadBufferPool : public GraphicsUploadBufferPool {
@@ -86,7 +204,7 @@ index 0e33a65..3e13012 100644
                     ID3D12Resource** buffer_out, size_t* offset_out,
                     D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out);
 diff --git a/include/rex/ui/graphics_upload_buffer_pool.h b/include/rex/ui/graphics_upload_buffer_pool.h
-index 517513c..fa8d250 100644
+index 517513c8..fa8d2509 100644
 --- a/include/rex/ui/graphics_upload_buffer_pool.h
 +++ b/include/rex/ui/graphics_upload_buffer_pool.h
 @@ -45,12 +45,19 @@ class GraphicsUploadBufferPool {
@@ -124,7 +242,7 @@ index 517513c..fa8d250 100644
  
    // A list of buffers with free space, with the first buffer being the one
 diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
-index 2be0e8e..f7d0fd8 100644
+index 2be0e8ee..968e9cca 100644
 --- a/src/graphics/d3d12/texture_cache.cpp
 +++ b/src/graphics/d3d12/texture_cache.cpp
 @@ -15,6 +15,7 @@
@@ -135,67 +253,19 @@ index 2be0e8e..f7d0fd8 100644
  #include <utility>
  
  #include <rex/assert.h>
-@@ -80,6 +81,59 @@ namespace shaders {
+@@ -80,6 +81,11 @@ namespace shaders {
  #include "../shaders/bytecode/d3d12_5_1/texture_load_r5g6b5_b5g6r5_scaled_cs.h"
  }  // namespace shaders
  
 +namespace {
 +
-+// Whether the guest format stores 32-bit-per-component data that isn't
-+// floating-point, so it needs to be converted for a host texture (see the k_32
-+// comment in host_formats_). The num_format bit of the fetch constant tells
-+// whether such data is a fraction or an integer.
-+bool IsNonFloat32bpcFormat(xenos::TextureFormat format) {
-+  return format == xenos::TextureFormat::k_32 || format == xenos::TextureFormat::k_32_32 ||
-+         format == xenos::TextureFormat::k_32_32_32_32;
-+}
-+
-+// Converts the 32-bit components of a big-endian guest texture region to the
-+// floating-point values a shader sampling it on the console would receive (used
-+// for the guest formats that aren't floating-point, such as 0.32 fixed-point and
-+// 32-bit integer ones), using the same math as the vertex fetch and the memory
-+// export for such formats. The conversion is done in-place for each component
-+// without any assumptions about the layout (tiling, mip packing and so on), as it
-+// doesn't change it - so the load shaders can still be used to load the converted
-+// data.
-+void ConvertNonFloatGuestRange(const uint8_t* source, uint8_t* destination, uint32_t size_bytes,
-+                               xenos::Endian endianness, bool is_signed, bool is_integer) {
-+  std::memcpy(destination, source, size_bytes);
-+  uint32_t component_count = size_bytes >> 2;
-+  uint32_t* destination_components = reinterpret_cast<uint32_t*>(destination);
-+  for (uint32_t i = 0; i < component_count; ++i) {
-+    // Store the floating-point bits in the byte order of the guest data, since
-+    // the load shaders apply the endianness conversion from the load constant
-+    // to what they read.
-+    uint32_t guest_value = xenos::GpuSwap(destination_components[i], endianness);
-+    float converted_value;
-+    if (is_integer) {
-+      // Integer - the value reaches the shaders as it is, not scaled to the
-+      // normalized range, just like in the is_integer mode of the vertex fetch
-+      // and the unsigned integer and the signed integer surface number formats
-+      // of the memory export, so the game applies any scaling it needs itself.
-+      converted_value = is_signed ? float(int32_t(guest_value)) : float(guest_value);
-+    } else if (is_signed) {
-+      // Signed repeating fraction (the only mode supported for textures,
-+      // kZeroClampMinusOne) - 1 / (2^31 - 1), with the most negative value
-+      // rounded to -1 as float32, so no clamping is needed.
-+      converted_value = float(int32_t(guest_value)) * (1.0f / 2147483647.0f);
-+    } else {
-+      // Unsigned repeating fraction - 1 / (2^32 - 1).
-+      converted_value = float(guest_value) * (1.0f / 4294967295.0f);
-+    }
-+    uint32_t converted_value_bits;
-+    std::memcpy(&converted_value_bits, &converted_value, sizeof(converted_value_bits));
-+    destination_components[i] = xenos::GpuSwap(converted_value_bits, endianness);
-+  }
-+}
 +
 +}  // namespace
 +
  const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
      // k_1_REVERSE
      {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
-@@ -232,17 +286,28 @@ const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
+@@ -232,17 +238,28 @@ const D3D12TextureCache::HostFormat D3D12TextureCache::host_formats_[64] = {
       DXGI_FORMAT_R16G16B16A16_FLOAT, kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN,
       kLoadShaderIndexUnknown, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
      // k_32
@@ -232,7 +302,7 @@ index 2be0e8e..f7d0fd8 100644
      // k_32_FLOAT
      {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
       kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
-@@ -391,6 +456,11 @@ bool D3D12TextureCache::Initialize() {
+@@ -391,6 +408,11 @@ bool D3D12TextureCache::Initialize() {
    const ui::d3d12::D3D12Provider& provider = command_processor_.GetD3D12Provider();
    ID3D12Device* device = provider.GetDevice();
  
@@ -244,7 +314,7 @@ index 2be0e8e..f7d0fd8 100644
    if (IsDrawResolutionScaled()) {
      // Buffers not used yet - no need aliasing barriers to change ownership of
      // gigabytes between even and odd buffers.
-@@ -648,12 +718,20 @@ bool D3D12TextureCache::Initialize() {
+@@ -648,12 +670,20 @@ bool D3D12TextureCache::Initialize() {
  void D3D12TextureCache::ClearCache() {
    TextureCache::ClearCache();
  
@@ -265,7 +335,7 @@ index 2be0e8e..f7d0fd8 100644
  void D3D12TextureCache::BeginSubmission(uint64_t new_submission_index) {
    TextureCache::BeginSubmission(new_submission_index);
  
-@@ -1460,12 +1538,26 @@ TextureCache::LoadShaderIndex D3D12TextureCache::GetLoadShaderIndex(TextureKey k
+@@ -1460,12 +1490,26 @@ TextureCache::LoadShaderIndex D3D12TextureCache::GetLoadShaderIndex(TextureKey k
  }
  
  bool D3D12TextureCache::IsSignedVersionSeparateForFormat(TextureKey key) const {
@@ -273,7 +343,7 @@ index 2be0e8e..f7d0fd8 100644
 +  // guest data is applied during the conversion to floating-point (see
 +  // ConvertNonFloatGuestRange), so the signed and the unsigned versions have
 +  // different contents even though the host format is the same for both.
-+  if (IsNonFloat32bpcFormat(key.format)) {
++  if (texture_util::IsNonFloat32bpcFormat(key.format)) {
 +    return true;
 +  }
    const HostFormat& host_format = host_formats_[uint32_t(key.format)];
@@ -286,13 +356,13 @@ index 2be0e8e..f7d0fd8 100644
 +  // floating-point on the CPU (see ConvertNonFloatGuestRange) when loaded from
 +  // the guest memory, but the resolution-scaled loading from the resolves
 +  // doesn't do that.
-+  if (IsNonFloat32bpcFormat(key.format)) {
++  if (texture_util::IsNonFloat32bpcFormat(key.format)) {
 +    return false;
 +  }
    LoadShaderIndex load_shader = GetLoadShaderIndex(key);
    return load_shader != kLoadShaderIndexUnknown && load_pipelines_scaled_[load_shader] != nullptr;
  }
-@@ -1695,6 +1787,74 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1695,6 +1739,74 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      return false;
    }
  
@@ -307,7 +377,7 @@ index 2be0e8e..f7d0fd8 100644
 +  // the load shaders is the staging buffer, and the guest offset is relative to
 +  // the beginning of the guest data in that buffer rather than to the shared
 +  // memory.
-+  bool convert_non_float = !texture_resolution_scaled && IsNonFloat32bpcFormat(texture_key.format);
++  bool convert_non_float = !texture_resolution_scaled && texture_util::IsNonFloat32bpcFormat(texture_key.format);
 +  uint32_t staging_size = 0;
 +  uint32_t mips_staging_offset = 0;
 +  ID3D12Resource* staging_buffer = nullptr;
@@ -353,12 +423,12 @@ index 2be0e8e..f7d0fd8 100644
 +          guest_format_info->name, is_signed ? "signed" : "unsigned");
 +    }
 +    if (level_first == 0) {
-+      ConvertNonFloatGuestRange(d3d12_shared_memory.TranslatePhysical(texture_key.base_page << 12),
++      texture_util::ConvertNonFloatGuestRange(d3d12_shared_memory.TranslatePhysical(texture_key.base_page << 12),
 +                                staging_mapping, guest_base_size, texture_key.endianness, is_signed,
 +                                is_integer);
 +    }
 +    if (level_last != 0) {
-+      ConvertNonFloatGuestRange(d3d12_shared_memory.TranslatePhysical(texture_key.mip_page << 12),
++      texture_util::ConvertNonFloatGuestRange(d3d12_shared_memory.TranslatePhysical(texture_key.mip_page << 12),
 +                                staging_mapping + mips_staging_offset, guest_mips_size,
 +                                texture_key.endianness, is_signed, is_integer);
 +    }
@@ -367,7 +437,7 @@ index 2be0e8e..f7d0fd8 100644
    // Begin loading.
    // May use different buffers for scaled base and mips, and also addressability
    // of more than 128 * 2^20 (2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP)
-@@ -1706,8 +1866,8 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1706,8 +1818,8 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
      // Source - base and mips, one or both.
      descriptor_count += (level_first == 0 && level_last != 0) ? 2 : 1;
    } else {
@@ -378,7 +448,7 @@ index 2be0e8e..f7d0fd8 100644
        ++descriptor_count;
      }
    }
-@@ -1733,17 +1893,30 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1733,17 +1845,30 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
    // depend on the buffer being current, so they will be set later - for mips,
    // after loading the base is done).
    if (!texture_resolution_scaled) {
@@ -417,7 +487,7 @@ index 2be0e8e..f7d0fd8 100644
      }
      command_list.D3DSetComputeRootDescriptorTable(1, descriptor_unscaled_source.second);
    }
-@@ -1799,6 +1972,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+@@ -1799,6 +1924,11 @@ bool D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
        // directly addresses as R32 on some hardware (above
        // 2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP).
        load_constants.guest_offset = 0;
@@ -430,7 +500,7 @@ index 2be0e8e..f7d0fd8 100644
        load_constants.guest_offset = guest_address;
      }
 diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
-index 76f5600..f16e03f 100644
+index 76f5600c..f16e03f2 100644
 --- a/src/graphics/pipeline/texture/cache.cpp
 +++ b/src/graphics/pipeline/texture/cache.cpp
 @@ -983,6 +983,7 @@ void TextureCache::BindingInfoFromFetchConstant(const xenos::xe_gpu_texture_fetc
@@ -441,8 +511,159 @@ index 76f5600..f16e03f 100644
  
    key_out.is_valid = 1;
  
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+index ecbd940d..313a895d 100644
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -276,11 +276,16 @@ const VulkanTextureCache::HostFormatPair VulkanTextureCache::kBestHostFormats[64
+      xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA,
+      true},
+     // k_32
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
++    // Fixed-point/integer components are converted on upload, preserving the guest layout.
++    // Signed and unsigned conversions have different contents, so they use separate images.
++    {{kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT},
++     {kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT}, xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
+     // k_32_32
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::XE_GPU_TEXTURE_SWIZZLE_RGGG},
++    {{kLoadShaderIndex64bpb, VK_FORMAT_R32G32_SFLOAT},
++     {kLoadShaderIndex64bpb, VK_FORMAT_R32G32_SFLOAT}, xenos::XE_GPU_TEXTURE_SWIZZLE_RGGG},
+     // k_32_32_32_32
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
++    {{kLoadShaderIndex128bpb, VK_FORMAT_R32G32B32A32_SFLOAT},
++     {kLoadShaderIndex128bpb, VK_FORMAT_R32G32B32A32_SFLOAT}, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
+     // k_32_FLOAT
+     {{kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT},
+      {kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT},
+@@ -487,10 +492,22 @@ VulkanTextureCache::~VulkanTextureCache() {
+   DestroyAllTextures(true);
+ 
+   if (vma_allocator_ != VK_NULL_HANDLE) {
++    for (const auto& staging : conversion_buffers_) {
++      vmaDestroyBuffer(vma_allocator_, staging.buffer, staging.allocation);
++    }
+     vmaDestroyAllocator(vma_allocator_);
+   }
+ }
+ 
++void VulkanTextureCache::ClearCache() {
++  TextureCache::ClearCache();
++  // The command processor waits for pending submissions before clearing caches.
++  for (const auto& staging : conversion_buffers_) {
++    vmaDestroyBuffer(vma_allocator_, staging.buffer, staging.allocation);
++  }
++  conversion_buffers_.clear();
++}
++
+ void VulkanTextureCache::BeginSubmission(uint64_t new_submission_index) {
+   TextureCache::BeginSubmission(new_submission_index);
+ 
+@@ -1054,6 +1071,10 @@ bool VulkanTextureCache::IsSignedVersionSeparateForFormat(TextureKey key) const
+ }
+ 
+ bool VulkanTextureCache::IsScaledResolveSupportedForFormat(TextureKey key) const {
++  // Scaled GPU resolves have not passed through the CPU component conversion.
++  if (texture_util::IsNonFloat32bpcFormat(key.format)) {
++    return false;
++  }
+   if (!IsDrawResolutionScaled()) {
+     return false;
+   }
+@@ -1213,6 +1234,68 @@ bool VulkanTextureCache::EnsureScaledResolveMemoryCommitted(uint32_t start_unsca
+   return EnsureScaledResolveBufferAllocated(start_scaled, length_scaled);
+ }
+ 
++bool VulkanTextureCache::ConvertTextureRange(uint32_t guest_address, uint32_t size, TextureKey key,
++                                            VkDescriptorBufferInfo& source) {
++  // Match the word-mover shader's vector loads, including padding at the end of a range.
++  const VkDeviceSize range = rex::align(VkDeviceSize(size), VkDeviceSize(16));
++  if (!range || range > SharedMemory::kBufferSize - uint64_t(guest_address) ||
++      range > command_processor_.GetVulkanDevice()->properties().maxStorageBufferRange) {
++    return false;
++  }
++  ConversionBuffer* staging = nullptr;
++  for (auto& candidate : conversion_buffers_) {
++    if (candidate.submission <= command_processor_.GetCompletedSubmission() &&
++        candidate.size >= range) {
++      staging = &candidate;
++      break;
++    }
++  }
++  if (!staging) {
++    VkBufferCreateInfo buffer_info = {};
++    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++    buffer_info.size = range;
++    buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
++    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    VmaAllocationCreateInfo allocation_info = {};
++    allocation_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
++    allocation_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
++                            VMA_ALLOCATION_CREATE_MAPPED_BIT;
++    ConversionBuffer created = {};
++    VmaAllocationInfo mapping_info = {};
++    if (vmaCreateBuffer(vma_allocator_, &buffer_info, &allocation_info, &created.buffer,
++                        &created.allocation, &mapping_info) != VK_SUCCESS) {
++      REXGPU_ERROR("VulkanTextureCache: Failed to allocate {} bytes for texture conversion", range);
++      return false;
++    }
++    created.mapping = static_cast<uint8_t*>(mapping_info.pMappedData);
++    created.size = range;
++    conversion_buffers_.push_back(created);
++    staging = &conversion_buffers_.back();
++  }
++  staging->submission = command_processor_.GetCurrentSubmission();
++  auto& guest_memory = static_cast<VulkanSharedMemory&>(shared_memory());
++  texture_util::ConvertNonFloatGuestRange(guest_memory.TranslatePhysical(guest_address),
++      staging->mapping, size, key.endianness, key.signed_separate != 0, key.num_format != 0);
++  std::memset(staging->mapping + size, 0, size_t(range - size));
++  if (vmaFlushAllocation(vma_allocator_, staging->allocation, 0, range) != VK_SUCCESS) {
++    return false;
++  }
++  command_processor_.PushBufferMemoryBarrier(staging->buffer, 0, range,
++      VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++      VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
++  const uint8_t report_bit = uint8_t(1 << (uint32_t(key.signed_separate) |
++                                         (uint32_t(key.num_format) << 1)));
++  auto& reported = conversion_reported_[uint32_t(key.format)];
++  if (!(reported & report_bit)) {
++    reported |= report_bit;
++    REXGPU_INFO("VulkanTextureCache: Converting {} {} {} components to float32",
++                FormatInfo::Get(key.format)->name, key.signed_separate ? "signed" : "unsigned",
++                key.num_format ? "integer" : "fixed-point");
++  }
++  source = {staging->buffer, 0, range};
++  return true;
++}
++
+ bool VulkanTextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture, bool load_base,
+                                                                bool load_mips) {
+   VulkanTexture& vulkan_texture = static_cast<VulkanTexture&>(texture);
+@@ -1441,6 +1524,11 @@ bool VulkanTextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     }
+     write_descriptor_set_source_base_buffer_info.offset = source_base_start;
+     write_descriptor_set_source_base_buffer_info.range = source_base_range;
++    if (texture_util::IsNonFloat32bpcFormat(texture_key.format) &&
++        !ConvertTextureRange(source_base_start_unscaled, vulkan_texture.GetGuestBaseSize(),
++                             texture_key, write_descriptor_set_source_base_buffer_info)) {
++      return false;
++    }
+     VkWriteDescriptorSet& write_descriptor_set_source_base =
+         write_descriptor_sets[write_descriptor_set_count++];
+     write_descriptor_set_source_base.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+@@ -1481,6 +1569,11 @@ bool VulkanTextureCache::LoadTextureDataFromResidentMemoryImpl(Texture& texture,
+     }
+     write_descriptor_set_source_mips_buffer_info.offset = source_mips_start;
+     write_descriptor_set_source_mips_buffer_info.range = source_mips_range;
++    if (texture_util::IsNonFloat32bpcFormat(texture_key.format) &&
++        !ConvertTextureRange(source_mips_start_unscaled, vulkan_texture.GetGuestMipsSize(),
++                             texture_key, write_descriptor_set_source_mips_buffer_info)) {
++      return false;
++    }
+     VkWriteDescriptorSet& write_descriptor_set_source_mips =
+         write_descriptor_sets[write_descriptor_set_count++];
+     write_descriptor_set_source_mips.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 diff --git a/src/ui/d3d12/d3d12_upload_buffer_pool.cpp b/src/ui/d3d12/d3d12_upload_buffer_pool.cpp
-index ade5dd2..a768989 100644
+index ade5dd2b..a768989a 100644
 --- a/src/ui/d3d12/d3d12_upload_buffer_pool.cpp
 +++ b/src/ui/d3d12/d3d12_upload_buffer_pool.cpp
 @@ -27,6 +27,15 @@ D3D12UploadBufferPool::D3D12UploadBufferPool(const D3D12Provider& provider, size
@@ -462,7 +683,7 @@ index ade5dd2..a768989 100644
    const D3D12Page* page = static_cast<const D3D12Page*>(
        GraphicsUploadBufferPool::Request(submission_index, size, alignment, offset));
 diff --git a/src/ui/graphics_upload_buffer_pool.cpp b/src/ui/graphics_upload_buffer_pool.cpp
-index 407498e..d42a4c0 100644
+index 407498ed..d42a4c08 100644
 --- a/src/ui/graphics_upload_buffer_pool.cpp
 +++ b/src/ui/graphics_upload_buffer_pool.cpp
 @@ -103,8 +103,10 @@ GraphicsUploadBufferPool::Page* GraphicsUploadBufferPool::Request(uint64_t submi

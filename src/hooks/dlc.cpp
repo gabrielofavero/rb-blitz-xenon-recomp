@@ -682,24 +682,32 @@ void RefreshConfigured() {
   {
     std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
     if (g_restarting) return;
-    if (!g_cache_enabled || g_runtime == nullptr) {
+    if (g_runtime == nullptr) {
       return;
     }
-    if (g_library_roots.empty()) {
-      REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to "
-                  "scan");
-      return;
-    }
-    // One at a time. A second ask while the scan is in flight rides the first one rather than
-    // queueing a second scan of the same tree - and it still waits below, because what it
-    // needs is the finished list, not a second worker
-    // (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5).
-    if (!g_refresh_state.Begin()) {
-      REXLOG_INFO("dlc: a refresh is already running; this ask rides it");
-    } else {
-      // The previous worker finished before Begin() above succeeded, so this joins an idle
-      // thread rather than waiting for work.
-      StartRefreshWorker("the main menu's refresh row");
+    // R7's scan belongs to the cache feature, so with the cache off a press schedules none. The
+    // wait below still runs: the store's post-install refresh (RefreshAfterStoreInstall) scans
+    // whatever the switch says, and the press may arrive while that scan is running or its list
+    // is waiting to be published - which is the case P9-14's toast refresh cares about. With
+    // nothing pending the wait returns at once.
+    if (g_cache_enabled) {
+      if (g_library_roots.empty()) {
+        REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to "
+                    "scan");
+        return;
+      }
+      // One at a time. A second ask while the scan is in flight rides the first one rather than
+      // queueing a second scan of the same tree - and it still waits below, because what it
+      // needs is the finished list, not a second worker
+      // (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5).
+      if (!g_refresh_state.Begin()) {
+        REXLOG_INFO("dlc: a refresh is already running; this ask rides it");
+      } else {
+        // The previous worker finished before Begin() above succeeded, so this joins an idle
+        // thread rather than waiting for work. The reason names the *entry*, not one caller: the
+        // main menu's row and P9-14's download toast both arrive through the same sentinel.
+        StartRefreshWorker("the song refresh entry");
+      }
     }
   }
   // The press waits (bounded) for the scan: see WaitForRefreshToLand below.
@@ -738,14 +746,15 @@ void DrainRefreshForRestart() {
   if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
 }
 
-// The refresh row's press re-enters the title's own connect/discovery pass (src/ui/menu_options.cpp's
-// TapRefreshCache navigates into it), and that pass must enumerate the list its own re-scan
-// produced - not the one this boot loaded. The pass's aggregate enumerators are built from the
-// content manager's list *at the create call*, and measured 2026-10-15 the creates run before
-// the pass's first message (and are made by guest code the mod cannot wait on: the create is an
-// ordinal-resolved import). So the waiting belongs here, inside the press: the row's action has
-// only scheduled the screen transition at this point - nothing of the pass has run yet - and by
-// the time this returns the list is either the finished one or the scan sat out its bound.
+// A refresh entry's press re-enters the title's own connect/discovery pass (src/ui/menu_options.cpp's
+// TapRefreshCache navigates into it, and P9-14's download toast runs the same sentinel right
+// before its navigation), and that pass must enumerate the list its own re-scan produced - not the
+// one this boot loaded. The pass's aggregate enumerators are built from the content manager's list
+// *at the create call*, and measured 2026-10-15 the creates run before the pass's first message
+// (and are made by guest code the mod cannot wait on: the create is an ordinal-resolved import).
+// So the waiting belongs here, inside the press: the row's action has only scheduled the screen
+// transition at this point - nothing of the pass has run yet - and by the time this returns the
+// list is either the finished one or the scan sat out its bound.
 //
 // PublishPendingRefresh() is called on this (guest) thread, exactly like the file-call hooks do
 // at the menu, because the content manager's list is a plain vector the worker must not write.
@@ -760,7 +769,11 @@ void DrainRefreshForRestart() {
 // the file hooks publish it). The scan rewrote the cache, so the next *boot* is the cheap one; a
 // second press in the same session scans again, because an explicit refresh never accepts the cache.
 void WaitForRefreshToLand() {
-  if (!g_cache_enabled || g_runtime == nullptr) {
+  // Not gated on the cache switch: with the cache off nothing schedules a scan, but a store
+  // install's own scan (which ignores the switch) can still be running or pending, and a press
+  // that is about to enter the discovery pass must publish it first (P9-14). With nothing pending
+  // the loop below exits on its first test.
+  if (g_runtime == nullptr) {
     return;
   }
   constexpr int kBoundMs = 15000;

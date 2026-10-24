@@ -356,8 +356,8 @@ bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 // thing and crashed the first boot that pressed the row), the `has_data` guard that keeps a missing
 // key from being walked, `sprintf` with a nested command as its argument, and the request channel's
 // own `write_file`. The path is the grammar `store_download.h` owns (`ParseJobCommand`), and the
-// token is the offer's `job` key. P9-6a's modal opens first (`AddDownloadPopup`), so the popup is
-// up before the transfer starts and it is the only place the job's state is drawn.
+// token is the offer's `job` key. The popup opens first (`AddDownloadPopup`), so it is up before
+// the transfer starts and it is the only place the job's state is drawn.
 //
 // Measured 2026-10-22 on the first boot that pressed the row (`out/_swap/store-probe/
 // 20261022-115913`, log `rb_blitz_212.log`): the case dispatched and reached the host (a literal
@@ -370,7 +370,7 @@ bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
 // ---------------------------------------------------------------------------------------------
-// P9-6a - the download press opens one modal popup
+// P9-6 - the download press opens one modal popup
 // ---------------------------------------------------------------------------------------------
 //
 // P5 shipped the transfer's feedback as a host-side line in the caption strip, drawn while the job
@@ -394,18 +394,40 @@ bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::str
 //   hide_popup         hides, releases `active`, and gives the focus back to
 //                      `store_info_panel`'s `buttons.lst`;
 //   BUTTON_DOWN_MSG    B writes `rbbz-store/download/cancel/<job>` while the job is not terminal
-//                      and closes - so a cancelled transfer never outlives the press - and every
-//                      other action is consumed;
+//                      and closes - so a cancelled transfer never outlives the press - and A (see
+//                      below) runs the in-session refresh in the `installed` state; every other
+//                      action is consumed;
 //   exit               leaving the screen with the popup up is a cancel as well (`active` and not
 //                      `terminal`), which is the search modal's rule.
 //
 // The press itself is `RouteDownloadButtons`' body: it shows the popup with the offer's `job` key
 // **before** it writes the start/again request, so the modal is up when the transfer begins.
 //
-// The outcome states are the panel's, not the strip's: P9-6b fills the loading sentence with the
-// live progress bucket and names a failure's reason, and P9-6c turns the `installed` state into the
-// toast whose A runs the main menu's Refresh Songs - all in this same object, which is why the
-// panel carries the switch now.
+// The outcome states are the panel's, not the strip's: the panel switches its own labels to the
+// installed sentence and the installed prompt (or the generic failure sentence) exactly once.
+//
+// **P9-14 - the installed toast's A Refresh.** Once the job is `installed`, **A**
+// (`kAction_Confirm`) runs the main menu's own refresh so the song the transfer just installed is
+// listed in the same session:
+//
+//   (kAction_Confirm
+//     {if [installed] {rbbz_download_panel hide_popup}}
+//     {if [installed] {ui goto_screen server_connect_screen}}
+//     {if [installed] {file_exists "songcache:/rbbz_dlc_refresh"}})
+//
+// The two statements are the menu row's own, in the row's own order - `menu_options::
+// kRefreshRowDiscoverScreen` (the title's discovery pass) and `menu_options::kRefreshSentinelPath`
+// (the sentinel `src/hooks/dlc_refresh.cpp` answers by re-scanning and publishing the fresh list) -
+// and they are **siblings** for the reason the row is: a `do` around them loses everything after
+// the navigation, because the screen change takes the evaluation with it (measured 2026-10-15). The
+// guard is therefore repeated per statement: each one is skipped on its own, so a cancelled or
+// failed job has no action behind the caption it does not draw, and no partial sequence can run.
+// The press runs the scan inside the row's own statement, so the list the discovery pass enumerates
+// is the refreshed one (`dlc::WaitForRefreshToLand` publishes it on this guest thread).
+//
+// `installed` is the second terminal property (TRUE in `finish_installed`, FALSE in `show_popup`
+// and `finish_failed`), so a cancelled or failed job draws no **A**. The prompt line switches with
+// it: `rbbz_download_refresh` reads **A Refresh   B Close**.
 //
 // Idempotent (the panel definition is the marker); refused, before any edit, when the record carries
 // no `store_info_screen` definition or no `panels` list on it.
@@ -416,6 +438,8 @@ inline constexpr char kDownloadCancelToken[] = "rbbz_download_cancel";
 inline constexpr char kDownloadCancelText[] = "Press <alt1>B</alt1> to Cancel";
 inline constexpr char kDownloadCloseToken[] = "rbbz_download_close";
 inline constexpr char kDownloadCloseText[] = "Press <alt1>B</alt1> to Close";
+inline constexpr char kDownloadRefreshToken[] = "rbbz_download_refresh";
+inline constexpr char kDownloadRefreshText[] = "<alt1>A</alt1> Refresh   <alt1>B</alt1> Close";
 inline constexpr char kDownloadFailedToken[] = "rbbz_download_failed";
 inline constexpr char kDownloadFailedText[] = "The download could not finish.";
 bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);

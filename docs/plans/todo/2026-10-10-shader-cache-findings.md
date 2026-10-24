@@ -1,13 +1,19 @@
 # Shader cache and gameplay stalls: findings and implementation plan
 
 Date: 2026-10-10. Architecture review 2026-10-16; plan finalized 2026-10-17.
+Product flow and implementation prompts updated 2026-10-24.
 Scope: first-play freezes that become less frequent with further play and do not
 recur at the same spot after restarting a song.
 Status: read-only investigation completed; cause of individual freezes is not yet
 measured. This document proposes follow-up work, not an implemented fix.
 
+The [2026-10-24 prompt plan](#implementation-prompts-2026-10-24) defines the next work:
+a graphics-preparation phase after the title-screen A press, beside the existing
+settings/content loading, with persistent caches for faster subsequent launches.
+It supersedes the older before-guest product flow and the optional priority of native
+caches; the earlier findings and acceptance requirements remain useful technical context.
 The [2026-10-16 implementation plan](#implementation-plan-2026-10-16) extends the
-original investigation and defines the next work. It corrects the earlier assumption
+original investigation. It corrects the earlier assumption
 that requesting blocking startup preload guarantees completion on D3D12. Historical
 measurements below are retained; no new gameplay measurements were taken in this review.
 
@@ -567,3 +573,273 @@ possible source of stutter has been eliminated.
 The first concrete fix to pursue is S1, supported by S0 instrumentation. A release
 claim of protected first-song playback additionally needs S2–S4 coverage/readiness
 and S6 packaging; a preload barrier alone cannot prepare previously unknown pipelines.
+
+## Implementation prompts (2026-10-24)
+
+Status: **planning only; P0–P9 below are unstarted**. This update inspected project
+`a8f0bb5`, SDK `c94f5eb` and the current working-tree sources. No game/UI navigation,
+build, cache deletion or new performance measurement was performed. The prompts are
+future implementation tasks, not authorization to execute them as part of this edit.
+
+### Feasibility and product behavior
+
+**Yes, startup preparation is feasible on both D3D12 and Vulkan for a known, validated
+set of shaders and pipeline recipes.** The difficult part is obtaining that set before
+the player's first song, including renderer helpers. An empty cache contains no recipe
+list to compile. A loading bar around today's learned cache would prepare previously
+seen effects and still leave a first-time player exposed to unknown combinations.
+Shader extraction plus a versioned pipeline catalogue is therefore part of the solution,
+not a later polish item. Coverage of arbitrary future custom content remains unproven.
+
+The intended experience is:
+
+1. Launch into the title screen using the minimum graphics needed to display it.
+2. Press A and follow the existing settings/content loading sequence. After the
+   effective content and graphics configuration is known, check graphics preparation
+   before releasing the transition to the usable main menu. P0 must establish the
+   exact insertion point and every route that can bypass that transition.
+3. On a first run, missing cache, changed configuration or incompatible cache, show
+   **Preparing graphics** with a loading bar styled like the existing DLC phase.
+   Resolve local shader data, prepare every required guest/helper pipeline, save
+   reusable results, then continue. Do not run a hidden song or advance scoring.
+4. On subsequent launches, validate and reuse saved data and recreate the required
+   live pipeline objects. Avoid repeating extraction/catalogue generation and reuse
+   native driver results where compatible. Skip a separate visible phase when actual
+   preparation finishes quickly enough; otherwise keep progress visible until ready.
+5. A backend/driver/GPU/content/settings change rebuilds only affected data where
+   compatibility is established. Switching backends retains each backend's cache.
+   New content installed during a session invalidates the applicable readiness result.
+
+**Saved does not mean zero work on later boots.** `.xsh` holds guest shader data and
+`.xpso` holds recipes; neither preserves live GPU objects between processes. Native
+D3D12 PSO data and a Vulkan `VkPipelineCache` can reduce repeated driver work, but
+the application still creates pipelines and verifies readiness on each launch.
+Microsoft documents [cached PSOs](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_cached_pipeline_state)
+as hardware/driver/machine specific; Khronos describes [pipeline caches](https://docs.vulkan.org/guide/latest/pipeline_cache.html)
+as removing some creation costs. These references were rechecked on 2026-10-24.
+Do not promise an invisible warm boot until its preparation time has been measured.
+This work targets compilation stutters; resource I/O, texture conversion, readback and
+other synchronization costs need separate diagnosis if they remain.
+
+### Current integration constraints
+
+- `ReXApp::LaunchModule()` still calls blocking `InitializeShaderStorage(..., true)`
+  on the deferred UI-thread launch path before `main_thread->Resume()`. The D3D12
+  worker-growth/completion defect F1 is still present. Vulkan's storage loader joins
+  its preload workers even when called with `blocking = false`; flipping that flag
+  does not provide the asynchronous loading-screen workflow.
+- The DLC bar is title-owned: `src/hooks/content_progress.cpp` drives the connect
+  panel's `current_content` / `total_content` via the guest's own progress object.
+  Enumeration then hands the bar back to guest mounting/parsing. It is not a generic
+  host progress widget; a graphics phase must have explicit ownership and cannot
+  reuse a stale DLC object or overwrite its counters while DLC work is active.
+- `ui/net/gen/server_connect.dtb` contains the existing connect/loading state machine.
+  `src/settings/menu_payload.cpp` and `src/hooks/settings_payload.cpp` provide the
+  compiled-record overlay pattern; inspect the effective retail/Ultimate records
+  before choosing an edit. Reuse the shared `UIManager::Poll` observation in
+  `src/input/native_menu.cpp`, without adding a competing strong hook or making
+  progress depend on mouse settings or window focus.
+- A title-owned bar needs guest polling and GPU submissions to keep running. Calling
+  today's blocking loader from a guest/UI callback would stop that bar. Bulk work
+  needs an asynchronous lifecycle that leaves the owner threads able to service UI
+  draws; moving the same blocking call to a worker that monopolizes the command
+  processor is insufficient. Prepare the loading screen's own dependencies first.
+- The title screen itself needs some pipelines before A. Keep that bootstrap small
+  and explicit; the requested bulk phase cannot prepare its own first frame retroactively.
+  The old before-guest preparation can remain a diagnostic/reference path while the
+  new flow is validated, but must not duplicate all bulk work ahead of the A press.
+
+### How to use the prompts
+
+Run these sequentially in separate implementation sessions. Each prompt inherits this
+document's coverage, threading and correctness requirements. At the end of each, update
+its status, evidence, actual files changed and remaining blockers. Preserve unrelated
+working-tree edits. SDK changes must also land as reproducible project patches.
+
+For implementation prompts, run `cmake --build --preset win-amd64-release` before
+asking the owner to test. Before any game/UI navigation, ask whether the owner wants
+to perform the test and wait for the answer, unless they have explicitly authorized
+autonomous testing for that scope. Code inspection, builds and non-UI tests can proceed.
+Use isolated caches under ignored `out/`; preserve normal caches and saves. Do not
+mark a runtime acceptance gate passed from source inspection or a successful build.
+
+### P0 — Establish the post-A loading gate and baseline measurements
+
+> Implement P0 of this shader-cache plan. Trace the effective title-screen A action,
+> settings/save loading, connect-panel DLC enumeration/mounting, and transition into
+> the usable main menu for retail and Ultimate. Identify every automatic, offline,
+> trial and confirmation route that reaches that menu. Document where content and
+> graphics settings become authoritative, who owns the panel and its progress object,
+> and the exact completion callback/state that can be deferred without blocking guest
+> polling or GPU submission. Inspect the current payload/filter edits so the existing
+> offline shortcut cannot bypass graphics preparation. Add bounded timing/counters
+> for translation, guest/helper pipeline creation, compile waits and frame gaps, with
+> distinct pre-A, post-A loading, menu and active-song phases. Build, then obtain the
+> required UI-test authorization before collecting controlled empty/warm-cache traces.
+> Preserve the comparison inputs and explain unresolved stalls. Do not implement a
+> speculative state number or assume all first-play stutters are compilation.
+
+Exit: a source/evidence map of the post-A gate, lifetime and bypass routes, plus a
+repeatable measurement workflow. If the gate is not proven, record that blocker;
+P1–P5 can proceed, but P6 must not guess the guest transition.
+
+### P1 — Make backend completion and failure reporting trustworthy
+
+> Implement P1. Fix the D3D12 worker-growth condition and enforce blocking completion
+> outside temporary-worker cleanup, including the no-growth case. Track required,
+> running, successful, failed and missing work explicitly on both backends; queued
+> attempts, an empty queue and Vulkan placeholders cannot count as ready. Preserve
+> submission correctness and pipeline/dependency lifetimes. Add focused regression
+> tests with a delayed worker, no extra worker needed, synchronous and multiworker
+> execution, creation failure, duplicate requests and shutdown. Carry SDK edits through
+> the patch workflow and build. Do not remove `EndSubmission()` waits as this fix.
+
+Exit: preload cannot return successful while required work is running, failed or
+missing. Tests exercise the actual completion logic, rather than only a copied model.
+
+### P2 — Resolve shaders locally before their first draw
+
+> Implement P2. Investigate the installed `xbox_shaders` / `xbox_preinit_shaders` assets
+> and the loader leads recorded above. Establish record boundaries, stage, byte order,
+> permutations and the exact SDK microcode hashes against captured runtime shaders.
+> Build a bounded, versioned resolver/index from the user's effective installed
+> retail/Ultimate content, with malformed/truncated-data tests and content fingerprints.
+> Resolve the candidate catalogue's shader identities without requiring prior gameplay.
+> Never execute untrusted cache lengths unchecked or bundle retail shader bytes.
+> Report shaders that cannot be resolved; investigate their initialization path rather
+> than substituting arbitrary bytes or marking them ready. Build the affected targets.
+
+Exit: every shader in the candidate supported catalogue resolves locally and matches
+runtime identity, or there is an explicit coverage blocker. Existing developer caches
+may support experiments but cannot be the release's only first-run shader source.
+
+### P3 — Build the complete candidate pipeline catalogue, including helpers
+
+> Implement P3. Add tools to capture, inspect, validate, deduplicate and merge normalized
+> D3D12/Vulkan pipeline recipes and their shader modifications. Inventory lazy graphics
+> and compute helpers, including render-target transfer/dump/resolve paths, and capture
+> their full creation keys and dependencies. Keep portable recipes and coverage
+> metadata separate from game shader bytes and machine-native cache data. Seed from
+> compatible local records, then collect the visual/power-up/settings/content matrix
+> with authorized testing. Preserve richer user discoveries when merging; handle hash
+> collisions, version mismatches and malformed records. Audit reachable state/material
+> construction rather than enumerating every possible shader pair. Build and report
+> both covered and unresolved combinations for each supported backend/rendering path.
+
+Exit: a versioned candidate catalogue with helper recipes, local shader resolution,
+provenance and explicit coverage scope. Capture saturation is useful evidence, not
+proof that arbitrary DLC/custom content can never add a pipeline.
+
+### P4 — Add asynchronous preparation without starving the loading screen
+
+> Implement P4. Separate storage opening/import from a reusable preparation operation.
+> Add begin, progress snapshot, completion and cancellation APIs with device/content/
+> configuration generation identities. Schedule translation and pipeline work through
+> audited owner-thread operations and bounded workers while continuing guest loading-
+> screen polling, window events and command-processor submissions. Bootstrap the
+> loading screen's real pipelines before bulk work. Keep pipeline-map mutation and
+> handle publication synchronized; never call guest transitions from compile workers.
+> Progress must reflect completed required work, with unresolved/failed counts; a
+> missing catalogue or zero-entry input is not verified coverage. On cancellation or
+> exit, stop enqueueing and safely retire in-flight work. Test responsiveness under
+> delayed compilation and cancellation/device shutdown races, then build.
+
+Exit: both backends can prepare the catalogue while the intended loading UI animates
+and polls; all required real pipelines remain resident after successful completion.
+If this cannot be achieved with the current ownership model, document and fix that
+architecture before integrating the guest bar. The old blocking API is not the new API.
+
+### P5 — Persist native results for faster subsequent boots on both backends
+
+> Implement P5. Add local D3D12 cached PSO blobs (or a supported pipeline library if
+> justified) and a real Vulkan pipeline cache to the covered guest/helper creation
+> paths. Include compute paths where the inventory requires them. Key data by full
+> pipeline/shader/root-signature or layout identity, translator/schema versions,
+> effective feature/settings choices and adapter/driver compatibility; validate Vulkan
+> cache headers and UUID. Audit worker synchronization and input-buffer lifetimes.
+> Retry a rejected native blob without it during preparation, retain portable recipes,
+> and replace unusable local results. Serialize outside active songs using bounded,
+> atomic writes and a concurrent-instance policy. Persist completed preparation before
+> announcing the reusable result. Build and measure empty-cache versus full-process
+> warm restarts independently for D3D12 and Vulkan. Persist translated shader bytecode
+> only if profiling shows it is needed and its runtime metadata can be reconstructed.
+
+Exit: both backends reuse native data across processes and recover from corrupted or
+incompatible data. Report actual preparation time and disk size; do not call cache-file
+existence a performance result. Native reuse is required work for the requested warm-
+boot experience; further bytecode-cache layers remain conditional on measurements.
+
+### P6 — Integrate the post-A Preparing graphics phase and native loading bar
+
+> Implement P6 using the proven P0 gate and P4 lifecycle. Add a distinct graphics phase
+> beside the existing settings/content loading, after required content/configuration
+> resolution and before the usable main menu. Reuse the title's loading-bar appearance
+> through a validated panel/state or authored compiled-record extension. Give the phase
+> its own counters and lifetime; hand ownership back cleanly and preserve DLC's existing
+> enumeration/mounting counters. Show Checking graphics cache / Preparing graphics as
+> appropriate, with real completed/total work once the catalogue is known. Continue
+> rendering/polling; release the continuation exactly once only for the current ready
+> generation. Route automatic/offline/trial/retail/Ultimate transitions through the same
+> gate. Restrict pre-A work to the bootstrap and remove duplicate bulk preparation from
+> the old pre-guest path. On warm boots, begin validation/restoration promptly within
+> the safe loading boundary and omit a separate visible phase if it finishes before
+> the normal transition; show progress if it takes longer. Build and verify the phase
+> with authorized cold/warm UI runs, including mouse disabled and focus changes.
+
+Exit: pressing A on a fresh installation visibly prepares graphics and then reaches
+the menu; a subsequent launch reuses saved data and still verifies live readiness.
+Progress remains responsive, and no bypass can start a song while preparation is pending.
+
+### P7 — Handle invalidation, new content and interrupted preparation
+
+> Implement P7. Define separate validity for local shader extraction, portable recipes,
+> native data and this process's live readiness. Use manifests/generation checks rather
+> than a single cache-exists flag. Cover backend switches, rendering path/features,
+> pipeline-affecting graphics settings, SDK/translator updates, retail/Ultimate content,
+> driver/GPU changes and successful store/DLC refreshes. Connect mid-session invalidation
+> to a proven non-playback gate or the existing restart mechanism; do not reset shader
+> storage during a song. Reuse valid layers and prepare affected entries where proven
+> safe. Add retry/return behavior for missing shader data or real compilation failure;
+> prevent stale/partial completion markers after cancellation, crash or failed writes.
+> Treat unwritable persistence separately from live GPU success: explain that a later
+> boot may need preparation again. Unsupported coverage must not be advertised as
+> protected; keep any existing recovery path explicit. Build and test these transitions
+> with isolated fixtures and authorized UI runs where needed.
+
+Exit: stale/corrupt/partial data never bypasses preparation; caches and saves survive
+updates and backend switching. A valid native cache does not override a changed recipe
+catalogue or an invalid live generation.
+
+### P8 — Validate first-song coverage, timing and visual correctness
+
+> Execute P8 after building the current implementation. Ask who will drive the UI unless
+> autonomous testing is authorized. Run the measurement matrix above on D3D12 and Vulkan:
+> fresh application cache plus shipped catalogue/local assets, immediate replay, full
+> restart, changed configuration, invalid native cache, cancellation and failure. Complete
+> the visual/power-up matrix through song endings; record retail/Ultimate and supported
+> DLC/custom scope separately. Capture runtime translations, guest/helper creations,
+> compile waits, skipped draws/placeholders, frame gaps and audio/input evidence. Any
+> compilation event during covered active playback fails that route; extend coverage
+> and repeat the affected checks. Measure cold and warm post-A latency, visible-bar
+> duration, pipeline memory and cache size. Confirm notes, effects, scoring, audio and
+> input with the player, and diagnose remaining non-compilation stalls separately.
+
+Exit: zero compilation-related work or visual fallbacks during validated active-song
+routes on each claimed backend/configuration. Report supported scope, untested hardware,
+worst frames and measured warm-boot behavior; do not promise universal absence of stutter.
+
+### P9 — Package, document and close the release gates
+
+> Implement P9. Package the versioned recipe/coverage manifest and local extraction
+> tooling/runtime support through `installer/tools/make_payload.ps1` and its audit.
+> Include no retail `.xsh` bytes or developer GPU-native cache. Verify patch applicability,
+> release build, installer fresh-install/update behavior and preservation of local
+> discoveries/saves. Test installed cold and warm startup with the user's own assets,
+> both backend variants and the approved UI-testing workflow. Update graphics/cache
+> documentation, troubleshooting and this plan with the actual preparation flow,
+> invalidation rules, measured timings, evidence and coverage limits. Close only the
+> gates actually demonstrated; retain unresolved content/hardware/performance work.
+
+Exit: a distributable install protects its first covered song without the user first
+training the cache, and subsequent launches reuse compatible saved results. Both the
+post-A loading experience and its failure/recovery paths are documented and validated.

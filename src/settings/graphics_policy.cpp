@@ -223,8 +223,11 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
       return result;
     }
     case SettingId::kRenderer: {
-      if (!renderer.empty() && requested.text != renderer) {
-        result.effective = MakeEnum(renderer);
+      // A usable saved choice is also the backend to select on the next launch.
+      // Using only the active backend here pins both the menu and boot to D3D12.
+      const std::string selected = PolicyRenderer(caps, requested.text);
+      if (!selected.empty() && requested.text != selected) {
+        result.effective = MakeEnum(selected);
         result.corrected = true;
         result.correction_reason_key = std::string(kGraphicsCorrectedRenderer);
         result.reason_key = result.correction_reason_key;

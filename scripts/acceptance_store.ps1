@@ -21,9 +21,12 @@
 #             browser without a second press. Then A on the first result opens the details screen,
 #             where the box that carries DOWNLOAD also carries the custom's own credit block
 #             (P9-13: charted by, released at, downloads), DOWNLOAD is pressed, and the install is
-#             asserted on disk, in the receipt and in the log. No price,
+#             asserted on disk, in the receipt and in the log. The installed toast is then read for
+#             P9-14's **A Refresh**, A is pressed, and the boot proves what the prompt asks: the
+#             sentinel's own line, a further discovery pass, the main menu coming back, and the
+#             downloaded title on Your Songs **in the same session** - no restart. No price,
 #             currency or purchase word appears on the browser, the details page or the browser it
-#             returns to.
+#             returns to (read before the download, because A ends the visit at the main menu).
 #   Install - the next boot, same profile, same DLC root: the downloaded song is on the title's
 #             own song list, which is the plan's "appears in the song list". The song's name is
 #             read out of the Store leg's install line (`store_download: job <job> installed
@@ -31,7 +34,7 @@
 #             not a name this script guessed from the catalogue.
 #   Control - a boot with RhythmVerse **Off**: no store activity in the log at all, no store row on
 #             the main menu, and the main menu's own **Refresh Songs** row still dispatches
-#             its sentinel (`dlc: refresh asked for from the main menu`).
+#             its sentinel (`dlc: refresh asked for` - the line names the refresh, not one entry).
 #
 # Two scratch fixtures, never the owner's files: a profile directory per leg family (the launcher
 # profile and its `settings.toml` sidecar, which is where a committed setting lives) and a DLC root.
@@ -784,8 +787,21 @@ function Invoke-StoreLeg {
         Assert-Label $detailsText @('CHARTED') 'store: the details page names the custom''s charter'
         Assert-Label $detailsText @('RELEASED', 'DOWNLOADS') 'store: the details page carries the release date and download count'
 
+        # The details page returns to the browser with no chrome either. It is read here, before
+        # the download, because P9-14's same-session route ends the visit at the main menu (the A
+        # Refresh leaves the store), so this state would otherwise go unread.
+        Drive @('key:b', 'wait:3')
+        Add-Step 'store: Back returns to the browser' (Wait-ForScreenName 'store_browser_screen' 20 'back from details') (Get-Screen)
+        Start-Sleep -Seconds 2
+        $returnText = Get-ScreenText 'browser-return.png'
+        Assert-Lacks $returnText 'MICROSOFT' 'store: no points chrome when returning to the browser'
+        # Back into the details page for the download: the browser keeps its selection, so one A
+        # reopens the same offer.
+        Drive @('key:a', 'wait:4')
+        Add-Step 'store: A reopens the details screen' (Wait-ForScreenName 'store_info_screen' 20 'details again') (Get-Screen)
+
         # Press Download (row 0 is where this build's Download row sits) and follow the transfer.
-        # P9-6a: the press opens a modal popup over the details page, and the panel's own text
+        # P9-6: the press opens a modal popup over the details page, and the panel's own text
         # carries the state (`Downloading from RhythmVerse...`, then `Downloaded '<Artist - Title>'.`).
         # The caption strip no longer reports any of it.
         $installsBefore = Get-LogMatches "store_download: job \w+ installed '"
@@ -811,15 +827,11 @@ function Invoke-StoreLeg {
             $script:installedTitle = $installed.Groups[2].Value
             $script:installedPath = $installed.Groups[3].Value
             $script:installedBytes = [int]$installed.Groups[4].Value
-            # The same panel switches to its outcome state; P9-6c turns that state into the toast
-            # whose A runs the main menu's Refresh Songs.
+            # The same panel switches to its outcome state, and P9-14 gives that state a second
+            # action: the prompt reads A Refresh beside B Close.
             $doneText = Wait-ForScreen 'popup-done.png' 'DOWNLOADED' 30 'the popup''s outcome state'
             Assert-Label $doneText @('DOWNLOADED', 'CLOSE') 'store: the popup reports the install'
-            # B closes the popup (the job is terminal, so no cancel is written) and leaves the
-            # details page focused, which is why the single Back below still reaches the browser.
-            Drive @('key:b', 'wait:2')
-            $closedText = Get-ScreenText 'popup-closed.png'
-            Assert-Lacks $closedText 'DOWNLOADED' 'store: B closes the download popup'
+            Assert-Label $doneText @('REFRESH') 'store: the installed toast offers A Refresh'
         }
 
         # The install is a file in the resolved root, the staging directory is empty again, the
@@ -862,11 +874,69 @@ function Invoke-StoreLeg {
         Assert-Log "dlc: the store's install asked for a refresh" 'store: the install asked for a library refresh'
         Assert-Log 'dlc: the refresh finished \(\d+ package\(s\)\)' 'store: the refresh finished'
 
-        # Back to the browser: the return state carries no price chrome either.
-        Drive @('key:b', 'wait:3')
-        Start-Sleep -Seconds 2
-        $returnText = Get-ScreenText 'browser-return.png'
-        Assert-Lacks $returnText 'MICROSOFT' 'store: no points chrome when returning to the browser'
+        # P9-14: **A Refresh** on the toast. The press runs the main menu's own two statements - the
+        # sentinel and the discovery page - so the song the transfer just installed is listed in
+        # this same session. Three host oracles, in the order the press produces them: the
+        # sentinel's own line, a further `content_pipeline: attempt` (the title re-enters its
+        # discovery pass), and the main menu coming back on its own (nothing restarts).
+        Refresh-LogText
+        $refreshBefore = Get-LogMatches 'dlc: refresh asked for'
+        $attemptsBefore = Get-LogMatches 'content_pipeline: attempt \d+ started'
+        Drive @('key:a', 'wait:3')
+        $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec)
+        while ((Get-Date) -lt $deadline) {
+            Refresh-LogText
+            if ((Get-LogMatches 'dlc: refresh asked for') -gt $refreshBefore) { break }
+            Start-Sleep -Seconds 1
+        }
+        Add-Step 'store: A Refresh asks for the library refresh' ((Get-LogMatches 'dlc: refresh asked for') -gt $refreshBefore) 'the sentinel reached the host'
+
+        $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec * 2)
+        $passReran = $false
+        while ((Get-Date) -lt $deadline) {
+            Refresh-LogText
+            if ((Get-LogMatches 'content_pipeline: attempt \d+ started') -gt $attemptsBefore) { $passReran = $true; break }
+            Start-Sleep -Seconds 2
+        }
+        Add-Step 'store: the refresh re-enters the discovery pass' $passReran 'a further content_pipeline attempt'
+
+        # The pass leaves on its own; no capture runs while it does (the 2026-10-22 trap), so the
+        # wait is the host's own `native_mouse: screen=` line.
+        $deadline = (Get-Date).AddSeconds($ScreenTimeoutSec * 2)
+        $menuBack = $false
+        while ((Get-Date) -lt $deadline) {
+            if ((Get-Screen) -eq 'splash_screen') { $menuBack = $true; break }
+            Start-Sleep -Seconds 2
+        }
+        Add-Step 'store: the discovery pass returns to the main menu' $menuBack (Get-Screen)
+
+        # Play opens the song list, and the title the Store leg installed is on it - the plan's
+        # "listed without a restart". The press is retried and a keyboard accept follows the click,
+        # the same shape the Install leg uses (the payload lands around the first click).
+        if ($menuBack -and $script:installedTitle) {
+            Drive @('mouse:0.5:0.78', 'wait:1')
+            $opened = $false
+            $listText = ''
+            for ($attempt = 0; $attempt -lt 4 -and -not $opened; $attempt++) {
+                ClickRow 0 'play' | Out-Null
+                $listText = Wait-ForScreen 'songs-same-session.png' 'YOUR SONGS' 25 'the song list'
+                if ($listText.Contains('YOUR SONGS')) { $opened = $true; break }
+                Drive @('key:a', 'wait:5')
+                $listText = Get-ScreenText 'songs-same-session.png'
+                if ($listText.Contains('YOUR SONGS')) { $opened = $true; break }
+                Drive @('mouse:0.5:0.78', 'wait:2')
+            }
+            Add-Step 'store: Play opens the song list in the same session' $opened (Get-Screen)
+            if ($opened) {
+                $title = $script:installedTitle
+                $at = $title.IndexOf(' - ')
+                if ($at -ge 0) { $title = $title.Substring($at + 3) }
+                $words = @($title.ToUpperInvariant() -split '[^A-Z0-9]+' | Where-Object { $_.Length -ge 4 })
+                if ($words.Count -eq 0) { $words = @($title.ToUpperInvariant()) }
+                $missing = @($words | Where-Object { -not $listText.Contains($_) })
+                Add-Step 'store: the downloaded song is listed without a restart' ($missing.Count -eq 0) "title '$title'; missing [$($missing -join ', ')]"
+            }
+        }
     } finally {
         Stop-Leg $proc
     }
@@ -899,9 +969,9 @@ function Invoke-InstallLeg {
         Add-Step 'install: a downloaded title is known from the Store leg' $false 'no install line in Store.log'
         return
     }
-    # The plan's own rule: the next boot's discovery is what makes the song playable, which is why
-    # the download popup stops at "Downloaded '<Artist - Title>'." and P9-6c's toast (A refreshes
-    # the songs) is the same-session path.
+    # The plan's own rule: the next boot's discovery is what makes the song playable. P9-14's A
+    # Refresh is the same-session path and the Store leg measures it; this leg keeps the next-boot
+    # check, which is also the route the toast's **B** leaves (close now, the song next start).
     $proc = Start-Leg 'Install' $profileDir $dlcRoot $InstallBootTimeoutSec
     try {
         if (-not (Enter-MainMenu $InstallBootTimeoutSec)) { return }
@@ -970,7 +1040,7 @@ function Invoke-ControlLeg {
             if ((Get-RowTable $RefreshRow) -and (ClickRow $RefreshRow 'control-refresh-row' -Wait 3)) {
                 Start-Sleep -Seconds 3
                 Refresh-LogText
-                if ($script:logText -match 'dlc: refresh asked for from the main menu') { $found = $RefreshRow }
+                if ($script:logText -match 'dlc: refresh asked for') { $found = $RefreshRow }
             }
         }
         for ($attempt = 0; $attempt -lt 8 -and $found -lt 0; $attempt++) {
@@ -979,7 +1049,7 @@ function Invoke-ControlLeg {
             ClickRow $attempt "control-refresh-row$attempt" | Out-Null
             Start-Sleep -Seconds 3
             Refresh-LogText
-            if ($script:logText -match 'dlc: refresh asked for from the main menu') { $found = $attempt }
+            if ($script:logText -match 'dlc: refresh asked for') { $found = $attempt }
         }
         Add-Step 'control: the Refresh Songs row dispatches its refresh' ($found -ge 0) "row $found"
 

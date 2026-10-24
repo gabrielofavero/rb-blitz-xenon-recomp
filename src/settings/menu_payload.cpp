@@ -660,8 +660,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           note("the Search Filters footer label was refused: " + why);
         }
         // P9-10's failed-press sentence: the store row's case shows this in the main menu's own
-        // error popup when the catalogue could not be reached (the same panel P9-6b's install
-        // notice uses; this is its first sentence).
+        // error popup when the catalogue could not be reached (the same panel the store's download
+        // modal borrows its resource from; this is that screen's own sentence).
         why.clear();
         if (!screen::AddLocaleEntry(&roots, screen::kStoreUnreachableKey,
                                     screen::kStoreUnreachableText, &why) &&
@@ -691,11 +691,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                  std::pair{store::kSearchEmptyToken, store::kSearchEmptyText},
                  std::pair{store::kSearchFailedToken, store::kSearchFailedText},
                  std::pair{store::kSearchShortToken, store::kSearchShortText},
-                 // P9-6a's modal: the download popup's own sentences. The installed state composes
-                 // its line from the offer, so it needs no entry here.
+                 // P9-6's modal: the download popup's own sentences. The installed state composes
+                 // its line from the offer, so it needs no entry here; P9-14 adds the prompt that
+                 // state draws (A Refresh   B Close).
                  std::pair{store::kDownloadLoadingToken, store::kDownloadLoadingText},
                  std::pair{store::kDownloadCancelToken, store::kDownloadCancelText},
                  std::pair{store::kDownloadCloseToken, store::kDownloadCloseText},
+                 std::pair{store::kDownloadRefreshToken, store::kDownloadRefreshText},
                  std::pair{store::kDownloadFailedToken, store::kDownloadFailedText}}) {
           why.clear();
           if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
@@ -923,7 +925,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (!store::AddDownloadButton(&info_roots, &why)) {
         note("adding the details page's Download row was refused: " + why);
       }
-      // P9-6a: the modal the press opens. Defined on the details screen - the record that carries
+      // P9-6: the modal the press opens. Defined on the details screen - the record that carries
       // the press - before the routes below write the press that shows it.
       why.clear();
       if (!store::AddDownloadPopup(&info_roots, &why)) {

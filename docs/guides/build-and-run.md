@@ -241,11 +241,11 @@ codegen target during the build.
 
 ### The two graphics backends (D3D12 and Vulkan)
 
-The Windows presets configure `REXGLUE_USE_VULKAN=ON` next to the SDK's Windows default
-`REXGLUE_USE_D3D12=ON`, because the SDK's own default is **OFF on Windows** — a tree configured by
-hand without it silently ships a `rexgpu-xenos.dll` that has no Vulkan backend, and then the
-game's *Renderer* row has only one choice to offer. The
-configure prints what it settled on, so the answer is in the first twenty lines of the log:
+The project and Windows presets default `REXGLUE_USE_VULKAN=ON` alongside
+`REXGLUE_USE_D3D12=ON`. The project sets this before loading the SDK, whose own Windows default
+is OFF, so configurations made without a preset also include Vulkan. An existing cache with
+Vulkan disabled still needs `cmake --preset win-amd64-release` to enable it. Configure prints
+the backends it settled on:
 
 ```
 --   Graphics: D3D12=ON Vulkan=ON
@@ -265,6 +265,18 @@ Vulkan pulls in the SDK's
 `glslang`/`spirv-tools`/`spirv-headers`/`vulkan-headers`/`vulkan-memory-allocator` submodules — they
 are initialised in this checkout (see [known-issues.md](../reference/known-issues.md)); a fresh clone needs
 `git -C rexglue-sdk submodule update --init --recursive` for them.
+
+In Help & Options → Audio / Video → Video, confirm the Renderer row to cycle between available
+backends. The row shows the saved selection immediately; leave Help & Options and accept the
+restart prompt to run it. A usable inactive backend must remain selected through saving and the
+next boot. Before 2026-10-24 the graphics reconciler replaced even a usable Vulkan preference with
+the active D3D12 backend, making the row appear stuck and preventing the next boot from using it.
+Vulkan also needs the B-010 fixed-point texture conversion in SDK patch 0002; without it the
+highway is invisible and the log repeats `k_32_32_32_32 resource unsigned`. The patch covers
+both backends as of 2026-10-24. Vulkan resolve readback defaults on for this title; an explicit
+`readback_resolve` or `vulkan_readback_resolve` setting is honored.
+For a dev override, launch `rb_blitz.exe --gpu_backend=vulkan`; an explicit override owns the
+setting for that process, so use a normal launch when testing the menu's saved preference.
 
 The same pair of switches reaches the **installed** product through a chain that has to agree at
 every step: the configured source tree → the freshly built game and GPU plugin → the installer's

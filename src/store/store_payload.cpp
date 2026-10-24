@@ -9,6 +9,7 @@
 
 #include "store/store_search.h"
 #include "store/album_art.h"
+#include "ui/menu_options.h"
 
 namespace rb_blitz::store {
 namespace {
@@ -1236,7 +1237,7 @@ Node DownloadRequest(std::string_view command) {
       Node::Array({Node::Var("offer"), Node::Property({Node::Symbol("cur_offer")})});
   // The token is read once, inside the `has_data` guard, and only the path uses the local: the
   // popup reads the same key from the same offer when its `poll` asks the bridge for the state, so
-  // the modal and the worker cannot disagree about which job they mean (P9-6a).
+  // the modal and the worker cannot disagree about which job they mean (P9-6).
   Node bind_job = Node::Array(
       {Node::Var("job"), Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
                                         Node::Array({Node::Symbol("job")})})});
@@ -1244,9 +1245,9 @@ Node DownloadRequest(std::string_view command) {
                              Node::String("rbbz-store/download/" + std::string(command) + "/%s"),
                              Node::Var("job")});
   Node bind_path = Node::Array({Node::Var("path"), std::move(read)});
-  // P9-6a: the modal is up before the transfer starts. The popup takes the screen's focus and shows
+  // P9-6: the modal is up before the transfer starts. The popup takes the screen's focus and shows
   // its loading sentence; its own `poll` reads the same offer's `job` key and moves the panel to the
-  // outcome state when the job finishes (store_payload.h), which is what replaces the caption
+  // outcome state when the job finishes (store_payload.h), which is what replaced the caption
   // strip's old progress line.
   Node open_popup = Node::Command({Node::Symbol(kDownloadPanelName), Node::Symbol("show_popup")});
   Node press = Node::Command(
@@ -1448,12 +1449,14 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
     kids.insert(kids.end(), body.begin(), body.end());
     return Node::Array(std::move(kids));
   };
-  // Two booleans, both measured on the search modal's own panel: `active` says the popup is up,
-  // `terminal` says the job already answered, so the poll writes the outcome once and B stops
-  // cancelling. A string property is avoided on purpose - the shipped records never set one from
-  // DTA, while the offer carrying the token needs no storage at all.
+  // Three booleans, the first two measured on the search modal's own panel: `active` says the
+  // popup is up, `terminal` says the job already answered, so the poll writes the outcome once and
+  // B stops cancelling - and `installed` says the answer was an install, which is the only state
+  // that has a song to refresh for (P9-14). A string property is avoided on purpose - the shipped
+  // records never set one from DTA, while the offer carrying the token needs no storage at all.
   const Node active = Node::Property({sym("active")});
   const Node terminal = Node::Property({sym("terminal")});
+  const Node installed = Node::Property({sym("installed")});
   const Node running = cmd({sym("&&"), active, cmd({sym("!"), terminal})});
   const Node deactivate = cmd({sym("set"), active, sym("FALSE")});
   const Node hide = cmd({sym("all.grp"), sym("set_showing"), sym("FALSE")});
@@ -1463,22 +1466,29 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
       cmd({sym("continue.lbl"), sym("set_token_fmt"), sym(kDownloadCancelToken)});
   const Node close_prompt =
       cmd({sym("continue.lbl"), sym("set_token_fmt"), sym(kDownloadCloseToken)});
-  // `installed` is the one outcome the player must see (the store cannot say "playable" until
-  // P9-6c proves same-session discovery, and this sentence is the state 6c turns into its toast);
-  // `failed`/`cancelled` get the generic sentence P9-6b replaces with the reason tokens.
+  // P9-14: the installed state's prompt names both actions (A Refresh   B Close), and only that
+  // state has them - the loading state keeps the Cancel prompt, a cancelled or failed job the Close
+  // prompt alone.
+  const Node refresh_prompt =
+      cmd({sym("continue.lbl"), sym("set_token_fmt"), sym(kDownloadRefreshToken)});
+  // `installed` is the outcome the player must see (the installed state is the one with A Refresh);
+  // `failed`/`cancelled` get the generic sentence - the live-status and reason-token states were
+  // withdrawn with the rest of the old follow-ups (plan §9/P9-6).
   const Node installed_text =
       cmd({sym("error.lbl"), sym("set_display_text_string"),
            cmd({sym("sprintf"), Node::String("Downloaded '%s'."), CurrentNameRead()})});
   const Node installed_body =
-      cmd({sym("do"), cmd({sym("set"), terminal, sym("TRUE")}), BindCurrentOffer(),
-           close_prompt,
+      cmd({sym("do"), cmd({sym("set"), terminal, sym("TRUE")}),
+           cmd({sym("set"), installed, sym("TRUE")}), BindCurrentOffer(), refresh_prompt,
            IfCurrentOffer(cmd({sym("if"), HasCurrentName(), installed_text}))});
   const Node finish_installed = member("finish_installed", {installed_body});
   const Node failed_body = cmd({sym("do"), cmd({sym("set"), terminal, sym("TRUE")}),
+      cmd({sym("set"), installed, sym("FALSE")}),
       cmd({sym("error.lbl"), sym("set_token_fmt"), sym(kDownloadFailedToken)}), close_prompt});
   const Node finish_failed = member("finish_failed", {failed_body});
   const Node show_body = cmd({sym("do"), cmd({sym("set"), active, sym("TRUE")}),
-      cmd({sym("set"), terminal, sym("FALSE")}), loading, cancel_prompt,
+      cmd({sym("set"), terminal, sym("FALSE")}), cmd({sym("set"), installed, sym("FALSE")}),
+      loading, cancel_prompt,
       cmd({sym("all.grp"), sym("set_showing"), sym("TRUE")}),
       cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"), Node::Var("this")})});
   const Node show_popup = member("show_popup", {show_body});
@@ -1499,6 +1509,18 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
            cmd({sym("do"), BindCurrentOffer(),
                 IfCurrentOffer(cmd({sym("if"), HasCurrentJob(), state_switch}))})});
   const Node poll = member("poll", {poll_body});
+  // P9-14's A: the main menu's own refresh, in that row's own two statements (the discovery page
+  // and the sentinel `src/hooks/dlc_refresh.cpp` answers) and in that row's own order - close,
+  // navigate, ask - as **siblings**, because that is the shape the row measured a screen change to
+  // survive: a `do` around them loses everything after the navigation (2026-10-15). Each statement
+  // carries the `installed` guard on its own, so a cancelled or failed job has no action behind the
+  // caption it does not draw and no partial sequence can run.
+  const Node refresh_close = cmd({sym("if"), installed, close});
+  const Node refresh_navigate =
+      cmd({sym("if"), installed,
+           cmd({sym("ui"), sym("goto_screen"), sym(menu_options::kRefreshRowDiscoverScreen)})});
+  const Node refresh_scan =
+      cmd({sym("if"), installed, FileExistsCommand(menu_options::kRefreshSentinelPath)});
   // B and Back: the transfer never outlives the press. The cancel goes first, then the close (the
   // search modal's own two statements), and after a terminal state only the close remains. Every
   // other action is consumed - the shape P9-11 measured, whose `(int 1)` return is the method's
@@ -1507,7 +1529,8 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
       cmd({sym("do"), cmd({sym("if"), running, CancelWrite()}), close});
   const Node buttons = member("BUTTON_DOWN_MSG",
       {cmd({sym("switch"), Node::Var("action"),
-            Node::Array({sym("kAction_Cancel"), cancel_case})}),
+            Node::Array({sym("kAction_Cancel"), cancel_case}),
+            Node::Array({sym("kAction_Confirm"), refresh_close, refresh_navigate, refresh_scan})}),
        Node::Int(1)});
   // Leaving the screen with the popup up is a cancel as well (`active` and not `terminal`).
   const Node exit_body = cmd({sym("if"), running, CancelWrite()});
@@ -1517,6 +1540,7 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
       Node::Array({sym("file"), Node::String("../error/error_general.milo")}),
       Node::Array({sym("active"), sym("FALSE")}),
       Node::Array({sym("terminal"), sym("FALSE")}),
+      Node::Array({sym("installed"), sym("FALSE")}),
       member("enter", {deactivate, hide}), exit, show_popup, hide_popup, finish_installed,
       finish_failed, poll, buttons});
   // The panel is listed last, the position the search modal measured (its `all.grp` draws over the

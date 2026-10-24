@@ -22,6 +22,7 @@
 #include "store/store_payload.h"
 #include "store/store_search.h"
 #include "ui/dtb_author.h"
+#include "ui/menu_options.h"
 
 #include <string>
 #include <vector>
@@ -1569,7 +1570,7 @@ int StoreEdit(const char* path, const char* which) {
   if (mode == "download") {
     // P5's two transforms against the shipped record, and both methods they rewrote, printed in
     // full: the row has to sit in the not-downloaded branch of the Downloaded gate, and its press
-    // has to be a `write_file` on a path built from the offer's own token - after P9-6a's popup
+    // has to be a `write_file` on a path built from the offer's own token - after P9-6's popup
     // call, which is why the modal's definition is printed too.
     ok = rb_blitz::store::AddDownloadButton(&roots, &why);
     std::printf("store-edit: download row -> %s (%s)\n", ok ? "edited" : "refused",
@@ -1749,7 +1750,7 @@ int StoreEdit(const char* path, const char* which) {
     const bool option = rb_blitz::store::ClearDetailsFooterOption(&roots, &why);
     std::printf("store-edit: view item caption -> %s (%s)\n", option ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    // P9-6a: the popup the Download press opens, on this record's own details screen.
+    // P9-6: the popup the Download press opens, on this record's own details screen.
     why.clear();
     const bool popup = rb_blitz::store::AddDownloadPopup(&roots, &why);
     std::printf("store-edit: download popup -> %s (%s)\n", popup ? "edited" : "refused",
@@ -2106,7 +2107,7 @@ void TestDownloadButtonsRouted() {
           shape.literal_path = node.kids[1].text.find(command) != std::string::npos;
         }
       }
-      // P9-6a: the press shows the popup, and it does so *before* the request is written - the
+      // P9-6: the press shows the popup, and it does so *before* the request is written - the
       // `do` that writes the path has the popup call as an earlier statement.
       if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
           node.kids[0].text == "do") {
@@ -2226,7 +2227,7 @@ void TestDownloadButtonsRouted() {
   CHECK_TRUE(TreeUnchanged(other, untouched));
 }
 
-// P9-6a: the modal the Download press opens on the details screen.
+// P9-6: the modal the Download press opens on the details screen.
 void TestDownloadPopup() {
   BeginCase("the Download press opens a modal popup on the details screen");
 
@@ -2298,6 +2299,7 @@ void TestDownloadPopup() {
   CHECK_TRUE(has(rb_blitz::store::kDownloadLoadingToken));
   CHECK_TRUE(has(rb_blitz::store::kDownloadCancelToken));
   CHECK_TRUE(has(rb_blitz::store::kDownloadCloseToken));
+  CHECK_TRUE(has(rb_blitz::store::kDownloadRefreshToken));
   CHECK_TRUE(has(rb_blitz::store::kDownloadFailedToken));
   // The installed line is composed from the offer with the writer the credit block already draws
   // with, and both the job and the song's name are the offer's own keys behind its `has_data` guard
@@ -2371,6 +2373,162 @@ void TestDownloadPopup() {
   why.clear();
   CHECK_FALSE(rb_blitz::store::AddDownloadPopup(&no_panels, &why));
   CHECK_TRUE(TreeUnchanged(no_panels, no_panels_untouched));
+}
+
+// P9-14: the installed toast's A Refresh.
+void TestDownloadRefreshAction() {
+  BeginCase("the installed toast offers A Refresh and runs the menu's own refresh");
+
+  const auto record_with_screen = [] {
+    return std::vector<Node>{
+        Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                       Node::Array({Symbol("focus"), Symbol("buttons.lst")})}),
+        Node::Command({Symbol("new"), Symbol("UIScreen"), Symbol("store_info_screen"),
+                       Node::Array({Symbol("panels"), Symbol("background_panel"),
+                                    Symbol("store_info_panel"), Symbol("error_popup_panel")})}),
+    };
+  };
+  std::vector<Node> record = record_with_screen();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddDownloadPopup(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  const Node& panel = record[0];
+
+  const auto method = [&](std::string_view name) -> const Node* {
+    for (const Node& kid : panel.kids) {
+      if (kid.tag == rb_blitz::ui::dtb::kArray && !kid.kids.empty() && kid.kids[0].text == name) {
+        return &kid;
+      }
+    }
+    return nullptr;
+  };
+  CHECK_TRUE(method("refresh_songs") == nullptr);  // no second method: the two statements are inline
+
+  // `installed` is declared beside `active`/`terminal` and starts FALSE - the caption and the
+  // action both hang off it, so it must exist before any press can reach the panel.
+  bool declared = false;
+  for (const Node& kid : panel.kids) {
+    if (kid.tag == rb_blitz::ui::dtb::kArray && kid.kids.size() == 2 &&
+        kid.kids[0].text == "installed" && kid.kids[1].text == "FALSE") {
+      declared = true;
+    }
+  }
+  CHECK_TRUE(declared);
+
+  // The three methods that write it: a new popup starts with it clear, an install sets it, and a
+  // failure clears it again - so neither the A caption nor the A action can outlive a job that
+  // installed nothing.
+  const auto writes = [&](std::string_view name, const char* value) {
+    const Node* body = method(name);
+    if (body == nullptr) return false;
+    bool found = false;
+    const auto scan = [&](const Node& node, const auto& self) -> void {
+      if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+          node.kids[0].text == "set" && node.kids[1].tag == rb_blitz::ui::dtb::kProperty &&
+          !node.kids[1].kids.empty() && node.kids[1].kids[0].text == "installed" &&
+          node.kids[2].text == value) {
+        found = true;
+      }
+      for (const Node& kid : node.kids) self(kid, self);
+    };
+    scan(*body, scan);
+    return found;
+  };
+  CHECK_TRUE(writes("show_popup", "FALSE"));
+  CHECK_TRUE(writes("finish_installed", "TRUE"));
+  CHECK_TRUE(writes("finish_failed", "FALSE"));
+
+  // The installed state's prompt is the new token: A Refresh   B Close.
+  {
+    const Node* body = method("finish_installed");
+    CHECK_TRUE(body != nullptr);
+    bool prompt = false;
+    if (body != nullptr) {
+      const auto scan = [&](const Node& node, const auto& self) -> void {
+        if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+            node.kids[0].text == "continue.lbl" && node.kids[1].text == "set_token_fmt" &&
+            node.kids[2].text == rb_blitz::store::kDownloadRefreshToken) {
+          prompt = true;
+        }
+        for (const Node& kid : node.kids) self(kid, self);
+      };
+      scan(*body, scan);
+    }
+    CHECK_TRUE(prompt);
+  }
+
+  // The A case lives in the same switch B does, and it is one guarded expression: `{if
+  // [installed] {do <close> {file_exists <sentinel>} {ui goto_screen <discovery screen>}}}`. The
+  // navigation is the LAST statement on purpose (store_payload.h: a `do` does not survive the
+  // screen change it would perform mid-way), and the sentinel/discovery spellings are the menu
+  // row's own constants rather than copies.
+  const Node* buttons = method("BUTTON_DOWN_MSG");
+  CHECK_TRUE(buttons != nullptr);
+  if (buttons == nullptr) return;
+  const Node* confirm = nullptr;
+  const Node* cancel = nullptr;
+  const auto find_case = [&](const Node& node, std::string_view symbol, const auto& self)
+      -> const Node* {
+    if (node.tag == rb_blitz::ui::dtb::kArray && !node.kids.empty() &&
+        node.kids[0].tag == rb_blitz::ui::dtb::kSymbol && node.kids[0].text == symbol) {
+      return &node;
+    }
+    for (const Node& kid : node.kids) {
+      if (const Node* found = self(kid, symbol, self)) return found;
+    }
+    return nullptr;
+  };
+  confirm = find_case(*buttons, "kAction_Confirm", find_case);
+  cancel = find_case(*buttons, "kAction_Cancel", find_case);
+  CHECK_TRUE(confirm != nullptr);
+  CHECK_TRUE(cancel != nullptr);
+
+  // B's case stays what P9-6 shipped: the cancel write and the close, never the refresh.
+  if (cancel != nullptr) {
+    bool routed = false;
+    const auto scan = [&](const Node& node, const auto& self) -> void {
+      if (node.tag == rb_blitz::ui::dtb::kString &&
+          (node.text == rb_blitz::menu_options::kRefreshSentinelPath ||
+           node.text == rb_blitz::menu_options::kRefreshRowDiscoverScreen)) {
+        routed = true;
+      }
+      for (const Node& kid : node.kids) self(kid, self);
+    };
+    scan(*cancel, scan);
+    CHECK_FALSE(routed);
+  }
+
+  if (confirm != nullptr) {
+    // Three siblings, the row's own order - close, navigate, ask - each guarded by `installed`, so
+    // a cancelled or failed job has no action behind the caption it does not draw.
+    CHECK_TRUE(confirm->kids.size() == 4);
+    for (size_t i = 1; i < 4 && i < confirm->kids.size(); ++i) {
+      const Node& step = confirm->kids[i];
+      CHECK_TRUE(step.tag == rb_blitz::ui::dtb::kCommand && step.kids.size() == 3 &&
+                 step.kids[0].text == "if");
+      if (step.tag != rb_blitz::ui::dtb::kCommand || step.kids.size() != 3) continue;
+      CHECK_TRUE(step.kids[1].tag == rb_blitz::ui::dtb::kProperty &&
+                 !step.kids[1].kids.empty() && step.kids[1].kids[0].text == "installed");
+      const Node& body = step.kids[2];
+      if (i == 1) {
+        // 1. the popup closes (the details page is left behind by the navigation below)
+        CHECK_TRUE(body.tag == rb_blitz::ui::dtb::kCommand && body.kids.size() == 2 &&
+                   body.kids[0].text == rb_blitz::store::kDownloadPanelName &&
+                   body.kids[1].text == "hide_popup");
+      } else if (i == 2) {
+        // 2. the discovery page the title's own start button enters
+        CHECK_TRUE(body.tag == rb_blitz::ui::dtb::kCommand && body.kids.size() == 3 &&
+                   body.kids[0].text == "ui" && body.kids[1].text == "goto_screen" &&
+                   body.kids[2].text == rb_blitz::menu_options::kRefreshRowDiscoverScreen);
+      } else {
+        // 3. the menu row's own sentinel, the call the host answers by re-scanning
+        CHECK_TRUE(body.tag == rb_blitz::ui::dtb::kCommand && body.kids.size() == 2 &&
+                   body.kids[0].text == "file_exists" &&
+                   body.kids[1].tag == rb_blitz::ui::dtb::kString &&
+                   body.kids[1].text == rb_blitz::menu_options::kRefreshSentinelPath);
+      }
+    }
+  }
 }
 
 void TestAlbumArtLinked() {
@@ -3161,6 +3319,7 @@ int main(int argc, char** argv) {
   TestDownloadButtonAdded();
   TestDownloadButtonsRouted();
   TestDownloadPopup();
+  TestDownloadRefreshAction();
   TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();
   TestStoreStartRoutesToFilter();

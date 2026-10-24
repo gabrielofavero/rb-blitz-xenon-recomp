@@ -339,6 +339,12 @@ void TestReconcileRenderer() {
 
   // A usable renderer is kept untouched.
   CHECK_FALSE(reconciler.Reconcile(SettingId::kRenderer, *renderer, EnumV("d3d12"), caps).corrected);
+  // It need not be active yet: the saved choice drives the next boot.
+  auto both = caps;
+  both.renderers[0].usable = true;
+  const auto selected = reconciler.Reconcile(SettingId::kRenderer, *renderer, EnumV("vulkan"), both);
+  CHECK_FALSE(selected.corrected);
+  CHECK_TRUE(IsToken(selected.effective, "vulkan"));
   // ... and the unusable one cannot be selected (it is not in the row's own choice set).
   CHECK_FALSE(reconciler.Validate(SettingId::kRenderer, *renderer, EnumV("vulkan"), caps).ok);
 

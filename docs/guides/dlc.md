@@ -173,12 +173,18 @@ the P8 record). What that adds to the rules above:
   or a song inside a multi-song pack, matches without ever having been downloaded here. A receipt
   (`<user_data_root>/store/downloads.tsv`) is transfer history only, and an index that is still
   building answers "unknown", never "not installed".
-- **A newly installed package waits for the next start.** `dlc::RefreshAfterStoreInstall()` re-walks
-  the flat roots (an install is not a cache feature, so R7's gate does not apply) and the host hands
-  the fresh list to the title on the next menu frame, but the running title's own song discovery
-  begins at boot - which is why the details page's download popup stops at *Downloaded 'Artist -
-  Song'.* instead of claiming the song is already playable. P9-6c's toast is where the in-session
-  Refresh Songs lands; until it does, the acceptance harness measures the pair of boots.
+- **The install's own refresh runs at the commit; the toast's A Refresh is what makes the running
+  title list the song.** `dlc::RefreshAfterStoreInstall()` re-walks the flat roots (an install is
+  not a cache feature, so R7's gate does not apply) and the host hands the fresh list to the title
+  on the next menu frame. The running title's own discovery is the title's: the details page's
+  download popup offers **A Refresh** on its installed toast, which runs the main menu row's own two
+  statements - `{ui goto_screen server_connect_screen}` and the `songcache:/rbbz_dlc_refresh`
+  sentinel - so the scan publishes before the discovery pass enumerates and the song is listed
+  without a restart. **B** closes the toast alone, and that route's song is listed on the next start
+  (the acceptance harness's `Install` leg measures that boot). The popup's sentence never claims
+  more than *Downloaded 'Artist - Song'.*; the refresh is what it offers next. *(The shipped payload,
+  its tests and the harness's steps landed 2026-10-24; the boot that reads the song on Your Songs
+  after A was still owed when this line was written.)*
 
 ## 3. Configuration
 

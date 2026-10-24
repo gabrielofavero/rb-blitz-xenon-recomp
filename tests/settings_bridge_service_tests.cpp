@@ -19,6 +19,7 @@
 #include "hooks/settings_bridge.h"
 #include "settings/bridge_sink.h"
 #include "settings/cvars.h"
+#include "settings/graphics_policy.h"
 #include "settings/schema.h"
 #include "settings/service.h"
 
@@ -452,6 +453,56 @@ void TestWireModelConversions() {
   CHECK_TRUE(!WireValuesEqual(WireValue::Text("1"), WireValue::Int(1)));
 }
 
+void TestRendererSelectionSurvivesCommitAndReload() {
+  BeginCase("a usable inactive renderer can be selected, saved, and used on the next boot");
+  Harness h;
+  CapabilityInputs inputs;
+  for (const std::string token : {"d3d12", "vulkan"}) {
+    RendererProbe probe;
+    probe.token = token;
+    probe.built = probe.detected = probe.usable = true;
+    probe.active = token == "d3d12";
+    inputs.renderers.push_back(probe);
+  }
+  const auto caps = BuildCapabilitySnapshot(inputs);
+  GraphicsReconciler reconciler;
+  h.service.SetReconciler(&reconciler);
+  h.service.SetCapabilities(caps);
+
+  Value initial;
+  initial.kind = ValueKind::kEnum;
+  initial.text = "d3d12";
+  h.service.SetBootValues({{SettingId::kRenderer, initial}}, "");
+  CHECK_TRUE(h.Holds("graphics.renderer", WireValue::Text("d3d12")));
+
+  CHECK_TRUE(h.Send("rbbz-settings/set/graphics.renderer/t:vulkan").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_durable());
+  CHECK_TRUE(h.sink.last_commit_requires_restart());
+  CHECK_TRUE(h.Holds("graphics.renderer", WireValue::Text("vulkan")));
+  CHECK_FALSE(h.Holds("graphics.renderer", WireValue::Text("d3d12")));
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kRenderer).text == "vulkan");
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kRenderer).text == "vulkan");
+
+  // Boot applies EffectiveValue to gpu_backend before the plugin is loaded.
+  Service again(h.paths);
+  again.Boot(nullptr, PathEntry{}, nullptr, true);
+  again.SetReconciler(&reconciler);
+  again.SetCapabilities(caps);
+  CHECK_TRUE(again.EffectiveValue(SettingId::kRenderer).text == "vulkan");
+
+  // Cycling back must persist D3D12 rather than look like a no-op against the active backend.
+  CHECK_TRUE(h.Send("rbbz-settings/set/graphics.renderer/t:d3d12").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_durable());
+  CHECK_TRUE(h.Holds("graphics.renderer", WireValue::Text("d3d12")));
+
+  auto unavailable = caps;
+  unavailable.renderers[1].usable = false;
+  h.service.SetCapabilities(unavailable);
+  CHECK_TRUE(h.Send("rbbz-settings/set/graphics.renderer/t:vulkan").status == Status::kInvalid);
+}
+
 }  // namespace
 
 int main() {
@@ -465,5 +516,6 @@ int main() {
   TestRestartRefusalsAreVisible();
   TestCommitFailureReasons();
   TestWireModelConversions();
+  TestRendererSelectionSurvivesCommitAndReload();
   return Finish();
 }
