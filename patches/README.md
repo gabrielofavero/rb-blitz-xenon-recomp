@@ -80,6 +80,15 @@ It also applies the computed pipeline-layout compatibility prefix and uses
 remain in place. Host tests cover the state helper, including layout and command
 buffer invalidation; see [Vulkan performance](../docs/engine/vulkan-performance.md).
 
+`rexglue-sdk/0025-d3d12-fence-and-resolve-readback.patch` fixes DX12's
+out-of-submission signal/arm/wait sequence: `S_OK == 0` previously short-circuited
+event arming inside a boolean HRESULT expression, then entered an infinite wait.
+It checks signal/arm/wait errors and device loss, protects resolve CPU copies with
+producing-submission completion/size checks, and defers release of in-flight
+readback slots. The new headless DX12 test exercises production sequencing and
+GPU readback. See [DX12 loading freeze](../docs/engine/d3d12-loading-freeze.md) for
+the reported run, validation and the limits of the diagnosis.
+
 ## Apply / verify
 
 ```powershell

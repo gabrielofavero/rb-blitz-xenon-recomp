@@ -124,6 +124,13 @@ The parent build now stages the plugin through a dependency of `rb_blitz`, using
 `copy_if_different` on every game build. This also runs when explicitly building
 the game target. Source and staged plugin hashes are checked before handoff.
 
+Validation: the release build and **58/58 CTest tests** passed. The extended
+descriptor test reports **14,130 checks, zero failures**; the SDK patch audit
+reports 64 accounted files, no unexpected/untracked files and no failures.
+An explicit incremental `rb_blitz` build ran staging without relinking the
+executable, and source/staged renderer SHA-256 hashes matched. Gameplay FPS for
+these latest changes remains unmeasured; the owner continues manual testing.
+
 ## Validation and limits
 
 `vulkan_texture_conversion` is a Windows headless GPU test. It compiles the exact

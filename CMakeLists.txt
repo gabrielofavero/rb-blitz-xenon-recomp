@@ -543,6 +543,13 @@ if(BUILD_TESTING)
         add_test(NAME sdk_patch_stack
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_patch_stack_tests.py")
     endif()
+    if(WIN32 AND REXGLUE_USE_D3D12)
+        add_executable(rb_blitz_d3d12_fence_sync_tests tests/d3d12_fence_sync_tests.cpp)
+        target_include_directories(rb_blitz_d3d12_fence_sync_tests PRIVATE "${REXSDK_DIR}/include")
+        target_link_libraries(rb_blitz_d3d12_fence_sync_tests PRIVATE d3d12 dxgi)
+        add_test(NAME d3d12_fence_sync COMMAND rb_blitz_d3d12_fence_sync_tests)
+        set_tests_properties(d3d12_fence_sync PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
 
     # Exercise the component conversion shared by the patched D3D12 and Vulkan texture caches.
     add_executable(rb_blitz_texture_conversion_tests tests/texture_conversion_tests.cpp)

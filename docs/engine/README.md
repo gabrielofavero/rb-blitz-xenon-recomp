@@ -14,6 +14,7 @@ or hook point it measured, with the evidence it came from.
 | [`shader-cache-p2.md`](shader-cache-p2.md) | Local shader resolution: the `XOBX` asset framing, vertex declaration linking, bounded executable sources, and the 186-identity candidate that resolves from installed content without prior gameplay. |
 | [`shader-cache-p3.md`](shader-cache-p3.md) | The pipeline recipe catalogue: the `.xpso` record layout and version pins, the validate/dedupe/merge tool with provenance and local identity checks, the helper-pipeline inventory and its key-identity gap, and the 2026-10-24 preserved-run measurements. |
 | [`vulkan-performance.md`](vulkan-performance.md) | Warm-cache Vulkan overhead: GPU texture conversion replacing CPU readback/conversion/upload, headless GPU validation and the pending gameplay comparison. |
+| [`d3d12-loading-freeze.md`](d3d12-loading-freeze.md) | The DX12 post-A freeze report, invalid fence HRESULT/event sequencing, incomplete resolve readback, resource retirement fixes and headless validation. |
 | [`diagnostics.md`](diagnostics.md) | The two standing instruments: the runtime probe (what the guest is doing, now) and the UI-state observer (what a captured state is made of). Both are also the harness the acceptance scripts drive. |
 | [`messages.md`](messages.md) | The retail Messages screen: its record and panels, the `InboxProvider` and `InboxMessage` objects, the empty-state tokens, the bottom-bar inline help, and the row-icon set (twelve 512×512 DXT1 icons with converted PNGs). |
 
